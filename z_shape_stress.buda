@@ -1,0 +1,13 @@
+add_block u_src   100 100 200 200
+add_block u_dst   800 800 900 900
+add_block u_mid   400 400 600 600
+def_layer 3 M3 H TOP 0.0
+def_layer 4 M4 V TOP 0.0
+add_net bus_0 u_src.tx u_dst.rx
+add_net bus_1 u_src.tx u_dst.rx
+add_net bus_2 u_src.tx u_dst.rx
+add_net bus_3 u_src.tx u_dst.rx
+add_net bus_4 u_src.tx u_dst.rx
+run_bundler strict
+run_planner 5
+visualize
