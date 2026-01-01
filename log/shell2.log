@@ -1,0 +1,120 @@
+ben@Bulents-MacBook-Pro buda % pwd
+pwd
+/Users/ben/src/buda
+ben@Bulents-MacBook-Pro buda % python3 setup_buda.py
+python3 setup_buda.py
+[Created] buda_system_v2/CMakeLists.txt
+[Created] buda_system_v2/src/bundler.h
+[Created] buda_system_v2/src/bundler.cpp
+[Created] buda_system_v2/src/topology.h
+[Created] buda_system_v2/src/topology.cpp
+[Created] buda_system_v2/src/layering.h
+[Created] buda_system_v2/src/layering.cpp
+[Created] buda_system_v2/src/global_router.h
+[Created] buda_system_v2/src/global_router.cpp
+[Created] buda_system_v2/src/nuts.h
+[Created] buda_system_v2/src/nuts.cpp
+[Created] buda_system_v2/src/bindings.cpp
+[Created] buda_system_v2/src/buda_viz.py
+[Created] buda_system_v2/src/buda_cli.py
+[Created] buda_system_v2/src/comprehensive_demo.buda
+
+[SUCCESS] BUDA System V2 Generated in 'buda_system_v2/'
+To run the comprehensive demo:
+  1. cd buda_system_v2
+  2. mkdir build && cd build
+  3. cmake .. && make -j4
+  4. cp interconnect*.so ../src/
+  5. cd ../src
+  6. python3 buda_cli.py comprehensive_demo.buda
+ben@Bulents-MacBook-Pro buda % cd buda_system_v2/
+cd buda_system_v2/
+ben@Bulents-MacBook-Pro buda_system_v2 % mkdir build && cd build
+mkdir build && cd build
+ben@Bulents-MacBook-Pro build % cmake .. && make -j4
+cmake .. && make -j4
+-- The CXX compiler identification is AppleClang 17.0.0.17000404
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+CMake Warning (dev) at /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/FindPythonLibsNew.cmake:101 (message):
+  Policy CMP0148 is not set: The FindPythonInterp and FindPythonLibs modules
+  are removed.  Run "cmake --help-policy CMP0148" for policy details.  Use
+  the cmake_policy command to set the policy and suppress this warning, or
+  preferably upgrade to using FindPython, either by calling it explicitly
+  before pybind11, or by setting PYBIND11_FINDPYTHON ON before pybind11.
+Call Stack (most recent call first):
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Tools.cmake:44 (find_package)
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Common.cmake:226 (include)
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Config.cmake:257 (include)
+  CMakeLists.txt:10 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+-- Found PythonInterp: /usr/local/bin/python3 (found suitable version "3.13.4", minimum required is "3.8")
+-- Found PythonLibs: /Library/Frameworks/Python.framework/Versions/3.13/lib/libpython3.13.dylib
+-- Performing Test HAS_FLTO_THIN
+-- Performing Test HAS_FLTO_THIN - Success
+-- Performing Test HAS_FLTO
+-- Performing Test HAS_FLTO - Success
+-- Found pybind11: /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/include (found version "3.0.1")
+-- Configuring done (1.7s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/ben/src/buda/buda_system_v2/build
+[ 28%] Building CXX object CMakeFiles/interconnect.dir/src/bundler.cpp.o
+[ 28%] Building CXX object CMakeFiles/interconnect.dir/src/bindings.cpp.o
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/layering.cpp.o
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/topology.cpp.o
+/Users/ben/src/buda/buda_system_v2/src/topology.cpp:35:128: warning: unused
+      parameter 'y_grid' [-Wunused-parameter]
+   35 |   ...dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std...
+      |                                                                   ^
+[ 71%] Building CXX object CMakeFiles/interconnect.dir/src/global_router.cpp.o
+1 warning generated.
+[ 85%] Building CXX object CMakeFiles/interconnect.dir/src/nuts.cpp.o
+/Users/ben/src/buda/buda_system_v2/src/global_router.cpp:5:43: warning: unused
+      parameter 'layer_id' [-Wunused-parameter]
+    5 | void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {}
+      |                                           ^
+/Users/ben/src/buda/buda_system_v2/src/global_router.cpp:5:60: warning: unused
+      parameter 'overhead_percent' [-Wunused-parameter]
+    5 | void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {}
+      |                                                            ^
+/Users/ben/src/buda/buda_system_v2/src/global_router.cpp:7:81: warning: unused
+      parameter 'max_iterations' [-Wunused-parameter]
+    7 |   ...bundles, int max_iterations) {
+      |                   ^
+3 warnings generated.
+[100%] Linking CXX shared module interconnect.cpython-313-darwin.so
+[100%] Built target interconnect
+ben@Bulents-MacBook-Pro build % pwd
+pwd
+/Users/ben/src/buda/buda_system_v2/build
+ben@Bulents-MacBook-Pro build % cd .
+cd .
+ben@Bulents-MacBook-Pro build % cd ..
+cd ..
+ben@Bulents-MacBook-Pro buda_system_v2 % pwd
+pwd
+/Users/ben/src/buda/buda_system_v2
+ben@Bulents-MacBook-Pro buda_system_v2 % ls
+ls
+build		CMakeLists.txt	src
+ben@Bulents-MacBook-Pro buda_system_v2 % cp build/interconnect.cpython-313-darwin.so src/
+<cp build/interconnect.cpython-313-darwin.so src/
+ben@Bulents-MacBook-Pro buda_system_v2 % cd src
+cd src
+ben@Bulents-MacBook-Pro src % python3 buda_cli.py comprehensive_demo.buda &
+python3 buda_cli.py comprehensive_demo.buda &
+[1] 48337
+ben@Bulents-MacBook-Pro src % Bundler created 3 bundles.
+Generated 19 topologies for bundle 1 (u_cpu->u_mem)
+Generated 28 topologies for bundle 2 (u_gpu->u_disp)
+Generated 14 topologies for bundle 3 (u_io_src->u_io_dst)
+Bundle 1 selected topology: L_HV
+Bundle 2 selected topology: L_HV
+Bundle 3 selected topology: L_HV
+
+[1]  + done       python3 buda_cli.py comprehensive_demo.buda
+ben@Bulents-MacBook-Pro src % 
