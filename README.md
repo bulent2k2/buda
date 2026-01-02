@@ -1,27 +1,41 @@
-History
-======
+* I asked GAI: 
+I want to build a system to help plan interconnect on a microchip. It has three major components:
+1- bundling of nets into buses
+2- generating a set of optimal bus topologies
+3- layer assignment and track assignment that supports non-uniform width wires/buses
 
-python3 setup_buda.py
-brew install cmake
-cd buda_system/
-mkdir build && cd build
-cmake .. && make
-pip3 install pybind11 pytest matplotlib
-/Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m pip install --upgrade pip
-   
-# added pybind11 to path for cmake to work in ~/.zshrc:
-export PATH=".:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin:/Users/ben/Library/Application Support/Coursier/bin:/Users/ben/bin:$HOME/.cargo/bin:/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11"
-# start a new shell:
-zsh 
-cmake ..
-make -j4
-cd ../
-cp build/interconnect.cpython-313-darwin.so src/
-cd src/
-python3 ./buda_cli.py ~/src/buda/design_demo.buda &
-python3 ./buda_cli.py ~/src/buda/z_shape.buda &
+** Here is the complete conversation: 
+  https://gemini.google.com/share/293d9e6c10a4
 
-# Assuming we are in the root folder
-cp build/interconnect*.so src/
-cd src
-python3 buda_cli.py design_demo.buda
+* It said:
+This is an exciting challenge. Revitalizing a proven concept with modern algorithms and software architecture is a fantastic way to approach EDA (Electronic Design Automation) tool development. Given your background, you likely remember that 25 years ago, compute constraints dictated simple heuristics. Today, we can leverage graph neural networks (GNNs), massive parallelism, and modern optimization solvers.
+
+Here is a high-level architectural proposal for your Interconnect Planning System.
+
+...
+
+
+* Some selections:
+
+buda_system/
+├── CMakeLists.txt              # The Build Configuration
+├── src/
+│   ├── bindings.cpp            # The Python Wrapper Code (The Bridge)
+│   ├── bundler.h / .cpp        # Engine A
+│   ├── topology.h / .cpp       # Engine B
+│   ├── layering.h / .cpp       # Engine C
+│   ├── global_router.h / .cpp  # Engine 4a
+│   ├── nuts.h / .cpp           # Engine 4b
+│   ├── buda_cli.py             # CLI Tool
+│   └── buda_viz.py             # Visualization
+├── tests/
+│   ├── features/               # Gherkin .feature files
+│   ├── test_bundler.py         # Python BDD tests
+│   └── ...
+└── extern/
+    └── pybind11/               # (Submodule) The binding library
+	
+Step C: Run the BUDA System Move the compiled library to the source
+folder (or add build/ to PYTHONPATH) and run the demo.
+
+* The End

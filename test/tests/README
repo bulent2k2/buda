@@ -1,0 +1,6 @@
+This file (test_bundler.py) connects your Gherkin feature file to
+actual code. It uses pytest-bdd to read the scenarios we just wrote
+and executes steps against our C++ engine.
+
+Note: In this prototype phase, we assume the C++ module is compiled
+and exposed to Python as interconnect.

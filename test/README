@@ -1,0 +1,38 @@
+tests/features/bundler_hierarchy.feature
+
+Package feature-mode is incompatible.
+
+     Status: Incompatible because it depends on Emacs 28.1.
+    Archive: melpa-stable
+    Version: 0.6.2
+     Commit: 76c91c05d15aca7732315b46dd3dcc13ec5235fd
+    Summary: Major mode for editing Gherkin (i.e. Cucumber) user stories
+   Requires: emacs-28.1
+   Homepage: https://github.com/freesteph/cucumber.el
+Other versions: 20251015.2134 (melpa).
+
+
+This package provides handling of feature files written using
+Gherkin/Cucumber.  It provides font locking, indentation support
+and can function in all the languages supported by Gherkin.
+
+[back]
+
+
+
+Package gherkin-mode is available obsolete.
+
+     Status: Available Obsolete from melpa -- Install
+    Archive: melpa
+    Version: 20171224.1353
+     Commit: 0313492e7da152f0aa73ddf96c0287ded8f51253
+    Summary: An emacs major mode for editing gherkin files
+   Homepage: https://github.com/candera/gherkin-mode
+   Keywords: languages 
+Other versions: 20171224.1353 (installed).
+
+A mode for editing gherkin files.
+
+For more about gherkin, see https://github.com/alandipert/gherkin.
+
+[back]
