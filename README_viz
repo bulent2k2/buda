@@ -1,0 +1,6 @@
+> cd ~/src/buda/buda_system_v2/src/
+> python3 buda_cli.py comprehensive_demo.buda
+Bundler created 3 bundles.
+Generated 19 topologies for bundle 1 (u_cpu->u_mem)
+Generated 28 topologies for bundle 2 (u_gpu->u_disp)
+Generated 14 topologies for bundle 3 (u_io_src->u_io_dst)
