@@ -4,21 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Is
 
-**BUDA** (Bundled Unified Design Automation) is an **EDA interconnect planning system** for chip design. It bundles nets into buses, generates routing topologies (L/Z/U-shapes on a Hanan grid), and assigns routes to metal layers based on congestion analysis.
+**BUDA** (Bundled Unified Design Automation) is an **EDA interconnect planning system** for chip design. It bundles nets into buses, generates routing topologies, assigns routes to metal layers, and resolves physical track positions — from abstract bus planning down to individual bit-wire placement respecting power-grid and pre-route blockages.
 
 The core engine is **C++20** exposed to Python via **pybind11**, with a Python CLI and matplotlib visualization layer on top.
 
 ## Build
 
 ```bash
-# Build v2 (current)
 cd buda_system_v2/
 mkdir -p build && cd build
 cmake .. && make -j4
-
-# Copy the compiled shared library so Python can import it
-cd ..
-cp build/interconnect.cpython-313-darwin.so src/
+# install overwrites without interactive prompt
+install build/interconnect.cpython-313-darwin.so src/
 ```
 
 CMake builds a single shared library module (`interconnect`) with `-O3 -march=native -Wall -Wextra`.
@@ -28,71 +25,307 @@ CMake builds a single shared library module (`interconnect`) with `-O3 -march=na
 ```bash
 cd buda_system_v2/src/
 python3 buda_cli.py comprehensive_demo.buda
-python3 buda_cli.py design_demo.buda
 ```
 
-`.buda` script syntax:
-```
-def_layer <id> <name> <H|V> <TOP|LOW> <overhead_percent>
-add_block <name> <x1> <y1> <x2> <y2>
-add_net <name> <driver_pin> <receiver_pins_csv>
-run_bundler <STRICT|CONVERGENT>
-generate_topologies_for_bundle <hint> <src_block> <dst_block>
-run_planner <iterations>
-run_nuts [track_pitch]      # optional; enables NUTS track assignment
-visualize                   # draws NUTS positions when run_nuts was called
-```
+`.buda` script command reference:
+
+| Command | Stage | Description |
+|---|---|---|
+| `def_layer <id> <name> <H\|V> <TOP\|LOW> <overhead%>` | setup | Register a metal layer |
+| `add_block <name> <x1> <y1> <x2> <y2>` | setup | Place a floorplan block |
+| `add_net <name> <driver_pin> <receiver_pins_csv>` | setup | Add a net to the netlist |
+| `run_bundler <STRICT\|CONVERGENT>` | 1 | Group nets into buses |
+| `generate_topologies_for_bundle <hint> <src> <dst>` | 2 | Generate L/Z/U candidates |
+| `run_planner <iterations>` | 3 | Layer assign + topology select |
+| `run_nuts [pitch]` | 4 | Abstract track placement |
+| `def_track_pattern <layer_id> <origin> <type> <w> <sp> ...` | 8 setup | Define repeating track pattern |
+| `add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> ...` | 8 setup | Region-scoped pattern override |
+| `run_detailed_nuts [lo_hi\|hi_lo]` | 9 | Snap bit-wires to concrete tracks |
+| `visualize` | — | Open interactive matplotlib window |
 
 ## Tests
 
-Tests live in `test/tests/` and use **pytest-bdd** with Gherkin feature files in `test/tests/features/`.
-
 ```bash
-# Run all tests
 cd test/tests/
-pytest
-
-# Run a single test file
-pytest test_bundler.py
-pytest test_topology.py
-pytest test_global_congestion.py
+pytest                        # all tests
+pytest test_nuts.py -v        # single file
 ```
 
-Feature files: `bundler_hierarchy.feature`, `bundler_logic.feature`, `topology_generation.feature`, `global_congestion.feature`, `layer_assignment.feature`, `detailed_track_assignment.feature`.
+Feature files in `test/tests/features/`. Each stage has a corresponding `.feature` and `test_*.py` file.
+
+---
 
 ## Architecture
 
-### Pipeline (in order)
+### Pipeline Overview
 
-1. **Bundler** (`bundler.h/cpp`) — groups nets by shared driver/receiver connectivity into `Bundle` objects.
-   - `STRICT` strategy: same driver AND receivers → one bundle
-   - `CONVERGENT` strategy: shared receivers only → one bundle
+```
+Netlist (.buda script)
+    │
+    ▼
+[1] Bundler          nets → Bundles
+    │
+    ▼
+[2] TopologyGen      Bundles → candidate L/Z/U topologies (Hanan grid)
+    │
+    ▼
+[3] Bundle Planner   topology selection + layer assignment (congestion-aware)
+    │                each segment now has: layer, routing-dir span, perp interval
+    ▼
+[4] Abstract NUTS    1.5-D rectangle packing → BusSegment track_position (real coords)
+    │                parallelises per layer; power-grid dilution applied approximately
+    ▼
+[5] Layer Stack      (consulted by stages 3–9 for layer direction/type metadata)
 
-2. **Topology Generator** (`topology.h/cpp`) — for each bundle, generates candidate routing paths using the Hanan grid (block boundaries):
-   - L-shape: 2 segments (horizontal + vertical)
-   - Z-shape: 3 segments via intermediate Hanan grid point
-   - U-shape: 3 segments that detour outside the bounding box
+[6] CLI              orchestrates stages 1–9 via .buda scripts
+[7] Visualizer       interactive matplotlib; click-to-highlight; pre-route toggles
 
-3. **Bundle Planner / Global Router** (`global_router.h/cpp`) — builds "cuts" from floorplan grid lines, tracks capacity/usage per layer cut, applies a dilution factor for layer overhead, and selects the best topology per bundle. After this step every segment has a layer, a soft routing-direction span, and a hard perpendicular interval from the Hanan grid cell it occupies.
-   - Dilution formula: `effective_width = raw_width × (100 / (100 − overhead_percent))`
+    ── planned ──────────────────────────────────────────────────────────────
+[8] Routing Grid     defines per-layer track patterns (power/signal/clock layout)
+    │                global pattern per layer + optional Hanan-region overrides
+    ▼
+[9] Detailed NUTS    snaps each BusSegment → N NetSegments on concrete signal tracks
+                     respects pre-route blockages; bit ordering; timing-critical mode
+```
 
-4. **NUTS – Non-Uniform Track Sharing** (`nuts.h/cpp`) — solves the 1.5-D rectangle packing problem (Ekici, Basaran & Keskinocak 2009) per layer. Each bus segment is treated as a rectangle: its routing-direction span is fixed; its perpendicular position must lie within a hard Hanan-grid-cell interval. A sweep-line / first-fit algorithm assigns concrete track positions with no physical overlaps.
-   - Key types: `TrackSegment` (input + output per segment), `NUTSResult` (flat list of placed segments + violation/overlap counts).
-   - Runs independently per layer (parallelisable).
-   - Best-effort placement when an interval is too narrow; violation is counted in `NUTSResult::num_violations`.
+---
 
-5. **Layer Stack** (`layering.h/cpp`) — metadata for the metal layer stack (direction H/V, type TOP/LOW).
+## Stage-by-Stage Detail
 
-5. **CLI** (`buda_cli.py`) — parses `.buda` scripts and drives the pipeline.
+### Stage 1 — Bundler (`bundler.h/cpp`)
 
-6. **Visualization** (`buda_viz.py`) — matplotlib rendering of blocks, Hanan grid, routed buses with non-uniform widths, driver terminals (cyan squares), receiver terminals (magenta circles). Layer colors: M3 horizontal = blue, M4 vertical = red.
+**Responsibility:** Group nets that share driver/receiver topology into `Bundle` objects.
 
-### Two System Versions
+**Key types:**
+- `Net` — name, driver pin (`instance.pin`), list of receiver pins
+- `Bundle` — id, list of net names, grouping reason string
+- `Netlist` — flat container of nets; populated by `add_net` CLI commands
+- `Bundler` — runs grouping with a configurable `Strategy`
+
+**Algorithm:** For each net, generate a string signature from its driver and/or receiver instance names. Nets with the same signature are grouped into one bundle.
+- `STRICT` — signature = driver instance + sorted receiver instances; exact match required
+- `CONVERGENT` — signature = sorted receiver instances only; shared destination is enough
+
+**Output fed to stage 2:** `vector<Bundle>`
+
+---
+
+### Stage 2 — Topology Generator (`topology.h/cpp`)
+
+**Responsibility:** For each bundle's source→destination block pair, enumerate candidate routing paths as sequences of axis-aligned segments.
+
+**Key types:**
+- `Point` — integer (x, y)
+- `Rect` — integer bounding box with `.center()`
+- `Segment` — start point, end point, `layer_hint` (integer)
+- `Topology` — type string (`"L_HV"`, `"Z_trunk_x"`, `"U_top"`, …), list of segments, estimated wirelength, trunk location
+- `Floorplan` — block registry; provides `get_hanan_grid()` (sorted unique x and y coordinates of all block edges)
+- `TopologyGenerator` — generates L, Z, U candidates between two named blocks
+
+**Topology shapes:**
+- **L-shape** (2 segments): horizontal then vertical, or vertical then horizontal. The bend point is at one block's center projected onto the other's axis.
+- **Z-shape** (3 segments): adds an intermediate trunk segment at a Hanan grid line between the two blocks. Multiple Z candidates are generated — one per intermediate Hanan grid coordinate.
+- **U-shape** (3 segments): routes outside the bounding box of the two blocks, used when a direct L or Z path would traverse an obstacle. Trunk is placed beyond the extreme Hanan grid lines.
+
+**Layer hints:** L-shape horizontal segment gets hint=3 (M3), vertical gets hint=4 (M4). All candidates use the same convention; the bundle planner may override.
+
+**Output fed to stage 3:** `vector<Topology>` per bundle, stored in `BundleWrapper::candidates`.
+
+---
+
+### Stage 3 — Bundle Planner / Global Router (`global_router.h/cpp`)
+
+**Responsibility:** Select one topology per bundle and assign it a layer, trading off congestion across all bundles simultaneously.
+
+**Key types:**
+- `GlobalCut` — a Hanan grid line segment with `capacity` and `current_usage`
+- `BundleWrapper` — wraps a `Bundle` with its topology candidates, the selected index, and the bus `width` (logical, in layout units)
+
+**Algorithm (current: mock):** Iterates bundles; selects topology index 0 by default; overrides for bundles whose first net name contains `"b2_"` (force Z) or `"b3_"` (force U). Real implementation will minimise congestion across cuts using the dilution formula:
+```
+effective_width = raw_width × (100 / (100 − overhead_percent))
+```
+`overhead_percent` is set per layer via `set_layer_overhead()`.
+
+**After this stage**, each `BundleWrapper::candidates[selected_topology_index]` contains segments where:
+- `layer_hint` is the assigned metal layer
+- `start`/`end` coordinates define a soft routing-direction span
+- The perpendicular coordinate implicitly defines the Hanan grid cell (hard interval for stage 4)
+
+**Output fed to stage 4:** mutated `vector<BundleWrapper>` with `selected_topology_index` set.
+
+---
+
+### Stage 4 — Abstract NUTS (`nuts.h/cpp`)
+
+**Responsibility:** Solve the 1.5-D rectangle packing problem (Ekici, Basaran & Keskinocak 2009) — assign a concrete perpendicular `track_position` (real coordinate) to every bus segment, per layer, with no physical overlaps.
+
+**Key types:**
+- `TrackSegment` — bundle_id, seg_idx, layer, span_lo/hi (routing direction), interval_lo/hi (hard perpendicular constraint from Hanan cell), width, track_position (output), placed flag
+- `NUTSResult` — flat list of `TrackSegment`s + `num_violations` (placed outside interval) + `num_overlaps` (physical collisions after placement)
+
+**Algorithm (per layer):**
+1. Extract segments from selected topologies; derive interval constraints from the Hanan grid cell containing each segment's nominal perpendicular coordinate.
+2. Build a sweep-line event queue: one START and one END event per segment, sorted by `span_lo`.
+3. Sweep: on START, collect occupied intervals from already-placed active segments; call `first_fit(interval_lo, interval_hi, width, occupied)` to find the lowest valid placement. On END, remove from active set.
+4. `first_fit`: tries placement at `interval_lo` and just after each occupied interval's upper edge (+ `track_pitch`). Returns −1 if infeasible; caller falls back to interval centre (best-effort, counted as violation).
+
+**Power-grid interaction (planned for stage 8):** When a `RoutingGridStack` is provided, `width` is pre-inflated by the layer's `dilution_factor` (= `unit_pitch / signal_width_sum`) so that the abstract bus footprint accounts for power/clock tracks approximately without snapping to them exactly.
+
+**Parallelism:** `solve_layer()` is called independently per layer — the per-layer maps have no cross-layer dependencies.
+
+**Output fed to stage 9:** `NUTSResult` with one `TrackSegment` per bus segment.
+
+---
+
+### Stage 5 — Layer Stack (`layering.h/cpp`)
+
+**Responsibility:** Metadata registry for the metal layer stack. Consulted by stages 3, 4, 8, and 9.
+
+**Key types:**
+- `Layer` — id, name, `LayerDir` (HORIZONTAL / VERTICAL), `LayerType` (TOP / LOW)
+- `LayerStack` — add/query layers; tracks which layer is the top horizontal and top vertical layer
+
+---
+
+### Stage 6 — CLI (`buda_cli.py`)
+
+**Responsibility:** Parse `.buda` script files line-by-line and drive the C++ engine via the pybind11 `interconnect` module.
+
+`BudaSession` holds all live objects: `Floorplan`, `Netlist`, `LayerStack`, `Bundler`, `bundles` list, `nuts_result`, and (planned) `routing_grid`. Each CLI command maps to one or more method calls on these objects.
+
+Adding a new stage means: (1) implement the C++ class, (2) expose it in `bindings.cpp`, (3) add a `elif cmd == "..."` branch in `BudaSession.do_command()`.
+
+---
+
+### Stage 7 — Visualizer (`buda_viz.py`)
+
+**Responsibility:** Interactive matplotlib window. All drawable elements are registered by bundle_id so click-to-highlight works uniformly across all draw methods.
+
+**Artist registry pattern:** Every `ax.plot()` or `ax.add_patch()` call that represents a routable object is passed to `_register(bundle_id, artist, alpha=..., lw=..., is_band=...)`. This stores the artist's resting style. `_set_highlight(bundle_id)` then dims all other bundles to α=0.1 and brightens the selected bundle to α=1.0 with 2.2× line width. Clicking the same bundle or the background resets.
+
+**Draw methods:**
+- `draw_blocks()` — floorplan rectangles (not registered; always full opacity)
+- `draw_hanan_grid()` — faint dashed grid lines (not registered)
+- `draw_buses()` — topology segments at nominal coordinates (no NUTS)
+- `draw_nuts_tracks(nuts_result)` — segments at NUTS-assigned track positions; faint interval-constraint bands behind each segment (registered as `is_band=True`)
+- `draw_preroutes(...)` *(planned)* — VDD/GND/CLK/SHIELD bands; per-type visibility toggle
+- `draw_detailed_tracks(detailed_result)` *(planned)* — individual bit-wire lines at concrete track positions
+
+---
+
+### Stage 8 — Routing Grid (`routing_grid.h/cpp`) *(planned)*
+
+**Responsibility:** Define the physical track structure of each metal layer — which track slots are POWER, GROUND, CLOCK, SHIELD, or SIGNAL — and expose this to both abstract NUTS (for dilution) and detailed NUTS (for exact track enumeration).
+
+**Key types (designed, not yet implemented):**
+
+`TrackSlot`
+- `type`: extensible enum `{ POWER, GROUND, CLOCK, SHIELD, SIGNAL, CUSTOM }`
+- `label`: string (`"VDD"`, `"GND"`, `"CLK1"`, user-defined)
+- `width`: double (track width in layout units)
+- `space_after`: double (gap to the next slot)
+
+`TrackPattern`
+- `origin`: double — global anchor from chip origin (0,0); ensures all Hanan channels tile on the same phase
+- `slots`: `vector<TrackSlot>` — one repeating unit (e.g. `[VDD(w=2), sig, sig, sig, sig, GND(w=2), sig, sig, sig, sig]`)
+- `unit_pitch()` → sum of all `width + space_after` in one unit
+- `signal_density()` → sum of signal widths / unit_pitch
+- `dilution_factor()` → 1.0 / signal_density (fed to abstract NUTS stage 4)
+- `tracks_in_range(lo, hi)` → `vector<(abs_position, TrackSlot)>` — enumerates all track centre positions within a perpendicular interval
+
+`PatternOverride`
+- `region`: `Rect` (Hanan-cell-aligned)
+- `layer_id`: int
+- `pattern`: `TrackPattern` with its own local `origin`
+- Power/CLK segments are **broken** at region boundaries (DRC gap accepted)
+
+`RoutingGrid` (per layer)
+- `global_pattern`: `TrackPattern`
+- `overrides`: `vector<PatternOverride>`
+- `effective_pattern_at(x, y)` → first matching override, else global
+- `signal_tracks_in(x, lo, hi)` → only SIGNAL-type slots within the interval
+
+`RoutingGridStack`
+- `define_layer(layer_id, pattern)`
+- `add_override(layer_id, region, pattern)`
+- `get_layer_grid(layer_id)` → `RoutingGrid&`
+
+**Python hooks:** `RoutingGridStack`, `TrackPattern`, `TrackSlot` fully exposed to Python so users can build, inspect, and override patterns programmatically without recompiling.
+
+**`.buda` commands:**
+```
+def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...
+add_grid_override  <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...
+```
+
+---
+
+### Stage 9 — Detailed NUTS (`detailed_nuts.h/cpp`) *(planned)*
+
+**Responsibility:** Expand each abstract `BusSegment` (from stage 4) into N concrete `NetSegment`s, one per bit-wire, snapped to exact signal track positions from the `RoutingGridStack`. Pre-route blockages (POWER, GROUND, CLOCK, SHIELD) are hard constraints.
+
+**Key types (designed, not yet implemented):**
+
+`PlacedSegmentBase` (abstract base)
+- `layer`, `span_lo`, `span_hi`, `track_position`, `width`
+- `kind`: `{ BUS, NET, POWER, GROUND, CLOCK, SHIELD, CUSTOM }`
+- `placed`: bool
+
+`BusSegment : PlacedSegmentBase` — replaces `TrackSegment` from stage 4
+- `bundle_id`, `seg_idx`, `bit_width` (number of signal tracks needed)
+- `interval_lo`, `interval_hi`
+- `bit_order`: `{ LO_HI, HI_LO }` (default LO_HI)
+- `timing_critical`: bool — if true, all bits must be on contiguous signal tracks with equal spacing for uniform RC
+
+`NetSegment : PlacedSegmentBase` — one bit-wire; output of stage 9
+- `bundle_id`, `seg_idx`, `bit_index` (0-based position within bus)
+- `net_name`: string
+- `track_index`: int (index into `signal_tracks_in()` result)
+
+`PreRoutedSegment : PlacedSegmentBase` — fixed blockage; input to stage 9
+- `label`: string (`"VDD"`, `"CLK1"`, …)
+- `track_index`: int
+
+`DetailedNUTSResult`
+- `net_segments`: `vector<NetSegment>`
+- `prerouted_segments`: `vector<PreRoutedSegment>`
+- `num_unplaced`: int
+
+**Algorithm:**
+1. For each `BusSegment` in `NUTSResult`, call `signal_tracks_in(x, interval_lo, interval_hi)` on the effective `RoutingGrid` to get the available signal track list.
+2. Take the first `bit_width` signal tracks (LO_HI) or last `bit_width` (HI_LO).
+3. If `timing_critical`, verify all selected tracks are contiguous (no power/clock tracks between them); if not, search for the tightest contiguous window of `bit_width` signal tracks within the interval.
+4. Emit one `NetSegment` per track with `track_position` = track centre, `width` = track width from `TrackSlot`.
+
+**`.buda` command:**
+```
+run_detailed_nuts [lo_hi|hi_lo]
+```
+
+**Visualization hook:** `draw_detailed_tracks(detailed_result)` draws individual bit-wire lines at their concrete track positions, with per-type visibility toggles (`[VDD] [GND] [CLK] [SIGNAL]`) as matplotlib `Button` widgets.
+
+---
+
+## Segment Type Hierarchy (target state)
+
+```
+PlacedSegmentBase          kind, layer, span, track_position, width, placed
+├── BusSegment             bundle_id, seg_idx, bit_width, interval, bit_order, timing_critical
+├── NetSegment             bundle_id, seg_idx, bit_index, net_name, track_index
+└── PreRoutedSegment       label, track_index
+```
+
+The raw geometry type `Segment` in `topology.h` (start/end points + layer_hint) is a **pre-placement** concept and remains separate from this hierarchy. `PlacedSegmentBase` and its subtypes are **post-placement** and live in `nuts.h` / `detailed_nuts.h`.
+
+---
+
+## Two System Versions
 
 - `buda_system/` — v1 (older, kept for reference)
-- `buda_system_v2/` — v2 (current; adds U-shapes, non-uniform widths in visualization)
+- `buda_system_v2/` — v2 (current, all active development)
 
-`setup_buda.py` at the repo root is a generator script that can regenerate the project skeleton from templates.
+---
 
 ## Dependencies
 
