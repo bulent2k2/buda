@@ -1,0 +1,2771 @@
+Run: java_std_path before building kojo.
+ben@Bulents-MacBook-Pro buda % python3 setup_buda.py
+python3 setup_buda.py
+[Created] buda_system/CMakeLists.txt
+[Created] buda_system/src/bundler.h
+[Created] buda_system/src/bundler.cpp
+[Created] buda_system/src/topology.h
+[Created] buda_system/src/topology.cpp
+[Created] buda_system/src/layering.h
+[Created] buda_system/src/layering.cpp
+[Created] buda_system/src/global_router.h
+[Created] buda_system/src/global_router.cpp
+[Created] buda_system/src/nuts.h
+[Created] buda_system/src/nuts.cpp
+[Created] buda_system/src/bindings.cpp
+[Created] buda_system/src/buda_viz.py
+[Created] buda_system/src/buda_cli.py
+[Created] buda_system/src/z_shape_stress.buda
+
+[SUCCESS] BUDA System Generated in 'buda_system/'
+To build and run:
+  1. cd buda_system
+  2. mkdir build && cd build
+  3. cmake .. && make
+  4. cp interconnect*.so ../src/
+  5. cd ../src
+  6. python3 buda_cli.py z_shape_stress.buda
+ben@Bulents-MacBook-Pro buda % which cmake
+which cmake
+cmake not found
+ben@Bulents-MacBook-Pro buda % brew install cmake
+brew install cmake
+==> Auto-updating Homebrew...
+Adjust how often this is run with HOMEBREW_AUTO_UPDATE_SECS or disable with
+HOMEBREW_NO_AUTO_UPDATE. Hide these hints with HOMEBREW_NO_ENV_HINTS (see `man brew`).
+==> Downloading https://ghcr.io/v2/homebrew/core/portable-ruby/blobs/sha256:80c194381e990a4967a1ae44b8242b688e6a17ab590865a38671137677411469
+######################################################################### 100.0%
+==> Pouring portable-ruby-3.4.8.catalina.bottle.tar.gz
+==> Auto-updated Homebrew!
+Updated 5 taps (unisonweb/unison, lightbend/brew, coursier/formulas, homebrew/core and homebrew/cask).
+==> New Formulae
+abpoa: SIMD-based C library for fast partial order alignment using adaptive band
+act_runner: Action runner for Gitea based on Gitea's fork of act
+addlicense: Scan directories recursively to ensure source files have license headers
+addons-linter: Firefox Add-ons linter, written in JavaScript
+adplay: Command-line player for OPL2 music
+aiac: Artificial Intelligence Infrastructure-as-Code Generator
+aicommit2: Reactive CLI that generates commit messages for Git and Jujutsu with AI
+aiken: Modern smart contract platform for Cardano
+air: Fast and opinionated formatter for R code
+airtable-mcp-server: MCP Server for Airtable
+aklomp-base64: Fast Base64 stream encoder/decoder in C99, with SIMD acceleration
+anchor: Solana Program Framework
+ansible@12: Automate deployment, configuration, and upgrading
+anyzig: Universal zig executable that runs any version of zig
+apache-polaris: Interoperable, open source catalog for Apache Iceberg
+apigeecli: Apigee management API command-line interface
+archgw: CLI for Arch Gateway
+arp-scan-rs: ARP scan tool written in Rust for fast local network scans
+asm-lsp: Language server for NASM/GAS/GO Assembly
+assimp@5: Portable library for importing many well-known 3D model formats
+astra: Command-Line Interface for DataStax Astra
+atomic_queue: C++14 lock-free queues
+attempt-cli: CLI for retrying fallible commands
+audiowaveform: Generate waveform data and render waveform images from audio files
+auto-editor: Efficient media analysis and rendering
+autocycler: Tool for generating consensus long-read assemblies for bacterial genomes
+aws-spiffe-workload-helper: Helper for providing AWS credentials to workloads using their SPIFFE identity
+ayatana-ido: Ayatana Indicator Display Objects
+b4: Tool to work with public-inbox and patch archives
+backgroundremover: Remove background from images and video using AI
+backlog-md: Markdown‑native Task Manager & Kanban visualizer for any Git repository
+badread: Long read simulator that can imitate many types of read problems
+bb-cli: Bitbucket Rest API CLI written in pure PHP
+bedtk: Simple toolset for BED files
+benchi: Benchmarking tool for data pipelines
+blueprint-compiler: Markup language and compiler for GTK 4 user interfaces
+boa: Embeddable and experimental Javascript engine written in Rust
+bom: Utility to generate SPDX-compliant Bill of Materials manifests
+bookokrat: Terminal EPUB Book Reader
+breseq: Computational pipeline for finding mutations in short-read DNA resequencing data
+brush: Bourne RUsty SHell (command interpreter)
+bsc: Bluespec Compiler (BSC)
+bstring: Fork of Paul Hsieh's Better String Library
+btcli: Bittensor command-line tool
+btllib: Bioinformatics Technology Lab common code library
+bulletty: Pretty feed reader (ATOM/RSS) that stores articles in Markdown files
+bumpp: Interactive CLI that bumps your version numbers and more
+bunster: Compile shell scripts to static binaries
+burrow: Kafka Consumer Lag Checking
+caesiumclt: Fast and efficient lossy and/or lossless image compression tool
+cagent: Agent Builder and Runtime by Docker Engineering
+cai: CLI tool for prompting LLMs
+calm-cli: CLI allows you to interact with the Common Architecture Language Model (CALM)
+cargo-careful: Execute Rust code carefully, with extra checking along the way
+cargo-clone: Cargo subcommand to fetch the source code of a Rust crate
+cargo-component: Create WebAssembly components based on the component model proposal
+cargo-geiger: Detects usage of unsafe Rust in a Rust crate and its dependencies
+carl: Calendar for the command-line
+ccusage: CLI tool for analyzing Claude Code usage from local JSONL files
+changelogen: Generate Beautiful Changelogs using Conventional Commits
+chawan: TUI web browser with CSS, inline image and JavaScript support
+chrome-devtools-mcp: Chrome DevTools for coding agents
+cinecli: Browse, inspect, and launch movie torrents directly from your terminal
+clang-include-graph: Simple tool for visualizing and analyzing C/C++ project include graph
+claude-cmd: Claude Code Commands Manager
+claude-code-router: Tool to route Claude Code requests to different models and customize any request
+claude-code-templates: CLI tool for configuring and monitoring Claude Code
+claude-hooks: Hook system for Claude Code
+claude-squad: Manage multiple AI agents like Claude Code, Aider and Codex in your terminal
+claudekit: Intelligent guardrails and workflow automation for Claude Code
+clipper2: Polygon clipping and offsetting library
+clippy: Copy files from your terminal that actually paste into GUI apps
+cliproxyapi: Wrap Gemini CLI, Codex, Claude Code, Qwen Code as an API service
+codebook-lsp: Code-aware spell checker language server
+cogapp: Small bits of Python computation for static files
+config-file-validator: CLI tool to validate different configuration file types
+container: Create and run Linux containers using lightweight virtual machines
+container-canary: Test and validate container requirements against versioned manifests
+container-compose: Manage Apple Container with Docker Compose files
+context7-mcp: Up-to-date code documentation for LLMs and AI code editors
+copyparty: Portable file server
+corepack: Package acting as bridge between Node projects and their package managers
+cpptrace: Simple, portable, and self-contained stacktrace library for C++11 and newer
+cram: Functional testing framework for command-line applications
+crd2pulumi: Generate typed CustomResources from a Kubernetes CustomResourceDefinition
+credo: Static code analysis tool for the Elixir
+ctre: Compile-time PCRE-compatible regular expression matcher for C++
+ctrld: Highly configurable, multi-protocol DNS forwarding proxy
+custom-install: Install CIA files directly to Nintendo 3DS SD card
+dagu: Lightweight and powerful workflow engine
+damask-grid: Grid solver of DAMASK - Multi-physics crystal plasticity simulation package
+darker: Apply Black formatting only in regions changed since last commit
+dash-mpd-cli: Download media content from a DASH-MPEG or DASH-WebM MPD manifest
+deck: Creates slide deck using Markdown and Google Slides
+decker: HyperCard-like multimedia sketchpad
+depot: Build your Docker images in the cloud
+desed: Debugger for Sed
+devcockpit: TUI system monitor for Apple Silicon
+dexidp: OpenID Connect Identity and OAuth 2.0 Provider
+diagram: CLI app to convert ASCII arts into hand drawn diagrams
+diffnav: Git diff pager based on delta but with a file tree
+dnglab: Camera RAW to DNG file format converter
+dnote: Simple command-line notebook
+dnspyre: CLI tool for a high QPS DNS benchmark
+docker-compose-langserver: Language service for Docker Compose documents
+docker-debug: Use new container attach on already container go on debug
+docker-language-server: Language server for Dockerfiles, Compose files, and Bake files
+docmd: Minimal Markdown documentation generator
+doge: Command-line DNS client
+doh: Stand-alone DNS-over-HTTPS resolver using libcurl
+domain-check: CLI tool for checking domain availability using RDAP and WHOIS protocols
+doxx: Terminal document viewer for .docx files
+dqlite: Embeddable, replicated and fault-tolerant SQLite-powered engine
+dstp: Run common networking tests against your site
+dumbpipe: Unix pipes between devices
+dvisvgm: Fast DVI to SVG converter
+e1s: TUI for managing AWS ECS, inspired by k9s
+eask-cli: CLI for building, running, testing, and managing your Emacs Lisp dependencies
+eigen@3: C++ template library for linear algebra
+electric: Real-time sync for Postgres
+elf2uf2-rs: Convert ELF files to UF2 for USB Flashing Bootloaders
+emmylua_ls: Lua Language Server
+endlessh: SSH tarpit that slowly sends an endless banner
+entt: Fast and reliable entity-component system for C++
+erlang-language-platform: LSP server and CLI for the Erlang programming language
+erlang@27: Programming language for highly scalable real-time systems
+errcheck: Finds silently ignored errors in Go code
+execline: Interpreter-less scripting language
+execstack: Utility to set/clear/query executable stack bit
+faceprints: Detect and label images of faces using local Vision.framework models
+fake-gcs-server: Emulator for Google Cloud Storage API
+fakesteak: ASCII Matrix-like steak demo
+faketty: Wrapper to exec a command in a pty, even if redirecting the output
+fastga: Pairwise whole genome aligner
+fastk: K-mer counter for high-fidelity shotgun datasets
+fastmcp: Fast, Pythonic way to build MCP servers and clients
+fastrace: Dependency-free traceroute implementation in pure C
+fennel-ls: Language Server for Fennel
+fernflower: Advanced decompiler for Java bytecode
+ffmate: FFmpeg automation layer
+ffmpeg@7: Play, record, convert, and stream audio and video
+filebrowser: Web File Browser
+filen-cli: Interface with Filen, an end-to-end encrypted cloud storage service
+fjira: Fuzzy-find cli jira interface
+flecs: Fast entity component system for C & C++
+flexget: Multipurpose automation tool for content
+flye: De novo assembler for single molecule sequencing reads using repeat graphs
+fnox: Fort Knox for your secrets - flexible secret management tool
+forgejo: Self-hosted lightweight software forge
+forgejo-cli: CLI tool for interacting with Forgejo
+foxglove-cli: Foxglove command-line tool
+framework-tool-tui: TUI for controlling and monitoring Framework Computers hardware
+fresh-editor: Text editor for your terminal: easy, powerful and fast
+fx-upscale: Metal-powered video upscaling
+garage: S3 object store so reliable you can run it outside datacenters
+gbox: Provides environments for AI Agents to operate computer and mobile devices
+gcc@14: GNU compiler collection
+gcl: GNU Common Lisp
+gcli: Portable Git(hub|lab|tea)/Forgejo/Bugzilla CLI tool
+gemini-cli: Interact with Google Gemini AI models from the command-line
+gerust: Project generator for Rust backend projects
+getparty: Multi-part HTTP download manager
+ggc: Modern Git CLI
+ghalint: GitHub Actions linter
+ghidra: Multi-platform software reverse engineering framework
+git-get: Better way to clone, organize and manage multiple git repositories
+git-pages: Scalable static site server for Git forges
+git-pages-cli: Tool for publishing a site to a git-pages server
+git-xet: Git LFS plugin that uploads and downloads using the Xet protocol
+gitea-mcp-server: Interactive with Gitea instances with MCP
+gitingest: Turn any Git repository into a prompt-friendly text ingest for LLMs
+gitlab-ci-linter: Command-line tool to lint GitLab CI YAML files
+gitlab-release-cli: Toolset to create, retrieve and update releases on GitLab
+gitlogue: Cinematic Git commit replay tool
+gitmux: Git status in tmux status bar
+gitnr: Create `.gitignore` using templates from TopTal, GitHub or your own collection
+global-arrays: Partitioned Global Address Space (PGAS) library for distributed arrays
+glom: Declarative object transformer and formatter, for conglomerating nested data
+gnome-papers: Document viewer for PDF and other document formats aimed at the GNOME desktop
+go-librespot: Spotify client
+go-passbolt-cli: CLI for passbolt
+go-rice: Easily embed resources like HTML, JS, CSS, images, and templates in Go
+go@1.24: Open source programming language to build simple/reliable/efficient software
+goat: General purpose AT Protocol CLI in Go
+gocheat: TUI Cheatsheet for keybindings, hotkeys and more
+goclone: Website Cloner
+gonzo: Log analysis TUI
+goodls: CLI tool to download shared files and folders from Google Drive
+goshs: Simple, yet feature-rich web server written in Go
+gotun: Lightweight HTTP proxy over SSH
+gpgmepp: C++ bindings for gpgme
+gpgmepy: Python bindings for gpgme
+gphotos-uploader-cli: Command-line tool to mass upload media folders to Google Photos
+gradle@8: Open-source build automation tool based on the Groovy and Kotlin DSL
+granted: Easiest way to access your cloud
+gravitino: High-performance, geo-distributed, and federated metadata lake
+gruyere: TUI program for viewing and killing processes listening on ports
+gtl: Greg's Template Library of useful classes
+gtrash: Featureful Trash CLI manager: alternative to rm and trash-cli
+gup: Update binaries installed by go install
+gwctl: CLI for managing and inspecting Gateway API resources in Kubernetes clusters
+hack-browser-data: Command-line tool for decrypting and exporting browser data
+hapless: Run and manage background processes
+haraka: Fast, highly extensible, and event driven SMTP server
+harbor-cli: CLI for Harbor container registry
+hayagriva: Bibliography management tool
+hdr10plus_tool: CLI utility to work with HDR10+ in HEVC files
+helm@3: Kubernetes package manager
+hexhog: Hex viewer/editor
+hf-mcp-server: MCP Server for Hugging Face
+hierarchy-builder: High level commands to declare a hierarchy based on packed classes
+html-to-markdown: Transforms HTML (even entire websites) into clean, readable Markdown
+htmlhint: Static code analysis tool you need for your HTML
+httptap: HTTP request visualizer with phase-by-phase timing breakdown
+hyper-mcp: MCP server that extends its capabilities through WebAssembly plugins
+icu4c@78: C/C++ and Java libraries for Unicode and globalization
+ifopt: Light-weight C++ Interface to Nonlinear Programming Solvers
+igrep: Interactive grep
+imagineer: Image processing and conversion from the terminal
+influxdb@2: Time series, events, and metrics database
+install-nothing: Simulates installing things but doesn't actually install anything
+intelli-shell: Like IntelliSense, but for shells
+jiratui: Textual User Interface for interacting with Atlassian Jira from your shell
+joyce: Emulates the Amstrad PCW on Unix, Windows and macOS
+jq-lsp: Jq language server
+jqp: TUI playground to experiment and play with jq
+jsonfmt: Like gofmt, but for JSON files
+jwt-hack: JSON Web Token Hack Toolkit
+kafkactl-aws-plugin: AWS Plugin for kafkactl
+kafkactl-azure-plugin: Azure Plugin for kafkactl
+kagent: Kubernetes native framework for building AI agents
+kanata-tray: System tray for kanata keyboard remapper
+kargo: Multi-Stage GitOps Continuous Promotion
+kbt: Keyboard tester in terminal
+kekkai: File integrity monitoring tool
+khaos: Kafka traffic simulator for observability and chaos engineering
+kibi: Text editor in ≤1024 lines of code, written in Rust
+kimi-cli: CLI agent for MoonshotAI Kimi platform
+kingfisher: MongoDB's blazingly fast secret scanning and validation tool
+kissat: Bare metal SAT solver
+klog: Command-line tool for time tracking in a human-readable, plain-text file format
+kokkos: C++ Performance Portability Ecosystem for parallel execution and abstraction
+komac: Community Manifest Creator for Windows Package Manager (WinGet)
+kraken2: Taxonomic sequence classification system
+krane: Kubernetes deploy tool with rollout verification
+ktea: Kafka TUI client
+ktop: Top-like tool for your Kubernetes clusters
+kubernetes-cli@1.33: Kubernetes command-line interface
+kubernetes-cli@1.34: Kubernetes command-line interface
+kubernetes-mcp-server: MCP server for Kubernetes
+kyua: Testing framework for infrastructure software
+labctl: CLI tool for interacting with iximiuz labs and playgrounds
+lakekeeper: Apache Iceberg REST Catalog
+lazycontainer: Terminal UI for Apple Containers
+lazyssh: Terminal-based SSH manager
+ldcli: CLI for managing LaunchDarkly feature flags
+libaegis: Portable C implementations of the AEGIS family of encryption algorithms
+libayatana-appindicator: Ayatana Application Indicators Shared Library
+libayatana-indicator: Ayatana Indicators Shared Library
+libbsc: High performance block-sorting data compression library
+libcaption: Free open-source CEA608 / CEA708 closed-caption encoder/decoder
+libcpucycles: Microlibrary for counting CPU cycles
+libdatrie: Double-Array Trie Library
+libdbusmenu: GLib and Gtk Implementation of the DBusMenu protocol
+libdecor: Client-side decorations library for Wayland client
+libevdev: Wrapper library for evdev devices
+libjodycode: Shared code used by several utilities written by Jody Bruchon
+libngtcp2: IETF QUIC protocol implementation
+libpq@16: Postgres C API library
+libpq@17: Postgres C API library
+libptytty: Library for OS-independent pseudo-TTY management
+libselinux: SELinux library and simple utilities
+libsepol: SELinux binary policy manipulation library
+libudfread: Universal Disk Format reader
+limine: Modern, advanced, portable, multiprotocol bootloader and boot manager
+lispkit: Scheme framework for extension and scripting languages on macOS and iOS
+litehtml: Fast and lightweight HTML/CSS rendering engine
+lld@20: LLVM Project Linker
+llvm@20: Next-gen compiler infrastructure
+lnk: Git-native dotfiles management that doesn't suck
+lolcrab: Make your console colorful, with OpenSimplex noise
+lsr: Ls but with io_uring
+lstr: Fast, minimalist directory tree viewer
+lue-reader: Terminal eBook reader with text-to-speech and multi-format support
+lunarml: Standard ML compiler that produces Lua/JavaScript
+lunasvg: SVG rendering and manipulation library in C++
+lutgen: Blazingly fast interpolated LUT generator and applicator for color palettes
+lzsa: Lossless packer that is optimized for fast decompression on 8-bit micros
+mac-cleanup-py: Python cleanup script for macOS
+macchanger: Change your mac address, for macOS
+magika: Fast and accurate AI powered file content types detection
+maigret: Collect a dossier on a person by username from thousands of sites
+mail-deduplicate: CLI to deduplicate mails from mail boxes
+manifold: Geometry library for topological robustness
+mapscii: Whole World In Your Console
+mariadb@11.8: Drop-in replacement for MySQL
+mark: Sync your markdown files with Confluence pages
+matcha: Daily digest generator for your RSS feeds
+mbedtls@3: Cryptographic & SSL/TLS library
+mcat: Terminal image, video, directory, and Markdown viewer
+mcp-atlassian: MCP server for Atlassian tools (Confluence, Jira)
+mcp-get: CLI for discovering, installing, and managing MCP servers
+mcp-google-sheets: MCP server integrates with your Google Drive and Google Sheets
+mcp-grafana: MCP server for Grafana
+mcp-inspector: Visual testing tool for MCP servers
+mcp-proxy: Bridge between Streamable HTTP and stdio MCP transports
+mcp-publisher: Publisher CLI tool for the Official Model Context Protocol (MCP) Registry
+mcp-scan: Constrain, log and scan your MCP connections for security vulnerabilities
+mcp-server-chart: MCP with 25+ @antvis charts for visualization, generation, and analysis
+mcp-server-kubernetes: MCP Server for kubernetes management commands
+mcphost: CLI host for LLMs to interact with tools via MCP
+mcptools: CLI for interacting with MCP servers using both stdio and HTTP transport
+mdfried: Terminal markdown viewer
+mdserve: Fast markdown preview server with live reload and theme support
+media-control: Control and observe media playback from the command-line
+melt: Backup and restore Ed25519 SSH keys with seed words
+memtier_benchmark: Redis and Memcache traffic generation and benchmarking tool
+mermaid-cli: CLI for Mermaid library
+min-lang: Small but practical concatenative programming language and shell
+minify: Minifier for HTML, CSS, JS, JSON, SVG, and XML
+miniprot: Align proteins to genomes with splicing and frameshift
+mistral-vibe: Minimal CLI coding agent
+mitama-cpp-result: Provides `result<T, E>` and `maybe<T>` and monadic functions for them
+mk: Wrapper for auto-detecting build and test commands in a repository
+mklittlefs: Creates LittleFS images for ESP8266, ESP32, Pico RP2040, and RP2350
+mlc: Check for broken links in markup files
+mlx-lm: Run LLMs with MLX
+mole: Deep clean and optimize your Mac
+mongo-c-driver@1: C driver for MongoDB
+moodle-dl: Downloads course content fast from Moodle (e.g., lecture PDFs)
+moribito: TUI for LDAP Viewing/Queries
+mpremote: Tool for interacting remotely with MicroPython devices
+mq: Jq-like command-line tool for markdown processing
+msedit: Simple text editor with clickable interface
+msolve: Library for Polynomial System Solving through Algebraic Methods
+mufetch: Neofetch-style music cli
+mysql-to-sqlite3: Transfer data from MySQL to SQLite
+n8n-mcp: MCP for Claude Desktop, Claude Code, Windsurf, Cursor to build n8n workflows
+nanoarrow: Helpers for Arrow C Data & Arrow C Stream interfaces
+nanobot: Build MCP Agents
+neo4j-mcp: Neo4j official Model Context Protocol server for AI tools
+nessie: Transactional Catalog for Data Lakes with Git-like semantics
+netscanner: Network scanner with features like WiFi scanning, packetdump and more
+netshow: Interactive network connection monitor with friendly service names
+nextflow: Reproducible scientific workflows
+ni: Selects the right Node package manager based on lockfiles
+nifi-toolkit: Command-line utilities to setup and support NiFi
+nixfmt: Command-line tool to format Nix language code
+nkt: TUI for fast and simple interacting with your BibLaTeX database
+node@24: Open-source, cross-platform JavaScript runtime environment
+notion-mcp-server: MCP Server for Notion
+npq: Audit npm packages before you install them
+nuxi: Nuxt CLI (nuxi) for creating and managing Nuxt projects
+nx: Smart, Fast and Extensible Build System
+nyan: Colorizing `cat` command with syntax highlighting
+oasis: CLI for interacting with the Oasis Protocol network
+oatpp: Light and powerful C++ web framework
+octodns: Tools for managing DNS across multiple providers
+omekasy: Converts alphanumeric input to various Unicode styles
+omnara: Talk to Your AI Agents from Anywhere
+onigmo: Regular expressions library forked from Oniguruma
+openapi: CLI tools for working with OpenAPI, Arazzo and Overlay specifications
+openapv: Open Advanced Professional Video Codec
+openblas64: Optimized BLAS library
+opencode: AI coding agent, built for the terminal
+openlist: New AList fork addressing anti-trust issues
+openssl@3.5: Cryptography and SSL/TLS Toolkit
+osx-trash: Allows trashing of files instead of tempting fate with rm
+oterm: Terminal client for Ollama
+ovsx: Command-line interface for Eclipse Open VSX
+oxen: Data VCS for structured and unstructured machine learning datasets
+pangene: Construct pangenome gene graphs
+papeer: Convert websites into eBooks and Markdown
+papis: Powerful command-line document and bibliography manager
+parqeye: Peek inside Parquet files right from your terminal
+patchpal: AI Assisted Patch Backporting Tool Frontend
+pdtm: ProjectDiscovery's Open Source Tool Manager
+pelican: Static site generator that supports Markdown and reST syntax
+perbase: Fast and correct perbase BAM/CRAM analysis
+permify: Open-source authorization service & policy engine based on Google Zanzibar
+pg-schema-diff: Diff Postgres schemas and generating SQL migrations
+pgslice: Postgres partitioning as easy as pie
+pgstream: PostgreSQL replication with DDL changes
+phantom: CLI tool for seamless parallel development with Git worktrees
+php@8.4: General-purpose scripting language
+pipewire: Server and user space API to deal with multimedia pipelines
+pixlet: App runtime and UX toolkit for pixel-based apps
+plakar: Create backups with compression, encryption and deduplication
+playwright-mcp: MCP server for Playwright
+plutobook: Paged HTML Rendering Library
+plutoprint: Generate PDFs and Images from HTML
+plutovg: Tiny 2D vector graphics library in C
+podcast-archiver: Archive all episodes from your favorite podcasts
+polaris: Validation of best practices in your Kubernetes clusters
+polypolish: Short-read polishing tool for long-read assemblies
+pony-language-server: Language server for Pony
+portable-libffi: Portable Foreign Function Interface library
+portable-libxcrypt: Extended crypt library for descrypt, md5crypt, bcrypt, and others
+portable-libyaml: YAML Parser
+portable-openssl: Cryptography and SSL/TLS Toolkit
+portable-ruby: Powerful, clean, object-oriented scripting language
+portable-zlib: General-purpose lossless data-compression library
+postgres-language-server: Language Server for Postgres
+postgresql@18: Object-relational database system
+precice: Coupling library for partitioned multi-physics simulations
+privatebin-cli: CLI for creating and managing PrivateBin pastes
+protozero: Minimalist protocol buffer decoder and encoder in C++
+pulp-cli: Command-line interface for Pulp 3
+pulumictl: Swiss army knife for Pulumi development
+pvetui: Terminal UI for Proxmox VE
+py7zr: 7-zip in Python
+pyrefly: Fast type checker and IDE for Python
+pyscn: Intelligent Python Code Quality Analyzer
+python-gdbm@3.14: Python interface to gdbm
+python-tk@3.14: Python interface to Tcl/Tk
+python@3.14: Interpreted, interactive, object-oriented programming language
+pytr: Use TradeRepublic in terminal and mass download all documents
+q: Tiny command-line DNS client with support for UDP, TCP, DoT, DoH, DoQ and ODoH
+qcoro6: C++ Coroutines for Qt
+qman: Modern man page viewer
+qnm: CLI for querying the node_modules directory
+qqqa: Fast, stateless LLM for your shell: qq answers; qa runs commands
+qrkey: Generate and recover QR codes from files for offline private key backup
+qt3d: Provides functionality for near-realtime simulation systems
+qt5compat: Qt 5 Core APIs that were removed in Qt 6
+qtbase: Cross-platform application and UI framework
+qtcharts: UI Components for displaying visually pleasing charts
+qtconnectivity: Provides access to Bluetooth hardware
+qtdatavis3d: Provides functionality for 3D visualization
+qtdeclarative: QML, Qt Quick and several related modules
+qtgraphs: Provides functionality for 2D and 3D graphs
+qtgrpc: Provides support for communicating with gRPC services
+qthttpserver: Framework for embedding an HTTP server into a Qt application
+qtimageformats: Plugins for additional image formats: TIFF, MNG, TGA, WBMP
+qtlanguageserver: Implementation of the Language Server Protocol and JSON-RPC
+qtlocation: Provides C++ interfaces to retrieve location and navigational information
+qtlottie: Display graphics and animations exported by the Bodymovin plugin
+qtmultimedia: Provides APIs for playing back and recording audiovisual content
+qtnetworkauth: Provides support for OAuth-based authorization to online services
+qtpositioning: Provides access to position, satellite info and area monitoring classes
+qtquick3d: Provides a high-level API for creating 3D content or UIs based on Qt Quick
+qtquick3dphysics: High-level QML module adding physical simulation capabilities to Qt Quick 3D
+qtquickeffectmaker: Tool to create custom Qt Quick shader effects
+qtquicktimeline: Enables keyframe-based animations and parameterization
+qtremoteobjects: Provides APIs for inter-process communication
+qtscxml: Provides functionality to create state machines from SCXML files
+qtsensors: Provides access to sensors via QML and C++ interfaces
+qtserialbus: Provides access to serial industrial bus interfaces
+qtserialport: Provides classes to interact with hardware and virtual serial ports
+qtshadertools: Provides tools for the cross-platform Qt shader pipeline
+qtspeech: Enables access to text-to-speech engines
+qtsvg: Classes for displaying the contents of SVG files
+qttools: Facilitate the design, development, testing and deployment of applications
+qttranslations: Qt translation catalogs
+qtvirtualkeyboard: Provides an input framework and reference keyboard frontend
+qtwayland: Wayland platform plugin and QtWaylandCompositor API
+qtwebchannel: Bridges the gap between Qt applications and HTML/JavaScript
+qtwebengine: Provides functionality for rendering regions of dynamic web content
+qtwebsockets: Provides WebSocket communication compliant with RFC 6455
+qtwebview: Displays web content in a QML application
+quadcastrgb: Set RGB lights on HyperX QuadCast S and Duocast microphones
+quint: Core tool for the Quint specification language
+qwen-code: AI-powered command-line workflow tool for developers
+rad: Modern CLI scripts made easy
+radvd: IPv6 Router Advertisement Daemon
+rails-mcp-server: MCP server for Rails applications
+rasusa: Randomly subsample sequencing reads or alignments
+readsb: ADS-B decoder swiss knife
+reckoner: Declaratively install and manage multiple Helm chart releases
+recur: Retry a command with exponential backoff and jitter
+reddix: Reddit, refined for the terminal
+redis@8.2: Persistent key-value database, with built-in net interface
+redu: Ncdu for your restic repository
+resterm: Terminal client for .http/.rest files with HTTP, GraphQL, and gRPC support
+rggen: Code generation tool for control and status registers
+rmpc: Terminal based Media Player Client with album art support
+rmrfrs: Filesystem cleaning tool
+rnp: High performance C++ OpenPGP library used by Mozilla Thunderbird
+rockcraft: Tool to create OCI images using the language from Snapcraft and Charmcraft
+rocq-elpi: Elpi extension language for Rocq
+rolesanywhere-credential-helper: Manages getting temporary security credentials from IAM Roles Anywhere
+ropebwt3: BWT construction and search
+rqbit: Fast command-line bittorrent client and server
+rsql: CLI for relational databases and common data file formats
+ruby@3.4: Powerful, clean, object-oriented scripting language
+rulesync: Unified AI rules management CLI tool
+rumdl: Markdown Linter and Formatter written in Rust
+rv: Ruby version manager
+s6-rc: Process supervision suite
+salesforce-mcp: MCP Server for interacting with Salesforce instances
+samply: CLI sampling profiler
+sarif-tools: Set of command-line tools and Python library for working with SARIF files
+save3ds_fuse: Extract/Import/FUSE for 3DS save/extdata/database
+scdl: Command-line tool to download music from SoundCloud
+secretspec: Declarative secrets management tool
+seqan3: Modern C++ library for sequence analysis
+shamrock: Astrophysical hydrodynamics using SYCL
+sherif: Opinionated, zero-config linter for JavaScript monorepos
+shimmy: Small local inference server with OpenAI-compatible GGUF endpoints
+shortest: AI-powered natural language end-to-end testing framework
+skalibs: Skarnet's library collection
+skani: Fast, robust ANI and aligned fraction for (metagenomic) genomes and contigs
+slack-mcp-server: Powerful MCP Slack Server with multiple transports and smart history fetch logic
+slicot: Fortran subroutines library for systems and control
+snitch: Prettier way to inspect network connections
+snooze: Run a command at a particular time
+somo: Human-friendly alternative to netstat for socket and port monitoring
+sox_ng: Sound eXchange NG
+specify: Toolkit to help you get started with Spec-Driven Development
+spice-server: Implements the server side of the SPICE protocol
+spiffe-helper: Tool that can be used to retrieve and manage SVIDs on behalf of a workload
+sprocket: Bioinformatics workflow engine built on the Workflow Description Language (WDL)
+sqlite-rsync: SQLite remote copy tool
+sqlite3-to-mysql: Transfer data from SQLite to MySQL
+sqruff: Fast SQL formatter/linter
+standardebooks: Tools for producing ebook files
+stormy: Minimal, customizable and neofetch-like weather CLI based on rainy
+strands-agents-sops: Standard Operating Procedures for AI agents using natural language
+stringtie: Transcript assembly and quantification for RNA-Seq
+stu: TUI explorer application for Amazon S3 (AWS S3)
+style-dictionary: Build system for creating cross-platform styles
+supabase: Open source Firebase alternative
+supabase-mcp-server: MCP Server for Supabase
+superseedr: BitTorrent Client in your Terminal
+svt-vp9: Scalable Video Technology for VP9 Encoder
+svu: Semantic version utility
+swag: Automatically generate RESTful API documentation with Swagger 2.0 for Go
+swift-section: CLI tool for parsing mach-o files to obtain Swift information
+sylph: Ultrafast taxonomic profiling and genome querying for metagenomic samples
+tabixpp: C++ wrapper to tabix indexer
+talm: Manage Talos Linux configurations the GitOps way
+taskline: Tasks, boards & notes for the command-line habitat
+taze: Modern cli tool that keeps your deps fresh
+tdd-guard: Automated TDD enforcement for Claude Code
+teamtype: Peer-to-peer, editor-agnostic collaborative editing of local text files
+termshot: Creates screenshots based on terminal command output
+termsvg: Record, share and export your terminal as a animated SVG image
+terraform-mcp-server: MCP server for Terraform
+terratag: CLI to automate tagging for AWS, Azure & GCP resources in Terraform
+teslamate: Self-hosted data logger for your Tesla
+tfclean: Remove applied moved block, import block, etc
+tfmcp: Terraform Model Context Protocol (MCP) Tool
+tfplugingen-openapi: OpenAPI to Terraform Provider Code Generation Specification
+tfstate-lookup: Lookup resource attributes in tfstate
+thorvg: Lightweight portable library used for drawing vector-based scenes and animations
+tiledb: Universal storage engine
+tiny-remapper: Tiny, efficient tool for remapping JAR files using "Tiny"-format mappings
+tkrzw: Set of implementations of DBM
+tldx: Domain Availability Research Tool
+tofu-ls: OpenTofu Language Server
+toktop: LLM usage monitor in terminal
+tombi: TOML formatter, linter and language server
+toml-bombadil: Dotfile manager with templating
+torrra: Find and download torrents without leaving your CLI
+tracetest: Build integration and end-to-end tests
+tree-sitter-cli: Parser generator tool
+tree-sitter@0.25: Incremental parsing library
+treemd: TUI and CLI dual pane markdown viewer
+trimal: Automated alignment trimming in large-scale phylogenetic analyses
+tronbyt-server: Manage your apps on your Tronbyt (flashed Tidbyt) completely locally
+ts_query_ls: LSP implementation for Tree-sitter's query files
+tscriptify: Golang struct to TypeScript class/interface converter
+tsnet-serve: Expose HTTP applications to a Tailscale Tailnet network
+tuios: Terminal UI OS (Terminal Multiplexer)
+tun2proxy: Tunnel (TUN) interface for SOCKS and HTTP proxies
+tweakcc: Customize your Claude Code themes, thinking verbs, and more
+two-ms: Detect secrets in files and communication platforms
+ty: Extremely fast Python type checker, written in Rust
+typtea: Minimal terminal-based typing speed tester
+unitycatalog: Open, Multi-modal Catalog for Data & AI
+urx: Extracts URLs from OSINT Archives for Security Insights
+uvwasi: WASI syscall API built atop libuv
+vacuum: World's fastest OpenAPI & Swagger linter
+varlock: Add declarative schema to .env files using @env-spec decorator comments
+vgo: Project scaffolder for Go, written in Go
+vibe-log-cli: CLI tool for analyzing Claude Code sessions
+vibecheck: AI-powered git commit assistant written in Go
+videoalchemy: Toolkit expanding video processing capabilities
+vineflower: Java decompiler
+volcano-cli: CLI for Volcano, Cloud Native Batch System
+vsd: Download video streams over HTTP, DASH (.mpd), and HLS (.m3u8)
+vtcode: CLI Semantic Coding Agent
+wait4x: Wait for a port or a service to enter the requested state
+wal-g: Archival restoration tool for databases
+wasm-bindgen: Facilitating high-level interactions between Wasm modules and JavaScript
+wassette: Security-oriented runtime that runs WebAssembly Components via MCP
+wayback: Archiving tool integrated with various archival services
+webdav: Simple and standalone WebDAV server
+wgpu-native: Native WebGPU implementation based on wgpu-core
+wifitui: Fast featureful friendly wifi terminal UI
+wishlist: Single entrypoint for multiple SSH endpoints
+witr: Why is this running?
+wuchale: Protobuf-like i18n from plain code
+wuppiefuzz: Coverage-guided REST API fuzzer developed on top of LibAFL
+wxwidgets@3.2: Cross-platform C++ GUI toolkit
+xcp: Fast & lightweight command-line tool for managing Xcode projects, built in Swift
+xleak: Terminal Excel viewer with an interactive TUI
+yaml2json: Command-line tool convert from YAML to JSON
+yamlresume: Resumes as code in YAML
+yek: Fast Rust based tool to serialize text-based files for LLM consumption
+yuque-dl: Knowledge base downloader for Yuque
+zig@0.14: Programming language designed for robustness, optimality, and clarity
+zsh-history-enquirer: Zsh plugin that enhances history search interaction
+zsv: Tabular data swiss-army knife CLI
+zuban: Python language server and type checker, written in Rust
+==> New Casks
+4k-image-compressor: Image compressor
+4k-tokkit: Download TikTok videos and accounts
+8bitdo-ultimate-software-v2: Control every piece of your controller
+accordance@13: Bible study software
+advantagescope: FRC log analysis tool
+affinity: Image editing and design software
+agentkube: AI-powered Kubernetes IDE
+aigcpanel: AI video, audio and broadcast generator
+aionui: GUI for Gemini CLI
+airscroll: Smooth mouse scrolling utility
+aks-desktop: Azure Kubernetes Service desktop application
+alfred@prerelease: Application launcher and productivity software
+alienator88-sentinel: Configure Gatekeeper, unquarantine and self-sign apps
+alifix: Refreshes aliases and identifies broken aliases
+alisma: Command tool to create Finder aliases, and to resolve them to full paths
+allen-and-heath-midi-control: Midi control software for Allen & Heath audio consoles
+alma: AI chat application
+aloha-browser: Web browser focused on privacy
+antigravity: AI Coding Agent IDE
+ape: Software for DNA sequence analysis and annotation
+app-buddy: Helper for Sindre Sorhus's apps
+appbox: iOS app distribution tool
+appexindexer: List and inspect installed app extensions
+archi: Open-source ArchiMate modelling toolkit
+astro-editor: Markdown editor for Astro content collections
+athas: Lightweight code editor
+atuin-desktop: Runbook editor for terminal workflows
+audio-modeling-software-center: Application for downloading, installing and updating Audio Modeling software
+backdrop: Live wallpaper app
+bcut: Professional video editing software by Bilibili
+beid-token: Middleware for the Belgian eID system
+bettertouchtool@alpha: Tool to customise input devices and automate computer systems
+bitfocus-buttons: Unified control and monitoring software
+bloom: File manager
+boss: AI-powered workspace for complex business operations
+brilliant: Design and communication tool
+browseros: Open-source agentic browser
+butterkit: App Store screenshots editor
+cadreader: CAD drawing viewer
+canon-mg2500-driver: CUPS driver for Canon PIXMA 2500 series
+cardinal-search: Fastest file searching tool
+chatglm: Desktop client for the ChatGLM AI chatbot
+chatgpt-atlas: OpenAI's official browser with ChatGPT built in
+chitubox: 3D printing slicer software
+clariti: Focus and relaxation soundscapes
+claude-code: Terminal-based AI coding assistant
+cmd: AI assistant for development in Xcode
+cmpxat: Command tool to compare all the extended attributes (xattrs) between two files
+codebolt: AI Powered Code Editor
+coderabbit: AI code review CLI
+codex: OpenAI's coding agent that runs in your terminal
+comet: Web browser with integrated AI assistant
+conar: AI-powered database and data management tool
+conductor: Claude code parallelisation
+context: MCP client and inspector
+copilot-cli: Brings the power of Copilot coding agent directly to your terminal
+copilot-cli@prerelease: Brings the power of Copilot coding agent directly to your terminal
+corretto@25: OpenJDK distribution from Amazon
+cursor-cli: Command-line agent for Cursor
+daruma: Track your goals using the Daruma Method
+datadog-security-cli: Datadog Security Product CLI
+dayflow: Generate a timeline of your day, automatically
+dda: Tool for developing on the Datadog Agent platform
+defguard-client: WireGuard VPN client which supports multi-factor authentication
+devknife: Collection of handy developer tools
+devonsphere-express: Find items related to the frontmost document locally or online
+digicheck-ng: Audio analysis software
+digiexam: Academic testing platform with device lockdown
+disk-jockey: Disk image creator and analyser for retro computers or emulators
+diskspace: Show available disk space on APFS volumes
+djstudio@next: DAW for DJs
+dnclient: Peer-to-peer VPN client for managed nebula networks
+dockflow: Manage Dock presets and switch between them instantly
+dotnet-sdk@8: Developer platform
+dotnet-sdk@9: Developer platform
+doubao: AI chat assistant
+drawpen: Screen annotation tool
+droid: AI-powered software engineering agent by Factory
+dyad: AI-powered app builder
+elasticvue: Elasticsearch GUI
+elgato-studio: Capture and manage Elgato devices for content creation
+emdash: UI for running multiple coding agents in parallel
+epson-print-layout: Software to layout and print images with Epson printers
+es-de: Frontend for browsing and launching games from your multi-platform collection
+eufymake-studio: Slicer for eufyMake 3D printers
+exelearning: Authoring tool to create educational resources
+fastmail: Email client
+fido2-manage: Manage FIDO2.1 security keys
+filefaker: Tool for generating fake files
+filefillet: Efficient file organizer
+filo: AI-powered email client designed for Gmail
+firezone: Zero-trust access platform built on WireGuard
+flowdown: AI agent
+fmail3: Unofficial native application for Fastmail
+focusany: Open source desktop toolbox
+folder-preview-pro: Quick Look extension for folders
+font-alan-sans
+font-amarna
+font-annotation-mono
+font-asimovian
+font-bbh-bartle
+font-bbh-bogle
+font-bbh-hegarty
+font-bitcount-grid-double
+font-bitcount-grid-double-ink
+font-bitcount-grid-single
+font-bitcount-grid-single-ink
+font-bitcount-ink
+font-bitcount-prop-double
+font-bitcount-prop-double-ink
+font-bitcount-prop-single
+font-bitcount-single
+font-cause
+font-charis
+font-chiron-goround-tc
+font-cossette-texte
+font-cossette-titre
+font-elms-sans
+font-formudpgothic
+font-gentium
+font-gentium-book
+font-geom
+font-golos-ui
+font-google-sans-code
+font-guguru-sans-code
+font-guguru-sans-code-nf
+font-gveret-levin
+font-juisee
+font-juisee-nf
+font-kedebideri
+font-libertinus-keyboard
+font-libertinus-sans
+font-libertinus-serif
+font-libertinus-serif-display
+font-line-seed-jp
+font-lxgw-marker-gothic
+font-manufacturing-consent
+font-maple-mono-nl
+font-maple-mono-nl-cn
+font-maple-mono-nl-nf
+font-maple-mono-nl-nf-cn
+font-maple-mono-normal-nl
+font-maple-mono-normal-nl-cn
+font-maple-mono-normal-nl-nf
+font-maple-mono-normal-nl-nf-cn
+font-matangi
+font-medio
+font-melete
+font-menbere
+font-momo-signature
+font-momo-trust-display
+font-momo-trust-sans
+font-monaspace-frozen
+font-monaspace-nf
+font-monaspace-var
+font-mozilla-headline
+font-mozilla-text
+font-myna
+font-nacelle
+font-nata-sans
+font-noto-sans-sunuwar
+font-parastoo
+font-psudofont-liga-mono
+font-pt-astra-sans
+font-pt-astra-serif
+font-pt-root-ui
+font-science-gothic
+font-sekuya
+font-simple-icons
+font-sirivennela
+font-source-han-sans-vf
+font-source-han-serif-vf
+font-stack-sans-headline
+font-stack-sans-notch
+font-stack-sans-text
+font-story-script
+font-suit
+font-suse-mono
+font-tasa-explorer
+font-tasa-orbiter
+font-tenderness
+font-tiktok-sans
+font-tirra
+font-uoqmunthenkhung
+font-urw-core35
+font-vend-sans
+font-wenjin-mincho: 可免费商用的大字符集宋体字库
+font-with-a-syntax-highlighter
+font-zalando-sans
+font-zalando-sans-expanded
+font-zalando-sans-semiexpanded
+fontra-pak: Browser-based font editor
+frame0: Wireframing tool
+freefilesync: Folder comparison and synchronization software
+freelens@nightly: Kubernetes IDE
+freepdf: Reader that supports translating PDF documents
+freetex: Free intelligent formula recognition software
+fruit-screensaver: Screensaver of the vintage Apple logo
+futubull@legacy: Futubull trading application
+gams: General Algebraic Modeling System
+gg: GUI for Jujutsu
+glide-browser: Extensible, firefox-based web browser
+glkvm: App for controlling GL.iNet KVM devices
+gonhanh: Vietnamese input method engine
+graalvm-jdk@25: GraalVM from Oracle
+handy: Speech to text application
+helium-browser: Chromium-based web browser
+hoppscotch-selfhost: Desktop client for SelfHost version of the Hoppscotch API development ecosystem
+hotovo-aider-desk: Desktop GUI for Aider AI pair programming
+hyperwhisper: AI-powered speech-to-text transcription
+iaito: GUI for radare2
+icon-composer: Apple tool to create multi-platform icons
+insta360-link-controller: Controller for Insta360 webcams
+itermbrowserplugin: Enables an integrated web browser in iTerm2
+jordanbaird-ice@beta: Menu bar manager
+kameleo: Antidetect browser to bypass anti-bot systems
+karing: Proxy utility
+kimi: AI chat assistant from Moonshot
+kiro: Agent-centric IDE with spec-driven development
+kontur-talk: Video conferencing service
+kubeterm: Kubernetes graphical management tool
+labymod: Launcher for LabyMod (Minecraft client)
+langflow: Low-code AI-workflow building tool
+laserpecker-design-space: Laser engraving and cutting software
+launchie: Launchpad replacement
+launchos: Launchpad alternative
+lexicon-dj: Library management for professional DJs
+lidanglesensor: Utility to display the lid angle and play a creaking sound
+linkandroid: Open source android assistant
+linqpad: .NET LINQ database query tool and code scratchpad
+liquibase-community: Library for database change tracking
+liquibase-secure: Database change management tool
+little-snitch@nightly: Host-based application firewall
+livebook@nightly: Code notebooks for Elixir developers
+llamabarn: Menu bar app for running local LLMs
+lobehub: AI chat framework
+locu: Daily planner and focus timer
+longbridge-pro: Stock trading platform
+loop-messenger: Team messenger for business communication
+m32-edit: Remote control for Midas M32 audio consoles
+macdown-3000: Markdown editor with live preview and syntax highlighting
+mace: Simplify compliance baseline creation, auditing, and management
+macpacker: Archive manager
+macsyzones: Window management utility
+maestro: AI agent command center
+makeracam: CAM software for Makera CNCs
+maru-jan: Play japanese mahjong online
+mcloud: China Mobile Cloud Drive
+meituxiuxiu: Photo editing and beautification software
+microsoft-openjdk@25: OpenJDK distribution from Microsoft
+monocle-app: Window dimming utility
+motionik: Screen recording software
+mountmate: Menubar app to easily manage external drives
+moves: Window manager
+mozilla-vpn: VPN client
+mozregression-gui: Interactive regression range finder for Firefox and other Mozilla products
+mpluginmanager: Installer for MeldaProduction audio plugins
+msgfiler: Keyboard-based email filing application for Apple Mail
+mstystudio: AI platform with local and online models
+music-presence: Discord music status that works with any media player
+nani: AI-powered translator
+nanoleaf: Control your Nanoleaf lights
+nessie-app: Knowledge base from AI chats
+nifty-file-lists: Extract file metadata into exportable tables
+nkoda: Digital sheet music app
+nook: Minimal browser with a sidebar-first design
+notepadexe: Lightweight code editor
+novation-components: Manager and updater for Novation hardware
+okta-verify: Identity verification provider
+onlook: Open-source visual editor for React apps
+onyx@beta: Verify system files structure, run miscellaneous maintenance and more
+opal-app: Screen time app
+open-data-editor: No-code application to explore, validate and publish data in a simple way
+opencode-desktop: AI coding agent desktop client
+openforis-collect: Data management for field-based inventories
+openlist-app: Desktop application for OpenList
+oracle-data-modeler: Graphical tool for data modeling tasks
+oracle-jdk-javadoc@25: Documentation for the Oracle JDK
+oracle-jdk@25: JDK from Oracle
+orcasheets: Local-first data analytics
+orcaslicer@nightly: G-code generator for 3D printers
+osaurus: LLM server built on MLX
+osu@tachyon: Rhythm game
+overview: Create live window previews for any application
+pale-moon: Web browser
+pally: AI Relationship Management
+papercut-mobility-print-client: Client for printing to PaperCut Mobility Print queues
+parallels@20: Desktop virtualization software
+passepartout: OpenVPN and WireGuard client
+paste: Limitless clipboard
+pcsx2: Playstation 2 Emulator
+peninsula: Notch app for window management
+petrichor: Offline Music Player
+picview: Picture viewer
+pikpak: Client for PikPak cloud storage service
+pimosa: Photo, video, music and pdf editing tools
+pixieditor: Open Source Universal 2D Graphics Editor
+portalbox: Share a region of your screen in video calls
+pot: Software for text translation and recognition
+proxygen-app: HTTP proxy tool
+pxplay: Third-party Remote Play client for PlayStation consoles
+qianwen: AI assistant and chatbot powered by Alibaba's Qwen model
+qidistudio: Slicer software for QIDI 3D printers
+qqnews: Tencent News client
+quakenotch: MacBook Notch utility
+raiderio: World of Warcraft client to track Mythic+ and Raid Progression
+rclone-ui: GUI for Rclone
+rcloneview: GUI for rclone
+refine: Grammar checker
+retrospective: Log analysis tool
+revisionist: Opens up the full power of the versioning system
+rewritebar: AI-powered writing assistant
+riverside-studio: Podcast and video recorder
+rnote: Sketch and take handwritten notes
+rocketman-choices-packager: Utility for customising installer package choices
+rodecaster: Easily manage your RØDECaster or Streamer X setup
+scrub-utility: Cleans folders and volumes to guard against potential leaks of sensitive data
+sculptor: GUI for Claude Code
+semeru-jdk-open@25: Production-ready JDK with the OpenJDK class libraries and the Eclipse OpenJ9 JVM
+serverbuddy: Manage Linux servers
+shell360: Cross-platform SSH & SFTP client
+simpledemviewer: Digital Elevation Model viewer
+simplysign: Emulates a physical crypto card/reader for proCertum SmartSign
+skint: Check status of key security settings and features
+sleep-aid: Monitor computer's sleeping habits
+slideshower: Slideshow application
+smartsheet: Spreadsheet-style project management solution
+smoothcsv: CSV editor
+snapmaker-orca: Slicing software for Snapmaker 3D printers, a fork of OrcaSlicer
+socialstream: Consolidate, control, and customise live social messaging streams
+sodamusic: Music app
+sourcegit: Git GUI client
+spacesaver: Application designed to help you manage and optimize your workspace
+spacewalker: Use virtual monitors with Viture XR glasses
+sparsity: Create and find APFS sparse files
+stillcolor: Tool to disable temporal dithering on Apple Silicon Macs
+stirling-pdf: PDF utility
+stravu-crystal: Run multiple Claude Code instances simultaneously using git worktrees
+strawberry: AI-powered web browser
+stremio@beta: Open-source media center
+studio-3t-community: IDE, client, and GUI for MongoDB
+support: Menu bar app for user and help desk support
+supportcompanion: Provides utility and support tools
+suspicious-package@preview: Application for inspecting installer packages
+swama: Machine-learning runtime
+swiftdialog: Admin utility that presents custom dialogs or messages from shell scripts
+systhist: Lists full system and security update installation history
+taobao: Online Shopping Client
+taphouse: Native GUI for Homebrew package management
+tartelet: Manage GitHub Actions runners in virtual machines
+teleport-suite@17: Modern SSH server for teams managing distributed infrastructure
+temurin@25: JDK from the Eclipse Foundation (Adoptium)
+textgrabber2: Menu bar app that detects text from copied images
+thebrowsercompany-dia: Web browser
+tiny-shield: Control and monitor network connections
+tng-digital-mini-program-studio: IDE for building mini programs
+topaz-gigapixel: AI image upscaler
+topaz-photo: AI image enhancer
+topaz-video: Video upscaler and quality enhancer
+tourbox-console: Configuration app for TourBox devices
+typeless: AI voice dictation that turns speech into polished text
+uefitool: UEFI firmware image viewer
+unifi-identity-endpoint: License free Wi-Fi, VPN, and Access Application for Organizations
+uuremote: NetEase UU remote desktop access and control tool
+vcamapp: Face-tracking virtual avatar app
+versatility: Archive and unarchive saved versions to protect and preserve them
+vibemeter: Menu bar app to monitor AI spending
+vibetunnel: Turn any browser into your terminal
+visualdiffer: Visually compare folders and files
+vocaster-hub: Interface controller for Focusrite Vocaster One and Two
+voicenotes: AI-powered app for recording, transcribing and summarising voice notes
+vrampro: Control VRAM allocation of unified memory
+wailbrew: Manage Homebrew packages with a UI
+warsaw: Security software for online banking in Brazil
+white-rabbit: SVG utility and optimiser
+whodb: Database management tool with AI-powered features
+wireless-workbench: Desktop app for RF coordination and wireless system management
+wiso-steuer-2020: Tax declaration for the fiscal year 2019
+wiso-steuer-2021: Tax declaration for the fiscal year 2020
+wiso-steuer-2026: Tax declaration for the fiscal year 2025
+wootility: Configuration software for Wooting keyboards
+xmlmind-editor: Strictly validating near WYSIWYG XML editor
+xppen-pentablet: Universal driver for XPPen drawing tablets and pen displays
+yingfu-online: Education app for teens
+yoink: Drag and drop utility
+yuanbao: Tencent AI Assistant with Hunyuan and DeepSeek LLMs
+zo: Friendly personal server
+zoho-cliq: Team communication and collaboration platform
+zoo-design-studio: Professional CAD platform enhanced with ML through Text-to-CAD
+zulu@25: OpenJDK distribution from Azul
+
+You have 54 outdated formulae and 1 outdated cask installed.
+==> luanti has been moved to homebrew/cask.
+To uninstall the formula and install the cask, run:
+  brew uninstall --formula --force luanti
+  brew tap homebrew/cask
+  brew install --cask homebrew/cask/luanti
+==> Migrating cask docker to docker-desktop
+==> Migrating cask emacs to emacs-app
+
+==> Fetching downloads for: cmake
+⠋ Bottle Manifest cmake (4.2.1)⠋ Bottle Manifest cmake (4.2.1)⠙ Bottle Manifest cmake (4.2.1)⠙ Bottle Manifest cmake (4.2.1) -------------------- Downloading  11.4KB/-------✔︎ Bottle Manifest cmake (4.2.1)                      Downloaded   11.4KB/ 11.4KB
+⠚ Bottle cmake (4.2.1)⠚ Bottle cmake (4.2.1)⠞ Bottle cmake (4.2.1)⠞ Bottle cmake (4.2.1)⠖ Bottle cmake (4.2.1)⠖ Bottle cmake (4.2.1)⠦ Bottle cmake (4.2.1)⠦ Bottle cmake (4.2.1)⠴ Bottle cmake (4.2.1)⠴ Bottle cmake (4.2.1) ----------------------------- Downloading 127.0KB/ 19.9MB⠲ Bottle cmake (4.2.1) #---------------------------- Downloading 667.6KB/ 19.9MB⠲ Bottle cmake (4.2.1) ##--------------------------- Downloading   1.1MB/ 19.9MB⠳ Bottle cmake (4.2.1) ##--------------------------- Downloading   1.4MB/ 19.9MB⠳ Bottle cmake (4.2.1) ###-------------------------- Downloading   1.8MB/ 19.9MB⠓ Bottle cmake (4.2.1) ###-------------------------- Downloading   2.2MB/ 19.9MB⠓ Bottle cmake (4.2.1) ####------------------------- Downloading   2.7MB/ 19.9MB⠋ Bottle cmake (4.2.1) ######----------------------- Downloading   4.2MB/ 19.9MB⠋ Bottle cmake (4.2.1) #######---------------------- Downloading   4.6MB/ 19.9MB⠙ Bottle cmake (4.2.1) #######---------------------- Downloading   4.9MB/ 19.9MB⠙ Bottle cmake (4.2.1) ########--------------------- Downloading   5.4MB/ 19.9MB⠚ Bottle cmake (4.2.1) #########-------------------- Downloading   5.9MB/ 19.9MB⠚ Bottle cmake (4.2.1) #########-------------------- Downloading   6.4MB/ 19.9MB⠞ Bottle cmake (4.2.1) ##########------------------- Downloading   6.8MB/ 19.9MB⠞ Bottle cmake (4.2.1) ##########------------------- Downloading   7.1MB/ 19.9MB⠖ Bottle cmake (4.2.1) ###########------------------ Downloading   7.4MB/ 19.9MB⠖ Bottle cmake (4.2.1) ############----------------- Downloading   7.9MB/ 19.9MB⠦ Bottle cmake (4.2.1) ############----------------- Downloading   8.5MB/ 19.9MB⠦ Bottle cmake (4.2.1) #############---------------- Downloading   9.0MB/ 19.9MB⠴ Bottle cmake (4.2.1) ##############--------------- Downloading   9.3MB/ 19.9MB⠴ Bottle cmake (4.2.1) ##############--------------- Downloading   9.8MB/ 19.9MB⠲ Bottle cmake (4.2.1) ###############-------------- Downloading  10.2MB/ 19.9MB⠲ Bottle cmake (4.2.1) ################------------- Downloading  10.9MB/ 19.9MB⠳ Bottle cmake (4.2.1) #################------------ Downloading  11.4MB/ 19.9MB⠳ Bottle cmake (4.2.1) ##################----------- Downloading  12.1MB/ 19.9MB⠓ Bottle cmake (4.2.1) ##################----------- Downloading  12.5MB/ 19.9MB⠓ Bottle cmake (4.2.1) ###################---------- Downloading  13.0MB/ 19.9MB⠋ Bottle cmake (4.2.1) ####################--------- Downloading  13.5MB/ 19.9MB⠋ Bottle cmake (4.2.1) ####################--------- Downloading  13.9MB/ 19.9MB⠙ Bottle cmake (4.2.1) #####################-------- Downloading  14.5MB/ 19.9MB⠙ Bottle cmake (4.2.1) ######################------- Downloading  15.1MB/ 19.9MB⠚ Bottle cmake (4.2.1) #######################------ Downloading  15.6MB/ 19.9MB⠚ Bottle cmake (4.2.1) #######################------ Downloading  16.1MB/ 19.9MB⠞ Bottle cmake (4.2.1) ########################----- Downloading  16.7MB/ 19.9MB⠞ Bottle cmake (4.2.1) #########################---- Downloading  17.4MB/ 19.9MB⠖ Bottle cmake (4.2.1) ##########################--- Downloading  18.0MB/ 19.9MB⠖ Bottle cmake (4.2.1) ###########################-- Downloading  18.5MB/ 19.9MB⠦ Bottle cmake (4.2.1) ############################- Downloading  19.1MB/ 19.9MB⠦ Bottle cmake (4.2.1) ############################- Downloading  19.5MB/ 19.9MB⠴ Bottle cmake (4.2.1) ############################# Downloading  19.7MB/ 19.9MB⠴ Bottle cmake (4.2.1)                               Downloaded   19.9MB/ 19.9MB⠲ Bottle cmake (4.2.1)                               Downloaded   19.9MB/ 19.9MB⠲ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠳ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠳ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠓ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠓ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠋ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠋ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠙ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠙ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠚ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠚ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠞ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠞ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠖ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠖ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠦ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠦ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠴ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠴ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠲ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠲ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠳ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠳ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠓ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠓ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠋ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠋ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠙ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠙ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠚ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB⠚ Bottle cmake (4.2.1)                               Extracting   19.9MB/ 19.9MB✔︎ Bottle cmake (4.2.1)                               Downloaded   19.9MB/ 19.9MB
+==> Pouring cmake--4.2.1.tahoe.bottle.tar.gz
+==> Caveats
+To install the CMake documentation, run:
+  brew install cmake-docs
+==> Summary
+🍺  /usr/local/Cellar/cmake/4.2.1: 4,016 files, 66.2MB
+==> Running `brew cleanup cmake`...
+Disable this behaviour by setting `HOMEBREW_NO_INSTALL_CLEANUP=1`.
+Hide these hints with `HOMEBREW_NO_ENV_HINTS=1` (see `man brew`).
+==> `brew cleanup` has not been run in the last 30 days, running now...
+Disable this behaviour by setting `HOMEBREW_NO_INSTALL_CLEANUP=1`.
+Hide these hints with `HOMEBREW_NO_ENV_HINTS=1` (see `man brew`).
+Removing: /Users/ben/Library/Caches/Homebrew/ca-certificates_bottle_manifest--2025-05-20... (2KB)
+Removing: /Users/ben/Library/Caches/Homebrew/ca-certificates--2025-05-20... (129.4KB)
+Removing: /Users/ben/Library/Caches/Homebrew/cairo_bottle_manifest--1.18.4... (30KB)
+Removing: /Users/ben/Library/Caches/Homebrew/cairo--1.18.4... (791.7KB)
+Removing: /Users/ben/Library/Caches/Homebrew/expat_bottle_manifest--2.7.1... (8.6KB)
+Removing: /Users/ben/Library/Caches/Homebrew/expat--2.7.1... (224KB)
+Removing: /Users/ben/Library/Caches/Homebrew/fontconfig_bottle_manifest--2.16.0... (13.5KB)
+Removing: /Users/ben/Library/Caches/Homebrew/fontconfig--2.16.0... (372.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gdb_bottle_manifest--16.3... (22.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gdb--16.3... (9.0MB)
+Removing: /Users/ben/Library/Caches/Homebrew/gdbm_bottle_manifest--1.25... (8.7KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gdbm--1.25... (280.9KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gettext_bottle_manifest--0.25... (15.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gettext--0.25... (9.4MB)
+Removing: /Users/ben/Library/Caches/Homebrew/glib_bottle_manifest--2.84.2... (22KB)
+Removing: /Users/ben/Library/Caches/Homebrew/glib--2.84.2... (8.7MB)
+Removing: /Users/ben/Library/Caches/Homebrew/gnupg_bottle_manifest--2.4.8... (38.2KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gnupg--2.4.8... (5.5MB)
+Removing: /Users/ben/Library/Caches/Homebrew/gnutls_bottle_manifest--3.8.9... (20.6KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gnutls--3.8.9... (3.3MB)
+Removing: /Users/ben/Library/Caches/Homebrew/gradle_bottle_manifest--8.14.1... (9.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/gradle--8.14.1... (194.9MB)
+Removing: /Users/ben/Library/Caches/Homebrew/harfbuzz_bottle_manifest--11.2.1... (33.2KB)
+Removing: /Users/ben/Library/Caches/Homebrew/harfbuzz--11.2.1... (2.9MB)
+Removing: /Users/ben/Library/Caches/Homebrew/icu4c@77_bottle_manifest--77.1... (11.2KB)
+Removing: /Users/ben/Library/Caches/Homebrew/icu4c@77--77.1... (30.9MB)
+Removing: /Users/ben/Library/Caches/Homebrew/jpeg-turbo_bottle_manifest--3.1.0... (9.5KB)
+Removing: /Users/ben/Library/Caches/Homebrew/jpeg-turbo--3.1.0... (1.4MB)
+Removing: /Users/ben/Library/Caches/Homebrew/libassuan_bottle_manifest--3.0.2... (11.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libassuan--3.0.2... (173.5KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libgcrypt_bottle_manifest--1.11.1... (11.9KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libgcrypt--1.11.1... (1.5MB)
+Removing: /Users/ben/Library/Caches/Homebrew/libgpg-error_bottle_manifest--1.55... (10.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libgpg-error--1.55... (561KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libidn2_bottle_manifest--2.3.8... (11.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libidn2--2.3.8... (317.6KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libnghttp2_bottle_manifest--1.65.0... (8.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libnghttp2--1.65.0... (216.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libpng_bottle_manifest--1.6.48... (9.7KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libpng--1.6.48... (451.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libtasn1_bottle_manifest--4.20.0... (9KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libtasn1--4.20.0... (155.4KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libtiff_bottle_manifest--4.7.0-1... (13.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libtiff--4.7.0... (1.8MB)
+Removing: /Users/ben/Library/Caches/Homebrew/libtommath_bottle_manifest--1.3.0... (9.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libtommath--1.3.0... (144.2KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libunistring_bottle_manifest--1.3... (8.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libunistring--1.3... (1.9MB)
+Removing: /Users/ben/Library/Caches/Homebrew/libusb_bottle_manifest--1.0.28... (14.2KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libusb--1.0.28... (182.7KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libx11_bottle_manifest--1.8.12... (16KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libx11--1.8.12... (2.3MB)
+Removing: /Users/ben/Library/Caches/Homebrew/libxau_bottle_manifest--1.0.12... (9KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libxau--1.0.12... (31.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libxrender_bottle_manifest--0.9.12... (12.5KB)
+Removing: /Users/ben/Library/Caches/Homebrew/libxrender--0.9.12... (54.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/little-cms2_bottle_manifest--2.17... (13.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/little-cms2--2.17... (425.0KB)
+Removing: /Users/ben/Library/Caches/Homebrew/mpdecimal_bottle_manifest--4.0.1... (9.7KB)
+Removing: /Users/ben/Library/Caches/Homebrew/mpdecimal--4.0.1... (188.9KB)
+Removing: /Users/ben/Library/Caches/Homebrew/mpfr_bottle_manifest--4.2.2... (10.4KB)
+Removing: /Users/ben/Library/Caches/Homebrew/mpfr--4.2.2... (1MB)
+Removing: /Users/ben/Library/Caches/Homebrew/nettle_bottle_manifest--3.10.1... (10.4KB)
+Removing: /Users/ben/Library/Caches/Homebrew/nettle--3.10.1... (955KB)
+Removing: /Users/ben/Library/Caches/Homebrew/npth_bottle_manifest--1.8... (8.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/npth--1.8... (38.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/openjdk_bottle_manifest--23.0.2... (44.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/openjdk--23.0.2... (209.3MB)
+Removing: /Users/ben/Library/Caches/Homebrew/openssl@3_bottle_manifest--3.5.0... (12.1KB)
+Removing: /Users/ben/Library/Caches/Homebrew/openssl@3--3.5.0... (9.9MB)
+Removing: /Users/ben/Library/Caches/Homebrew/pcre2_bottle_manifest--10.45... (10.5KB)
+Removing: /Users/ben/Library/Caches/Homebrew/pcre2--10.45... (2.4MB)
+Removing: /Users/ben/Library/Caches/Homebrew/pixman_bottle_manifest--0.46.0... (8.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/pixman--0.46.0... (255.9KB)
+Removing: /Users/ben/Library/Caches/Homebrew/python@3.12_bottle_manifest--3.12.10_1... (32.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/python@3.13_bottle_manifest--3.13.3_1... (31.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/python@3.13--3.13.3_1... (17.9MB)
+Removing: /Users/ben/Library/Caches/Homebrew/python@3.9_bottle_manifest--3.9.22_1... (26.6KB)
+Removing: /Users/ben/Library/Caches/Homebrew/python@3.9--3.9.22_1... (14.7MB)
+Removing: /Users/ben/Library/Caches/Homebrew/sqlite_bottle_manifest--3.49.2... (11.4KB)
+Removing: /Users/ben/Library/Caches/Homebrew/sqlite--3.49.2... (2.4MB)
+Removing: /Users/ben/Library/Caches/Homebrew/tcl-tk_bottle_manifest--9.0.1-1... (15.6KB)
+Removing: /Users/ben/Library/Caches/Homebrew/tcl-tk--9.0.1... (10.1MB)
+Removing: /Users/ben/Library/Caches/Homebrew/unbound_bottle_manifest--1.23.0... (16.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/unbound--1.23.0... (3.1MB)
+Removing: /Users/ben/Library/Caches/Homebrew/xz_bottle_manifest--5.8.1... (11.8KB)
+Removing: /Users/ben/Library/Caches/Homebrew/xz--5.8.1... (727.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/zstd_bottle_manifest--1.5.7... (12.9KB)
+Removing: /Users/ben/Library/Caches/Homebrew/zstd--1.5.7... (945.5KB)
+==> Autoremoving 5 unneeded formulae:
+jsoncpp
+libogg
+libvorbis
+luajit
+openssl@1.1
+Uninstalling /usr/local/Cellar/jsoncpp/1.9.5... (18 files, 337.7KB)
+Uninstalling /usr/local/Cellar/libvorbis/1.3.7... (157 files, 2.5MB)
+Uninstalling /usr/local/Cellar/openssl@1.1/1.1.1o... (8,089 files, 19.4MB)
+
+Warning: The following openssl@1.1 configuration files have not been removed!
+If desired, remove them manually with `rm -rf`:
+  /usr/local/etc/openssl@1.1
+  /usr/local/etc/openssl@1.1/cert.pem
+  /usr/local/etc/openssl@1.1/ct_log_list.cnf
+  /usr/local/etc/openssl@1.1/ct_log_list.cnf.dist
+  /usr/local/etc/openssl@1.1/misc
+  /usr/local/etc/openssl@1.1/misc/CA.pl
+  /usr/local/etc/openssl@1.1/misc/tsget
+  /usr/local/etc/openssl@1.1/misc/tsget.default
+  /usr/local/etc/openssl@1.1/misc/tsget.pl
+  /usr/local/etc/openssl@1.1/misc/tsget.pl.default
+  /usr/local/etc/openssl@1.1/openssl.cnf
+  /usr/local/etc/openssl@1.1/openssl.cnf.dist
+Uninstalling /usr/local/Cellar/luajit/2.1.1725453128... (56 files, 2.0MB)
+luajit 2.1.1716656478 is still installed.
+To remove all versions, run:
+  brew uninstall --force luajit
+Uninstalling /usr/local/Cellar/libogg/1.3.5... (97 files, 509.3KB)
+Removing: /Users/ben/Library/Caches/Homebrew/portable-ruby-3.4.3.el_capitan.bottle.tar.gz... (11.6MB)
+Removing: /Users/ben/Library/Caches/Homebrew/bootsnap/d366432e1c0f14b5e76157e191efc2c944c77823d1f41651596fa44d1fece001... (566 files, 4.9MB)
+Removing: /Users/ben/Library/Logs/Homebrew/glib... (64B)
+Removing: /Users/ben/Library/Logs/Homebrew/fontconfig... (6.5KB)
+Removing: /Users/ben/Library/Logs/Homebrew/openssl@3... (64B)
+Removing: /Users/ben/Library/Logs/Homebrew/ca-certificates... (64B)
+Removing: /Users/ben/Library/Logs/Homebrew/unbound... (64B)
+Removing: /Users/ben/Library/Logs/Homebrew/gnupg... (64B)
+Removing: /Users/ben/Library/Logs/Homebrew/python@3.9... (2 files, 2.5KB)
+Removing: /Users/ben/Library/Logs/Homebrew/gnutls... (64B)
+Pruned 6 symbolic links from /usr/local
+==> Caveats
+Emacs Lisp files have been installed to:
+  /usr/local/share/emacs/site-lisp/cmake
+ben@Bulents-MacBook-Pro buda % which cmake
+which cmake
+/usr/local/bin/cmake
+ben@Bulents-MacBook-Pro buda % ls
+ls
+buda_system	setup_buda.py
+ben@Bulents-MacBook-Pro buda % cd buda_system/
+cd buda_system/
+ben@Bulents-MacBook-Pro buda_system % mkdir build && cd build
+mkdir build && cd build
+ben@Bulents-MacBook-Pro build % cmake .. && make
+cmake .. && make
+-- The CXX compiler identification is AppleClang 17.0.0.17000404
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+CMake Error at CMakeLists.txt:10 (find_package):
+  By not providing "Findpybind11.cmake" in CMAKE_MODULE_PATH this project has
+  asked CMake to find a package configuration file provided by "pybind11",
+  but CMake did not find one.
+
+  Could not find a package configuration file provided by "pybind11" with any
+  of the following names:
+
+    pybind11Config.cmake
+    pybind11-config.cmake
+
+  Add the installation prefix of "pybind11" to CMAKE_PREFIX_PATH or set
+  "pybind11_DIR" to a directory containing one of the above files.  If
+  "pybind11" provides a separate development package or SDK, be sure it has
+  been installed.
+
+
+-- Configuring incomplete, errors occurred!
+ben@Bulents-MacBook-Pro build % pip3 install pybind11 pytest matplotlib
+pip3 install pybind11 pytest matplotlib
+Collecting pybind11
+  Downloading pybind11-3.0.1-py3-none-any.whl.metadata (10.0 kB)
+Collecting pytest
+  Downloading pytest-9.0.2-py3-none-any.whl.metadata (7.6 kB)
+Collecting matplotlib
+  Downloading matplotlib-3.10.8-cp313-cp313-macosx_10_13_x86_64.whl.metadata (52 kB)
+Collecting iniconfig>=1.0.1 (from pytest)
+  Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+Collecting packaging>=22 (from pytest)
+  Downloading packaging-25.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting pluggy<2,>=1.5 (from pytest)
+  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+Collecting pygments>=2.7.2 (from pytest)
+  Downloading pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)
+Collecting contourpy>=1.0.1 (from matplotlib)
+  Downloading contourpy-1.3.3-cp313-cp313-macosx_10_13_x86_64.whl.metadata (5.5 kB)
+Collecting cycler>=0.10 (from matplotlib)
+  Downloading cycler-0.12.1-py3-none-any.whl.metadata (3.8 kB)
+Collecting fonttools>=4.22.0 (from matplotlib)
+  Downloading fonttools-4.61.1-cp313-cp313-macosx_10_13_x86_64.whl.metadata (114 kB)
+Collecting kiwisolver>=1.3.1 (from matplotlib)
+  Downloading kiwisolver-1.4.9-cp313-cp313-macosx_10_13_x86_64.whl.metadata (6.3 kB)
+Collecting numpy>=1.23 (from matplotlib)
+  Downloading numpy-2.4.0-cp313-cp313-macosx_14_0_x86_64.whl.metadata (6.6 kB)
+Collecting pillow>=8 (from matplotlib)
+  Downloading pillow-12.0.0-cp313-cp313-macosx_10_13_x86_64.whl.metadata (8.8 kB)
+Collecting pyparsing>=3 (from matplotlib)
+  Downloading pyparsing-3.3.1-py3-none-any.whl.metadata (5.6 kB)
+Collecting python-dateutil>=2.7 (from matplotlib)
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Collecting six>=1.5 (from python-dateutil>=2.7->matplotlib)
+  Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Downloading pybind11-3.0.1-py3-none-any.whl (293 kB)
+Downloading pytest-9.0.2-py3-none-any.whl (374 kB)
+Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+Downloading matplotlib-3.10.8-cp313-cp313-macosx_10_13_x86_64.whl (8.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.3/8.3 MB 6.1 MB/s  0:00:01
+
+Downloading contourpy-1.3.3-cp313-cp313-macosx_10_13_x86_64.whl (293 kB)
+Downloading cycler-0.12.1-py3-none-any.whl (8.3 kB)
+Downloading fonttools-4.61.1-cp313-cp313-macosx_10_13_x86_64.whl (2.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.4/2.4 MB 6.0 MB/s  0:00:00
+
+Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+Downloading kiwisolver-1.4.9-cp313-cp313-macosx_10_13_x86_64.whl (66 kB)
+Downloading numpy-2.4.0-cp313-cp313-macosx_14_0_x86_64.whl (6.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.5/6.5 MB 5.6 MB/s  0:00:01
+
+Downloading packaging-25.0-py3-none-any.whl (66 kB)
+Downloading pillow-12.0.0-cp313-cp313-macosx_10_13_x86_64.whl (5.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 4.6 MB/s  0:00:01
+
+Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 5.2 MB/s  0:00:00
+
+Downloading pyparsing-3.3.1-py3-none-any.whl (121 kB)
+Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Installing collected packages: six, pyparsing, pygments, pybind11, pluggy, pillow, packaging, numpy, kiwisolver, iniconfig, fonttools, cycler, python-dateutil, pytest, contourpy, matplotlib
+
+
+Successfully installed contourpy-1.3.3 cycler-0.12.1 fonttools-4.61.1 iniconfig-2.3.0 kiwisolver-1.4.9 matplotlib-3.10.8 numpy-2.4.0 packaging-25.0 pillow-12.0.0 pluggy-1.6.0 pybind11-3.0.1 pygments-2.19.2 pyparsing-3.3.1 pytest-9.0.2 python-dateutil-2.9.0.post0 six-1.17.0
+
+[notice] A new release of pip is available: 25.2 -> 25.3
+[notice] To update, run: /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m pip install --upgrade pip
+ben@Bulents-MacBook-Pro build % /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m pip install --upgrade pip
+<3/bin/python3.13 -m pip install --upgrade pip
+Requirement already satisfied: pip in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (25.2)
+Collecting pip
+  Downloading pip-25.3-py3-none-any.whl.metadata (4.7 kB)
+Downloading pip-25.3-py3-none-any.whl (1.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 4.5 MB/s  0:00:00
+
+Installing collected packages: pip
+  Attempting uninstall: pip
+    Found existing installation: pip 25.2
+    Uninstalling pip-25.2:
+      Successfully uninstalled pip-25.2
+Successfully installed pip-25.3
+ben@Bulents-MacBook-Pro build % cmake ..
+cmake ..
+CMake Error at CMakeLists.txt:10 (find_package):
+  By not providing "Findpybind11.cmake" in CMAKE_MODULE_PATH this project has
+  asked CMake to find a package configuration file provided by "pybind11",
+  but CMake did not find one.
+
+  Could not find a package configuration file provided by "pybind11" with any
+  of the following names:
+
+    pybind11Config.cmake
+    pybind11-config.cmake
+
+  Add the installation prefix of "pybind11" to CMAKE_PREFIX_PATH or set
+  "pybind11_DIR" to a directory containing one of the above files.  If
+  "pybind11" provides a separate development package or SDK, be sure it has
+  been installed.
+
+
+-- Configuring incomplete, errors occurred!
+ben@Bulents-MacBook-Pro build % which pybind11
+which pybind11
+pybind11 not found
+ben@Bulents-MacBook-Pro build % pip3 install pybind11 pytest matplotlib
+pip3 install pybind11 pytest matplotlib
+Requirement already satisfied: pybind11 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (3.0.1)
+Requirement already satisfied: pytest in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (9.0.2)
+Requirement already satisfied: matplotlib in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (3.10.8)
+Requirement already satisfied: iniconfig>=1.0.1 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (2.3.0)
+Requirement already satisfied: packaging>=22 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (25.0)
+Requirement already satisfied: pluggy<2,>=1.5 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (2.19.2)
+Requirement already satisfied: contourpy>=1.0.1 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (1.3.3)
+Requirement already satisfied: cycler>=0.10 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (0.12.1)
+Requirement already satisfied: fonttools>=4.22.0 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (4.61.1)
+Requirement already satisfied: kiwisolver>=1.3.1 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (1.4.9)
+Requirement already satisfied: numpy>=1.23 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (2.4.0)
+Requirement already satisfied: pillow>=8 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (12.0.0)
+Requirement already satisfied: pyparsing>=3 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (3.3.1)
+Requirement already satisfied: python-dateutil>=2.7 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from matplotlib) (2.9.0.post0)
+Requirement already satisfied: six>=1.5 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from python-dateutil>=2.7->matplotlib) (1.17.0)
+ben@Bulents-MacBook-Pro build % echo $SHELL
+echo $SHELL
+/bin/zsh
+ben@Bulents-MacBook-Pro build % zsh
+zsh
+Run: java_std_path before building kojo.
+ben@Bulents-MacBook-Pro build % which pybind11
+which pybind11
+pybind11 not found
+ben@Bulents-MacBook-Pro build % cmake .. && make
+cmake .. && make
+CMake Error at CMakeLists.txt:10 (find_package):
+  By not providing "Findpybind11.cmake" in CMAKE_MODULE_PATH this project has
+  asked CMake to find a package configuration file provided by "pybind11",
+  but CMake did not find one.
+
+  Could not find a package configuration file provided by "pybind11" with any
+  of the following names:
+
+    pybind11Config.cmake
+    pybind11-config.cmake
+
+  Add the installation prefix of "pybind11" to CMAKE_PREFIX_PATH or set
+  "pybind11_DIR" to a directory containing one of the above files.  If
+  "pybind11" provides a separate development package or SDK, be sure it has
+  been installed.
+
+
+-- Configuring incomplete, errors occurred!
+ben@Bulents-MacBook-Pro build % echo $CMAKE_PREFIX_PATH
+echo $CMAKE_PREFIX_PATH
+
+ben@Bulents-MacBook-Pro build % pwd
+pwd
+/Users/ben/src/buda/buda_system/build
+ben@Bulents-MacBook-Pro build % cmake .. && make
+cmake .. && make
+CMake Error at CMakeLists.txt:10 (find_package):
+  By not providing "Findpybind11.cmake" in CMAKE_MODULE_PATH this project has
+  asked CMake to find a package configuration file provided by "pybind11",
+  but CMake did not find one.
+
+  Could not find a package configuration file provided by "pybind11" with any
+  of the following names:
+
+    pybind11Config.cmake
+    pybind11-config.cmake
+
+  Add the installation prefix of "pybind11" to CMAKE_PREFIX_PATH or set
+  "pybind11_DIR" to a directory containing one of the above files.  If
+  "pybind11" provides a separate development package or SDK, be sure it has
+  been installed.
+
+
+-- Configuring incomplete, errors occurred!
+ben@Bulents-MacBook-Pro build % export pybind11_DIR=/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Config.cmake
+<e-packages/pybind11/share/cmake/pybind11/pybind11Config.cmake
+ben@Bulents-MacBook-Pro build % cmake .. && make
+cmake .. && make
+CMake Error at CMakeLists.txt:10 (find_package):
+  By not providing "Findpybind11.cmake" in CMAKE_MODULE_PATH this project has
+  asked CMake to find a package configuration file provided by "pybind11",
+  but CMake did not find one.
+
+  Could not find a package configuration file provided by "pybind11" with any
+  of the following names:
+
+    pybind11Config.cmake
+    pybind11-config.cmake
+
+  Add the installation prefix of "pybind11" to CMAKE_PREFIX_PATH or set
+  "pybind11_DIR" to a directory containing one of the above files.  If
+  "pybind11" provides a separate development package or SDK, be sure it has
+  been installed.
+
+
+-- Configuring incomplete, errors occurred!
+ben@Bulents-MacBook-Pro build % echo $CMAKE_MODULE_PATH
+echo $CMAKE_MODULE_PATH
+
+ben@Bulents-MacBook-Pro build % echo $PATH
+echo $PATH
+.:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin:/Users/ben/Library/Application Support/Coursier/bin:/Users/ben/bin:/Users/ben/.cargo/bin
+ben@Bulents-MacBook-Pro build % which python3
+which python3
+/usr/local/bin/python3
+ben@Bulents-MacBook-Pro build % cmake ..
+cmake ..
+CMake Error at CMakeLists.txt:10 (find_package):
+  By not providing "Findpybind11.cmake" in CMAKE_MODULE_PATH this project has
+  asked CMake to find a package configuration file provided by "pybind11",
+  but CMake did not find one.
+
+  Could not find a package configuration file provided by "pybind11" with any
+  of the following names:
+
+    pybind11Config.cmake
+    pybind11-config.cmake
+
+  Add the installation prefix of "pybind11" to CMAKE_PREFIX_PATH or set
+  "pybind11_DIR" to a directory containing one of the above files.  If
+  "pybind11" provides a separate development package or SDK, be sure it has
+  been installed.
+
+
+-- Configuring incomplete, errors occurred!
+ben@Bulents-MacBook-Pro build % echo $PATH
+echo $PATH
+.:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin:/Users/ben/Library/Application Support/Coursier/bin:/Users/ben/bin:/Users/ben/.cargo/bin
+ben@Bulents-MacBook-Pro build % zsh
+zsh
+Run: java_std_path before building kojo.
+ben@Bulents-MacBook-Pro build % echo $PATH
+echo $PATH
+.:/usr/local/bin:/usr/bin:/usr/sbin:/bin:/sbin:/Users/ben/Library/Application Support/Coursier/bin:/Users/ben/bin:/Users/ben/.cargo/bin:/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11
+ben@Bulents-MacBook-Pro build % cmake ..
+cmake ..
+CMake Warning (dev) at /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/FindPythonLibsNew.cmake:101 (message):
+  Policy CMP0148 is not set: The FindPythonInterp and FindPythonLibs modules
+  are removed.  Run "cmake --help-policy CMP0148" for policy details.  Use
+  the cmake_policy command to set the policy and suppress this warning, or
+  preferably upgrade to using FindPython, either by calling it explicitly
+  before pybind11, or by setting PYBIND11_FINDPYTHON ON before pybind11.
+Call Stack (most recent call first):
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Tools.cmake:44 (find_package)
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Common.cmake:226 (include)
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Config.cmake:257 (include)
+  CMakeLists.txt:10 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+-- Found PythonInterp: /usr/local/bin/python3 (found suitable version "3.13.4", minimum required is "3.8")
+-- Found PythonLibs: /Library/Frameworks/Python.framework/Versions/3.13/lib/libpython3.13.dylib
+-- Performing Test HAS_FLTO_THIN
+-- Performing Test HAS_FLTO_THIN - Success
+-- Performing Test HAS_FLTO
+-- Performing Test HAS_FLTO - Success
+-- Found pybind11: /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/include (found version "3.0.1")
+-- Configuring done (1.5s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/ben/src/buda/buda_system/build
+ben@Bulents-MacBook-Pro build % make -j4
+make -j4
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/bundler.cpp.o
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/layering.cpp.o
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/topology.cpp.o
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/bindings.cpp.o
+/Users/ben/src/buda/buda_system/src/topology.cpp:37:128: warning: unused
+      parameter 'y_grid' [-Wunused-parameter]
+   37 |   ...dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std...
+      |                                                                   ^
+[ 71%] Building CXX object CMakeFiles/interconnect.dir/src/global_router.cpp.o
+1 warning generated.
+[ 85%] Building CXX object CMakeFiles/interconnect.dir/src/nuts.cpp.o
+/Users/ben/src/buda/buda_system/src/global_router.cpp:18:51: warning: unused
+      parameter 'layer_id' [-Wunused-parameter]
+   18 | void GlobalRouter::inject_congestion_on_layer(int layer_id, double usage) {
+      |                                                   ^
+/Users/ben/src/buda/buda_system/src/global_router.cpp:18:68: warning: unused
+      parameter 'usage' [-Wunused-parameter]
+   18 | void GlobalRouter::inject_congestion_on_layer(int layer_id, double usage) {
+      |                                                                    ^
+/Users/ben/src/buda/buda_system/src/global_router.cpp:21:57: warning: unused
+      parameter 'topo' [-Wunused-parameter]
+   21 | void GlobalRouter::map_topology_to_cuts(const Topology& topo, double wid...
+      |                                                         ^
+/Users/ben/src/buda/buda_system/src/global_router.cpp:21:70: warning: unused
+      parameter 'width' [-Wunused-parameter]
+   21 | void GlobalRouter::map_topology_to_cuts(const Topology& topo, double width, b...
+      |                                                                      ^
+/Users/ben/src/buda/buda_system/src/global_router.cpp:21:82: warning: unused
+      parameter 'add_usage' [-Wunused-parameter]
+   21 |   ...Topology& topo, double width, bool add_usage) {
+      |                                         ^
+/Users/ben/src/buda/buda_system/src/global_router.cpp:24:66: warning: unused
+      parameter 'width' [-Wunused-parameter]
+   24 | double GlobalRouter::calculate_cost(const Topology& topo, double width) const {
+      |                                                                  ^
+/Users/ben/src/buda/buda_system/src/global_router.cpp:32:81: warning: unused
+      parameter 'max_iterations' [-Wunused-parameter]
+   32 |   ...bundles, int max_iterations) {
+      |                   ^
+In file included from /Users/ben/src/buda/buda_system/src/global_router.cpp:1:
+/Users/ben/src/buda/buda_system/src/global_router.h:27:22: warning: private
+      field 'floorplan_' is not used [-Wunused-private-field]
+   27 |     const Floorplan& floorplan_;
+      |                      ^
+/Users/ben/src/buda/buda_system/src/global_router.h:28:23: warning: private
+      field 'layers_' is not used [-Wunused-private-field]
+   28 |     const LayerStack& layers_;
+      |                       ^
+9 warnings generated.
+[100%] Linking CXX shared module interconnect.cpython-313-darwin.so
+[100%] Built target interconnect
+ben@Bulents-MacBook-Pro build % pwd
+pwd
+/Users/ben/src/buda/buda_system/build
+ben@Bulents-MacBook-Pro build % cp build/interconnect*.so src/
+cp build/interconnect*.so src/
+zsh: no matches found: build/interconnect*.so
+ben@Bulents-MacBook-Pro build % cp build/interconnect.cpython-313-darwin.so src/
+<interconnect.cpython-313-darwin.so src/
+cp: src: No such file or directory
+ben@Bulents-MacBook-Pro build % pwd
+pwd
+/Users/ben/src/buda/buda_system/build
+ben@Bulents-MacBook-Pro build % ls
+ls
+cmake_install.cmake			CMakeFiles
+CMakeCache.txt				interconnect.cpython-313-darwin.so
+CMakeCache.txt~				Makefile
+ben@Bulents-MacBook-Pro build % cd ..
+cd ..
+ben@Bulents-MacBook-Pro buda_system % cp build/interconnect.cpython-313-darwin.so src/
+<build/interconnect.cpython-313-darwin.so src/
+ben@Bulents-MacBook-Pro buda_system % cd src/
+cd src/
+ben@Bulents-MacBook-Pro src % pwd
+pwd
+/Users/ben/src/buda/buda_system/src
+ben@Bulents-MacBook-Pro src % ll
+ll
+total 784
+-rw-r--r--  1 ben  staff    2716 Jan  1 15:57 bindings.cpp
+-rw-r--r--  1 ben  staff    2978 Jan  1 15:57 buda_cli.py
+-rw-r--r--  1 ben  staff    1557 Jan  1 15:57 buda_viz.py
+-rw-r--r--  1 ben  staff    1811 Jan  1 15:57 bundler.cpp
+-rw-r--r--  1 ben  staff    1127 Jan  1 15:57 bundler.h
+-rw-r--r--  1 ben  staff    1793 Jan  1 15:57 global_router.cpp
+-rw-r--r--  1 ben  staff    1192 Jan  1 15:57 global_router.h
+-rwxr-xr-x  1 ben  staff  342496 Jan  1 16:16 interconnect.cpython-313-darwin.so
+-rw-r--r--  1 ben  staff     590 Jan  1 15:57 layering.cpp
+-rw-r--r--  1 ben  staff     611 Jan  1 15:57 layering.h
+-rw-r--r--  1 ben  staff      47 Jan  1 15:57 nuts.cpp
+-rw-r--r--  1 ben  staff     102 Jan  1 15:57 nuts.h
+-rw-r--r--  1 ben  staff    2766 Jan  1 15:57 topology.cpp
+-rw-r--r--  1 ben  staff    1488 Jan  1 15:57 topology.h
+-rw-r--r--  1 ben  staff     354 Jan  1 15:57 z_shape_stress.buda
+ben@Bulents-MacBook-Pro src % pwd
+pwd
+/Users/ben/src/buda/buda_system/src
+ben@Bulents-MacBook-Pro src % python3 buda_cli.py design_demo.buda
+python3 buda_cli.py design_demo.buda
+Matplotlib is building the font cache; this may take a moment.
+Traceback (most recent call last):
+  File "/Users/ben/src/buda/buda_system/src/buda_cli.py", line 71, in <module>
+    main()
+    ~~~~^^
+  File "/Users/ben/src/buda/buda_system/src/buda_cli.py", line 68, in main
+    if args.script: session.do_command(f"source {args.script}")
+                    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ben/src/buda/buda_system/src/buda_cli.py", line 59, in do_command
+    with open(args[0], 'r') as f:
+         ~~~~^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'design_demo.buda'
+ben@Bulents-MacBook-Pro src % python3 ./buda_cli.py ~/src/buda/design_demo.buda
+<uda_cli.py ~/src/buda/design_demo.buda
+Bundler created 3 bundles.
+
+
+  C-c C-z^Z
+zsh: suspended  python3 ./buda_cli.py ~/src/buda/design_demo.buda
+ben@Bulents-MacBook-Pro src % bg
+bg
+[1]  + continued  python3 ./buda_cli.py ~/src/buda/design_demo.buda
+ben@Bulents-MacBook-Pro src % pwd
+pwd
+/Users/ben/src/buda/buda_system/src
+ben@Bulents-MacBook-Pro src % pwd
+pwd
+/Users/ben/src/buda/buda_system/src
+ben@Bulents-MacBook-Pro src % python3 ./buda_cli.py ~/src/buda/z_shape.buda
+python3 ./buda_cli.py ~/src/buda/z_shape.buda
+Bundler created 1 bundles.
+ben@Bulents-MacBook-Pro src % 
+[1]  + done       python3 ./buda_cli.py ~/src/buda/design_demo.buda
+ben@Bulents-MacBook-Pro src % h
+h
+ 1031  cp build/interconnect*.so src/
+ 1032  cp build/interconnect.cpython-313-darwin.so src/
+ 1033  pwd
+ 1034  ls
+ 1035  cd ..
+ 1036  cp build/interconnect.cpython-313-darwin.so src/
+ 1037  cd src/
+ 1038  pwd
+ 1039  ll
+ 1040  pwd
+ 1041  python3 buda_cli.py design_demo.buda
+ 1042  python3 ./buda_cli.py ~/src/buda/design_demo.buda
+ 1043  bg
+ 1044  pwd
+ 1045  pwd
+ 1046  python3 ./buda_cli.py ~/src/buda/z_shape.buda
+ben@Bulents-MacBook-Pro src % h help
+h help
+fc: event not found: help
+ben@Bulents-MacBook-Pro src % man h
+man h
+No manual entry for h
+ben@Bulents-MacBook-Pro src % h 100
+h 100
+  100  cd ~/src/cpp/
+  101  pwd
+  102  ls
+  103  pwd
+  104  cd e1
+  105  ls
+  106  ls -ltr
+  107  c++ e1a.cpp -o euler
+  108  ls -ltr
+  109  ./euler
+  110  c++ e1a.cpp -o euler
+  111  ./euler
+  112  c++ e1a.cpp -o euler
+  113  c++ e1a.cpp -o euler
+  114  c++ e1a.cpp -c
+  115  ls -ltr
+  116  cat e1a.o
+  117  cd ..
+  118  mkdir tmp2
+  119  cd tmp2
+  120  ls
+  121  c++ ana.cpp
+  122  c++ ana.cpp
+  123  ls
+  124  alias ll
+  125  ll
+  126  a.out
+  127  c++ ana.cpp
+  128  ./a.out
+  129  c++ prob1.cpp
+  130  c++ prob1.cpp
+  131  c++ -std=c++23 prob1.cpp
+  132  echo Pre-processor Directives
+  133  c++ -std=c++23 prob1.cpp
+  134  c++ -std=c++23 prob1.cpp
+  135  c++ -std=c++23 prob1.cpp -c
+  136  ls -ltr
+  137  c++ -std=c++23 ana.cpp -c
+  138  ls -tr
+  139  ls -ltr
+  140  c++ ana.o prob1.o
+  141  ls -ltr
+  142  ./a.out
+  143  c++ -std=c++23 prob1.cpp -c
+  144  c++ -std=c++23 ana.cpp -c
+  145  c++ ana.o prob1.o
+  146  ./a.out
+  147  c++ -std=c++23 ana.cpp prob1.cpp -o prob1
+  148  ./prob1
+  149  c++ -std=c++23 ana.cpp prob1.cpp -o prob1c++ ana.o prob1.o -o prob1
+  150  c++ ana.o prob1.o -o prob1
+  151  prob1
+  152  c++ -std=c++23 ana.cpp prob1.cpp -o prob1
+  153  prob1
+  154  c++ -std=c++23 ana.cpp prob1.cpp -o prob1
+  155  prob1
+  156  pwd
+  157  ls /
+  158  which c++
+  159  pwd
+  160  ls -help
+  161  man ls
+  162  echo google unix ls pwd mkdir cat echo cd 
+  163  cd ..
+  164  cd tmp2
+  165  c++ -std=c++23 -c ana.cpp
+  166  ls -ltr
+  167  cat ana.o
+  168  strings ana.o
+  169  c++ ana.o prob1.o -o deneme
+  170  c++ -std=c++23 -c ana.cpp
+  171  c++ ana.o prob1.o -o deneme
+  172  deneme
+  173  c++ -std=c++23 prob2.cpp -c
+  174  c++ -std=c++23 prob2.cpp -c
+  175  ls -ltr
+  176  c++ ana.o prob1.o prob2.o -o prob1ve2
+  177  c++ -std=c++23 ana.cpp -c
+  178  c++ ana.o prob1.o prob2.o -o prob1ve2
+  179  prob1ve2
+  180  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  181  prob1ve2
+  182  c++ prob1.cpp
+  183  c++ -std=c++23 prob1.cpp
+  184  c++ -std=c++23 prob1.cpp -c
+  185  c++ -std=c++23 prob1.cpp -c
+  186  c++ -std=c++23 prob1.cpp -c
+  187  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  188  ./prob1ve2
+  189  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  190  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  191  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  192  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  193  prob1ve2
+  194  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  195  prob1ve2
+  196  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  197  prob1ve2
+  198  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  199  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  200  c++ -std=c++23 ana.cpp prob1.cpp prob2.cpp -o prob1ve2
+  201  prob1ve2
+  202  c++ -std=c++23 ana.cpp prob1.cpp -o prob1
+  203  c++ -std=c++23 ana.cpp prob1.cpp -o prob1
+  204  prob1
+  205  exit
+  206  /Applications/Kojo\ Learning\ Environment.app/Contents/PlugIns/jre.bundle/Contents/Home/bin/java ; exit;
+  207  exit
+  208  exit
+  209  exit
+  210  cd ~/kojo-repo
+  211  java_std_path
+  212  gs
+  213  build
+  214  sbt
+  215  build
+  216  sbt
+  217  java_std_path
+  218  build
+  219  ../kojo_exe &
+  220  build
+  221  build
+  222  java_std_path
+  223  ../kojo_exe &
+  224  java_std_path
+  225  cd ~/kojo-repo/
+  226  build
+  227  exit
+  228  java_std_path
+  229  ./stage-i4j-installer
+  230  exit
+  231  java_std_path
+  232  java_std_path
+  233  ./stage-i4j-installer
+  234  c++ -std=c++23 ana.cpp -o deneme
+  235  ./deneme
+  236  c++ -std=c++23 ana.cpp -o deneme
+  237  c++ -std=c++23 ana.cpp -o deneme
+  238  deneme
+  239  c++ -std=c++23 ana.cpp -o deneme
+  240  deneme
+  241  c++ -std=c++23 ana.cpp -o deneme
+  242  deneme
+  243  make
+  244  make
+  245  pwd
+  246  cd ..
+  247  mkdir gfx
+  248  cd gfx
+  249  git clone https://github.com/bulent2k2/olcPixelGameEngine.git
+  250  cd olcPixelGameEngine/
+  251  ls
+  252  make
+  253  make
+  254  make
+  255  make
+  256  make
+  257  uname -a
+  258  make
+  259  xcode
+  260  cd ..
+  261  git clone --recursive https://github.com/bulent2k2/Cinder.git
+  262  ls
+  263  ls Cinder/
+  264  brew install sfml@3.0.0
+  265  brew install sfml@3.0.0
+  266  pwd
+  267  ls
+  268  ls
+  269  mv ~/Downloads/cinder_0.9.2_mac .
+  270  ls
+  271  cd cinder_0.9.2_mac/
+  272  ls
+  273  pwd
+  274  cd ~/kojo-repo
+  275  ls
+  276  exit
+  277  java_std_path
+  278  sbt
+  279  java_std_path
+  280  java -version
+  281  sgrep swing
+  282  sgrep swing | grep sun
+  283  java_std_path
+  284  cd ~/kojo-repo/
+  285  pwd
+  286  ls
+  287  pwd
+  288  ../kojo_exe &
+  289  c++ 
+  290  c++ kutucuk.cpp
+  291  ls -ltr
+  292  ./a.out
+  293  ./a.out
+  294  ./a.out
+  295  ./a.out
+  296  c++ kutucuk.cpp
+  297  c++ kutucuk.cpp
+  298  c++ kutucuk.cpp
+  299  c++ -std=c++23 kutucuk.cpp
+  300  ./a.out
+  301  ./a.out 11
+  302  c++ -std=c++23 kutucuk.cpp
+  303  ./a.out 11
+  304  ./a.out 11 abc 10 gunaydin merhaba 3.5
+  305  c++ -std=c++23 kutucuk.cpp
+  306  !
+  307  c++ -std=c++23 kutucuk.cpp
+  308  ./a.out 11
+  309  ./a.out 4
+  310  c++ -std=c++23 kutucuk.cpp
+  311  ./a.out 4
+  312  ./a.out 2
+  313  a.out
+  314  make
+  315  ./kutucuklar
+  316  make
+  317  ./kutucuklar
+  318  \t./sarmal
+  319  \t./sarmal
+  320  ./sarmal
+  321  ./sarmal
+  322  ./sarmal
+  323  asarmal
+  324  pwd
+  325  pwd
+  326  cd src/cpp/proje/talha
+  327  ls
+  328  make
+  329  make
+  330  ./asarmal
+  331  c++
+  332  man c++
+  333  ./asarmal
+  334  pwd
+  335  exit
+  336  make
+  337  make
+  338  cd src/cpp/proje/talha
+  339  ./nesne
+  340  EXIT
+  341  exit
+  342  cd ~/kojo-repo/
+  343  ls
+  344  gs
+  345  \tmodified:   build.sbt
+  346  git pull
+  347  cd ~/src/cpp/ileri/cizim/
+  348  c++ -std=c++23 ana.cpp
+  349  c++ -std=c++23 ana.cpp
+  350  cd ~/cpp/
+  351  cd src/cpp/ileri
+  352  ls
+  353  cd hayat
+  354  ./hayat
+  355  make
+  356  make
+  357  make
+  358  hayat 1
+  359  hayat
+  360  make
+  361  ./hayat 1
+  362  ./hayat
+  363  make yaşa
+  364  make yaşa1
+  365  make
+  366  make yasa1
+  367  make yaşa1
+  368  make
+  369  make
+  370  make
+  371  make
+  372  make
+  373  make
+  374  make
+  375  make
+  376  make
+  377  make
+  378  make
+  379  make
+  380  make
+  381  make
+  382  cat Makefile
+  383  make yaşa1
+  384  make yaşa1
+  385  make
+  386  make
+  387  make
+  388  make
+  389  make
+  390  c++
+  391  c++ -std=c++23 s35.cpp -o prog
+  392  c++ -std=c++23 s35.cpp -o prog
+  393  prog
+  394  *******
+  395  c++ -std=c++23 s35.cpp -o prog
+  396  prog
+  397  prog
+  398  c++ -std=c++23 s35.cpp -o prog
+  399  prog
+  400  c++ -std=c++23 s36_v_s40.cpp -o prog
+  401  prog
+  402  c++ -std=c++23 s36_v_s40.cpp -o prog
+  403  prog
+  404  ../kojo_exe&
+  405  gdb prog
+  406  brew install gdb
+  407  gdb prog
+  408  ./prog
+  409  git push
+  410  cd ~/kojo-repo/
+  411  git push
+  412  git push
+  413  java_std_path
+  414  gs
+  415  sbt
+  416  gs
+  417  sbt
+  418  cd ~/kojo-repo
+  419  ../kojo_exe&
+  420  pwd
+  421  java_std_path
+  422  build
+  423  build
+  424  ../kojo_exe&
+  425  build
+  426  sgrep ANAGRAMS
+  427  grep -r ANAGRAM *.scala
+  428  grep -r ANAGRAM .
+  429  a sgrep
+  430  sgrep ANAGRAMS
+  431  sgrep Anagrams
+  432  build
+  433  /Applications/Python\ 3.13/Install\ Certificates.command ; exit;
+  434  java_std_path
+  435  build
+  436  build
+  437  ../kojo_exe&
+  438  ../kojo_exe &
+  439  gs
+  440  build
+  441  build
+  442  ../kojo_exe &
+  443  exit
+  444  gs
+  445  java_std_path
+  446  h
+  447  gs
+  448  build
+  449  build
+  450  sgrep "Select an Option"
+  451  sgrep "Cancel"
+  452  sgrep S_FileChanged
+  453  sgrep JOptionPane
+  454  sgrep JOptionPane|grep Locale
+  455  sgrep Select
+  456  sgrep Select | grep OptionPane
+  457  sgrep "Select an"
+  458  sgrep "Select "
+  459  sgrep JOptionPane
+  460  sgrep JOptionPane | grep showMes
+  461  sgrep JOptionPane | grep showOpt
+  462  sgrep S_SaveAs
+  463  sgrep SaveAs
+  464  exit
+  465  java_std_path
+  466  sbt
+  467  exit
+  468  pwd
+  469  exit
+  470  /Applications/Kojo\ Learning\ Environment.app/Contents/PlugIns/jre.bundle/Contents/Home/bin/java ; exit;
+  471  builod
+  472  gs
+  473  build
+  474  build
+  475  gs
+  476  build
+  477  build
+  478  echo "COMMITTED AND PUSHED TO GITHUB"
+  479  gs
+  480  ../kojo_exe&
+  481  build
+  482  java_std_path
+  483  sbt
+  484  java_std_path
+  485  sbt
+  486  pwd
+  487  cd src
+  488  ls
+  489  mkdir alg
+  490  cd alg
+  491  ls
+  492  javac
+  493  javac -version
+  494  java -version
+  495  pushd /usr/local
+  496  sudo apt-get install curl
+  497  popd
+  498  ls
+  499  java -version
+  500  javac -version
+  501  echo $PATH
+  502  java_std_path
+  503  cd ~/kojo-repo
+  504  build
+  505  pwd
+  506  j
+  507  h
+  508  exit
+  509  exit
+  510  exit
+  511  pip install requests
+  512  pip3 install requests
+  513  /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 -m pip install --upgrade pip
+  514  h
+  515  python3
+  516  python3
+  517  python3
+  518  python3 secret.py
+  519  python3 secret.py
+  520  python3 secret.py
+  521  python3 secret.py
+  522  git push
+  523  cd ..
+  524  pwd
+  525  cd Kojo
+  526  cd git
+  527  pwd
+  528  gs
+  529  git push
+  530  pwd
+  531  cd ..
+  532  exit
+  533  pip3
+  534  pip3 install lxml
+  535  pip3 install bs4
+  536  exit
+  537  cd src/
+  538  ls
+  539  mkdir rust
+  540  cd rust
+  541  $ curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
+  542  curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh
+  543  exit
+  544  rustc
+  545  exit
+  546  rustc
+  547  exit
+  548  which rust
+  549  which rustup
+  550  echo $PATH
+  551  bashrc
+  552  bash
+  553  zsh
+  554  zsh
+  555  exit
+  556  cd ~/src/kojo/git
+  557  kojo.exe &
+  558  ls
+  559  ./kojo_exe &
+  560  pwd
+  561  ls
+  562  cd lalit-mast4er
+  563  cd lalit-master/
+  564  ls
+  565  gs
+  566  pwd
+  567  sgrep pauseMillis
+  568  cd kojo
+  569  sgrep pauseMillis
+  570  sgrep withLocal
+  571  gs
+  572  pwd
+  573  rustc
+  574  rustc --version
+  575  rustup update
+  576  which rustup
+  577  git clone https://github.com/bulent2k2/rust-mode.git
+  578  ls
+  579  cd rust-mode/
+  580  ls
+  581  cd ..
+  582  pwd
+  583  ls
+  584  cargo new get-dependencies
+  585  cd get-dependencies
+  586  cargo add rand@0.8.5 trpl@0.2.0
+  587  cd ..
+  588  cd projects/hello_world/
+  589  rustc main.rs
+  590  ./main
+  591  cargo --version
+  592  cd ..
+  593  cargo new hello_cargo
+  594  cd hello_cargo/
+  595  ls
+  596  ls -la
+  597  cargo build
+  598  ls
+  599  ls target/
+  600  ./target/debug/hello_cargo
+  601  cargo run
+  602  cargo run
+  603  cargo check
+  604  cargo check
+  605  cargo check
+  606  cargo check
+  607  cargo check
+  608  cargo build --release
+  609  tree
+  610  find .
+  611  ./target/release/hello_cargo
+  612  cargo build --release
+  613  ./target/release/hello_cargo
+  614  ./target/debug/hello_cargo
+  615  cd ..
+  616  ls
+  617  $ git clone example.org/someproject
+  618  git clone example.org/someproject
+  619  cargo new guessing_game
+  620  cd guessing_game/
+  621  cargo run
+  622  cargo run
+  623  cargo build
+  624  cargo doc --open
+  625  cargo run
+  626  cargo run
+  627  cargo run
+  628  cargo run
+  629  cargo run
+  630  pwd
+  631  pwd
+  632  git clone https://github.com/bulent2k2/kojo.git
+  633  git branch
+  634  git checkout turkish_keywords_2.13.x
+  635  git branch turkish_keywords_2.13.x
+  636  gs
+  637  pwd
+  638  ls
+  639  gs
+  640  git branch
+  641  git branch -d turkish_keywords_2.13.x
+  642  git branch
+  643  cd kojo/
+  644  git branch
+  645  pwd
+  646  ls
+  647  git branch -r
+  648  git switch -help
+  649  git switch turkish_keywords_2.13.x
+  650  gs
+  651  pwd
+  652  pwd
+  653  cd /Users/ben/src/kojo/git/lalit-master/kojo/
+  654  sgrep S_Fireworks
+  655  pwd
+  656  diff -rq ~/src/kojo/git/turkish-branch/kojo/src/main/resources/samples/ ~/src/kojo/git/lalit-master/kojo/src/main/resources/samples/
+  657  diff -q ~/src/kojo/git/turkish-branch/kojo/src/main/resources/samples/ ~/src/kojo/git/lalit-master/kojo/src/main/resources/samples/
+  658  java_std_path
+  659  sbt
+  660  sgrep S_Fireworks
+  661  j
+  662  java_std_path
+  663  ../kojo_exe &
+  664  gs
+  665  java_std_path
+  666  gs
+  667  build
+  668  gs
+  669  gs
+  670  git checkout master
+  671  gs
+  672  git merge turkish_keywords_2.13.x
+  673  gs
+  674  gs
+  675  ../kojo.exe &
+  676  pwd
+  677  pwd
+  678  gs
+  679  build
+  680  build
+  681  build
+  682  ../kojo_exe
+  683  ../kojo_exe &
+  684  build
+  685  gs
+  686  gs
+  687  build
+  688  sgrep S_FIREWORKS
+  689  sgrep S_Fireworks
+  690  build
+  691  build
+  692  pwd
+  693  gs
+  694  sudo xcodebuild -license
+  695  gs
+  696  cd ~/src/rust
+  697  rustc
+  698  cd projects/guessing_game
+  699  cargo run
+  700  zsh
+  701  cargo run
+  702  cargo run
+  703  cargo run
+  704  cargo run
+  705  cargo run
+  706  cargo run
+  707  cargo run
+  708  cargo run
+  709  cargo run
+  710  cargo run
+  711  cargo run
+  712  cargo run
+  713  cargo run
+  714  cd ..
+  715  cargo new variables
+  716  cd variables
+  717  cargo run
+  718  cargo run
+  719  cargo run
+  720  cargo run
+  721  cargo run
+  722  cargo run
+  723  pwd
+  724  cd ..
+  725  tkdiff kojo-repo ~/src/kojo/git/turkish-branch
+  726  tkdiff kojo-repo ~/src/kojo/git/turkish-branch
+  727  ~/bin/tkdiff kojo-repo ~/src/kojo/git/turkish-branch
+  728  ~/bin/tkdiff kojo-repo ~/src/kojo/git/turkish-branch
+  729  ~/bin/tkdiff kojo-repo/build.sbt ~/src/kojo/git/turkish-branch/kojo/build.sbt
+  730  diff -q kojo-repo/build.sbt ~/src/kojo/git/turkish-branch/kojo/build.sbt
+  731  diff -rq kojo-repo ~/src/kojo/git/turkish-branch/kojo
+  732  java_std_path
+  733  build
+  734  gs
+  735  cd ~/kojo-repo
+  736  git diff
+  737  cd 
+  738  diff -rq kojo-repo ~/src/kojo/git/turkish-branch/kojo
+  739  rust
+  740  cargo run
+  741  cd ..
+  742  H
+  743  h
+  744  man h
+  745  h -help
+  746  h --help
+  747  carge run
+  748  cd guessing_game/
+  749  cargo run
+  750  cargo run
+  751   rustc --explain E0502
+  752  cargo run
+  753  cargo run
+  754  cargo run
+  755  cargo run
+  756  cargo run
+  757  cargo run
+  758  cargo run
+  759  cargo run
+  760  cargo run
+  761  cargo run
+  762  cargo run
+  763  cargo run
+  764  cargo run
+  765  cargo run
+  766  exit
+  767  cd ~/kojo-repo/
+  768  gs
+  769  build
+  770  g++
+  771  g++ --version
+  772  /Applications/Kojo\ Learning\ Environment.app/Contents/PlugIns/jre.bundle/Contents/Home/bin/java ; exit;
+  773  g++ gurkan.pp
+  774  g++ gurkan.cpp
+  775  ./a.out
+  776  make
+  777  cp formulas.txt formulas.txt.golden
+  778  cp Zip.txt Zip.txt.golden
+  779  cp points.txt points.txt.golden
+  780  make
+  781  clang --version
+  782  g++ -std=c++23
+  783  g++ -std=c++23 deneme.cpp -o deneme
+  784  deneme
+  785  g++ -std=c++23 deneme.cpp -o deneme; deneme
+  786  cd src/cpp/tmp
+  787  make
+  788  ./uf
+  789  make
+  790  make
+  791  make
+  792  make
+  793  make
+  794  make
+  795  make
+  796  make
+  797  make
+  798  pwd
+  799  ls -ltr
+  800  uf
+  801  make
+  802  make
+  803  make
+  804  make
+  805  make
+  806  make
+  807  make
+  808  make
+  809  make
+  810  ./program
+  811  make
+  812  make
+  813  make
+  814  ./program << cf2152b.test.in\n\n\nfoo\nsdf
+  815  make
+  816  make
+  817  make
+  818  pwd
+  819  make
+  820  make
+  821  make
+  822  make
+  823  make
+  824  make
+  825  make
+  826  make
+  827  make
+  828  make
+  829  make
+  830  make
+  831  make
+  832  cd ~/tmp
+  833  amm
+  834  pwd
+  835  make
+  836  ls -ltr
+  837  ./uf
+  838  ./uf
+  839  pwd
+  840  ls
+  841  ls -ltr
+  842  make
+  843  cat Makefile
+  844  g++ -std=c++23 uf2.cpp -o uf2
+  845  ls -ltr
+  846  uf2
+  847  git clone https://github.com/bulent2k2/cpp_ogreniyoruz
+  848  git clone https://github.com/bulent2k2/cpp_ogreniyoruz.git
+  849  cd cpp_ogreniyoruz/
+  850  ls
+  851  gdb
+  852  gdb altdizi
+  853  gdb ./altdizi
+  854  pwd
+  855  cd ileri/dp/ortak_altdiziler/
+  856  gdb altdizi
+  857  lldb aldizi
+  858  lldb ./altdizi
+  859  pwd
+  860  cd ~/src/cpp/tmp/
+  861  uf2
+  862  ./uf2
+  863  pwd
+  864  ls
+  865  make
+  866  make
+  867  ./fibYA1 30
+  868  time ./fibYA1 30
+  869  time ./fibYA1 10
+  870  time ./fibYA1 < 10
+  871  make
+  872  ./fibYA1 a b c 10
+  873  make
+  874  ./fibYA1 a b c 10
+  875  time ./fibYA1 20
+  876  time ./fibYA1 30
+  877  time ./fibYA1 40
+  878  time ./fibYA1 50
+  879  make
+  880  time ./fibYA1 20
+  881  time ./fibYA1 8
+  882  time ./fibYA1 30
+  883  time ./fibYA1 40
+  884  time ./fibYA1 50
+  885  make
+  886  time ./fibYA2 30
+  887  time ./fibYA2 40
+  888  time ./fibYA2 50
+  889  time ./fibYA2 50
+  890  time ./fibYA2 100
+  891  time ./fibYA2 90
+  892  time ./fibYA2 90
+  893  make
+  894  time ./fibYA2 90
+  895  time ./fibYA2 100
+  896  time ./fibAY1 10
+  897  time ./fibAY1 30
+  898  time ./fibAY1 50
+  899  time ./fibAY1 100
+  900  time ./fibYA2 100
+  901  time ./fibAY1 100
+  902  time ./fibAY1 10
+  903  time ./fibAY1 20
+  904  time ./fibAY1 250
+  905  time ./fibAY1 50
+  906  time ./fibAY1 90
+  907  time ./fibAY1 100
+  908  time ./fibAY1 100
+  909  time ./fibAY1 90
+  910  time ./fibAY1 100
+  911  time ./fibAY2 90
+  912  time ./fibAY2 90
+  913  time ./fibAY2 100
+  914  time ./fibYA2 90
+  915  time ./fibYA2 100
+  916  cd fib/
+  917  make
+  918  make
+  919  ./fibYA1 30
+  920  time ./fibYA1 30
+  921  time ./fibYA1 40
+  922  time ./fibYA1 45
+  923  time ./fibYA2 45
+  924  time ./fibAY1 45
+  925  time ./fibAY2 45
+  926  pwd
+  927  cd ..
+  928  git config pull.rebase false
+  929  exit
+  930  python3
+  931  python3 seg_tree.py
+  932  pwd
+  933  exit
+  934  cd ~/src/cpp/git/cpp_ogreniyoruz/
+  935  g++
+  936  cd ileri/
+  937  g++ -std=c++23 ranges.cpp
+  938  g++ -std=c++23 ranges.cpp
+  939  g++ -std=c++23 ranges.cpp
+  940  g++ -std=c++23 ranges.cpp
+  941  ./a.out
+  942  pwd
+  943  cd segment-trees/
+  944  ls
+  945  cd alt_dizi_agaci/
+  946  ls
+  947  make
+  948  make run
+  949  make run
+  950  cd ..
+  951  pwd
+  952  cd ..
+  953  ls
+  954  ./a.out
+  955  cd ~/kojo-repo
+  956  ../kojo_exe&
+  957  ls
+  958  tree
+  959  find .
+  960  find . | grep Color
+  961  find . | grep Color | grep java
+  962  time find . | grep Color | grep java
+  963  c++ -std=c++23 -c chrono.cpp -o chrono
+  964  ./chrono
+  965  c++ -std=c++23 chrono.cpp -o chrono
+  966  ./chrono
+  967  exit
+  968  pwd
+  969  cd ~/src/cpp/tmp
+  970  cd ..
+  971  cd xcode
+  972  ln -s /Users/ben/Library/Developer/Xcode/DerivedData/funprog-fkfrxpadtlndjefxlosjsjninlpx/Build funprog
+  973  ls funprog/funprog
+  974  ls
+  975  ll
+  976  cd funprog
+  977  cd funprog
+  978  ls
+  979  pwd
+  980  cd ..
+  981  ls
+  982  Build/Products/Debug/funprog
+  983  pwd
+  984  make
+  985  make
+  986  make
+  987  make
+  988  make
+  989  make
+  990  pwd
+  991  make
+  992  pwd
+  993  exit
+  994  cd ~/src/cpp/git/cpp_ogreniyoruz/ileri/segment-trees
+  995  ls
+  996  cd alt_dizi_agaci
+  997  make
+  998  ./agac_diziyle
+  999  exit
+ 1000  exit
+ 1001  ./uf3
+ 1002  ./uf3
+ 1003  make
+ 1004  make uf3
+ 1005  ./uf3
+ 1006  ./uf3
+ 1007  make uf3
+ 1008  make uf3
+ 1009  touch uf3.cpp
+ 1010  make uf3
+ 1011  make uf3
+ 1012  make
+ 1013  make uf3
+ 1014  make uf3
+ 1015  make uf3
+ 1016  ./uf3 < uf3.girdi
+ 1017  ./uf3 < uf3.girdi
+ 1018  make
+ 1019  ./uf3 < uf3.girdi
+ 1020  ./uf4 < uf3.girdi
+ 1021  ./uf4 < uf3.girdi
+ 1022  pwd
+ 1023  git push
+ 1024  pwd
+ 1025  cd 4_coloring_a_grid/
+ 1026  ./grid_coloring 
+ 1027  echo $PATH
+ 1028  cmake ..
+ 1029  make -j4
+ 1030  pwd
+ 1031  cp build/interconnect*.so src/
+ 1032  cp build/interconnect.cpython-313-darwin.so src/
+ 1033  pwd
+ 1034  ls
+ 1035  cd ..
+ 1036  cp build/interconnect.cpython-313-darwin.so src/
+ 1037  cd src/
+ 1038  pwd
+ 1039  ll
+ 1040  pwd
+ 1041  python3 buda_cli.py design_demo.buda
+ 1042  python3 ./buda_cli.py ~/src/buda/design_demo.buda
+ 1043  bg
+ 1044  pwd
+ 1045  pwd
+ 1046  python3 ./buda_cli.py ~/src/buda/z_shape.buda
+ 1047  h
+ 1048  h help
+ 1049  man h
+ben@Bulents-MacBook-Pro src % ls
+ls
+__pycache__				interconnect.cpython-313-darwin.so
+bindings.cpp				layering.cpp
+buda_cli.py				layering.h
+buda_viz.py				nuts.cpp
+bundler.cpp				nuts.h
+bundler.h				topology.cpp
+global_router.cpp			topology.h
+global_router.h
+ben@Bulents-MacBook-Pro src % cd ..
+cd ..
+ben@Bulents-MacBook-Pro buda_system % cd ..
+cd ..
+ben@Bulents-MacBook-Pro buda % ls
+ls
+archive			log			z_shape_stress.buda
+buda_system		README.md		z_shape.buda
+design_demo.buda	setup_buda.py
+ben@Bulents-MacBook-Pro buda % pwd
+pwd
+/Users/ben/src/buda
+ben@Bulents-MacBook-Pro buda % python3 setup_buda.py
+python3 setup_buda.py
+[Created] buda_system_v2/CMakeLists.txt
+[Created] buda_system_v2/src/bundler.h
+[Created] buda_system_v2/src/bundler.cpp
+[Created] buda_system_v2/src/topology.h
+[Created] buda_system_v2/src/topology.cpp
+[Created] buda_system_v2/src/layering.h
+[Created] buda_system_v2/src/layering.cpp
+[Created] buda_system_v2/src/global_router.h
+[Created] buda_system_v2/src/global_router.cpp
+[Created] buda_system_v2/src/nuts.h
+[Created] buda_system_v2/src/nuts.cpp
+[Created] buda_system_v2/src/bindings.cpp
+[Created] buda_system_v2/src/buda_viz.py
+[Created] buda_system_v2/src/buda_cli.py
+[Created] buda_system_v2/src/comprehensive_demo.buda
+
+[SUCCESS] BUDA System V2 Generated in 'buda_system_v2/'
+To run the comprehensive demo:
+  1. cd buda_system_v2
+  2. mkdir build && cd build
+  3. cmake .. && make -j4
+  4. cp interconnect*.so ../src/
+  5. cd ../src
+  6. python3 buda_cli.py comprehensive_demo.buda
+ben@Bulents-MacBook-Pro buda % cd buda_system_v2/
+cd buda_system_v2/
+ben@Bulents-MacBook-Pro buda_system_v2 % mkdir build && cd build
+mkdir build && cd build
+ben@Bulents-MacBook-Pro build % cmake .. && make -j4
+cmake .. && make -j4
+-- The CXX compiler identification is AppleClang 17.0.0.17000404
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+CMake Warning (dev) at /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/FindPythonLibsNew.cmake:101 (message):
+  Policy CMP0148 is not set: The FindPythonInterp and FindPythonLibs modules
+  are removed.  Run "cmake --help-policy CMP0148" for policy details.  Use
+  the cmake_policy command to set the policy and suppress this warning, or
+  preferably upgrade to using FindPython, either by calling it explicitly
+  before pybind11, or by setting PYBIND11_FINDPYTHON ON before pybind11.
+Call Stack (most recent call first):
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Tools.cmake:44 (find_package)
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Common.cmake:226 (include)
+  /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/share/cmake/pybind11/pybind11Config.cmake:257 (include)
+  CMakeLists.txt:10 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+-- Found PythonInterp: /usr/local/bin/python3 (found suitable version "3.13.4", minimum required is "3.8")
+-- Found PythonLibs: /Library/Frameworks/Python.framework/Versions/3.13/lib/libpython3.13.dylib
+-- Performing Test HAS_FLTO_THIN
+-- Performing Test HAS_FLTO_THIN - Success
+-- Performing Test HAS_FLTO
+-- Performing Test HAS_FLTO - Success
+-- Found pybind11: /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages/pybind11/include (found version "3.0.1")
+-- Configuring done (1.7s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/ben/src/buda/buda_system_v2/build
+[ 28%] Building CXX object CMakeFiles/interconnect.dir/src/bundler.cpp.o
+[ 28%] Building CXX object CMakeFiles/interconnect.dir/src/bindings.cpp.o
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/layering.cpp.o
+[ 57%] Building CXX object CMakeFiles/interconnect.dir/src/topology.cpp.o
+/Users/ben/src/buda/buda_system_v2/src/topology.cpp:35:128: warning: unused
+      parameter 'y_grid' [-Wunused-parameter]
+   35 |   ...dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std...
+      |                                                                   ^
+[ 71%] Building CXX object CMakeFiles/interconnect.dir/src/global_router.cpp.o
+1 warning generated.
+[ 85%] Building CXX object CMakeFiles/interconnect.dir/src/nuts.cpp.o
+/Users/ben/src/buda/buda_system_v2/src/global_router.cpp:5:43: warning: unused
+      parameter 'layer_id' [-Wunused-parameter]
+    5 | void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {}
+      |                                           ^
+/Users/ben/src/buda/buda_system_v2/src/global_router.cpp:5:60: warning: unused
+      parameter 'overhead_percent' [-Wunused-parameter]
+    5 | void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {}
+      |                                                            ^
+/Users/ben/src/buda/buda_system_v2/src/global_router.cpp:7:81: warning: unused
+      parameter 'max_iterations' [-Wunused-parameter]
+    7 |   ...bundles, int max_iterations) {
+      |                   ^
+3 warnings generated.
+[100%] Linking CXX shared module interconnect.cpython-313-darwin.so
+[100%] Built target interconnect
+ben@Bulents-MacBook-Pro build % pwd
+pwd
+/Users/ben/src/buda/buda_system_v2/build
+ben@Bulents-MacBook-Pro build % cd .
+cd .
+ben@Bulents-MacBook-Pro build % cd ..
+cd ..
+ben@Bulents-MacBook-Pro buda_system_v2 % pwd
+pwd
+/Users/ben/src/buda/buda_system_v2
+ben@Bulents-MacBook-Pro buda_system_v2 % ls
+ls
+build		CMakeLists.txt	src
+ben@Bulents-MacBook-Pro buda_system_v2 % cp build/interconnect.cpython-313-darwin.so src/
+<cp build/interconnect.cpython-313-darwin.so src/
+ben@Bulents-MacBook-Pro buda_system_v2 % cd src
+cd src
+ben@Bulents-MacBook-Pro src % python3 buda_cli.py comprehensive_demo.buda &
+python3 buda_cli.py comprehensive_demo.buda &
+[1] 48337
+ben@Bulents-MacBook-Pro src % Bundler created 3 bundles.
+Generated 19 topologies for bundle 1 (u_cpu->u_mem)
+Generated 28 topologies for bundle 2 (u_gpu->u_disp)
+Generated 14 topologies for bundle 3 (u_io_src->u_io_dst)
+Bundle 1 selected topology: L_HV
+Bundle 2 selected topology: L_HV
+Bundle 3 selected topology: L_HV
+
+[1]  + done       python3 buda_cli.py comprehensive_demo.buda
+ben@Bulents-MacBook-Pro src % pip3 install pytest
+pip3 install pytest
+Requirement already satisfied: pytest in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (9.0.2)
+Requirement already satisfied: iniconfig>=1.0.1 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (2.3.0)
+Requirement already satisfied: packaging>=22 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (25.0)
+Requirement already satisfied: pluggy<2,>=1.5 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (1.6.0)
+Requirement already satisfied: pygments>=2.7.2 in /Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages (from pytest) (2.19.2)
+ben@Bulents-MacBook-Pro src % pwd
+pwd
+/Users/ben/src/buda/buda_system_v2/src
+ben@Bulents-MacBook-Pro src % python3 buda_cli.py comprehensive_demo.buda
+python3 buda_cli.py comprehensive_demo.buda
+Bundler created 3 bundles.
+Generated 19 topologies for bundle 1 (u_cpu->u_mem)
+Generated 28 topologies for bundle 2 (u_gpu->u_disp)
+Generated 14 topologies for bundle 3 (u_io_src->u_io_dst)
+ben@Bulents-MacBook-Pro src % pwd
+pwd
+/Users/ben/src/buda/buda_system_v2/src
+ben@Bulents-MacBook-Pro src % pwd
+pwd
+/Users/ben/src/buda/buda_system_v2/src
+ben@Bulents-MacBook-Pro src % exit
+exit
+ben@Bulents-MacBook-Pro build % exit
+exit
+ben@Bulents-MacBook-Pro build % exit
+exit
+
+Process shell<2> finished

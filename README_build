@@ -1,0 +1,8 @@
+python3 setup_buda.py
+cd buda_system/
+mkdir build && cd build
+cmake .. && make
+
+or
+  cmake ..
+  make -j4
