@@ -44,4 +44,9 @@ generate_topologies_for_bundle b3_ u_io_src u_io_dst
 # Run the planner (uses mock selection based on 'b2_'/'b3_' hints)
 run_planner 5
 
+# Non-Uniform Track Sharing: assign actual perpendicular track positions
+# per layer so that no two buses with overlapping spans collide.
+# Argument is the minimum spacing (track pitch) between placed buses.
+run_nuts 2.0
+
 visualize

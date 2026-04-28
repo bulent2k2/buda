@@ -9,8 +9,9 @@ class BudaSession:
         self.netlist = interconnect.Netlist()
         self.layers = interconnect.LayerStack()
         self.bundler = interconnect.Bundler()
-        self.planner = None 
-        self.bundles = [] 
+        self.planner = None
+        self.bundles = []
+        self.nuts_result = None
 
     def extract_instances(self, bundle):
         # Helper to find source/dest instances from a bundle's nets for Topology Generation
@@ -67,11 +68,23 @@ class BudaSession:
             self.planner = interconnect.GlobalRouter(self.fp, self.layers)
             self.planner.build_congestion_map()
             self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
+        elif cmd == "run_nuts":
+            # Usage: run_nuts [track_pitch]
+            pitch = float(args[0]) if args else 1.0
+            nuts = interconnect.NUTSEngine(self.fp)
+            nuts.set_track_pitch(pitch)
+            self.nuts_result = nuts.run(self.bundles)
+            print(f"NUTS placed {len(self.nuts_result.segments)} segments "
+                  f"({self.nuts_result.num_violations} interval violations, "
+                  f"{self.nuts_result.num_overlaps} track overlaps).")
         elif cmd == "visualize":
             viz = BudaVisualizer(self.fp, self.bundles)
             viz.draw_blocks()
             viz.draw_hanan_grid()
-            viz.draw_buses()
+            if self.nuts_result is not None:
+                viz.draw_nuts_tracks(self.nuts_result)
+            else:
+                viz.draw_buses()
             viz.show()
         elif cmd == "source":
              with open(args[0], 'r') as f:
