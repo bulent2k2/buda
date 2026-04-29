@@ -36,12 +36,23 @@ private:
 class TopologyGenerator {
 public:
     TopologyGenerator(const Floorplan& fp) : floorplan_(fp) {}
-    std::vector<Topology> generate_candidates(const std::string& src_name, const std::string& dst_name);
+
+    // 2-pin: L / Z / U shapes
+    std::vector<Topology> generate_candidates(
+        const std::string& src_name,
+        const std::string& dst_name);
+
+    // Multi-pin: trunk + branch shapes (1 driver, N receivers)
+    std::vector<Topology> generate_multicast_candidates(
+        const std::string& src_name,
+        const std::vector<std::string>& dst_names);
+
 private:
     const Floorplan& floorplan_;
     void add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results);
     void add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
-    // NEW: U-shape generation
     void add_u_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
+    void add_trunk_h(const std::vector<Point>& pins, int y_trunk, bool out_of_bbox, std::vector<Topology>& results);
+    void add_trunk_v(const std::vector<Point>& pins, int x_trunk, bool out_of_bbox, std::vector<Topology>& results);
 };
 }

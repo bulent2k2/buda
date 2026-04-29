@@ -75,14 +75,22 @@ class BudaSession:
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} bundles.")
         elif cmd == "generate_topologies_for_bundle":
-            # Usage: generate_topologies_for_bundle <bundle_id_hint> <src_inst> <dst_inst>
-            hint, src, dst = args
+            # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...]
+            # Single dst  → 2-pin L/Z/U candidates
+            # Multiple dst → multicast trunk+branch candidates
+            hint = args[0]; src = args[1]; dsts = args[2:]
             topo_gen = interconnect.TopologyGenerator(self.fp)
             found = False
             for w in self.bundles:
                 if w.original_bundle.get_net_names()[0].startswith(hint):
-                    w.candidates = topo_gen.generate_candidates(src, dst)
-                    print(f"Generated {len(w.candidates)} topologies for bundle {w.original_bundle.id} ({src}->{dst})")
+                    if len(dsts) == 1:
+                        w.candidates = topo_gen.generate_candidates(src, dsts[0])
+                        label = f"{src}->{dsts[0]}"
+                    else:
+                        w.candidates = topo_gen.generate_multicast_candidates(src, dsts)
+                        label = f"{src}->[{','.join(dsts)}]"
+                    print(f"Generated {len(w.candidates)} topologies for bundle "
+                          f"{w.original_bundle.id} ({label})")
                     found = True
             if not found: print(f"Warning: Could not find bundle matching hint {hint}")
 

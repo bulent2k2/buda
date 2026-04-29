@@ -1,0 +1,55 @@
+# ============================================================
+# BUDA Multicast Topology Test
+# 1 driver  →  4 receivers
+#
+# Purpose: verify topology generation produces a rich candidate
+# set — I, H-trunk, V-trunk (inside & outside bbox), plus the
+# existing L/Z/U shapes are NOT generated (multicast path).
+#
+# Visualized without NUTS so the tree shapes are shown at their
+# nominal positions with all stubs properly connected.
+# ============================================================
+
+# Layers
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+def_layer 6 M6 H TOP 0.0
+
+# ── Floorplan ────────────────────────────────────────────────
+#
+#   u_rx3 ·········· u_rx0
+#   (top-left)       (top-right)
+#
+#   u_src            u_rx1
+#   (left)           (right)
+#
+#                    u_rx2
+#                    (bottom-right)
+#
+add_block u_src    50  380  230  620
+add_block u_rx0   680   50  880  230
+add_block u_rx1   680  380  880  620
+add_block u_rx2   680  750  880  950
+add_block u_rx3   250   50  450  230
+
+# ── Net ──────────────────────────────────────────────────────
+# One net, one driver, four receivers.
+# The bundler (STRICT) groups all nets with the same
+# driver-instance + sorted-receiver-instance signature.
+add_net clk u_src.tx u_rx0.rx,u_rx1.rx,u_rx2.rx,u_rx3.rx
+
+# ── Pipeline ─────────────────────────────────────────────────
+run_bundler strict
+
+# Pass all four destination blocks so the CLI dispatches to
+# generate_multicast_candidates() instead of generate_candidates().
+generate_topologies_for_bundle clk u_src u_rx0 u_rx1 u_rx2 u_rx3
+
+run_planner 1
+
+# NOTE: NUTS is intentionally omitted here.
+# NUTS displaces each segment independently within its Hanan
+# interval, which breaks end-to-end connectivity for multi-
+# segment trees.  The draw_buses() path shows the topologies
+# at their nominal (connected) coordinates.
+visualize
