@@ -21,7 +21,10 @@ public:
     void set_layer_overhead(int layer_id, double overhead_percent);
     void build_congestion_map();
     void optimize_topologies(std::vector<BundleWrapper>& bundles, int max_iterations);
+    const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
 private:
+    double score_topology(const Topology& topo, double eff_width) const;
+    void   apply_topology(const Topology& topo, double eff_width);
     const Floorplan& floorplan_;
     const LayerStack& layers_;
     std::map<int, double> layer_dilution_factors_;

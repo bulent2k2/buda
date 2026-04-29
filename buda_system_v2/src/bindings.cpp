@@ -22,7 +22,18 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>()).def("add_block", &Floorplan::add_block).def("get_hanan_grid", [](const Floorplan& fp) { std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y); }).def("get_all_blocks", [](const Floorplan& fp) { return fp.get_all_blocks(); });
     py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer);
     py::class_<TopologyGenerator>(m, "TopologyGenerator").def(py::init<const Floorplan&>()).def("generate_candidates", &TopologyGenerator::generate_candidates);
-    py::class_<GlobalRouter>(m, "GlobalRouter").def(py::init<const Floorplan&, const LayerStack&>()).def("set_layer_overhead", &GlobalRouter::set_layer_overhead).def("build_congestion_map", &GlobalRouter::build_congestion_map).def("optimize_topologies", &GlobalRouter::optimize_topologies);
+    py::class_<GlobalCut>(m, "GlobalCut")
+        .def(py::init<>())
+        .def_readwrite("p1",            &GlobalCut::p1)
+        .def_readwrite("p2",            &GlobalCut::p2)
+        .def_readwrite("capacity",      &GlobalCut::capacity)
+        .def_readwrite("current_usage", &GlobalCut::current_usage);
+    py::class_<GlobalRouter>(m, "GlobalRouter")
+        .def(py::init<const Floorplan&, const LayerStack&>())
+        .def("set_layer_overhead",  &GlobalRouter::set_layer_overhead)
+        .def("build_congestion_map",&GlobalRouter::build_congestion_map)
+        .def("optimize_topologies", &GlobalRouter::optimize_topologies)
+        .def("get_cuts",            &GlobalRouter::get_cuts);
     py::class_<TrackSegment>(m, "TrackSegment")
         .def(py::init<>())
         .def_readwrite("bundle_id",    &TrackSegment::bundle_id)
