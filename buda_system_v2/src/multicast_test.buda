@@ -33,17 +33,17 @@ add_block u_rx2   680  750  880  950
 add_block u_rx3   250   50  450  230
 
 # ── Net ──────────────────────────────────────────────────────
-# One net, one driver, four receivers.
+# One bus, one driver, four receivers.
 # The bundler (STRICT) groups all nets with the same
 # driver-instance + sorted-receiver-instance signature.
-add_net clk u_src.tx u_rx0.rx,u_rx1.rx,u_rx2.rx,u_rx3.rx
+add_net bus u_src.tx u_rx0.rx,u_rx1.rx,u_rx2.rx,u_rx3.rx
 
 # ── Pipeline ─────────────────────────────────────────────────
 run_bundler strict
 
 # Pass all four destination blocks so the CLI dispatches to
 # generate_multicast_candidates() instead of generate_candidates().
-generate_topologies_for_bundle clk u_src u_rx0 u_rx1 u_rx2 u_rx3
+generate_topologies_for_bundle bus u_src u_rx0 u_rx1 u_rx2 u_rx3
 
 run_planner 1
 
@@ -51,7 +51,7 @@ run_planner 1
 # ← / → arrow keys (or ◀/▶ buttons) cycle through each candidate.
 # NOTE: NUTS is omitted — draw_buses() shows segments at their
 # nominal (connected) coordinates, which is correct for tree shapes.
-visualize_topologies clk
+visualize_topologies bus
 
 # Full visualize shows the planner-selected topology with the
 # congestion map overlaid.

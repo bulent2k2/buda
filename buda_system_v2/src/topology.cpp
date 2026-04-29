@@ -183,23 +183,27 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     }
     if (all_same_x || all_same_y) return results; // degenerate — no need for trunk variants
 
-    // Candidate trunk positions: unique pin-centre coords + Hanan grid lines.
     std::vector<int> hanan_x, hanan_y;
     floorplan_.get_hanan_grid(hanan_x, hanan_y);
 
-    std::set<int> y_set(hanan_y.begin(), hanan_y.end());
-    for (const auto& p : pins) y_set.insert(p.y); // pin centres as additional candidates
+    // In-bbox trunks: one candidate per unique pin-centre coordinate only.
+    // Hanan grid lines (block edges) between two pin centres produce the same
+    // topological structure shifted slightly — near-duplicates that add noise.
+    std::set<int> y_pin, x_pin;
+    for (const auto& p : pins) { y_pin.insert(p.y); x_pin.insert(p.x); }
 
-    std::set<int> x_set(hanan_x.begin(), hanan_x.end());
-    for (const auto& p : pins) x_set.insert(p.x);
+    for (int y_t : y_pin) add_trunk_h(pins, y_t, false, results);
+    for (int x_t : x_pin) add_trunk_v(pins, x_t, false, results);
 
-    // H-trunk candidates (spine inside or outside pin bbox).
-    for (int y_t : y_set)
-        add_trunk_h(pins, y_t, (y_t < y_lo || y_t > y_hi), results);
-
-    // V-trunk candidates.
-    for (int x_t : x_set)
-        add_trunk_v(pins, x_t, (x_t < x_lo || x_t > x_hi), results);
+    // OOB trunks: Hanan grid lines strictly outside the pin bbox (detour routes).
+    // Pin centres outside the bbox don't exist by definition, so Hanan lines are
+    // the natural anchor here.
+    for (int y_t : hanan_y)
+        if (y_t < y_lo || y_t > y_hi)
+            add_trunk_h(pins, y_t, true, results);
+    for (int x_t : hanan_x)
+        if (x_t < x_lo || x_t > x_hi)
+            add_trunk_v(pins, x_t, true, results);
 
     annotate_and_sort(results);
     return results;
