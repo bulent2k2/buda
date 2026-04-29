@@ -47,9 +47,12 @@ generate_topologies_for_bundle clk u_src u_rx0 u_rx1 u_rx2 u_rx3
 
 run_planner 1
 
-# NOTE: NUTS is intentionally omitted here.
-# NUTS displaces each segment independently within its Hanan
-# interval, which breaks end-to-end connectivity for multi-
-# segment trees.  The draw_buses() path shows the topologies
-# at their nominal (connected) coordinates.
+# Step through all 18 topologies in wirelength order.
+# ← / → arrow keys (or ◀/▶ buttons) cycle through each candidate.
+# NOTE: NUTS is omitted — draw_buses() shows segments at their
+# nominal (connected) coordinates, which is correct for tree shapes.
+visualize_topologies clk
+
+# Full visualize shows the planner-selected topology with the
+# congestion map overlaid.
 visualize

@@ -75,6 +75,26 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std
     }
 }
 // ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+static int wirelength(const Topology& t) {
+    int wl = 0;
+    for (const auto& s : t.segments)
+        wl += std::abs(s.end.x - s.start.x) + std::abs(s.end.y - s.start.y);
+    return wl;
+}
+
+static void annotate_and_sort(std::vector<Topology>& v) {
+    for (auto& t : v)
+        t.estimated_wirelength = wirelength(t);
+    std::sort(v.begin(), v.end(),
+        [](const Topology& a, const Topology& b) {
+            return a.estimated_wirelength < b.estimated_wirelength;
+        });
+}
+
+// ---------------------------------------------------------------------------
 // Multicast helpers
 // ---------------------------------------------------------------------------
 
@@ -181,6 +201,7 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     for (int x_t : x_set)
         add_trunk_v(pins, x_t, (x_t < x_lo || x_t > x_hi), results);
 
+    annotate_and_sort(results);
     return results;
 }
 
@@ -197,6 +218,7 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
     floorplan_.get_hanan_grid(hanan_x, hanan_y);
     add_z_shapes(src, dst, hanan_x, hanan_y, candidates);
     add_u_shapes(src, dst, hanan_x, hanan_y, candidates);
+    annotate_and_sort(candidates);
     return candidates;
 }
 }

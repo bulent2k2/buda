@@ -1,7 +1,7 @@
 import argparse
 import sys
 import interconnect 
-from buda_viz import BudaVisualizer
+from buda_viz import BudaVisualizer, TopologyExplorer
 
 class BudaSession:
     def __init__(self):
@@ -109,6 +109,19 @@ class BudaSession:
             print(f"NUTS placed {len(self.nuts_result.segments)} segments "
                   f"({self.nuts_result.num_violations} interval violations, "
                   f"{self.nuts_result.num_overlaps} track overlaps).")
+        elif cmd == "visualize_topologies":
+            # Usage: visualize_topologies <bundle_hint>
+            # Opens the TopologyExplorer for the matching bundle so you can
+            # step through every candidate in wirelength order.
+            hint = args[0] if args else ""
+            for w in self.bundles:
+                if not w.candidates: continue
+                if w.original_bundle.get_net_names()[0].startswith(hint):
+                    print(f"Opening explorer for bundle {w.original_bundle.id} "
+                          f"({len(w.candidates)} topologies, sorted by WL)")
+                    TopologyExplorer(self.fp, w).show()
+                    return
+            print(f"Warning: no bundle with candidates matching hint '{hint}'")
         elif cmd == "visualize":
             viz = BudaVisualizer(self.fp, self.bundles)
             viz.draw_blocks()

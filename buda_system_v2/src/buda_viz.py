@@ -1,6 +1,116 @@
 import math
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.widgets import Button
+
+
+_LAYER_COLOR = {4: '#007ACC', 5: '#CC0000', 6: '#00AA44'}
+_LAYER_LABEL = {4: 'M4 H', 5: 'M5 V', 6: 'M6 H-trunk'}
+
+
+class TopologyExplorer:
+    """Cycle through all topology candidates for one bundle.
+
+    Navigation: ◀ / ▶ buttons, or ← / → arrow keys.
+    Topologies are shown in order of increasing wirelength (pre-sorted by the
+    C++ generator).
+    """
+
+    def __init__(self, fp, bundle_wrapper):
+        self.fp      = fp
+        self.wrapper = bundle_wrapper
+        self.topos   = bundle_wrapper.candidates   # already sorted by WL
+        self.idx     = 0
+
+        self.fig = plt.figure(figsize=(13, 10))
+        self.fig.patch.set_facecolor('#f0f0f0')
+
+        # Main axes — leave bottom margin for buttons
+        self.ax = self.fig.add_axes([0.05, 0.12, 0.90, 0.82])
+
+        # Prev / Next buttons
+        ax_prev = self.fig.add_axes([0.08, 0.02, 0.18, 0.05])
+        ax_next = self.fig.add_axes([0.74, 0.02, 0.18, 0.05])
+        self._btn_prev = Button(ax_prev, '◀  Prev',  color='#ddeeff')
+        self._btn_next = Button(ax_next, 'Next  ▶', color='#ddeeff')
+        self._btn_prev.on_clicked(lambda _: self._step(-1))
+        self._btn_next.on_clicked(lambda _: self._step(+1))
+
+        self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+
+        self._draw()
+
+    # ------------------------------------------------------------------
+
+    def _step(self, delta):
+        self.idx = (self.idx + delta) % len(self.topos)
+        self._draw()
+
+    def _on_key(self, event):
+        if event.key in ('left',  'a'): self._step(-1)
+        if event.key in ('right', 'd'): self._step(+1)
+
+    def _draw(self):
+        ax = self.ax
+        ax.clear()
+
+        topo  = self.topos[self.idx]
+        n     = len(self.topos)
+        bid   = self.wrapper.original_bundle.id
+        wl    = topo.estimated_wirelength
+
+        ax.set_title(
+            f"Bundle {bid}  ·  topology {self.idx + 1} / {n}"
+            f"  ·  {topo.type}  ·  WL = {wl}",
+            fontsize=13, pad=10)
+
+        # Floorplan blocks
+        for name, rect in self.fp.get_all_blocks():
+            w = rect.x2 - rect.x1
+            h = rect.y2 - rect.y1
+            ax.add_patch(patches.Rectangle(
+                (rect.x1, rect.y1), w, h,
+                linewidth=1.5, edgecolor='#444444', facecolor='#d9d9d9',
+                alpha=0.55, zorder=1))
+            ax.text((rect.x1 + rect.x2) / 2, (rect.y1 + rect.y2) / 2,
+                    name, ha='center', va='center',
+                    fontsize=8, fontweight='bold', color='#333333', zorder=2)
+
+        # Hanan grid
+        xs, ys = self.fp.get_hanan_grid()
+        for x in xs:
+            ax.axvline(x=x, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
+        for y in ys:
+            ax.axhline(y=y, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
+
+        # Topology segments — width proportional to bundle width
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
+        for seg in topo.segments:
+            col = _LAYER_COLOR.get(seg.layer_hint, '#888888')
+            ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
+                    color=col, linewidth=viz_lw,
+                    solid_capstyle='round', zorder=10)
+            # Junction dot where stubs meet the trunk
+            ax.plot(seg.start.x, seg.start.y, 'o',
+                    color=col, markersize=viz_lw * 0.6, zorder=11)
+            ax.plot(seg.end.x, seg.end.y, 'o',
+                    color=col, markersize=viz_lw * 0.6, zorder=11)
+
+        # Legend
+        from matplotlib.lines import Line2D
+        used_layers = sorted({s.layer_hint for seg in topo.segments
+                               for s in [seg]})
+        handles = [Line2D([0], [0], color=_LAYER_COLOR.get(l, '#888'), lw=3,
+                          label=_LAYER_LABEL.get(l, f'Layer {l}'))
+                   for l in used_layers]
+        ax.legend(handles=handles, loc='upper right', fontsize=9)
+
+        ax.set_aspect('equal')
+        ax.autoscale_view()
+        self.fig.canvas.draw_idle()
+
+    def show(self):
+        plt.show()
 
 
 class BudaVisualizer:
@@ -153,11 +263,7 @@ class BudaVisualizer:
 
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
-        layer_specs = {
-            4: {'color': '#007ACC'},   # M4 horizontal — blue
-            5: {'color': '#CC0000'},   # M5 vertical   — red
-            6: {'color': '#00AA44'},   # M6 horizontal trunk — green
-        }
+        layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
             bid      = wrapper.original_bundle.id
             topo     = wrapper.candidates[wrapper.selected_topology_index]
@@ -189,11 +295,7 @@ class BudaVisualizer:
 
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
-        layer_specs = {
-            4: {'color': '#007ACC'},   # M4 horizontal — blue
-            5: {'color': '#CC0000'},   # M5 vertical   — red
-            6: {'color': '#00AA44'},   # M6 horizontal trunk — green
-        }
+        layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}
         band_alpha = 0.04   # very subtle — just marks the hard interval boundary
         seg_alpha  = 0.90
