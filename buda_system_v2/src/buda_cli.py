@@ -12,6 +12,7 @@ class BudaSession:
         self.planner = None
         self.bundles = []
         self.nuts_result = None
+        self._layer_overheads = {}   # layer_id -> overhead_percent
 
     def extract_instances(self, bundle):
         # Helper to find source/dest instances from a bundle's nets for Topology Generation
@@ -37,11 +38,32 @@ class BudaSession:
             self.fp.add_block(args[0], int(args[1]), int(args[2]), int(args[3]), int(args[4]))
         elif cmd == "add_net":
             self.netlist.add_net(args[0], args[1], args[2].split(','))
+        elif cmd == "add_bus":
+            # Syntax: add_bus <prefix>[<N>] <drv_pin> <rcv_pin>
+            #      or add_bus <prefix>[<lo>:<hi>] <drv_pin> <rcv_pin>
+            # Expands to add_net calls: <prefix>_<lo> … <prefix>_<hi>
+            import re
+            m = re.match(r'^(.+)\[(\d+)(?::(\d+))?\]$', args[0])
+            if not m:
+                print(f"Error: bad add_bus syntax '{args[0]}' — expected name[N] or name[lo:hi]")
+                return
+            prefix = m.group(1)
+            lo = int(m.group(2))
+            hi = int(m.group(3)) if m.group(3) is not None else lo - 1
+            if m.group(3) is None:      # name[N]  → indices 0 … N-1
+                lo, hi = 0, int(m.group(2)) - 1
+            drv_pin  = args[1]
+            rcv_pins = args[2].split(',')
+            for i in range(lo, hi + 1):
+                self.netlist.add_net(f"{prefix}_{i}", drv_pin, rcv_pins)
         elif cmd == "def_layer":
             lid, name, dirstr, typestr, ovh = args
             ldir = interconnect.LayerDir.HORIZONTAL if dirstr.upper()=="H" else interconnect.LayerDir.VERTICAL
             ltype = interconnect.LayerType.TOP if typestr.upper()=="TOP" else interconnect.LayerType.LOW
             self.layers.add_layer(int(lid), name, ldir, ltype)
+            ovh_val = float(ovh)
+            if ovh_val > 0.0:
+                self._layer_overheads[int(lid)] = ovh_val
         elif cmd == "run_bundler":
             self.bundler.set_strategy(interconnect.Strategy.STRICT)
             raw_bundles = self.bundler.run(self.netlist)
@@ -49,7 +71,7 @@ class BudaSession:
             for b in raw_bundles:
                 w = interconnect.BundleWrapper()
                 w.original_bundle = b
-                w.width = len(b.get_net_names()) * 3.0 # Simulating wide buses
+                w.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} bundles.")
         elif cmd == "generate_topologies_for_bundle":
@@ -66,6 +88,8 @@ class BudaSession:
 
         elif cmd == "run_planner":
             self.planner = interconnect.GlobalRouter(self.fp, self.layers)
+            for lid, ovh in self._layer_overheads.items():
+                self.planner.set_layer_overhead(lid, ovh)
             self.planner.build_congestion_map()
             self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
         elif cmd == "run_nuts":
@@ -80,6 +104,10 @@ class BudaSession:
         elif cmd == "visualize":
             viz = BudaVisualizer(self.fp, self.bundles)
             viz.draw_blocks()
+            if self.planner is not None:
+                cuts = self.planner.get_cuts()
+                if cuts:
+                    viz.draw_congestion_map(cuts)
             viz.draw_hanan_grid()
             if self.nuts_result is not None:
                 viz.draw_nuts_tracks(self.nuts_result)

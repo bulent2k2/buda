@@ -1,3 +1,4 @@
+import math
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
@@ -101,6 +102,48 @@ class BudaVisualizer:
                          ha='center', va='center', fontsize=9, fontweight='bold',
                          color='#333333', zorder=2)
 
+    def draw_congestion_map(self, cuts):
+        """Shade each Hanan channel by utilisation ratio (green→red)."""
+        import matplotlib.colors as mcolors
+        cmap = plt.cm.RdYlGn_r   # green=free, red=overflowed
+        xs, ys = self.fp.get_hanan_grid()
+
+        for cut in cuts:
+            ratio = (cut.current_usage / cut.capacity) if cut.capacity > 0 else 0.0
+            if ratio == 0:
+                continue
+            color = cmap(min(ratio, 1.5) / 1.5)   # cap visual at 150 % for colour
+            alpha = 0.12 + 0.22 * min(ratio, 1.0)  # subtle — buses stay readable
+
+            # Draw a band covering the channel this cut represents.
+            # Vertical cut → shade the channel it bisects (between adjacent x-lines).
+            if cut.p1.x == cut.p2.x:          # vertical cut
+                cx = cut.p1.x
+                # Find enclosing x interval
+                x_idx = [i for i, x in enumerate(xs) if x <= cx]
+                if not x_idx: continue
+                xi = x_idx[-1]
+                x_lo = xs[xi]
+                x_hi = xs[xi + 1] if xi + 1 < len(xs) else cx + 20
+                self.ax.add_patch(patches.Rectangle(
+                    (x_lo, ys[0]), x_hi - x_lo, ys[-1] - ys[0],
+                    linewidth=0, facecolor=color, alpha=alpha, zorder=3))
+                # Label overflow
+                if ratio > 1.0:
+                    self.ax.text((x_lo + x_hi) / 2, (ys[0] + ys[-1]) / 2,
+                                 f"OVF\n{ratio:.0%}", fontsize=7, color='darkred',
+                                 ha='center', va='center', zorder=4, fontweight='bold')
+            else:                               # horizontal cut
+                cy = cut.p1.y
+                y_idx = [i for i, y in enumerate(ys) if y <= cy]
+                if not y_idx: continue
+                yi = y_idx[-1]
+                y_lo = ys[yi]
+                y_hi = ys[yi + 1] if yi + 1 < len(ys) else cy + 20
+                self.ax.add_patch(patches.Rectangle(
+                    (xs[0], y_lo), xs[-1] - xs[0], y_hi - y_lo,
+                    linewidth=0, facecolor=color, alpha=alpha, zorder=3))
+
     def draw_hanan_grid(self):
         xs, ys = self.fp.get_hanan_grid()
         for x in xs:
@@ -111,13 +154,14 @@ class BudaVisualizer:
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         layer_specs = {
-            3: {'color': '#007ACC'},
-            4: {'color': '#CC0000'},
+            4: {'color': '#007ACC'},   # M4 horizontal — blue
+            5: {'color': '#CC0000'},   # M5 vertical   — red
+            6: {'color': '#00AA44'},   # M6 horizontal trunk — green
         }
         for i, wrapper in enumerate(self.bundles):
             bid      = wrapper.original_bundle.id
             topo     = wrapper.candidates[wrapper.selected_topology_index]
-            viz_lw   = (wrapper.width * 1.5) + 2.0
+            viz_lw   = 3.0 + math.log2(1 + wrapper.width) * 2.0
             offset   = (i % 3 - 1) * 2.0
             alpha    = 0.8
 
@@ -146,12 +190,13 @@ class BudaVisualizer:
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
         layer_specs = {
-            3: {'color': '#007ACC'},
-            4: {'color': '#CC0000'},
+            4: {'color': '#007ACC'},   # M4 horizontal — blue
+            5: {'color': '#CC0000'},   # M5 vertical   — red
+            6: {'color': '#00AA44'},   # M6 horizontal trunk — green
         }
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}
-        band_alpha = 0.08
-        seg_alpha  = 0.85
+        band_alpha = 0.04   # very subtle — just marks the hard interval boundary
+        seg_alpha  = 0.90
 
         for i, wrapper in enumerate(self.bundles):
             bid    = wrapper.original_bundle.id
@@ -171,22 +216,35 @@ class BudaVisualizer:
                     if is_h:
                         sx, ex = seg.start.x, seg.end.x
                         sy = ey = center
-                        band = patches.Rectangle(
-                            (min(sx, ex), ts.interval_lo),
-                            abs(ex - sx), ts.interval_hi - ts.interval_lo,
+                        # Filled footprint of the placed bus (actual track occupancy)
+                        footprint = patches.Rectangle(
+                            (min(sx, ex), ts.track_position),
+                            abs(ex - sx), ts.width,
                             linewidth=0, facecolor=col,
-                            alpha=band_alpha, zorder=5)
+                            alpha=band_alpha * 3, zorder=5)
+                        self.ax.add_patch(footprint)
+                        self._register(bid, footprint, alpha=band_alpha*3, is_band=True)
+                        # Dashed lines at interval bounds (constraint context)
+                        for y_bound in (ts.interval_lo, ts.interval_hi):
+                            bl, = self.ax.plot([min(sx,ex), max(sx,ex)], [y_bound, y_bound],
+                                               color=col, linewidth=0.5, linestyle='--',
+                                               alpha=0.3, zorder=4)
+                            self._register(bid, bl, alpha=0.3, is_band=True)
                     else:
                         sy, ey = seg.start.y, seg.end.y
                         sx = ex = center
-                        band = patches.Rectangle(
-                            (ts.interval_lo, min(sy, ey)),
-                            ts.interval_hi - ts.interval_lo, abs(ey - sy),
+                        footprint = patches.Rectangle(
+                            (ts.track_position, min(sy, ey)),
+                            ts.width, abs(ey - sy),
                             linewidth=0, facecolor=col,
-                            alpha=band_alpha, zorder=5)
-
-                    self.ax.add_patch(band)
-                    self._register(bid, band, alpha=band_alpha, is_band=True)
+                            alpha=band_alpha * 3, zorder=5)
+                        self.ax.add_patch(footprint)
+                        self._register(bid, footprint, alpha=band_alpha*3, is_band=True)
+                        for x_bound in (ts.interval_lo, ts.interval_hi):
+                            bl, = self.ax.plot([x_bound, x_bound], [min(sy,ey), max(sy,ey)],
+                                               color=col, linewidth=0.5, linestyle='--',
+                                               alpha=0.3, zorder=4)
+                            self._register(bid, bl, alpha=0.3, is_band=True)
                 else:
                     sx, sy = seg.start.x, seg.start.y
                     ex, ey = seg.end.x,   seg.end.y
@@ -210,11 +268,12 @@ class BudaVisualizer:
 
     def _draw_terminals(self, bundle_id, topo_start, topo_end, viz_lw, alpha):
         """Draw driver (cyan square) and receiver (magenta circle) terminals."""
+        msz = min(viz_lw, 16)   # cap terminal size so fat buses don't blow up
         if topo_start:
             drv, = self.ax.plot(topo_start[0], topo_start[1], 's',
                                 color='#00FFFF', markeredgecolor='black',
-                                markersize=viz_lw, alpha=alpha, zorder=20)
-            self._register(bundle_id, drv, alpha=alpha, lw=viz_lw)
+                                markersize=msz, alpha=alpha, zorder=20)
+            self._register(bundle_id, drv, alpha=alpha, lw=msz)
             self.ax.text(topo_start[0], topo_start[1], f"B{bundle_id}",
                          fontsize=8, color='black', fontweight='bold',
                          ha='center', va='center', zorder=21)
@@ -222,8 +281,8 @@ class BudaVisualizer:
         if topo_end:
             rcv, = self.ax.plot(topo_end[0], topo_end[1], 'o',
                                 color='#FF00FF', markeredgecolor='black',
-                                markersize=viz_lw, alpha=alpha, zorder=20)
-            self._register(bundle_id, rcv, alpha=alpha, lw=viz_lw)
+                                markersize=msz, alpha=alpha, zorder=20)
+            self._register(bundle_id, rcv, alpha=alpha, lw=msz)
 
     def show(self):
         self.ax.set_aspect('equal')
@@ -234,8 +293,9 @@ class BudaVisualizer:
 
         from matplotlib.lines import Line2D
         self.ax.legend(handles=[
-            Line2D([0], [0], color='#007ACC', lw=4, label='Metal 3 (Horiz)'),
-            Line2D([0], [0], color='#CC0000', lw=4, label='Metal 4 (Vert)'),
+            Line2D([0], [0], color='#007ACC', lw=4, label='M4 Horizontal'),
+            Line2D([0], [0], color='#CC0000', lw=4, label='M5 Vertical'),
+            Line2D([0], [0], color='#00AA44', lw=4, label='M6 H-trunk (U-shape)'),
             Line2D([0], [0], marker='s', color='w',
                    markerfacecolor='#00FFFF', markeredgecolor='k', label='Driver term'),
             Line2D([0], [0], marker='o', color='w',

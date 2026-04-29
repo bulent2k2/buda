@@ -24,12 +24,12 @@ Segment make_seg(int x1, int y1, int x2, int y2, int layer) {
 void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
     Topology hv; hv.type = "L_HV";
-    hv.segments.push_back(make_seg(s.x, s.y, d.x, s.y, 3)); 
-    hv.segments.push_back(make_seg(d.x, s.y, d.x, d.y, 4));
+    hv.segments.push_back(make_seg(s.x, s.y, d.x, s.y, 4));  // M4 horizontal
+    hv.segments.push_back(make_seg(d.x, s.y, d.x, d.y, 5));  // M5 vertical
     results.push_back(hv);
     Topology vh; vh.type = "L_VH";
-    vh.segments.push_back(make_seg(s.x, s.y, s.x, d.y, 4));
-    vh.segments.push_back(make_seg(s.x, d.y, d.x, d.y, 3));
+    vh.segments.push_back(make_seg(s.x, s.y, s.x, d.y, 5));  // M5 vertical
+    vh.segments.push_back(make_seg(s.x, d.y, d.x, d.y, 4));  // M4 horizontal
     results.push_back(vh);
 }
 void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results) {
@@ -37,10 +37,10 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     for (int x_cut : x_grid) {
         if (x_cut > min_x && x_cut < max_x) {
-            Topology z; z.type = "Z_HVH"; 
-            z.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 3));
-            z.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 4));
-            z.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 3));
+            Topology z; z.type = "Z_HVH";
+            z.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 4));  // M4 horizontal stub
+            z.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));// M5 vertical trunk
+            z.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 4));  // M4 horizontal stub
             results.push_back(z);
         }
     }
@@ -51,23 +51,23 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
 
-    // Vertical U-trunks
+    // Vertical U-trunks (detour left/right of bounding box)
     for (int x_cut : x_grid) {
         if (x_cut < min_x || x_cut > max_x) {
             Topology u; u.type = "U_HVH";
-            u.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 3));
-            u.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 4));
-            u.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 3));
+            u.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 4));  // M4 horizontal stub
+            u.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));// M5 vertical trunk
+            u.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 4));  // M4 horizontal stub
             results.push_back(u);
         }
     }
-    // Horizontal U-trunks
+    // Horizontal U-trunks (detour above/below bounding box) — use M6 for the trunk
     for (int y_cut : y_grid) {
         if (y_cut < min_y || y_cut > max_y) {
             Topology u; u.type = "U_VHV";
-            u.segments.push_back(make_seg(s.x, s.y, s.x, y_cut, 4));
-            u.segments.push_back(make_seg(s.x, y_cut, d.x, y_cut, 3));
-            u.segments.push_back(make_seg(d.x, y_cut, d.x, d.y, 4));
+            u.segments.push_back(make_seg(s.x, s.y, s.x, y_cut, 5));  // M5 vertical stub
+            u.segments.push_back(make_seg(s.x, y_cut, d.x, y_cut, 6));// M6 horizontal trunk (long-haul)
+            u.segments.push_back(make_seg(d.x, y_cut, d.x, d.y, 5));  // M5 vertical stub
             results.push_back(u);
         }
     }
