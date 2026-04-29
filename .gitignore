@@ -1,4 +1,4 @@
 **/build/
-**/src/__pycache__/
+**/__pycache__/
 **/src/interconnect.cpython-313-darwin.so
 **/*~
