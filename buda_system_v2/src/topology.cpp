@@ -136,14 +136,60 @@ static void annotate_and_sort(std::vector<Topology>& v) {
 // ---------------------------------------------------------------------------
 
 // H-trunk at y_trunk: horizontal spine + vertical stubs to nearest block face.
+// In busterm mode the stubs slide in x so the spine is as short as possible:
+//   • leftmost stub slides toward +x (block's right face minus 10% margin)
+//   • rightmost stub slides toward −x (block's left face plus 10% margin)
+//   • pass-through blocks (trunk inside block) generate no stub and the spine
+//     endpoint is pulled back to the block face rather than the block centre.
 // out_of_bbox=true → spine uses M6 (long-haul detour layer).
 void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                                      const std::vector<Rect>& blocks,
                                      int y_trunk, bool out_of_bbox,
                                      std::vector<Topology>& results)
 {
-    int x_lo = INT_MAX, x_hi = INT_MIN;
-    for (const auto& p : pins) { x_lo = std::min(x_lo, p.x); x_hi = std::max(x_hi, p.x); }
+    int n = (int)pins.size();
+
+    // conn_y: block face y toward y_trunk (or y_trunk itself if trunk passes through).
+    // att_x:  stub x-position, initially block centre; will be slid to shorten spine.
+    std::vector<int> conn_y(n), att_x(n);
+    std::vector<bool> has_stub(n);
+    for (int i = 0; i < n; ++i) {
+        conn_y[i]   = use_busterm_ ? blocks[i].face_y(y_trunk) : pins[i].y;
+        has_stub[i] = (conn_y[i] != y_trunk);
+        att_x[i]    = pins[i].x;
+    }
+
+    if (use_busterm_) {
+        // For pass-through blocks at the spine extremes, pull the endpoint back to
+        // the block face so the spine doesn't poke into the block.
+        {
+            int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
+            int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
+            if (!has_stub[lo]) att_x[lo] = blocks[lo].x2; // right face (step inward)
+            if (!has_stub[hi]) att_x[hi] = blocks[hi].x1; // left face (step inward)
+        }
+
+        // Iteratively slide the extreme stubs inward to minimise spine length.
+        for (int iter = 0; iter < n; ++iter) {
+            int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
+            int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
+            bool changed = false;
+            if (has_stub[lo]) {
+                int margin = std::max(1, (int)(0.1 * (blocks[lo].x2 - blocks[lo].x1)));
+                int target = blocks[lo].x2 - margin;
+                if (target > att_x[lo]) { att_x[lo] = target; changed = true; }
+            }
+            if (has_stub[hi]) {
+                int margin = std::max(1, (int)(0.1 * (blocks[hi].x2 - blocks[hi].x1)));
+                int target = blocks[hi].x1 + margin;
+                if (target < att_x[hi]) { att_x[hi] = target; changed = true; }
+            }
+            if (!changed) break;
+        }
+    }
+
+    int x_lo = *std::min_element(att_x.begin(), att_x.end());
+    int x_hi = *std::max_element(att_x.begin(), att_x.end());
 
     Topology t;
     t.type           = out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H";
@@ -153,38 +199,72 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     if (x_lo < x_hi)
         t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, spine_layer));
 
-    for (int i = 0; i < (int)pins.size(); ++i) {
-        // Stub end on the block: nearest y-face toward y_trunk (or y_trunk itself
-        // if the trunk passes through the block — zero-length, skip).
-        int conn_y = use_busterm_ ? blocks[i].face_y(y_trunk) : pins[i].y;
-        if (conn_y != y_trunk)
-            t.segments.push_back(make_seg(pins[i].x, conn_y, pins[i].x, y_trunk, 5));
-    }
+    for (int i = 0; i < n; ++i)
+        if (has_stub[i])
+            t.segments.push_back(make_seg(att_x[i], conn_y[i], att_x[i], y_trunk, 5));
 
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
 
 // V-trunk at x_trunk: vertical spine + horizontal stubs to nearest block face.
+// In busterm mode the stubs slide in y to minimise spine length (symmetric to
+// add_trunk_h above).
 void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                                      const std::vector<Rect>& blocks,
                                      int x_trunk, bool out_of_bbox,
                                      std::vector<Topology>& results)
 {
-    int y_lo = INT_MAX, y_hi = INT_MIN;
-    for (const auto& p : pins) { y_lo = std::min(y_lo, p.y); y_hi = std::max(y_hi, p.y); }
+    int n = (int)pins.size();
+
+    std::vector<int> conn_x(n), att_y(n);
+    std::vector<bool> has_stub(n);
+    for (int i = 0; i < n; ++i) {
+        conn_x[i]   = use_busterm_ ? blocks[i].face_x(x_trunk) : pins[i].x;
+        has_stub[i] = (conn_x[i] != x_trunk);
+        att_y[i]    = pins[i].y;
+    }
+
+    if (use_busterm_) {
+        // Pull pass-through block endpoints to the block face.
+        {
+            int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
+            int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
+            if (!has_stub[lo]) att_y[lo] = blocks[lo].y2; // bottom face (step inward)
+            if (!has_stub[hi]) att_y[hi] = blocks[hi].y1; // top face (step inward)
+        }
+
+        // Slide extreme stubs inward to shorten spine.
+        for (int iter = 0; iter < n; ++iter) {
+            int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
+            int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
+            bool changed = false;
+            if (has_stub[lo]) {
+                int margin = std::max(1, (int)(0.1 * (blocks[lo].y2 - blocks[lo].y1)));
+                int target = blocks[lo].y2 - margin;
+                if (target > att_y[lo]) { att_y[lo] = target; changed = true; }
+            }
+            if (has_stub[hi]) {
+                int margin = std::max(1, (int)(0.1 * (blocks[hi].y2 - blocks[hi].y1)));
+                int target = blocks[hi].y1 + margin;
+                if (target < att_y[hi]) { att_y[hi] = target; changed = true; }
+            }
+            if (!changed) break;
+        }
+    }
+
+    int y_lo = *std::min_element(att_y.begin(), att_y.end());
+    int y_hi = *std::max_element(att_y.begin(), att_y.end());
 
     Topology t;
     t.type           = out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V";
     t.trunk_location = x_trunk;
 
     if (y_lo < y_hi)
-        t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, 5)); // M5 spine
+        t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, 5));
 
-    for (int i = 0; i < (int)pins.size(); ++i) {
-        int conn_x = use_busterm_ ? blocks[i].face_x(x_trunk) : pins[i].x;
-        if (conn_x != x_trunk)
-            t.segments.push_back(make_seg(conn_x, pins[i].y, x_trunk, pins[i].y, 4));
-    }
+    for (int i = 0; i < n; ++i)
+        if (has_stub[i])
+            t.segments.push_back(make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], 4));
 
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
