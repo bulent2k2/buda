@@ -32,28 +32,44 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
     Point s = src.center(); Point d = dst.center();
 
     // L_HV: horizontal first, then vertical.
-    // Busterm: src connects at its nearest x-face toward d.x;
-    //          dst connects at its nearest y-face toward s.y.
+    // In busterm mode the H stub starts at src's nearest x-face toward d.x.
+    // The V stub ends at dst's nearest y-face toward s.y.
+    // When the H arm degenerates (src x-range covers d.x), the whole topology
+    // becomes a straight vertical: start at src's y-face, end at dst's y-face.
     {
+        int sx = use_busterm_ ? src.face_x(d.x) : s.x;   // src x-face
+        int dy = use_busterm_ ? dst.face_y(s.y) : d.y;   // dst y-face
+
         Topology hv; hv.type = "L_HV";
-        int sx = use_busterm_ ? src.face_x(d.x) : s.x;
-        int dy = use_busterm_ ? dst.face_y(s.y) : d.y;
-        if (sx != d.x)                    // H stub from src to bend
+        if (sx != d.x) {
+            // Normal L: H then V
             hv.segments.push_back(make_seg(sx, s.y, d.x, s.y, 4));
-        if (s.y != dy)                    // V stub from bend to dst
-            hv.segments.push_back(make_seg(d.x, s.y, d.x, dy, 5));
+            if (s.y != dy)
+                hv.segments.push_back(make_seg(d.x, s.y, d.x, dy, 5));
+        } else if (use_busterm_) {
+            // H degenerates → straight V from src y-face to dst y-face
+            int sy = src.face_y(d.y);
+            if (sy != dy)
+                hv.segments.push_back(make_seg(d.x, sy, d.x, dy, 5));
+        }
         if (!hv.segments.empty()) results.push_back(hv);
     }
 
     // L_VH: vertical first, then horizontal.
+    // In busterm mode the V stub starts at src's y-face; the bend y is dst's
+    // nearest y-face toward s.y (not dst center y).  The H stub ends at dst's
+    // nearest x-face toward s.x.
+    // When the H arm degenerates (dst x-range covers s.x), result is straight V.
     {
+        int sy = use_busterm_ ? src.face_y(d.y) : s.y;   // src y-face
+        int by = use_busterm_ ? dst.face_y(s.y) : d.y;   // bend y = dst y-face
+        int dx = use_busterm_ ? dst.face_x(s.x) : d.x;   // dst x-face
+
         Topology vh; vh.type = "L_VH";
-        int sy = use_busterm_ ? src.face_y(d.y) : s.y;
-        int dx = use_busterm_ ? dst.face_x(s.x) : d.x;
-        if (s.y != sy || sy != d.y)       // V stub from src to bend
-            vh.segments.push_back(make_seg(s.x, sy != s.y ? sy : s.y, s.x, d.y, 5));
-        if (s.x != dx)                    // H stub from bend to dst
-            vh.segments.push_back(make_seg(s.x, d.y, dx, d.y, 4));
+        if (sy != by)
+            vh.segments.push_back(make_seg(s.x, sy, s.x, by, 5));  // V src→bend
+        if (s.x != dx)
+            vh.segments.push_back(make_seg(s.x, by, dx, by, 4));   // H bend→dst
         if (!vh.segments.empty()) results.push_back(vh);
     }
 }
@@ -65,12 +81,17 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std
         if (x_cut > min_x && x_cut < max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
+            // When a block's x-face coincides with x_cut (no H stub), the V trunk
+            // should start/end at the block's y-face rather than its centre.
+            int ty_src = (use_busterm_ && sx == x_cut) ? src.face_y(d.y) : s.y;
+            int ty_dst = (use_busterm_ && dx == x_cut) ? dst.face_y(s.y) : d.y;
             Topology z; z.type = "Z_HVH";
             if (sx != x_cut)
-                z.segments.push_back(make_seg(sx, s.y, x_cut, s.y, 4));  // H stub src→cut
-            z.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));   // V trunk
+                z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
+            if (ty_src != ty_dst)
+                z.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
             if (x_cut != dx)
-                z.segments.push_back(make_seg(x_cut, d.y, dx, d.y, 4));  // H stub cut→dst
+                z.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
             if (!z.segments.empty()) results.push_back(z);
         }
     }
@@ -86,12 +107,15 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std
         if (x_cut < min_x || x_cut > max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
+            int ty_src = (use_busterm_ && sx == x_cut) ? src.face_y(d.y) : s.y;
+            int ty_dst = (use_busterm_ && dx == x_cut) ? dst.face_y(s.y) : d.y;
             Topology u; u.type = "U_HVH";
             if (sx != x_cut)
-                u.segments.push_back(make_seg(sx, s.y, x_cut, s.y, 4));
-            u.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));
+                u.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
+            if (ty_src != ty_dst)
+                u.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
             if (x_cut != dx)
-                u.segments.push_back(make_seg(x_cut, d.y, dx, d.y, 4));
+                u.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
             if (!u.segments.empty()) results.push_back(u);
         }
     }
@@ -114,6 +138,22 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+// Build a Hanan grid from a specific set of blocks only (not the full floorplan).
+// Using just the bundle's own blocks avoids trunk candidates at unrelated block
+// edges, which would produce redundant or noise topologies.
+static void bundle_hanan_grid(const std::vector<Rect>& rects,
+                               std::vector<int>& xs, std::vector<int>& ys) {
+    for (const auto& r : rects) {
+        xs.push_back(r.x1); xs.push_back(r.x2);
+        ys.push_back(r.y1); ys.push_back(r.y2);
+    }
+    auto sort_unique = [](std::vector<int>& v) {
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+    };
+    sort_unique(xs); sort_unique(ys);
+}
 
 static int wirelength(const Topology& t) {
     int wl = 0;
@@ -316,8 +356,9 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     }
     if (all_same_x || all_same_y) return results;
 
+    // Hanan grid from bundle blocks only — avoids trunk candidates at unrelated block edges.
     std::vector<int> hanan_x, hanan_y;
-    floorplan_.get_hanan_grid(hanan_x, hanan_y);
+    bundle_hanan_grid(blocks, hanan_x, hanan_y);
 
     // In-bbox trunks: pin-centre coordinates + channel centres (midpoints of
     // adjacent Hanan cell intervals within the pin bounding box).
@@ -356,9 +397,40 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
     std::vector<Topology> candidates;
     Rect src = floorplan_.get_block_bounds(src_name);
     Rect dst = floorplan_.get_block_bounds(dst_name);
+
+    // I-shapes: direct single-segment connection when blocks share an overlapping
+    // x-range (vertical I) or y-range (horizontal I).  Only meaningful in busterm
+    // mode where block extents matter; in centre mode blocks are treated as points.
+    if (use_busterm_) {
+        // I_V: blocks overlap in x → straight vertical wire through the overlap
+        int xo_lo = std::max(src.x1, dst.x1), xo_hi = std::min(src.x2, dst.x2);
+        if (xo_lo < xo_hi) {
+            int x_mid  = (xo_lo + xo_hi) / 2;
+            int src_y  = src.face_y(dst.center().y);
+            int dst_y  = dst.face_y(src.center().y);
+            if (src_y != dst_y) {
+                Topology t; t.type = "I_V";
+                t.segments.push_back(make_seg(x_mid, src_y, x_mid, dst_y, 5));
+                candidates.push_back(t);
+            }
+        }
+        // I_H: blocks overlap in y → straight horizontal wire through the overlap
+        int yo_lo = std::max(src.y1, dst.y1), yo_hi = std::min(src.y2, dst.y2);
+        if (yo_lo < yo_hi) {
+            int y_mid  = (yo_lo + yo_hi) / 2;
+            int src_x  = src.face_x(dst.center().x);
+            int dst_x  = dst.face_x(src.center().x);
+            if (src_x != dst_x) {
+                Topology t; t.type = "I_H";
+                t.segments.push_back(make_seg(src_x, y_mid, dst_x, y_mid, 4));
+                candidates.push_back(t);
+            }
+        }
+    }
+
     add_l_shapes(src, dst, candidates);
     std::vector<int> hanan_x, hanan_y;
-    floorplan_.get_hanan_grid(hanan_x, hanan_y);
+    bundle_hanan_grid({src, dst}, hanan_x, hanan_y);
     add_z_shapes(src, dst, hanan_x, hanan_y, candidates);
     add_u_shapes(src, dst, hanan_x, hanan_y, candidates);
     annotate_and_sort(candidates);
