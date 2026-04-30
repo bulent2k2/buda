@@ -1,4 +1,6 @@
-* I asked GAI: 
+* Started using Google's AI (below) and then used Claude Code
+
+* I asked GAI (Gemini): 
 I want to build a system to help plan interconnect on a microchip. It has three major components:
 1- bundling of nets into buses
 2- generating a set of optimal bus topologies
