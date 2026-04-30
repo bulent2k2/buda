@@ -23,31 +23,59 @@ void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_c
 Segment make_seg(int x1, int y1, int x2, int y2, int layer) {
     Segment s; s.start={x1,y1}; s.end={x2,y2}; s.layer_hint=layer; return s;
 }
+
+// ---------------------------------------------------------------------------
+// 2-pin shapes (L / Z / U)
+// ---------------------------------------------------------------------------
+
 void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
-    Topology hv; hv.type = "L_HV";
-    hv.segments.push_back(make_seg(s.x, s.y, d.x, s.y, 4));  // M4 horizontal
-    hv.segments.push_back(make_seg(d.x, s.y, d.x, d.y, 5));  // M5 vertical
-    results.push_back(hv);
-    Topology vh; vh.type = "L_VH";
-    vh.segments.push_back(make_seg(s.x, s.y, s.x, d.y, 5));  // M5 vertical
-    vh.segments.push_back(make_seg(s.x, d.y, d.x, d.y, 4));  // M4 horizontal
-    results.push_back(vh);
+
+    // L_HV: horizontal first, then vertical.
+    // Busterm: src connects at its nearest x-face toward d.x;
+    //          dst connects at its nearest y-face toward s.y.
+    {
+        Topology hv; hv.type = "L_HV";
+        int sx = use_busterm_ ? src.face_x(d.x) : s.x;
+        int dy = use_busterm_ ? dst.face_y(s.y) : d.y;
+        if (sx != d.x)                    // H stub from src to bend
+            hv.segments.push_back(make_seg(sx, s.y, d.x, s.y, 4));
+        if (s.y != dy)                    // V stub from bend to dst
+            hv.segments.push_back(make_seg(d.x, s.y, d.x, dy, 5));
+        if (!hv.segments.empty()) results.push_back(hv);
+    }
+
+    // L_VH: vertical first, then horizontal.
+    {
+        Topology vh; vh.type = "L_VH";
+        int sy = use_busterm_ ? src.face_y(d.y) : s.y;
+        int dx = use_busterm_ ? dst.face_x(s.x) : d.x;
+        if (s.y != sy || sy != d.y)       // V stub from src to bend
+            vh.segments.push_back(make_seg(s.x, sy != s.y ? sy : s.y, s.x, d.y, 5));
+        if (s.x != dx)                    // H stub from bend to dst
+            vh.segments.push_back(make_seg(s.x, d.y, dx, d.y, 4));
+        if (!vh.segments.empty()) results.push_back(vh);
+    }
 }
-void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results) {
+
+void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& /*y_grid*/, std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     for (int x_cut : x_grid) {
         if (x_cut > min_x && x_cut < max_x) {
+            int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
+            int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
             Topology z; z.type = "Z_HVH";
-            z.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 4));  // M4 horizontal stub
-            z.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));// M5 vertical trunk
-            z.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 4));  // M4 horizontal stub
-            results.push_back(z);
+            if (sx != x_cut)
+                z.segments.push_back(make_seg(sx, s.y, x_cut, s.y, 4));  // H stub src→cut
+            z.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));   // V trunk
+            if (x_cut != dx)
+                z.segments.push_back(make_seg(x_cut, d.y, dx, d.y, 4));  // H stub cut→dst
+            if (!z.segments.empty()) results.push_back(z);
         }
     }
 }
-// NEW: U-Shape logic (detours outside bounding box)
+
 void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
@@ -56,24 +84,33 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std
     // Vertical U-trunks (detour left/right of bounding box)
     for (int x_cut : x_grid) {
         if (x_cut < min_x || x_cut > max_x) {
+            int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
+            int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
             Topology u; u.type = "U_HVH";
-            u.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 4));  // M4 horizontal stub
-            u.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));// M5 vertical trunk
-            u.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 4));  // M4 horizontal stub
-            results.push_back(u);
+            if (sx != x_cut)
+                u.segments.push_back(make_seg(sx, s.y, x_cut, s.y, 4));
+            u.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 5));
+            if (x_cut != dx)
+                u.segments.push_back(make_seg(x_cut, d.y, dx, d.y, 4));
+            if (!u.segments.empty()) results.push_back(u);
         }
     }
     // Horizontal U-trunks (detour above/below bounding box) — use M6 for the trunk
     for (int y_cut : y_grid) {
         if (y_cut < min_y || y_cut > max_y) {
+            int sy = use_busterm_ ? src.face_y(y_cut) : s.y;
+            int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
             Topology u; u.type = "U_VHV";
-            u.segments.push_back(make_seg(s.x, s.y, s.x, y_cut, 5));  // M5 vertical stub
-            u.segments.push_back(make_seg(s.x, y_cut, d.x, y_cut, 6));// M6 horizontal trunk (long-haul)
-            u.segments.push_back(make_seg(d.x, y_cut, d.x, d.y, 5));  // M5 vertical stub
-            results.push_back(u);
+            if (sy != y_cut)
+                u.segments.push_back(make_seg(s.x, sy, s.x, y_cut, 5));
+            u.segments.push_back(make_seg(s.x, y_cut, d.x, y_cut, 6));   // M6 long-haul
+            if (y_cut != dy)
+                u.segments.push_back(make_seg(d.x, y_cut, d.x, dy, 5));
+            if (!u.segments.empty()) results.push_back(u);
         }
     }
 }
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -98,46 +135,56 @@ static void annotate_and_sort(std::vector<Topology>& v) {
 // Multicast helpers
 // ---------------------------------------------------------------------------
 
-// H-trunk at y_trunk: one horizontal spine + vertical stubs from each pin.
+// H-trunk at y_trunk: horizontal spine + vertical stubs to nearest block face.
 // out_of_bbox=true → spine uses M6 (long-haul detour layer).
-void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins, int y_trunk,
-                                     bool out_of_bbox, std::vector<Topology>& results)
+void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
+                                     const std::vector<Rect>& blocks,
+                                     int y_trunk, bool out_of_bbox,
+                                     std::vector<Topology>& results)
 {
     int x_lo = INT_MAX, x_hi = INT_MIN;
     for (const auto& p : pins) { x_lo = std::min(x_lo, p.x); x_hi = std::max(x_hi, p.x); }
 
     Topology t;
-    t.type         = out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H";
+    t.type           = out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H";
     t.trunk_location = y_trunk;
-    int spine_layer = out_of_bbox ? 6 : 4;
+    int spine_layer  = out_of_bbox ? 6 : 4;
 
     if (x_lo < x_hi)
         t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, spine_layer));
 
-    for (const auto& p : pins)
-        if (p.y != y_trunk)
-            t.segments.push_back(make_seg(p.x, p.y, p.x, y_trunk, 5)); // M5 stub
+    for (int i = 0; i < (int)pins.size(); ++i) {
+        // Stub end on the block: nearest y-face toward y_trunk (or y_trunk itself
+        // if the trunk passes through the block — zero-length, skip).
+        int conn_y = use_busterm_ ? blocks[i].face_y(y_trunk) : pins[i].y;
+        if (conn_y != y_trunk)
+            t.segments.push_back(make_seg(pins[i].x, conn_y, pins[i].x, y_trunk, 5));
+    }
 
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
 
-// V-trunk at x_trunk: one vertical spine + horizontal stubs from each pin.
-void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins, int x_trunk,
-                                     bool out_of_bbox, std::vector<Topology>& results)
+// V-trunk at x_trunk: vertical spine + horizontal stubs to nearest block face.
+void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
+                                     const std::vector<Rect>& blocks,
+                                     int x_trunk, bool out_of_bbox,
+                                     std::vector<Topology>& results)
 {
     int y_lo = INT_MAX, y_hi = INT_MIN;
     for (const auto& p : pins) { y_lo = std::min(y_lo, p.y); y_hi = std::max(y_hi, p.y); }
 
     Topology t;
-    t.type         = out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V";
+    t.type           = out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V";
     t.trunk_location = x_trunk;
 
     if (y_lo < y_hi)
         t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, 5)); // M5 spine
 
-    for (const auto& p : pins)
-        if (p.x != x_trunk)
-            t.segments.push_back(make_seg(p.x, p.y, x_trunk, p.y, 4)); // M4 stub
+    for (int i = 0; i < (int)pins.size(); ++i) {
+        int conn_x = use_busterm_ ? blocks[i].face_x(x_trunk) : pins[i].x;
+        if (conn_x != x_trunk)
+            t.segments.push_back(make_seg(conn_x, pins[i].y, x_trunk, pins[i].y, 4));
+    }
 
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
@@ -152,13 +199,19 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
 {
     std::vector<Topology> results;
 
-    // Collect all pin centres.
+    // Collect pin centres and block bounds in parallel order.
     std::vector<Point> pins;
-    pins.push_back(floorplan_.get_block_bounds(src_name).center());
-    for (const auto& d : dst_names)
-        pins.push_back(floorplan_.get_block_bounds(d).center());
+    std::vector<Rect>  blocks;
+    {
+        Rect r = floorplan_.get_block_bounds(src_name);
+        pins.push_back(r.center()); blocks.push_back(r);
+    }
+    for (const auto& d : dst_names) {
+        Rect r = floorplan_.get_block_bounds(d);
+        pins.push_back(r.center()); blocks.push_back(r);
+    }
 
-    // Bounding box of all pins.
+    // Bounding box of all pin centres.
     int x_lo = INT_MAX, x_hi = INT_MIN, y_lo = INT_MAX, y_hi = INT_MIN;
     for (const auto& p : pins) {
         x_lo = std::min(x_lo, p.x); x_hi = std::max(x_hi, p.x);
@@ -181,36 +234,42 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
         t.segments.push_back(make_seg(x_lo, pins[0].y, x_hi, pins[0].y, 4));
         results.push_back(t);
     }
-    if (all_same_x || all_same_y) return results; // degenerate — no need for trunk variants
+    if (all_same_x || all_same_y) return results;
 
     std::vector<int> hanan_x, hanan_y;
     floorplan_.get_hanan_grid(hanan_x, hanan_y);
 
-    // In-bbox trunks: one candidate per unique pin-centre coordinate only.
-    // Hanan grid lines (block edges) between two pin centres produce the same
-    // topological structure shifted slightly — near-duplicates that add noise.
-    std::set<int> y_pin, x_pin;
-    for (const auto& p : pins) { y_pin.insert(p.y); x_pin.insert(p.x); }
+    // In-bbox trunks: pin-centre coordinates + channel centres (midpoints of
+    // adjacent Hanan cell intervals within the pin bounding box).
+    std::set<int> y_set, x_set;
+    for (const auto& p : pins) { y_set.insert(p.y); x_set.insert(p.x); }
 
-    for (int y_t : y_pin) add_trunk_h(pins, y_t, false, results);
-    for (int x_t : x_pin) add_trunk_v(pins, x_t, false, results);
+    for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {
+        int mid = (hanan_y[i] + hanan_y[i+1]) / 2;
+        if (mid > y_lo && mid < y_hi) y_set.insert(mid);
+    }
+    for (int i = 0; i + 1 < (int)hanan_x.size(); ++i) {
+        int mid = (hanan_x[i] + hanan_x[i+1]) / 2;
+        if (mid > x_lo && mid < x_hi) x_set.insert(mid);
+    }
+
+    for (int y_t : y_set) add_trunk_h(pins, blocks, y_t, false, results);
+    for (int x_t : x_set) add_trunk_v(pins, blocks, x_t, false, results);
 
     // OOB trunks: Hanan grid lines strictly outside the pin bbox (detour routes).
-    // Pin centres outside the bbox don't exist by definition, so Hanan lines are
-    // the natural anchor here.
     for (int y_t : hanan_y)
         if (y_t < y_lo || y_t > y_hi)
-            add_trunk_h(pins, y_t, true, results);
+            add_trunk_h(pins, blocks, y_t, true, results);
     for (int x_t : hanan_x)
         if (x_t < x_lo || x_t > x_hi)
-            add_trunk_v(pins, x_t, true, results);
+            add_trunk_v(pins, blocks, x_t, true, results);
 
     annotate_and_sort(results);
     return results;
 }
 
 // ---------------------------------------------------------------------------
-// 2-pin candidates (unchanged)
+// 2-pin candidates
 // ---------------------------------------------------------------------------
 
 std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& src_name, const std::string& dst_name) {

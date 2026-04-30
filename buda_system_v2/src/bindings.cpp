@@ -27,6 +27,7 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer);
     py::class_<TopologyGenerator>(m, "TopologyGenerator")
         .def(py::init<const Floorplan&>())
+        .def("set_busterm_mode",              &TopologyGenerator::set_busterm_mode)
         .def("generate_candidates",           &TopologyGenerator::generate_candidates)
         .def("generate_multicast_candidates", &TopologyGenerator::generate_multicast_candidates);
     py::class_<GlobalCut>(m, "GlobalCut")
