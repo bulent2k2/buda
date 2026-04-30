@@ -99,17 +99,39 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
     }
 }
 
-void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& /*y_grid*/, std::vector<Topology>& results) {
+// Helper: H-stub y-level or V-trunk endpoint y for HVH topologies.
+// When a block has no H stub (its x-face IS the cut), use the y-face toward the
+// other block.  When a stub exists, clamp toward the other block's centre 10% from
+// the source block's y-corners so the connection point is not too close to a corner.
+static int stub_y(bool use_busterm, bool has_stub,
+                  const Rect& blk, int toward_y, int fallback_y) {
+    if (!use_busterm) return fallback_y;
+    return has_stub ? clamp_10pct(toward_y, blk.y1, blk.y2)
+                    : blk.face_y(toward_y);
+}
+
+// Symmetric helper for VHV topologies (V-stub x-level).
+static int stub_x(bool use_busterm, bool has_stub,
+                  const Rect& blk, int toward_x, int fallback_x) {
+    if (!use_busterm) return fallback_x;
+    return has_stub ? clamp_10pct(toward_x, blk.x1, blk.x2)
+                    : blk.face_x(toward_x);
+}
+
+void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
+                                      const std::vector<int>& x_grid,
+                                      const std::vector<int>& y_grid,
+                                      std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
+
+    // Z_HVH: trunk is vertical at x_cut between the two block centres.
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     for (int x_cut : x_grid) {
         if (x_cut > min_x && x_cut < max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
-            // When a block's x-face coincides with x_cut (no H stub), the V trunk
-            // should start/end at the block's y-face rather than its centre.
-            int ty_src = (use_busterm_ && sx == x_cut) ? src.face_y(d.y) : s.y;
-            int ty_dst = (use_busterm_ && dx == x_cut) ? dst.face_y(s.y) : d.y;
+            int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
+            int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
             Topology z; z.type = "Z_HVH";
             if (sx != x_cut)
                 z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
@@ -120,20 +142,42 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std
             if (!z.segments.empty()) results.push_back(z);
         }
     }
+
+    // Z_VHV: trunk is horizontal at y_cut between the two block centres.
+    int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
+    for (int y_cut : y_grid) {
+        if (y_cut > min_y && y_cut < max_y) {
+            int sy = use_busterm_ ? src.face_y(y_cut) : s.y;
+            int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
+            int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
+            int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
+            Topology z; z.type = "Z_VHV";
+            if (sy != y_cut)
+                z.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
+            if (vx_src != vx_dst)
+                z.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 4));
+            if (y_cut != dy)
+                z.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
+            if (!z.segments.empty()) results.push_back(z);
+        }
+    }
 }
 
-void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results) {
+void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
+                                      const std::vector<int>& x_grid,
+                                      const std::vector<int>& y_grid,
+                                      std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
 
-    // Vertical U-trunks (detour left/right of bounding box)
+    // U_HVH: vertical detour trunk left/right of bounding box.
     for (int x_cut : x_grid) {
         if (x_cut < min_x || x_cut > max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
-            int ty_src = (use_busterm_ && sx == x_cut) ? src.face_y(d.y) : s.y;
-            int ty_dst = (use_busterm_ && dx == x_cut) ? dst.face_y(s.y) : d.y;
+            int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
+            int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
             Topology u; u.type = "U_HVH";
             if (sx != x_cut)
                 u.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
@@ -144,17 +188,20 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std
             if (!u.segments.empty()) results.push_back(u);
         }
     }
-    // Horizontal U-trunks (detour above/below bounding box) — use M6 for the trunk
+
+    // U_VHV: horizontal detour trunk above/below bounding box — M6 for long-haul trunk.
     for (int y_cut : y_grid) {
         if (y_cut < min_y || y_cut > max_y) {
             int sy = use_busterm_ ? src.face_y(y_cut) : s.y;
             int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
+            int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
+            int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
             Topology u; u.type = "U_VHV";
             if (sy != y_cut)
-                u.segments.push_back(make_seg(s.x, sy, s.x, y_cut, 5));
-            u.segments.push_back(make_seg(s.x, y_cut, d.x, y_cut, 6));   // M6 long-haul
+                u.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
+            u.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 6));   // M6 long-haul
             if (y_cut != dy)
-                u.segments.push_back(make_seg(d.x, y_cut, d.x, dy, 5));
+                u.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
             if (!u.segments.empty()) results.push_back(u);
         }
     }
@@ -456,8 +503,32 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
     add_l_shapes(src, dst, candidates);
     std::vector<int> hanan_x, hanan_y;
     bundle_hanan_grid({src, dst}, hanan_x, hanan_y);
-    add_z_shapes(src, dst, hanan_x, hanan_y, candidates);
-    add_u_shapes(src, dst, hanan_x, hanan_y, candidates);
+
+    // Z and U/C trunks: use channel midpoints so both stubs are always visible.
+    // Hanan lines are block faces; a trunk on a block face collapses one stub.
+    // Inner channel midpoints (between consecutive Hanan lines) serve Z trunks.
+    // Outer channel midpoints (one step beyond each end, mirroring the outermost
+    // real channel width) serve U/C trunks and ensure both stubs exist there too.
+    std::vector<int> chan_x, chan_y;
+    for (int i = 0; i + 1 < (int)hanan_x.size(); ++i)
+        chan_x.push_back((hanan_x[i] + hanan_x[i+1]) / 2);
+    for (int i = 0; i + 1 < (int)hanan_y.size(); ++i)
+        chan_y.push_back((hanan_y[i] + hanan_y[i+1]) / 2);
+    // Outer channel positions for U/C detour trunks: place the trunk 10% of the
+    // block-pair bounding box size away from each bbox edge.
+    if (hanan_x.size() >= 2) {
+        int margin_x = std::max(1, (int)(0.1 * (hanan_x.back() - hanan_x[0])));
+        chan_x.insert(chan_x.begin(), hanan_x[0]       - margin_x);
+        chan_x.push_back             (hanan_x.back()   + margin_x);
+    }
+    if (hanan_y.size() >= 2) {
+        int margin_y = std::max(1, (int)(0.1 * (hanan_y.back() - hanan_y[0])));
+        chan_y.insert(chan_y.begin(), hanan_y[0]       - margin_y);
+        chan_y.push_back             (hanan_y.back()   + margin_y);
+    }
+
+    add_z_shapes(src, dst, chan_x, chan_y, candidates);
+    add_u_shapes(src, dst, chan_x, chan_y, candidates);
     annotate_and_sort(candidates);
     return candidates;
 }
