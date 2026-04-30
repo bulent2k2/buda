@@ -24,6 +24,13 @@ Segment make_seg(int x1, int y1, int x2, int y2, int layer) {
     Segment s; s.start={x1,y1}; s.end={x2,y2}; s.layer_hint=layer; return s;
 }
 
+// Clamp 'value' to stay 10% away from either end of [lo, hi].
+// Used to ensure stub endpoints land 10% from block corners along a face.
+static int clamp_10pct(int value, int lo, int hi) {
+    int margin = std::max(1, (int)(0.1 * (hi - lo)));
+    return std::max(lo + margin, std::min(hi - margin, value));
+}
+
 // ---------------------------------------------------------------------------
 // 2-pin shapes (L / Z / U)
 // ---------------------------------------------------------------------------
@@ -31,45 +38,63 @@ Segment make_seg(int x1, int y1, int x2, int y2, int layer) {
 void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
 
-    // L_HV: horizontal first, then vertical.
-    // In busterm mode the H stub starts at src's nearest x-face toward d.x.
-    // The V stub ends at dst's nearest y-face toward s.y.
-    // When the H arm degenerates (src x-range covers d.x), the whole topology
-    // becomes a straight vertical: start at src's y-face, end at dst's y-face.
+    // L_HV: horizontal first, then vertical to dst y-face.
+    //
+    // In busterm mode:
+    //  • H y-level slides 10% from the src y-face nearest dst (minimises V stub).
+    //  • V column is placed at clamp_10pct of sx w.r.t. dst's x-range, so the
+    //    connection point on dst's y-face is 10% away from each corner.
+    //  • V endpoint is the exact dst y-face — no inward offset.
     {
-        int sx = use_busterm_ ? src.face_x(d.x) : s.x;   // src x-face
-        int dy = use_busterm_ ? dst.face_y(s.y) : d.y;   // dst y-face
+        int sx = use_busterm_ ? src.face_x(d.x) : s.x;   // src x-face toward dst
+        int hy = s.y;                                      // H y-level
+        int bend_x = use_busterm_ ? clamp_10pct(sx, dst.x1, dst.x2) : d.x;
+        int dy = use_busterm_ ? dst.face_y(hy) : d.y;    // exact dst y-face (updated after hy slides)
+
+        if (use_busterm_) {
+            // Slide H y toward dst (10% from the src face nearest dst).
+            int sh = src.y2 - src.y1;
+            int sm = std::max(1, (int)(0.1 * sh));
+            if      (d.y < src.y1) hy = src.y1 + sm;   // dst above: move up
+            else if (d.y > src.y2) hy = src.y2 - sm;   // dst below: move down
+            dy = dst.face_y(hy);  // recompute after hy slides
+        }
 
         Topology hv; hv.type = "L_HV";
-        if (sx != d.x) {
-            // Normal L: H then V
-            hv.segments.push_back(make_seg(sx, s.y, d.x, s.y, 4));
-            if (s.y != dy)
-                hv.segments.push_back(make_seg(d.x, s.y, d.x, dy, 5));
-        } else if (use_busterm_) {
-            // H degenerates → straight V from src y-face to dst y-face
-            int sy = src.face_y(d.y);
-            if (sy != dy)
-                hv.segments.push_back(make_seg(d.x, sy, d.x, dy, 5));
-        }
+        if (sx != bend_x)
+            hv.segments.push_back(make_seg(sx, hy, bend_x, hy, 4));   // H
+        if (hy != dy)
+            hv.segments.push_back(make_seg(bend_x, hy, bend_x, dy, 5)); // V
         if (!hv.segments.empty()) results.push_back(hv);
     }
 
-    // L_VH: vertical first, then horizontal.
-    // In busterm mode the V stub starts at src's y-face; the bend y is dst's
-    // nearest y-face toward s.y (not dst center y).  The H stub ends at dst's
-    // nearest x-face toward s.x.
-    // When the H arm degenerates (dst x-range covers s.x), result is straight V.
+    // L_VH: vertical first, then horizontal to dst x-face.
+    //
+    // In busterm mode:
+    //  • V x-position slides 10% from the src x-face nearest dst (minimises H stub).
+    //  • Bend y is placed at clamp_10pct of sy w.r.t. dst's y-range, so the
+    //    connection point on dst's x-face is 10% away from each corner.
+    //  • H endpoint is the exact dst x-face — no inward offset.
     {
-        int sy = use_busterm_ ? src.face_y(d.y) : s.y;   // src y-face
-        int by = use_busterm_ ? dst.face_y(s.y) : d.y;   // bend y = dst y-face
-        int dx = use_busterm_ ? dst.face_x(s.x) : d.x;   // dst x-face
+        int sy = use_busterm_ ? src.face_y(d.y) : s.y;   // src y-face toward dst
+        int vx = s.x;                                      // V x-pos
+        int dx = use_busterm_ ? dst.face_x(vx) : d.x;    // exact dst x-face (updated after vx slides)
+        int bend_y = use_busterm_ ? clamp_10pct(sy, dst.y1, dst.y2) : d.y;
+
+        if (use_busterm_) {
+            // Slide V x toward dst (10% from the src face nearest dst).
+            int sw = src.x2 - src.x1;
+            int sm = std::max(1, (int)(0.1 * sw));
+            if      (d.x > src.x2) vx = src.x2 - sm;   // dst right: move right
+            else if (d.x < src.x1) vx = src.x1 + sm;   // dst left:  move left
+            dx = dst.face_x(vx);  // recompute after vx slides
+        }
 
         Topology vh; vh.type = "L_VH";
-        if (sy != by)
-            vh.segments.push_back(make_seg(s.x, sy, s.x, by, 5));  // V src→bend
-        if (s.x != dx)
-            vh.segments.push_back(make_seg(s.x, by, dx, by, 4));   // H bend→dst
+        if (sy != bend_y)
+            vh.segments.push_back(make_seg(vx, sy, vx, bend_y, 5));   // V
+        if (vx != dx)
+            vh.segments.push_back(make_seg(vx, bend_y, dx, bend_y, 4));   // H
         if (!vh.segments.empty()) results.push_back(vh);
     }
 }
