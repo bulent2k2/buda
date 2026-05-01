@@ -12,6 +12,7 @@ set(SOURCE_FILES
     src/bindings.cpp
     src/bundler.cpp
     src/topology.cpp
+    src/conn_topology.cpp
     src/layering.cpp
     src/global_router.cpp
     src/nuts.cpp

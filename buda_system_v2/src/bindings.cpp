@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 #include "bundler.h"
 #include "topology.h"
+#include "conn_topology.h"
 #include "layering.h"
 #include "global_router.h"
 #include "nuts.h"
@@ -25,6 +26,27 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<Bundler>(m, "Bundler").def(py::init<>()).def("set_strategy", &Bundler::set_strategy).def("run", &Bundler::run);
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>()).def("add_block", &Floorplan::add_block).def("get_hanan_grid", [](const Floorplan& fp) { std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y); }).def("get_all_blocks", [](const Floorplan& fp) { return fp.get_all_blocks(); });
     py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer);
+    py::class_<SegConn>(m, "SegConn")
+        .def_readwrite("kind",       &SegConn::kind)
+        .def_readwrite("block_name", &SegConn::block_name)
+        .def_readwrite("face_coord", &SegConn::face_coord)
+        .def_readwrite("seg_idx",    &SegConn::seg_idx)
+        .def_readwrite("at_pos",     &SegConn::at_pos);
+    py::enum_<SegConn::Kind>(m, "SegConnKind")
+        .value("BUSTERM", SegConn::BUSTERM)
+        .value("SEG",     SegConn::SEG);
+    py::class_<ConnSeg>(m, "ConnSeg")
+        .def_readwrite("horiz",    &ConnSeg::horiz)
+        .def_readwrite("along_lo", &ConnSeg::along_lo)
+        .def_readwrite("along_hi", &ConnSeg::along_hi)
+        .def_readwrite("perp_pos", &ConnSeg::perp_pos)
+        .def_readwrite("perp_lo",  &ConnSeg::perp_lo)
+        .def_readwrite("perp_hi",  &ConnSeg::perp_hi)
+        .def_readwrite("conns",    &ConnSeg::conns);
+    py::class_<ConnTopology>(m, "ConnTopology")
+        .def(py::init<>())
+        .def("build", &ConnTopology::build)
+        .def("segs",  &ConnTopology::segs);
     py::class_<TopologyGenerator>(m, "TopologyGenerator")
         .def(py::init<const Floorplan&>())
         .def("set_busterm_mode",              &TopologyGenerator::set_busterm_mode)
