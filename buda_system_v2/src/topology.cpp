@@ -45,27 +45,51 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
     //  • V column is placed at clamp_10pct of sx w.r.t. dst's x-range, so the
     //    connection point on dst's y-face is 10% away from each corner.
     //  • V endpoint is the exact dst y-face — no inward offset.
+    //
+    //  Overlap case: when src and dst x-ranges overlap, the standard bend_x
+    //  lands inside src (sx == bend_x → H zero-length).  Instead, route the
+    //  V through dst's exclusive zone(s) — the part of dst's x-range that lies
+    //  outside src's x-range — so both segments are always visible.
     {
         int sx = use_busterm_ ? src.face_x(d.x) : s.x;   // src x-face toward dst
         int hy = s.y;                                      // H y-level
         int bend_x = use_busterm_ ? clamp_10pct(sx, dst.x1, dst.x2) : d.x;
-        int dy = use_busterm_ ? dst.face_y(hy) : d.y;    // exact dst y-face (updated after hy slides)
+        int dy = use_busterm_ ? dst.face_y(hy) : d.y;
 
         if (use_busterm_) {
-            // Slide H y toward dst (10% from the src face nearest dst).
             int sh = src.y2 - src.y1;
             int sm = std::max(1, (int)(0.1 * sh));
-            if      (d.y < src.y1) hy = src.y1 + sm;   // dst above: move up
-            else if (d.y > src.y2) hy = src.y2 - sm;   // dst below: move down
-            dy = dst.face_y(hy);  // recompute after hy slides
+            if      (d.y < src.y1) hy = src.y1 + sm;
+            else if (d.y > src.y2) hy = src.y2 - sm;
+            dy = dst.face_y(hy);
         }
 
-        Topology hv; hv.type = "L_HV";
-        if (sx != bend_x)
-            hv.segments.push_back(make_seg(sx, hy, bend_x, hy, 4));   // H
-        if (hy != dy)
-            hv.segments.push_back(make_seg(bend_x, hy, bend_x, dy, 5)); // V
-        if (!hv.segments.empty()) results.push_back(hv);
+        if (use_busterm_ && sx == bend_x) {
+            // H collapses — route via each of dst's exclusive x-zones.
+            // dst left of src: [dst.x1, src.x1)
+            if (dst.x1 < src.x1) {
+                int bx = (dst.x1 + src.x1) / 2;
+                Topology hv; hv.type = "L_HV";
+                hv.segments.push_back(make_seg(src.x1, hy, bx, hy, 4));       // H exits src left
+                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, 5)); // V in exclusive zone
+                results.push_back(hv);
+            }
+            // dst right of src: (src.x2, dst.x2]
+            if (dst.x2 > src.x2) {
+                int bx = (src.x2 + dst.x2) / 2;
+                Topology hv; hv.type = "L_HV";
+                hv.segments.push_back(make_seg(src.x2, hy, bx, hy, 4));
+                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, 5));
+                results.push_back(hv);
+            }
+        } else {
+            Topology hv; hv.type = "L_HV";
+            if (sx != bend_x)
+                hv.segments.push_back(make_seg(sx, hy, bend_x, hy, 4));
+            if (hy != dy)
+                hv.segments.push_back(make_seg(bend_x, hy, bend_x, dy, 5));
+            if (!hv.segments.empty()) results.push_back(hv);
+        }
     }
 
     // L_VH: vertical first, then horizontal to dst x-face.
@@ -75,27 +99,51 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
     //  • Bend y is placed at clamp_10pct of sy w.r.t. dst's y-range, so the
     //    connection point on dst's x-face is 10% away from each corner.
     //  • H endpoint is the exact dst x-face — no inward offset.
+    //
+    //  Overlap case: when vx lands inside dst (vx == dx → H zero-length), route
+    //  the V through src's exclusive x-zone(s) instead.
     {
-        int sy = use_busterm_ ? src.face_y(d.y) : s.y;   // src y-face toward dst
-        int vx = s.x;                                      // V x-pos
-        int dx = use_busterm_ ? dst.face_x(vx) : d.x;    // exact dst x-face (updated after vx slides)
+        int sy = use_busterm_ ? src.face_y(d.y) : s.y;
+        int vx = s.x;
+        int dx = use_busterm_ ? dst.face_x(vx) : d.x;
         int bend_y = use_busterm_ ? clamp_10pct(sy, dst.y1, dst.y2) : d.y;
 
         if (use_busterm_) {
-            // Slide V x toward dst (10% from the src face nearest dst).
             int sw = src.x2 - src.x1;
             int sm = std::max(1, (int)(0.1 * sw));
-            if      (d.x > src.x2) vx = src.x2 - sm;   // dst right: move right
-            else if (d.x < src.x1) vx = src.x1 + sm;   // dst left:  move left
-            dx = dst.face_x(vx);  // recompute after vx slides
+            if      (d.x > src.x2) vx = src.x2 - sm;
+            else if (d.x < src.x1) vx = src.x1 + sm;
+            dx = dst.face_x(vx);
         }
 
-        Topology vh; vh.type = "L_VH";
-        if (sy != bend_y)
-            vh.segments.push_back(make_seg(vx, sy, vx, bend_y, 5));   // V
-        if (vx != dx)
-            vh.segments.push_back(make_seg(vx, bend_y, dx, bend_y, 4));   // H
-        if (!vh.segments.empty()) results.push_back(vh);
+        if (use_busterm_ && vx == dx) {
+            // H collapses — route via each of src's exclusive x-zones.
+            // src right of dst: (dst.x2, src.x2]
+            if (src.x2 > dst.x2) {
+                int vx2 = (dst.x2 + src.x2) / 2;
+                int dx2 = dst.face_x(vx2);   // = dst.x2
+                Topology vh; vh.type = "L_VH";
+                if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, 5));
+                if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, 4));
+                if (!vh.segments.empty()) results.push_back(vh);
+            }
+            // src left of dst: [src.x1, dst.x1)
+            if (src.x1 < dst.x1) {
+                int vx2 = (src.x1 + dst.x1) / 2;
+                int dx2 = dst.face_x(vx2);   // = dst.x1
+                Topology vh; vh.type = "L_VH";
+                if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, 5));
+                if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, 4));
+                if (!vh.segments.empty()) results.push_back(vh);
+            }
+        } else {
+            Topology vh; vh.type = "L_VH";
+            if (sy != bend_y)
+                vh.segments.push_back(make_seg(vx, sy, vx, bend_y, 5));
+            if (vx != dx)
+                vh.segments.push_back(make_seg(vx, bend_y, dx, bend_y, 4));
+            if (!vh.segments.empty()) results.push_back(vh);
+        }
     }
 }
 
