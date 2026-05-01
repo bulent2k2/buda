@@ -75,16 +75,20 @@ class BudaSession:
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} bundles.")
         elif cmd == "generate_topologies_for_bundle":
-            # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...] [center_mode]
+            # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...] [center_mode] [double_detour]
             # Single dst  → 2-pin L/Z/U candidates
             # Multiple dst → multicast trunk+branch candidates
-            # Append "center_mode" as last arg to use block centres instead of busterm faces.
-            use_center = args and args[-1] == "center_mode"
-            pos_args = args[:-1] if use_center else args
+            # Append "center_mode"    to use block centres instead of busterm faces.
+            # Append "double_detour"  to include UU_VHV / UU_HVH high-congestion variants.
+            use_center        = "center_mode"   in args
+            use_double_detour = "double_detour" in args
+            pos_args = [a for a in args if a not in ("center_mode", "double_detour")]
             hint = pos_args[0]; src = pos_args[1]; dsts = pos_args[2:]
             topo_gen = interconnect.TopologyGenerator(self.fp)
             if use_center:
                 topo_gen.set_busterm_mode(False)
+            if use_double_detour:
+                topo_gen.set_double_detour(True)
             found = False
             for w in self.bundles:
                 if w.original_bundle.get_net_names()[0].startswith(hint):

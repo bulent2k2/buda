@@ -46,6 +46,12 @@ public:
     // the original centre-to-centre behaviour.
     void set_busterm_mode(bool v) { use_busterm_ = v; }
 
+    // Double-detour mode (default false): add UU_VHV / UU_HVH topologies where
+    // the src stub is an L-shape that exits a SIDE face of the src block rather
+    // than the primary face used by the standard U shape.  Useful when the normal
+    // U route is congested.  Only meaningful in busterm mode.
+    void set_double_detour(bool v) { allow_double_detour_ = v; }
+
     // 2-pin: L / Z / U shapes
     std::vector<Topology> generate_candidates(
         const std::string& src_name,
@@ -58,11 +64,13 @@ public:
 
 private:
     const Floorplan& floorplan_;
-    bool use_busterm_ = true;
+    bool use_busterm_       = true;
+    bool allow_double_detour_ = false;
 
     void add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results);
     void add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_u_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
+    void add_uu_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_trunk_h(const std::vector<Point>& pins, const std::vector<Rect>& blocks,
                      int y_trunk, bool out_of_bbox, std::vector<Topology>& results);
     void add_trunk_v(const std::vector<Point>& pins, const std::vector<Rect>& blocks,

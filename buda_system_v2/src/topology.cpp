@@ -207,6 +207,104 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
     }
 }
 
+void TopologyGenerator::add_uu_shapes(const Rect& src, const Rect& dst,
+                                       const std::vector<int>& x_grid,
+                                       const std::vector<int>& y_grid,
+                                       std::vector<Topology>& results) {
+    if (!use_busterm_) return;  // only meaningful in busterm mode
+
+    Point s = src.center(); Point d = dst.center();
+    int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
+    int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
+
+    // Block-pair bounding box — used for exit margins.
+    int bp_x_lo = std::min({src.x1, src.x2, dst.x1, dst.x2});
+    int bp_x_hi = std::max({src.x1, src.x2, dst.x1, dst.x2});
+    int bp_y_lo = std::min({src.y1, src.y2, dst.y1, dst.y2});
+    int bp_y_hi = std::max({src.y1, src.y2, dst.y1, dst.y2});
+    int margin_x = std::max(1, (int)(0.1 * (bp_x_hi - bp_x_lo)));
+    int margin_y = std::max(1, (int)(0.1 * (bp_y_hi - bp_y_lo)));
+
+    // ── UU_VHV ──────────────────────────────────────────────────────────────
+    // Double-detour of U_VHV.  The src stub, normally a single V to the
+    // bottom/top face of src, is replaced with an H+V L-shape that exits a
+    // SIDE face of src (the face furthest from dst in x).
+    // Shape (src → trunk → dst): H · V · H(trunk) · V
+    for (int y_cut : y_grid) {
+        if (y_cut >= min_y && y_cut <= max_y) continue;  // OOB only
+
+        // Dst attachment (standard, same as U_VHV).
+        int dy      = dst.face_y(y_cut);
+        int vx_dst  = stub_x(true, dy != y_cut, dst, s.x, d.x);
+
+        // Src: exit the x-face furthest from dst.
+        int exit_x = (std::abs(src.x1 - d.x) >= std::abs(src.x2 - d.x))
+                     ? src.x1 : src.x2;
+
+        // sy_src: y-level on the src side face, 10% toward the trunk side
+        // so the connection point is not too close to a corner.
+        int src_h       = src.y2 - src.y1;
+        int src_margin_y = std::max(1, (int)(0.1 * src_h));
+        int sy_src = (y_cut < min_y) ? src.y1 + src_margin_y   // trunk below: near src bottom
+                                     : src.y2 - src_margin_y;  // trunk above: near src top
+
+        // x_corner: where the V leg of the src L-stub is placed.
+        // 10% of block-pair bbox further out from src's exit face.
+        int x_corner = (exit_x == src.x1) ? src.x1 - margin_x
+                                           : src.x2 + margin_x;
+
+        Topology uu; uu.type = "UU_VHV";
+        if (exit_x != x_corner)
+            uu.segments.push_back(make_seg(exit_x, sy_src, x_corner, sy_src, 4)); // H
+        if (sy_src != y_cut)
+            uu.segments.push_back(make_seg(x_corner, sy_src, x_corner, y_cut, 5)); // V
+        if (x_corner != vx_dst)
+            uu.segments.push_back(make_seg(x_corner, y_cut, vx_dst, y_cut, 6));   // H trunk
+        if (y_cut != dy)
+            uu.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));         // V to dst
+        if ((int)uu.segments.size() >= 3) results.push_back(uu);
+    }
+
+    // ── UU_HVH ──────────────────────────────────────────────────────────────
+    // Double-detour of U_HVH.  The src stub, normally a single H to the
+    // left/right face of src, is replaced with a V+H L-shape that exits a
+    // TOP or BOTTOM face of src (the face furthest from dst in y).
+    // Shape (src → trunk → dst): V · H · V(trunk) · H
+    for (int x_cut : x_grid) {
+        if (x_cut >= min_x && x_cut <= max_x) continue;  // OOB only
+
+        // Dst attachment (standard, same as U_HVH).
+        int dx      = dst.face_x(x_cut);
+        int ty_dst  = stub_y(true, dx != x_cut, dst, s.y, d.y);
+
+        // Src: exit the y-face furthest from dst.
+        int exit_y = (std::abs(src.y1 - d.y) >= std::abs(src.y2 - d.y))
+                     ? src.y1 : src.y2;
+
+        // tx_src: x-level on the src exit face, 10% toward the trunk side.
+        int src_w        = src.x2 - src.x1;
+        int src_margin_x = std::max(1, (int)(0.1 * src_w));
+        int tx_src = (x_cut < min_x) ? src.x1 + src_margin_x   // trunk left:  near src left
+                                     : src.x2 - src_margin_x;  // trunk right: near src right
+
+        // y_corner: where the H leg of the src L-stub is placed.
+        // 10% of block-pair bbox further out from src's exit face.
+        int y_corner = (exit_y == src.y1) ? src.y1 - margin_y
+                                           : src.y2 + margin_y;
+
+        Topology uu; uu.type = "UU_HVH";
+        if (exit_y != y_corner)
+            uu.segments.push_back(make_seg(tx_src, exit_y, tx_src, y_corner, 5)); // V
+        if (tx_src != x_cut)
+            uu.segments.push_back(make_seg(tx_src, y_corner, x_cut, y_corner, 4)); // H
+        if (y_corner != ty_dst)
+            uu.segments.push_back(make_seg(x_cut, y_corner, x_cut, ty_dst, 5));    // V trunk
+        if (x_cut != dx)
+            uu.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));          // H to dst
+        if ((int)uu.segments.size() >= 3) results.push_back(uu);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
@@ -529,6 +627,8 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
 
     add_z_shapes(src, dst, chan_x, chan_y, candidates);
     add_u_shapes(src, dst, chan_x, chan_y, candidates);
+    if (allow_double_detour_)
+        add_uu_shapes(src, dst, chan_x, chan_y, candidates);
     annotate_and_sort(candidates);
     return candidates;
 }
