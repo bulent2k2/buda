@@ -139,7 +139,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                 z.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
             if (x_cut != dx)
                 z.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
-            if (!z.segments.empty()) results.push_back(z);
+            if (z.segments.size() == 3) results.push_back(z);
         }
     }
 
@@ -158,7 +158,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                 z.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 4));
             if (y_cut != dy)
                 z.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
-            if (!z.segments.empty()) results.push_back(z);
+            if (z.segments.size() == 3) results.push_back(z);
         }
     }
 }
@@ -185,7 +185,7 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
                 u.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
             if (x_cut != dx)
                 u.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
-            if (!u.segments.empty()) results.push_back(u);
+            if (u.segments.size() == 3) results.push_back(u);
         }
     }
 
@@ -202,7 +202,7 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
             u.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 6));   // M6 long-haul
             if (y_cut != dy)
                 u.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
-            if (!u.segments.empty()) results.push_back(u);
+            if (u.segments.size() == 3) results.push_back(u);
         }
     }
 }
