@@ -1,6 +1,8 @@
 #include "conn_topology.h"
 #include <algorithm>
 #include <map>
+#include <numeric>
+#include <set>
 #include <climits>
 
 namespace interconnect {
@@ -210,6 +212,96 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
             }
         }
     }
+}
+
+// ── manhattan_nearest ─────────────────────────────────────────────────────────
+//
+// Minimum Manhattan distance between the closest points of two rectangles.
+// The gap in each axis is max(0, lo_of_right - hi_of_left) after sorting.
+// Overlapping or touching rects → gap 0, distance = 0.
+
+int manhattan_nearest(const Rect& a, const Rect& b) {
+    int dx = std::max(0, std::max(a.x1 - b.x2, b.x1 - a.x2));
+    int dy = std::max(0, std::max(a.y1 - b.y2, b.y1 - a.y2));
+    return dx + dy;
+}
+
+// ── seg_bbox ──────────────────────────────────────────────────────────────────
+
+Rect seg_bbox(const ConnSeg& cs) {
+    if (cs.horiz)
+        return Rect{ cs.along_lo, cs.perp_pos, cs.along_hi, cs.perp_pos };
+    else
+        return Rect{ cs.perp_pos, cs.along_lo, cs.perp_pos, cs.along_hi };
+}
+
+// ── compute_mst (Kruskal's) ───────────────────────────────────────────────────
+//
+// Build every pairwise edge, sort by Manhattan distance, then greedily add
+// edges that join two previously disconnected components (union-find).
+
+std::vector<MSTEdge> compute_mst(
+    const std::vector<std::pair<std::string, Rect>>& nodes)
+{
+    int n = (int)nodes.size();
+    if (n <= 1) return {};
+
+    // Enumerate all O(N²) edges.
+    struct RawEdge { int u, v, dist; };
+    std::vector<RawEdge> edges;
+    edges.reserve(n * (n - 1) / 2);
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+            edges.push_back({i, j, manhattan_nearest(nodes[i].second,
+                                                     nodes[j].second)});
+
+    std::sort(edges.begin(), edges.end(),
+              [](const RawEdge& a, const RawEdge& b){ return a.dist < b.dist; });
+
+    // Union-find: path-compressed.
+    std::vector<int> parent(n);
+    std::iota(parent.begin(), parent.end(), 0);
+    std::function<int(int)> find = [&](int x) {
+        return parent[x] == x ? x : parent[x] = find(parent[x]);
+    };
+
+    std::vector<MSTEdge> mst;
+    mst.reserve(n - 1);
+    for (const auto& e : edges) {
+        int pu = find(e.u), pv = find(e.v);
+        if (pu == pv) continue;
+        parent[pu] = pv;
+        mst.push_back({e.u, e.v, e.dist,
+                       nodes[e.u].first, nodes[e.v].first});
+        if ((int)mst.size() == n - 1) break;
+    }
+    return mst;
+}
+
+// ── ConnTopology::trunk_mst ───────────────────────────────────────────────────
+//
+// Collect all blocks in fp whose name does NOT appear in any BUSTERM conn of
+// segs_[trunk_idx].  Build a node list: node 0 = trunk (degenerate bbox),
+// nodes 1..k = unconnected blocks.  Return their MST.
+
+std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
+                                              const Floorplan& fp) const
+{
+    const ConnSeg& trunk = segs_[trunk_idx];
+
+    // Collect already-connected block names.
+    std::set<std::string> connected;
+    for (const auto& c : trunk.conns)
+        if (c.kind == SegConn::BUSTERM) connected.insert(c.block_name);
+
+    // Build node list: trunk first, then unconnected blocks.
+    std::vector<std::pair<std::string, Rect>> nodes;
+    nodes.emplace_back("trunk", seg_bbox(trunk));
+    for (const auto& [name, rect] : fp.get_all_blocks())
+        if (!connected.count(name))
+            nodes.emplace_back(name, rect);
+
+    return compute_mst(nodes);
 }
 
 } // namespace interconnect

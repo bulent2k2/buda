@@ -1,6 +1,7 @@
 #pragma once
 #include "topology.h"
 #include <string>
+#include <utility>
 #include <vector>
 #include <climits>
 
@@ -51,6 +52,32 @@ struct ConnSeg {
     std::vector<SegConn> conns;
 };
 
+// ── Manhattan nearest-point distance ─────────────────────────────────────────
+//
+// Minimum Manhattan distance between any point in rect a and any point in
+// rect b.  Treats each rect as a closed axis-aligned rectangle.  For a
+// segment pass its degenerate bounding box (x1==x2 for V, y1==y2 for H).
+//
+int manhattan_nearest(const Rect& a, const Rect& b);
+
+// Return the bounding-box Rect of a ConnSeg (degenerate in the perp direction).
+Rect seg_bbox(const ConnSeg& cs);
+
+// ── MST types ─────────────────────────────────────────────────────────────────
+
+struct MSTEdge {
+    int         u, v;      // indices into the nodes vector (0-based)
+    int         dist;      // Manhattan nearest-point distance
+    std::string u_name;
+    std::string v_name;
+};
+
+// Kruskal's MST over a set of named rectangular nodes.
+// Distances = manhattan_nearest between bounding boxes.
+// Returns exactly (nodes.size()-1) edges, sorted ascending by dist.
+std::vector<MSTEdge> compute_mst(
+    const std::vector<std::pair<std::string, Rect>>& nodes);
+
 // ── ConnTopology ──────────────────────────────────────────────────────────────
 //
 // Augments a raw Topology with:
@@ -65,6 +92,13 @@ class ConnTopology {
 public:
     void build(const Topology& topo, const Floorplan& fp);
     const std::vector<ConnSeg>& segs() const { return segs_; }
+
+    // For the trunk segment at segs()[trunk_idx], gather all blocks in fp that
+    // are NOT yet directly connected (no BUSTERM conn on that segment), then
+    // return the MST over {trunk} ∪ {unconnected blocks}.
+    // Node 0 in the result is the trunk; nodes 1..n are the unconnected blocks
+    // in the order returned by fp.get_all_blocks() minus already-connected ones.
+    std::vector<MSTEdge> trunk_mst(int trunk_idx, const Floorplan& fp) const;
 
 private:
     std::vector<ConnSeg> segs_;

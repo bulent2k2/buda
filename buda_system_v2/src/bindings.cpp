@@ -43,10 +43,20 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("perp_lo",  &ConnSeg::perp_lo)
         .def_readwrite("perp_hi",  &ConnSeg::perp_hi)
         .def_readwrite("conns",    &ConnSeg::conns);
+    py::class_<MSTEdge>(m, "MSTEdge")
+        .def_readwrite("u",      &MSTEdge::u)
+        .def_readwrite("v",      &MSTEdge::v)
+        .def_readwrite("dist",   &MSTEdge::dist)
+        .def_readwrite("u_name", &MSTEdge::u_name)
+        .def_readwrite("v_name", &MSTEdge::v_name);
     py::class_<ConnTopology>(m, "ConnTopology")
         .def(py::init<>())
-        .def("build", &ConnTopology::build)
-        .def("segs",  &ConnTopology::segs);
+        .def("build",      &ConnTopology::build)
+        .def("segs",       &ConnTopology::segs)
+        .def("trunk_mst",  &ConnTopology::trunk_mst);
+    m.def("manhattan_nearest", &manhattan_nearest);
+    m.def("seg_bbox",          &seg_bbox);
+    m.def("compute_mst",       &compute_mst);
     py::class_<TopologyGenerator>(m, "TopologyGenerator")
         .def(py::init<const Floorplan&>())
         .def("set_busterm_mode",              &TopologyGenerator::set_busterm_mode)
