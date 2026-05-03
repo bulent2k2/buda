@@ -578,10 +578,16 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     std::vector<int> hanan_x, hanan_y;
     bundle_hanan_grid(blocks, hanan_x, hanan_y);
 
-    // In-bbox trunks: pin-centre coordinates + channel centres (midpoints of
-    // adjacent Hanan cell intervals within the pin bounding box).
+    // In-bbox trunks: one candidate per Hanan channel — the midpoint of each
+    // consecutive pair of Hanan lines whose midpoint falls strictly within the
+    // pin bounding box.
+    //
+    // Pin-centre coordinates are intentionally NOT added here.  A pin centre
+    // always falls inside a Hanan interval, so it produces the same has_stub
+    // pattern and conn_y values as the interval's midpoint — the only difference
+    // would be a slight shift in the spine coordinate, which adds no structural
+    // value and creates near-duplicate candidates in the explorer.
     std::set<int> y_set, x_set;
-    for (const auto& p : pins) { y_set.insert(p.y); x_set.insert(p.x); }
 
     for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {
         int mid = (hanan_y[i] + hanan_y[i+1]) / 2;
