@@ -1,0 +1,210 @@
+6)
+Bash command                                                                                                                                                                                             
+                                                                                                                                                                                                        
+   install /Users/ben/src/buda/buda_system_v2/build/interconnect.cpython-313-darwin.so /Users/ben/src/buda/buda_system_v2/src/ && cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
+   import sys; sys.path.insert(0, '.')
+   import interconnect as ic
+
+   fp = ic.Floorplan()
+   fp.add_block('drv1',  50, 380, 230, 620)
+   fp.add_block('rcv1', 680, 120, 880, 500)
+   fp.add_block('rcv2', 250,  50, 450, 230)
+
+   gen = ic.TopologyGenerator(fp)
+   topos = gen.generate_multicast_candidates('drv1', ['rcv1', 'rcv2'])
+   t = topos[0]  # TRUNK_H WL=618
+   print('Topology:', t.type, 'WL=', t.estimated_wirelength)
+
+   ct = ic.ConnTopology()
+   ct.build(t, fp)
+
+   # seg[0] is the H spine (directly connected to rcv1, not yet to drv1/rcv2)
+   print()
+   print('Trunk MST (seg[0] spine -> unconnected blocks):')
+   for e in ct.trunk_mst(0, fp):
+       print(f'  {e.u_name} -- {e.v_name}  dist={e.dist}')
+
+   print()
+   print('Direct call: compute_mst on all 4 nodes (trunk + 3 blocks):')
+   nodes = [
+       ('trunk', ic.seg_bbox(ct.segs()[0])),
+       ('drv1',  ic.Rect()),
+       ('rcv2',  ic.Rect()),
+   ]
+   # Use manhattan_nearest standalone
+   trunk_bb = ic.seg_bbox(ct.segs()[0])
+   print(f'  trunk bbox: ({trunk_bb.x1},{trunk_bb.y1},{trunk_bb.x2},{trunk_bb.y2})')
+   drv1 = ic.Rect(); drv1.x1=50;  drv1.y1=380; drv1.x2=230; drv1.y2=620
+   rcv2 = ic.Rect(); rcv2.x1=250; rcv2.y1=50;  rcv2.x2=450; rcv2.y2=230
+   print(f'  trunk->drv1: {ic.manhattan_nearest(trunk_bb, drv1)}')
+   print(f'  trunk->rcv2: {ic.manhattan_nearest(trunk_bb, rcv2)}')
+   print(f'  drv1->rcv2:  {ic.manhattan_nearest(drv1, rcv2)}')
+   "
+
+   Run shell command
+
+ Newline followed by # inside a quoted argument can hide arguments from path validation
+
+
+5) after my prompt for MST for trunk + busterms..
+ Bash command                                                                                                                                                                                             
+                                                                                                                                                                                                          
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "                                                                                                                                              
+   # TRUNK_H WL=618: seg[0] H [212,680] y=305, seg[1] V drv1 x=212, seg[2] V rcv2 x=350                                                                                                                   
+   # Blocks: drv1(50,380,230,620), rcv1(680,120,880,500), rcv2(250,50,450,230)                                                                                                                            
+   # Trunk bbox: x=[212,680] y=[305,305] (degenerate H)
+
+   def mdist(ax1,ay1,ax2,ay2, bx1,by1,bx2,by2):
+       dx = max(0, max(ax1-bx2, bx1-ax2))
+       dy = max(0, max(ay1-by2, by1-ay2))
+       return dx+dy
+
+   # trunk to drv1
+   print('trunk->drv1:', mdist(212,305,680,305, 50,380,230,620))
+   # trunk to rcv2
+   print('trunk->rcv2:', mdist(212,305,680,305, 250,50,450,230))
+   # drv1 to rcv2
+   print('drv1->rcv2:', mdist(50,380,230,620, 250,50,450,230))
+   # trunk to rcv1 (directly connected)
+   print('trunk->rcv1:', mdist(212,305,680,305, 680,120,880,500))
+   "
+
+   Run shell command
+
+ Newline followed by # inside a quoted argument can hide arguments from path validation
+
+ Do you want to proceed?
+
+
+4) Bash command                                                                                                                                                                                             
+                                                                                                                                                                                                        
+   install /Users/ben/src/buda/buda_system_v2/build/interconnect.cpython-313-darwin.so /Users/ben/src/buda/buda_system_v2/src/ && cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "             
+   import sys; sys.path.insert(0, '.')                                                                                                                                                                    
+   import interconnect as ic
+                                                                                                                                                                                                          
+   fp = ic.Floorplan()                                                                                                                                                                                    
+   fp.add_block('drv1',  50, 380, 230, 620)                                                                                                                                                               
+   fp.add_block('rcv1', 680, 120, 880, 500)
+   fp.add_block('rcv2', 250,  50, 450, 230)
+
+   gen = ic.TopologyGenerator(fp)
+   topos = gen.generate_multicast_candidates('drv1', ['rcv1', 'rcv2'])
+   # Pick the first TRUNK_H (shortest WL)
+   t = topos[0]
+   print('Topology:', t.type, 'WL=', t.estimated_wirelength)
+   for i,s in enumerate(t.segments):
+       print(f'  seg[{i}]: ({s.start.x},{s.start.y})->({s.end.x},{s.end.y})')
+   print()
+
+   ct = ic.ConnTopology()
+   ct.build(t, fp)
+   for i, cs in enumerate(ct.segs()):
+       dir_str = 'H' if cs.horiz else 'V'
+       along = f'[{cs.along_lo},{cs.along_hi}]'
+       slide = f'[{cs.perp_lo},{cs.perp_hi}]'
+       print(f'  seg[{i}] {dir_str}  along={along}  perp_pos={cs.perp_pos}  perp_slide={slide}')
+       for c in cs.conns:
+           if c.kind == ic.SegConnKind.BUSTERM:
+               print(f'    -> BUSTERM {c.block_name}  face={c.face_coord}  at_pos={c.at_pos}')
+           else:
+               print(f'    -> SEG[{c.seg_idx}]  at_pos={c.at_pos}')
+   "
+
+   Run shell command
+
+ Newline followed by # inside a quoted argument can hide arguments from path validation
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+
+3) Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
+      import sys; sys.path.insert(0, '.')
+      import interconnect as ic
+
+      fp = ic.Floorplan()
+      fp.add_block('drv1',  50, 380, 230, 620)
+      fp.add_block('rcv1', 680, 120, 880, 500)
+      fp.add_block('rcv2', 250,  50, 450, 230)
+
+      gen = ic.TopologyGenerator(fp)
+      topos = gen.generate_multicast_candidates('drv1', ['rcv1', 'rcv2'])
+      for t in topos:
+          segs = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t.segments]
+          print(f'{t.type:14s} WL={t.estimated_wirelength}: {segs}')
+      "
+      )
+  ⎿  TRUNK_H        WL=618: [(212, 305, 680, 305), (212, 380, 212, 305), (350, 230, 350, 305)]
+     TRUNK_H        WL=618: [(212, 310, 680, 310), (212, 380, 212, 310), (350, 230, 350, 310)]
+     TRUNK_V        WL=624: [(350, 230, 350, 404), (230, 404, 350, 404), (680, 310, 350, 310)]
+     TRUNK_V        WL=652: [(240, 212, 240, 404), (230, 404, 240, 404), (680, 310, 240, 310), (250, 212, 240, 212)]
+     TRUNK_H        WL=660: [(230, 440, 680, 440), (350, 230, 350, 440)]
+     TRUNK_H        WL=673: [(212, 175, 680, 175), (212, 380, 212, 175)]
+     TRUNK_H        WL=708: [(212, 140, 680, 140), (212, 380, 212, 140)]
+     TRUNK_H        WL=720: [(230, 500, 680, 500), (350, 230, 350, 500)]
+     TRUNK_H_OOB    WL=728: [(212, 120, 680, 120), (212, 380, 212, 120)]
+     TRUNK_V        WL=757: [(565, 212, 565, 404), (230, 404, 565, 404), (680, 310, 565, 310), (450, 212, 565, 212)]
+     TRUNK_V        WL=818: [(140, 212, 140, 380), (680, 310, 140, 310), (250, 212, 140, 212)]
+     TRUNK_H_OOB    WL=888: [(212, 50, 700, 50), (212, 380, 212, 50), (700, 120, 700, 50)]
+     TRUNK_H_OOB    WL=980: [(230, 620, 700, 620), (700, 500, 700, 620), (350, 230, 350, 620)]
+     TRUNK_V_OOB    WL=998: [(50, 212, 50, 380), (680, 310, 50, 310), (250, 212, 50, 212)]
+     TRUNK_V        WL=1072: [(780, 212, 780, 404), (230, 404, 780, 404), (450, 212, 780, 212)]
+     TRUNK_V_OOB    WL=1272: [(880, 212, 880, 404), (230, 404, 880, 404), (450, 212, 880, 212)]
+
+
+
+1)
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
+   import sys; sys.path.insert(0, '.')                      
+   import interconnect as ic          
+                            
+   fp = ic.Floorplan()
+   # drv2 and rcv2 from two_bundle_cong.buda
+   fp.add_block('drv2', 300, 450, 500, 550) 
+   fp.add_block('rcv2', 250,  50, 450, 230)
+                                           
+   print('drv2 x: 300..500,  rcv2 x: 250..450  (overlap: 300..450)')
+   print('drv2 y: 450..550,  rcv2 y: 50..230   (no overlap)')       
+   print()                                                   
+          
+   gen = ic.TopologyGenerator(fp)
+   topos = gen.generate_candidates('drv2', 'rcv2')
+   for t in topos:                                
+       segs = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t.segments]
+       print(f'{t.type:12s} WL={t.estimated_wirelength}: {segs}')           
+   "                                                             
+    
+2)
+ cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
+ # drv2 and rcv2 layout 
+ # drv2: x=300..500  y=450..550 
+ # rcv2: x=250..450  y=50..230 
+ # x-overlap: 300..450 
+   # rcv2-exclusive left zone: x=250..300
+   # drv2-exclusive right zone: x=450..500
+
+   # Current L shapes just collapse to 1-segment V
+   # L_HV: sx=face_x(d.x=350)=350, bend_x=clamp_10pct(350,250,450)=350 → sx==bend_x → H zero
+   # L_VH: vx=s.x=400, dx=face_x(400)=400 → vx==dx → H zero
+
+   # Proper L_HV: H exits drv2 LEFT face (x=300), V in rcv2's exclusive zone [250,300)
+   # bend_x = midpoint(250,300) = 275
+   # H: (300,460) → (275,460)  V: (275,460) → (275,230)  WL=25+230=255
+
+   # Proper L_VH: V in drv2's exclusive zone (450,500], H to rcv2 RIGHT face (x=450)
+   # vx = midpoint(450,500) = 475, dx=dst.face_x(475)=450
+   # V: (475,450) → (475,212)  H: (475,212) → (450,212)  WL=238+25=263
+
+   for label, segs in [
+       ('L_HV proper', [(300,460,275,460),(275,460,275,230)]),
+       ('L_VH proper', [(475,450,475,212),(475,212,450,212)]),
+   ]:
+       wl = sum(abs(x2-x1)+abs(y2-y1) for x1,y1,x2,y2 in segs)
+       print(f'{label} WL={wl}: {segs}')
+   "
+
+# Newline followed by # inside a quoted argument can hide arguments from path validation
+# Do you want to proceed?
+# ❯ 1. Yes               
+#   2. No 

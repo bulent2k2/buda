@@ -3,9 +3,14 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.widgets import Button
 
+import interconnect as ic
 
 _LAYER_COLOR = {4: '#007ACC', 5: '#CC0000', 6: '#00AA44'}
 _LAYER_LABEL = {4: 'M4 H', 5: 'M5 V', 6: 'M6 H-trunk'}
+
+# Values beyond this magnitude are the INT_MIN/2 or INT_MAX/2 sentinels
+# that ConnTopology uses for "unconstrained" slide ranges.
+_UNCONSTRAINED = 1_000_000_000
 
 
 class TopologyExplorer:
@@ -39,6 +44,74 @@ class TopologyExplorer:
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
 
         self._draw()
+
+    # ------------------------------------------------------------------
+
+    def _draw_slide_spans(self, topo):
+        """Overlay slide-range bands on the current topology.
+
+        For each ConnSeg the band is the rectangle the segment can occupy while
+        respecting all its busterm and seg-to-seg connectivity constraints:
+
+          H segment  →  width  = along span,   height = perp_lo .. perp_hi  (y range)
+          V segment  →  height = along span,   width  = perp_lo .. perp_hi  (x range)
+
+        Sentinels (±INT_MIN/2) are clamped to the view bounds so the band
+        stays finite on screen.  Finite bounds get a dotted marker line and a
+        small numeric label.
+        """
+        ax = self.ax
+        xs, ys = self.fp.get_hanan_grid()
+
+        # View bounds used to clamp "infinite" sentinel values.
+        margin = max((xs[-1] - xs[0]) if len(xs) > 1 else 50,
+                     (ys[-1] - ys[0]) if len(ys) > 1 else 50) * 0.25
+        x_lo_v = (xs[0]  if xs else 0)  - margin
+        x_hi_v = (xs[-1] if xs else 100) + margin
+        y_lo_v = (ys[0]  if ys else 0)  - margin
+        y_hi_v = (ys[-1] if ys else 100) + margin
+
+        def clamp_x(v): return x_lo_v if v < -_UNCONSTRAINED else (x_hi_v if v > _UNCONSTRAINED else v)
+        def clamp_y(v): return y_lo_v if v < -_UNCONSTRAINED else (y_hi_v if v > _UNCONSTRAINED else v)
+
+        ct = ic.ConnTopology()
+        ct.build(topo, self.fp)
+
+        for raw_seg, cs in zip(topo.segments, ct.segs()):
+            col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
+
+            if cs.horiz:
+                # Band spans the full y slide range across the segment's x extent.
+                band_y0 = clamp_y(cs.perp_lo)
+                band_y1 = clamp_y(cs.perp_hi)
+                if band_y0 >= band_y1:
+                    continue
+                ax.add_patch(patches.Rectangle(
+                    (cs.along_lo, band_y0), cs.along_hi - cs.along_lo, band_y1 - band_y0,
+                    linewidth=0, facecolor=col, alpha=0.10, zorder=3))
+                # Dotted marker + label at each finite bound.
+                for y_b, label in ((cs.perp_lo, 'lo'), (cs.perp_hi, 'hi')):
+                    if abs(y_b) < _UNCONSTRAINED:
+                        ax.plot([cs.along_lo, cs.along_hi], [y_b, y_b],
+                                color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
+                        ax.text((cs.along_lo + cs.along_hi) / 2, y_b, f' {y_b}',
+                                fontsize=6, color=col, va='bottom' if label == 'lo' else 'top',
+                                ha='center', zorder=5, alpha=0.85)
+            else:
+                band_x0 = clamp_x(cs.perp_lo)
+                band_x1 = clamp_x(cs.perp_hi)
+                if band_x0 >= band_x1:
+                    continue
+                ax.add_patch(patches.Rectangle(
+                    (band_x0, cs.along_lo), band_x1 - band_x0, cs.along_hi - cs.along_lo,
+                    linewidth=0, facecolor=col, alpha=0.10, zorder=3))
+                for x_b, label in ((cs.perp_lo, 'lo'), (cs.perp_hi, 'hi')):
+                    if abs(x_b) < _UNCONSTRAINED:
+                        ax.plot([x_b, x_b], [cs.along_lo, cs.along_hi],
+                                color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
+                        ax.text(x_b, (cs.along_lo + cs.along_hi) / 2, f' {x_b}',
+                                fontsize=6, color=col, va='center',
+                                ha='left' if label == 'lo' else 'right', zorder=5, alpha=0.85)
 
     # ------------------------------------------------------------------
 
@@ -83,6 +156,9 @@ class TopologyExplorer:
         for y in ys:
             ax.axhline(y=y, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
 
+        # Slide-range bands (drawn before segments so segments sit on top)
+        self._draw_slide_spans(topo)
+
         # Topology segments — width proportional to bundle width
         viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
         for seg in topo.segments:
@@ -103,6 +179,10 @@ class TopologyExplorer:
         handles = [Line2D([0], [0], color=_LAYER_COLOR.get(l, '#888'), lw=3,
                           label=_LAYER_LABEL.get(l, f'Layer {l}'))
                    for l in used_layers]
+        handles.append(patches.Patch(facecolor='#888888', alpha=0.20,
+                                     label='slide range'))
+        handles.append(Line2D([0], [0], color='#888888', lw=0.9, linestyle=':',
+                               alpha=0.7, label='slide bound'))
         ax.legend(handles=handles, loc='upper right', fontsize=9)
 
         ax.set_aspect('equal')
