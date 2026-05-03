@@ -1,6 +1,31 @@
-6)
-Bash command                                                                                                                                                                                             
-                                                                                                                                                                                                        
+7) Bash command 
+
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
+   import interconnect as ic, sys
+   sys.path.insert(0, '.')
+
+   # Reproduce test.buda setup
+   fp = ic.Floorplan()
+   fp.add_block('drv1', 50, 380, 230, 620)
+   fp.add_block('rcv1', 680, 120, 880, 500)
+   fp.add_block('rcv2', 350, 50, 550, 230)
+
+   gen = ic.TopologyGenerator(fp)
+   gen.set_busterm_mode(True)
+   topos = gen.generate_multicast_candidates('drv1', ['rcv1', 'rcv2'])
+
+   print(f'{len(topos)} topologies:')
+   for i, t in enumerate(topos):
+       segs = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t.segments]
+       print(f'  [{i+1}] {t.type:15s}  WL={t.estimated_wirelength:4d}  trunk={t.trunk_location}  segs={segs}')
+   "
+
+   Verify topology count and distinctness
+
+
+
+6) Bash command 
+ 
    install /Users/ben/src/buda/buda_system_v2/build/interconnect.cpython-313-darwin.so /Users/ben/src/buda/buda_system_v2/src/ && cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
    import sys; sys.path.insert(0, '.')
    import interconnect as ic
@@ -41,18 +66,14 @@ Bash command
    print(f'  drv1->rcv2:  {ic.manhattan_nearest(drv1, rcv2)}')
    "
 
-   Run shell command
-
- Newline followed by # inside a quoted argument can hide arguments from path validation
-
 
 5) after my prompt for MST for trunk + busterms..
- Bash command                                                                                                                                                                                             
-                                                                                                                                                                                                          
-   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "                                                                                                                                              
-   # TRUNK_H WL=618: seg[0] H [212,680] y=305, seg[1] V drv1 x=212, seg[2] V rcv2 x=350                                                                                                                   
-   # Blocks: drv1(50,380,230,620), rcv1(680,120,880,500), rcv2(250,50,450,230)                                                                                                                            
-   # Trunk bbox: x=[212,680] y=[305,305] (degenerate H)
+ Bash command 
+ 
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
+   # TRUNK_H WL=618: seg[0] H [212,680] y=305, seg[1] V drv1 x=212, seg[2] V rcv2 x=350 
+   # Blocks: drv1(50,380,230,620), rcv1(680,120,880,500), rcv2(250,50,450,230) 
+   # Trunk bbox: x=[212,680] y=[305,305] (degenerate H) 
 
    def mdist(ax1,ay1,ax2,ay2, bx1,by1,bx2,by2):
        dx = max(0, max(ax1-bx2, bx1-ax2))
@@ -69,21 +90,14 @@ Bash command
    print('trunk->rcv1:', mdist(212,305,680,305, 680,120,880,500))
    "
 
-   Run shell command
-
- Newline followed by # inside a quoted argument can hide arguments from path validation
-
- Do you want to proceed?
-
-
-4) Bash command                                                                                                                                                                                             
-                                                                                                                                                                                                        
-   install /Users/ben/src/buda/buda_system_v2/build/interconnect.cpython-313-darwin.so /Users/ben/src/buda/buda_system_v2/src/ && cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "             
-   import sys; sys.path.insert(0, '.')                                                                                                                                                                    
-   import interconnect as ic
-                                                                                                                                                                                                          
-   fp = ic.Floorplan()                                                                                                                                                                                    
-   fp.add_block('drv1',  50, 380, 230, 620)                                                                                                                                                               
+4) Bash command 
+ 
+   install /Users/ben/src/buda/buda_system_v2/build/interconnect.cpython-313-darwin.so /Users/ben/src/buda/buda_system_v2/src/ && cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
+   import sys; sys.path.insert(0, '.') 
+   import interconnect as ic 
+ 
+   fp = ic.Floorplan() 
+   fp.add_block('drv1',  50, 380, 230, 620) 
    fp.add_block('rcv1', 680, 120, 880, 500)
    fp.add_block('rcv2', 250,  50, 450, 230)
 
@@ -110,14 +124,6 @@ Bash command
                print(f'    -> SEG[{c.seg_idx}]  at_pos={c.at_pos}')
    "
 
-   Run shell command
-
- Newline followed by # inside a quoted argument can hide arguments from path validation
-
- Do you want to proceed?
- ❯ 1. Yes
-   2. No
-
 
 3) Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
       import sys; sys.path.insert(0, '.')
@@ -135,7 +141,7 @@ Bash command
           print(f'{t.type:14s} WL={t.estimated_wirelength}: {segs}')
       "
       )
-  ⎿  TRUNK_H        WL=618: [(212, 305, 680, 305), (212, 380, 212, 305), (350, 230, 350, 305)]
+     TRUNK_H        WL=618: [(212, 305, 680, 305), (212, 380, 212, 305), (350, 230, 350, 305)]
      TRUNK_H        WL=618: [(212, 310, 680, 310), (212, 380, 212, 310), (350, 230, 350, 310)]
      TRUNK_V        WL=624: [(350, 230, 350, 404), (230, 404, 350, 404), (680, 310, 350, 310)]
      TRUNK_V        WL=652: [(240, 212, 240, 404), (230, 404, 240, 404), (680, 310, 240, 310), (250, 212, 240, 212)]
@@ -151,8 +157,6 @@ Bash command
      TRUNK_V_OOB    WL=998: [(50, 212, 50, 380), (680, 310, 50, 310), (250, 212, 50, 212)]
      TRUNK_V        WL=1072: [(780, 212, 780, 404), (230, 404, 780, 404), (450, 212, 780, 212)]
      TRUNK_V_OOB    WL=1272: [(880, 212, 880, 404), (230, 404, 880, 404), (450, 212, 880, 212)]
-
-
 
 1)
    cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
@@ -176,11 +180,11 @@ Bash command
    "                                                             
     
 2)
- cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
- # drv2 and rcv2 layout 
- # drv2: x=300..500  y=450..550 
- # rcv2: x=250..450  y=50..230 
- # x-overlap: 300..450 
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
+   # drv2 and rcv2 layout 
+   # drv2: x=300..500  y=450..550 
+   # rcv2: x=250..450  y=50..230 
+   # x-overlap: 300..450 
    # rcv2-exclusive left zone: x=250..300
    # drv2-exclusive right zone: x=450..500
 

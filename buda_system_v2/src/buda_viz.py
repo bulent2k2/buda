@@ -134,7 +134,7 @@ class TopologyExplorer:
 
         ax.set_title(
             f"Bundle {bid}  ·  topology {self.idx + 1} / {n}"
-            f"  ·  {topo.type}  ·  WL = {wl}",
+            f"  ·  {topo.type}  ·  WL = {wl}  ·  segs = {len(topo.segments)}",
             fontsize=13, pad=10)
 
         # Floorplan blocks

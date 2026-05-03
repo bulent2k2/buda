@@ -418,6 +418,44 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     }
 
     if (use_busterm_) {
+        // ── In-bbox pass-through snap ──────────────────────────────────────────
+        // When the trunk lands inside one or more pass-through blocks and all
+        // stubbed block faces lie on the SAME SIDE, we can minimise stub length
+        // by pulling y_trunk to the nearest pass-through boundary on that side
+        // (10 % from the block edge, consistent with busterm margin rule).
+        // Only applied for in-bbox trunks to avoid pushing OOB trunks back inside.
+        if (!out_of_bbox) {
+            int pt_lo = INT_MIN / 2, pt_hi = INT_MAX / 2;
+            bool any_pt = false;
+            for (int i = 0; i < n; ++i) {
+                if (!has_stub[i]) {
+                    any_pt = true;
+                    int m = std::max(1, (int)(0.1 * (blocks[i].y2 - blocks[i].y1)));
+                    pt_lo = std::max(pt_lo, blocks[i].y1 + m);
+                    pt_hi = std::min(pt_hi, blocks[i].y2 - m);
+                }
+            }
+            if (any_pt && pt_lo <= pt_hi) {
+                int n_above = 0, n_below = 0;
+                for (int i = 0; i < n; ++i) {
+                    if (has_stub[i]) {
+                        if (conn_y[i] > y_trunk) ++n_above;
+                        else                      ++n_below;
+                    }
+                }
+                // Only snap when all stubs are on one side (balanced case is
+                // already at the optimal wirelength regardless of trunk y).
+                if      (n_above > 0 && n_below == 0) y_trunk = pt_hi; // stubs above → snap up
+                else if (n_below > 0 && n_above == 0) y_trunk = pt_lo; // stubs below → snap down
+                // Recompute conn_y (stub faces are unchanged, but pass-through
+                // conn_y = y_trunk, which we won't use for stub generation).
+                for (int i = 0; i < n; ++i)
+                    conn_y[i] = blocks[i].face_y(y_trunk);
+                // has_stub stays unchanged — y_trunk is still within each
+                // pass-through block's range after clamping by pt_lo/pt_hi.
+            }
+        }
+
         // For pass-through blocks at the spine extremes, pull the endpoint back to
         // the block face so the spine doesn't poke into the block.
         {
@@ -483,6 +521,33 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     }
 
     if (use_busterm_) {
+        // ── In-bbox pass-through snap ──────────────────────────────────────────
+        if (!out_of_bbox) {
+            int pt_lo = INT_MIN / 2, pt_hi = INT_MAX / 2;
+            bool any_pt = false;
+            for (int i = 0; i < n; ++i) {
+                if (!has_stub[i]) {
+                    any_pt = true;
+                    int m = std::max(1, (int)(0.1 * (blocks[i].x2 - blocks[i].x1)));
+                    pt_lo = std::max(pt_lo, blocks[i].x1 + m);
+                    pt_hi = std::min(pt_hi, blocks[i].x2 - m);
+                }
+            }
+            if (any_pt && pt_lo <= pt_hi) {
+                int n_right = 0, n_left = 0;
+                for (int i = 0; i < n; ++i) {
+                    if (has_stub[i]) {
+                        if (conn_x[i] > x_trunk) ++n_right;
+                        else                      ++n_left;
+                    }
+                }
+                if      (n_right > 0 && n_left == 0) x_trunk = pt_hi;
+                else if (n_left  > 0 && n_right == 0) x_trunk = pt_lo;
+                for (int i = 0; i < n; ++i)
+                    conn_x[i] = blocks[i].face_x(x_trunk);
+            }
+        }
+
         // Pull pass-through block endpoints to the block face.
         {
             int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
@@ -601,13 +666,31 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     for (int y_t : y_set) add_trunk_h(pins, blocks, y_t, false, results);
     for (int x_t : x_set) add_trunk_v(pins, blocks, x_t, false, results);
 
-    // OOB trunks: Hanan grid lines strictly outside the pin bbox (detour routes).
-    for (int y_t : hanan_y)
-        if (y_t < y_lo || y_t > y_hi)
-            add_trunk_h(pins, blocks, y_t, true, results);
-    for (int x_t : hanan_x)
-        if (x_t < x_lo || x_t > x_hi)
-            add_trunk_v(pins, blocks, x_t, true, results);
+    // OOB trunks: channel midpoints of Hanan intervals that fall outside the pin
+    // bbox, plus outer-margin positions one step beyond each extreme Hanan line.
+    // Never use exact Hanan lines (= block faces) for OOB trunks — placing the
+    // trunk on a face collapses one stub to zero length, producing a degenerate
+    // pass-through instead of a proper detour stub.  (Same logic as 2-pin U/C.)
+    if ((int)hanan_y.size() >= 2) {
+        int margin_y = std::max(1, (int)(0.1 * (hanan_y.back() - hanan_y[0])));
+        for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {
+            int mid = (hanan_y[i] + hanan_y[i+1]) / 2;
+            if (mid < y_lo || mid > y_hi)
+                add_trunk_h(pins, blocks, mid, true, results);
+        }
+        add_trunk_h(pins, blocks, hanan_y[0]      - margin_y, true, results);
+        add_trunk_h(pins, blocks, hanan_y.back()  + margin_y, true, results);
+    }
+    if ((int)hanan_x.size() >= 2) {
+        int margin_x = std::max(1, (int)(0.1 * (hanan_x.back() - hanan_x[0])));
+        for (int i = 0; i + 1 < (int)hanan_x.size(); ++i) {
+            int mid = (hanan_x[i] + hanan_x[i+1]) / 2;
+            if (mid < x_lo || mid > x_hi)
+                add_trunk_v(pins, blocks, mid, true, results);
+        }
+        add_trunk_v(pins, blocks, hanan_x[0]      - margin_x, true, results);
+        add_trunk_v(pins, blocks, hanan_x.back()  + margin_x, true, results);
+    }
 
     annotate_and_sort(results);
     return results;

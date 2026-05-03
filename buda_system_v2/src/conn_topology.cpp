@@ -155,6 +155,35 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     std::map<std::string, Rect> bmap;
     for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
 
+    // ── Pass 0 — pass-through block constraints ──────────────────────────────
+    //
+    // A segment "passes through" a block when its along-span overlaps the block's
+    // extent in the along direction AND its perp_pos is inside the block's perp
+    // extent.  The segment's perp coordinate must stay within the block's perp
+    // range to maintain that connection — constrain perp_lo/hi accordingly.
+    //
+    // No margin is applied here (unlike busterm face connections): the trunk can
+    // sit at any y (or x) within the block as long as the along-span overlaps.
+    for (auto& cs : segs_) {
+        for (const auto& [bname, rect] : bmap) {
+            if (cs.horiz) {
+                bool overlaps = (cs.along_lo < rect.x2 && cs.along_hi > rect.x1);
+                bool inside   = (cs.perp_pos >= rect.y1 && cs.perp_pos <= rect.y2);
+                if (overlaps && inside) {
+                    cs.perp_lo = std::max(cs.perp_lo, rect.y1);
+                    cs.perp_hi = std::min(cs.perp_hi, rect.y2);
+                }
+            } else {
+                bool overlaps = (cs.along_lo < rect.y2 && cs.along_hi > rect.y1);
+                bool inside   = (cs.perp_pos >= rect.x1 && cs.perp_pos <= rect.x2);
+                if (overlaps && inside) {
+                    cs.perp_lo = std::max(cs.perp_lo, rect.x1);
+                    cs.perp_hi = std::min(cs.perp_hi, rect.x2);
+                }
+            }
+        }
+    }
+
     // ── Pass 1 ──
     for (auto& cs : segs_) {
         for (const auto& conn : cs.conns) {

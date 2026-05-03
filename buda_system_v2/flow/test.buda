@@ -9,7 +9,7 @@ def_layer 6 M6 H TOP 0.0
 # ── Floorplan ────────────────────────────────────────────────
 add_block drv1    50  380  230  620
 add_block rcv1   680  120  880  500
-add_block rcv2   250   50  450  230
+add_block rcv2   350   50  550  230
 
 # ── Net ──────────────────────────────────────────────────────
 add_net b1 drv1.tx rcv1.rx,rcv2.rx
