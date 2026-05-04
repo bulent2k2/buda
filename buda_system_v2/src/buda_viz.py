@@ -402,6 +402,7 @@ class BudaVisualizer:
         self._solo           = False  # hide vs dim non-selected bundles
         self._bid_list       = []     # ordered list of bundle ids (set in show())
         self._btn_solo       = None   # Button widget (set in show())
+        self._topo_explorer  = None   # keeps TopologyExplorer alive while open
         self._pick_happened  = False
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
@@ -509,15 +510,19 @@ class BudaVisualizer:
         self._refresh_highlight()
 
     def _open_topo_explorer(self):
-        """Open a TopologyExplorer window for the currently highlighted bundle."""
+        """Open a TopologyExplorer window for the currently highlighted bundle.
+
+        The explorer is stored on self so it is not garbage-collected while the
+        window is open — button callbacks would silently die otherwise.
+        """
         if self._highlighted is None:
             return
         wrapper = next((w for w in self.bundles
                         if w.original_bundle.id == self._highlighted), None)
         if wrapper is None or not wrapper.candidates:
             return
-        explorer = TopologyExplorer(self.fp, wrapper)
-        explorer.fig.show()
+        self._topo_explorer = TopologyExplorer(self.fp, wrapper)
+        self._topo_explorer.fig.show()
 
     def _on_key(self, event):
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
