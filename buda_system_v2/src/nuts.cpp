@@ -292,13 +292,19 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     }
 
     // Pass 2 — connectivity-based override via SEG→BUSTERM traversal.
-    // Also captures ConnTopology slide ranges and identifies trunk segments.
+    // Also captures ConnTopology slide ranges, identifies trunk segments, and
+    // builds the reverse-connection map for per-layer span adjustment.
     //
-    // slide_map : (bid, si) -> (perp_lo, perp_hi) from ConnTopology
-    // trunk_set : segments with ≥2 SEG connections and 0 BUSTERM connections
-    //             (i.e. spine/trunk segments, not stubs or direct I-shapes)
-    std::map<std::pair<int,int>, std::pair<double,double>> slide_map;
-    std::set<std::pair<int,int>>                           trunk_set;
+    // slide_map    : (bid, si) -> (perp_lo, perp_hi) from ConnTopology
+    // trunk_set    : segments with ≥2 SEG connections and 0 BUSTERM connections
+    //               (i.e. spine/trunk segments, not stubs or direct I-shapes)
+    // rev_conn_map : (bid, T_si) -> list of {S_bid, S_si, at_pos_in_S}
+    //   "when T is placed, SET the span endpoint of S at at_pos_in_S to T's centre"
+    //   at_pos_in_S is the nominal junction coordinate along S's routing direction.
+    struct SpanAdjConn { int src_bid, src_si; double at_pos; };
+    std::map<std::pair<int,int>, std::pair<double,double>>    slide_map;
+    std::set<std::pair<int,int>>                              trunk_set;
+    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>    rev_conn_map;
 
     for (const auto& bw : bundles) {
         if (bw.candidates.empty()) continue;
@@ -324,6 +330,16 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
                 else                             ++n_bt;
             }
             if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
+
+            // Reverse-connection map: when segment T=(bid, conn.seg_idx) is placed,
+            // SET the span endpoint of S=(bid, si) at at_pos to T's track centre.
+            // at_pos is along S's routing direction (= T's perpendicular direction).
+            for (const auto& conn : cs.conns) {
+                if (conn.kind != SegConn::SEG) continue;
+                auto t_key = std::make_pair(bid, conn.seg_idx);
+                rev_conn_map[t_key].push_back(
+                    { bid, si, static_cast<double>(conn.at_pos) });
+            }
 
             // Pull target from connected block faces.
             std::vector<double> targets;
@@ -390,14 +406,46 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
         }
     }
 
+    // Index for fast span-adjustment lookups.
+    std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
+    for (auto& ts : result.segments)
+        ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+
     // Group segment pointers by layer.
     std::map<int, std::vector<TrackSegment*>> by_layer;
     for (auto& ts : result.segments)
         by_layer[ts.layer].push_back(&ts);
 
-    // Solve each layer independently (the problem parallelises here).
-    for (auto& [layer_id, layer_segs] : by_layer)
+    // Solve each layer independently, then immediately adjust the span
+    // endpoints of every segment whose connected partner just moved.
+    //
+    // Span adjustment: when segment T on this layer is placed at track centre C,
+    // identify each segment S that has a SEG connection to T.  The connection
+    // carries at_pos — the nominal junction coordinate along S's routing
+    // direction (= T's perpendicular direction = the direction of C).  We SET
+    // the endpoint of S's span that is nearest to at_pos to C, which correctly
+    // handles both extension (trunk moved away) and shrinking (trunk moved
+    // closer than the original topology position).
+    for (auto& [layer_id, layer_segs] : by_layer) {
         solve_layer(layer_segs, pull_map);
+
+        for (const TrackSegment* ts : layer_segs) {
+            if (!ts->placed) continue;
+            auto it = rev_conn_map.find({ts->bundle_id, ts->seg_idx});
+            if (it == rev_conn_map.end()) continue;
+            const double my_centre = ts->track_position + ts->width / 2.0;
+            for (const auto& sc : it->second) {
+                auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
+                if (jt == ts_ptr_map.end()) continue;
+                TrackSegment* other = jt->second;
+                const double mid = (other->span_lo + other->span_hi) / 2.0;
+                if (sc.at_pos <= mid)
+                    other->span_lo = my_centre;
+                else
+                    other->span_hi = my_centre;
+            }
+        }
+    }
 
     // -----------------------------------------------------------------------
     // Metrics
