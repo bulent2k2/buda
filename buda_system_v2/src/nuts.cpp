@@ -336,9 +336,17 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
                 }
             }
             if (!targets.empty()) {
-                double mean = std::accumulate(targets.begin(), targets.end(), 0.0)
-                              / static_cast<double>(targets.size());
-                pull_map[key] = mean;   // overrides nominal
+                // Use the median (L1 minimiser) rather than the mean so that a
+                // majority of stubs pulling in one direction actually wins.
+                // Example: faces at [100, 100, 150] → median 100, not mean 116.7.
+                std::sort(targets.begin(), targets.end());
+                double median;
+                std::size_t n = targets.size();
+                if (n % 2 == 1)
+                    median = targets[n / 2];
+                else
+                    median = (targets[n / 2 - 1] + targets[n / 2]) / 2.0;
+                pull_map[key] = median;   // overrides nominal
             }
         }
     }
