@@ -652,12 +652,12 @@ class BudaVisualizer:
                     is_h   = (seg.start.y == seg.end.y)
 
                     if is_h:
-                        sx, ex = seg.start.x, seg.end.x
+                        sx, ex = ts.span_lo, ts.span_hi
                         sy = ey = center
                         # Filled footprint of the placed bus (actual track occupancy)
                         footprint = patches.Rectangle(
-                            (min(sx, ex), ts.track_position),
-                            abs(ex - sx), ts.width,
+                            (sx, ts.track_position),
+                            ex - sx, ts.width,
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
@@ -669,11 +669,11 @@ class BudaVisualizer:
                                                alpha=0.3, zorder=4)
                             self._register(bid, bl, alpha=0.3, is_band=True)
                     else:
-                        sy, ey = seg.start.y, seg.end.y
+                        sy, ey = ts.span_lo, ts.span_hi
                         sx = ex = center
                         footprint = patches.Rectangle(
-                            (ts.track_position, min(sy, ey)),
-                            ts.width, abs(ey - sy),
+                            (ts.track_position, sy),
+                            ts.width, ey - sy,
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
