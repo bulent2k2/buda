@@ -14,36 +14,60 @@ _UNCONSTRAINED = 1_000_000_000
 
 
 class TopologyExplorer:
-    """Cycle through all topology candidates for one bundle.
+    """Cycle through topology candidates across one or more bundles.
 
-    Navigation: ◀ / ▶ buttons, or ← / → arrow keys.
-    Topologies are shown in order of increasing wirelength (pre-sorted by the
-    C++ generator).
+    Navigation:
+      ← / → (or ◀/▶ Topo buttons)  — prev / next topology within bundle
+      [ / ] (or ◀/▶ Bus buttons)    — prev / next bundle
     """
 
-    def __init__(self, fp, bundle_wrapper):
-        self.fp      = fp
-        self.wrapper = bundle_wrapper
-        self.topos   = bundle_wrapper.candidates   # already sorted by WL
-        self.idx     = 0
+    def __init__(self, fp, wrappers):
+        self.fp       = fp
+        # Accept a single wrapper or a list for backward compatibility.
+        self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
+        self.bidx     = 0   # current bundle index
+        self.idx      = 0   # current topology index within bundle
 
         self.fig = plt.figure(figsize=(13, 10))
         self.fig.patch.set_facecolor('#f0f0f0')
 
-        # Main axes — leave bottom margin for buttons
-        self.ax = self.fig.add_axes([0.05, 0.12, 0.90, 0.82])
+        # Main axes — leave bottom margin for two button rows
+        self.ax = self.fig.add_axes([0.05, 0.13, 0.90, 0.81])
 
-        # Prev / Next buttons
-        ax_prev = self.fig.add_axes([0.08, 0.02, 0.18, 0.05])
-        ax_next = self.fig.add_axes([0.74, 0.02, 0.18, 0.05])
-        self._btn_prev = Button(ax_prev, '◀  Prev',  color='#ddeeff')
-        self._btn_next = Button(ax_next, 'Next  ▶', color='#ddeeff')
-        self._btn_prev.on_clicked(lambda _: self._step(-1))
-        self._btn_next.on_clicked(lambda _: self._step(+1))
+        # ── Topo navigation (inner pair, blue) ──
+        ax_tprev = self.fig.add_axes([0.22, 0.02, 0.20, 0.05])
+        ax_tnext = self.fig.add_axes([0.58, 0.02, 0.20, 0.05])
+        self._btn_tprev = Button(ax_tprev, '◀  Prev Topo', color='#ddeeff')
+        self._btn_tnext = Button(ax_tnext, 'Next Topo  ▶', color='#ddeeff')
+        self._btn_tprev.on_clicked(lambda _: self._step_topo(-1))
+        self._btn_tnext.on_clicked(lambda _: self._step_topo(+1))
+
+        # ── Bus navigation (outer pair, green) ──
+        ax_bprev = self.fig.add_axes([0.01, 0.02, 0.19, 0.05])
+        ax_bnext = self.fig.add_axes([0.80, 0.02, 0.19, 0.05])
+        self._btn_bprev = Button(ax_bprev, '◀  Prev Bus', color='#d9f5d9')
+        self._btn_bnext = Button(ax_bnext, 'Next Bus  ▶', color='#d9f5d9')
+        self._btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
+        self._btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
+
+        # Hide bus buttons when only one bundle is loaded.
+        if len(self.wrappers) == 1:
+            ax_bprev.set_visible(False)
+            ax_bnext.set_visible(False)
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
 
         self._draw()
+
+    # ------------------------------------------------------------------
+
+    @property
+    def wrapper(self):
+        return self.wrappers[self.bidx]
+
+    @property
+    def topos(self):
+        return self.wrapper.candidates
 
     # ------------------------------------------------------------------
 
@@ -162,13 +186,20 @@ class TopologyExplorer:
 
     # ------------------------------------------------------------------
 
-    def _step(self, delta):
+    def _step_topo(self, delta):
         self.idx = (self.idx + delta) % len(self.topos)
         self._draw()
 
+    def _step_bundle(self, delta):
+        self.bidx = (self.bidx + delta) % len(self.wrappers)
+        self.idx  = 0
+        self._draw()
+
     def _on_key(self, event):
-        if event.key in ('left',  'a'): self._step(-1)
-        if event.key in ('right', 'd'): self._step(+1)
+        if event.key in ('left',  'a'):         self._step_topo(-1)
+        if event.key in ('right', 'd'):         self._step_topo(+1)
+        if event.key in ('[', 'pageup'):        self._step_bundle(-1)
+        if event.key in (']', 'pagedown'):      self._step_bundle(+1)
 
     def _draw(self):
         ax = self.ax
@@ -181,12 +212,14 @@ class TopologyExplorer:
         ct     = self._build_conn_topo(topo)
         viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
 
+        nb   = len(self.wrappers)
         n_bt = sum(1 for cs in ct.segs()
                    for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
+        bus_label = (f"bus {self.bidx + 1}/{nb} · " if nb > 1 else "")
         ax.set_title(
-            f"Bundle {bid}  ·  topology {self.idx + 1} / {n}"
-            f"  ·  {topo.type}  ·  WL = {wl}"
-            f"  ·  bus-terms = {n_bt}  ·  segs = {len(topo.segments)}",
+            f"{bus_label}Bundle {bid}  ·  topo {self.idx + 1}/{n}"
+            f"  ·  {topo.type}  ·  WL={wl}"
+            f"  ·  bus-terms={n_bt}  ·  segs={len(topo.segments)}",
             fontsize=13, pad=10)
 
         # Floorplan blocks

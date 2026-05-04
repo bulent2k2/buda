@@ -119,18 +119,32 @@ class BudaSession:
                   f"({self.nuts_result.num_violations} interval violations, "
                   f"{self.nuts_result.num_overlaps} track overlaps).")
         elif cmd == "visualize_topologies":
-            # Usage: visualize_topologies <bundle_hint>
-            # Opens the TopologyExplorer for the matching bundle so you can
-            # step through every candidate in wirelength order.
-            hint = args[0] if args else ""
+            # Usage:
+            #   visualize_topologies <hint>         — first matching bundle
+            #   visualize_topologies -all [hints…]  — all matching bundles
+            #                                         (no hints = every bundle)
+            all_mode = args and args[0] == '-all'
+            hints    = args[1:] if all_mode else args[:1]
+
+            seen, wrappers = set(), []
             for w in self.bundles:
                 if not w.candidates: continue
-                if w.original_bundle.get_net_names()[0].startswith(hint):
-                    print(f"Opening explorer for bundle {w.original_bundle.id} "
-                          f"({len(w.candidates)} topologies, sorted by WL)")
-                    TopologyExplorer(self.fp, w).show()
-                    return
-            print(f"Warning: no bundle with candidates matching hint '{hint}'")
+                bid  = w.original_bundle.id
+                if bid in seen: continue
+                net0 = w.original_bundle.get_net_names()[0]
+                if not hints or any(net0.startswith(h) for h in hints):
+                    wrappers.append(w)
+                    seen.add(bid)
+                    if not all_mode:
+                        break   # single-bundle mode: stop at first match
+
+            if not wrappers:
+                print(f"Warning: no bundle with candidates matching {hints or '(any)'}")
+            else:
+                for w in wrappers:
+                    print(f"  bundle {w.original_bundle.id}: "
+                          f"{len(w.candidates)} topologies")
+                TopologyExplorer(self.fp, wrappers).show()
         elif cmd == "visualize":
             viz = BudaVisualizer(self.fp, self.bundles)
             viz.draw_blocks()
