@@ -1,3 +1,28 @@
+8)  Bash command 
+
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
+   import interconnect as ic
+
+   fp = ic.Floorplan()
+   fp.add_block('drv1', 50, 380, 230, 620)
+   fp.add_block('rcv1', 680, 120, 880, 500)
+   fp.add_block('rcv2', 350, 50, 550, 230)
+
+   gen = ic.TopologyGenerator(fp)
+   gen.set_busterm_mode(True)
+   topos = gen.generate_multicast_candidates('drv1', ['rcv1', 'rcv2'])
+
+   # Show only topo 12 in detail
+   t = topos[11]
+   ct = ic.ConnTopology()
+   ct.build(t, fp)
+   print(f'Topo 12: {t.type}  trunk={t.trunk_location}')
+   for j, (seg, cs) in enumerate(zip(t.segments, ct.segs())):
+       lo = cs.perp_lo if abs(cs.perp_lo) < 10**9 else '-inf'
+       hi = cs.perp_hi if abs(cs.perp_hi) < 10**9 else '+inf'
+       print(f'  seg{j} ({seg.start.x},{seg.start.y})->({seg.end.x},{seg.end.y})  slide=[{lo},{hi}]')
+   "
+
 7) Bash command 
 
    cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "

@@ -47,7 +47,57 @@ class TopologyExplorer:
 
     # ------------------------------------------------------------------
 
-    def _draw_slide_spans(self, topo):
+    def _build_conn_topo(self, topo):
+        ct = ic.ConnTopology()
+        ct.build(topo, self.fp)
+        return ct
+
+    def _draw_busterm_markers(self, topo, ct, viz_lw):
+        """Draw a diamond at every busterm connection point.
+
+        Each ConnSeg may have one or more BUSTERM connections.  The physical
+        connection point on the block face is:
+          H segment → (conn.at_pos,   cs.perp_pos)   (x along seg, y of seg)
+          V segment → (cs.perp_pos,   conn.at_pos)   (x of seg,   y along seg)
+
+        A filled diamond is drawn at that point, sized proportionally to
+        viz_lw, with the block name shown as a small label offset outward
+        from the segment end so it doesn't overlap the wire.
+        """
+        ax = self.ax
+        msz = viz_lw * 1.1 + 3
+
+        for raw_seg, cs in zip(topo.segments, ct.segs()):
+            col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
+            for conn in cs.conns:
+                if conn.kind != ic.SegConnKind.BUSTERM:
+                    continue
+                # Connection point on the block face
+                if cs.horiz:
+                    px, py = conn.at_pos, cs.perp_pos
+                    # Label offset: left of left endpoint, right of right endpoint
+                    dx = -8 if px <= (cs.along_lo + cs.along_hi) / 2 else +8
+                    dy = 0
+                    ha = 'right' if dx < 0 else 'left'
+                    va = 'center'
+                else:
+                    px, py = cs.perp_pos, conn.at_pos
+                    dx = 0
+                    dy = -8 if py <= (cs.along_lo + cs.along_hi) / 2 else +8
+                    ha = 'center'
+                    va = 'top' if dy < 0 else 'bottom'
+
+                ax.plot(px, py, 'D',
+                        color=col, markersize=msz,
+                        markeredgecolor='white', markeredgewidth=1.2,
+                        zorder=15)
+                ax.text(px + dx, py + dy, conn.block_name,
+                        fontsize=7, color=col, fontweight='bold',
+                        ha=ha, va=va, zorder=16,
+                        bbox=dict(boxstyle='round,pad=0.15', fc='white',
+                                  ec='none', alpha=0.7))
+
+    def _draw_slide_spans(self, topo, ct):
         """Overlay slide-range bands on the current topology.
 
         For each ConnSeg the band is the rectangle the segment can occupy while
@@ -73,9 +123,6 @@ class TopologyExplorer:
 
         def clamp_x(v): return x_lo_v if v < -_UNCONSTRAINED else (x_hi_v if v > _UNCONSTRAINED else v)
         def clamp_y(v): return y_lo_v if v < -_UNCONSTRAINED else (y_hi_v if v > _UNCONSTRAINED else v)
-
-        ct = ic.ConnTopology()
-        ct.build(topo, self.fp)
 
         for raw_seg, cs in zip(topo.segments, ct.segs()):
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
@@ -156,11 +203,13 @@ class TopologyExplorer:
         for y in ys:
             ax.axhline(y=y, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
 
+        ct     = self._build_conn_topo(topo)
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
+
         # Slide-range bands (drawn before segments so segments sit on top)
-        self._draw_slide_spans(topo)
+        self._draw_slide_spans(topo, ct)
 
         # Topology segments — width proportional to bundle width
-        viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
         for seg in topo.segments:
             col = _LAYER_COLOR.get(seg.layer_hint, '#888888')
             ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
@@ -171,6 +220,9 @@ class TopologyExplorer:
                     color=col, markersize=viz_lw * 0.6, zorder=11)
             ax.plot(seg.end.x, seg.end.y, 'o',
                     color=col, markersize=viz_lw * 0.6, zorder=11)
+
+        # Busterm diamonds (on top of segments and junction dots)
+        self._draw_busterm_markers(topo, ct, viz_lw)
 
         # Legend
         from matplotlib.lines import Line2D
@@ -183,6 +235,9 @@ class TopologyExplorer:
                                      label='slide range'))
         handles.append(Line2D([0], [0], color='#888888', lw=0.9, linestyle=':',
                                alpha=0.7, label='slide bound'))
+        handles.append(Line2D([0], [0], marker='D', color='w',
+                               markerfacecolor='#888888', markeredgecolor='white',
+                               markersize=8, label='bus-term'))
         ax.legend(handles=handles, loc='upper right', fontsize=9)
 
         ax.set_aspect('equal')
