@@ -178,10 +178,15 @@ class TopologyExplorer:
         n     = len(self.topos)
         bid   = self.wrapper.original_bundle.id
         wl    = topo.estimated_wirelength
+        ct     = self._build_conn_topo(topo)
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
 
+        n_bt = sum(1 for cs in ct.segs()
+                   for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
         ax.set_title(
             f"Bundle {bid}  ·  topology {self.idx + 1} / {n}"
-            f"  ·  {topo.type}  ·  WL = {wl}  ·  segs = {len(topo.segments)}",
+            f"  ·  {topo.type}  ·  WL = {wl}"
+            f"  ·  bus-terms = {n_bt}  ·  segs = {len(topo.segments)}",
             fontsize=13, pad=10)
 
         # Floorplan blocks
@@ -202,9 +207,6 @@ class TopologyExplorer:
             ax.axvline(x=x, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
         for y in ys:
             ax.axhline(y=y, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
-
-        ct     = self._build_conn_topo(topo)
-        viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
 
         # Slide-range bands (drawn before segments so segments sit on top)
         self._draw_slide_spans(topo, ct)
