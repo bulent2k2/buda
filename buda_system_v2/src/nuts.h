@@ -1,5 +1,7 @@
 #pragma once
 #include "global_router.h"
+#include <map>
+#include <utility>
 #include <vector>
 
 namespace interconnect {
@@ -57,12 +59,21 @@ private:
         const std::vector<int>& y_grid) const;
 
     // Solve placement for one layer (modifies TrackSegment::track_position in place).
-    void solve_layer(std::vector<TrackSegment*>& segs) const;
+    // pull_map: (bundle_id, seg_idx) -> preferred perpendicular centre; absent entries
+    // fall back to first-fit (lowest valid) behaviour.
+    void solve_layer(std::vector<TrackSegment*>& segs,
+                     const std::map<std::pair<int,int>, double>& pull_map) const;
 
-    // First-fit within [lo, hi] given a sorted list of already-occupied intervals.
-    // Returns the lowest valid placement position, or -1.0 if the interval is infeasible.
+    // First-fit: lowest valid placement position within [lo, hi].
+    // Returns -1.0 if the interval is infeasible.
     double first_fit(double lo, double hi, double width,
                      const std::vector<std::pair<double,double>>& occupied) const;
+
+    // Preferred-fit: valid placement position closest to 'preferred' within [lo, hi].
+    // Returns -1.0 if the interval is infeasible.
+    double preferred_fit(double lo, double hi, double width,
+                         const std::vector<std::pair<double,double>>& occupied,
+                         double preferred) const;
 };
 
 } // namespace interconnect

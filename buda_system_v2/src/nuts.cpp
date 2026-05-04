@@ -1,7 +1,10 @@
 #include "nuts.h"
+#include "conn_topology.h"
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <map>
+#include <numeric>
 
 namespace interconnect {
 
@@ -122,10 +125,54 @@ double NUTSEngine::first_fit(double lo, double hi, double width,
 }
 
 // ---------------------------------------------------------------------------
+// Preferred-fit within interval
+// ---------------------------------------------------------------------------
+//
+// Returns the valid placement position closest to 'preferred', or -1.0 if
+// the interval is infeasible for this segment.
+//
+// Candidate positions tried (in arbitrary order; the closest valid wins):
+//   • preferred itself
+//   • lo (interval lower bound — ensures first-fit as fallback)
+//   • just above each occupied interval:  occ_hi + track_pitch_
+//   • just below each occupied interval:  occ_lo - width - track_pitch_
+//
+double NUTSEngine::preferred_fit(
+    double lo, double hi, double width,
+    const std::vector<std::pair<double,double>>& occupied,
+    double preferred) const
+{
+    std::vector<double> candidates;
+    candidates.push_back(preferred);
+    candidates.push_back(lo);
+    for (const auto& [occ_lo, occ_hi] : occupied) {
+        candidates.push_back(occ_hi + track_pitch_);
+        candidates.push_back(occ_lo - width - track_pitch_);
+    }
+
+    auto valid = [&](double p) -> bool {
+        if (p < lo || p + width > hi) return false;
+        for (const auto& [occ_lo, occ_hi] : occupied)
+            if (p < occ_hi && p + width > occ_lo) return false;
+        return true;
+    };
+
+    double best      = -1.0;
+    double best_dist = std::numeric_limits<double>::max();
+    for (double c : candidates) {
+        if (!valid(c)) continue;
+        double dist = std::abs(c - preferred);
+        if (dist < best_dist) { best_dist = dist; best = c; }
+    }
+    return best;
+}
+
+// ---------------------------------------------------------------------------
 // Per-layer sweep-line solver
 // ---------------------------------------------------------------------------
 
-void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs) const {
+void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
+                              const std::map<std::pair<int,int>, double>& pull_map) const {
     if (segs.empty()) return;
 
     // Events: (position_in_routing_dir, type, segment_index_in_segs)
@@ -169,12 +216,26 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs) const {
         }
         std::sort(occupied.begin(), occupied.end());
 
-        double pos = first_fit(ts->interval_lo, ts->interval_hi, ts->width, occupied);
+        // Determine preferred perpendicular position from pull map.
+        // pull_map stores the target segment centre; convert to track_position
+        // (lower edge) and clamp to the placeable range [interval_lo, interval_hi-width].
+        double pos;
+        auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
+        auto it  = pull_map.find(key);
+        if (it != pull_map.end()) {
+            double preferred = std::clamp(it->second - ts->width / 2.0,
+                                          ts->interval_lo,
+                                          ts->interval_hi - ts->width);
+            pos = preferred_fit(ts->interval_lo, ts->interval_hi,
+                                ts->width, occupied, preferred);
+        } else {
+            pos = first_fit(ts->interval_lo, ts->interval_hi, ts->width, occupied);
+        }
 
         if (pos >= 0.0) {
             ts->track_position = pos;
         } else {
-            // Best-effort: center within interval (interval may be too narrow).
+            // Best-effort: centre within interval (interval may be too narrow).
             ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0
                                  - ts->width / 2.0;
         }
@@ -194,6 +255,48 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     NUTSResult result;
     result.segments = extract_segments(bundles, x_grid, y_grid);
 
+    // -----------------------------------------------------------------------
+    // Build pull map: (bundle_id, seg_idx) -> preferred perpendicular centre.
+    //
+    // For each segment S, look at every SEG-connected perpendicular segment T.
+    // Each BUSTERM connection of T has at_pos = face coordinate along T's
+    // routing direction = perpendicular direction of S.  Averaging those face
+    // coordinates gives the position for S that minimises total stub wirelength.
+    // -----------------------------------------------------------------------
+    std::map<std::pair<int,int>, double> pull_map;
+
+    for (const auto& bw : bundles) {
+        if (bw.candidates.empty()) continue;
+        const Topology& topo = bw.candidates[bw.selected_topology_index];
+        int bid = bw.original_bundle.id;
+
+        ConnTopology ct;
+        ct.build(topo, floorplan_);
+        const auto& conn_segs = ct.segs();
+
+        for (int si = 0; si < (int)conn_segs.size(); ++si) {
+            const ConnSeg& cs = conn_segs[si];
+            std::vector<double> targets;
+
+            for (const auto& conn : cs.conns) {
+                if (conn.kind != SegConn::SEG) continue;
+                const ConnSeg& other = conn_segs[conn.seg_idx];
+                for (const auto& other_conn : other.conns) {
+                    if (other_conn.kind != SegConn::BUSTERM) continue;
+                    // other_conn.at_pos is along other's routing direction,
+                    // which is S's perpendicular direction → pull target for S.
+                    targets.push_back(static_cast<double>(other_conn.at_pos));
+                }
+            }
+
+            if (!targets.empty()) {
+                double mean = std::accumulate(targets.begin(), targets.end(), 0.0)
+                              / static_cast<double>(targets.size());
+                pull_map[{bid, si}] = mean;
+            }
+        }
+    }
+
     // Group segment pointers by layer.
     std::map<int, std::vector<TrackSegment*>> by_layer;
     for (auto& ts : result.segments)
@@ -201,7 +304,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
 
     // Solve each layer independently (the problem parallelises here).
     for (auto& [layer_id, layer_segs] : by_layer)
-        solve_layer(layer_segs);
+        solve_layer(layer_segs, pull_map);
 
     // -----------------------------------------------------------------------
     // Metrics
