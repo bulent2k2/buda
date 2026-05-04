@@ -173,6 +173,22 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
     Point s = src.center(); Point d = dst.center();
 
     // Z_HVH: trunk is vertical at x_cut between the two block centres.
+    //
+    // Standard case: ty_src != ty_dst — H segments are at different y levels,
+    // V segment is non-degenerate.
+    //
+    // Spread case: when the two BUSTERMs are y-aligned (ty_src == ty_dst), the
+    // V segment collapses to zero length.  Instead, spread the two H segments
+    // to opposite corners of the block y-range (one near the top face, one near
+    // the bottom face) so the V is always visible.
+    //
+    // To guarantee NUTS places the two H segments on different tracks, each H is
+    // extended by ovlp units past the trunk so the two spans strictly overlap:
+    //   H1: [sx,        x_cut + ovlp]   (right stub, extends past trunk)
+    //   H2: [x_cut - ovlp, dx         ] (left stub,  starts before trunk)
+    // ovlp is sized so that the overlap region is wider than the 10% span
+    // threshold used by the span-adjustment SET/EXTEND decision in NUTS, which
+    // preserves the overlap after track placement.
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     for (int x_cut : x_grid) {
         if (x_cut > min_x && x_cut < max_x) {
@@ -180,14 +196,42 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
             int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
             int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
-            Topology z; z.type = "Z_HVH";
-            if (sx != x_cut)
-                z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
-            if (ty_src != ty_dst)
+
+            if (ty_src != ty_dst) {
+                // Standard Z_HVH — no spread or overlap needed.
+                Topology z; z.type = "Z_HVH";
+                if (sx != x_cut)
+                    z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
                 z.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
-            if (x_cut != dx)
-                z.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
-            if (z.segments.size() == 3) results.push_back(z);
+                if (x_cut != dx)
+                    z.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
+                if (z.segments.size() == 3) results.push_back(z);
+            } else if (use_busterm_ && sx != x_cut && x_cut != dx) {
+                // Spread Z_HVH: both BUSTERMs at same y — force two distinct
+                // y-levels so the V segment is non-degenerate.  Generate two
+                // mirror variants (top/bottom and bottom/top).
+                int sh   = src.y2 - src.y1;
+                int sm   = std::max(1, (int)(0.1 * sh));
+                int y_hi = src.y2 - sm;   // near top corner
+                int y_lo = src.y1 + sm;   // near bottom corner
+
+                // ovlp: extend each H past the trunk so spans strictly overlap.
+                // Must exceed 11% of the resulting H span so NUTS span-adjustment
+                // uses EXTEND (not SET) and preserves the overlap.
+                int h1_len = x_cut - sx;
+                int ovlp   = std::max(1, h1_len / 5);   // ~20% of H1 length
+
+                for (int flip = 0; flip < 2; ++flip) {
+                    int y1 = flip ? y_lo : y_hi;   // H1 y-level (src side)
+                    int y2 = flip ? y_hi : y_lo;   // H2 y-level (dst side)
+                    if (y1 == y2) continue;
+                    Topology z; z.type = "Z_HVH";
+                    z.segments.push_back(make_seg(sx,           y1, x_cut + ovlp, y1, 4));
+                    z.segments.push_back(make_seg(x_cut,        y1, x_cut,        y2, 5));
+                    z.segments.push_back(make_seg(x_cut - ovlp, y2, dx,           y2, 4));
+                    results.push_back(z);
+                }
+            }
         }
     }
 

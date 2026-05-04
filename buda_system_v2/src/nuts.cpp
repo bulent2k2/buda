@@ -438,11 +438,34 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
                 auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
                 if (jt == ts_ptr_map.end()) continue;
                 TrackSegment* other = jt->second;
-                const double mid = (other->span_lo + other->span_hi) / 2.0;
-                if (sc.at_pos <= mid)
-                    other->span_lo = my_centre;
-                else
+                // Decide which span endpoint to update.
+                //
+                // SET semantics (normal stub): at_pos is at or very near the
+                // endpoint being adjusted — the segment was designed to terminate
+                // exactly at the junction.  Move that endpoint to my_centre
+                // (handles both shrinking when the partner moved closer and
+                // extension when it moved farther).
+                //
+                // EXTEND semantics (designed overlap): at_pos sits well inside
+                // the span — the topology intentionally extends the segment past
+                // the junction to create x-overlap for NUTS conflict detection
+                // (e.g. spread Z_HVH).  Only grow the span toward my_centre;
+                // never shrink the designed overlap away.
+                //
+                // Threshold: if at_pos is within 11% of the span width from
+                // an endpoint, treat as SET; otherwise treat as EXTEND.
+                const double range = other->span_hi - other->span_lo;
+                const double tol   = 0.11 * range;
+                const double lo_d  = sc.at_pos - other->span_lo;
+                const double hi_d  = other->span_hi - sc.at_pos;
+                if (hi_d <= tol)                         // at_pos near hi end
                     other->span_hi = my_centre;
+                else if (lo_d <= tol)                    // at_pos near lo end
+                    other->span_lo = my_centre;
+                else {                                   // interior — keep overlap
+                    other->span_lo = std::min(other->span_lo, my_centre);
+                    other->span_hi = std::max(other->span_hi, my_centre);
+                }
             }
         }
     }
