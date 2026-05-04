@@ -292,6 +292,14 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     }
 
     // Pass 2 — connectivity-based override via SEG→BUSTERM traversal.
+    // Also captures ConnTopology slide ranges and identifies trunk segments.
+    //
+    // slide_map : (bid, si) -> (perp_lo, perp_hi) from ConnTopology
+    // trunk_set : segments with ≥2 SEG connections and 0 BUSTERM connections
+    //             (i.e. spine/trunk segments, not stubs or direct I-shapes)
+    std::map<std::pair<int,int>, std::pair<double,double>> slide_map;
+    std::set<std::pair<int,int>>                           trunk_set;
+
     for (const auto& bw : bundles) {
         if (bw.candidates.empty()) continue;
         const Topology& topo = bw.candidates[bw.selected_topology_index];
@@ -303,23 +311,73 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
 
         for (int si = 0; si < (int)conn_segs.size(); ++si) {
             const ConnSeg& cs = conn_segs[si];
-            std::vector<double> targets;
+            auto key = std::make_pair(bid, si);
 
+            // Slide range from ConnTopology.
+            slide_map[key] = { static_cast<double>(cs.perp_lo),
+                               static_cast<double>(cs.perp_hi) };
+
+            // Trunk detection: spine has ≥2 SEG connections and no BUSTERM.
+            int n_seg = 0, n_bt = 0;
+            for (const auto& c : cs.conns) {
+                if (c.kind == SegConn::SEG)     ++n_seg;
+                else                             ++n_bt;
+            }
+            if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
+
+            // Pull target from connected block faces.
+            std::vector<double> targets;
             for (const auto& conn : cs.conns) {
                 if (conn.kind != SegConn::SEG) continue;
                 const ConnSeg& other = conn_segs[conn.seg_idx];
                 for (const auto& other_conn : other.conns) {
                     if (other_conn.kind != SegConn::BUSTERM) continue;
-                    // other_conn.at_pos is along other's routing direction,
-                    // which is S's perpendicular direction → pull target for S.
                     targets.push_back(static_cast<double>(other_conn.at_pos));
                 }
             }
-
             if (!targets.empty()) {
                 double mean = std::accumulate(targets.begin(), targets.end(), 0.0)
                               / static_cast<double>(targets.size());
-                pull_map[{bid, si}] = mean;   // overrides nominal
+                pull_map[key] = mean;   // overrides nominal
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Apply ConnTopology slide ranges and 10% trunk-channel margin.
+    //
+    // Step A — tighten: intersect each segment's NUTS interval with the
+    //   ConnTopology perp_lo/perp_hi.  Values near ±INT_MAX/2 are sentinels
+    //   meaning "unconstrained"; we skip those ends.
+    //
+    // Step B — 10% margin for trunks: a free-floating trunk should stay 10%
+    //   of its channel width away from the channel boundary (Hanan grid edge)
+    //   in both directions, unless doing so would leave no room for the track.
+    //   This prevents trunks from hugging block faces.
+    // -----------------------------------------------------------------------
+    constexpr double kSentinel = 5e8;   // half of INT_MAX/2 ≈ 1.07e9
+
+    for (auto& ts : result.segments) {
+        auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
+
+        // Step A: tighten interval from ConnTopology slide range.
+        auto sit = slide_map.find(key);
+        if (sit != slide_map.end()) {
+            auto [slo, shi] = sit->second;
+            if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
+            if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
+        }
+
+        // Step B: 10% inward margin for trunk segments.
+        if (trunk_set.count(key)) {
+            double span   = ts.interval_hi - ts.interval_lo;
+            double margin = 0.1 * span;
+            double new_lo = ts.interval_lo + margin;
+            double new_hi = ts.interval_hi - margin;
+            // Only apply if the margin leaves room for at least one track.
+            if (new_hi - new_lo >= ts.width) {
+                ts.interval_lo = new_lo;
+                ts.interval_hi = new_hi;
             }
         }
     }
