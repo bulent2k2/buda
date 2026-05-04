@@ -73,6 +73,58 @@ class BudaSession:
             print(f"Pinned bundle '{hint}' to topology {resolved} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']})")
 
+    def _stretch_nuts_segments(self):
+        """Post-NUTS span stretch: extend each segment's span to physically
+        overlap every segment it is logically connected to.
+
+        NUTS assigns track_position but leaves span_lo/hi at the original
+        topology coordinates.  After placement, connected segments may have
+        shifted perpendicularly so their spans no longer overlap.  For each
+        SEG-to-SEG connection we extend both spans to include the center of
+        the connected segment's placed track.
+
+        BUSTERM connections are not stretched: the topology already terminates
+        at the block face, and ConnTopology perp constraints keep the stub
+        track within the face extent.
+        """
+        ts_map = {(ts.bundle_id, ts.seg_idx): ts
+                  for ts in self.nuts_result.segments}
+
+        stretch_count = 0
+        for w in self.bundles:
+            if not w.candidates:
+                continue
+            bid  = w.original_bundle.id
+            topo = w.candidates[w.selected_topology_index]
+
+            ct = interconnect.ConnTopology()
+            ct.build(topo, self.fp)
+
+            for seg_idx, (raw_seg, cs) in enumerate(
+                    zip(topo.segments, ct.segs())):
+                ts = ts_map.get((bid, seg_idx))
+                if ts is None or not ts.placed:
+                    continue
+
+                for conn in cs.conns:
+                    if conn.kind != interconnect.SegConnKind.SEG:
+                        continue
+                    other = ts_map.get((bid, conn.seg_idx))
+                    if other is None or not other.placed:
+                        continue
+
+                    # other is perpendicular; its track centre is a coordinate
+                    # along our span direction — stretch to include it.
+                    other_centre = other.track_position + other.width / 2.0
+                    new_lo = min(ts.span_lo, other_centre)
+                    new_hi = max(ts.span_hi, other_centre)
+                    if new_lo != ts.span_lo or new_hi != ts.span_hi:
+                        ts.span_lo = new_lo
+                        ts.span_hi = new_hi
+                        stretch_count += 1
+
+        return stretch_count
+
     def extract_instances(self, bundle):
         # Helper to find source/dest instances from a bundle's nets for Topology Generation
         if not bundle.get_net_names(): return "top", "top"
@@ -179,6 +231,10 @@ class BudaSession:
             print(f"NUTS placed {len(self.nuts_result.segments)} segments "
                   f"({self.nuts_result.num_violations} interval violations, "
                   f"{self.nuts_result.num_overlaps} track overlaps).")
+            n_stretched = self._stretch_nuts_segments()
+            if n_stretched:
+                print(f"Stretched {n_stretched} segment span(s) to restore "
+                      f"physical connectivity after track placement.")
         elif cmd == "visualize_topologies":
             # Usage:
             #   visualize_topologies <hint>         — first matching bundle
