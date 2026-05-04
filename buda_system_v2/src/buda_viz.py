@@ -1,4 +1,8 @@
+import json
 import math
+import os
+from datetime import datetime
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.widgets import Button
@@ -21,20 +25,26 @@ class TopologyExplorer:
       [ / ] (or ◀/▶ Bus buttons)    — prev / next bundle
     """
 
-    def __init__(self, fp, wrappers):
+    def __init__(self, fp, wrappers, sidecar_path=None):
         self.fp       = fp
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         self.bidx     = 0   # current bundle index
         self.idx      = 0   # current topology index within bundle
 
+        # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at}
+        self._selections    = {}
+        self._sidecar_path  = sidecar_path
+        if sidecar_path and os.path.exists(sidecar_path):
+            self._load_sidecar()
+
         self.fig = plt.figure(figsize=(13, 10))
         self.fig.patch.set_facecolor('#f0f0f0')
 
         # Main axes — leave bottom margin for two button rows
-        self.ax = self.fig.add_axes([0.05, 0.13, 0.90, 0.81])
+        self.ax = self.fig.add_axes([0.05, 0.14, 0.90, 0.80])
 
-        # ── Topo navigation (inner pair, blue) ──
+        # ── Row 1: topo navigation (inner pair, blue) + bus navigation (outer, green) ──
         ax_tprev = self.fig.add_axes([0.22, 0.02, 0.20, 0.05])
         ax_tnext = self.fig.add_axes([0.58, 0.02, 0.20, 0.05])
         self._btn_tprev = Button(ax_tprev, '◀  Prev Topo', color='#ddeeff')
@@ -42,7 +52,6 @@ class TopologyExplorer:
         self._btn_tprev.on_clicked(lambda _: self._step_topo(-1))
         self._btn_tnext.on_clicked(lambda _: self._step_topo(+1))
 
-        # ── Bus navigation (outer pair, green) ──
         ax_bprev = self.fig.add_axes([0.01, 0.02, 0.19, 0.05])
         ax_bnext = self.fig.add_axes([0.80, 0.02, 0.19, 0.05])
         self._btn_bprev = Button(ax_bprev, '◀  Prev Bus', color='#d9f5d9')
@@ -54,6 +63,14 @@ class TopologyExplorer:
         if len(self.wrappers) == 1:
             ax_bprev.set_visible(False)
             ax_bnext.set_visible(False)
+
+        # ── Row 2: selection controls ──
+        ax_select   = self.fig.add_axes([0.22, 0.08, 0.26, 0.05])
+        ax_deselect = self.fig.add_axes([0.52, 0.08, 0.26, 0.05])
+        self._btn_select   = Button(ax_select,   '★  Select Topo', color='#f0f0f0')
+        self._btn_deselect = Button(ax_deselect, '✕  Deselect',    color='#f0f0f0')
+        self._btn_select.on_clicked(lambda _: self._select_current())
+        self._btn_deselect.on_clicked(lambda _: self._deselect_current())
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
 
@@ -185,6 +202,71 @@ class TopologyExplorer:
                                 ha='left' if label == 'lo' else 'right', zorder=5, alpha=0.85)
 
     # ------------------------------------------------------------------
+    # Selection DB helpers
+    # ------------------------------------------------------------------
+
+    def _bundle_hint(self, wrapper=None):
+        w = wrapper or self.wrapper
+        names = w.original_bundle.get_net_names()
+        return names[0] if names else f"bundle_{w.original_bundle.id}"
+
+    def _current_is_selected(self):
+        hint = self._bundle_hint()
+        if hint not in self._selections:
+            return False
+        sel  = self._selections[hint]
+        topo = self.topos[self.idx]
+        return (topo.type == sel['topo_type'] and
+                topo.estimated_wirelength == sel['topo_wl'])
+
+    def _select_current(self):
+        topo = self.topos[self.idx]
+        hint = self._bundle_hint()
+        self._selections[hint] = {
+            'bundle_id':       self.wrapper.original_bundle.id,
+            'topo_type':       topo.type,
+            'topo_wl':         topo.estimated_wirelength,
+            'topo_index_hint': self.idx,
+            'note':            '',
+            'selected_at':     datetime.now().isoformat(timespec='seconds'),
+        }
+        self._save_sidecar()
+        self._draw()
+
+    def _deselect_current(self):
+        hint = self._bundle_hint()
+        if hint in self._selections:
+            del self._selections[hint]
+            self._save_sidecar()
+        self._draw()
+
+    def _load_sidecar(self):
+        try:
+            with open(self._sidecar_path) as f:
+                data = json.load(f)
+            for entry in data.get('selections', []):
+                self._selections[entry['bundle_hint']] = {
+                    k: entry[k] for k in
+                    ('bundle_id', 'topo_type', 'topo_wl',
+                     'topo_index_hint', 'note', 'selected_at')
+                }
+            print(f"Loaded {len(self._selections)} selection(s) from {self._sidecar_path}")
+        except Exception as e:
+            print(f"Warning: could not load sidecar {self._sidecar_path}: {e}")
+
+    def _save_sidecar(self):
+        if not self._sidecar_path:
+            return
+        entries = [{'bundle_hint': hint, **sel}
+                   for hint, sel in sorted(self._selections.items())]
+        try:
+            with open(self._sidecar_path, 'w') as f:
+                json.dump({'selections': entries}, f, indent=2)
+            print(f"Saved {len(entries)} selection(s) to {self._sidecar_path}")
+        except Exception as e:
+            print(f"Warning: could not save sidecar {self._sidecar_path}: {e}")
+
+    # ------------------------------------------------------------------
 
     def _step_topo(self, delta):
         self.idx = (self.idx + delta) % len(self.topos)
@@ -200,6 +282,8 @@ class TopologyExplorer:
         if event.key in ('right', 'd'):         self._step_topo(+1)
         if event.key in ('[', 'pageup'):        self._step_bundle(-1)
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
+        if event.key == 's':                    self._select_current()
+        if event.key == 'x':                    self._deselect_current()
 
     def _draw(self):
         ax = self.ax
@@ -212,15 +296,37 @@ class TopologyExplorer:
         ct     = self._build_conn_topo(topo)
         viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
 
+        is_sel = self._current_is_selected()
+        hint   = self._bundle_hint()
+        has_any_sel = hint in self._selections
+
+        # ── Update selection button states ──
+        if is_sel:
+            self._btn_select.label.set_text('★  Selected')
+            self._btn_select.ax.set_facecolor('#aadd88')
+        else:
+            self._btn_select.label.set_text('★  Select Topo')
+            self._btn_select.ax.set_facecolor('#f0f0f0')
+        self._btn_deselect.ax.set_facecolor('#ffbbaa' if has_any_sel else '#f0f0f0')
+
+        # ── Axes border: gold when selected, subtle grey otherwise ──
+        border_col = '#FFD700' if is_sel else '#cccccc'
+        border_lw  = 3.5      if is_sel else 0.8
+        for spine in ax.spines.values():
+            spine.set_edgecolor(border_col)
+            spine.set_linewidth(border_lw)
+
         nb   = len(self.wrappers)
         n_bt = sum(1 for cs in ct.segs()
                    for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
         bus_label = (f"bus {self.bidx + 1}/{nb} · " if nb > 1 else "")
+        sel_badge = "  ★ SELECTED" if is_sel else ""
         ax.set_title(
             f"{bus_label}Bundle {bid}  ·  topo {self.idx + 1}/{n}"
             f"  ·  {topo.type}  ·  WL={wl}"
-            f"  ·  bus-terms={n_bt}  ·  segs={len(topo.segments)}",
-            fontsize=13, pad=10)
+            f"  ·  bterms={n_bt}  ·  bsegs={len(topo.segments)}{sel_badge}",
+            fontsize=13, pad=10,
+            color='#886600' if is_sel else 'black')
 
         # Floorplan blocks
         for name, rect in self.fp.get_all_blocks():
@@ -292,11 +398,15 @@ class BudaVisualizer:
 
         # bundle_id -> list of dicts {artist, alpha, lw, is_band}
         self._bundle_artists = {}
-        self._highlighted = None   # currently highlighted bundle_id, or None
-        self._pick_happened = False
+        self._highlighted    = None   # currently highlighted bundle_id, or None
+        self._solo           = False  # hide vs dim non-selected bundles
+        self._bid_list       = []     # ordered list of bundle ids (set in show())
+        self._btn_solo       = None   # Button widget (set in show())
+        self._pick_happened  = False
 
-        self.fig.canvas.mpl_connect('pick_event',        self._on_pick)
+        self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
+        self.fig.canvas.mpl_connect('key_press_event',    self._on_key)
 
     # ------------------------------------------------------------------
     # Artist registry & interaction
@@ -331,6 +441,11 @@ class BudaVisualizer:
         if bundle_id == self._highlighted:
             bundle_id = None
         self._highlighted = bundle_id
+        self._refresh_highlight()
+
+    def _refresh_highlight(self):
+        """Apply current highlight + solo state to all registered artists."""
+        bundle_id = self._highlighted
 
         for bid, entries in self._bundle_artists.items():
             selected = (bundle_id is None) or (bid == bundle_id)
@@ -347,14 +462,18 @@ class BudaVisualizer:
                     if e['lw'] is not None:
                         a.set_linewidth(e['lw'] * 2.2)
                 else:
-                    # Dim everything else.
-                    a.set_alpha(0.03 if e['is_band'] else 0.1)
+                    # Dim or hide everything else depending on solo mode.
+                    if self._solo:
+                        a.set_alpha(0.0)
+                    else:
+                        a.set_alpha(0.03 if e['is_band'] else 0.1)
                     if e['lw'] is not None:
                         a.set_linewidth(e['lw'])
 
         if bundle_id is not None:
+            solo_hint = "  [Solo ON]" if self._solo else ""
             self.ax.set_title(
-                f"BUDA — Bundle {bundle_id} selected  "
+                f"BUDA — Bundle {bundle_id} selected{solo_hint}  "
                 f"(click again or click background to deselect)",
                 fontsize=13)
         else:
@@ -364,6 +483,46 @@ class BudaVisualizer:
                 fontsize=13)
 
         self.fig.canvas.draw_idle()
+
+    def _step_bundle(self, delta):
+        """Cycle to the next/prev bundle and highlight it."""
+        if not self._bid_list:
+            return
+        if self._highlighted not in self._bid_list:
+            # Nothing selected yet — start at first bundle.
+            idx = 0 if delta > 0 else len(self._bid_list) - 1
+        else:
+            idx = (self._bid_list.index(self._highlighted) + delta) % len(self._bid_list)
+        self._highlighted = self._bid_list[idx]
+        self._refresh_highlight()
+
+    def _toggle_solo(self):
+        """Toggle between dimming and hiding non-selected bundles."""
+        self._solo = not self._solo
+        if self._btn_solo is not None:
+            if self._solo:
+                self._btn_solo.label.set_text('Solo  ON')
+                self._btn_solo.ax.set_facecolor('#ffddaa')
+            else:
+                self._btn_solo.label.set_text('Solo OFF')
+                self._btn_solo.ax.set_facecolor('#f0f0f0')
+        self._refresh_highlight()
+
+    def _open_topo_explorer(self):
+        """Open a TopologyExplorer window for the currently highlighted bundle."""
+        if self._highlighted is None:
+            return
+        wrapper = next((w for w in self.bundles
+                        if w.original_bundle.id == self._highlighted), None)
+        if wrapper is None or not wrapper.candidates:
+            return
+        explorer = TopologyExplorer(self.fp, wrapper)
+        explorer.fig.show()
+
+    def _on_key(self, event):
+        if event.key in ('[', 'pageup'):   self._step_bundle(-1)
+        if event.key in (']', 'pagedown'): self._step_bundle(+1)
+        if event.key == 't':               self._open_topo_explorer()
 
     # ------------------------------------------------------------------
     # Drawing
@@ -557,6 +716,9 @@ class BudaVisualizer:
             self._register(bundle_id, rcv, alpha=alpha, lw=msz)
 
     def show(self):
+        # Populate ordered bundle list for keyboard / button navigation.
+        self._bid_list = sorted(self._bundle_artists.keys())
+
         self.ax.set_aspect('equal')
         self.ax.set_title(
             "BUDA: Non-Uniform Track Sharing (NUTS)  "
@@ -575,5 +737,25 @@ class BudaVisualizer:
         ], loc='upper right')
 
         self.ax.autoscale_view()
-        plt.tight_layout()
+
+        # Reserve bottom strip for navigation buttons.
+        self.fig.subplots_adjust(bottom=0.09)
+
+        ax_bprev  = self.fig.add_axes([0.02, 0.02, 0.18, 0.05])
+        ax_solo   = self.fig.add_axes([0.23, 0.02, 0.18, 0.05])
+        ax_bnext  = self.fig.add_axes([0.44, 0.02, 0.18, 0.05])
+        ax_topos  = self.fig.add_axes([0.65, 0.02, 0.33, 0.05])
+
+        btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
+        btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
+
+        self._btn_solo = Button(ax_solo, 'Solo OFF', color='#f0f0f0')
+        self._btn_solo.on_clicked(lambda _: self._toggle_solo())
+
+        btn_bnext = Button(ax_bnext, 'Next Bundle  ▶', color='#ddeeff')
+        btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
+
+        btn_topos = Button(ax_topos, 'View Topologies  ↗', color='#fff0cc')
+        btn_topos.on_clicked(lambda _: self._open_topo_explorer())
+
         plt.show()

@@ -1,6 +1,8 @@
 import argparse
+import json
+import os
 import sys
-import interconnect 
+import interconnect
 from buda_viz import BudaVisualizer, TopologyExplorer
 
 class BudaSession:
@@ -13,6 +15,63 @@ class BudaSession:
         self.bundles = []
         self.nuts_result = None
         self._layer_overheads = {}   # layer_id -> overhead_percent
+        self.script_path = None      # set when a .buda script is sourced
+
+    def _sidecar_path(self):
+        """Return the .selections.json path for the current script, or None."""
+        if not self.script_path:
+            return None
+        base = os.path.splitext(self.script_path)[0]
+        return base + '.selections.json'
+
+    def _apply_selections(self):
+        """Load the sidecar and override selected_topology_index for pinned bundles.
+
+        Selected bundles are processed first by the real planner (future work).
+        For now we simply force the topology index after optimize_topologies runs.
+        """
+        path = self._sidecar_path()
+        if not path or not os.path.exists(path):
+            return
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"Warning: could not read selections sidecar: {e}")
+            return
+
+        for sel in data.get('selections', []):
+            hint = sel['bundle_hint']
+            matched_w = None
+            for w in self.bundles:
+                names = w.original_bundle.get_net_names()
+                if names and names[0] == hint:
+                    matched_w = w
+                    break
+            if matched_w is None:
+                print(f"Warning: no bundle found for hint '{hint}' — skipping")
+                continue
+
+            # Prefer stable (type, wl) match; fall back to stored index hint.
+            resolved = None
+            for i, cand in enumerate(matched_w.candidates):
+                if (cand.type == sel['topo_type'] and
+                        cand.estimated_wirelength == sel['topo_wl']):
+                    resolved = i
+                    break
+            if resolved is None:
+                idx_hint = sel.get('topo_index_hint', -1)
+                if 0 <= idx_hint < len(matched_w.candidates):
+                    resolved = idx_hint
+                    print(f"Warning: selection for '{hint}' matched by index hint "
+                          f"(type/WL changed?) — using topo {resolved}")
+                else:
+                    print(f"Warning: selection for '{hint}' could not be resolved — ignored")
+                    continue
+
+            matched_w.selected_topology_index = resolved
+            print(f"Pinned bundle '{hint}' to topology {resolved} "
+                  f"({sel['topo_type']}, WL={sel['topo_wl']})")
 
     def extract_instances(self, bundle):
         # Helper to find source/dest instances from a bundle's nets for Topology Generation
@@ -109,6 +168,8 @@ class BudaSession:
                 self.planner.set_layer_overhead(lid, ovh)
             self.planner.build_congestion_map()
             self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
+            # Override planner choices with any architect-pinned selections.
+            self._apply_selections()
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0
@@ -144,7 +205,8 @@ class BudaSession:
                 for w in wrappers:
                     print(f"  bundle {w.original_bundle.id}: "
                           f"{len(w.candidates)} topologies")
-                TopologyExplorer(self.fp, wrappers).show()
+                TopologyExplorer(self.fp, wrappers,
+                                 sidecar_path=self._sidecar_path()).show()
         elif cmd == "visualize":
             viz = BudaVisualizer(self.fp, self.bundles)
             viz.draw_blocks()
@@ -159,16 +221,20 @@ class BudaSession:
                 viz.draw_buses()
             viz.show()
         elif cmd == "source":
-             with open(args[0], 'r') as f:
-                 for line in f:
-                     if not line.strip().startswith('#'): self.do_command(line)
+            if self.script_path is None:
+                self.script_path = os.path.abspath(args[0])
+            with open(args[0], 'r') as f:
+                for line in f:
+                    if not line.strip().startswith('#'): self.do_command(line)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('script', nargs='?')
     args = parser.parse_args()
     session = BudaSession()
-    if args.script: session.do_command(f"source {args.script}")
+    if args.script:
+        session.script_path = os.path.abspath(args.script)
+        session.do_command(f"source {args.script}")
 
 if __name__ == "__main__":
     main()
