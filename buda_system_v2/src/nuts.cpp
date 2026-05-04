@@ -216,20 +216,22 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         }
         std::sort(occupied.begin(), occupied.end());
 
-        // Determine preferred perpendicular position from pull map.
-        // pull_map stores the target segment centre; convert to track_position
-        // (lower edge) and clamp to the placeable range [interval_lo, interval_hi-width].
+        // Every segment has a preferred perpendicular centre in pull_map
+        // (nominal topology position by default, overridden by SEG→BUSTERM
+        // connectivity pull where applicable).  Convert to track_position
+        // (lower edge) and clamp to the placeable range, then find the
+        // closest valid placement to that position.
         double pos;
-        auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
-        auto it  = pull_map.find(key);
-        if (it != pull_map.end()) {
-            double preferred = std::clamp(it->second - ts->width / 2.0,
+        {
+            auto it = pull_map.find(std::make_pair(ts->bundle_id, ts->seg_idx));
+            double pref_centre = (it != pull_map.end())
+                                 ? it->second
+                                 : (ts->interval_lo + ts->interval_hi) / 2.0;
+            double preferred = std::clamp(pref_centre - ts->width / 2.0,
                                           ts->interval_lo,
                                           ts->interval_hi - ts->width);
             pos = preferred_fit(ts->interval_lo, ts->interval_hi,
                                 ts->width, occupied, preferred);
-        } else {
-            pos = first_fit(ts->interval_lo, ts->interval_hi, ts->width, occupied);
         }
 
         if (pos >= 0.0) {
@@ -258,13 +260,38 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     // -----------------------------------------------------------------------
     // Build pull map: (bundle_id, seg_idx) -> preferred perpendicular centre.
     //
-    // For each segment S, look at every SEG-connected perpendicular segment T.
-    // Each BUSTERM connection of T has at_pos = face coordinate along T's
-    // routing direction = perpendicular direction of S.  Averaging those face
-    // coordinates gives the position for S that minimises total stub wirelength.
+    // Two-pass initialisation:
+    //
+    // Pass 1 — nominal position.
+    //   Every segment starts with its topology-generator position as preferred.
+    //   This keeps direct I-shape segments (two BUSTERM, no SEG connections)
+    //   near their intended track rather than drifting to interval_lo.
+    //
+    // Pass 2 — connectivity override.
+    //   For each segment S with SEG connections, collect BUSTERM at_pos values
+    //   from every connected perpendicular segment T.  Each at_pos is a face
+    //   coordinate along T's routing direction = S's perpendicular direction,
+    //   so averaging them gives the position for S that minimises total stub
+    //   wirelength.  Overrides the nominal only when targets exist.
     // -----------------------------------------------------------------------
     std::map<std::pair<int,int>, double> pull_map;
 
+    // Pass 1 — nominal perpendicular position from the topology.
+    for (const auto& bw : bundles) {
+        if (bw.candidates.empty()) continue;
+        const Topology& topo = bw.candidates[bw.selected_topology_index];
+        int bid = bw.original_bundle.id;
+
+        for (int si = 0; si < (int)topo.segments.size(); ++si) {
+            const Segment& seg = topo.segments[si];
+            bool is_h  = (seg.start.y == seg.end.y);
+            double nom = is_h ? static_cast<double>(seg.start.y)   // H → perp = y
+                               : static_cast<double>(seg.start.x);  // V → perp = x
+            pull_map[{bid, si}] = nom;
+        }
+    }
+
+    // Pass 2 — connectivity-based override via SEG→BUSTERM traversal.
     for (const auto& bw : bundles) {
         if (bw.candidates.empty()) continue;
         const Topology& topo = bw.candidates[bw.selected_topology_index];
@@ -292,7 +319,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
             if (!targets.empty()) {
                 double mean = std::accumulate(targets.begin(), targets.end(), 0.0)
                               / static_cast<double>(targets.size());
-                pull_map[{bid, si}] = mean;
+                pull_map[{bid, si}] = mean;   // overrides nominal
             }
         }
     }
