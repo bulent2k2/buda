@@ -70,9 +70,9 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
             if (dst.x1 < src.x1) {
                 int bx = (dst.x1 + src.x1) / 2;
                 Topology hv; hv.type = "L_HV";
-                hv.segments.push_back(make_seg(src.x1, hy, bx, hy, 4));       // H exits src left
-                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, 5)); // V in exclusive zone
-                results.push_back(hv);
+                hv.segments.push_back(make_seg(src.x1, hy, bx, hy, 4));
+                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, 5));
+                if (hv.segments.size() == 2) results.push_back(hv);
             }
             // dst right of src: (src.x2, dst.x2]
             if (dst.x2 > src.x2) {
@@ -80,7 +80,7 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
                 Topology hv; hv.type = "L_HV";
                 hv.segments.push_back(make_seg(src.x2, hy, bx, hy, 4));
                 if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, 5));
-                results.push_back(hv);
+                if (hv.segments.size() == 2) results.push_back(hv);
             }
         } else {
             Topology hv; hv.type = "L_HV";
@@ -88,7 +88,7 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
                 hv.segments.push_back(make_seg(sx, hy, bend_x, hy, 4));
             if (hy != dy)
                 hv.segments.push_back(make_seg(bend_x, hy, bend_x, dy, 5));
-            if (!hv.segments.empty()) results.push_back(hv);
+            if (hv.segments.size() == 2) results.push_back(hv);
         }
     }
 
@@ -125,7 +125,7 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
                 Topology vh; vh.type = "L_VH";
                 if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, 5));
                 if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, 4));
-                if (!vh.segments.empty()) results.push_back(vh);
+                if (vh.segments.size() == 2) results.push_back(vh);
             }
             // src left of dst: [src.x1, dst.x1)
             if (src.x1 < dst.x1) {
@@ -134,7 +134,7 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
                 Topology vh; vh.type = "L_VH";
                 if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, 5));
                 if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, 4));
-                if (!vh.segments.empty()) results.push_back(vh);
+                if (vh.segments.size() == 2) results.push_back(vh);
             }
         } else {
             Topology vh; vh.type = "L_VH";
@@ -142,7 +142,7 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
                 vh.segments.push_back(make_seg(vx, sy, vx, bend_y, 5));
             if (vx != dx)
                 vh.segments.push_back(make_seg(vx, bend_y, dx, bend_y, 4));
-            if (!vh.segments.empty()) results.push_back(vh);
+            if (vh.segments.size() == 2) results.push_back(vh);
         }
     }
 }
@@ -236,6 +236,11 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
     }
 
     // Z_VHV: trunk is horizontal at y_cut between the two block centres.
+    //
+    // Spread case: when BUSTERMs are x-aligned (vx_src == vx_dst), the H segment
+    // collapses.  Instead, spread the two V segments to opposite sides of the block
+    // x-range so the H is always non-degenerate.  Each V is extended by ovlp units
+    // past y_cut so spans overlap → NUTS places them on different tracks.
     int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
     for (int y_cut : y_grid) {
         if (y_cut > min_y && y_cut < max_y) {
@@ -243,14 +248,38 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
             int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
             int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
             int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
-            Topology z; z.type = "Z_VHV";
-            if (sy != y_cut)
-                z.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
-            if (vx_src != vx_dst)
+
+            if (vx_src != vx_dst) {
+                // Standard Z_VHV — no spread needed.
+                Topology z; z.type = "Z_VHV";
+                if (sy != y_cut)
+                    z.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
                 z.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 4));
-            if (y_cut != dy)
-                z.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
-            if (z.segments.size() == 3) results.push_back(z);
+                if (y_cut != dy)
+                    z.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
+                if (z.segments.size() == 3) results.push_back(z);
+            } else if (use_busterm_ && sy != y_cut && y_cut != dy) {
+                // Spread Z_VHV: both BUSTERMs at same x — force two distinct
+                // x-levels so the H segment is non-degenerate.
+                int sw   = src.x2 - src.x1;
+                int sm   = std::max(1, (int)(0.1 * sw));
+                int vx_hi = src.x2 - sm;   // near right corner
+                int vx_lo = src.x1 + sm;   // near left corner
+
+                int v1_len = std::abs(y_cut - sy);
+                int ovlp   = std::max(1, v1_len / 5);   // ~20% of V1 length
+
+                for (int flip = 0; flip < 2; ++flip) {
+                    int x1 = flip ? vx_lo : vx_hi;   // V1 x-level (src side)
+                    int x2 = flip ? vx_hi : vx_lo;   // V2 x-level (dst side)
+                    if (x1 == x2) continue;
+                    Topology z; z.type = "Z_VHV";
+                    z.segments.push_back(make_seg(x1, sy,           x1, y_cut + ovlp, 5));
+                    z.segments.push_back(make_seg(x1, y_cut,        x2, y_cut,        4));
+                    z.segments.push_back(make_seg(x2, y_cut - ovlp, x2, dy,           5));
+                    results.push_back(z);
+                }
+            }
         }
     }
 }
