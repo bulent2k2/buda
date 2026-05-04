@@ -390,9 +390,10 @@ class TopologyExplorer:
 
 
 class BudaVisualizer:
-    def __init__(self, floorplan, bundles):
-        self.fp = floorplan
-        self.bundles = bundles
+    def __init__(self, floorplan, bundles, sidecar_path=None):
+        self.fp           = floorplan
+        self.bundles      = bundles
+        self._sidecar_path = sidecar_path
         self.fig, self.ax = plt.subplots(figsize=(14, 12))
         self.fig.patch.set_facecolor('#f0f0f0')
 
@@ -521,7 +522,8 @@ class BudaVisualizer:
                         if w.original_bundle.id == self._highlighted), None)
         if wrapper is None or not wrapper.candidates:
             return
-        self._topo_explorer = TopologyExplorer(self.fp, wrapper)
+        self._topo_explorer = TopologyExplorer(self.fp, wrapper,
+                                               sidecar_path=self._sidecar_path)
         self._topo_explorer.fig.show()
 
     def _on_key(self, event):

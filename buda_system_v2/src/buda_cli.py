@@ -208,7 +208,8 @@ class BudaSession:
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path()).show()
         elif cmd == "visualize":
-            viz = BudaVisualizer(self.fp, self.bundles)
+            viz = BudaVisualizer(self.fp, self.bundles,
+                                 sidecar_path=self._sidecar_path())
             viz.draw_blocks()
             if self.planner is not None:
                 cuts = self.planner.get_cuts()
