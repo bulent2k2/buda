@@ -200,7 +200,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
 
             if (ty_src != ty_dst) {
                 // Standard Z_HVH — no spread or overlap needed.
-                Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut);
+                Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut) + "@y" + std::to_string(ty_src);
                 if (sx != x_cut)
                     z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
                 z.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
@@ -226,7 +226,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                     int y1 = flip ? y_lo : y_hi;   // H1 y-level (src side)
                     int y2 = flip ? y_hi : y_lo;   // H2 y-level (dst side)
                     if (y1 == y2) continue;
-                    Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut);
+                    Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut) + "@y" + std::to_string(y1);
                     z.segments.push_back(make_seg(sx,           y1, x_cut + ovlp, y1, 4));
                     z.segments.push_back(make_seg(x_cut,        y1, x_cut,        y2, 5));
                     z.segments.push_back(make_seg(x_cut - ovlp, y2, dx,           y2, 4));
@@ -252,7 +252,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
 
             if (vx_src != vx_dst) {
                 // Standard Z_VHV — no spread needed.
-                Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut);
+                Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut) + "@x" + std::to_string(vx_src);
                 if (sy != y_cut)
                     z.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
                 z.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 4));
@@ -274,7 +274,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                     int x1 = flip ? vx_lo : vx_hi;   // V1 x-level (src side)
                     int x2 = flip ? vx_hi : vx_lo;   // V2 x-level (dst side)
                     if (x1 == x2) continue;
-                    Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut);
+                    Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut) + "@x" + std::to_string(x1);
                     z.segments.push_back(make_seg(x1, sy,           x1, y_cut + ovlp, 5));
                     z.segments.push_back(make_seg(x1, y_cut,        x2, y_cut,        4));
                     z.segments.push_back(make_seg(x2, y_cut - ovlp, x2, dy,           5));
