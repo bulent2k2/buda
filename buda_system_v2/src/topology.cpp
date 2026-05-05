@@ -2,6 +2,7 @@
 #include <cmath>
 #include <climits>
 #include <set>
+#include <string>
 namespace interconnect {
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     blocks_[name] = Rect{x1, y1, x2, y2};
@@ -199,7 +200,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
 
             if (ty_src != ty_dst) {
                 // Standard Z_HVH — no spread or overlap needed.
-                Topology z; z.type = "Z_HVH";
+                Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut);
                 if (sx != x_cut)
                     z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
                 z.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
@@ -225,7 +226,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                     int y1 = flip ? y_lo : y_hi;   // H1 y-level (src side)
                     int y2 = flip ? y_hi : y_lo;   // H2 y-level (dst side)
                     if (y1 == y2) continue;
-                    Topology z; z.type = "Z_HVH";
+                    Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut);
                     z.segments.push_back(make_seg(sx,           y1, x_cut + ovlp, y1, 4));
                     z.segments.push_back(make_seg(x_cut,        y1, x_cut,        y2, 5));
                     z.segments.push_back(make_seg(x_cut - ovlp, y2, dx,           y2, 4));
@@ -251,7 +252,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
 
             if (vx_src != vx_dst) {
                 // Standard Z_VHV — no spread needed.
-                Topology z; z.type = "Z_VHV";
+                Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut);
                 if (sy != y_cut)
                     z.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
                 z.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 4));
@@ -273,7 +274,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                     int x1 = flip ? vx_lo : vx_hi;   // V1 x-level (src side)
                     int x2 = flip ? vx_hi : vx_lo;   // V2 x-level (dst side)
                     if (x1 == x2) continue;
-                    Topology z; z.type = "Z_VHV";
+                    Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut);
                     z.segments.push_back(make_seg(x1, sy,           x1, y_cut + ovlp, 5));
                     z.segments.push_back(make_seg(x1, y_cut,        x2, y_cut,        4));
                     z.segments.push_back(make_seg(x2, y_cut - ovlp, x2, dy,           5));
@@ -299,7 +300,7 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
             int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
             int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
-            Topology u; u.type = "U_HVH";
+            Topology u; u.type = "U_HVH@x" + std::to_string(x_cut);
             if (sx != x_cut)
                 u.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
             if (ty_src != ty_dst)
@@ -317,7 +318,7 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
             int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
             int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
             int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
-            Topology u; u.type = "U_VHV";
+            Topology u; u.type = "U_VHV@y" + std::to_string(y_cut);
             if (sy != y_cut)
                 u.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
             if (vx_src != vx_dst)
@@ -375,7 +376,7 @@ void TopologyGenerator::add_uu_shapes(const Rect& src, const Rect& dst,
         int x_corner = (exit_x == src.x1) ? src.x1 - margin_x
                                            : src.x2 + margin_x;
 
-        Topology uu; uu.type = "UU_VHV";
+        Topology uu; uu.type = "UU_VHV@y" + std::to_string(y_cut);
         if (exit_x != x_corner)
             uu.segments.push_back(make_seg(exit_x, sy_src, x_corner, sy_src, 4)); // H
         if (sy_src != y_cut)
@@ -414,7 +415,7 @@ void TopologyGenerator::add_uu_shapes(const Rect& src, const Rect& dst,
         int y_corner = (exit_y == src.y1) ? src.y1 - margin_y
                                            : src.y2 + margin_y;
 
-        Topology uu; uu.type = "UU_HVH";
+        Topology uu; uu.type = "UU_HVH@x" + std::to_string(x_cut);
         if (exit_y != y_corner)
             uu.segments.push_back(make_seg(tx_src, exit_y, tx_src, y_corner, 5)); // V
         if (tx_src != x_cut)
