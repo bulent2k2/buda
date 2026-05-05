@@ -101,24 +101,30 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
 double NUTSEngine::first_fit(double lo, double hi, double width,
                               const std::vector<std::pair<double,double>>& occupied) const
 {
-    // The candidate starting positions are: lo itself, and just after each
-    // occupied interval ends (with mandatory spacing applied).
+    // Placement positions are CENTERLINES.  The stripe occupies
+    // [center - width/2, center + width/2] and must fit within [lo, hi].
+    // occupied stores [lo_edge, hi_edge] of already-placed stripes.
+    const double half = width / 2.0;
+    const double c_lo = lo + half;   // minimum valid centerline
+    const double c_hi = hi - half;   // maximum valid centerline
+    if (c_lo > c_hi) return -1.0;
+
     std::vector<double> candidates;
-    candidates.push_back(lo);
+    candidates.push_back(c_lo);
     for (const auto& [occ_lo, occ_hi] : occupied)
-        candidates.push_back(occ_hi + track_pitch_);
+        candidates.push_back(occ_hi + track_pitch_ + half);  // edge-to-edge gap
 
     std::sort(candidates.begin(), candidates.end());
 
-    for (double pos : candidates) {
-        if (pos < lo) continue;
-        if (pos + width > hi) break;  // remaining candidates are only larger
+    for (double c : candidates) {
+        if (c < c_lo) continue;
+        if (c > c_hi) break;
 
         bool conflict = false;
         for (const auto& [occ_lo, occ_hi] : occupied) {
-            if (pos < occ_hi && pos + width > occ_lo) { conflict = true; break; }
+            if (c - half < occ_hi && c + half > occ_lo) { conflict = true; break; }
         }
-        if (!conflict) return pos;
+        if (!conflict) return c;
     }
 
     return -1.0;  // interval infeasible
@@ -142,18 +148,24 @@ double NUTSEngine::preferred_fit(
     const std::vector<std::pair<double,double>>& occupied,
     double preferred) const
 {
+    // All positions are CENTERLINES.  preferred is already a centerline.
+    const double half = width / 2.0;
+    const double c_lo = lo + half;
+    const double c_hi = hi - half;
+    if (c_lo > c_hi) return -1.0;
+
     std::vector<double> candidates;
     candidates.push_back(preferred);
-    candidates.push_back(lo);
+    candidates.push_back(c_lo);
     for (const auto& [occ_lo, occ_hi] : occupied) {
-        candidates.push_back(occ_hi + track_pitch_);
-        candidates.push_back(occ_lo - width - track_pitch_);
+        candidates.push_back(occ_hi + track_pitch_ + half);
+        candidates.push_back(occ_lo - track_pitch_ - half);
     }
 
-    auto valid = [&](double p) -> bool {
-        if (p < lo || p + width > hi) return false;
+    auto valid = [&](double c) -> bool {
+        if (c < c_lo || c > c_hi) return false;
         for (const auto& [occ_lo, occ_hi] : occupied)
-            if (p < occ_hi && p + width > occ_lo) return false;
+            if (c - half < occ_hi && c + half > occ_lo) return false;
         return true;
     };
 
@@ -207,29 +219,27 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         // Start event: assign a track to segs[ev.idx].
         TrackSegment* ts = segs[ev.idx];
 
-        // Collect occupied intervals from already-placed active segments.
+        // Collect occupied intervals [lo_edge, hi_edge] from active placed segments.
         std::vector<std::pair<double,double>> occupied;
         for (int ai : active) {
-            if (segs[ai]->placed)
-                occupied.push_back({segs[ai]->track_position,
-                                    segs[ai]->track_position + segs[ai]->width});
+            if (segs[ai]->placed) {
+                const double c = segs[ai]->track_position;
+                const double h = segs[ai]->width / 2.0;
+                occupied.push_back({c - h, c + h});
+            }
         }
         std::sort(occupied.begin(), occupied.end());
 
-        // Every segment has a preferred perpendicular centre in pull_map
-        // (nominal topology position by default, overridden by SEG→BUSTERM
-        // connectivity pull where applicable).  Convert to track_position
-        // (lower edge) and clamp to the placeable range, then find the
-        // closest valid placement to that position.
+        // preferred is a centerline; preferred_fit works entirely in centerline space.
         double pos;
         {
             auto it = pull_map.find(std::make_pair(ts->bundle_id, ts->seg_idx));
-            double pref_centre = (it != pull_map.end())
-                                 ? it->second
-                                 : (ts->interval_lo + ts->interval_hi) / 2.0;
-            double preferred = std::clamp(pref_centre - ts->width / 2.0,
-                                          ts->interval_lo,
-                                          ts->interval_hi - ts->width);
+            double preferred = (it != pull_map.end())
+                               ? it->second
+                               : (ts->interval_lo + ts->interval_hi) / 2.0;
+            preferred = std::clamp(preferred,
+                                   ts->interval_lo + ts->width / 2.0,
+                                   ts->interval_hi - ts->width / 2.0);
             pos = preferred_fit(ts->interval_lo, ts->interval_hi,
                                 ts->width, occupied, preferred);
         }
@@ -237,9 +247,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         if (pos >= 0.0) {
             ts->track_position = pos;
         } else {
-            // Best-effort: centre within interval (interval may be too narrow).
-            ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0
-                                 - ts->width / 2.0;
+            // Best-effort: centre of interval (interval may be too narrow).
+            ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
         }
         ts->placed = true;
         active.push_back(ev.idx);
@@ -433,9 +442,15 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
             if (!ts->placed) continue;
             auto it = rev_conn_map.find({ts->bundle_id, ts->seg_idx});
             if (it == rev_conn_map.end()) continue;
-            // Use track_position (the drawn coordinate) as the connection point,
-            // not track_position + width/2 (the bus-stripe centre).
-            const double my_centre = ts->track_position;
+            // lo_edge / hi_edge: the two faces of the just-placed bus stripe T.
+            // track_position is the centerline; stripe occupies ± width/2.
+            // When S's span endpoint is adjusted to meet T, we align it to the
+            // face of T furthest from S's body so the overlap is exactly one
+            // bus-stripe wide with no protrusion:
+            //   • trimming S's hi end → align to T's hi face
+            //   • trimming S's lo end → align to T's lo face
+            const double lo_edge = ts->track_position - ts->width / 2.0;
+            const double hi_edge = ts->track_position + ts->width / 2.0;
             for (const auto& sc : it->second) {
                 auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
                 if (jt == ts_ptr_map.end()) continue;
@@ -443,15 +458,14 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
 
                 if (!other->placed) {
                     // S not yet solved: EXTEND only — widen S's solve range to
-                    // cover the connection point; never shrink it (multiple stubs
-                    // may connect and must all be covered).
-                    other->span_lo = std::min(other->span_lo, my_centre);
-                    other->span_hi = std::max(other->span_hi, my_centre);
+                    // cover T's full stripe; never shrink it.
+                    other->span_lo = std::min(other->span_lo, lo_edge);
+                    other->span_hi = std::max(other->span_hi, hi_edge);
                     continue;
                 }
 
-                // S already placed: SET the endpoint of S nearest sc.at_pos to
-                // my_centre so the drawn segment terminates at the junction.
+                // S already placed: SET the endpoint of S nearest sc.at_pos so
+                // the overlap is precisely one stripe wide.
                 //
                 // at_pos sits at or very near the endpoint for normal stubs, and
                 // well inside the span for designed-overlap segments (spread Z).
@@ -461,12 +475,12 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
                 const double lo_d  = sc.at_pos - other->span_lo;
                 const double hi_d  = other->span_hi - sc.at_pos;
                 if (hi_d <= tol)
-                    other->span_hi = my_centre;
+                    other->span_hi = hi_edge;
                 else if (lo_d <= tol)
-                    other->span_lo = my_centre;
+                    other->span_lo = lo_edge;
                 else {
-                    other->span_lo = std::min(other->span_lo, my_centre);
-                    other->span_hi = std::max(other->span_hi, my_centre);
+                    other->span_lo = std::min(other->span_lo, lo_edge);
+                    other->span_hi = std::max(other->span_hi, hi_edge);
                 }
             }
         }
@@ -477,8 +491,8 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     // -----------------------------------------------------------------------
     for (const auto& ts : result.segments) {
         if (!ts.placed) continue;
-        if (ts.track_position < ts.interval_lo ||
-            ts.track_position + ts.width > ts.interval_hi)
+        if (ts.track_position - ts.width / 2.0 < ts.interval_lo ||
+            ts.track_position + ts.width / 2.0 > ts.interval_hi)
             ++result.num_violations;
     }
 
@@ -490,9 +504,9 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
             if (a.layer != b.layer || !a.placed || !b.placed) continue;
             // Spans overlap?
             if (a.span_hi <= b.span_lo || b.span_hi <= a.span_lo) continue;
-            // Tracks overlap?
-            if (a.track_position + a.width > b.track_position &&
-                b.track_position + b.width > a.track_position)
+            // Stripes overlap? (centerline ± half-width)
+            if (a.track_position + a.width / 2.0 > b.track_position - b.width / 2.0 &&
+                b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0)
                 ++result.num_overlaps;
         }
     }

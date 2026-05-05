@@ -660,7 +660,9 @@ class BudaVisualizer:
                 col  = spec['color']
 
                 if ts and ts.placed:
-                    center = ts.track_position + ts.width / 2.0
+                    # track_position is the centerline; stripe spans ± width/2.
+                    half   = ts.width / 2.0
+                    center = ts.track_position
                     is_h   = (seg.start.y == seg.end.y)
 
                     if is_h:
@@ -668,7 +670,7 @@ class BudaVisualizer:
                         sy = ey = center
                         # Filled footprint of the placed bus (actual track occupancy)
                         footprint = patches.Rectangle(
-                            (sx, ts.track_position),
+                            (sx, center - half),
                             ex - sx, ts.width,
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
@@ -684,7 +686,7 @@ class BudaVisualizer:
                         sy, ey = ts.span_lo, ts.span_hi
                         sx = ex = center
                         footprint = patches.Rectangle(
-                            (ts.track_position, sy),
+                            (center - half, sy),
                             ts.width, ey - sy,
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
