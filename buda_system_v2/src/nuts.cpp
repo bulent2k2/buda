@@ -433,36 +433,38 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
             if (!ts->placed) continue;
             auto it = rev_conn_map.find({ts->bundle_id, ts->seg_idx});
             if (it == rev_conn_map.end()) continue;
-            const double my_centre = ts->track_position + ts->width / 2.0;
+            // Use track_position (the drawn coordinate) as the connection point,
+            // not track_position + width/2 (the bus-stripe centre).
+            const double my_centre = ts->track_position;
             for (const auto& sc : it->second) {
                 auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
                 if (jt == ts_ptr_map.end()) continue;
                 TrackSegment* other = jt->second;
-                // Decide which span endpoint to update.
+
+                if (!other->placed) {
+                    // S not yet solved: EXTEND only — widen S's solve range to
+                    // cover the connection point; never shrink it (multiple stubs
+                    // may connect and must all be covered).
+                    other->span_lo = std::min(other->span_lo, my_centre);
+                    other->span_hi = std::max(other->span_hi, my_centre);
+                    continue;
+                }
+
+                // S already placed: SET the endpoint of S nearest sc.at_pos to
+                // my_centre so the drawn segment terminates at the junction.
                 //
-                // SET semantics (normal stub): at_pos is at or very near the
-                // endpoint being adjusted — the segment was designed to terminate
-                // exactly at the junction.  Move that endpoint to my_centre
-                // (handles both shrinking when the partner moved closer and
-                // extension when it moved farther).
-                //
-                // EXTEND semantics (designed overlap): at_pos sits well inside
-                // the span — the topology intentionally extends the segment past
-                // the junction to create x-overlap for NUTS conflict detection
-                // (e.g. spread Z_HVH).  Only grow the span toward my_centre;
-                // never shrink the designed overlap away.
-                //
-                // Threshold: if at_pos is within 11% of the span width from
-                // an endpoint, treat as SET; otherwise treat as EXTEND.
+                // at_pos sits at or very near the endpoint for normal stubs, and
+                // well inside the span for designed-overlap segments (spread Z).
+                // Use the 11% threshold to distinguish SET from EXTEND.
                 const double range = other->span_hi - other->span_lo;
                 const double tol   = 0.11 * range;
                 const double lo_d  = sc.at_pos - other->span_lo;
                 const double hi_d  = other->span_hi - sc.at_pos;
-                if (hi_d <= tol)                         // at_pos near hi end
+                if (hi_d <= tol)
                     other->span_hi = my_centre;
-                else if (lo_d <= tol)                    // at_pos near lo end
+                else if (lo_d <= tol)
                     other->span_lo = my_centre;
-                else {                                   // interior — keep overlap
+                else {
                     other->span_lo = std::min(other->span_lo, my_centre);
                     other->span_hi = std::max(other->span_hi, my_centre);
                 }
