@@ -399,7 +399,7 @@ class BudaVisualizer:
         # sidecar_path here is the .buda script path (for the window title).
         # The selections file is derived separately and passed to TopologyExplorer.
         self._selections_path = (
-            os.path.splitext(sidecar_path)[0] + '.selections.json'
+            os.path.splitext(sidecar_path)[0] + '.json'
             if sidecar_path else None
         )
         self.fig, self.ax = plt.subplots(figsize=(14, 12))

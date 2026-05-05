@@ -1,0 +1,13 @@
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+def_layer 6 M6 H TOP 0.0
+add_block u1    50   50   100 100
+add_block u2    150  70   200 120
+add_block u3    50  150   100 200
+add_block u4    150 130   200 170
+add_net b4 u2.tx u3.rx,u4.rx,u1.tx
+run_bundler strict
+generate_topologies_for_bundle b4 u2 u3 u4 u1
+run_planner 1
+run_nuts 2.0
+visualize

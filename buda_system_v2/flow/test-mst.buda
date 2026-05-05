@@ -7,36 +7,30 @@ def_layer 5 M5 V TOP 0.0
 def_layer 6 M6 H TOP 0.0
 
 # ── Floorplan ────────────────────────────────────────────────
-add_block u1    50   50   100 100
-add_block u2    150  50   200 100
-add_block u3    50  150   100 200
-add_block u4    150 150   200 200
-
+add_block d1    50  380  230  620
+add_block r1   680  120  880  500
+add_block r2   350   50  550  230
+add_block r3   200  -30  300   10
+add_block r4   400  -30  600   10
+add_block r5   200  -90  300  -40
+add_block r6   400  -90  600  -40
 
 # ── Net ──────────────────────────────────────────────────────
-add_net b1 u1.tx u2.rx
-add_net b2 u1.tx u2.rx,u3.rx
-add_net b3 u1.tx u2.rx,u3.rx,u4.rx
-add_net b4 u2.tx u3.rx,u4.rx,u1.tx
+add_net b1 d1.tx r1.rx,r2.rx,r3.rx,r4.rx,r5.rx,r6.rx
 # ── Pipeline ─────────────────────────────────────────────────
 run_bundler strict
 
 # Pass all four destination blocks so the CLI dispatches to
 # generate_multicast_candidates() instead of generate_candidates().
-generate_topologies_for_bundle b1 u1 u2
-generate_topologies_for_bundle b2 u1 u2 u3
-generate_topologies_for_bundle b3 u1 u2 u3 u4
-generate_topologies_for_bundle b4 u2 u3 u4 u1
+generate_topologies_for_bundle b1 d1 r1 r2 r3 r4 r5 r6
 run_planner 1
 
 # Step through all 18 topologies in wirelength order.
 # ← / → arrow keys (or ◀/▶ buttons) cycle through each candidate.
 # NOTE: NUTS is omitted — draw_buses() shows segments at their
 # nominal (connected) coordinates, which is correct for tree shapes.
-# visualize_topologies -all
-
-run_nuts 2.0
+visualize_topologies b1
 
 # Full visualize shows the planner-selected topology with the
 # congestion map overlaid.
-visualize
+# visualize

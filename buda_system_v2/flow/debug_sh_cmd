@@ -1,3 +1,222 @@
+14)  Inspect b2 TRUNK_V topology using stderr
+Bash command 
+ 
+ cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
+   import interconnect, sys 
+   from buda_cli import Buda Session 
+   s = BudaSession() 
+   s.script_path = '/Users/ben/src/buda/buda_system_v2/flow/sidecar.buda' 
+   s.do_command('source ../flow/sidecar.buda') 
+   for w in s.bundles: 
+       if w.original_bundle.id != 2: continue 
+       topo = w.candidates[w.selected_topology_index] 
+       sys.stderr.write('b2 topo: ' + topo.type + chr(10)) 
+       for si, seg in enumerate(topo.segments): 
+           sys.stderr.write(' seg%d: (%d,%d)->(%d,%d) layer=%d\n' % (si,seg.start.x,seg.start.y,seg.end.x,seg.end.y,seg.layer_hint)) 
+       ct = interconnect.ConnTopology() 
+       ct.build(topo, s.fp) 
+       for si, cs in enumerate(ct.segs()): 
+           n_seg = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.SEG) 
+           n_bt  = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.BUSTERM) 
+           sys.stderr.write(' conn seg%d: perp=[%d,%d] n_seg=%d n_bt=%d\n' % (si,cs.perp_lo,cs.perp_hi,n_seg,n_bt)) 
+           for c in cs.conns: 
+               sys.stderr.write('   kind=%s seg_idx=%d at_pos=%d\n' % (c.kind,c.seg_idx,c.at_pos)) 
+   for ts in s.nuts_result.segments: 
+       if ts.bundle_id == 2: 
+           sys.stderr.write(' NUTS seg%d interval=[%.1f,%.1f] track_pos=%.2f\n' % (ts.seg_idx,ts.interval_lo,ts.interval_hi,ts.track_position)) 
+   " 2>&1 1>/dev/null                                                                                                                          
+   Inspect b2 TRUNK_V topology using stderr
+                                           
+ Compound command contains cd with output redirection - manual approval required to prevent path resolution bypass
+                                                                                                                  
+ Do you want to proceed?
+
+
+13) ❯ Bundle 2 in the same test case, selected topo, TRUNK_V (2 of 6), the trunk has two stubs pulling left and one stub pulling right. To minimize WL, trunk needs to slide left, 10% shy of the left edge.  
+Let's fix that.                                                                                                                                                                                           
+                                                                                                                                                                                                          
+⏺ Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "                                                                                                                                          
+      import interconnect…)              
+  ⎿  Running in the background (↓ to manage)                                                                                                                                                              
+                                  
+⏺ Bash(sleep 5 && cat /private/tmp/claude-501/-Users-ben-src-buda/d81b14bb-30bf-409b-b9b4-e0d13e8c1c8f/tasks/b39cggf1p.output)                                                                            
+  ⎿  (No output)                                            
+                                                                                                                                                                                                          
+⏺ Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 - <<'EOF' 2>&1                                                                                                                                
+      import interconnect…)                                                                                                                                                                               
+  ⎿  Running…                                                                                                                                                                                             
+                                                                                                                                                                                                          
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command                                                                                                                                                                                             
+                                                                                                                                                                                                          
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 - <<'EOF' 2>&1
+   import interconnect
+   from buda_cli import BudaSession
+   s = BudaSession()
+   s.script_path = '/Users/ben/src/buda/buda_system_v2/flow/sidecar.buda'
+   s.do_command('source ../flow/sidecar.buda')
+
+   for w in s.bundles:
+       if w.original_bundle.id != 2: continue
+       topo = w.candidates[w.selected_topology_index]
+       print('b2 topo:', topo.type, 'idx:', w.selected_topology_index)
+       for si, seg in enumerate(topo.segments):
+           print(f'  seg{si}: ({seg.start.x},{seg.start.y})->({seg.end.x},{seg.end.y}) layer={seg.layer_hint}')
+       ct = interconnect.ConnTopology()
+       ct.build(topo, s.fp)
+       for si, cs in enumerate(ct.segs()):
+           n_seg = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.SEG)
+           n_bt  = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.BUSTERM)
+           print(f'  conn seg{si}: perp=[{cs.perp_lo},{cs.perp_hi}] n_seg={n_seg} n_bt={n_bt}')
+           for c in cs.conns:
+               print(f'    {c.kind} seg_idx={c.seg_idx} at_pos={c.at_pos}')
+
+   for ts in s.nuts_result.segments:
+       if ts.bundle_id == 2:
+           print(f'  NUTS seg{ts.seg_idx} span=[{ts.span_lo:.1f},{ts.span_hi:.1f}] interval=[{ts.interval_lo:.1f},{ts.interval_hi:.1f}] track_pos={ts.track_position:.2f}')
+   EOF
+   Inspect b2 TRUNK_V topology, ConnTopology, and NUTS placement
+
+ Unhandled node type: file_redirect
+
+
+12) Bash command                                               
+
+   python3 -c "
+   import interconnect
+   from buda_cli import BudaSession
+   s = BudaSession()
+   s.script_path = '/Users/ben/src/buda/buda_system_v2/flow/sidecar.buda'
+   s.do_command('source ../flow/sidecar.buda')
+
+   # Now inspect ConnTopology for b3 with correct topo
+   for w in s.bundles:
+       if w.original_bundle.id != 3: continue
+       topo = w.candidates[w.selected_topology_index]
+       bid = w.original_bundle.id
+       print('b3 topo:', topo.type, 'idx:', w.selected_topology_index)
+       for si, seg in enumerate(topo.segments):
+           print(f'  seg{si}: ({seg.start.x},{seg.start.y})->({seg.end.x},{seg.end.y}) layer={seg.layer_hint}')
+       ct = interconnect.ConnTopology()
+       ct.build(topo, s.fp)
+       for si, cs in enumerate(ct.segs()):
+           seg = topo.segments[si]
+           n_seg = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.SEG)
+           n_bt  = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.BUSTERM)
+           print(f'  conn seg{si}: perp=[{cs.perp_lo},{cs.perp_hi}] n_seg={n_seg} n_bt={n_bt} trunk_candidate={n_seg>=2 and n_bt==0}')
+   " 2>&1 | grep -E "^b3|^  seg|^  conn"
+   Debug ConnTopology for b3 with correct sidecar selections
+
+ Newline followed by # inside a quoted argument can hide arguments from path validation
+
+
+11) Bash command
+
+   python3 -c "
+   import interconnect
+   from buda_cli import BudaSession
+   s = BudaSession()
+   # Run just up to planner, not NUTS
+   for line in open('../flow/sidecar.buda'):
+       if line.strip().startswith('#') or not line.strip(): continue
+       if 'run_nuts' in line or 'visualize' in line: break
+       s.do_command(line)
+
+   # Inspect ConnTopology for b3
+   for w in s.bundles:
+       if w.original_bundle.id != 3: continue
+       topo = w.candidates[w.selected_topology_index]
+       bid = w.original_bundle.id
+       ct = interconnect.ConnTopology()
+       ct.build(topo, s.fp)
+       for si, cs in enumerate(ct.segs()):
+           seg = topo.segments[si]
+           n_seg = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.SEG)
+           n_bt  = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.BUSTERM)
+           print(f'  b{bid}/seg{si}: perp=[{cs.perp_lo},{cs.perp_hi}] '
+                 f'n_seg={n_seg} n_bt={n_bt} trunk={n_seg>=2 and n_bt==0}')
+           for c in cs.conns:
+               print(f'    conn kind={c.kind} seg_idx={c.seg_idx} at_pos={c.at_pos}')
+   " 2>&1 | grep -v Planner | grep -v Bundle | grep -v Bundler | grep -v Generated | grep -v Pinned
+   Debug ConnTopology connections for b3 TRUNK_V_OOB
+
+ Newline followed by # inside a quoted argument can hide arguments from path validation
+
+10)
+
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
+   import interconnect
+   from buda_cli import BudaSession
+   s = BudaSession()
+   s.do_command('source ../flow/sidecar.buda')
+   # Check b3 trunk placement
+   for ts in s.nuts_result.segments:
+       print(f'  bid={ts.bundle_id} seg={ts.seg_idx} layer={ts.layer} '
+             f'span=[{ts.span_lo:.1f},{ts.span_hi:.1f}] '
+             f'interval=[{ts.interval_lo:.1f},{ts.interval_hi:.1f}] '
+             f'width={ts.width:.1f} track_pos={ts.track_position:.2f} placed={ts.placed}')
+   print('violations:', s.nuts_result.num_violations)
+   print('overlaps:', s.nuts_result.num_overlaps)
+   " 2>&1
+   Test NUTS with sidecar.buda, check b3 trunk placement
+
+ Newline followed by # inside a quoted argument can hide arguments from path validation
+
+ Do you want to proceed?
+
+9) Stretch to connect after NUTS and support pull preferences
+Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "
+      import interconnect as ic, sys
+      sys.path.insert(0, '.')
+      from buda_cli import BudaSession
+      s = BudaSession()
+      s.script_path = '/Users/ben/src/buda/buda_system_v2/flow/sidecar.buda'
+
+      cmds = open('/Users/ben/src/buda/buda_system_v2/flow/sidecar.buda').readlines()
+      for line in cmds:
+          line = line.strip()
+          if line and not line.startswith('#') and not line.startswith('visualize'):
+              s.do_command(line)
+
+      for ts in s.nuts_result.segments:
+          topo = s.bundles[ts.bundle_id - 1].candidates[s.bundles[ts.bundle_id-1].selected_topology_index]
+          seg  = topo.segments[ts.seg_idx]
+          is_h = seg.start.y == seg.end.y
+          nom  = seg.start.y if is_h else seg.start.x
+          print(f'b{ts.bundle_id} seg{ts.seg_idx} {\"H\" if is_h else \"V\"}'
+                f'  nom={nom}  track={ts.track_position:.1f}  interval=[{ts.interval_lo:.0f},{ts.interval_hi:.0f}]')
+      " 2>&1 | grep -v "^\[NUTS\]")
+  ⎿  Bundler created 3 bundles.
+     Generated 5 topologies for bundle 1 (u1->u2)
+     Generated 6 topologies for bundle 2 (u1->[u2,u3])
+     Generated 6 topologies for bundle 3 (u1->[u2,u3,u4])
+     Pinned bundle 'b1' to topology 3 (U_VHV, WL=70)
+     Pinned bundle 'b2' to topology 1 (TRUNK_V, WL=135)
+     Pinned bundle 'b3' to topology 4 (TRUNK_V_OOB, WL=320)
+     NUTS placed 12 segments (0 interval violations, 0 track overlaps).
+     Stretched 4 segment span(s) to restore physical connectivity after track placement.
+     b1 seg0 V  nom=95  track=94.2  interval=[50,100]
+     b1 seg1 H  nom=45  track=49.2  interval=[-5,95]
+     b1 seg2 V  nom=155  track=154.2  interval=[150,200]
+     b2 seg0 V  nom=125  track=115.9  interval=[100,150]
+     b2 seg1 H  nom=95  track=94.2  interval=[50,100]
+     b2 seg2 H  nom=95  track=94.2  interval=[50,100]
+     b2 seg3 H  nom=155  track=154.2  interval=[150,200]
+     b3 seg0 V  nom=35  track=83.5  interval=[-15,85]
+     b3 seg1 H  nom=95  track=94.2  interval=[50,100]
+     b3 seg2 H  nom=95  track=97.8  interval=[50,100]
+     b3 seg3 H  nom=155  track=154.2  interval=[150,200]
+     b3 seg4 H  nom=155  track=157.8  interval=[150,200]
+     [Planner] Top constrained cuts (capacity):
+       V-cut @ 75  capacity=50
+       V-cut @ 175  capacity=50
+       H-cut @ 75  capacity=50
+       H-cut @ 175  capacity=50
+     [Planner] Bundle 1 (1.5 units wide) -> I_H  overflow=0
+     [Planner] Bundle 2 (1.5 units wide) -> TRUNK_H  overflow=0
+     [Planner] Bundle 3 (1.5 units wide) -> TRUNK_H  overflow=0
+
+
 8)  Bash command 
 
    cd /Users/ben/src/buda/buda_system_v2/src && python3 -c "

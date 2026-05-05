@@ -26,6 +26,15 @@
       "topo_index_hint": 5,
       "note": "",
       "selected_at": "2026-05-04T15:41:05"
+    },
+    {
+      "bundle_hint": "b4",
+      "bundle_id": 4,
+      "topo_type": "TRUNK_V",
+      "topo_wl": 160,
+      "topo_index_hint": 1,
+      "note": "",
+      "selected_at": "2026-05-04T18:44:29"
     }
   ]
 }

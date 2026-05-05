@@ -18,11 +18,11 @@ class BudaSession:
         self.script_path = None      # set when a .buda script is sourced
 
     def _sidecar_path(self):
-        """Return the .selections.json path for the current script, or None."""
+        """Return the .json path for the current script, or None."""
         if not self.script_path:
             return None
         base = os.path.splitext(self.script_path)[0]
-        return base + '.selections.json'
+        return base + '.json'
 
     def _apply_selections(self):
         """Load the sidecar and override selected_topology_index for pinned bundles.
