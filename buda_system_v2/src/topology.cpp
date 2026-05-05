@@ -320,7 +320,8 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
             Topology u; u.type = "U_VHV";
             if (sy != y_cut)
                 u.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
-            u.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 6));   // M6 long-haul
+            if (vx_src != vx_dst)
+                u.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 6));   // M6 long-haul
             if (y_cut != dy)
                 u.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
             if (u.segments.size() == 3) results.push_back(u);
