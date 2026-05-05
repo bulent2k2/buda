@@ -396,11 +396,15 @@ class BudaVisualizer:
     def __init__(self, floorplan, bundles, sidecar_path=None):
         self.fp           = floorplan
         self.bundles      = bundles
-        self._sidecar_path = sidecar_path
+        # sidecar_path here is the .buda script path (for the window title).
+        # The selections file is derived separately and passed to TopologyExplorer.
+        self._selections_path = (
+            os.path.splitext(sidecar_path)[0] + '.selections.json'
+            if sidecar_path else None
+        )
         self.fig, self.ax = plt.subplots(figsize=(14, 12))
         self.fig.patch.set_facecolor('#f0f0f0')
         if sidecar_path and self.fig.canvas.manager:
-            import os
             self.fig.canvas.manager.set_window_title(
                 os.path.splitext(os.path.basename(sidecar_path))[0]
             )
@@ -531,7 +535,7 @@ class BudaVisualizer:
         if wrapper is None or not wrapper.candidates:
             return
         self._topo_explorer = TopologyExplorer(self.fp, wrapper,
-                                               sidecar_path=self._sidecar_path)
+                                               sidecar_path=self._selections_path)
         self._topo_explorer.fig.show()
 
     def _on_key(self, event):
