@@ -327,6 +327,9 @@ class TopologyExplorer:
             f"  ·  bterms={n_bt}  ·  bsegs={len(topo.segments)}{sel_badge}",
             fontsize=13, pad=10,
             color='#886600' if is_sel else 'black')
+        if self.fig.canvas.manager:
+            net0 = self.wrapper.original_bundle.get_net_names()[0]
+            self.fig.canvas.manager.set_window_title(net0)
 
         # Floorplan blocks
         for name, rect in self.fp.get_all_blocks():
