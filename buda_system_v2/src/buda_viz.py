@@ -396,6 +396,11 @@ class BudaVisualizer:
         self._sidecar_path = sidecar_path
         self.fig, self.ax = plt.subplots(figsize=(14, 12))
         self.fig.patch.set_facecolor('#f0f0f0')
+        if sidecar_path and self.fig.canvas.manager:
+            import os
+            self.fig.canvas.manager.set_window_title(
+                os.path.splitext(os.path.basename(sidecar_path))[0]
+            )
 
         # bundle_id -> list of dicts {artist, alpha, lw, is_band}
         self._bundle_artists = {}
