@@ -803,17 +803,15 @@ class BudaVisualizer:
         # Layer-visibility checkboxes — right of plot, top-down order M4/M5/M6.
         ax_layers = self.fig.add_axes([0.855, 0.60, 0.12, 0.28])
         ax_layers.set_title('Layers', fontsize=9, pad=6)
+        layer_colors = [_LAYER_COLOR[lid] for lid in (4, 5, 6)]
         self._chk_layers = CheckButtons(
             ax_layers,
             labels  = ['M4', 'M5', 'M6'],
             actives = [True,  True,  True],
         )
-        # Colour each checkbox's cross-marks to match the layer colour.
-        for lines_pair, layer_id in zip(self._chk_layers.lines, [4, 5, 6]):
-            col = _LAYER_COLOR[layer_id]
-            for ln in lines_pair:
-                ln.set_color(col)
-                ln.set_linewidth(2.0)
+        # Colour check marks and labels to match layer colours (mpl 3.7+ API).
+        self._chk_layers.set_check_props({'facecolor': layer_colors})
+        self._chk_layers.set_label_props({'color': layer_colors})
         self._chk_layers.on_clicked(self._on_layer_toggle)
 
         btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
