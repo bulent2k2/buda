@@ -302,8 +302,11 @@ class TopologyExplorer:
             fontsize=13, pad=10,
             color='#886600' if is_sel else 'black')
         if self.fig.canvas.manager:
-            net0 = self.wrapper.original_bundle.get_net_names()[0]
-            self.fig.canvas.manager.set_window_title(net0)
+            bid_  = self.wrapper.original_bundle.id
+            names_ = self.wrapper.original_bundle.get_net_names()
+            net0  = names_[0] if names_ else f"B{bid_}"
+            self.fig.canvas.manager.set_window_title(
+                f"{net0} (Bundle {bid_})")
 
         # Floorplan blocks
         for name, rect in self.fp.get_all_blocks():
@@ -434,6 +437,14 @@ class BudaVisualizer:
             self._set_highlight(None)
         self._pick_happened = False
 
+    def _bundle_name(self, bid):
+        """Return the first net name for bid, or 'B{bid}' as fallback."""
+        w = next((w for w in self.bundles if w.original_bundle.id == bid), None)
+        if w:
+            names = w.original_bundle.get_net_names()
+            return names[0] if names else f"B{bid}"
+        return f"B{bid}"
+
     def _set_highlight(self, bundle_id):
         if bundle_id == self._highlighted:
             bundle_id = None
@@ -483,8 +494,9 @@ class BudaVisualizer:
 
         if bundle_id is not None:
             solo_hint = "  [Solo ON]" if self._solo else ""
+            bname = self._bundle_name(bundle_id)
             self.ax.set_title(
-                f"BUDA — Bundle {bundle_id} selected{solo_hint}  "
+                f"BUDA — Bundle {bundle_id} ({bname}) selected{solo_hint}  "
                 f"(click again or click background to deselect)",
                 fontsize=13)
         else:
@@ -493,6 +505,7 @@ class BudaVisualizer:
                 "— click a bus-term or bus-seg to highlight",
                 fontsize=13)
 
+        self._redraw_bundle_list()
         self.fig.canvas.draw_idle()
 
     def _step_bundle(self, delta):
@@ -592,20 +605,23 @@ class BudaVisualizer:
             # y coordinate: top row at y≈1, bottom row at y≈0.
             y = 1.0 - (row + 0.5) / n_vis
 
-            # Label: first net name, truncated to fit.
-            w = next((w for w in self.bundles
-                      if w.original_bundle.id == bid), None)
-            if w:
-                nets  = w.original_bundle.get_net_names()
-                label = nets[0] if nets else f"B{bid}"
-                if len(label) > 13:
-                    label = label[:12] + '…'
-            else:
-                label = f"B{bid}"
+            # Build label: "{name} (Bundle {bid})", truncated to fit.
+            name  = self._bundle_name(bid)
+            full  = f"{name} (Bundle {bid})"
+            if len(full) > 18:
+                full = name[:max(4, 18 - 10)] + '… ' + f"(Bundle {bid})"
 
-            symbol    = '☑' if on else '☐'
-            txt_color = '#111111' if on else '#bbbbbb'
-            ax.text(0.04, y, f"{symbol} {label}",
+            # Radio indicator (left, for selection) and checkbox (for visibility).
+            radio_char = '◉' if bid == self._highlighted else '○'
+            vis_char   = '☑' if on else '☐'
+            txt_color  = '#111111' if on else '#bbbbbb'
+            sel_color  = '#004488' if bid == self._highlighted else txt_color
+
+            ax.text(0.03, y, radio_char,
+                    transform=ax.transAxes,
+                    fontsize=7, color=sel_color,
+                    va='center', clip_on=True)
+            ax.text(0.20, y, f"{vis_char} {full}",
                     transform=ax.transAxes,
                     fontsize=7, color=txt_color,
                     va='center', clip_on=True)
@@ -631,20 +647,24 @@ class BudaVisualizer:
         self.fig.canvas.draw_idle()
 
     def _on_bundle_list_click(self, event):
-        """Toggle visibility of the bundle whose row was clicked."""
+        """Radio column (x<0.18): select bundle.  Checkbox column (x>=0.18): toggle visibility."""
         ax = self._ax_bundles
-        if ax is None or event.ydata is None:
+        if ax is None or event.ydata is None or event.xdata is None:
             return
         n_vis = self._bundle_list_n_visible()
-        # ydata is in [0, 1] (data coords = axes fraction since ylim=(0,1)).
         row = int((1.0 - event.ydata) * n_vis)
         idx = self._bundle_scroll + row
         bids = self._bid_list
         if 0 <= idx < len(bids):
             bid = bids[idx]
-            self._bundle_visible[bid] = not self._bundle_visible.get(bid, True)
-            self._redraw_bundle_list()
-            self._refresh_highlight()
+            if event.xdata < 0.18:
+                # Radio click → select / deselect bundle in main view.
+                self._set_highlight(bid)   # _set_highlight toggles if same bid
+            else:
+                # Checkbox click → toggle visibility.
+                self._bundle_visible[bid] = not self._bundle_visible.get(bid, True)
+                self._redraw_bundle_list()
+                self._refresh_highlight()
 
     def _scroll_bundles(self, delta):
         n_vis      = self._bundle_list_n_visible()
@@ -915,9 +935,9 @@ class BudaVisualizer:
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
-        # ── Per-layer checkboxes (M4 / M5 / M6) ─────────────────────────
-        ax_layers = self.fig.add_axes([RX, 0.63, RW, 0.26])
-        ax_layers.set_title('Layers', fontsize=9, pad=6)
+        # ── Per-layer checkboxes (M4 / M5 / M6) — compact, no large gaps ──
+        ax_layers = self.fig.add_axes([RX, 0.78, RW, 0.10])
+        ax_layers.set_title('Layers', fontsize=9, pad=4)
         layer_colors = [_LAYER_COLOR[lid] for lid in (4, 5, 6)]
         self._chk_layers = CheckButtons(
             ax_layers,
@@ -925,20 +945,20 @@ class BudaVisualizer:
             actives = [True, True, True],
         )
         self._chk_layers.set_check_props({'facecolor': layer_colors})
-        self._chk_layers.set_label_props({'color': layer_colors})
+        self._chk_layers.set_label_props({'color': layer_colors, 'fontsize': 8})
         self._chk_layers.on_clicked(self._on_layer_toggle)
 
         # ── "All Bundles" global toggle ──────────────────────────────────
-        ax_all_bundles = self.fig.add_axes([RX, 0.58, RW, 0.04])
+        ax_all_bundles = self.fig.add_axes([RX, 0.73, RW, 0.04])
         self._btn_all_bundles = Button(ax_all_bundles, '☑ All Bundles', color='#e8e8e8')
         self._btn_all_bundles.on_clicked(lambda _: self._on_bundle_toggle_all())
 
         # ── Bundle list: scroll ▲, list area, scroll ▼ ──────────────────
-        ax_bscroll_up = self.fig.add_axes([RX, 0.53, RW, 0.04])
+        ax_bscroll_up = self.fig.add_axes([RX, 0.68, RW, 0.04])
         btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
         btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles(-5))
 
-        self._ax_bundles = self.fig.add_axes([RX, 0.14, RW, 0.38])
+        self._ax_bundles = self.fig.add_axes([RX, 0.14, RW, 0.53])
         self._ax_bundles.set_facecolor('#fafafa')
         self._redraw_bundle_list()
 
