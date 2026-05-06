@@ -536,9 +536,7 @@ NUTSResult NUTSEngine::rerun_layer(
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
 
     solve_layer(layer_segs, pull_map);
-    // Pass only_unplaced=true: do not modify spans of already-placed segments
-    // (other layers are solved and their geometry must not change).
-    do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map, /*only_unplaced=*/true);
+    do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
 
     compute_metrics(result);
 

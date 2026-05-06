@@ -292,4 +292,5 @@ generate_topologies_for_bundle t7_b7  u_t7  u_b7
 
 run_planner 5
 run_nuts 2.0
+run_nuts_on_layer M4
 visualize
