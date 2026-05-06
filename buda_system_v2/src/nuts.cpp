@@ -5,6 +5,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <set>
 
 namespace interconnect {
 
@@ -17,6 +18,213 @@ static int find_grid_cell(const std::vector<int>& grid, int v) {
     for (int i = 0; i + 1 < (int)grid.size(); ++i)
         if (v >= grid[i] && v <= grid[i + 1]) return i;
     return -1;
+}
+
+// Internal type: records how segment S's span must follow T's track position.
+struct SpanAdjConn { int src_bid, src_si; double at_pos; };
+
+// ---------------------------------------------------------------------------
+// Shared map builders
+// ---------------------------------------------------------------------------
+//
+// Populates pull_map, slide_map, trunk_set, and rev_conn_map from bundles.
+// Called by both run() and rerun_layer().
+static void build_nuts_maps(
+    const std::vector<BundleWrapper>& bundles,
+    const Floorplan& floorplan,
+    std::map<std::pair<int,int>, double>&                         pull_map,
+    std::map<std::pair<int,int>, std::pair<double,double>>&       slide_map,
+    std::set<std::pair<int,int>>&                                 trunk_set,
+    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map)
+{
+    // Pass 1 — nominal perpendicular position from the topology.
+    for (const auto& bw : bundles) {
+        if (bw.candidates.empty()) continue;
+        const Topology& topo = bw.candidates[bw.selected_topology_index];
+        int bid = bw.original_bundle.id;
+        for (int si = 0; si < (int)topo.segments.size(); ++si) {
+            const Segment& seg = topo.segments[si];
+            bool is_h  = (seg.start.y == seg.end.y);
+            double nom = is_h ? static_cast<double>(seg.start.y)
+                               : static_cast<double>(seg.start.x);
+            pull_map[{bid, si}] = nom;
+        }
+    }
+
+    // Pass 2 — connectivity-based override.
+    for (const auto& bw : bundles) {
+        if (bw.candidates.empty()) continue;
+        const Topology& topo = bw.candidates[bw.selected_topology_index];
+        int bid = bw.original_bundle.id;
+
+        ConnTopology ct;
+        ct.build(topo, floorplan);
+        const auto& conn_segs = ct.segs();
+
+        for (int si = 0; si < (int)conn_segs.size(); ++si) {
+            const ConnSeg& cs = conn_segs[si];
+            auto key = std::make_pair(bid, si);
+
+            slide_map[key] = { static_cast<double>(cs.perp_lo),
+                               static_cast<double>(cs.perp_hi) };
+
+            int n_seg = 0, n_bt = 0;
+            for (const auto& c : cs.conns) {
+                if (c.kind == SegConn::SEG) ++n_seg;
+                else                        ++n_bt;
+            }
+            if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
+
+            for (const auto& conn : cs.conns) {
+                if (conn.kind != SegConn::SEG) continue;
+                auto t_key = std::make_pair(bid, conn.seg_idx);
+                rev_conn_map[t_key].push_back(
+                    { bid, si, static_cast<double>(conn.at_pos) });
+            }
+
+            std::vector<double> targets;
+            for (const auto& conn : cs.conns) {
+                if (conn.kind != SegConn::SEG) continue;
+                const ConnSeg& other = conn_segs[conn.seg_idx];
+                for (const auto& other_conn : other.conns) {
+                    if (other_conn.kind != SegConn::BUSTERM) continue;
+                    targets.push_back(static_cast<double>(other_conn.at_pos));
+                }
+            }
+            if (!targets.empty()) {
+                std::sort(targets.begin(), targets.end());
+                double median;
+                std::size_t n = targets.size();
+                if (n % 2 == 1)
+                    median = targets[n / 2];
+                else
+                    median = (targets[n / 2 - 1] + targets[n / 2]) / 2.0;
+                pull_map[key] = median;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Apply ConnTopology slide ranges and 10% trunk-channel margin.
+//
+// only_layer: if >= 0, apply only to segments on that layer; -1 = all layers.
+// ---------------------------------------------------------------------------
+static void apply_interval_constraints(
+    std::vector<TrackSegment>& segments,
+    const std::map<std::pair<int,int>, std::pair<double,double>>& slide_map,
+    const std::set<std::pair<int,int>>&                           trunk_set,
+    int only_layer = -1)
+{
+    constexpr double kSentinel = 5e8;
+    for (auto& ts : segments) {
+        if (only_layer >= 0 && ts.layer != only_layer) continue;
+        auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
+
+        auto sit = slide_map.find(key);
+        if (sit != slide_map.end()) {
+            auto [slo, shi] = sit->second;
+            if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
+            if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
+        }
+
+        if (trunk_set.count(key)) {
+            double span   = ts.interval_hi - ts.interval_lo;
+            double margin = 0.1 * span;
+            double new_lo = ts.interval_lo + margin;
+            double new_hi = ts.interval_hi - margin;
+            if (new_hi - new_lo >= ts.width) {
+                ts.interval_lo = new_lo;
+                ts.interval_hi = new_hi;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Span adjustments after solving one layer.
+//
+// For every segment T in layer_segs that was just placed, look up which
+// segments S depend on T's position (rev_conn_map) and SET/EXTEND the
+// endpoint of S closest to sc.at_pos so the segments meet edge-to-edge.
+// ---------------------------------------------------------------------------
+static void do_span_adjustments(
+    const std::vector<TrackSegment*>&                               layer_segs,
+    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&   rev_conn_map,
+    std::map<std::pair<int,int>, TrackSegment*>&                     ts_ptr_map)
+{
+    for (const TrackSegment* ts : layer_segs) {
+        if (!ts->placed) continue;
+        auto it = rev_conn_map.find({ts->bundle_id, ts->seg_idx});
+        if (it == rev_conn_map.end()) continue;
+
+        const double lo_edge = ts->track_position - ts->width / 2.0;
+        const double hi_edge = ts->track_position + ts->width / 2.0;
+
+        for (const auto& sc : it->second) {
+            auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
+            if (jt == ts_ptr_map.end()) continue;
+            TrackSegment* other = jt->second;
+
+            const double range = other->span_hi - other->span_lo;
+            const double tol   = 0.11 * range;
+            const double lo_d  = sc.at_pos - other->span_lo;
+            const double hi_d  = other->span_hi - sc.at_pos;
+
+            if (hi_d <= tol)
+                other->span_hi = hi_edge;
+            else if (lo_d <= tol)
+                other->span_lo = lo_edge;
+            else {
+                other->span_lo = std::min(other->span_lo, lo_edge);
+                other->span_hi = std::max(other->span_hi, hi_edge);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Metrics: violations, overlaps, overlap_details.  Resets all counters first.
+// ---------------------------------------------------------------------------
+static void compute_metrics(NUTSResult& result)
+{
+    result.num_violations = 0;
+    result.num_overlaps   = 0;
+    result.overlaps_per_layer.clear();
+    result.overlap_details.clear();
+
+    for (const auto& ts : result.segments) {
+        if (!ts.placed) continue;
+        if (ts.track_position - ts.width / 2.0 < ts.interval_lo ||
+            ts.track_position + ts.width / 2.0 > ts.interval_hi)
+            ++result.num_violations;
+    }
+
+    const int n = (int)result.segments.size();
+    for (int i = 0; i < n; ++i) {
+        for (int j = i + 1; j < n; ++j) {
+            const auto& a = result.segments[i];
+            const auto& b = result.segments[j];
+            if (a.layer != b.layer || !a.placed || !b.placed) continue;
+            if (a.span_hi <= b.span_lo || b.span_hi <= a.span_lo) continue;
+            if (a.track_position + a.width / 2.0 > b.track_position - b.width / 2.0 &&
+                b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0) {
+                ++result.num_overlaps;
+                ++result.overlaps_per_layer[a.layer];
+                OverlapDetail od;
+                od.layer   = a.layer;
+                od.bid_a   = a.bundle_id;  od.seg_a = a.seg_idx;
+                od.bid_b   = b.bundle_id;  od.seg_b = b.seg_idx;
+                od.span_lo = std::max(a.span_lo, b.span_lo);
+                od.span_hi = std::min(a.span_hi, b.span_hi);
+                od.perp_lo = std::max(a.track_position - a.width / 2.0,
+                                      b.track_position - b.width / 2.0);
+                od.perp_hi = std::min(a.track_position + a.width / 2.0,
+                                      b.track_position + b.width / 2.0);
+                result.overlap_details.push_back(od);
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -54,22 +262,18 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
             const bool is_horizontal = (seg.start.y == seg.end.y);
 
             if (is_horizontal) {
-                // Routing direction: x.  Perpendicular: y.
                 ts.span_lo = std::min(seg.start.x, seg.end.x);
                 ts.span_hi = std::max(seg.start.x, seg.end.x);
 
-                // Hard interval: the Hanan grid cell that contains this y value.
                 int cell = find_grid_cell(y_grid, seg.start.y);
                 if (cell >= 0) {
                     ts.interval_lo = y_grid[cell];
                     ts.interval_hi = y_grid[cell + 1];
                 } else {
-                    // Segment sits outside the Hanan grid; give it some slack.
                     ts.interval_lo = seg.start.y - 50;
                     ts.interval_hi = seg.start.y + 50;
                 }
             } else {
-                // Vertical segment: routing direction y, perpendicular x.
                 ts.span_lo = std::min(seg.start.y, seg.end.y);
                 ts.span_hi = std::max(seg.start.y, seg.end.y);
 
@@ -94,25 +298,18 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
 // First-fit within interval
 // ---------------------------------------------------------------------------
 
-// Given a sorted list of occupied intervals [lo, hi), find the leftmost
-// position p in [lo, hi) such that [p, p+width) does not overlap any
-// occupied interval and fits within [lo, hi).
-// Returns -1.0 if no such position exists.
 double NUTSEngine::first_fit(double lo, double hi, double width,
                               const std::vector<std::pair<double,double>>& occupied) const
 {
-    // Placement positions are CENTERLINES.  The stripe occupies
-    // [center - width/2, center + width/2] and must fit within [lo, hi].
-    // occupied stores [lo_edge, hi_edge] of already-placed stripes.
     const double half = width / 2.0;
-    const double c_lo = lo + half;   // minimum valid centerline
-    const double c_hi = hi - half;   // maximum valid centerline
+    const double c_lo = lo + half;
+    const double c_hi = hi - half;
     if (c_lo > c_hi) return -1.0;
 
     std::vector<double> candidates;
     candidates.push_back(c_lo);
     for (const auto& [occ_lo, occ_hi] : occupied)
-        candidates.push_back(occ_hi + track_pitch_ + half);  // edge-to-edge gap
+        candidates.push_back(occ_hi + track_pitch_ + half);
 
     std::sort(candidates.begin(), candidates.end());
 
@@ -127,28 +324,18 @@ double NUTSEngine::first_fit(double lo, double hi, double width,
         if (!conflict) return c;
     }
 
-    return -1.0;  // interval infeasible
+    return -1.0;
 }
 
 // ---------------------------------------------------------------------------
 // Preferred-fit within interval
 // ---------------------------------------------------------------------------
-//
-// Returns the valid placement position closest to 'preferred', or -1.0 if
-// the interval is infeasible for this segment.
-//
-// Candidate positions tried (in arbitrary order; the closest valid wins):
-//   • preferred itself
-//   • lo (interval lower bound — ensures first-fit as fallback)
-//   • just above each occupied interval:  occ_hi + track_pitch_
-//   • just below each occupied interval:  occ_lo - width - track_pitch_
-//
+
 double NUTSEngine::preferred_fit(
     double lo, double hi, double width,
     const std::vector<std::pair<double,double>>& occupied,
     double preferred) const
 {
-    // All positions are CENTERLINES.  preferred is already a centerline.
     const double half = width / 2.0;
     const double c_lo = lo + half;
     const double c_hi = hi - half;
@@ -187,15 +374,13 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                               const std::map<std::pair<int,int>, double>& pull_map) const {
     if (segs.empty()) return;
 
-    // Events: (position_in_routing_dir, type, segment_index_in_segs)
-    // type 0 = segment starts, type 1 = segment ends
     struct Event {
         double pos;
         int    type;   // 0 = start, 1 = end
         int    idx;
         bool operator<(const Event& o) const {
             if (pos != o.pos) return pos < o.pos;
-            return type > o.type;   // process ends before starts at same position
+            return type > o.type;
         }
     };
 
@@ -207,7 +392,6 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     }
     std::sort(events.begin(), events.end());
 
-    // Active set: indices into segs[] that are currently spanning the sweep position.
     std::vector<int> active;
 
     for (const auto& ev : events) {
@@ -216,10 +400,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             continue;
         }
 
-        // Start event: assign a track to segs[ev.idx].
         TrackSegment* ts = segs[ev.idx];
 
-        // Collect occupied intervals [lo_edge, hi_edge] from active placed segments.
         std::vector<std::pair<double,double>> occupied;
         for (int ai : active) {
             if (segs[ai]->placed) {
@@ -230,7 +412,6 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         }
         std::sort(occupied.begin(), occupied.end());
 
-        // preferred is a centerline; preferred_fit works entirely in centerline space.
         double pos;
         {
             auto it = pull_map.find(std::make_pair(ts->bundle_id, ts->seg_idx));
@@ -247,7 +428,6 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         if (pos >= 0.0) {
             ts->track_position = pos;
         } else {
-            // Best-effort: centre of interval (interval may be too narrow).
             ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
         }
         ts->placed = true;
@@ -256,7 +436,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
 }
 
 // ---------------------------------------------------------------------------
-// Public entry point
+// run() — full solve
 // ---------------------------------------------------------------------------
 
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
@@ -266,281 +446,99 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     NUTSResult result;
     result.segments = extract_segments(bundles, x_grid, y_grid);
 
-    // -----------------------------------------------------------------------
-    // Build pull map: (bundle_id, seg_idx) -> preferred perpendicular centre.
-    //
-    // Two-pass initialisation:
-    //
-    // Pass 1 — nominal position.
-    //   Every segment starts with its topology-generator position as preferred.
-    //   This keeps direct I-shape segments (two BUSTERM, no SEG connections)
-    //   near their intended track rather than drifting to interval_lo.
-    //
-    // Pass 2 — connectivity override.
-    //   For each segment S with SEG connections, collect BUSTERM at_pos values
-    //   from every connected perpendicular segment T.  Each at_pos is a face
-    //   coordinate along T's routing direction = S's perpendicular direction,
-    //   so averaging them gives the position for S that minimises total stub
-    //   wirelength.  Overrides the nominal only when targets exist.
-    // -----------------------------------------------------------------------
-    std::map<std::pair<int,int>, double> pull_map;
+    std::map<std::pair<int,int>, double>                         pull_map;
+    std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
+    std::set<std::pair<int,int>>                                 trunk_set;
+    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
 
-    // Pass 1 — nominal perpendicular position from the topology.
-    for (const auto& bw : bundles) {
-        if (bw.candidates.empty()) continue;
-        const Topology& topo = bw.candidates[bw.selected_topology_index];
-        int bid = bw.original_bundle.id;
+    apply_interval_constraints(result.segments, slide_map, trunk_set);
 
-        for (int si = 0; si < (int)topo.segments.size(); ++si) {
-            const Segment& seg = topo.segments[si];
-            bool is_h  = (seg.start.y == seg.end.y);
-            double nom = is_h ? static_cast<double>(seg.start.y)   // H → perp = y
-                               : static_cast<double>(seg.start.x);  // V → perp = x
-            pull_map[{bid, si}] = nom;
-        }
-    }
-
-    // Pass 2 — connectivity-based override via SEG→BUSTERM traversal.
-    // Also captures ConnTopology slide ranges, identifies trunk segments, and
-    // builds the reverse-connection map for per-layer span adjustment.
-    //
-    // slide_map    : (bid, si) -> (perp_lo, perp_hi) from ConnTopology
-    // trunk_set    : segments with ≥2 SEG connections and 0 BUSTERM connections
-    //               (i.e. spine/trunk segments, not stubs or direct I-shapes)
-    // rev_conn_map : (bid, T_si) -> list of {S_bid, S_si, at_pos_in_S}
-    //   "when T is placed, SET the span endpoint of S at at_pos_in_S to T's centre"
-    //   at_pos_in_S is the nominal junction coordinate along S's routing direction.
-    struct SpanAdjConn { int src_bid, src_si; double at_pos; };
-    std::map<std::pair<int,int>, std::pair<double,double>>    slide_map;
-    std::set<std::pair<int,int>>                              trunk_set;
-    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>    rev_conn_map;
-
-    for (const auto& bw : bundles) {
-        if (bw.candidates.empty()) continue;
-        const Topology& topo = bw.candidates[bw.selected_topology_index];
-        int bid = bw.original_bundle.id;
-
-        ConnTopology ct;
-        ct.build(topo, floorplan_);
-        const auto& conn_segs = ct.segs();
-
-        for (int si = 0; si < (int)conn_segs.size(); ++si) {
-            const ConnSeg& cs = conn_segs[si];
-            auto key = std::make_pair(bid, si);
-
-            // Slide range from ConnTopology.
-            slide_map[key] = { static_cast<double>(cs.perp_lo),
-                               static_cast<double>(cs.perp_hi) };
-
-            // Trunk detection: spine has ≥2 SEG connections and no BUSTERM.
-            int n_seg = 0, n_bt = 0;
-            for (const auto& c : cs.conns) {
-                if (c.kind == SegConn::SEG)     ++n_seg;
-                else                             ++n_bt;
-            }
-            if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
-
-            // Reverse-connection map: when segment T=(bid, conn.seg_idx) is placed,
-            // SET the span endpoint of S=(bid, si) at at_pos to T's track centre.
-            // at_pos is along S's routing direction (= T's perpendicular direction).
-            for (const auto& conn : cs.conns) {
-                if (conn.kind != SegConn::SEG) continue;
-                auto t_key = std::make_pair(bid, conn.seg_idx);
-                rev_conn_map[t_key].push_back(
-                    { bid, si, static_cast<double>(conn.at_pos) });
-            }
-
-            // Pull target from connected block faces.
-            std::vector<double> targets;
-            for (const auto& conn : cs.conns) {
-                if (conn.kind != SegConn::SEG) continue;
-                const ConnSeg& other = conn_segs[conn.seg_idx];
-                for (const auto& other_conn : other.conns) {
-                    if (other_conn.kind != SegConn::BUSTERM) continue;
-                    targets.push_back(static_cast<double>(other_conn.at_pos));
-                }
-            }
-            if (!targets.empty()) {
-                // Use the median (L1 minimiser) rather than the mean so that a
-                // majority of stubs pulling in one direction actually wins.
-                // Example: faces at [100, 100, 150] → median 100, not mean 116.7.
-                std::sort(targets.begin(), targets.end());
-                double median;
-                std::size_t n = targets.size();
-                if (n % 2 == 1)
-                    median = targets[n / 2];
-                else
-                    median = (targets[n / 2 - 1] + targets[n / 2]) / 2.0;
-                pull_map[key] = median;   // overrides nominal
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Apply ConnTopology slide ranges and 10% trunk-channel margin.
-    //
-    // Step A — tighten: intersect each segment's NUTS interval with the
-    //   ConnTopology perp_lo/perp_hi.  Values near ±INT_MAX/2 are sentinels
-    //   meaning "unconstrained"; we skip those ends.
-    //
-    // Step B — 10% margin for trunks: a free-floating trunk should stay 10%
-    //   of its channel width away from the channel boundary (Hanan grid edge)
-    //   in both directions, unless doing so would leave no room for the track.
-    //   This prevents trunks from hugging block faces.
-    // -----------------------------------------------------------------------
-    constexpr double kSentinel = 5e8;   // half of INT_MAX/2 ≈ 1.07e9
-
-    for (auto& ts : result.segments) {
-        auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
-
-        // Step A: tighten interval from ConnTopology slide range.
-        auto sit = slide_map.find(key);
-        if (sit != slide_map.end()) {
-            auto [slo, shi] = sit->second;
-            if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
-            if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
-        }
-
-        // Step B: 10% inward margin for trunk segments.
-        if (trunk_set.count(key)) {
-            double span   = ts.interval_hi - ts.interval_lo;
-            double margin = 0.1 * span;
-            double new_lo = ts.interval_lo + margin;
-            double new_hi = ts.interval_hi - margin;
-            // Only apply if the margin leaves room for at least one track.
-            if (new_hi - new_lo >= ts.width) {
-                ts.interval_lo = new_lo;
-                ts.interval_hi = new_hi;
-            }
-        }
-    }
-
-    // Index for fast span-adjustment lookups.
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
 
-    // Group segment pointers by layer.
     std::map<int, std::vector<TrackSegment*>> by_layer;
     for (auto& ts : result.segments)
         by_layer[ts.layer].push_back(&ts);
 
-    // Solve each layer independently, then immediately adjust the span
-    // endpoints of every segment whose connected partner just moved.
-    //
-    // Span adjustment: when segment T on this layer is placed at track centre C,
-    // identify each segment S that has a SEG connection to T.  The connection
-    // carries at_pos — the nominal junction coordinate along S's routing
-    // direction (= T's perpendicular direction = the direction of C).  We SET
-    // the endpoint of S's span that is nearest to at_pos to C, which correctly
-    // handles both extension (trunk moved away) and shrinking (trunk moved
-    // closer than the original topology position).
     for (auto& [layer_id, layer_segs] : by_layer) {
         solve_layer(layer_segs, pull_map);
-
-        for (const TrackSegment* ts : layer_segs) {
-            if (!ts->placed) continue;
-            auto it = rev_conn_map.find({ts->bundle_id, ts->seg_idx});
-            if (it == rev_conn_map.end()) continue;
-            // lo_edge / hi_edge: the two faces of the just-placed bus stripe T.
-            // track_position is the centerline; stripe occupies ± width/2.
-            // When S's span endpoint is adjusted to meet T, we align it to the
-            // face of T furthest from S's body so the overlap is exactly one
-            // bus-stripe wide with no protrusion:
-            //   • trimming S's hi end → align to T's hi face
-            //   • trimming S's lo end → align to T's lo face
-            const double lo_edge = ts->track_position - ts->width / 2.0;
-            const double hi_edge = ts->track_position + ts->width / 2.0;
-            for (const auto& sc : it->second) {
-                auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
-                if (jt == ts_ptr_map.end()) continue;
-                TrackSegment* other = jt->second;
-
-                if (!other->placed) {
-                    // S not yet solved: use the same SET/EXTEND logic as the
-                    // placed case.  When a stub is displaced inward (e.g. the
-                    // NUTS solver pushed it closer to the trunk than nominal),
-                    // the trunk's span must shrink to match rather than leaving
-                    // a dangling visual overshoot past the stub's stripe edge.
-                    const double range2 = other->span_hi - other->span_lo;
-                    const double tol2   = 0.11 * range2;
-                    const double lo_d2  = sc.at_pos - other->span_lo;
-                    const double hi_d2  = other->span_hi - sc.at_pos;
-                    if (hi_d2 <= tol2)
-                        other->span_hi = hi_edge;
-                    else if (lo_d2 <= tol2)
-                        other->span_lo = lo_edge;
-                    else {
-                        other->span_lo = std::min(other->span_lo, lo_edge);
-                        other->span_hi = std::max(other->span_hi, hi_edge);
-                    }
-                    continue;
-                }
-
-                // S already placed: SET the endpoint of S nearest sc.at_pos so
-                // the overlap is precisely one stripe wide.
-                //
-                // at_pos sits at or very near the endpoint for normal stubs, and
-                // well inside the span for designed-overlap segments (spread Z).
-                // Use the 11% threshold to distinguish SET from EXTEND.
-                const double range = other->span_hi - other->span_lo;
-                const double tol   = 0.11 * range;
-                const double lo_d  = sc.at_pos - other->span_lo;
-                const double hi_d  = other->span_hi - sc.at_pos;
-                if (hi_d <= tol)
-                    other->span_hi = hi_edge;
-                else if (lo_d <= tol)
-                    other->span_lo = lo_edge;
-                else {
-                    other->span_lo = std::min(other->span_lo, lo_edge);
-                    other->span_hi = std::max(other->span_hi, hi_edge);
-                }
-            }
-        }
+        do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
     }
 
-    // -----------------------------------------------------------------------
-    // Metrics
-    // -----------------------------------------------------------------------
-    for (const auto& ts : result.segments) {
-        if (!ts.placed) continue;
-        if (ts.track_position - ts.width / 2.0 < ts.interval_lo ||
-            ts.track_position + ts.width / 2.0 > ts.interval_hi)
-            ++result.num_violations;
-    }
-
-    const int n = (int)result.segments.size();
-    for (int i = 0; i < n; ++i) {
-        for (int j = i + 1; j < n; ++j) {
-            const auto& a = result.segments[i];
-            const auto& b = result.segments[j];
-            if (a.layer != b.layer || !a.placed || !b.placed) continue;
-            // Spans overlap?
-            if (a.span_hi <= b.span_lo || b.span_hi <= a.span_lo) continue;
-            // Stripes overlap? (centerline ± half-width)
-            if (a.track_position + a.width / 2.0 > b.track_position - b.width / 2.0 &&
-                b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0) {
-                ++result.num_overlaps;
-                ++result.overlaps_per_layer[a.layer];
-                OverlapDetail od;
-                od.layer   = a.layer;
-                od.bid_a   = a.bundle_id;  od.seg_a = a.seg_idx;
-                od.bid_b   = b.bundle_id;  od.seg_b = b.seg_idx;
-                od.span_lo = std::max(a.span_lo, b.span_lo);
-                od.span_hi = std::min(a.span_hi, b.span_hi);
-                od.perp_lo = std::max(a.track_position - a.width / 2.0,
-                                      b.track_position - b.width / 2.0);
-                od.perp_hi = std::min(a.track_position + a.width / 2.0,
-                                      b.track_position + b.width / 2.0);
-                result.overlap_details.push_back(od);
-            }
-        }
-    }
+    compute_metrics(result);
 
     std::cout << "[NUTS] " << result.segments.size() << " segments placed across "
               << by_layer.size() << " layer(s). "
               << "Interval violations: " << result.num_violations << ", "
               << "Track overlaps: " << result.num_overlaps << ".\n";
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// rerun_layer() — re-solve one layer, keeping all others as-is
+// ---------------------------------------------------------------------------
+//
+// Resets the target layer's segments to their fresh topology-extracted state,
+// then re-solves placement and applies span adjustments to connected segments
+// (which may be on other layers).  All other layers retain their previously
+// placed positions.  Metrics are recomputed for the full result.
+NUTSResult NUTSEngine::rerun_layer(
+    const NUTSResult&                  prev,
+    const std::vector<BundleWrapper>&  bundles,
+    int                                layer_id) const
+{
+    std::vector<int> x_grid, y_grid;
+    floorplan_.get_hanan_grid(x_grid, y_grid);
+
+    // Start from a copy of the previous result.
+    NUTSResult result = prev;
+
+    // Re-extract fresh segments for the target layer and overwrite them.
+    auto fresh = extract_segments(bundles, x_grid, y_grid);
+
+    std::map<std::pair<int,int>, std::size_t> pos_map;
+    for (std::size_t i = 0; i < result.segments.size(); ++i)
+        pos_map[{result.segments[i].bundle_id, result.segments[i].seg_idx}] = i;
+
+    for (const auto& fs : fresh) {
+        if (fs.layer != layer_id) continue;
+        auto it = pos_map.find({fs.bundle_id, fs.seg_idx});
+        if (it != pos_map.end())
+            result.segments[it->second] = fs;   // resets span/interval/placed
+    }
+
+    // Rebuild shared maps.
+    std::map<std::pair<int,int>, double>                         pull_map;
+    std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
+    std::set<std::pair<int,int>>                                 trunk_set;
+    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
+
+    // Apply interval constraints only for the target layer.
+    apply_interval_constraints(result.segments, slide_map, trunk_set, layer_id);
+
+    // Build pointer map (covers all layers for span adjustment targets).
+    std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
+    for (auto& ts : result.segments)
+        ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+
+    // Collect target layer segment pointers.
+    std::vector<TrackSegment*> layer_segs;
+    for (auto& ts : result.segments)
+        if (ts.layer == layer_id) layer_segs.push_back(&ts);
+
+    solve_layer(layer_segs, pull_map);
+    do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
+
+    compute_metrics(result);
+
+    std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
+              << layer_segs.size() << " segment(s) re-placed. "
+              << "Violations: " << result.num_violations << ", "
+              << "Overlaps: " << result.num_overlaps << ".\n";
 
     return result;
 }

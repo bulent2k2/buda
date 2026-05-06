@@ -60,6 +60,14 @@ public:
     // Each BundleWrapper must have candidates filled and selected_topology_index set.
     NUTSResult run(const std::vector<BundleWrapper>& bundles);
 
+    // Re-solve a single layer, keeping all other layers' placements intact.
+    // Resets the target layer's segments to fresh topology state, re-runs the
+    // sweep-line solver, applies span adjustments to connected segments, and
+    // recomputes metrics for the whole result.
+    NUTSResult rerun_layer(const NUTSResult& prev,
+                           const std::vector<BundleWrapper>& bundles,
+                           int layer_id) const;
+
 private:
     const Floorplan& floorplan_;
     double track_pitch_ = 1.0;

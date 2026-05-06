@@ -107,5 +107,6 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<NUTSEngine>(m, "NUTSEngine")
         .def(py::init<const Floorplan&>())
         .def("set_track_pitch", &NUTSEngine::set_track_pitch)
-        .def("run",             &NUTSEngine::run);
+        .def("run",             &NUTSEngine::run)
+        .def("rerun_layer",     &NUTSEngine::rerun_layer);
 }

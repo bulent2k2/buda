@@ -15,6 +15,8 @@ class BudaSession:
         self.bundles = []
         self.nuts_result = None
         self._layer_overheads = {}   # layer_id -> overhead_percent
+        self._layer_name_map = {}    # layer_name -> layer_id
+        self._nuts_pitch = 1.0       # last track pitch used by run_nuts
         self.script_path = None      # set when a .buda script is sourced
 
     def _sidecar_path(self):
@@ -73,17 +75,27 @@ class BudaSession:
             print(f"Pinned bundle '{hint}' to topology {resolved} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']})")
 
-    def _write_nuts_log(self, layer_names=None):
-        """Write a per-overlap log file alongside the .buda script.
+    def _make_layer_names(self):
+        """Build a layer_id -> name dict from def_layer commands, with fallback defaults."""
+        names = {4: 'M4', 5: 'M5', 6: 'M6'}
+        for name, lid in self._layer_name_map.items():
+            names[lid] = name
+        return names
+
+    def _write_nuts_log(self, layer_names=None, append=False, rerun_layer_name=None):
+        """Write (or append to) the per-overlap log file alongside the .buda script.
 
         File: <script_stem>_nuts.log  (or nuts.log if no script path).
         Each overlap is reported with its two segments, the overlap rectangle
         (routing-direction span and perpendicular band), and the overlap area.
+
+        append=True  — append a re-run section instead of overwriting.
+        rerun_layer_name — layer name shown in the re-run header (append mode only).
         """
         if self.nuts_result is None:
             return
         if layer_names is None:
-            layer_names = {4: 'M4', 5: 'M5', 6: 'M6'}
+            layer_names = self._make_layer_names()
 
         if self.script_path:
             log_path = os.path.splitext(self.script_path)[0] + '_nuts.log'
@@ -105,10 +117,20 @@ class BudaSession:
                 seg_label[(bid, si)] = f"B{bid}.{lname}[{si}]"
 
         from datetime import datetime
-        with open(log_path, 'w') as f:
+        open_mode = 'a' if append else 'w'
+        with open(log_path, open_mode) as f:
             script_name = os.path.basename(self.script_path) if self.script_path else '(interactive)'
-            f.write(f"NUTS Overlap Report — {script_name}\n")
-            f.write(f"Generated : {datetime.now().isoformat(timespec='seconds')}\n")
+            if append:
+                f.write(f"\n{'='*60}\n")
+                if rerun_layer_name:
+                    f.write(f"  Re-run: {rerun_layer_name}  —  {script_name}\n")
+                else:
+                    f.write(f"  Re-run  —  {script_name}\n")
+                f.write(f"  At        : {datetime.now().isoformat(timespec='seconds')}\n")
+                f.write(f"{'='*60}\n\n")
+            else:
+                f.write(f"NUTS Overlap Report — {script_name}\n")
+                f.write(f"Generated : {datetime.now().isoformat(timespec='seconds')}\n")
             f.write(f"Segments  : {len(self.nuts_result.segments)}\n")
             f.write(f"Violations: {self.nuts_result.num_violations}\n")
             total = self.nuts_result.num_overlaps
@@ -148,7 +170,8 @@ class BudaSession:
                         )
                     f.write("\n")
 
-        print(f"NUTS overlap log → {log_path}")
+        action = "appended to" if append else "→"
+        print(f"NUTS overlap log {action} {log_path}")
 
     def extract_instances(self, bundle):
         # Helper to find source/dest instances from a bundle's nets for Topology Generation
@@ -200,6 +223,7 @@ class BudaSession:
             ovh_val = float(ovh)
             if ovh_val > 0.0:
                 self._layer_overheads[int(lid)] = ovh_val
+            self._layer_name_map[name] = int(lid)
         elif cmd == "run_bundler":
             self.bundler.set_strategy(interconnect.Strategy.STRICT)
             raw_bundles = self.bundler.run(self.netlist)
@@ -250,10 +274,11 @@ class BudaSession:
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0
+            self._nuts_pitch = pitch
             nuts = interconnect.NUTSEngine(self.fp)
             nuts.set_track_pitch(pitch)
             self.nuts_result = nuts.run(self.bundles)
-            layer_names = {4: 'M4', 5: 'M5', 6: 'M6'}
+            layer_names = self._make_layer_names()
             per_layer = self.nuts_result.overlaps_per_layer
             if per_layer:
                 detail = ', '.join(
@@ -267,6 +292,35 @@ class BudaSession:
                   f"({self.nuts_result.num_violations} interval violations, "
                   f"{overlap_str}).")
             self._write_nuts_log(layer_names)
+        elif cmd == "run_nuts_on_layer":
+            # Usage: run_nuts_on_layer <layer-name>
+            if not args:
+                print("Error: run_nuts_on_layer requires a layer name")
+                return
+            layer_name = args[0]
+            layer_id = self._layer_name_map.get(layer_name)
+            if layer_id is None:
+                print(f"Error: unknown layer '{layer_name}' — define it with def_layer first")
+                return
+            if self.nuts_result is None:
+                print("Error: run_nuts must be called before run_nuts_on_layer")
+                return
+            nuts = interconnect.NUTSEngine(self.fp)
+            nuts.set_track_pitch(self._nuts_pitch)
+            self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
+            layer_names = self._make_layer_names()
+            per_layer = self.nuts_result.overlaps_per_layer
+            if per_layer:
+                detail = ', '.join(
+                    f"{layer_names.get(lid, f'L{lid}')}={cnt}"
+                    for lid, cnt in sorted(per_layer.items())
+                )
+                overlap_str = f"{self.nuts_result.num_overlaps} track overlaps ({detail})"
+            else:
+                overlap_str = "0 track overlaps"
+            print(f"NUTS re-solved {layer_name}: "
+                  f"{self.nuts_result.num_violations} violations, {overlap_str}.")
+            self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name)
         elif cmd == "visualize_topologies":
             # Usage:
             #   visualize_topologies <hint>         — first matching bundle
