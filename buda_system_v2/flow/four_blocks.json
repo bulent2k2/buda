@@ -3,8 +3,8 @@
     {
       "bundle_hint": "b1",
       "bundle_id": 1,
-      "topo_type": "Z_HVH",
-      "topo_wl": 100,
+      "topo_type": "Z_HVH@x125@y95",
+      "topo_wl": 92,
       "topo_index_hint": 3,
       "note": "",
       "selected_at": "2026-05-05T18:42:21"
@@ -12,7 +12,7 @@
     {
       "bundle_hint": "b2",
       "bundle_id": 2,
-      "topo_type": "TRUNK_V",
+      "topo_type": "TRUNK_V@x125",
       "topo_wl": 135,
       "topo_index_hint": 1,
       "note": "",
@@ -21,7 +21,7 @@
     {
       "bundle_hint": "b3",
       "bundle_id": 3,
-      "topo_type": "TRUNK_V_OOB",
+      "topo_type": "TRUNK_V_OOB@x215",
       "topo_wl": 320,
       "topo_index_hint": 5,
       "note": "",
@@ -30,7 +30,7 @@
     {
       "bundle_hint": "b4",
       "bundle_id": 4,
-      "topo_type": "TRUNK_V",
+      "topo_type": "TRUNK_V@x125",
       "topo_wl": 160,
       "topo_index_hint": 1,
       "note": "",

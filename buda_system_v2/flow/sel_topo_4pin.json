@@ -3,8 +3,8 @@
     {
       "bundle_hint": "b4",
       "bundle_id": 1,
-      "topo_type": "TRUNK_H",
-      "topo_wl": 170,
+      "topo_type": "TRUNK_H@y155",
+      "topo_wl": 150,
       "topo_index_hint": 4,
       "note": "",
       "selected_at": "2026-05-04T19:02:28"

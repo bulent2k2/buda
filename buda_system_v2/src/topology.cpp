@@ -569,7 +569,8 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     if (x_lo > x_hi) return; // all pass-through — degenerate, skip
 
     Topology t;
-    t.type           = out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H";
+    t.type           = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
+                       + "@y" + std::to_string(y_trunk);
     t.trunk_location = y_trunk;
     int spine_layer  = out_of_bbox ? 6 : 4;
 
@@ -664,7 +665,8 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     if (y_lo > y_hi) return; // all pass-through — degenerate, skip
 
     Topology t;
-    t.type           = out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V";
+    t.type           = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
+                       + "@x" + std::to_string(x_trunk);
     t.trunk_location = x_trunk;
 
     if (y_lo < y_hi)
