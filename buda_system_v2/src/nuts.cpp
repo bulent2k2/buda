@@ -457,10 +457,23 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
                 TrackSegment* other = jt->second;
 
                 if (!other->placed) {
-                    // S not yet solved: EXTEND only — widen S's solve range to
-                    // cover T's full stripe; never shrink it.
-                    other->span_lo = std::min(other->span_lo, lo_edge);
-                    other->span_hi = std::max(other->span_hi, hi_edge);
+                    // S not yet solved: use the same SET/EXTEND logic as the
+                    // placed case.  When a stub is displaced inward (e.g. the
+                    // NUTS solver pushed it closer to the trunk than nominal),
+                    // the trunk's span must shrink to match rather than leaving
+                    // a dangling visual overshoot past the stub's stripe edge.
+                    const double range2 = other->span_hi - other->span_lo;
+                    const double tol2   = 0.11 * range2;
+                    const double lo_d2  = sc.at_pos - other->span_lo;
+                    const double hi_d2  = other->span_hi - sc.at_pos;
+                    if (hi_d2 <= tol2)
+                        other->span_hi = hi_edge;
+                    else if (lo_d2 <= tol2)
+                        other->span_lo = lo_edge;
+                    else {
+                        other->span_lo = std::min(other->span_lo, lo_edge);
+                        other->span_hi = std::max(other->span_hi, hi_edge);
+                    }
                     continue;
                 }
 

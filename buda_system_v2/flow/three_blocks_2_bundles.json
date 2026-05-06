@@ -1,0 +1,22 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "b1",
+      "bundle_id": 1,
+      "topo_type": "Z_HVH@x125@y95",
+      "topo_wl": 92,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-05T21:20:32"
+    },
+    {
+      "bundle_hint": "b2",
+      "bundle_id": 2,
+      "topo_type": "Z_VHV@y125@x95",
+      "topo_wl": 92,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-05T21:20:19"
+    }
+  ]
+}
