@@ -1,5 +1,5 @@
 NUTS Overlap Report — channel_stress.buda
-Generated : 2026-05-06T01:35:01
+Generated : 2026-05-06T11:42:01
 Segments  : 172
 Violations: 0
 Overlaps  : 62  (M4=2  M5=60)
@@ -201,7 +201,7 @@ Overlaps  : 62  (M4=2  M5=60)
 
 ============================================================
   Re-run: M4  —  channel_stress.buda
-  At        : 2026-05-06T01:35:01
+  At        : 2026-05-06T11:42:01
 ============================================================
 
 Segments  : 172
