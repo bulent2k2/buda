@@ -9,7 +9,9 @@
 namespace py = pybind11;
 using namespace interconnect;
 PYBIND11_MODULE(interconnect, m) {
-    py::enum_<Strategy>(m, "Strategy").value("STRICT", Strategy::STRICT);
+    py::enum_<Strategy>(m, "Strategy")
+        .value("STRICT",     Strategy::STRICT)
+        .value("CONVERGENT", Strategy::CONVERGENT);
     py::enum_<LayerDir>(m, "LayerDir").value("HORIZONTAL", LayerDir::HORIZONTAL).value("VERTICAL", LayerDir::VERTICAL);
     py::enum_<LayerType>(m, "LayerType").value("TOP", LayerType::TOP).value("LOW", LayerType::LOW);
     py::class_<Point>(m, "Point").def(py::init<int, int>()).def_readwrite("x", &Point::x).def_readwrite("y", &Point::y);
@@ -71,6 +73,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def(py::init<>())
         .def_readwrite("p1",            &GlobalCut::p1)
         .def_readwrite("p2",            &GlobalCut::p2)
+        .def_readwrite("dir",           &GlobalCut::dir)
+        .def_readwrite("layer_id",      &GlobalCut::layer_id)
         .def_readwrite("capacity",      &GlobalCut::capacity)
         .def_readwrite("current_usage", &GlobalCut::current_usage);
     py::class_<GlobalRouter>(m, "GlobalRouter")
