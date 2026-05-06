@@ -94,17 +94,7 @@ class TopologyExplorer:
         return ct
 
     def _draw_busterm_markers(self, topo, ct, viz_lw):
-        """Draw a diamond at every busterm connection point.
-
-        Each ConnSeg may have one or more BUSTERM connections.  The physical
-        connection point on the block face is:
-          H segment → (conn.at_pos,   cs.perp_pos)   (x along seg, y of seg)
-          V segment → (cs.perp_pos,   conn.at_pos)   (x of seg,   y along seg)
-
-        A filled diamond is drawn at that point, sized proportionally to
-        viz_lw, with the block name shown as a small label offset outward
-        from the segment end so it doesn't overlap the wire.
-        """
+        """Draw a diamond at every busterm connection point."""
         ax = self.ax
         msz = viz_lw * 1.1 + 3
 
@@ -113,10 +103,8 @@ class TopologyExplorer:
             for conn in cs.conns:
                 if conn.kind != ic.SegConnKind.BUSTERM:
                     continue
-                # Connection point on the block face
                 if cs.horiz:
                     px, py = conn.at_pos, cs.perp_pos
-                    # Label offset: left of left endpoint, right of right endpoint
                     dx = -8 if px <= (cs.along_lo + cs.along_hi) / 2 else +8
                     dy = 0
                     ha = 'right' if dx < 0 else 'left'
@@ -139,22 +127,10 @@ class TopologyExplorer:
                                   ec='none', alpha=0.7))
 
     def _draw_slide_spans(self, topo, ct):
-        """Overlay slide-range bands on the current topology.
-
-        For each ConnSeg the band is the rectangle the segment can occupy while
-        respecting all its busterm and seg-to-seg connectivity constraints:
-
-          H segment  →  width  = along span,   height = perp_lo .. perp_hi  (y range)
-          V segment  →  height = along span,   width  = perp_lo .. perp_hi  (x range)
-
-        Sentinels (±INT_MIN/2) are clamped to the view bounds so the band
-        stays finite on screen.  Finite bounds get a dotted marker line and a
-        small numeric label.
-        """
+        """Overlay slide-range bands on the current topology."""
         ax = self.ax
         xs, ys = self.fp.get_hanan_grid()
 
-        # View bounds used to clamp "infinite" sentinel values.
         margin = max((xs[-1] - xs[0]) if len(xs) > 1 else 50,
                      (ys[-1] - ys[0]) if len(ys) > 1 else 50) * 0.25
         x_lo_v = (xs[0]  if xs else 0)  - margin
@@ -169,7 +145,6 @@ class TopologyExplorer:
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
 
             if cs.horiz:
-                # Band spans the full y slide range across the segment's x extent.
                 band_y0 = clamp_y(cs.perp_lo)
                 band_y1 = clamp_y(cs.perp_hi)
                 if band_y0 >= band_y1:
@@ -177,7 +152,6 @@ class TopologyExplorer:
                 ax.add_patch(patches.Rectangle(
                     (cs.along_lo, band_y0), cs.along_hi - cs.along_lo, band_y1 - band_y0,
                     linewidth=0, facecolor=col, alpha=0.10, zorder=3))
-                # Dotted marker + label at each finite bound.
                 for y_b, label in ((cs.perp_lo, 'lo'), (cs.perp_hi, 'hi')):
                     if abs(y_b) < _UNCONSTRAINED:
                         ax.plot([cs.along_lo, cs.along_hi], [y_b, y_b],
@@ -359,7 +333,6 @@ class TopologyExplorer:
             ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
                     color=col, linewidth=viz_lw,
                     solid_capstyle='round', zorder=10)
-            # Junction dot where stubs meet the trunk
             ax.plot(seg.start.x, seg.start.y, 'o',
                     color=col, markersize=viz_lw * 0.6, zorder=11)
             ax.plot(seg.end.x, seg.end.y, 'o',
@@ -396,8 +369,6 @@ class BudaVisualizer:
     def __init__(self, floorplan, bundles, sidecar_path=None):
         self.fp           = floorplan
         self.bundles      = bundles
-        # sidecar_path here is the .buda script path (for the window title).
-        # The selections file is derived separately and passed to TopologyExplorer.
         self._selections_path = (
             os.path.splitext(sidecar_path)[0] + '.json'
             if sidecar_path else None
@@ -411,14 +382,20 @@ class BudaVisualizer:
 
         # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
         self._bundle_artists = {}
-        self._highlighted    = None          # currently highlighted bundle_id, or None
-        self._solo           = False         # hide vs dim non-selected bundles
+        self._highlighted    = None
+        self._solo           = False
         self._layer_visible  = {4: True, 5: True, 6: True}
-        self._bid_list       = []            # ordered list of bundle ids (set in show())
-        self._btn_solo       = None          # Button widget (set in show())
-        self._chk_layers     = None          # CheckButtons widget (set in show())
-        self._topo_explorer  = None          # keeps TopologyExplorer alive while open
+        self._bundle_visible = {}     # bid -> bool; populated in show()
+        self._bundle_scroll  = 0      # first visible row in the bundle list
+        self._bid_list       = []
+        self._btn_solo       = None
+        self._btn_all_layers = None
+        self._btn_all_bundles= None
+        self._chk_layers     = None
+        self._ax_bundles     = None
+        self._topo_explorer  = None
         self._pick_happened  = False
+        self._in_bulk_layer_toggle = False  # suppress layer callbacks during bulk update
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
@@ -429,12 +406,6 @@ class BudaVisualizer:
     # ------------------------------------------------------------------
 
     def _register(self, bundle_id, artist, *, alpha, lw=None, is_band=False, layer=None):
-        """Make an artist pickable and store its resting style for later restore.
-
-        layer — the metal layer id (4/5/6) this artist belongs to, or None for
-                layer-agnostic artists (terminals, vias, interval bands).  Used
-                by the layer-visibility checkboxes.
-        """
         artist.set_picker(5)
         self._bundle_artists.setdefault(bundle_id, []).append({
             'artist':  artist,
@@ -453,28 +424,41 @@ class BudaVisualizer:
                     return
 
     def _on_click(self, event):
+        # Route bundle list clicks before doing anything else.
+        if self._ax_bundles is not None and event.inaxes == self._ax_bundles:
+            self._on_bundle_list_click(event)
+            self._pick_happened = False
+            return
         # A click that didn't land on any registered artist → deselect.
         if not self._pick_happened and event.inaxes == self.ax:
             self._set_highlight(None)
         self._pick_happened = False
 
     def _set_highlight(self, bundle_id):
-        # Clicking the already-highlighted bundle toggles it off.
         if bundle_id == self._highlighted:
             bundle_id = None
         self._highlighted = bundle_id
         self._refresh_highlight()
 
     def _refresh_highlight(self):
-        """Apply current highlight + solo + layer-visibility to all registered artists."""
+        """Apply highlight + solo + layer-visibility + bundle-visibility to all artists."""
         bundle_id = self._highlighted
 
         for bid, entries in self._bundle_artists.items():
-            selected = (bundle_id is None) or (bid == bundle_id)
+            bundle_on = self._bundle_visible.get(bid, True)
+            selected  = (bundle_id is None) or (bid == bundle_id)
+
             for e in entries:
                 a = e['artist']
 
-                # Layer-visibility is a hard gate: always off regardless of highlight.
+                # Bundle visibility: hard gate — always off when hidden.
+                if not bundle_on:
+                    a.set_alpha(0.0)
+                    if e['lw'] is not None:
+                        a.set_linewidth(e['lw'])
+                    continue
+
+                # Layer visibility: hard gate.
                 if e['layer'] is not None and not self._layer_visible.get(e['layer'], True):
                     a.set_alpha(0.0)
                     if e['lw'] is not None:
@@ -482,17 +466,14 @@ class BudaVisualizer:
                     continue
 
                 if bundle_id is None:
-                    # Reset to resting style.
                     a.set_alpha(e['alpha'])
                     if e['lw'] is not None:
                         a.set_linewidth(e['lw'])
                 elif selected:
-                    # Highlight: full opacity, thicker lines.
                     a.set_alpha(0.2 if e['is_band'] else 1.0)
                     if e['lw'] is not None:
                         a.set_linewidth(e['lw'] * 2.2)
                 else:
-                    # Dim or hide everything else depending on solo mode.
                     if self._solo:
                         a.set_alpha(0.0)
                     else:
@@ -515,11 +496,9 @@ class BudaVisualizer:
         self.fig.canvas.draw_idle()
 
     def _step_bundle(self, delta):
-        """Cycle to the next/prev bundle and highlight it."""
         if not self._bid_list:
             return
         if self._highlighted not in self._bid_list:
-            # Nothing selected yet — start at first bundle.
             idx = 0 if delta > 0 else len(self._bid_list) - 1
         else:
             idx = (self._bid_list.index(self._highlighted) + delta) % len(self._bid_list)
@@ -527,7 +506,6 @@ class BudaVisualizer:
         self._refresh_highlight()
 
     def _toggle_solo(self):
-        """Toggle between dimming and hiding non-selected bundles."""
         self._solo = not self._solo
         if self._btn_solo is not None:
             if self._solo:
@@ -538,20 +516,165 @@ class BudaVisualizer:
                 self._btn_solo.ax.set_facecolor('#f0f0f0')
         self._refresh_highlight()
 
+    # ------------------------------------------------------------------
+    # Layer toggle
+    # ------------------------------------------------------------------
+
     def _on_layer_toggle(self, label):
-        """Called by CheckButtons when a layer checkbox is clicked."""
+        if self._in_bulk_layer_toggle:
+            return
         layer_map = {'M4': 4, 'M5': 5, 'M6': 6}
         layer = layer_map.get(label)
         if layer is not None:
             self._layer_visible[layer] = not self._layer_visible[layer]
         self._refresh_highlight()
 
-    def _open_topo_explorer(self):
-        """Open a TopologyExplorer window for the currently highlighted bundle.
+    def _on_layer_toggle_all(self):
+        """Toggle all layers on (if any are off) or off (if all are on)."""
+        all_on    = all(self._layer_visible.values())
+        new_state = not all_on
 
-        The explorer is stored on self so it is not garbage-collected while the
-        window is open — button callbacks would silently die otherwise.
-        """
+        # Bulk-update: suppress the per-layer checkbox callback.
+        self._in_bulk_layer_toggle = True
+        if self._chk_layers is not None:
+            statuses = self._chk_layers.get_status()
+            for i, lid in enumerate((4, 5, 6)):
+                if statuses[i] != new_state:
+                    self._layer_visible[lid] = new_state
+                    self._chk_layers.set_active(i)   # syncs visual only
+        else:
+            for lid in self._layer_visible:
+                self._layer_visible[lid] = new_state
+        self._in_bulk_layer_toggle = False
+
+        if self._btn_all_layers is not None:
+            self._btn_all_layers.label.set_text(
+                '☑ All Layers' if new_state else '☐ All Layers')
+            self._btn_all_layers.ax.set_facecolor(
+                '#e8e8e8' if new_state else '#cccccc')
+        self._refresh_highlight()
+
+    # ------------------------------------------------------------------
+    # Bundle list panel
+    # ------------------------------------------------------------------
+
+    def _bundle_list_n_visible(self):
+        """Number of bundle rows that fit in the list panel at current figure size."""
+        if self._ax_bundles is None:
+            return 20
+        fig_h_in  = self.fig.get_figheight()
+        ax_h_frac = self._ax_bundles.get_position().height
+        ax_h_in   = fig_h_in * ax_h_frac
+        row_h_in  = 0.145   # ~10 pt rows at standard DPI
+        return max(1, int(ax_h_in / row_h_in))
+
+    def _redraw_bundle_list(self):
+        """Clear and redraw all rows in the bundle checkbox list."""
+        ax = self._ax_bundles
+        if ax is None:
+            return
+        ax.clear()
+        ax.set_axis_off()
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+
+        n_vis   = self._bundle_list_n_visible()
+        bids    = self._bid_list
+        n_total = len(bids)
+
+        for row in range(n_vis):
+            idx = self._bundle_scroll + row
+            if idx >= n_total:
+                break
+            bid = bids[idx]
+            on  = self._bundle_visible.get(bid, True)
+
+            # y coordinate: top row at y≈1, bottom row at y≈0.
+            y = 1.0 - (row + 0.5) / n_vis
+
+            # Label: first net name, truncated to fit.
+            w = next((w for w in self.bundles
+                      if w.original_bundle.id == bid), None)
+            if w:
+                nets  = w.original_bundle.get_net_names()
+                label = nets[0] if nets else f"B{bid}"
+                if len(label) > 13:
+                    label = label[:12] + '…'
+            else:
+                label = f"B{bid}"
+
+            symbol    = '☑' if on else '☐'
+            txt_color = '#111111' if on else '#bbbbbb'
+            ax.text(0.04, y, f"{symbol} {label}",
+                    transform=ax.transAxes,
+                    fontsize=7, color=txt_color,
+                    va='center', clip_on=True)
+
+        # Scrollbar thumb on right edge.
+        if n_total > n_vis:
+            # Background track.
+            ax.add_patch(patches.Rectangle(
+                (0.91, 0.0), 0.07, 1.0,
+                transform=ax.transAxes,
+                linewidth=0, facecolor='#e8e8e8',
+                clip_on=True, zorder=1))
+            # Thumb.
+            y1 = 1.0 - self._bundle_scroll / n_total
+            y0 = max(0.0, y1 - n_vis / n_total)
+            ax.add_patch(patches.Rectangle(
+                (0.91, y0), 0.07, y1 - y0,
+                transform=ax.transAxes,
+                linewidth=0.5, edgecolor='#888888',
+                facecolor='#aaaaaa',
+                clip_on=True, zorder=2))
+
+        self.fig.canvas.draw_idle()
+
+    def _on_bundle_list_click(self, event):
+        """Toggle visibility of the bundle whose row was clicked."""
+        ax = self._ax_bundles
+        if ax is None or event.ydata is None:
+            return
+        n_vis = self._bundle_list_n_visible()
+        # ydata is in [0, 1] (data coords = axes fraction since ylim=(0,1)).
+        row = int((1.0 - event.ydata) * n_vis)
+        idx = self._bundle_scroll + row
+        bids = self._bid_list
+        if 0 <= idx < len(bids):
+            bid = bids[idx]
+            self._bundle_visible[bid] = not self._bundle_visible.get(bid, True)
+            self._redraw_bundle_list()
+            self._refresh_highlight()
+
+    def _scroll_bundles(self, delta):
+        n_vis      = self._bundle_list_n_visible()
+        max_scroll = max(0, len(self._bid_list) - n_vis)
+        self._bundle_scroll = max(0, min(max_scroll, self._bundle_scroll + delta))
+        self._redraw_bundle_list()
+
+    def _on_scroll_event(self, event):
+        if self._ax_bundles is None or event.inaxes != self._ax_bundles:
+            return
+        delta = -3 if event.button == 'up' else 3
+        self._scroll_bundles(delta)
+
+    def _on_bundle_toggle_all(self):
+        """Toggle all bundles on (if any are off) or off (if all are on)."""
+        all_on    = all(self._bundle_visible.values())
+        new_state = not all_on
+        for bid in self._bundle_visible:
+            self._bundle_visible[bid] = new_state
+        if self._btn_all_bundles is not None:
+            self._btn_all_bundles.label.set_text(
+                '☑ All Bundles' if new_state else '☐ All Bundles')
+            self._btn_all_bundles.ax.set_facecolor(
+                '#e8e8e8' if new_state else '#cccccc')
+        self._redraw_bundle_list()
+        self._refresh_highlight()
+
+    # ------------------------------------------------------------------
+
+    def _open_topo_explorer(self):
         if self._highlighted is None:
             return
         wrapper = next((w for w in self.bundles
@@ -586,22 +709,18 @@ class BudaVisualizer:
 
     def draw_congestion_map(self, cuts):
         """Shade each Hanan channel by utilisation ratio (green→red)."""
-        import matplotlib.colors as mcolors
-        cmap = plt.cm.RdYlGn_r   # green=free, red=overflowed
         xs, ys = self.fp.get_hanan_grid()
+        cmap = plt.cm.RdYlGn_r
 
         for cut in cuts:
             ratio = (cut.current_usage / cut.capacity) if cut.capacity > 0 else 0.0
             if ratio == 0:
                 continue
-            color = cmap(min(ratio, 1.5) / 1.5)   # cap visual at 150 % for colour
-            alpha = 0.12 + 0.22 * min(ratio, 1.0)  # subtle — buses stay readable
+            color = cmap(min(ratio, 1.5) / 1.5)
+            alpha = 0.12 + 0.22 * min(ratio, 1.0)
 
-            # Draw a band covering the channel this cut represents.
-            # Vertical cut → shade the channel it bisects (between adjacent x-lines).
-            if cut.p1.x == cut.p2.x:          # vertical cut
+            if cut.p1.x == cut.p2.x:
                 cx = cut.p1.x
-                # Find enclosing x interval
                 x_idx = [i for i, x in enumerate(xs) if x <= cx]
                 if not x_idx: continue
                 xi = x_idx[-1]
@@ -610,12 +729,11 @@ class BudaVisualizer:
                 self.ax.add_patch(patches.Rectangle(
                     (x_lo, ys[0]), x_hi - x_lo, ys[-1] - ys[0],
                     linewidth=0, facecolor=color, alpha=alpha, zorder=3))
-                # Label overflow
                 if ratio > 1.0:
                     self.ax.text((x_lo + x_hi) / 2, (ys[0] + ys[-1]) / 2,
                                  f"OVF\n{ratio:.0%}", fontsize=7, color='darkred',
                                  ha='center', va='center', zorder=4, fontweight='bold')
-            else:                               # horizontal cut
+            else:
                 cy = cut.p1.y
                 y_idx = [i for i, y in enumerate(ys) if y <= cy]
                 if not y_idx: continue
@@ -670,7 +788,7 @@ class BudaVisualizer:
         """Draw segments at NUTS-assigned track positions with interval bands."""
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}
-        band_alpha = 0.04   # very subtle — just marks the hard interval boundary
+        band_alpha = 0.04
         seg_alpha  = 0.90
 
         for i, wrapper in enumerate(self.bundles):
@@ -685,7 +803,6 @@ class BudaVisualizer:
                 col  = spec['color']
 
                 if ts and ts.placed:
-                    # track_position is the centerline; stripe spans ± width/2.
                     half   = ts.width / 2.0
                     center = ts.track_position
                     is_h   = (seg.start.y == seg.end.y)
@@ -693,16 +810,13 @@ class BudaVisualizer:
                     if is_h:
                         sx, ex = ts.span_lo, ts.span_hi
                         sy = ey = center
-                        # Filled footprint of the placed bus (actual track occupancy)
                         footprint = patches.Rectangle(
-                            (sx, center - half),
-                            ex - sx, ts.width,
+                            (sx, center - half), ex - sx, ts.width,
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
                         self._register(bid, footprint, alpha=band_alpha*3, is_band=True,
                                        layer=seg.layer_hint)
-                        # Dashed lines at interval bounds (constraint context)
                         for y_bound in (ts.interval_lo, ts.interval_hi):
                             bl, = self.ax.plot([min(sx,ex), max(sx,ex)], [y_bound, y_bound],
                                                color=col, linewidth=0.5, linestyle='--',
@@ -713,8 +827,7 @@ class BudaVisualizer:
                         sy, ey = ts.span_lo, ts.span_hi
                         sx = ex = center
                         footprint = patches.Rectangle(
-                            (center - half, sy),
-                            ts.width, ey - sy,
+                            (center - half, sy), ts.width, ey - sy,
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
@@ -730,7 +843,6 @@ class BudaVisualizer:
                     sx, sy = seg.start.x, seg.start.y
                     ex, ey = seg.end.x,   seg.end.y
 
-                # Terminals stay at original block-face positions, not NUTS positions.
                 if idx == 0: topo_start = (seg.start.x, seg.start.y)
                 if idx == len(topo.segments) - 1: topo_end = (seg.end.x, seg.end.y)
 
@@ -751,7 +863,7 @@ class BudaVisualizer:
 
     def _draw_terminals(self, bundle_id, topo_start, topo_end, viz_lw, alpha):
         """Draw driver (cyan square) and receiver (magenta circle) terminals."""
-        msz = min(viz_lw, 16)   # cap terminal size so fat buses don't blow up
+        msz = min(viz_lw, 16)
         if topo_start:
             drv, = self.ax.plot(topo_start[0], topo_start[1], 's',
                                 color='#00FFFF', markeredgecolor='black',
@@ -770,8 +882,8 @@ class BudaVisualizer:
             self._register(bundle_id, rcv, alpha=alpha, lw=msz)
 
     def show(self):
-        # Populate ordered bundle list for keyboard / button navigation.
         self._bid_list = sorted(self._bundle_artists.keys())
+        self._bundle_visible = {bid: True for bid in self._bid_list}
 
         self.ax.set_aspect('equal')
         self.ax.set_title(
@@ -792,27 +904,55 @@ class BudaVisualizer:
 
         self.ax.autoscale_view()
 
-        # Reserve bottom strip for navigation buttons; right strip for layer toggles.
-        self.fig.subplots_adjust(bottom=0.09, right=0.83)
+        # Right panel starts at x=0.83; leave plot right edge at 0.81.
+        self.fig.subplots_adjust(bottom=0.09, right=0.81)
 
-        ax_bprev  = self.fig.add_axes([0.02, 0.02, 0.18, 0.05])
-        ax_solo   = self.fig.add_axes([0.23, 0.02, 0.18, 0.05])
-        ax_bnext  = self.fig.add_axes([0.44, 0.02, 0.18, 0.05])
-        ax_topos  = self.fig.add_axes([0.65, 0.02, 0.33, 0.05])
+        RX = 0.83   # right-panel left edge (figure fraction)
+        RW = 0.15   # right-panel width
 
-        # Layer-visibility checkboxes — right of plot, top-down order M4/M5/M6.
-        ax_layers = self.fig.add_axes([0.855, 0.60, 0.12, 0.28])
+        # ── "All Layers" global toggle ──────────────────────────────────
+        ax_all_layers = self.fig.add_axes([RX, 0.90, RW, 0.04])
+        self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
+        self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
+
+        # ── Per-layer checkboxes (M4 / M5 / M6) ─────────────────────────
+        ax_layers = self.fig.add_axes([RX, 0.63, RW, 0.26])
         ax_layers.set_title('Layers', fontsize=9, pad=6)
         layer_colors = [_LAYER_COLOR[lid] for lid in (4, 5, 6)]
         self._chk_layers = CheckButtons(
             ax_layers,
             labels  = ['M4', 'M5', 'M6'],
-            actives = [True,  True,  True],
+            actives = [True, True, True],
         )
-        # Colour check marks and labels to match layer colours (mpl 3.7+ API).
         self._chk_layers.set_check_props({'facecolor': layer_colors})
         self._chk_layers.set_label_props({'color': layer_colors})
         self._chk_layers.on_clicked(self._on_layer_toggle)
+
+        # ── "All Bundles" global toggle ──────────────────────────────────
+        ax_all_bundles = self.fig.add_axes([RX, 0.58, RW, 0.04])
+        self._btn_all_bundles = Button(ax_all_bundles, '☑ All Bundles', color='#e8e8e8')
+        self._btn_all_bundles.on_clicked(lambda _: self._on_bundle_toggle_all())
+
+        # ── Bundle list: scroll ▲, list area, scroll ▼ ──────────────────
+        ax_bscroll_up = self.fig.add_axes([RX, 0.53, RW, 0.04])
+        btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
+        btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles(-5))
+
+        self._ax_bundles = self.fig.add_axes([RX, 0.14, RW, 0.38])
+        self._ax_bundles.set_facecolor('#fafafa')
+        self._redraw_bundle_list()
+
+        ax_bscroll_dn = self.fig.add_axes([RX, 0.09, RW, 0.04])
+        btn_bscroll_dn = Button(ax_bscroll_dn, '▼', color='#f0f0f0')
+        btn_bscroll_dn.on_clicked(lambda _: self._scroll_bundles(+5))
+
+        self.fig.canvas.mpl_connect('scroll_event', self._on_scroll_event)
+
+        # ── Bottom navigation buttons ────────────────────────────────────
+        ax_bprev = self.fig.add_axes([0.02, 0.02, 0.18, 0.05])
+        ax_solo  = self.fig.add_axes([0.23, 0.02, 0.18, 0.05])
+        ax_bnext = self.fig.add_axes([0.44, 0.02, 0.18, 0.05])
+        ax_topos = self.fig.add_axes([0.65, 0.02, 0.33, 0.05])
 
         btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
         btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
