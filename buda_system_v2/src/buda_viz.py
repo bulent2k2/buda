@@ -283,6 +283,7 @@ class TopologyExplorer:
         self._draw()
 
     def _on_key(self, event):
+        if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
         if event.key in ('left',  'a'):         self._step_topo(-1)
         if event.key in ('right', 'd'):         self._step_topo(+1)
         if event.key in ('[', 'pageup'):        self._step_bundle(-1)
@@ -740,6 +741,7 @@ class BudaVisualizer:
         self._topo_explorer.fig.show()
 
     def _on_key(self, event):
+        if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key == 't':               self._open_topo_explorer()

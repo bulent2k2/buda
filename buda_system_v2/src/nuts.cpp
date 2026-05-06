@@ -21,7 +21,11 @@ static int find_grid_cell(const std::vector<int>& grid, int v) {
 }
 
 // Internal type: records how segment S's span must follow T's track position.
-struct SpanAdjConn { int src_bid, src_si; double at_pos; };
+// lo_end=true  → the lo end of S is near the junction; extend span_lo toward T.
+// lo_end=false → the hi end of S is near the junction; extend span_hi toward T.
+// The lo/hi decision is locked in at map-build time using the *nominal* span so
+// that repeated rerun_layer calls cannot drift the decision as spans grow.
+struct SpanAdjConn { int src_bid, src_si; bool lo_end; };
 
 // ---------------------------------------------------------------------------
 // Shared map builders
@@ -78,8 +82,12 @@ static void build_nuts_maps(
             for (const auto& conn : cs.conns) {
                 if (conn.kind != SegConn::SEG) continue;
                 auto t_key = std::make_pair(bid, conn.seg_idx);
-                rev_conn_map[t_key].push_back(
-                    { bid, si, static_cast<double>(conn.at_pos) });
+                // Decide lo/hi end from the nominal span (along_lo/along_hi) so the
+                // decision stays stable across repeated rerun_layer calls even after
+                // prior span adjustments have moved span_lo or span_hi.
+                double mid = 0.5 * (cs.along_lo + cs.along_hi);
+                bool lo_end = (conn.at_pos <= mid);
+                rev_conn_map[t_key].push_back({ bid, si, lo_end });
             }
 
             std::vector<double> targets;
@@ -161,7 +169,7 @@ static void do_span_adjustments(
     bool                                                             only_unplaced = false)
 {
     // ── Pass 1: collect adjustment requests per target segment ──────────
-    struct AdjReq { double lo_edge, hi_edge, at_pos; };
+    struct AdjReq { double lo_edge, hi_edge; bool lo_end; };
     std::map<std::pair<int,int>, std::vector<AdjReq>> adj_map;
 
     for (const TrackSegment* ts : layer_segs) {
@@ -177,16 +185,11 @@ static void do_span_adjustments(
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
             if (only_unplaced && other->placed) continue;
-            adj_map[{sc.src_bid, sc.src_si}].push_back({lo_edge, hi_edge, sc.at_pos});
+            adj_map[{sc.src_bid, sc.src_si}].push_back({lo_edge, hi_edge, sc.lo_end});
         }
     }
 
     // ── Pass 2: apply all requests jointly per target ───────────────────
-    //
-    // Use the segment's own span endpoints as sentinels so that spans can
-    // both grow and shrink correctly regardless of processing order:
-    //   new_lo starts at span_hi  (pos-INF for std::min → decreases toward lo)
-    //   new_hi starts at span_lo  (neg-INF for std::max → increases toward hi)
     for (auto& [key, reqs] : adj_map) {
         auto jt = ts_ptr_map.find(key);
         if (jt == ts_ptr_map.end()) continue;
@@ -194,24 +197,15 @@ static void do_span_adjustments(
 
         const double orig_lo = other->span_lo;
         const double orig_hi = other->span_hi;
-        const double range   = orig_hi - orig_lo;
-        const double tol     = 0.11 * range;
 
-        double new_lo = orig_hi;   // pos-INF: will decrease via std::min
-        double new_hi = orig_lo;   // neg-INF: will increase via std::max
+        double new_lo = orig_hi;   // pos-INF sentinel: decreases via std::min
+        double new_hi = orig_lo;   // neg-INF sentinel: increases via std::max
 
         for (const auto& req : reqs) {
-            const double lo_d = req.at_pos - orig_lo;
-            const double hi_d = orig_hi    - req.at_pos;
-
-            if (hi_d <= tol)
-                new_hi = std::max(new_hi, req.hi_edge);
-            else if (lo_d <= tol)
+            if (req.lo_end)
                 new_lo = std::min(new_lo, req.lo_edge);
-            else {
-                new_lo = std::min(new_lo, req.lo_edge);
+            else
                 new_hi = std::max(new_hi, req.hi_edge);
-            }
         }
 
         if (new_lo < orig_hi)   // at least one lo-end connection found
