@@ -1,5 +1,5 @@
 # channel_stress.buda
-# 8 top blocks + 8 bottom blocks with a 140-unit horizontal channel.
+# 8 top blocks + 8 bottom blocks with a 340-unit horizontal channel.
 # 200 nets randomly paired (fixed seed=42) — stress-tests NUTS channel packing.
 
 def_layer 4 M4 H TOP 0.0
@@ -15,14 +15,14 @@ add_block u_b5   420   20  480   80
 add_block u_b6   500   20  560   80
 add_block u_b7   580   20  640   80
 
-add_block u_t0    20  220   80  280
-add_block u_t1   100  220  160  280
-add_block u_t2   180  220  240  280
-add_block u_t3   260  220  320  280
-add_block u_t4   340  220  400  280
-add_block u_t5   420  220  480  280
-add_block u_t6   500  220  560  280
-add_block u_t7   580  220  640  280
+add_block u_t0    20  420   80  480
+add_block u_t1   100  420  160  480
+add_block u_t2   180  420  240  480
+add_block u_t3   260  420  320  480
+add_block u_t4   340  420  400  480
+add_block u_t5   420  420  480  480
+add_block u_t6   500  420  560  480
+add_block u_t7   580  420  640  480
 
 add_net t1_b0_00  u_t1.tx  u_b0.rx
 add_net t4_b3_00  u_t4.tx  u_b3.rx

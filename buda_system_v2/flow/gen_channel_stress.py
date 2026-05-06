@@ -14,8 +14,14 @@ Block geometry
 --------------
   width = 60, height = 60, x-pitch = 80
   bottom row : y = 20 .. 80
-  top row    : y = 220 .. 280
-  channel    : y = 80 .. 220  (140 units tall)
+  top row    : y = 420 .. 480
+  channel    : y = 80 .. 420  (340 units tall)
+
+Channel sizing
+--------------
+  With seed=42 the 62 cross-column bundles carry ~269 layout-units of
+  H-trunk width (55 bundles × avg 4.9 units).  340 units gives ~27%
+  headroom so NUTS can place all H trunks without interval violations.
 """
 
 import random, sys, os
@@ -28,7 +34,7 @@ BLOCK_H   = 60
 X_PITCH   = 80
 X0        = 20
 Y_BOT_LO  = 20;  Y_BOT_HI  = 80
-Y_TOP_LO  = 220; Y_TOP_HI  = 280
+Y_TOP_LO  = 420; Y_TOP_HI  = 480
 
 random.seed(SEED)
 
@@ -36,7 +42,7 @@ lines = []
 def L(s=""): lines.append(s)
 
 L("# channel_stress.buda")
-L("# 8 top blocks + 8 bottom blocks with a 140-unit horizontal channel.")
+L("# 8 top blocks + 8 bottom blocks with a 340-unit horizontal channel.")
 L("# 200 nets randomly paired (fixed seed=42) — stress-tests NUTS channel packing.")
 L()
 
