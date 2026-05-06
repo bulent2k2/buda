@@ -519,8 +519,10 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
             if (a.span_hi <= b.span_lo || b.span_hi <= a.span_lo) continue;
             // Stripes overlap? (centerline ± half-width)
             if (a.track_position + a.width / 2.0 > b.track_position - b.width / 2.0 &&
-                b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0)
+                b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0) {
                 ++result.num_overlaps;
+                ++result.overlaps_per_layer[a.layer];
+            }
         }
     }
 

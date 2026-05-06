@@ -89,9 +89,10 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("placed",       &TrackSegment::placed);
     py::class_<NUTSResult>(m, "NUTSResult")
         .def(py::init<>())
-        .def_readwrite("segments",       &NUTSResult::segments)
-        .def_readwrite("num_violations", &NUTSResult::num_violations)
-        .def_readwrite("num_overlaps",   &NUTSResult::num_overlaps);
+        .def_readwrite("segments",           &NUTSResult::segments)
+        .def_readwrite("num_violations",     &NUTSResult::num_violations)
+        .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
+        .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer);
     py::class_<NUTSEngine>(m, "NUTSEngine")
         .def(py::init<const Floorplan&>())
         .def("set_track_pitch", &NUTSEngine::set_track_pitch)

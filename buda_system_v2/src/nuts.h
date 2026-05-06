@@ -1,6 +1,7 @@
 #pragma once
 #include "global_router.h"
 #include <map>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -25,6 +26,7 @@ struct NUTSResult {
     std::vector<TrackSegment> segments;
     int num_violations = 0;   // segments placed outside their interval
     int num_overlaps   = 0;   // pairs of segments that physically overlap after placement
+    std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
 };
 
 // Non-Uniform Track Sharing engine.

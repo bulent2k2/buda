@@ -176,9 +176,19 @@ class BudaSession:
             nuts = interconnect.NUTSEngine(self.fp)
             nuts.set_track_pitch(pitch)
             self.nuts_result = nuts.run(self.bundles)
+            layer_names = {4: 'M4', 5: 'M5', 6: 'M6'}
+            per_layer = self.nuts_result.overlaps_per_layer
+            if per_layer:
+                detail = ', '.join(
+                    f"{layer_names.get(lid, f'L{lid}')}={cnt}"
+                    for lid, cnt in sorted(per_layer.items())
+                )
+                overlap_str = f"{self.nuts_result.num_overlaps} track overlaps ({detail})"
+            else:
+                overlap_str = "0 track overlaps"
             print(f"NUTS placed {len(self.nuts_result.segments)} segments "
                   f"({self.nuts_result.num_violations} interval violations, "
-                  f"{self.nuts_result.num_overlaps} track overlaps).")
+                  f"{overlap_str}).")
         elif cmd == "visualize_topologies":
             # Usage:
             #   visualize_topologies <hint>         — first matching bundle
