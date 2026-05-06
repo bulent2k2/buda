@@ -73,6 +73,83 @@ class BudaSession:
             print(f"Pinned bundle '{hint}' to topology {resolved} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']})")
 
+    def _write_nuts_log(self, layer_names=None):
+        """Write a per-overlap log file alongside the .buda script.
+
+        File: <script_stem>_nuts.log  (or nuts.log if no script path).
+        Each overlap is reported with its two segments, the overlap rectangle
+        (routing-direction span and perpendicular band), and the overlap area.
+        """
+        if self.nuts_result is None:
+            return
+        if layer_names is None:
+            layer_names = {4: 'M4', 5: 'M5', 6: 'M6'}
+
+        if self.script_path:
+            log_path = os.path.splitext(self.script_path)[0] + '_nuts.log'
+        else:
+            log_path = 'nuts.log'
+
+        details = self.nuts_result.overlap_details
+        per_layer = self.nuts_result.overlaps_per_layer
+
+        # Build a segment label map: (bundle_id, seg_idx) -> display name
+        seg_label = {}
+        for w in self.bundles:
+            bid   = w.original_bundle.id
+            nets  = w.original_bundle.get_net_names()
+            hint  = nets[0] if nets else f"B{bid}"
+            topo  = w.candidates[w.selected_topology_index]
+            for si, seg in enumerate(topo.segments):
+                lname = layer_names.get(seg.layer_hint, f"L{seg.layer_hint}")
+                seg_label[(bid, si)] = f"B{bid}.{lname}[{si}]"
+
+        from datetime import datetime
+        with open(log_path, 'w') as f:
+            script_name = os.path.basename(self.script_path) if self.script_path else '(interactive)'
+            f.write(f"NUTS Overlap Report — {script_name}\n")
+            f.write(f"Generated : {datetime.now().isoformat(timespec='seconds')}\n")
+            f.write(f"Segments  : {len(self.nuts_result.segments)}\n")
+            f.write(f"Violations: {self.nuts_result.num_violations}\n")
+            total = self.nuts_result.num_overlaps
+            layer_summary = '  '.join(
+                f"{layer_names.get(lid, f'L{lid}')}={cnt}"
+                for lid, cnt in sorted(per_layer.items())
+            )
+            f.write(f"Overlaps  : {total}  ({layer_summary})\n")
+            f.write("\n")
+
+            if not details:
+                f.write("No overlaps.\n")
+            else:
+                # Group by layer
+                by_layer = {}
+                for od in details:
+                    by_layer.setdefault(od.layer, []).append(od)
+
+                for lid in sorted(by_layer):
+                    lname = layer_names.get(lid, f"L{lid}")
+                    entries = by_layer[lid]
+                    f.write(f"{'='*60}\n")
+                    f.write(f"  {lname}  —  {len(entries)} overlap(s)\n")
+                    f.write(f"{'='*60}\n")
+                    for n, od in enumerate(entries, 1):
+                        la = seg_label.get((od.bid_a, od.seg_a), f"B{od.bid_a}[{od.seg_a}]")
+                        lb = seg_label.get((od.bid_b, od.seg_b), f"B{od.bid_b}[{od.seg_b}]")
+                        span_len = od.span_hi - od.span_lo
+                        perp_dep = od.perp_hi - od.perp_lo
+                        area     = span_len * perp_dep
+                        f.write(
+                            f"  [{n:3d}]  {la}  ×  {lb}\n"
+                            f"         span  [{od.span_lo:.1f}, {od.span_hi:.1f}]"
+                            f"  len={span_len:.1f}\n"
+                            f"         perp  [{od.perp_lo:.2f}, {od.perp_hi:.2f}]"
+                            f"  depth={perp_dep:.2f}  area={area:.2f}\n"
+                        )
+                    f.write("\n")
+
+        print(f"NUTS overlap log → {log_path}")
+
     def extract_instances(self, bundle):
         # Helper to find source/dest instances from a bundle's nets for Topology Generation
         if not bundle.get_net_names(): return "top", "top"
@@ -189,6 +266,7 @@ class BudaSession:
             print(f"NUTS placed {len(self.nuts_result.segments)} segments "
                   f"({self.nuts_result.num_violations} interval violations, "
                   f"{overlap_str}).")
+            self._write_nuts_log(layer_names)
         elif cmd == "visualize_topologies":
             # Usage:
             #   visualize_topologies <hint>         — first matching bundle

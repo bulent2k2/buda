@@ -522,6 +522,17 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
                 b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0) {
                 ++result.num_overlaps;
                 ++result.overlaps_per_layer[a.layer];
+                OverlapDetail od;
+                od.layer   = a.layer;
+                od.bid_a   = a.bundle_id;  od.seg_a = a.seg_idx;
+                od.bid_b   = b.bundle_id;  od.seg_b = b.seg_idx;
+                od.span_lo = std::max(a.span_lo, b.span_lo);
+                od.span_hi = std::min(a.span_hi, b.span_hi);
+                od.perp_lo = std::max(a.track_position - a.width / 2.0,
+                                      b.track_position - b.width / 2.0);
+                od.perp_hi = std::min(a.track_position + a.width / 2.0,
+                                      b.track_position + b.width / 2.0);
+                result.overlap_details.push_back(od);
             }
         }
     }

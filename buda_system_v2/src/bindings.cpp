@@ -87,9 +87,20 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("width",        &TrackSegment::width)
         .def_readwrite("track_position", &TrackSegment::track_position)
         .def_readwrite("placed",       &TrackSegment::placed);
+    py::class_<OverlapDetail>(m, "OverlapDetail")
+        .def_readwrite("layer",    &OverlapDetail::layer)
+        .def_readwrite("bid_a",    &OverlapDetail::bid_a)
+        .def_readwrite("seg_a",    &OverlapDetail::seg_a)
+        .def_readwrite("bid_b",    &OverlapDetail::bid_b)
+        .def_readwrite("seg_b",    &OverlapDetail::seg_b)
+        .def_readwrite("span_lo",  &OverlapDetail::span_lo)
+        .def_readwrite("span_hi",  &OverlapDetail::span_hi)
+        .def_readwrite("perp_lo",  &OverlapDetail::perp_lo)
+        .def_readwrite("perp_hi",  &OverlapDetail::perp_hi);
     py::class_<NUTSResult>(m, "NUTSResult")
         .def(py::init<>())
         .def_readwrite("segments",           &NUTSResult::segments)
+        .def_readwrite("overlap_details",    &NUTSResult::overlap_details)
         .def_readwrite("num_violations",     &NUTSResult::num_violations)
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
         .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer);

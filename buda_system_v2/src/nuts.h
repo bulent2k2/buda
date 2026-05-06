@@ -22,8 +22,18 @@ struct TrackSegment {
     bool   placed   = false;
 };
 
+// Exact geometry of one overlap pair, after placement.
+struct OverlapDetail {
+    int    layer;
+    int    bid_a,  seg_a;    // first  segment: bundle_id, seg_idx
+    int    bid_b,  seg_b;    // second segment: bundle_id, seg_idx
+    double span_lo, span_hi; // overlap rectangle — routing direction
+    double perp_lo, perp_hi; // overlap rectangle — perpendicular direction
+};
+
 struct NUTSResult {
-    std::vector<TrackSegment> segments;
+    std::vector<TrackSegment>  segments;
+    std::vector<OverlapDetail> overlap_details;     // one entry per overlapping pair
     int num_violations = 0;   // segments placed outside their interval
     int num_overlaps   = 0;   // pairs of segments that physically overlap after placement
     std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
