@@ -1,3 +1,164 @@
+19)                                                                 
+   python3 /tmp/test_rerun.py > /tmp/test_rerun.out 2>&1; echo "exit $?" >> /tmp/test_rerun.out; cat /tmp/test_rerun.out 
+ 
+   This command runs a Python script (`test_rerun.py`), redirects both stdout and stderr to an output file (`test_rerun.out`), appends the exit code to that same file, and then prints the full 
+   contents of the output file to the terminal. 
+ 
+   I need to execute a Python test script, capture all of its output (including errors) and exit status into a log file, and then display the combined results — all in a single chained command. 
+ 
+   Med risk: Executing an unknown Python script in /tmp could have side effects. 
+                                                 
+ Do you want to proceed?                      
+ ❯ 1. Yes
+   2. Yes, and don’t ask again for: echo "exit $?"
+   3. No
+
+18) matplotlib!    Test per-item coloring with new API
+
+   python3 -c "
+   import matplotlib; matplotlib.use('Agg')
+   import matplotlib.pyplot as plt
+   from matplotlib.widgets import CheckButtons
+   fig, ax = plt.subplots()
+   cb = CheckButtons(ax, ['M4','M5','M6'], [True,True,True])
+   # Try per-label color
+   cb.set_label_props({'color': ['#007ACC', '#CC0000', '#00AA44']})
+   cb.set_check_props({'facecolor': ['#007ACC', '#CC0000', '#00AA44']})
+   print('OK')
+   "
+
+
+17) Bash command  -    Calculate required channel height from bundle widths 
+ 
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 - <<'EOF' 
+   import sys; sys.path.insert(0, '.') 
+   from buda_cli import BudaSession 
+ 
+   session = BudaSession() 
+   STOP_AT = {'run_planner', 'run_nuts', 'visualize'} 
+   with open('../flow/channel_stress.buda') as f: 
+       for line in f: 
+           line = line.strip() 
+           if not line or line.startswith('#'): continue 
+           if line.split()[0].lower() in STOP_AT: break 
+           session.do_command(line) 
+ 
+   same_col, cross_col = [], [] 
+   for w in session.bundles: 
+       hint = w.original_bundle.get_net_names()[0].rsplit('_', 1)[0]  # t0_b0 
+       parts = hint.split('_')   # ['t0', 'b0'] 
+       ti = int(parts[0][1:]); bi = int(parts[1][1:]) 
+       (same_col if ti == bi else cross_col).append(w) 
+ 
+   same_w  = sum(w.width for w in same_col) 
+   cross_w = sum(w.width for w in cross_col) 
+   print(f"Same-column bundles: {len(same_col)}, total H-stub width: {same_w:.1f}") 
+   print(f"Cross-column bundles: {len(cross_col)}, total H-trunk width: {cross_w:.1f}") 
+   print(f"Channel height needed for H layer (no overlaps): {cross_w:.0f} units") 
+   print(f"Recommended channel height (20% margin): {cross_w * 1.2:.0f} units") 
+   EOF 
+ 
+
+16) 
+❯ Let's add a json file for the channel_stress test case so that Z-topologies are selected, instead of I or L. 
+ 
+⏺ I need to know what Z-topology candidates are generated for each bundle. Let me write a quick introspection script rather than guessing indices. 
+ 
+  Reading 1 file… (ctrl+o to expand) 
+  ⎿  src/topology.cpp 
+ 
+⏺ Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 - <<'EOF' 
+      import sys…)
+  ⎿  Running…
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 - <<'EOF'
+   import sys
+   sys.path.insert(0, '.')
+   from buda_cli import BudaSession
+
+   # Run just enough of channel_stress.buda to get topology candidates,
+   # but skip run_planner / run_nuts / visualize.
+   session = BudaSession()
+   STOP_AT = {'run_planner', 'run_nuts', 'visualize'}
+
+   with open('../flow/channel_stress.buda') as f:
+       for line in f:
+           line = line.strip()
+           if not line or line.startswith('#'):
+               continue
+           cmd = line.split()[0].lower()
+           if cmd in STOP_AT:
+               break
+           session.do_command(line)
+
+   # Dump: for each bundle print id, hint (first net), then all Z candidates.
+   import json, datetime
+
+   selections = []
+   for w in session.bundles:
+       nets = w.original_bundle.get_net_names()
+       hint = nets[0].rsplit('_', 1)[0]   # strip trailing _00 → t0_b0
+       bid  = w.original_bundle.id
+
+       z_idx = None
+       z_type = None
+       z_wl   = None
+       for i, c in enumerate(w.candidates):
+           if 'Z_' in c.type:
+               z_idx  = i
+               z_type = c.type
+               z_wl   = c.estimated_wirelength
+               break
+
+       if z_idx is None:
+           print(f"  bundle {bid} ({hint}): NO Z candidate — types: {[c.type for c in w.candidates]}")
+           # Fall back to last non-I/L candidate
+           continue
+
+       selections.append({
+           "bundle_hint":     hint,
+           "bundle_id":       bid,
+           "topo_type":       z_type,
+           "topo_wl":         z_wl,
+           "topo_index_hint": z_idx,
+           "note":            "",
+           "selected_at":     datetime.datetime.now().isoformat(timespec='seconds')
+       })
+
+   print(f"\n{len(selections)} selections built")
+   print(json.dumps({"selections": selections[:3]}, indent=2), "...")
+
+   with open('../flow/channel_stress.json', 'w') as f:
+       json.dump({"selections": selections}, f, indent=2)
+       f.write('\n')
+   print(f"Wrote channel_stress.json")
+   EOF
+
+   Introspect topology candidates and generate sidecar JSON
+
+ Contains brace with quote character (expansion obfuscation)
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+
+15) Bash command 
+ 
+   cd /Users/ben/src/buda/buda_system_v2/src && MPLBACKEND=Agg python3 buda_cli.py ../flow/channel_stress.buda 2>&1 
+ 
+   This command navigates to the buda_system_v2/src directory, sets the `MPLBACKEND=Agg` environment variable to force matplotlib to use a non-interactive (file-rendering only) backend, then runs a 
+   Python CLI script (`buda_cli.py`) with a `.buda` flow file as input, merging stderr into stdout (`2>&1`) to capture all output together. 
+ 
+   I need to execute the buda_cli.py script against a channel stress test flow file, using the Agg matplotlib backend to avoid errors that would arise from attempting to open a GUI/display window in 
+   a non-interactive or headless environment. 
+ 
+   Low risk: Script may modify files or produce side effects depending on the .buda flow definition. 
+ 
+
 14)  Inspect b2 TRUNK_V topology using stderr
 Bash command 
  
