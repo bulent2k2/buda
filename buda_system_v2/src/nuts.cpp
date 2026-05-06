@@ -160,6 +160,10 @@ static void do_span_adjustments(
     std::map<std::pair<int,int>, TrackSegment*>&                     ts_ptr_map,
     bool                                                             only_unplaced = false)
 {
+    // ── Pass 1: collect adjustment requests per target segment ──────────
+    struct AdjReq { double lo_edge, hi_edge, at_pos; };
+    std::map<std::pair<int,int>, std::vector<AdjReq>> adj_map;
+
     for (const TrackSegment* ts : layer_segs) {
         if (!ts->placed) continue;
         auto it = rev_conn_map.find({ts->bundle_id, ts->seg_idx});
@@ -173,21 +177,47 @@ static void do_span_adjustments(
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
             if (only_unplaced && other->placed) continue;
+            adj_map[{sc.src_bid, sc.src_si}].push_back({lo_edge, hi_edge, sc.at_pos});
+        }
+    }
 
-            const double range = other->span_hi - other->span_lo;
-            const double tol   = 0.11 * range;
-            const double lo_d  = sc.at_pos - other->span_lo;
-            const double hi_d  = other->span_hi - sc.at_pos;
+    // ── Pass 2: apply all requests jointly per target ───────────────────
+    //
+    // Use the segment's own span endpoints as sentinels so that spans can
+    // both grow and shrink correctly regardless of processing order:
+    //   new_lo starts at span_hi  (pos-INF for std::min → decreases toward lo)
+    //   new_hi starts at span_lo  (neg-INF for std::max → increases toward hi)
+    for (auto& [key, reqs] : adj_map) {
+        auto jt = ts_ptr_map.find(key);
+        if (jt == ts_ptr_map.end()) continue;
+        TrackSegment* other = jt->second;
+
+        const double orig_lo = other->span_lo;
+        const double orig_hi = other->span_hi;
+        const double range   = orig_hi - orig_lo;
+        const double tol     = 0.11 * range;
+
+        double new_lo = orig_hi;   // pos-INF: will decrease via std::min
+        double new_hi = orig_lo;   // neg-INF: will increase via std::max
+
+        for (const auto& req : reqs) {
+            const double lo_d = req.at_pos - orig_lo;
+            const double hi_d = orig_hi    - req.at_pos;
 
             if (hi_d <= tol)
-                other->span_hi = std::max(other->span_hi, hi_edge);
+                new_hi = std::max(new_hi, req.hi_edge);
             else if (lo_d <= tol)
-                other->span_lo = std::min(other->span_lo, lo_edge);
+                new_lo = std::min(new_lo, req.lo_edge);
             else {
-                other->span_lo = std::min(other->span_lo, lo_edge);
-                other->span_hi = std::max(other->span_hi, hi_edge);
+                new_lo = std::min(new_lo, req.lo_edge);
+                new_hi = std::max(new_hi, req.hi_edge);
             }
         }
+
+        if (new_lo < orig_hi)   // at least one lo-end connection found
+            other->span_lo = new_lo;
+        if (new_hi > orig_lo)   // at least one hi-end connection found
+            other->span_hi = new_hi;
     }
 }
 
