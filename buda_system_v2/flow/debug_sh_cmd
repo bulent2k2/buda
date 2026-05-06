@@ -1,18 +1,13 @@
-19)                                                                 
-   python3 /tmp/test_rerun.py > /tmp/test_rerun.out 2>&1; echo "exit $?" >> /tmp/test_rerun.out; cat /tmp/test_rerun.out 
- 
-   This command runs a Python script (`test_rerun.py`), redirects both stdout and stderr to an output file (`test_rerun.out`), appends the exit code to that same file, and then prints the full 
-   contents of the output file to the terminal. 
- 
+19) 
+   python3 /tmp/test_rerun.py > /tmp/test_rerun.out 2>&1; echo "exit $?" >> /tmp/test_rerun.out; cat /tmp/test_rerun.out
+
+   This command runs a Python script (`test_rerun.py`), redirects both stdout and stderr to an output file (`test_rerun.out`), appends the exit code to that same file, and then prints the full
+   contents of the output file to the terminal.
+
    I need to execute a Python test script, capture all of its output (including errors) and exit status into a log file, and then display the combined results — all in a single chained command. 
  
    Med risk: Executing an unknown Python script in /tmp could have side effects. 
-                                                 
- Do you want to proceed?                      
- ❯ 1. Yes
-   2. Yes, and don’t ask again for: echo "exit $?"
-   3. No
-
+ 
 18) matplotlib!    Test per-item coloring with new API
 
    python3 -c "
