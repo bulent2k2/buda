@@ -376,8 +376,11 @@ def main():
     args = parser.parse_args()
     session = BudaSession()
     if args.script:
-        session.script_path = os.path.abspath(args.script)
-        session.do_command(f"source {args.script}")
+        script = args.script
+        if not os.path.exists(script) and not script.endswith('.buda'):
+            script = script + '.buda'
+        session.script_path = os.path.abspath(script)
+        session.do_command(f"source {script}")
 
 if __name__ == "__main__":
     main()
