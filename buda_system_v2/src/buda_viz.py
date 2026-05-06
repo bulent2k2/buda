@@ -5,7 +5,7 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib.widgets import Button
+from matplotlib.widgets import Button, CheckButtons
 
 import interconnect as ic
 
@@ -409,13 +409,15 @@ class BudaVisualizer:
                 os.path.splitext(os.path.basename(sidecar_path))[0]
             )
 
-        # bundle_id -> list of dicts {artist, alpha, lw, is_band}
+        # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
         self._bundle_artists = {}
-        self._highlighted    = None   # currently highlighted bundle_id, or None
-        self._solo           = False  # hide vs dim non-selected bundles
-        self._bid_list       = []     # ordered list of bundle ids (set in show())
-        self._btn_solo       = None   # Button widget (set in show())
-        self._topo_explorer  = None   # keeps TopologyExplorer alive while open
+        self._highlighted    = None          # currently highlighted bundle_id, or None
+        self._solo           = False         # hide vs dim non-selected bundles
+        self._layer_visible  = {4: True, 5: True, 6: True}
+        self._bid_list       = []            # ordered list of bundle ids (set in show())
+        self._btn_solo       = None          # Button widget (set in show())
+        self._chk_layers     = None          # CheckButtons widget (set in show())
+        self._topo_explorer  = None          # keeps TopologyExplorer alive while open
         self._pick_happened  = False
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
@@ -426,14 +428,20 @@ class BudaVisualizer:
     # Artist registry & interaction
     # ------------------------------------------------------------------
 
-    def _register(self, bundle_id, artist, *, alpha, lw=None, is_band=False):
-        """Make an artist pickable and store its resting style for later restore."""
+    def _register(self, bundle_id, artist, *, alpha, lw=None, is_band=False, layer=None):
+        """Make an artist pickable and store its resting style for later restore.
+
+        layer — the metal layer id (4/5/6) this artist belongs to, or None for
+                layer-agnostic artists (terminals, vias, interval bands).  Used
+                by the layer-visibility checkboxes.
+        """
         artist.set_picker(5)
         self._bundle_artists.setdefault(bundle_id, []).append({
-            'artist': artist,
-            'alpha':  alpha,
-            'lw':     lw,
+            'artist':  artist,
+            'alpha':   alpha,
+            'lw':      lw,
             'is_band': is_band,
+            'layer':   layer,
         })
 
     def _on_pick(self, event):
@@ -458,13 +466,21 @@ class BudaVisualizer:
         self._refresh_highlight()
 
     def _refresh_highlight(self):
-        """Apply current highlight + solo state to all registered artists."""
+        """Apply current highlight + solo + layer-visibility to all registered artists."""
         bundle_id = self._highlighted
 
         for bid, entries in self._bundle_artists.items():
             selected = (bundle_id is None) or (bid == bundle_id)
             for e in entries:
                 a = e['artist']
+
+                # Layer-visibility is a hard gate: always off regardless of highlight.
+                if e['layer'] is not None and not self._layer_visible.get(e['layer'], True):
+                    a.set_alpha(0.0)
+                    if e['lw'] is not None:
+                        a.set_linewidth(e['lw'])
+                    continue
+
                 if bundle_id is None:
                     # Reset to resting style.
                     a.set_alpha(e['alpha'])
@@ -520,6 +536,14 @@ class BudaVisualizer:
             else:
                 self._btn_solo.label.set_text('Solo OFF')
                 self._btn_solo.ax.set_facecolor('#f0f0f0')
+        self._refresh_highlight()
+
+    def _on_layer_toggle(self, label):
+        """Called by CheckButtons when a layer checkbox is clicked."""
+        layer_map = {'M4': 4, 'M5': 5, 'M6': 6}
+        layer = layer_map.get(label)
+        if layer is not None:
+            self._layer_visible[layer] = not self._layer_visible[layer]
         self._refresh_highlight()
 
     def _open_topo_explorer(self):
@@ -631,7 +655,8 @@ class BudaVisualizer:
                                      color=spec['color'], linewidth=viz_lw,
                                      solid_capstyle='butt', alpha=alpha,
                                      zorder=10 + i)
-                self._register(bid, line, alpha=alpha, lw=viz_lw)
+                self._register(bid, line, alpha=alpha, lw=viz_lw,
+                                layer=seg.layer_hint)
 
                 if idx < len(topo.segments) - 1:
                     via, = self.ax.plot(ex, ey, 'o', color='black',
@@ -675,13 +700,15 @@ class BudaVisualizer:
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
-                        self._register(bid, footprint, alpha=band_alpha*3, is_band=True)
+                        self._register(bid, footprint, alpha=band_alpha*3, is_band=True,
+                                       layer=seg.layer_hint)
                         # Dashed lines at interval bounds (constraint context)
                         for y_bound in (ts.interval_lo, ts.interval_hi):
                             bl, = self.ax.plot([min(sx,ex), max(sx,ex)], [y_bound, y_bound],
                                                color=col, linewidth=0.5, linestyle='--',
                                                alpha=0.3, zorder=4)
-                            self._register(bid, bl, alpha=0.3, is_band=True)
+                            self._register(bid, bl, alpha=0.3, is_band=True,
+                                           layer=seg.layer_hint)
                     else:
                         sy, ey = ts.span_lo, ts.span_hi
                         sx = ex = center
@@ -691,12 +718,14 @@ class BudaVisualizer:
                             linewidth=0, facecolor=col,
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
-                        self._register(bid, footprint, alpha=band_alpha*3, is_band=True)
+                        self._register(bid, footprint, alpha=band_alpha*3, is_band=True,
+                                       layer=seg.layer_hint)
                         for x_bound in (ts.interval_lo, ts.interval_hi):
                             bl, = self.ax.plot([x_bound, x_bound], [min(sy,ey), max(sy,ey)],
                                                color=col, linewidth=0.5, linestyle='--',
                                                alpha=0.3, zorder=4)
-                            self._register(bid, bl, alpha=0.3, is_band=True)
+                            self._register(bid, bl, alpha=0.3, is_band=True,
+                                           layer=seg.layer_hint)
                 else:
                     sx, sy = seg.start.x, seg.start.y
                     ex, ey = seg.end.x,   seg.end.y
@@ -709,7 +738,8 @@ class BudaVisualizer:
                                      color=col, linewidth=viz_lw,
                                      solid_capstyle='butt',
                                      alpha=seg_alpha, zorder=10 + i)
-                self._register(bid, line, alpha=seg_alpha, lw=viz_lw)
+                self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
+                                layer=seg.layer_hint)
 
                 if idx < len(topo.segments) - 1:
                     via, = self.ax.plot(ex, ey, 'o', color='black',
@@ -762,13 +792,29 @@ class BudaVisualizer:
 
         self.ax.autoscale_view()
 
-        # Reserve bottom strip for navigation buttons.
-        self.fig.subplots_adjust(bottom=0.09)
+        # Reserve bottom strip for navigation buttons; right strip for layer toggles.
+        self.fig.subplots_adjust(bottom=0.09, right=0.83)
 
         ax_bprev  = self.fig.add_axes([0.02, 0.02, 0.18, 0.05])
         ax_solo   = self.fig.add_axes([0.23, 0.02, 0.18, 0.05])
         ax_bnext  = self.fig.add_axes([0.44, 0.02, 0.18, 0.05])
         ax_topos  = self.fig.add_axes([0.65, 0.02, 0.33, 0.05])
+
+        # Layer-visibility checkboxes — right of plot, top-down order M4/M5/M6.
+        ax_layers = self.fig.add_axes([0.855, 0.60, 0.12, 0.28])
+        ax_layers.set_title('Layers', fontsize=9, pad=6)
+        self._chk_layers = CheckButtons(
+            ax_layers,
+            labels  = ['M4', 'M5', 'M6'],
+            actives = [True,  True,  True],
+        )
+        # Colour each checkbox's cross-marks to match the layer colour.
+        for lines_pair, layer_id in zip(self._chk_layers.lines, [4, 5, 6]):
+            col = _LAYER_COLOR[layer_id]
+            for ln in lines_pair:
+                ln.set_color(col)
+                ln.set_linewidth(2.0)
+        self._chk_layers.on_clicked(self._on_layer_toggle)
 
         btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
         btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
