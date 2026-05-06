@@ -180,9 +180,9 @@ static void do_span_adjustments(
             const double hi_d  = other->span_hi - sc.at_pos;
 
             if (hi_d <= tol)
-                other->span_hi = hi_edge;
+                other->span_hi = std::max(other->span_hi, hi_edge);
             else if (lo_d <= tol)
-                other->span_lo = lo_edge;
+                other->span_lo = std::min(other->span_lo, lo_edge);
             else {
                 other->span_lo = std::min(other->span_lo, lo_edge);
                 other->span_hi = std::max(other->span_hi, hi_edge);
