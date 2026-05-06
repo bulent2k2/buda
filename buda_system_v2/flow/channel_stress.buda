@@ -1,0 +1,295 @@
+# channel_stress.buda
+# 8 top blocks + 8 bottom blocks with a 140-unit horizontal channel.
+# 200 nets randomly paired (fixed seed=42) — stress-tests NUTS channel packing.
+
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+def_layer 6 M6 H TOP 0.0
+
+add_block u_b0    20   20   80   80
+add_block u_b1   100   20  160   80
+add_block u_b2   180   20  240   80
+add_block u_b3   260   20  320   80
+add_block u_b4   340   20  400   80
+add_block u_b5   420   20  480   80
+add_block u_b6   500   20  560   80
+add_block u_b7   580   20  640   80
+
+add_block u_t0    20  220   80  280
+add_block u_t1   100  220  160  280
+add_block u_t2   180  220  240  280
+add_block u_t3   260  220  320  280
+add_block u_t4   340  220  400  280
+add_block u_t5   420  220  480  280
+add_block u_t6   500  220  560  280
+add_block u_t7   580  220  640  280
+
+add_net t1_b0_00  u_t1.tx  u_b0.rx
+add_net t4_b3_00  u_t4.tx  u_b3.rx
+add_net t3_b2_00  u_t3.tx  u_b2.rx
+add_net t1_b1_00  u_t1.tx  u_b1.rx
+add_net t6_b0_00  u_t6.tx  u_b0.rx
+add_net t0_b1_00  u_t0.tx  u_b1.rx
+add_net t3_b3_00  u_t3.tx  u_b3.rx
+add_net t0_b3_00  u_t0.tx  u_b3.rx
+add_net t6_b3_00  u_t6.tx  u_b3.rx
+add_net t7_b4_00  u_t7.tx  u_b4.rx
+add_net t0_b2_00  u_t0.tx  u_b2.rx
+add_net t6_b5_00  u_t6.tx  u_b5.rx
+add_net t4_b2_00  u_t4.tx  u_b2.rx
+add_net t3_b5_00  u_t3.tx  u_b5.rx
+add_net t1_b1_01  u_t1.tx  u_b1.rx
+add_net t6_b1_00  u_t6.tx  u_b1.rx
+add_net t5_b5_00  u_t5.tx  u_b5.rx
+add_net t4_b0_00  u_t4.tx  u_b0.rx
+add_net t7_b1_00  u_t7.tx  u_b1.rx
+add_net t6_b1_01  u_t6.tx  u_b1.rx
+add_net t4_b5_00  u_t4.tx  u_b5.rx
+add_net t3_b1_00  u_t3.tx  u_b1.rx
+add_net t0_b3_01  u_t0.tx  u_b3.rx
+add_net t4_b1_00  u_t4.tx  u_b1.rx
+add_net t3_b1_01  u_t3.tx  u_b1.rx
+add_net t6_b4_00  u_t6.tx  u_b4.rx
+add_net t7_b5_00  u_t7.tx  u_b5.rx
+add_net t2_b5_00  u_t2.tx  u_b5.rx
+add_net t5_b3_00  u_t5.tx  u_b3.rx
+add_net t4_b1_01  u_t4.tx  u_b1.rx
+add_net t2_b3_00  u_t2.tx  u_b3.rx
+add_net t2_b7_00  u_t2.tx  u_b7.rx
+add_net t6_b4_01  u_t6.tx  u_b4.rx
+add_net t3_b5_01  u_t3.tx  u_b5.rx
+add_net t0_b3_02  u_t0.tx  u_b3.rx
+add_net t0_b5_00  u_t0.tx  u_b5.rx
+add_net t6_b4_02  u_t6.tx  u_b4.rx
+add_net t1_b3_00  u_t1.tx  u_b3.rx
+add_net t5_b3_01  u_t5.tx  u_b3.rx
+add_net t7_b6_00  u_t7.tx  u_b6.rx
+add_net t7_b2_00  u_t7.tx  u_b2.rx
+add_net t4_b2_01  u_t4.tx  u_b2.rx
+add_net t3_b4_00  u_t3.tx  u_b4.rx
+add_net t6_b6_00  u_t6.tx  u_b6.rx
+add_net t5_b3_02  u_t5.tx  u_b3.rx
+add_net t2_b7_01  u_t2.tx  u_b7.rx
+add_net t1_b0_01  u_t1.tx  u_b0.rx
+add_net t1_b2_00  u_t1.tx  u_b2.rx
+add_net t2_b6_00  u_t2.tx  u_b6.rx
+add_net t1_b6_00  u_t1.tx  u_b6.rx
+add_net t6_b7_00  u_t6.tx  u_b7.rx
+add_net t4_b0_01  u_t4.tx  u_b0.rx
+add_net t1_b4_00  u_t1.tx  u_b4.rx
+add_net t5_b1_00  u_t5.tx  u_b1.rx
+add_net t4_b6_00  u_t4.tx  u_b6.rx
+add_net t2_b7_02  u_t2.tx  u_b7.rx
+add_net t0_b4_00  u_t0.tx  u_b4.rx
+add_net t2_b1_00  u_t2.tx  u_b1.rx
+add_net t4_b3_01  u_t4.tx  u_b3.rx
+add_net t2_b5_01  u_t2.tx  u_b5.rx
+add_net t2_b0_00  u_t2.tx  u_b0.rx
+add_net t5_b7_00  u_t5.tx  u_b7.rx
+add_net t0_b1_01  u_t0.tx  u_b1.rx
+add_net t5_b4_00  u_t5.tx  u_b4.rx
+add_net t3_b0_00  u_t3.tx  u_b0.rx
+add_net t3_b1_02  u_t3.tx  u_b1.rx
+add_net t1_b7_00  u_t1.tx  u_b7.rx
+add_net t1_b2_01  u_t1.tx  u_b2.rx
+add_net t2_b7_03  u_t2.tx  u_b7.rx
+add_net t2_b4_00  u_t2.tx  u_b4.rx
+add_net t6_b3_01  u_t6.tx  u_b3.rx
+add_net t3_b4_01  u_t3.tx  u_b4.rx
+add_net t6_b5_01  u_t6.tx  u_b5.rx
+add_net t7_b7_00  u_t7.tx  u_b7.rx
+add_net t1_b3_01  u_t1.tx  u_b3.rx
+add_net t3_b1_03  u_t3.tx  u_b1.rx
+add_net t5_b0_00  u_t5.tx  u_b0.rx
+add_net t3_b3_01  u_t3.tx  u_b3.rx
+add_net t0_b1_02  u_t0.tx  u_b1.rx
+add_net t0_b3_03  u_t0.tx  u_b3.rx
+add_net t1_b0_02  u_t1.tx  u_b0.rx
+add_net t5_b1_01  u_t5.tx  u_b1.rx
+add_net t3_b4_02  u_t3.tx  u_b4.rx
+add_net t7_b3_00  u_t7.tx  u_b3.rx
+add_net t2_b7_04  u_t2.tx  u_b7.rx
+add_net t3_b7_00  u_t3.tx  u_b7.rx
+add_net t6_b3_02  u_t6.tx  u_b3.rx
+add_net t1_b1_02  u_t1.tx  u_b1.rx
+add_net t6_b5_02  u_t6.tx  u_b5.rx
+add_net t6_b6_01  u_t6.tx  u_b6.rx
+add_net t7_b0_00  u_t7.tx  u_b0.rx
+add_net t1_b0_03  u_t1.tx  u_b0.rx
+add_net t6_b5_03  u_t6.tx  u_b5.rx
+add_net t1_b3_02  u_t1.tx  u_b3.rx
+add_net t3_b3_02  u_t3.tx  u_b3.rx
+add_net t7_b2_01  u_t7.tx  u_b2.rx
+add_net t6_b2_00  u_t6.tx  u_b2.rx
+add_net t4_b7_00  u_t4.tx  u_b7.rx
+add_net t3_b1_04  u_t3.tx  u_b1.rx
+add_net t7_b1_01  u_t7.tx  u_b1.rx
+add_net t0_b0_00  u_t0.tx  u_b0.rx
+add_net t1_b3_03  u_t1.tx  u_b3.rx
+add_net t2_b6_01  u_t2.tx  u_b6.rx
+add_net t7_b7_01  u_t7.tx  u_b7.rx
+add_net t3_b6_00  u_t3.tx  u_b6.rx
+add_net t0_b2_01  u_t0.tx  u_b2.rx
+add_net t6_b0_01  u_t6.tx  u_b0.rx
+add_net t6_b4_03  u_t6.tx  u_b4.rx
+add_net t7_b4_01  u_t7.tx  u_b4.rx
+add_net t6_b7_01  u_t6.tx  u_b7.rx
+add_net t2_b3_01  u_t2.tx  u_b3.rx
+add_net t4_b3_02  u_t4.tx  u_b3.rx
+add_net t0_b0_01  u_t0.tx  u_b0.rx
+add_net t5_b0_01  u_t5.tx  u_b0.rx
+add_net t0_b7_00  u_t0.tx  u_b7.rx
+add_net t2_b0_01  u_t2.tx  u_b0.rx
+add_net t1_b2_02  u_t1.tx  u_b2.rx
+add_net t1_b1_03  u_t1.tx  u_b1.rx
+add_net t3_b6_01  u_t3.tx  u_b6.rx
+add_net t1_b3_04  u_t1.tx  u_b3.rx
+add_net t0_b1_03  u_t0.tx  u_b1.rx
+add_net t6_b5_04  u_t6.tx  u_b5.rx
+add_net t4_b3_03  u_t4.tx  u_b3.rx
+add_net t5_b3_03  u_t5.tx  u_b3.rx
+add_net t4_b6_01  u_t4.tx  u_b6.rx
+add_net t2_b4_01  u_t2.tx  u_b4.rx
+add_net t7_b5_01  u_t7.tx  u_b5.rx
+add_net t1_b0_04  u_t1.tx  u_b0.rx
+add_net t7_b1_02  u_t7.tx  u_b1.rx
+add_net t1_b3_05  u_t1.tx  u_b3.rx
+add_net t4_b2_02  u_t4.tx  u_b2.rx
+add_net t5_b1_02  u_t5.tx  u_b1.rx
+add_net t3_b5_02  u_t3.tx  u_b5.rx
+add_net t4_b2_03  u_t4.tx  u_b2.rx
+add_net t7_b4_02  u_t7.tx  u_b4.rx
+add_net t0_b4_01  u_t0.tx  u_b4.rx
+add_net t1_b2_03  u_t1.tx  u_b2.rx
+add_net t4_b1_02  u_t4.tx  u_b1.rx
+add_net t1_b2_04  u_t1.tx  u_b2.rx
+add_net t4_b4_00  u_t4.tx  u_b4.rx
+add_net t3_b5_03  u_t3.tx  u_b5.rx
+add_net t3_b4_03  u_t3.tx  u_b4.rx
+add_net t7_b4_03  u_t7.tx  u_b4.rx
+add_net t0_b1_04  u_t0.tx  u_b1.rx
+add_net t6_b4_04  u_t6.tx  u_b4.rx
+add_net t0_b0_02  u_t0.tx  u_b0.rx
+add_net t5_b2_00  u_t5.tx  u_b2.rx
+add_net t4_b2_04  u_t4.tx  u_b2.rx
+add_net t7_b6_01  u_t7.tx  u_b6.rx
+add_net t0_b1_05  u_t0.tx  u_b1.rx
+add_net t1_b2_05  u_t1.tx  u_b2.rx
+add_net t0_b5_01  u_t0.tx  u_b5.rx
+add_net t2_b6_02  u_t2.tx  u_b6.rx
+add_net t2_b0_02  u_t2.tx  u_b0.rx
+add_net t4_b5_01  u_t4.tx  u_b5.rx
+add_net t0_b5_02  u_t0.tx  u_b5.rx
+add_net t3_b3_03  u_t3.tx  u_b3.rx
+add_net t1_b5_00  u_t1.tx  u_b5.rx
+add_net t6_b2_01  u_t6.tx  u_b2.rx
+add_net t3_b2_01  u_t3.tx  u_b2.rx
+add_net t2_b6_03  u_t2.tx  u_b6.rx
+add_net t0_b2_02  u_t0.tx  u_b2.rx
+add_net t5_b6_00  u_t5.tx  u_b6.rx
+add_net t3_b4_04  u_t3.tx  u_b4.rx
+add_net t2_b1_01  u_t2.tx  u_b1.rx
+add_net t6_b0_02  u_t6.tx  u_b0.rx
+add_net t7_b3_01  u_t7.tx  u_b3.rx
+add_net t3_b7_01  u_t3.tx  u_b7.rx
+add_net t5_b4_01  u_t5.tx  u_b4.rx
+add_net t3_b3_04  u_t3.tx  u_b3.rx
+add_net t0_b3_04  u_t0.tx  u_b3.rx
+add_net t6_b5_05  u_t6.tx  u_b5.rx
+add_net t4_b1_03  u_t4.tx  u_b1.rx
+add_net t4_b5_02  u_t4.tx  u_b5.rx
+add_net t6_b5_06  u_t6.tx  u_b5.rx
+add_net t0_b1_06  u_t0.tx  u_b1.rx
+add_net t4_b2_05  u_t4.tx  u_b2.rx
+add_net t4_b0_02  u_t4.tx  u_b0.rx
+add_net t1_b6_01  u_t1.tx  u_b6.rx
+add_net t5_b5_01  u_t5.tx  u_b5.rx
+add_net t6_b1_02  u_t6.tx  u_b1.rx
+add_net t6_b3_03  u_t6.tx  u_b3.rx
+add_net t4_b0_03  u_t4.tx  u_b0.rx
+add_net t6_b0_03  u_t6.tx  u_b0.rx
+add_net t3_b5_04  u_t3.tx  u_b5.rx
+add_net t6_b1_03  u_t6.tx  u_b1.rx
+add_net t5_b5_02  u_t5.tx  u_b5.rx
+add_net t1_b4_01  u_t1.tx  u_b4.rx
+add_net t4_b6_02  u_t4.tx  u_b6.rx
+add_net t5_b6_01  u_t5.tx  u_b6.rx
+add_net t4_b2_06  u_t4.tx  u_b2.rx
+add_net t3_b6_02  u_t3.tx  u_b6.rx
+add_net t6_b2_02  u_t6.tx  u_b2.rx
+add_net t4_b6_03  u_t4.tx  u_b6.rx
+add_net t0_b4_02  u_t0.tx  u_b4.rx
+add_net t4_b3_04  u_t4.tx  u_b3.rx
+add_net t6_b5_07  u_t6.tx  u_b5.rx
+add_net t7_b7_02  u_t7.tx  u_b7.rx
+add_net t7_b3_02  u_t7.tx  u_b3.rx
+add_net t7_b2_02  u_t7.tx  u_b2.rx
+
+run_bundler strict
+
+generate_topologies_for_bundle t0_b0  u_t0  u_b0
+generate_topologies_for_bundle t0_b1  u_t0  u_b1
+generate_topologies_for_bundle t0_b2  u_t0  u_b2
+generate_topologies_for_bundle t0_b3  u_t0  u_b3
+generate_topologies_for_bundle t0_b4  u_t0  u_b4
+generate_topologies_for_bundle t0_b5  u_t0  u_b5
+generate_topologies_for_bundle t0_b7  u_t0  u_b7
+generate_topologies_for_bundle t1_b0  u_t1  u_b0
+generate_topologies_for_bundle t1_b1  u_t1  u_b1
+generate_topologies_for_bundle t1_b2  u_t1  u_b2
+generate_topologies_for_bundle t1_b3  u_t1  u_b3
+generate_topologies_for_bundle t1_b4  u_t1  u_b4
+generate_topologies_for_bundle t1_b5  u_t1  u_b5
+generate_topologies_for_bundle t1_b6  u_t1  u_b6
+generate_topologies_for_bundle t1_b7  u_t1  u_b7
+generate_topologies_for_bundle t2_b0  u_t2  u_b0
+generate_topologies_for_bundle t2_b1  u_t2  u_b1
+generate_topologies_for_bundle t2_b3  u_t2  u_b3
+generate_topologies_for_bundle t2_b4  u_t2  u_b4
+generate_topologies_for_bundle t2_b5  u_t2  u_b5
+generate_topologies_for_bundle t2_b6  u_t2  u_b6
+generate_topologies_for_bundle t2_b7  u_t2  u_b7
+generate_topologies_for_bundle t3_b0  u_t3  u_b0
+generate_topologies_for_bundle t3_b1  u_t3  u_b1
+generate_topologies_for_bundle t3_b2  u_t3  u_b2
+generate_topologies_for_bundle t3_b3  u_t3  u_b3
+generate_topologies_for_bundle t3_b4  u_t3  u_b4
+generate_topologies_for_bundle t3_b5  u_t3  u_b5
+generate_topologies_for_bundle t3_b6  u_t3  u_b6
+generate_topologies_for_bundle t3_b7  u_t3  u_b7
+generate_topologies_for_bundle t4_b0  u_t4  u_b0
+generate_topologies_for_bundle t4_b1  u_t4  u_b1
+generate_topologies_for_bundle t4_b2  u_t4  u_b2
+generate_topologies_for_bundle t4_b3  u_t4  u_b3
+generate_topologies_for_bundle t4_b4  u_t4  u_b4
+generate_topologies_for_bundle t4_b5  u_t4  u_b5
+generate_topologies_for_bundle t4_b6  u_t4  u_b6
+generate_topologies_for_bundle t4_b7  u_t4  u_b7
+generate_topologies_for_bundle t5_b0  u_t5  u_b0
+generate_topologies_for_bundle t5_b1  u_t5  u_b1
+generate_topologies_for_bundle t5_b2  u_t5  u_b2
+generate_topologies_for_bundle t5_b3  u_t5  u_b3
+generate_topologies_for_bundle t5_b4  u_t5  u_b4
+generate_topologies_for_bundle t5_b5  u_t5  u_b5
+generate_topologies_for_bundle t5_b6  u_t5  u_b6
+generate_topologies_for_bundle t5_b7  u_t5  u_b7
+generate_topologies_for_bundle t6_b0  u_t6  u_b0
+generate_topologies_for_bundle t6_b1  u_t6  u_b1
+generate_topologies_for_bundle t6_b2  u_t6  u_b2
+generate_topologies_for_bundle t6_b3  u_t6  u_b3
+generate_topologies_for_bundle t6_b4  u_t6  u_b4
+generate_topologies_for_bundle t6_b5  u_t6  u_b5
+generate_topologies_for_bundle t6_b6  u_t6  u_b6
+generate_topologies_for_bundle t6_b7  u_t6  u_b7
+generate_topologies_for_bundle t7_b0  u_t7  u_b0
+generate_topologies_for_bundle t7_b1  u_t7  u_b1
+generate_topologies_for_bundle t7_b2  u_t7  u_b2
+generate_topologies_for_bundle t7_b3  u_t7  u_b3
+generate_topologies_for_bundle t7_b4  u_t7  u_b4
+generate_topologies_for_bundle t7_b5  u_t7  u_b5
+generate_topologies_for_bundle t7_b6  u_t7  u_b6
+generate_topologies_for_bundle t7_b7  u_t7  u_b7
+
+run_planner 5
+run_nuts 2.0
+visualize
