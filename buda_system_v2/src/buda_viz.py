@@ -945,7 +945,9 @@ class BudaVisualizer:
             actives = [True, True, True],
         )
         self._chk_layers.set_check_props({'facecolor': layer_colors})
-        self._chk_layers.set_label_props({'color': layer_colors, 'fontsize': 8})
+        self._chk_layers.set_label_props({'color': layer_colors})
+        for lbl in self._chk_layers.labels:
+            lbl.set_fontsize(8)
         self._chk_layers.on_clicked(self._on_layer_toggle)
 
         # ── "All Bundles" global toggle ──────────────────────────────────
