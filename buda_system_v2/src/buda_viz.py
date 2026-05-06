@@ -37,6 +37,14 @@ class TopologyExplorer:
         self._sidecar_path  = sidecar_path
         if sidecar_path and os.path.exists(sidecar_path):
             self._load_sidecar()
+            # Jump to the saved topo index for the first bundle so the
+            # gold selection border appears immediately on open.
+            hint = self._bundle_hint(self.wrappers[0])
+            if hint in self._selections:
+                saved = self._selections[hint].get('topo_index_hint', 0)
+                n_cands = len(self.wrappers[0].candidates)
+                if 0 <= saved < n_cands:
+                    self.idx = saved
 
         self.fig = plt.figure(figsize=(13, 10))
         self.fig.patch.set_facecolor('#f0f0f0')
