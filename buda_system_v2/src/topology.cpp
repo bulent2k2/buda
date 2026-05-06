@@ -217,10 +217,10 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                 int y_lo = src.y1 + sm;   // near bottom corner
 
                 // ovlp: extend each H past the trunk so spans strictly overlap.
-                // Must exceed 11% of the resulting H span so NUTS span-adjustment
-                // uses EXTEND (not SET) and preserves the overlap.
+                // Must be < 11% of the resulting H span so NUTS span-adjustment
+                // uses SET (not EXTEND) for precise alignment at trunk stripe edges.
                 int h1_len = x_cut - sx;
-                int ovlp   = std::max(1, h1_len / 5);   // ~20% of H1 length
+                int ovlp   = std::max(1, h1_len / 20);  // ~5% of H1 length → SET fires
 
                 for (int flip = 0; flip < 2; ++flip) {
                     int y1 = flip ? y_lo : y_hi;   // H1 y-level (src side)
@@ -268,7 +268,7 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                 int vx_lo = src.x1 + sm;   // near left corner
 
                 int v1_len = std::abs(y_cut - sy);
-                int ovlp   = std::max(1, v1_len / 5);   // ~20% of V1 length
+                int ovlp   = std::max(1, v1_len / 20);  // ~5% of V1 length → SET fires
 
                 for (int flip = 0; flip < 2; ++flip) {
                     int x1 = flip ? vx_lo : vx_hi;   // V1 x-level (src side)
