@@ -559,8 +559,14 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
     }
 
-    int x_lo = *std::min_element(att_x.begin(), att_x.end());
-    int x_hi = *std::max_element(att_x.begin(), att_x.end());
+    // Use only stub positions for the spine extent — pass-through blocks
+    // are already covered wherever the trunk passes through them and must
+    // not push the spine past the outermost stub.
+    int x_lo = INT_MAX, x_hi = INT_MIN;
+    for (int i = 0; i < n; ++i) {
+        if (has_stub[i]) { x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]); }
+    }
+    if (x_lo > x_hi) return; // all pass-through — degenerate, skip
 
     Topology t;
     t.type           = out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H";
@@ -650,8 +656,12 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
     }
 
-    int y_lo = *std::min_element(att_y.begin(), att_y.end());
-    int y_hi = *std::max_element(att_y.begin(), att_y.end());
+    // Use only stub positions for the spine extent.
+    int y_lo = INT_MAX, y_hi = INT_MIN;
+    for (int i = 0; i < n; ++i) {
+        if (has_stub[i]) { y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]); }
+    }
+    if (y_lo > y_hi) return; // all pass-through — degenerate, skip
 
     Topology t;
     t.type           = out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V";
