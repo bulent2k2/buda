@@ -98,15 +98,23 @@ void GlobalRouter::build_congestion_map() {
         }
     }
 
-    // Debug: report the most constrained H-cuts (V routing capacity) per layer.
-    std::cout << "[Planner] V-layer capacities per H-cut:\n";
+    // Debug: report minimum channel capacities per layer.
+    std::cout << "[Planner] Layer channel capacities:\n";
     for (int vid : v_layers) {
         double min_cap = std::numeric_limits<double>::max();
         for (const auto& c : cuts_)
             if (c.layer_id == vid && c.dir == LayerDir::HORIZONTAL)
                 min_cap = std::min(min_cap, c.capacity);
         if (min_cap < std::numeric_limits<double>::max())
-            std::cout << "  M" << vid << "  min_channel_cap=" << min_cap << "\n";
+            std::cout << "  M" << vid << " (V)  min_H-cut_cap=" << min_cap << "\n";
+    }
+    for (int hid : h_layers) {
+        double min_cap = std::numeric_limits<double>::max();
+        for (const auto& c : cuts_)
+            if (c.layer_id == hid && c.dir == LayerDir::VERTICAL)
+                min_cap = std::min(min_cap, c.capacity);
+        if (min_cap < std::numeric_limits<double>::max())
+            std::cout << "  M" << hid << " (H)  min_V-cut_cap=" << min_cap << "\n";
     }
 }
 
@@ -121,18 +129,38 @@ static bool v_seg_crosses_hcut(int seg_y1, int seg_y2, int cy) {
     return cy > lo && cy < hi;
 }
 
-// Score the V-segment demand of a topology against H-cuts on a specific V layer.
-// Returns the peak (cut_usage + demand - capacity), floored at 0.
-double GlobalRouter::score_topology_on_layer(const Topology& topo, int v_layer_id,
-                                              double eff_width) const {
+// Does a horizontal segment (y fixed, x in [x1,x2]) cross vertical cut at cx?
+static bool h_seg_crosses_vcut(int seg_x1, int seg_x2, int cx) {
+    int lo = std::min(seg_x1, seg_x2);
+    int hi = std::max(seg_x1, seg_x2);
+    return cx > lo && cx < hi;
+}
+
+// Score (topo, v_layer, h_layer) — returns peak overflow across all relevant cuts.
+// V-segments are scored against H-cuts on v_layer_id.
+// H-segments are scored against V-cuts on h_layer_id.
+double GlobalRouter::score_topology(const Topology& topo,
+                                    int v_layer_id, int h_layer_id,
+                                    double eff_v_width, double eff_h_width) const {
     double peak_overflow = 0.0;
     for (const auto& cut : cuts_) {
-        if (cut.layer_id != v_layer_id || cut.dir != LayerDir::HORIZONTAL) continue;
         double demand = 0.0;
-        for (const auto& seg : topo.segments) {
-            bool is_h = (seg.start.y == seg.end.y);
-            if (!is_h && v_seg_crosses_hcut(seg.start.y, seg.end.y, cut.p1.y))
-                demand += eff_width;
+        if (cut.layer_id == v_layer_id && cut.dir == LayerDir::HORIZONTAL) {
+            // H-cut: counts crossing V-segments
+            for (const auto& seg : topo.segments) {
+                bool is_h = (seg.start.y == seg.end.y);
+                if (!is_h && v_seg_crosses_hcut(seg.start.y, seg.end.y, cut.p1.y))
+                    demand += eff_v_width;
+            }
+        } else if (cut.layer_id == h_layer_id && cut.dir == LayerDir::VERTICAL) {
+            // V-cut: counts crossing H-segments
+            for (const auto& seg : topo.segments) {
+                bool is_h = (seg.start.y == seg.end.y);
+                if (is_h && h_seg_crosses_vcut(seg.start.x, seg.end.x, cut.p1.x))
+                    demand += eff_h_width;
+            }
+        } else {
+            continue;
         }
         double overflow = (cut.current_usage + demand) - cut.capacity;
         if (overflow > peak_overflow) peak_overflow = overflow;
@@ -140,15 +168,23 @@ double GlobalRouter::score_topology_on_layer(const Topology& topo, int v_layer_i
     return peak_overflow;
 }
 
-// Apply V-segment demand to H-cuts on a specific V layer.
-void GlobalRouter::apply_topology_on_layer(const Topology& topo, int v_layer_id,
-                                            double eff_width) {
+// Apply (topo, v_layer, h_layer) demand to the relevant cuts.
+void GlobalRouter::apply_topology(const Topology& topo,
+                                  int v_layer_id, int h_layer_id,
+                                  double eff_v_width, double eff_h_width) {
     for (auto& cut : cuts_) {
-        if (cut.layer_id != v_layer_id || cut.dir != LayerDir::HORIZONTAL) continue;
-        for (const auto& seg : topo.segments) {
-            bool is_h = (seg.start.y == seg.end.y);
-            if (!is_h && v_seg_crosses_hcut(seg.start.y, seg.end.y, cut.p1.y))
-                cut.current_usage += eff_width;
+        if (cut.layer_id == v_layer_id && cut.dir == LayerDir::HORIZONTAL) {
+            for (const auto& seg : topo.segments) {
+                bool is_h = (seg.start.y == seg.end.y);
+                if (!is_h && v_seg_crosses_hcut(seg.start.y, seg.end.y, cut.p1.y))
+                    cut.current_usage += eff_v_width;
+            }
+        } else if (cut.layer_id == h_layer_id && cut.dir == LayerDir::VERTICAL) {
+            for (const auto& seg : topo.segments) {
+                bool is_h = (seg.start.y == seg.end.y);
+                if (is_h && h_seg_crosses_vcut(seg.start.x, seg.end.x, cut.p1.x))
+                    cut.current_usage += eff_h_width;
+            }
         }
     }
 }
@@ -162,7 +198,9 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
     if (cuts_.empty()) build_congestion_map();
 
     auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
+    auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
     if (v_layers.empty()) v_layers.push_back(5);
+    if (h_layers.empty()) h_layers.push_back(4);
 
     // Process widest buses first so they claim the best paths early.
     std::vector<int> order(bundles.size());
@@ -178,37 +216,53 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
         auto& bw = bundles[idx];
         if (bw.candidates.empty()) continue;
 
-        // Try every (topology, V-layer) combination; pick the one with the
-        // least V-routing overflow. V-layers are tried in ascending ID order
-        // (M3 → M5 → M7) so the lowest-numbered layer gets preference when
-        // scores are equal (ensures M3 fills before M5, M5 before M7).
-        int    best_topo  = 0;
-        int    best_layer = v_layers[0];
-        double best_score = std::numeric_limits<double>::max();
+        // Try every (topology, V-layer, H-layer) combination; pick the one
+        // with the least total overflow.  Layers are tried in ascending ID
+        // order so the lowest-numbered layer gets preference when scores tie.
+        int    best_topo    = 0;
+        int    best_v_layer = v_layers[0];
+        int    best_h_layer = h_layers[0];
+        double best_score   = std::numeric_limits<double>::max();
 
         for (int ci = 0; ci < (int)bw.candidates.size(); ++ci) {
             for (int vid : v_layers) {
-                double eff_w = bw.width;
-                auto it = layer_dilution_factors_.find(vid);
-                if (it != layer_dilution_factors_.end()) eff_w *= it->second;
-                double s = score_topology_on_layer(bw.candidates[ci], vid, eff_w);
-                if (s < best_score) {
-                    best_score = s; best_topo = ci; best_layer = vid;
+                double eff_v = bw.width;
+                auto itv = layer_dilution_factors_.find(vid);
+                if (itv != layer_dilution_factors_.end()) eff_v *= itv->second;
+
+                for (int hid : h_layers) {
+                    double eff_h = bw.width;
+                    auto ith = layer_dilution_factors_.find(hid);
+                    if (ith != layer_dilution_factors_.end()) eff_h *= ith->second;
+
+                    double s = score_topology(bw.candidates[ci], vid, hid, eff_v, eff_h);
+                    if (s < best_score) {
+                        best_score   = s;
+                        best_topo    = ci;
+                        best_v_layer = vid;
+                        best_h_layer = hid;
+                    }
                 }
             }
         }
 
-        double eff_w = bw.width;
-        auto it = layer_dilution_factors_.find(best_layer);
-        if (it != layer_dilution_factors_.end()) eff_w *= it->second;
-        apply_topology_on_layer(bw.candidates[best_topo], best_layer, eff_w);
+        {
+            double eff_v = bw.width;
+            auto itv = layer_dilution_factors_.find(best_v_layer);
+            if (itv != layer_dilution_factors_.end()) eff_v *= itv->second;
+            double eff_h = bw.width;
+            auto ith = layer_dilution_factors_.find(best_h_layer);
+            if (ith != layer_dilution_factors_.end()) eff_h *= ith->second;
+            apply_topology(bw.candidates[best_topo], best_v_layer, best_h_layer, eff_v, eff_h);
+        }
 
-        assignments.push_back({bw.original_bundle.id, best_topo, best_layer});
+        assignments.push_back({bw.original_bundle.id, best_topo, best_v_layer, best_h_layer});
 
         std::cout << "[Planner] Bundle " << bw.original_bundle.id
                   << " (" << bw.width << " units wide)"
                   << " -> " << bw.candidates[best_topo].type
-                  << "  V-layer=M" << best_layer
+                  << "  V-layer=M" << best_v_layer
+                  << "  H-layer=M" << best_h_layer
                   << "  overflow=" << best_score << "\n";
     }
 

@@ -276,6 +276,7 @@ class BudaSession:
                 if w is not None:
                     w.selected_topology_index = asn.topo_index
                     w.assigned_v_layer = asn.v_layer_id
+                    w.assigned_h_layer = asn.h_layer_id
             # Override planner choices with any architect-pinned selections.
             self._apply_selections()
         elif cmd == "run_nuts":
