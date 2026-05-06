@@ -12,6 +12,11 @@ import interconnect as ic
 _LAYER_COLOR = {3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC'}
 _LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H-trunk', 7: 'M7 V'}
 
+def _toggle_fullscreen(fig):
+    mgr = fig.canvas.manager
+    if mgr:
+        mgr.full_screen_toggle()
+
 # Values beyond this magnitude are the INT_MIN/2 or INT_MAX/2 sentinels
 # that ConnTopology uses for "unconstrained" slide ranges.
 _UNCONSTRAINED = 1_000_000_000
@@ -284,6 +289,7 @@ class TopologyExplorer:
 
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
+        if event.key in ('cmd+f', 'ctrl+f'):    _toggle_fullscreen(self.fig); return
         if event.key in ('left',  'a'):         self._step_topo(-1)
         if event.key in ('right', 'd'):         self._step_topo(+1)
         if event.key in ('[', 'pageup'):        self._step_bundle(-1)
@@ -329,7 +335,9 @@ class TopologyExplorer:
         ax.set_title(
             f"{bus_label}Bundle {bid}  ·  topo {self.idx + 1}/{n}"
             f"  ·  {topo.type}  ·  WL={wl}"
-            f"  ·  bterms={n_bt}  ·  bsegs={len(topo.segments)}{sel_badge}",
+            f"  ·  bterms={n_bt}"
+            + (f" (+{topo.pass_through_count} pass-thru)" if topo.pass_through_count else "")
+            + f"  ·  bsegs={len(topo.segments)}{sel_badge}",
             fontsize=13, pad=10,
             color='#886600' if is_sel else 'black')
         if self.fig.canvas.manager:
@@ -742,6 +750,7 @@ class BudaVisualizer:
 
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
+        if event.key in ('cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key == 't':               self._open_topo_explorer()

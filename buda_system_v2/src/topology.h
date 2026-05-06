@@ -21,8 +21,9 @@ struct Segment {
 struct Topology {
     std::string type; 
     std::vector<Segment> segments;
-    int estimated_wirelength = 0;
-    int trunk_location = 0;
+    int estimated_wirelength  = 0;
+    int trunk_location        = 0;
+    int pass_through_count    = 0;  // blocks whose bbox contains the trunk (no stub generated)
 };
 class Floorplan {
 public:

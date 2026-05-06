@@ -21,7 +21,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("type",              &Topology::type)
         .def_readwrite("segments",          &Topology::segments)
         .def_readwrite("estimated_wirelength", &Topology::estimated_wirelength)
-        .def_readwrite("trunk_location",    &Topology::trunk_location);
+        .def_readwrite("trunk_location",    &Topology::trunk_location)
+        .def_readwrite("pass_through_count", &Topology::pass_through_count);
     py::class_<Bundle>(m, "Bundle").def(py::init<>()).def_readwrite("id", &Bundle::id).def_readwrite("net_names", &Bundle::net_names).def("get_net_names", &Bundle::get_net_names);
     py::class_<BundleAssignment>(m, "BundleAssignment")
         .def_readwrite("bundle_id",  &BundleAssignment::bundle_id)
