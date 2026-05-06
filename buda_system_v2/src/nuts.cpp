@@ -147,11 +147,18 @@ static void apply_interval_constraints(
 // For every segment T in layer_segs that was just placed, look up which
 // segments S depend on T's position (rev_conn_map) and SET/EXTEND the
 // endpoint of S closest to sc.at_pos so the segments meet edge-to-edge.
+//
+// only_unplaced: when true, skip S segments that are already placed.
+//   Use this in rerun_layer so that previously-solved layers are not
+//   disturbed by the span update (their track_positions are fixed, so
+//   changing their spans would introduce geometric inconsistencies and
+//   spurious overlaps in the already-solved layers).
 // ---------------------------------------------------------------------------
 static void do_span_adjustments(
     const std::vector<TrackSegment*>&                               layer_segs,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&   rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&                     ts_ptr_map)
+    std::map<std::pair<int,int>, TrackSegment*>&                     ts_ptr_map,
+    bool                                                             only_unplaced = false)
 {
     for (const TrackSegment* ts : layer_segs) {
         if (!ts->placed) continue;
@@ -165,6 +172,7 @@ static void do_span_adjustments(
             auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
+            if (only_unplaced && other->placed) continue;
 
             const double range = other->span_hi - other->span_lo;
             const double tol   = 0.11 * range;
@@ -496,18 +504,15 @@ NUTSResult NUTSEngine::rerun_layer(
     // Start from a copy of the previous result.
     NUTSResult result = prev;
 
-    // Re-extract fresh segments for the target layer and overwrite them.
-    auto fresh = extract_segments(bundles, x_grid, y_grid);
-
-    std::map<std::pair<int,int>, std::size_t> pos_map;
-    for (std::size_t i = 0; i < result.segments.size(); ++i)
-        pos_map[{result.segments[i].bundle_id, result.segments[i].seg_idx}] = i;
-
-    for (const auto& fs : fresh) {
-        if (fs.layer != layer_id) continue;
-        auto it = pos_map.find({fs.bundle_id, fs.seg_idx});
-        if (it != pos_map.end())
-            result.segments[it->second] = fs;   // resets span/interval/placed
+    // Reset placement for the target layer only.
+    // We intentionally keep span_lo/span_hi and interval_lo/hi unchanged: the
+    // spans were adjusted by prior do_span_adjustments passes (e.g. M4 x-spans
+    // were extended by post-M5 span adjustment) and must be preserved so that
+    // re-solving only changes the perpendicular track_position, not the geometry.
+    for (auto& ts : result.segments) {
+        if (ts.layer != layer_id) continue;
+        ts.track_position = -1.0;
+        ts.placed         = false;
     }
 
     // Rebuild shared maps.
@@ -531,7 +536,9 @@ NUTSResult NUTSEngine::rerun_layer(
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
 
     solve_layer(layer_segs, pull_map);
-    do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
+    // Pass only_unplaced=true: do not modify spans of already-placed segments
+    // (other layers are solved and their geometry must not change).
+    do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map, /*only_unplaced=*/true);
 
     compute_metrics(result);
 
