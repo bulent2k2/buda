@@ -45,7 +45,7 @@ class BudaSession:
             matched_w = None
             for w in self.bundles:
                 names = w.original_bundle.get_net_names()
-                if names and names[0] == hint:
+                if names and names[0].startswith(hint):
                     matched_w = w
                     break
             if matched_w is None:

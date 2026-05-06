@@ -701,8 +701,9 @@ class BudaVisualizer:
                     sx, sy = seg.start.x, seg.start.y
                     ex, ey = seg.end.x,   seg.end.y
 
-                if idx == 0: topo_start = (sx, sy)
-                if idx == len(topo.segments) - 1: topo_end = (ex, ey)
+                # Terminals stay at original block-face positions, not NUTS positions.
+                if idx == 0: topo_start = (seg.start.x, seg.start.y)
+                if idx == len(topo.segments) - 1: topo_end = (seg.end.x, seg.end.y)
 
                 line, = self.ax.plot([sx, ex], [sy, ey],
                                      color=col, linewidth=viz_lw,
@@ -726,9 +727,11 @@ class BudaVisualizer:
                                 color='#00FFFF', markeredgecolor='black',
                                 markersize=msz, alpha=alpha, zorder=20)
             self._register(bundle_id, drv, alpha=alpha, lw=msz)
-            self.ax.text(topo_start[0], topo_start[1], f"B{bundle_id}",
-                         fontsize=8, color='black', fontweight='bold',
-                         ha='center', va='center', zorder=21)
+            lbl = self.ax.text(topo_start[0], topo_start[1], f"B{bundle_id}",
+                               fontsize=8, color='black', fontweight='bold',
+                               ha='center', va='center', zorder=21)
+            lbl.set_alpha(alpha)
+            self._register(bundle_id, lbl, alpha=alpha)
 
         if topo_end:
             rcv, = self.ax.plot(topo_end[0], topo_end[1], 'o',
