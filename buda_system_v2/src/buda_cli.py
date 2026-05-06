@@ -72,6 +72,7 @@ class BudaSession:
                     continue
 
             matched_w.selected_topology_index = resolved
+            matched_w.topology_pinned = True
             print(f"Pinned bundle '{hint}' to topology {resolved} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']})")
 
@@ -268,8 +269,11 @@ class BudaSession:
             for lid, ovh in self._layer_overheads.items():
                 self.planner.set_layer_overhead(lid, ovh)
             self.planner.build_congestion_map()
+            # Apply architect-pinned selections BEFORE optimizing so the
+            # planner scores the correct topology and assigns layers for it.
+            self._apply_selections()
             assignments = self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
-            # Apply planner decisions (vector copy in C++ means we must apply here).
+            # Apply planner layer decisions (vector copy in C++ means we must apply here).
             bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
             for asn in assignments:
                 w = bid_to_wrapper.get(asn.bundle_id)
@@ -277,8 +281,6 @@ class BudaSession:
                     w.selected_topology_index = asn.topo_index
                     w.assigned_v_layer = asn.v_layer_id
                     w.assigned_h_layer = asn.h_layer_id
-            # Override planner choices with any architect-pinned selections.
-            self._apply_selections()
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0

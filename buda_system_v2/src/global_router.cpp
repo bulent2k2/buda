@@ -216,15 +216,16 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
         auto& bw = bundles[idx];
         if (bw.candidates.empty()) continue;
 
-        // Try every (topology, V-layer, H-layer) combination; pick the one
-        // with the least total overflow.  Layers are tried in ascending ID
-        // order so the lowest-numbered layer gets preference when scores tie.
-        int    best_topo    = 0;
+        // If the topology is pinned (architect override), only assign layers.
+        // Otherwise try all (topology, V-layer, H-layer) combinations.
+        int    best_topo    = bw.topology_pinned ? bw.selected_topology_index : 0;
         int    best_v_layer = v_layers[0];
         int    best_h_layer = h_layers[0];
         double best_score   = std::numeric_limits<double>::max();
 
-        for (int ci = 0; ci < (int)bw.candidates.size(); ++ci) {
+        int ci_lo = bw.topology_pinned ? bw.selected_topology_index : 0;
+        int ci_hi = bw.topology_pinned ? bw.selected_topology_index + 1 : (int)bw.candidates.size();
+        for (int ci = ci_lo; ci < ci_hi; ++ci) {
             for (int vid : v_layers) {
                 double eff_v = bw.width;
                 auto itv = layer_dilution_factors_.find(vid);
@@ -261,6 +262,7 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
         std::cout << "[Planner] Bundle " << bw.original_bundle.id
                   << " (" << bw.width << " units wide)"
                   << " -> " << bw.candidates[best_topo].type
+                  << (bw.topology_pinned ? " [pinned]" : "")
                   << "  V-layer=M" << best_v_layer
                   << "  H-layer=M" << best_h_layer
                   << "  overflow=" << best_score << "\n";

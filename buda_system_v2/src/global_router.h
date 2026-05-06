@@ -14,6 +14,7 @@ struct BundleWrapper {
     Bundle original_bundle;
     std::vector<Topology> candidates;
     int selected_topology_index = 0;
+    bool topology_pinned = false;  // if true, optimizer keeps selected_topology_index and only assigns layers
     double width = 1.0;
     int assigned_v_layer = -1;  // -1 = use segment layer_hint; set by GlobalRouter
     int assigned_h_layer = -1;  // -1 = use segment layer_hint; set by GlobalRouter
