@@ -37,11 +37,10 @@ class TopologyExplorer:
         self._sidecar_path  = sidecar_path
         if sidecar_path and os.path.exists(sidecar_path):
             self._load_sidecar()
-            # Jump to the saved topo index for the first bundle so the
-            # gold selection border appears immediately on open.
-            hint = self._bundle_hint(self.wrappers[0])
-            if hint in self._selections:
-                saved = self._selections[hint].get('topo_index_hint', 0)
+            # Jump to the saved topo index so the gold border appears on open.
+            saved_sel = self._find_selection(self.wrappers[0])
+            if saved_sel is not None:
+                saved = saved_sel.get('topo_index_hint', 0)
                 n_cands = len(self.wrappers[0].candidates)
                 if 0 <= saved < n_cands:
                     self.idx = saved
@@ -192,11 +191,25 @@ class TopologyExplorer:
         names = w.original_bundle.get_net_names()
         return names[0] if names else f"bundle_{w.original_bundle.id}"
 
+    def _find_selection(self, wrapper=None):
+        """Return the saved selection dict for the given wrapper, or None.
+
+        Tries the current bundle_hint first (first net name); falls back to
+        matching by bundle_id so that sidecars created with older hint
+        conventions (e.g. 't0_b0' instead of 't0_b0_00') still work.
+        """
+        w   = wrapper or self.wrapper
+        sel = self._selections.get(self._bundle_hint(w))
+        if sel is None:
+            bid = w.original_bundle.id
+            sel = next((s for s in self._selections.values()
+                        if s.get('bundle_id') == bid), None)
+        return sel
+
     def _current_is_selected(self):
-        hint = self._bundle_hint()
-        if hint not in self._selections:
+        sel  = self._find_selection()
+        if sel is None:
             return False
-        sel  = self._selections[hint]
         topo = self.topos[self.idx]
         return (topo.type == sel['topo_type'] and
                 topo.estimated_wirelength == sel['topo_wl'])
@@ -204,6 +217,13 @@ class TopologyExplorer:
     def _select_current(self):
         topo = self.topos[self.idx]
         hint = self._bundle_hint()
+        # Remove any old entry for this bundle (may have a different hint key).
+        old_sel = self._find_selection()
+        if old_sel is not None:
+            stale_key = next((k for k, v in self._selections.items()
+                              if v is old_sel), None)
+            if stale_key and stale_key != hint:
+                del self._selections[stale_key]
         self._selections[hint] = {
             'bundle_id':       self.wrapper.original_bundle.id,
             'topo_type':       topo.type,
@@ -216,9 +236,12 @@ class TopologyExplorer:
         self._draw()
 
     def _deselect_current(self):
-        hint = self._bundle_hint()
-        if hint in self._selections:
-            del self._selections[hint]
+        hint    = self._bundle_hint()
+        old_sel = self._find_selection()
+        if old_sel is not None:
+            stale_key = next((k for k, v in self._selections.items()
+                              if v is old_sel), hint)
+            self._selections.pop(stale_key, None)
             self._save_sidecar()
         self._draw()
 
@@ -279,8 +302,7 @@ class TopologyExplorer:
         viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
 
         is_sel = self._current_is_selected()
-        hint   = self._bundle_hint()
-        has_any_sel = hint in self._selections
+        has_any_sel = self._find_selection() is not None
 
         # ── Update selection button states ──
         if is_sel:
