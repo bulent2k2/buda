@@ -6,6 +6,7 @@ namespace interconnect {
 struct GlobalCut {
     Point p1, p2;
     LayerDir dir;
+    int layer_id = 0;
     double capacity;
     double current_usage;
 };
@@ -14,17 +15,23 @@ struct BundleWrapper {
     std::vector<Topology> candidates;
     int selected_topology_index = 0;
     double width = 1.0;
+    int assigned_v_layer = -1;  // -1 = use segment layer_hint; set by GlobalRouter
+};
+struct BundleAssignment {
+    int bundle_id;
+    int topo_index;
+    int v_layer_id;
 };
 class GlobalRouter {
 public:
     GlobalRouter(const Floorplan& fp, const LayerStack& layers);
     void set_layer_overhead(int layer_id, double overhead_percent);
     void build_congestion_map();
-    void optimize_topologies(std::vector<BundleWrapper>& bundles, int max_iterations);
+    std::vector<BundleAssignment> optimize_topologies(std::vector<BundleWrapper>& bundles, int max_iterations);
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
 private:
-    double score_topology(const Topology& topo, double eff_width) const;
-    void   apply_topology(const Topology& topo, double eff_width);
+    double score_topology_on_layer(const Topology& topo, int v_layer_id, double eff_width) const;
+    void   apply_topology_on_layer(const Topology& topo, int v_layer_id, double eff_width);
     const Floorplan& floorplan_;
     const LayerStack& layers_;
     std::map<int, double> layer_dilution_factors_;

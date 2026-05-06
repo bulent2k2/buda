@@ -21,11 +21,15 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("estimated_wirelength", &Topology::estimated_wirelength)
         .def_readwrite("trunk_location",    &Topology::trunk_location);
     py::class_<Bundle>(m, "Bundle").def(py::init<>()).def_readwrite("id", &Bundle::id).def_readwrite("net_names", &Bundle::net_names).def("get_net_names", &Bundle::get_net_names);
-    py::class_<BundleWrapper>(m, "BundleWrapper").def(py::init<>()).def_readwrite("original_bundle", &BundleWrapper::original_bundle).def_readwrite("candidates", &BundleWrapper::candidates).def_readwrite("selected_topology_index", &BundleWrapper::selected_topology_index).def_readwrite("width", &BundleWrapper::width);
+    py::class_<BundleAssignment>(m, "BundleAssignment")
+        .def_readwrite("bundle_id",  &BundleAssignment::bundle_id)
+        .def_readwrite("topo_index", &BundleAssignment::topo_index)
+        .def_readwrite("v_layer_id", &BundleAssignment::v_layer_id);
+    py::class_<BundleWrapper>(m, "BundleWrapper").def(py::init<>()).def_readwrite("original_bundle", &BundleWrapper::original_bundle).def_readwrite("candidates", &BundleWrapper::candidates).def_readwrite("selected_topology_index", &BundleWrapper::selected_topology_index).def_readwrite("width", &BundleWrapper::width).def_readwrite("assigned_v_layer", &BundleWrapper::assigned_v_layer);
     py::class_<Netlist>(m, "Netlist").def(py::init<>()).def("add_net", &Netlist::add_net);
     py::class_<Bundler>(m, "Bundler").def(py::init<>()).def("set_strategy", &Bundler::set_strategy).def("run", &Bundler::run);
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>()).def("add_block", &Floorplan::add_block).def("get_hanan_grid", [](const Floorplan& fp) { std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y); }).def("get_all_blocks", [](const Floorplan& fp) { return fp.get_all_blocks(); });
-    py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer);
+    py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer).def("get_layer_ids_by_dir", &LayerStack::get_layer_ids_by_dir);
     py::class_<SegConn>(m, "SegConn")
         .def_readwrite("kind",       &SegConn::kind)
         .def_readwrite("block_name", &SegConn::block_name)

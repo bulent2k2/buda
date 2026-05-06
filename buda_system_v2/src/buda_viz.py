@@ -9,8 +9,8 @@ from matplotlib.widgets import Button, CheckButtons
 
 import interconnect as ic
 
-_LAYER_COLOR = {4: '#007ACC', 5: '#CC0000', 6: '#00AA44'}
-_LAYER_LABEL = {4: 'M4 H', 5: 'M5 V', 6: 'M6 H-trunk'}
+_LAYER_COLOR = {3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC'}
+_LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H-trunk', 7: 'M7 V'}
 
 # Values beyond this magnitude are the INT_MIN/2 or INT_MAX/2 sentinels
 # that ConnTopology uses for "unconstrained" slide ranges.
@@ -417,7 +417,8 @@ class BudaVisualizer:
         self._bundle_artists = {}
         self._highlighted    = None
         self._solo           = False
-        self._layer_visible  = {4: True, 5: True, 6: True}
+        self._layer_visible  = {}   # populated in show()
+        self._layer_ids      = []   # sorted list of active layer IDs
         self._bundle_visible = {}     # bid -> bool; populated in show()
         self._bundle_scroll  = 0      # first visible row in the bundle list
         self._bid_list       = []
@@ -566,10 +567,13 @@ class BudaVisualizer:
     def _on_layer_toggle(self, label):
         if self._in_bulk_layer_toggle:
             return
-        layer_map = {'M4': 4, 'M5': 5, 'M6': 6}
-        layer = layer_map.get(label)
+        # Labels are of the form 'M3', 'M4', etc.
+        try:
+            layer = int(label[1:])
+        except (ValueError, IndexError):
+            layer = None
         if layer is not None:
-            self._layer_visible[layer] = not self._layer_visible[layer]
+            self._layer_visible[layer] = not self._layer_visible.get(layer, True)
         self._refresh_highlight()
 
     def _on_layer_toggle_all(self):
@@ -581,7 +585,7 @@ class BudaVisualizer:
         self._in_bulk_layer_toggle = True
         if self._chk_layers is not None:
             statuses = self._chk_layers.get_status()
-            for i, lid in enumerate((4, 5, 6)):
+            for i, lid in enumerate(self._layer_ids):
                 if statuses[i] != new_state:
                     self._layer_visible[lid] = new_state
                     self._chk_layers.set_active(i)   # syncs visual only
@@ -849,7 +853,10 @@ class BudaVisualizer:
             topo_start = topo_end = None
             for idx, seg in enumerate(topo.segments):
                 ts   = ts_map.get((bid, idx))
-                spec = layer_specs.get(seg.layer_hint, {'color': 'green'})
+                # Use ts.layer (NUTS-assigned, honours assigned_v_layer) when
+                # available; fall back to seg.layer_hint for pre-NUTS drawing.
+                effective_layer = ts.layer if ts else seg.layer_hint
+                spec = layer_specs.get(effective_layer, {'color': 'green'})
                 col  = spec['color']
 
                 if ts and ts.placed:
@@ -866,13 +873,13 @@ class BudaVisualizer:
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
                         self._register(bid, footprint, alpha=band_alpha*3, is_band=True,
-                                       layer=seg.layer_hint)
+                                       layer=effective_layer)
                         for y_bound in (ts.interval_lo, ts.interval_hi):
                             bl, = self.ax.plot([min(sx,ex), max(sx,ex)], [y_bound, y_bound],
                                                color=col, linewidth=0.5, linestyle='--',
                                                alpha=0.3, zorder=4)
                             self._register(bid, bl, alpha=0.3, is_band=True,
-                                           layer=seg.layer_hint)
+                                           layer=effective_layer)
                     else:
                         sy, ey = ts.span_lo, ts.span_hi
                         sx = ex = center
@@ -882,13 +889,13 @@ class BudaVisualizer:
                             alpha=band_alpha * 3, zorder=5)
                         self.ax.add_patch(footprint)
                         self._register(bid, footprint, alpha=band_alpha*3, is_band=True,
-                                       layer=seg.layer_hint)
+                                       layer=effective_layer)
                         for x_bound in (ts.interval_lo, ts.interval_hi):
                             bl, = self.ax.plot([x_bound, x_bound], [min(sy,ey), max(sy,ey)],
                                                color=col, linewidth=0.5, linestyle='--',
                                                alpha=0.3, zorder=4)
                             self._register(bid, bl, alpha=0.3, is_band=True,
-                                           layer=seg.layer_hint)
+                                           layer=effective_layer)
                 else:
                     sx, sy = seg.start.x, seg.start.y
                     ex, ey = seg.end.x,   seg.end.y
@@ -901,7 +908,7 @@ class BudaVisualizer:
                                      solid_capstyle='butt',
                                      alpha=seg_alpha, zorder=10 + i)
                 self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
-                                layer=seg.layer_hint)
+                                layer=effective_layer)
 
                 if idx < len(topo.segments) - 1:
                     via, = self.ax.plot(ex, ey, 'o', color='black',
@@ -935,6 +942,15 @@ class BudaVisualizer:
         self._bid_list = sorted(self._bundle_artists.keys())
         self._bundle_visible = {bid: True for bid in self._bid_list}
 
+        # Collect all layer IDs actually present in the drawn artists.
+        seen_layers: set = set()
+        for artists_list in self._bundle_artists.values():
+            for e in artists_list:
+                if e.get('layer') is not None:
+                    seen_layers.add(e['layer'])
+        self._layer_ids = sorted(seen_layers)
+        self._layer_visible = {lid: True for lid in self._layer_ids}
+
         self.ax.set_aspect('equal')
         self.ax.set_title(
             "BUDA: Non-Uniform Track Sharing (NUTS)  "
@@ -942,15 +958,18 @@ class BudaVisualizer:
             fontsize=13)
 
         from matplotlib.lines import Line2D
-        self.ax.legend(handles=[
-            Line2D([0], [0], color='#007ACC', lw=4, label='M4 Horizontal'),
-            Line2D([0], [0], color='#CC0000', lw=4, label='M5 Vertical'),
-            Line2D([0], [0], color='#00AA44', lw=4, label='M6 H-trunk (U-shape)'),
+        legend_handles = [
+            Line2D([0], [0], color=_LAYER_COLOR.get(lid, '#888888'), lw=4,
+                   label=_LAYER_LABEL.get(lid, f'Layer {lid}'))
+            for lid in self._layer_ids
+        ]
+        legend_handles += [
             Line2D([0], [0], marker='s', color='w',
                    markerfacecolor='#00FFFF', markeredgecolor='k', label='Driver term'),
             Line2D([0], [0], marker='o', color='w',
                    markerfacecolor='#FF00FF', markeredgecolor='k', label='Receiver term'),
-        ], loc='upper right')
+        ]
+        self.ax.legend(handles=legend_handles, loc='upper right')
 
         self.ax.autoscale_view()
 
@@ -965,14 +984,17 @@ class BudaVisualizer:
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
-        # ── Per-layer checkboxes (M4 / M5 / M6) — compact, no large gaps ──
-        ax_layers = self.fig.add_axes([RX, 0.78, RW, 0.10])
+        # ── Per-layer checkboxes — built dynamically from active layers ──
+        n_layers = max(len(self._layer_ids), 1)
+        chk_h = min(0.04 * n_layers + 0.04, 0.18)   # scale with count, cap at 0.18
+        ax_layers = self.fig.add_axes([RX, 0.78, RW, chk_h])
         ax_layers.set_title('Layers', fontsize=9, pad=4)
-        layer_colors = [_LAYER_COLOR[lid] for lid in (4, 5, 6)]
+        layer_labels  = [f'M{lid}' for lid in self._layer_ids]
+        layer_colors  = [_LAYER_COLOR.get(lid, '#888888') for lid in self._layer_ids]
         self._chk_layers = CheckButtons(
             ax_layers,
-            labels  = ['M4', 'M5', 'M6'],
-            actives = [True, True, True],
+            labels  = layer_labels,
+            actives = [True] * len(self._layer_ids),
         )
         self._chk_layers.set_check_props({'facecolor': layer_colors})
         self._chk_layers.set_label_props({'color': layer_colors})

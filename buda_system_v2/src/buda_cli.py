@@ -268,7 +268,14 @@ class BudaSession:
             for lid, ovh in self._layer_overheads.items():
                 self.planner.set_layer_overhead(lid, ovh)
             self.planner.build_congestion_map()
-            self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
+            assignments = self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
+            # Apply planner decisions (vector copy in C++ means we must apply here).
+            bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
+            for asn in assignments:
+                w = bid_to_wrapper.get(asn.bundle_id)
+                if w is not None:
+                    w.selected_topology_index = asn.topo_index
+                    w.assigned_v_layer = asn.v_layer_id
             # Override planner choices with any architect-pinned selections.
             self._apply_selections()
         elif cmd == "run_nuts":

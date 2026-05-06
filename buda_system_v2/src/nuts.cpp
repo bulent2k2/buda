@@ -294,10 +294,14 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
             TrackSegment ts;
             ts.bundle_id = bw.original_bundle.id;
             ts.seg_idx   = si;
-            ts.layer     = seg.layer_hint;
             ts.width     = bw.width;
 
             const bool is_horizontal = (seg.start.y == seg.end.y);
+            // Use assigned_v_layer for vertical segments if the planner set one.
+            if (!is_horizontal && bw.assigned_v_layer >= 0)
+                ts.layer = bw.assigned_v_layer;
+            else
+                ts.layer = seg.layer_hint;
 
             if (is_horizontal) {
                 ts.span_lo = std::min(seg.start.x, seg.end.x);

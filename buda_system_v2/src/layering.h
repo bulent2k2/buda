@@ -15,8 +15,10 @@ struct Layer {
 class LayerStack {
 public:
     void add_layer(int id, const std::string& name, LayerDir dir, LayerType type);
-    LayerDir get_layer_dir(int id) const; 
+    LayerDir get_layer_dir(int id) const;
     int get_top_layer(LayerDir dir) const;
+    // Returns IDs of all layers with the given direction, sorted ascending.
+    std::vector<int> get_layer_ids_by_dir(LayerDir dir) const;
 private:
     std::vector<Layer> layers_;
     int top_horiz_id_ = -1;

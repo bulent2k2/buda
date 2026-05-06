@@ -2,9 +2,11 @@
 # 8 top blocks + 8 bottom blocks with a 340-unit horizontal channel.
 # 200 nets randomly paired (fixed seed=42) — stress-tests NUTS channel packing.
 
+def_layer 3 M3 V TOP 0.0
 def_layer 4 M4 H TOP 0.0
 def_layer 5 M5 V TOP 0.0
 def_layer 6 M6 H TOP 0.0
+def_layer 7 M7 V TOP 0.0
 
 add_block u_b0    20   20   80   80
 add_block u_b1   100   20  160   80
@@ -292,5 +294,5 @@ generate_topologies_for_bundle t7_b7  u_t7  u_b7
 
 run_planner 5
 run_nuts 2.0
-run_nuts_on_layer M4
+#run_nuts_on_layer M4
 visualize
