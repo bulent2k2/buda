@@ -33,7 +33,7 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<Netlist>(m, "Netlist").def(py::init<>()).def("add_net", &Netlist::add_net);
     py::class_<Bundler>(m, "Bundler").def(py::init<>()).def("set_strategy", &Bundler::set_strategy).def("run", &Bundler::run);
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>()).def("add_block", &Floorplan::add_block).def("get_hanan_grid", [](const Floorplan& fp) { std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y); }).def("get_all_blocks", [](const Floorplan& fp) { return fp.get_all_blocks(); });
-    py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer).def("get_layer_ids_by_dir", &LayerStack::get_layer_ids_by_dir);
+    py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer).def("get_layer_ids_by_dir", &LayerStack::get_layer_ids_by_dir).def("get_top_layer", &LayerStack::get_top_layer);
     py::class_<SegConn>(m, "SegConn")
         .def_readwrite("kind",       &SegConn::kind)
         .def_readwrite("block_name", &SegConn::block_name)
@@ -69,6 +69,7 @@ PYBIND11_MODULE(interconnect, m) {
         .def(py::init<const Floorplan&>())
         .def("set_busterm_mode",              &TopologyGenerator::set_busterm_mode)
         .def("set_double_detour",             &TopologyGenerator::set_double_detour)
+        .def("set_layer_ids",                 &TopologyGenerator::set_layer_ids)
         .def("generate_candidates",           &TopologyGenerator::generate_candidates)
         .def("generate_multicast_candidates", &TopologyGenerator::generate_multicast_candidates);
     py::class_<GlobalCut>(m, "GlobalCut")

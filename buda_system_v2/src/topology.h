@@ -47,6 +47,11 @@ public:
     // the original centre-to-centre behaviour.
     void set_busterm_mode(bool v) { use_busterm_ = v; }
 
+    // Override the default H and V layer IDs used for segment layer_hint.
+    // Defaults: h=4 (M4), v=5 (M5).  Call this after determining which layers
+    // are actually defined in the layer stack so no undefined layer is emitted.
+    void set_layer_ids(int h, int v) { h_layer_ = h; v_layer_ = v; }
+
     // Double-detour mode (default false): add UU_VHV / UU_HVH topologies where
     // the src stub is an L-shape that exits a SIDE face of the src block rather
     // than the primary face used by the standard U shape.  Useful when the normal
@@ -65,8 +70,10 @@ public:
 
 private:
     const Floorplan& floorplan_;
-    bool use_busterm_       = true;
+    bool use_busterm_         = true;
     bool allow_double_detour_ = false;
+    int  h_layer_             = 4;
+    int  v_layer_             = 5;
 
     void add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results);
     void add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);

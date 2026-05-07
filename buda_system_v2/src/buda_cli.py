@@ -246,6 +246,10 @@ class BudaSession:
             pos_args = [a for a in args if a not in ("center_mode", "double_detour")]
             hint = pos_args[0]; src = pos_args[1]; dsts = pos_args[2:]
             topo_gen = interconnect.TopologyGenerator(self.fp)
+            h_layer = self.layer_stack.get_top_layer(interconnect.LayerDir.HORIZONTAL)
+            v_layer = self.layer_stack.get_top_layer(interconnect.LayerDir.VERTICAL)
+            if h_layer != -1 and v_layer != -1:
+                topo_gen.set_layer_ids(h_layer, v_layer)
             if use_center:
                 topo_gen.set_busterm_mode(False)
             if use_double_detour:

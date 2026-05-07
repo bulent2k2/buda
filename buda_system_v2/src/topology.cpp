@@ -71,24 +71,24 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
             if (dst.x1 < src.x1) {
                 int bx = (dst.x1 + src.x1) / 2;
                 Topology hv; hv.type = "L_HV";
-                hv.segments.push_back(make_seg(src.x1, hy, bx, hy, 4));
-                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, 5));
+                hv.segments.push_back(make_seg(src.x1, hy, bx, hy, h_layer_));
+                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, v_layer_));
                 if (hv.segments.size() == 2) results.push_back(hv);
             }
             // dst right of src: (src.x2, dst.x2]
             if (dst.x2 > src.x2) {
                 int bx = (src.x2 + dst.x2) / 2;
                 Topology hv; hv.type = "L_HV";
-                hv.segments.push_back(make_seg(src.x2, hy, bx, hy, 4));
-                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, 5));
+                hv.segments.push_back(make_seg(src.x2, hy, bx, hy, h_layer_));
+                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, v_layer_));
                 if (hv.segments.size() == 2) results.push_back(hv);
             }
         } else {
             Topology hv; hv.type = "L_HV";
             if (sx != bend_x)
-                hv.segments.push_back(make_seg(sx, hy, bend_x, hy, 4));
+                hv.segments.push_back(make_seg(sx, hy, bend_x, hy, h_layer_));
             if (hy != dy)
-                hv.segments.push_back(make_seg(bend_x, hy, bend_x, dy, 5));
+                hv.segments.push_back(make_seg(bend_x, hy, bend_x, dy, v_layer_));
             if (hv.segments.size() == 2) results.push_back(hv);
         }
     }
@@ -124,8 +124,8 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
                 int vx2 = (dst.x2 + src.x2) / 2;
                 int dx2 = dst.face_x(vx2);   // = dst.x2
                 Topology vh; vh.type = "L_VH";
-                if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, 5));
-                if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, 4));
+                if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, v_layer_));
+                if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, h_layer_));
                 if (vh.segments.size() == 2) results.push_back(vh);
             }
             // src left of dst: [src.x1, dst.x1)
@@ -133,16 +133,16 @@ void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vect
                 int vx2 = (src.x1 + dst.x1) / 2;
                 int dx2 = dst.face_x(vx2);   // = dst.x1
                 Topology vh; vh.type = "L_VH";
-                if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, 5));
-                if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, 4));
+                if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, v_layer_));
+                if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, h_layer_));
                 if (vh.segments.size() == 2) results.push_back(vh);
             }
         } else {
             Topology vh; vh.type = "L_VH";
             if (sy != bend_y)
-                vh.segments.push_back(make_seg(vx, sy, vx, bend_y, 5));
+                vh.segments.push_back(make_seg(vx, sy, vx, bend_y, v_layer_));
             if (vx != dx)
-                vh.segments.push_back(make_seg(vx, bend_y, dx, bend_y, 4));
+                vh.segments.push_back(make_seg(vx, bend_y, dx, bend_y, h_layer_));
             if (vh.segments.size() == 2) results.push_back(vh);
         }
     }
@@ -202,10 +202,10 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                 // Standard Z_HVH — no spread or overlap needed.
                 Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut) + "@y" + std::to_string(ty_src);
                 if (sx != x_cut)
-                    z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
-                z.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
+                    z.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, h_layer_));
+                z.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, v_layer_));
                 if (x_cut != dx)
-                    z.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
+                    z.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, h_layer_));
                 if (z.segments.size() == 3) results.push_back(z);
             } else if (use_busterm_ && sx != x_cut && x_cut != dx) {
                 // Spread Z_HVH: both BUSTERMs at same y — force two distinct
@@ -227,9 +227,9 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                     int y2 = flip ? y_hi : y_lo;   // H2 y-level (dst side)
                     if (y1 == y2) continue;
                     Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut) + "@y" + std::to_string(y1);
-                    z.segments.push_back(make_seg(sx,           y1, x_cut + ovlp, y1, 4));
-                    z.segments.push_back(make_seg(x_cut,        y1, x_cut,        y2, 5));
-                    z.segments.push_back(make_seg(x_cut - ovlp, y2, dx,           y2, 4));
+                    z.segments.push_back(make_seg(sx,           y1, x_cut + ovlp, y1, h_layer_));
+                    z.segments.push_back(make_seg(x_cut,        y1, x_cut,        y2, v_layer_));
+                    z.segments.push_back(make_seg(x_cut - ovlp, y2, dx,           y2, h_layer_));
                     results.push_back(z);
                 }
             }
@@ -254,10 +254,10 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                 // Standard Z_VHV — no spread needed.
                 Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut) + "@x" + std::to_string(vx_src);
                 if (sy != y_cut)
-                    z.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
-                z.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 4));
+                    z.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, v_layer_));
+                z.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, h_layer_));
                 if (y_cut != dy)
-                    z.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
+                    z.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, v_layer_));
                 if (z.segments.size() == 3) results.push_back(z);
             } else if (use_busterm_ && sy != y_cut && y_cut != dy) {
                 // Spread Z_VHV: both BUSTERMs at same x — force two distinct
@@ -275,9 +275,9 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst,
                     int x2 = flip ? vx_hi : vx_lo;   // V2 x-level (dst side)
                     if (x1 == x2) continue;
                     Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut) + "@x" + std::to_string(x1);
-                    z.segments.push_back(make_seg(x1, sy,           x1, y_cut + ovlp, 5));
-                    z.segments.push_back(make_seg(x1, y_cut,        x2, y_cut,        4));
-                    z.segments.push_back(make_seg(x2, y_cut - ovlp, x2, dy,           5));
+                    z.segments.push_back(make_seg(x1, sy,           x1, y_cut + ovlp, v_layer_));
+                    z.segments.push_back(make_seg(x1, y_cut,        x2, y_cut,        h_layer_));
+                    z.segments.push_back(make_seg(x2, y_cut - ovlp, x2, dy,           v_layer_));
                     results.push_back(z);
                 }
             }
@@ -302,11 +302,11 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
             int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
             Topology u; u.type = "U_HVH@x" + std::to_string(x_cut);
             if (sx != x_cut)
-                u.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, 4));
+                u.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, h_layer_));
             if (ty_src != ty_dst)
-                u.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, 5));
+                u.segments.push_back(make_seg(x_cut, ty_src, x_cut, ty_dst, v_layer_));
             if (x_cut != dx)
-                u.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));
+                u.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, h_layer_));
             if (u.segments.size() == 3) results.push_back(u);
         }
     }
@@ -320,11 +320,11 @@ void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst,
             int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
             Topology u; u.type = "U_VHV@y" + std::to_string(y_cut);
             if (sy != y_cut)
-                u.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, 5));
+                u.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, v_layer_));
             if (vx_src != vx_dst)
-                u.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, 6));   // M6 long-haul
+                u.segments.push_back(make_seg(vx_src, y_cut, vx_dst, y_cut, h_layer_));
             if (y_cut != dy)
-                u.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));
+                u.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, v_layer_));
             if (u.segments.size() == 3) results.push_back(u);
         }
     }
@@ -378,13 +378,13 @@ void TopologyGenerator::add_uu_shapes(const Rect& src, const Rect& dst,
 
         Topology uu; uu.type = "UU_VHV@y" + std::to_string(y_cut);
         if (exit_x != x_corner)
-            uu.segments.push_back(make_seg(exit_x, sy_src, x_corner, sy_src, 4)); // H
+            uu.segments.push_back(make_seg(exit_x, sy_src, x_corner, sy_src, h_layer_)); // H
         if (sy_src != y_cut)
-            uu.segments.push_back(make_seg(x_corner, sy_src, x_corner, y_cut, 5)); // V
+            uu.segments.push_back(make_seg(x_corner, sy_src, x_corner, y_cut, v_layer_)); // V
         if (x_corner != vx_dst)
-            uu.segments.push_back(make_seg(x_corner, y_cut, vx_dst, y_cut, 6));   // H trunk
+            uu.segments.push_back(make_seg(x_corner, y_cut, vx_dst, y_cut, h_layer_));   // H trunk
         if (y_cut != dy)
-            uu.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, 5));         // V to dst
+            uu.segments.push_back(make_seg(vx_dst, y_cut, vx_dst, dy, v_layer_));         // V to dst
         if ((int)uu.segments.size() >= 3) results.push_back(uu);
     }
 
@@ -417,13 +417,13 @@ void TopologyGenerator::add_uu_shapes(const Rect& src, const Rect& dst,
 
         Topology uu; uu.type = "UU_HVH@x" + std::to_string(x_cut);
         if (exit_y != y_corner)
-            uu.segments.push_back(make_seg(tx_src, exit_y, tx_src, y_corner, 5)); // V
+            uu.segments.push_back(make_seg(tx_src, exit_y, tx_src, y_corner, v_layer_)); // V
         if (tx_src != x_cut)
-            uu.segments.push_back(make_seg(tx_src, y_corner, x_cut, y_corner, 4)); // H
+            uu.segments.push_back(make_seg(tx_src, y_corner, x_cut, y_corner, h_layer_)); // H
         if (y_corner != ty_dst)
-            uu.segments.push_back(make_seg(x_cut, y_corner, x_cut, ty_dst, 5));    // V trunk
+            uu.segments.push_back(make_seg(x_cut, y_corner, x_cut, ty_dst, v_layer_));    // V trunk
         if (x_cut != dx)
-            uu.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, 4));          // H to dst
+            uu.segments.push_back(make_seg(x_cut, ty_dst, dx, ty_dst, h_layer_));          // H to dst
         if ((int)uu.segments.size() >= 3) results.push_back(uu);
     }
 }
@@ -573,14 +573,12 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                            + "@y" + std::to_string(y_trunk);
     t.trunk_location     = y_trunk;
     t.pass_through_count = (int)std::count(has_stub.begin(), has_stub.end(), false);
-    int spine_layer  = out_of_bbox ? 6 : 4;
-
     if (x_lo < x_hi)
-        t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, spine_layer));
+        t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
 
     for (int i = 0; i < n; ++i)
         if (has_stub[i])
-            t.segments.push_back(make_seg(att_x[i], conn_y[i], att_x[i], y_trunk, 5));
+            t.segments.push_back(make_seg(att_x[i], conn_y[i], att_x[i], y_trunk, v_layer_));
 
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
@@ -672,11 +670,11 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     t.pass_through_count = (int)std::count(has_stub.begin(), has_stub.end(), false);
 
     if (y_lo < y_hi)
-        t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, 5));
+        t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
 
     for (int i = 0; i < n; ++i)
         if (has_stub[i])
-            t.segments.push_back(make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], 4));
+            t.segments.push_back(make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], h_layer_));
 
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
@@ -718,12 +716,12 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     }
     if (all_same_x) {
         Topology t; t.type = "I_V";
-        t.segments.push_back(make_seg(pins[0].x, y_lo, pins[0].x, y_hi, 5));
+        t.segments.push_back(make_seg(pins[0].x, y_lo, pins[0].x, y_hi, v_layer_));
         results.push_back(t);
     }
     if (all_same_y) {
         Topology t; t.type = "I_H";
-        t.segments.push_back(make_seg(x_lo, pins[0].y, x_hi, pins[0].y, 4));
+        t.segments.push_back(make_seg(x_lo, pins[0].y, x_hi, pins[0].y, h_layer_));
         results.push_back(t);
     }
     if (all_same_x || all_same_y) return results;
@@ -806,7 +804,7 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
             int dst_y  = dst.face_y(src.center().y);
             if (src_y != dst_y) {
                 Topology t; t.type = "I_V";
-                t.segments.push_back(make_seg(x_mid, src_y, x_mid, dst_y, 5));
+                t.segments.push_back(make_seg(x_mid, src_y, x_mid, dst_y, v_layer_));
                 candidates.push_back(t);
             }
         }
@@ -818,7 +816,7 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
             int dst_x  = dst.face_x(src.center().x);
             if (src_x != dst_x) {
                 Topology t; t.type = "I_H";
-                t.segments.push_back(make_seg(src_x, y_mid, dst_x, y_mid, 4));
+                t.segments.push_back(make_seg(src_x, y_mid, dst_x, y_mid, h_layer_));
                 candidates.push_back(t);
             }
         }
