@@ -2,3 +2,9 @@
 **/__pycache__/
 **/src/interconnect.cpython-313-darwin.so
 **/*~
+buda_system_v2/flow/four_blocks_nuts.log
+buda_system_v2/flow/nuts.log
+buda_system_v2/flow/sel_topo_4pin_nuts.log
+buda_system_v2/flow/sidecar_4pin_open_nuts.log
+buda_system_v2/flow/test3_nuts.log
+buda_system_v2/flow/test4_nuts.log

@@ -1,0 +1,58 @@
+Some prompts... 
+
+====
+
+ Let's make the naming consistent. Next/Prev Bundle buttons select a bundle and we see a bundle id at the top: "Bundle <n> selected" Please include the name of the bundle too: "Bundle 1 (t0_b0_00)" for example. Also label the bundle viz checkbox similarly: "t0_b0_00 (Bundle 1)" for example. By the way, there is a large vertical gap between layer viz checkboxes. Let's fix that, too. Two more enhancements: Please label the topo viz window similarly "t0_b0_00 (Bundle 1)". Finally, can we add radiobuttons for the bundle checkboxes so the user can select a bundle from that widget? 
+                                                                                                                                             ⏺ Let me plan all the changes carefully before editing: 
+ 
+  1. TopologyExplorer._draw: window title → "t0_b0_00 (Bundle 1)" 
+  2. BudaVisualizer._refresh_highlight: title → "Bundle 1 (t0_b0_00) selected", call _redraw_bundle_list to update radio state 
+  3. BudaVisualizer._redraw_bundle_list: add radio ◉/○ column, label → "t0_b0_00 (Bundle 1)" 
+  4. BudaVisualizer._on_bundle_list_click: split click zones — left half = select (radio), right half = toggle visibility 
+  5. Layout: shrink layer checkbox axes height to remove the gap 
+  6. Add _bundle_name(bid) helper 
+
+...
+
+⏺ Now let me verify the changes look right end-to-end: 
+ 
+⏺ Bash(python3 -c " 
+      import sys, os…) 
+  ⎿  syntax OK 
+ 
+⏺ Bash(git add src/buda_viz.py && git commit -m "$(cat <<'EOF' 
+      Consistent bundle naming, fix layer checkbox gap, add radio select in bundle list…) 
+  ⎿  [main 9999788] Consistent bundle naming, fix layer checkbox gap, add radio select in bundle list 
+      1 file changed, 49 insertions(+), 29 deletions(-) 
+ 
+⏺ Done. Summary of what changed: 
+ 
+  - Selection title: "Bundle 1 selected" → "Bundle 1 (t0_b0_00) selected" 
+  - Bundle list rows: two columns — ◉/○ (radio, left) and ☑ t0_b0_00 (Bundle 1) (right). Click the radio column to select/highlight; click the checkbox column to toggle visibility. 
+  - Topo explorer window title: "t0_b0_00" → "t0_b0_00 (Bundle 1)" 
+  - Layer checkbox gap: axes height reduced from 0.26 to 0.10 — labels are now compact with no wasted space. The bundle list gains the recovered vertical space (height 0.53 vs 0.38). 
+  - Radio state updates automatically when using Prev/Next Bundle buttons or [/] keys (since they go through _refresh_highlight → _redraw_bundle_list). 
+ 
+✻ Cogitated for 2m 21s 
+ 
+ 
+====
+
+❯ Let's improve the GUI for the visualizer so the designer can find overlaps more easily: Just under the layer checkboxes, please add a list of checkboxes, one for each bundle with a scrollbar. Also, a global toggle on/off button just above the layer viz checkboxes and a similar one for the bundles. 
+
+1) selected topo in sidecar_4pin_open.buda has a disconnected seg (trunk is too short)
+2) selected topo in sel_topo_4pin has some seg span error (stretched too far)
+
+====
+
+Please enhance the viz to report at the top of the window after WL, the number of segments in the current topo. 
+
+* Got to think for too long on this, but came back and fixed later!
+
+A few minor things to fix in test.buda:
+    1) see topo 4 of 11. The sliding span of the trunk should be within rcv2. Otherwise, it would not connect to rcv2. Also, the trunk should be pulled up towards the top edge of rcv2 to minimize the length of the vertical segment that connects to it.
+    2) see topo 7 of 11. The slide range of the trunk is wrong. It's supposed to be a detour.
+    3) Similarly in topo 8 of 11. The slide range should be below rcv2 and we need a vertical stub to connect to rcv2.
+    4) Topo 9 of 11, the ranges are good, but, the trunk is placed outside of its sliding range! It should be pulled to y=500 + 10%. Similarly for topo 10 of 11.
+    5) Finally the last topo, 11 of 11. We need the sliding range of the OOB trunk to be 10% away from the right edge of rcv1, and a horizontal stub to connect to rcv1. That would make the other two stubs to connect to drv1 and drv2 much more flexible with larger slide ranges determined by the y-span of drv1 and rcv2, respectively.
+

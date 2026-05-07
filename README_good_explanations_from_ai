@@ -1,0 +1,128 @@
+The topo-viz form no longer shows the selected topo. Selection still works in NUTS, but we don't see it visually. Something broke? 
+ 
+⏺ Let me check the git history to find when this regressed. 
+
+...
+
+The _draw logic is unchanged — the real problem is that the explorer always opens at idx=0. If the selected topology isn't index 0, _current_is_selected() is False and no gold border appears. The fix: 
+   after loading the sidecar, jump to the saved topo_index_hint for the first bundle. 
+
+...
+
+The explorer was always opening at idx=0. Since _current_is_selected() compares the currently displayed topology against the saved selection, if you selected e.g. topo 3 but the explorer reopens at topo 1, it evaluates False → no gold border. 
+ 
+  Fix: after _load_sidecar(), read topo_index_hint from the saved selection for this bundle and set self.idx accordingly. Now the explorer opens directly on the previously selected topology, and the 
+  gold border + ★ SELECTED badge appear immediately. 
+ 
+✻ Cogitated for 4m 39s 
+ 
+❯ Funny, it works for test3.buda, but it doesn't work for channel_stress.buda testcase. 
+ 
+⏺ Let me look at the channel_stress sidecar and see what hints are stored vs what the bundles actually produce: 
+ 
+...
+
+Searched for 2 patterns (ctrl+o to expand) 
+ 
+⏺ The mismatch: channel_stress.json has hints like t0_b0 but _bundle_hint() returns the first net name t0_b0_00. The sidecar was created manually with a different naming convention. The fix: add a 
+  fallback that matches by bundle_id when hint lookup fails. 
+ 
+  Read 1 file (ctrl+o to expand) 
+ 
+⏺ Now I'll replace the selection helper section with a _find_selection fallback that matches by bundle_id when hint lookup fails: 
+ 
+⏺ Update(src/buda_viz.py) 
+  ⎿  Added 30 lines, removed 6 lines 
+ 
+...
+
+syntax OK 
+ 
+⏺ Bash(git add src/buda_viz.py && git commit -m "$(cat <<'EOF' 
+      Fix topo selection not showing for channel_stress.buda…) 
+  ⎿  [main ceb581a] Fix topo selection not showing for channel_stress.buda 
+      1 file changed, 35 insertions(+), 13 deletions(-) 
+ 
+⏺ The root cause: channel_stress.json was created manually with shortened hints (t0_b0) while _bundle_hint() returns the first net name (t0_b0_00). No match → no gold border. 
+ 
+  The fix adds _find_selection() which tries the current hint format first, then falls back to matching by bundle_id. This is used consistently across _current_is_selected, has_any_sel, the __init__ 
+  topo-jump, and both _select_current / _deselect_current. As a side effect, _select_current now migrates any stale hint key to the current format when you next select a topo. 
+ 
+✻ Cogitated for 2m 18s                                      
+
+==
+
+Committed. The visualizer now has: 
+  - "☑ All Layers" global toggle above the layer checkboxes 
+  - "☑ All Bundles" global toggle above the bundle list 
+  - Scrollable per-bundle checkbox list with ▲/▼ buttons and mousewheel support 
+ 
+✻ Worked for 7m 56s 
+ 
+❯ Let's make the naming consistent. Next/Prev Bundle buttons select a bundle and we see a bundle id at the top: "Bundle <n> selected" Please include the name of the bundle too: "Bundle 1 (t0_b0_00)" 
+for example. Also label the bundle viz checkbox similarly: "t0_b0_00 (Bundle 1)" for example. By the way, there is a large vertical gap between layer viz checkboxes. Let's fix that, too. Two more 
+enhancements: Please label the topo viz window similarly "t0_b0_00 (Bundle 1)". Finally, can we add radiobuttons for the bundle checkboxes so the user can select a bundle from that widget? 
+ 
+  Read 1 file (ctrl+o to expand) 
+ 
+⏺ Let me plan all the changes carefully before editing: 
+ 
+  1. TopologyExplorer._draw: window title → "t0_b0_00 (Bundle 1)" 
+  2. BudaVisualizer._refresh_highlight: title → "Bundle 1 (t0_b0_00) selected", call _redraw_bundle_list to update radio state 
+  3. BudaVisualizer._redraw_bundle_list: add radio ◉/○ column, label → "t0_b0_00 (Bundle 1)" 
+  4. BudaVisualizer._on_bundle_list_click: split click zones — left half = select (radio), right half = toggle visibility 
+  5. Layout: shrink layer checkbox axes height to remove the gap 
+  6. Add _bundle_name(bid) helper 
+ 
+ 
+ Done. Summary of what changed: 
+ 
+  - Selection title: "Bundle 1 selected" → "Bundle 1 (t0_b0_00) selected" 
+  - Bundle list rows: two columns — ◉/○ (radio, left) and ☑ t0_b0_00 (Bundle 1) (right). Click the radio column to select/highlight; click the checkbox column to toggle visibility. 
+  - Topo explorer window title: "t0_b0_00" → "t0_b0_00 (Bundle 1)" 
+  - Layer checkbox gap: axes height reduced from 0.26 to 0.10 — labels are now compact with no wasted space. The bundle list gains the recovered vertical space (height 0.53 vs 0.38). 
+  - Radio state updates automatically when using Prev/Next Bundle buttons or [/] keys (since they go through _refresh_highlight → _redraw_bundle_list). 
+ 
+✻ Cogitated for 2m 21s  
+
+cycler requires iterable values (one per label), but fontsize=8 is a plain int. Fixed by setting font size directly on each label text object after the fact. 
+ 
+❯ The topo-viz form no longer shows the selected topo. Selection still works in NUTS, but we don't see it visually. Something broke? 
+ 
+⏺ Let me check the git history to find when this regressed. 
+ 
+====
+
+Committed as b08c619. The log is written to <script>_nuts.log next to the .buda file. Each entry shows: 
+ 
+  - The two segment labels (B18.M4[1] × B29.M4[1]) — bundle ID, layer name, segment index 
+  - The overlap rectangle: span (routing direction extent) and perp (perpendicular band depth), plus area for quick triage of severity 
+ 
+✻ Brewed for 2m 7s 
+ 
+❯ I suspect we are running NUTS on m4 first and then on m5. The latter is possibly causing these overlaps during adjusting the endpoints of connected segments. Please double check and let me know. 
+ 
+  Read 1 file (ctrl+o to expand) 
+ 
+⏺ Yes, M4 is solved first. Let me trace exactly what happens and where the M5 overlaps come from. 
+ 
+  Layer order — by_layer is a std::map<int, ...>, so layers iterate in ascending key order: M4 (4) → M5 (5) → M6 (6). (nuts.cpp:438) 
+ 
+  The causal chain: 
+ 
+  1. M4 solved first. The H trunks of all Z_VHV bundles share the [80, 420] Hanan interval and are packed together. With 55 bundles competing, many H trunks end up displaced significantly from their 
+  nominal y=250. 
+  2. Post-M4 span adjustment fires. For each placed H trunk T, rev_conn_map says "adjust connected V stubs". The V stubs (M5, not yet placed) have their span_lo or span_hi SET to T's stripe edge — so a 
+  V1 stub whose H trunk ended up at y=205 gets its span_lo pulled down from 250 to ~203.5. 
+  3. M5 solve runs with extended spans. The V stubs now have longer spans than the topology originally specified. More V segments are active simultaneously across overlapping routing-direction ranges, 
+  saturating the Hanan x-cells. The solver can't fit them all without collision. 
+ 
+  What post-M5 adjustment does NOT do — this is the important part of your hypothesis. After M5 segments are placed, the span adjustment loop fires again, but it only ever touches M4 segments (visually 
+  trimming H trunk spans to meet where V stubs landed). It never modifies another M5 segment's position or span, because in rev_conn_map, V stubs map to their H trunk, never to a peer V stub. So post-M5 
+   span adjustment does not create new M5 overlaps — those overlaps already exist at the moment solve_layer(M5_segs) returns. 
+ 
+  Root cause: M4 packing displaces H trunks → V spans grow → M5 channel saturates. The 60 M5 overlaps are a capacity problem, not a span-adjustment artifact. The channel needs to be wide enough that M4 
+  packing keeps H trunks close to nominal, keeping V spans short. The 340-unit channel is just barely under-provisioned for this seed. 
+ 
+✻ Sautéed for 1m 39s 
+ 

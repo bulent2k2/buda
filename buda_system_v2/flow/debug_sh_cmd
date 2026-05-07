@@ -1,3 +1,36 @@
+20)Bash command                                                   
+ 
+   cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
+   import sys; sys.argv=['x'] 
+   import interconnect as ic 
+ 
+   fp = ic.Floorplan() 
+   fp.add_block('u1', 50, 50, 100, 100) 
+   fp.add_block('u2', 150, 70, 200, 120) 
+ 
+   ls = ic.LayerStack() 
+   ls.add_layer(4, 'M4', ic.LayerDir.HORIZONTAL, ic.LayerType.TOP) 
+   ls.add_layer(5, 'M5', ic.LayerDir.VERTICAL,   ic.LayerType.TOP) 
+   # M6 not defined 
+ 
+   gen = ic.TopologyGenerator(fp) 
+   h = ls.get_top_layer(ic.LayerDir.HORIZONTAL) 
+   v = ls.get_top_layer(ic.LayerDir.VERTICAL) 
+   print('h_layer:', h, 'v_layer:', v) 
+   gen.set_layer_ids(h, v) 
+ 
+   topos = gen.generate_candidates('u2', 'u1') 
+   layers_used = {seg.layer_hint for t in topos for seg in t.segments} 
+   print('layers used:', sorted(layers_used)) 
+   assert 6 not in layers_used, 'M6 still emitted!' 
+   print('OK - no M6') 
+   " 
+ 
+   Verify no M6 when M6 not in layer stack
+
+ Newline followed by # inside a quoted argument can hide arguments from path validation
+
+
 19) 
    python3 /tmp/test_rerun.py > /tmp/test_rerun.out 2>&1; echo "exit $?" >> /tmp/test_rerun.out; cat /tmp/test_rerun.out
 
