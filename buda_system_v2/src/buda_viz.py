@@ -816,6 +816,31 @@ class BudaVisualizer:
         for y in ys:
             self.ax.axhline(y=y, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
 
+    @staticmethod
+    def _busterm_positions(topo, ct, ts_map=None, bid=None, offset=0.0):
+        """Return (driver_pos, [receiver_pos, ...]) from ConnTopology BUSTERMs.
+
+        Uses ts.track_position (NUTS-adjusted perp) when ts_map is supplied,
+        otherwise falls back to the nominal cs.perp_pos.  The first BUSTERM
+        encountered is treated as the driver terminal; the rest are receivers.
+        """
+        positions = []
+        for si, (seg, cs) in enumerate(zip(topo.segments, ct.segs())):
+            key = (bid, si) if bid is not None else None
+            ts  = ts_map.get(key) if (ts_map and key) else None
+            perp = (ts.track_position if (ts and ts.placed) else cs.perp_pos) + offset
+            for conn in cs.conns:
+                if conn.kind != ic.SegConnKind.BUSTERM:
+                    continue
+                if cs.horiz:
+                    px, py = conn.at_pos + offset, perp
+                else:
+                    px, py = perp, conn.at_pos + offset
+                positions.append((px, py))
+        if not positions:
+            return None, []
+        return positions[0], positions[1:]
+
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
@@ -826,13 +851,10 @@ class BudaVisualizer:
             offset   = (i % 3 - 1) * 2.0
             alpha    = 0.8
 
-            topo_start = topo_end = None
             for idx, seg in enumerate(topo.segments):
                 spec = layer_specs.get(seg.layer_hint, {'color': 'green'})
                 sx = seg.start.x + offset;  sy = seg.start.y + offset
                 ex = seg.end.x   + offset;  ey = seg.end.y   + offset
-                if idx == 0: topo_start = (sx, sy)
-                if idx == len(topo.segments) - 1: topo_end = (ex, ey)
 
                 line, = self.ax.plot([sx, ex], [sy, ey],
                                      color=spec['color'], linewidth=viz_lw,
@@ -847,7 +869,9 @@ class BudaVisualizer:
                                         alpha=alpha, zorder=11 + i)
                     self._register(bid, via, alpha=alpha, lw=viz_lw / 3)
 
-            self._draw_terminals(bid, topo_start, topo_end, viz_lw, alpha)
+            ct = ic.ConnTopology(); ct.build(topo, self.fp)
+            drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
+            self._draw_terminals(bid, drv, rcvs[-1] if rcvs else None, viz_lw, alpha)
 
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
@@ -861,7 +885,6 @@ class BudaVisualizer:
             topo   = wrapper.candidates[wrapper.selected_topology_index]
             viz_lw = (wrapper.width * 1.5) + 2.0
 
-            topo_start = topo_end = None
             for idx, seg in enumerate(topo.segments):
                 ts   = ts_map.get((bid, idx))
                 # Use ts.layer (NUTS-assigned, honours assigned_v_layer) when
@@ -911,9 +934,6 @@ class BudaVisualizer:
                     sx, sy = seg.start.x, seg.start.y
                     ex, ey = seg.end.x,   seg.end.y
 
-                if idx == 0: topo_start = (seg.start.x, seg.start.y)
-                if idx == len(topo.segments) - 1: topo_end = (seg.end.x, seg.end.y)
-
                 line, = self.ax.plot([sx, ex], [sy, ey],
                                      color=col, linewidth=viz_lw,
                                      solid_capstyle='butt',
@@ -927,7 +947,9 @@ class BudaVisualizer:
                                         alpha=seg_alpha, zorder=11 + i)
                     self._register(bid, via, alpha=seg_alpha, lw=viz_lw / 3)
 
-            self._draw_terminals(bid, topo_start, topo_end, viz_lw, seg_alpha)
+            ct = ic.ConnTopology(); ct.build(topo, self.fp)
+            drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
+            self._draw_terminals(bid, drv, rcvs[-1] if rcvs else None, viz_lw, seg_alpha)
 
     def _draw_terminals(self, bundle_id, topo_start, topo_end, viz_lw, alpha):
         """Draw driver (cyan square) and receiver (magenta circle) terminals."""
@@ -976,9 +998,9 @@ class BudaVisualizer:
         ]
         legend_handles += [
             Line2D([0], [0], marker='s', color='w',
-                   markerfacecolor='#00FFFF', markeredgecolor='k', label='Driver term'),
+                   markerfacecolor='#00FFFF', markeredgecolor='k', label='Driver'),
             Line2D([0], [0], marker='o', color='w',
-                   markerfacecolor='#FF00FF', markeredgecolor='k', label='Receiver term'),
+                   markerfacecolor='#FF00FF', markeredgecolor='k', label='Receivers'),
         ]
         self.ax.legend(handles=legend_handles, loc='upper right')
 
