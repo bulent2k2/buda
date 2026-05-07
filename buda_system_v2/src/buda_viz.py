@@ -871,7 +871,7 @@ class BudaVisualizer:
 
             ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
-            self._draw_terminals(bid, drv, rcvs[-1] if rcvs else None, viz_lw, alpha)
+            self._draw_terminals(bid, drv, rcvs, viz_lw, alpha)
 
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
@@ -949,24 +949,35 @@ class BudaVisualizer:
 
             ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
-            self._draw_terminals(bid, drv, rcvs[-1] if rcvs else None, viz_lw, seg_alpha)
+            self._draw_terminals(bid, drv, rcvs, viz_lw, seg_alpha)
 
-    def _draw_terminals(self, bundle_id, topo_start, topo_end, viz_lw, alpha):
-        """Draw driver (cyan square) and receiver (magenta circle) terminals."""
-        msz = min(viz_lw, 16)
-        if topo_start:
-            drv, = self.ax.plot(topo_start[0], topo_start[1], 's',
+    def _draw_terminals(self, bundle_id, drv_pos, rcv_positions, viz_lw, alpha):
+        """Draw driver (cyan square) and receiver (magenta circle) terminals.
+
+        rcv_positions may be a single (x,y) or a list of (x,y).
+        Marker size matches the segment line width so they are always visible.
+        """
+        msz = viz_lw
+        if drv_pos:
+            drv, = self.ax.plot(drv_pos[0], drv_pos[1], 's',
                                 color='#00FFFF', markeredgecolor='black',
                                 markersize=msz, alpha=alpha, zorder=20)
             self._register(bundle_id, drv, alpha=alpha, lw=msz)
-            lbl = self.ax.text(topo_start[0], topo_start[1], f"B{bundle_id}",
+            lbl = self.ax.text(drv_pos[0], drv_pos[1], f"B{bundle_id}",
                                fontsize=8, color='black', fontweight='bold',
                                ha='center', va='center', zorder=21)
             lbl.set_alpha(alpha)
             self._register(bundle_id, lbl, alpha=alpha)
 
-        if topo_end:
-            rcv, = self.ax.plot(topo_end[0], topo_end[1], 'o',
+        if rcv_positions is None:
+            return
+        # Accept single tuple or list of tuples
+        if isinstance(rcv_positions, tuple):
+            rcv_positions = [rcv_positions]
+        for pos in rcv_positions:
+            if pos is None:
+                continue
+            rcv, = self.ax.plot(pos[0], pos[1], 'o',
                                 color='#FF00FF', markeredgecolor='black',
                                 markersize=msz, alpha=alpha, zorder=20)
             self._register(bundle_id, rcv, alpha=alpha, lw=msz)
