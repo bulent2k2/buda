@@ -566,7 +566,7 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     for (int i = 0; i < n; ++i) {
         if (has_stub[i]) { x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]); }
     }
-    if (x_lo > x_hi) return; // all pass-through — degenerate, skip
+    if (x_lo >= x_hi) return; // single stub or all pass-through — no spine, degenerate, skip
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
@@ -661,7 +661,7 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     for (int i = 0; i < n; ++i) {
         if (has_stub[i]) { y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]); }
     }
-    if (y_lo > y_hi) return; // all pass-through — degenerate, skip
+    if (y_lo >= y_hi) return; // single stub or all pass-through — no spine, degenerate, skip
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
