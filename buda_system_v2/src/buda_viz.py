@@ -777,6 +777,7 @@ class BudaVisualizer:
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
         if event.key in ('cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
+        if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key == 't':               self._open_topo_explorer()
