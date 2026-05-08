@@ -864,10 +864,11 @@ class BudaVisualizer:
                                 layer=seg.layer_hint)
 
                 if idx < len(topo.segments) - 1:
+                    via_sz = max(2, min(viz_lw / 3, 6))
                     via, = self.ax.plot(ex, ey, 'o', color='black',
-                                        markersize=viz_lw / 3,
+                                        markersize=via_sz,
                                         alpha=alpha, zorder=11 + i)
-                    self._register(bid, via, alpha=alpha, lw=viz_lw / 3)
+                    self._register(bid, via, alpha=alpha, lw=via_sz)
 
             ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
@@ -942,10 +943,11 @@ class BudaVisualizer:
                                 layer=effective_layer)
 
                 if idx < len(topo.segments) - 1:
+                    via_sz = max(2, min(viz_lw / 3, 6))
                     via, = self.ax.plot(ex, ey, 'o', color='black',
-                                        markersize=viz_lw / 3,
+                                        markersize=via_sz,
                                         alpha=seg_alpha, zorder=11 + i)
-                    self._register(bid, via, alpha=seg_alpha, lw=viz_lw / 3)
+                    self._register(bid, via, alpha=seg_alpha, lw=via_sz)
 
             ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
@@ -955,9 +957,10 @@ class BudaVisualizer:
         """Draw driver (cyan square) and receiver (magenta circle) terminals.
 
         rcv_positions may be a single (x,y) or a list of (x,y).
-        Marker size matches the segment line width so they are always visible.
+        viz_lw may be the physical bus width (large for wide buses in NUTS view),
+        so marker size is capped to stay visually reasonable.
         """
-        msz = viz_lw
+        msz = max(6, min(viz_lw, 16))
         if drv_pos:
             drv, = self.ax.plot(drv_pos[0], drv_pos[1], 's',
                                 color='#00FFFF', markeredgecolor='black',
