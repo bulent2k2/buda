@@ -5,7 +5,6 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import matplotlib.patheffects as pe
 from matplotlib.widgets import Button, CheckButtons
 
 import interconnect as ic
@@ -424,8 +423,9 @@ class BudaVisualizer:
             )
 
         # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
-        self._bundle_artists = {}
-        self._highlighted    = None
+        self._bundle_artists    = {}
+        self._highlighted       = None
+        self._highlight_overlays = []   # thin boundary lines added on selection
         self._solo           = False
         self._layer_visible  = {}   # populated in show()
         self._layer_ids      = []   # sorted list of active layer IDs
@@ -494,7 +494,15 @@ class BudaVisualizer:
 
     def _refresh_highlight(self):
         """Apply highlight + solo + layer-visibility + bundle-visibility to all artists."""
+        from matplotlib.lines import Line2D as MplLine2D
+
         bundle_id = self._highlighted
+
+        # Remove overlay boundary lines from the previous selection.
+        for art in self._highlight_overlays:
+            try: art.remove()
+            except Exception: pass
+        self._highlight_overlays.clear()
 
         for bid, entries in self._bundle_artists.items():
             bundle_on = self._bundle_visible.get(bid, True)
@@ -506,15 +514,13 @@ class BudaVisualizer:
                 # Bundle visibility: hard gate — always off when hidden.
                 if not bundle_on:
                     a.set_alpha(0.0)
-                    if e['lw'] is not None:
-                        a.set_linewidth(e['lw'])
+                    if e['lw'] is not None: a.set_linewidth(e['lw'])
                     continue
 
                 # Layer visibility: hard gate.
                 if e['layer'] is not None and not self._layer_visible.get(e['layer'], True):
                     a.set_alpha(0.0)
-                    if e['lw'] is not None:
-                        a.set_linewidth(e['lw'])
+                    if e['lw'] is not None: a.set_linewidth(e['lw'])
                     continue
 
                 if e['lw'] is not None:
@@ -522,23 +528,24 @@ class BudaVisualizer:
 
                 if bundle_id is None:
                     a.set_alpha(e['alpha'])
-                    a.set_path_effects([])
                 elif selected:
                     a.set_alpha(0.2 if e['is_band'] else 1.0)
-                    # Highlight with a white halo outline — no width change.
-                    if not e['is_band']:
-                        halo_lw = (e['lw'] or 1.0) + 4
-                        a.set_path_effects([
-                            pe.withStroke(linewidth=halo_lw, foreground='white'),
-                            pe.Normal()])
-                    else:
-                        a.set_path_effects([])
                 else:
-                    if self._solo:
-                        a.set_alpha(0.0)
-                    else:
-                        a.set_alpha(0.03 if e['is_band'] else 0.1)
-                    a.set_path_effects([])
+                    a.set_alpha(0.0 if self._solo else (0.03 if e['is_band'] else 0.1))
+
+        # Draw thin white boundary lines over each segment of the selected bundle.
+        if bundle_id is not None:
+            for e in self._bundle_artists.get(bundle_id, []):
+                a = e['artist']
+                if e['is_band'] or not isinstance(a, MplLine2D):
+                    continue
+                x, y = a.get_xdata(orig=False), a.get_ydata(orig=False)
+                ol, = self.ax.plot(x, y, '-',
+                                   color='white', linewidth=2,
+                                   solid_capstyle='butt',
+                                   alpha=0.9, zorder=200,
+                                   picker=False)
+                self._highlight_overlays.append(ol)
 
         if bundle_id is not None:
             solo_hint = "  [Solo ON]" if self._solo else ""
