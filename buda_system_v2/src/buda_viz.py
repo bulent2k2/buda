@@ -5,6 +5,7 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import matplotlib.patheffects as pe
 from matplotlib.widgets import Button, CheckButtons
 
 import interconnect as ic
@@ -516,21 +517,28 @@ class BudaVisualizer:
                         a.set_linewidth(e['lw'])
                     continue
 
+                if e['lw'] is not None:
+                    a.set_linewidth(e['lw'])  # width never changes
+
                 if bundle_id is None:
                     a.set_alpha(e['alpha'])
-                    if e['lw'] is not None:
-                        a.set_linewidth(e['lw'])
+                    a.set_path_effects([])
                 elif selected:
                     a.set_alpha(0.2 if e['is_band'] else 1.0)
-                    if e['lw'] is not None:
-                        a.set_linewidth(e['lw'] * 2.2)
+                    # Highlight with a white halo outline — no width change.
+                    if not e['is_band']:
+                        halo_lw = (e['lw'] or 1.0) + 4
+                        a.set_path_effects([
+                            pe.withStroke(linewidth=halo_lw, foreground='white'),
+                            pe.Normal()])
+                    else:
+                        a.set_path_effects([])
                 else:
                     if self._solo:
                         a.set_alpha(0.0)
                     else:
                         a.set_alpha(0.03 if e['is_band'] else 0.1)
-                    if e['lw'] is not None:
-                        a.set_linewidth(e['lw'])
+                    a.set_path_effects([])
 
         if bundle_id is not None:
             solo_hint = "  [Solo ON]" if self._solo else ""
