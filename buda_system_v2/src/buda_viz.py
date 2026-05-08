@@ -1000,6 +1000,31 @@ class BudaVisualizer:
                                 markersize=msz, alpha=alpha, zorder=20)
             self._register(bundle_id, rcv, alpha=alpha, lw=msz)
 
+    def _zoom_to_bundle(self, _=None):
+        """Zoom axes to the bounding box of the selected bundle, or reset to full view."""
+        from matplotlib.lines import Line2D as MplLine2D
+        bid = self._highlighted
+        if bid is None:
+            self.ax.autoscale()
+            self.fig.canvas.draw_idle()
+            return
+        xs, ys = [], []
+        for e in self._bundle_artists.get(bid, []):
+            a = e['artist']
+            if e['is_band'] or not isinstance(a, MplLine2D):
+                continue
+            xs.extend(a.get_xdata(orig=False))
+            ys.extend(a.get_ydata(orig=False))
+        if not xs:
+            return
+        x0, x1 = min(xs), max(xs)
+        y0, y1 = min(ys), max(ys)
+        pad_x = max((x1 - x0) * 0.2, 50)
+        pad_y = max((y1 - y0) * 0.2, 50)
+        self.ax.set_xlim(x0 - pad_x, x1 + pad_x)
+        self.ax.set_ylim(y0 - pad_y, y1 + pad_y)
+        self.fig.canvas.draw_idle()
+
     def show(self):
         self._bid_list = sorted(self._bundle_artists.keys())
         self._bundle_visible = {bid: True for bid in self._bid_list}
@@ -1085,10 +1110,11 @@ class BudaVisualizer:
         self.fig.canvas.mpl_connect('scroll_event', self._on_scroll_event)
 
         # ── Bottom navigation buttons ────────────────────────────────────
-        ax_bprev = self.fig.add_axes([0.02, 0.02, 0.18, 0.05])
-        ax_solo  = self.fig.add_axes([0.23, 0.02, 0.18, 0.05])
-        ax_bnext = self.fig.add_axes([0.44, 0.02, 0.18, 0.05])
-        ax_topos = self.fig.add_axes([0.65, 0.02, 0.33, 0.05])
+        ax_bprev = self.fig.add_axes([0.02, 0.02, 0.14, 0.05])
+        ax_solo  = self.fig.add_axes([0.18, 0.02, 0.13, 0.05])
+        ax_bnext = self.fig.add_axes([0.33, 0.02, 0.14, 0.05])
+        ax_zoom  = self.fig.add_axes([0.49, 0.02, 0.13, 0.05])
+        ax_topos = self.fig.add_axes([0.64, 0.02, 0.34, 0.05])
 
         btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
         btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
@@ -1098,6 +1124,9 @@ class BudaVisualizer:
 
         btn_bnext = Button(ax_bnext, 'Next Bundle  ▶', color='#ddeeff')
         btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
+
+        self._btn_zoom = Button(ax_zoom, '⌖ Zoom to Sel', color='#f0f0f0')
+        self._btn_zoom.on_clicked(self._zoom_to_bundle)
 
         btn_topos = Button(ax_topos, 'View Topologies  ↗', color='#fff0cc')
         btn_topos.on_clicked(lambda _: self._open_topo_explorer())
