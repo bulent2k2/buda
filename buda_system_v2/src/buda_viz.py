@@ -486,6 +486,13 @@ class BudaVisualizer:
             return names[0] if names else f"B{bid}"
         return f"B{bid}"
 
+    def _bundle_bits(self, bid):
+        """Return the number of nets (bit-width) for bid, or 0 if unknown."""
+        w = next((w for w in self.bundles if w.original_bundle.id == bid), None)
+        if w:
+            return len(w.original_bundle.get_net_names())
+        return 0
+
     def _set_highlight(self, bundle_id):
         if bundle_id == self._highlighted:
             bundle_id = None
@@ -550,8 +557,10 @@ class BudaVisualizer:
         if bundle_id is not None:
             solo_hint = "  [Solo ON]" if self._solo else ""
             bname = self._bundle_name(bundle_id)
+            nbits = self._bundle_bits(bundle_id)
+            bits_str = f"  {nbits}-bit" if nbits > 0 else ""
             self.ax.set_title(
-                f"BUDA — Bundle {bundle_id} ({bname}) selected{solo_hint}  "
+                f"BUDA — Bundle {bundle_id} ({bname}){bits_str} selected{solo_hint}  "
                 f"(click again or click background to deselect)",
                 fontsize=13)
         else:
@@ -663,11 +672,13 @@ class BudaVisualizer:
             # y coordinate: top row at y≈1, bottom row at y≈0.
             y = 1.0 - (row + 0.5) / n_vis
 
-            # Build label: "{name} (Bundle {bid})", truncated to fit.
+            # Build label: "{name} B{bid} ({nbits}b)", truncated to fit.
             name  = self._bundle_name(bid)
-            full  = f"{name} (Bundle {bid})"
-            if len(full) > 18:
-                full = name[:max(4, 18 - 10)] + '… ' + f"(Bundle {bid})"
+            nbits = self._bundle_bits(bid)
+            bits_suffix = f" ({nbits}b)" if nbits > 0 else ""
+            full  = f"{name} B{bid}{bits_suffix}"
+            if len(full) > 20:
+                full = name[:max(4, 20 - len(f" B{bid}{bits_suffix}"))] + '…' + f" B{bid}{bits_suffix}"
 
             # Radio indicator (left, for selection) and checkbox (for visibility).
             radio_char = '◉' if bid == self._highlighted else '○'
@@ -1125,7 +1136,7 @@ class BudaVisualizer:
         btn_bnext = Button(ax_bnext, 'Next Bundle  ▶', color='#ddeeff')
         btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
 
-        self._btn_zoom = Button(ax_zoom, '⌖ Zoom to Sel', color='#f0f0f0')
+        self._btn_zoom = Button(ax_zoom, '[Z] Zoom to Sel', color='#f0f0f0')
         self._btn_zoom.on_clicked(self._zoom_to_bundle)
 
         btn_topos = Button(ax_topos, 'View Topologies  ↗', color='#fff0cc')
