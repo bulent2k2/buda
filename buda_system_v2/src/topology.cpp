@@ -559,14 +559,16 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
     }
 
-    // Use only stub positions for the spine extent — pass-through blocks
-    // are already covered wherever the trunk passes through them and must
-    // not push the spine past the outermost stub.
+    // Spine extent covers ALL blocks: stubs define their own connection points, and
+    // pass-through blocks that fall outside the stub range must still be reached by
+    // the spine (their att_x was already set to the block face in the pull-to-face
+    // step above, so the spine endpoint lands exactly on the block face and
+    // ConnTopology registers a BUSTERM connection from the spine endpoint).
     int x_lo = INT_MAX, x_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
-        if (has_stub[i]) { x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]); }
+        x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]);
     }
-    if (x_lo >= x_hi) return; // single stub or all pass-through — no spine, degenerate, skip
+    if (x_lo >= x_hi) return; // degenerate (zero-length spine), skip
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
@@ -656,12 +658,12 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
     }
 
-    // Use only stub positions for the spine extent.
+    // Spine extent covers ALL blocks (symmetric to add_trunk_h above).
     int y_lo = INT_MAX, y_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
-        if (has_stub[i]) { y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]); }
+        y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]);
     }
-    if (y_lo >= y_hi) return; // single stub or all pass-through — no spine, degenerate, skip
+    if (y_lo >= y_hi) return; // degenerate (zero-length spine), skip
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
