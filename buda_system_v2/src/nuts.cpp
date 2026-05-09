@@ -208,10 +208,13 @@ static void do_span_adjustments(
                 new_hi = std::max(new_hi, req.hi_edge);
         }
 
+        // Only ever extend spans — never shrink.  A T-junction stub in the
+        // interior of a spine (e.g. rcv2 at x=450 on a spine that extends to
+        // x=680 for a BUSTERM) must not pull the spine endpoint back inward.
         if (new_lo < orig_hi)   // at least one lo-end connection found
-            other->span_lo = new_lo;
+            other->span_lo = std::min(orig_lo, new_lo);
         if (new_hi > orig_lo)   // at least one hi-end connection found
-            other->span_hi = new_hi;
+            other->span_hi = std::max(orig_hi, new_hi);
     }
 }
 

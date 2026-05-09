@@ -574,7 +574,13 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
                            + "@y" + std::to_string(y_trunk);
     t.trunk_location     = y_trunk;
-    t.pass_through_count = (int)std::count(has_stub.begin(), has_stub.end(), false);
+    // Blocks at the spine endpoints (att_x == x_lo or x_hi) are BUSTERM
+    // connections of the spine, not pass-throughs.  Only interior blocks
+    // (strictly between x_lo and x_hi) are true pass-throughs.
+    t.pass_through_count = 0;
+    for (int i = 0; i < n; ++i)
+        if (!has_stub[i] && att_x[i] != x_lo && att_x[i] != x_hi)
+            ++t.pass_through_count;
     if (x_lo < x_hi)
         t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
 
@@ -669,7 +675,11 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
                            + "@x" + std::to_string(x_trunk);
     t.trunk_location     = x_trunk;
-    t.pass_through_count = (int)std::count(has_stub.begin(), has_stub.end(), false);
+    // Same rule as add_trunk_h: blocks at spine endpoints are BUSTERM connections.
+    t.pass_through_count = 0;
+    for (int i = 0; i < n; ++i)
+        if (!has_stub[i] && att_y[i] != y_lo && att_y[i] != y_hi)
+            ++t.pass_through_count;
 
     if (y_lo < y_hi)
         t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
