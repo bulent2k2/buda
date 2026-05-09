@@ -911,7 +911,7 @@ class BudaVisualizer:
         for i, wrapper in enumerate(self.bundles):
             bid    = wrapper.original_bundle.id
             topo   = wrapper.candidates[wrapper.selected_topology_index]
-            viz_lw = (wrapper.width * 1.5) + 2.0
+            viz_lw = 3.0 + math.log2(1 + wrapper.width) * 2.0
 
             for idx, seg in enumerate(topo.segments):
                 ts   = ts_map.get((bid, idx))
