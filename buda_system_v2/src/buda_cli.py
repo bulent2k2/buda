@@ -188,6 +188,85 @@ class BudaSession:
         # Let's just pass the block names directly in the script for now to simplify the connection.
         return "top", "top"
 
+    def _run_post_nuts_planner(self, short_thresh: float, long_thresh: float):
+        """Stage 4c — Post-NUTS stub layer reassignment.
+
+        Classifies every bundle's vertical stub segments by span length and
+        moves short stubs to the lowest available V layer (e.g. M3) and long
+        stubs to the highest (e.g. M7).  After reassignment a full NUTS solve
+        is run so all layers are consistent with the new assignments.
+
+        short_thresh : stubs shorter than this go to the lowest V layer.
+        long_thresh  : stubs longer than this go to the highest V layer.
+        """
+        if self.nuts_result is None:
+            print("Error: run_planner post_nuts requires run_nuts to have been called first")
+            return
+
+        v_dir = interconnect.LayerDir.VERTICAL
+        v_layers = sorted(self.layers.get_layer_ids_by_dir(v_dir))
+        if len(v_layers) < 2:
+            print("[Planner] post_nuts: fewer than 2 V layers defined — nothing to reassign")
+            return
+
+        lo_v = v_layers[0]   # e.g. M3 — short stubs (near block face)
+        hi_v = v_layers[-1]  # e.g. M7 — long stubs (full channel crossing)
+        v_layer_set = set(v_layers)
+        layer_names = self._make_layer_names()
+
+        # Map bundle_id → max V-segment span length in the current NUTS result.
+        bid_max_span: dict[int, float] = {}
+        for seg in self.nuts_result.segments:
+            if seg.layer not in v_layer_set:
+                continue
+            span_len = seg.span_hi - seg.span_lo
+            bid = seg.bundle_id
+            if bid not in bid_max_span or span_len > bid_max_span[bid]:
+                bid_max_span[bid] = span_len
+
+        # Reassign assigned_v_layer on each bundle.
+        short_count = medium_count = long_count = 0
+        for w in self.bundles:
+            bid = w.original_bundle.id
+            if bid not in bid_max_span:
+                continue  # no V segments for this bundle
+            max_span = bid_max_span[bid]
+            if max_span < short_thresh:
+                new_v = lo_v
+                short_count += 1
+            elif max_span > long_thresh:
+                new_v = hi_v
+                long_count += 1
+            else:
+                medium_count += 1
+                continue  # keep current assignment
+            w.assigned_v_layer = new_v
+
+        lo_name = layer_names.get(lo_v, f"L{lo_v}")
+        hi_name = layer_names.get(hi_v, f"L{hi_v}")
+        print(f"[Planner] post_nuts: short<{short_thresh:.0f}→{lo_name} ({short_count}b), "
+              f"medium ({medium_count}b), long>{long_thresh:.0f}→{hi_name} ({long_count}b)")
+
+        # Re-run full NUTS with the updated layer assignments.
+        pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
+        nuts = interconnect.NUTSEngine(self.fp)
+        nuts.set_track_pitch(pitch)
+        self.nuts_result = nuts.run(self.bundles)
+
+        layer_names = self._make_layer_names()
+        per_layer = self.nuts_result.overlaps_per_layer
+        if per_layer:
+            detail = ', '.join(
+                f"{layer_names.get(lid, f'L{lid}')}={cnt}"
+                for lid, cnt in sorted(per_layer.items())
+            )
+            overlap_str = f"{self.nuts_result.num_overlaps} track overlaps ({detail})"
+        else:
+            overlap_str = "0 track overlaps"
+        print(f"[Planner] post_nuts NUTS: {len(self.nuts_result.segments)} segments "
+              f"({self.nuts_result.num_violations} violations, {overlap_str}).")
+        self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts")
+
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
         if not parts or parts[0].startswith('#'): return
@@ -269,22 +348,28 @@ class BudaSession:
             if not found: print(f"Warning: Could not find bundle matching hint {hint}")
 
         elif cmd == "run_planner":
-            self.planner = interconnect.GlobalRouter(self.fp, self.layers)
-            for lid, ovh in self._layer_overheads.items():
-                self.planner.set_layer_overhead(lid, ovh)
-            self.planner.build_congestion_map()
-            # Apply architect-pinned selections BEFORE optimizing so the
-            # planner scores the correct topology and assigns layers for it.
-            self._apply_selections()
-            assignments = self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
-            # Apply planner layer decisions (vector copy in C++ means we must apply here).
-            bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
-            for asn in assignments:
-                w = bid_to_wrapper.get(asn.bundle_id)
-                if w is not None:
-                    w.selected_topology_index = asn.topo_index
-                    w.assigned_v_layer = asn.v_layer_id
-                    w.assigned_h_layer = asn.h_layer_id
+            if args and args[0] == "post_nuts":
+                # Stage 4c: post-NUTS stub layer reassignment.
+                short_thresh = float(args[1]) if len(args) > 1 else 80.0
+                long_thresh  = float(args[2]) if len(args) > 2 else 200.0
+                self._run_post_nuts_planner(short_thresh, long_thresh)
+            else:
+                self.planner = interconnect.GlobalRouter(self.fp, self.layers)
+                for lid, ovh in self._layer_overheads.items():
+                    self.planner.set_layer_overhead(lid, ovh)
+                self.planner.build_congestion_map()
+                # Apply architect-pinned selections BEFORE optimizing so the
+                # planner scores the correct topology and assigns layers for it.
+                self._apply_selections()
+                assignments = self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
+                # Apply planner layer decisions (vector copy in C++ means we must apply here).
+                bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
+                for asn in assignments:
+                    w = bid_to_wrapper.get(asn.bundle_id)
+                    if w is not None:
+                        w.selected_topology_index = asn.topo_index
+                        w.assigned_v_layer = asn.v_layer_id
+                        w.assigned_h_layer = asn.h_layer_id
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0

@@ -22,6 +22,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 3 | `run_planner` | Select topology + assign V layers |
 | 4 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
+| 4c | `run_planner post_nuts` | Reassign stub V-layers to resolve channel pin conflicts; re-runs NUTS |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
@@ -262,6 +263,82 @@ run_planner 5
 
 ---
 
+---
+
+## Stage 4c — Post-NUTS stub layer reassignment
+
+### `run_planner post_nuts`
+
+```
+run_planner post_nuts [<short_thresh> [<long_thresh>]]
+```
+
+Runs a second planner pass **after** `run_nuts` that resolves **channel pin
+conflicts** — local stub-on-stub overlaps at block faces that the global
+planner cannot predict before concrete track positions are known.
+
+#### The channel pin conflict problem
+
+The global planner (Stage 3) assigns every bundle to a single vertical layer
+and selects a topology, but it cannot see how many stubs from adjacent blocks
+will compete for the same narrow perpendicular interval on the same layer.
+When many blocks line up along a channel wall, their stubs pack into the same
+Hanan-cell column on M5, exceeding its capacity and causing NUTS violations.
+
+#### Resolution strategy
+
+`run_planner post_nuts` redistributes stubs across all available vertical
+layers using stub span length as a proxy for routing distance:
+
+| Stub span (routing-direction extent) | Target V layer |
+|---|---|
+| `< short_thresh` | Lowest-numbered V layer (e.g. M3) — short stubs close to the block face stay on the nearest metal |
+| `> long_thresh`  | Highest-numbered V layer (e.g. M7) — long stubs crossing the full channel use the highest available metal |
+| Between thresholds | Unchanged — stays on the planner-assigned layer (e.g. M5) |
+
+After reassigning each bundle's V-layer, `run_planner post_nuts` re-runs the
+full NUTS solver so all layers are resolved consistently with the new
+assignments.
+
+**Topology selections and H-layer assignments are not changed.**
+
+#### Arguments
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `short_thresh` | float | 80.0 | Stubs shorter than this (layout units) move to the lowest V layer. A good starting point is ≈ 25% of the channel height. |
+| `long_thresh`  | float | 200.0 | Stubs longer than this move to the highest V layer. A good starting point is ≈ 60% of the channel height. |
+
+#### Notes
+
+- Requires `run_nuts` to have been called first.
+- Bundles are classified by the **longest** V-segment span within the bundle,
+  so all stubs in a bundle move together to the same new layer.
+- A full NUTS re-run is performed after reassignment; any previous
+  `run_nuts_on_layer` overrides are superseded.
+- Thresholds are in layout units. Inspect the NUTS log or use `visualize` to
+  estimate typical stub lengths for your floorplan.
+
+#### Example
+
+```
+run_nuts 2.0
+run_planner post_nuts            # default thresholds (80 / 200)
+run_planner post_nuts 100 280    # custom thresholds for a 400-unit channel
+visualize
+```
+
+#### Typical script pattern (congested channel)
+
+```buda
+run_planner 5
+run_nuts 2.0
+run_planner post_nuts 100 280    # redistribute stubs to M3 / M5 / M7
+visualize
+```
+
+---
+
 ## Stage 4 — Abstract NUTS
 
 ### `run_nuts`
@@ -489,7 +566,11 @@ run_planner 5
 # ── Stage 4: abstract track placement ────────────────────────
 run_nuts 2.0
 
-# ── Optional: re-solve a congested layer ─────────────────────
+# ── Stage 4c (optional): redistribute stubs across V layers ──
+# Use when many blocks line up along a channel and stubs overlap.
+# run_planner post_nuts 80 200
+
+# ── Optional: re-solve a single congested layer ───────────────
 # run_nuts_on_layer M3
 
 # ── Visualise ────────────────────────────────────────────────
