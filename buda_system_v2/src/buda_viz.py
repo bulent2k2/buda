@@ -10,7 +10,7 @@ from matplotlib.widgets import Button
 import interconnect as ic
 
 _LAYER_COLOR = {3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC'}
-_LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H-trunk', 7: 'M7 V'}
+_LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V'}
 
 def _toggle_fullscreen(fig):
     mgr = fig.canvas.manager
