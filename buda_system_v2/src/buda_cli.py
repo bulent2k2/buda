@@ -306,25 +306,149 @@ class BudaSession:
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
                              extra_lines=[planner_msg])
 
-    def _rerun_nuts_layer(self, layer_id: int):
-        """Re-solve one layer with NUTS, emit detailed diagnostics, and log.
+    def _segment_states_from_topology(self) -> dict:
+        """Build a 'before' snapshot from topology geometry (no track assignment yet).
 
-        Diagnostics emitted (all also written to nuts.log via extra_lines):
-          [NUTS] Running Mx: N segment(s)
-          [NUTS] Mx: K/N segments moved  (avg/max |Δperp|)
-          [NUTS] Mx local overlaps: P pair(s) → B{a}×B{b} …
-          [NUTS] Connected span adjustments: Ma:X, Mb:Y
-          [NUTS] Post-adjust overlaps on connected layers: Ma:X, Mb:Y → B{a}×B{b} …
-          [NUTS] rerun_layer(id=Mx): N segments re-placed. Violations: V, Overlaps: O.
+        track_position = -1.0 signals 'unplaced'; _nuts_diagnostics skips movement
+        stats for those segments so the same diagnostic code works for both the
+        initial run_nuts and per-layer rerun_layer calls.
+        """
+        states: dict[tuple, dict] = {}
+        for bw in self.bundles:
+            if not bw.candidates:
+                continue
+            topo = bw.candidates[bw.selected_topology_index]
+            bid  = bw.original_bundle.id
+            for si, seg in enumerate(topo.segments):
+                is_h = (seg.start.y == seg.end.y)
+                if is_h:
+                    span_lo = float(min(seg.start.x, seg.end.x))
+                    span_hi = float(max(seg.start.x, seg.end.x))
+                    layer   = bw.assigned_h_layer if bw.assigned_h_layer >= 0 else seg.layer_hint
+                else:
+                    span_lo = float(min(seg.start.y, seg.end.y))
+                    span_hi = float(max(seg.start.y, seg.end.y))
+                    layer   = bw.assigned_v_layer if bw.assigned_v_layer >= 0 else seg.layer_hint
+                states[(bid, si)] = {
+                    'layer':          layer,
+                    'track_position': -1.0,   # unplaced sentinel
+                    'span_lo':        span_lo,
+                    'span_hi':        span_hi,
+                }
+        return states
+
+    def _nuts_diagnostics(self, result, layer_names: dict,
+                          before: dict, target_layer: int | None = None) -> list[str]:
+        """Emit and collect NUTS diagnostic lines after a solve.
+
+        Shared by run_nuts (target_layer=None, all layers) and
+        _rerun_nuts_layer (target_layer=layer_id, focus on one layer).
+
+        before: (bid, seg_idx) -> {layer, track_position, span_lo, span_hi}
+            track_position == -1.0  →  unplaced; movement stats suppressed.
+        target_layer: if set, only that layer is reported per-layer and other
+            layers are treated as 'connected' for span-adjustment analysis.
+            If None, all layers are reported; span adjustments shown across all.
+        """
+        diag: list[str] = []
+
+        def emit(msg: str):
+            print(msg)
+            diag.append(msg)
+
+        by_layer: dict[int, list] = {}
+        for s in result.segments:
+            by_layer.setdefault(s.layer, []).append(s)
+
+        report_layers = [target_layer] if target_layer is not None else sorted(by_layer.keys())
+
+        for lid in report_layers:
+            segs  = by_layer.get(lid, [])
+            lname = layer_names.get(lid, f'L{lid}')
+            n     = len(segs)
+
+            # Movement stats — only when segment was placed before (track_position >= 0).
+            moved_deltas: list[float] = []
+            for s in segs:
+                bef = before.get((s.bundle_id, s.seg_idx))
+                if bef and bef['track_position'] >= 0:
+                    delta = abs(s.track_position - bef['track_position'])
+                    if delta > 1e-6:
+                        moved_deltas.append(delta)
+            if moved_deltas:
+                avg_d = sum(moved_deltas) / len(moved_deltas)
+                max_d = max(moved_deltas)
+                emit(f"[NUTS] {lname}: {len(moved_deltas)}/{n} segments moved "
+                     f"(avg |Δperp|={avg_d:.1f}, max={max_d:.1f})")
+
+            # Local overlaps on this layer.
+            local_ov = [od for od in result.overlap_details if od.layer == lid]
+            if local_ov:
+                pairs_str = ', '.join(f"B{od.bid_a}×B{od.bid_b}" for od in local_ov)
+                emit(f"[NUTS] {lname} local overlaps: {len(local_ov)} → {pairs_str}")
+            else:
+                emit(f"[NUTS] {lname}: no local overlaps")
+
+        # Span adjustments: compare before vs after spans.
+        # For rerun: skip the target layer (it drove the adjustment).
+        # For full run: report all layers.
+        span_adj: dict[int, int] = {}
+        for s in result.segments:
+            if target_layer is not None and s.layer == target_layer:
+                continue
+            bef = before.get((s.bundle_id, s.seg_idx))
+            if bef and (abs(s.span_lo - bef['span_lo']) > 1e-6 or
+                        abs(s.span_hi - bef['span_hi']) > 1e-6):
+                span_adj[s.layer] = span_adj.get(s.layer, 0) + 1
+
+        if span_adj:
+            label   = "Connected span adjustments" if target_layer is not None else "Span adjustments"
+            adj_str = ', '.join(
+                f"{layer_names.get(lid, f'L{lid}')}:{cnt}"
+                for lid, cnt in sorted(span_adj.items())
+            )
+            emit(f"[NUTS] {label}: {adj_str}")
+
+            # Post-adjust overlaps on adjusted layers.
+            # For full run these equal the global overlap summary — skip to avoid noise.
+            if target_layer is not None:
+                adj_layer_ids = set(span_adj)
+                post_ov_by_layer: dict[int, list] = {}
+                for od in result.overlap_details:
+                    if od.layer in adj_layer_ids:
+                        post_ov_by_layer.setdefault(od.layer, []).append(od)
+                if post_ov_by_layer:
+                    summary = ', '.join(
+                        f"{layer_names.get(lid, f'L{lid}')}:{len(ods)}"
+                        for lid, ods in sorted(post_ov_by_layer.items())
+                    )
+                    all_pairs = ', '.join(
+                        f"B{od.bid_a}×B{od.bid_b}"
+                        for ods in post_ov_by_layer.values()
+                        for od in ods
+                    )
+                    emit(f"[NUTS] Post-adjust overlaps: {summary} → {all_pairs}")
+                else:
+                    adj_names = ', '.join(
+                        layer_names.get(lid, f'L{lid}') for lid in sorted(adj_layer_ids))
+                    emit(f"[NUTS] No overlaps on adjusted layers ({adj_names})")
+        elif target_layer is not None:
+            emit(f"[NUTS] No connected span adjustments")
+
+        return diag
+
+    def _rerun_nuts_layer(self, layer_id: int):
+        """Re-solve one layer with NUTS, emit diagnostics, and log.
 
         Returns the updated NUTSResult (also stored in self.nuts_result).
+        Used by both the run_nuts_on_layer command and the visualizer ↺ button.
         """
         layer_names  = self._make_layer_names()
         layer_name   = layer_names.get(layer_id, f"L{layer_id}")
         nuts = interconnect.NUTSEngine(self.fp)
         nuts.set_track_pitch(self._nuts_pitch)
 
-        # ── Snapshot state before rerun ──────────────────────────────────
+        # Snapshot full state before rerun.
         before: dict[tuple, dict] = {
             (s.bundle_id, s.seg_idx): {
                 'layer':          s.layer,
@@ -336,87 +460,15 @@ class BudaSession:
         }
         n_layer_segs = sum(1 for s in self.nuts_result.segments if s.layer == layer_id)
 
-        diag: list[str] = []
+        pre_msg = f"[NUTS] Running {layer_name}: {n_layer_segs} segment(s)"
+        print(pre_msg)
 
-        def emit(msg: str):
-            print(msg)
-            diag.append(msg)
-
-        emit(f"[NUTS] Running {layer_name}: {n_layer_segs} segment(s)")
-
-        # ── Rerun (C++ also prints its own [NUTS] rerun_layer line here) ─
+        # C++ also prints its own [NUTS] rerun_layer(...) line here.
         self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
 
-        # ── 1. Track-position movement on the re-run layer ───────────────
-        moved_deltas: list[float] = []
-        for s in self.nuts_result.segments:
-            if s.layer != layer_id:
-                continue
-            bef = before.get((s.bundle_id, s.seg_idx))
-            if bef and abs(s.track_position - bef['track_position']) > 1e-6:
-                moved_deltas.append(abs(s.track_position - bef['track_position']))
+        diag = self._nuts_diagnostics(self.nuts_result, layer_names, before,
+                                      target_layer=layer_id)
 
-        if moved_deltas:
-            avg_d = sum(moved_deltas) / len(moved_deltas)
-            max_d = max(moved_deltas)
-            emit(f"[NUTS] {layer_name}: {len(moved_deltas)}/{n_layer_segs} segments moved "
-                 f"(avg |Δperp|={avg_d:.1f}, max={max_d:.1f})")
-        else:
-            emit(f"[NUTS] {layer_name}: no segments moved")
-
-        # ── 2. Local overlap check — re-run layer only ───────────────────
-        local_ov = [od for od in self.nuts_result.overlap_details if od.layer == layer_id]
-        if local_ov:
-            pairs_str = ', '.join(
-                f"B{od.bid_a}×B{od.bid_b}" for od in local_ov
-            )
-            emit(f"[NUTS] {layer_name} local overlaps: {len(local_ov)} pair(s) → {pairs_str}")
-        else:
-            emit(f"[NUTS] {layer_name}: no local overlaps")
-
-        # ── 3. Span adjustments on connected layers (from do_span_adjustments) ─
-        span_adj: dict[int, int] = {}   # layer -> count
-        for s in self.nuts_result.segments:
-            if s.layer == layer_id:
-                continue
-            bef = before.get((s.bundle_id, s.seg_idx))
-            if bef and (abs(s.span_lo - bef['span_lo']) > 1e-6 or
-                        abs(s.span_hi - bef['span_hi']) > 1e-6):
-                span_adj[s.layer] = span_adj.get(s.layer, 0) + 1
-
-        if span_adj:
-            adj_str = ', '.join(
-                f"{layer_names.get(lid, f'L{lid}')}:{cnt}"
-                for lid, cnt in sorted(span_adj.items())
-            )
-            emit(f"[NUTS] Connected span adjustments: {adj_str}")
-
-            # ── 4. Overlaps on the adjusted layers ───────────────────────
-            adj_layer_ids = set(span_adj)
-            post_ov_by_layer: dict[int, list] = {}
-            for od in self.nuts_result.overlap_details:
-                if od.layer in adj_layer_ids:
-                    post_ov_by_layer.setdefault(od.layer, []).append(od)
-
-            if post_ov_by_layer:
-                summary = ', '.join(
-                    f"{layer_names.get(lid, f'L{lid}')}:{len(ods)}"
-                    for lid, ods in sorted(post_ov_by_layer.items())
-                )
-                all_pairs = ', '.join(
-                    f"B{od.bid_a}×B{od.bid_b}"
-                    for ods in post_ov_by_layer.values()
-                    for od in ods
-                )
-                emit(f"[NUTS] Post-adjust overlaps on connected layers: {summary} → {all_pairs}")
-            else:
-                adj_names = ', '.join(
-                    layer_names.get(lid, f'L{lid}') for lid in sorted(adj_layer_ids))
-                emit(f"[NUTS] No overlaps on adjusted layers ({adj_names})")
-        else:
-            emit(f"[NUTS] No connected span adjustments")
-
-        # ── Summary mirror (for nuts.log; C++ already printed its version) ─
         rerun_msg = (f"[NUTS] rerun_layer({layer_id}={layer_name}): "
                      f"{n_layer_segs} segment(s) re-placed. "
                      f"Violations: {self.nuts_result.num_violations}, "
@@ -424,7 +476,7 @@ class BudaSession:
         print(rerun_msg)
 
         self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name,
-                             extra_lines=diag + [rerun_msg])
+                             extra_lines=[pre_msg] + diag + [rerun_msg])
         return self.nuts_result
 
     def do_command(self, cmd_line):
@@ -536,21 +588,13 @@ class BudaSession:
             self._nuts_pitch = pitch
             nuts = interconnect.NUTSEngine(self.fp)
             nuts.set_track_pitch(pitch)
+            # Snapshot topology-derived initial spans before the solve.
+            before = self._segment_states_from_topology()
+            # C++ prints its own [NUTS] N segments placed across K layer(s) line.
             self.nuts_result = nuts.run(self.bundles)
             layer_names = self._make_layer_names()
-            per_layer = self.nuts_result.overlaps_per_layer
-            if per_layer:
-                detail = ', '.join(
-                    f"{layer_names.get(lid, f'L{lid}')}={cnt}"
-                    for lid, cnt in sorted(per_layer.items())
-                )
-                overlap_str = f"{self.nuts_result.num_overlaps} track overlaps ({detail})"
-            else:
-                overlap_str = "0 track overlaps"
-            print(f"NUTS placed {len(self.nuts_result.segments)} segments "
-                  f"({self.nuts_result.num_violations} interval violations, "
-                  f"{overlap_str}).")
-            self._write_nuts_log(layer_names)
+            diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
+            self._write_nuts_log(layer_names, extra_lines=diag)
         elif cmd == "run_nuts_on_layer":
             # Usage: run_nuts_on_layer <layer-name>
             if not args:
