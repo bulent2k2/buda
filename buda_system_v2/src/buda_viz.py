@@ -425,6 +425,8 @@ class BudaVisualizer:
         # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
         self._bundle_artists    = {}
         self._highlighted       = None
+        self._highlighted_set   = set()   # multi-highlight (overlap pair selection)
+        self._selected_overlap  = None    # OverlapDetail currently selected
         self._highlight_overlays = []   # thin boundary lines added on selection
         self._solo           = False
         self._layer_visible  = {}   # populated in show()
@@ -435,8 +437,13 @@ class BudaVisualizer:
         self._btn_solo       = None
         self._btn_all_layers = None
         self._btn_all_bundles= None
+        self._btn_all_overlaps = None
         self._chk_layers     = None
         self._ax_bundles     = None
+        self._ax_overlaps    = None
+        self._overlap_entries = []   # sorted list of OverlapDetail from nuts_result
+        self._overlap_scroll = 0
+        self._nuts_result    = None  # stored in draw_nuts_tracks for the overlap panel
         self._topo_explorer  = None
         self._pick_happened  = False
         self._in_bulk_layer_toggle = False  # suppress layer callbacks during bulk update
@@ -468,9 +475,13 @@ class BudaVisualizer:
                     return
 
     def _on_click(self, event):
-        # Route bundle list clicks before doing anything else.
+        # Route panel clicks before doing anything else.
         if self._ax_bundles is not None and event.inaxes == self._ax_bundles:
             self._on_bundle_list_click(event)
+            self._pick_happened = False
+            return
+        if self._ax_overlaps is not None and event.inaxes == self._ax_overlaps:
+            self._on_overlap_list_click(event)
             self._pick_happened = False
             return
         # A click that didn't land on any registered artist → deselect.
@@ -494,9 +505,23 @@ class BudaVisualizer:
         return 0
 
     def _set_highlight(self, bundle_id):
-        if bundle_id == self._highlighted:
+        if bundle_id == self._highlighted and not self._highlighted_set:
             bundle_id = None
-        self._highlighted = bundle_id
+        self._highlighted      = bundle_id
+        self._highlighted_set  = set()
+        self._selected_overlap = None
+        self._refresh_highlight()
+
+    def _set_overlap_highlight(self, od):
+        """Select or deselect an overlap pair, highlighting both bundles."""
+        if self._selected_overlap is od:
+            self._highlighted_set  = set()
+            self._selected_overlap = None
+            self._highlighted      = None
+        else:
+            self._highlighted      = None
+            self._highlighted_set  = {od.bid_a, od.bid_b}
+            self._selected_overlap = od
         self._refresh_highlight()
 
     def _refresh_highlight(self):
@@ -504,6 +529,15 @@ class BudaVisualizer:
         from matplotlib.lines import Line2D as MplLine2D
 
         bundle_id = self._highlighted
+        hset      = self._highlighted_set
+
+        # Resolve which bundle ids are "active" (shown at full alpha).
+        if hset:
+            active_bids = hset
+        elif bundle_id is not None:
+            active_bids = {bundle_id}
+        else:
+            active_bids = None   # none selected → all at resting alpha
 
         # Remove overlay boundary lines from the previous selection.
         for art in self._highlight_overlays:
@@ -513,7 +547,7 @@ class BudaVisualizer:
 
         for bid, entries in self._bundle_artists.items():
             bundle_on = self._bundle_visible.get(bid, True)
-            selected  = (bundle_id is None) or (bid == bundle_id)
+            selected  = (active_bids is None) or (bid in active_bids)
 
             for e in entries:
                 a = e['artist']
@@ -533,28 +567,38 @@ class BudaVisualizer:
                 if e['lw'] is not None:
                     a.set_linewidth(e['lw'])  # width never changes
 
-                if bundle_id is None:
+                if active_bids is None:
                     a.set_alpha(e['alpha'])
                 elif selected:
                     a.set_alpha(0.2 if e['is_band'] else 1.0)
                 else:
                     a.set_alpha(0.0 if self._solo else (0.03 if e['is_band'] else 0.1))
 
-        # Draw thin white boundary lines over each segment of the selected bundle.
-        if bundle_id is not None:
-            for e in self._bundle_artists.get(bundle_id, []):
-                a = e['artist']
-                if e['is_band'] or not isinstance(a, MplLine2D):
-                    continue
-                x, y = a.get_xdata(orig=False), a.get_ydata(orig=False)
-                ol, = self.ax.plot(x, y, '-',
-                                   color='white', linewidth=2,
-                                   solid_capstyle='butt',
-                                   alpha=0.9, zorder=200,
-                                   picker=False)
-                self._highlight_overlays.append(ol)
+        # Draw thin white boundary lines over each selected bundle's segments.
+        if active_bids is not None:
+            for sel_bid in active_bids:
+                for e in self._bundle_artists.get(sel_bid, []):
+                    a = e['artist']
+                    if e['is_band'] or not isinstance(a, MplLine2D):
+                        continue
+                    x, y = a.get_xdata(orig=False), a.get_ydata(orig=False)
+                    ol, = self.ax.plot(x, y, '-',
+                                       color='white', linewidth=2,
+                                       solid_capstyle='butt',
+                                       alpha=0.9, zorder=200,
+                                       picker=False)
+                    self._highlight_overlays.append(ol)
 
-        if bundle_id is not None:
+        # Update title.
+        if hset and len(hset) == 2:
+            a_bid, b_bid = sorted(hset)
+            od = self._selected_overlap
+            layer_str = f" on M{od.layer}" if od else ""
+            self.ax.set_title(
+                f"BUDA — Overlap: Bundle {a_bid} × Bundle {b_bid}{layer_str}  "
+                f"(click overlap again or All Overlaps to deselect)",
+                fontsize=13)
+        elif bundle_id is not None:
             solo_hint = "  [Solo ON]" if self._solo else ""
             bname = self._bundle_name(bundle_id)
             nbits = self._bundle_bits(bundle_id)
@@ -570,6 +614,7 @@ class BudaVisualizer:
                 fontsize=13)
 
         self._redraw_bundle_list()
+        self._redraw_overlap_list()
         self.fig.canvas.draw_idle()
 
     def _step_bundle(self, delta):
@@ -742,10 +787,12 @@ class BudaVisualizer:
         self._redraw_bundle_list()
 
     def _on_scroll_event(self, event):
-        if self._ax_bundles is None or event.inaxes != self._ax_bundles:
-            return
-        delta = -3 if event.button == 'up' else 3
-        self._scroll_bundles(delta)
+        if self._ax_bundles is not None and event.inaxes == self._ax_bundles:
+            delta = -3 if event.button == 'up' else 3
+            self._scroll_bundles(delta)
+        elif self._ax_overlaps is not None and event.inaxes == self._ax_overlaps:
+            delta = -3 if event.button == 'up' else 3
+            self._scroll_overlaps(delta)
 
     def _on_bundle_toggle_all(self):
         """Toggle all bundles on (if any are off) or off (if all are on)."""
@@ -760,6 +807,101 @@ class BudaVisualizer:
                 '#e8e8e8' if new_state else '#cccccc')
         self._redraw_bundle_list()
         self._refresh_highlight()
+
+    # ------------------------------------------------------------------
+    # Overlap list panel
+    # ------------------------------------------------------------------
+
+    def _on_overlap_toggle_all(self):
+        """Clear the current overlap selection and return to normal view."""
+        self._highlighted_set  = set()
+        self._selected_overlap = None
+        self._highlighted      = None
+        self._refresh_highlight()
+
+    def _scroll_overlaps(self, delta):
+        n_vis      = self._overlap_list_n_visible()
+        max_scroll = max(0, len(self._overlap_entries) - n_vis)
+        self._overlap_scroll = max(0, min(max_scroll, self._overlap_scroll + delta))
+        self._redraw_overlap_list()
+
+    def _overlap_list_n_visible(self):
+        if self._ax_overlaps is None:
+            return 8
+        fig_h_in  = self.fig.get_figheight()
+        ax_h_frac = self._ax_overlaps.get_position().height
+        ax_h_in   = fig_h_in * ax_h_frac
+        row_h_in  = 0.145
+        return max(1, int(ax_h_in / row_h_in))
+
+    def _redraw_overlap_list(self):
+        ax = self._ax_overlaps
+        if ax is None:
+            return
+        ax.clear()
+        ax.set_axis_off()
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+
+        entries = self._overlap_entries
+        n_total = len(entries)
+
+        if n_total == 0:
+            ax.text(0.5, 0.5, "No overlaps", transform=ax.transAxes,
+                    fontsize=7, color='#888888', ha='center', va='center')
+            self.fig.canvas.draw_idle()
+            return
+
+        n_vis = self._overlap_list_n_visible()
+        for row in range(n_vis):
+            idx = self._overlap_scroll + row
+            if idx >= n_total:
+                break
+            od     = entries[idx]
+            y      = 1.0 - (row + 0.5) / n_vis
+            is_sel = (od is self._selected_overlap)
+
+            radio_char = '◉' if is_sel else '○'
+            txt_color  = '#cc0000' if is_sel else '#444444'
+            layer_lbl  = _LAYER_LABEL.get(od.layer, f'M{od.layer}')[:2]
+            label      = f"B{od.bid_a}×B{od.bid_b} {layer_lbl}"
+
+            ax.text(0.03, y, radio_char,
+                    transform=ax.transAxes,
+                    fontsize=7, color=txt_color,
+                    va='center', clip_on=True)
+            ax.text(0.20, y, label,
+                    transform=ax.transAxes,
+                    fontsize=7, color=txt_color,
+                    va='center', clip_on=True)
+
+        # Scrollbar thumb when list overflows.
+        if n_total > n_vis:
+            ax.add_patch(patches.Rectangle(
+                (0.91, 0.0), 0.07, 1.0,
+                transform=ax.transAxes,
+                linewidth=0, facecolor='#e8e8e8',
+                clip_on=True, zorder=1))
+            y1 = 1.0 - self._overlap_scroll / n_total
+            y0 = max(0.0, y1 - n_vis / n_total)
+            ax.add_patch(patches.Rectangle(
+                (0.91, y0), 0.07, y1 - y0,
+                transform=ax.transAxes,
+                linewidth=0.5, edgecolor='#888888',
+                facecolor='#ffaaaa',
+                clip_on=True, zorder=2))
+
+        self.fig.canvas.draw_idle()
+
+    def _on_overlap_list_click(self, event):
+        ax = self._ax_overlaps
+        if ax is None or event.ydata is None:
+            return
+        n_vis = self._overlap_list_n_visible()
+        row   = int((1.0 - event.ydata) * n_vis)
+        idx   = self._overlap_scroll + row
+        if 0 <= idx < len(self._overlap_entries):
+            self._set_overlap_highlight(self._overlap_entries[idx])
 
     # ------------------------------------------------------------------
 
@@ -903,6 +1045,7 @@ class BudaVisualizer:
 
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
+        self._nuts_result = nuts_result   # saved for overlap panel in show()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}
         band_alpha = 0.04
@@ -1041,6 +1184,13 @@ class BudaVisualizer:
         self._bid_list = sorted(self._bundle_artists.keys())
         self._bundle_visible = {bid: True for bid in self._bid_list}
 
+        # Build overlap entries sorted by layer → bid_a → bid_b.
+        if self._nuts_result is not None:
+            self._overlap_entries = sorted(
+                self._nuts_result.overlap_details,
+                key=lambda od: (od.layer, od.bid_a, od.bid_b)
+            )
+
         # Collect all layer IDs actually present in the drawn artists.
         seen_layers: set = set()
         for artists_list in self._bundle_artists.values():
@@ -1069,27 +1219,36 @@ class BudaVisualizer:
                    markerfacecolor='#FF00FF', markeredgecolor='k', label='Receivers'),
         ]
         self.ax.legend(handles=legend_handles, loc='upper right')
-
         self.ax.autoscale_view()
 
-        # Right panel starts at x=0.83; leave plot right edge at 0.81.
+        # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
         self.fig.subplots_adjust(bottom=0.09, right=0.81)
 
-        RX = 0.83   # right-panel left edge (figure fraction)
-        RW = 0.15   # right-panel width
+        RX, RW       = 0.83, 0.15
+        BTN_H        = 0.04
+        SCROLL_H     = 0.03
+        GAP          = 0.01
+        n_layers     = max(len(self._layer_ids), 1)
+        chk_h        = min(0.035 * n_layers + 0.04, 0.22)
 
-        # ── "All Layers" global toggle ──────────────────────────────────
-        ax_all_layers = self.fig.add_axes([RX, 0.90, RW, 0.04])
+        # Top-down allocation.  y tracks the top edge of the next widget.
+        y = 0.95
+
+        def _rect(h, gap=0):
+            nonlocal y
+            y -= gap + h
+            return [RX, y, RW, h]
+
+        # ── All Layers ──────────────────────────────────────────────────
+        ax_all_layers = self.fig.add_axes(_rect(BTN_H))
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
-        # ── Per-layer checkboxes — built dynamically from active layers ──
-        n_layers = max(len(self._layer_ids), 1)
-        chk_h = min(0.04 * n_layers + 0.04, 0.18)   # scale with count, cap at 0.18
-        ax_layers = self.fig.add_axes([RX, 0.78, RW, chk_h])
+        # ── Per-layer checkboxes ─────────────────────────────────────────
+        ax_layers = self.fig.add_axes(_rect(chk_h, GAP))
         ax_layers.set_title('Layers', fontsize=9, pad=4)
-        layer_labels  = [f'M{lid}' for lid in self._layer_ids]
-        layer_colors  = [_LAYER_COLOR.get(lid, '#888888') for lid in self._layer_ids]
+        layer_labels = [f'M{lid}' for lid in self._layer_ids]
+        layer_colors = [_LAYER_COLOR.get(lid, '#888888') for lid in self._layer_ids]
         self._chk_layers = CheckButtons(
             ax_layers,
             labels  = layer_labels,
@@ -1101,23 +1260,45 @@ class BudaVisualizer:
             lbl.set_fontsize(8)
         self._chk_layers.on_clicked(self._on_layer_toggle)
 
-        # ── "All Bundles" global toggle ──────────────────────────────────
-        ax_all_bundles = self.fig.add_axes([RX, 0.73, RW, 0.04])
+        # ── All Bundles ──────────────────────────────────────────────────
+        ax_all_bundles = self.fig.add_axes(_rect(BTN_H, GAP))
         self._btn_all_bundles = Button(ax_all_bundles, '☑ All Bundles', color='#e8e8e8')
         self._btn_all_bundles.on_clicked(lambda _: self._on_bundle_toggle_all())
 
-        # ── Bundle list: scroll ▲, list area, scroll ▼ ──────────────────
-        ax_bscroll_up = self.fig.add_axes([RX, 0.68, RW, 0.04])
+        # ── Bundle list: ▲ · list · ▼ ───────────────────────────────────
+        ax_bscroll_up = self.fig.add_axes(_rect(SCROLL_H, GAP))
         btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
         btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles(-5))
 
-        self._ax_bundles = self.fig.add_axes([RX, 0.14, RW, 0.53])
+        self._ax_bundles = self.fig.add_axes(_rect(0.18))
         self._ax_bundles.set_facecolor('#fafafa')
         self._redraw_bundle_list()
 
-        ax_bscroll_dn = self.fig.add_axes([RX, 0.09, RW, 0.04])
+        ax_bscroll_dn = self.fig.add_axes(_rect(SCROLL_H))
         btn_bscroll_dn = Button(ax_bscroll_dn, '▼', color='#f0f0f0')
         btn_bscroll_dn.on_clicked(lambda _: self._scroll_bundles(+5))
+
+        # ── All Overlaps ─────────────────────────────────────────────────
+        n_ov = len(self._overlap_entries)
+        ov_label = f'Overlaps ({n_ov})' if n_ov else 'No Overlaps'
+        ax_all_overlaps = self.fig.add_axes(_rect(BTN_H, GAP))
+        self._btn_all_overlaps = Button(ax_all_overlaps, ov_label, color='#e8e8e8')
+        self._btn_all_overlaps.on_clicked(lambda _: self._on_overlap_toggle_all())
+
+        # ── Overlap list: ▲ · list · ▼ ──────────────────────────────────
+        ax_oscroll_up = self.fig.add_axes(_rect(SCROLL_H, GAP))
+        btn_oscroll_up = Button(ax_oscroll_up, '▲', color='#f0f0f0')
+        btn_oscroll_up.on_clicked(lambda _: self._scroll_overlaps(-5))
+
+        # Give remaining space (down to SCROLL_H + 0.09 margin) to the list.
+        overlap_list_h = max(y - SCROLL_H - 0.09, 0.05)
+        self._ax_overlaps = self.fig.add_axes(_rect(overlap_list_h))
+        self._ax_overlaps.set_facecolor('#fff8f8')
+        self._redraw_overlap_list()
+
+        ax_oscroll_dn = self.fig.add_axes(_rect(SCROLL_H))
+        btn_oscroll_dn = Button(ax_oscroll_dn, '▼', color='#f0f0f0')
+        btn_oscroll_dn.on_clicked(lambda _: self._scroll_overlaps(+5))
 
         self.fig.canvas.mpl_connect('scroll_event', self._on_scroll_event)
 
