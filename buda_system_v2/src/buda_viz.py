@@ -427,6 +427,7 @@ class BudaVisualizer:
         self._highlighted       = None
         self._highlighted_set   = set()   # multi-highlight (overlap pair selection)
         self._selected_overlap  = None    # OverlapDetail currently selected
+        self._overlap_state     = 0       # 0=none 1=both 2=A-only 3=B-only
         self._highlight_overlays = []   # thin boundary lines added on selection
         self._solo           = False
         self._layer_visible  = {}   # populated in show()
@@ -510,18 +511,39 @@ class BudaVisualizer:
         self._highlighted      = bundle_id
         self._highlighted_set  = set()
         self._selected_overlap = None
+        self._overlap_state    = 0
         self._refresh_highlight()
 
     def _set_overlap_highlight(self, od):
-        """Select or deselect an overlap pair, highlighting both bundles."""
+        """Cycle through 4 states on repeated clicks of the same overlap row.
+
+        State 1 — both bundles glow, everything else dims
+        State 2 — bid_a (first)  glows, bid_b and everything else dims
+        State 3 — bid_b (second) glows, bid_a and everything else dims
+        State 0 — cleared (back to normal)
+        """
         if self._selected_overlap is od:
+            # Advance the cycle: 1→2→3→0
+            new_state = (self._overlap_state + 1) % 4
+        else:
+            # New row selected → always start at state 1
+            new_state = 1
+
+        self._overlap_state    = new_state
+        self._highlighted      = None
+
+        if new_state == 0:
             self._highlighted_set  = set()
             self._selected_overlap = None
-            self._highlighted      = None
         else:
-            self._highlighted      = None
-            self._highlighted_set  = {od.bid_a, od.bid_b}
             self._selected_overlap = od
+            if new_state == 1:
+                self._highlighted_set = {od.bid_a, od.bid_b}
+            elif new_state == 2:
+                self._highlighted_set = {od.bid_a}
+            else:  # state 3
+                self._highlighted_set = {od.bid_b}
+
         self._refresh_highlight()
 
     def _refresh_highlight(self):
@@ -590,13 +612,17 @@ class BudaVisualizer:
                     self._highlight_overlays.append(ol)
 
         # Update title.
-        if hset and len(hset) == 2:
-            a_bid, b_bid = sorted(hset)
-            od = self._selected_overlap
-            layer_str = f" on M{od.layer}" if od else ""
+        od = self._selected_overlap
+        if od is not None and self._overlap_state > 0:
+            layer_str = f" M{od.layer}"
+            if self._overlap_state == 1:
+                msg = f"Bundle {od.bid_a} × Bundle {od.bid_b}{layer_str} — both highlighted"
+            elif self._overlap_state == 2:
+                msg = f"Bundle {od.bid_a} highlighted · Bundle {od.bid_b} dimmed{layer_str}"
+            else:
+                msg = f"Bundle {od.bid_a} dimmed · Bundle {od.bid_b} highlighted{layer_str}"
             self.ax.set_title(
-                f"BUDA — Overlap: Bundle {a_bid} × Bundle {b_bid}{layer_str}  "
-                f"(click overlap again or All Overlaps to deselect)",
+                f"BUDA — Overlap: {msg}  (click row to cycle, All Overlaps to clear)",
                 fontsize=13)
         elif bundle_id is not None:
             solo_hint = "  [Solo ON]" if self._solo else ""
@@ -817,6 +843,7 @@ class BudaVisualizer:
         self._highlighted_set  = set()
         self._selected_overlap = None
         self._highlighted      = None
+        self._overlap_state    = 0
         self._refresh_highlight()
 
     def _scroll_overlaps(self, delta):
