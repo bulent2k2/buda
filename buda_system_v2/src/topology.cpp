@@ -557,6 +557,23 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
             }
             if (!changed) break;
         }
+
+        // Post-slide pull-to-face: a pass-through block may have been shadowed
+        // at the extreme by a stub block that was subsequently slid inward,
+        // leaving the pass-through as the new extreme at its centre position.
+        // Snap any such block to its face now.
+        for (int iter2 = 0; iter2 < n; ++iter2) {
+            int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
+            int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
+            bool changed = false;
+            if (!has_stub[lo] && att_x[lo] != blocks[lo].x2) {
+                att_x[lo] = blocks[lo].x2; changed = true;
+            }
+            if (!has_stub[hi] && att_x[hi] != blocks[hi].x1) {
+                att_x[hi] = blocks[hi].x1; changed = true;
+            }
+            if (!changed) break;
+        }
     }
 
     // Spine extent covers ALL blocks: stubs define their own connection points, and
@@ -659,6 +676,20 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                 int margin = std::max(1, (int)(0.1 * (blocks[hi].y2 - blocks[hi].y1)));
                 int target = blocks[hi].y1 + margin;
                 if (target < att_y[hi]) { att_y[hi] = target; changed = true; }
+            }
+            if (!changed) break;
+        }
+
+        // Post-slide pull-to-face (symmetric to add_trunk_h).
+        for (int iter2 = 0; iter2 < n; ++iter2) {
+            int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
+            int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
+            bool changed = false;
+            if (!has_stub[lo] && att_y[lo] != blocks[lo].y2) {
+                att_y[lo] = blocks[lo].y2; changed = true;
+            }
+            if (!has_stub[hi] && att_y[hi] != blocks[hi].y1) {
+                att_y[hi] = blocks[hi].y1; changed = true;
             }
             if (!changed) break;
         }
