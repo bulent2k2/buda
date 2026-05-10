@@ -5,6 +5,36 @@ import sys
 import interconnect
 from buda_viz import BudaVisualizer, TopologyExplorer
 
+
+class _TeeStream:
+    """Write to two streams simultaneously.
+
+    Used to mirror sys.stdout/sys.stderr to a flow-log file so that all
+    Python-level print() output is preserved alongside the overlap log.
+
+    Note: C++ extensions write directly to fd 1 and are NOT captured here;
+    their key metrics are mirrored into the nuts log from Python data instead.
+    """
+    def __init__(self, primary, secondary):
+        self._primary   = primary
+        self._secondary = secondary
+
+    def write(self, data):
+        n = self._primary.write(data)
+        self._secondary.write(data)
+        return n
+
+    def flush(self):
+        self._primary.flush()
+        self._secondary.flush()
+
+    def isatty(self):
+        return self._primary.isatty()
+
+    def fileno(self):
+        # Return primary's fd so C extensions (pybind11) still reach the terminal.
+        return self._primary.fileno()
+
 class BudaSession:
     def __init__(self):
         self.fp = interconnect.Floorplan()
@@ -83,15 +113,18 @@ class BudaSession:
             names[lid] = name
         return names
 
-    def _write_nuts_log(self, layer_names=None, append=False, rerun_layer_name=None):
+    def _write_nuts_log(self, layer_names=None, append=False, rerun_layer_name=None,
+                        extra_lines: list[str] | None = None):
         """Write (or append to) the per-overlap log file alongside the .buda script.
 
         File: <script_stem>_nuts.log  (or nuts.log if no script path).
-        Each overlap is reported with its two segments, the overlap rectangle
-        (routing-direction span and perpendicular band), and the overlap area.
+        Mirrors key [NUTS] console messages then lists per-overlap detail.
 
-        append=True  — append a re-run section instead of overwriting.
-        rerun_layer_name — layer name shown in the re-run header (append mode only).
+        append=True       — append a re-run section instead of overwriting.
+        rerun_layer_name  — label shown in the re-run header (append mode only).
+        extra_lines       — additional lines (e.g. [Planner] messages) written
+                            before the NUTS summary, so the log stays in the
+                            same order as the console output.
         """
         if self.nuts_result is None:
             return
@@ -117,6 +150,10 @@ class BudaSession:
                 lname = layer_names.get(seg.layer_hint, f"L{seg.layer_hint}")
                 seg_label[(bid, si)] = f"B{bid}.{lname}[{si}]"
 
+        # Compute layer count from segments (mirrors C++ "[NUTS] N segments placed across K layer(s)")
+        layer_ids_used = {s.layer for s in self.nuts_result.segments}
+        n_layers = len(layer_ids_used)
+
         from datetime import datetime
         open_mode = 'a' if append else 'w'
         with open(log_path, open_mode) as f:
@@ -131,10 +168,21 @@ class BudaSession:
                 f.write(f"{'='*60}\n\n")
             else:
                 f.write(f"NUTS Overlap Report — {script_name}\n")
-                f.write(f"Generated : {datetime.now().isoformat(timespec='seconds')}\n")
-            f.write(f"Segments  : {len(self.nuts_result.segments)}\n")
-            f.write(f"Violations: {self.nuts_result.num_violations}\n")
+                f.write(f"Generated : {datetime.now().isoformat(timespec='seconds')}\n\n")
+
+            # Mirror any Planner / caller messages that preceded this NUTS run.
+            if extra_lines:
+                for line in extra_lines:
+                    f.write(line + "\n")
+                f.write("\n")
+
+            # Mirror the C++ [NUTS] summary line.
             total = self.nuts_result.num_overlaps
+            f.write(f"[NUTS] {len(self.nuts_result.segments)} segments placed across "
+                    f"{n_layers} layer(s). "
+                    f"Interval violations: {self.nuts_result.num_violations}, "
+                    f"Track overlaps: {total}.\n")
+
             layer_summary = '  '.join(
                 f"{layer_names.get(lid, f'L{lid}')}={cnt}"
                 for lid, cnt in sorted(per_layer.items())
@@ -244,8 +292,9 @@ class BudaSession:
 
         lo_name = layer_names.get(lo_v, f"L{lo_v}")
         hi_name = layer_names.get(hi_v, f"L{hi_v}")
-        print(f"[Planner] post_nuts: short<{short_thresh:.0f}→{lo_name} ({short_count}b), "
-              f"medium ({medium_count}b), long>{long_thresh:.0f}→{hi_name} ({long_count}b)")
+        planner_msg = (f"[Planner] post_nuts: short<{short_thresh:.0f}→{lo_name} ({short_count}b), "
+                       f"medium ({medium_count}b), long>{long_thresh:.0f}→{hi_name} ({long_count}b)")
+        print(planner_msg)
 
         # Re-run full NUTS with the updated layer assignments.
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
@@ -254,18 +303,8 @@ class BudaSession:
         self.nuts_result = nuts.run(self.bundles)
 
         layer_names = self._make_layer_names()
-        per_layer = self.nuts_result.overlaps_per_layer
-        if per_layer:
-            detail = ', '.join(
-                f"{layer_names.get(lid, f'L{lid}')}={cnt}"
-                for lid, cnt in sorted(per_layer.items())
-            )
-            overlap_str = f"{self.nuts_result.num_overlaps} track overlaps ({detail})"
-        else:
-            overlap_str = "0 track overlaps"
-        print(f"[Planner] post_nuts NUTS: {len(self.nuts_result.segments)} segments "
-              f"({self.nuts_result.num_violations} violations, {overlap_str}).")
-        self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts")
+        self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
+                             extra_lines=[planner_msg])
 
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
@@ -406,20 +445,17 @@ class BudaSession:
                 return
             nuts = interconnect.NUTSEngine(self.fp)
             nuts.set_track_pitch(self._nuts_pitch)
+            # Count segments on this layer before re-solve (mirrors C++ [NUTS] rerun line).
+            n_layer_segs = sum(1 for s in self.nuts_result.segments if s.layer == layer_id)
             self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
             layer_names = self._make_layer_names()
-            per_layer = self.nuts_result.overlaps_per_layer
-            if per_layer:
-                detail = ', '.join(
-                    f"{layer_names.get(lid, f'L{lid}')}={cnt}"
-                    for lid, cnt in sorted(per_layer.items())
-                )
-                overlap_str = f"{self.nuts_result.num_overlaps} track overlaps ({detail})"
-            else:
-                overlap_str = "0 track overlaps"
-            print(f"NUTS re-solved {layer_name}: "
-                  f"{self.nuts_result.num_violations} violations, {overlap_str}.")
-            self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name)
+            rerun_msg = (f"[NUTS] rerun_layer({layer_id}={layer_name}): "
+                         f"{n_layer_segs} segment(s) re-placed. "
+                         f"Violations: {self.nuts_result.num_violations}, "
+                         f"Overlaps: {self.nuts_result.num_overlaps}.")
+            print(rerun_msg)
+            self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name,
+                                 extra_lines=[rerun_msg])
         elif cmd == "visualize_topologies":
             # Usage:
             #   visualize_topologies <hint>         — first matching bundle
@@ -479,6 +515,18 @@ def main():
         if not os.path.exists(script) and not script.endswith('.buda'):
             script = script + '.buda'
         session.script_path = os.path.abspath(script)
+
+        # Install TeeStream so all Python print() output is mirrored to a flow log.
+        # C++ extensions write directly to fd 1 (terminal) and are NOT captured here;
+        # their key [NUTS] metrics are mirrored into the nuts log from Python data.
+        flow_log_path = os.path.splitext(session.script_path)[0] + '_flow.log'
+        try:
+            _flow_log_file = open(flow_log_path, 'w', buffering=1)
+            sys.stdout = _TeeStream(sys.stdout, _flow_log_file)
+            sys.stderr = _TeeStream(sys.stderr, _flow_log_file)
+        except OSError as e:
+            print(f"Warning: could not open flow log {flow_log_path}: {e}")
+
         session.do_command(f"source {script}")
 
 if __name__ == "__main__":
