@@ -632,9 +632,9 @@ class BudaVisualizer:
             solo_hint = "  [Solo ON]" if self._solo else ""
             bname = self._bundle_name(bundle_id)
             nbits = self._bundle_bits(bundle_id)
-            bits_str = f"  {nbits}-bit" if nbits > 0 else ""
+            bits_str = f" ({nbits} bits)" if nbits > 0 else ""
             self.ax.set_title(
-                f"BUDA — Bundle {bundle_id} ({bname}){bits_str} selected{solo_hint}  "
+                f"BUDA — B{bundle_id} {bname}{bits_str} selected{solo_hint}  "
                 f"(click again or click background to deselect)",
                 fontsize=13)
         else:
@@ -821,13 +821,14 @@ class BudaVisualizer:
             # y coordinate: top row at y≈1, bottom row at y≈0.
             y = 1.0 - (row + 0.5) / n_vis
 
-            # Build label: "{name} B{bid} ({nbits}b)", truncated to fit.
+            # Build label: "B{bid} {name} ({nbits} bits)", truncated to fit.
             name  = self._bundle_name(bid)
             nbits = self._bundle_bits(bid)
-            bits_suffix = f" ({nbits}b)" if nbits > 0 else ""
-            full  = f"{name} B{bid}{bits_suffix}"
-            if len(full) > 20:
-                full = name[:max(4, 20 - len(f" B{bid}{bits_suffix}"))] + '…' + f" B{bid}{bits_suffix}"
+            bits_suffix = f" ({nbits} bits)" if nbits > 0 else ""
+            prefix = f"B{bid} "
+            max_name = max(4, 20 - len(prefix) - len(bits_suffix))
+            name_part = name if len(name) <= max_name else name[:max_name - 1] + '…'
+            full  = f"{prefix}{name_part}{bits_suffix}"
 
             # Radio indicator (left, for selection) and checkbox (for visibility).
             radio_char = '◉' if bid == self._highlighted else '○'
