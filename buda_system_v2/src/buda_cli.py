@@ -306,6 +306,27 @@ class BudaSession:
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
                              extra_lines=[planner_msg])
 
+    def _rerun_nuts_layer(self, layer_id: int):
+        """Re-solve one layer with NUTS and log the result.
+
+        Returns the updated NUTSResult (also stored in self.nuts_result).
+        Used by both the run_nuts_on_layer command and the visualizer ↺ button.
+        """
+        layer_names = self._make_layer_names()
+        layer_name  = layer_names.get(layer_id, f"L{layer_id}")
+        nuts = interconnect.NUTSEngine(self.fp)
+        nuts.set_track_pitch(self._nuts_pitch)
+        n_layer_segs = sum(1 for s in self.nuts_result.segments if s.layer == layer_id)
+        self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
+        rerun_msg = (f"[NUTS] rerun_layer({layer_id}={layer_name}): "
+                     f"{n_layer_segs} segment(s) re-placed. "
+                     f"Violations: {self.nuts_result.num_violations}, "
+                     f"Overlaps: {self.nuts_result.num_overlaps}.")
+        print(rerun_msg)
+        self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name,
+                             extra_lines=[rerun_msg])
+        return self.nuts_result
+
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
         if not parts or parts[0].startswith('#'): return
@@ -443,19 +464,7 @@ class BudaSession:
             if self.nuts_result is None:
                 print("Error: run_nuts must be called before run_nuts_on_layer")
                 return
-            nuts = interconnect.NUTSEngine(self.fp)
-            nuts.set_track_pitch(self._nuts_pitch)
-            # Count segments on this layer before re-solve (mirrors C++ [NUTS] rerun line).
-            n_layer_segs = sum(1 for s in self.nuts_result.segments if s.layer == layer_id)
-            self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
-            layer_names = self._make_layer_names()
-            rerun_msg = (f"[NUTS] rerun_layer({layer_id}={layer_name}): "
-                         f"{n_layer_segs} segment(s) re-placed. "
-                         f"Violations: {self.nuts_result.num_violations}, "
-                         f"Overlaps: {self.nuts_result.num_overlaps}.")
-            print(rerun_msg)
-            self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name,
-                                 extra_lines=[rerun_msg])
+            self._rerun_nuts_layer(layer_id)
         elif cmd == "visualize_topologies":
             # Usage:
             #   visualize_topologies <hint>         — first matching bundle
@@ -485,8 +494,10 @@ class BudaSession:
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path()).show()
         elif cmd == "visualize":
+            rerun_fn = self._rerun_nuts_layer if self.nuts_result is not None else None
             viz = BudaVisualizer(self.fp, self.bundles,
-                                 sidecar_path=self.script_path)
+                                 sidecar_path=self.script_path,
+                                 rerun_layer_fn=rerun_fn)
             viz.draw_blocks()
             if self.planner is not None:
                 cuts = self.planner.get_cuts()

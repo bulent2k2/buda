@@ -5,7 +5,7 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib.widgets import Button, CheckButtons
+from matplotlib.widgets import Button
 
 import interconnect as ic
 
@@ -408,7 +408,7 @@ class TopologyExplorer:
 
 
 class BudaVisualizer:
-    def __init__(self, floorplan, bundles, sidecar_path=None):
+    def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None):
         self.fp           = floorplan
         self.bundles      = bundles
         self._selections_path = (
@@ -439,15 +439,15 @@ class BudaVisualizer:
         self._btn_all_layers = None
         self._btn_all_bundles= None
         self._btn_all_overlaps = None
-        self._chk_layers     = None
+        self._ax_layers      = None   # custom layer panel (replaces CheckButtons)
         self._ax_bundles     = None
         self._ax_overlaps    = None
+        self._rerun_layer_fn = rerun_layer_fn   # (layer_id: int) -> NUTSResult | None
         self._overlap_entries = []   # sorted list of OverlapDetail from nuts_result
         self._overlap_scroll = 0
         self._nuts_result    = None  # stored in draw_nuts_tracks for the overlap panel
         self._topo_explorer  = None
         self._pick_happened  = False
-        self._in_bulk_layer_toggle = False  # suppress layer callbacks during bulk update
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
@@ -477,6 +477,10 @@ class BudaVisualizer:
 
     def _on_click(self, event):
         # Route panel clicks before doing anything else.
+        if self._ax_layers is not None and event.inaxes == self._ax_layers:
+            self._on_layer_list_click(event)
+            self._pick_happened = False
+            return
         if self._ax_bundles is not None and event.inaxes == self._ax_bundles:
             self._on_bundle_list_click(event)
             self._pick_happened = False
@@ -665,44 +669,118 @@ class BudaVisualizer:
         self._refresh_highlight()
 
     # ------------------------------------------------------------------
-    # Layer toggle
+    # Layer panel (custom, replaces CheckButtons)
     # ------------------------------------------------------------------
 
-    def _on_layer_toggle(self, label):
-        if self._in_bulk_layer_toggle:
-            return
-        # Labels are of the form 'M3', 'M4', etc.
-        try:
-            layer = int(label[1:])
-        except (ValueError, IndexError):
-            layer = None
-        if layer is not None:
-            self._layer_visible[layer] = not self._layer_visible.get(layer, True)
+    def _on_layer_toggle(self, lid):
+        self._layer_visible[lid] = not self._layer_visible.get(lid, True)
+        self._redraw_layer_list()
         self._refresh_highlight()
 
     def _on_layer_toggle_all(self):
         """Toggle all layers on (if any are off) or off (if all are on)."""
         all_on    = all(self._layer_visible.values())
         new_state = not all_on
-
-        # Bulk-update: suppress the per-layer checkbox callback.
-        self._in_bulk_layer_toggle = True
-        if self._chk_layers is not None:
-            statuses = self._chk_layers.get_status()
-            for i, lid in enumerate(self._layer_ids):
-                if statuses[i] != new_state:
-                    self._layer_visible[lid] = new_state
-                    self._chk_layers.set_active(i)   # syncs visual only
-        else:
-            for lid in self._layer_visible:
-                self._layer_visible[lid] = new_state
-        self._in_bulk_layer_toggle = False
-
+        for lid in self._layer_visible:
+            self._layer_visible[lid] = new_state
         if self._btn_all_layers is not None:
             self._btn_all_layers.label.set_text(
                 '☑ All Layers' if new_state else '☐ All Layers')
             self._btn_all_layers.ax.set_facecolor(
                 '#e8e8e8' if new_state else '#cccccc')
+        self._redraw_layer_list()
+        self._refresh_highlight()
+
+    def _redraw_layer_list(self):
+        ax = self._ax_layers
+        if ax is None:
+            return
+        ax.clear()
+        ax.set_axis_off()
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+
+        n = len(self._layer_ids)
+        if n == 0:
+            self.fig.canvas.draw_idle()
+            return
+
+        has_rerun = self._rerun_layer_fn is not None
+        for row, lid in enumerate(self._layer_ids):
+            y     = 1.0 - (row + 0.5) / n
+            on    = self._layer_visible.get(lid, True)
+            col   = _LAYER_COLOR.get(lid, '#888888')
+            vis_char  = '☑' if on else '☐'
+            txt_color = col if on else '#bbbbbb'
+
+            ax.text(0.04, y, vis_char,
+                    transform=ax.transAxes, fontsize=8, color=txt_color,
+                    va='center', clip_on=True)
+            ax.text(0.22, y, f'M{lid}',
+                    transform=ax.transAxes, fontsize=8, color=txt_color,
+                    va='center', clip_on=True, fontweight='bold')
+
+            if has_rerun:
+                ax.text(0.80, y, '↺',
+                        transform=ax.transAxes, fontsize=9,
+                        color='#555555', va='center', ha='center',
+                        clip_on=True,
+                        bbox=dict(boxstyle='round,pad=0.25',
+                                  fc='#eeeeee', ec='#aaaaaa', lw=0.6))
+
+        self.fig.canvas.draw_idle()
+
+    def _on_layer_list_click(self, event):
+        ax = self._ax_layers
+        if ax is None or event.ydata is None or event.xdata is None:
+            return
+        n = len(self._layer_ids)
+        if n == 0:
+            return
+        row = int((1.0 - event.ydata) * n)
+        if not (0 <= row < n):
+            return
+        lid = self._layer_ids[row]
+        if event.xdata >= 0.60 and self._rerun_layer_fn is not None:
+            # Rerun button area → re-solve this layer and refresh the view.
+            result = self._rerun_layer_fn(lid)
+            if result is not None:
+                self._redraw_nuts_tracks(result)
+        else:
+            # Checkbox area → toggle layer visibility.
+            self._on_layer_toggle(lid)
+
+    def _redraw_nuts_tracks(self, nuts_result):
+        """Remove all NUTS track artists and redraw from an updated result."""
+        # Detach every registered artist from the axes.
+        for entries in self._bundle_artists.values():
+            for e in entries:
+                try: e['artist'].remove()
+                except Exception: pass
+        for art in self._highlight_overlays:
+            try: art.remove()
+            except Exception: pass
+        self._highlight_overlays.clear()
+        self._bundle_artists.clear()
+
+        # Redraw segments at new track positions.
+        self.draw_nuts_tracks(nuts_result)
+
+        # Rebuild overlap list.
+        self._overlap_entries = sorted(
+            nuts_result.overlap_details,
+            key=lambda od: (od.layer, od.bid_a, od.bid_b)
+        )
+        n_ov = len(self._overlap_entries)
+        if self._btn_all_overlaps is not None:
+            self._btn_all_overlaps.label.set_text(
+                f'Overlaps ({n_ov})' if n_ov else 'No Overlaps')
+
+        # Clear overlap selection — geometry has changed.
+        self._highlighted_set  = set()
+        self._selected_overlap = None
+        self._overlap_state    = 0
+
         self._refresh_highlight()
 
     # ------------------------------------------------------------------
@@ -1271,20 +1349,10 @@ class BudaVisualizer:
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
-        # ── Per-layer checkboxes ─────────────────────────────────────────
-        ax_layers = self.fig.add_axes(_rect(chk_h, GAP))
-        layer_labels = [f'M{lid}' for lid in self._layer_ids]
-        layer_colors = [_LAYER_COLOR.get(lid, '#888888') for lid in self._layer_ids]
-        self._chk_layers = CheckButtons(
-            ax_layers,
-            labels  = layer_labels,
-            actives = [True] * len(self._layer_ids),
-        )
-        self._chk_layers.set_check_props({'facecolor': layer_colors})
-        self._chk_layers.set_label_props({'color': layer_colors})
-        for lbl in self._chk_layers.labels:
-            lbl.set_fontsize(8)
-        self._chk_layers.on_clicked(self._on_layer_toggle)
+        # ── Per-layer custom panel ───────────────────────────────────────
+        self._ax_layers = self.fig.add_axes(_rect(chk_h, GAP))
+        self._ax_layers.set_facecolor('#f8f8f8')
+        self._redraw_layer_list()
 
         # ── All Bundles ──────────────────────────────────────────────────
         ax_all_bundles = self.fig.add_axes(_rect(BTN_H, GAP))
