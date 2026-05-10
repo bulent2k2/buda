@@ -1246,7 +1246,6 @@ class BudaVisualizer:
 
         # ── Per-layer checkboxes ─────────────────────────────────────────
         ax_layers = self.fig.add_axes(_rect(chk_h, GAP))
-        ax_layers.set_title('Layers', fontsize=9, pad=4)
         layer_labels = [f'M{lid}' for lid in self._layer_ids]
         layer_colors = [_LAYER_COLOR.get(lid, '#888888') for lid in self._layer_ids]
         self._chk_layers = CheckButtons(
