@@ -35,7 +35,8 @@ python3 buda_cli.py comprehensive_demo.buda
 | `add_block <name> <x1> <y1> <x2> <y2>` | setup | Place a floorplan block |
 | `add_net <name> <driver_pin> <receiver_pins_csv>` | setup | Add a net to the netlist |
 | `run_bundler <STRICT\|CONVERGENT>` | 1 | Group nets into buses |
-| `generate_topologies_for_bundle <hint> <src> <dst>` | 2 | Generate L/Z/U candidates |
+| `generate_topologies [center_mode] [double_detour]` | 2 | Generate candidates for all bundles (src/dst auto-derived from netlist) |
+| `generate_topologies_for_bundle <hint> <src> <dst>` | 2 | Generate L/Z/U candidates for a specific bundle |
 | `run_planner <iterations>` | 3 | Layer assign + topology select |
 | `run_nuts [pitch]` | 4 | Abstract track placement |
 | `def_track_pattern <layer_id> <origin> <type> <w> <sp> ...` | 8 setup | Define repeating track pattern |

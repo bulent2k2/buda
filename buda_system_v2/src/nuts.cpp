@@ -21,11 +21,16 @@ static int find_grid_cell(const std::vector<int>& grid, int v) {
 }
 
 // Internal type: records how segment S's span must follow T's track position.
-// lo_end=true  → the lo end of S is near the junction; extend span_lo toward T.
-// lo_end=false → the hi end of S is near the junction; extend span_hi toward T.
+// lo_end=true    → the lo end of S is near the junction; adjust span_lo toward T.
+// lo_end=false   → the hi end of S is near the junction; adjust span_hi toward T.
+// is_endpoint    → the junction is at an *endpoint* of S (stub tip meets trunk).
+//                  Endpoint connections use SET semantics (span can shrink to
+//                  trunk centre, fixing Z_VHV left-stub overextension).
+//                  Interior (T-junction) connections use extend-only semantics so
+//                  a long spine is never truncated by a hanging stub's position.
 // The lo/hi decision is locked in at map-build time using the *nominal* span so
 // that repeated rerun_layer calls cannot drift the decision as spans grow.
-struct SpanAdjConn { int src_bid, src_si; bool lo_end; };
+struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
 
 // ---------------------------------------------------------------------------
 // Shared map builders
@@ -86,8 +91,12 @@ static void build_nuts_maps(
                 // decision stays stable across repeated rerun_layer calls even after
                 // prior span adjustments have moved span_lo or span_hi.
                 double mid = 0.5 * (cs.along_lo + cs.along_hi);
-                bool lo_end = (conn.at_pos <= mid);
-                rev_conn_map[t_key].push_back({ bid, si, lo_end });
+                bool lo_end   = (conn.at_pos <= mid);
+                // is_endpoint: junction is at one of S's endpoints (not interior).
+                // Endpoint → SET semantics; interior T-junction → extend-only.
+                bool is_ep    = (conn.at_pos == cs.along_lo ||
+                                 conn.at_pos == cs.along_hi);
+                rev_conn_map[t_key].push_back({ bid, si, lo_end, is_ep });
             }
 
             std::vector<double> targets;
@@ -169,11 +178,12 @@ static void do_span_adjustments(
     bool                                                             only_unplaced = false)
 {
     // ── Pass 1: collect adjustment requests per target segment ──────────
-    // We extend connected stubs only to the trunk's centre (track_position),
-    // not to its far edge (hi_edge / lo_edge).  Using the far edge would push
-    // the stub's span_hi/lo through the full width of the trunk, causing the
-    // stub to visually overlap the far half of the trunk band.
-    struct AdjReq { double center; bool lo_end; };
+    // Stubs snap to the trunk's centre (track_position), not its far edge,
+    // so the stub band doesn't visually penetrate past the trunk centre.
+    // is_endpoint distinguishes stub-tip connections (SET semantics: span can
+    // shrink to trunk centre) from interior T-junction connections on a spine
+    // (extend-only: the spine must never be truncated by a stub's position).
+    struct AdjReq { double center; bool lo_end; bool is_endpoint; };
     std::map<std::pair<int,int>, std::vector<AdjReq>> adj_map;
 
     for (const TrackSegment* ts : layer_segs) {
@@ -186,7 +196,8 @@ static void do_span_adjustments(
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
             if (only_unplaced && other->placed) continue;
-            adj_map[{sc.src_bid, sc.src_si}].push_back({ts->track_position, sc.lo_end});
+            adj_map[{sc.src_bid, sc.src_si}].push_back(
+                {ts->track_position, sc.lo_end, sc.is_endpoint});
         }
     }
 
@@ -199,26 +210,34 @@ static void do_span_adjustments(
         const double orig_lo = other->span_lo;
         const double orig_hi = other->span_hi;
 
-        double new_lo = orig_hi;   // pos-INF sentinel: decreases via std::min
-        double new_hi = orig_lo;   // neg-INF sentinel: increases via std::max
+        // Collect endpoint and interior requests separately.
+        double lo_ep  = orig_hi, lo_int = orig_hi;   // sentinels: decrease via min
+        double hi_ep  = orig_lo, hi_int = orig_lo;   // sentinels: increase via max
+        bool has_lo_ep = false, has_lo_int = false;
+        bool has_hi_ep = false, has_hi_int = false;
 
         for (const auto& req : reqs) {
-            if (req.lo_end)
-                new_lo = std::min(new_lo, req.center);
-            else
-                new_hi = std::max(new_hi, req.center);
+            if (req.lo_end) {
+                if (req.is_endpoint) { lo_ep  = std::min(lo_ep,  req.center); has_lo_ep  = true; }
+                else                 { lo_int = std::min(lo_int, req.center); has_lo_int = true; }
+            } else {
+                if (req.is_endpoint) { hi_ep  = std::max(hi_ep,  req.center); has_hi_ep  = true; }
+                else                 { hi_int = std::max(hi_int, req.center); has_hi_int = true; }
+            }
         }
 
-        // SET the stub endpoint to the trunk's centre.  The trunk may have been
-        // placed below the nominal y_cut (interval top), so the left stub's
-        // span_hi can decrease from y_cut to track_position.  Using max/min
-        // (extend-only) broke that case: span_hi would stay at y_cut even when
-        // the trunk moved inward.  All current topologies use end-to-end
-        // connections (no interior T-junctions), so SET semantics are safe.
-        if (new_lo < orig_hi)   // at least one lo-end connection found
-            other->span_lo = new_lo;
-        if (new_hi > orig_lo)   // at least one hi-end connection found
-            other->span_hi = new_hi;
+        double final_lo = orig_lo, final_hi = orig_hi;
+
+        // Endpoint connections: SET to trunk centre (may shrink or extend).
+        if (has_lo_ep) final_lo = lo_ep;
+        if (has_hi_ep) final_hi = hi_ep;
+
+        // Interior T-junction connections: extend-only (spine must not shrink).
+        if (has_lo_int) final_lo = std::min(final_lo, lo_int);
+        if (has_hi_int) final_hi = std::max(final_hi, hi_int);
+
+        other->span_lo = final_lo;
+        other->span_hi = final_hi;
     }
 }
 

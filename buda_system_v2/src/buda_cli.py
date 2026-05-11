@@ -45,6 +45,7 @@ class BudaSession:
         self.bundles = []
         self.nuts_result = None
         self._layer_overheads = {}   # layer_id -> overhead_percent
+        self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
         self._nuts_pitch = 1.0       # last track pitch used by run_nuts
         self.script_path = None      # set when a .buda script is sourced
@@ -488,7 +489,13 @@ class BudaSession:
         if cmd == "add_block":
             self.fp.add_block(args[0], int(args[1]), int(args[2]), int(args[3]), int(args[4]))
         elif cmd == "add_net":
-            self.netlist.add_net(args[0], args[1], args[2].split(','))
+            name, drv_pin, rcv_str = args[0], args[1], args[2]
+            rcv_pins = rcv_str.split(',')
+            self.netlist.add_net(name, drv_pin, rcv_pins)
+            self._net_endpoints[name] = (
+                drv_pin.split('.')[0],
+                [r.split('.')[0] for r in rcv_pins],
+            )
         elif cmd == "add_bus":
             # Syntax: add_bus <prefix>[<N>] <drv_pin> <rcv_pin>
             #      or add_bus <prefix>[<lo>:<hi>] <drv_pin> <rcv_pin>
@@ -505,8 +512,12 @@ class BudaSession:
                 lo, hi = 0, int(m.group(2)) - 1
             drv_pin  = args[1]
             rcv_pins = args[2].split(',')
+            drv_inst = drv_pin.split('.')[0]
+            rcv_insts = [r.split('.')[0] for r in rcv_pins]
             for i in range(lo, hi + 1):
-                self.netlist.add_net(f"{prefix}_{i}", drv_pin, rcv_pins)
+                net_name = f"{prefix}_{i}"
+                self.netlist.add_net(net_name, drv_pin, rcv_pins)
+                self._net_endpoints[net_name] = (drv_inst, rcv_insts)
         elif cmd == "def_layer":
             lid, name, dirstr, typestr, ovh = args
             ldir = interconnect.LayerDir.HORIZONTAL if dirstr.upper()=="H" else interconnect.LayerDir.VERTICAL
@@ -558,6 +569,37 @@ class BudaSession:
                           f"{w.original_bundle.id} ({label})")
                     found = True
             if not found: print(f"Warning: Could not find bundle matching hint {hint}")
+
+        elif cmd == "generate_topologies":
+            # Usage: generate_topologies [center_mode] [double_detour]
+            # Generates topologies for every bundle produced by run_bundler,
+            # deriving src/dst block names from the netlist automatically.
+            use_center        = "center_mode"   in args
+            use_double_detour = "double_detour" in args
+            topo_gen = interconnect.TopologyGenerator(self.fp)
+            h_layer = self.layers.get_top_layer(interconnect.LayerDir.HORIZONTAL)
+            v_layer = self.layers.get_top_layer(interconnect.LayerDir.VERTICAL)
+            if h_layer != -1 and v_layer != -1:
+                topo_gen.set_layer_ids(h_layer, v_layer)
+            if use_center:
+                topo_gen.set_busterm_mode(False)
+            if use_double_detour:
+                topo_gen.set_double_detour(True)
+            for w in self.bundles:
+                net_name = w.original_bundle.get_net_names()[0]
+                ep = self._net_endpoints.get(net_name)
+                if ep is None:
+                    print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.original_bundle.id}")
+                    continue
+                src, dsts = ep
+                if len(dsts) == 1:
+                    w.candidates = topo_gen.generate_candidates(src, dsts[0])
+                    label = f"{src}->{dsts[0]}"
+                else:
+                    w.candidates = topo_gen.generate_multicast_candidates(src, dsts)
+                    label = f"{src}->[{','.join(dsts)}]"
+                print(f"Generated {len(w.candidates)} topologies for bundle "
+                      f"{w.original_bundle.id} ({label})")
 
         elif cmd == "run_planner":
             if args and args[0] == "post_nuts":
