@@ -1,0 +1,58 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "bus02_0",
+      "bundle_id": 2,
+      "topo_type": "Z_VHV@y250@x74",
+      "topo_wl": 372,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-10T17:18:34"
+    },
+    {
+      "bundle_hint": "bus03_0",
+      "bundle_id": 3,
+      "topo_type": "Z_VHV@y250@x74",
+      "topo_wl": 458,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-10T20:36:41"
+    },
+    {
+      "bundle_hint": "bus11_0",
+      "bundle_id": 4,
+      "topo_type": "Z_VHV@y250@x106",
+      "topo_wl": 372,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-10T17:19:11"
+    },
+    {
+      "bundle_hint": "bus13_0",
+      "bundle_id": 6,
+      "topo_type": "Z_VHV@y250@x154",
+      "topo_wl": 378,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-10T20:37:02"
+    },
+    {
+      "bundle_hint": "bus21_0",
+      "bundle_id": 7,
+      "topo_type": "Z_VHV@y250@x192",
+      "topo_wl": 458,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-10T20:37:31"
+    },
+    {
+      "bundle_hint": "bus22_0",
+      "bundle_id": 8,
+      "topo_type": "Z_VHV@y250@x192",
+      "topo_wl": 378,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-10T20:37:47"
+    }
+  ]
+}
