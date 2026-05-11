@@ -5,9 +5,15 @@
 # ==================================================================
 
 # Layers: M4 horizontal, M5 vertical, M6 long-haul horizontal
-def_layer 4 M4 H TOP 10.0
-def_layer 5 M5 V TOP 10.0
-def_layer 6 M6 H TOP 10.0
+#def_layer 4 M4 H TOP 10.0
+#def_layer 5 M5 V TOP 10.0
+#def_layer 6 M6 H TOP 10.0
+def_layer 3 M3 V LOW 10.0
+# high power % is to force planner to resort to M6
+def_layer 4 M4 H TOP 88.0
+def_layer 5 M5 V TOP 20.0
+def_layer 6 M6 H LOW 20.0
+def_layer 7 M7 V LOW 40.0
 
 # Floorplan blocks
 add_block u_cpu0 200 200 1000 1600
@@ -25,269 +31,23 @@ add_block u_pcie 2400 9000 5000 10200
 add_block u_usb 5600 9000 8400 10200
 add_block u_sec 8800 9000 10400 10200
 
-# Buses (vector syntax: add_bus prefix[N] drv rcv)
-add_bus c0l3d0[128] u_cpu0.c0l3d0.tx u_l3.c0l3d0.rx
-add_bus c0l3d1[128] u_cpu0.c0l3d1.tx u_l3.c0l3d1.rx
-
-add_bus c0l3t0[64] u_cpu0.c0l3t0.tx u_l3.c0l3t0.rx
-
-add_bus c0l3c0[32] u_cpu0.c0l3c0.tx u_l3.c0l3c0.rx
-
-add_bus c1l3d0[128] u_cpu1.c1l3d0.tx u_l3.c1l3d0.rx
-add_bus c1l3d1[128] u_cpu1.c1l3d1.tx u_l3.c1l3d1.rx
-
-add_bus c1l3t0[64] u_cpu1.c1l3t0.tx u_l3.c1l3t0.rx
-
-add_bus c1l3c0[32] u_cpu1.c1l3c0.tx u_l3.c1l3c0.rx
-
-add_bus c0ncp0[64] u_cpu0.c0ncp0.tx u_noc.c0ncp0.rx
-add_bus c0ncp1[64] u_cpu0.c0ncp1.tx u_noc.c0ncp1.rx
-add_bus c0ncp2[64] u_cpu0.c0ncp2.tx u_noc.c0ncp2.rx
-add_bus c0ncp3[64] u_cpu0.c0ncp3.tx u_noc.c0ncp3.rx
-
-add_bus c0ncm0[32] u_cpu0.c0ncm0.tx u_noc.c0ncm0.rx
-add_bus c0ncm1[32] u_cpu0.c0ncm1.tx u_noc.c0ncm1.rx
-
-add_bus c1ncp0[64] u_cpu1.c1ncp0.tx u_noc.c1ncp0.rx
-add_bus c1ncp1[64] u_cpu1.c1ncp1.tx u_noc.c1ncp1.rx
-add_bus c1ncp2[64] u_cpu1.c1ncp2.tx u_noc.c1ncp2.rx
-add_bus c1ncp3[64] u_cpu1.c1ncp3.tx u_noc.c1ncp3.rx
-
-add_bus c1ncm0[32] u_cpu1.c1ncm0.tx u_noc.c1ncm0.rx
-add_bus c1ncm1[32] u_cpu1.c1ncm1.tx u_noc.c1ncm1.rx
-
-add_bus gpncp0[128] u_gpu.gpncp0.tx u_noc.gpncp0.rx
-add_bus gpncp1[128] u_gpu.gpncp1.tx u_noc.gpncp1.rx
-add_bus gpncp2[128] u_gpu.gpncp2.tx u_noc.gpncp2.rx
-add_bus gpncp3[128] u_gpu.gpncp3.tx u_noc.gpncp3.rx
-add_bus gpncp4[128] u_gpu.gpncp4.tx u_noc.gpncp4.rx
-add_bus gpncp5[128] u_gpu.gpncp5.tx u_noc.gpncp5.rx
-
-add_bus gpncc0[32] u_gpu.gpncc0.tx u_noc.gpncc0.rx
-add_bus gpncc1[32] u_gpu.gpncc1.tx u_noc.gpncc1.rx
-
-add_bus gpl3p0[128] u_gpu.gpl3p0.tx u_l3.gpl3p0.rx
-add_bus gpl3p1[128] u_gpu.gpl3p1.tx u_l3.gpl3p1.rx
-add_bus gpl3p2[128] u_gpu.gpl3p2.tx u_l3.gpl3p2.rx
-add_bus gpl3p3[128] u_gpu.gpl3p3.tx u_l3.gpl3p3.rx
-
-add_bus npncp0[64] u_npu.npncp0.tx u_noc.npncp0.rx
-add_bus npncp1[64] u_npu.npncp1.tx u_noc.npncp1.rx
-add_bus npncp2[64] u_npu.npncp2.tx u_noc.npncp2.rx
-add_bus npncp3[64] u_npu.npncp3.tx u_noc.npncp3.rx
-
-add_bus npncc0[32] u_npu.npncc0.tx u_noc.npncc0.rx
-add_bus npncc1[32] u_npu.npncc1.tx u_noc.npncc1.rx
-
-add_bus npl3p0[64] u_npu.npl3p0.tx u_l3.npl3p0.rx
-add_bus npl3p1[64] u_npu.npl3p1.tx u_l3.npl3p1.rx
-
-add_bus l3ncp0[128] u_l3.l3ncp0.tx u_noc.l3ncp0.rx
-add_bus l3ncp1[128] u_l3.l3ncp1.tx u_noc.l3ncp1.rx
-add_bus l3ncp2[128] u_l3.l3ncp2.tx u_noc.l3ncp2.rx
-add_bus l3ncp3[128] u_l3.l3ncp3.tx u_noc.l3ncp3.rx
-add_bus l3ncp4[128] u_l3.l3ncp4.tx u_noc.l3ncp4.rx
-add_bus l3ncp5[128] u_l3.l3ncp5.tx u_noc.l3ncp5.rx
-add_bus l3ncp6[128] u_l3.l3ncp6.tx u_noc.l3ncp6.rx
-add_bus l3ncp7[128] u_l3.l3ncp7.tx u_noc.l3ncp7.rx
-
-add_bus l3ncc0[32] u_l3.l3ncc0.tx u_noc.l3ncc0.rx
-add_bus l3ncc1[32] u_l3.l3ncc1.tx u_noc.l3ncc1.rx
-
-add_bus nh0_p0[128] u_noc.nh0_p0.tx u_hbm0.nh0_p0.rx
-add_bus nh0_p1[128] u_noc.nh0_p1.tx u_hbm0.nh0_p1.rx
-add_bus nh0_p2[128] u_noc.nh0_p2.tx u_hbm0.nh0_p2.rx
-add_bus nh0_p3[128] u_noc.nh0_p3.tx u_hbm0.nh0_p3.rx
-
-add_bus nh1_p0[128] u_noc.nh1_p0.tx u_hbm1.nh1_p0.rx
-add_bus nh1_p1[128] u_noc.nh1_p1.tx u_hbm1.nh1_p1.rx
-add_bus nh1_p2[128] u_noc.nh1_p2.tx u_hbm1.nh1_p2.rx
-add_bus nh1_p3[128] u_noc.nh1_p3.tx u_hbm1.nh1_p3.rx
-
-add_bus ndr_p0[64] u_noc.ndr_p0.tx u_ddr.ndr_p0.rx
-add_bus ndr_p1[64] u_noc.ndr_p1.tx u_ddr.ndr_p1.rx
-add_bus ndr_p2[64] u_noc.ndr_p2.tx u_ddr.ndr_p2.rx
-add_bus ndr_p3[64] u_noc.ndr_p3.tx u_ddr.ndr_p3.rx
-
-add_bus ndsp_0[128] u_noc.ndsp_0.tx u_disp.ndsp_0.rx
-add_bus ndsp_1[128] u_noc.ndsp_1.tx u_disp.ndsp_1.rx
-add_bus ndsp_2[128] u_noc.ndsp_2.tx u_disp.ndsp_2.rx
-add_bus ndsp_3[128] u_noc.ndsp_3.tx u_disp.ndsp_3.rx
-
-add_bus ndsc_0[32] u_noc.ndsc_0.tx u_disp.ndsc_0.rx
-add_bus ndsc_1[32] u_noc.ndsc_1.tx u_disp.ndsc_1.rx
-
-add_bus nisp_0[64] u_noc.nisp_0.tx u_isp.nisp_0.rx
-add_bus nisp_1[64] u_noc.nisp_1.tx u_isp.nisp_1.rx
-add_bus nisp_2[64] u_noc.nisp_2.tx u_isp.nisp_2.rx
-add_bus nisp_3[64] u_noc.nisp_3.tx u_isp.nisp_3.rx
-
-add_bus npc__0[32] u_noc.npc__0.tx u_pcie.npc__0.rx
-add_bus npc__1[32] u_noc.npc__1.tx u_pcie.npc__1.rx
-add_bus npc__2[32] u_noc.npc__2.tx u_pcie.npc__2.rx
-add_bus npc__3[32] u_noc.npc__3.tx u_pcie.npc__3.rx
-add_bus npc__4[32] u_noc.npc__4.tx u_pcie.npc__4.rx
-add_bus npc__5[32] u_noc.npc__5.tx u_pcie.npc__5.rx
-
-add_bus nusb_0[16] u_noc.nusb_0.tx u_usb.nusb_0.rx
-add_bus nusb_1[16] u_noc.nusb_1.tx u_usb.nusb_1.rx
-add_bus nusb_2[16] u_noc.nusb_2.tx u_usb.nusb_2.rx
-add_bus nusb_3[16] u_noc.nusb_3.tx u_usb.nusb_3.rx
-
-add_bus nsec_0[32] u_noc.nsec_0.tx u_sec.nsec_0.rx
-add_bus nsec_1[32] u_noc.nsec_1.tx u_sec.nsec_1.rx
-add_bus nsec_2[32] u_noc.nsec_2.tx u_sec.nsec_2.rx
-add_bus nsec_3[32] u_noc.nsec_3.tx u_sec.nsec_3.rx
-
-add_bus sc0_p0[64] u_sec.sc0_p0.tx u_cpu0.sc0_p0.rx
-add_bus sc0_p1[64] u_sec.sc0_p1.tx u_cpu0.sc0_p1.rx
-
-add_bus sc1_p0[64] u_sec.sc1_p0.tx u_cpu1.sc1_p0.rx
-add_bus sc1_p1[64] u_sec.sc1_p1.tx u_cpu1.sc1_p1.rx
-
-add_bus isn_p0[32] u_isp.isn_p0.tx u_noc.isn_p0.rx
-add_bus isn_p1[32] u_isp.isn_p1.tx u_noc.isn_p1.rx
-add_bus isn_p2[32] u_isp.isn_p2.tx u_noc.isn_p2.rx
-add_bus isn_p3[32] u_isp.isn_p3.tx u_noc.isn_p3.rx
-
-add_bus gdsp_0[128] u_gpu.gdsp_0.tx u_disp.gdsp_0.rx
-add_bus gdsp_1[128] u_gpu.gdsp_1.tx u_disp.gdsp_1.rx
-add_bus gdsp_2[128] u_gpu.gdsp_2.tx u_disp.gdsp_2.rx
-add_bus gdsp_3[128] u_gpu.gdsp_3.tx u_disp.gdsp_3.rx
-
-add_bus pcn_p0[32] u_pcie.pcn_p0.tx u_noc.pcn_p0.rx
-add_bus pcn_p1[32] u_pcie.pcn_p1.tx u_noc.pcn_p1.rx
-add_bus pcn_p2[32] u_pcie.pcn_p2.tx u_noc.pcn_p2.rx
-add_bus pcn_p3[32] u_pcie.pcn_p3.tx u_noc.pcn_p3.rx
-
-add_bus c0sm_0[8] u_cpu0.c0sm_0.tx u_sec.c0sm_0.rx
-add_bus c0sm_1[8] u_cpu0.c0sm_1.tx u_sec.c0sm_1.rx
-
-add_bus c1sm_0[8] u_cpu1.c1sm_0.tx u_sec.c1sm_0.rx
-add_bus c1sm_1[8] u_cpu1.c1sm_1.tx u_sec.c1sm_1.rx
-
-add_bus c0pm_0[8] u_cpu0.c0pm_0.tx u_pcie.c0pm_0.rx
-
-add_bus c0um_0[8] u_cpu0.c0um_0.tx u_usb.c0um_0.rx
+source large_scale_demo_buses.buda
 
 # Stage 1 — bundle nets by driver+receiver instance
 run_bundler strict
 
-# Stage 2 — generate L/Z/U topology candidates per bundle
-generate_topologies_for_bundle c0l3d0_ u_cpu0 u_l3
-generate_topologies_for_bundle c0l3d1_ u_cpu0 u_l3
-generate_topologies_for_bundle c0l3t0_ u_cpu0 u_l3
-generate_topologies_for_bundle c0l3c0_ u_cpu0 u_l3
-generate_topologies_for_bundle c1l3d0_ u_cpu1 u_l3
-generate_topologies_for_bundle c1l3d1_ u_cpu1 u_l3
-generate_topologies_for_bundle c1l3t0_ u_cpu1 u_l3
-generate_topologies_for_bundle c1l3c0_ u_cpu1 u_l3
-generate_topologies_for_bundle c0ncp0_ u_cpu0 u_noc
-generate_topologies_for_bundle c0ncp1_ u_cpu0 u_noc
-generate_topologies_for_bundle c0ncp2_ u_cpu0 u_noc
-generate_topologies_for_bundle c0ncp3_ u_cpu0 u_noc
-generate_topologies_for_bundle c0ncm0_ u_cpu0 u_noc
-generate_topologies_for_bundle c0ncm1_ u_cpu0 u_noc
-generate_topologies_for_bundle c1ncp0_ u_cpu1 u_noc
-generate_topologies_for_bundle c1ncp1_ u_cpu1 u_noc
-generate_topologies_for_bundle c1ncp2_ u_cpu1 u_noc
-generate_topologies_for_bundle c1ncp3_ u_cpu1 u_noc
-generate_topologies_for_bundle c1ncm0_ u_cpu1 u_noc
-generate_topologies_for_bundle c1ncm1_ u_cpu1 u_noc
-generate_topologies_for_bundle gpncp0_ u_gpu u_noc
-generate_topologies_for_bundle gpncp1_ u_gpu u_noc
-generate_topologies_for_bundle gpncp2_ u_gpu u_noc
-generate_topologies_for_bundle gpncp3_ u_gpu u_noc
-generate_topologies_for_bundle gpncp4_ u_gpu u_noc
-generate_topologies_for_bundle gpncp5_ u_gpu u_noc
-generate_topologies_for_bundle gpncc0_ u_gpu u_noc
-generate_topologies_for_bundle gpncc1_ u_gpu u_noc
-generate_topologies_for_bundle gpl3p0_ u_gpu u_l3
-generate_topologies_for_bundle gpl3p1_ u_gpu u_l3
-generate_topologies_for_bundle gpl3p2_ u_gpu u_l3
-generate_topologies_for_bundle gpl3p3_ u_gpu u_l3
-generate_topologies_for_bundle npncp0_ u_npu u_noc
-generate_topologies_for_bundle npncp1_ u_npu u_noc
-generate_topologies_for_bundle npncp2_ u_npu u_noc
-generate_topologies_for_bundle npncp3_ u_npu u_noc
-generate_topologies_for_bundle npncc0_ u_npu u_noc
-generate_topologies_for_bundle npncc1_ u_npu u_noc
-generate_topologies_for_bundle npl3p0_ u_npu u_l3
-generate_topologies_for_bundle npl3p1_ u_npu u_l3
-generate_topologies_for_bundle l3ncp0_ u_l3 u_noc
-generate_topologies_for_bundle l3ncp1_ u_l3 u_noc
-generate_topologies_for_bundle l3ncp2_ u_l3 u_noc
-generate_topologies_for_bundle l3ncp3_ u_l3 u_noc
-generate_topologies_for_bundle l3ncp4_ u_l3 u_noc
-generate_topologies_for_bundle l3ncp5_ u_l3 u_noc
-generate_topologies_for_bundle l3ncp6_ u_l3 u_noc
-generate_topologies_for_bundle l3ncp7_ u_l3 u_noc
-generate_topologies_for_bundle l3ncc0_ u_l3 u_noc
-generate_topologies_for_bundle l3ncc1_ u_l3 u_noc
-generate_topologies_for_bundle nh0_p0_ u_noc u_hbm0
-generate_topologies_for_bundle nh0_p1_ u_noc u_hbm0
-generate_topologies_for_bundle nh0_p2_ u_noc u_hbm0
-generate_topologies_for_bundle nh0_p3_ u_noc u_hbm0
-generate_topologies_for_bundle nh1_p0_ u_noc u_hbm1
-generate_topologies_for_bundle nh1_p1_ u_noc u_hbm1
-generate_topologies_for_bundle nh1_p2_ u_noc u_hbm1
-generate_topologies_for_bundle nh1_p3_ u_noc u_hbm1
-generate_topologies_for_bundle ndr_p0_ u_noc u_ddr
-generate_topologies_for_bundle ndr_p1_ u_noc u_ddr
-generate_topologies_for_bundle ndr_p2_ u_noc u_ddr
-generate_topologies_for_bundle ndr_p3_ u_noc u_ddr
-generate_topologies_for_bundle ndsp_0_ u_noc u_disp
-generate_topologies_for_bundle ndsp_1_ u_noc u_disp
-generate_topologies_for_bundle ndsp_2_ u_noc u_disp
-generate_topologies_for_bundle ndsp_3_ u_noc u_disp
-generate_topologies_for_bundle ndsc_0_ u_noc u_disp
-generate_topologies_for_bundle ndsc_1_ u_noc u_disp
-generate_topologies_for_bundle nisp_0_ u_noc u_isp
-generate_topologies_for_bundle nisp_1_ u_noc u_isp
-generate_topologies_for_bundle nisp_2_ u_noc u_isp
-generate_topologies_for_bundle nisp_3_ u_noc u_isp
-generate_topologies_for_bundle npc__0_ u_noc u_pcie
-generate_topologies_for_bundle npc__1_ u_noc u_pcie
-generate_topologies_for_bundle npc__2_ u_noc u_pcie
-generate_topologies_for_bundle npc__3_ u_noc u_pcie
-generate_topologies_for_bundle npc__4_ u_noc u_pcie
-generate_topologies_for_bundle npc__5_ u_noc u_pcie
-generate_topologies_for_bundle nusb_0_ u_noc u_usb
-generate_topologies_for_bundle nusb_1_ u_noc u_usb
-generate_topologies_for_bundle nusb_2_ u_noc u_usb
-generate_topologies_for_bundle nusb_3_ u_noc u_usb
-generate_topologies_for_bundle nsec_0_ u_noc u_sec
-generate_topologies_for_bundle nsec_1_ u_noc u_sec
-generate_topologies_for_bundle nsec_2_ u_noc u_sec
-generate_topologies_for_bundle nsec_3_ u_noc u_sec
-generate_topologies_for_bundle sc0_p0_ u_sec u_cpu0
-generate_topologies_for_bundle sc0_p1_ u_sec u_cpu0
-generate_topologies_for_bundle sc1_p0_ u_sec u_cpu1
-generate_topologies_for_bundle sc1_p1_ u_sec u_cpu1
-generate_topologies_for_bundle isn_p0_ u_isp u_noc
-generate_topologies_for_bundle isn_p1_ u_isp u_noc
-generate_topologies_for_bundle isn_p2_ u_isp u_noc
-generate_topologies_for_bundle isn_p3_ u_isp u_noc
-generate_topologies_for_bundle gdsp_0_ u_gpu u_disp
-generate_topologies_for_bundle gdsp_1_ u_gpu u_disp
-generate_topologies_for_bundle gdsp_2_ u_gpu u_disp
-generate_topologies_for_bundle gdsp_3_ u_gpu u_disp
-generate_topologies_for_bundle pcn_p0_ u_pcie u_noc
-generate_topologies_for_bundle pcn_p1_ u_pcie u_noc
-generate_topologies_for_bundle pcn_p2_ u_pcie u_noc
-generate_topologies_for_bundle pcn_p3_ u_pcie u_noc
-generate_topologies_for_bundle c0sm_0_ u_cpu0 u_sec
-generate_topologies_for_bundle c0sm_1_ u_cpu0 u_sec
-generate_topologies_for_bundle c1sm_0_ u_cpu1 u_sec
-generate_topologies_for_bundle c1sm_1_ u_cpu1 u_sec
-generate_topologies_for_bundle c0pm_0_ u_cpu0 u_pcie
-generate_topologies_for_bundle c0um_0_ u_cpu0 u_usb
+# Stage 2
+# source large_scale_demo_gen_topo.buda
+generate_topologies
 
 # Stage 3 — congestion-aware topology selection (fattest-bus-first)
 run_planner 1
 
 # Stage 4 — NUTS abstract track placement (pitch=2.0)
 run_nuts 2.0
+# V 100 280 H 150 400
+# run_planner post_nuts V H
+# run_nuts_on_layer M7
 
 # Visualize
 visualize
