@@ -169,7 +169,11 @@ static void do_span_adjustments(
     bool                                                             only_unplaced = false)
 {
     // ── Pass 1: collect adjustment requests per target segment ──────────
-    struct AdjReq { double lo_edge, hi_edge; bool lo_end; };
+    // We extend connected stubs only to the trunk's centre (track_position),
+    // not to its far edge (hi_edge / lo_edge).  Using the far edge would push
+    // the stub's span_hi/lo through the full width of the trunk, causing the
+    // stub to visually overlap the far half of the trunk band.
+    struct AdjReq { double center; bool lo_end; };
     std::map<std::pair<int,int>, std::vector<AdjReq>> adj_map;
 
     for (const TrackSegment* ts : layer_segs) {
@@ -177,15 +181,12 @@ static void do_span_adjustments(
         auto it = rev_conn_map.find({ts->bundle_id, ts->seg_idx});
         if (it == rev_conn_map.end()) continue;
 
-        const double lo_edge = ts->track_position - ts->width / 2.0;
-        const double hi_edge = ts->track_position + ts->width / 2.0;
-
         for (const auto& sc : it->second) {
             auto jt = ts_ptr_map.find({sc.src_bid, sc.src_si});
             if (jt == ts_ptr_map.end()) continue;
             TrackSegment* other = jt->second;
             if (only_unplaced && other->placed) continue;
-            adj_map[{sc.src_bid, sc.src_si}].push_back({lo_edge, hi_edge, sc.lo_end});
+            adj_map[{sc.src_bid, sc.src_si}].push_back({ts->track_position, sc.lo_end});
         }
     }
 
@@ -203,18 +204,21 @@ static void do_span_adjustments(
 
         for (const auto& req : reqs) {
             if (req.lo_end)
-                new_lo = std::min(new_lo, req.lo_edge);
+                new_lo = std::min(new_lo, req.center);
             else
-                new_hi = std::max(new_hi, req.hi_edge);
+                new_hi = std::max(new_hi, req.center);
         }
 
-        // Only ever extend spans — never shrink.  A T-junction stub in the
-        // interior of a spine (e.g. rcv2 at x=450 on a spine that extends to
-        // x=680 for a BUSTERM) must not pull the spine endpoint back inward.
+        // SET the stub endpoint to the trunk's centre.  The trunk may have been
+        // placed below the nominal y_cut (interval top), so the left stub's
+        // span_hi can decrease from y_cut to track_position.  Using max/min
+        // (extend-only) broke that case: span_hi would stay at y_cut even when
+        // the trunk moved inward.  All current topologies use end-to-end
+        // connections (no interior T-junctions), so SET semantics are safe.
         if (new_lo < orig_hi)   // at least one lo-end connection found
-            other->span_lo = std::min(orig_lo, new_lo);
+            other->span_lo = new_lo;
         if (new_hi > orig_lo)   // at least one hi-end connection found
-            other->span_hi = std::max(orig_hi, new_hi);
+            other->span_hi = new_hi;
     }
 }
 

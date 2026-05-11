@@ -705,23 +705,52 @@ class BudaVisualizer:
             self.fig.canvas.draw_idle()
             return
 
+        # Per-layer segment and bit counts from the current nuts result.
+        layer_seg_count = {}
+        layer_bit_count = {}
+        if self._nuts_result is not None:
+            for ts in self._nuts_result.segments:
+                if not ts.placed:
+                    continue
+                lid = ts.layer
+                layer_seg_count[lid] = layer_seg_count.get(lid, 0) + 1
+                layer_bit_count[lid] = (layer_bit_count.get(lid, 0)
+                                        + self._bundle_bits(ts.bundle_id))
+
         has_rerun = self._rerun_layer_fn is not None
         for row, lid in enumerate(self._layer_ids):
-            y     = 1.0 - (row + 0.5) / n
+            # Two text lines per row: name on top, stats just below.
+            # 0.25/0.75 split gives ~9 pt separation at min chk_h — no overlap.
+            y_name  = 1.0 - (row + 0.25) / n
+            y_stats = 1.0 - (row + 0.75) / n
             on    = self._layer_visible.get(lid, True)
             col   = _LAYER_COLOR.get(lid, '#888888')
             vis_char  = '☑' if on else '☐'
             txt_color = col if on else '#bbbbbb'
+            dim_color = (col if on else '#bbbbbb')
 
-            ax.text(0.04, y, vis_char,
-                    transform=ax.transAxes, fontsize=8, color=txt_color,
+            # Checkbox glyph — centred vertically across the full row.
+            y_mid = 1.0 - (row + 0.5) / n
+            ax.text(0.04, y_mid, vis_char,
+                    transform=ax.transAxes, fontsize=9, color=txt_color,
                     va='center', clip_on=True)
-            ax.text(0.22, y, f'M{lid}',
-                    transform=ax.transAxes, fontsize=8, color=txt_color,
+
+            # Layer name ("M4 H").
+            ax.text(0.22, y_name, _LAYER_LABEL.get(lid, f'M{lid}'),
+                    transform=ax.transAxes, fontsize=9, color=txt_color,
                     va='center', clip_on=True, fontweight='bold')
 
+            # Stats line ("6 segs, 48 bits").
+            n_segs = layer_seg_count.get(lid, 0)
+            n_bits = layer_bit_count.get(lid, 0)
+            if n_segs:
+                stats_txt = f'{n_segs} segs, {n_bits} bits'
+                ax.text(0.22, y_stats, stats_txt,
+                        transform=ax.transAxes, fontsize=8,
+                        color=dim_color, va='center', clip_on=True)
+
             if has_rerun:
-                ax.text(0.80, y, '↺',
+                ax.text(0.88, y_mid, '↺',
                         transform=ax.transAxes, fontsize=9,
                         color='#555555', va='center', ha='center',
                         clip_on=True,
@@ -741,7 +770,7 @@ class BudaVisualizer:
         if not (0 <= row < n):
             return
         lid = self._layer_ids[row]
-        if event.xdata >= 0.60 and self._rerun_layer_fn is not None:
+        if event.xdata >= 0.75 and self._rerun_layer_fn is not None:
             # Rerun button area → re-solve this layer and refresh the view.
             result = self._rerun_layer_fn(lid)
             if result is not None:
@@ -1314,11 +1343,6 @@ class BudaVisualizer:
 
         from matplotlib.lines import Line2D
         legend_handles = [
-            Line2D([0], [0], color=_LAYER_COLOR.get(lid, '#888888'), lw=4,
-                   label=_LAYER_LABEL.get(lid, f'Layer {lid}'))
-            for lid in self._layer_ids
-        ]
-        legend_handles += [
             Line2D([0], [0], marker='s', color='w',
                    markerfacecolor='#00FFFF', markeredgecolor='k', label='Driver'),
             Line2D([0], [0], marker='o', color='w',
@@ -1328,14 +1352,16 @@ class BudaVisualizer:
         self.ax.autoscale_view()
 
         # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
-        self.fig.subplots_adjust(bottom=0.09, right=0.81)
+        # bottom=0.11 reserves room for x-tick labels above the button row.
+        # top=0.97 reclaims the wasted margin above the title.
+        self.fig.subplots_adjust(bottom=0.11, right=0.81, top=0.97)
 
         RX, RW       = 0.83, 0.15
-        BTN_H        = 0.04
-        SCROLL_H     = 0.03
-        GAP          = 0.01
+        BTN_H        = 0.044
+        SCROLL_H     = 0.033
+        GAP          = 0.012
         n_layers     = max(len(self._layer_ids), 1)
-        chk_h        = min(0.035 * n_layers + 0.04, 0.22)
+        chk_h        = min(0.020 * n_layers + 0.01, 0.12)
 
         # Top-down allocation.  y tracks the top edge of the next widget.
         y = 0.95
@@ -1397,12 +1423,16 @@ class BudaVisualizer:
 
         self.fig.canvas.mpl_connect('scroll_event', self._on_scroll_event)
 
-        # ── Bottom navigation buttons ────────────────────────────────────
-        ax_bprev = self.fig.add_axes([0.02, 0.02, 0.14, 0.05])
-        ax_solo  = self.fig.add_axes([0.18, 0.02, 0.13, 0.05])
-        ax_bnext = self.fig.add_axes([0.33, 0.02, 0.14, 0.05])
-        ax_zoom  = self.fig.add_axes([0.49, 0.02, 0.13, 0.05])
-        ax_topos = self.fig.add_axes([0.64, 0.02, 0.34, 0.05])
+        # ── Bottom navigation buttons ─────────────────────────────────────
+        # All buttons sit in x=[0.02, 0.79] (same footprint as main plot),
+        # y=0.02, h=0.06 — safely below the bottom=0.11 plot boundary so that
+        # x-tick labels have room between button tops (0.08) and the plot (0.11).
+        _by, _bh = 0.02, 0.06
+        ax_bprev = self.fig.add_axes([0.02, _by, 0.14, _bh])
+        ax_solo  = self.fig.add_axes([0.17, _by, 0.12, _bh])
+        ax_bnext = self.fig.add_axes([0.30, _by, 0.14, _bh])
+        ax_zoom  = self.fig.add_axes([0.45, _by, 0.12, _bh])
+        ax_topos = self.fig.add_axes([0.58, _by, 0.21, _bh])
 
         btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
         btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
