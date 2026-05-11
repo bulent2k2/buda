@@ -191,6 +191,19 @@ class BudaSession:
             f.write(f"Overlaps  : {total}  ({layer_summary})\n")
             f.write("\n")
 
+            # Build a placed-segment map for full coordinate lookup.
+            ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in self.nuts_result.segments}
+
+            def _seg_coords(bid, si):
+                ts = ts_map.get((bid, si))
+                if ts is None:
+                    return "    (segment not found)\n"
+                return (f"    span=[{ts.span_lo:.1f}, {ts.span_hi:.1f}]"
+                        f"  perp_center={ts.track_position:.2f}  width={ts.width:.2f}"
+                        f"  → perp=[{ts.track_position - ts.width/2:.2f},"
+                        f" {ts.track_position + ts.width/2:.2f}]"
+                        f"  interval=[{ts.interval_lo:.1f}, {ts.interval_hi:.1f}]\n")
+
             if not details:
                 f.write("No overlaps.\n")
             else:
@@ -213,11 +226,13 @@ class BudaSession:
                         area     = span_len * perp_dep
                         f.write(
                             f"  [{n:3d}]  {la}  ×  {lb}\n"
-                            f"         span  [{od.span_lo:.1f}, {od.span_hi:.1f}]"
+                            f"         overlap span  [{od.span_lo:.1f}, {od.span_hi:.1f}]"
                             f"  len={span_len:.1f}\n"
-                            f"         perp  [{od.perp_lo:.2f}, {od.perp_hi:.2f}]"
+                            f"         overlap perp  [{od.perp_lo:.2f}, {od.perp_hi:.2f}]"
                             f"  depth={perp_dep:.2f}  area={area:.2f}\n"
                         )
+                        f.write(f"         {la}:\n" + _seg_coords(od.bid_a, od.seg_a))
+                        f.write(f"         {lb}:\n" + _seg_coords(od.bid_b, od.seg_b))
                     f.write("\n")
 
         action = "appended to" if append else "→"
@@ -257,10 +272,11 @@ class BudaSession:
         layer_names = self._make_layer_names()
         extra_lines: list[str] = []
 
-        def _reassign_dir(dir_enum, layer_attr: str, thresholds: tuple[float, float]):
+        def _reassign_dir(dir_enum, thresholds: tuple[float, float]):
             short_thresh, long_thresh = thresholds
             layers_sorted = sorted(self.layers.get_layer_ids_by_dir(dir_enum))
             dir_label = "V" if dir_enum == interconnect.LayerDir.VERTICAL else "H"
+            is_v = (dir_enum == interconnect.LayerDir.VERTICAL)
             if len(layers_sorted) < 2:
                 print(f"[Planner] post_nuts {dir_label}: fewer than 2 {dir_label} layers — nothing to reassign")
                 return
@@ -285,13 +301,32 @@ class BudaSession:
                     continue
                 max_span = bid_max_span[bid]
                 if max_span < short_thresh:
-                    setattr(w, layer_attr, lo_layer)
+                    new_layer = lo_layer
                     short_count += 1
                 elif max_span > long_thresh:
-                    setattr(w, layer_attr, hi_layer)
+                    new_layer = hi_layer
                     long_count += 1
                 else:
                     medium_count += 1
+                    continue
+
+                # Update per-segment layers for segments of this direction.
+                # If seg_layers is populated (from run_planner), update it directly;
+                # otherwise fall back to the legacy assigned_v/h_layer attribute.
+                topo = w.candidates[w.selected_topology_index]
+                if w.seg_layers:
+                    sl = list(w.seg_layers)
+                    for si, seg in enumerate(topo.segments):
+                        seg_is_v = (seg.start.y != seg.end.y)
+                        if (is_v and seg_is_v) or (not is_v and not seg_is_v):
+                            if si < len(sl):
+                                sl[si] = new_layer
+                    w.seg_layers = sl
+                else:
+                    if is_v:
+                        w.assigned_v_layer = new_layer
+                    else:
+                        w.assigned_h_layer = new_layer
 
             lo_name = layer_names.get(lo_layer, f"L{lo_layer}")
             hi_name = layer_names.get(hi_layer, f"L{hi_layer}")
@@ -301,9 +336,9 @@ class BudaSession:
             extra_lines.append(msg)
 
         if v_thresholds is not None:
-            _reassign_dir(interconnect.LayerDir.VERTICAL, "assigned_v_layer", v_thresholds)
+            _reassign_dir(interconnect.LayerDir.VERTICAL, v_thresholds)
         if h_thresholds is not None:
-            _reassign_dir(interconnect.LayerDir.HORIZONTAL, "assigned_h_layer", h_thresholds)
+            _reassign_dir(interconnect.LayerDir.HORIZONTAL, h_thresholds)
 
         # Single NUTS re-run after all reassignments.
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
@@ -661,6 +696,7 @@ class BudaSession:
                         w.selected_topology_index = asn.topo_index
                         w.assigned_v_layer = asn.v_layer_id
                         w.assigned_h_layer = asn.h_layer_id
+                        w.seg_layers = list(asn.seg_layers)
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0

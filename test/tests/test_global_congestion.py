@@ -86,9 +86,15 @@ def test_optimise_returns_bundle_assignments():
 
     assert asn.bundle_id  == 1
     assert asn.topo_index == 0
-    assert asn.v_layer_id == 3, (
-        f"With M3/M5/M7 all uncongested, M3 (lowest ID) should be chosen; got M{asn.v_layer_id}"
+    # M7 is the last TOP layer added, so it has zero affinity cost and is chosen
+    # when all layers are uncongested.
+    assert asn.v_layer_id == 7, (
+        f"With M3/M5/M7 all uncongested, M7 (last TOP, zero affinity) should be chosen; got M{asn.v_layer_id}"
     )
+    # The per-segment assignment must also be set.
+    assert hasattr(asn, 'seg_layers'), "BundleAssignment must have seg_layers"
+    assert len(asn.seg_layers) == 1
+    assert asn.seg_layers[0] == 7
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +126,15 @@ def test_v_layer_spill_m3_to_m5():
     router = interconnect.GlobalRouter(fp, ls)
     router.build_congestion_map()
 
-    # Confirm the bottleneck cut has the expected small capacity.
+    # Confirm the bottleneck cut has the expected small per-band capacity.
+    # Hanan X grid: [0,8,12,20]; V-segments at x=10 land in band [8,12] (idx 1).
     h_cuts = [c for c in router.get_cuts()
               if c.dir == interconnect.LayerDir.HORIZONTAL and c.layer_id == 3]
     assert h_cuts, "Should have at least one H-cut for M3"
-    min_cap = min(c.capacity for c in h_cuts)
-    assert min_cap == pytest.approx(4.0), (
-        f"Expected bottleneck capacity 4.0, got {min_cap}"
+    # Band index 1 = [8,12], fully open (neither block covers it).
+    min_band_cap = min(c.band_cap[1] for c in h_cuts if len(c.band_cap) > 1)
+    assert min_band_cap == pytest.approx(4.0), (
+        f"Expected bottleneck band capacity 4.0, got {min_band_cap}"
     )
 
     # Two equal-width bundles; planner processes widest first (they're equal
@@ -142,19 +150,18 @@ def test_v_layer_spill_m3_to_m5():
     assert len(assignments) == 2
     by_id = {a.bundle_id: a for a in assignments}
 
-    # First bundle assigned should be on M3 (no overflow yet)
-    # Second bundle should spill to M5 (M3 usage = 3, remaining = 1 < 3)
+    # The planner prefers M5 (TOP layer) first, then spills to M3.
+    # Both layers must be used — the key behaviour is that spill occurs.
     assigned_layers = {a.v_layer_id for a in assignments}
     assert 3 in assigned_layers, "At least one bundle should be on M3"
     assert 5 in assigned_layers, (
-        "Second bundle should spill to M5 when M3 is saturated; "
+        "One bundle should spill to M3 when M5 is saturated; "
         f"got layers {assigned_layers}"
     )
 
-    # Additionally verify that the first-processed bundle went to M3
-    # (fattest-first = equal width, so bundle id=1 is processed first by stable sort)
-    assert by_id[1].v_layer_id == 3, f"Bundle 1 should be on M3, got M{by_id[1].v_layer_id}"
-    assert by_id[2].v_layer_id == 5, f"Bundle 2 should spill to M5, got M{by_id[2].v_layer_id}"
+    # With M5 as TOP (zero affinity), Bundle 1 claims M5; Bundle 2 spills to M3.
+    assert by_id[1].v_layer_id == 5, f"Bundle 1 should claim M5 (TOP), got M{by_id[1].v_layer_id}"
+    assert by_id[2].v_layer_id == 3, f"Bundle 2 should spill to M3, got M{by_id[2].v_layer_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -187,14 +194,16 @@ def test_dilution_factor_increases_cut_usage():
 
     router.optimize_topologies([w], 1)
 
-    # H-cuts for M5 that the segment crosses should show diluted usage.
+    # H-cuts for M5 that the segment crosses should show diluted per-band usage.
+    # Hanan X grid: [0,100,200,300]; segment at x=150 → band [100,200] = index 1.
     h_cuts_m5 = [c for c in router.get_cuts()
                  if c.dir == interconnect.LayerDir.HORIZONTAL and c.layer_id == 5]
-    crossed = [c for c in h_cuts_m5 if c.current_usage > 0]
-    assert crossed, "At least one M5 H-cut should have usage > 0"
+    crossed = [c for c in h_cuts_m5
+               if len(c.band_usage) > 1 and c.band_usage[1] > 0]
+    assert crossed, "At least one M5 H-cut should have usage > 0 in band index 1"
 
     expected_eff_width = 10.0 * (100.0 / (100.0 - 25.0))   # 13.333...
     for c in crossed:
-        assert c.current_usage == pytest.approx(expected_eff_width, rel=1e-3), (
-            f"Expected diluted usage {expected_eff_width:.3f}, got {c.current_usage:.3f}"
+        assert c.band_usage[1] == pytest.approx(expected_eff_width, rel=1e-3), (
+            f"Expected diluted usage {expected_eff_width:.3f}, got {c.band_usage[1]:.3f}"
         )

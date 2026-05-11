@@ -28,8 +28,17 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("bundle_id",  &BundleAssignment::bundle_id)
         .def_readwrite("topo_index", &BundleAssignment::topo_index)
         .def_readwrite("v_layer_id", &BundleAssignment::v_layer_id)
-        .def_readwrite("h_layer_id", &BundleAssignment::h_layer_id);
-    py::class_<BundleWrapper>(m, "BundleWrapper").def(py::init<>()).def_readwrite("original_bundle", &BundleWrapper::original_bundle).def_readwrite("candidates", &BundleWrapper::candidates).def_readwrite("selected_topology_index", &BundleWrapper::selected_topology_index).def_readwrite("width", &BundleWrapper::width).def_readwrite("assigned_v_layer", &BundleWrapper::assigned_v_layer).def_readwrite("assigned_h_layer", &BundleWrapper::assigned_h_layer).def_readwrite("topology_pinned", &BundleWrapper::topology_pinned);
+        .def_readwrite("h_layer_id", &BundleAssignment::h_layer_id)
+        .def_readwrite("seg_layers", &BundleAssignment::seg_layers);
+    py::class_<BundleWrapper>(m, "BundleWrapper").def(py::init<>())
+        .def_readwrite("original_bundle",         &BundleWrapper::original_bundle)
+        .def_readwrite("candidates",              &BundleWrapper::candidates)
+        .def_readwrite("selected_topology_index", &BundleWrapper::selected_topology_index)
+        .def_readwrite("width",                   &BundleWrapper::width)
+        .def_readwrite("seg_layers",              &BundleWrapper::seg_layers)
+        .def_readwrite("assigned_v_layer",        &BundleWrapper::assigned_v_layer)
+        .def_readwrite("assigned_h_layer",        &BundleWrapper::assigned_h_layer)
+        .def_readwrite("topology_pinned",         &BundleWrapper::topology_pinned);
     py::class_<Netlist>(m, "Netlist").def(py::init<>()).def("add_net", &Netlist::add_net);
     py::class_<Bundler>(m, "Bundler").def(py::init<>()).def("set_strategy", &Bundler::set_strategy).def("run", &Bundler::run);
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>()).def("add_block", &Floorplan::add_block).def("get_hanan_grid", [](const Floorplan& fp) { std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y); }).def("get_all_blocks", [](const Floorplan& fp) { return fp.get_all_blocks(); });
@@ -74,12 +83,13 @@ PYBIND11_MODULE(interconnect, m) {
         .def("generate_multicast_candidates", &TopologyGenerator::generate_multicast_candidates);
     py::class_<GlobalCut>(m, "GlobalCut")
         .def(py::init<>())
-        .def_readwrite("p1",            &GlobalCut::p1)
-        .def_readwrite("p2",            &GlobalCut::p2)
-        .def_readwrite("dir",           &GlobalCut::dir)
-        .def_readwrite("layer_id",      &GlobalCut::layer_id)
-        .def_readwrite("capacity",      &GlobalCut::capacity)
-        .def_readwrite("current_usage", &GlobalCut::current_usage);
+        .def_readwrite("p1",         &GlobalCut::p1)
+        .def_readwrite("p2",         &GlobalCut::p2)
+        .def_readwrite("cut_coord",  &GlobalCut::cut_coord)
+        .def_readwrite("dir",        &GlobalCut::dir)
+        .def_readwrite("layer_id",   &GlobalCut::layer_id)
+        .def_readwrite("band_cap",   &GlobalCut::band_cap)
+        .def_readwrite("band_usage", &GlobalCut::band_usage);
     py::class_<GlobalRouter>(m, "GlobalRouter")
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_layer_overhead",  &GlobalRouter::set_layer_overhead)

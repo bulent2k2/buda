@@ -317,8 +317,10 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
             ts.width     = bw.width;
 
             const bool is_horizontal = (seg.start.y == seg.end.y);
-            // Use planner-assigned layers; fall back to topology layer_hint.
-            if (!is_horizontal && bw.assigned_v_layer >= 0)
+            // Layer priority: per-segment assignment > per-direction override > layer_hint.
+            if (si < (int)bw.seg_layers.size() && bw.seg_layers[si] >= 0)
+                ts.layer = bw.seg_layers[si];
+            else if (!is_horizontal && bw.assigned_v_layer >= 0)
                 ts.layer = bw.assigned_v_layer;
             else if (is_horizontal && bw.assigned_h_layer >= 0)
                 ts.layer = bw.assigned_h_layer;
