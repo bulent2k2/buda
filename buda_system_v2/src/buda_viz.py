@@ -1200,8 +1200,22 @@ class BudaVisualizer:
                 pass
         self._cbar_ax = self.fig.add_axes([0.040, 0.20, 0.018, 0.46])
         import matplotlib.colors as mcolors
+        import numpy as np
+        # Build a custom colormap that matches the actual cell appearance:
+        # at 0% congestion cells are ~white (low alpha on white bg); at 150%+ they
+        # are the full RdYlGn_r red.  Blend from white → RdYlGn_r colours.
+        base_colors = cmap(np.linspace(0, 1, 256))
+        # alpha ramp: 0.12 at ratio=0, up to 0.34 at ratio=1, held at 0.34 beyond
+        ratios = np.linspace(0, 1.5, 256)
+        alphas = np.clip(0.12 + 0.22 * np.minimum(ratios, 1.0), 0, 1)
+        white = np.array([1.0, 1.0, 1.0, 1.0])
+        blended = base_colors.copy()
+        for i, a in enumerate(alphas):
+            blended[i, :3] = a * base_colors[i, :3] + (1 - a) * white[:3]
+        blended[:, 3] = 1.0   # fully opaque in the colorbar
+        cbar_cmap = mcolors.ListedColormap(blended)
         sm = plt.cm.ScalarMappable(
-            cmap=cmap,
+            cmap=cbar_cmap,
             norm=mcolors.Normalize(vmin=0.0, vmax=1.5))
         sm.set_array([])
         cbar = self.fig.colorbar(sm, cax=self._cbar_ax)
