@@ -1,0 +1,48 @@
+# From channel_stress, pick a few bundles with pin conflict
+
+def_layer 3 M3 V LOW 10.0
+# high power % is to force planner to resort to M6
+def_layer 4 M4 H TOP 88.0
+def_layer 5 M5 V TOP 20.0
+def_layer 6 M6 H LOW 20.0
+def_layer 7 M7 V LOW 40.0
+
+add_block u_b0    20   20   80   80
+add_block u_b1   100   20  160   80
+add_block u_b2   180   20  300   80
+
+add_block u_t0    20  420   80  480
+add_block u_t1   100  420  160  480
+add_block u_t2   180  420  300  480
+
+add_bus bus01[8]      u_t0.tx  u_b0.rx
+add_bus bus02[8]      u_t0.tx  u_b1.rx
+add_bus bus03[8]      u_t0.tx  u_b2.rx
+
+add_bus bus11[8]      u_t1.tx  u_b0.rx
+add_bus bus12[8]      u_t1.tx  u_b1.rx
+add_bus bus13[8]      u_t1.tx  u_b2.rx
+
+add_bus bus21[8]      u_t2.tx  u_b0.rx
+add_bus bus22[8]      u_t2.tx  u_b1.rx
+add_bus bus23[8]      u_t2.tx  u_b2.rx
+
+run_bundler strict
+
+generate_topologies_for_bundle bus01  u_t0  u_b0
+generate_topologies_for_bundle bus02  u_t0  u_b1
+generate_topologies_for_bundle bus03  u_t0  u_b2
+generate_topologies_for_bundle bus11  u_t1  u_b0
+generate_topologies_for_bundle bus12  u_t1  u_b1
+generate_topologies_for_bundle bus13  u_t1  u_b2
+generate_topologies_for_bundle bus21  u_t2  u_b0
+generate_topologies_for_bundle bus22  u_t2  u_b1
+generate_topologies_for_bundle bus23  u_t2  u_b2
+
+run_planner 5
+run_nuts 2.0
+
+#run_planner post_nuts 200 300
+#run_nuts 2.0
+
+visualize

@@ -1,6 +1,7 @@
 # channel_stress.buda
 # 8 top blocks + 8 bottom blocks with a 340-unit horizontal channel.
 # 200 nets randomly paired (fixed seed=42) — stress-tests NUTS channel packing.
+# Results in 62 bundles.
 
 def_layer 3 M3 V LOW 10.0
 # high power % is to force planner to resort to M6
@@ -230,73 +231,30 @@ add_net t7_b2_02  u_t7.tx  u_b2.rx
 
 run_bundler strict
 
-generate_topologies_for_bundle t0_b0  u_t0  u_b0
-generate_topologies_for_bundle t0_b1  u_t0  u_b1
-generate_topologies_for_bundle t0_b2  u_t0  u_b2
-generate_topologies_for_bundle t0_b3  u_t0  u_b3
-generate_topologies_for_bundle t0_b4  u_t0  u_b4
-generate_topologies_for_bundle t0_b5  u_t0  u_b5
-generate_topologies_for_bundle t0_b7  u_t0  u_b7
-generate_topologies_for_bundle t1_b0  u_t1  u_b0
-generate_topologies_for_bundle t1_b1  u_t1  u_b1
-generate_topologies_for_bundle t1_b2  u_t1  u_b2
-generate_topologies_for_bundle t1_b3  u_t1  u_b3
-generate_topologies_for_bundle t1_b4  u_t1  u_b4
-generate_topologies_for_bundle t1_b5  u_t1  u_b5
-generate_topologies_for_bundle t1_b6  u_t1  u_b6
-generate_topologies_for_bundle t1_b7  u_t1  u_b7
-generate_topologies_for_bundle t2_b0  u_t2  u_b0
-generate_topologies_for_bundle t2_b1  u_t2  u_b1
-generate_topologies_for_bundle t2_b3  u_t2  u_b3
-generate_topologies_for_bundle t2_b4  u_t2  u_b4
-generate_topologies_for_bundle t2_b5  u_t2  u_b5
-generate_topologies_for_bundle t2_b6  u_t2  u_b6
-generate_topologies_for_bundle t2_b7  u_t2  u_b7
-generate_topologies_for_bundle t3_b0  u_t3  u_b0
-generate_topologies_for_bundle t3_b1  u_t3  u_b1
-generate_topologies_for_bundle t3_b2  u_t3  u_b2
-generate_topologies_for_bundle t3_b3  u_t3  u_b3
-generate_topologies_for_bundle t3_b4  u_t3  u_b4
-generate_topologies_for_bundle t3_b5  u_t3  u_b5
-generate_topologies_for_bundle t3_b6  u_t3  u_b6
-generate_topologies_for_bundle t3_b7  u_t3  u_b7
-generate_topologies_for_bundle t4_b0  u_t4  u_b0
-generate_topologies_for_bundle t4_b1  u_t4  u_b1
-generate_topologies_for_bundle t4_b2  u_t4  u_b2
-generate_topologies_for_bundle t4_b3  u_t4  u_b3
-generate_topologies_for_bundle t4_b4  u_t4  u_b4
-generate_topologies_for_bundle t4_b5  u_t4  u_b5
-generate_topologies_for_bundle t4_b6  u_t4  u_b6
-generate_topologies_for_bundle t4_b7  u_t4  u_b7
-generate_topologies_for_bundle t5_b0  u_t5  u_b0
-generate_topologies_for_bundle t5_b1  u_t5  u_b1
-generate_topologies_for_bundle t5_b2  u_t5  u_b2
-generate_topologies_for_bundle t5_b3  u_t5  u_b3
-generate_topologies_for_bundle t5_b4  u_t5  u_b4
-generate_topologies_for_bundle t5_b5  u_t5  u_b5
-generate_topologies_for_bundle t5_b6  u_t5  u_b6
-generate_topologies_for_bundle t5_b7  u_t5  u_b7
-generate_topologies_for_bundle t6_b0  u_t6  u_b0
-generate_topologies_for_bundle t6_b1  u_t6  u_b1
-generate_topologies_for_bundle t6_b2  u_t6  u_b2
-generate_topologies_for_bundle t6_b3  u_t6  u_b3
-generate_topologies_for_bundle t6_b4  u_t6  u_b4
-generate_topologies_for_bundle t6_b5  u_t6  u_b5
-generate_topologies_for_bundle t6_b6  u_t6  u_b6
-generate_topologies_for_bundle t6_b7  u_t6  u_b7
-generate_topologies_for_bundle t7_b0  u_t7  u_b0
-generate_topologies_for_bundle t7_b1  u_t7  u_b1
-generate_topologies_for_bundle t7_b2  u_t7  u_b2
-generate_topologies_for_bundle t7_b3  u_t7  u_b3
-generate_topologies_for_bundle t7_b4  u_t7  u_b4
-generate_topologies_for_bundle t7_b5  u_t7  u_b5
-generate_topologies_for_bundle t7_b6  u_t7  u_b6
-generate_topologies_for_bundle t7_b7  u_t7  u_b7
+# source test4_gen_topo.buda
+generate_topologies
 
 run_planner 5
 run_nuts 2.0
+# OverlapCnt: 61 = 1 m4 + 60 m5
+
+# Default values: [Planner] post_nuts: short<80→M3 (0b), medium (35b), long>200→M7 (27b)
+# 2nd try:        [Planner] post_nuts: short<250→M3 (55b), medium (7b), long>350→M7 (0b)
+# vertical channel is 400 tall
+run_planner post_nuts V 200 300
+
+run_nuts 2.0
+# Overlaps  : 22  (M3=16  M5=6)
+
+# These can be done after `visualize`, too!
+# major impact to reduce overlaps!
 run_nuts_on_layer M3
-#this creates opens:
-run_nuts_on_layer M4
-#run_nuts_on_layer M3
+# Overlaps  : 10  (M3=4  M5=6)
+
+run_nuts_on_layer M5
+# Overlaps  : 4  (M3=4)
+
+# has no effect:
+run_nuts_on_layer M3
+
 visualize

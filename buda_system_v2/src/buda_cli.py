@@ -237,67 +237,75 @@ class BudaSession:
         # Let's just pass the block names directly in the script for now to simplify the connection.
         return "top", "top"
 
-    def _run_post_nuts_planner(self, short_thresh: float, long_thresh: float):
+    def _run_post_nuts_planner(self,
+                               v_thresholds: tuple[float, float] | None,
+                               h_thresholds: tuple[float, float] | None):
         """Stage 4c — Post-NUTS stub layer reassignment.
 
-        Classifies every bundle's vertical stub segments by span length and
-        moves short stubs to the lowest available V layer (e.g. M3) and long
-        stubs to the highest (e.g. M7).  After reassignment a full NUTS solve
-        is run so all layers are consistent with the new assignments.
+        Classifies every bundle's V and/or H stub segments by max span length
+        and moves short stubs to the lowest layer and long stubs to the highest
+        layer for each direction.  After all reassignments a single full NUTS
+        solve is run so all layers are consistent with the new assignments.
 
-        short_thresh : stubs shorter than this go to the lowest V layer.
-        long_thresh  : stubs longer than this go to the highest V layer.
+        v_thresholds : (short_thresh, long_thresh) for V segments, or None to skip.
+        h_thresholds : (short_thresh, long_thresh) for H segments, or None to skip.
         """
         if self.nuts_result is None:
             print("Error: run_planner post_nuts requires run_nuts to have been called first")
             return
 
-        v_dir = interconnect.LayerDir.VERTICAL
-        v_layers = sorted(self.layers.get_layer_ids_by_dir(v_dir))
-        if len(v_layers) < 2:
-            print("[Planner] post_nuts: fewer than 2 V layers defined — nothing to reassign")
-            return
-
-        lo_v = v_layers[0]   # e.g. M3 — short stubs (near block face)
-        hi_v = v_layers[-1]  # e.g. M7 — long stubs (full channel crossing)
-        v_layer_set = set(v_layers)
         layer_names = self._make_layer_names()
+        extra_lines: list[str] = []
 
-        # Map bundle_id → max V-segment span length in the current NUTS result.
-        bid_max_span: dict[int, float] = {}
-        for seg in self.nuts_result.segments:
-            if seg.layer not in v_layer_set:
-                continue
-            span_len = seg.span_hi - seg.span_lo
-            bid = seg.bundle_id
-            if bid not in bid_max_span or span_len > bid_max_span[bid]:
-                bid_max_span[bid] = span_len
+        def _reassign_dir(dir_enum, layer_attr: str, thresholds: tuple[float, float]):
+            short_thresh, long_thresh = thresholds
+            layers_sorted = sorted(self.layers.get_layer_ids_by_dir(dir_enum))
+            dir_label = "V" if dir_enum == interconnect.LayerDir.VERTICAL else "H"
+            if len(layers_sorted) < 2:
+                print(f"[Planner] post_nuts {dir_label}: fewer than 2 {dir_label} layers — nothing to reassign")
+                return
+            lo_layer = layers_sorted[0]
+            hi_layer = layers_sorted[-1]
+            layer_set = set(layers_sorted)
 
-        # Reassign assigned_v_layer on each bundle.
-        short_count = medium_count = long_count = 0
-        for w in self.bundles:
-            bid = w.original_bundle.id
-            if bid not in bid_max_span:
-                continue  # no V segments for this bundle
-            max_span = bid_max_span[bid]
-            if max_span < short_thresh:
-                new_v = lo_v
-                short_count += 1
-            elif max_span > long_thresh:
-                new_v = hi_v
-                long_count += 1
-            else:
-                medium_count += 1
-                continue  # keep current assignment
-            w.assigned_v_layer = new_v
+            # Map bundle_id → max span length among segments on this direction's layers.
+            bid_max_span: dict[int, float] = {}
+            for seg in self.nuts_result.segments:
+                if seg.layer not in layer_set:
+                    continue
+                span_len = seg.span_hi - seg.span_lo
+                bid = seg.bundle_id
+                if bid not in bid_max_span or span_len > bid_max_span[bid]:
+                    bid_max_span[bid] = span_len
 
-        lo_name = layer_names.get(lo_v, f"L{lo_v}")
-        hi_name = layer_names.get(hi_v, f"L{hi_v}")
-        planner_msg = (f"[Planner] post_nuts: short<{short_thresh:.0f}→{lo_name} ({short_count}b), "
-                       f"medium ({medium_count}b), long>{long_thresh:.0f}→{hi_name} ({long_count}b)")
-        print(planner_msg)
+            short_count = medium_count = long_count = 0
+            for w in self.bundles:
+                bid = w.original_bundle.id
+                if bid not in bid_max_span:
+                    continue
+                max_span = bid_max_span[bid]
+                if max_span < short_thresh:
+                    setattr(w, layer_attr, lo_layer)
+                    short_count += 1
+                elif max_span > long_thresh:
+                    setattr(w, layer_attr, hi_layer)
+                    long_count += 1
+                else:
+                    medium_count += 1
 
-        # Re-run full NUTS with the updated layer assignments.
+            lo_name = layer_names.get(lo_layer, f"L{lo_layer}")
+            hi_name = layer_names.get(hi_layer, f"L{hi_layer}")
+            msg = (f"[Planner] post_nuts {dir_label}: short<{short_thresh:.0f}→{lo_name} ({short_count}b), "
+                   f"medium ({medium_count}b), long>{long_thresh:.0f}→{hi_name} ({long_count}b)")
+            print(msg)
+            extra_lines.append(msg)
+
+        if v_thresholds is not None:
+            _reassign_dir(interconnect.LayerDir.VERTICAL, "assigned_v_layer", v_thresholds)
+        if h_thresholds is not None:
+            _reassign_dir(interconnect.LayerDir.HORIZONTAL, "assigned_h_layer", h_thresholds)
+
+        # Single NUTS re-run after all reassignments.
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
         nuts = interconnect.NUTSEngine(self.fp)
         nuts.set_track_pitch(pitch)
@@ -305,7 +313,7 @@ class BudaSession:
 
         layer_names = self._make_layer_names()
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
-                             extra_lines=[planner_msg])
+                             extra_lines=extra_lines)
 
     def _segment_states_from_topology(self) -> dict:
         """Build a 'before' snapshot from topology geometry (no track assignment yet).
@@ -604,9 +612,38 @@ class BudaSession:
         elif cmd == "run_planner":
             if args and args[0] == "post_nuts":
                 # Stage 4c: post-NUTS stub layer reassignment.
-                short_thresh = float(args[1]) if len(args) > 1 else 80.0
-                long_thresh  = float(args[2]) if len(args) > 2 else 200.0
-                self._run_post_nuts_planner(short_thresh, long_thresh)
+                # Syntax: post_nuts [V [short [long]]] [H [short [long]]]
+                # Bare "post_nuts" (no letter) → V with defaults (backward compat).
+                _V_DEFAULTS = (80.0, 200.0)
+                _H_DEFAULTS = (150.0, 400.0)
+                rest = args[1:]
+                v_thresholds = None
+                h_thresholds = None
+                i = 0
+                while i < len(rest):
+                    tok = rest[i].upper()
+                    if tok in ("V", "H"):
+                        # Consume up to two following numeric tokens as thresholds.
+                        defaults = _V_DEFAULTS if tok == "V" else _H_DEFAULTS
+                        s = float(rest[i + 1]) if i + 1 < len(rest) and rest[i + 1].replace('.','',1).isdigit() else defaults[0]
+                        l = float(rest[i + 2]) if i + 2 < len(rest) and rest[i + 2].replace('.','',1).isdigit() else defaults[1]
+                        # Advance past any numeric tokens we consumed.
+                        i += 1
+                        if i < len(rest) and rest[i].replace('.','',1).isdigit():
+                            i += 1
+                            if i < len(rest) and rest[i].replace('.','',1).isdigit():
+                                i += 1
+                        if tok == "V":
+                            v_thresholds = (s, l)
+                        else:
+                            h_thresholds = (s, l)
+                    else:
+                        print(f"Warning: run_planner post_nuts — unexpected token '{rest[i]}', ignored")
+                        i += 1
+                # Bare "post_nuts" with no direction letters → V with defaults.
+                if v_thresholds is None and h_thresholds is None:
+                    v_thresholds = _V_DEFAULTS
+                self._run_post_nuts_planner(v_thresholds, h_thresholds)
             else:
                 self.planner = interconnect.GlobalRouter(self.fp, self.layers)
                 for lid, ovh in self._layer_overheads.items():
