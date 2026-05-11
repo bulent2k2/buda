@@ -95,7 +95,9 @@ PYBIND11_MODULE(interconnect, m) {
         .def("set_layer_overhead",  &GlobalRouter::set_layer_overhead)
         .def("build_congestion_map",&GlobalRouter::build_congestion_map)
         .def("optimize_topologies", &GlobalRouter::optimize_topologies)
-        .def("get_cuts",            &GlobalRouter::get_cuts);
+        .def("get_cuts",            &GlobalRouter::get_cuts)
+        .def("get_x_grid",          &GlobalRouter::get_x_grid)
+        .def("get_y_grid",          &GlobalRouter::get_y_grid);
     py::class_<TrackSegment>(m, "TrackSegment")
         .def(py::init<>())
         .def_readwrite("bundle_id",    &TrackSegment::bundle_id)
@@ -127,7 +129,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer);
     py::class_<NUTSEngine>(m, "NUTSEngine")
         .def(py::init<const Floorplan&>())
-        .def("set_track_pitch", &NUTSEngine::set_track_pitch)
-        .def("run",             &NUTSEngine::run)
-        .def("rerun_layer",     &NUTSEngine::rerun_layer);
+        .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
+        .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)
+        .def("run",                   &NUTSEngine::run)
+        .def("rerun_layer",           &NUTSEngine::rerun_layer);
 }

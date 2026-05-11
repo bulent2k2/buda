@@ -5,15 +5,14 @@
 # ==================================================================
 
 # Layers: M4 horizontal, M5 vertical, M6 long-haul horizontal
-#def_layer 4 M4 H TOP 10.0
-#def_layer 5 M5 V TOP 10.0
-#def_layer 6 M6 H TOP 10.0
-def_layer 3 M3 V LOW 10.0
 # high power % is to force planner to resort to M6
-def_layer 4 M4 H TOP 88.0
+def_layer 2 M2 H LOW 5.0
+def_layer 3 M3 V LOW 10.0
+def_layer 4 M4 H TOP 10.0
 def_layer 5 M5 V TOP 20.0
 def_layer 6 M6 H LOW 20.0
 def_layer 7 M7 V LOW 40.0
+def_layer 8 M8 H LOW 40.0
 
 # Floorplan blocks
 add_block u_cpu0 200 200 1000 1600
@@ -48,6 +47,7 @@ run_nuts 2.0
 # V 100 280 H 150 400
 # run_planner post_nuts V H
 # run_nuts_on_layer M7
+# run_nuts 2.0
 
 # Visualize
 visualize

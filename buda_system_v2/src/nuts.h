@@ -56,6 +56,11 @@ public:
     // Minimum gap between adjacent placed buses (default 1.0 layout unit).
     void set_track_pitch(double pitch);
 
+    // Supply additional Hanan grid coordinates (e.g. segment endpoints outside
+    // the floorplan bounding box) that the NUTSEngine should use when deriving
+    // perpendicular intervals.  Must be called before run() / rerun_layer().
+    void set_extra_grid_points(std::vector<int> xs, std::vector<int> ys);
+
     // Run NUTS on the bundles that have already been processed by GlobalRouter.
     // Each BundleWrapper must have candidates filled and selected_topology_index set.
     NUTSResult run(const std::vector<BundleWrapper>& bundles);
@@ -71,6 +76,7 @@ public:
 private:
     const Floorplan& floorplan_;
     double track_pitch_ = 1.0;
+    std::vector<int> extra_x_, extra_y_;   // additional grid points from GlobalRouter
 
     // Build a flat list of TrackSegments from all selected topologies.
     std::vector<TrackSegment> extract_segments(

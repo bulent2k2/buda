@@ -13,6 +13,14 @@ namespace interconnect {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Merge extra grid points (sorted) into an existing sorted grid.
+static void merge_grid(std::vector<int>& grid, const std::vector<int>& extra) {
+    for (int val : extra) {
+        auto it = std::lower_bound(grid.begin(), grid.end(), val);
+        if (it == grid.end() || *it != val) grid.insert(it, val);
+    }
+}
+
 // Return the index i such that grid[i] <= v <= grid[i+1], or -1 if out of range.
 static int find_grid_cell(const std::vector<int>& grid, int v) {
     for (int i = 0; i + 1 < (int)grid.size(); ++i)
@@ -505,9 +513,20 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
 // run() — full solve
 // ---------------------------------------------------------------------------
 
+void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys) {
+    std::sort(xs.begin(), xs.end());
+    xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+    std::sort(ys.begin(), ys.end());
+    ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
+    extra_x_ = std::move(xs);
+    extra_y_ = std::move(ys);
+}
+
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
+    merge_grid(x_grid, extra_x_);
+    merge_grid(y_grid, extra_y_);
 
     NUTSResult result;
     result.segments = extract_segments(bundles, x_grid, y_grid);
@@ -558,6 +577,8 @@ NUTSResult NUTSEngine::rerun_layer(
 {
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
+    merge_grid(x_grid, extra_x_);
+    merge_grid(y_grid, extra_y_);
 
     // Start from a copy of the previous result.
     NUTSResult result = prev;

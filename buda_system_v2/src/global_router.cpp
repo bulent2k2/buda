@@ -78,6 +78,10 @@ static double band_available_length(
 
 void GlobalRouter::build_congestion_map() {
     floorplan_.get_hanan_grid(x_grid_, y_grid_);
+    _rebuild_cuts();
+}
+
+void GlobalRouter::_rebuild_cuts() {
     cuts_.clear();
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
@@ -239,7 +243,40 @@ double GlobalRouter::segment_affinity(double span_norm, int layer_id,
 
 std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
         std::vector<BundleWrapper>& bundles, int /*max_iterations*/) {
-    if (cuts_.empty()) build_congestion_map();
+    // Ensure base grid is populated from floorplan.
+    if (x_grid_.empty()) build_congestion_map();
+
+    // Extend the Hanan grid only with segment endpoint coordinates that fall
+    // OUTSIDE the current grid's range.  Topology generators place in-grid
+    // segments at Hanan-cell midpoints; inserting those as new grid lines would
+    // split cells into tiny sub-bands with zero capacity and cause violations.
+    // Out-of-range coordinates (e.g. U-shape trunks beyond the chip boundary)
+    // have no covering cell at all and would receive the ±50 fallback interval.
+    {
+        size_t nx0 = x_grid_.size(), ny0 = y_grid_.size();
+        auto extend_oob = [](std::vector<int>& grid, int val) {
+            if (grid.size() < 2) return;
+            if (val >= grid.front() && val <= grid.back()) return; // inside — skip
+            auto it = std::lower_bound(grid.begin(), grid.end(), val);
+            if (it == grid.end() || *it != val) grid.insert(it, val);
+        };
+        for (const auto& bw : bundles) {
+            for (const auto& cand : bw.candidates) {
+                for (const auto& seg : cand.segments) {
+                    extend_oob(x_grid_, seg.start.x);
+                    extend_oob(x_grid_, seg.end.x);
+                    extend_oob(y_grid_, seg.start.y);
+                    extend_oob(y_grid_, seg.end.y);
+                }
+            }
+        }
+        if (x_grid_.size() != nx0 || y_grid_.size() != ny0) {
+            std::cout << "[Planner] Grid extended: "
+                      << (x_grid_.size() - nx0) << " X, "
+                      << (y_grid_.size() - ny0) << " Y points from topology candidates.\n";
+            _rebuild_cuts();
+        }
+    }
 
     int top_h = layers_.get_top_layer(LayerDir::HORIZONTAL);
     int top_v = layers_.get_top_layer(LayerDir::VERTICAL);

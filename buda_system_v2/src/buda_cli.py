@@ -491,6 +491,10 @@ class BudaSession:
         layer_name   = layer_names.get(layer_id, f"L{layer_id}")
         nuts = interconnect.NUTSEngine(self.fp)
         nuts.set_track_pitch(self._nuts_pitch)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
 
         # Snapshot full state before rerun.
         before: dict[tuple, dict] = {
@@ -703,6 +707,10 @@ class BudaSession:
             self._nuts_pitch = pitch
             nuts = interconnect.NUTSEngine(self.fp)
             nuts.set_track_pitch(pitch)
+            if self.planner is not None:
+                nuts.set_extra_grid_points(
+                    list(self.planner.get_x_grid()),
+                    list(self.planner.get_y_grid()))
             # Snapshot topology-derived initial spans before the solve.
             before = self._segment_states_from_topology()
             # C++ prints its own [NUTS] N segments placed across K layer(s) line.

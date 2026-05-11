@@ -46,8 +46,12 @@ public:
     std::vector<BundleAssignment> optimize_topologies(
             std::vector<BundleWrapper>& bundles, int max_iterations);
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
+    const std::vector<int>& get_x_grid() const { return x_grid_; }
+    const std::vector<int>& get_y_grid() const { return y_grid_; }
 
 private:
+    // Rebuild cuts_ from the current x_grid_ / y_grid_ (without resetting the grids).
+    void _rebuild_cuts();
     // 2D per-segment scoring/application.
     double score_segment(const Segment& seg, int layer_id, double eff_width) const;
     void   apply_segment(const Segment& seg, int layer_id, double eff_width);

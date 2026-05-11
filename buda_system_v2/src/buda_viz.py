@@ -448,6 +448,16 @@ class BudaVisualizer:
         self._nuts_result    = None  # stored in draw_nuts_tracks for the overlap panel
         self._topo_explorer  = None
         self._pick_happened  = False
+        self._cbar_ax        = None   # colorbar axes for congestion heatmap
+        self._heatmap_artists = []    # patches + texts created by draw_congestion_map
+        self._block_name_artists = [] # text artists created by draw_blocks
+        self._heatmap_visible    = True
+        self._block_names_visible = True
+        self._bustermss_visible  = True
+        self._busterm_artists    = []    # driver/receiver terminal artists
+        self._btn_heatmap    = None
+        self._btn_blknames   = None
+        self._btn_bustermss  = None
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
@@ -658,6 +668,37 @@ class BudaVisualizer:
             idx = (self._bid_list.index(self._highlighted) + delta) % len(self._bid_list)
         self._highlighted = self._bid_list[idx]
         self._refresh_highlight()
+
+    def _toggle_heatmap(self):
+        self._heatmap_visible = not self._heatmap_visible
+        vis = self._heatmap_visible
+        for a in self._heatmap_artists:
+            a.set_visible(vis)
+        if self._cbar_ax is not None:
+            self._cbar_ax.set_visible(vis)
+        label = '☑ Heatmap' if vis else '☐ Heatmap'
+        if self._btn_heatmap is not None:
+            self._btn_heatmap.label.set_text(label)
+        self.fig.canvas.draw_idle()
+
+    def _toggle_bustermss(self):
+        self._bustermss_visible = not self._bustermss_visible
+        vis = self._bustermss_visible
+        for a in self._busterm_artists:
+            a.set_visible(vis)
+        label = '☑ Busterms' if vis else '☐ Busterms'
+        self._btn_bustermss.label.set_text(label)
+        self.fig.canvas.draw_idle()
+
+    def _toggle_block_names(self):
+        self._block_names_visible = not self._block_names_visible
+        vis = self._block_names_visible
+        for txt in self._block_name_artists:
+            txt.set_visible(vis)
+        label = '☑ Blk Names' if vis else '☐ Blk Names'
+        if self._btn_blknames is not None:
+            self._btn_blknames.label.set_text(label)
+        self.fig.canvas.draw_idle()
 
     def _toggle_solo(self):
         self._solo = not self._solo
@@ -1066,6 +1107,7 @@ class BudaVisualizer:
     # ------------------------------------------------------------------
 
     def draw_blocks(self):
+        self._block_name_artists = []
         for name, rect in self.fp.get_all_blocks():
             w = rect.x2 - rect.x1
             h = rect.y2 - rect.y1
@@ -1074,9 +1116,10 @@ class BudaVisualizer:
                 linewidth=2, edgecolor='#444444', facecolor='#d9d9d9',
                 alpha=0.6, zorder=1))
             cx, cy = (rect.x1 + rect.x2) / 2, (rect.y1 + rect.y2) / 2
-            self.ax.text(cx, cy, name,
-                         ha='center', va='center', fontsize=9, fontweight='bold',
-                         color='#333333', zorder=2)
+            txt = self.ax.text(cx, cy, name,
+                               ha='center', va='center', fontsize=9, fontweight='bold',
+                               color='#333333', zorder=2)
+            self._block_name_artists.append(txt)
 
     def draw_congestion_map(self, cuts):
         """Shade each Hanan (cut × perpendicular-band) cell by utilisation ratio.
@@ -1087,6 +1130,7 @@ class BudaVisualizer:
         """
         xs, ys = self.fp.get_hanan_grid()
         cmap = plt.cm.RdYlGn_r
+        self._heatmap_artists = []
 
         for cut in cuts:
             is_vcut = (cut.p1.x == cut.p2.x)   # V-cut → shades an X-channel × Y-bands
@@ -1129,16 +1173,45 @@ class BudaVisualizer:
                         (x_lo, p_lo), x_hi - x_lo, p_hi - p_lo,
                         linewidth=0, facecolor=color, alpha=alpha, zorder=3)
                     self.ax.add_patch(rect)
+                    self._heatmap_artists.append(rect)
                     if ratio > 1.0:
-                        self.ax.text((x_lo + x_hi) / 2, (p_lo + p_hi) / 2,
-                                     f"OVF\n{ratio:.0%}", fontsize=6, color='darkred',
-                                     ha='center', va='center', zorder=4,
-                                     fontweight='bold')
+                        txt = self.ax.text((x_lo + x_hi) / 2, (p_lo + p_hi) / 2,
+                                           f"OVF\n{ratio:.0%}", fontsize=6, color='darkred',
+                                           ha='center', va='center', zorder=4,
+                                           fontweight='bold')
+                        self._heatmap_artists.append(txt)
                 else:
                     rect = patches.Rectangle(
                         (p_lo, y_lo), p_hi - p_lo, y_hi - y_lo,
                         linewidth=0, facecolor=color, alpha=alpha, zorder=3)
                     self.ax.add_patch(rect)
+                    self._heatmap_artists.append(rect)
+
+        # Apply current visibility state.
+        vis = self._heatmap_visible
+        for a in self._heatmap_artists:
+            a.set_visible(vis)
+
+        # Colorbar legend — created once per draw, rebuilt on subsequent calls.
+        if self._cbar_ax is not None:
+            try:
+                self._cbar_ax.remove()
+            except Exception:
+                pass
+        self._cbar_ax = self.fig.add_axes([0.040, 0.20, 0.018, 0.46])
+        import matplotlib.colors as mcolors
+        sm = plt.cm.ScalarMappable(
+            cmap=cmap,
+            norm=mcolors.Normalize(vmin=0.0, vmax=1.5))
+        sm.set_array([])
+        cbar = self.fig.colorbar(sm, cax=self._cbar_ax)
+        cbar.set_ticks([0.0, 0.5, 1.0, 1.5])
+        cbar.set_ticklabels(['0%', '50%', '100%', '≥150%'])
+        cbar.ax.tick_params(labelsize=7)
+        cbar.set_label('Congestion', fontsize=8, labelpad=4)
+        cbar.ax.yaxis.set_label_position('left')
+        cbar.ax.yaxis.set_ticks_position('left')
+        self._cbar_ax.set_visible(vis)
 
     def draw_hanan_grid(self):
         xs, ys = self.fp.get_hanan_grid()
@@ -1174,6 +1247,7 @@ class BudaVisualizer:
 
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
+        self._busterm_artists = []
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
             bid      = wrapper.original_bundle.id
@@ -1207,6 +1281,7 @@ class BudaVisualizer:
 
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
+        self._busterm_artists = []
         self._nuts_result = nuts_result   # saved for overlap panel in show()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}
@@ -1293,29 +1368,38 @@ class BudaVisualizer:
         so marker size is capped to stay visually reasonable.
         """
         msz = max(6, min(viz_lw, 16))
+        new_artists = []
         if drv_pos:
             drv, = self.ax.plot(drv_pos[0], drv_pos[1], 's',
                                 color='#00FFFF', markeredgecolor='black',
                                 markersize=msz, alpha=alpha, zorder=20)
             self._register(bundle_id, drv, alpha=alpha, lw=msz)
+            new_artists.append(drv)
             lbl = self.ax.text(drv_pos[0], drv_pos[1], f"B{bundle_id}",
                                fontsize=8, color='black', fontweight='bold',
                                ha='center', va='center', zorder=21)
             lbl.set_alpha(alpha)
             self._register(bundle_id, lbl, alpha=alpha)
+            new_artists.append(lbl)
 
-        if rcv_positions is None:
-            return
-        # Accept single tuple or list of tuples
-        if isinstance(rcv_positions, tuple):
-            rcv_positions = [rcv_positions]
-        for pos in rcv_positions:
-            if pos is None:
-                continue
-            rcv, = self.ax.plot(pos[0], pos[1], 'o',
-                                color='#FF00FF', markeredgecolor='black',
-                                markersize=msz, alpha=alpha, zorder=20)
-            self._register(bundle_id, rcv, alpha=alpha, lw=msz)
+        if rcv_positions is not None:
+            # Accept single tuple or list of tuples
+            if isinstance(rcv_positions, tuple):
+                rcv_positions = [rcv_positions]
+            for pos in rcv_positions:
+                if pos is None:
+                    continue
+                rcv, = self.ax.plot(pos[0], pos[1], 'o',
+                                    color='#FF00FF', markeredgecolor='black',
+                                    markersize=msz, alpha=alpha, zorder=20)
+                self._register(bundle_id, rcv, alpha=alpha, lw=msz)
+                new_artists.append(rcv)
+
+        self._busterm_artists.extend(new_artists)
+        # Apply current visibility state to newly created artists
+        if not self._bustermss_visible:
+            for a in new_artists:
+                a.set_visible(False)
 
     def _zoom_to_bundle(self, _=None):
         """Zoom axes to the bounding box of the selected bundle, or reset to full view."""
@@ -1379,19 +1463,55 @@ class BudaVisualizer:
         self.ax.autoscale_view()
 
         # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
+        # Left panel: x=0.005, width=0.09.  Plot left edge at 0.10.
         # bottom=0.11 reserves room for x-tick labels above the button row.
         # top=0.97 reclaims the wasted margin above the title.
-        self.fig.subplots_adjust(bottom=0.11, right=0.81, top=0.97)
+        self.fig.subplots_adjust(left=0.10, bottom=0.11, right=0.81, top=0.97)
 
-        RX, RW       = 0.83, 0.15
-        BTN_H        = 0.044
-        SCROLL_H     = 0.033
-        GAP          = 0.012
-        n_layers     = max(len(self._layer_ids), 1)
-        chk_h        = min(0.020 * n_layers + 0.01, 0.12)
+        # ── Left panel: view toggles ──────────────────────────────────────
+        LX, LW = 0.005, 0.088
+        BTN_H_L = 0.038
+        GAP_L   = 0.008
+
+        ly = 0.97  # top-down, same as right panel
+
+        def _lrect(h, gap=0):
+            nonlocal ly
+            ly -= gap + h
+            return [LX, ly, LW, h]
+
+        ax_blknames = self.fig.add_axes(_lrect(BTN_H_L))
+        self._btn_blknames = Button(ax_blknames, '☑ Blk Names', color='#e8f4e8')
+        self._btn_blknames.label.set_fontsize(8)
+        self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
+
+        ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_bustermss = Button(ax_bustermss, '☑ Busterms', color='#e8f4e8')
+        self._btn_bustermss.label.set_fontsize(8)
+        self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
+
+        ax_heatmap = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_heatmap = Button(ax_heatmap, '☑ Heatmap', color='#e8f4e8')
+        self._btn_heatmap.label.set_fontsize(8)
+        self._btn_heatmap.on_clicked(lambda _: self._toggle_heatmap())
+        # Heatmap button is only meaningful when a congestion map was drawn.
+        if not self._heatmap_artists and self._cbar_ax is None:
+            self._btn_heatmap.ax.set_visible(False)
+
+        RX, RW   = 0.83, 0.15
+        BTN_H    = 0.044
+        SCROLL_H = 0.033
+        GAP      = 0.012
+        TOP_Y    = 0.95
+        BOT_Y    = 0.09   # bottom margin
+
+        # Fixed overhead consumed by buttons, scroll arrows, and gaps
+        # (3 header btns) + (4 scroll arrows for bundles+overlaps) + (5 gaps)
+        fixed_h  = 3 * BTN_H + 4 * SCROLL_H + 5 * GAP
+        list_h   = max((TOP_Y - BOT_Y - fixed_h) / 3, 0.05)
 
         # Top-down allocation.  y tracks the top edge of the next widget.
-        y = 0.95
+        y = TOP_Y
 
         def _rect(h, gap=0):
             nonlocal y
@@ -1404,7 +1524,7 @@ class BudaVisualizer:
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
         # ── Per-layer custom panel ───────────────────────────────────────
-        self._ax_layers = self.fig.add_axes(_rect(chk_h, GAP))
+        self._ax_layers = self.fig.add_axes(_rect(list_h, GAP))
         self._ax_layers.set_facecolor('#f8f8f8')
         self._redraw_layer_list()
 
@@ -1418,7 +1538,7 @@ class BudaVisualizer:
         btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
         btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles(-5))
 
-        self._ax_bundles = self.fig.add_axes(_rect(0.18))
+        self._ax_bundles = self.fig.add_axes(_rect(list_h))
         self._ax_bundles.set_facecolor('#fafafa')
         self._redraw_bundle_list()
 
@@ -1438,9 +1558,7 @@ class BudaVisualizer:
         btn_oscroll_up = Button(ax_oscroll_up, '▲', color='#f0f0f0')
         btn_oscroll_up.on_clicked(lambda _: self._scroll_overlaps(-5))
 
-        # Give remaining space (down to SCROLL_H + 0.09 margin) to the list.
-        overlap_list_h = max(y - SCROLL_H - 0.09, 0.05)
-        self._ax_overlaps = self.fig.add_axes(_rect(overlap_list_h))
+        self._ax_overlaps = self.fig.add_axes(_rect(list_h))
         self._ax_overlaps.set_facecolor('#fff8f8')
         self._redraw_overlap_list()
 

@@ -195,15 +195,17 @@ def test_dilution_factor_increases_cut_usage():
     router.optimize_topologies([w], 1)
 
     # H-cuts for M5 that the segment crosses should show diluted per-band usage.
-    # Hanan X grid: [0,100,200,300]; segment at x=150 → band [100,200] = index 1.
+    # optimize_topologies extends the Hanan grid with segment endpoint x=150,
+    # so the exact band index is not fixed — find it dynamically.
     h_cuts_m5 = [c for c in router.get_cuts()
                  if c.dir == interconnect.LayerDir.HORIZONTAL and c.layer_id == 5]
-    crossed = [c for c in h_cuts_m5
-               if len(c.band_usage) > 1 and c.band_usage[1] > 0]
-    assert crossed, "At least one M5 H-cut should have usage > 0 in band index 1"
+    crossed = [c for c in h_cuts_m5 if any(u > 0 for u in c.band_usage)]
+    assert crossed, "At least one M5 H-cut should have non-zero band usage"
 
     expected_eff_width = 10.0 * (100.0 / (100.0 - 25.0))   # 13.333...
     for c in crossed:
-        assert c.band_usage[1] == pytest.approx(expected_eff_width, rel=1e-3), (
-            f"Expected diluted usage {expected_eff_width:.3f}, got {c.band_usage[1]:.3f}"
+        used = [u for u in c.band_usage if u > 0]
+        assert len(used) == 1, f"Expected exactly one used band, got {c.band_usage}"
+        assert used[0] == pytest.approx(expected_eff_width, rel=1e-3), (
+            f"Expected diluted usage {expected_eff_width:.3f}, got {used[0]:.3f}"
         )
