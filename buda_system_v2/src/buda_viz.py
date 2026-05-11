@@ -545,8 +545,10 @@ class BudaVisualizer:
                 self._highlighted_set = {od.bid_a, od.bid_b}
             elif new_state == 2:
                 self._highlighted_set = {od.bid_a}
+                self._highlighted     = od.bid_a   # also select so sidebar/title update
             else:  # state 3
                 self._highlighted_set = {od.bid_b}
+                self._highlighted     = od.bid_b   # also select so sidebar/title update
 
         self._refresh_highlight()
 
@@ -1077,31 +1079,30 @@ class BudaVisualizer:
                          color='#333333', zorder=2)
 
     def draw_congestion_map(self, cuts):
-        """Shade each Hanan channel by utilisation ratio (green→red)."""
+        """Shade each Hanan (cut × perpendicular-band) cell by utilisation ratio.
+
+        V-cuts (vertical lines, counting H-segments) are shaded per Y-band.
+        H-cuts (horizontal lines, counting V-segments) are shaded per X-band.
+        Each cell gets its own colour so the map shows true 2D congestion.
+        """
         xs, ys = self.fp.get_hanan_grid()
         cmap = plt.cm.RdYlGn_r
 
         for cut in cuts:
-            ratio = (cut.current_usage / cut.capacity) if cut.capacity > 0 else 0.0
-            if ratio == 0:
+            is_vcut = (cut.p1.x == cut.p2.x)   # V-cut → shades an X-channel × Y-bands
+            n_bands = len(cut.band_cap)
+            if n_bands == 0:
                 continue
-            color = cmap(min(ratio, 1.5) / 1.5)
-            alpha = 0.12 + 0.22 * min(ratio, 1.0)
 
-            if cut.p1.x == cut.p2.x:
+            # Locate the X-channel (V-cut) or Y-channel (H-cut) this cut belongs to.
+            if is_vcut:
                 cx = cut.p1.x
                 x_idx = [i for i, x in enumerate(xs) if x <= cx]
                 if not x_idx: continue
                 xi = x_idx[-1]
                 x_lo = xs[xi]
                 x_hi = xs[xi + 1] if xi + 1 < len(xs) else cx + 20
-                self.ax.add_patch(patches.Rectangle(
-                    (x_lo, ys[0]), x_hi - x_lo, ys[-1] - ys[0],
-                    linewidth=0, facecolor=color, alpha=alpha, zorder=3))
-                if ratio > 1.0:
-                    self.ax.text((x_lo + x_hi) / 2, (ys[0] + ys[-1]) / 2,
-                                 f"OVF\n{ratio:.0%}", fontsize=7, color='darkred',
-                                 ha='center', va='center', zorder=4, fontweight='bold')
+                perp_grid = ys
             else:
                 cy = cut.p1.y
                 y_idx = [i for i, y in enumerate(ys) if y <= cy]
@@ -1109,9 +1110,35 @@ class BudaVisualizer:
                 yi = y_idx[-1]
                 y_lo = ys[yi]
                 y_hi = ys[yi + 1] if yi + 1 < len(ys) else cy + 20
-                self.ax.add_patch(patches.Rectangle(
-                    (xs[0], y_lo), xs[-1] - xs[0], y_hi - y_lo,
-                    linewidth=0, facecolor=color, alpha=alpha, zorder=3))
+                perp_grid = xs
+
+            for b in range(min(n_bands, len(perp_grid) - 1)):
+                cap   = cut.band_cap[b]
+                usage = cut.band_usage[b]
+                if usage == 0:
+                    continue
+                ratio = (usage / cap) if cap > 0 else 2.0
+                color = cmap(min(ratio, 1.5) / 1.5)
+                alpha = 0.12 + 0.22 * min(ratio, 1.0)
+
+                p_lo = perp_grid[b]
+                p_hi = perp_grid[b + 1]
+
+                if is_vcut:
+                    rect = patches.Rectangle(
+                        (x_lo, p_lo), x_hi - x_lo, p_hi - p_lo,
+                        linewidth=0, facecolor=color, alpha=alpha, zorder=3)
+                    self.ax.add_patch(rect)
+                    if ratio > 1.0:
+                        self.ax.text((x_lo + x_hi) / 2, (p_lo + p_hi) / 2,
+                                     f"OVF\n{ratio:.0%}", fontsize=6, color='darkred',
+                                     ha='center', va='center', zorder=4,
+                                     fontweight='bold')
+                else:
+                    rect = patches.Rectangle(
+                        (p_lo, y_lo), p_hi - p_lo, y_hi - y_lo,
+                        linewidth=0, facecolor=color, alpha=alpha, zorder=3)
+                    self.ax.add_patch(rect)
 
     def draw_hanan_grid(self):
         xs, ys = self.fp.get_hanan_grid()
