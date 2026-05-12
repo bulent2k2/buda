@@ -21,6 +21,14 @@ buda_system_v2/flow/test_flow.log
 buda_system_v2/flow/test_nuts.log
 buda_system_v2/flow/test6_flow.log
 buda_system_v2/flow/test6_nuts.log
+buda_system_v2/flow/two_bundle_cong_flow.log
+buda_system_v2/flow/two_bundle_cong_nuts.log
+buda_system_v2/flow/two_busterms_flow.log
+buda_system_v2/flow/two_busterms_nuts.log
+buda_system_v2/flow/two_busterms_rotated_flow.log
+buda_system_v2/flow/two_busterms_rotated_nuts.log
+buda_system_v2/flow/two_flow.log
+buda_system_v2/flow/two_nuts.log
 log/cc-before-compact.log
 log/claude-code-may-8-after-compaction.md
 log/claude-code-may-8.md

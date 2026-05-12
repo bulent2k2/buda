@@ -1,0 +1,9 @@
+test5 small channel b2 and b7 have abutted M3 segs. Imagine the bbox to have min-width + half min-space on four sides
+
+test6 -> large_scale_demo  long M2 and over congested areas
+
+two_busterms OVF 200%! overflow
+
+two_busterms_rotated check slide ranges for bundle 5, e.g.
+
+two_bundle_cong net/bus mix&compare

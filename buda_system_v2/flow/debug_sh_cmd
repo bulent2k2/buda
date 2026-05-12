@@ -1,3 +1,140 @@
+22) > two_busterms.buda, bundle 1, topo 1 (L_HV): the ranges are good, but each seg is placed outside its range. They are pulled all the way to the corner. They should stay within their slide-ranges. Topo 2 (L_VH) has a good V seg, but the H seg has the same problem as in topo 1. Finally, topo 5 (U_HVH): The V segment can have a wider slide-range. It should not be limited to one hanan grid, because it is detouring outside of the bbox of the busterms anyway.
+
+⏺ Let me trace the exact bug. For bundle 1, L_HV (u0→u11):
+  - H seg at y=600 (u0.y2, top face)
+  - extract_segments → Hanan cell y=600 lands in [600,800], so interval=[600,800]
+  - Pass 1 margin → perp_lo=max(600,400+20)=600, perp_hi=min(800,600-20)=580 → inverted [600,580]
+  - preferred_fit returns -1, fallback to midpoint 590 → placed outside range
+
+  Fix 1&2: remove margin from Pass 1 (full face extent). Fix 3: skip Pass 0 for detour trunks whose perp_pos is outside busterm union bbox.
+
+
+Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 - << 'EOF'
+      import sys; sys.path.insert(0, '.')
+      import interconnect as ic
+
+      fp = ic.Floorplan()
+      fp.add_block("u0",  50,  400, 250,  600)
+      fp.add_block("u11", 500, 800, 600, 1000)
+      fp.add_block("u12", 600, 600, 700, 1000)
+      fp.add_block("u13", 700, 500, 800, 1000)
+      fp.add_block("u14", 800, 400, 900, 1000)
+      fp.add_block("u15", 900, 200,1000, 1000)
+
+      gen = ic.TopologyGenerator(fp)
+      gen.set_layer_ids(4, 5)
+
+      # Check 2-pin u0→u11 L shapes
+      print("=== 2-pin u0→u11 ===")
+      topos2 = gen.generate_candidates("u0", "u11")
+      for i, t in enumerate(topos2[:5]):
+          print(f"  Topo {i+1}: {t.type}")
+          ct = ic.ConnTopology(); ct.build(t, fp)
+          valid = all(cs.perp_lo <= cs.perp_hi for cs in ct.segs())
+          for si, cs in enumerate(ct.segs()):
+              ok = "ok" if cs.perp_lo <= cs.perp_hi and cs.perp_lo <= cs.perp_pos <= cs.perp_hi else "VIOLATED"
+              print(f"    seg{si} pos={cs.perp_pos} slide=[{cs.perp_lo},{cs.perp_hi}] {ok}")
+
+      # Check multicast
+      print("\n=== multicast u0→{u11..u15} ===")
+      topos = gen.generate_multicast_candidates("u0", ["u11","u12","u13","u14","u15"])
+      print(f"  {len(topos)} candidates")
+      any_violation = False
+      for i, t in enumerate(topos):
+          ct = ic.ConnTopology(); ct.build(t, fp)
+          for si, cs in enumerate(ct.segs()):
+              if cs.perp_lo > cs.perp_hi:
+                  print(f"  INVERTED topo{i+1} {t.type} seg{si}: [{cs.perp_lo},{cs.perp_hi}]")
+                  any_violation = True
+              elif cs.perp_pos < cs.perp_lo or cs.perp_pos > cs.perp_hi:
+                  print(f"  OOB topo{i+1} {t.type} seg{si}: pos={cs.perp_pos} slide=[{cs.perp_lo},{cs.perp_hi}]")
+                  any_violation = True
+      if not any_violation:
+          print("  All slides valid (pos within [lo,hi], non-inverted)")
+
+      # Check topo 5 specifically (should be U_HVH or similar)
+      t5 = topos[4]
+      print(f"\nTopo 5: {t5.type}")
+      ct = ic.ConnTopology(); ct.build(t5, fp)
+      for si, cs in enumerate(ct.segs()):
+          ok = "ok" if cs.perp_lo <= cs.perp_hi and cs.perp_lo <= cs.perp_pos <= cs.perp_hi else "BAD"
+          print(f"  seg{si} pos={cs.perp_pos} slide=[{cs.perp_lo},{cs.perp_hi}] {ok}")
+      EOF
+      )
+  ⎿  === 2-pin u0→u11 ===
+       Topo 1: L_HV
+         seg0 pos=600 slide=[400,600] ok
+         seg1 pos=500 slide=[500,600] ok
+       Topo 2: L_VH
+         seg0 pos=230 slide=[50,250] ok
+         seg1 pos=800 slide=[800,1000] ok
+       Topo 3: Z_VHV@y700@x230
+         seg0 pos=230 slide=[50,250] ok
+         seg1 pos=700 slide=[600,800] ok
+         seg2 pos=510 slide=[500,600] ok
+       Topo 4: Z_HVH@x375@y580
+         seg0 pos=580 slide=[400,600] ok
+         seg1 pos=375 slide=[250,500] ok
+         seg2 pos=820 slide=[800,1000] ok
+       Topo 5: U_HVH@x655
+         seg0 pos=580 slide=[400,600] ok
+         seg1 pos=655 slide=[600,1073741823] ok
+         seg2 pos=820 slide=[800,1000] ok
+
+     === multicast u0→{u11..u15} ===
+       13 candidates
+       OOB topo3 TRUNK_V@x650 seg0: pos=650 slide=[900,1073741823]
+       OOB topo4 TRUNK_V@x750 seg0: pos=750 slide=[900,1073741823]
+       INVERTED topo6 TRUNK_V@x550 seg0: [900,600]
+       OOB topo7 TRUNK_V@x850 seg0: pos=850 slide=[900,1073741823]
+       INVERTED topo10 TRUNK_V@x375 seg0: [900,500]
+       INVERTED topo13 TRUNK_V_OOB@x-45 seg0: [900,50]
+
+     Topo 5: TRUNK_H_OOB@y450
+       seg0 pos=450 slide=[400,500] ok
+       seg1 pos=550 slide=[500,600] ok
+       seg2 pos=650 slide=[600,700] ok
+       seg3 pos=750 slide=[700,800] ok
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Showing detailed transcript · ctrl+o to toggle · ctrl+e to show all
+
+
+21) ❯ two_busterms.buda, bundle 4: some topos (e.g., topos 1, 2, 3 and more) use wrong busterm label (u13) instead of the correct one (u14).                                                                  
+
+⏺ Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 - <<'EOF'
+      import interconnect as ic
+
+      fp = ic.Floorplan()
+      fp.add_block("u0",  50,  400, 250,  600)
+      fp.add_block("u11", 500, 800, 600, 1000)
+      fp.add_block("u12", 600, 600, 700, 1000)
+      fp.add_block("u13", 700, 500, 800, 1000)
+      fp.add_block("u14", 800, 400, 900, 1000)
+      fp.add_block("u15", 900, 200,1000, 1000)
+
+      gen = ic.TopologyGenerator(fp)
+      gen.set_busterm_mode(True)
+      gen.set_layer_ids(4, 5)
+
+      topos = gen.generate_candidates("u0", "u14")
+      print(f"u0→u14: {len(topos)} total")
+      for i, t in enumerate(topos):
+          segs = [(s.start.x,s.start.y,s.end.x,s.end.y) for s in t.segments]
+          print(f"  [{i+1}] {t.type}: {segs}")
+      EOF
+      )
+  ⎿  u0→u14: 7 total
+       [1] I_H: [(250, 500, 800, 500)]
+       [2] L_VH: [(230, 600, 230, 640), (230, 640, 800, 640)]
+       [3] Z_HVH@x525@y580: [(250, 580, 525, 580), (525, 580, 525, 500), (525, 500, 800, 500)]
+       [4] U_VHV@y340: [(230, 400, 230, 340), (230, 340, 810, 340), (810, 340, 810, 400)]
+       [5] U_HVH@x985: [(250, 580, 985, 580), (985, 580, 985, 500), (985, 500, 900, 500)]
+       [6] U_HVH@x-35: [(50, 580, -35, 580), (-35, 580, -35, 500), (-35, 500, 800, 500)]
+       [7] U_VHV@y1060: [(230, 600, 230, 1060), (230, 1060, 810, 1060), (810, 1060, 810, 1000)]
+
+
+
 20)Bash command                                                   
  
    cd /Users/ben/src/buda/buda_system_v2/src && python3 -c " 
