@@ -7,6 +7,20 @@ void LayerStack::add_layer(int id, const std::string& name, LayerDir dir, LayerT
         else top_vert_id_ = id;
     }
 }
+void LayerStack::set_layer_span(int id, int span_min, int span_max) {
+    for (auto& l : layers_) if (l.id == id) { l.span_min = span_min; l.span_max = span_max; return; }
+}
+void LayerStack::set_layer_kspan(int id, double kspan) {
+    for (auto& l : layers_) if (l.id == id) { l.kspan_override = kspan; return; }
+}
+const Layer* LayerStack::get_layer(int id) const {
+    for (const auto& l : layers_) if (l.id == id) return &l;
+    return nullptr;
+}
+bool LayerStack::is_top(int id) const {
+    const Layer* l = get_layer(id);
+    return l && l->type == LayerType::TOP;
+}
 LayerDir LayerStack::get_layer_dir(int id) const {
     for(auto& l : layers_) if(l.id == id) return l.dir;
     return LayerDir::HORIZONTAL;
@@ -16,14 +30,13 @@ LayerType LayerStack::get_layer_type(int id) const {
     return LayerType::LOW;
 }
 std::vector<int> LayerStack::get_layer_ids_preferred(LayerDir dir) const {
-    int top_id = get_top_layer(dir);
     std::vector<int> ids = get_layer_ids_by_dir(dir);
-    // Stable-sort: TOP layer first, LOW layers keep ascending order after it.
+    // Stable-sort: TOP layers first (ascending), then non-TOP (ascending).
     std::stable_sort(ids.begin(), ids.end(), [&](int a, int b) {
-        bool a_top = (a == top_id);
-        bool b_top = (b == top_id);
+        bool a_top = is_top(a);
+        bool b_top = is_top(b);
         if (a_top != b_top) return a_top;
-        return false; // preserve original ascending order for LOW layers
+        return false; // preserve original ascending order within each group
     });
     return ids;
 }

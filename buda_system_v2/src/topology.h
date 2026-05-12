@@ -40,10 +40,23 @@ struct Topology {
     // scanning the entire floorplan.  Key = segment index.
     std::map<int, SegEndpoints> seg_busterms;
 };
+// Per-block corner margin: keeps trunk/stub connections away from block corners.
+// dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).
+// dy: margin along the vertical direction   (applied to left/right  faces, extent in Y).
+// A margin of 0 means no constraint beyond the face extent (default).
+struct BlockCornerMargin {
+    int dx = 0;
+    int dy = 0;
+};
+
 class Floorplan {
 public:
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
+    // Set corner margin for a previously-added block (absolute units).
+    void set_block_corner_margin(const std::string& name, int dx, int dy);
     Rect get_block_bounds(const std::string& name) const;
+    // Returns {0,0} for blocks without an explicit margin.
+    BlockCornerMargin get_block_corner_margin(const std::string& name) const;
     void get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_coords) const;
     std::vector<std::pair<std::string, Rect>> get_all_blocks() const {
         std::vector<std::pair<std::string, Rect>> res;
@@ -52,6 +65,7 @@ public:
     }
 private:
     std::map<std::string, Rect> blocks_;
+    std::map<std::string, BlockCornerMargin> corner_margins_;
 };
 class TopologyGenerator {
 public:

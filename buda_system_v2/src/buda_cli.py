@@ -45,6 +45,7 @@ class BudaSession:
         self.bundles = []
         self.nuts_result = None
         self._layer_overheads = {}   # layer_id -> overhead_percent
+        self._planner_params  = {}   # param_name -> value (buffered before planner exists)
         self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
         self._nuts_pitch = 1.0       # last track pitch used by run_nuts
@@ -534,7 +535,35 @@ class BudaSession:
         args = parts[1:]
 
         if cmd == "add_block":
-            self.fp.add_block(args[0], int(args[1]), int(args[2]), int(args[3]), int(args[4]))
+            # add_block <name> <x1> <y1> <x2> <y2>
+            #   [corner_margin dx <n> [dy <n>]]
+            #   [corner_margin pct_h <p> [pct_v <p>]]
+            name = args[0]
+            x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
+            self.fp.add_block(name, x1, y1, x2, y2)
+            rest = list(args[5:])
+            if rest and rest[0].lower() == "corner_margin":
+                rest = rest[1:]
+                kws = {}
+                i = 0
+                while i < len(rest):
+                    kw = rest[i].lower()
+                    if kw in ("dx", "dy", "pct_h", "pct_v") and i + 1 < len(rest):
+                        kws[kw] = float(rest[i + 1]); i += 2
+                    else: i += 1
+                # Resolve to absolute dx, dy
+                cm_dx = cm_dy = 0
+                if "dx" in kws:    cm_dx = int(round(kws["dx"]))
+                if "dy" in kws:    cm_dy = int(round(kws["dy"]))
+                if "pct_h" in kws: cm_dx = int(round((x2 - x1) * kws["pct_h"] / 100.0))
+                if "pct_v" in kws: cm_dy = int(round((y2 - y1) * kws["pct_v"] / 100.0))
+                # If only one axis specified, mirror to the other
+                if "dx" in kws and "dy" not in kws and "pct_v" not in kws: cm_dy = cm_dx
+                if "dy" in kws and "dx" not in kws and "pct_h" not in kws: cm_dx = cm_dy
+                if "pct_h" in kws and "pct_v" not in kws and "dy" not in kws: cm_dy = cm_dx
+                if "pct_v" in kws and "pct_h" not in kws and "dx" not in kws: cm_dx = cm_dy
+                if cm_dx > 0 or cm_dy > 0:
+                    self.fp.set_block_corner_margin(name, cm_dx, cm_dy)
         elif cmd == "add_net":
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')
@@ -566,14 +595,45 @@ class BudaSession:
                 self.netlist.add_net(net_name, drv_pin, rcv_pins)
                 self._net_endpoints[net_name] = (drv_inst, rcv_insts)
         elif cmd == "def_layer":
-            lid, name, dirstr, typestr, ovh = args
-            ldir = interconnect.LayerDir.HORIZONTAL if dirstr.upper()=="H" else interconnect.LayerDir.VERTICAL
-            ltype = interconnect.LayerType.TOP if typestr.upper()=="TOP" else interconnect.LayerType.LOW
+            # def_layer <id> <name> <H|V> [TOP|LOW] <overhead%>
+            #           [span_min N] [span_max N] [kSpan K]
+            # TOP/LOW is optional; omitting it means non-TOP. LOW is accepted for
+            # backward compatibility and treated as non-TOP.
+            lid, name, dirstr = args[0], args[1], args[2]
+            rest = list(args[3:])
+            if rest and rest[0].upper() in ("TOP", "LOW"):
+                typestr = rest.pop(0).upper()
+            else:
+                typestr = "NONE"
+            ovh = rest.pop(0)
+            # Parse optional keyword args
+            span_min = span_max = kspan_override = None
+            i = 0
+            while i < len(rest):
+                kw = rest[i].lower()
+                if kw == "span_min":    span_min = int(rest[i+1]);    i += 2
+                elif kw == "span_max":  span_max = int(rest[i+1]);    i += 2
+                elif kw == "kspan":     kspan_override = float(rest[i+1]); i += 2
+                else: i += 1
+            ldir  = interconnect.LayerDir.HORIZONTAL if dirstr.upper()=="H" else interconnect.LayerDir.VERTICAL
+            ltype = interconnect.LayerType.TOP if typestr == "TOP" else interconnect.LayerType.LOW
             self.layers.add_layer(int(lid), name, ldir, ltype)
+            if span_min is not None or span_max is not None:
+                smin = span_min if span_min is not None else 0
+                smax = span_max if span_max is not None else 1_000_000_000
+                self.layers.set_layer_span(int(lid), smin, smax)
+            if kspan_override is not None:
+                self.layers.set_layer_kspan(int(lid), kspan_override)
             ovh_val = float(ovh)
             if ovh_val > 0.0:
                 self._layer_overheads[int(lid)] = ovh_val
             self._layer_name_map[name] = int(lid)
+        elif cmd == "set_planner_param":
+            name_p, value_p = args[0], float(args[1])
+            if self.planner is None:
+                self._planner_params[name_p] = value_p
+            else:
+                self.planner.set_planner_param(name_p, value_p)
         elif cmd == "run_bundler":
             self.bundler.set_strategy(interconnect.Strategy.STRICT)
             raw_bundles = self.bundler.run(self.netlist)
@@ -687,6 +747,8 @@ class BudaSession:
                 self.planner = interconnect.GlobalRouter(self.fp, self.layers)
                 for lid, ovh in self._layer_overheads.items():
                     self.planner.set_layer_overhead(lid, ovh)
+                for pname, pval in self._planner_params.items():
+                    self.planner.set_planner_param(pname, pval)
                 self.planner.build_congestion_map()
                 # Apply architect-pinned selections BEFORE optimizing so the
                 # planner scores the correct topology and assigns layers for it.

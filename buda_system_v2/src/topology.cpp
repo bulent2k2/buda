@@ -7,6 +7,13 @@ namespace interconnect {
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     blocks_[name] = Rect{x1, y1, x2, y2};
 }
+void Floorplan::set_block_corner_margin(const std::string& name, int dx, int dy) {
+    corner_margins_[name] = BlockCornerMargin{dx, dy};
+}
+BlockCornerMargin Floorplan::get_block_corner_margin(const std::string& name) const {
+    auto it = corner_margins_.find(name);
+    return (it != corner_margins_.end()) ? it->second : BlockCornerMargin{};
+}
 Rect Floorplan::get_block_bounds(const std::string& name) const {
     if (blocks_.count(name)) return blocks_.at(name);
     return Rect{0,0,0,0};

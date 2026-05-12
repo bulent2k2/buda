@@ -43,8 +43,28 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("topology_pinned",         &BundleWrapper::topology_pinned);
     py::class_<Netlist>(m, "Netlist").def(py::init<>()).def("add_net", &Netlist::add_net);
     py::class_<Bundler>(m, "Bundler").def(py::init<>()).def("set_strategy", &Bundler::set_strategy).def("run", &Bundler::run);
-    py::class_<Floorplan>(m, "Floorplan").def(py::init<>()).def("add_block", &Floorplan::add_block).def("get_hanan_grid", [](const Floorplan& fp) { std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y); }).def("get_all_blocks", [](const Floorplan& fp) { return fp.get_all_blocks(); });
-    py::class_<LayerStack>(m, "LayerStack").def(py::init<>()).def("add_layer", &LayerStack::add_layer).def("get_layer_ids_by_dir", &LayerStack::get_layer_ids_by_dir).def("get_layer_ids_preferred", &LayerStack::get_layer_ids_preferred).def("get_top_layer", &LayerStack::get_top_layer).def("get_layer_type", &LayerStack::get_layer_type);
+    py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
+        .def(py::init<>())
+        .def_readwrite("dx", &BlockCornerMargin::dx)
+        .def_readwrite("dy", &BlockCornerMargin::dy);
+    py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
+        .def("add_block",              &Floorplan::add_block)
+        .def("set_block_corner_margin",&Floorplan::set_block_corner_margin)
+        .def("get_block_corner_margin",&Floorplan::get_block_corner_margin)
+        .def("get_block_bounds",       &Floorplan::get_block_bounds)
+        .def("get_hanan_grid", [](const Floorplan& fp) {
+            std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y);
+        })
+        .def("get_all_blocks", [](const Floorplan& fp) { return fp.get_all_blocks(); });
+    py::class_<LayerStack>(m, "LayerStack").def(py::init<>())
+        .def("add_layer",        &LayerStack::add_layer)
+        .def("set_layer_span",   &LayerStack::set_layer_span)
+        .def("set_layer_kspan",  &LayerStack::set_layer_kspan)
+        .def("is_top",           &LayerStack::is_top)
+        .def("get_layer_ids_by_dir",   &LayerStack::get_layer_ids_by_dir)
+        .def("get_layer_ids_preferred",&LayerStack::get_layer_ids_preferred)
+        .def("get_top_layer",    &LayerStack::get_top_layer)
+        .def("get_layer_type",   &LayerStack::get_layer_type);
     py::class_<SegConn>(m, "SegConn")
         .def_readwrite("kind",       &SegConn::kind)
         .def_readwrite("block_name", &SegConn::block_name)
@@ -95,6 +115,7 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<GlobalRouter>(m, "GlobalRouter")
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_layer_overhead",  &GlobalRouter::set_layer_overhead)
+        .def("set_planner_param",   &GlobalRouter::set_planner_param)
         .def("build_congestion_map",&GlobalRouter::build_congestion_map)
         .def("optimize_topologies", &GlobalRouter::optimize_topologies)
         .def("get_cuts",            &GlobalRouter::get_cuts)

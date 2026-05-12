@@ -42,6 +42,11 @@ class GlobalRouter {
 public:
     GlobalRouter(const Floorplan& fp, const LayerStack& layers);
     void set_layer_overhead(int layer_id, double overhead_percent);
+    // Tune global planner knobs.  Recognised names:
+    //   "kCong"            — congestion cost coefficient (default 1.0)
+    //   "kSpan"            — span-mismatch cost per layout-unit (default 0.001)
+    //   "base_cost_non_top"— flat penalty for non-TOP layers (default 0.5)
+    void set_planner_param(const std::string& name, double value);
     void build_congestion_map();
     std::vector<BundleAssignment> optimize_topologies(
             std::vector<BundleWrapper>& bundles, int max_iterations);
@@ -50,24 +55,28 @@ public:
     const std::vector<int>& get_y_grid() const { return y_grid_; }
 
 private:
-    // Rebuild cuts_ from the current x_grid_ / y_grid_ (without resetting the grids).
     void _rebuild_cuts();
-    // 2D per-segment scoring/application.
+    // Hyperbolic congestion cost: kCong * u/(1-u) where u = (usage+eff)/cap.
+    double cong_cost_segment(const Segment& seg, int layer_id, double eff_width) const;
+    // Raw overflow for logging (usage+eff - cap, clamped to 0).
     double score_segment(const Segment& seg, int layer_id, double eff_width) const;
     void   apply_segment(const Segment& seg, int layer_id, double eff_width);
+    // Span-mismatch cost: kSpan(layer) * max(0, span_min-span, span-span_max).
+    double span_cost_for(double seg_span, int layer_id) const;
 
-    // Band lookup: for a V-cut (is_vcut=true) look up in y_grid_, else x_grid_.
-    int  find_band(bool is_vcut, int perp_pos) const;
+    int    find_band(bool is_vcut, int perp_pos) const;
     double get_dilution(int layer_id) const;
-    double segment_affinity(double span_norm, int layer_id,
-                            int top_layer,
-                            const std::vector<int>& alt_layers) const;
 
     const Floorplan&  floorplan_;
     const LayerStack& layers_;
     std::map<int, double> layer_dilution_factors_;
     std::vector<GlobalCut> cuts_;
-    std::vector<int> x_grid_, y_grid_;  // Hanan grids, populated by build_congestion_map
+    std::vector<int> x_grid_, y_grid_;
+
+    // Tunable cost coefficients.
+    double kCong_             = 1.0;
+    double kSpan_             = 0.001;
+    double base_cost_non_top_ = 0.5;
 };
 
 } // namespace interconnect

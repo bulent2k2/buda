@@ -240,23 +240,35 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     }
 
     // ── Pass 1 ──
-    // Constrain to the full face extent [rect.lo, rect.hi].  No inward margin is
-    // applied here: topology generation already places segment endpoints at least
-    // 10% from block corners (via clamp_10pct / stub_y / stub_x), so the NUTS
-    // preferred position is already away from extremes.  Shrinking the slide range
-    // by another 10% would exclude the face-adjacent positions that the topology
-    // generator intentionally produces (e.g. hy = src.y2 for a below-to-above L),
-    // causing inverted intervals and out-of-range placements.
+    // Constrain to the block face extent, optionally shrunk by the block's corner
+    // margin (set via Floorplan::set_block_corner_margin).
+    //
+    //   H segment on left/right face (face runs in Y) → margin = dy
+    //     slide becomes [rect.y1+dy, rect.y2-dy]
+    //   V segment on top/bottom face (face runs in X) → margin = dx
+    //     slide becomes [rect.x1+dx, rect.x2-dx]
+    //
+    // Guard: if the margin would invert the interval (block smaller than 2×margin),
+    // fall back to the full face extent for that axis.
     for (auto& cs : segs_) {
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::BUSTERM) continue;
             const Rect& rect = bmap.at(conn.block_name);
+            BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
             if (cs.horiz) {
-                cs.perp_lo = std::max(cs.perp_lo, rect.y1);
-                cs.perp_hi = std::min(cs.perp_hi, rect.y2);
+                int m  = cm.dy;
+                int lo = rect.y1 + m;
+                int hi = rect.y2 - m;
+                if (lo > hi) { lo = rect.y1; hi = rect.y2; }  // block too short
+                cs.perp_lo = std::max(cs.perp_lo, lo);
+                cs.perp_hi = std::min(cs.perp_hi, hi);
             } else {
-                cs.perp_lo = std::max(cs.perp_lo, rect.x1);
-                cs.perp_hi = std::min(cs.perp_hi, rect.x2);
+                int m  = cm.dx;
+                int lo = rect.x1 + m;
+                int hi = rect.x2 - m;
+                if (lo > hi) { lo = rect.x1; hi = rect.x2; }  // block too narrow
+                cs.perp_lo = std::max(cs.perp_lo, lo);
+                cs.perp_hi = std::min(cs.perp_hi, hi);
             }
         }
     }

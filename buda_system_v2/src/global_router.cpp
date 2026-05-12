@@ -15,6 +15,13 @@ void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {
     layer_dilution_factors_[layer_id] = 100.0 / (100.0 - overhead_percent);
 }
 
+void GlobalRouter::set_planner_param(const std::string& name, double value) {
+    if      (name == "kCong")             kCong_             = value;
+    else if (name == "kSpan")             kSpan_             = value;
+    else if (name == "base_cost_non_top") base_cost_non_top_ = value;
+    else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
+}
+
 double GlobalRouter::get_dilution(int layer_id) const {
     auto it = layer_dilution_factors_.find(layer_id);
     return (it != layer_dilution_factors_.end()) ? it->second : 1.0;
@@ -214,27 +221,44 @@ void GlobalRouter::apply_segment(const Segment& seg, int layer_id, double eff_wi
 }
 
 // ---------------------------------------------------------------------------
-// Affinity helpers — bias toward physically appropriate layers
+// Span-aware cost helpers
 // ---------------------------------------------------------------------------
 
-static constexpr double kBase     = 0.5;
-static constexpr double kMismatch = 0.001;
-
-static int preferred_alt_idx(double span_norm, int n_alts) {
-    if (n_alts <= 1) return 0;
-    return std::clamp((int)std::round(span_norm * (n_alts - 1)), 0, n_alts - 1);
+// Hyperbolic congestion cost: kCong * u/(1-u) where u = (existing+eff)/cap.
+// Returns the peak cost across all cuts the segment crosses on the given layer.
+double GlobalRouter::cong_cost_segment(const Segment& seg, int layer_id,
+                                       double eff_width) const {
+    bool   is_h      = (seg.start.y == seg.end.y);
+    double peak_cost = 0.0;
+    for (const auto& c : cuts_) {
+        if (c.layer_id != layer_id) continue;
+        int b = -1;
+        if (is_h && c.dir == LayerDir::VERTICAL) {
+            if (!h_seg_crosses_vcut(seg.start.x, seg.end.x, c.cut_coord)) continue;
+            b = find_band(/*is_vcut=*/true, seg.start.y);
+        } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
+            if (!v_seg_crosses_hcut(seg.start.y, seg.end.y, c.cut_coord)) continue;
+            b = find_band(/*is_vcut=*/false, seg.start.x);
+        }
+        if (b < 0 || b >= (int)c.band_cap.size()) continue;
+        double cap = c.band_cap[b];
+        if (cap <= 0.0) { return kCong_ * 9999.0; }
+        double u    = std::min((c.band_usage[b] + eff_width) / cap, 0.9999);
+        double cost = kCong_ * u / (1.0 - u);
+        peak_cost   = std::max(peak_cost, cost);
+    }
+    return peak_cost;
 }
 
-// Returns 0 for the top layer, kBase + small mismatch for alternates.
-double GlobalRouter::segment_affinity(double span_norm, int layer_id,
-                                      int top_layer,
-                                      const std::vector<int>& alt_layers) const {
-    if (layer_id == top_layer || alt_layers.empty()) return 0.0;
-    auto it = std::find(alt_layers.begin(), alt_layers.end(), layer_id);
-    if (it == alt_layers.end()) return 0.0;
-    int actual_idx = (int)(it - alt_layers.begin());
-    int pref_idx   = preferred_alt_idx(span_norm, (int)alt_layers.size());
-    return kBase + kMismatch * std::abs(actual_idx - pref_idx);
+// Span-mismatch cost: kSpan(layer) * excess outside [span_min, span_max].
+double GlobalRouter::span_cost_for(double seg_span, int layer_id) const {
+    const Layer* layer = layers_.get_layer(layer_id);
+    if (!layer) return 0.0;
+    double k      = (layer->kspan_override >= 0.0) ? layer->kspan_override : kSpan_;
+    double excess = std::max({0.0,
+                              (double)layer->span_min - seg_span,
+                              seg_span - (double)layer->span_max});
+    return k * excess;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,23 +310,9 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
     if (h_layers.empty()) { h_layers.push_back(4); top_h = 4; }
     if (v_layers.empty()) { v_layers.push_back(5); top_v = 5; }
 
-    std::vector<int> alt_h, alt_v;
-    for (int id : h_layers) if (id != top_h) alt_h.push_back(id);
-    for (int id : v_layers) if (id != top_v) alt_v.push_back(id);
-
-    // Pre-compute max spans across all candidates for span-norm affinity.
-    double max_h_span = 1.0, max_v_span = 1.0;
-    for (const auto& bw : bundles) {
-        for (const auto& cand : bw.candidates) {
-            for (const auto& seg : cand.segments) {
-                bool is_h = (seg.start.y == seg.end.y);
-                if (is_h)
-                    max_h_span = std::max(max_h_span, (double)std::abs(seg.end.x - seg.start.x));
-                else
-                    max_v_span = std::max(max_v_span, (double)std::abs(seg.end.y - seg.start.y));
-            }
-        }
-    }
+    // Reversed copies: highest layer ID first so ties break toward higher metal.
+    auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
+    auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
 
     // Process widest buses first so they claim the best paths early.
     std::vector<int> order(bundles.size());
@@ -345,23 +355,23 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
             for (int si = 0; si < (int)topo.segments.size(); ++si) {
                 const Segment& seg = topo.segments[si];
                 bool  is_h         = (seg.start.y == seg.end.y);
-                int   top_layer    = is_h ? top_h : top_v;
-                const auto& layers_for_dir = is_h ? h_layers : v_layers;
-                const auto& alt            = is_h ? alt_h    : alt_v;
+                const auto& layers_rev = is_h ? h_layers_rev : v_layers_rev;
                 double seg_span = is_h
                     ? (double)std::abs(seg.end.x - seg.start.x)
                     : (double)std::abs(seg.end.y - seg.start.y);
-                double span_norm = seg_span / (is_h ? max_h_span : max_v_span);
 
-                int    best_lid = layers_for_dir[0];
+                int    best_lid = layers_rev[0];
                 double best_s   = std::numeric_limits<double>::max();
                 double best_ov  = 0.0;
 
-                for (int lid : layers_for_dir) {
-                    double eff = bw.width * get_dilution(lid);
-                    double ov  = score_segment(seg, lid, eff);
-                    double aff = segment_affinity(span_norm, lid, top_layer, alt);
-                    double s   = ov + aff;
+                // Iterate highest-ID first so equal-cost layers prefer higher metal.
+                for (int lid : layers_rev) {
+                    double eff  = bw.width * get_dilution(lid);
+                    double cong = cong_cost_segment(seg, lid, eff);
+                    double span = span_cost_for(seg_span, lid);
+                    double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
+                    double s    = cong + span + base;
+                    double ov   = score_segment(seg, lid, eff);  // raw overflow for logging
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; }
                 }
 
