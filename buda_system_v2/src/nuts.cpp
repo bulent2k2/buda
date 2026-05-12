@@ -134,12 +134,26 @@ static void build_nuts_maps(
 // Apply ConnTopology slide ranges and 10% trunk-channel margin.
 //
 // only_layer: if >= 0, apply only to segments on that layer; -1 = all layers.
+// x_grid/y_grid: Hanan grids used to recover degenerate intervals.
+//
+// When a segment's nominal perp_pos lands exactly on a Hanan grid line, the
+// Hanan cell assignment may produce a tight (e.g. [350,400]) interval while
+// the ConnTopology slide starts or ends exactly at that grid line.  Applying
+// the slide can collapse the interval to a single point [v,v] from which the
+// bus of non-zero width cannot be placed without a forced violation.
+//
+// Recovery: if the result is degenerate AND slo == hanan_hi (slide lower
+// bound clamped lo up to the hanan upper boundary), expand to the NEXT
+// Hanan cell [hanan_hi, next].  Symmetrically, if shi == hanan_lo, expand
+// to the PREVIOUS Hanan cell [prev, hanan_lo].
 // ---------------------------------------------------------------------------
 static void apply_interval_constraints(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, std::pair<double,double>>& slide_map,
     const std::set<std::pair<int,int>>&                           trunk_set,
-    int only_layer = -1)
+    int only_layer = -1,
+    const std::vector<int>* x_grid = nullptr,
+    const std::vector<int>* y_grid = nullptr)
 {
     constexpr double kSentinel = 5e8;
     for (auto& ts : segments) {
@@ -149,8 +163,57 @@ static void apply_interval_constraints(
         auto sit = slide_map.find(key);
         if (sit != slide_map.end()) {
             auto [slo, shi] = sit->second;
+            double hanan_lo = ts.interval_lo;
+            double hanan_hi = ts.interval_hi;
             if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
             if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
+
+            // Recovery from degenerate interval caused by slide/Hanan boundary clash.
+            if (ts.interval_lo >= ts.interval_hi) {
+                double v = ts.interval_lo;  // collapsed gridline value
+
+                // We need the grid for the perpendicular axis of this segment.
+                // H segment: perpendicular = Y → use y_grid.
+                // V segment: perpendicular = X → use x_grid.
+                // Infer orientation from whether span_lo/span_hi were filled;
+                // use the grid whose values bracket v on the correct side.
+                for (int dir = 0; dir < 2; ++dir) {
+                    const std::vector<int>* g = (dir == 0) ? y_grid : x_grid;
+                    if (!g || g->size() < 2) continue;
+
+                    // Case 1: slo clamped lo up to hanan_hi → need next cell [v, next].
+                    if (std::abs(v - hanan_hi) < 0.5 && slo > -kSentinel) {
+                        auto it = std::lower_bound(g->begin(), g->end(),
+                                                   static_cast<int>(v + 0.5));
+                        if (it != g->end() && std::next(it) != g->end()) {
+                            double new_lo = static_cast<double>(*it);
+                            double new_hi = static_cast<double>(*std::next(it));
+                            if (new_lo >= v - 0.5) {   // sanity: starts at v
+                                ts.interval_lo = new_lo;
+                                ts.interval_hi = new_hi;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Case 2: shi pulled hi down to hanan_lo → need prev cell [prev, v].
+                    if (std::abs(v - hanan_lo) < 0.5 && shi < kSentinel) {
+                        auto it = std::lower_bound(g->begin(), g->end(),
+                                                   static_cast<int>(v + 0.5));
+                        if (it != g->begin()) {
+                            --it;  // iterator to v itself
+                            if (it != g->begin()) {
+                                --it;  // iterator to prev
+                                double new_lo = static_cast<double>(*it);
+                                double new_hi = v;
+                                ts.interval_lo = new_lo;
+                                ts.interval_hi = new_hi;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (trunk_set.count(key)) {
@@ -537,7 +600,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
 
-    apply_interval_constraints(result.segments, slide_map, trunk_set);
+    apply_interval_constraints(result.segments, slide_map, trunk_set, -1, &x_grid, &y_grid);
 
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
@@ -602,7 +665,8 @@ NUTSResult NUTSEngine::rerun_layer(
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
 
     // Apply interval constraints only for the target layer.
-    apply_interval_constraints(result.segments, slide_map, trunk_set, layer_id);
+    apply_interval_constraints(result.segments, slide_map, trunk_set, layer_id,
+                               &x_grid, &y_grid);
 
     // Build pointer map (covers all layers for span adjustment targets).
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;

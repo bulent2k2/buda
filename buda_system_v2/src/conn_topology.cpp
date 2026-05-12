@@ -73,9 +73,15 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
             // topology.cpp's annotate_endpoints populates topo.seg_busterms so
             // we know exactly which block each terminal endpoint belongs to —
             // no geometric search needed, no shared-face ambiguity possible.
+            // When the annotation entry exists but says "no busterm" (nullopt),
+            // the endpoint is a bend/SEG junction — skip the geometric fallback
+            // so a coincidentally-touching block face is not misidentified as a
+            // busterm connection (e.g. L-shape bend at a block corner).
+            bool annotation_present = false;
             {
                 auto it = topo.seg_busterms.find(i);
                 if (it != topo.seg_busterms.end()) {
+                    annotation_present = true;
                     const auto& opt = (ep == 0) ? it->second.first
                                                 : it->second.second;
                     if (opt.has_value()) {
@@ -93,7 +99,9 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
 
             // (b) geometric fallback — for unannotated topologies (e.g. those
             // built directly in tests without going through generate_candidates).
-            if (!found) {
+            // Skipped when the annotation entry is present (even if nullopt):
+            // the annotation is authoritative and the bend/junction is a SEG conn.
+            if (!found && !annotation_present) {
                 for (const auto& [bname, rect] : blocks) {
                     bool on_xface = (P.x == rect.x1 || P.x == rect.x2)
                                     && in_range(P.y, rect.y1, rect.y2);
@@ -222,14 +230,16 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                 if (busterm_blocks.count(bname)) continue; // has its own stub
                 if (cs.horiz) {
                     bool overlaps = (cs.along_lo < rect.x2 && cs.along_hi > rect.x1);
-                    bool inside   = (cs.perp_pos >= rect.y1 && cs.perp_pos <= rect.y2);
+                    // Strictly interior: a segment at exactly y=y1 or y=y2 is touching
+                    // the block face, not passing through the interior — no constraint.
+                    bool inside   = (cs.perp_pos > rect.y1 && cs.perp_pos < rect.y2);
                     if (overlaps && inside) {
                         cs.perp_lo = std::max(cs.perp_lo, rect.y1);
                         cs.perp_hi = std::min(cs.perp_hi, rect.y2);
                     }
                 } else {
                     bool overlaps = (cs.along_lo < rect.y2 && cs.along_hi > rect.y1);
-                    bool inside   = (cs.perp_pos >= rect.x1 && cs.perp_pos <= rect.x2);
+                    bool inside   = (cs.perp_pos > rect.x1 && cs.perp_pos < rect.x2);
                     if (overlaps && inside) {
                         cs.perp_lo = std::max(cs.perp_lo, rect.x1);
                         cs.perp_hi = std::min(cs.perp_hi, rect.x2);
