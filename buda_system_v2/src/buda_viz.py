@@ -1327,6 +1327,24 @@ class BudaVisualizer:
             return None, []
         return positions[0], positions[1:]
 
+    def _draw_via_marker(self, bid, x, y, msz, alpha, zorder):
+        """X inside a square at an H↔V segment junction."""
+        sq, = self.ax.plot(x, y, 's', color='white',
+                           markeredgecolor='black', markeredgewidth=1.2,
+                           markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
+        self._register(bid, sq, alpha=alpha, lw=msz)
+        xm, = self.ax.plot(x, y, 'x', color='black',
+                           markersize=msz * 0.65, markeredgewidth=1.5,
+                           alpha=alpha, zorder=zorder + 1, clip_on=True)
+        self._register(bid, xm, alpha=alpha, lw=msz * 0.65)
+
+    def _draw_busterm_conn(self, bid, x, y, col, msz, alpha, zorder):
+        """Filled square at a segment endpoint that connects to a busterm."""
+        sq, = self.ax.plot(x, y, 's', color=col,
+                           markeredgecolor='black', markeredgewidth=1.0,
+                           markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
+        self._register(bid, sq, alpha=alpha, lw=msz)
+
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         self._busterm_artists = []
@@ -1338,24 +1356,27 @@ class BudaVisualizer:
             offset   = (i % 3 - 1) * 2.0
             alpha    = 0.8
 
+            n_segs = len(topo.segments)
+            msz = max(4, min(viz_lw, 14))
             for idx, seg in enumerate(topo.segments):
                 spec = layer_specs.get(seg.layer_hint, {'color': 'green'})
+                col  = spec['color']
                 sx = seg.start.x + offset;  sy = seg.start.y + offset
                 ex = seg.end.x   + offset;  ey = seg.end.y   + offset
 
                 line, = self.ax.plot([sx, ex], [sy, ey],
-                                     color=spec['color'], linewidth=viz_lw,
+                                     color=col, linewidth=viz_lw,
                                      solid_capstyle='butt', alpha=alpha,
                                      zorder=10 + i)
                 self._register(bid, line, alpha=alpha, lw=viz_lw,
                                 layer=seg.layer_hint)
 
-                if idx < len(topo.segments) - 1:
-                    via_sz = max(2, min(viz_lw / 3, 6))
-                    via, = self.ax.plot(ex, ey, 'o', color='black',
-                                        markersize=via_sz,
-                                        alpha=alpha, zorder=11 + i)
-                    self._register(bid, via, alpha=alpha, lw=via_sz)
+                if idx < n_segs - 1:
+                    self._draw_via_marker(bid, ex, ey, msz, alpha, 12 + i)
+                if idx == 0:
+                    self._draw_busterm_conn(bid, sx, sy, col, msz, alpha, 12 + i)
+                if idx == n_segs - 1:
+                    self._draw_busterm_conn(bid, ex, ey, col, msz, alpha, 12 + i)
 
             ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
@@ -1374,6 +1395,8 @@ class BudaVisualizer:
             bid    = wrapper.original_bundle.id
             topo   = wrapper.candidates[wrapper.selected_topology_index]
             viz_lw = 3.0 + math.log2(1 + wrapper.width) * 2.0
+            n_segs = len(topo.segments)
+            msz    = max(4, min(viz_lw, 14))
 
             for idx, seg in enumerate(topo.segments):
                 ts   = ts_map.get((bid, idx))
@@ -1431,12 +1454,12 @@ class BudaVisualizer:
                 self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
                                 layer=effective_layer)
 
-                if idx < len(topo.segments) - 1:
-                    via_sz = max(2, min(viz_lw / 3, 6))
-                    via, = self.ax.plot(ex, ey, 'o', color='black',
-                                        markersize=via_sz,
-                                        alpha=seg_alpha, zorder=11 + i)
-                    self._register(bid, via, alpha=seg_alpha, lw=via_sz)
+                if idx < n_segs - 1:
+                    self._draw_via_marker(bid, ex, ey, msz, seg_alpha, 12 + i)
+                if idx == 0:
+                    self._draw_busterm_conn(bid, sx, sy, col, msz, seg_alpha, 12 + i)
+                if idx == n_segs - 1:
+                    self._draw_busterm_conn(bid, ex, ey, col, msz, seg_alpha, 12 + i)
 
             ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
