@@ -233,6 +233,64 @@ def test_small_block_guard_prevents_inversion():
 # Scenario: Specifying only dy mirrors to dx (tested via CLI parsing logic)
 # ---------------------------------------------------------------------------
 
+def test_nominal_at_lower_face_boundary_skips_margin():
+    """
+    Scenario: Nominal at face boundary — margin not applied (topology-generator case).
+    Block "src" at (200,400)-(300,600) with dy=20.
+    H segment at nominal y=400 (= src.y1, bottom face boundary).
+    Margin range = [420, 580]; 400 < 420 → guard fires → slide = [400, 600].
+    Segment end is in open space (no dst block) to avoid extra constraints.
+    """
+    fp = make_fp_with_block("src", 200, 400, 300, 600, dy=20)
+    # H segment: start on src's right face at y=400 (= src.y1), end in open space.
+    topo = interconnect.Topology()
+    topo.type = "TEST_H_BOUNDARY"
+    seg = interconnect.Segment()
+    seg.start = interconnect.Point(300, 400)
+    seg.end   = interconnect.Point(900, 400)  # open space — no block there
+    seg.layer_hint = 4
+    topo.segments = [seg]
+    bt = interconnect.Busterm()
+    bt.block_name = "src"
+    bt.bbox = fp.get_block_bounds("src")
+    topo.seg_busterms[0] = (bt, None)  # only start annotated
+
+    ct = interconnect.ConnTopology()
+    ct.build(topo, fp)
+    lo, hi = slide_range(ct)
+    assert lo == 400, f"Expected perp_lo=400 (guard: nominal at boundary), got {lo}"
+    assert hi == 600, f"Expected perp_hi=600 (guard: nominal at boundary), got {hi}"
+
+
+def test_nominal_at_upper_face_boundary_skips_margin():
+    """
+    Scenario: Nominal at opposite face boundary — margin not applied.
+    Block "src" at (200,400)-(300,600) with dx=15.
+    V segment at nominal x=300 (= src.x2, right face boundary).
+    Margin range [215, 285]; 300 > 285 → guard fires → slide = [200, 300].
+    Segment end is in open space to avoid extra constraints.
+    """
+    fp = make_fp_with_block("src", 200, 400, 300, 600, dx=15)
+    # V segment: start on src's right face at x=300, going downward to open space.
+    topo = interconnect.Topology()
+    topo.type = "TEST_V_BOUNDARY"
+    seg = interconnect.Segment()
+    seg.start = interconnect.Point(300, 400)
+    seg.end   = interconnect.Point(300, 0)   # open space — no block there
+    seg.layer_hint = 5
+    topo.segments = [seg]
+    bt = interconnect.Busterm()
+    bt.block_name = "src"
+    bt.bbox = fp.get_block_bounds("src")
+    topo.seg_busterms[0] = (bt, None)  # only start annotated
+
+    ct = interconnect.ConnTopology()
+    ct.build(topo, fp)
+    lo, hi = slide_range(ct)
+    assert lo == 200, f"Expected perp_lo=200 (guard: nominal at boundary), got {lo}"
+    assert hi == 300, f"Expected perp_hi=300 (guard: nominal at boundary), got {hi}"
+
+
 def test_dx_dy_applied_independently():
     """dy applies to vertical faces, dx to horizontal — both can coexist on one block."""
     fp = make_fp_with_block("blk", 0, 0, 200, 200, dx=25, dy=25)

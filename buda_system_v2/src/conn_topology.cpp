@@ -259,14 +259,24 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                 int m  = cm.dy;
                 int lo = rect.y1 + m;
                 int hi = rect.y2 - m;
-                if (lo > hi) { lo = rect.y1; hi = rect.y2; }  // block too short
+                // Guard 1: block too short for both margins.
+                // Guard 2: nominal perp_pos is outside the margin range — this
+                //   happens when the topology generator places the endpoint at the
+                //   face boundary (e.g. y=rect.y1 for a below-to-above L).
+                //   Applying the margin would exclude the nominal position and
+                //   cause NUTS interval inversions; fall back to full face extent.
+                if (lo > hi || cs.perp_pos < lo || cs.perp_pos > hi) {
+                    lo = rect.y1; hi = rect.y2;
+                }
                 cs.perp_lo = std::max(cs.perp_lo, lo);
                 cs.perp_hi = std::min(cs.perp_hi, hi);
             } else {
                 int m  = cm.dx;
                 int lo = rect.x1 + m;
                 int hi = rect.x2 - m;
-                if (lo > hi) { lo = rect.x1; hi = rect.x2; }  // block too narrow
+                if (lo > hi || cs.perp_pos < lo || cs.perp_pos > hi) {
+                    lo = rect.x1; hi = rect.x2;
+                }
                 cs.perp_lo = std::max(cs.perp_lo, lo);
                 cs.perp_hi = std::min(cs.perp_hi, hi);
             }

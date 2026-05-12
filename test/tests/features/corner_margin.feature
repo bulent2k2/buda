@@ -52,6 +52,29 @@ Feature: Block Corner Margin for Slide Ranges
     When I compute the ConnTopology slide ranges
     Then the H segment's perp slide range is [0, 30]
 
+  Scenario: Nominal at face boundary — margin not applied (topology-generator placement)
+    # The topology generator places segment endpoints at the nearest block face.
+    # When the endpoint lands exactly on the face boundary (e.g. y=y1 for a
+    # below-to-above L), the margin range [y1+dy, y2-dy] excludes the nominal
+    # position.  The guard falls back to the full face extent so NUTS can place
+    # the segment at (or near) its nominal position without interval inversion.
+    #
+    # Block "src" at (200,400)-(300,600) with dy=20 → margin range [420,580].
+    # H segment at nominal y=400 (= src.y1, a face boundary) → 400 < 420,
+    # so margin is skipped → slide range = [400, 600].
+    Given a block "src" at (200,400)-(300,600) with corner_margin dy=20
+    And an H segment at nominal y=400 (the bottom face boundary of "src")
+    When I compute the ConnTopology slide ranges
+    Then the H segment's perp slide range is [400, 600]
+
+  Scenario: Nominal at opposite face boundary — margin not applied
+    # V segment at nominal x=300 (= src.x2, right face boundary) with dx=15
+    # → margin range [215, 285] excludes 300 → guard → slide = [200, 300].
+    Given a block "src" at (200,400)-(300,600) with corner_margin dx=15
+    And a V segment at nominal x=300 (the right face boundary of "src")
+    When I compute the ConnTopology slide ranges
+    Then the V segment's perp slide range is [200, 300]
+
   Scenario: Specifying only dy mirrors to dx
     Given a block "blk" at (0,0)-(200,200) with corner_margin dy=25
     And an H segment whose endpoint lies on the left face of "blk"
