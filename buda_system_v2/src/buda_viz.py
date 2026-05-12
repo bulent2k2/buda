@@ -1345,6 +1345,29 @@ class BudaVisualizer:
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
         self._register(bid, sq, alpha=alpha, lw=msz)
 
+    def _draw_seg_connectors(self, bid, cs, sx, sy, col, msz, alpha, zorder,
+                              along_offset=0.0):
+        """Draw via or busterm-conn marker at each connection point on a segment.
+
+        Uses ConnTopology's cs.conns to determine the marker type:
+          BUSTERM → filled square (_draw_busterm_conn)
+          SEG     → X-in-square  (_draw_via_marker)
+
+        For a horizontal segment, cs.horiz=True and conn.at_pos is an x coordinate;
+        perp is sy (the y track position, already in drawing coords).
+        For a vertical segment, conn.at_pos is a y coordinate; perp is sx.
+        along_offset is added to conn.at_pos to convert from topology to drawing coords.
+        """
+        for conn in cs.conns:
+            if cs.horiz:
+                cx, cy = conn.at_pos + along_offset, sy
+            else:
+                cx, cy = sx, conn.at_pos + along_offset
+            if conn.kind == ic.SegConnKind.BUSTERM:
+                self._draw_busterm_conn(bid, cx, cy, col, msz, alpha, zorder)
+            else:
+                self._draw_via_marker(bid, cx, cy, msz, alpha, zorder)
+
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         self._busterm_artists = []
@@ -1356,7 +1379,8 @@ class BudaVisualizer:
             offset   = (i % 3 - 1) * 2.0
             alpha    = 0.8
 
-            n_segs = len(topo.segments)
+            ct = ic.ConnTopology(); ct.build(topo, self.fp)
+            cs_list = list(ct.segs())
             msz = max(4, min(viz_lw, 14))
             for idx, seg in enumerate(topo.segments):
                 spec = layer_specs.get(seg.layer_hint, {'color': 'green'})
@@ -1371,14 +1395,9 @@ class BudaVisualizer:
                 self._register(bid, line, alpha=alpha, lw=viz_lw,
                                 layer=seg.layer_hint)
 
-                if idx < n_segs - 1:
-                    self._draw_via_marker(bid, ex, ey, msz, alpha, 12 + i)
-                if idx == 0:
-                    self._draw_busterm_conn(bid, sx, sy, col, msz, alpha, 12 + i)
-                if idx == n_segs - 1:
-                    self._draw_busterm_conn(bid, ex, ey, col, msz, alpha, 12 + i)
+                self._draw_seg_connectors(bid, cs_list[idx], sx, sy, col,
+                                          msz, alpha, 12 + i, along_offset=offset)
 
-            ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
             self._draw_terminals(bid, drv, rcvs, viz_lw, alpha)
 
@@ -1395,8 +1414,9 @@ class BudaVisualizer:
             bid    = wrapper.original_bundle.id
             topo   = wrapper.candidates[wrapper.selected_topology_index]
             viz_lw = 3.0 + math.log2(1 + wrapper.width) * 2.0
-            n_segs = len(topo.segments)
             msz    = max(4, min(viz_lw, 14))
+            ct     = ic.ConnTopology(); ct.build(topo, self.fp)
+            cs_list = list(ct.segs())
 
             for idx, seg in enumerate(topo.segments):
                 ts   = ts_map.get((bid, idx))
@@ -1454,14 +1474,9 @@ class BudaVisualizer:
                 self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
                                 layer=effective_layer)
 
-                if idx < n_segs - 1:
-                    self._draw_via_marker(bid, ex, ey, msz, seg_alpha, 12 + i)
-                if idx == 0:
-                    self._draw_busterm_conn(bid, sx, sy, col, msz, seg_alpha, 12 + i)
-                if idx == n_segs - 1:
-                    self._draw_busterm_conn(bid, ex, ey, col, msz, seg_alpha, 12 + i)
+                self._draw_seg_connectors(bid, cs_list[idx], sx, sy, col,
+                                          msz, seg_alpha, 12 + i)
 
-            ct = ic.ConnTopology(); ct.build(topo, self.fp)
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
             self._draw_terminals(bid, drv, rcvs, viz_lw, seg_alpha)
 
