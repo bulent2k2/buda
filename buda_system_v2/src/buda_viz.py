@@ -455,6 +455,8 @@ class BudaVisualizer:
         self._block_names_visible = True
         self._bustermss_visible  = True
         self._all_vis            = True
+        self._home_xlim          = None
+        self._home_ylim          = None
         self._busterm_artists    = []    # driver/receiver terminal artists
         self._btn_heatmap    = None
         self._btn_blknames   = None
@@ -1154,11 +1156,15 @@ class BudaVisualizer:
         if event.key in ('cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
         if event.key in ('cmd+a', 'ctrl+a'):
-            toolbar = getattr(self.fig.canvas, 'toolbar', None)
-            if toolbar is not None:
-                toolbar.home()
+            if self._home_xlim is not None:
+                self.ax.set_xlim(self._home_xlim)
+                self.ax.set_ylim(self._home_ylim)
+                toolbar = getattr(self.fig.canvas, 'toolbar', None)
+                if toolbar is not None:
+                    toolbar.update()   # reset toolbar nav stack to current limits
             else:
-                self.ax.autoscale(); self.fig.canvas.draw_idle()
+                self.ax.autoscale()
+            self.fig.canvas.draw_idle()
             return
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
@@ -1180,7 +1186,7 @@ class BudaVisualizer:
             cx, cy = (rect.x1 + rect.x2) / 2, (rect.y1 + rect.y2) / 2
             txt = self.ax.text(cx, cy, name,
                                ha='center', va='center', fontsize=9, fontweight='bold',
-                               color='#333333', zorder=2)
+                               color='#333333', zorder=2, clip_on=True)
             self._block_name_artists.append(txt)
 
     def draw_congestion_map(self, cuts):
@@ -1240,7 +1246,7 @@ class BudaVisualizer:
                         txt = self.ax.text((x_lo + x_hi) / 2, (p_lo + p_hi) / 2,
                                            f"OVF\n{ratio:.0%}", fontsize=6, color='darkred',
                                            ha='center', va='center', zorder=4,
-                                           fontweight='bold')
+                                           fontweight='bold', clip_on=True)
                         self._heatmap_artists.append(txt)
                 else:
                     rect = patches.Rectangle(
@@ -1453,7 +1459,7 @@ class BudaVisualizer:
             new_artists.append(drv)
             lbl = self.ax.text(drv_pos[0], drv_pos[1], f"B{bundle_id}",
                                fontsize=8, color='black', fontweight='bold',
-                               ha='center', va='center', zorder=21)
+                               ha='center', va='center', zorder=21, clip_on=True)
             lbl.set_alpha(alpha)
             self._register(bundle_id, lbl, alpha=alpha)
             new_artists.append(lbl)
@@ -1537,6 +1543,8 @@ class BudaVisualizer:
         ]
         self.ax.legend(handles=legend_handles, loc='upper right')
         self.ax.autoscale_view()
+        self._home_xlim = self.ax.get_xlim()
+        self._home_ylim = self.ax.get_ylim()
 
         # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
         # Left panel: x=0.005, width=0.09.  Plot left edge at 0.10.
