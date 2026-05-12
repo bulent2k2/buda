@@ -488,6 +488,12 @@ class BudaVisualizer:
                     return
 
     def _on_click(self, event):
+        # Ignore clicks while a toolbar tool (zoom, pan) is active.
+        toolbar = getattr(self.fig.canvas, 'toolbar', None)
+        if toolbar is not None and getattr(toolbar, 'mode', '') != '':
+            self._pick_happened = False
+            return
+
         # Route panel clicks before doing anything else.
         if self._ax_layers is not None and event.inaxes == self._ax_layers:
             self._on_layer_list_click(event)
