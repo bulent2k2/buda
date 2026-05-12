@@ -454,13 +454,16 @@ class BudaVisualizer:
         self._heatmap_visible    = True
         self._block_names_visible = True
         self._bustermss_visible  = True
+        self._vias_conns_visible = True
         self._all_vis            = True
         self._home_xlim          = None
         self._home_ylim          = None
         self._busterm_artists    = []    # driver/receiver terminal artists
+        self._vias_conns_artists = []    # via and busterm-conn marker artists
         self._btn_heatmap    = None
         self._btn_blknames   = None
         self._btn_bustermss  = None
+        self._btn_vias_conns = None
         self._btn_all        = None
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
@@ -719,6 +722,13 @@ class BudaVisualizer:
         if self._btn_bustermss is not None:
             self._btn_bustermss.label.set_text('☑ Busterms' if vis else '☐ Busterms')
 
+        # Vias/Conns
+        self._vias_conns_visible = vis
+        for a in self._vias_conns_artists:
+            a.set_visible(vis)
+        if self._btn_vias_conns is not None:
+            self._btn_vias_conns.label.set_text('☑ Vias/Conns' if vis else '☐ Vias/Conns')
+
         # All layers
         for lid in self._layer_visible:
             self._layer_visible[lid] = vis
@@ -745,6 +755,15 @@ class BudaVisualizer:
             a.set_visible(vis)
         label = '☑ Busterms' if vis else '☐ Busterms'
         self._btn_bustermss.label.set_text(label)
+        self.fig.canvas.draw_idle()
+
+    def _toggle_vias_conns(self):
+        self._vias_conns_visible = not self._vias_conns_visible
+        vis = self._vias_conns_visible
+        for a in self._vias_conns_artists:
+            a.set_visible(vis)
+        label = '☑ Vias/Conns' if vis else '☐ Vias/Conns'
+        self._btn_vias_conns.label.set_text(label)
         self.fig.canvas.draw_idle()
 
     def _toggle_block_names(self):
@@ -1333,10 +1352,15 @@ class BudaVisualizer:
                            markeredgecolor='black', markeredgewidth=1.2,
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
         self._register(bid, sq, alpha=alpha, lw=msz)
+        self._vias_conns_artists.append(sq)
         xm, = self.ax.plot(x, y, 'x', color='black',
                            markersize=msz * 0.65, markeredgewidth=1.5,
                            alpha=alpha, zorder=zorder + 1, clip_on=True)
         self._register(bid, xm, alpha=alpha, lw=msz * 0.65)
+        self._vias_conns_artists.append(xm)
+        if not self._vias_conns_visible:
+            sq.set_visible(False)
+            xm.set_visible(False)
 
     def _draw_busterm_conn(self, bid, x, y, col, msz, alpha, zorder):
         """Filled square at a segment endpoint that connects to a busterm."""
@@ -1344,6 +1368,9 @@ class BudaVisualizer:
                            markeredgecolor='black', markeredgewidth=1.0,
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
         self._register(bid, sq, alpha=alpha, lw=msz)
+        self._vias_conns_artists.append(sq)
+        if not self._vias_conns_visible:
+            sq.set_visible(False)
 
     def _draw_seg_connectors(self, bid, seg_idx, cs, sx, sy, col, msz, alpha,
                               zorder, along_offset=0.0, adj_perp=None):
@@ -1386,6 +1413,7 @@ class BudaVisualizer:
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
         self._busterm_artists = []
+        self._vias_conns_artists = []
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
             bid      = wrapper.original_bundle.id
@@ -1419,6 +1447,7 @@ class BudaVisualizer:
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
         self._busterm_artists = []
+        self._vias_conns_artists = []
         self._nuts_result = nuts_result   # saved for overlap panel in show()
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in nuts_result.segments}
@@ -1639,6 +1668,11 @@ class BudaVisualizer:
         self._btn_bustermss = Button(ax_bustermss, '☑ Busterms', color='#e8f4e8')
         self._btn_bustermss.label.set_fontsize(8)
         self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
+
+        ax_vias_conns = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_vias_conns = Button(ax_vias_conns, '☑ Vias/Conns', color='#e8f4e8')
+        self._btn_vias_conns.label.set_fontsize(8)
+        self._btn_vias_conns.on_clicked(lambda _: self._toggle_vias_conns())
 
         ax_heatmap = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_heatmap = Button(ax_heatmap, '☑ Heatmap', color='#e8f4e8')
