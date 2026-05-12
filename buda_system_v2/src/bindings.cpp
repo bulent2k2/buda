@@ -17,12 +17,14 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<Point>(m, "Point").def(py::init<int, int>()).def_readwrite("x", &Point::x).def_readwrite("y", &Point::y);
     py::class_<Rect>(m, "Rect").def_readwrite("x1", &Rect::x1).def_readwrite("y1", &Rect::y1).def_readwrite("x2", &Rect::x2).def_readwrite("y2", &Rect::y2);
     py::class_<Segment>(m, "Segment").def(py::init<>()).def_readwrite("start", &Segment::start).def_readwrite("end", &Segment::end).def_readwrite("layer_hint", &Segment::layer_hint);
+    py::class_<Busterm>(m, "Busterm").def(py::init<>()).def_readwrite("block_name", &Busterm::block_name).def_readwrite("bbox", &Busterm::bbox);
     py::class_<Topology>(m, "Topology").def(py::init<>())
         .def_readwrite("type",              &Topology::type)
         .def_readwrite("segments",          &Topology::segments)
         .def_readwrite("estimated_wirelength", &Topology::estimated_wirelength)
         .def_readwrite("trunk_location",    &Topology::trunk_location)
-        .def_readwrite("pass_through_count", &Topology::pass_through_count);
+        .def_readwrite("pass_through_count", &Topology::pass_through_count)
+        .def_readwrite("seg_busterms",      &Topology::seg_busterms);
     py::class_<Bundle>(m, "Bundle").def(py::init<>()).def_readwrite("id", &Bundle::id).def_readwrite("net_names", &Bundle::net_names).def("get_net_names", &Bundle::get_net_names);
     py::class_<BundleAssignment>(m, "BundleAssignment")
         .def_readwrite("bundle_id",  &BundleAssignment::bundle_id)

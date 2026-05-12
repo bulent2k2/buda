@@ -9,9 +9,6 @@ namespace interconnect {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-static int margin10(int lo, int hi) {
-    return std::max(1, (int)(0.1 * (hi - lo)));
-}
 static bool in_range(int v, int lo, int hi) { return v >= lo && v <= hi; }
 
 // ── ConnTopology::build ───────────────────────────────────────────────────────
@@ -68,32 +65,56 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
         const Segment& si = topo.segments[i];
         ConnSeg&       ci = segs_[i];
 
-        for (const Point& P : {si.start, si.end}) {
+        for (int ep = 0; ep < 2; ++ep) {
+            const Point& P = (ep == 0) ? si.start : si.end;
             bool found = false;
 
-            // (a) busterm connection -------------------------------------------
-            for (const auto& [bname, rect] : blocks) {
-                bool on_xface = (P.x == rect.x1 || P.x == rect.x2)
-                                && in_range(P.y, rect.y1, rect.y2);
-                bool on_yface = (P.y == rect.y1 || P.y == rect.y2)
-                                && in_range(P.x, rect.x1, rect.x2);
+            // (a) busterm from pre-computed annotation -------------------------
+            // topology.cpp's annotate_endpoints populates topo.seg_busterms so
+            // we know exactly which block each terminal endpoint belongs to —
+            // no geometric search needed, no shared-face ambiguity possible.
+            {
+                auto it = topo.seg_busterms.find(i);
+                if (it != topo.seg_busterms.end()) {
+                    const auto& opt = (ep == 0) ? it->second.first
+                                                : it->second.second;
+                    if (opt.has_value()) {
+                        SegConn c;
+                        c.kind       = SegConn::BUSTERM;
+                        c.block_name = opt->block_name;
+                        c.face_coord = ci.horiz ? P.x : P.y;
+                        c.seg_idx    = -1;
+                        c.at_pos     = ci.horiz ? P.x : P.y;
+                        add_conn(i, std::move(c));
+                        found = true;
+                    }
+                }
+            }
 
-                // H seg connects to an x-face; V seg connects to a y-face.
-                if ((ci.horiz && on_xface) || (!ci.horiz && on_yface)) {
-                    SegConn c;
-                    c.kind       = SegConn::BUSTERM;
-                    c.block_name = bname;
-                    c.face_coord = ci.horiz ? P.x : P.y;
-                    c.seg_idx    = -1;
-                    c.at_pos     = ci.horiz ? P.x : P.y;
-                    add_conn(i, std::move(c));
-                    found = true;
-                    break;
+            // (b) geometric fallback — for unannotated topologies (e.g. those
+            // built directly in tests without going through generate_candidates).
+            if (!found) {
+                for (const auto& [bname, rect] : blocks) {
+                    bool on_xface = (P.x == rect.x1 || P.x == rect.x2)
+                                    && in_range(P.y, rect.y1, rect.y2);
+                    bool on_yface = (P.y == rect.y1 || P.y == rect.y2)
+                                    && in_range(P.x, rect.x1, rect.x2);
+                    if ((ci.horiz && on_xface) || (!ci.horiz && on_yface)) {
+                        SegConn c;
+                        c.kind       = SegConn::BUSTERM;
+                        c.block_name = bname;
+                        c.face_coord = ci.horiz ? P.x : P.y;
+                        c.seg_idx    = -1;
+                        c.at_pos     = ci.horiz ? P.x : P.y;
+                        add_conn(i, std::move(c));
+                        found = true;
+                        break;
+                    }
                 }
             }
             if (found) continue;
 
-            // (b) seg-to-seg connection ----------------------------------------
+            // (c) seg-to-seg connection ----------------------------------------
             for (int j = 0; j < n; j++) {
                 if (j == i) continue;
                 const ConnSeg& cj = segs_[j];
@@ -168,6 +189,10 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     // footprint are routing wires at a different layer and carry no connectivity
     // obligation — constraining them by that block's extent would be wrong.
     //
+    // Detour trunks (U/C shapes) whose perp_pos is outside the union bounding box
+    // of all busterm-connected blocks are routing in the detour region and must not
+    // be constrained by blocks they happen to pass near in that region.
+    //
     // No margin is applied here: the trunk can sit at any y (or x) within the
     // block as long as the along-span overlaps.
     {
@@ -177,7 +202,22 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                 if (conn.kind == SegConn::BUSTERM)
                     busterm_blocks.insert(conn.block_name);
 
+        // Union bbox of all busterm-connected blocks.
+        int bt_x_lo = INT_MAX, bt_x_hi = INT_MIN;
+        int bt_y_lo = INT_MAX, bt_y_hi = INT_MIN;
+        for (const auto& bn : busterm_blocks) {
+            const Rect& r = bmap.at(bn);
+            bt_x_lo = std::min(bt_x_lo, r.x1); bt_x_hi = std::max(bt_x_hi, r.x2);
+            bt_y_lo = std::min(bt_y_lo, r.y1); bt_y_hi = std::max(bt_y_hi, r.y2);
+        }
+        bool have_bt = (bt_x_hi >= bt_x_lo);
+
         for (auto& cs : segs_) {
+            // Skip detour trunks: perp_pos outside the busterm union bbox.
+            if (have_bt) {
+                if ( cs.horiz && (cs.perp_pos < bt_y_lo || cs.perp_pos > bt_y_hi)) continue;
+                if (!cs.horiz && (cs.perp_pos < bt_x_lo || cs.perp_pos > bt_x_hi)) continue;
+            }
             for (const auto& [bname, rect] : bmap) {
                 if (busterm_blocks.count(bname)) continue; // has its own stub
                 if (cs.horiz) {
@@ -200,28 +240,45 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     }
 
     // ── Pass 1 ──
+    // Constrain to the full face extent [rect.lo, rect.hi].  No inward margin is
+    // applied here: topology generation already places segment endpoints at least
+    // 10% from block corners (via clamp_10pct / stub_y / stub_x), so the NUTS
+    // preferred position is already away from extremes.  Shrinking the slide range
+    // by another 10% would exclude the face-adjacent positions that the topology
+    // generator intentionally produces (e.g. hy = src.y2 for a below-to-above L),
+    // causing inverted intervals and out-of-range placements.
     for (auto& cs : segs_) {
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::BUSTERM) continue;
             const Rect& rect = bmap.at(conn.block_name);
             if (cs.horiz) {
-                int m = margin10(rect.y1, rect.y2);
-                cs.perp_lo = std::max(cs.perp_lo, rect.y1 + m);
-                cs.perp_hi = std::min(cs.perp_hi, rect.y2 - m);
+                cs.perp_lo = std::max(cs.perp_lo, rect.y1);
+                cs.perp_hi = std::min(cs.perp_hi, rect.y2);
             } else {
-                int m = margin10(rect.x1, rect.x2);
-                cs.perp_lo = std::max(cs.perp_lo, rect.x1 + m);
-                cs.perp_hi = std::min(cs.perp_hi, rect.x2 - m);
+                cs.perp_lo = std::max(cs.perp_lo, rect.x1);
+                cs.perp_hi = std::min(cs.perp_hi, rect.x2);
             }
         }
     }
 
     // ── Pass 2 ──
     // Iterate to convergence (usually 1 pass suffices for a tree).
+    // Only segments with ≥2 SEG connections are genuine spines; only they need
+    // indirect busterm constraints propagated from their stubs.  Terminal stubs
+    // (1 SEG connection + 1 BUSTERM) are fully constrained by Pass 1 already.
+    // Applying Pass 2 from a stub's perspective would treat the spine's annotated
+    // endpoint BUSTERMs as if they were its own stub's far-end anchor, producing
+    // inverted intervals for multicast TRUNK_H/V topologies.
     bool changed = true;
     while (changed) {
         changed = false;
         for (auto& cs : segs_) {
+            {
+                int n_seg = 0;
+                for (const auto& c : cs.conns)
+                    if (c.kind == SegConn::SEG) ++n_seg;
+                if (n_seg < 2) continue;  // not a spine; skip
+            }
             for (const auto& conn : cs.conns) {
                 if (conn.kind != SegConn::SEG) continue;
                 const ConnSeg& stub = segs_[conn.seg_idx];

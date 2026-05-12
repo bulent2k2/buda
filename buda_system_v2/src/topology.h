@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <map>
+#include <optional>
 #include "bundler.h"
 namespace interconnect {
 struct Point { int x, y; };
@@ -16,14 +17,28 @@ struct Rect {
 };
 struct Segment {
     Point start, end;
-    int layer_hint = 0; 
+    int layer_hint = 0;
 };
+// A busterm is a connection point on a block face.  Currently represented by
+// the block name and its bounding box; can be refined to a pin location later.
+struct Busterm {
+    std::string block_name;
+    Rect        bbox;
+};
+// Per-segment busterm annotation: .first = busterm at segment start endpoint,
+// .second = busterm at segment end endpoint.  nullopt means the endpoint is an
+// internal junction (connects to another segment, not a block face).
+using SegEndpoints = std::pair<std::optional<Busterm>, std::optional<Busterm>>;
 struct Topology {
-    std::string type; 
+    std::string type;
     std::vector<Segment> segments;
     int estimated_wirelength  = 0;
     int trunk_location        = 0;
     int pass_through_count    = 0;  // blocks whose bbox contains the trunk (no stub generated)
+    // Populated by generate_candidates / generate_multicast_candidates so that
+    // ConnTopology::infer_connections can identify busterm connections without
+    // scanning the entire floorplan.  Key = segment index.
+    std::map<int, SegEndpoints> seg_busterms;
 };
 class Floorplan {
 public:
@@ -75,13 +90,13 @@ private:
     int  h_layer_             = 4;
     int  v_layer_             = 5;
 
-    void add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results);
-    void add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
-    void add_u_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
-    void add_uu_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
-    void add_trunk_h(const std::vector<Point>& pins, const std::vector<Rect>& blocks,
+    void add_l_shapes(const Busterm& src, const Busterm& dst, std::vector<Topology>& results);
+    void add_z_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
+    void add_u_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
+    void add_uu_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
+    void add_trunk_h(const std::vector<Point>& pins, const std::vector<Busterm>& blocks,
                      int y_trunk, bool out_of_bbox, std::vector<Topology>& results);
-    void add_trunk_v(const std::vector<Point>& pins, const std::vector<Rect>& blocks,
+    void add_trunk_v(const std::vector<Point>& pins, const std::vector<Busterm>& blocks,
                      int x_trunk, bool out_of_bbox, std::vector<Topology>& results);
 };
 }

@@ -17,6 +17,29 @@ def _toggle_fullscreen(fig):
     if mgr:
         mgr.full_screen_toggle()
 
+def _raise_window(fig):
+    """Bring fig's window to the front (best-effort; backend-dependent)."""
+    mgr = fig.canvas.manager
+    if mgr is None:
+        return
+    # MacOSX backend exposes show() which calls makeKeyAndOrderFront: internally.
+    # Other backends may use window.raise_() / window.activateWindow().
+    if callable(getattr(mgr, 'show', None)):
+        try:
+            mgr.show()
+            return
+        except Exception:
+            pass
+    win = getattr(mgr, 'window', None)
+    if win is not None:
+        for method in ('raise_', 'activateWindow', 'lift'):
+            if callable(getattr(win, method, None)):
+                try:
+                    getattr(win, method)()
+                    return
+                except Exception:
+                    pass
+
 # Values beyond this magnitude are the INT_MIN/2 or INT_MAX/2 sentinels
 # that ConnTopology uses for "unconstrained" slide ranges.
 _UNCONSTRAINED = 1_000_000_000
@@ -26,12 +49,15 @@ class TopologyExplorer:
     """Cycle through topology candidates across one or more bundles.
 
     Navigation:
-      ← / → (or ◀/▶ Topo buttons)  — prev / next topology within bundle
-      [ / ] (or ◀/▶ Bus buttons)    — prev / next bundle
+      ← / →  (or ◀/▶ Topo buttons)  — prev / next topology within bundle
+      cmd-p / cmd-n                  — prev / next topology within bundle
+      [ / ]  (or ◀/▶ Bus buttons)   — prev / next bundle
+      cmd-1                          — raise the main BUDA viz window
     """
 
-    def __init__(self, fp, wrappers, sidecar_path=None):
+    def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None):
         self.fp       = fp
+        self._main_fig = main_fig   # back-reference to main viz figure for cmd-1
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         self.bidx     = 0   # current bundle index
@@ -290,8 +316,13 @@ class TopologyExplorer:
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
         if event.key in ('cmd+f', 'ctrl+f'):    _toggle_fullscreen(self.fig); return
+        if event.key in ('cmd+1', 'ctrl+1'):
+            if self._main_fig is not None: _raise_window(self._main_fig)
+            return
         if event.key in ('left',  'a'):         self._step_topo(-1)
         if event.key in ('right', 'd'):         self._step_topo(+1)
+        if event.key in ('cmd+n', 'ctrl+n'):    self._step_topo(+1)
+        if event.key in ('cmd+p', 'ctrl+p'):    self._step_topo(-1)
         if event.key in ('[', 'pageup'):        self._step_bundle(-1)
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
         if event.key == 's':                    self._select_current()
@@ -1167,7 +1198,8 @@ class BudaVisualizer:
         if wrapper is None or not wrapper.candidates:
             return
         self._topo_explorer = TopologyExplorer(self.fp, wrapper,
-                                               sidecar_path=self._selections_path)
+                                               sidecar_path=self._selections_path,
+                                               main_fig=self.fig)
         self._topo_explorer.fig.show()
 
     def _on_key(self, event):
@@ -1185,9 +1217,11 @@ class BudaVisualizer:
                 self.ax.autoscale()
             self.fig.canvas.draw_idle()
             return
+        if event.key in ('cmd+n', 'ctrl+n'): self._step_bundle(+1)
+        if event.key in ('cmd+p', 'ctrl+p'): self._step_bundle(-1)
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
-        if event.key == 't':               self._open_topo_explorer()
+        if event.key in ('t', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
 
     # ------------------------------------------------------------------
     # Drawing
