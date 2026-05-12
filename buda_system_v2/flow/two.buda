@@ -3,6 +3,8 @@
 def_layer 4 M4 H TOP 0.0
 def_layer 5 M5 V TOP 0.0
 
+corner_margin dx 15 dy 20
+
 # top edge: y=600
 add_block u0    200  400  300   600
 

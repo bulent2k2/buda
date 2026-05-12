@@ -10,9 +10,12 @@ void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y
 void Floorplan::set_block_corner_margin(const std::string& name, int dx, int dy) {
     corner_margins_[name] = BlockCornerMargin{dx, dy};
 }
+void Floorplan::set_global_corner_margin(int dx, int dy) {
+    global_corner_margin_ = BlockCornerMargin{dx, dy};
+}
 BlockCornerMargin Floorplan::get_block_corner_margin(const std::string& name) const {
     auto it = corner_margins_.find(name);
-    return (it != corner_margins_.end()) ? it->second : BlockCornerMargin{};
+    return (it != corner_margins_.end()) ? it->second : global_corner_margin_;
 }
 Rect Floorplan::get_block_bounds(const std::string& name) const {
     if (blocks_.count(name)) return blocks_.at(name);

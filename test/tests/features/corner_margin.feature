@@ -89,3 +89,13 @@ Feature: Block Corner Margin for Slide Ranges
     And an H segment at nominal y=100 connecting to the left face of "blk"
     When I run NUTS on this topology
     Then the placed track position is in [30, 170]
+
+  Scenario: Global margin applies to blocks with no per-block override
+    Given a global corner_margin dy=20
+    And a block "a" at (0,0)-(100,200) with no corner margin
+    And a block "b" at (0,0)-(100,200) with corner_margin dy=10
+    And an H segment whose endpoint lies on the left face of "a"
+    And an H segment whose endpoint lies on the left face of "b"
+    When I compute the ConnTopology slide ranges
+    Then the H segment for "a" has perp slide range [20, 180]
+    And the H segment for "b" has perp slide range [10, 190]

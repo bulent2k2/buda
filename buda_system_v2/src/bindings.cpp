@@ -49,9 +49,10 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("dy", &BlockCornerMargin::dy);
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
         .def("add_block",              &Floorplan::add_block)
-        .def("set_block_corner_margin",&Floorplan::set_block_corner_margin)
-        .def("get_block_corner_margin",&Floorplan::get_block_corner_margin)
-        .def("get_block_bounds",       &Floorplan::get_block_bounds)
+        .def("set_block_corner_margin", &Floorplan::set_block_corner_margin)
+        .def("set_global_corner_margin",&Floorplan::set_global_corner_margin)
+        .def("get_block_corner_margin", &Floorplan::get_block_corner_margin)
+        .def("get_block_bounds",        &Floorplan::get_block_bounds)
         .def("get_hanan_grid", [](const Floorplan& fp) {
             std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y);
         })

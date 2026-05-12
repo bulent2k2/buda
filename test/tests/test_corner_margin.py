@@ -387,3 +387,49 @@ def test_cli_pct_parsing_produces_correct_margin():
     cm = fp.get_block_corner_margin("blk")
     assert cm.dx == expected_dx, f"Expected dx={expected_dx}, got {cm.dx}"
     assert cm.dy == expected_dy, f"Expected dy={expected_dy}, got {cm.dy}"
+
+
+# ---------------------------------------------------------------------------
+# Scenario: Global margin applies to blocks with no per-block override
+# ---------------------------------------------------------------------------
+
+def test_global_margin_applies_to_unoverridden_block():
+    """Scenario: Global margin applies to blocks with no per-block override.
+    global dy=20 → block 'a' (no override) gets [20,180]; block 'b' (dy=10) gets [10,190].
+    """
+    fp = interconnect.Floorplan()
+    fp.set_global_corner_margin(20, 20)
+    fp.add_block("a", 0, 0, 100, 200)            # no per-block override → global dy=20
+    fp.add_block("b", 0, 0, 100, 200)            # per-block dy=10 overrides global
+    fp.set_block_corner_margin("b", 10, 10)
+
+    # Block "a" should use global margin dy=20.
+    topo_a = make_topo_h_on_left_face("a", fp)
+    ct_a = interconnect.ConnTopology()
+    ct_a.build(topo_a, fp)
+    lo_a, hi_a = slide_range(ct_a)
+    assert lo_a == 20 and hi_a == 180, \
+        f"Block 'a' (global margin) slide wrong: [{lo_a}, {hi_a}]"
+
+    # Block "b" should use per-block dy=10 (overrides global).
+    # Build the topology inline — do NOT add a helper block at the segment endpoint,
+    # because the geometric busterm fallback would pick it up and apply the global
+    # margin, masking the per-block margin under test.
+    fp2 = interconnect.Floorplan()
+    fp2.set_global_corner_margin(20, 20)
+    fp2.add_block("b", 0, 0, 100, 200)
+    fp2.set_block_corner_margin("b", 10, 10)
+    rect_b = fp2.get_block_bounds("b")
+    mid_y_b = (rect_b.y1 + rect_b.y2) // 2
+    topo_b = interconnect.Topology()
+    topo_b.type = "TEST_H_LEFT_B"
+    seg_b = interconnect.Segment()
+    seg_b.start = interconnect.Point(rect_b.x1, mid_y_b)   # on "b"'s left face
+    seg_b.end   = interconnect.Point(rect_b.x1 + 499, mid_y_b)  # open space, no block
+    seg_b.layer_hint = 4
+    topo_b.segments = [seg_b]
+    ct_b = interconnect.ConnTopology()
+    ct_b.build(topo_b, fp2)
+    lo_b, hi_b = slide_range(ct_b)
+    assert lo_b == 10 and hi_b == 190, \
+        f"Block 'b' (per-block margin) slide wrong: [{lo_b}, {hi_b}]"

@@ -564,6 +564,29 @@ class BudaSession:
                 if "pct_v" in kws and "pct_h" not in kws and "dx" not in kws: cm_dx = cm_dy
                 if cm_dx > 0 or cm_dy > 0:
                     self.fp.set_block_corner_margin(name, cm_dx, cm_dy)
+        elif cmd == "corner_margin":
+            # corner_margin dx <n> [dy <n>]
+            # corner_margin pct_h <p> [pct_v <p>]
+            # Sets the global corner margin applied to all blocks that have no
+            # per-block override.  Percentage variants require block dimensions;
+            # they are not meaningful globally, so an error is raised.
+            kws = {}
+            i = 0
+            while i < len(args):
+                kw = args[i].lower()
+                if kw in ("dx", "dy") and i + 1 < len(args):
+                    kws[kw] = float(args[i + 1]); i += 2
+                elif kw in ("pct_h", "pct_v"):
+                    print(f"Error: corner_margin pct_h/pct_v not supported globally "
+                          f"(no single block dimension to use). Use dx/dy instead.")
+                    i += 2
+                else:
+                    i += 1
+            cm_dx = int(round(kws.get("dx", 0)))
+            cm_dy = int(round(kws.get("dy", 0)))
+            if "dx" in kws and "dy" not in kws: cm_dy = cm_dx
+            if "dy" in kws and "dx" not in kws: cm_dx = cm_dy
+            self.fp.set_global_corner_margin(cm_dx, cm_dy)
         elif cmd == "add_net":
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')

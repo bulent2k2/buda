@@ -54,8 +54,10 @@ public:
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
     // Set corner margin for a previously-added block (absolute units).
     void set_block_corner_margin(const std::string& name, int dx, int dy);
+    // Set global corner margin applied to all blocks that have no per-block override.
+    void set_global_corner_margin(int dx, int dy);
     Rect get_block_bounds(const std::string& name) const;
-    // Returns {0,0} for blocks without an explicit margin.
+    // Returns per-block margin if set, else global margin, else {0,0}.
     BlockCornerMargin get_block_corner_margin(const std::string& name) const;
     void get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_coords) const;
     std::vector<std::pair<std::string, Rect>> get_all_blocks() const {
@@ -66,6 +68,7 @@ public:
 private:
     std::map<std::string, Rect> blocks_;
     std::map<std::string, BlockCornerMargin> corner_margins_;
+    BlockCornerMargin global_corner_margin_{};
 };
 class TopologyGenerator {
 public:
