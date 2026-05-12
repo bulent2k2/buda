@@ -454,10 +454,12 @@ class BudaVisualizer:
         self._heatmap_visible    = True
         self._block_names_visible = True
         self._bustermss_visible  = True
+        self._all_vis            = True
         self._busterm_artists    = []    # driver/receiver terminal artists
         self._btn_heatmap    = None
         self._btn_blknames   = None
         self._btn_bustermss  = None
+        self._btn_all        = None
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
@@ -679,6 +681,53 @@ class BudaVisualizer:
         label = '☑ Heatmap' if vis else '☐ Heatmap'
         if self._btn_heatmap is not None:
             self._btn_heatmap.label.set_text(label)
+        self.fig.canvas.draw_idle()
+
+    def _toggle_all(self):
+        self._all_vis = not self._all_vis
+        vis = self._all_vis
+        self._btn_all.label.set_text('☑ All' if vis else '☐ All')
+
+        # Heatmap
+        self._heatmap_visible = vis
+        for a in self._heatmap_artists:
+            a.set_visible(vis)
+        if self._cbar_ax is not None:
+            self._cbar_ax.set_visible(vis)
+        if self._btn_heatmap is not None:
+            self._btn_heatmap.label.set_text('☑ Heatmap' if vis else '☐ Heatmap')
+
+        # Block names
+        self._block_names_visible = vis
+        for txt in self._block_name_artists:
+            txt.set_visible(vis)
+        if self._btn_blknames is not None:
+            self._btn_blknames.label.set_text('☑ Blk Names' if vis else '☐ Blk Names')
+
+        # Busterms
+        self._bustermss_visible = vis
+        for a in self._busterm_artists:
+            a.set_visible(vis)
+        if self._btn_bustermss is not None:
+            self._btn_bustermss.label.set_text('☑ Busterms' if vis else '☐ Busterms')
+
+        # All layers
+        for lid in self._layer_visible:
+            self._layer_visible[lid] = vis
+        if self._btn_all_layers is not None:
+            self._btn_all_layers.label.set_text('☑ All Layers' if vis else '☐ All Layers')
+            self._btn_all_layers.ax.set_facecolor('#e8e8e8' if vis else '#cccccc')
+        self._redraw_layer_list()
+
+        # All bundles
+        for bid in self._bundle_visible:
+            self._bundle_visible[bid] = vis
+        if self._btn_all_bundles is not None:
+            self._btn_all_bundles.label.set_text('☑ All Bundles' if vis else '☐ All Bundles')
+            self._btn_all_bundles.ax.set_facecolor('#e8e8e8' if vis else '#cccccc')
+        self._redraw_bundle_list()
+
+        self._refresh_highlight()
         self.fig.canvas.draw_idle()
 
     def _toggle_bustermss(self):
@@ -1494,7 +1543,12 @@ class BudaVisualizer:
             ly -= gap + h
             return [LX, ly, LW, h]
 
-        ax_blknames = self.fig.add_axes(_lrect(BTN_H_L))
+        ax_all = self.fig.add_axes(_lrect(BTN_H_L))
+        self._btn_all = Button(ax_all, '☑ All', color='#d0e8ff')
+        self._btn_all.label.set_fontsize(8)
+        self._btn_all.on_clicked(lambda _: self._toggle_all())
+
+        ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_blknames = Button(ax_blknames, '☑ Blk Names', color='#e8f4e8')
         self._btn_blknames.label.set_fontsize(8)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
