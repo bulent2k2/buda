@@ -14,6 +14,14 @@ struct Rect {
     // if the value falls inside the block (= trunk passes through the block).
     int face_x(int toward) const { return toward > x2 ? x2 : toward < x1 ? x1 : toward; }
     int face_y(int toward) const { return toward > y2 ? y2 : toward < y1 ? y1 : toward; }
+    // Return a rect inset by (dx, dy) on each side.
+    // Guard: if the margin would invert an axis, keep that axis at full extent.
+    Rect shrink(int dx, int dy) const {
+        int nx1 = x1+dx, nx2 = x2-dx, ny1 = y1+dy, ny2 = y2-dy;
+        if (nx1 > nx2) { nx1 = x1; nx2 = x2; }
+        if (ny1 > ny2) { ny1 = y1; ny2 = y2; }
+        return Rect{nx1, ny1, nx2, ny2};
+    }
 };
 struct Segment {
     Point start, end;

@@ -35,13 +35,8 @@ Segment make_seg(int x1, int y1, int x2, int y2, int layer) {
     Segment s; s.start={x1,y1}; s.end={x2,y2}; s.layer_hint=layer; return s;
 }
 
-// Clamp 'value' to stay at least 'margin' away from either end of [lo, hi].
-// Guard: if 2*margin >= extent, the interval would invert — use full range.
-static int clamp_margin(int value, int lo, int hi, int margin) {
-    int safe_lo = lo + margin;
-    int safe_hi = hi - margin;
-    if (safe_lo > safe_hi) { safe_lo = lo; safe_hi = hi; }
-    return std::max(safe_lo, std::min(safe_hi, value));
+static int clamp(int value, int lo, int hi) {
+    return std::max(lo, std::min(hi, value));
 }
 
 // ---------------------------------------------------------------------------
@@ -51,29 +46,23 @@ static int clamp_margin(int value, int lo, int hi, int margin) {
 void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, std::vector<Topology>& results) {
     const Rect& src = s_bt.bbox; const Rect& dst = d_bt.bbox;
     Point s = src.center(); Point d = dst.center();
-    const auto cm_src = floorplan_.get_block_corner_margin(s_bt.block_name);
-    const auto cm_dst = floorplan_.get_block_corner_margin(d_bt.block_name);
 
     // L_HV: horizontal first, then vertical to dst y-face.
     //
-    // In busterm mode, enumerate all bundle Hanan y-values {src.y1, src.y2,
-    // dst.y1, dst.y2} as H-trunk candidates.  A candidate y is valid when:
-    //   • src.y1 <= y <= src.y2  — busterm on src x-face is within src's y-extent
-    //   • y < dst.y1 or y > dst.y2  — V stub to dst y-face is non-degenerate
+    // The Busterm bboxes are already margin-inset, so all face/clamp operations
+    // produce positions within the margin zone automatically.
     //
     // Overlap case: when src and dst x-ranges overlap the standard bend_x
     // lands inside src (sx == bend_x → H zero-length).  Route the V through
     // dst's exclusive zone(s) using a single heuristic y-level.
     {
         int sx     = use_busterm_ ? src.face_x(d.x) : s.x;
-        // V stub's x must be within dst's dx margin zone so ConnTopology's
-        // slide range is [dst.x1+dx, dst.x2-dx] without triggering the guard.
-        int bend_x = use_busterm_ ? clamp_margin(sx, dst.x1, dst.x2, cm_dst.dx) : d.x;
+        int bend_x = use_busterm_ ? dst.face_x(sx)  : d.x;
 
         if (use_busterm_ && sx == bend_x) {
             // H collapses — route via each of dst's exclusive x-zones.
-            int hy = (d.y < src.y1) ? src.y1 + cm_src.dy
-                   : (d.y > src.y2) ? src.y2 - cm_src.dy : s.y;
+            int hy = (d.y < src.y1) ? src.y1
+                   : (d.y > src.y2) ? src.y2 : s.y;
             int dy = dst.face_y(hy);
             // dst left of src: [dst.x1, src.x1)
             if (dst.x1 < src.x1) {
@@ -92,17 +81,12 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                 if (hv.segments.size() == 2) results.push_back(hv);
             }
         } else if (use_busterm_) {
-            // Two independent options (below dst / above dst).  For each,
-            // place H as close to dst as possible but within src's corner margin:
-            //   • dst entirely above/below src → use src face inset by dy margin.
-            //   • dst partially overlaps src in y → use dst face ± margin of gap.
-            // This ensures the V is a short stub while the H avoids src corners.
+            // Two independent options (below dst / above dst).  The bboxes are
+            // margin-inset so src.y2 and src.y1 are already the valid face positions.
 
             // Option 1: H below dst, V up to dst.y1
             if (src.y1 < dst.y1) {
-                int hy = (src.y2 < dst.y1)
-                       ? src.y2 - cm_src.dy                             // dst entirely above
-                       : dst.y1 - std::max(1, cm_src.dy);               // partial overlap
+                int hy = (src.y2 < dst.y1) ? src.y2 : dst.y1 - 1;  // dst above or overlapping
                 if (hy >= src.y1 && hy < dst.y1) {
                     Topology hv; hv.type = "L_HV";
                     hv.segments.push_back(make_seg(sx,     hy,     bend_x, hy,     h_layer_));
@@ -112,9 +96,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             }
             // Option 2: H above dst, V down to dst.y2
             if (src.y2 > dst.y2) {
-                int hy = (src.y1 > dst.y2)
-                       ? src.y1 + cm_src.dy                             // dst entirely below
-                       : dst.y2 + std::max(1, cm_src.dy);               // partial overlap
+                int hy = (src.y1 > dst.y2) ? src.y1 : dst.y2 + 1;  // dst below or overlapping
                 if (hy > dst.y2 && hy <= src.y2) {
                     Topology hv; hv.type = "L_HV";
                     hv.segments.push_back(make_seg(sx,     hy,     bend_x, hy,     h_layer_));
@@ -134,14 +116,8 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
 
     // L_VH: vertical first, then horizontal to dst x-face.
     //
-    // In busterm mode:
-    //  • V x-position is inset from the src x-face nearest dst by the corner
-    //    margin dx, keeping the connection away from src corners.
-    //  • Bend y is placed within dst's corner margin dy on the dst x-face.
-    //  • H endpoint is the exact dst x-face — no inward offset.
-    //
-    //  Overlap case: when vx lands inside dst (vx == dx → H zero-length), route
-    //  the V through src's exclusive x-zone(s) instead.
+    // In busterm mode the bboxes are margin-inset, so src.x1/x2 are already the
+    // valid V-stub x positions and dst.y1/y2 are the valid H connection points.
     {
         int sy = use_busterm_ ? src.face_y(d.y) : s.y;
         int vx = s.x;
@@ -149,8 +125,8 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
         int bend_y = use_busterm_ ? dst.face_y(sy) : d.y;
 
         if (use_busterm_) {
-            if      (d.x > src.x2) vx = src.x2 - cm_src.dx;
-            else if (d.x < src.x1) vx = src.x1 + cm_src.dx;
+            if      (d.x > src.x2) vx = src.x2;
+            else if (d.x < src.x1) vx = src.x1;
             dx = dst.face_x(vx);
         }
 
@@ -175,14 +151,12 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                 if (vh.segments.size() == 2) results.push_back(vh);
             }
         } else if (use_busterm_) {
-            // Two independent options mirroring L_HV: place H within dst's corner
-            // margin so the connection to dst's x-face avoids dst's corners.
+            // Two independent options mirroring L_HV.  dst bbox is margin-inset so
+            // dst.y2/y1 are already valid H connection points on dst's x-face.
 
             // Option A: H below src, V stub down from src bottom face
             if (dst.y1 < src.y1) {
-                int bend_y_a = (dst.y2 < src.y1)
-                             ? dst.y2 - cm_dst.dy   // dst entirely below src
-                             : src.y1 - std::max(1, cm_dst.dy);  // partial overlap
+                int bend_y_a = (dst.y2 < src.y1) ? dst.y2 : src.y1 - 1;
                 if (bend_y_a >= dst.y1 && bend_y_a < src.y1) {
                     Topology vh; vh.type = "L_VH";
                     vh.segments.push_back(make_seg(vx, src.y1,   vx, bend_y_a, v_layer_));
@@ -192,9 +166,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             }
             // Option B: H above src, V stub up from src top face
             if (dst.y2 > src.y2) {
-                int bend_y_b = (dst.y1 > src.y2)
-                             ? dst.y1 + cm_dst.dy   // dst entirely above src
-                             : src.y2 + std::max(1, cm_dst.dy);  // partial overlap
+                int bend_y_b = (dst.y1 > src.y2) ? dst.y1 : src.y2 + 1;
                 if (bend_y_b > src.y2 && bend_y_b <= dst.y2) {
                     Topology vh; vh.type = "L_VH";
                     vh.segments.push_back(make_seg(vx, src.y2,   vx, bend_y_b, v_layer_));
@@ -213,23 +185,20 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
     }
 }
 
-// Helper: H-stub y-level or V-trunk endpoint y for HVH topologies.
-// When a block has no H stub (its x-face IS the cut), use the y-face toward the
-// other block.  When a stub exists, clamp toward the other block using the block's
-// corner margin dy so the connection point stays away from face corners.
+// Helper: H-stub y-level for HVH topologies.
+// The bbox is already margin-inset, so a plain clamp to [blk.y1, blk.y2] lands
+// within the margin zone.  When there is no stub the block face is used directly.
 static int stub_y(bool use_busterm, bool has_stub,
-                  const Rect& blk, int toward_y, int fallback_y, int dy) {
+                  const Rect& blk, int toward_y, int fallback_y) {
     if (!use_busterm) return fallback_y;
-    return has_stub ? clamp_margin(toward_y, blk.y1, blk.y2, dy)
-                    : blk.face_y(toward_y);
+    return has_stub ? clamp(toward_y, blk.y1, blk.y2) : blk.face_y(toward_y);
 }
 
-// Symmetric helper for VHV topologies (V-stub x-level).
+// Symmetric helper for VHV topologies.
 static int stub_x(bool use_busterm, bool has_stub,
-                  const Rect& blk, int toward_x, int fallback_x, int dx) {
+                  const Rect& blk, int toward_x, int fallback_x) {
     if (!use_busterm) return fallback_x;
-    return has_stub ? clamp_margin(toward_x, blk.x1, blk.x2, dx)
-                    : blk.face_x(toward_x);
+    return has_stub ? clamp(toward_x, blk.x1, blk.x2) : blk.face_x(toward_x);
 }
 
 void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
@@ -238,8 +207,6 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
                                       std::vector<Topology>& results) {
     const Rect& src = s_bt.bbox; const Rect& dst = d_bt.bbox;
     Point s = src.center(); Point d = dst.center();
-    const auto cm_src = floorplan_.get_block_corner_margin(s_bt.block_name);
-    const auto cm_dst = floorplan_.get_block_corner_margin(d_bt.block_name);
 
     // Z_HVH: trunk is vertical at x_cut between the two block centres.
     //
@@ -258,13 +225,15 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
     // ovlp is sized so that the overlap region is wider than the 10% span
     // threshold used by the span-adjustment SET/EXTEND decision in NUTS, which
     // preserves the overlap after track placement.
+    // The Busterm bboxes are already margin-inset, so face/clamp operations on
+    // src/dst naturally land within the margin zone.
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     for (int x_cut : x_grid) {
         if (x_cut > min_x && x_cut < max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
-            int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y, cm_src.dy);
-            int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y, cm_dst.dy);
+            int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
+            int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
 
             if (ty_src != ty_dst) {
                 // Standard Z_HVH — no spread or overlap needed.
@@ -279,10 +248,10 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
                 // Spread Z_HVH: both BUSTERMs at same y — force two distinct
                 // y-levels so the V segment is non-degenerate.  Generate two
                 // mirror variants (top/bottom and bottom/top).
-                int sy_hi = src.y2 - cm_src.dy;   // near src top corner
-                int sy_lo = src.y1 + cm_src.dy;   // near src bottom corner
-                int dy_hi = dst.y2 - cm_dst.dy;   // near dst top corner
-                int dy_lo = dst.y1 + cm_dst.dy;   // near dst bottom corner
+                int sy_hi = src.y2;   // near src top corner (bbox already margin-inset)
+                int sy_lo = src.y1;   // near src bottom corner
+                int dy_hi = dst.y2;   // near dst top corner
+                int dy_lo = dst.y1;   // near dst bottom corner
 
                 // ovlp: extend each H past the trunk so spans strictly overlap.
                 // Must be < 11% of the resulting H span so NUTS span-adjustment
@@ -321,8 +290,8 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
         if (y_cut > min_y && y_cut < max_y) {
             int sy = use_busterm_ ? src.face_y(y_cut) : s.y;
             int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
-            int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x, cm_src.dx);
-            int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x, cm_dst.dx);
+            int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
+            int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
 
             if (vx_src != vx_dst) {
                 // Standard Z_VHV — no spread needed.
@@ -336,8 +305,8 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
             } else if (use_busterm_ && sy != y_cut && y_cut != dy) {
                 // Spread Z_VHV: both BUSTERMs at same x — force two distinct
                 // x-levels so the H segment is non-degenerate.
-                int vx_hi = src.x2 - cm_src.dx;   // near src right corner
-                int vx_lo = src.x1 + cm_src.dx;   // near src left corner
+                int vx_hi = src.x2;   // near src right corner (bbox already margin-inset)
+                int vx_lo = src.x1;   // near src left corner
 
                 int v1_len = std::abs(y_cut - sy);
                 int ovlp   = std::max(1, v1_len / 20);  // ~5% of V1 length → SET fires
@@ -365,16 +334,15 @@ void TopologyGenerator::add_u_shapes(const Busterm& s_bt, const Busterm& d_bt,
     Point s = src.center(); Point d = dst.center();
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
-    const auto cm_src = floorplan_.get_block_corner_margin(s_bt.block_name);
-    const auto cm_dst = floorplan_.get_block_corner_margin(d_bt.block_name);
 
     // U_HVH: vertical detour trunk left/right of bounding box.
+    // Busterm bboxes are already margin-inset; face/clamp naturally lands in margin zone.
     for (int x_cut : x_grid) {
         if (x_cut < min_x || x_cut > max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
-            int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y, cm_src.dy);
-            int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y, cm_dst.dy);
+            int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
+            int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
             Topology u; u.type = "U_HVH@x" + std::to_string(x_cut);
             if (sx != x_cut)
                 u.segments.push_back(make_seg(sx, ty_src, x_cut, ty_src, h_layer_));
@@ -391,8 +359,8 @@ void TopologyGenerator::add_u_shapes(const Busterm& s_bt, const Busterm& d_bt,
         if (y_cut < min_y || y_cut > max_y) {
             int sy = use_busterm_ ? src.face_y(y_cut) : s.y;
             int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
-            int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x, cm_src.dx);
-            int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x, cm_dst.dx);
+            int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
+            int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
             Topology u; u.type = "U_VHV@y" + std::to_string(y_cut);
             if (sy != y_cut)
                 u.segments.push_back(make_seg(vx_src, sy, vx_src, y_cut, v_layer_));
@@ -414,9 +382,6 @@ void TopologyGenerator::add_uu_shapes(const Busterm& s_bt, const Busterm& d_bt,
     Point s = src.center(); Point d = dst.center();
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
-    const auto cm_src = floorplan_.get_block_corner_margin(s_bt.block_name);
-    const auto cm_dst = floorplan_.get_block_corner_margin(d_bt.block_name);
-
     // Block-pair bounding box — used for exit margins.
     int bp_x_lo = std::min({src.x1, src.x2, dst.x1, dst.x2});
     int bp_x_hi = std::max({src.x1, src.x2, dst.x1, dst.x2});
@@ -435,15 +400,16 @@ void TopologyGenerator::add_uu_shapes(const Busterm& s_bt, const Busterm& d_bt,
 
         // Dst attachment (standard, same as U_VHV).
         int dy      = dst.face_y(y_cut);
-        int vx_dst  = stub_x(true, dy != y_cut, dst, s.x, d.x, cm_dst.dx);
+        int vx_dst  = stub_x(true, dy != y_cut, dst, s.x, d.x);
 
         // Src: exit the x-face furthest from dst.
         int exit_x = (std::abs(src.x1 - d.x) >= std::abs(src.x2 - d.x))
                      ? src.x1 : src.x2;
 
-        // sy_src: y-level on the src side face, within the corner margin zone.
-        int sy_src = (y_cut < min_y) ? src.y1 + cm_src.dy   // trunk below: near src bottom
-                                     : src.y2 - cm_src.dy;  // trunk above: near src top
+        // sy_src: y-level on the src side face.
+        // The bbox is already margin-inset so src.y1/y2 are the valid face positions.
+        int sy_src = (y_cut < min_y) ? src.y1   // trunk below: src bottom face
+                                     : src.y2;  // trunk above: src top face
 
         // x_corner: where the V leg of the src L-stub is placed.
         // 10% of block-pair bbox further out from src's exit face.
@@ -472,15 +438,16 @@ void TopologyGenerator::add_uu_shapes(const Busterm& s_bt, const Busterm& d_bt,
 
         // Dst attachment (standard, same as U_HVH).
         int dx      = dst.face_x(x_cut);
-        int ty_dst  = stub_y(true, dx != x_cut, dst, s.y, d.y, cm_dst.dy);
+        int ty_dst  = stub_y(true, dx != x_cut, dst, s.y, d.y);
 
         // Src: exit the y-face furthest from dst.
         int exit_y = (std::abs(src.y1 - d.y) >= std::abs(src.y2 - d.y))
                      ? src.y1 : src.y2;
 
-        // tx_src: x-level on the src exit face, within the corner margin zone.
-        int tx_src = (x_cut < min_x) ? src.x1 + cm_src.dx   // trunk left:  near src left
-                                     : src.x2 - cm_src.dx;  // trunk right: near src right
+        // tx_src: x-level on the src exit face.
+        // The bbox is already margin-inset so src.x1/x2 are the valid face positions.
+        int tx_src = (x_cut < min_x) ? src.x1   // trunk left:  src left face
+                                     : src.x2;  // trunk right: src right face
 
         // y_corner: where the H leg of the src L-stub is placed.
         // 10% of block-pair bbox further out from src's exit face.
@@ -604,9 +571,9 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                 if (!has_stub[i]) {
                     any_pt = true;
                     const Rect& b = blocks[i].bbox;
-                    int m = std::max(1, (int)(0.1 * (b.y2 - b.y1)));
-                    pt_lo = std::max(pt_lo, b.y1 + m);
-                    pt_hi = std::min(pt_hi, b.y2 - m);
+                    // bbox is already margin-inset; use full extent as valid range.
+                    pt_lo = std::max(pt_lo, b.y1);
+                    pt_hi = std::min(pt_hi, b.y2);
                 }
             }
             if (any_pt && pt_lo <= pt_hi) {
@@ -645,15 +612,12 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
             int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
             bool changed = false;
             if (has_stub[lo]) {
-                const Rect& b = blocks[lo].bbox;
-                int margin = std::max(1, (int)(0.1 * (b.x2 - b.x1)));
-                int target = b.x2 - margin;
+                // bbox is already margin-inset; slide to face edge directly.
+                int target = blocks[lo].bbox.x2;
                 if (target > att_x[lo]) { att_x[lo] = target; changed = true; }
             }
             if (has_stub[hi]) {
-                const Rect& b = blocks[hi].bbox;
-                int margin = std::max(1, (int)(0.1 * (b.x2 - b.x1)));
-                int target = b.x1 + margin;
+                int target = blocks[hi].bbox.x1;
                 if (target < att_x[hi]) { att_x[hi] = target; changed = true; }
             }
             if (!changed) break;
@@ -744,9 +708,9 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                 if (!has_stub[i]) {
                     any_pt = true;
                     const Rect& b = blocks[i].bbox;
-                    int m = std::max(1, (int)(0.1 * (b.x2 - b.x1)));
-                    pt_lo = std::max(pt_lo, b.x1 + m);
-                    pt_hi = std::min(pt_hi, b.x2 - m);
+                    // bbox is already margin-inset; use full extent as valid range.
+                    pt_lo = std::max(pt_lo, b.x1);
+                    pt_hi = std::min(pt_hi, b.x2);
                 }
             }
             if (any_pt && pt_lo <= pt_hi) {
@@ -778,15 +742,12 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
             bool changed = false;
             if (has_stub[lo]) {
-                const Rect& b = blocks[lo].bbox;
-                int margin = std::max(1, (int)(0.1 * (b.y2 - b.y1)));
-                int target = b.y2 - margin;
+                // bbox is already margin-inset; slide to face edge directly.
+                int target = blocks[lo].bbox.y2;
                 if (target > att_y[lo]) { att_y[lo] = target; changed = true; }
             }
             if (has_stub[hi]) {
-                const Rect& b = blocks[hi].bbox;
-                int margin = std::max(1, (int)(0.1 * (b.y2 - b.y1)));
-                int target = b.y1 + margin;
+                int target = blocks[hi].bbox.y1;
                 if (target < att_y[hi]) { att_y[hi] = target; changed = true; }
             }
             if (!changed) break;
@@ -853,13 +814,17 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     // Collect pin centres and block bounds in parallel order.
     std::vector<Point>   pins;
     std::vector<Busterm> blocks;
+    auto mk_bt = [&](const std::string& n) {
+        auto cm = floorplan_.get_block_corner_margin(n);
+        return Busterm{n, floorplan_.get_block_bounds(n).shrink(cm.dx, cm.dy)};
+    };
     {
-        Rect r = floorplan_.get_block_bounds(src_name);
-        pins.push_back(r.center()); blocks.push_back({src_name, r});
+        Busterm bt = mk_bt(src_name);
+        pins.push_back(bt.bbox.center()); blocks.push_back(bt);
     }
     for (const auto& d : dst_names) {
-        Rect r = floorplan_.get_block_bounds(d);
-        pins.push_back(r.center()); blocks.push_back({d, r});
+        Busterm bt = mk_bt(d);
+        pins.push_back(bt.bbox.center()); blocks.push_back(bt);
     }
 
     // Bounding box of all pin centres.
@@ -958,8 +923,12 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
 
 std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& src_name, const std::string& dst_name) {
     std::vector<Topology> candidates;
-    Busterm src_bt = {src_name, floorplan_.get_block_bounds(src_name)};
-    Busterm dst_bt = {dst_name, floorplan_.get_block_bounds(dst_name)};
+    auto mk_bt = [&](const std::string& n) {
+        auto cm = floorplan_.get_block_corner_margin(n);
+        return Busterm{n, floorplan_.get_block_bounds(n).shrink(cm.dx, cm.dy)};
+    };
+    Busterm src_bt = mk_bt(src_name);
+    Busterm dst_bt = mk_bt(dst_name);
     const Rect& src = src_bt.bbox;
     const Rect& dst = dst_bt.bbox;
 
