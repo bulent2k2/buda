@@ -319,13 +319,15 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                 for (const auto& sc : stub.conns) {
                     if (sc.kind != SegConn::BUSTERM) continue;
                     const Rect& rect = bmap.at(sc.block_name);
+                    BlockCornerMargin cm = fp.get_block_corner_margin(sc.block_name);
 
                     if (cs.horiz && !stub.horiz) {
                         // cs = H spine, stub = V stub anchored at rect's y-face
                         int f = sc.face_coord;  // the busterm y-face stub endpoint
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
-                        if (f == rect.y1) new_hi = std::min(new_hi, rect.y1); // spine below B
-                        else              new_lo = std::max(new_lo, rect.y2); // spine above B
+                        if (f <= rect.y1 + cm.dy) new_hi = std::min(new_hi, rect.y1); // spine below B
+                        else if (f >= rect.y2 - cm.dy) new_lo = std::max(new_lo, rect.y2); // spine above B
+
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
                             changed = true;
@@ -334,8 +336,9 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         // cs = V spine, stub = H stub anchored at rect's x-face
                         int f = sc.face_coord;
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
-                        if (f == rect.x1) new_hi = std::min(new_hi, rect.x1);
-                        else              new_lo = std::max(new_lo, rect.x2);
+                        if (f <= rect.x1 + cm.dx) new_hi = std::min(new_hi, rect.x1); // spine left of B
+                        else if (f >= rect.x2 - cm.dx) new_lo = std::max(new_lo, rect.x2); // spine right of B
+
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
                             changed = true;

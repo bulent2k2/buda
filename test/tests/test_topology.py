@@ -60,11 +60,26 @@ def test_random_topologies(topology_setup):
         
         for topo in candidates:
             # Check A: Continuity
-            # The end of one segment must match the start of the next
+            # Segments must be connected: either end matches start, or they intersect
+            # (allowing for spread-case overlaps used to preserve V/H segments).
             segments = topo.segments
             for k in range(len(segments) - 1):
-                assert segments[k].end.x == segments[k+1].start.x
-                assert segments[k].end.y == segments[k+1].start.y
+                s1, s2 = segments[k], segments[k+1]
+                # Is s1 connected to s2?
+                # Case 1: Exact match
+                if s1.end.x == s2.start.x and s1.end.y == s2.start.y:
+                    continue
+                
+                # Case 2: Intersection (T-junction or overlap)
+                # s1 must contain s2.start OR s2 must contain s1.end
+                def point_on_seg(p, s):
+                    if s.start.x == s.end.x: # Vertical
+                        return p.x == s.start.x and min(s.start.y, s.end.y) <= p.y <= max(s.start.y, s.end.y)
+                    else: # Horizontal
+                        return p.y == s.start.y and min(s.start.x, s.end.x) <= p.x <= max(s.start.x, s.end.x)
+                
+                assert point_on_seg(s2.start, s1) or point_on_seg(s1.end, s2), \
+                    f"Disconnected segments in {topo.type}: seg{k} end ({s1.end.x},{s1.end.y}) vs seg{k+1} start ({s2.start.x},{s2.start.y})"
             
             # Check B: Orthogonality (Manhattan geometry)
             for seg in segments:
