@@ -32,3 +32,11 @@ buda_system_v2/flow/two_nuts.log
 log/cc-before-compact.log
 log/claude-code-may-8-after-compaction.md
 log/claude-code-may-8.md
+buda_system_v2/src/nuts.log
+buda_system_v2/flow/tmp
+buda_system_v2/flow/large_fanout_flow.log
+buda_system_v2/flow/large_fanout_nuts.log
+buda_system_v2/flow/one2_flow.log
+buda_system_v2/flow/one_flow.log
+buda_system_v2/flow/realistic_large_chip_flow.log
+buda_system_v2/flow/realistic_large_chip_nuts.log

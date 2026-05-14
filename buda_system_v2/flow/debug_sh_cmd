@@ -1,3 +1,201 @@
+See: ~/src/buda/buda_system_v2/flow/tmp.py
+
+25) L-topo trouble with corner_margins
+
+⏺ Bash(git commit -m "$(cat <<'EOF'
+      Add global corner_margin command; per-block overrides take precedence…)
+  ⎿  [main b138915] Add global corner_margin command; per-block overrides take precedence
+      7 files changed, 93 insertions(+), 5 deletions(-)
+
+⏺ All 29 tests pass (3 pre-existing bundler failures are unrelated). The global corner_margin feature is complete and committed.
+
+  Root cause of the test failure: pybind11 converts std::map<int, SegEndpoints> to a Python dict by value, so topo.seg_busterms[0] = (bt, None) was silently discarded — the C++ map never received the
+  annotation. This meant the geometric busterm fallback always ran, picking up the "src_helper" block at the segment endpoint and applying the global margin (dy=20) there, which intersected with block
+  "b"'s per-block margin (dy=10) to produce [20,180] instead of [10,190]. The fix builds the topology for block "b" without a helper block at the segment endpoint, so only "b" is found geometrically.
+
+✻ Baked for 8m 5s
+
+❯ When topology generation runs on a bundle, it uses the Hanan Grid, right?                                                                                                                               
+
+⏺ Yes. The Hanan grid provides the candidate bend/trunk coordinates for Z and U shapes.
+
+  Specifically in TopologyGenerator::generate_candidates():
+
+  - L-shapes don't need the grid — the single bend point is just one block's center projected onto the other block's axis. Two candidates: L_HV and L_VH.
+  - Z-shapes iterate the Hanan grid lines that fall between the two blocks. Each intermediate grid coordinate becomes a trunk position, so you get one Z candidate per qualifying grid line.
+  - U-shapes use the grid lines outside the bounding box of the two blocks (one candidate beyond the min extreme, one beyond the max extreme).
+
+  The grid itself comes from Floorplan::get_hanan_grid(), which returns sorted unique x and y coordinates of all block edges. So every block corner in the floorplan contributes lines to the grid, and
+  the topology generator uses those lines as the universe of valid trunk positions.
+
+❯ Now, check how the grid is created. It should use only the busterms for the given bundle. I suspect it is using them all.                                                                               
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+⏺ There's already a bundle_hanan_grid helper. Let me see what it uses:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ It's already using bundle_hanan_grid with only the bundle's own block rects — not the full floorplan grid. The comment on line 511 even calls this out explicitly.
+
+  So it's correct: topology generation uses only the blocks belonging to that specific bundle (extracted from the Busterm list at line 899–901), not all blocks in the floorplan.
+
+❯ New simple testcase: one.buda. Only one bundle. Please go over all topologies and make sure that corner_margin is handled correctly.                                                                    
+
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+⏺ Good, one.buda already exists with one bundle. Let me run it and see all topologies:
+
+
+⏺ Bash(python3 - <<'EOF'
+      import sys
+      sys.path.insert(0, '/Users/ben/src/buda/buda_system_v2/src')
+      import interconnect
+
+      fp = interconnect.Floorplan()
+      fp.set_global_corner_margin(15, 20)
+      fp.add_block("u0",  200, 400, 300,  600)
+      fp.add_block("u11", 500, 800, 550, 1000)
+
+      gen = interconnect.TopologyGenerator(fp)
+      gen.set_layer_ids(4, 5)
+      topos = gen.generate_candidates("u0", "u11")
+
+      # Expected margins
+      # u0:  H-face (left/right, runs Y): dy=20 → [420,580].  V-face (top/bottom, runs X): dx=15 → [215,285]
+      # u11: H-face (left/right, runs Y): dy=20 → [820,980].  V-face (top/bottom, runs X): dx=15 → [515,535]
+
+      def check(cs, conns, expected_lo, expected_hi, label):
+          actual_lo, actual_hi = cs.perp_lo, cs.perp_hi
+          status = "OK" if actual_lo == expected_lo and actual_hi == expected_hi else "MISS"
+          guard  = " [GUARD]" if (actual_lo != expected_lo or actual_hi != expected_hi) else ""
+          print(f"    {status}  {label}: nominal={cs.perp_pos}  slide=[{actual_lo},{actual_hi}]  expected=[{expected_lo},{expected_hi}]{guard}")
+
+      for i, t in enumerate(topos):
+          ct = interconnect.ConnTopology()
+          ct.build(t, fp)
+          segs = ct.segs()
+          print(f"[{i}] {t.type}")
+          for si, cs in enumerate(segs):
+              btconns = [c.block_name for c in cs.conns if c.kind == interconnect.SegConnKind.BUSTERM]
+              if 'u0' in btconns:
+                  if cs.horiz:
+                      check(cs, btconns, 420, 580, f"seg{si} H→u0 (dy=20)")
+                  else:
+                      check(cs, btconns, 215, 285, f"seg{si} V→u0 (dx=15)")
+              elif 'u11' in btconns:
+                  if cs.horiz:
+                      check(cs, btconns, 820, 980, f"seg{si} H→u11 (dy=20)")
+                  else:
+                      check(cs, btconns, 515, 535, f"seg{si} V→u11 (dx=15)")
+              else:
+                  print(f"    --   seg{si} {'H' if cs.horiz else 'V'} spine: slide=[{cs.perp_lo},{cs.perp_hi}]")
+      EOF
+      )
+
+24) ⏺ Bash(python3 -c "import interconnect; help(interconnect.Bundler)")
+  ⎿  Help on class Bundler in module interconnect:
+
+     class Bundler(pybind11_builtins.pybind11_object)
+      |  Method resolution order:
+      |      Bundler
+      |      pybind11_builtins.pybind11_object
+      |      builtins.object
+      |
+      |  Methods defined here:
+      |
+
+
+23) > test case "two.buda" [Planner] Bundle 13 (1.5 units wide) -> L_HV  [H→M4 V→M5]  overflow=0. slide ranges are too tiny for both segs. Second issue: for topo 2 (L_VH) the segs are placed outside the slide ranges.
+
+
+   cd /Users/ben/src/buda/buda_system_v2 && cat > /tmp/debug_violations.py << 'EOF'
+   import sys
+   sys.path.insert(0, '/Users/ben/src/buda/buda_system_v2/src')
+   import interconnect
+
+   def run_two():
+       fp = interconnect.Floorplan()
+       ls = interconnect.LayerStack()
+       ls.add_layer(4, "M4", "H", "TOP", 0.0)
+       ls.add_layer(5, "M5", "V", "TOP", 0.0)
+
+       # From two.buda
+       fp.add_block("u0",   200, 400, 300,  600)
+       fp.set_block_corner_margin("u0", 15, 20)
+       fp.add_block("u11",  500, 800, 550, 1000)
+       fp.set_block_corner_margin("u11", 15, 20)
+       fp.add_block("u12",  550, 600, 600, 1000)
+       fp.set_block_corner_margin("u12", 15, 20)
+       fp.add_block("u13",  600, 500, 650, 1000)
+       fp.set_block_corner_margin("u13", 15, 20)
+       fp.add_block("u14",  650, 400, 700, 1000)
+       fp.set_block_corner_margin("u14", 15, 20)
+       fp.add_block("u15",  700, 200, 750, 1000)
+       fp.set_block_corner_margin("u15", 15, 20)
+       fp.add_block("u21", -150, 500, -100, 600)
+       fp.set_block_corner_margin("u21", 15, 20)
+       fp.add_block("u22", -100, 400,  -50, 600)
+       fp.set_block_corner_margin("u22", 15, 20)
+       fp.add_block("u23",  -50, 300,    0, 600)
+       fp.set_block_corner_margin("u23", 15, 20)
+       fp.add_block("u31",    0, 450,   50, 550)
+       fp.set_block_corner_margin("u31", 15, 20)
+       fp.add_block("u32",   50, 400,  100, 550)
+       fp.set_block_corner_margin("u32", 15, 20)
+       fp.add_block("u33",  100, 350,  150, 550)
+       fp.set_block_corner_margin("u33", 15, 20)
+       fp.add_block("u41",  400, 200,  500, 400)
+       fp.set_block_corner_margin("u41", 15, 20)
+       fp.add_block("u51",  500, 100,  600, 300)
+       fp.set_block_corner_margin("u51", 15, 20)
+
+       nl = interconnect.Netlist()
+       nets = [
+           ("n11","u0.tx","u11.rx"), ("n12","u0.tx","u12.rx"), ("n13","u0.tx","u13.rx"),
+           ("n14","u0.tx","u14.rx"), ("n15","u0.tx","u15.rx"),
+           ("n21","u0.tx","u21.rx"), ("n22","u0.tx","u22.rx"), ("n23","u0.tx","u23.rx"),
+           ("n31","u0.tx","u31.rx"), ("n32","u0.tx","u32.rx"), ("n33","u0.tx","u33.rx"),
+           ("n41","u0.tx","u41.rx"), ("n51","u0.tx","u51.rx"),
+       ]
+       for name, drv, rcv in nets:
+           nl.add_net(name, drv, rcv)
+
+       bundler = interconnect.Bundler(interconnect.BundlerStrategy.STRICT)
+       bundles = bundler.run(nl)
+
+       tg = interconnect.TopologyGenerator(fp, ls)
+       wrappers = []
+       for b in bundles:
+           bw = interconnect.BundleWrapper(b, 1.5, fp, nl)
+           tg.generate_candidates(bw)
+           wrappers.append(bw)
+
+       gr = interconnect.GlobalRouter(ls, fp)
+       gr.optimize_topologies(wrappers, fp)
+
+       solver = interconnect.NUTSSolver(ls)
+       result = solver.solve(wrappers, fp)
+
+       print(f"Total violations={result.num_violations}, overlaps={result.num_overlaps}")
+       print(f"Total segments: {len(result.segments)}")
+
+       for ts in result.segments:
+           lo, hi = ts.interval_lo, ts.interval_hi
+           pos = ts.track_position
+           if pos < lo - 0.001 or pos > hi + 0.001:
+               print(f"VIOLATION bid={ts.bundle_id} seg={ts.seg_idx} layer={ts.layer} pos={pos:.1f} interval=[{lo:.1f},{hi:.1f}] span=[{ts.span_lo},{ts.span_hi}]")
+
+   run_two()
+   EOF
+   python3 /tmp/debug_violations.py
+   Run debug script to find NUTS violations in two.buda
+
+ Compound command contains cd with output redirection - manual approval required to prevent path resolution bypass
+
+ Do you want to proceed?
+
+
 22) > two_busterms.buda, bundle 1, topo 1 (L_HV): the ranges are good, but each seg is placed outside its range. They are pulled all the way to the corner. They should stay within their slide-ranges. Topo 2 (L_VH) has a good V seg, but the H seg has the same problem as in topo 1. Finally, topo 5 (U_HVH): The V segment can have a wider slide-range. It should not be limited to one hanan grid, because it is detouring outside of the bbox of the busterms anyway.
 
 ⏺ Let me trace the exact bug. For bundle 1, L_HV (u0→u11):

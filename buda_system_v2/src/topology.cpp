@@ -1,4 +1,5 @@
 #include "topology.h"
+#include "conn_topology.h"
 #include <cmath>
 #include <climits>
 #include <set>
@@ -913,8 +914,99 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     }
 
     for (auto& t : results) annotate_endpoints(t, blocks);
+    add_mst_candidates(blocks, results);
+    add_multi_trunk_candidates(pins, blocks, results);
     annotate_and_sort(results);
     return results;
+}
+
+// Find points P1 in r1, P2 in r2 that minimize Manhattan distance.
+static void closest_points(const Rect& r1, const Rect& r2, Point& p1, Point& p2) {
+    if (r1.x2 < r2.x1) { p1.x = r1.x2; p2.x = r2.x1; }
+    else if (r2.x2 < r1.x1) { p1.x = r1.x1; p2.x = r2.x2; }
+    else { p1.x = p2.x = (std::max(r1.x1, r2.x1) + std::min(r1.x2, r2.x2)) / 2; }
+
+    if (r1.y2 < r2.y1) { p1.y = r1.y2; p2.y = r2.y1; }
+    else if (r2.y2 < r1.y1) { p1.y = r1.y1; p2.y = r2.y2; }
+    else { p1.y = p2.y = (std::max(r1.y1, r2.y1) + std::min(r1.y2, r2.y2)) / 2; }
+}
+
+void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
+                                           std::vector<Topology>& results) {
+    if (blocks.size() < 2) return;
+    std::vector<std::pair<std::string, Rect>> nodes;
+    for (const auto& bt : blocks) nodes.push_back({bt.block_name, bt.bbox});
+    auto mst_edges = compute_mst(nodes);
+
+    for (int strategy = 0; strategy < 2; ++strategy) {
+        Topology mst;
+        mst.type = (strategy == 0) ? "MST_HV" : "MST_VH";
+        for (const auto& edge : mst_edges) {
+            Point p1, p2;
+            closest_points(nodes[edge.u].second, nodes[edge.v].second, p1, p2);
+            if (p1.x == p2.x && p1.y == p2.y) continue;
+            if (p1.x == p2.x) {
+                mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+            } else if (p1.y == p2.y) {
+                mst.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+            } else {
+                if (strategy == 0) { // HV
+                    mst.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+                    mst.segments.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+                } else { // VH
+                    mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+                    mst.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
+                }
+            }
+        }
+        annotate_endpoints(mst, blocks);
+        results.push_back(std::move(mst));
+    }
+}
+
+void TopologyGenerator::add_multi_trunk_candidates(
+    const std::vector<Point>& pins,
+    const std::vector<Busterm>& blocks,
+    std::vector<Topology>& results)
+{
+    if (blocks.size() < 4) return;
+
+    // Bi-Trunk H: two horizontal trunks connected by a vertical spine
+    {
+        std::vector<int> y_coords;
+        for (const auto& p : pins) y_coords.push_back(p.y);
+        std::sort(y_coords.begin(), y_coords.end());
+        int y_mid = y_coords[y_coords.size() / 2];
+
+        int y_t1 = y_coords[y_coords.size() / 4];
+        int y_t2 = y_coords[3 * y_coords.size() / 4];
+
+        if (y_t1 != y_t2) {
+            Topology t;
+            t.type = "BITRUNK_H";
+            int x_min = INT_MAX, x_max = INT_MIN;
+            for (const auto& p : pins) {
+                x_min = std::min(x_min, p.x);
+                x_max = std::max(x_max, p.x);
+            }
+            int x_backbone = (x_min + x_max) / 2;
+
+            t.segments.push_back(make_seg(x_min, y_t1, x_max, y_t1, h_layer_));
+            t.segments.push_back(make_seg(x_min, y_t2, x_max, y_t2, h_layer_));
+            t.segments.push_back(make_seg(x_backbone, y_t1, x_backbone, y_t2, v_layer_));
+
+            for (int i = 0; i < (int)blocks.size(); ++i) {
+                int yt = (pins[i].y <= y_mid) ? y_t1 : y_t2;
+                int face_y = blocks[i].bbox.face_y(yt);
+                if (face_y != yt) {
+                    int si = (int)t.segments.size();
+                    t.segments.push_back(make_seg(pins[i].x, face_y, pins[i].x, yt, v_layer_));
+                    t.seg_busterms[si].first = blocks[i];
+                }
+            }
+            results.push_back(std::move(t));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

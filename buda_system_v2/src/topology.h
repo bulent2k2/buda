@@ -123,5 +123,7 @@ private:
                      int y_trunk, bool out_of_bbox, std::vector<Topology>& results);
     void add_trunk_v(const std::vector<Point>& pins, const std::vector<Busterm>& blocks,
                      int x_trunk, bool out_of_bbox, std::vector<Topology>& results);
+    void add_mst_candidates(const std::vector<Busterm>& blocks, std::vector<Topology>& results);
+    void add_multi_trunk_candidates(const std::vector<Point>& pins, const std::vector<Busterm>& blocks, std::vector<Topology>& results);
 };
 }
