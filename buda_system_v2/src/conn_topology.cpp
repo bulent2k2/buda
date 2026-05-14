@@ -305,12 +305,6 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     while (changed) {
         changed = false;
         for (auto& cs : segs_) {
-            {
-                int n_seg = 0;
-                for (const auto& c : cs.conns)
-                    if (c.kind == SegConn::SEG) ++n_seg;
-                if (n_seg < 2) continue;  // not a spine; skip
-            }
             for (const auto& conn : cs.conns) {
                 if (conn.kind != SegConn::SEG) continue;
                 const ConnSeg& stub = segs_[conn.seg_idx];
