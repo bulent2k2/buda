@@ -395,7 +395,15 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
                 topo_score    = std::max(topo_score,    best_s);
             }
 
-            if (topo_score < best_score) {
+            bool is_better = false;
+            if (topo_score < best_score - 1e-6) {
+                is_better = true;
+            } else if (std::abs(topo_score - best_score) < 1e-6) {
+                // Tie-breaker: stable selection by index.
+                if (ci < best_topo) is_better = true;
+            }
+
+            if (is_better) {
                 best_score      = topo_score;
                 best_overflow   = topo_overflow;
                 best_topo       = ci;

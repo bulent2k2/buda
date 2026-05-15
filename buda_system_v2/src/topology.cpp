@@ -89,7 +89,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (src.y1 < dst.y1) {
                 int hy = (src.y2 < dst.y1) ? src.y2 : dst.y1 - 1;  // dst above or overlapping
                 if (hy >= src.y1 && hy < dst.y1) {
-                    Topology hv; hv.type = "L_HV";
+                    Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
                     hv.segments.push_back(make_seg(sx,     hy,     bend_x, hy,     h_layer_));
                     hv.segments.push_back(make_seg(bend_x, hy,     bend_x, dst.y1, v_layer_));
                     results.push_back(hv);
@@ -99,7 +99,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (src.y2 > dst.y2) {
                 int hy = (src.y1 > dst.y2) ? src.y1 : dst.y2 + 1;  // dst below or overlapping
                 if (hy > dst.y2 && hy <= src.y2) {
-                    Topology hv; hv.type = "L_HV";
+                    Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
                     hv.segments.push_back(make_seg(sx,     hy,     bend_x, hy,     h_layer_));
                     hv.segments.push_back(make_seg(bend_x, hy,     bend_x, dst.y2, v_layer_));
                     results.push_back(hv);
@@ -137,7 +137,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (src.x2 > dst.x2) {
                 int vx2 = (dst.x2 + src.x2) / 2;
                 int dx2 = dst.face_x(vx2);   // = dst.x2
-                Topology vh; vh.type = "L_VH";
+                Topology vh; vh.type = "L_VH@x" + std::to_string(vx2);
                 if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, v_layer_));
                 if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, h_layer_));
                 if (vh.segments.size() == 2) results.push_back(vh);
@@ -146,7 +146,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (src.x1 < dst.x1) {
                 int vx2 = (src.x1 + dst.x1) / 2;
                 int dx2 = dst.face_x(vx2);   // = dst.x1
-                Topology vh; vh.type = "L_VH";
+                Topology vh; vh.type = "L_VH@x" + std::to_string(vx2);
                 if (sy != bend_y) vh.segments.push_back(make_seg(vx2, sy, vx2, bend_y, v_layer_));
                 if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y, dx2, bend_y, h_layer_));
                 if (vh.segments.size() == 2) results.push_back(vh);
@@ -159,7 +159,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (dst.y1 < src.y1) {
                 int bend_y_a = (dst.y2 < src.y1) ? dst.y2 : src.y1 - 1;
                 if (bend_y_a >= dst.y1 && bend_y_a < src.y1) {
-                    Topology vh; vh.type = "L_VH";
+                    Topology vh; vh.type = "L_VH@y" + std::to_string(bend_y_a) + "@x" + std::to_string(vx);
                     vh.segments.push_back(make_seg(vx, src.y1,   vx, bend_y_a, v_layer_));
                     vh.segments.push_back(make_seg(vx, bend_y_a, dx, bend_y_a, h_layer_));
                     results.push_back(vh);
@@ -169,14 +169,14 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (dst.y2 > src.y2) {
                 int bend_y_b = (dst.y1 > src.y2) ? dst.y1 : src.y2 + 1;
                 if (bend_y_b > src.y2 && bend_y_b <= dst.y2) {
-                    Topology vh; vh.type = "L_VH";
+                    Topology vh; vh.type = "L_VH@y" + std::to_string(bend_y_b) + "@x" + std::to_string(vx);
                     vh.segments.push_back(make_seg(vx, src.y2,   vx, bend_y_b, v_layer_));
                     vh.segments.push_back(make_seg(vx, bend_y_b, dx, bend_y_b, h_layer_));
                     results.push_back(vh);
                 }
             }
         } else {
-            Topology vh; vh.type = "L_VH";
+            Topology vh; vh.type = "L_VH@y" + std::to_string(bend_y) + "@x" + std::to_string(vx);
             if (sy != bend_y)
                 vh.segments.push_back(make_seg(vx, sy, vx, bend_y, v_layer_));
             if (vx != dx)
