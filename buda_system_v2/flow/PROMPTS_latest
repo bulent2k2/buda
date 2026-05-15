@@ -5,7 +5,9 @@ New:
 3) Same test case, same bundle. Why does `run_planner` pick that topo? There are shorter topos?
 
 Last prompt:
-❯ Doesn't it make sense to apply corner margins on the busterm.rect and then use those rects to create the hanan grid? Then, topo generation code get simpler by using busterm.rects as is.
+Gem > See test-case two.buda, bundle 2, topo 4 of 8: Z_VHV. The slide for H is [600, 600]. That's trivial and can not be used to route this bus. Let's add the right logic to eliminate such topos.          
+
+CC ❯ Doesn't it make sense to apply corner margins on the busterm.rect and then use those rects to create the hanan grid? Then, topo generation code get simpler by using busterm.rects as is.
 
 "two.buda" topologies for Bundle 13 have a few issues: 1) 
 

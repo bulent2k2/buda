@@ -1,5 +1,8 @@
 # From channel_stress, pick a few bundles with pin conflict
 
+# bug without this(!) the V segs (in Z-topos) connecting to the blocks on the right most column fly off to +x..
+# corner_margin dx 3 dy 5
+
 def_layer 3 M3 V 10.0
 # high power % is to force planner to resort to M6
 def_layer 4 M4 H TOP 88.0

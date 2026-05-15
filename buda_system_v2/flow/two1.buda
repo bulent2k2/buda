@@ -1,0 +1,16 @@
+# Only two blocks and one bunlde from "two.buda"
+# trivial slide for H of Z_VHV
+
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+
+corner_margin dx 15 dy 20
+
+add_block u0    200  400  300   600
+add_block u12   550  600  600  1000
+
+add_net n12 u0.tx u12.rx
+
+run_bundler strict
+generate_topologies
+#visualize_topologies

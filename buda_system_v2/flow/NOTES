@@ -1,6 +1,6 @@
-!!Why not derive busterms(rects) from blocks(rects) by cutting out the corner margins and generate hanan grid from busterms(rects)!
+FIXED !!Why not derive busterms(rects) from blocks(rects) by cutting out the corner margins and generate hanan grid from busterms(rects)!
 
-one2 topo 2/8 L_VH H seg has no corner-margin
+FIXED one2 topo 2/8 L_VH H seg has no corner-margin
 
 test5 small channel b2 and b7 have abutted M3 segs. Imagine the bbox to have min-width + half min-space on four sides
 

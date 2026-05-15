@@ -109,6 +109,7 @@ public:
         const std::vector<std::string>& dst_names);
 
 private:
+    void filter_pinched(std::vector<Topology>& candidates);
     const Floorplan& floorplan_;
     bool use_busterm_         = true;
     bool allow_double_detour_ = false;

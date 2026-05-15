@@ -173,16 +173,28 @@ static void apply_interval_constraints(
                 double v = ts.interval_lo;  // collapsed gridline value
 
                 // We need the grid for the perpendicular axis of this segment.
-                // H segment: perpendicular = Y → use y_grid.
-                // V segment: perpendicular = X → use x_grid.
-                // Infer orientation from whether span_lo/span_hi were filled;
-                // use the grid whose values bracket v on the correct side.
-                for (int dir = 0; dir < 2; ++dir) {
-                    const std::vector<int>* g = (dir == 0) ? y_grid : x_grid;
-                    if (!g || g->size() < 2) continue;
+                // H segment: perpendicular = Y -> use y_grid.
+                // V segment: perpendicular = X -> use x_grid.
+                // Check which grid bracketed the ORIGINAL interval.
+                const std::vector<int>* g = nullptr;
+                if (y_grid && !y_grid->empty()) {
+                    int c = find_grid_cell(*y_grid, static_cast<int>(hanan_lo + 0.5));
+                    if (c >= 0 && std::abs((*y_grid)[c] - hanan_lo) < 0.5 &&
+                                  std::abs((*y_grid)[c+1] - hanan_hi) < 0.5) {
+                        g = y_grid;
+                    }
+                }
+                if (!g && x_grid && !x_grid->empty()) {
+                    int c = find_grid_cell(*x_grid, static_cast<int>(hanan_lo + 0.5));
+                    if (c >= 0 && std::abs((*x_grid)[c] - hanan_lo) < 0.5 &&
+                                  std::abs((*x_grid)[c+1] - hanan_hi) < 0.5) {
+                        g = x_grid;
+                    }
+                }
 
+                if (g && g->size() >= 2) {
                     // Case 1: slo clamped lo up to hanan_hi → need next cell [v, next].
-                    if (std::abs(v - hanan_hi) < 0.5 && slo > -kSentinel) {
+                    if (std::abs(v - hanan_hi) < 1.5 && slo > -kSentinel) {
                         auto it = std::lower_bound(g->begin(), g->end(),
                                                    static_cast<int>(v + 0.5));
                         if (it != g->end() && std::next(it) != g->end()) {
@@ -191,24 +203,22 @@ static void apply_interval_constraints(
                             if (new_lo >= v - 0.5) {   // sanity: starts at v
                                 ts.interval_lo = new_lo;
                                 ts.interval_hi = new_hi;
-                                break;
                             }
                         }
                     }
-
                     // Case 2: shi pulled hi down to hanan_lo → need prev cell [prev, v].
-                    if (std::abs(v - hanan_lo) < 0.5 && shi < kSentinel) {
+                    else if (std::abs(v - hanan_lo) < 1.5 && shi < kSentinel) {
                         auto it = std::lower_bound(g->begin(), g->end(),
                                                    static_cast<int>(v + 0.5));
                         if (it != g->begin()) {
                             --it;  // iterator to v itself
                             if (it != g->begin()) {
-                                --it;  // iterator to prev
-                                double new_lo = static_cast<double>(*it);
-                                double new_hi = v;
-                                ts.interval_lo = new_lo;
-                                ts.interval_hi = new_hi;
-                                break;
+                                double new_hi = static_cast<double>(*it);
+                                double new_lo = static_cast<double>(*std::prev(it));
+                                if (new_hi <= v + 0.5) {
+                                    ts.interval_lo = new_lo;
+                                    ts.interval_hi = new_hi;
+                                }
                             }
                         }
                     }

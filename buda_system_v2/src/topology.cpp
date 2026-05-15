@@ -917,6 +917,7 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     add_mst_candidates(blocks, results);
     add_multi_trunk_candidates(pins, blocks, results);
     annotate_and_sort(results);
+    filter_pinched(results);
     return results;
 }
 
@@ -1087,6 +1088,27 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
         add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
     annotate_and_sort(candidates);
+    filter_pinched(candidates);
     return candidates;
 }
+
+void TopologyGenerator::filter_pinched(std::vector<Topology>& candidates) {
+    std::vector<Topology> filtered;
+    for (auto& cand : candidates) {
+        ConnTopology ct;
+        ct.build(cand, floorplan_);
+        bool pinched = false;
+        for (const auto& cs : ct.segs()) {
+            if (cs.perp_lo == cs.perp_hi) {
+                pinched = true;
+                break;
+            }
+        }
+        if (!pinched) {
+            filtered.push_back(std::move(cand));
+        }
+    }
+    candidates = std::move(filtered);
 }
+
+} // namespace interconnect
