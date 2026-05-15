@@ -55,9 +55,12 @@ class TopologyExplorer:
       cmd-1                          — raise the main BUDA viz window
     """
 
-    def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None):
-        self.fp       = fp
-        self._main_fig = main_fig   # back-reference to main viz figure for cmd-1
+    def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
+                 rerun_fn=None, refresh_fn=None):
+        self.fp         = fp
+        self._main_fig  = main_fig    # back-reference to main viz figure for cmd-1
+        self._rerun_fn  = rerun_fn    # () -> NUTSResult | None
+        self._refresh_fn = refresh_fn  # (NUTSResult) -> None
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         self.bidx     = 0   # current bundle index
@@ -102,13 +105,28 @@ class TopologyExplorer:
             ax_bprev.set_visible(False)
             ax_bnext.set_visible(False)
 
-        # ── Row 2: selection controls ──
-        ax_select   = self.fig.add_axes([0.22, 0.08, 0.26, 0.05])
-        ax_deselect = self.fig.add_axes([0.52, 0.08, 0.26, 0.05])
+        # ── Row 2: selection + re-run controls ──
+        # Layout adapts: if rerun_fn is provided, squeeze select/deselect left to
+        # make room for the Re-run button on the right.
+        if rerun_fn is not None:
+            ax_select   = self.fig.add_axes([0.22, 0.08, 0.18, 0.05])
+            ax_deselect = self.fig.add_axes([0.41, 0.08, 0.14, 0.05])
+            ax_rerun    = self.fig.add_axes([0.56, 0.08, 0.22, 0.05])
+        else:
+            ax_select   = self.fig.add_axes([0.22, 0.08, 0.26, 0.05])
+            ax_deselect = self.fig.add_axes([0.52, 0.08, 0.26, 0.05])
+            ax_rerun    = None
+
         self._btn_select   = Button(ax_select,   '★  Select Topo', color='#f0f0f0')
         self._btn_deselect = Button(ax_deselect, '✕  Deselect',    color='#f0f0f0')
         self._btn_select.on_clicked(lambda _: self._select_current())
         self._btn_deselect.on_clicked(lambda _: self._deselect_current())
+
+        if ax_rerun is not None:
+            self._btn_rerun = Button(ax_rerun, '▶  Re-run & Refresh', color='#ffe0b0')
+            self._btn_rerun.on_clicked(lambda _: self._rerun_and_refresh())
+        else:
+            self._btn_rerun = None
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
 
@@ -304,13 +322,20 @@ class TopologyExplorer:
 
     # ------------------------------------------------------------------
 
+    def _reset_rerun_btn(self):
+        if self._btn_rerun is not None:
+            self._btn_rerun.label.set_text('▶  Re-run & Refresh')
+            self._btn_rerun.ax.set_facecolor('#ffe0b0')
+
     def _step_topo(self, delta):
         self.idx = (self.idx + delta) % len(self.topos)
+        self._reset_rerun_btn()
         self._draw()
 
     def _step_bundle(self, delta):
         self.bidx = (self.bidx + delta) % len(self.wrappers)
         self.idx  = 0
+        self._reset_rerun_btn()
         self._draw()
 
     def _on_key(self, event):
@@ -327,6 +352,37 @@ class TopologyExplorer:
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
         if event.key == 's':                    self._select_current()
         if event.key == 'x':                    self._deselect_current()
+        if event.key == 'r':                    self._rerun_and_refresh()
+
+    def _rerun_and_refresh(self):
+        """Select current topology, re-run NUTS, and refresh the main viz."""
+        if self._rerun_fn is None:
+            return
+        # Persist the currently displayed topology as the selection for this bundle.
+        self._select_current()
+        # Visual feedback while running.
+        if self._btn_rerun is not None:
+            self._btn_rerun.label.set_text('⏳ Running…')
+            self._btn_rerun.ax.set_facecolor('#ffcc88')
+            self.fig.canvas.draw_idle()
+            self.fig.canvas.flush_events()
+        try:
+            result = self._rerun_fn()
+        except Exception as e:
+            print(f"[Viz] Re-run failed: {e}")
+            result = None
+        if self._btn_rerun is not None:
+            if result is not None:
+                self._btn_rerun.label.set_text('✓  Done')
+                self._btn_rerun.ax.set_facecolor('#c8f0c8')
+            else:
+                self._btn_rerun.label.set_text('✗  Error')
+                self._btn_rerun.ax.set_facecolor('#f0c8c8')
+            self.fig.canvas.draw_idle()
+        if result is not None and self._refresh_fn is not None:
+            self._refresh_fn(result)
+            if self._main_fig is not None:
+                _raise_window(self._main_fig)
 
     def _draw(self):
         ax = self.ax
@@ -439,7 +495,8 @@ class TopologyExplorer:
 
 
 class BudaVisualizer:
-    def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None):
+    def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
+                 rerun_fn=None):
         self.fp           = floorplan
         self.bundles      = bundles
         self._selections_path = (
@@ -474,6 +531,7 @@ class BudaVisualizer:
         self._ax_bundles     = None
         self._ax_overlaps    = None
         self._rerun_layer_fn = rerun_layer_fn   # (layer_id: int) -> NUTSResult | None
+        self._rerun_fn       = rerun_fn         # () -> NUTSResult | None  (full re-run)
         self._overlap_entries = []   # sorted list of OverlapDetail from nuts_result
         self._overlap_scroll = 0
         self._nuts_result    = None  # stored in draw_nuts_tracks for the overlap panel
@@ -1197,9 +1255,13 @@ class BudaVisualizer:
                         if w.original_bundle.id == self._highlighted), None)
         if wrapper is None or not wrapper.candidates:
             return
-        self._topo_explorer = TopologyExplorer(self.fp, wrapper,
-                                               sidecar_path=self._selections_path,
-                                               main_fig=self.fig)
+        refresh_fn = self._redraw_nuts_tracks if self._rerun_fn is not None else None
+        self._topo_explorer = TopologyExplorer(
+            self.fp, wrapper,
+            sidecar_path=self._selections_path,
+            main_fig=self.fig,
+            rerun_fn=self._rerun_fn,
+            refresh_fn=refresh_fn)
         self._topo_explorer.fig.show()
 
     def _on_key(self, event):

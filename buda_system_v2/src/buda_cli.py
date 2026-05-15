@@ -528,6 +528,27 @@ class BudaSession:
                              extra_lines=[pre_msg] + diag + [rerun_msg])
         return self.nuts_result
 
+    def _rerun_all(self):
+        """Apply sidecar topology selections and re-run full NUTS.
+
+        Called by the TopoExplorer "Re-run & Refresh" button.
+        Returns the updated NUTSResult (also stored in self.nuts_result).
+        """
+        self._apply_selections()
+        layer_names = self._make_layer_names()
+        nuts = interconnect.NUTSEngine(self.fp)
+        nuts.set_track_pitch(self._nuts_pitch)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
+        before = self._segment_states_from_topology()
+        self.nuts_result = nuts.run(self.bundles)
+        diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
+        self._write_nuts_log(layer_names, append=True,
+                             rerun_layer_name="topo-rerun", extra_lines=diag)
+        return self.nuts_result
+
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
         if not parts or parts[0].startswith('#'): return
@@ -846,10 +867,12 @@ class BudaSession:
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path()).show()
         elif cmd == "visualize":
-            rerun_fn = self._rerun_nuts_layer if self.nuts_result is not None else None
+            rerun_layer_fn = self._rerun_nuts_layer if self.nuts_result is not None else None
+            rerun_all_fn   = self._rerun_all        if self.nuts_result is not None else None
             viz = BudaVisualizer(self.fp, self.bundles,
                                  sidecar_path=self.script_path,
-                                 rerun_layer_fn=rerun_fn)
+                                 rerun_layer_fn=rerun_layer_fn,
+                                 rerun_fn=rerun_all_fn)
             viz.draw_blocks()
             if self.planner is not None:
                 cuts = self.planner.get_cuts()
