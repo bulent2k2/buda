@@ -31,7 +31,8 @@ struct Segment {
 // the block name and its bounding box; can be refined to a pin location later.
 struct Busterm {
     std::string block_name;
-    Rect        bbox;
+    Rect        bbox;       // possibly margin-inset
+    Rect        orig_bbox;  // always the full physical extent
 };
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an
