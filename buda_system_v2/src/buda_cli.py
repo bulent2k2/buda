@@ -49,6 +49,7 @@ class BudaSession:
         self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
         self._nuts_pitch = 1.0       # last track pitch used by run_nuts
+        self._planner_iterations = 5 # last iteration count used by run_planner
         self.script_path = None      # set when a .buda script is sourced
 
     def _sidecar_path(self):
@@ -529,12 +530,31 @@ class BudaSession:
         return self.nuts_result
 
     def _rerun_all(self):
-        """Apply sidecar topology selections and re-run full NUTS.
+        """Apply sidecar topology selections, re-run planner layer assignment,
+        then re-run full NUTS.
 
         Called by the TopoExplorer "Re-run & Refresh" button.
         Returns the updated NUTSResult (also stored in self.nuts_result).
         """
+        # Pin topology indices from sidecar.
         self._apply_selections()
+
+        # Re-run the planner so that assigned_h_layer / assigned_v_layer / seg_layers
+        # are updated to match the new topology's segment directions.  The planner
+        # respects topology_pinned=True set by _apply_selections() and will not
+        # override the user's topology choice.
+        if self.planner is not None:
+            assignments = self.planner.optimize_topologies(
+                self.bundles, self._planner_iterations)
+            bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
+            for asn in assignments:
+                w = bid_to_wrapper.get(asn.bundle_id)
+                if w is not None:
+                    w.selected_topology_index = asn.topo_index
+                    w.assigned_v_layer = asn.v_layer_id
+                    w.assigned_h_layer = asn.h_layer_id
+                    w.seg_layers = list(asn.seg_layers)
+
         layer_names = self._make_layer_names()
         nuts = interconnect.NUTSEngine(self.fp)
         nuts.set_track_pitch(self._nuts_pitch)
@@ -797,7 +817,8 @@ class BudaSession:
                 # Apply architect-pinned selections BEFORE optimizing so the
                 # planner scores the correct topology and assigns layers for it.
                 self._apply_selections()
-                assignments = self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
+                self._planner_iterations = int(args[0]) if args else 5
+                assignments = self.planner.optimize_topologies(self.bundles, self._planner_iterations)
                 # Apply planner layer decisions (vector copy in C++ means we must apply here).
                 bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
                 for asn in assignments:
