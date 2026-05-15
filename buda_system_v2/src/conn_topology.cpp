@@ -319,8 +319,8 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         // cs = H spine, stub = V stub anchored at rect's y-face
                         int f = sc.face_coord;  // the busterm y-face stub endpoint
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
-                        if (f <= rect.y1 + cm.dy) new_hi = std::min(new_hi, rect.y1); // spine below B
-                        else if (f >= rect.y2 - cm.dy) new_lo = std::max(new_lo, rect.y2); // spine above B
+                        if (f <= rect.y1 + cm.dy) new_hi = std::min(new_hi, rect.y1 + cm.dy); // spine below or in bottom margin
+                        else if (f >= rect.y2 - cm.dy) new_lo = std::max(new_lo, rect.y2 - cm.dy); // spine above or in top margin
 
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
@@ -330,8 +330,8 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         // cs = V spine, stub = H stub anchored at rect's x-face
                         int f = sc.face_coord;
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
-                        if (f <= rect.x1 + cm.dx) new_hi = std::min(new_hi, rect.x1); // spine left of B
-                        else if (f >= rect.x2 - cm.dx) new_lo = std::max(new_lo, rect.x2); // spine right of B
+                        if (f <= rect.x1 + cm.dx) new_hi = std::min(new_hi, rect.x1 + cm.dx); // spine left of or in left margin
+                        else if (f >= rect.x2 - cm.dx) new_lo = std::max(new_lo, rect.x2 - cm.dx); // spine right of or in right margin
 
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;

@@ -106,6 +106,7 @@ void GlobalRouter::_rebuild_cuts() {
     for (int i = 0; i + 1 < (int)x_grid_.size(); ++i) {
         int x_mid = (x_grid_[i] + x_grid_[i+1]) / 2;
         for (int lid : h_layers) {
+            bool is_top = layers_.get_layer_type(lid) == LayerType::TOP;
             GlobalCut c;
             c.p1        = {x_mid, y_grid_.front()};
             c.p2        = {x_mid, y_grid_.back()};
@@ -114,9 +115,14 @@ void GlobalRouter::_rebuild_cuts() {
             c.layer_id  = lid;
             c.band_cap.resize(n_ybands);
             c.band_usage.assign(n_ybands, 0.0);
-            for (int b = 0; b < n_ybands; ++b)
-                c.band_cap[b] = band_available_length(
-                        x_mid, true, blocks, y_grid_[b], y_grid_[b+1]);
+            for (int b = 0; b < n_ybands; ++b) {
+                if (is_top) {
+                    c.band_cap[b] = (double)(y_grid_[b+1] - y_grid_[b]);
+                } else {
+                    c.band_cap[b] = band_available_length(
+                            x_mid, true, blocks, y_grid_[b], y_grid_[b+1]);
+                }
+            }
             cuts_.push_back(std::move(c));
         }
     }
@@ -126,6 +132,7 @@ void GlobalRouter::_rebuild_cuts() {
     for (int i = 0; i + 1 < (int)y_grid_.size(); ++i) {
         int y_mid = (y_grid_[i] + y_grid_[i+1]) / 2;
         for (int lid : v_layers) {
+            bool is_top = layers_.get_layer_type(lid) == LayerType::TOP;
             GlobalCut c;
             c.p1        = {x_grid_.front(), y_mid};
             c.p2        = {x_grid_.back(),  y_mid};
@@ -134,9 +141,14 @@ void GlobalRouter::_rebuild_cuts() {
             c.layer_id  = lid;
             c.band_cap.resize(n_xbands);
             c.band_usage.assign(n_xbands, 0.0);
-            for (int b = 0; b < n_xbands; ++b)
-                c.band_cap[b] = band_available_length(
-                        y_mid, false, blocks, x_grid_[b], x_grid_[b+1]);
+            for (int b = 0; b < n_xbands; ++b) {
+                if (is_top) {
+                    c.band_cap[b] = (double)(x_grid_[b+1] - x_grid_[b]);
+                } else {
+                    c.band_cap[b] = band_available_length(
+                            y_mid, false, blocks, x_grid_[b], x_grid_[b+1]);
+                }
+            }
             cuts_.push_back(std::move(c));
         }
     }

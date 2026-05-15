@@ -1242,14 +1242,13 @@ class BudaVisualizer:
                                color='#333333', zorder=2, clip_on=True)
             self._block_name_artists.append(txt)
 
-    def draw_congestion_map(self, cuts):
+    def draw_congestion_map(self, cuts, xs, ys):
         """Shade each Hanan (cut × perpendicular-band) cell by utilisation ratio.
 
         V-cuts (vertical lines, counting H-segments) are shaded per Y-band.
         H-cuts (horizontal lines, counting V-segments) are shaded per X-band.
         Each cell gets its own colour so the map shows true 2D congestion.
         """
-        xs, ys = self.fp.get_hanan_grid()
         cmap = plt.cm.RdYlGn_r
         self._heatmap_artists = []
 
@@ -1282,7 +1281,11 @@ class BudaVisualizer:
                 usage = cut.band_usage[b]
                 if usage == 0:
                     continue
-                ratio = (usage / cap) if cap > 0 else 2.0
+                if cap > 0:
+                    ratio = usage / cap
+                else:
+                    ratio = 2.0  # blocked cell
+
                 color = cmap(min(ratio, 1.5) / 1.5)
                 alpha = 0.12 + 0.22 * min(ratio, 1.0)
 
@@ -1296,8 +1299,9 @@ class BudaVisualizer:
                     self.ax.add_patch(rect)
                     self._heatmap_artists.append(rect)
                     if ratio > 1.0:
+                        label = "BLOCK" if cap <= 0 else f"OVF\n{ratio:.0%}"
                         txt = self.ax.text((x_lo + x_hi) / 2, (p_lo + p_hi) / 2,
-                                           f"OVF\n{ratio:.0%}", fontsize=6, color='darkred',
+                                           label, fontsize=6, color='darkred',
                                            ha='center', va='center', zorder=4,
                                            fontweight='bold', clip_on=True)
                         self._heatmap_artists.append(txt)
@@ -1307,6 +1311,13 @@ class BudaVisualizer:
                         linewidth=0, facecolor=color, alpha=alpha, zorder=3)
                     self.ax.add_patch(rect)
                     self._heatmap_artists.append(rect)
+                    if ratio > 1.0:
+                        label = "BLOCK" if cap <= 0 else f"OVF\n{ratio:.0%}"
+                        txt = self.ax.text((p_lo + p_hi) / 2, (y_lo + y_hi) / 2,
+                                           label, fontsize=6, color='darkred',
+                                           ha='center', va='center', zorder=4,
+                                           fontweight='bold', clip_on=True)
+                        self._heatmap_artists.append(txt)
 
         # Apply current visibility state.
         vis = self._heatmap_visible

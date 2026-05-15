@@ -12,18 +12,19 @@ def test_no_pinched_z_shape():
 
     gen = interconnect.TopologyGenerator(fp)
     candidates = gen.generate_candidates("u0", "u1")
-    print(f"DEBUG: Found {len(candidates)} candidates")
     
-    # Check that no Z_VHV is at y=600
+    # All candidates must have non-zero slide ranges for all segments.
+    # The robust filter_pinched already ensures this.
+    # Specifically, Z_VHV@y600 is now allowed because its slide is [580, 620].
     for cand in candidates:
-        if "Z_VHV" in cand.type:
-            assert "@y600" not in cand.type, f"Found pinched Z_VHV at y=600: {cand.type}"
+        ct = interconnect.ConnTopology()
+        ct.build(cand, fp)
+        for cs in ct.segs():
+            assert cs.perp_lo != cs.perp_hi, f"Found pinched segment in {cand.type}: slide=[{cs.perp_lo}, {cs.perp_hi}]"
 
 def test_non_pinched_z_shape_allowed():
     fp = interconnect.Floorplan()
     # Two blocks with a gap in Y
-    # u0: x=[200, 300], y=[400, 600]
-    # u1: x=[550, 600], y=[700, 1000]
     fp.add_block("u0", 200, 400, 300, 600)
     fp.add_block("u1", 550, 700, 600, 1000)
     # Add a block to create a Hanan point at y=650
@@ -32,7 +33,6 @@ def test_non_pinched_z_shape_allowed():
 
     gen = interconnect.TopologyGenerator(fp)
     candidates = gen.generate_candidates("u0", "u1")
-    print(f"DEBUG: Found {len(candidates)} candidates")
     
     found_z = False
     for cand in candidates:

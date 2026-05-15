@@ -854,7 +854,7 @@ class BudaSession:
             if self.planner is not None:
                 cuts = self.planner.get_cuts()
                 if cuts:
-                    viz.draw_congestion_map(cuts)
+                    viz.draw_congestion_map(cuts, self.planner.get_x_grid(), self.planner.get_y_grid())
             viz.draw_hanan_grid()
             if self.nuts_result is not None:
                 viz.draw_nuts_tracks(self.nuts_result)
