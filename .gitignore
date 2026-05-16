@@ -42,3 +42,6 @@ buda_system_v2/flow/realistic_large_chip_flow.log
 buda_system_v2/flow/realistic_large_chip_nuts.log
 buda_system_v2/flow/test5bug_flow.log
 buda_system_v2/flow/test5bug_nuts.log
+buda_system_v2/flow/two1_flow.log
+buda_system_v2/flow/four_blocks_flow.log
+buda_system_v2/flow/one3_flow.log

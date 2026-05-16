@@ -44,8 +44,10 @@ run_planner 5
 
 # Stage 4 — NUTS abstract track placement (pitch=2.0)
 run_nuts 1.0
+
+# After improvements to layer assignment in run_planner, this makes overlaps worse because many more short segs go down to M2
 # V 100 280 H 150 400
-#run_planner post_nuts V H
+# run_planner post_nuts V H
 # run_nuts_on_layer M7
 #run_nuts 1.0
 

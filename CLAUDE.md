@@ -31,18 +31,25 @@ python3 buda_cli.py comprehensive_demo.buda
 
 | Command | Stage | Description |
 |---|---|---|
-| `def_layer <id> <name> <H\|V> <TOP\|LOW> <overhead%>` | setup | Register a metal layer |
-| `add_block <name> <x1> <y1> <x2> <y2>` | setup | Place a floorplan block |
+| `add_block <name> <x1> <y1> <x2> <y2> [corner_margin dx <n> [dy <n>]]` | setup | Place a floorplan block; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
+| `corner_margin dx <n> [dy <n>]` | setup | Set global corner margin for all blocks with no per-block override. Only `dx`/`dy` (absolute); `pct_h`/`pct_v` not valid globally. Single-axis value mirrors to the other axis. |
 | `add_net <name> <driver_pin> <receiver_pins_csv>` | setup | Add a net to the netlist |
+| `add_bus <prefix>[<N>] <drv_pin> <rcv_pin_csv>` | setup | Expand a bus into N nets: `prefix[N]` → `prefix_0`…`prefix_{N-1}`; `prefix[lo:hi]` → explicit range |
+| `def_layer <id> <name> <H\|V> [TOP\|LOW] <overhead%> [span_min N] [span_max N] [kSpan K]` | setup | Register a metal layer; `TOP` marks it for trunk preference; optional span limits and per-layer congestion weight override |
 | `run_bundler <STRICT\|CONVERGENT>` | 1 | Group nets into buses |
 | `generate_topologies [center_mode] [double_detour]` | 2 | Generate candidates for all bundles (src/dst auto-derived from netlist) |
-| `generate_topologies_for_bundle <hint> <src> <dst>` | 2 | Generate L/Z/U candidates for a specific bundle |
+| `generate_topologies_for_bundle <hint> <src> <dst...> [center_mode] [double_detour]` | 2 | Generate candidates for a specific bundle; multiple dst → multicast trunk+branch shapes |
+| `set_planner_param <name> <value>` | 3 | Set a planner tuning knob before or after `run_planner`. Known params: `kCong` (congestion weight), `kSpan` (span-length weight), `base_cost_non_top` (penalty for non-TOP layers) |
 | `run_planner <iterations>` | 3 | Layer assign + topology select |
+| `run_planner post_nuts [V [short long]] [H [short long]]` | 3 | Post-NUTS stub layer reassignment: short/long stubs on V or H layers are moved to cheaper layers |
 | `run_nuts [pitch]` | 4 | Abstract track placement |
+| `run_nuts_on_layer <layer-name>` | 4 | Re-solve one layer with NUTS without disturbing other layers |
+| `visualize_topologies [<hint>]` | — | Open topology explorer for the matching bundle (`-all [hints…]` for multiple) |
+| `visualize` | — | Open interactive matplotlib window |
+| `source <file>` | — | Execute another `.buda` script inline |
 | `def_track_pattern <layer_id> <origin> <type> <w> <sp> ...` | 8 setup | Define repeating track pattern |
 | `add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> ...` | 8 setup | Region-scoped pattern override |
 | `run_detailed_nuts [lo_hi\|hi_lo]` | 9 | Snap bit-wires to concrete tracks |
-| `visualize` | — | Open interactive matplotlib window |
 
 ## Tests
 
@@ -129,6 +136,8 @@ Netlist (.buda script)
 - **U-shape** (3 segments): routes outside the bounding box of the two blocks, used when a direct L or Z path would traverse an obstacle. Trunk is placed beyond the extreme Hanan grid lines.
 
 **Layer hints:** L-shape horizontal segment gets hint=3 (M3), vertical gets hint=4 (M4). All candidates use the same convention; the bundle planner may override.
+
+**Corner margins:** At Busterm construction time, each block's bounding box is inset by its `BlockCornerMargin{dx, dy}` via `Rect::shrink(dx, dy)`. All shape functions (L/Z/U/UU/trunk) operate on the shrunken bbox directly — no per-function margin threading. The Hanan grid is built from the shrunken bboxes, so stub and trunk positions automatically land within the margin zone. `dy` applies to vertical faces (left/right, constrains Y); `dx` to horizontal faces (top/bottom, constrains X). Guard: if `2*margin >= face_extent`, the shrink is skipped for that axis.
 
 **Output fed to stage 3:** `vector<Topology>` per bundle, stored in `BundleWrapper::candidates`.
 

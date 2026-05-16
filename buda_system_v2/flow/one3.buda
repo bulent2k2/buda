@@ -10,15 +10,11 @@ add_block u13   700  500  800  1000
 add_block u14   800  400  900  1000
 add_block u15   900  200  1000 1000
 
-add_net n11 u0.tx u11.rx
-add_net n12 u0.tx u12.rx
 add_net n13 u0.tx u13.rx
-add_net n14 u0.tx u14.rx
-add_net n15 u0.tx u15.rx
 
 run_bundler strict
 generate_topologies
-run_planner 1
-run_nuts
-
-visualize
+visualize_topologies
+#run_planner 1
+#run_nuts
+#visualize

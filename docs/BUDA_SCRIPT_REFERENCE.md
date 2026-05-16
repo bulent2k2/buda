@@ -16,14 +16,18 @@ Commands run in the following order. Later stages depend on earlier ones.
 
 | Stage | Command(s) | Purpose |
 |------:|---|---|
-| Setup | `def_layer`, `add_block`, `add_net`, `add_bus` | Declare layers, floorplan, netlist |
+| Setup | `def_layer` | Register metal layers |
+| Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin) |
+| Setup | `corner_margin` | Set global corner margin for all blocks without a per-block override |
+| Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | 1 | `run_bundler` | Group nets into buses |
-| 2 | `generate_topologies` | Enumerate L/Z/U candidates for **all** bundles (src/dst auto-derived) |
-| 2 | `generate_topologies_for_bundle` | Enumerate L/Z/U candidates for a **specific** bundle |
-| 3 | `run_planner` | Select topology + assign V layers |
+| 2 | `generate_topologies` | Enumerate topology candidates for **all** bundles (src/dst auto-derived) |
+| 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** bundle |
+| 3 | `set_planner_param` | Tune planner cost coefficients (must be called before `run_planner`) |
+| 3 | `run_planner` | Select topology + assign layers per segment |
 | 4 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
-| 4c | `run_planner post_nuts` | Reassign stub V and/or H layers to resolve channel pin conflicts; single NUTS re-run |
+| 4c | `run_planner post_nuts` | Reassign stub layers to resolve channel pin conflicts; single NUTS re-run |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
@@ -35,7 +39,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 ### `def_layer`
 
 ```
-def_layer <id> <name> <dir> <type> <overhead%>
+def_layer <id> <name> <dir> [TOP|LOW] <overhead%> [span_min N] [span_max N] [kSpan K]
 ```
 
 Register a metal routing layer.
@@ -45,23 +49,24 @@ Register a metal routing layer.
 | `id` | int | Unique numeric layer ID (used everywhere else to identify the layer) |
 | `name` | str | Human-readable name, e.g. `M4` |
 | `dir` | `H` or `V` | Routing direction: horizontal or vertical |
-| `type` | `TOP` or `LOW` | `TOP` — preferred (highest) layer in this direction; `LOW` — secondary |
+| `TOP` / `LOW` | keyword | Optional. `TOP` — preferred (highest) layer in this direction; `LOW` — secondary. Omitting defaults to `LOW`. |
 | `overhead%` | float | Fraction of each channel consumed by power/clock tracks, 0–99. Scales effective bus width by `100/(100 − overhead%)`. Use `0.0` for no dilation. |
+| `span_min N` | keyword+int | Optional. Segments shorter than `N` layout units on this layer incur a span-mismatch penalty (guides short stubs to lower layers). |
+| `span_max N` | keyword+int | Optional. Segments longer than `N` layout units on this layer incur a span-mismatch penalty (guides long wires to higher layers). |
+| `kSpan K` | keyword+float | Optional. Per-layer override for the span-mismatch cost coefficient (overrides the global `kSpan` from `set_planner_param`). |
 
 **Notes:**
 - At least one H layer and one V layer must be defined before `run_planner`.
-- Multiple V layers (e.g. M3, M5, M7) are used by the global router in
-  ascending ID order — the lowest-numbered V layer is filled first before
-  spilling to the next.
+- Multiple V layers (e.g. M3, M5, M7) are all considered by the global router; the planner assigns each segment to the layer that minimises its score.
 - The layer name is used by `run_nuts_on_layer`.
 
 **Example:**
 ```
-def_layer 3 M3 V TOP 0.0
+def_layer 3 M3 V TOP 0.0  span_max 150              # short stubs only
 def_layer 4 M4 H TOP 0.0
-def_layer 5 M5 V TOP 0.0
-def_layer 6 M6 H TOP 20.0   # 20% of M6 channels used by power grid
-def_layer 7 M7 V TOP 0.0
+def_layer 5 M5 V TOP 0.0  span_min 100 span_max 400 # mid-range spans
+def_layer 6 M6 H TOP 20.0                           # 20% power overhead
+def_layer 7 M7 V TOP 0.0  span_min 300              # long trunks only
 ```
 
 ---
@@ -69,7 +74,8 @@ def_layer 7 M7 V TOP 0.0
 ### `add_block`
 
 ```
-add_block <name> <x1> <y1> <x2> <y2>
+add_block <name> <x1> <y1> <x2> <y2> [corner_margin dx <n> [dy <n>]]
+add_block <name> <x1> <y1> <x2> <y2> [corner_margin pct_h <p> [pct_v <p>]]
 ```
 
 Place a rectangular block in the floorplan. Blocks define the Hanan grid
@@ -80,11 +86,20 @@ used by topology generation and the congestion model.
 | `name` | str | Instance name, e.g. `u_cpu`. Referred to in `add_net` pin names and `generate_topologies_for_bundle`. |
 | `x1 y1` | int | Lower-left corner (layout units) |
 | `x2 y2` | int | Upper-right corner (layout units) |
+| `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
+| `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
+| `corner_margin pct_h P` | keyword | Shrink X faces by `P`% of block width. If `pct_v` is omitted, same percentage applies to height. |
+| `corner_margin pct_v P` | keyword | Shrink Y faces by `P`% of block height. |
+
+A per-block `corner_margin` overrides the global `corner_margin` command for
+that block. The margin is baked into the block's `Busterm.bbox` at construction;
+topology generation and the Hanan grid use the shrunken bounding box directly.
 
 **Example:**
 ```
 add_block u_cpu   0    0  100  100
-add_block u_mem 200    0  300  100
+add_block u_mem 200    0  300  100  corner_margin dx 5
+add_block u_io  400    0  500  100  corner_margin pct_h 10 pct_v 15
 ```
 
 ---
@@ -133,6 +148,35 @@ destination blocks.
 ```
 add_bus data[8]  u_cpu.dout  u_mem.din       # expands to data_0 … data_7
 add_bus addr[16] u_cpu.addr  u_mem.addr      # expands to addr_0 … addr_15
+```
+
+---
+
+### `corner_margin`
+
+```
+corner_margin dx <n> [dy <n>]
+```
+
+Set a global corner margin applied to all blocks that have no per-block
+`corner_margin` override. Percentage variants (`pct_h` / `pct_v`) are not
+supported globally because the margin in layout units depends on individual
+block dimensions — use `dx` / `dy` instead.
+
+| Argument | Type | Description |
+|---|---|---|
+| `dx N` | keyword+int | Shrink top/bottom (X-direction) faces by `N` layout units. If `dy` is omitted, same value applies to Y. |
+| `dy N` | keyword+int | Shrink left/right (Y-direction) faces by `N` layout units. |
+
+The margin constrains where segment endpoints can land on a block face.
+`dy` limits the Y range on left/right (vertical) faces; `dx` limits the X
+range on top/bottom (horizontal) faces. A guard prevents the margin from
+inverting the face if the block is smaller than `2 × margin`.
+
+**Example:**
+```
+corner_margin dx 8          # 8-unit margin on all faces for all blocks
+corner_margin dx 5 dy 10    # 5-unit X margin, 10-unit Y margin
 ```
 
 ---
@@ -197,16 +241,29 @@ starts with `<hint>`.
 
 **Candidate shapes generated (2-pin):**
 
-| Shape | Segments | Description |
+| Type string | Segments | Description |
 |---|---|---|
-| `L_HV` / `L_VH` | 2 | Right-angle bend; horizontal-first or vertical-first. |
-| `Z_trunk_x` / `Z_trunk_y` | 3 | Z-route with intermediate trunk at each Hanan grid line between the two blocks. |
-| `U_top` / `U_bot` / `U_left` / `U_right` | 3 | U-route outside the block bounding box. |
-| `UU_VHV` / `UU_HVH` | 4 | Double-detour variant (requires `double_detour` flag). |
-| `I_H` / `I_V` | 1 | Straight horizontal or vertical route when blocks are axis-aligned. |
+| `I_H` / `I_V` | 1 | Straight H or V wire; generated when margin-inset bboxes overlap on one axis. Always shortest; tried first. |
+| `L_HV@x{bend}@y{hy}` | 2 | H then V; two corner variants (top/bottom face exit). |
+| `L_VH@y{bend}@x{vx}` | 2 | V then H; two corner variants (left/right face exit). |
+| `Z_HVH@x{cut}@y{ty}` | 2–3 | H stub · V trunk · H stub; one candidate per Hanan channel midpoint strictly between the two blocks. |
+| `Z_VHV@y{cut}@x{vx}` | 2–3 | V stub · H trunk · V stub; symmetric. |
+| `U_HVH@x{cut}` | 2–3 | H stub · V trunk (outside block bbox in X) · H stub. |
+| `U_VHV@y{cut}` | 2–3 | V stub · H trunk (outside block bbox in Y) · V stub. |
+| `UU_VHV@y{cut}` | 3–4 | H+V L-exit from src side face, then H trunk OOB. Requires `double_detour`. |
+| `UU_HVH@x{cut}` | 3–4 | V+H L-exit from src side face, then V trunk OOB. Requires `double_detour`. |
 
-**Multicast shapes:** `TRUNK_H`, `TRUNK_V`, `TRUNK_Z` with per-receiver
-stub branches.
+**Candidate shapes generated (multicast):**
+
+| Type string | Description |
+|---|---|
+| `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. |
+| `TRUNK_V@x{trunk}` | V spine + H stubs. Symmetric. |
+| `TRUNK_H_OOB@y{trunk}` | H spine outside the pin bounding box + V stubs (detour equivalent of U-shape). |
+| `TRUNK_V_OOB@x{trunk}` | V spine outside the pin bounding box + H stubs. |
+| `MST_HV` | Prim MST on block bboxes, L-bends H-first. Lower total wirelength for scattered pins. |
+| `MST_VH` | Prim MST, L-bends V-first. |
+| `BITRUNK_H` | Two parallel H spines at 25th/75th percentile Y + vertical backbone. Generated for 4+ receivers. |
 
 **Notes:**
 - Each call targets exactly one bundle. For N bundles, call N times.
@@ -242,7 +299,7 @@ Source and destination block names are derived automatically from the netlist
 **Notes:**
 - Replaces N individual `generate_topologies_for_bundle` calls with one line.
 - Must be called after `run_bundler` and before `run_planner`.
-- Candidate shapes generated are identical to `generate_topologies_for_bundle` (L, Z, U, I, multicast TRUNK variants).
+- Candidate shapes generated are identical to `generate_topologies_for_bundle` (I, L, Z, U, UU, multicast TRUNK/MST/BITRUNK variants).
 - Bundles with no registered endpoint info emit a warning and are skipped.
 
 **Example:**
@@ -263,33 +320,58 @@ run_planner 5
 
 ## Stage 3 — Global router / planner
 
+### `set_planner_param`
+
+```
+set_planner_param <name> <value>
+```
+
+Tune a global planner cost coefficient. Must be called before `run_planner`
+(or immediately before if the planner is already active).
+
+| Parameter | Default | Description |
+|---|---|---|
+| `kCong` | `1.0` | Congestion cost coefficient. Multiplies the hyperbolic term `u/(1−u)` for each channel band. Larger values make the planner avoid congested channels more aggressively. |
+| `kSpan` | `0.001` | Span-mismatch cost coefficient. Multiplies the excess span outside a layer's `[span_min, span_max]` window. Guides long segments to higher metal and short stubs to lower metal. |
+| `base_cost_non_top` | `0.5` | Flat penalty per segment for using a non-`TOP` layer. Keeps the default preference on top layers without hard-blocking lower ones. |
+
+**Example:**
+```
+set_planner_param kCong 2.0          # stronger congestion avoidance
+set_planner_param kSpan 0.005        # stronger span preference
+set_planner_param base_cost_non_top 0.1
+```
+
+---
+
 ### `run_planner`
 
 ```
 run_planner [<iterations>]
 ```
 
-Runs the global congestion-aware router. For each bundle:
-1. Builds a Hanan-grid congestion map (one cut per channel per layer).
-2. Scores every `(topology candidate, V-layer)` pair against current cut
-   utilisation.
-3. Selects the combination with the lowest peak overflow, preferring
-   lower-numbered V layers when scores are equal (M3 fills before M5, M5
-   before M7).
-4. Updates `BundleWrapper.selected_topology_index` and
-   `BundleWrapper.assigned_v_layer` for the winning choice.
-5. Applies any architect-pinned selections from the `.json` sidecar file
-   (see `visualize_topologies`), which override the planner's choices for
-   pinned bundles.
+Runs the global congestion-aware router. Bundles are processed widest-first
+(fattest-first greedy). For each bundle:
 
-Bundles are processed widest-first (fattest-first greedy).
+1. Builds a Hanan-grid congestion map (one cut per channel per layer).
+2. Scores every topology candidate — for each segment independently selects
+   the best layer from the direction-appropriate set (H layers for H segments,
+   V layers for V segments).  Segment score = `kCong·u/(1−u) + kSpan·excess + base_cost_non_top`.
+   Topology score = maximum segment score (weakest-link).
+3. Selects the topology with the lowest score. Ties broken by candidate index
+   (shortest wirelength first, since candidates are sorted).
+4. Commits the winning topology's per-segment layer choices to the running
+   congestion state so subsequent bundles see the correct congestion.
+5. Applies any architect-pinned selections from the `.json` sidecar file
+   (see `visualize_topologies`): for a pinned bundle, only that one topology
+   is scored (layer assignment is still computed).
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `iterations` | int | 5 | Reserved for future iterative refinement; currently unused beyond the first pass. |
 
-**Output:** Prints `[Planner] Bundle N (W units wide) → <type>  V-layer=MX  overflow=Y`
-for each bundle, followed by a NUTS run summary.
+**Output:** Prints per-bundle selection: topology type, assigned H/V layers,
+and overflow estimate.
 
 **Side effects:**
 - Creates a `GlobalRouter` object accessible to `visualize` for congestion
@@ -532,6 +614,11 @@ all generated topology candidates and pinning a selection for the planner.
 | `<` / `>` buttons | Step through topology candidates |
 | `Select` button | Pin this topology; saves to `<script>.json` sidecar |
 | `Deselect` button | Remove the pin for this bundle |
+| `▶  Re-run & Refresh` button | Re-run the planner (respecting all pinned topologies) + NUTS, then refresh the main layout window. Equivalent to pressing `r`. |
+| `r` key | Same as `▶  Re-run & Refresh` |
+
+The `▶  Re-run & Refresh` button appears only when the session was started
+with `run_nuts` already completed (i.e. `visualize` was called after NUTS).
 
 **Persistence:** Selected topologies are saved to `<script>.json` alongside
 the `.buda` file. The next `run_planner` will load and honour these pins,
@@ -592,6 +679,7 @@ the `#` must be the first non-whitespace character.
 |---|---|---|
 | `<script>.json` | `visualize_topologies` → Select | Architect-pinned topology selections. Loaded by `run_planner`. |
 | `<script>_nuts.log` | `run_nuts` | Per-overlap detail report: segment pairs, span/perp rectangles, area. Re-run sections are appended by `run_nuts_on_layer`. |
+| `<script>_flow.log` | Session start | Mirror of all Python `print()` output (planner decisions, NUTS metrics, warnings). C++ output is not captured. Written from the first command; useful for post-mortem review. |
 
 ---
 

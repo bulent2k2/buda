@@ -1,13 +1,49 @@
 {
   "selections": [
     {
+      "bundle_hint": "n11",
+      "bundle_id": 1,
+      "topo_type": "Z_HVH@x375@y580",
+      "topo_wl": 490,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-15T19:32:32"
+    },
+    {
+      "bundle_hint": "n12",
+      "bundle_id": 2,
+      "topo_type": "L_VH@y620@x235",
+      "topo_wl": 385,
+      "topo_index_hint": 2,
+      "note": "",
+      "selected_at": "2026-05-15T19:33:05"
+    },
+    {
       "bundle_hint": "n13",
       "bundle_id": 3,
-      "topo_type": "U_HVH@x875",
-      "topo_wl": 730,
-      "topo_index_hint": 5,
+      "topo_type": "I_H",
+      "topo_wl": 450,
+      "topo_index_hint": 0,
       "note": "",
-      "selected_at": "2026-05-12T09:17:55"
+      "selected_at": "2026-05-15T19:19:38"
+    },
+    {
+      "bundle_hint": "n14",
+      "bundle_id": 4,
+      "topo_type": "I_H",
+      "topo_wl": 550,
+      "topo_index_hint": 0,
+      "note": "",
+      "selected_at": "2026-05-15T19:20:42"
+    },
+    {
+      "bundle_hint": "n15",
+      "bundle_id": 5,
+      "topo_type": "I_H",
+      "topo_wl": 650,
+      "topo_index_hint": 0,
+      "note": "",
+      "selected_at": "2026-05-15T19:20:24"
     }
   ]
 }
