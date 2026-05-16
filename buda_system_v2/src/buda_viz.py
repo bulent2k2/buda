@@ -82,22 +82,64 @@ class TopologyExplorer:
         self.fig = plt.figure(figsize=(13, 10))
         self.fig.patch.set_facecolor('#f0f0f0')
 
-        # Main axes — leave bottom margin for two button rows
-        self.ax = self.fig.add_axes([0.05, 0.14, 0.90, 0.80])
+        # Main axes — single button row below; leave y=0.10 for x-tick labels
+        self.ax = self.fig.add_axes([0.05, 0.10, 0.90, 0.84])
 
-        # ── Row 1: topo navigation (inner pair, blue) + bus navigation (outer, green) ──
-        ax_tprev = self.fig.add_axes([0.22, 0.02, 0.20, 0.05])
-        ax_tnext = self.fig.add_axes([0.58, 0.02, 0.20, 0.05])
-        self._btn_tprev = Button(ax_tprev, '◀  Prev Topo', color='#ddeeff')
-        self._btn_tnext = Button(ax_tnext, 'Next Topo  ▶', color='#ddeeff')
-        self._btn_tprev.on_clicked(lambda _: self._step_topo(-1))
-        self._btn_tnext.on_clicked(lambda _: self._step_topo(+1))
+        # ── Single button row ────────────────────────────────────────────
+        # Order: ◀Bus  ◀Topo  ★Select  ✕Desel  [▶Re-run]  Topo▶  Bus▶
+        # Positions are computed from weights so adding/removing Re-run
+        # doesn't require touching all the other numbers.
+        _BY, _BH   = 0.022, 0.038   # row y and height
+        _MARGIN    = 0.010
+        _GAP       = 0.008
 
-        ax_bprev = self.fig.add_axes([0.01, 0.02, 0.19, 0.05])
-        ax_bnext = self.fig.add_axes([0.80, 0.02, 0.19, 0.05])
-        self._btn_bprev = Button(ax_bprev, '◀  Prev Bus', color='#d9f5d9')
-        self._btn_bnext = Button(ax_bnext, 'Next Bus  ▶', color='#d9f5d9')
+        _btn_specs = [
+            ('◀  Bus',     '#d9f5d9', 1.0),
+            ('◀  Topo',    '#ddeeff', 1.0),
+            ('★  Select',  '#f0f0f0', 1.0),
+            ('✕  Desel',   '#f0f0f0', 0.85),
+        ]
+        if rerun_fn is not None:
+            _btn_specs.append(('▶  Re-run', '#ffe0b0', 1.2))
+        _btn_specs += [
+            ('Topo  ▶',   '#ddeeff', 1.0),
+            ('Bus  ▶',    '#d9f5d9', 1.0),
+        ]
+
+        _n          = len(_btn_specs)
+        _total_w    = sum(w for _, _, w in _btn_specs)
+        _avail      = 1.0 - 2 * _MARGIN - (_n - 1) * _GAP
+        _unit       = _avail / _total_w
+
+        _bax = []
+        _x = _MARGIN
+        for _label, _color, _weight in _btn_specs:
+            _bw = _weight * _unit
+            _bax.append(self.fig.add_axes([_x, _BY, _bw, _BH]))
+            _x += _bw + _GAP
+
+        _i = 0
+        ax_bprev    = _bax[_i]; _i += 1
+        ax_tprev    = _bax[_i]; _i += 1
+        ax_select   = _bax[_i]; _i += 1
+        ax_deselect = _bax[_i]; _i += 1
+        ax_rerun    = _bax[_i] if rerun_fn is not None else None
+        if rerun_fn is not None: _i += 1
+        ax_tnext    = _bax[_i]; _i += 1
+        ax_bnext    = _bax[_i]
+
+        self._btn_bprev = Button(ax_bprev, '◀  Bus',    color='#d9f5d9')
+        self._btn_tprev = Button(ax_tprev, '◀  Topo',   color='#ddeeff')
+        self._btn_select   = Button(ax_select,   '★  Select', color='#f0f0f0')
+        self._btn_deselect = Button(ax_deselect, '✕  Desel',  color='#f0f0f0')
+        self._btn_tnext = Button(ax_tnext, 'Topo  ▶',   color='#ddeeff')
+        self._btn_bnext = Button(ax_bnext, 'Bus  ▶',    color='#d9f5d9')
+
         self._btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
+        self._btn_tprev.on_clicked(lambda _: self._step_topo(-1))
+        self._btn_select.on_clicked(lambda _: self._select_current())
+        self._btn_deselect.on_clicked(lambda _: self._deselect_current())
+        self._btn_tnext.on_clicked(lambda _: self._step_topo(+1))
         self._btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
 
         # Hide bus buttons when only one bundle is loaded.
@@ -105,25 +147,8 @@ class TopologyExplorer:
             ax_bprev.set_visible(False)
             ax_bnext.set_visible(False)
 
-        # ── Row 2: selection + re-run controls ──
-        # Layout adapts: if rerun_fn is provided, squeeze select/deselect left to
-        # make room for the Re-run button on the right.
-        if rerun_fn is not None:
-            ax_select   = self.fig.add_axes([0.22, 0.08, 0.18, 0.05])
-            ax_deselect = self.fig.add_axes([0.41, 0.08, 0.14, 0.05])
-            ax_rerun    = self.fig.add_axes([0.56, 0.08, 0.22, 0.05])
-        else:
-            ax_select   = self.fig.add_axes([0.22, 0.08, 0.26, 0.05])
-            ax_deselect = self.fig.add_axes([0.52, 0.08, 0.26, 0.05])
-            ax_rerun    = None
-
-        self._btn_select   = Button(ax_select,   '★  Select Topo', color='#f0f0f0')
-        self._btn_deselect = Button(ax_deselect, '✕  Deselect',    color='#f0f0f0')
-        self._btn_select.on_clicked(lambda _: self._select_current())
-        self._btn_deselect.on_clicked(lambda _: self._deselect_current())
-
         if ax_rerun is not None:
-            self._btn_rerun = Button(ax_rerun, '▶  Re-run & Refresh', color='#ffe0b0')
+            self._btn_rerun = Button(ax_rerun, '▶  Re-run', color='#ffe0b0')
             self._btn_rerun.on_clicked(lambda _: self._rerun_and_refresh())
         else:
             self._btn_rerun = None
@@ -324,7 +349,7 @@ class TopologyExplorer:
 
     def _reset_rerun_btn(self):
         if self._btn_rerun is not None:
-            self._btn_rerun.label.set_text('▶  Re-run & Refresh')
+            self._btn_rerun.label.set_text('▶  Re-run')
             self._btn_rerun.ax.set_facecolor('#ffe0b0')
 
     def _step_topo(self, delta):

@@ -3,11 +3,11 @@
     {
       "bundle_hint": "b1",
       "bundle_id": 1,
-      "topo_type": "U_VHV@y105",
-      "topo_wl": 60,
-      "topo_index_hint": 1,
+      "topo_type": "Z_HVH@x125@y100",
+      "topo_wl": 102,
+      "topo_index_hint": 3,
       "note": "",
-      "selected_at": "2026-05-15T19:48:24"
+      "selected_at": "2026-05-16T11:29:49"
     },
     {
       "bundle_hint": "b2",
@@ -21,11 +21,11 @@
     {
       "bundle_hint": "b3",
       "bundle_id": 3,
-      "topo_type": "TRUNK_V_OOB@x215",
-      "topo_wl": 320,
-      "topo_index_hint": 5,
+      "topo_type": "BITRUNK_H",
+      "topo_wl": 450,
+      "topo_index_hint": 8,
       "note": "",
-      "selected_at": "2026-05-04T15:41:05"
+      "selected_at": "2026-05-16T07:42:43"
     },
     {
       "bundle_hint": "b4",
