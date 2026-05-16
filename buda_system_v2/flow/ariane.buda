@@ -1,0 +1,84 @@
+# Ariane (CVA6) 64-bit RISC-V core — realistic floorplan testcase
+#
+# Floorplan derived from TILOS MacroPlacement NanGate45 ariane133 benchmark:
+#   https://github.com/TILOS-AI-Institute/MacroPlacement
+#
+# 133 fakeram45_256x16 SRAM macros grouped into functional clusters.
+# Scale: 1 BUDA unit ≈ 7 µm  (die ≈ 196 × 196 units).
+#
+# SRAM groups (from manual_floorplan.def FIXED placements, ÷7):
+#   u_icache:    44 macros  bbox (1–132, 1–39)
+#   u_dcache_lo: 15 macros  bbox (141–185, 1–39)  — lower right D-cache SRAMs
+#   u_dcache_hi: 74 macros  bbox (1–185, 136–174) — upper D-cache SRAMs
+#
+# CPU core logic (u_frontend, u_execute, u_lsu) placed in the remaining
+# central area; widths are estimated from typical CVA6 floorplan proportions.
+#
+# Bus widths (net count → 1.5× layout units):
+#   fetch_data[20]  — 256-bit I-cache fetch data   → 30 units
+#   fetch_addr[8]   — 64-bit virtual PC             → 12 units
+#   decode_bus[10]  — decoded instruction fields    → 15 units
+#   writeback[6]    — rd + 64-bit wb data           →  9 units
+#   ex_fwd[6]       — ALU→LSU forwarding            →  9 units
+#   mem_addr[10]    — physical address, lower bank  → 15 units
+#   store_data[14]  — 64-bit store data             → 21 units
+#   load_data[14]   — 64-bit load return, lower bk  → 21 units
+#   mem_addr_hi[8]  — physical address, upper bank  → 12 units
+#   load_data_hi[14]— 64-bit load return, upper bk  → 21 units
+
+# ── Layer stack ──────────────────────────────────────────────
+def_layer 3 M3 V TOP 0.0  span_max 60
+def_layer 4 M4 H TOP 0.0  span_max 80
+def_layer 5 M5 V TOP 0.0
+def_layer 6 M6 H TOP 0.0
+def_layer 7 M7 V TOP 0.0  span_min 60
+
+# ── Global corner margin ─────────────────────────────────────
+corner_margin dx 5
+
+# ── Floorplan ────────────────────────────────────────────────
+# SRAM macro clusters (from DEF bounding boxes, ÷7, rounded)
+add_block u_icache       0    0  133   40
+add_block u_dcache_lo  142    0  186   93  corner_margin dx 3
+add_block u_dcache_hi    0  137  186  175  corner_margin dx 8 dy 3
+
+# CPU core logic — fills central area between cache strips
+add_block u_frontend     0   43   65  135
+add_block u_execute     70   43  115  135
+add_block u_lsu        120   43  140  135  corner_margin dx 3
+
+# ── Netlist ──────────────────────────────────────────────────
+# Fetch path: frontend issues PC → icache returns instruction data
+add_bus  fetch_addr[8]    u_frontend.pc      u_icache.addr
+add_bus  fetch_data[20]   u_icache.rdata     u_frontend.idata
+
+# Decode → execute pipeline
+add_bus  decode_bus[10]   u_frontend.decode  u_execute.instr
+
+# Execute write-back and result forwarding
+add_bus  writeback[6]     u_execute.rd       u_frontend.wb
+add_bus  ex_fwd[6]        u_execute.alu_out  u_lsu.ex_in
+
+# Load/store path → lower D-cache bank (right side, nearby)
+add_bus  mem_addr[10]     u_lsu.paddr        u_dcache_lo.addr
+add_bus  store_data[14]   u_lsu.wdata        u_dcache_lo.wdata
+add_bus  load_data[14]    u_dcache_lo.rdata  u_lsu.ldata
+
+# Load/store path → upper D-cache bank (long vertical route)
+add_bus  mem_addr_hi[8]   u_lsu.paddr_hi     u_dcache_hi.addr
+add_bus  load_data_hi[14] u_dcache_hi.rdata  u_lsu.ldata_hi
+
+# ── Stage 1: bundle ──────────────────────────────────────────
+run_bundler strict
+
+# ── Stage 2: topologies ──────────────────────────────────────
+generate_topologies
+
+# ── Stage 3: global route ────────────────────────────────────
+run_planner 5
+
+# ── Stage 4: abstract track placement ────────────────────────
+run_nuts 2.0
+
+# ── Visualise ────────────────────────────────────────────────
+visualize
