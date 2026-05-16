@@ -32,8 +32,9 @@ BUDA is an open EDA tool designed to help plan interconnect on a microchip. It f
 - `test/`: Comprehensive test suite.
 
 ## Key References
-- [BUDA Script Reference](buda_system_v2/BUDA_SCRIPT_REFERENCE.md)
-- [Design Notes](buda_system_v2/src/DESIGN_NOTES.md)
+- [Principles](CLAUDE.md)
+- [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md)
+- [Topology Generation](docs/topology_generation.md)
 
 ## Future Roadmap
 - [ ] **MST Heuristic:** Implement Minimum Steiner Tree for large fan-out bundles.
