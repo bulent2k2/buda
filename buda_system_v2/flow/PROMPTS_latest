@@ -1,10 +1,22 @@
-New: 
+Future?
 
 1) Testcase: two_busterms_rotated.buda. Bundle 3. Topo 4. What's the sliding range for the H seg? It should be the whole right edge.
 2) Testcase: two.buda. Bundle 4. Topo 1 (I_H): slide-in-y=[500, 580]. Shouldn't it be [460, 580]? Similarly for Topo 3, H-seg connecting to u14. 
 3) Same test case, same bundle. Why does `run_planner` pick that topo? There are shorter topos?
 
 Last prompt:
+
+To CC> Here is the problem with this solution: def_layer settings are not honored. After re-run the main window shows H layer used for V routing and vice versa!     
+To GM> testcase one3.buda. Topo 3 (L_VH) has the wrong slide range for H segment. It should be the y-span of u13 above the y-span of u0. 
+
+In parallel to C: > I find myself selecting a topo for a bundle and come back and re-run planning and nuts and go back select a different for another bundle and re-iterate. Let's improve the GUI, maybe add a new flow-chart window with clickable buttons. A new button on the main viz menu brings up a that? Or maybe do that from the topo-viz menu? Please suggest some options. We also need to refresh the layout after NUTS is re-run.
+
+ > Same testcase has another issue: L- topo selection doesn't disambiguate between the two L-topos. WL is the same for both.                                                               > See simplified testcase: one5.buda. The slides changes when u14 is added! It is not a busterm for the bundle.             > Now, please explain why two cells in the heatmap are marked as BLOCK? I see ample over-the-block routing space.                                                                         > two_busterms.buda test case bundle 3, topos 2 and 3, both L-topos have bad slides.                                                    
+ > Let's review the code for congestion measurment and heatmap code on hanan-grid, document how exactly it works given the selected topology and layer assignments for each bundle. And then debug the    
+   heatmap for two_busterms.buda testcase. 200% OVF on a few grid cells don't look correct.
+
+ > This looks good. Thanks. There is an old bug to fix: test5bug.buda. Fourth topo is selected in .json file. The topology and seg slides look good. But, nuts places one of the vertical segs too far    
+
 Gem > See test-case two.buda, bundle 2, topo 4 of 8: Z_VHV. The slide for H is [600, 600]. That's trivial and can not be used to route this bus. Let's add the right logic to eliminate such topos.          
 
 CC ❯ Doesn't it make sense to apply corner margins on the busterm.rect and then use those rects to create the hanan grid? Then, topo generation code get simpler by using busterm.rects as is.

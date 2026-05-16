@@ -1,5 +1,46 @@
 See: ~/src/buda/buda_system_v2/flow/tmp.py
 
+26) debug congestion map
+PYTHONPATH=buda_system_v2/build python3 -c ' 
+ import interconnect 
+ fp = interconnect.Floorplan() 
+ fp.add_block("u0", 50, 400, 250, 600) 
+ fp.add_block("u11", 500, 800, 600, 1000) 
+ fp.add_block("u12", 600, 600, 700, 1000) 
+ fp.add_block("u13", 700, 500, 800, 1000) 
+ fp.add_block("u14", 800, 400, 900, 1000) 
+ fp.add_block("u15", 900, 200, 1000, 1000) 
+ ls = interconnect.LayerStack() 
+ ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP) 
+ ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL, interconnect.LayerType.TOP) 
+ gr = interconnect.GlobalRouter(fp, ls) 
+ gr.build_congestion_map() 
+ 
+ bundles = [] 
+ nets = [("u0", "u11"), ("u0", "u12"), ("u0", "u13"), ("u0", "u14"), ("u0", "u15")] 
+ tg = interconnect.TopologyGenerator(fp) 
+ for i, (src, dst) in enumerate(nets): 
+     bw = interconnect.BundleWrapper() 
+     bw.original_bundle = interconnect.Bundle() 
+     bw.original_bundle.id = i + 1 
+     bw.width = 1.5 
+     bw.candidates = tg.generate_candidates(src, dst) 
+     bw.selected_topology_index = 0 
+     bundles.append(bw) 
+ 
+ gr.optimize_topologies(bundles, 5) 
+ cuts = gr.get_cuts() 
+ for c in cuts: 
+     for b, usage in enumerate(c.band_usage): 
+         if usage > 0: 
+             cap = c.band_cap[b] 
+             ratio = usage / cap if cap > 0 else float("inf") 
+             if ratio > 1.0: 
+                 dir_str = "V-cut" if c.dir == interconnect.LayerDir.VERTICAL else "H-cut" 
+                 print(f"{dir_str} at {c.cut_coord}, layer {c.layer_id}, band {b}, usage={usage}, cap={cap}, ratio={ratio}") 
+ ' 
+ 
+
 25) L-topo trouble with corner_margins
 
 ⏺ Bash(git commit -m "$(cat <<'EOF'

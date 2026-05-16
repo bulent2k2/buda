@@ -16,14 +16,18 @@ Commands run in the following order. Later stages depend on earlier ones.
 
 | Stage | Command(s) | Purpose |
 |------:|---|---|
-| Setup | `def_layer`, `add_block`, `add_net`, `add_bus` | Declare layers, floorplan, netlist |
+| Setup | `def_layer` | Register metal layers |
+| Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin) |
+| Setup | `corner_margin` | Set global corner margin for all blocks without a per-block override |
+| Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | 1 | `run_bundler` | Group nets into buses |
-| 2 | `generate_topologies` | Enumerate L/Z/U candidates for **all** bundles (src/dst auto-derived) |
-| 2 | `generate_topologies_for_bundle` | Enumerate L/Z/U candidates for a **specific** bundle |
-| 3 | `run_planner` | Select topology + assign V layers |
+| 2 | `generate_topologies` | Enumerate topology candidates for **all** bundles (src/dst auto-derived) |
+| 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** bundle |
+| 3 | `set_planner_param` | Tune planner cost coefficients (must be called before `run_planner`) |
+| 3 | `run_planner` | Select topology + assign layers per segment |
 | 4 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
-| 4c | `run_planner post_nuts` | Reassign stub V and/or H layers to resolve channel pin conflicts; single NUTS re-run |
+| 4c | `run_planner post_nuts` | Reassign stub layers to resolve channel pin conflicts; single NUTS re-run |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
