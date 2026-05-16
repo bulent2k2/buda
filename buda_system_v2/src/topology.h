@@ -58,6 +58,12 @@ struct BlockCornerMargin {
     int dy = 0;
 };
 
+struct MinStubLength {
+    int global = 20;
+    std::map<int, int> per_dir;   // 0=HORIZONTAL, 1=VERTICAL
+    std::map<int, int> per_layer;
+};
+
 class Floorplan {
 public:
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
@@ -65,6 +71,18 @@ public:
     void set_block_corner_margin(const std::string& name, int dx, int dy);
     // Set global corner margin applied to all blocks that have no per-block override.
     void set_global_corner_margin(int dx, int dy);
+
+    // Minimum stub length configuration (global, per-direction, per-layer).
+    void set_min_stub_length(int val) { min_stub_len_.global = val; }
+    void set_min_stub_length_dir(int dir, int val) { min_stub_len_.per_dir[dir] = val; }
+    void set_min_stub_length_layer(int layer_id, int val) { min_stub_len_.per_layer[layer_id] = val; }
+
+    int get_min_stub_length(int dir, int layer_id) const {
+        if (min_stub_len_.per_layer.count(layer_id)) return min_stub_len_.per_layer.at(layer_id);
+        if (min_stub_len_.per_dir.count(dir)) return min_stub_len_.per_dir.at(dir);
+        return min_stub_len_.global;
+    }
+
     Rect get_block_bounds(const std::string& name) const;
     // Returns per-block margin if set, else global margin, else {0,0}.
     BlockCornerMargin get_block_corner_margin(const std::string& name) const;
@@ -78,6 +96,7 @@ private:
     std::map<std::string, Rect> blocks_;
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};
+    MinStubLength min_stub_len_;
 };
 class TopologyGenerator {
 public:

@@ -29,29 +29,18 @@ static int find_grid_cell(const std::vector<int>& grid, int v) {
 }
 
 // Internal type: records how segment S's span must follow T's track position.
-// lo_end=true    → the lo end of S is near the junction; adjust span_lo toward T.
-// lo_end=false   → the hi end of S is near the junction; adjust span_hi toward T.
-// is_endpoint    → the junction is at an *endpoint* of S (stub tip meets trunk).
-//                  Endpoint connections use SET semantics (span can shrink to
-//                  trunk centre, fixing Z_VHV left-stub overextension).
-//                  Interior (T-junction) connections use extend-only semantics so
-//                  a long spine is never truncated by a hanging stub's position.
-// The lo/hi decision is locked in at map-build time using the *nominal* span so
-// that repeated rerun_layer calls cannot drift the decision as spans grow.
 struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
 
 // ---------------------------------------------------------------------------
 // Shared map builders
 // ---------------------------------------------------------------------------
-//
-// Populates pull_map, slide_map, trunk_set, and rev_conn_map from bundles.
-// Called by both run() and rerun_layer().
+
 static void build_nuts_maps(
     const std::vector<BundleWrapper>& bundles,
     const Floorplan& floorplan,
     std::map<std::pair<int,int>, double>&                         pull_map,
     std::map<std::pair<int,int>, std::pair<double,double>>&       slide_map,
-    std::set<std::pair<int,int>>&                                 trunk_set,
+    std::set<std::pair<int,int>>                                 trunk_set,
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map)
 {
     // Pass 1 — nominal perpendicular position from the topology.
@@ -95,13 +84,8 @@ static void build_nuts_maps(
             for (const auto& conn : cs.conns) {
                 if (conn.kind != SegConn::SEG) continue;
                 auto t_key = std::make_pair(bid, conn.seg_idx);
-                // Decide lo/hi end from the nominal span (along_lo/along_hi) so the
-                // decision stays stable across repeated rerun_layer calls even after
-                // prior span adjustments have moved span_lo or span_hi.
                 double mid = 0.5 * (cs.along_lo + cs.along_hi);
                 bool lo_end   = (conn.at_pos <= mid);
-                // is_endpoint: junction is at one of S's endpoints (not interior).
-                // Endpoint → SET semantics; interior T-junction → extend-only.
                 bool is_ep    = (conn.at_pos == cs.along_lo ||
                                  conn.at_pos == cs.along_hi);
                 rev_conn_map[t_key].push_back({ bid, si, lo_end, is_ep });
@@ -130,23 +114,6 @@ static void build_nuts_maps(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Apply ConnTopology slide ranges and 10% trunk-channel margin.
-//
-// only_layer: if >= 0, apply only to segments on that layer; -1 = all layers.
-// x_grid/y_grid: Hanan grids used to recover degenerate intervals.
-//
-// When a segment's nominal perp_pos lands exactly on a Hanan grid line, the
-// Hanan cell assignment may produce a tight (e.g. [350,400]) interval while
-// the ConnTopology slide starts or ends exactly at that grid line.  Applying
-// the slide can collapse the interval to a single point [v,v] from which the
-// bus of non-zero width cannot be placed without a forced violation.
-//
-// Recovery: if the result is degenerate AND slo == hanan_hi (slide lower
-// bound clamped lo up to the hanan upper boundary), expand to the NEXT
-// Hanan cell [hanan_hi, next].  Symmetrically, if shi == hanan_lo, expand
-// to the PREVIOUS Hanan cell [prev, hanan_lo].
-// ---------------------------------------------------------------------------
 static void apply_interval_constraints(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, std::pair<double,double>>& slide_map,
@@ -168,14 +135,8 @@ static void apply_interval_constraints(
             if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
             if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
 
-            // Recovery from degenerate interval caused by slide/Hanan boundary clash.
             if (ts.interval_lo >= ts.interval_hi) {
-                double v = ts.interval_lo;  // collapsed gridline value
-
-                // We need the grid for the perpendicular axis of this segment.
-                // H segment: perpendicular = Y -> use y_grid.
-                // V segment: perpendicular = X -> use x_grid.
-                // Check which grid bracketed the ORIGINAL interval.
+                double v = ts.interval_lo;
                 const std::vector<int>* g = nullptr;
                 if (y_grid && !y_grid->empty()) {
                     int c = find_grid_cell(*y_grid, static_cast<int>(hanan_lo + 0.5));
@@ -193,25 +154,23 @@ static void apply_interval_constraints(
                 }
 
                 if (g && g->size() >= 2) {
-                    // Case 1: slo clamped lo up to hanan_hi → need next cell [v, next].
                     if (std::abs(v - hanan_hi) < 1.5 && slo > -kSentinel) {
                         auto it = std::lower_bound(g->begin(), g->end(),
                                                    static_cast<int>(v + 0.5));
                         if (it != g->end() && std::next(it) != g->end()) {
                             double new_lo = static_cast<double>(*it);
                             double new_hi = static_cast<double>(*std::next(it));
-                            if (new_lo >= v - 0.5) {   // sanity: starts at v
+                            if (new_lo >= v - 0.5) {
                                 ts.interval_lo = new_lo;
                                 ts.interval_hi = new_hi;
                             }
                         }
                     }
-                    // Case 2: shi pulled hi down to hanan_lo → need prev cell [prev, v].
                     else if (std::abs(v - hanan_lo) < 1.5 && shi < kSentinel) {
                         auto it = std::lower_bound(g->begin(), g->end(),
                                                    static_cast<int>(v + 0.5));
                         if (it != g->begin()) {
-                            --it;  // iterator to v itself
+                            --it;
                             if (it != g->begin()) {
                                 double new_hi = static_cast<double>(*it);
                                 double new_lo = static_cast<double>(*std::prev(it));
@@ -239,31 +198,12 @@ static void apply_interval_constraints(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Span adjustments after solving one layer.
-//
-// For every segment T in layer_segs that was just placed, look up which
-// segments S depend on T's position (rev_conn_map) and SET/EXTEND the
-// endpoint of S closest to sc.at_pos so the segments meet edge-to-edge.
-//
-// only_unplaced: when true, skip S segments that are already placed.
-//   Use this in rerun_layer so that previously-solved layers are not
-//   disturbed by the span update (their track_positions are fixed, so
-//   changing their spans would introduce geometric inconsistencies and
-//   spurious overlaps in the already-solved layers).
-// ---------------------------------------------------------------------------
 static void do_span_adjustments(
     const std::vector<TrackSegment*>&                               layer_segs,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&   rev_conn_map,
     std::map<std::pair<int,int>, TrackSegment*>&                     ts_ptr_map,
     bool                                                             only_unplaced = false)
 {
-    // ── Pass 1: collect adjustment requests per target segment ──────────
-    // Stubs snap to the trunk's centre (track_position), not its far edge,
-    // so the stub band doesn't visually penetrate past the trunk centre.
-    // is_endpoint distinguishes stub-tip connections (SET semantics: span can
-    // shrink to trunk centre) from interior T-junction connections on a spine
-    // (extend-only: the spine must never be truncated by a stub's position).
     struct AdjReq { double center; bool lo_end; bool is_endpoint; };
     std::map<std::pair<int,int>, std::vector<AdjReq>> adj_map;
 
@@ -282,18 +222,14 @@ static void do_span_adjustments(
         }
     }
 
-    // ── Pass 2: apply all requests jointly per target ───────────────────
     for (auto& [key, reqs] : adj_map) {
         auto jt = ts_ptr_map.find(key);
         if (jt == ts_ptr_map.end()) continue;
         TrackSegment* other = jt->second;
-
         const double orig_lo = other->span_lo;
         const double orig_hi = other->span_hi;
-
-        // Collect endpoint and interior requests separately.
-        double lo_ep  = orig_hi, lo_int = orig_hi;   // sentinels: decrease via min
-        double hi_ep  = orig_lo, hi_int = orig_lo;   // sentinels: increase via max
+        double lo_ep  = orig_hi, lo_int = orig_hi;
+        double hi_ep  = orig_lo, hi_int = orig_lo;
         bool has_lo_ep = false, has_lo_int = false;
         bool has_hi_ep = false, has_hi_int = false;
 
@@ -306,25 +242,16 @@ static void do_span_adjustments(
                 else                 { hi_int = std::max(hi_int, req.center); has_hi_int = true; }
             }
         }
-
         double final_lo = orig_lo, final_hi = orig_hi;
-
-        // Endpoint connections: SET to trunk centre (may shrink or extend).
         if (has_lo_ep) final_lo = lo_ep;
         if (has_hi_ep) final_hi = hi_ep;
-
-        // Interior T-junction connections: extend-only (spine must not shrink).
         if (has_lo_int) final_lo = std::min(final_lo, lo_int);
         if (has_hi_int) final_hi = std::max(final_hi, hi_int);
-
         other->span_lo = final_lo;
         other->span_hi = final_hi;
     }
 }
 
-// ---------------------------------------------------------------------------
-// Metrics: violations, overlaps, overlap_details.  Resets all counters first.
-// ---------------------------------------------------------------------------
 static void compute_metrics(NUTSResult& result)
 {
     result.num_violations = 0;
@@ -366,17 +293,8 @@ static void compute_metrics(NUTSResult& result)
     }
 }
 
-// ---------------------------------------------------------------------------
-// NUTSEngine
-// ---------------------------------------------------------------------------
-
 NUTSEngine::NUTSEngine(const Floorplan& fp) : floorplan_(fp) {}
-
 void NUTSEngine::set_track_pitch(double pitch) { track_pitch_ = pitch; }
-
-// ---------------------------------------------------------------------------
-// Segment extraction
-// ---------------------------------------------------------------------------
 
 std::vector<TrackSegment> NUTSEngine::extract_segments(
     const std::vector<BundleWrapper>& bundles,
@@ -384,21 +302,16 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
     const std::vector<int>& y_grid) const
 {
     std::vector<TrackSegment> result;
-
     for (const auto& bw : bundles) {
-        if (bw.candidates.empty()) continue;
+        if (bw.candidates.empty() || bw.selected_topology_index < 0) continue;
         const Topology& topo = bw.candidates[bw.selected_topology_index];
-
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
-
             TrackSegment ts;
             ts.bundle_id = bw.original_bundle.id;
             ts.seg_idx   = si;
             ts.width     = bw.width;
-
             const bool is_horizontal = (seg.start.y == seg.end.y);
-            // Layer priority: per-segment assignment > per-direction override > layer_hint.
             if (si < (int)bw.seg_layers.size() && bw.seg_layers[si] >= 0)
                 ts.layer = bw.seg_layers[si];
             else if (!is_horizontal && bw.assigned_v_layer >= 0)
@@ -407,11 +320,10 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                 ts.layer = bw.assigned_h_layer;
             else
                 ts.layer = seg.layer_hint;
-
-            if (is_horizontal) {
+            ts.horiz = is_horizontal;
+            if (ts.horiz) {
                 ts.span_lo = std::min(seg.start.x, seg.end.x);
                 ts.span_hi = std::max(seg.start.x, seg.end.x);
-
                 int cell = find_grid_cell(y_grid, seg.start.y);
                 if (cell >= 0) {
                     ts.interval_lo = y_grid[cell];
@@ -423,7 +335,6 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
             } else {
                 ts.span_lo = std::min(seg.start.y, seg.end.y);
                 ts.span_hi = std::max(seg.start.y, seg.end.y);
-
                 int cell = find_grid_cell(x_grid, seg.start.x);
                 if (cell >= 0) {
                     ts.interval_lo = x_grid[cell];
@@ -433,17 +344,11 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                     ts.interval_hi = seg.start.x + 50;
                 }
             }
-
             result.push_back(ts);
         }
     }
-
     return result;
 }
-
-// ---------------------------------------------------------------------------
-// First-fit within interval
-// ---------------------------------------------------------------------------
 
 double NUTSEngine::first_fit(double lo, double hi, double width,
                               const std::vector<std::pair<double,double>>& occupied) const
@@ -452,31 +357,22 @@ double NUTSEngine::first_fit(double lo, double hi, double width,
     const double c_lo = lo + half;
     const double c_hi = hi - half;
     if (c_lo > c_hi) return -1.0;
-
     std::vector<double> candidates;
     candidates.push_back(c_lo);
     for (const auto& [occ_lo, occ_hi] : occupied)
         candidates.push_back(occ_hi + track_pitch_ + half);
-
     std::sort(candidates.begin(), candidates.end());
-
     for (double c : candidates) {
         if (c < c_lo) continue;
         if (c > c_hi) break;
-
         bool conflict = false;
         for (const auto& [occ_lo, occ_hi] : occupied) {
             if (c - half < occ_hi && c + half > occ_lo) { conflict = true; break; }
         }
         if (!conflict) return c;
     }
-
     return -1.0;
 }
-
-// ---------------------------------------------------------------------------
-// Preferred-fit within interval
-// ---------------------------------------------------------------------------
 
 double NUTSEngine::preferred_fit(
     double lo, double hi, double width,
@@ -487,7 +383,6 @@ double NUTSEngine::preferred_fit(
     const double c_lo = lo + half;
     const double c_hi = hi - half;
     if (c_lo > c_hi) return -1.0;
-
     std::vector<double> candidates;
     candidates.push_back(preferred);
     candidates.push_back(c_lo);
@@ -495,14 +390,12 @@ double NUTSEngine::preferred_fit(
         candidates.push_back(occ_hi + track_pitch_ + half);
         candidates.push_back(occ_lo - track_pitch_ - half);
     }
-
     auto valid = [&](double c) -> bool {
         if (c < c_lo || c > c_hi) return false;
         for (const auto& [occ_lo, occ_hi] : occupied)
             if (c - half < occ_hi && c + half > occ_lo) return false;
         return true;
     };
-
     double best      = -1.0;
     double best_dist = std::numeric_limits<double>::max();
     for (double c : candidates) {
@@ -513,24 +406,16 @@ double NUTSEngine::preferred_fit(
     return best;
 }
 
-// ---------------------------------------------------------------------------
-// Per-layer sweep-line solver
-// ---------------------------------------------------------------------------
-
 void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                               const std::map<std::pair<int,int>, double>& pull_map) const {
     if (segs.empty()) return;
-
     struct Event {
-        double pos;
-        int    type;   // 0 = start, 1 = end
-        int    idx;
+        double pos; int type; int idx;
         bool operator<(const Event& o) const {
             if (pos != o.pos) return pos < o.pos;
             return type > o.type;
         }
     };
-
     std::vector<Event> events;
     events.reserve(segs.size() * 2);
     for (int i = 0; i < (int)segs.size(); ++i) {
@@ -538,17 +423,13 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         events.push_back({segs[i]->span_hi, 1, i});
     }
     std::sort(events.begin(), events.end());
-
     std::vector<int> active;
-
     for (const auto& ev : events) {
         if (ev.type == 1) {
             active.erase(std::remove(active.begin(), active.end(), ev.idx), active.end());
             continue;
         }
-
         TrackSegment* ts = segs[ev.idx];
-
         std::vector<std::pair<double,double>> occupied;
         for (int ai : active) {
             if (segs[ai]->placed) {
@@ -558,7 +439,6 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             }
         }
         std::sort(occupied.begin(), occupied.end());
-
         double pos;
         {
             auto it = pull_map.find(std::make_pair(ts->bundle_id, ts->seg_idx));
@@ -571,20 +451,11 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             pos = preferred_fit(ts->interval_lo, ts->interval_hi,
                                 ts->width, occupied, preferred);
         }
-
-        if (pos >= 0.0) {
-            ts->track_position = pos;
-        } else {
-            ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
-        }
+        if (pos >= 0.0) ts->track_position = pos;
+        else           ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
         ts->placed = true;
-        active.push_back(ev.idx);
     }
 }
-
-// ---------------------------------------------------------------------------
-// run() — full solve
-// ---------------------------------------------------------------------------
 
 void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys) {
     std::sort(xs.begin(), xs.end());
@@ -600,49 +471,32 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
     merge_grid(y_grid, extra_y_);
-
     NUTSResult result;
     result.segments = extract_segments(bundles, x_grid, y_grid);
-
     std::map<std::pair<int,int>, double>                         pull_map;
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
     std::set<std::pair<int,int>>                                 trunk_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
-
     apply_interval_constraints(result.segments, slide_map, trunk_set, -1, &x_grid, &y_grid);
-
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
-
     std::map<int, std::vector<TrackSegment*>> by_layer;
     for (auto& ts : result.segments)
         by_layer[ts.layer].push_back(&ts);
-
     for (auto& [layer_id, layer_segs] : by_layer) {
         solve_layer(layer_segs, pull_map);
         do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
     }
-
     compute_metrics(result);
-
     std::cout << "[NUTS] " << result.segments.size() << " segments placed across "
               << by_layer.size() << " layer(s). "
               << "Interval violations: " << result.num_violations << ", "
               << "Track overlaps: " << result.num_overlaps << ".\n";
-
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// rerun_layer() — re-solve one layer, keeping all others as-is
-// ---------------------------------------------------------------------------
-//
-// Resets the target layer's segments to their fresh topology-extracted state,
-// then re-solves placement and applies span adjustments to connected segments
-// (which may be on other layers).  All other layers retain their previously
-// placed positions.  Metrics are recomputed for the full result.
 NUTSResult NUTSEngine::rerun_layer(
     const NUTSResult&                  prev,
     const std::vector<BundleWrapper>&  bundles,
@@ -652,52 +506,32 @@ NUTSResult NUTSEngine::rerun_layer(
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
     merge_grid(y_grid, extra_y_);
-
-    // Start from a copy of the previous result.
     NUTSResult result = prev;
-
-    // Reset placement for the target layer only.
-    // We intentionally keep span_lo/span_hi and interval_lo/hi unchanged: the
-    // spans were adjusted by prior do_span_adjustments passes (e.g. M4 x-spans
-    // were extended by post-M5 span adjustment) and must be preserved so that
-    // re-solving only changes the perpendicular track_position, not the geometry.
     for (auto& ts : result.segments) {
         if (ts.layer != layer_id) continue;
         ts.track_position = -1.0;
         ts.placed         = false;
     }
-
-    // Rebuild shared maps.
     std::map<std::pair<int,int>, double>                         pull_map;
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
     std::set<std::pair<int,int>>                                 trunk_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
-
-    // Apply interval constraints only for the target layer.
     apply_interval_constraints(result.segments, slide_map, trunk_set, layer_id,
                                &x_grid, &y_grid);
-
-    // Build pointer map (covers all layers for span adjustment targets).
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
-
-    // Collect target layer segment pointers.
     std::vector<TrackSegment*> layer_segs;
     for (auto& ts : result.segments)
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
-
     solve_layer(layer_segs, pull_map);
     do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
-
     compute_metrics(result);
-
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "
               << "Violations: " << result.num_violations << ", "
               << "Overlaps: " << result.num_overlaps << ".\n";
-
     return result;
 }
 

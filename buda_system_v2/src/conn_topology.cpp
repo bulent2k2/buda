@@ -21,6 +21,7 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
         const Segment& s = topo.segments[i];
         ConnSeg& cs = segs_[i];
         cs.horiz    = (s.start.y == s.end.y);
+        cs.layer_id = s.layer_hint;
         if (cs.horiz) {
             cs.along_lo = std::min(s.start.x, s.end.x);
             cs.along_hi = std::max(s.start.x, s.end.x);
@@ -253,11 +254,10 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         int f = sc.face_coord;  // the busterm y-face stub endpoint
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
 
-                        // Enforce robust stub length (20 units).
-                        // If nominal perp_pos is on or outside the face, force outer separation.
-                        // If nominal perp_pos is inside the face, force inner separation.
-                        if (cs.perp_pos >= f) new_lo = std::max(new_lo, f + 20);
-                        else                   new_hi = std::min(new_hi, f - 20);
+                        // Enforce robust stub length.
+                        int m = fp.get_min_stub_length(1 /*VERTICAL*/, stub.layer_id);
+                        if (cs.perp_pos >= f) new_lo = std::max(new_lo, f + m);
+                        else                   new_hi = std::min(new_hi, f - m);
 
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
@@ -268,8 +268,9 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         int f = sc.face_coord;
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
 
-                        if (cs.perp_pos >= f) new_lo = std::max(new_lo, f + 20);
-                        else                   new_hi = std::min(new_hi, f - 20);
+                        int m = fp.get_min_stub_length(0 /*HORIZONTAL*/, stub.layer_id);
+                        if (cs.perp_pos >= f) new_lo = std::max(new_lo, f + m);
+                        else                   new_hi = std::min(new_hi, f - m);
 
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;

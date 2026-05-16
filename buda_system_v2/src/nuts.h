@@ -15,6 +15,7 @@ struct TrackSegment {
     int  bundle_id  = -1;
     int  seg_idx    = -1;
     int  layer      = 0;
+    bool horiz      = false;
     double span_lo  = 0, span_hi   = 0;   // routing-direction extent
     double interval_lo = 0, interval_hi = 0; // perpendicular placement range (hard)
     double width    = 1.0;                 // bus width in perpendicular direction

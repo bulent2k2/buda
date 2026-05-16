@@ -6,6 +6,10 @@ def_layer 5 M5 V TOP 0.0
 def_layer 6 M6 H TOP 0.0
 
 corner_margin 10 10
+set_min_stub_length 10
+set_min_stub_length_dir V 20
+set_min_stub_length_layer M5 5
+
 # ── Floorplan ────────────────────────────────────────────────
 add_block u1    50   50   100 100
 add_block u2    150  50   200 100
@@ -22,10 +26,11 @@ run_bundler strict
 
 # Pass all four destination blocks so the CLI dispatches to
 # generate_multicast_candidates() instead of generate_candidates().
-generate_topologies_for_bundle b1 u1 u2
-generate_topologies_for_bundle b2 u1 u2 u3
-generate_topologies_for_bundle b3 u1 u2 u3 u4
-generate_topologies_for_bundle b4 u2 u3 u4 u1
+#generate_topologies_for_bundle b1 u1 u2
+#generate_topologies_for_bundle b2 u1 u2 u3
+#generate_topologies_for_bundle b3 u1 u2 u3 u4
+#generate_topologies_for_bundle b4 u2 u3 u4 u1
+generate_topologies
 run_planner 1
 
 # Step through all 18 topologies in wirelength order.

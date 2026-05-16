@@ -3,11 +3,11 @@
     {
       "bundle_hint": "b1",
       "bundle_id": 1,
-      "topo_type": "Z_HVH@x125@y100",
-      "topo_wl": 102,
-      "topo_index_hint": 3,
+      "topo_type": "U_VHV@y105",
+      "topo_wl": 60,
+      "topo_index_hint": 1,
       "note": "",
-      "selected_at": "2026-05-16T11:29:49"
+      "selected_at": "2026-05-16T13:40:56"
     },
     {
       "bundle_hint": "b2",

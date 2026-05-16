@@ -606,17 +606,18 @@ class BudaSession:
                 if cm_dx > 0 or cm_dy > 0:
                     self.fp.set_block_corner_margin(name, cm_dx, cm_dy)
         elif cmd == "corner_margin":
-            # corner_margin dx <n> [dy <n>]
-            # corner_margin pct_h <p> [pct_v <p>]
-            # Sets the global corner margin applied to all blocks that have no
-            # per-block override.  Percentage variants require block dimensions;
-            # they are not meaningful globally, so an error is raised.
+            # Syntax: corner_margin [dx <dx>] [dy <dy>] [pct_h <pct>] [pct_v <pct>]
+            #      or corner_margin <dx> [<dy>]
             kws = {}
             i = 0
             while i < len(args):
                 kw = args[i].lower()
                 if kw in ("dx", "dy") and i + 1 < len(args):
                     kws[kw] = float(args[i + 1]); i += 2
+                elif kw[0].isdigit() or (kw[0] == '-' and len(kw) > 1 and kw[1].isdigit()): # Positional
+                    if "dx" not in kws: kws["dx"] = float(kw)
+                    elif "dy" not in kws: kws["dy"] = float(kw)
+                    i += 1
                 elif kw in ("pct_h", "pct_v"):
                     print(f"Error: corner_margin pct_h/pct_v not supported globally "
                           f"(no single block dimension to use). Use dx/dy instead.")
@@ -628,6 +629,27 @@ class BudaSession:
             if "dx" in kws and "dy" not in kws: cm_dy = cm_dx
             if "dy" in kws and "dx" not in kws: cm_dx = cm_dy
             self.fp.set_global_corner_margin(cm_dx, cm_dy)
+        elif cmd == "set_min_stub_length":
+            if args: self.fp.set_min_stub_length(int(args[0]))
+        elif cmd == "set_min_stub_length_dir":
+            if len(args) >= 2:
+                dstr = args[0].upper()
+                val = int(args[1])
+                if dstr in ("H", "HORIZONTAL"):
+                    self.fp.set_min_stub_length_dir(interconnect.LayerDir.HORIZONTAL, val)
+                elif dstr in ("V", "VERTICAL"):
+                    self.fp.set_min_stub_length_dir(interconnect.LayerDir.VERTICAL, val)
+                else:
+                    print(f"Error: unknown direction '{args[0]}' — use H or V")
+        elif cmd == "set_min_stub_length_layer":
+            if len(args) >= 2:
+                lname = args[0]
+                val = int(args[1])
+                lid = self._layer_name_map.get(lname)
+                if lid is not None:
+                    self.fp.set_min_stub_length_layer(lid, val)
+                else:
+                    print(f"Error: unknown layer '{lname}'")
         elif cmd == "add_net":
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')

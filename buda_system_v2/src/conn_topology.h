@@ -44,6 +44,7 @@ struct SegConn {
 //
 struct ConnSeg {
     bool horiz     = false;
+    int  layer_id  = -1;
     int  along_lo  = 0;
     int  along_hi  = 0;
     int  perp_pos  = 0;

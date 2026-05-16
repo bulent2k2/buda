@@ -51,6 +51,14 @@ PYBIND11_MODULE(interconnect, m) {
         .def("add_block",              &Floorplan::add_block)
         .def("set_block_corner_margin", &Floorplan::set_block_corner_margin)
         .def("set_global_corner_margin",&Floorplan::set_global_corner_margin)
+        .def("set_min_stub_length",    &Floorplan::set_min_stub_length)
+        .def("set_min_stub_length_dir", [](Floorplan& fp, LayerDir dir, int val) {
+            fp.set_min_stub_length_dir(static_cast<int>(dir), val);
+        })
+        .def("set_min_stub_length_layer",&Floorplan::set_min_stub_length_layer)
+        .def("get_min_stub_length", [](const Floorplan& fp, LayerDir dir, int layer_id) {
+            return fp.get_min_stub_length(static_cast<int>(dir), layer_id);
+        })
         .def("get_block_corner_margin", &Floorplan::get_block_corner_margin)
         .def("get_block_bounds",        &Floorplan::get_block_bounds)
         .def("get_hanan_grid", [](const Floorplan& fp) {
