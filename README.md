@@ -1,4 +1,4 @@
-Started using Google's AI and then used Claude Code.
+Started using Google's AI (Gemini web) and then used [Claude Code CLI](CLAUDE.md). Now it's a three way collaboration including [Gemini CLI](GEMINI.md). Come join, if you want to help improve electronic chip design and break out of the monopolistic status quo.
 
 Originally, I asked GAI (Gemini): 
 I want to build a system to help plan interconnect on a microchip. It has three major components:
