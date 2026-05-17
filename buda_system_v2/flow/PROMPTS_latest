@@ -6,6 +6,9 @@ Future?
 
 Last prompt:
 
+> Testcase: four_blocks_b1. Selected topo. corner_margin setting seems to be ignored for the two V segs. Similarly for other topos and H segs. 
+
+
 To CC> Here is the problem with this solution: def_layer settings are not honored. After re-run the main window shows H layer used for V routing and vice versa!     
 To GM> testcase one3.buda. Topo 3 (L_VH) has the wrong slide range for H segment. It should be the y-span of u13 above the y-span of u0. 
 
