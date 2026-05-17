@@ -514,7 +514,8 @@ class BudaSession:
         print(pre_msg)
 
         # C++ also prints its own [NUTS] rerun_layer(...) line here.
-        self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
+        with interconnect.ostream_redirect():
+            self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
 
         diag = self._nuts_diagnostics(self.nuts_result, layer_names, before,
                                       target_layer=layer_id)
@@ -840,7 +841,8 @@ class BudaSession:
                 # planner scores the correct topology and assigns layers for it.
                 self._apply_selections()
                 self._planner_iterations = int(args[0]) if args else 5
-                assignments = self.planner.optimize_topologies(self.bundles, self._planner_iterations)
+                with interconnect.ostream_redirect():
+                    assignments = self.planner.optimize_topologies(self.bundles, self._planner_iterations)
                 # Apply planner layer decisions (vector copy in C++ means we must apply here).
                 bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
                 for asn in assignments:
@@ -863,7 +865,8 @@ class BudaSession:
             # Snapshot topology-derived initial spans before the solve.
             before = self._segment_states_from_topology()
             # C++ prints its own [NUTS] N segments placed across K layer(s) line.
-            self.nuts_result = nuts.run(self.bundles)
+            with interconnect.ostream_redirect():
+                self.nuts_result = nuts.run(self.bundles)
             layer_names = self._make_layer_names()
             diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
             self._write_nuts_log(layer_names, extra_lines=diag)

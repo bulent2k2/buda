@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/iostream.h>
 #include "bundler.h"
 #include "topology.h"
 #include "conn_topology.h"
@@ -9,6 +10,7 @@
 namespace py = pybind11;
 using namespace interconnect;
 PYBIND11_MODULE(interconnect, m) {
+    py::add_ostream_redirect(m, "ostream_redirect");
     py::enum_<Strategy>(m, "Strategy")
         .value("STRICT",     Strategy::STRICT)
         .value("CONVERGENT", Strategy::CONVERGENT);
