@@ -156,6 +156,46 @@ def test_layers_solved_independently():
 
 
 # ---------------------------------------------------------------------------
+# Regression: co-starting segments must be separated (active-set push bug)
+# Two segments with the same span_lo and overlapping spans must land at
+# distinct perpendicular positions — the sweep-line must register each
+# placed segment as occupied before processing the next one.
+# ---------------------------------------------------------------------------
+
+def test_co_starting_two_segments_separated():
+    """Regression for missing active.push_back in solve_layer sweep."""
+    fp = make_floorplan(("a", 0, 200, 100, 500), ("b", 400, 200, 500, 500))
+    w1 = make_bundle(1, ["n1"], width=10.0,
+                     segments=[{'x1': 0, 'y1': 350, 'x2': 400, 'y2': 350, 'layer': 3}])
+    w2 = make_bundle(2, ["n2"], width=10.0,
+                     segments=[{'x1': 0, 'y1': 350, 'x2': 300, 'y2': 350, 'layer': 3}])
+    engine = interconnect.NUTSEngine(fp)
+    engine.set_track_pitch(1.0)
+    result = engine.run([w1, w2])
+
+    assert result.num_overlaps == 0
+    ts1 = next(s for s in result.segments if s.bundle_id == 1)
+    ts2 = next(s for s in result.segments if s.bundle_id == 2)
+    assert abs(ts2.track_position - ts1.track_position) >= 10.0 + 1.0
+
+
+def test_co_starting_three_segments_all_separated():
+    """Three segments all at span_lo=0; each must see the previous as occupied."""
+    fp = make_floorplan(("a", 0, 0, 100, 1000), ("b", 500, 0, 600, 1000))
+    w1 = make_bundle(1, ["n1"], width=10.0,
+                     segments=[{'x1': 0, 'y1': 500, 'x2': 500, 'y2': 500, 'layer': 3}])
+    w2 = make_bundle(2, ["n2"], width=10.0,
+                     segments=[{'x1': 0, 'y1': 500, 'x2': 400, 'y2': 500, 'layer': 3}])
+    w3 = make_bundle(3, ["n3"], width=10.0,
+                     segments=[{'x1': 0, 'y1': 500, 'x2': 300, 'y2': 500, 'layer': 3}])
+    engine = interconnect.NUTSEngine(fp)
+    engine.set_track_pitch(1.0)
+    result = engine.run([w1, w2, w3])
+
+    assert result.num_overlaps == 0
+
+
+# ---------------------------------------------------------------------------
 # Scenario: Interval too narrow → violation counted, segment still placed
 # ---------------------------------------------------------------------------
 

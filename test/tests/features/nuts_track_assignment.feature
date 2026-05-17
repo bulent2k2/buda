@@ -70,6 +70,35 @@ Feature: Non-Uniform Track Sharing (NUTS)
     # Different layers never conflict — NUTS solves each independently.
 
   # -----------------------------------------------------------------------
+  # Regression: two segments whose spans start at the same coordinate (same
+  # span_lo) must still be separated.  The sweep-line must add each segment
+  # to the active set after placing it so the next segment sees it as
+  # occupied.  Without that push, every segment lands at its preferred
+  # coordinate regardless of prior placements.
+  Scenario: Two co-starting segments with overlapping spans are separated
+    Given two horizontal bus segments on layer 3 with the same span start:
+      | bundle_id | span_lo | span_hi | interval_lo | interval_hi | width |
+      | 1         | 100     | 400     | 200         | 500         | 10    |
+      | 2         | 100     | 300     | 200         | 500         | 10    |
+    When I run NUTS with track_pitch 1.0
+    Then there should be 0 track overlaps
+    And  segment (bundle=1, seg=0) track_position should differ from
+         segment (bundle=2, seg=0) track_position by at least 11 (width + pitch)
+
+  # -----------------------------------------------------------------------
+  # Regression: three segments all starting at the same span_lo, each
+  # must be placed at a distinct perpendicular position (active-set grows
+  # incrementally so segment k+1 sees segments 0..k as occupied).
+  Scenario: Three co-starting segments with fully overlapping spans are all separated
+    Given three horizontal bus segments on layer 3 all starting at span_lo=0:
+      | bundle_id | span_lo | span_hi | interval_lo | interval_hi | width |
+      | 1         | 0       | 500     | 0           | 1000        | 10    |
+      | 2         | 0       | 400     | 0           | 1000        | 10    |
+      | 3         | 0       | 300     | 0           | 1000        | 10    |
+    When I run NUTS with track_pitch 1.0
+    Then there should be 0 track overlaps
+
+  # -----------------------------------------------------------------------
   Scenario: Interval too narrow for bus width triggers a violation count
     Given a horizontal bus segment whose interval is smaller than its width:
       | bundle_id | span_lo | span_hi | interval_lo | interval_hi | width |

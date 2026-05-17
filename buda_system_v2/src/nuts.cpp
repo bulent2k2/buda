@@ -454,6 +454,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         if (pos >= 0.0) ts->track_position = pos;
         else           ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
         ts->placed = true;
+        active.push_back(ev.idx);
     }
 }
 
