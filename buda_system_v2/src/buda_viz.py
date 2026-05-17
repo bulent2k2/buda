@@ -371,8 +371,8 @@ class TopologyExplorer:
             return
         if event.key in ('left',  'a'):         self._step_topo(-1)
         if event.key in ('right', 'd'):         self._step_topo(+1)
-        if event.key in ('cmd+n', 'ctrl+n'):    self._step_topo(+1)
-        if event.key in ('cmd+p', 'ctrl+p'):    self._step_topo(-1)
+        if event.key in ('n', 'cmd+n', 'ctrl+n'):    self._step_topo(+1)
+        if event.key in ('p', 'cmd+p', 'ctrl+p'):    self._step_topo(-1)
         if event.key in ('[', 'pageup'):        self._step_bundle(-1)
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
         if event.key == 's':                    self._select_current()
@@ -1304,11 +1304,11 @@ class BudaVisualizer:
                 self.ax.autoscale()
             self.fig.canvas.draw_idle()
             return
-        if event.key in ('cmd+n', 'ctrl+n'): self._step_bundle(+1)
-        if event.key in ('cmd+p', 'ctrl+p'): self._step_bundle(-1)
+        if event.key in ('n', 'cmd+n', 'ctrl+n'): self._step_bundle(+1)
+        if event.key in ('p', 'cmd+p', 'ctrl+p'): self._step_bundle(-1)
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
-        if event.key in ('t', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
+        if event.key in ('v', 't', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
 
     # ------------------------------------------------------------------
     # Drawing
