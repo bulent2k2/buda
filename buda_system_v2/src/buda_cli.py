@@ -51,6 +51,7 @@ class BudaSession:
         self._nuts_pitch = 1.0       # last track pitch used by run_nuts
         self._planner_iterations = 5 # last iteration count used by run_planner
         self.script_path = None      # set when a .buda script is sourced
+        self.routing_grid = None     # RoutingGridStack (stage 8)
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -870,6 +871,62 @@ class BudaSession:
             layer_names = self._make_layer_names()
             diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
             self._write_nuts_log(layer_names, extra_lines=diag)
+        elif cmd == "def_track_pattern":
+            # Usage: def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...
+            # Example: def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0
+            if len(args) < 2:
+                print("Error: def_track_pattern requires layer_id and origin")
+                return
+            layer_id = int(args[0])
+            origin   = float(args[1])
+            slots = []
+            i = 2
+            while i + 2 < len(args):
+                slot_type   = args[i]
+                width       = float(args[i + 1])
+                space_after = float(args[i + 2])
+                slots.append(interconnect.TrackSlot(
+                    type=slot_type, label=slot_type.lower(),
+                    width=width, space_after=space_after))
+                i += 3
+            if not slots:
+                print("Error: def_track_pattern requires at least one slot triple")
+                return
+            pat = interconnect.TrackPattern(origin=origin, slots=slots)
+            if self.routing_grid is None:
+                self.routing_grid = interconnect.RoutingGridStack()
+            self.routing_grid.define_layer(layer_id, pat)
+            print(f"[RoutingGrid] Layer {layer_id}: {len(slots)} slots, "
+                  f"unit_pitch={pat.unit_pitch():.3f}, "
+                  f"signal_density={pat.signal_density():.3f}")
+        elif cmd == "add_grid_override":
+            # Usage: add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...
+            if len(args) < 6:
+                print("Error: add_grid_override requires layer_id x1 y1 x2 y2 origin [slots...]")
+                return
+            layer_id = int(args[0])
+            x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
+            origin = float(args[5])
+            slots = []
+            i = 6
+            while i + 2 < len(args):
+                slot_type   = args[i]
+                width       = float(args[i + 1])
+                space_after = float(args[i + 2])
+                slots.append(interconnect.TrackSlot(
+                    type=slot_type, label=slot_type.lower(),
+                    width=width, space_after=space_after))
+                i += 3
+            if not slots:
+                print("Error: add_grid_override requires at least one slot triple")
+                return
+            pat = interconnect.TrackPattern(origin=origin, slots=slots)
+            if self.routing_grid is None:
+                self.routing_grid = interconnect.RoutingGridStack()
+            self.routing_grid.add_override(layer_id, x1, y1, x2, y2, pat)
+            print(f"[RoutingGrid] Override on layer {layer_id} "
+                  f"region=({x1},{y1})-({x2},{y2}): "
+                  f"{len(slots)} slots, unit_pitch={pat.unit_pitch():.3f}")
         elif cmd == "run_nuts_on_layer":
             # Usage: run_nuts_on_layer <layer-name>
             if not args:
