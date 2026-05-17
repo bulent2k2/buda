@@ -16,5 +16,6 @@ set(SOURCE_FILES
     src/layering.cpp
     src/global_router.cpp
     src/nuts.cpp
+    src/routing_grid.cpp
 )
 pybind11_add_module(interconnect ${SOURCE_FILES})

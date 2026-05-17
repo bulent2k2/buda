@@ -7,6 +7,7 @@
 #include "layering.h"
 #include "global_router.h"
 #include "nuts.h"
+#include "routing_grid.h"
 namespace py = pybind11;
 using namespace interconnect;
 PYBIND11_MODULE(interconnect, m) {
@@ -167,4 +168,52 @@ PYBIND11_MODULE(interconnect, m) {
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)
         .def("run",                   &NUTSEngine::run)
         .def("rerun_layer",           &NUTSEngine::rerun_layer);
+
+    // -----------------------------------------------------------------------
+    // Stage 8 — Routing Grid
+    // -----------------------------------------------------------------------
+    py::class_<TrackSlot>(m, "TrackSlot")
+        .def(py::init([](const std::string& type, const std::string& label,
+                         double width, double space_after) {
+            TrackSlot s; s.type = type; s.label = label;
+            s.width = width; s.space_after = space_after;
+            return s;
+        }), py::arg("type"), py::arg("label"),
+            py::arg("width"), py::arg("space_after"))
+        .def_readwrite("type",        &TrackSlot::type)
+        .def_readwrite("label",       &TrackSlot::label)
+        .def_readwrite("width",       &TrackSlot::width)
+        .def_readwrite("space_after", &TrackSlot::space_after);
+
+    py::class_<TrackPattern>(m, "TrackPattern")
+        .def(py::init([](double origin, const std::vector<TrackSlot>& slots) {
+            TrackPattern p; p.origin = origin; p.slots = slots; return p;
+        }), py::arg("origin"), py::arg("slots"))
+        .def_readwrite("origin",         &TrackPattern::origin)
+        .def_readwrite("slots",          &TrackPattern::slots)
+        .def("unit_pitch",               &TrackPattern::unit_pitch)
+        .def("signal_density",           &TrackPattern::signal_density)
+        .def("dilution_factor",          &TrackPattern::dilution_factor)
+        .def("tracks_in_range",          &TrackPattern::tracks_in_range,
+             py::arg("lo"), py::arg("hi"));
+
+    py::class_<RoutingGrid>(m, "RoutingGrid")
+        .def("effective_pattern_at", [](const RoutingGrid& g, double x, double y) {
+            return g.effective_pattern_at(x, y);  // returns by value (copy)
+        }, py::arg("x"), py::arg("y"))
+        .def("signal_tracks_in", &RoutingGrid::signal_tracks_in,
+             py::arg("x"), py::arg("lo"), py::arg("hi"));
+
+    py::class_<RoutingGridStack>(m, "RoutingGridStack")
+        .def(py::init<>())
+        .def("define_layer",  &RoutingGridStack::define_layer,
+             py::arg("layer_id"), py::arg("pattern"))
+        .def("add_override",  &RoutingGridStack::add_override,
+             py::arg("layer_id"),
+             py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
+             py::arg("pattern"))
+        .def("get_layer_grid", [](RoutingGridStack& s, int id) -> RoutingGrid& {
+            return s.get_layer_grid(id);
+        }, py::arg("layer_id"), py::return_value_policy::reference_internal)
+        .def("has_layer",      &RoutingGridStack::has_layer, py::arg("layer_id"));
 }
