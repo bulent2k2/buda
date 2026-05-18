@@ -52,6 +52,7 @@ class BudaSession:
         self._planner_iterations = 5 # last iteration count used by run_planner
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
+        self.detailed_result = None  # DetailedNUTSResult (stage 9)
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -927,6 +928,36 @@ class BudaSession:
             print(f"[RoutingGrid] Override on layer {layer_id} "
                   f"region=({x1},{y1})-({x2},{y2}): "
                   f"{len(slots)} slots, unit_pitch={pat.unit_pitch():.3f}")
+        elif cmd == "run_detailed_nuts":
+            # Usage: run_detailed_nuts [lo_hi|hi_lo]
+            bit_order = "LO_HI"
+            if args and args[0].lower() in ("lo_hi", "hi_lo"):
+                bit_order = args[0].upper()
+            if self.nuts_result is None:
+                print("Error: run_detailed_nuts requires run_nuts to have been called first")
+                return
+            if self.routing_grid is None:
+                print("Error: run_detailed_nuts requires a routing grid (def_track_pattern)")
+                return
+            bus_segs = []
+            for ts in self.nuts_result.segments:
+                bs = interconnect.BusSegment()
+                bs.bundle_id = ts.bundle_id
+                bs.seg_idx   = ts.seg_idx
+                bs.layer     = ts.layer
+                bs.span_lo   = ts.span_lo
+                bs.span_hi   = ts.span_hi
+                bs.interval_lo = ts.interval_lo
+                bs.interval_hi = ts.interval_hi
+                bs.bit_width   = int(round(ts.width))
+                bs.bit_order   = bit_order
+                bus_segs.append(bs)
+            engine = interconnect.DetailedNUTSEngine(self.routing_grid)
+            self.detailed_result = engine.run(bus_segs)
+            n_net = len(self.detailed_result.net_segments)
+            n_unplaced = self.detailed_result.num_unplaced
+            print(f"[DetailedNUTS] {n_net} net segments placed, "
+                  f"{n_unplaced} bits unplaced.")
         elif cmd == "run_nuts_on_layer":
             # Usage: run_nuts_on_layer <layer-name>
             if not args:

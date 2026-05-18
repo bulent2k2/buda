@@ -8,6 +8,7 @@
 #include "global_router.h"
 #include "nuts.h"
 #include "routing_grid.h"
+#include "detailed_nuts.h"
 namespace py = pybind11;
 using namespace interconnect;
 PYBIND11_MODULE(interconnect, m) {
@@ -216,4 +217,40 @@ PYBIND11_MODULE(interconnect, m) {
             return s.get_layer_grid(id);
         }, py::arg("layer_id"), py::return_value_policy::reference_internal)
         .def("has_layer",      &RoutingGridStack::has_layer, py::arg("layer_id"));
+
+    // -----------------------------------------------------------------------
+    // Stage 9 — Detailed NUTS
+    // -----------------------------------------------------------------------
+    py::class_<BusSegment>(m, "BusSegment")
+        .def(py::init<>())
+        .def_readwrite("bundle_id",       &BusSegment::bundle_id)
+        .def_readwrite("seg_idx",         &BusSegment::seg_idx)
+        .def_readwrite("layer",           &BusSegment::layer)
+        .def_readwrite("span_lo",         &BusSegment::span_lo)
+        .def_readwrite("span_hi",         &BusSegment::span_hi)
+        .def_readwrite("interval_lo",     &BusSegment::interval_lo)
+        .def_readwrite("interval_hi",     &BusSegment::interval_hi)
+        .def_readwrite("bit_width",       &BusSegment::bit_width)
+        .def_readwrite("bit_order",       &BusSegment::bit_order)
+        .def_readwrite("timing_critical", &BusSegment::timing_critical);
+
+    py::class_<NetSegment>(m, "NetSegment")
+        .def(py::init<>())
+        .def_readwrite("bundle_id",      &NetSegment::bundle_id)
+        .def_readwrite("seg_idx",        &NetSegment::seg_idx)
+        .def_readwrite("bit_index",      &NetSegment::bit_index)
+        .def_readwrite("track_position", &NetSegment::track_position)
+        .def_readwrite("width",          &NetSegment::width)
+        .def_readwrite("layer",          &NetSegment::layer)
+        .def_readwrite("span_lo",        &NetSegment::span_lo)
+        .def_readwrite("span_hi",        &NetSegment::span_hi);
+
+    py::class_<DetailedNUTSResult>(m, "DetailedNUTSResult")
+        .def(py::init<>())
+        .def_readwrite("net_segments",  &DetailedNUTSResult::net_segments)
+        .def_readwrite("num_unplaced",  &DetailedNUTSResult::num_unplaced);
+
+    py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
+        .def(py::init<const RoutingGridStack&>())
+        .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
 }
