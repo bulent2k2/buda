@@ -72,7 +72,7 @@ def test_two_rotated():
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out
     )
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) == 38
+    assert int(dm.group(1)) == 19
     assert int(dm.group(2)) == 0
 
 
@@ -113,7 +113,7 @@ def test_two_rotated_buses():
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out
     )
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) == 228
+    assert int(dm.group(1)) == 152
     assert int(dm.group(2)) == 0
 
 

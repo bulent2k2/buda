@@ -940,6 +940,8 @@ class BudaSession:
             if self.routing_grid is None:
                 print("Error: run_detailed_nuts requires a routing grid (def_track_pattern)")
                 return
+            bid_to_nbits = {w.original_bundle.id: len(w.original_bundle.get_net_names())
+                            for w in self.bundles}
             bus_segs = []
             for ts in self.nuts_result.segments:
                 bs = interconnect.BusSegment()
@@ -950,7 +952,7 @@ class BudaSession:
                 bs.span_hi   = ts.span_hi
                 bs.interval_lo = ts.interval_lo
                 bs.interval_hi = ts.interval_hi
-                bs.bit_width   = int(round(ts.width))
+                bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
                 bs.bit_order   = bit_order
                 bus_segs.append(bs)
             engine = interconnect.DetailedNUTSEngine(self.routing_grid)
