@@ -53,6 +53,7 @@ class BudaSession:
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
+        self.no_viz = False          # set by --no-viz CLI flag
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -1001,6 +1002,8 @@ class BudaSession:
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path()).show()
         elif cmd == "visualize":
+            if self.no_viz:
+                return
             rerun_layer_fn = self._rerun_nuts_layer if self.nuts_result is not None else None
             rerun_all_fn   = self._rerun_all        if self.nuts_result is not None else None
             viz = BudaVisualizer(self.fp, self.bundles,
@@ -1028,8 +1031,11 @@ class BudaSession:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('script', nargs='?')
+    parser.add_argument('--no-viz', action='store_true',
+                        help='skip visualize commands (useful for batch/CI runs)')
     args = parser.parse_args()
     session = BudaSession()
+    session.no_viz = args.no_viz
     if args.script:
         script = args.script
         if not os.path.exists(script) and not script.endswith('.buda'):
