@@ -28,6 +28,9 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 4 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
 | 4c | `run_planner post_nuts` | Reassign stub layers to resolve channel pin conflicts; single NUTS re-run |
+| 8 | `def_track_pattern` | Define the repeating POWER/SIGNAL/GROUND track pattern for a layer |
+| 8 | `add_grid_override` | Override the track pattern for a specific floorplan region on a layer |
+| 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
@@ -552,6 +555,119 @@ run_nuts_on_layer M5     # then re-solve M5 if needed
 
 ---
 
+## Stage 8 — Routing grid
+
+Stage 8 defines the physical track structure of each metal layer. Commands in this stage can appear anywhere in the script — they only take effect when `run_detailed_nuts` (Stage 9) is called. See [docs/routing_grid.md](routing_grid.md) for the full design.
+
+### `def_track_pattern`
+
+```
+def_track_pattern <layer_id> <origin> <type1> <w1> <sp1> [<type2> <w2> <sp2> …]
+```
+
+Define the repeating track pattern for a layer. The pattern tiles from `origin` outward across the full layer extent.
+
+| Argument | Type | Description |
+|---|---|---|
+| `layer_id` | int | Layer ID as registered with `def_layer` |
+| `origin` | float | Anchor position of the first unit in layout units (use `0.0` to align with chip origin) |
+| `type` | string | Track type: `POWER`, `GROUND`, `CLOCK`, `SHIELD`, `SIGNAL`, or `CUSTOM` |
+| `w` | float | Track width in layout units |
+| `sp` | float | Space after this track (gap to the next slot), in layout units |
+
+Each `<type> <w> <sp>` triple defines one slot in the repeating unit. Slots are listed in order from low to high perpendicular position. The unit pitch is the sum of all `(w + sp)` values.
+
+**Notes:**
+- Each layer may have at most one global pattern. Calling `def_track_pattern` a second time on the same layer replaces the existing pattern.
+- The `origin` should be consistent across layers and with the power-grid intent — mismatched origins produce phase drift across layers.
+- At least one `SIGNAL` slot is required for `run_detailed_nuts` to place any bit-wires.
+- Calling `run_detailed_nuts` without a defined pattern for a bus segment's layer causes that bus to be counted as unplaced.
+
+**Example:**
+```buda
+# 4 signal tracks per 14-unit period, surrounded by POWER/GROUND rails
+def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0
+
+# M3 (vertical): denser signal pitch, CLOCK rail every 8 tracks
+def_track_pattern 3 0.0  CLOCK 1.0 0.5  SIGNAL 0.5 0.5  SIGNAL 0.5 0.5  SIGNAL 0.5 0.5  SIGNAL 0.5 0.5
+```
+
+---
+
+### `add_grid_override`
+
+```
+add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> <type1> <w1> <sp1> [<type2> <w2> <sp2> …]
+```
+
+Override the track pattern for a rectangular region on a layer. Useful when a floorplan region (e.g. an SRAM macro) uses a different power-grid pitch than the rest of the chip.
+
+| Argument | Type | Description |
+|---|---|---|
+| `layer_id` | int | Layer to override |
+| `x1 y1 x2 y2` | int | Bounding box of the override region (Hanan-grid-aligned) |
+| `origin` | float | Anchor for the local pattern within this region |
+| `type w sp …` | — | Same slot format as `def_track_pattern` |
+
+First-match wins: if a point falls in multiple override regions, the first one defined takes precedence.
+
+**Notes:**
+- Power and clock tracks are broken at region boundaries — a DRC gap at the seam is accepted.
+- The global pattern (from `def_track_pattern`) still applies outside the override region.
+- Override regions and the global pattern are independent objects; each has its own `origin`.
+
+**Example:**
+```buda
+# Dense SRAM macro at (200,0)-(400,500) uses half-pitch POWER/SIGNAL layout
+add_grid_override 4  200 0 400 500  0.0  POWER 1.5 0.5  SIGNAL 0.5 0.5  SIGNAL 0.5 0.5  GROUND 1.5 0.5  SIGNAL 0.5 0.5  SIGNAL 0.5 0.5
+```
+
+---
+
+## Stage 9 — Detailed NUTS
+
+Stage 9 snaps each abstract bus segment (from Stage 4) to concrete signal-track positions (from Stage 8). See [docs/detailed_nuts.md](detailed_nuts.md) for the full design.
+
+### `run_detailed_nuts`
+
+```
+run_detailed_nuts [lo_hi|hi_lo]
+```
+
+For each bus segment in the NUTS result, calls `signal_tracks_in()` on its layer's routing grid and assigns one signal track per bit-wire.
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `lo_hi` / `hi_lo` | keyword | `lo_hi` | Bit ordering: `lo_hi` assigns bit 0 to the lowest available signal track, increasing upward; `hi_lo` assigns bit 0 to the highest track, decreasing. |
+
+**Algorithm:**
+
+1. Convert each `TrackSegment` from `run_nuts` to a `BusSegment` (layer, span, interval, bit_width from rounded abstract width).
+2. For each `BusSegment`, enumerate signal tracks inside `[interval_lo, interval_hi]` using the layer's `RoutingGrid`.
+3. Select tracks according to `bit_order`:
+   - `lo_hi`: take the first `bit_width` signal tracks.
+   - `hi_lo`: take the last `bit_width` signal tracks.
+4. If a bus is marked `timing_critical` (not yet settable from `.buda`; API available in Python): find the first contiguous window of `bit_width` signal tracks — a window where no POWER/GROUND/CLOCK track centre lies between any adjacent pair.
+5. If fewer signal tracks are available than `bit_width`, or no valid contiguous window exists, the entire bus is **unplaced** (all-or-nothing; no partial placement).
+
+**Output:** Prints the total number of net segments placed and the number of bits unplaced.
+
+**Requires:** `run_nuts` must have been called first. At least one `def_track_pattern` must cover the layers used by the NUTS result.
+
+**Example:**
+```buda
+run_nuts 2.0
+def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0
+run_detailed_nuts
+```
+
+With HI_LO ordering:
+```buda
+run_detailed_nuts hi_lo
+```
+
+---
+
 ## Visualisation commands
 
 ### `visualize`
@@ -723,6 +839,16 @@ run_nuts 2.0
 
 # ── Optional: re-solve a single congested layer ───────────────
 # run_nuts_on_layer M3
+
+# ── Stage 8: routing grid (track pattern definitions) ─────────
+# Define the repeating POWER/SIGNAL/GROUND pattern for each layer.
+# slot format: <TYPE> <width> <space_after>  (one unit = one repeating period)
+def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0
+def_track_pattern 3 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0
+
+# ── Stage 9: snap bit-wires to concrete signal tracks ─────────
+run_detailed_nuts        # lo_hi ordering (default)
+# run_detailed_nuts hi_lo  # reverse bit ordering
 
 # ── Visualise ────────────────────────────────────────────────
 visualize
