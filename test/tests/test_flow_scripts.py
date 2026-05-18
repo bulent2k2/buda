@@ -94,6 +94,29 @@ def test_comprehensive_demo():
 # four_blocks_3_bundles.buda — 3 bundles, 6 segments, 0 track overlaps
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# two_rotated_buses.buda — same geometry as two_rotated but 8-bit buses.
+# Bundle width = 8 × 1.5 = 12 → bit_width=12 in detailed NUTS (228 net segs).
+# 2 M5 track overlaps (B7×B9, B8×B9) are a known geometric fixture: three
+# 12-unit buses compete for a ~30-unit perpendicular corridor and cannot all fit.
+# ---------------------------------------------------------------------------
+
+def test_two_rotated_buses():
+    out, rc = run_script("two_rotated_buses.buda")
+    assert_clean(out, rc, "two_rotated_buses.buda")
+    assert "Bundler created 13 bundles." in out
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 19
+    assert viols == 0
+    assert ovlps == 2   # known: B7×B9, B8×B9 (3×12u buses in 30u corridor)
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out
+    )
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) == 228
+    assert int(dm.group(2)) == 0
+
+
 def test_four_blocks_3_bundles():
     out, rc = run_script("four_blocks_3_bundles.buda")
     assert_clean(out, rc, "four_blocks_3_bundles.buda")
