@@ -1018,6 +1018,9 @@ class BudaSession:
             viz.draw_hanan_grid()
             if self.nuts_result is not None:
                 viz.draw_nuts_tracks(self.nuts_result)
+                if self.detailed_result is not None:
+                    viz.draw_detailed_tracks(
+                        self.detailed_result, self.routing_grid, self.layers)
             else:
                 viz.draw_buses()
             viz.show()
