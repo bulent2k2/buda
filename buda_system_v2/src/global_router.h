@@ -43,7 +43,7 @@ public:
     GlobalRouter(const Floorplan& fp, const LayerStack& layers);
     void set_layer_overhead(int layer_id, double overhead_percent);
     // Tune global planner knobs.  Recognised names:
-    //   "kCong"            — congestion cost coefficient (default 1.0)
+    //   "kCong"            — overflow cost coefficient: cost = kCong*(overflow/cap) (default 1.0)
     //   "kSpan"            — span-mismatch cost per layout-unit (default 0.001)
     //   "base_cost_non_top"— flat penalty for non-TOP layers (default 0.5)
     void set_planner_param(const std::string& name, double value);
@@ -56,7 +56,7 @@ public:
 
 private:
     void _rebuild_cuts();
-    // Hyperbolic congestion cost: kCong * u/(1-u) where u = (usage+eff)/cap.
+    // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.
     double cong_cost_segment(const Segment& seg, int layer_id, double eff_width) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
     double score_segment(const Segment& seg, int layer_id, double eff_width) const;

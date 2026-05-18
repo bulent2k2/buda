@@ -5,9 +5,14 @@ Covers the scenarios in features/span_aware_layer_assignment.feature.
 
 Design under test
 -----------------
-cost(seg, layer) = kCong * u/(1-u)          # hyperbolic congestion
-                 + kSpan(layer) * max(0, span_min-span, span-span_max)  # span mismatch
-                 + (0 if TOP else base_cost_non_top)                     # tier penalty
+cost(seg, layer) = kCong * max(0, (usage+eff-cap)/cap)  # overflow congestion (zero below cap)
+                 + kSpan(layer) * max(0, span_min-span, span-span_max)   # span mismatch
+                 + (0 if TOP else base_cost_non_top)                      # tier penalty
+
+The congestion term is zero when the segment fits within the cut-band capacity; only
+actual overflow incurs a cost.  This ensures Z/U topologies are preferred over I only
+when I genuinely cannot fit through the Hanan grid, not merely because they avoid a
+lightly-used cut via boundary effects.
 
 Ties broken toward higher layer ID (higher metal preferred when costs are equal).
 """
@@ -181,8 +186,8 @@ def test_congestion_spill_to_span_mismatched_layer():
     """
     Scenario: Congestion on preferred layer drives spill to span-mismatched layer
     Bottleneck channel capacity = 4. Bundle width = 3.
-    Bundle 1 (span=200): M6 wins tie (higher ID), uses 3/4 of M6 capacity.
-    Bundle 2 (span=200): M6 cost = kCong*3 (congested), M4 span_cost=0 → M4 wins.
+    Bundle 1 (span=400): M6 wins tie (higher ID), uses 3 of 4 capacity.
+    Bundle 2 (span=400): M6 overflows (3+3=6 > 4) → positive cost; M4 empty → M4 wins.
     """
     fp = bottleneck_fp()
     ls = make_ls_m4_m6(span_max_m4=500, span_min_m6=400)
@@ -194,7 +199,7 @@ def test_congestion_spill_to_span_mismatched_layer():
     v_cuts_m4 = [c for c in router.get_cuts()
                  if c.dir == interconnect.LayerDir.VERTICAL and c.layer_id == 4]
     assert v_cuts_m4, "Need V-cuts on M4"
-    bottleneck_cap = max(max(c.band_cap) for c in v_cuts_m4 if c.band_cap)
+    bottleneck_cap = min(min(c.band_cap) for c in v_cuts_m4 if c.band_cap)
     assert bottleneck_cap == pytest.approx(4.0), (
         f"Expected bottleneck capacity 4.0, got {bottleneck_cap}"
     )
@@ -211,43 +216,51 @@ def test_congestion_spill_to_span_mismatched_layer():
     assert len(assignments) == 2
     layers = {a.bundle_id: a.seg_layers[0] for a in assignments}
 
-    # Bundle 1 claims M6 (highest ID wins tie when both empty).
-    # Bundle 2: M6 at 75% utilization → cong_cost = 3*kCong; M4 empty → M4 wins.
+    # Bundle 1 claims M6 (highest ID wins tie when both uncongested).
+    # Bundle 2: M6 overflows (3+3=6 > cap 4) → cost = kCong*(2/4); M4 no overflow → M4 wins.
     assert layers[1] == 6, f"Bundle 1 should claim M6 (tie→highest ID); got M{layers[1]}"
-    assert layers[2] == 4, f"Bundle 2 should spill to M4 (M6 at 75%); got M{layers[2]}"
+    assert layers[2] == 4, f"Bundle 2 should spill to M4 (M6 overflow); got M{layers[2]}"
 
 
 # ---------------------------------------------------------------------------
-# Scenario: Hyperbolic cost grows super-linearly near capacity
+# Scenario: Cost is zero below capacity, positive only on overflow
 # ---------------------------------------------------------------------------
 
-def test_hyperbolic_congestion_cost_is_superlinear():
+def test_overflow_threshold_congestion():
     """
-    Scenario: Hyperbolic cost grows super-linearly near capacity
-    For a single-band channel with capacity C:
-      cost(u=0.5) = kCong * 0.5/0.5 = kCong
-      cost(u=0.9) = kCong * 0.9/0.1 = 9 * kCong
-    Ratio must be >= 8 (not 1.8 as linear would predict).
+    Scenario: Overflow-threshold congestion model
+    Congestion cost is exactly zero when a segment fits within the cut-band
+    capacity, and becomes positive only when it would overflow.
 
-    We drive this indirectly: create a narrow channel, fill it to 50% with
-    one bundle-set, then score a probe bundle vs a fresh layer and compare.
+    Setup: bottleneck channel capacity=4.  Three equal-width bundles (width=2
+    each) are processed in ID order.  Bundles 1 and 2 fill M6 without overflow
+    (2+2=4 = cap); bundle 3 would overflow M6 (4+2=6 > 4) and is routed to M4.
     """
-    # Channel capacity = 20; first batch fills 10 (50%).
-    fp = interconnect.Floorplan()
-    fp.add_block("lo", 0,  0, 500,  0)   # zero-height blocks just to establish grid
-    fp.add_block("hi", 0, 20, 500, 20)
-    fp.add_block("wall_lo", 0, 0, 500,  0)
-    fp.add_block("wall_hi", 0, 20, 500, 20)
+    fp = bottleneck_fp()   # V-cut at x=300, open band capacity=4
+    ls = interconnect.LayerStack()
+    ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
+    ls.add_layer(6, "M6", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
+    ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
 
-    # Simpler: use the same bottleneck_fp and measure via scores after placing.
-    # We test mathematically: verify the formula directly.
-    kCong = 1.0
-    def hyp(u): return kCong * u / (1.0 - u)
-    cost_50 = hyp(0.50)
-    cost_90 = hyp(0.90)
-    assert cost_90 / cost_50 >= 8.0, (
-        f"Hyperbolic ratio at 90%/50% should be >=8, got {cost_90/cost_50:.2f}"
-    )
+    router = interconnect.GlobalRouter(fp, ls)
+    router.build_congestion_map()
+
+    seg1 = make_h_segment(100, 500, y=98)
+    seg2 = make_h_segment(100, 500, y=98)
+    seg3 = make_h_segment(100, 500, y=98)
+    # All width=2 so fattest-first order is stable by bundle ID.
+    w1 = make_bundle_wrapper(bid=1, width=2.0, seg=seg1)
+    w2 = make_bundle_wrapper(bid=2, width=2.0, seg=seg2)
+    w3 = make_bundle_wrapper(bid=3, width=2.0, seg=seg3)
+
+    assignments = router.optimize_topologies([w1, w2, w3], 1)
+    layers = {a.bundle_id: a.seg_layers[0] for a in assignments}
+
+    # Bundles 1 and 2: no overflow (2→2, 2+2=4 = cap) → cong=0 → tie → M6 wins both.
+    assert layers[1] == 6, f"Bundle 1 should stay on M6 (no overflow); got M{layers[1]}"
+    assert layers[2] == 6, f"Bundle 2 should stay on M6 (2+2=4, no overflow); got M{layers[2]}"
+    # Bundle 3: M6 overflow (4+2=6 > 4) → positive cost → spills to M4.
+    assert layers[3] == 4, f"Bundle 3 should spill to M4 (M6 overflow); got M{layers[3]}"
 
 
 # ---------------------------------------------------------------------------
@@ -314,8 +327,7 @@ def test_set_planner_param_kcong():
     assignments = router.optimize_topologies([w_fill, w_probe], 1)
     layers = {a.bundle_id: a.seg_layers[0] for a in assignments}
 
-    # With kCong=100 and M6 at 75%, cong_cost_M6 = 100 * 0.75/0.25 = 300.
-    # M4 cong_cost = 0. M4 must win for the second bundle.
-    # (First bundle goes to M6 since both empty, highest ID wins.)
+    # Bundle 1 goes to M6 (both empty, highest ID wins tie).
+    # Bundle 2: M6 overflows (3+3=6 > 4) → cong=kCong*(2/4)=50; M4 no overflow → M4 wins.
     assert layers[0] == 6, f"First bundle should claim M6 (highest ID, both empty); got M{layers[0]}"
     assert layers[1] == 4, f"Second bundle: kCong=100, M6 at 75% → cost=300 → should spill to M4; got M{layers[1]}"

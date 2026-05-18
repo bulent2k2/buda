@@ -236,8 +236,11 @@ void GlobalRouter::apply_segment(const Segment& seg, int layer_id, double eff_wi
 // Span-aware cost helpers
 // ---------------------------------------------------------------------------
 
-// Hyperbolic congestion cost: kCong * u/(1-u) where u = (existing+eff)/cap.
-// Returns the peak cost across all cuts the segment crosses on the given layer.
+// Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).
+// Returns zero when the segment fits within the cut-band capacity, and a
+// positive cost proportional to the overflow only when it doesn't.
+// This means Z/U topologies are only preferred over I when I genuinely
+// overflows a cut — not merely because they exploit cut-boundary effects.
 double GlobalRouter::cong_cost_segment(const Segment& seg, int layer_id,
                                        double eff_width) const {
     bool   is_h      = (seg.start.y == seg.end.y);
@@ -255,8 +258,9 @@ double GlobalRouter::cong_cost_segment(const Segment& seg, int layer_id,
         if (b < 0 || b >= (int)c.band_cap.size()) continue;
         double cap = c.band_cap[b];
         if (cap <= 0.0) { return kCong_ * 9999.0; }
-        double u    = std::min((c.band_usage[b] + eff_width) / cap, 0.9999);
-        double cost = kCong_ * u / (1.0 - u);
+        double ov = c.band_usage[b] + eff_width - cap;
+        if (ov <= 0.0) continue;   // fits — no cost
+        double cost = kCong_ * ov / cap;
         peak_cost   = std::max(peak_cost, cost);
     }
     return peak_cost;
