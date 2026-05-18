@@ -1,23 +1,26 @@
 #pragma once
 #include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 #include "routing_grid.h"
-#include "layering.h"
 
 namespace interconnect {
 
 struct BusSegment {
-    int         bundle_id       = 0;
-    int         seg_idx         = 0;
-    int         layer           = 0;
-    double      span_lo         = 0.0;
-    double      span_hi         = 0.0;
-    double      interval_lo     = 0.0;
-    double      interval_hi     = 0.0;
-    int         bit_width       = 1;
-    std::string bit_order       = "LO_HI";  // "LO_HI" or "HI_LO"
-    bool        timing_critical = false;
+    int         bundle_id         = 0;
+    int         seg_idx           = 0;
+    int         layer             = 0;
+    double      span_lo           = 0.0;
+    double      span_hi           = 0.0;
+    double      interval_lo       = 0.0;
+    double      interval_hi       = 0.0;
+    int         bit_width         = 1;
+    std::string bit_order         = "LO_HI";  // "LO_HI" or "HI_LO"
+    bool        timing_critical   = false;
+    // seg_idx of the adjacent perpendicular segment at each span end (-1 = block face)
+    int         lo_adj_seg_idx    = -1;
+    int         hi_adj_seg_idx    = -1;
 };
 
 struct NetSegment {
@@ -38,12 +41,11 @@ struct DetailedNUTSResult {
 
 class DetailedNUTSEngine {
 public:
-    DetailedNUTSEngine(const RoutingGridStack& stack, const LayerStack& layers);
+    explicit DetailedNUTSEngine(const RoutingGridStack& stack);
     DetailedNUTSResult run(const std::vector<BusSegment>& bus_segments) const;
 
 private:
-    const RoutingGridStack&  stack_;
-    std::map<int,bool>       layer_is_h_; // layer_id → true if HORIZONTAL
+    const RoutingGridStack& stack_;
 
     // Returns index into signal_tracks of the first contiguous window of size
     // bit_width, searching from lo to hi end.  Returns -1 if none found.

@@ -232,7 +232,9 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("interval_hi",     &BusSegment::interval_hi)
         .def_readwrite("bit_width",       &BusSegment::bit_width)
         .def_readwrite("bit_order",       &BusSegment::bit_order)
-        .def_readwrite("timing_critical", &BusSegment::timing_critical);
+        .def_readwrite("timing_critical", &BusSegment::timing_critical)
+        .def_readwrite("lo_adj_seg_idx",  &BusSegment::lo_adj_seg_idx)
+        .def_readwrite("hi_adj_seg_idx",  &BusSegment::hi_adj_seg_idx);
 
     py::class_<NetSegment>(m, "NetSegment")
         .def(py::init<>())
@@ -251,6 +253,6 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("num_unplaced",  &DetailedNUTSResult::num_unplaced);
 
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
-        .def(py::init<const RoutingGridStack&, const LayerStack&>())
+        .def(py::init<const RoutingGridStack&>())
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
 }

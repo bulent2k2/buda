@@ -942,20 +942,37 @@ class BudaSession:
                 return
             bid_to_nbits = {w.original_bundle.id: len(w.original_bundle.get_net_names())
                             for w in self.bundles}
+            # Build ConnTopology per bundle for endpoint adj info.
+            bid_to_cs = {}
+            for w in self.bundles:
+                ct = interconnect.ConnTopology()
+                ct.build(w.candidates[w.selected_topology_index], self.fp)
+                bid_to_cs[w.original_bundle.id] = list(ct.segs())
+
             bus_segs = []
             for ts in self.nuts_result.segments:
                 bs = interconnect.BusSegment()
-                bs.bundle_id = ts.bundle_id
-                bs.seg_idx   = ts.seg_idx
-                bs.layer     = ts.layer
-                bs.span_lo   = ts.span_lo
-                bs.span_hi   = ts.span_hi
+                bs.bundle_id   = ts.bundle_id
+                bs.seg_idx     = ts.seg_idx
+                bs.layer       = ts.layer
+                bs.span_lo     = ts.span_lo
+                bs.span_hi     = ts.span_hi
                 bs.interval_lo = ts.interval_lo
                 bs.interval_hi = ts.interval_hi
                 bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
                 bs.bit_order   = bit_order
+                # Populate lo/hi adj from ConnTopology.
+                cs_list = bid_to_cs.get(ts.bundle_id, [])
+                if ts.seg_idx < len(cs_list):
+                    cs = cs_list[ts.seg_idx]
+                    for conn in cs.conns:
+                        if conn.kind == interconnect.SegConnKind.SEG:
+                            if conn.at_pos == cs.along_lo:
+                                bs.lo_adj_seg_idx = conn.seg_idx
+                            elif conn.at_pos == cs.along_hi:
+                                bs.hi_adj_seg_idx = conn.seg_idx
                 bus_segs.append(bs)
-            engine = interconnect.DetailedNUTSEngine(self.routing_grid, self.layers)
+            engine = interconnect.DetailedNUTSEngine(self.routing_grid)
             self.detailed_result = engine.run(bus_segs)
             n_net = len(self.detailed_result.net_segments)
             n_unplaced = self.detailed_result.num_unplaced

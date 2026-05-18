@@ -1,19 +1,12 @@
 #include "detailed_nuts.h"
-#include <cmath>
 #include <map>
 #include <stdexcept>
 #include <tuple>
 
 namespace interconnect {
 
-DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack,
-                                       const LayerStack& layers)
-    : stack_(stack) {
-    for (int id : layers.get_layer_ids_by_dir(LayerDir::HORIZONTAL))
-        layer_is_h_[id] = true;
-    for (int id : layers.get_layer_ids_by_dir(LayerDir::VERTICAL))
-        layer_is_h_[id] = false;
-}
+DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
+    : stack_(stack) {}
 
 bool DetailedNUTSEngine::signals_contiguous(
         double pos_a, double pos_b,
@@ -127,34 +120,36 @@ DetailedNUTSResult DetailedNUTSEngine::run(
         }
     }
 
-    // Span-adjustment post-pass: extend each bit-wire's nearer endpoint to the
-    // track_position of the same-bit wire on the adjacent perpendicular segment.
-    // This is the per-bit equivalent of NUTS do_span_adjustments — without it,
-    // H and V legs of the same bit don't visually meet at the bend point.
+    // Span-adjustment post-pass: extend each bit-wire endpoint that connects to
+    // a perpendicular segment (lo_adj_seg_idx / hi_adj_seg_idx) to the exact
+    // track_position of the same bit on that adjacent segment.
+    // Endpoints that terminate at a block face (adj = -1) are left unchanged.
     {
         using Key = std::tuple<int,int,int>; // bundle_id, seg_idx, bit_index
-        std::map<Key, int> idx_map;
+        std::map<Key, int>              idx_map;
+        std::map<std::pair<int,int>, const BusSegment*> bs_map;
+
         for (int i = 0; i < (int)result.net_segments.size(); ++i) {
             const auto& ns = result.net_segments[i];
             idx_map[{ns.bundle_id, ns.seg_idx, ns.bit_index}] = i;
         }
+        for (const auto& bs : bus_segs)
+            bs_map[{bs.bundle_id, bs.seg_idx}] = &bs;
 
         for (auto& ns : result.net_segments) {
-            auto h_it = layer_is_h_.find(ns.layer);
-            bool is_h = (h_it != layer_is_h_.end()) ? h_it->second : true;
-            for (int d : {-1, +1}) {
-                auto it = idx_map.find({ns.bundle_id, ns.seg_idx + d, ns.bit_index});
-                if (it == idx_map.end()) continue;
-                const NetSegment& nb = result.net_segments[it->second];
-                auto nb_h_it = layer_is_h_.find(nb.layer);
-                bool nb_is_h = (nb_h_it != layer_is_h_.end()) ? nb_h_it->second : true;
-                if (nb_is_h == is_h)
-                    continue; // same direction — no perpendicular junction
-                double tp = nb.track_position;
-                if (std::abs(tp - ns.span_hi) <= std::abs(tp - ns.span_lo))
-                    ns.span_hi = tp;
-                else
-                    ns.span_lo = tp;
+            auto bit = ns.bundle_id ? ns.bundle_id : 0; (void)bit; // suppress unused
+            const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
+            if (!bs_ptr) continue;
+
+            if (bs_ptr->lo_adj_seg_idx >= 0) {
+                auto it = idx_map.find({ns.bundle_id, bs_ptr->lo_adj_seg_idx, ns.bit_index});
+                if (it != idx_map.end())
+                    ns.span_lo = result.net_segments[it->second].track_position;
+            }
+            if (bs_ptr->hi_adj_seg_idx >= 0) {
+                auto it = idx_map.find({ns.bundle_id, bs_ptr->hi_adj_seg_idx, ns.bit_index});
+                if (it != idx_map.end())
+                    ns.span_hi = result.net_segments[it->second].track_position;
             }
         }
     }
