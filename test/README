@@ -1,3 +1,184 @@
+  BDD/TDD test proposals (2026.05.17)
+  
+  1. Stage 8 — Routing Grid (planned, no code, no tests)
+
+  The CLAUDE.md spec is detailed. These tests define the API contract before implementation:
+
+  Feature file: routing_grid.feature
+  Scenarios needed: TrackPattern pitch/density calculation; def_track_pattern CLI
+  round-trip;
+    signal_tracks_in(lo, hi) returns only SIGNAL slots; power/clock slots correctly block
+    signal placement; PatternOverride region takes precedence over global; edge case: region
+
+    boundary — slot straddles override boundary
+
+  TDD unit tests in test_routing_grid.py: unit_pitch(), signal_density(), dilution_factor(),
+   tracks_in_range() with known patterns (VDD/sig/sig/sig/GND/sig/sig/sig repeating unit).
+
+  ---
+  2. Stage 9 — Detailed NUTS (planned, no code, no tests)
+  
+  detailed_track_assignment.feature already has three placeholder scenarios but they target
+  abstract concepts (VIC pull, corner margins, non-uniform width). They need to be rewritten
+   to match the actual designed API:
+
+  ┌─────────────────────────────────────┬───────────────────────────────────────────────┐
+  │              Scenario               │                What to assert                 │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ run_detailed_nuts expands           │ len(net_segments) == bit_width for each       │
+  │ BusSegment → N NetSegments          │ BusSegment                                    │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ LO_HI bit ordering assigns          │ net_segments[i].track_position <              │
+  │ contiguous tracks low-to-high       │ net_segments[i+1].track_position              │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ HI_LO bit ordering is the reverse   │ same, flipped                                 │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ timing_critical flag finds          │ no PreRoutedSegment between any two           │
+  │ contiguous window (no power/clock   │ consecutive NetSegments in the window         │
+  │ between bits)                       │                                               │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ Pre-route blockage forces placement │ no NetSegment lands on a POWER or CLOCK track │
+  │  above/below                        │                                               │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ num_unplaced > 0 when interval has  │ assertion on DetailedNUTSResult.num_unplaced  │
+  │ no contiguous window large enough   │                                               │
+  └─────────────────────────────────────┴───────────────────────────────────────────────┘
+
+  ---
+  3. MST / Multi-trunk topologies (roadmap, feature stub exists)
+  
+  large_fanout_mst.feature has three scenarios but they're vague ("significantly less
+  wirelength"). Replace with concrete assertions:
+
+  ┌─────────────────────────────────────────────┬───────────────────────────────────────┐
+  │                  Scenario                   │          Concrete assertion           │
+  ├─────────────────────────────────────────────┼───────────────────────────────────────┤
+  │ MST for 1-driver, 4-receiver fanout         │ total wirelength ≤ bounding-box       │
+  │                                             │ diagonal × 1.5 (Steiner ratio bound)  │
+  ├─────────────────────────────────────────────┼───────────────────────────────────────┤
+  │ MST produces N-1 edges for N nodes          │ len(topology.segments) is bounded     │
+  ├─────────────────────────────────────────────┼───────────────────────────────────────┤
+  │ Multi-trunk topology selected over          │ planner picks BITRUNK or MST type     │
+  │ single-trunk when channel is congested      │ over L/Z when single-trunk overflow > │
+  │                                             │  0                                    │
+  ├─────────────────────────────────────────────┼───────────────────────────────────────┤
+  │ Multicast generate_topologies_for_bundle    │ topology type starts with MST_ or     │
+  │ with 3 destinations                         │ BITRUNK_                              │
+  └─────────────────────────────────────────────┴───────────────────────────────────────┘
+
+  ---
+  4. Post-NUTS planner (implemented, no dedicated tests)
+  
+  run_planner post_nuts V <short> <long> has no test at all — it's currently only exercised
+  by ariane_core.buda. Needed:
+
+  ┌──────────────────────────────────────────┬──────────────────────────────────────────┐
+  │                 Scenario                 │                  Assert                  │
+  ├──────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ Short V stubs (< threshold) are moved to │ seg previously on M7 reassigned to M3/M5 │
+  │  a lower V layer                         │  after post_nuts                         │
+  ├──────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ Long V stubs (> threshold) stay on high  │ seg on M7 remains M7                     │
+  │ V layer                                  │                                          │
+  ├──────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ H variant works symmetrically            │ same for H-layer stubs                   │
+  ├──────────────────────────────────────────┼──────────────────────────────────────────┤
+  │ post_nuts without prior run_nuts errors  │ raises/prints error, doesn't crash       │
+  │ gracefully                               │                                          │
+  └──────────────────────────────────────────┴──────────────────────────────────────────┘
+
+  ---
+  5. run_nuts_on_layer / rerun isolation (implemented, no isolation test)
+
+  ┌──────────────────────────────────┬──────────────────────────────────────────────────┐
+  │             Scenario             │                      Assert                      │
+  ├──────────────────────────────────┼──────────────────────────────────────────────────┤
+  │ Rerunning M5 does not disturb M4 │ all M4 track_position values unchanged           │
+  │  placements                      │ before/after rerun_layer(5)                      │
+  ├──────────────────────────────────┼──────────────────────────────────────────────────┤
+  │ Rerun reduces overlaps on target │ num_overlaps on M5 ≤ pre-rerun count             │
+  │  layer                           │                                                  │
+  └──────────────────────────────────┴──────────────────────────────────────────────────┘
+
+  ---
+  6. CLI integration tests (no .buda-level tests exist)
+  
+  All current tests call C++ directly. End-to-end tests exercising buda_cli.py catch
+  integration bugs (like the two.buda case, which had no test):
+
+  ┌─────────────────────────────────────┬───────────────────────────────────────────────┐
+  │                Test                 │                    Script                     │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ two.buda produces 0 overlaps        │ run two.buda, assert nuts_result.num_overlaps │
+  │                                     │  == 0                                         │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ ariane.buda runs without violation  │ assert num_violations == 0                    │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ ariane_core.buda runs with ≤ 3      │ assert known bound                            │
+  │ overlaps                            │                                               │
+  ├─────────────────────────────────────┼───────────────────────────────────────────────┤
+  │ source command includes nested      │ inline source in temp script, assert it       │
+  │ script                              │ executes                                      │
+  └─────────────────────────────────────┴───────────────────────────────────────────────┘
+
+  ---
+  7. def2buda.py converter (no tests at all)
+  
+  ┌────────────────────────────────────────────────────┬────────────────────────────────┐
+  │                        Test                        │             Assert             │
+  ├────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ Known DEF with 2 FIXED macros → correct add_block  │ parse output, check            │
+  │ lines                                              │ coordinates                    │
+  ├────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ --depth 1 groups all macros under same top-level   │ single add_block emitted       │
+  ├────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ --scale scales coordinates proportionally          │ bbox coordinates match         │
+  │                                                    │ expected                       │
+  ├────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ DEF with no DIEAREA → graceful fallback            │ no exception, ? in header      │
+  │                                                    │ comment                        │
+  ├────────────────────────────────────────────────────┼────────────────────────────────┤
+  │ Backslash-escaped bracket names (\[0\]) parsed     │ name appears unescaped in      │
+  │ correctly                                          │ output                         │
+  └────────────────────────────────────────────────────┴────────────────────────────────┘
+
+  ---
+  Summary table
+  
+  ┌──────────────┬───────────────────────────────────┬───────────────────────┬─────────┐
+  │     Area     │         BDD feature file          │     TDD test file     │ Status  │
+  ├──────────────┼───────────────────────────────────┼───────────────────────┼─────────┤
+  │ Routing Grid │ routing_grid.feature (new)        │ test_routing_grid.py  │ Not     │
+  │  (Stage 8)   │                                   │ (new)                 │ started │
+  ├──────────────┼───────────────────────────────────┼───────────────────────┼─────────┤
+  │ Detailed     │ detailed_track_assignment.feature │ test_detailed_nuts.py │ Stub    │
+  │ NUTS (Stage  │  (rewrite)                        │  (new)                │ exists  │
+  │ 9)           │                                   │                       │         │
+  ├──────────────┼───────────────────────────────────┼───────────────────────┼─────────┤
+  │ MST /        │ large_fanout_mst.feature          │ test_mst.py (new)     │ Stub    │
+  │ multi-trunk  │ (rewrite)                         │                       │ exists  │
+  ├──────────────┼───────────────────────────────────┼───────────────────────┼─────────┤
+  │ Post-NUTS    │ post_nuts_redistribution.feature  │ test_post_nuts.py     │ No test │
+  │ planner      │ (new)                             │ (new)                 │         │
+  ├──────────────┼───────────────────────────────────┼───────────────────────┼─────────┤
+  │ rerun_layer  │ add to                            │ add to test_nuts.py   │ No test │
+  │ isolation    │ nuts_track_assignment.feature     │                       │         │
+  ├──────────────┼───────────────────────────────────┼───────────────────────┼─────────┤
+  │ CLI          │ cli_integration.feature (new)     │ test_cli.py (new)     │ No test │
+  │ integration  │                                   │                       │         │
+  ├──────────────┼───────────────────────────────────┼───────────────────────┼─────────┤
+  │ def2buda     │ def2buda.feature (new)            │ test_def2buda.py      │ No test │
+  │ converter    │                                   │ (new)                 │         │
+  └──────────────┴───────────────────────────────────┴───────────────────────┴─────────┘
+
+  The highest-leverage items are Routing Grid and Detailed NUTS — writing their tests now
+  defines the API contract and will drive a clean TDD implementation. Want to start with one
+   of those?
+
+
+
+* Old
+
 tests/features/bundler_hierarchy.feature
 
 Package feature-mode is incompatible.

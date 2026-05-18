@@ -6,6 +6,12 @@ Future?
 
 Last prompt:
 
+❯ There are some future tasks we've defined (see GEMINI.md as well as CLAUDE.md). Please    
+  propose a list of items for which we need to design Cucumber tests for Behavior Driven    
+  Design (BDD) and extensive tests for Test-Driven Development (TDD).  
+
+See: test/README
+
 > Testcase: four_blocks_b1. Selected topo. corner_margin setting seems to be ignored for the two V segs. Similarly for other topos and H segs. 
 
 
