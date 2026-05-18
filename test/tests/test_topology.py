@@ -89,5 +89,73 @@ def test_random_topologies(topology_setup):
                 
             # Check C: Endpoints touch the blocks
             # (Simplified check: Start of first segment vs Source Rect)
-            # In a real implementation, we check intersection. 
+            # In a real implementation, we check intersection.
             # Here we just check logical connectivity if the API supports it.
+
+
+# ---------------------------------------------------------------------------
+# Regression: spread-Z trunk slide range must be finite
+# ---------------------------------------------------------------------------
+
+def _make_spread_z_floorplan():
+    """Two blocks at identical Y range, side-by-side in X.
+    Their shrunken centres share the same Y → spread-Z candidates generated."""
+    fp = interconnect.Floorplan()
+    fp.set_global_corner_margin(15, 20)
+    fp.add_block("u0",   200, 400, 300, 600)
+    fp.add_block("u22", -100, 400,  -50, 600)
+    return fp
+
+
+def test_spread_z_hvh_trunk_has_bounded_slide_range():
+    """Spread Z_HVH trunk must have finite perp_lo and perp_hi.
+
+    Regression for topology.cpp bug where the H stubs terminated at
+    x_cut ± 1 instead of x_cut, leaving ConnTopology with no connections
+    for the trunk and an unbounded slide interval.
+    """
+    fp = _make_spread_z_floorplan()
+    gen = interconnect.TopologyGenerator(fp)
+    gen.set_layer_ids(4, 5)
+    candidates = gen.generate_candidates("u0", "u22")
+
+    spread_z = [t for t in candidates if t.type.startswith("Z_HVH")]
+    assert len(spread_z) >= 1, "Expected at least one spread Z_HVH candidate"
+
+    BOUND = 10_000  # anything larger than the floorplan is effectively unbounded
+    ct = interconnect.ConnTopology()
+    for topo in spread_z:
+        ct.build(topo, fp)
+        for j, cs in enumerate(ct.segs()):
+            if not cs.horiz:  # V trunk segment
+                assert cs.perp_lo > -BOUND, (
+                    f"Trunk perp_lo unbounded in {topo.type} seg{j}: {cs.perp_lo}"
+                )
+                assert cs.perp_hi < BOUND, (
+                    f"Trunk perp_hi unbounded in {topo.type} seg{j}: {cs.perp_hi}"
+                )
+                # Trunk should slide within the inter-block gap
+                # u22.x2=-50, u0.x1=200, min_stub_length=20 (default)
+                assert cs.perp_lo >= -50 + 20 - 1   # allow 1-unit tolerance
+                assert cs.perp_hi <=  200 - 20 + 1
+
+
+def test_spread_z_hvh_trunk_has_two_seg_connections():
+    """Each spread Z_HVH trunk must be connected to both H stubs."""
+    fp = _make_spread_z_floorplan()
+    gen = interconnect.TopologyGenerator(fp)
+    gen.set_layer_ids(4, 5)
+    candidates = gen.generate_candidates("u0", "u22")
+
+    spread_z = [t for t in candidates if t.type.startswith("Z_HVH")]
+    ct = interconnect.ConnTopology()
+    for topo in spread_z:
+        ct.build(topo, fp)
+        for j, cs in enumerate(ct.segs()):
+            if not cs.horiz:  # V trunk
+                seg_conns = [c for c in cs.conns
+                             if c.kind == interconnect.SegConnKind.SEG]
+                assert len(seg_conns) == 2, (
+                    f"Trunk in {topo.type} seg{j} has {len(seg_conns)} SEG "
+                    f"connections, expected 2"
+                )
