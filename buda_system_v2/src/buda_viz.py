@@ -1756,40 +1756,20 @@ class BudaVisualizer:
                 self._grid_rail_artists.append(rect)
 
         # Draw bit-wire NetSegments.
-        # Build lookup for inter-segment junction stretching: each bit-wire's
-        # span endpoint is extended to reach the track_position of the same bit
-        # on the adjacent perpendicular segment (the per-bit equivalent of
-        # NUTS span adjustment, which only reaches the abstract track centre).
-        ns_map = {(ns.bundle_id, ns.seg_idx, ns.bit_index): ns
-                  for ns in detailed_result.net_segments}
-
+        # span_lo/span_hi are already junction-adjusted by DetailedNUTSEngine.
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for ns in detailed_result.net_segments:
             is_h  = self._layer_is_h.get(ns.layer, True)
             col   = layer_specs.get(ns.layer, {'color': 'green'})['color']
             lw    = max(0.6, ns.width * 0.6)
-
-            draw_lo, draw_hi = ns.span_lo, ns.span_hi
-            for d_si in (ns.seg_idx - 1, ns.seg_idx + 1):
-                nb = ns_map.get((ns.bundle_id, d_si, ns.bit_index))
-                if nb is None:
-                    continue
-                if self._layer_is_h.get(nb.layer, True) == is_h:
-                    continue  # same direction — no perpendicular junction
-                tp = nb.track_position   # on the same axis as draw_lo/draw_hi
-                if abs(tp - draw_hi) <= abs(tp - draw_lo):
-                    draw_hi = tp
-                else:
-                    draw_lo = tp
-
             if is_h:
                 line, = self.ax.plot(
-                    [draw_lo, draw_hi], [ns.track_position, ns.track_position],
+                    [ns.span_lo, ns.span_hi], [ns.track_position, ns.track_position],
                     color=col, linewidth=lw, solid_capstyle='butt',
                     alpha=0.9, zorder=15)
             else:
                 line, = self.ax.plot(
-                    [ns.track_position, ns.track_position], [draw_lo, draw_hi],
+                    [ns.track_position, ns.track_position], [ns.span_lo, ns.span_hi],
                     color=col, linewidth=lw, solid_capstyle='butt',
                     alpha=0.9, zorder=15)
             self._register_detailed(ns.bundle_id, line, alpha=0.9, lw=lw, layer=ns.layer)

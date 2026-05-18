@@ -955,7 +955,7 @@ class BudaSession:
                 bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
                 bs.bit_order   = bit_order
                 bus_segs.append(bs)
-            engine = interconnect.DetailedNUTSEngine(self.routing_grid)
+            engine = interconnect.DetailedNUTSEngine(self.routing_grid, self.layers)
             self.detailed_result = engine.run(bus_segs)
             n_net = len(self.detailed_result.net_segments)
             n_unplaced = self.detailed_result.num_unplaced

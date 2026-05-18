@@ -251,6 +251,6 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("num_unplaced",  &DetailedNUTSResult::num_unplaced);
 
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
-        .def(py::init<const RoutingGridStack&>())
+        .def(py::init<const RoutingGridStack&, const LayerStack&>())
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
 }

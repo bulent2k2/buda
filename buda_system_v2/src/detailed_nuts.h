@@ -1,7 +1,9 @@
 #pragma once
+#include <map>
 #include <string>
 #include <vector>
 #include "routing_grid.h"
+#include "layering.h"
 
 namespace interconnect {
 
@@ -36,11 +38,12 @@ struct DetailedNUTSResult {
 
 class DetailedNUTSEngine {
 public:
-    explicit DetailedNUTSEngine(const RoutingGridStack& stack);
+    DetailedNUTSEngine(const RoutingGridStack& stack, const LayerStack& layers);
     DetailedNUTSResult run(const std::vector<BusSegment>& bus_segments) const;
 
 private:
-    const RoutingGridStack& stack_;
+    const RoutingGridStack&  stack_;
+    std::map<int,bool>       layer_is_h_; // layer_id → true if HORIZONTAL
 
     // Returns index into signal_tracks of the first contiguous window of size
     // bit_width, searching from lo to hi end.  Returns -1 if none found.
