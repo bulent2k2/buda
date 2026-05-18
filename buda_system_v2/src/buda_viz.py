@@ -752,7 +752,8 @@ class BudaVisualizer:
                     a.set_alpha(0.0 if self._solo else (0.03 if e['is_band'] else 0.1))
 
         # Draw thin white boundary lines over each selected bundle's segments.
-        if active_bids is not None:
+        # Skipped in detailed mode — overlays would cover bit-wire lines entirely.
+        if active_bids is not None and not self._detailed_mode:
             for sel_bid in active_bids:
                 for e in active_reg.get(sel_bid, []):
                     a = e['artist']
