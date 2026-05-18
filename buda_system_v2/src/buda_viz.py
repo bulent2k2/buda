@@ -1322,6 +1322,7 @@ class BudaVisualizer:
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key in ('v', 't', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
+        if event.key == 'd' and self._detailed_bundle_artists: self._toggle_detailed()
 
     # ------------------------------------------------------------------
     # Drawing
