@@ -29,7 +29,7 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("trunk_location",    &Topology::trunk_location)
         .def_readwrite("pass_through_count", &Topology::pass_through_count)
         .def_readwrite("seg_busterms",      &Topology::seg_busterms);
-    py::class_<Bundle>(m, "Bundle").def(py::init<>()).def_readwrite("id", &Bundle::id).def_readwrite("net_names", &Bundle::net_names).def("get_net_names", &Bundle::get_net_names);
+    py::class_<Bundle>(m, "Bundle").def(py::init<>()).def_readwrite("id", &Bundle::id).def_readwrite("net_names", &Bundle::net_names).def_readwrite("reason", &Bundle::reason).def("get_net_names", &Bundle::get_net_names);
     py::class_<BundleAssignment>(m, "BundleAssignment")
         .def_readwrite("bundle_id",  &BundleAssignment::bundle_id)
         .def_readwrite("topo_index", &BundleAssignment::topo_index)

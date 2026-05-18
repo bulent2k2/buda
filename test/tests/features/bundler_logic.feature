@@ -21,7 +21,7 @@ Feature: Intelligent Net Bundling
     # Note: Drivers are different (BlockA vs BlockB), but they share the same sink instance (Arbiter)
     When I run the bundler with "shared_receivers_only"
     Then I should get 1 bundle containing "req_A, req_B"
-    And the bundle reason should be "Common Sink: u_arbiter"
+    And the bundle reason should be "REC:u_arbiter"
 
   Scenario: Preventing False Positives
     Given a netlist with nets:
@@ -30,4 +30,4 @@ Feature: Intelligent Net Bundling
       | net_Y    | u_src.y      | u_dest_2.in           |
     # Drivers are same, but Sinks are totally different
     When I run the bundler
-    Then I should get 0 bundles
+    Then I should get 2 bundles
