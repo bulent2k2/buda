@@ -1,10 +1,260 @@
 Future?
 
-1) Testcase: two_busterms_rotated.buda. Bundle 3. Topo 4. What's the sliding range for the H seg? It should be the whole right edge.
-2) Testcase: two.buda. Bundle 4. Topo 1 (I_H): slide-in-y=[500, 580]. Shouldn't it be [460, 580]? Similarly for Topo 3, H-seg connecting to u14. 
-3) Same test case, same bundle. Why does `run_planner` pick that topo? There are shorter topos?
+· Compacting conversation… (2m 40s · ↑ 292 tokens · almost done thinking)
+  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱ 77%
+  ⎿  Tip: Use Plan Mode to prepare for a complex request before making changes.
+     Press shift+tab twice to enable.
+
+FIXED 1) Testcase: two_busterms_rotated.buda. Bundle 3. Topo 4. What's the sliding range for the H seg? It should be the whole right edge.
+FIXED 2) Testcase: two.buda. Bundle 4. Topo 1 (I_H): slide-in-y=[500, 580]. Shouldn't it be [460, 580]? Similarly for Topo 3, H-seg connecting to u14. 
+FIXED 3) Same test case, same bundle. Why does `run_planner` pick that topo? There are shorter topos?
 
 Last prompt:
+> Let's rebuild. Fetched new code.
+
+/Users/ben/src/git/buda/gem/buda_system_v2/src/topology.cpp:56:9: warning: unused va │
+│ riable 'm_h' [-Wunused-variable]                                                     │
+│    56 |     int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);    │
+│       |         ^~~                                                                  │
+│ 1 warning generated.                                                                 │
+│ [ 30%] Building CXX object CMakeFiles/interconnect.dir/src/routing_grid.cpp.o        │
+│ [ 40%] Building CXX object CMakeFiles/interconnect.dir/src/detailed_nuts.cpp.o       │
+│ [ 50%] Linking CXX shared module interconnect.cpython-313-darwin.so                  │
+│ [100%] Built target interconnect                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+
+✦ I have successfully rebuilt the project using the newly fetched code. 
+
+  Build Summary:
+   - Environment: Configured using CMake, built with Make.
+   - Compiled Modules: 
+       - topology.cpp (with a minor unused variable warning for m_h)
+       - routing_grid.cpp (New)
+       - detailed_nuts.cpp (New)
+   - Output: Built the shared library
+     buda_system_v2/build/interconnect.cpython-313-darwin.so.
+
+  I noticed that two new files, routing_grid.cpp/.h and detailed_nuts.cpp/.h, have been
+  added to the src directory and integrated into the build. These appear to be new
+  components for more granular routing or track assignment.
+
+  The build is clean and the shared library is ready for use. Ready for the next task!
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+
+> Let's find out when the unused variable was introduced.
+ 
+✦ The unused variable m_h was introduced in commit 6ad74967 on Saturday, May 16, 2026.
+
+  This commit implemented the hierarchical configurable MIN_STUB_LEN settings. While both
+  m_v (minimum vertical stub length) and m_h (minimum horizontal stub length) were retrieved
+  from the Floorplan settings at the start of add_l_shapes, only m_v is currently being used
+  in the construction of the L-topologies in that function.
+
+   1 // From buda_system_v2/src/topology.cpp (Line 55-56)
+   2 int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+   3 int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+
+  I can remove the unused variable or investigate if it was intended to be used in one of
+  the L-shape options. Would you like me to clean it up now?
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ > Thanks to 90 degree rotational symmetry,  I expect both are useful. Maybe m_h is misused 
+   in one of the options?  
+
+❯ Z_HVH splits the H track usage from one long H to two short H tracks. But, it
+   has the extra V track use. Let's improve the hanan grid cost calculation to
+  account for this. We want Z topos only when an I topo can find no single
+  track to go through the whole hanan grid.
+
+❯ Compare the two simple testcases under flow/ two_b7.buda vs two_b7_b11.buda. two_b7.buda gives us:
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=50
+  M4 (H)  min_band_cap=200
+[Planner] Grid extended: 0 X, 2 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=50
+  M4 (H)  min_band_cap=20
+[Planner] Bundle 1 (1.5 units wide) -> Z_HVH@x75@y420  [H→M4 V→M5 H→M4]  overflow=0
+
+two_b11.buda gives us: 
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=50
+  M4 (H)  min_band_cap=50
+[Planner] Grid extended: 1 X, 3 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=20
+  M4 (H)  min_band_cap=5
+[Planner] Bundle 1 (1.5 units wide) -> I_H  [H→M4]  overflow=0
+[Planner] Bundle 2 (1.5 units wide) -> I_H  [H→M4]  overflow=0
+
+I don't understand why the planner makes those decisions. Please analyze.    
+
+
+❯ Not ready to make that decision, yet. Please document this as a future        
+  enhancement to Topology Generation and NUTS under docs/future/                
+
+⏺ Write(docs/future/spread_z_trunk_squeeze.md)
+  ⎿  Wrote 96 lines to docs/future/spread_z_trunk_squeeze.md
+       2 # Future Enhancement: Spread-Z Trunk Squeezing
+       3 ## Problem
+       5 When two blocks share the same perpendicular centre (e.g. both c
+         entred at `y=500`), the topology generator produces **spread-Z**
+          one block to the bottom edge of the other. The trunk currently 
+         spans the full block height (`[y1, y2]`) regardless of where the
+       6  two H stubs are actually placed.
+       7 ### Concrete example (`two_b7.buda`)            
+       9 ```
+      10 u0:   x=[200,300]  y=[400,600]  (shrunken: y=[420,580])
+     … +130 lines (ctrl+o to expand)
+
+⏺ Bash(git add docs/future/spread_z_trunk_squeeze.md && git commit -m "$(cat
+      <<'EOF'
+      Add future enhancement doc: spread-Z trunk squeezing…)
+  ⎿  [main 8b3d9bf] Add future enhancement doc: spread-Z trunk squeezing
+      1 file changed, 96 insertions(+)
+      create mode 100644 docs/future/spread_z_trunk_squeeze.md
+
+⏺ Committed to docs/future/spread_z_trunk_squeeze.md. The doc covers:
+
+  - The problem in two forms: the current two_b7 case (first-fit already
+  collapses the trunk naturally, but congestion accounting and the planner's
+  wirelength estimate are still inflated) and the harder general case (partially
+   overlapping intervals where first-fit can leave the stubs far apart).
+  - Part A — topology generator: estimate the trunk's wirelength from the
+  interval intersection rather than the full nominal span.
+  - Part B — NUTS engine: a post-first-fit trunk-squeeze pass that identifies
+  stub–trunk–stub triples, slides stubs toward each other within their
+  intervals, and updates the trunk's reported span.
+  - The coupling signal (coupled_stubs field on TrackSegment) that ties the two
+  parts together.
+  - What's explicitly out of scope to keep the change bounded.
+
+✻ Churned for 57s
+
+※ recap: Implementing the BUDA EDA routing pipeline stages 8 and 9, plus fixing 
+  topology bugs. We just documented a future spread-Z trunk-squeezing 
+  enhancement. Next: resume wherever the user wants to continue. (disable recaps
+   in /config)
+
+
+❯ Z topos now look good. But, notice that the wirelength could be reduced by    
+  moving the two H segs towards each other which makes the V trunk that connect 
+   them shorter. This would need an enhancement to NUTS engine, I believe. In   
+  similar Z-topos, when the slide ranges of the two outer segs do not overlap,  
+  the pull preference does the trick. But, in this case, the slide ranges are   
+  identical. But, in any similar situation when they overlap, this enhancement  
+  is useful. Let me know if you have any ideas.                                 
+  
+⏺ This is a good design problem. Let me reason through the mechanics first, then
+   offer concrete directions.
+     
+  What actually happens today:
+
+  For the two_b7 spread-Z, both H stubs live on the same layer (M4) and their
+  routing-direction spans are adjacent, not overlapping ([-50,75] and [75,200]).
+   So NUTS's first-fit places them both at y=420 (interval bottom), the trunk's
+  effective length collapses to zero, and the result is already optimal. The
+  problem you're describing — paying for a full [420,580] trunk in congestion
+  accounting even when the stubs can meet — is real but the placement itself is
+  already good here.
+
+  The interesting general case is when the stubs have partially overlapping
+  intervals and first-fit doesn't naturally bring them together:
+
+  stub A interval: [100, 300]   first-fit → 100
+  stub B interval: [200, 400]   first-fit → 200          
+  trunk effective length: |100 - 200| = 100
+  optimal: both at 200 → trunk = 0
+
+  Three ideas, roughly ranked by tractability:
+
+  ---
+  1. Post-NUTS trunk-squeeze pass (local search)
+  
+  After the per-layer first-fit placement, run a second pass over connected
+  stub–trunk–stub triples. For each triple:
+  - Compute the midpoint of the two stubs' current track positions.
+  - Try sliding each stub toward that midpoint inside its interval, checking
+  only the segments whose spans it actually overlaps on that layer. 
+  - Accept any move that reduces trunk effective length without creating a new
+  conflict.
+  - Iterate to convergence (usually 1–2 rounds).
+  
+  This fits cleanly into the existing architecture — it's a post-processing step
+   inside NUTSEngine::run(), and per-layer independence is preserved. The
+  triples can be identified from the topology's seg_busterms map (the trunk
+  segment already knows which block faces it connects to) or from ConnTopology.
+  The main bookkeeping addition: the trunk TrackSegment needs to record which
+  two stubs determine its effective span, so the output can report accurate wire
+   length.
+
+  ---
+  2. Preferred-position hint on stubs
+  
+  Add an optional preferred_pos field to TrackSegment. In first-fit, try
+  preferred_pos as a candidate before interval_lo. For spread-Z stubs, the
+  topology generator would set preferred_pos = (interval_lo + interval_hi) / 2 —
+   both stubs would converge naturally to the center in first-fit without
+  touching the trunk logic at all.
+                                                         
+  Cheaper to implement, but less general: it only works when you can precompute
+  the ideal position at topology-generation time, and it doesn't adapt to other
+  segments on the same layer that might already occupy the center.
+  
+  ---                                                    
+  3. Telescope the trunk span in the topology itself
+  
+  Instead of representing the trunk as a fixed-span segment [y1, y2], represent
+  it as a zero-span "stub connector" at the nominal position. Generate the
+  spread-Z with the trunk initialised to a degenerate span [center, center],
+  letting the stubs' actual Hanan-interval constraints expand it only if forced
+  to. This changes the wirelength estimate immediately (the planner would
+  correctly rank it cheaper) and removes the congestion inflation on the V
+  layer.
+
+  The trade-off: it requires a new segment kind or a flag in TrackSegment, and
+  NUTS needs to handle the "telescoping" span during sweep. More architectural
+  change than ideas 1 or 2.
+  
+  ---                                                    
+  Which to pursue:
+  
+  Idea 1 is the most general and most architecturally honest — trunk length
+  really is a cross-layer derived quantity, and a post-pass is the right place
+  to handle it. Ideas 2 and 3 bake in assumptions at topology-generation time
+  and will miss cases the topology generator can't anticipate.
+  
+  The one missing piece for idea 1: a way for the NUTS engine to know which two
+  stubs determine a trunk's span. The cleanest carrier for that is the
+  TrackSegment — add a coupled_seg_indices: pair<int,int> field that the CLI
+  populates from ConnTopology when building the NUTS input. The post-pass then
+  has everything it needs without any geometric re-analysis.
+
+✻ Churned for 2m 51s
+
+※ recap: Working on the BUDA EDA routing pipeline. The last fix corrected 
+  spread-Z topology slide ranges; the current discussion is around a NUTS 
+  enhancement to minimize trunk length when stub intervals overlap. No immediate
+   action pending. (disable recaps in /config)           
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)                3% until auto-compact
+
+
+❯ Z topos now look good. But, notice that the wirelength could be reduced by    
+  moving the two H segs towards each other which makes the V trunk that connect 
+   them shorter. This would need an enhancement to NUTS engine, I believe. In   
+  similar Z-topos, when the slide ranges of the two outer segs do not overlap,  
+  the pull preference does the trick. But, in this case, the slide ranges are   
+  identical. But, in any similar situation when they overlap, this enhancement  
+  is useful. Let me know if you have any ideas. 
+
+✻ Symbioting… (54s · almost done thinking)
+  ⎿  Tip: Use /agents to optimize specific tasks. Eg. Software Architect, Code Writer, Code Reviewer
+─────────────────────────────────
+
+> testcase flow/two_b7, has one bundle. Topos 4 and 5 are both Z-topos. The slide range of the middle segment in each seems wrong.
 
 ❯ There are some future tasks we've defined (see GEMINI.md as well as CLAUDE.md). Please    
   propose a list of items for which we need to design Cucumber tests for Behavior Driven    
