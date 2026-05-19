@@ -234,7 +234,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("bit_order",       &BusSegment::bit_order)
         .def_readwrite("timing_critical", &BusSegment::timing_critical)
         .def_readwrite("lo_adj_seg_idx",  &BusSegment::lo_adj_seg_idx)
-        .def_readwrite("hi_adj_seg_idx",  &BusSegment::hi_adj_seg_idx);
+        .def_readwrite("hi_adj_seg_idx",  &BusSegment::hi_adj_seg_idx)
+        .def_readwrite("abstract_pos",    &BusSegment::abstract_pos);
 
     py::class_<NetSegment>(m, "NetSegment")
         .def(py::init<>())

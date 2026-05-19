@@ -961,6 +961,7 @@ class BudaSession:
                 bs.interval_hi = ts.interval_hi
                 bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
                 bs.bit_order   = bit_order
+                bs.abstract_pos = ts.track_position
                 # Populate lo/hi adj from ConnTopology.
                 cs_list = bid_to_cs.get(ts.bundle_id, [])
                 if ts.seg_idx < len(cs_list):

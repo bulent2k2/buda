@@ -96,9 +96,10 @@ def test_comprehensive_demo():
 
 # ---------------------------------------------------------------------------
 # two_rotated_buses.buda — same geometry as two_rotated but 8-bit buses.
-# Bundle width = 8 × 1.5 = 12 → bit_width=12 in detailed NUTS (228 net segs).
-# 2 M5 track overlaps (B7×B9, B8×B9) are a known geometric fixture: three
-# 12-unit buses compete for a ~30-unit perpendicular corridor and cannot all fit.
+# 2 abstract-NUTS M5 overlaps (B7×B9, B8×B9): three 8-bit buses share a
+# ~30-unit corridor that has ~12 signal tracks (< 8+8+8 needed).
+# Option B places buses in abstract_pos order; the third cannot find a
+# non-conflicting 8-track window → 3 segments × 8 bits = 24 unplaced.
 # ---------------------------------------------------------------------------
 
 def test_two_rotated_buses():
@@ -108,13 +109,13 @@ def test_two_rotated_buses():
     segs, viols, ovlps = nuts_summary(out)
     assert segs  == 19
     assert viols == 0
-    assert ovlps == 2   # known: B7×B9, B8×B9 (3×12u buses in 30u corridor)
+    assert ovlps == 2   # known: B7×B9, B8×B9 (3×8u buses in 30u corridor)
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out
     )
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) == 152
-    assert int(dm.group(2)) == 0
+    assert int(dm.group(1)) == 128   # 19 segs × 8 bits − 24 unplaced
+    assert int(dm.group(2)) == 24    # 3 congested segs × 8 bits (Option B)
 
 
 def test_four_blocks_3_bundles():
