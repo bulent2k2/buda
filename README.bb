@@ -1,6 +1,7 @@
-cd buda_system_v2
-export PYTHONPATH=build:src
-python3 src/buda_cli.py flow/four_blocks.buda
+To run:
+  cd buda_system_v2
+  export PYTHONPATH=build:src
+  python3 src/buda_cli.py flow/four_blocks.buda
 
 The original session:
     	   ~/src/buda/.claude

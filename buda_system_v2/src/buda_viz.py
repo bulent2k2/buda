@@ -579,6 +579,13 @@ class BudaVisualizer:
         self._btn_bustermss  = None
         self._btn_vias_conns = None
         self._btn_all        = None
+        self._btn_detailed   = None
+
+        # Detailed NUTS (Stage 9) visualisation state.
+        self._detailed_mode          = False
+        self._detailed_bundle_artists = {}   # bid -> [{artist,alpha,lw,is_band,layer}]
+        self._grid_rail_artists      = []    # POWER/GND/CLK stripe patches (not per-bundle)
+        self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
 
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
@@ -600,7 +607,9 @@ class BudaVisualizer:
 
     def _on_pick(self, event):
         self._pick_happened = True
-        for bid, entries in self._bundle_artists.items():
+        active_reg = (self._detailed_bundle_artists
+                      if self._detailed_mode else self._bundle_artists)
+        for bid, entries in active_reg.items():
             for e in entries:
                 if event.artist is e['artist']:
                     self._set_highlight(bid)
@@ -710,7 +719,10 @@ class BudaVisualizer:
             except Exception: pass
         self._highlight_overlays.clear()
 
-        for bid, entries in self._bundle_artists.items():
+        active_reg = (self._detailed_bundle_artists
+                      if self._detailed_mode else self._bundle_artists)
+
+        for bid, entries in active_reg.items():
             bundle_on = self._bundle_visible.get(bid, True)
             selected  = (active_bids is None) or (bid in active_bids)
 
@@ -740,9 +752,10 @@ class BudaVisualizer:
                     a.set_alpha(0.0 if self._solo else (0.03 if e['is_band'] else 0.1))
 
         # Draw thin white boundary lines over each selected bundle's segments.
-        if active_bids is not None:
+        # Skipped in detailed mode — overlays would cover bit-wire lines entirely.
+        if active_bids is not None and not self._detailed_mode:
             for sel_bid in active_bids:
-                for e in self._bundle_artists.get(sel_bid, []):
+                for e in active_reg.get(sel_bid, []):
                     a = e['artist']
                     if e['is_band'] or not isinstance(a, MplLine2D):
                         continue
@@ -1309,6 +1322,7 @@ class BudaVisualizer:
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key in ('v', 't', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
+        if event.key == 'd' and self._detailed_bundle_artists: self._toggle_detailed()
 
     # ------------------------------------------------------------------
     # Drawing
@@ -1664,6 +1678,132 @@ class BudaVisualizer:
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
             self._draw_terminals(bid, drv, rcvs, viz_lw, seg_alpha)
 
+    # ------------------------------------------------------------------
+    # Detailed NUTS (Stage 9) drawing
+    # ------------------------------------------------------------------
+
+    def _register_detailed(self, bundle_id, artist, *, alpha, lw=None, layer=None):
+        artist.set_picker(5)
+        self._detailed_bundle_artists.setdefault(bundle_id, []).append({
+            'artist':  artist,
+            'alpha':   alpha,
+            'lw':      lw,
+            'is_band': False,
+            'layer':   layer,
+        })
+
+    def draw_detailed_tracks(self, detailed_result, routing_grid_stack, layer_stack):
+        """Draw Stage-9 bit-wire lines and routing-grid power/ground rail stripes.
+
+        All artists are created hidden; the [Detailed] toggle button makes them
+        visible and hides the abstract NUTS artists.
+        """
+        import interconnect as ic_mod
+
+        # Build layer direction map from the LayerStack.
+        h_ids = set(layer_stack.get_layer_ids_by_dir(ic_mod.LayerDir.HORIZONTAL))
+        for lid in h_ids:
+            self._layer_is_h[lid] = True
+        for lid in layer_stack.get_layer_ids_by_dir(ic_mod.LayerDir.VERTICAL):
+            self._layer_is_h[lid] = False
+
+        # Layout bounding box for grid-rail extent.
+        all_blocks = list(self.fp.get_all_blocks())
+        if all_blocks:
+            x_min = min(r.x1 for _, r in all_blocks)
+            x_max = max(r.x2 for _, r in all_blocks)
+            y_min = min(r.y1 for _, r in all_blocks)
+            y_max = max(r.y2 for _, r in all_blocks)
+        else:
+            x_min, x_max, y_min, y_max = 0, 1000, 0, 1000
+
+        # Rail stripe colours by slot type.
+        _RAIL_COLOR = {'POWER': '#ffcccc', 'GROUND': '#cce0ff', 'CLOCK': '#fffacc'}
+
+        # Draw grid rail stripes for every layer that has a pattern.
+        for lid, is_h in self._layer_is_h.items():
+            if not routing_grid_stack.has_layer(lid):
+                continue
+            grid    = routing_grid_stack.get_layer_grid(lid)
+            # Use the global pattern (no override; representative for full-layout view).
+            pattern = grid.effective_pattern_at(0.0, 0.0)
+            up      = pattern.unit_pitch()
+            if up <= 0:
+                continue
+
+            if is_h:
+                # Horizontal layer: track_position is Y.  Draw stripes spanning full X.
+                lo, hi = y_min - up, y_max + up
+            else:
+                # Vertical layer: track_position is X.  Draw stripes spanning full Y.
+                lo, hi = x_min - up, x_max + up
+
+            all_tracks = pattern.tracks_in_range(lo, hi)
+            for centre, slot in all_tracks:
+                col = _RAIL_COLOR.get(slot.type, None)
+                if col is None:
+                    continue   # SIGNAL slots are the transparent gaps
+                half = slot.width / 2.0
+                if is_h:
+                    rect = patches.Rectangle(
+                        (x_min, centre - half), x_max - x_min, slot.width,
+                        linewidth=0, facecolor=col, alpha=0.15, zorder=4)
+                else:
+                    rect = patches.Rectangle(
+                        (centre - half, y_min), slot.width, y_max - y_min,
+                        linewidth=0, facecolor=col, alpha=0.15, zorder=4)
+                self.ax.add_patch(rect)
+                self._grid_rail_artists.append(rect)
+
+        # Draw bit-wire NetSegments.
+        # span_lo/span_hi are already junction-adjusted by DetailedNUTSEngine.
+        layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
+        for ns in detailed_result.net_segments:
+            is_h  = self._layer_is_h.get(ns.layer, True)
+            col   = layer_specs.get(ns.layer, {'color': 'green'})['color']
+            lw    = max(0.6, ns.width * 0.6)
+            if is_h:
+                line, = self.ax.plot(
+                    [ns.span_lo, ns.span_hi], [ns.track_position, ns.track_position],
+                    color=col, linewidth=lw, solid_capstyle='butt',
+                    alpha=0.9, zorder=15)
+            else:
+                line, = self.ax.plot(
+                    [ns.track_position, ns.track_position], [ns.span_lo, ns.span_hi],
+                    color=col, linewidth=lw, solid_capstyle='butt',
+                    alpha=0.9, zorder=15)
+            self._register_detailed(ns.bundle_id, line, alpha=0.9, lw=lw, layer=ns.layer)
+
+        # Start hidden; toggle button reveals them.
+        for entries in self._detailed_bundle_artists.values():
+            for e in entries:
+                e['artist'].set_visible(False)
+        for a in self._grid_rail_artists:
+            a.set_visible(False)
+
+    def _toggle_detailed(self):
+        self._detailed_mode = not self._detailed_mode
+        active = self._detailed_mode
+
+        # Show/hide the inactive set first (bulk operation without highlight logic).
+        for entries in self._bundle_artists.values():
+            for e in entries:
+                e['artist'].set_visible(not active)
+        for entries in self._detailed_bundle_artists.values():
+            for e in entries:
+                e['artist'].set_visible(active)
+        for a in self._grid_rail_artists:
+            a.set_visible(active)
+
+        if self._btn_detailed is not None:
+            lbl = '☑ Detailed' if active else '☐ Detailed'
+            self._btn_detailed.label.set_text(lbl)
+            self._btn_detailed.ax.set_facecolor('#ffe8cc' if active else '#e8f4e8')
+
+        # Re-apply highlight/layer/bundle visibility to the now-active set.
+        self._refresh_highlight()
+        self.fig.canvas.draw_idle()
+
     def _draw_terminals(self, bundle_id, drv_pos, rcv_positions, viz_lw, alpha):
         """Draw driver (cyan square) and receiver (magenta circle) terminals.
 
@@ -1813,6 +1953,14 @@ class BudaVisualizer:
         # Heatmap button is only meaningful when a congestion map was drawn.
         if not self._heatmap_artists and self._cbar_ax is None:
             self._btn_heatmap.ax.set_visible(False)
+
+        ax_detailed = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_detailed = Button(ax_detailed, '☐ Detailed', color='#e8f4e8')
+        self._btn_detailed.label.set_fontsize(8)
+        self._btn_detailed.on_clicked(lambda _: self._toggle_detailed())
+        # Hidden until draw_detailed_tracks() has been called.
+        if not self._detailed_bundle_artists:
+            self._btn_detailed.ax.set_visible(False)
 
         RX, RW   = 0.83, 0.15
         BTN_H    = 0.044

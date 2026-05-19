@@ -78,6 +78,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             }
             if (dst.x2 > src.x2) {
                 int bx = (src.x2 + dst.x2) / 2;
+<<<<<<< HEAD
                 if (std::abs(bx - s_orig.face_x(bx)) >= m_h && std::abs(dy - hy) >= m_v) {
                     Topology hv; hv.type = "L_HV@x" + std::to_string(bx);
                     hv.segments.push_back(make_seg(s_orig.face_x(bx), hy, bx, hy, h_layer_));
@@ -106,6 +107,34 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                         hv.segments.push_back(make_seg(bend_x, hy, bend_x, d_orig.y2, v_layer_));
                         results.push_back(hv);
                     }
+=======
+                Topology hv; hv.type = "L_HV@x" + std::to_string(bx);
+                hv.segments.push_back(make_seg(s_orig.face_x(bx), hy, bx, hy, h_layer_));
+                if (hy != dy) hv.segments.push_back(make_seg(bx, hy, bx, dy, v_layer_));
+                if (hv.segments.size() == 2) results.push_back(hv);
+            }
+        } else if (use_busterm_) {
+            // Option 1: H below dst, V up to dst.y1
+            if (s_orig.y1 < d_orig.y1) {
+                int hy = std::min(src.y2, d_orig.y1 - m_v);
+                if (hy >= src.y1 && hy <= d_orig.y1 - m_v
+                        && std::abs(bend_x - src.face_x(bend_x)) >= m_h) {
+                    Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
+                    hv.segments.push_back(make_seg(s_orig.face_x(bend_x), hy, bend_x, hy, h_layer_));
+                    hv.segments.push_back(make_seg(bend_x, hy, bend_x, d_orig.y1, v_layer_));
+                    results.push_back(hv);
+                }
+            }
+            // Option 2: H above dst, V down to dst.y2
+            if (s_orig.y2 > d_orig.y2) {
+                int hy = std::max(src.y1, d_orig.y2 + m_v);
+                if (hy >= d_orig.y2 + m_v && hy <= src.y2
+                        && std::abs(bend_x - src.face_x(bend_x)) >= m_h) {
+                    Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
+                    hv.segments.push_back(make_seg(s_orig.face_x(bend_x), hy, bend_x, hy, h_layer_));
+                    hv.segments.push_back(make_seg(bend_x, hy, bend_x, d_orig.y2, v_layer_));
+                    results.push_back(hv);
+>>>>>>> origin/main
                 }
             }
         } else {
@@ -147,6 +176,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                 int vx2 = (src.x1 + dst.x1) / 2;
                 int dx2 = d_orig.face_x(vx2);
                 int bend_y_fixed = d_orig.face_y(sy);
+<<<<<<< HEAD
                 if (std::abs(vx2 - s_orig.face_x(vx2)) >= m_h && std::abs(bend_y_fixed - sy) >= m_v) {
                     Topology vh; vh.type = "L_VH@x" + std::to_string(vx2);
                     if (s_orig.face_y(bend_y_fixed) != bend_y_fixed) vh.segments.push_back(make_seg(vx2, s_orig.face_y(bend_y_fixed), vx2, bend_y_fixed, v_layer_));
@@ -175,6 +205,33 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                         vh.segments.push_back(make_seg(vx, bend_y_b, d_orig.face_x(vx), bend_y_b, h_layer_));
                         results.push_back(vh);
                     }
+=======
+                if (s_orig.face_y(bend_y_fixed) != bend_y_fixed) vh.segments.push_back(make_seg(vx2, s_orig.face_y(bend_y_fixed), vx2, bend_y_fixed, v_layer_));
+                if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y_fixed, dx2, bend_y_fixed, h_layer_));
+                if (vh.segments.size() == 2) results.push_back(vh);
+            }
+        } else if (use_busterm_) {
+            // Option A: H below src, V stub down from src bottom face
+            if (d_orig.y1 < s_orig.y1) {
+                int bend_y_a = std::min(s_orig.y1 - m_v, dst.y2);
+                if (bend_y_a >= dst.y1 && bend_y_a <= s_orig.y1 - m_v
+                        && std::abs(dst.face_x(vx) - vx) >= m_h) {
+                    Topology vh; vh.type = "L_VH@y" + std::to_string(bend_y_a) + "@x" + std::to_string(vx);
+                    vh.segments.push_back(make_seg(vx, s_orig.y1,   vx, bend_y_a, v_layer_));
+                    vh.segments.push_back(make_seg(vx, bend_y_a, d_orig.face_x(vx), bend_y_a, h_layer_));
+                    results.push_back(vh);
+                }
+            }
+            // Option B: H above src, V stub up from src top face
+            if (d_orig.y2 > s_orig.y2) {
+                int bend_y_b = std::max(s_orig.y2 + m_v, dst.y1);
+                if (bend_y_b >= s_orig.y2 + m_v && bend_y_b <= dst.y2
+                        && std::abs(dst.face_x(vx) - vx) >= m_h) {
+                    Topology vh; vh.type = "L_VH@y" + std::to_string(bend_y_b) + "@x" + std::to_string(vx);
+                    vh.segments.push_back(make_seg(vx, s_orig.y2,   vx, bend_y_b, v_layer_));
+                    vh.segments.push_back(make_seg(vx, bend_y_b, d_orig.face_x(vx), bend_y_b, h_layer_));
+                    results.push_back(vh);
+>>>>>>> origin/main
                 }
             }
         } else {
@@ -318,6 +375,8 @@ void TopologyGenerator::add_u_shapes(const Busterm& s_bt, const Busterm& d_bt,
     Point s = src.center(); Point d = dst.center();
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
+    int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+    int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
 
     int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
     int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
@@ -327,6 +386,8 @@ void TopologyGenerator::add_u_shapes(const Busterm& s_bt, const Busterm& d_bt,
         if (x_cut < min_x || x_cut > max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
+            if (sx != x_cut && std::abs(s_orig.face_x(x_cut) - x_cut) < m_h) continue;
+            if (dx != x_cut && std::abs(d_orig.face_x(x_cut) - x_cut) < m_h) continue;
             int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
             int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
 
@@ -349,6 +410,8 @@ void TopologyGenerator::add_u_shapes(const Busterm& s_bt, const Busterm& d_bt,
         if (y_cut < min_y || y_cut > max_y) {
             int sy = use_busterm_ ? src.face_y(y_cut) : s.y;
             int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
+            if (sy != y_cut && std::abs(s_orig.face_y(y_cut) - y_cut) < m_v) continue;
+            if (dy != y_cut && std::abs(d_orig.face_y(y_cut) - y_cut) < m_v) continue;
             int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
             int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
 
@@ -519,6 +582,11 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         has_stub[i] = (conn_y[i] != y_trunk);
         att_x[i]    = pins[i].x;
     }
+    {
+        int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && std::abs(conn_y[i] - y_trunk) < m_v) return;
+    }
 
     if (use_busterm_) {
         // Enforce vertical stub length for multicast stubs.
@@ -626,6 +694,11 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         conn_x[i]   = use_busterm_ ? blocks[i].orig_bbox.face_x(x_trunk) : pins[i].x;
         has_stub[i] = (conn_x[i] != x_trunk);
         att_y[i]    = pins[i].y;
+    }
+    {
+        int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && std::abs(conn_x[i] - x_trunk) < m_h) return;
     }
 
     if (use_busterm_) {

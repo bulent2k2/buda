@@ -1,4 +1,70 @@
-See: ~/src/buda/buda_system_v2/flow/tmp.py
+See:
+  ~/src/buda/debug
+and
+  ~/src/buda/buda_system_v2/flow/tmp/README
+
+
+27) ⏺ Done. The span-adjustment post-pass now lives in DetailedNUTSEngine::run()
+  where it belongs — NetSegment.span_lo/span_hi are fully resolved by the time
+  results leave the engine, and buda_viz.py just draws them directly.
+
+✻ Sautéed for 4m 32s
+
+※ recap: Implementing detailed NUTS visualization for the BUDA EDA routing
+  system. All recent fixes are committed and pushed. Next: verify
+  two_dnuts.buda now shows 8 wires per segment with no overlaps.
+
+❯ See two_dnuts_b1.buda. The end point of M4 wires that connect to u0          
+  (busterm) and also to M5 wires are adjusted towards the wrong direction.     
+  DetailedNutsEngine needs to use the ConnTopology info to do this correctly.  
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=buda_system_v2/src python3 -c "
+      import sys; sys.path.insert(0,'buda_system_v2/src')…)
+  ⎿  Waiting…
+
+───────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   PYTHONPATH=buda_system_v2/src python3 -c "
+   import sys; sys.path.insert(0,'buda_system_v2/src')
+   from buda_cli import BudaSession
+   from pathlib import Path
+   sess = BudaSession(); sess.no_viz = True
+   for line in
+   Path('buda_system_v2/flow/two_dnuts_b1.buda').read_text().splitlines():
+       line = line.strip()
+       if line and not line.startswith('#'): sess.do_command(line)
+
+   print('--- bundles ---')
+   for w in sess.bundles:
+       b = w.original_bundle
+       topo = w.candidates[w.selected_topology_index]
+       print(f'  B{b.id}: {b.get_net_names()}, topo={topo.type}')
+       for i,seg in enumerate(topo.segments):
+           print(f'    seg{i}:
+   ({seg.start.x},{seg.start.y})->({seg.end.x},{seg.end.y})
+   layer={seg.layer_hint}')
+
+   print()
+   print('--- NUTS segments ---')
+   for ts in sess.nuts_result.segments:
+       print(f'  B{ts.bundle_id} seg{ts.seg_idx} L{ts.layer}
+   track={ts.track_position:.1f} span=[{ts.span_lo:.1f},{ts.span_hi:.1f}]
+   iv=[{ts.interval_lo:.1f},{ts.interval_hi:.1f}]')
+
+   print()
+   print('--- NetSegments ---')
+   for ns in sess.detailed_result.net_segments:
+       print(f'  B{ns.bundle_id} seg{ns.seg_idx} bit{ns.bit_index}
+   L{ns.layer} track={ns.track_position:.2f}
+   span=[{ns.span_lo:.1f},{ns.span_hi:.1f}]')
+   " 2>&1 | grep -v "^\[Planner\]\|^Generated\|^Bundler\|NUTS
+   overlap\|nuts.log\|RoutingGrid\|Span adj"
+   Inspect topology and segment details for two_dnuts_b1.buda
+
+ Do you want to proceed?
 
 26) debug congestion map
 PYTHONPATH=buda_system_v2/build python3 -c ' 

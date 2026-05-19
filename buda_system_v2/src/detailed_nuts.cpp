@@ -1,5 +1,10 @@
 #include "detailed_nuts.h"
+#include <algorithm>
+#include <limits>
+#include <map>
+#include <set>
 #include <stdexcept>
+#include <tuple>
 
 namespace interconnect {
 
@@ -15,106 +20,229 @@ bool DetailedNUTSEngine::signals_contiguous(
     return true;
 }
 
-int DetailedNUTSEngine::find_contiguous_window_lo(
-        const std::vector<std::pair<double, TrackSlot>>& signal_tracks,
-        const std::vector<std::pair<double, TrackSlot>>& all_tracks,
-        int bit_width) {
-    int n = static_cast<int>(signal_tracks.size());
-    for (int i = 0; i <= n - bit_width; ++i) {
-        bool ok = true;
-        for (int j = i; j < i + bit_width - 1; ++j) {
-            if (!signals_contiguous(signal_tracks[j].first,
-                                    signal_tracks[j + 1].first, all_tracks)) {
-                ok = false;
-                break;
-            }
-        }
-        if (ok) return i;
-    }
-    return -1;
-}
-
-int DetailedNUTSEngine::find_contiguous_window_hi(
-        const std::vector<std::pair<double, TrackSlot>>& signal_tracks,
-        const std::vector<std::pair<double, TrackSlot>>& all_tracks,
-        int bit_width) {
-    int n = static_cast<int>(signal_tracks.size());
-    for (int i = n - bit_width; i >= 0; --i) {
-        bool ok = true;
-        for (int j = i; j < i + bit_width - 1; ++j) {
-            if (!signals_contiguous(signal_tracks[j].first,
-                                    signal_tracks[j + 1].first, all_tracks)) {
-                ok = false;
-                break;
-            }
-        }
-        if (ok) return i;
-    }
-    return -1;
-}
+// ---------------------------------------------------------------------------
+// Option B: ordered-anchor track assignment.
+//
+// Within each layer, bus segments are sorted by abstract_pos (the track
+// position assigned by abstract NUTS).  For each segment in that order, we
+// find the contiguous N-track window from the available (unreserved) signal
+// tracks whose centre is closest to abstract_pos.  Segments that previously
+// claimed tracks in the same span+interval block those tracks from reuse,
+// preserving the topological ordering set by abstract NUTS.
+//
+// When abstract_pos < 0 (sentinel "unset"), the code falls back to the
+// original behaviour: LO_HI picks the first valid window, HI_LO picks the
+// last valid window.
+// ---------------------------------------------------------------------------
 
 DetailedNUTSResult DetailedNUTSEngine::run(
         const std::vector<BusSegment>& bus_segs) const {
     DetailedNUTSResult result;
 
-    for (const auto& bs : bus_segs) {
-        if (!stack_.has_layer(bs.layer)) {
-            result.num_unplaced += bs.bit_width;
+    // ------------------------------------------------------------------ //
+    // 1. Group segment indices by layer; sort each layer by abstract_pos. //
+    // ------------------------------------------------------------------ //
+    std::map<int, std::vector<int>> by_layer;
+    for (int i = 0; i < (int)bus_segs.size(); ++i)
+        by_layer[bus_segs[i].layer].push_back(i);
+
+    for (auto& [layer, indices] : by_layer) {
+        if (!stack_.has_layer(layer)) {
+            for (int idx : indices) result.num_unplaced += bus_segs[idx].bit_width;
             continue;
         }
 
-        const RoutingGrid& grid = stack_.get_layer_grid(bs.layer);
-        double x = (bs.span_lo + bs.span_hi) / 2.0;
+        // Sort by abstract_pos; unset (-1) sorts before 0, which places
+        // them at the lo end — consistent with their fallback behaviour.
+        std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+            return bus_segs[a].abstract_pos < bus_segs[b].abstract_pos;
+        });
 
-        auto signal_tracks = grid.signal_tracks_in(x, bs.interval_lo, bs.interval_hi);
-        int n_sig = static_cast<int>(signal_tracks.size());
+        const RoutingGrid& grid = stack_.get_layer_grid(layer);
 
-        if (n_sig < bs.bit_width) {
-            result.num_unplaced += bs.bit_width;
-            continue;
-        }
+        // Assignments already made on this layer; used to reserve tracks.
+        struct LayerAssignment {
+            double span_lo, span_hi, interval_lo, interval_hi;
+            std::vector<double> track_positions;
+        };
+        std::vector<LayerAssignment> layer_assigns;
 
-        int start_idx  = 0;
-        int direction  = +1;   // +1 → ascending index (LO_HI), -1 → descending (HI_LO)
+        // --------------------------------------------------------------- //
+        // 2. Process each segment in abstract_pos order.                  //
+        // --------------------------------------------------------------- //
+        for (int idx : indices) {
+            const BusSegment& bs = bus_segs[idx];
+            double x = (bs.span_lo + bs.span_hi) / 2.0;
 
-        if (bs.timing_critical) {
-            const TrackPattern& pat = grid.effective_pattern_at(x, bs.interval_lo);
-            auto all_tracks = pat.tracks_in_range(bs.interval_lo, bs.interval_hi);
+            auto signal_tracks = grid.signal_tracks_in(x, bs.interval_lo, bs.interval_hi);
+            int n_sig = (int)signal_tracks.size();
 
-            if (bs.bit_order == "LO_HI") {
-                int w = find_contiguous_window_lo(signal_tracks, all_tracks, bs.bit_width);
-                if (w < 0) { result.num_unplaced += bs.bit_width; continue; }
-                start_idx = w;
-                direction = +1;
-            } else {
-                int w = find_contiguous_window_hi(signal_tracks, all_tracks, bs.bit_width);
-                if (w < 0) { result.num_unplaced += bs.bit_width; continue; }
-                // bit_index=0 → highest track in window
-                start_idx = w + bs.bit_width - 1;
-                direction = -1;
+            if (n_sig < bs.bit_width) {
+                result.num_unplaced += bs.bit_width;
+                continue;
             }
-        } else {
-            if (bs.bit_order == "LO_HI") {
-                start_idx = 0;
-                direction = +1;
-            } else {
-                start_idx = n_sig - 1;
-                direction = -1;
-            }
-        }
 
-        for (int bit = 0; bit < bs.bit_width; ++bit) {
-            int idx = start_idx + direction * bit;
-            NetSegment ns;
-            ns.bundle_id      = bs.bundle_id;
-            ns.seg_idx        = bs.seg_idx;
-            ns.bit_index      = bit;
-            ns.track_position = signal_tracks[idx].first;
-            ns.width          = signal_tracks[idx].second.width;
-            ns.layer          = bs.layer;
-            ns.span_lo        = bs.span_lo;
-            ns.span_hi        = bs.span_hi;
-            result.net_segments.push_back(ns);
+            // Collect track positions already reserved by competing segments.
+            std::set<double> reserved;
+            for (const auto& asgn : layer_assigns) {
+                bool span_ov = asgn.span_lo < bs.span_hi && asgn.span_hi > bs.span_lo;
+                bool itvl_ov = asgn.interval_lo < bs.interval_hi &&
+                               asgn.interval_hi > bs.interval_lo;
+                if (span_ov && itvl_ov)
+                    for (double p : asgn.track_positions) reserved.insert(p);
+            }
+
+            // Cache timing-critical data once per segment.
+            std::vector<std::pair<double, TrackSlot>> all_tracks_tc;
+            if (bs.timing_critical) {
+                const TrackPattern& pat =
+                    grid.effective_pattern_at(x, bs.interval_lo);
+                all_tracks_tc = pat.tracks_in_range(bs.interval_lo, bs.interval_hi);
+            }
+
+            // ------------------------------------------------------- //
+            // 3. Choose bit_width signal tracks from the available set.//
+            //                                                           //
+            // Path A — anchor + non-timing-critical:                   //
+            //   Pick the N available tracks whose positions are closest //
+            //   to abstract_pos (no consecutiveness constraint).  This //
+            //   avoids fragmentation when reserved tracks split the     //
+            //   space.  Sort chosen tracks by position for assignment.  //
+            //                                                           //
+            // Path B — timing-critical or fallback (abstract_pos < 0): //
+            //   Scan windows of N consecutive signal-track indices.     //
+            //   Timing-critical also requires physical contiguity       //
+            //   (no non-signal track between adjacent pair).            //
+            //   Fallback: first valid window (LO_HI) or last (HI_LO).  //
+            // ------------------------------------------------------- //
+            const bool use_anchor = (bs.abstract_pos >= 0.0);
+            const int  bw = bs.bit_width;
+
+            // chosen_indices: the bw signal-track indices to use,
+            // already sorted by track position (ascending).
+            std::vector<int> chosen_indices;
+
+            if (use_anchor && !bs.timing_critical) {
+                // Path A: N closest available tracks.
+                std::vector<int> avail;
+                avail.reserve(n_sig);
+                for (int k = 0; k < n_sig; ++k)
+                    if (!reserved.count(signal_tracks[k].first))
+                        avail.push_back(k);
+
+                if ((int)avail.size() < bw) {
+                    result.num_unplaced += bw;
+                    continue;
+                }
+
+                // Sort available by distance from abstract_pos.
+                std::sort(avail.begin(), avail.end(), [&](int a, int b) {
+                    return std::abs(signal_tracks[a].first - bs.abstract_pos) <
+                           std::abs(signal_tracks[b].first - bs.abstract_pos);
+                });
+
+                // Take the bw closest; sort them by track index (= by position).
+                chosen_indices.assign(avail.begin(), avail.begin() + bw);
+                std::sort(chosen_indices.begin(), chosen_indices.end());
+
+            } else {
+                // Path B: window-based (timing-critical or no anchor).
+                int best_start = -1;
+                double best_dist = std::numeric_limits<double>::max();
+
+                for (int j = 0; j + bw <= n_sig; ++j) {
+                    bool avail = true;
+                    for (int k = j; k < j + bw; ++k) {
+                        if (reserved.count(signal_tracks[k].first)) { avail = false; break; }
+                    }
+                    if (!avail) continue;
+
+                    if (bs.timing_critical) {
+                        for (int k = j; k < j + bw - 1; ++k) {
+                            if (!signals_contiguous(signal_tracks[k].first,
+                                                    signal_tracks[k + 1].first,
+                                                    all_tracks_tc)) {
+                                avail = false; break;
+                            }
+                        }
+                        if (!avail) continue;
+                    }
+
+                    if (use_anchor) {
+                        int mid_k = j + (bw - 1) / 2;
+                        double dist = std::abs(signal_tracks[mid_k].first - bs.abstract_pos);
+                        if (dist < best_dist) { best_dist = dist; best_start = j; }
+                    } else {
+                        if (bs.bit_order == "LO_HI") { best_start = j; break; }
+                        else                         { best_start = j; }
+                    }
+                }
+
+                if (best_start < 0) {
+                    result.num_unplaced += bw;
+                    continue;
+                }
+
+                for (int k = 0; k < bw; ++k)
+                    chosen_indices.push_back(best_start + k);
+                // chosen_indices already in ascending order.
+            }
+
+            // Emit NetSegments.
+            // For LO_HI: bit_index=0 → chosen_indices[0] (lowest position).
+            // For HI_LO: bit_index=0 → chosen_indices[bw-1] (highest position).
+            std::vector<double> assigned;
+            for (int bit = 0; bit < bw; ++bit) {
+                int ci = (bs.bit_order == "HI_LO") ? (bw - 1 - bit) : bit;
+                int ti = chosen_indices[ci];
+                NetSegment ns;
+                ns.bundle_id      = bs.bundle_id;
+                ns.seg_idx        = bs.seg_idx;
+                ns.bit_index      = bit;
+                ns.track_position = signal_tracks[ti].first;
+                ns.width          = signal_tracks[ti].second.width;
+                ns.layer          = bs.layer;
+                ns.span_lo        = bs.span_lo;
+                ns.span_hi        = bs.span_hi;
+                result.net_segments.push_back(ns);
+                assigned.push_back(signal_tracks[ti].first);
+            }
+            layer_assigns.push_back({bs.span_lo, bs.span_hi,
+                                     bs.interval_lo, bs.interval_hi,
+                                     std::move(assigned)});
+        }
+    }
+
+    // ------------------------------------------------------------------ //
+    // 4. Span-adjustment post-pass: extend bit-wire endpoints that        //
+    //    connect to a perpendicular segment to its exact track_position.  //
+    // ------------------------------------------------------------------ //
+    {
+        using Key = std::tuple<int,int,int>; // bundle_id, seg_idx, bit_index
+        std::map<Key, int>              idx_map;
+        std::map<std::pair<int,int>, const BusSegment*> bs_map;
+
+        for (int i = 0; i < (int)result.net_segments.size(); ++i) {
+            const auto& ns = result.net_segments[i];
+            idx_map[{ns.bundle_id, ns.seg_idx, ns.bit_index}] = i;
+        }
+        for (const auto& bs : bus_segs)
+            bs_map[{bs.bundle_id, bs.seg_idx}] = &bs;
+
+        for (auto& ns : result.net_segments) {
+            const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
+            if (!bs_ptr) continue;
+
+            if (bs_ptr->lo_adj_seg_idx >= 0) {
+                auto it = idx_map.find({ns.bundle_id, bs_ptr->lo_adj_seg_idx, ns.bit_index});
+                if (it != idx_map.end())
+                    ns.span_lo = result.net_segments[it->second].track_position;
+            }
+            if (bs_ptr->hi_adj_seg_idx >= 0) {
+                auto it = idx_map.find({ns.bundle_id, bs_ptr->hi_adj_seg_idx, ns.bit_index});
+                if (it != idx_map.end())
+                    ns.span_hi = result.net_segments[it->second].track_position;
+            }
         }
     }
 

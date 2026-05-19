@@ -53,6 +53,7 @@ class BudaSession:
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
+        self.no_viz = False          # set by --no-viz CLI flag
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -939,18 +940,38 @@ class BudaSession:
             if self.routing_grid is None:
                 print("Error: run_detailed_nuts requires a routing grid (def_track_pattern)")
                 return
+            bid_to_nbits = {w.original_bundle.id: len(w.original_bundle.get_net_names())
+                            for w in self.bundles}
+            # Build ConnTopology per bundle for endpoint adj info.
+            bid_to_cs = {}
+            for w in self.bundles:
+                ct = interconnect.ConnTopology()
+                ct.build(w.candidates[w.selected_topology_index], self.fp)
+                bid_to_cs[w.original_bundle.id] = list(ct.segs())
+
             bus_segs = []
             for ts in self.nuts_result.segments:
                 bs = interconnect.BusSegment()
-                bs.bundle_id = ts.bundle_id
-                bs.seg_idx   = ts.seg_idx
-                bs.layer     = ts.layer
-                bs.span_lo   = ts.span_lo
-                bs.span_hi   = ts.span_hi
+                bs.bundle_id   = ts.bundle_id
+                bs.seg_idx     = ts.seg_idx
+                bs.layer       = ts.layer
+                bs.span_lo     = ts.span_lo
+                bs.span_hi     = ts.span_hi
                 bs.interval_lo = ts.interval_lo
                 bs.interval_hi = ts.interval_hi
-                bs.bit_width   = int(round(ts.width))
+                bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
                 bs.bit_order   = bit_order
+                bs.abstract_pos = ts.track_position
+                # Populate lo/hi adj from ConnTopology.
+                cs_list = bid_to_cs.get(ts.bundle_id, [])
+                if ts.seg_idx < len(cs_list):
+                    cs = cs_list[ts.seg_idx]
+                    for conn in cs.conns:
+                        if conn.kind == interconnect.SegConnKind.SEG:
+                            if conn.at_pos == cs.along_lo:
+                                bs.lo_adj_seg_idx = conn.seg_idx
+                            elif conn.at_pos == cs.along_hi:
+                                bs.hi_adj_seg_idx = conn.seg_idx
                 bus_segs.append(bs)
             engine = interconnect.DetailedNUTSEngine(self.routing_grid)
             self.detailed_result = engine.run(bus_segs)
@@ -1001,6 +1022,8 @@ class BudaSession:
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path()).show()
         elif cmd == "visualize":
+            if self.no_viz:
+                return
             rerun_layer_fn = self._rerun_nuts_layer if self.nuts_result is not None else None
             rerun_all_fn   = self._rerun_all        if self.nuts_result is not None else None
             viz = BudaVisualizer(self.fp, self.bundles,
@@ -1015,6 +1038,9 @@ class BudaSession:
             viz.draw_hanan_grid()
             if self.nuts_result is not None:
                 viz.draw_nuts_tracks(self.nuts_result)
+                if self.detailed_result is not None:
+                    viz.draw_detailed_tracks(
+                        self.detailed_result, self.routing_grid, self.layers)
             else:
                 viz.draw_buses()
             viz.show()
@@ -1028,8 +1054,11 @@ class BudaSession:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('script', nargs='?')
+    parser.add_argument('--no-viz', action='store_true',
+                        help='skip visualize commands (useful for batch/CI runs)')
     args = parser.parse_args()
     session = BudaSession()
+    session.no_viz = args.no_viz
     if args.script:
         script = args.script
         if not os.path.exists(script) and not script.endswith('.buda'):

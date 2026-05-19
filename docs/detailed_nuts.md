@@ -148,7 +148,7 @@ Interval [0, 28] with unit_pitch=14:
 
 `NUTSResult.segments` (list of `TrackSegment`) is converted to `BusSegment` objects:
 - `bundle_id`, `seg_idx`, `layer`, `span_lo`, `span_hi`, `interval_lo`, `interval_hi` are direct field copies
-- `bit_width` = `round(TrackSegment.width)` (abstract NUTS width → number of bits)
+- `bit_width` = number of nets in the bundle (`len(bundle.net_names)`); not the abstract bus width in layout units
 
 ### Receives from Stage 8
 

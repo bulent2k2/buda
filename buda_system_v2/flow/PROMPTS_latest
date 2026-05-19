@@ -1,15 +1,77 @@
-Future?
+Future? /agent  (architect, bdd, tdd)
+
+gem> Let's add some test-cases that exercise the code that supports min-stub-lengths and make sure we cover each topo type: I, L, Z, U, UU, multi-cast topos with trunks and MSTs.                          
+
+
+====
+
+> flow/dnuts1.buda testcase has four bundles. b1 and b2 each has a
+problem. 1) b1 has a Z-topo but after DNUTS, the wires for the lower H
+seg that connects to u11 busterm are missing. 2) b2 is missing the
+L-topo that minimizes the wirelength. Compare this to
+flow/two_dnuts_b2.buda where the same bundle has two L-topos.
+
+===
+
+❯ Yes, Option B is the right solution now. But, before we implement it,
+  notice that Abstract NUTS is using the utilization % settings in def_layer,
+  however, Detailed NUTS is using the def_track_pattern. Let's improve the 
+  def_layer setting for this test-case so that it matches correctly the bus 
+  segment width after detailed NUTS. 
+
+Now let me understand how abstract NUTS uses the overhead% and how the track
+  pattern signals relate.
+
+⏺ Now I have the full picture. Let me compute the correct overhead% for the
+  track patterns in the test scripts.
+
+⏺ The track pattern has unit_pitch=18, total signal pitch=12 (8 signals × 1.5
+  each). The overhead is (18−12)/18 = 33.33%. This makes eff_width = 12 × 1.5 =
+   18 — the planner correctly sees each bus filling one full pattern period.
+
+  Let me update all four .buda files and also check whether any other scripts
+  have the same mismatch.
+
+⏺ The pattern POWER 2 1 / SIGNAL 1 0.5 ×4 / GROUND 2 1 / SIGNAL 1 0.5 ×4 has
+  unit_pitch=18, total signal pitch=12. Correct overhead is 100×(18−12)/18 =
+  33.33%. I'll update the four manually-run scripts (not the test-suite scripts
+   which would need count re-validation).
+
+===
+
+⏺ Done. The key insight: the heuristic failed because the M5 signal tracks
+  (placed near the lo end of the M5 interval) landed closer to the H stub's src
+   face than to its abstract bend coordinate. ConnTopology.SegConn already
+  knows exactly which end of each segment meets another segment vs. a block
+  face — using at_pos == along_lo/hi maps each SEG connection to the correct
+  lo_adj_seg_idx or hi_adj_seg_idx, and the engine adjusts exactly those ends.
+
+✻ Worked for 5m 28s
+
+❯ Now, let's improve DetailedNutsEngine to use tracks that are closest to the  
+  abstract segment location. But, watch for neighboring bus segments (running  
+  in adjacent or nearby tracks) and bus segments that share the same tracks.   
+  We want to keep the overall "topological" relationships between bus segments 
+   within the same or adjacent Hanan Grids. In a way, we need                  
+  DetailedNutsEngine to work hand in hand with the abstract older brother.     
+  Give me some options.                             
+
+===
+
+❯ See two_dnuts_b1.buda. The end point of M4 wires that connect to u0          
+  (busterm) and also to M5 wires are adjusted towards the wrong direction.     
+  DetailedNutsEngine needs to use the ConnTopology info to do this correctly.  
+
+===
 
 · Compacting conversation… (2m 40s · ↑ 292 tokens · almost done thinking)
   ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱ 77%
   ⎿  Tip: Use Plan Mode to prepare for a complex request before making changes.
      Press shift+tab twice to enable.
 
-FIXED 1) Testcase: two_busterms_rotated.buda. Bundle 3. Topo 4. What's the sliding range for the H seg? It should be the whole right edge.
-FIXED 2) Testcase: two.buda. Bundle 4. Topo 1 (I_H): slide-in-y=[500, 580]. Shouldn't it be [460, 580]? Similarly for Topo 3, H-seg connecting to u14. 
-FIXED 3) Same test case, same bundle. Why does `run_planner` pick that topo? There are shorter topos?
-
 Last prompt:
+❯ two_dnuts.buda has two buses 8 bits each. I only see 12 wires per segment. And there are overlaps. 
+
 > Let's rebuild. Fetched new code.
 
 /Users/ben/src/git/buda/gem/buda_system_v2/src/topology.cpp:56:9: warning: unused va │
@@ -292,3 +354,7 @@ two_busterms, bundle 3: Same bundle is missing another L-topo. See the busterms 
 
 DONE. Test:
 Testcase two_busterms.buda has variations of the same L-topo problem: 1) topo 3 of bundle 3, 2) topos 2 and 3 of bundle 4, 3) topos 3 and 4 of bundle 5
+
+FIXED 1) Testcase: two_busterms_rotated.buda. Bundle 3. Topo 4. What's the sliding range for the H seg? It should be the whole right edge.
+FIXED 2) Testcase: two.buda. Bundle 4. Topo 1 (I_H): slide-in-y=[500, 580]. Shouldn't it be [460, 580]? Similarly for Topo 3, H-seg connecting to u14. 
+FIXED 3) Same test case, same bundle. Why does `run_planner` pick that topo? There are shorter topos?

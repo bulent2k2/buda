@@ -35,3 +35,4 @@ run_nuts 2.0
 
 # ── Cleanup ──────────────────────────────────────────────────
 # (No changes needed, just verify log)
+visualize
