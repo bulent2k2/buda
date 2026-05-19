@@ -89,6 +89,7 @@ PYBIND11_MODULE(interconnect, m) {
         .value("SEG",     SegConn::SEG);
     py::class_<ConnSeg>(m, "ConnSeg")
         .def_readwrite("horiz",    &ConnSeg::horiz)
+        .def_readwrite("layer_id", &ConnSeg::layer_id)
         .def_readwrite("along_lo", &ConnSeg::along_lo)
         .def_readwrite("along_hi", &ConnSeg::along_hi)
         .def_readwrite("perp_pos", &ConnSeg::perp_pos)
