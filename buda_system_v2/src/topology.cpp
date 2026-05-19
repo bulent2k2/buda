@@ -84,7 +84,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (s_orig.y1 < d_orig.y1) {
                 int hy = std::min(src.y2, d_orig.y1 - m_v);
                 if (hy >= src.y1 && hy <= d_orig.y1 - m_v
-                        && std::abs(bend_x - s_orig.face_x(bend_x)) >= m_h) {
+                        && std::abs(bend_x - src.face_x(bend_x)) >= m_h) {
                     Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
                     hv.segments.push_back(make_seg(s_orig.face_x(bend_x), hy, bend_x, hy, h_layer_));
                     hv.segments.push_back(make_seg(bend_x, hy, bend_x, d_orig.y1, v_layer_));
@@ -95,7 +95,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (s_orig.y2 > d_orig.y2) {
                 int hy = std::max(src.y1, d_orig.y2 + m_v);
                 if (hy >= d_orig.y2 + m_v && hy <= src.y2
-                        && std::abs(bend_x - s_orig.face_x(bend_x)) >= m_h) {
+                        && std::abs(bend_x - src.face_x(bend_x)) >= m_h) {
                     Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
                     hv.segments.push_back(make_seg(s_orig.face_x(bend_x), hy, bend_x, hy, h_layer_));
                     hv.segments.push_back(make_seg(bend_x, hy, bend_x, d_orig.y2, v_layer_));
@@ -149,7 +149,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (d_orig.y1 < s_orig.y1) {
                 int bend_y_a = std::min(s_orig.y1 - m_v, dst.y2);
                 if (bend_y_a >= dst.y1 && bend_y_a <= s_orig.y1 - m_v
-                        && std::abs(d_orig.face_x(vx) - vx) >= m_h) {
+                        && std::abs(dst.face_x(vx) - vx) >= m_h) {
                     Topology vh; vh.type = "L_VH@y" + std::to_string(bend_y_a) + "@x" + std::to_string(vx);
                     vh.segments.push_back(make_seg(vx, s_orig.y1,   vx, bend_y_a, v_layer_));
                     vh.segments.push_back(make_seg(vx, bend_y_a, d_orig.face_x(vx), bend_y_a, h_layer_));
@@ -160,7 +160,7 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             if (d_orig.y2 > s_orig.y2) {
                 int bend_y_b = std::max(s_orig.y2 + m_v, dst.y1);
                 if (bend_y_b >= s_orig.y2 + m_v && bend_y_b <= dst.y2
-                        && std::abs(d_orig.face_x(vx) - vx) >= m_h) {
+                        && std::abs(dst.face_x(vx) - vx) >= m_h) {
                     Topology vh; vh.type = "L_VH@y" + std::to_string(bend_y_b) + "@x" + std::to_string(vx);
                     vh.segments.push_back(make_seg(vx, s_orig.y2,   vx, bend_y_b, v_layer_));
                     vh.segments.push_back(make_seg(vx, bend_y_b, d_orig.face_x(vx), bend_y_b, h_layer_));

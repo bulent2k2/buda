@@ -101,71 +101,100 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             }
 
             // ------------------------------------------------------- //
-            // 3. Find best window of bit_width consecutive signal       //
-            //    tracks that are all unreserved.                        //
-            //    "Best" when abstract_pos >= 0: window whose centre     //
-            //    is closest to abstract_pos.                            //
-            //    Fallback (abstract_pos < 0): first valid (LO_HI) or   //
-            //    last valid (HI_LO) window.                             //
+            // 3. Choose bit_width signal tracks from the available set.//
+            //                                                           //
+            // Path A — anchor + non-timing-critical:                   //
+            //   Pick the N available tracks whose positions are closest //
+            //   to abstract_pos (no consecutiveness constraint).  This //
+            //   avoids fragmentation when reserved tracks split the     //
+            //   space.  Sort chosen tracks by position for assignment.  //
+            //                                                           //
+            // Path B — timing-critical or fallback (abstract_pos < 0): //
+            //   Scan windows of N consecutive signal-track indices.     //
+            //   Timing-critical also requires physical contiguity       //
+            //   (no non-signal track between adjacent pair).            //
+            //   Fallback: first valid window (LO_HI) or last (HI_LO).  //
             // ------------------------------------------------------- //
             const bool use_anchor = (bs.abstract_pos >= 0.0);
-            int best_start = -1;
-            double best_dist  = std::numeric_limits<double>::max();
+            const int  bw = bs.bit_width;
 
-            const int bw = bs.bit_width;
-            for (int j = 0; j + bw <= n_sig; ++j) {
-                // All tracks in window must be available.
-                bool avail = true;
-                for (int k = j; k < j + bw; ++k) {
-                    if (reserved.count(signal_tracks[k].first)) { avail = false; break; }
+            // chosen_indices: the bw signal-track indices to use,
+            // already sorted by track position (ascending).
+            std::vector<int> chosen_indices;
+
+            if (use_anchor && !bs.timing_critical) {
+                // Path A: N closest available tracks.
+                std::vector<int> avail;
+                avail.reserve(n_sig);
+                for (int k = 0; k < n_sig; ++k)
+                    if (!reserved.count(signal_tracks[k].first))
+                        avail.push_back(k);
+
+                if ((int)avail.size() < bw) {
+                    result.num_unplaced += bw;
+                    continue;
                 }
-                if (!avail) continue;
 
-                // Timing-critical: no non-signal track between any adjacent pair.
-                if (bs.timing_critical) {
-                    for (int k = j; k < j + bw - 1; ++k) {
-                        if (!signals_contiguous(signal_tracks[k].first,
-                                                signal_tracks[k + 1].first,
-                                                all_tracks_tc)) {
-                            avail = false; break;
-                        }
+                // Sort available by distance from abstract_pos.
+                std::sort(avail.begin(), avail.end(), [&](int a, int b) {
+                    return std::abs(signal_tracks[a].first - bs.abstract_pos) <
+                           std::abs(signal_tracks[b].first - bs.abstract_pos);
+                });
+
+                // Take the bw closest; sort them by track index (= by position).
+                chosen_indices.assign(avail.begin(), avail.begin() + bw);
+                std::sort(chosen_indices.begin(), chosen_indices.end());
+
+            } else {
+                // Path B: window-based (timing-critical or no anchor).
+                int best_start = -1;
+                double best_dist = std::numeric_limits<double>::max();
+
+                for (int j = 0; j + bw <= n_sig; ++j) {
+                    bool avail = true;
+                    for (int k = j; k < j + bw; ++k) {
+                        if (reserved.count(signal_tracks[k].first)) { avail = false; break; }
                     }
                     if (!avail) continue;
-                }
 
-                if (use_anchor) {
-                    // Score by distance of window centre from abstract_pos.
-                    int mid_k = j + (bw - 1) / 2;
-                    double centre = signal_tracks[mid_k].first;
-                    double dist   = std::abs(centre - bs.abstract_pos);
-                    if (dist < best_dist) { best_dist = dist; best_start = j; }
-                } else {
-                    // Fallback: first valid for LO_HI, last valid for HI_LO.
-                    if (bs.bit_order == "LO_HI") {
-                        best_start = j;
-                        break;  // first wins
+                    if (bs.timing_critical) {
+                        for (int k = j; k < j + bw - 1; ++k) {
+                            if (!signals_contiguous(signal_tracks[k].first,
+                                                    signal_tracks[k + 1].first,
+                                                    all_tracks_tc)) {
+                                avail = false; break;
+                            }
+                        }
+                        if (!avail) continue;
+                    }
+
+                    if (use_anchor) {
+                        int mid_k = j + (bw - 1) / 2;
+                        double dist = std::abs(signal_tracks[mid_k].first - bs.abstract_pos);
+                        if (dist < best_dist) { best_dist = dist; best_start = j; }
                     } else {
-                        best_start = j;  // keep updating → last wins
+                        if (bs.bit_order == "LO_HI") { best_start = j; break; }
+                        else                         { best_start = j; }
                     }
                 }
+
+                if (best_start < 0) {
+                    result.num_unplaced += bw;
+                    continue;
+                }
+
+                for (int k = 0; k < bw; ++k)
+                    chosen_indices.push_back(best_start + k);
+                // chosen_indices already in ascending order.
             }
 
-            if (best_start < 0) {
-                result.num_unplaced += bs.bit_width;
-                continue;
-            }
-
-            // Assign direction within the window.
-            int start_idx = best_start;
-            int direction = +1;
-            if (bs.bit_order == "HI_LO") {
-                start_idx = best_start + bw - 1;
-                direction = -1;
-            }
-
+            // Emit NetSegments.
+            // For LO_HI: bit_index=0 → chosen_indices[0] (lowest position).
+            // For HI_LO: bit_index=0 → chosen_indices[bw-1] (highest position).
             std::vector<double> assigned;
             for (int bit = 0; bit < bw; ++bit) {
-                int ti = start_idx + direction * bit;
+                int ci = (bs.bit_order == "HI_LO") ? (bw - 1 - bit) : bit;
+                int ti = chosen_indices[ci];
                 NetSegment ns;
                 ns.bundle_id      = bs.bundle_id;
                 ns.seg_idx        = bs.seg_idx;
