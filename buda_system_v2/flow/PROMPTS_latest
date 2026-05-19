@@ -1,5 +1,10 @@
 Future? /agent  (architect, bdd, tdd)
 
+gem> Let's add some test-cases that exercise the code that supports min-stub-lengths and make sure we cover each topo type: I, L, Z, U, UU, multi-cast topos with trunks and MSTs.                          
+
+
+====
+
 > flow/dnuts1.buda testcase has four bundles. b1 and b2 each has a
 problem. 1) b1 has a Z-topo but after DNUTS, the wires for the lower H
 seg that connects to u11 busterm are missing. 2) b2 is missing the

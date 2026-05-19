@@ -108,3 +108,10 @@
                                                         
 ✻ Cooked for 1m 16s
 
+8d6aa99 Switch planner congestion cost to overflow-only model
+8b3d9bf Add future enhancement doc: spread-Z trunk squeezing
+ccd03aa Fix spread-Z stub endpoints so trunk gets bounded slide range
+de93cc3 Add Stage 8 and 9 design docs; update script reference
+4facd96 Stage 9 (DetailedNUTS): snap bus segments to concrete signal tracks
+548768c Add def_track_pattern and add_grid_override CLI commands (Stage 8)
+1644adc Implement Stage 8: RoutingGrid — TrackPattern, RoutingGridStack
