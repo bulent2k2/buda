@@ -382,7 +382,216 @@ parameter controls this.
 
 ---
 
-## 10. Configuration Summary
+## 10. Topology Ranking — Routing Flexibility Score
+
+### 10.1 Motivation
+
+The current `annotate_and_sort` sorts candidates purely by `estimated_wirelength`.
+This is correct as a first approximation, but wirelength alone does not capture
+*how much freedom the layout optimiser has* after a topology is selected.
+
+Consider two 2-pin topologies that connect the same block faces:
+
+```
+Block A [0,0,100,100]           Block B [180,60,280,160]
+gap between right face of A and left face of B = 80 units
+```
+
+**L_HV@x180@y80** — H stub from A.right (x=100) to B.left (x=180) at y=80;
+V stub from x=180 down to B.bottom (y=60).  
+Nominal WL = 80 + 20 = 100 units.
+
+`ConnTopology` gives the V stub a slide range:
+- Pass 1 (busterm constraint): perp (x) ∈ [B.x1, B.x2] = [180, 280].
+- Pass 2 (via H stub from A): perp ≥ A.x2 + m_h = 100 + 20 = 120.
+- **Effective slide = [180, 280] → 100 units** (the full dst x-extent, as long as
+  the lower bound 120 < 180).
+
+**Z_HVH@x140@y80** — H stub from A.right (x=100) to trunk x=140; V trunk at
+x=140 from y=80 to y=60; H stub from x=140 to B.left (x=180).  
+Nominal WL = 40 + 20 + 40 = 100 units (same).
+
+`ConnTopology` gives the V trunk a slide range:
+- No direct busterm constraint (trunk is not on any block face).
+- Pass 2 from A's H stub: perp ≥ A.x2 + m_h = 120.
+- Pass 2 from B's H stub: perp ≤ B.x1 − m_h = 160.
+- **Effective slide = [120, 160] → 40 units** (constrained to the inter-block gap).
+
+In this configuration the L wins on flexibility: its V segment can traverse B's
+full x-width, while Z's trunk is boxed into the 40-unit gap.  
+
+Now extend the gap to 200 units (B at x=[300,400,…]):
+
+| | L_HV | Z_HVH@x200 |
+|---|---|---|
+| Nominal WL | 220 | 220 |
+| V-seg slide (pass 1+2) | min(B.width=100, 200−20=180) = 100 | 200 − 2×20 = 160 |
+
+Z wins.  The cross-over depends on the ratio of gap to destination block width.
+In general, Z is more flexible when the routing channel is wide relative to the
+destination block; L is more flexible when the destination block is wide relative
+to the channel.
+
+A second important case: when blocks are vertically *misaligned*, the L-bend
+point is constrained by BOTH blocks simultaneously (its y must satisfy src's face
+AND dst's extent, which may produce a narrow intersection).  The Z trunk has no
+direct busterm constraint — only pass-2 indirect constraints — so its slide range
+is the full channel width, independent of both blocks' extents.
+
+The practical consequence: a Z topology whose nominal WL is 10–20% longer than a
+competing L may still be preferable because the wider slide range lets NUTS place
+the trunk without a violation, reducing the chance of an overflow that forces
+rip-up-and-reroute.  The flexibility score makes this trade-off explicit and
+tunable.
+
+### 10.2 Slide Range Computation
+
+`ConnTopology::compute_slide_ranges` already computes `perp_lo` and `perp_hi` for
+every segment after a two-pass constraint propagation (§ 8.1 of the current code).
+The slide range of segment *i* is:
+
+```
+slide[i] = perp_hi[i] − perp_lo[i]    (layout units; 0 = pinched)
+```
+
+For a multi-segment topology the **bottleneck slide** is:
+
+```
+min_slide = min over all i of slide[i]
+```
+
+The **trunk-weighted slide** adds importance weighting for longer segments:
+
+```
+weighted_slide = Σ(slide[i] × segment_length[i]) / Σ(segment_length[i])
+```
+
+Where `segment_length[i] = along_hi[i] − along_lo[i]`.
+
+`min_slide` is the primary metric: a single pinched segment forces NUTS into a
+fixed position and eliminates all routing freedom regardless of what the other
+segments can do.  `weighted_slide` is a secondary tiebreaker between candidates
+that share the same `min_slide`.
+
+Topologies with `min_slide = 0` (pinched) are already discarded by
+`filter_pinched`.  The flexibility score therefore operates on the range
+`(0, ∞)`.
+
+### 10.3 Flexibility Score and Adjusted Wirelength
+
+The flexibility score converts a slide range to a WL discount factor:
+
+```
+flex_score(s) = kFlex × min(s / ref_slide, max_flex_ratio)
+```
+
+Where:
+- `s` = `min_slide` in layout units.
+- `kFlex` ∈ [0, 1] controls the maximum discount (default **0.20**).
+- `ref_slide` is the "comfortable" reference slide range (default
+  **3 × min_stub_length** = 60 units with the default stub of 20).
+- `max_flex_ratio` caps the multiplier at `s/ref_slide` = 1 (so the maximum
+  discount is exactly `kFlex`; extra flexibility beyond `ref_slide` gives no
+  further reward).
+
+The **adjusted wirelength** used for sorting is:
+
+```
+adjusted_wl = estimated_wl × (1 − flex_score(min_slide))
+```
+
+Lower `adjusted_wl` = higher rank.  Parameterised examples with `kFlex=0.20`
+and `ref_slide=60`:
+
+| min_slide (units) | flex_score | Effective WL discount |
+|---|---|---|
+| 0 (pinched, filtered) | — | filtered |
+| 10 | 0.033 | 3.3% |
+| 20 (= min_stub_length) | 0.067 | 6.7% |
+| 60 (= ref_slide) | 0.200 | 20% |
+| 90 | 0.200 (capped) | 20% |
+| 120 | 0.200 (capped) | 20% |
+
+So a topology with `min_slide ≥ ref_slide` gets the full 20% discount; one with
+`min_slide = min_stub_length` (barely acceptable) gets ~7%; and anything pinched
+is filtered out first.
+
+**Using `weighted_slide` as a secondary tiebreaker:** when two topologies have
+the same `adjusted_wl` (after rounding to integer WL units), the one with higher
+`weighted_slide` ranks first.
+
+### 10.4 Worked Example: Z vs L re-compared
+
+Gap = 80, B.width = 100 (from §10.1):
+
+| Topology | Nominal WL | min_slide | flex_score | adjusted_wl |
+|---|---|---|---|---|
+| L_HV | 100 | 100 | 0.200 | 80.0 |
+| Z_HVH@x140 | 100 | 40 | 0.133 | 86.7 |
+
+L still wins when `gap < B.width + m_h` (80 < 120).
+
+Gap = 200, B.width = 100:
+
+| Topology | Nominal WL | min_slide | flex_score | adjusted_wl |
+|---|---|---|---|---|
+| L_HV | 220 | 100 | 0.200 | 176.0 |
+| Z_HVH@x200 | 220 | 160 (capped) | 0.200 | 176.0 |
+
+Tie on adjusted_wl; `weighted_slide` breaks the tie (Z wins if its trunk is
+longer than L's pinned V segment).
+
+Gap = 200, B.width = 50 (a narrow destination block):
+
+| Topology | Nominal WL | min_slide | flex_score | adjusted_wl |
+|---|---|---|---|---|
+| L_HV | 220 | 50 | 0.167 | 183.3 |
+| Z_HVH@x200 | 220 | 160 (capped) | 0.200 | 176.0 |
+
+**Z wins by 4%** — the flexibility bonus overcomes the equal nominal WL because
+the inter-block channel is larger than the narrow destination.
+
+### 10.5 Interaction with the Planner (Stage 3)
+
+The planner already has its own cost function (`kCong`, `kSpan`, congestion map).
+The flexibility-adjusted ranking from Stage 2 affects *which topologies appear
+near the top of the candidate list* that the planner iterates over.  The effects
+are complementary:
+
+- **Stage 2 ranking** ensures the planner sees flexible options first, reducing
+  the number of iterations needed to find a good global solution.
+- **Stage 3 cost** captures cross-bundle congestion that Stage 2 cannot see
+  (since Stage 2 generates per-bundle, not globally).
+
+When `kFlex` is set to 0, Stage 2 ranking degenerates to pure WL order (current
+behaviour); setting it higher (0.15–0.25) is the recommended operating range.
+
+### 10.6 Storing and Exposing Flexibility Metadata
+
+Two new fields are added to `Topology`:
+
+```cpp
+struct Topology {
+    // ... existing fields ...
+    int   min_slide     = 0;   // min perp_hi − perp_lo across all segments (0 = unknown)
+    int   adjusted_wl  = 0;   // estimated_wl × (1 − flex_score), used for sorting
+};
+```
+
+`annotate_and_sort` is updated to:
+1. For each candidate, run `ConnTopology::build(cand, floorplan_)` to get slide ranges.
+2. Set `cand.min_slide = min over segs of (perp_hi − perp_lo)`.
+3. Compute `flex_score = kFlex × min(min_slide / ref_slide, 1.0)`.
+4. Set `cand.adjusted_wl = (int)(estimated_wl × (1.0 − flex_score))`.
+5. Sort by `adjusted_wl` ascending (secondary key: `−min_slide` to prefer
+   flexible candidates when adjusted WL ties).
+
+The `kFlex` and `ref_slide` values are read from `Floorplan` at sort time so the
+generator is stateless and tests can override them.
+
+---
+
+## 11. Configuration Summary
 
 All new parameters follow the same resolution hierarchy as `min_stub_length`:
 `per_layer > per_block/per_dir > global`.
@@ -395,6 +604,8 @@ All new parameters follow the same resolution hierarchy as `min_stub_length`:
 | `feedthru_penalty` | float | `1.5×` | WL multiplier for feedthru hops |
 | `max_trunk_depth` | int | `2` | Maximum trunk hierarchy depth |
 | `min_stub_length` | int | `20` | Already implemented; unchanged |
+| `kFlex` | float | `0.20` | Max WL discount for routing flexibility (0 = disable) |
+| `flex_ref_slide` | int | `3 × min_stub_length` | Slide range considered "comfortable" (full discount threshold) |
 
 ---
 
@@ -451,6 +662,17 @@ the planner and visualizer to treat feedthru-containing topologies distinctly.
 2. Replace hard-coded BITRUNK with this generalised version.
 3. Add BDD feature `multi_level_trunk.feature`.
 
+### Phase F — Routing flexibility score
+1. Add `min_slide` and `adjusted_wl` fields to `Topology`.
+2. Add `kFlex` and `flex_ref_slide` to `Floorplan`.
+3. Update `annotate_and_sort` to run `ConnTopology::build` per candidate and
+   populate `min_slide` and `adjusted_wl`.
+4. Change sort key from `estimated_wirelength` to `adjusted_wl` (secondary:
+   `-min_slide`).
+5. Add `.buda` CLI commands `set_planner_param kFlex <v>` and
+   `set_planner_param flex_ref_slide <v>`.
+6. Add BDD feature `topology_flexibility.feature`.
+
 ---
 
 ## 13. BDD Feature Outline (Gherkin stubs)
@@ -492,6 +714,17 @@ Feature: Multi-level trunk trees
   Scenario: 4 blocks split into two H-trunk halves connected by V spine
   Scenario: Depth-1 (single trunk) still generated alongside depth-2
   Scenario: max_trunk_depth=1 disables multi-level generation
+
+# topology_flexibility.feature
+Feature: Routing flexibility score
+  Scenario: Topology.min_slide equals minimum perp slide range across all segments
+  Scenario: Topology.adjusted_wl reflects WL discount proportional to min_slide
+  Scenario: kFlex=0 disables the discount and sorts by estimated_wl only
+  Scenario: Z topology with large inter-block gap ranks above equal-WL L topology
+  Scenario: L topology with wide destination block ranks above equal-WL Z topology
+  Scenario: flex_ref_slide controls the slide threshold for full discount
+  Scenario: Candidate with same adjusted_wl but higher min_slide ranks first
+  Scenario: Two-segment topology: min_slide is the bottleneck (smaller) segment
 ```
 
 ---
