@@ -589,6 +589,174 @@ struct Topology {
 The `kFlex` and `ref_slide` values are read from `Floorplan` at sort time so the
 generator is stateless and tests can override them.
 
+### 10.7 Pull Preference
+
+#### What pull means
+
+For every segment in a routed tree, each stub that hangs off it has a busterm at
+its far end.  That busterm lives on one side of the segment's perpendicular axis —
+either *below* (or to the left for a V segment) or *above* (or to the right).
+The stub exerts a **pull** on the parent segment: it constrains the segment's
+`perp_lo` (upward pressure) if the busterm is below, or `perp_hi` (downward
+pressure) if the busterm is above.
+
+```
+H trunk at y = T
+  V stub going DOWN to block B (B.top_face < T):
+      pass-2 constraint:  T ≥ B.top_face + min_stub     ← B pushes perp_lo up
+      B has a  lo_pull  on the trunk  (block is below, pulls trunk down toward it)
+
+  V stub going UP to block C (C.bottom_face > T):
+      pass-2 constraint:  T ≤ C.bottom_face − min_stub  ← C pushes perp_hi down
+      C has a  hi_pull  on the trunk  (block is above, pulls trunk up toward it)
+```
+
+**lo_pull** = count of busterm stubs whose far end is on the *low* side of the
+segment's current perp position (they constrain `perp_lo`).  
+**hi_pull** = count on the *high* side (they constrain `perp_hi`).
+
+These counts are computed directly from the `ConnSeg` data built by
+`ConnTopology`:
+
+```
+for each stub T (V or H) with conn.kind == SEG attached to segment S:
+    face_coord = T.conns[BUSTERM].face_coord
+    if face_coord < S.perp_pos:  lo_pull[S]++
+    if face_coord > S.perp_pos:  hi_pull[S]++
+    // face_coord == S.perp_pos → pass-through (feedthru or direct), no pull
+```
+
+#### Pull factor and the L-topology
+
+The **pull factor** of a segment is `lo_pull + hi_pull` — the total number of
+busterm constraints it carries, directly or through one level of stubs.
+
+An **L topology** is the fundamental unit case: each of its two segments has a
+pull factor of exactly 1.
+
+- H segment of L_HV: one attached V stub whose busterm is either above or below
+  → `lo_pull=1, hi_pull=0` or `lo_pull=0, hi_pull=1`.
+- V segment of L_HV: directly anchored at one busterm on its far end → same.
+
+Every segment in an L topology is *unidirectionally constrained*: one block owns
+the entire constraint, and the segment is free in the other direction (up to the
+global layout boundary).  This is why L topologies have one of the largest
+possible slide ranges when the unconstrained direction is open — but it also means
+the segment has no "counterweight" to keep it from drifting away from the single
+block that constrains it.
+
+#### Pull balance
+
+For a segment with `n = lo_pull + hi_pull > 0`:
+
+```
+pull_balance = (lo_pull − hi_pull) / n    ∈ [−1, +1]
+```
+
+| pull_balance | Meaning |
+|---|---|
+| +1.0 | All constraints push `perp_lo` up — segment can only move upward freely |
+| 0.0 | Equal constraints on both sides — slide range is symmetric about current position |
+| −1.0 | All constraints push `perp_hi` down — segment can only move downward freely |
+
+A TRUNK_H with 3 blocks below and 2 blocks above:
+- `lo_pull = 3`, `hi_pull = 2`, `pull_balance = (3−2)/5 = +0.2` (slight downward bias).
+
+The same trunk with all 5 blocks below:
+- `lo_pull = 5`, `hi_pull = 0`, `pull_balance = +1.0` (fully one-sided).
+
+#### Pull balance and the slide range
+
+Pull balance tells you the *direction* of freedom; slide range tells you the
+*magnitude*.  A segment can be:
+
+| pull_balance | slide range | Interpretation |
+|---|---|---|
+| 0.0 (balanced) | large | Best: symmetric freedom, trunk can dodge congestion in either direction |
+| 0.0 (balanced) | small | Both sides are tightly constrained — a narrow channel surrounds the trunk |
+| ±1.0 (one-sided) | large | The unconstrained side is open; useful for OOB trunks |
+| ±1.0 (one-sided) | small | The single constraint is very tight; little room to move even in the free direction |
+
+For NUTS, the optimal trunk is balanced with a large slide range.  A fully
+one-sided trunk with a large slide range is second-best: NUTS can still shift it
+significantly, but only in one direction, which limits its ability to resolve
+conflicts on both sides of the routing channel.
+
+#### 10.8 Pull-Balanced Centroid as a Trunk Candidate
+
+The trunk position that minimises the sum of stub lengths (L1 wirelength) is the
+**median** of the busterms' face coordinates toward the trunk.  For N busterms
+with face positions `f₁ … fₙ`:
+
+```
+y_centroid = median(f₁, f₂, …, fₙ)
+```
+
+This position also maximises pull balance (at the median, ≈ N/2 blocks pull from
+each side).  It is therefore both the lowest-WL and the most-flexible trunk
+position — a unique sweet spot.
+
+The current generator only produces trunks at Hanan-grid *midpoints*.  The
+centroid will generally not fall on a Hanan midpoint.  **Phase 1 of the unified
+algorithm should add the pull-balanced centroid as an explicit additional trunk
+candidate** for every set of busterms, distinct from the Hanan-grid sweep:
+
+```
+Phase 1 (extended):
+  for each H trunk direction:
+    candidates ← Hanan-midpoint sweep (existing)
+    y_cen ← median of all busterm top/bottom face y positions
+    if y_cen is not already in candidates: add try_trunk(H, y_cen, busterms)
+
+  for each V trunk direction:
+    x_cen ← median of all busterm left/right face x positions
+    if x_cen not already in candidates: add try_trunk(V, x_cen, busterms)
+```
+
+The centroid candidate is labelled `TRUNK_H@y<cen>~CEN` (or `~CEN` suffix) in the
+type string so the visualiser can highlight it distinctly.
+
+For the 2-pin case the centroid is unambiguous: the median of two values is their
+midpoint, so the centroid candidate is the Z-shape with the trunk at the midpoint
+of the two block faces — matching the default Z position from `add_z_shapes`.
+
+#### 10.9 Updated Topology Fields and Sort Key
+
+Extend `Topology`:
+
+```cpp
+struct Topology {
+    // ... existing fields ...
+    int   min_slide      = 0;   // min(perp_hi − perp_lo) across all segments
+    int   adjusted_wl    = 0;   // estimated_wl × (1 − flex_score)
+    int   lo_pull        = 0;   // sum of lo_pull counts across all segments
+    int   hi_pull        = 0;   // sum of hi_pull counts across all segments
+    // pull_balance per topology = (lo_pull − hi_pull) / max(1, lo_pull + hi_pull)
+};
+```
+
+Extend `ConnSeg`:
+
+```cpp
+struct ConnSeg {
+    // ... existing fields ...
+    int lo_pull = 0;   // # busterm stubs constraining from below/left
+    int hi_pull = 0;   // # busterm stubs constraining from above/right
+};
+```
+
+Updated sort key for `annotate_and_sort` (lower = better):
+
+```
+primary:    adjusted_wl                              (lower WL after flex discount)
+secondary:  −min_slide                               (larger slide first on WL tie)
+tertiary:   |lo_pull − hi_pull| / (lo_pull+hi_pull)  (more balanced pull wins)
+```
+
+The tertiary key resolves the rare case where two topologies have identical
+adjusted_wl and min_slide but differ in pull balance — the more balanced one (net
+pull closer to 0) is preferred because it gives NUTS symmetric freedom.
+
 ---
 
 ## 11. Configuration Summary
@@ -725,6 +893,17 @@ Feature: Routing flexibility score
   Scenario: flex_ref_slide controls the slide threshold for full discount
   Scenario: Candidate with same adjusted_wl but higher min_slide ranks first
   Scenario: Two-segment topology: min_slide is the bottleneck (smaller) segment
+
+# pull_preference.feature
+Feature: Pull preference and pull-balanced trunk generation
+  Scenario: L topology each segment has pull factor 1 (lo_pull+hi_pull == 1)
+  Scenario: H trunk with 3 blocks below and 2 above has pull_balance = +0.2
+  Scenario: H trunk with all blocks on one side has pull_balance = ±1.0
+  Scenario: Pull-balanced centroid candidate generated for every trunk direction
+  Scenario: Centroid candidate labelled with ~CEN suffix in topology type string
+  Scenario: For 2-pin case centroid trunk matches midpoint Z-shape position
+  Scenario: More balanced pull breaks tie between equal adjusted_wl/min_slide candidates
+  Scenario: lo_pull and hi_pull counts stored on ConnSeg after ConnTopology::build
 ```
 
 ---
