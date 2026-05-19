@@ -288,12 +288,16 @@ void TopologyGenerator::add_u_shapes(const Busterm& s_bt, const Busterm& d_bt,
     Point s = src.center(); Point d = dst.center();
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
+    int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+    int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
 
     // U_HVH: vertical detour trunk left/right of bounding box.
     for (int x_cut : x_grid) {
         if (x_cut < min_x || x_cut > max_x) {
             int sx = use_busterm_ ? src.face_x(x_cut) : s.x;
             int dx = use_busterm_ ? dst.face_x(x_cut) : d.x;
+            if (sx != x_cut && std::abs(s_orig.face_x(x_cut) - x_cut) < m_h) continue;
+            if (dx != x_cut && std::abs(d_orig.face_x(x_cut) - x_cut) < m_h) continue;
             int ty_src = stub_y(use_busterm_, sx != x_cut, src, d.y, s.y);
             int ty_dst = stub_y(use_busterm_, dx != x_cut, dst, s.y, d.y);
             Topology u; u.type = "U_HVH@x" + std::to_string(x_cut);
@@ -312,6 +316,8 @@ void TopologyGenerator::add_u_shapes(const Busterm& s_bt, const Busterm& d_bt,
         if (y_cut < min_y || y_cut > max_y) {
             int sy = use_busterm_ ? src.face_y(y_cut) : s.y;
             int dy = use_busterm_ ? dst.face_y(y_cut) : d.y;
+            if (sy != y_cut && std::abs(s_orig.face_y(y_cut) - y_cut) < m_v) continue;
+            if (dy != y_cut && std::abs(d_orig.face_y(y_cut) - y_cut) < m_v) continue;
             int vx_src = stub_x(use_busterm_, sy != y_cut, src, d.x, s.x);
             int vx_dst = stub_x(use_busterm_, dy != y_cut, dst, s.x, d.x);
             Topology u; u.type = "U_VHV@y" + std::to_string(y_cut);
@@ -458,6 +464,11 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         has_stub[i] = (conn_y[i] != y_trunk);
         att_x[i]    = pins[i].x;
     }
+    {
+        int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && std::abs(conn_y[i] - y_trunk) < m_v) return;
+    }
 
     if (use_busterm_) {
         if (!out_of_bbox) {
@@ -557,6 +568,11 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         conn_x[i]   = use_busterm_ ? blocks[i].orig_bbox.face_x(x_trunk) : pins[i].x;
         has_stub[i] = (conn_x[i] != x_trunk);
         att_y[i]    = pins[i].y;
+    }
+    {
+        int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && std::abs(conn_x[i] - x_trunk) < m_h) return;
     }
 
     if (use_busterm_) {

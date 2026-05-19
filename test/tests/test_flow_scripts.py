@@ -123,5 +123,5 @@ def test_four_blocks_3_bundles():
     assert_clean(out, rc, "four_blocks_3_bundles.buda")
     assert "Bundler created 3 bundles." in out
     segs, _viols, ovlps = nuts_summary(out)
-    assert segs  == 6
+    assert segs  == 4   # b1=I_H(1), b2=I_V(1), b3=L_HV(2)
     assert ovlps == 0
