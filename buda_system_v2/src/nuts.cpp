@@ -137,21 +137,7 @@ static void apply_interval_constraints(
 
             if (ts.interval_lo >= ts.interval_hi) {
                 double v = ts.interval_lo;
-                const std::vector<int>* g = nullptr;
-                if (y_grid && !y_grid->empty()) {
-                    int c = find_grid_cell(*y_grid, static_cast<int>(hanan_lo + 0.5));
-                    if (c >= 0 && std::abs((*y_grid)[c] - hanan_lo) < 0.5 &&
-                                  std::abs((*y_grid)[c+1] - hanan_hi) < 0.5) {
-                        g = y_grid;
-                    }
-                }
-                if (!g && x_grid && !x_grid->empty()) {
-                    int c = find_grid_cell(*x_grid, static_cast<int>(hanan_lo + 0.5));
-                    if (c >= 0 && std::abs((*x_grid)[c] - hanan_lo) < 0.5 &&
-                                  std::abs((*x_grid)[c+1] - hanan_hi) < 0.5) {
-                        g = x_grid;
-                    }
-                }
+                const std::vector<int>* g = ts.horiz ? y_grid : x_grid;
 
                 if (g && g->size() >= 2) {
                     if (std::abs(v - hanan_hi) < 1.5 && slo > -kSentinel) {

@@ -8,6 +8,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The core engine is **C++20** exposed to Python via **pybind11**, with a Python CLI and matplotlib visualization layer on top.
 
+## Useful Docs
+- [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
+- [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation.
+- [Detailed NUTS](docs/detailed_nuts.md) — Internal design of bit-level track assignment.
+
 ## Build
 
 ```bash

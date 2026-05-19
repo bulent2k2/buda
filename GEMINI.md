@@ -33,6 +33,7 @@ BUDA is an open EDA tool designed to help plan interconnect on a microchip. It f
 
 ## Key References
 - [Principles](CLAUDE.md)
+- [User Guide](docs/USER_GUIDE.md)
 - [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md)
 - [Topology Generation](docs/topology_generation.md)
 

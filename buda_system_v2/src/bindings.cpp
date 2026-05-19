@@ -140,6 +140,7 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("bundle_id",    &TrackSegment::bundle_id)
         .def_readwrite("seg_idx",      &TrackSegment::seg_idx)
         .def_readwrite("layer",        &TrackSegment::layer)
+        .def_readwrite("horiz",        &TrackSegment::horiz)
         .def_readwrite("span_lo",      &TrackSegment::span_lo)
         .def_readwrite("span_hi",      &TrackSegment::span_hi)
         .def_readwrite("interval_lo",  &TrackSegment::interval_lo)
