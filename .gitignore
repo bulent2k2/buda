@@ -74,3 +74,4 @@ buda_system_v2/flow/two_rotated_buses_nuts.log
 buda_system_v2/flow/two_rotated_flow.log
 buda_system_v2/flow/two_rotated_nuts.log
 nuts.log
+buda_system_v2/flow/*.log
