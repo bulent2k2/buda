@@ -48,7 +48,9 @@ class BudaSession:
         self._planner_params  = {}   # param_name -> value (buffered before planner exists)
         self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
-        self._nuts_pitch = 1.0       # last track pitch used by run_nuts
+        self._nuts_pitch = 1.0
+        self._detailed_bit_order = "LO_HI"
+       # last track pitch used by run_nuts
         self._planner_iterations = 5 # last iteration count used by run_planner
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
@@ -531,6 +533,11 @@ class BudaSession:
 
         self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name,
                              extra_lines=[pre_msg] + diag + [rerun_msg])
+
+        if self.detailed_result is not None:
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            return self.nuts_result, self.detailed_result
+
         return self.nuts_result
 
     def _rerun_all(self):
@@ -571,7 +578,61 @@ class BudaSession:
         diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
         self._write_nuts_log(layer_names, append=True,
                              rerun_layer_name="topo-rerun", extra_lines=diag)
+
+        if self.detailed_result is not None:
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            return self.nuts_result, self.detailed_result
+
         return self.nuts_result
+
+    def _run_detailed_nuts(self, bit_order="LO_HI"):
+        """Execute bit-level track assignment using DetailedNUTSEngine."""
+        if self.nuts_result is None or self.routing_grid is None:
+            return None
+
+        bid_to_nbits = {w.original_bundle.id: len(w.original_bundle.get_net_names())
+                        for w in self.bundles}
+        # Build ConnTopology per bundle for endpoint adj info.
+        bid_to_cs = {}
+        for w in self.bundles:
+            ct = interconnect.ConnTopology()
+            ct.build(w.candidates[w.selected_topology_index], self.fp)
+            bid_to_cs[w.original_bundle.id] = list(ct.segs())
+
+        bus_segs = []
+        for ts in self.nuts_result.segments:
+            bs = interconnect.BusSegment()
+            bs.bundle_id   = ts.bundle_id
+            bs.seg_idx     = ts.seg_idx
+            bs.layer       = ts.layer
+            bs.span_lo     = ts.span_lo
+            bs.span_hi     = ts.span_hi
+            bs.interval_lo = ts.interval_lo
+            bs.interval_hi = ts.interval_hi
+            bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
+            bs.bit_order   = bit_order
+            bs.abstract_pos = ts.track_position
+            # Populate lo/hi adj from ConnTopology.
+            cs_list = bid_to_cs.get(ts.bundle_id, [])
+            if ts.seg_idx < len(cs_list):
+                cs = cs_list[ts.seg_idx]
+                for conn in cs.conns:
+                    if conn.kind == interconnect.SegConnKind.SEG:
+                        if conn.at_pos == cs.along_lo:
+                            bs.lo_adj_seg_idx = conn.seg_idx
+                        elif conn.at_pos == cs.along_hi:
+                            bs.hi_adj_seg_idx = conn.seg_idx
+            bus_segs.append(bs)
+
+        engine = interconnect.DetailedNUTSEngine(self.routing_grid)
+        with interconnect.ostream_redirect():
+            self.detailed_result = engine.run(bus_segs)
+
+        n_net = len(self.detailed_result.net_segments)
+        n_unplaced = self.detailed_result.num_unplaced
+        print(f"[DetailedNUTS] {n_net} net segments placed, "
+              f"{n_unplaced} bits unplaced.")
+        return self.detailed_result
 
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
@@ -931,54 +992,18 @@ class BudaSession:
                   f"{len(slots)} slots, unit_pitch={pat.unit_pitch():.3f}")
         elif cmd == "run_detailed_nuts":
             # Usage: run_detailed_nuts [lo_hi|hi_lo]
-            bit_order = "LO_HI"
+            self._detailed_bit_order = "LO_HI"
             if args and args[0].lower() in ("lo_hi", "hi_lo"):
-                bit_order = args[0].upper()
+                self._detailed_bit_order = args[0].upper()
+
             if self.nuts_result is None:
                 print("Error: run_detailed_nuts requires run_nuts to have been called first")
                 return
             if self.routing_grid is None:
                 print("Error: run_detailed_nuts requires a routing grid (def_track_pattern)")
                 return
-            bid_to_nbits = {w.original_bundle.id: len(w.original_bundle.get_net_names())
-                            for w in self.bundles}
-            # Build ConnTopology per bundle for endpoint adj info.
-            bid_to_cs = {}
-            for w in self.bundles:
-                ct = interconnect.ConnTopology()
-                ct.build(w.candidates[w.selected_topology_index], self.fp)
-                bid_to_cs[w.original_bundle.id] = list(ct.segs())
 
-            bus_segs = []
-            for ts in self.nuts_result.segments:
-                bs = interconnect.BusSegment()
-                bs.bundle_id   = ts.bundle_id
-                bs.seg_idx     = ts.seg_idx
-                bs.layer       = ts.layer
-                bs.span_lo     = ts.span_lo
-                bs.span_hi     = ts.span_hi
-                bs.interval_lo = ts.interval_lo
-                bs.interval_hi = ts.interval_hi
-                bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
-                bs.bit_order   = bit_order
-                bs.abstract_pos = ts.track_position
-                # Populate lo/hi adj from ConnTopology.
-                cs_list = bid_to_cs.get(ts.bundle_id, [])
-                if ts.seg_idx < len(cs_list):
-                    cs = cs_list[ts.seg_idx]
-                    for conn in cs.conns:
-                        if conn.kind == interconnect.SegConnKind.SEG:
-                            if conn.at_pos == cs.along_lo:
-                                bs.lo_adj_seg_idx = conn.seg_idx
-                            elif conn.at_pos == cs.along_hi:
-                                bs.hi_adj_seg_idx = conn.seg_idx
-                bus_segs.append(bs)
-            engine = interconnect.DetailedNUTSEngine(self.routing_grid)
-            self.detailed_result = engine.run(bus_segs)
-            n_net = len(self.detailed_result.net_segments)
-            n_unplaced = self.detailed_result.num_unplaced
-            print(f"[DetailedNUTS] {n_net} net segments placed, "
-                  f"{n_unplaced} bits unplaced.")
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
         elif cmd == "run_nuts_on_layer":
             # Usage: run_nuts_on_layer <layer-name>
             if not args:
@@ -1029,7 +1054,9 @@ class BudaSession:
             viz = BudaVisualizer(self.fp, self.bundles,
                                  sidecar_path=self.script_path,
                                  rerun_layer_fn=rerun_layer_fn,
-                                 rerun_fn=rerun_all_fn)
+                                 rerun_fn=rerun_all_fn,
+                                 routing_grid=self.routing_grid,
+                                 layer_stack=self.layers)
             viz.draw_blocks()
             if self.planner is not None:
                 cuts = self.planner.get_cuts()

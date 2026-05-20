@@ -12,11 +12,11 @@
     {
       "bundle_hint": "data_0",
       "bundle_id": 3,
-      "topo_type": "TRUNK_H@y400",
-      "topo_wl": 1040,
-      "topo_index_hint": 7,
+      "topo_type": "TRUNK_H@y600",
+      "topo_wl": 920,
+      "topo_index_hint": 0,
       "note": "",
-      "selected_at": "2026-05-19T18:35:30"
+      "selected_at": "2026-05-19T21:32:03"
     }
   ]
 }

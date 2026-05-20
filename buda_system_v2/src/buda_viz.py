@@ -521,9 +521,11 @@ class TopologyExplorer:
 
 class BudaVisualizer:
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
-                 rerun_fn=None):
+                 rerun_fn=None, routing_grid=None, layer_stack=None):
         self.fp           = floorplan
         self.bundles      = bundles
+        self.routing_grid = routing_grid
+        self.layer_stack  = layer_stack
         self._selections_path = (
             os.path.splitext(sidecar_path)[0] + '.json'
             if sidecar_path else None
@@ -1025,9 +1027,15 @@ class BudaVisualizer:
             # Checkbox area → toggle layer visibility.
             self._on_layer_toggle(lid)
 
-    def _redraw_nuts_tracks(self, nuts_result):
+    def _redraw_nuts_tracks(self, rerun_result):
         """Remove all NUTS track artists and redraw from an updated result."""
-        # Detach every registered artist from the axes.
+        # result can be NUTSResult or (NUTSResult, DetailedNUTSResult)
+        if isinstance(rerun_result, tuple):
+            nuts_result, detailed_result = rerun_result
+        else:
+            nuts_result, detailed_result = rerun_result, None
+
+        # Detach every registered artist from the axes (abstract).
         for entries in self._bundle_artists.values():
             for e in entries:
                 try: e['artist'].remove()
@@ -1038,8 +1046,21 @@ class BudaVisualizer:
         self._highlight_overlays.clear()
         self._bundle_artists.clear()
 
+        # Detach detailed artists if they exist.
+        for entries in self._detailed_bundle_artists.values():
+            for e in entries:
+                try: e['artist'].remove()
+                except Exception: pass
+        for art in self._grid_rail_artists:
+            try: art.remove()
+            except Exception: pass
+        self._detailed_bundle_artists.clear()
+        self._grid_rail_artists.clear()
+
         # Redraw segments at new track positions.
         self.draw_nuts_tracks(nuts_result)
+        if detailed_result is not None and self.routing_grid and self.layer_stack:
+            self.draw_detailed_tracks(detailed_result, self.routing_grid, self.layer_stack)
 
         # Rebuild overlap list.
         self._overlap_entries = sorted(
