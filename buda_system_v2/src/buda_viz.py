@@ -770,6 +770,10 @@ class BudaVisualizer:
         self._btn_detailed   = None
         self._btn_tracks     = None
 
+        # Layout constants for the left panel (view toggles + heatmap)
+        self._LX, self._LW = 0.005, 0.065
+        self._ly_post_buttons = 0.97 # top edge
+
         # Detailed NUTS (Stage 9) visualisation state.
         self._detailed_mode          = False
         self._tracks_visible         = True
@@ -2202,7 +2206,6 @@ class BudaVisualizer:
         self.fig.subplots_adjust(left=0.13, bottom=0.11, right=0.81, top=0.97)
 
         # ── Left panel: view toggles ──────────────────────────────────────
-        self._LX, self._LW = 0.005, 0.065
         LX, LW = self._LX, self._LW
         BTN_H_L = 0.038
         GAP_L   = 0.008
