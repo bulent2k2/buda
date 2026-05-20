@@ -84,78 +84,100 @@ class TopologyExplorer:
         self.fig = plt.figure(figsize=(13, 10))
         self.fig.patch.set_facecolor('#f0f0f0')
 
-        # Main axes — single button row below; leave y=0.10 for x-tick labels
-        self.ax = self.fig.add_axes([0.05, 0.10, 0.90, 0.84])
+        # Main axes — two button rows below; leave y=0.14 for buttons and x-tick labels
+        self.ax = self.fig.add_axes([0.05, 0.14, 0.90, 0.81])
 
-        # ── Single button row ────────────────────────────────────────────
-        # Order: ◀Bus  ◀Topo  ★Select  ✕Desel  [▶Re-run]  Topo▶  Bus▶
-        # Positions are computed from weights so adding/removing Re-run
-        # doesn't require touching all the other numbers.
-        _BY, _BH   = 0.022, 0.038   # row y and height
+        # ── Navigation row (y=0.015) ─────────────────────────────────────────
+        _BY1, _BH1  = 0.015, 0.038   # row y and height
+        _BY2, _BH2  = 0.065, 0.038   # tuning row y and height (above nav)
         _MARGIN    = 0.010
         _GAP       = 0.008
 
-        _btn_specs = [
+        _nav_specs = [
             ('◀  Bus',     '#d9f5d9', 1.0),
             ('◀  Topo',    '#ddeeff', 1.0),
             ('★  Select',  '#f0f0f0', 1.0),
             ('✕  Desel',   '#f0f0f0', 0.85),
         ]
         if rerun_fn is not None:
-            _btn_specs.append(('▶  Re-run', '#ffe0b0', 1.2))
-        _btn_specs += [
+            _nav_specs.append(('▶  Re-run', '#ffe0b0', 1.2))
+        _nav_specs += [
             ('Topo  ▶',   '#ddeeff', 1.0),
             ('Bus  ▶',    '#d9f5d9', 1.0),
         ]
 
-        _n          = len(_btn_specs)
-        _total_w    = sum(w for _, _, w in _btn_specs)
-        _avail      = 1.0 - 2 * _MARGIN - (_n - 1) * _GAP
-        _unit       = _avail / _total_w
+        _n1          = len(_nav_specs)
+        _total_w1    = sum(w for _, _, w in _nav_specs)
+        _avail1      = 1.0 - 2 * _MARGIN - (_n1 - 1) * _GAP
+        _unit1       = _avail1 / _total_w1
 
-        _bax = []
+        _bax1 = []
         _x = _MARGIN
-        for _label, _color, _weight in _btn_specs:
-            _bw = _weight * _unit
-            _bax.append(self.fig.add_axes([_x, _BY, _bw, _BH]))
+        for _label, _color, _weight in _nav_specs:
+            _bw = _weight * _unit1
+            _bax1.append(self.fig.add_axes([_x, _BY1, _bw, _BH1]))
             _x += _bw + _GAP
 
-        _i = 0
-        ax_bprev    = _bax[_i]; _i += 1
-        ax_tprev    = _bax[_i]; _i += 1
-        ax_select   = _bax[_i]; _i += 1
-        ax_deselect = _bax[_i]; _i += 1
-        ax_rerun    = _bax[_i] if rerun_fn is not None else None
-        if rerun_fn is not None: _i += 1
-        ax_tnext    = _bax[_i]; _i += 1
-        ax_bnext    = _bax[_i]
-
-        self._btn_bprev = Button(ax_bprev, '◀  Bus',    color='#d9f5d9')
-        self._btn_tprev = Button(ax_tprev, '◀  Topo',   color='#ddeeff')
-        self._btn_select   = Button(ax_select,   '★  Select', color='#f0f0f0')
-        self._btn_deselect = Button(ax_deselect, '✕  Desel',  color='#f0f0f0')
-        self._btn_tnext = Button(ax_tnext, 'Topo  ▶',   color='#ddeeff')
-        self._btn_bnext = Button(ax_bnext, 'Bus  ▶',    color='#d9f5d9')
-
+        self._btn_bprev = Button(_bax1[0], _nav_specs[0][0], color=_nav_specs[0][1])
         self._btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
+        self._btn_tprev = Button(_bax1[1], _nav_specs[1][0], color=_nav_specs[1][1])
         self._btn_tprev.on_clicked(lambda _: self._step_topo(-1))
+        self._btn_select   = Button(_bax1[2], _nav_specs[2][0], color=_nav_specs[2][1])
         self._btn_select.on_clicked(lambda _: self._select_current())
+        self._btn_deselect = Button(_bax1[3], _nav_specs[3][0], color=_nav_specs[3][1])
         self._btn_deselect.on_clicked(lambda _: self._deselect_current())
+        
+        idx = 4
+        self._btn_rerun = None
+        if rerun_fn is not None:
+            self._btn_rerun = Button(_bax1[idx], _nav_specs[idx][0], color=_nav_specs[idx][1])
+            self._btn_rerun.on_clicked(lambda _: self._rerun_and_refresh())
+            idx += 1
+            
+        self._btn_tnext = Button(_bax1[idx], _nav_specs[idx][0], color=_nav_specs[idx][1])
         self._btn_tnext.on_clicked(lambda _: self._step_topo(+1))
+        self._btn_bnext = Button(_bax1[idx+1], _nav_specs[idx+1][0], color=_nav_specs[idx+1][1])
         self._btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
 
         # Hide bus buttons when only one bundle is loaded.
         if len(self.wrappers) == 1:
-            ax_bprev.set_visible(False)
-            ax_bnext.set_visible(False)
+            _bax1[0].set_visible(False)
+            _bax1[idx+1].set_visible(False)
 
-        if ax_rerun is not None:
-            self._btn_rerun = Button(ax_rerun, '▶  Re-run', color='#ffe0b0')
-            self._btn_rerun.on_clicked(lambda _: self._rerun_and_refresh())
-        else:
-            self._btn_rerun = None
+        # ── Tuning row (y=0.065) ─────────────────────────────────────────
+        _tune_specs = [
+            ('◀  Seg',    '#f5f5f5', 0.8),
+            ('Seg  ▶',    '#f5f5f5', 0.8),
+            ('+',         '#ffe8cc', 0.6),
+            ('-',         '#ffe8cc', 0.6),
+        ]
+        
+        _n2          = len(_tune_specs)
+        _total_w2    = sum(w for _, _, w in _tune_specs)
+        _w2_frac     = 0.4 
+        _avail2      = _w2_frac - (_n2 - 1) * _GAP
+        _unit2       = _avail2 / _total_w2
+        
+        _bax2 = []
+        self._bax2 = _bax2 # for visibility toggling
+        _x = (1.0 - _w2_frac) / 2.0
+        for _label, _color, _weight in _tune_specs:
+            _bw = _weight * _unit2
+            _bax2.append(self.fig.add_axes([_x, _BY2, _bw, _BH2]))
+            _x += _bw + _GAP
+            
+        self._btn_sprev = Button(_bax2[0], _tune_specs[0][0], color=_tune_specs[0][1])
+        self._btn_sprev.on_clicked(lambda _: self._step_segment(-1))
+        self._btn_snext = Button(_bax2[1], _tune_specs[1][0], color=_tune_specs[1][1])
+        self._btn_snext.on_clicked(lambda _: self._step_segment(+1))
+        self._btn_promote = Button(_bax2[2], _tune_specs[2][0], color=_tune_specs[2][1])
+        self._btn_promote.on_clicked(lambda _: self._cycle_layer(+1))
+        self._btn_demote  = Button(_bax2[3], _tune_specs[3][0], color=_tune_specs[3][1])
+        self._btn_demote.on_clicked(lambda _: self._cycle_layer(-1))
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+
+        self._draw()
 
         self._draw()
 
@@ -316,6 +338,10 @@ class TopologyExplorer:
             if any(lid != -1 for lid in pinned):
                 sel['seg_layers'] = pinned
         
+        # Update live object
+        wrapper.selected_topology_index = self.idx
+        wrapper.topology_pinned = True
+        
         self._selections[hint] = sel
         self._save_sidecar()
         self._draw()
@@ -328,6 +354,12 @@ class TopologyExplorer:
                               if v is old_sel), hint)
             self._selections.pop(stale_key, None)
             self._save_sidecar()
+            
+            # Update live object
+            wrapper = self.wrappers[self.bidx]
+            wrapper.topology_pinned = False
+            wrapper.pinned_seg_layers = []
+
         self._draw()
 
     def _load_sidecar(self):
@@ -418,41 +450,57 @@ class TopologyExplorer:
         seg = topo.segments[self.sidx]
         is_h = (seg.start.y == seg.end.y)
 
-        # Get compatible layers.
+        # Get compatible layers based on segment orientation.
         dir = ic.LayerDir.HORIZONTAL if is_h else ic.LayerDir.VERTICAL
         lids = list(self.layer_stack.get_layer_ids_by_dir(dir))
         if not lids: return
 
-        # Current layer ID.
+        # Resolve current layer ID using same precedence as _draw.
+        sel = self._find_selection()
+        is_current_selection = self._current_is_selected()
+        is_planner_active = (self.idx == wrapper.selected_topology_index)
+        
         curr = -1
-        pinned = list(wrapper.pinned_seg_layers)
-        if len(pinned) == len(topo.segments):
-            curr = pinned[self.sidx]
-
+        if is_current_selection and sel and 'seg_layers' in sel:
+            pinned = sel['seg_layers']
+            if len(pinned) == len(topo.segments):
+                curr = pinned[self.sidx]
+        
+        if curr == -1 and is_planner_active:
+            if len(wrapper.seg_layers) == len(topo.segments):
+                curr = wrapper.seg_layers[self.sidx]
+        
         if curr == -1:
-            actual = list(wrapper.seg_layers)
-            if len(actual) == len(topo.segments):
-                curr = actual[self.sidx]
-            else:
-                curr = seg.layer_hint
+            curr = seg.layer_hint
 
-        # Find index in lids.
+        # Find index in compatible lids.
         try:
             lidx = lids.index(curr)
         except ValueError:
-            lidx = 0 # fallback
+            # Current layer doesn't match orientation (unlikely but possible via hints)
+            # Find closest match or fallback.
+            lidx = 0
 
         new_lidx = (lidx + delta) % len(lids)
         new_lid = lids[new_lidx]
 
-        # Update pinned_seg_layers.
-        if len(pinned) != len(topo.segments):
-            pinned = [-1] * len(topo.segments)
+        # Update pinned_seg_layers scratchpad.
+        pinned_list = list(wrapper.pinned_seg_layers)
+        if len(pinned_list) != len(topo.segments):
+            # Start from current actual layers.
+            pinned_list = []
+            for i, s in enumerate(topo.segments):
+                l = -1
+                if is_planner_active and len(wrapper.seg_layers) == len(topo.segments):
+                    l = wrapper.seg_layers[i]
+                else:
+                    l = s.layer_hint
+                pinned_list.append(l)
 
-        pinned[self.sidx] = new_lid
-        wrapper.pinned_seg_layers = pinned
+        pinned_list[self.sidx] = new_lid
+        wrapper.pinned_seg_layers = pinned_list
 
-        # Selection logic now automatically persists this.
+        # Selection logic now automatically persists this to sidecar.
         self._select_current()
 
     def _rerun_and_refresh(self):
@@ -499,6 +547,10 @@ class TopologyExplorer:
         is_sel = self._current_is_selected()
         has_any_sel = self._find_selection() is not None
 
+        # ── Enable/Disable Tuning Row ──
+        for b in self._bax2:
+            b.set_visible(is_sel)
+
         # ── Update selection button states ──
         if is_sel:
             self._btn_select.label.set_text('★  Selected')
@@ -520,20 +572,65 @@ class TopologyExplorer:
                    for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
         bus_label = (f"bus {self.bidx + 1}/{nb} · " if nb > 1 else "")
         sel_badge = "  ★ SELECTED" if is_sel else ""
-        ax.set_title(
-            f"{bus_label}Bundle {bid}  ·  topo {self.idx + 1}/{n}"
-            f"  ·  {topo.type}  ·  WL={wl}"
-            f"  ·  bterms={n_bt}"
-            + (f" (+{topo.pass_through_count} pass-thru)" if topo.pass_through_count else "")
-            + f"  ·  bsegs={len(topo.segments)}{sel_badge}",
-            fontsize=13, pad=10,
-            color='#886600' if is_sel else 'black')
+
+        # Topology segments — width proportional to bundle width
+        actual_lids = []
+        sel = self._find_selection()
+        is_current_selection = self._current_is_selected()
+        is_planner_active = (self.idx == self.wrapper.selected_topology_index)
+
+        for i, seg in enumerate(topo.segments):
+            lid = -1
+            # 1. Pinned layers (from sidecar/active tuning)
+            if is_current_selection and sel and 'seg_layers' in sel:
+                pinned = sel['seg_layers']
+                if len(pinned) == len(topo.segments):
+                    lid = pinned[i]
+            
+            # 2. Planned layers (from GlobalRouter result)
+            if lid == -1 and is_planner_active:
+                if len(self.wrapper.seg_layers) == len(topo.segments):
+                    lid = self.wrapper.seg_layers[i]
+            
+            # 3. Default from topology generator
+            if lid == -1:
+                lid = seg.layer_hint
+            actual_lids.append(lid)
+
+            col = _LAYER_COLOR.get(lid, '#888888')
+            
+            # Highlight selected segment; dim others
+            seg_alpha = 1.0
+            if self.sidx != -1:
+                if i == self.sidx:
+                    ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
+                            color='white', linewidth=viz_lw + 4,
+                            alpha=0.6, solid_capstyle='round', zorder=9)
+                else:
+                    seg_alpha = 0.3
+
+            ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
+                    color=col, linewidth=viz_lw,
+                    solid_capstyle='round', zorder=10, alpha=seg_alpha)
+            ax.plot(seg.start.x, seg.start.y, 'o',
+                    color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
+            ax.plot(seg.end.x, seg.end.y, 'o',
+                    color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
+
+        # Update title with layer info (Single concise line)
+        layer_summary = " ".join([_LAYER_LABEL.get(lid, f"L{lid}").split()[0] for lid in actual_lids])
+        
+        title_main = (
+            f"{bus_label}B{bid} ({len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
+            f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
+        )
+        ax.set_title(title_main, fontsize=12, pad=10, color='#886600' if is_sel else 'black')
+
         if self.fig.canvas.manager:
             bid_  = self.wrapper.original_bundle.id
             names_ = self.wrapper.original_bundle.get_net_names()
             net0  = names_[0] if names_ else f"B{bid_}"
-            self.fig.canvas.manager.set_window_title(
-                f"{net0} (Bundle {bid_})")
+            self.fig.canvas.manager.set_window_title(f"{net0} (Bundle {bid_})")
 
         # Floorplan blocks
         for name, rect in self.fp.get_all_blocks():
@@ -556,38 +653,6 @@ class TopologyExplorer:
 
         # Slide-range bands (drawn before segments so segments sit on top)
         self._draw_slide_spans(topo, ct)
-
-        # Topology segments — width proportional to bundle width
-        actual_lids = []
-        for i, seg in enumerate(topo.segments):
-            lid = -1
-            if len(self.wrapper.pinned_seg_layers) == len(topo.segments):
-                lid = self.wrapper.pinned_seg_layers[i]
-            if lid == -1 and len(self.wrapper.seg_layers) == len(topo.segments):
-                lid = self.wrapper.seg_layers[i]
-            if lid == -1:
-                lid = seg.layer_hint
-            actual_lids.append(lid)
-
-            col = _LAYER_COLOR.get(lid, '#888888')
-
-            if i == self.sidx:
-                # Selected segment highlight
-                ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
-                        color='white', linewidth=viz_lw + 4,
-                        alpha=0.4, solid_capstyle='round', zorder=9)
-
-            ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
-                    color=col, linewidth=viz_lw,
-                    solid_capstyle='round', zorder=10)
-            ax.plot(seg.start.x, seg.start.y, 'o',
-                    color=col, markersize=viz_lw * 0.6, zorder=11)
-            ax.plot(seg.end.x, seg.end.y, 'o',
-                    color=col, markersize=viz_lw * 0.6, zorder=11)
-
-        # Update title with layer info
-        layer_str = " ".join([_LAYER_LABEL.get(lid, f"L{lid}").split()[0] for lid in actual_lids])
-        ax.set_title(ax.get_title() + f" [{layer_str}]", loc='left', fontsize=10, pad=10)
 
         # Busterm diamonds (on top of segments and junction dots)
         self._draw_busterm_markers(topo, ct, viz_lw)
@@ -1016,6 +1081,30 @@ class BudaVisualizer:
     # Layer panel (custom, replaces CheckButtons)
     # ------------------------------------------------------------------
 
+    def _update_layer_ids(self):
+        """Re-derive the sorted list of layer IDs to show in the panel.
+        We include all layers defined in the LayerStack, plus anything
+        actually present in the current drawing (e.g. from topology hints).
+        """
+        import interconnect as ic_mod
+        ids = set()
+        if self.layer_stack:
+            for d in (ic_mod.LayerDir.HORIZONTAL, ic_mod.LayerDir.VERTICAL):
+                ids.update(self.layer_stack.get_layer_ids_by_dir(d))
+        
+        # Also check what's actually drawn (in case layer_stack is missing 
+        # or a topology hint uses an undefined layer ID).
+        for artists_list in self._bundle_artists.values():
+            for e in artists_list:
+                if e.get('layer') is not None:
+                    ids.add(e['layer'])
+        
+        self._layer_ids = sorted(list(ids))
+        # Ensure visibility mapping is populated for any new layers found.
+        for lid in self._layer_ids:
+            if lid not in self._layer_visible:
+                self._layer_visible[lid] = True
+
     def _on_layer_toggle(self, lid):
         self._layer_visible[lid] = not self._layer_visible.get(lid, True)
         self._redraw_layer_list()
@@ -1157,6 +1246,10 @@ class BudaVisualizer:
         self.draw_nuts_tracks(nuts_result)
         if detailed_result is not None and self.routing_grid and self.layer_stack:
             self.draw_detailed_tracks(detailed_result, self.routing_grid, self.layer_stack)
+
+        # Refresh layer list in case new layers were introduced.
+        self._update_layer_ids()
+        self._redraw_layer_list()
 
         # Rebuild overlap list.
         self._overlap_entries = sorted(
@@ -1999,14 +2092,8 @@ class BudaVisualizer:
                 key=lambda od: (od.layer, od.bid_a, od.bid_b)
             )
 
-        # Collect all layer IDs actually present in the drawn artists.
-        seen_layers: set = set()
-        for artists_list in self._bundle_artists.values():
-            for e in artists_list:
-                if e.get('layer') is not None:
-                    seen_layers.add(e['layer'])
-        self._layer_ids = sorted(seen_layers)
-        self._layer_visible = {lid: True for lid in self._layer_ids}
+        # Collect and initialize layer IDs.
+        self._update_layer_ids()
 
         self.ax.set_aspect('equal')
         self.ax.set_title(
