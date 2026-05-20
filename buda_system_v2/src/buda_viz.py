@@ -1688,8 +1688,16 @@ class BudaVisualizer:
                 self._cbar_ax.remove()
             except Exception:
                 pass
-        # Positioned to the left of the main plot area (left=0.13 in subplots_adjust).
-        self._cbar_ax = self.fig.add_axes([0.075, 0.20, 0.012, 0.46])
+        # Positioned below the button stack, aligned horizontally with buttons.
+        # Height reduced to 0.35; centered horizontally in the toggle area.
+        cb_w = 0.012
+        cb_h = 0.35
+        # Aligned by vertical centerline with buttons:
+        cb_x = self._LX + (self._LW - cb_w) / 2.0
+        # Pack below the last button (or at a reasonable resting position if buttons aren't drawn yet)
+        cb_y = getattr(self, '_ly_post_buttons', 0.6) - cb_h - 0.04
+        
+        self._cbar_ax = self.fig.add_axes([cb_x, cb_y, cb_w, cb_h])
         import matplotlib.colors as mcolors
         import numpy as np
         # Build a custom colormap that matches the actual cell appearance:
@@ -2188,13 +2196,14 @@ class BudaVisualizer:
         self._home_ylim = self.ax.get_ylim()
 
         # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
-        # Left panel: x=0.005, width=0.065.  Plot left edge at 0.13.
+        # Left panel: centered area for toggles and heatmap.
         # bottom=0.11 reserves room for x-tick labels above the button row.
         # top=0.97 reclaims the wasted margin above the title.
         self.fig.subplots_adjust(left=0.13, bottom=0.11, right=0.81, top=0.97)
 
         # ── Left panel: view toggles ──────────────────────────────────────
-        LX, LW = 0.005, 0.065
+        self._LX, self._LW = 0.005, 0.065
+        LX, LW = self._LX, self._LW
         BTN_H_L = 0.038
         GAP_L   = 0.008
 
@@ -2248,6 +2257,9 @@ class BudaVisualizer:
         # Only visible when detailed mode is active and there are rail artists.
         if not self._detailed_mode or not self._grid_rail_artists:
             self._btn_tracks.ax.set_visible(False)
+
+        # Store the current packing position for the colorbar.
+        self._ly_post_buttons = ly
 
         RX, RW   = 0.83, 0.15
         BTN_H    = 0.044
