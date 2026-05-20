@@ -1,0 +1,27 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "bus_0",
+      "bundle_id": 2,
+      "topo_type": "Z_HVH@x250@y300",
+      "topo_wl": 200,
+      "topo_index_hint": 2,
+      "note": "",
+      "selected_at": "2026-05-19T22:24:44"
+    },
+    {
+      "bundle_hint": "cntr",
+      "bundle_id": 1,
+      "topo_type": "U_VHV@y430",
+      "topo_wl": 360,
+      "topo_index_hint": 6,
+      "note": "",
+      "selected_at": "2026-05-19T22:23:11",
+      "seg_layers": [
+        -1,
+        4,
+        -1
+      ]
+    }
+  ]
+}
