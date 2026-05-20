@@ -3,3 +3,17 @@ From: ~/Desktop/Terminal Saved Output-claude-code-summary-May06.txt
  1285  head /Users/ben/.claude/projects/-Users-ben-src-buda/d81b14bb-30bf-409b-b9b4-e0d13e8c1c8f.jsonl
  1286  tail /Users/ben/.claude/projects/-Users-ben-src-buda/d81b14bb-30bf-409b-b9b4-e0d13e8c1c8f.jsonl
 
+(dired-smart-shell-command "grep detailed *.buda" nil nil)
+dnuts1.buda:run_detailed_nuts
+dnuts2.buda:run_detailed_nuts
+layer_assignment.buda:# 2. Define track patterns (Required for run_detailed_nuts)
+layer_assignment.buda:run_detailed_nuts
+quickstart.buda:run_detailed_nuts
+two_dnuts_b1.buda:run_detailed_nuts
+two_dnuts_b2.buda:run_detailed_nuts
+two_dnuts.buda:run_detailed_nuts
+two_rotated_buses.buda:# bit_width = 12 → detailed NUTS needs 12 signal tracks per segment.
+two_rotated_buses.buda:run_detailed_nuts
+two_rotated.buda:run_detailed_nuts
+user_guide.buda:# 2. Define track patterns (Required for run_detailed_nuts)
+user_guide.buda:run_detailed_nuts

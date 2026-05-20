@@ -1,5 +1,6 @@
 corner_margins 4.0 6.0
 
+add_block stretch    100 -100 200 0
 add_block unit1      100 100  200 200
 add_block unit2      300 300  400 400
 add_net   cntr       unit1.tx unit2.rx
@@ -14,7 +15,7 @@ def_layer 6 M6 H 30.0
 # 2. Define track patterns (Required for run_detailed_nuts)
 # Example: 2.0 unit wide SIGNAL tracks with 3.0 unit spacing
 def_track_pattern 3 0.0  SIGNAL 1.0 2.0 SIGNAL 1.0 2.0 GND 3.0 2.0 SIGNAL 1.0 2.0 SIGNAL 1.0 2.0 POWER 3.0 2.0
-def_track_pattern 4 0.0  SIGNAL 2.0 3.0 GND 4.0 2.0 SIGNAL 2.0 3.0 SIGNAL 2.0 3.0 POWER 4.0 2.0
+def_track_pattern 4 0.0  SIGNAL 2.0 3.0 GND 4.0 2.0 SIGNAL 2.0 3.0 SIGNAL 2.0 3.0 POWER 4.0 2.0 SIGNAL 2.0 3.0 SIGNAL 2.0 3.0 
 def_track_pattern 5 0.0  SIGNAL 2.0 3.0 GND 4.0 2.0 SIGNAL 2.0 3.0 SIGNAL 2.0 3.0 POWER 4.0 2.0
 def_track_pattern 5 0.0  SIGNAL 2.5 3.0 SIGNAL 2.5 3.0 GND 6.0 3.0 SIGNAL 2.5 3.0 SIGNAL 2.5 3.0 POWER 6.0 3.0
 def_track_pattern 6 0.0  SIGNAL 2.0 3.0 GND 4.0 2.0 SIGNAL 2.0 3.0 SIGNAL 2.0 3.0 SIGNAL 2.0 3.0 POWER 4.0 2.0

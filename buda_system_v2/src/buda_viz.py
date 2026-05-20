@@ -339,6 +339,9 @@ class TopologyExplorer:
                 sel['seg_layers'] = pinned
         
         # Update live object
+        if wrapper.selected_topology_index != self.idx:
+            wrapper.seg_layers = [] # Clear stale results for different topology
+        
         wrapper.selected_topology_index = self.idx
         wrapper.topology_pinned = True
         
@@ -913,6 +916,15 @@ class BudaVisualizer:
                     a.set_alpha(0.2 if e['is_band'] else 1.0)
                 else:
                     a.set_alpha(0.0 if self._solo else (0.03 if e['is_band'] else 0.1))
+
+        # Apply layer visibility to non-bundle detailed artists (grid rails).
+        # These are only shown when _detailed_mode is active.
+        if self._detailed_mode:
+            for e in self._grid_rail_artists:
+                a = e['artist']
+                layer_on = self._layer_visible.get(e['layer'], True)
+                # Rails are resting at 0.15 alpha.
+                a.set_alpha(0.15 if layer_on else 0.0)
 
         # Draw thin white boundary lines over each selected bundle's segments.
         # Skipped in detailed mode — overlays would cover bit-wire lines entirely.
@@ -1703,34 +1715,34 @@ class BudaVisualizer:
             return None, []
         return positions[0], positions[1:]
 
-    def _draw_via_marker(self, bid, x, y, msz, alpha, zorder):
+    def _draw_via_marker(self, bid, x, y, msz, alpha, zorder, layer=None):
         """X inside a square at an H↔V segment junction."""
         sq, = self.ax.plot(x, y, 's', color='white',
                            markeredgecolor='black', markeredgewidth=1.2,
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
-        self._register(bid, sq, alpha=alpha, lw=msz)
+        self._register(bid, sq, alpha=alpha, lw=msz, layer=layer)
         self._vias_conns_artists.append(sq)
         xm, = self.ax.plot(x, y, 'x', color='black',
                            markersize=msz * 0.65, markeredgewidth=1.5,
                            alpha=alpha, zorder=zorder + 1, clip_on=True)
-        self._register(bid, xm, alpha=alpha, lw=msz * 0.65)
+        self._register(bid, xm, alpha=alpha, lw=msz * 0.65, layer=layer)
         self._vias_conns_artists.append(xm)
         if not self._vias_conns_visible:
             sq.set_visible(False)
             xm.set_visible(False)
 
-    def _draw_busterm_conn(self, bid, x, y, col, msz, alpha, zorder):
+    def _draw_busterm_conn(self, bid, x, y, col, msz, alpha, zorder, layer=None):
         """Filled square at a segment endpoint that connects to a busterm."""
         sq, = self.ax.plot(x, y, 's', color=col,
                            markeredgecolor='black', markeredgewidth=1.0,
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
-        self._register(bid, sq, alpha=alpha, lw=msz)
+        self._register(bid, sq, alpha=alpha, lw=msz, layer=layer)
         self._vias_conns_artists.append(sq)
         if not self._vias_conns_visible:
             sq.set_visible(False)
 
     def _draw_seg_connectors(self, bid, seg_idx, cs, sx, sy, col, msz, alpha,
-                              zorder, along_offset=0.0, adj_perp=None):
+                              zorder, along_offset=0.0, adj_perp=None, layer=None):
         """Draw via or busterm-conn marker at each connection point on a segment.
 
         Uses ConnTopology's cs.conns to determine the marker type:
@@ -1756,16 +1768,16 @@ class BudaVisualizer:
                         cx, cy = adj_perp[conn.seg_idx], sy
                     else:
                         cx, cy = sx, adj_perp[conn.seg_idx]
-                    self._draw_via_marker(bid, cx, cy, msz, alpha, zorder)
+                    self._draw_via_marker(bid, cx, cy, msz, alpha, zorder, layer=layer)
                     continue
             if cs.horiz:
                 cx, cy = conn.at_pos + along_offset, sy
             else:
                 cx, cy = sx, conn.at_pos + along_offset
             if conn.kind == ic.SegConnKind.BUSTERM:
-                self._draw_busterm_conn(bid, cx, cy, col, msz, alpha, zorder)
+                self._draw_busterm_conn(bid, cx, cy, col, msz, alpha, zorder, layer=layer)
             else:
-                self._draw_via_marker(bid, cx, cy, msz, alpha, zorder)
+                self._draw_via_marker(bid, cx, cy, msz, alpha, zorder, layer=layer)
 
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
@@ -1796,7 +1808,8 @@ class BudaVisualizer:
                                 layer=seg.layer_hint)
 
                 self._draw_seg_connectors(bid, idx, cs_list[idx], sx, sy, col,
-                                          msz, alpha, 12 + i, along_offset=offset)
+                                          msz, alpha, 12 + i, along_offset=offset,
+                                          layer=seg.layer_hint)
 
             drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
             self._draw_terminals(bid, drv, rcvs, viz_lw, alpha)
@@ -1884,7 +1897,8 @@ class BudaVisualizer:
 
                 self._draw_seg_connectors(bid, idx, cs_list[idx], sx, sy, col,
                                           msz, seg_alpha, 12 + i,
-                                          adj_perp=adj_perp)
+                                          adj_perp=adj_perp,
+                                          layer=effective_layer)
 
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
             self._draw_terminals(bid, drv, rcvs, viz_lw, seg_alpha)
@@ -1964,7 +1978,7 @@ class BudaVisualizer:
                         (centre - half, y_min), slot.width, y_max - y_min,
                         linewidth=0, facecolor=col, alpha=0.15, zorder=4)
                 self.ax.add_patch(rect)
-                self._grid_rail_artists.append(rect)
+                self._grid_rail_artists.append({'artist': rect, 'layer': lid})
 
         # Draw bit-wire NetSegments.
         # span_lo/span_hi are already junction-adjusted by DetailedNUTSEngine.
@@ -1989,8 +2003,8 @@ class BudaVisualizer:
         for entries in self._detailed_bundle_artists.values():
             for e in entries:
                 e['artist'].set_visible(False)
-        for a in self._grid_rail_artists:
-            a.set_visible(False)
+        for e in self._grid_rail_artists:
+            e['artist'].set_visible(False)
 
     def _toggle_detailed(self):
         self._detailed_mode = not self._detailed_mode
@@ -2003,8 +2017,8 @@ class BudaVisualizer:
         for entries in self._detailed_bundle_artists.values():
             for e in entries:
                 e['artist'].set_visible(active)
-        for a in self._grid_rail_artists:
-            a.set_visible(active)
+        for e in self._grid_rail_artists:
+            e['artist'].set_visible(active)
 
         if self._btn_detailed is not None:
             lbl = '☑ Detailed' if active else '☐ Detailed'
