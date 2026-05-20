@@ -557,8 +557,8 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         {
             int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
             int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
-            if (!has_stub[lo]) att_x[lo] = blocks[lo].bbox.x2;
-            if (!has_stub[hi]) att_x[hi] = blocks[hi].bbox.x1;
+            if (!has_stub[lo]) att_x[lo] = blocks[lo].orig_bbox.x2;
+            if (!has_stub[hi]) att_x[hi] = blocks[hi].orig_bbox.x1;
         }
         for (int iter = 0; iter < n; ++iter) {
             int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
@@ -578,11 +578,11 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
             int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
             int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
             bool changed = false;
-            if (!has_stub[lo] && att_x[lo] != blocks[lo].bbox.x2) {
-                att_x[lo] = blocks[lo].bbox.x2; changed = true;
+            if (!has_stub[lo] && att_x[lo] != blocks[lo].orig_bbox.x2) {
+                att_x[lo] = blocks[lo].orig_bbox.x2; changed = true;
             }
-            if (!has_stub[hi] && att_x[hi] != blocks[hi].bbox.x1) {
-                att_x[hi] = blocks[hi].bbox.x1; changed = true;
+            if (!has_stub[hi] && att_x[hi] != blocks[hi].orig_bbox.x1) {
+                att_x[hi] = blocks[hi].orig_bbox.x1; changed = true;
             }
             if (!changed) break;
         }
@@ -665,8 +665,8 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         {
             int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
             int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
-            if (!has_stub[lo]) att_y[lo] = blocks[lo].bbox.y2;
-            if (!has_stub[hi]) att_y[hi] = blocks[hi].bbox.y1;
+            if (!has_stub[lo]) att_y[lo] = blocks[lo].orig_bbox.y2;
+            if (!has_stub[hi]) att_y[hi] = blocks[hi].orig_bbox.y1;
         }
         for (int iter = 0; iter < n; ++iter) {
             int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
@@ -686,11 +686,11 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
             int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
             bool changed = false;
-            if (!has_stub[lo] && att_y[lo] != blocks[lo].bbox.y2) {
-                att_y[lo] = blocks[lo].bbox.y2; changed = true;
+            if (!has_stub[lo] && att_y[lo] != blocks[lo].orig_bbox.y2) {
+                att_y[lo] = blocks[lo].orig_bbox.y2; changed = true;
             }
-            if (!has_stub[hi] && att_y[hi] != blocks[hi].bbox.y1) {
-                att_y[hi] = blocks[hi].bbox.y1; changed = true;
+            if (!has_stub[hi] && att_y[hi] != blocks[hi].orig_bbox.y1) {
+                att_y[hi] = blocks[hi].orig_bbox.y1; changed = true;
             }
             if (!changed) break;
         }
