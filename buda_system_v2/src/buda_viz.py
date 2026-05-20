@@ -40,6 +40,23 @@ def _raise_window(fig):
                 except Exception:
                     pass
 
+def _disable_default_keymaps():
+    """Remove default matplotlib keybindings that interfere with BUDA shortcuts."""
+    keys_to_clear = (
+        'keymap.save', 'keymap.fullscreen', 'keymap.home', 'keymap.back',
+        'keymap.forward', 'keymap.xscale', 'keymap.yscale', 'keymap.grid'
+    )
+    for key in keys_to_clear:
+        try:
+            vals = plt.rcParams.get(key, [])
+            # We want to remove single-letter shortcuts like 's', 'f', 'h', 'p', 'n', 'k', etc.
+            # but keep multi-key ones like 'ctrl+s' if possible.
+            to_remove = [v for v in vals if len(v) == 1]
+            for v in to_remove:
+                vals.remove(v)
+        except Exception:
+            pass
+
 # Values beyond this magnitude are the INT_MIN/2 or INT_MAX/2 sentinels
 # that ConnTopology uses for "unconstrained" slide ranges.
 _UNCONSTRAINED = 1_000_000_000
@@ -72,6 +89,7 @@ class TopologyExplorer:
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}
         self._sidecar_path  = sidecar_path
+        _disable_default_keymaps()
         if sidecar_path and os.path.exists(sidecar_path):
             self._load_sidecar()
             # Jump to the saved topo index so the gold border appears on open.
@@ -697,6 +715,7 @@ class BudaVisualizer:
             os.path.splitext(sidecar_path)[0] + '.json'
             if sidecar_path else None
         )
+        _disable_default_keymaps()
         self.fig, self.ax = plt.subplots(figsize=(14, 12))
         self.fig.patch.set_facecolor('#f0f0f0')
         if sidecar_path and self.fig.canvas.manager:
