@@ -439,7 +439,7 @@ class TopologyExplorer:
 
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
-        if event.key in ('cmd+f', 'ctrl+f'):    _toggle_fullscreen(self.fig); return
+        if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+1', 'ctrl+1'):
             if self._main_fig is not None: _raise_window(self._main_fig)
             return
@@ -1549,7 +1549,7 @@ class BudaVisualizer:
 
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
-        if event.key in ('cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
+        if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
         if event.key in ('cmd+a', 'ctrl+a'):
             if self._home_xlim is not None:
