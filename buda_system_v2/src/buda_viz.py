@@ -56,17 +56,19 @@ class TopologyExplorer:
     """
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
-                 rerun_fn=None, refresh_fn=None):
-        self.fp         = fp
-        self._main_fig  = main_fig    # back-reference to main viz figure for cmd-1
-        self._rerun_fn  = rerun_fn    # () -> NUTSResult | None
+                 rerun_fn=None, refresh_fn=None, layer_stack=None):
+        self.fp          = fp
+        self.layer_stack = layer_stack
+        self._main_fig   = main_fig    # back-reference to main viz figure for cmd-1
+        self._rerun_fn   = rerun_fn    # () -> NUTSResult | None
         self._refresh_fn = refresh_fn  # (NUTSResult) -> None
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         self.bidx     = 0   # current bundle index
         self.idx      = 0   # current topology index within bundle
+        self.sidx     = -1  # current selected segment index within current topology
 
-        # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at}
+        # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}
         self._sidecar_path  = sidecar_path
         if sidecar_path and os.path.exists(sidecar_path):
@@ -298,14 +300,23 @@ class TopologyExplorer:
                               if v is old_sel), None)
             if stale_key and stale_key != hint:
                 del self._selections[stale_key]
-        self._selections[hint] = {
-            'bundle_id':       self.wrapper.original_bundle.id,
+        
+        wrapper = self.wrappers[self.bidx]
+        sel = {
+            'bundle_id':       wrapper.original_bundle.id,
             'topo_type':       topo.type,
             'topo_wl':         topo.estimated_wirelength,
             'topo_index_hint': self.idx,
             'note':            '',
             'selected_at':     datetime.now().isoformat(timespec='seconds'),
         }
+        
+        pinned = list(wrapper.pinned_seg_layers)
+        if len(pinned) == len(topo.segments):
+            if any(lid != -1 for lid in pinned):
+                sel['seg_layers'] = pinned
+        
+        self._selections[hint] = sel
         self._save_sidecar()
         self._draw()
 
@@ -329,6 +340,9 @@ class TopologyExplorer:
                     ('bundle_id', 'topo_type', 'topo_wl',
                      'topo_index_hint', 'note', 'selected_at')
                 }
+                if 'seg_layers' in entry:
+                    self._selections[entry['bundle_hint']]['seg_layers'] = entry['seg_layers']
+
             print(f"Loaded {len(self._selections)} selection(s) from {self._sidecar_path}")
         except Exception as e:
             print(f"Warning: could not load sidecar {self._sidecar_path}: {e}")
@@ -336,8 +350,12 @@ class TopologyExplorer:
     def _save_sidecar(self):
         if not self._sidecar_path:
             return
-        entries = [{'bundle_hint': hint, **sel}
-                   for hint, sel in sorted(self._selections.items())]
+        entries = []
+        for hint, sel in sorted(self._selections.items()):
+            # Find the wrapper to check for actual pinned layers if they aren't in sel yet.
+            # (Though _select_current usually populates sel from wrapper).
+            entries.append({'bundle_hint': hint, **sel})
+
         try:
             with open(self._sidecar_path, 'w') as f:
                 json.dump({'selections': entries}, f, indent=2)
@@ -354,12 +372,14 @@ class TopologyExplorer:
 
     def _step_topo(self, delta):
         self.idx = (self.idx + delta) % len(self.topos)
+        self.sidx = -1
         self._reset_rerun_btn()
         self._draw()
 
     def _step_bundle(self, delta):
         self.bidx = (self.bidx + delta) % len(self.wrappers)
         self.idx  = 0
+        self.sidx = -1
         self._reset_rerun_btn()
         self._draw()
 
@@ -375,9 +395,65 @@ class TopologyExplorer:
         if event.key in ('p', 'cmd+p', 'ctrl+p'):    self._step_topo(-1)
         if event.key in ('[', 'pageup'):        self._step_bundle(-1)
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
+        if event.key in ('up', 'k'):            self._step_segment(-1)
+        if event.key in ('down', 'j'):          self._step_segment(+1)
+        if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
+        if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
         if event.key == 's':                    self._select_current()
         if event.key == 'x':                    self._deselect_current()
         if event.key == 'r':                    self._rerun_and_refresh()
+
+    def _step_segment(self, delta):
+        topo = self.topos[self.idx]
+        n = len(topo.segments)
+        if n == 0: return
+        self.sidx = (self.sidx + delta) % n
+        self._draw()
+
+    def _cycle_layer(self, delta):
+        if self.sidx == -1 or self.layer_stack is None:
+            return
+        wrapper = self.wrappers[self.bidx]
+        topo = wrapper.candidates[self.idx]
+        seg = topo.segments[self.sidx]
+        is_h = (seg.start.y == seg.end.y)
+
+        # Get compatible layers.
+        dir = ic.LayerDir.HORIZONTAL if is_h else ic.LayerDir.VERTICAL
+        lids = list(self.layer_stack.get_layer_ids_by_dir(dir))
+        if not lids: return
+
+        # Current layer ID.
+        curr = -1
+        pinned = list(wrapper.pinned_seg_layers)
+        if len(pinned) == len(topo.segments):
+            curr = pinned[self.sidx]
+
+        if curr == -1:
+            actual = list(wrapper.seg_layers)
+            if len(actual) == len(topo.segments):
+                curr = actual[self.sidx]
+            else:
+                curr = seg.layer_hint
+
+        # Find index in lids.
+        try:
+            lidx = lids.index(curr)
+        except ValueError:
+            lidx = 0 # fallback
+
+        new_lidx = (lidx + delta) % len(lids)
+        new_lid = lids[new_lidx]
+
+        # Update pinned_seg_layers.
+        if len(pinned) != len(topo.segments):
+            pinned = [-1] * len(topo.segments)
+
+        pinned[self.sidx] = new_lid
+        wrapper.pinned_seg_layers = pinned
+
+        # Selection logic now automatically persists this.
+        self._select_current()
 
     def _rerun_and_refresh(self):
         """Select current topology, re-run NUTS, and refresh the main viz."""
@@ -482,8 +558,25 @@ class TopologyExplorer:
         self._draw_slide_spans(topo, ct)
 
         # Topology segments — width proportional to bundle width
-        for seg in topo.segments:
-            col = _LAYER_COLOR.get(seg.layer_hint, '#888888')
+        actual_lids = []
+        for i, seg in enumerate(topo.segments):
+            lid = -1
+            if len(self.wrapper.pinned_seg_layers) == len(topo.segments):
+                lid = self.wrapper.pinned_seg_layers[i]
+            if lid == -1 and len(self.wrapper.seg_layers) == len(topo.segments):
+                lid = self.wrapper.seg_layers[i]
+            if lid == -1:
+                lid = seg.layer_hint
+            actual_lids.append(lid)
+
+            col = _LAYER_COLOR.get(lid, '#888888')
+
+            if i == self.sidx:
+                # Selected segment highlight
+                ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
+                        color='white', linewidth=viz_lw + 4,
+                        alpha=0.4, solid_capstyle='round', zorder=9)
+
             ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
                     color=col, linewidth=viz_lw,
                     solid_capstyle='round', zorder=10)
@@ -492,13 +585,16 @@ class TopologyExplorer:
             ax.plot(seg.end.x, seg.end.y, 'o',
                     color=col, markersize=viz_lw * 0.6, zorder=11)
 
+        # Update title with layer info
+        layer_str = " ".join([_LAYER_LABEL.get(lid, f"L{lid}").split()[0] for lid in actual_lids])
+        ax.set_title(ax.get_title() + f" [{layer_str}]", loc='left', fontsize=10, pad=10)
+
         # Busterm diamonds (on top of segments and junction dots)
         self._draw_busterm_markers(topo, ct, viz_lw)
 
         # Legend
         from matplotlib.lines import Line2D
-        used_layers = sorted({s.layer_hint for seg in topo.segments
-                               for s in [seg]})
+        used_layers = sorted(set(actual_lids))
         handles = [Line2D([0], [0], color=_LAYER_COLOR.get(l, '#888'), lw=3,
                           label=_LAYER_LABEL.get(l, f'Layer {l}'))
                    for l in used_layers]
@@ -1320,7 +1416,8 @@ class BudaVisualizer:
             sidecar_path=self._selections_path,
             main_fig=self.fig,
             rerun_fn=self._rerun_fn,
-            refresh_fn=refresh_fn)
+            refresh_fn=refresh_fn,
+            layer_stack=self.layer_stack)
         self._topo_explorer.fig.show()
 
     def _on_key(self, event):

@@ -111,6 +111,15 @@ class BudaSession:
 
             matched_w.selected_topology_index = resolved
             matched_w.topology_pinned = True
+
+            # Load per-segment layer overrides if present.
+            if 'seg_layers' in sel:
+                pinned = sel['seg_layers']
+                topo = matched_w.candidates[resolved]
+                if len(pinned) == len(topo.segments):
+                    matched_w.pinned_seg_layers = list(pinned)
+                    print(f"  (pinned {len(pinned)} segment layers)")
+
             print(f"Pinned bundle '{hint}' to topology {resolved} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']})")
 
@@ -1045,7 +1054,8 @@ class BudaSession:
                     print(f"  bundle {w.original_bundle.id}: "
                           f"{len(w.candidates)} topologies")
                 TopologyExplorer(self.fp, wrappers,
-                                 sidecar_path=self._sidecar_path()).show()
+                                 sidecar_path=self._sidecar_path(),
+                                 layer_stack=self.layers).show()
         elif cmd == "visualize":
             if self.no_viz:
                 return

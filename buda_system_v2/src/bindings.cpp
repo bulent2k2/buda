@@ -42,6 +42,7 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("selected_topology_index", &BundleWrapper::selected_topology_index)
         .def_readwrite("width",                   &BundleWrapper::width)
         .def_readwrite("seg_layers",              &BundleWrapper::seg_layers)
+        .def_readwrite("pinned_seg_layers",       &BundleWrapper::pinned_seg_layers)
         .def_readwrite("assigned_v_layer",        &BundleWrapper::assigned_v_layer)
         .def_readwrite("assigned_h_layer",        &BundleWrapper::assigned_h_layer)
         .def_readwrite("topology_pinned",         &BundleWrapper::topology_pinned);

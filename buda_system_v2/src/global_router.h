@@ -25,6 +25,9 @@ struct BundleWrapper {
     // Per-segment layer assignments set by GlobalRouter (primary).
     // Index matches topo.segments of the selected topology.
     std::vector<int> seg_layers;
+    // Manual layer overrides per segment.  Values are layer IDs, or -1
+    // for no override (let the planner decide).
+    std::vector<int> pinned_seg_layers;
     // Legacy per-direction overrides (set by post_nuts; secondary to seg_layers).
     int assigned_v_layer = -1;
     int assigned_h_layer = -1;

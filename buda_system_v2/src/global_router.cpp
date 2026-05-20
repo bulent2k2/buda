@@ -380,15 +380,22 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
                 double best_s   = std::numeric_limits<double>::max();
                 double best_ov  = 0.0;
 
-                // Iterate highest-ID first so equal-cost layers prefer higher metal.
-                for (int lid : layers_rev) {
-                    double eff  = bw.width * get_dilution(lid);
-                    double cong = cong_cost_segment(seg, lid, eff);
-                    double span = span_cost_for(seg_span, lid);
-                    double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
-                    double s    = cong + span + base;
-                    double ov   = score_segment(seg, lid, eff);  // raw overflow for logging
-                    if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; }
+                // Respect manual layer overrides if present for this segment.
+                if (si < (int)bw.pinned_seg_layers.size() && bw.pinned_seg_layers[si] != -1) {
+                    best_lid = bw.pinned_seg_layers[si];
+                    best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
+                    best_ov  = score_segment(seg, best_lid, bw.width * get_dilution(best_lid));
+                } else {
+                    // Iterate highest-ID first so equal-cost layers prefer higher metal.
+                    for (int lid : layers_rev) {
+                        double eff  = bw.width * get_dilution(lid);
+                        double cong = cong_cost_segment(seg, lid, eff);
+                        double span = span_cost_for(seg_span, lid);
+                        double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
+                        double s    = cong + span + base;
+                        double ov   = score_segment(seg, lid, eff);  // raw overflow for logging
+                        if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; }
+                    }
                 }
 
                 // Apply chosen layer so later segments in this topology see
