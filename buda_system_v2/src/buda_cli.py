@@ -52,6 +52,7 @@ class BudaSession:
         self._detailed_bit_order = "LO_HI"
        # last track pitch used by run_nuts
         self._planner_iterations = 5 # last iteration count used by run_planner
+        self._script_stack = []      # stack of absolute paths of sourced scripts
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
@@ -1082,11 +1083,36 @@ class BudaSession:
                 viz.draw_buses()
             viz.show()
         elif cmd == "source":
+            if not args:
+                print("Error: source command requires a file path")
+                return
+
+            raw_path = args[0]
+            if not raw_path.endswith('.buda') and not os.path.exists(raw_path):
+                raw_path += '.buda'
+
+            # Resolve path relative to the current executing script (if any)
+            if self._script_stack:
+                parent_dir = os.path.dirname(self._script_stack[-1])
+                full_path = os.path.normpath(os.path.join(parent_dir, raw_path))
+            else:
+                full_path = os.path.abspath(raw_path)
+
+            if not os.path.exists(full_path):
+                print(f"Error: sourced file not found: {full_path}")
+                return
+
             if self.script_path is None:
-                self.script_path = os.path.abspath(args[0])
-            with open(args[0], 'r') as f:
-                for line in f:
-                    if not line.strip().startswith('#'): self.do_command(line)
+                self.script_path = full_path
+
+            self._script_stack.append(full_path)
+            try:
+                with open(full_path, 'r') as f:
+                    for line in f:
+                        if not line.strip().startswith('#'):
+                            self.do_command(line)
+            finally:
+                self._script_stack.pop()
 
 def main():
     parser = argparse.ArgumentParser()

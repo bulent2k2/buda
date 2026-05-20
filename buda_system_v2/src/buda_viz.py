@@ -768,9 +768,11 @@ class BudaVisualizer:
         self._btn_vias_conns = None
         self._btn_all        = None
         self._btn_detailed   = None
+        self._btn_tracks     = None
 
         # Detailed NUTS (Stage 9) visualisation state.
         self._detailed_mode          = False
+        self._tracks_visible         = True
         self._detailed_bundle_artists = {}   # bid -> [{artist,alpha,lw,is_band,layer}]
         self._grid_rail_artists      = []    # POWER/GND/CLK stripe patches (not per-bundle)
         self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
@@ -945,8 +947,9 @@ class BudaVisualizer:
             for e in self._grid_rail_artists:
                 a = e['artist']
                 layer_on = self._layer_visible.get(e['layer'], True)
+                tracks_on = self._tracks_visible
                 # Rails are resting at 0.15 alpha.
-                a.set_alpha(0.15 if layer_on else 0.0)
+                a.set_alpha(0.15 if (layer_on and tracks_on) else 0.0)
 
         # Draw thin white boundary lines over each selected bundle's segments.
         # Skipped in detailed mode — overlays would cover bit-wire lines entirely.
@@ -1052,6 +1055,15 @@ class BudaVisualizer:
             a.set_visible(vis)
         if self._btn_vias_conns is not None:
             self._btn_vias_conns.label.set_text('☑ Vias/Conns' if vis else '☐ Vias/Conns')
+
+        # Tracks
+        self._tracks_visible = vis
+        if self._btn_tracks is not None:
+            lbl = '☑ Tracks' if vis else '☐ Tracks'
+            self._btn_tracks.label.set_text(lbl)
+            self._btn_tracks.ax.set_facecolor('#ffe8cc' if vis else '#e8f4e8')
+            for e in self._grid_rail_artists:
+                e['artist'].set_visible(self._detailed_mode and vis)
 
         # All layers
         for lid in self._layer_visible:
@@ -1676,7 +1688,8 @@ class BudaVisualizer:
                 self._cbar_ax.remove()
             except Exception:
                 pass
-        self._cbar_ax = self.fig.add_axes([0.040, 0.20, 0.018, 0.46])
+        # Positioned to the left of the main plot area (left=0.13 in subplots_adjust).
+        self._cbar_ax = self.fig.add_axes([0.075, 0.20, 0.012, 0.46])
         import matplotlib.colors as mcolors
         import numpy as np
         # Build a custom colormap that matches the actual cell appearance:
@@ -2028,6 +2041,12 @@ class BudaVisualizer:
         for e in self._grid_rail_artists:
             e['artist'].set_visible(False)
 
+        # Reveal control buttons if they exist.
+        if self._btn_detailed is not None:
+            self._btn_detailed.ax.set_visible(True)
+        if self._btn_tracks is not None and self._grid_rail_artists:
+            self._btn_tracks.ax.set_visible(self._detailed_mode)
+
     def _toggle_detailed(self):
         self._detailed_mode = not self._detailed_mode
         active = self._detailed_mode
@@ -2040,14 +2059,33 @@ class BudaVisualizer:
             for e in entries:
                 e['artist'].set_visible(active)
         for e in self._grid_rail_artists:
-            e['artist'].set_visible(active)
+            e['artist'].set_visible(active and self._tracks_visible)
 
         if self._btn_detailed is not None:
             lbl = '☑ Detailed' if active else '☐ Detailed'
             self._btn_detailed.label.set_text(lbl)
             self._btn_detailed.ax.set_facecolor('#ffe8cc' if active else '#e8f4e8')
+            
+        if self._btn_tracks is not None:
+            self._btn_tracks.ax.set_visible(active and bool(self._grid_rail_artists))
 
         # Re-apply highlight/layer/bundle visibility to the now-active set.
+        self._refresh_highlight()
+        self.fig.canvas.draw_idle()
+
+    def _toggle_tracks(self):
+        self._tracks_visible = not self._tracks_visible
+        vis = self._tracks_visible
+        
+        for e in self._grid_rail_artists:
+            # Visibility is hard-gated by detailed_mode, alpha by _refresh_highlight.
+            e['artist'].set_visible(self._detailed_mode and vis)
+            
+        if self._btn_tracks is not None:
+            lbl = '☑ Tracks' if vis else '☐ Tracks'
+            self._btn_tracks.label.set_text(lbl)
+            self._btn_tracks.ax.set_facecolor('#ffe8cc' if vis else '#e8f4e8')
+            
         self._refresh_highlight()
         self.fig.canvas.draw_idle()
 
@@ -2150,13 +2188,13 @@ class BudaVisualizer:
         self._home_ylim = self.ax.get_ylim()
 
         # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
-        # Left panel: x=0.005, width=0.09.  Plot left edge at 0.10.
+        # Left panel: x=0.005, width=0.065.  Plot left edge at 0.13.
         # bottom=0.11 reserves room for x-tick labels above the button row.
         # top=0.97 reclaims the wasted margin above the title.
-        self.fig.subplots_adjust(left=0.10, bottom=0.11, right=0.81, top=0.97)
+        self.fig.subplots_adjust(left=0.13, bottom=0.11, right=0.81, top=0.97)
 
         # ── Left panel: view toggles ──────────────────────────────────────
-        LX, LW = 0.005, 0.088
+        LX, LW = 0.005, 0.065
         BTN_H_L = 0.038
         GAP_L   = 0.008
 
@@ -2169,27 +2207,27 @@ class BudaVisualizer:
 
         ax_all = self.fig.add_axes(_lrect(BTN_H_L))
         self._btn_all = Button(ax_all, '☑ All', color='#d0e8ff')
-        self._btn_all.label.set_fontsize(8)
+        self._btn_all.label.set_fontsize(7.5)
         self._btn_all.on_clicked(lambda _: self._toggle_all())
 
         ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_blknames = Button(ax_blknames, '☑ Blk Names', color='#e8f4e8')
-        self._btn_blknames.label.set_fontsize(8)
+        self._btn_blknames.label.set_fontsize(7.5)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
 
         ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_bustermss = Button(ax_bustermss, '☑ Busterms', color='#e8f4e8')
-        self._btn_bustermss.label.set_fontsize(8)
+        self._btn_bustermss.label.set_fontsize(7.5)
         self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
 
         ax_vias_conns = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_vias_conns = Button(ax_vias_conns, '☑ Vias/Conns', color='#e8f4e8')
-        self._btn_vias_conns.label.set_fontsize(8)
+        self._btn_vias_conns.label.set_fontsize(7.5)
         self._btn_vias_conns.on_clicked(lambda _: self._toggle_vias_conns())
 
         ax_heatmap = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_heatmap = Button(ax_heatmap, '☑ Heatmap', color='#e8f4e8')
-        self._btn_heatmap.label.set_fontsize(8)
+        self._btn_heatmap.label.set_fontsize(7.5)
         self._btn_heatmap.on_clicked(lambda _: self._toggle_heatmap())
         # Heatmap button is only meaningful when a congestion map was drawn.
         if not self._heatmap_artists and self._cbar_ax is None:
@@ -2197,11 +2235,19 @@ class BudaVisualizer:
 
         ax_detailed = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_detailed = Button(ax_detailed, '☐ Detailed', color='#e8f4e8')
-        self._btn_detailed.label.set_fontsize(8)
+        self._btn_detailed.label.set_fontsize(7.5)
         self._btn_detailed.on_clicked(lambda _: self._toggle_detailed())
         # Hidden until draw_detailed_tracks() has been called.
         if not self._detailed_bundle_artists:
             self._btn_detailed.ax.set_visible(False)
+
+        ax_tracks = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_tracks = Button(ax_tracks, '☑ Tracks', color='#ffe8cc')
+        self._btn_tracks.label.set_fontsize(7.5)
+        self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
+        # Only visible when detailed mode is active and there are rail artists.
+        if not self._detailed_mode or not self._grid_rail_artists:
+            self._btn_tracks.ax.set_visible(False)
 
         RX, RW   = 0.83, 0.15
         BTN_H    = 0.044
