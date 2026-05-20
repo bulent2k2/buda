@@ -52,6 +52,7 @@ class TopologyExplorer:
       ← / →  (or ◀/▶ Topo buttons)  — prev / next topology within bundle
       cmd-p / cmd-n                  — prev / next topology within bundle
       [ / ]  (or ◀/▶ Bus buttons)   — prev / next bundle
+      s (or Select button)           — toggle selection (pin/unpin)
       cmd-1                          — raise the main BUDA viz window
     """
 
@@ -434,7 +435,9 @@ class TopologyExplorer:
         if event.key in ('down', 'j'):          self._step_segment(+1)
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
         if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
-        if event.key == 's':                    self._select_current()
+        if event.key == 's':
+            if self._current_is_selected(): self._deselect_current()
+            else:                           self._select_current()
         if event.key == 'x':                    self._deselect_current()
         if event.key == 'r':                    self._rerun_and_refresh()
 
