@@ -1,5 +1,6 @@
 #include "detailed_nuts.h"
 #include <algorithm>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <set>
@@ -48,6 +49,9 @@ DetailedNUTSResult DetailedNUTSEngine::run(
 
     for (auto& [layer, indices] : by_layer) {
         if (!stack_.has_layer(layer)) {
+            std::cout << "[DetailedNUTS] Warning: Layer " << layer 
+                      << " has no track pattern defined. Skipping " << indices.size()
+                      << " segment(s)." << std::endl;
             for (int idx : indices) result.num_unplaced += bus_segs[idx].bit_width;
             continue;
         }
@@ -78,6 +82,10 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             int n_sig = (int)signal_tracks.size();
 
             if (n_sig < bs.bit_width) {
+                std::cout << "[DetailedNUTS] Warning: Layer " << layer 
+                          << " has insufficient signal tracks (" << n_sig 
+                          << ") for bus width " << bs.bit_width 
+                          << " in interval [" << bs.interval_lo << ", " << bs.interval_hi << "]" << std::endl;
                 result.num_unplaced += bs.bit_width;
                 continue;
             }
