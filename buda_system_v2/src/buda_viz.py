@@ -748,6 +748,7 @@ class BudaVisualizer:
         self._overlap_entries = []   # sorted list of OverlapDetail from nuts_result
         self._overlap_scroll = 0
         self._nuts_result    = None  # stored in draw_nuts_tracks for the overlap panel
+        self._detailed_result = None # stored in draw_detailed_tracks for bit stats
         self._topo_explorer  = None
         self._pick_happened  = False
         self._cbar_ax        = None   # colorbar axes for congestion heatmap
@@ -768,9 +769,17 @@ class BudaVisualizer:
         self._btn_vias_conns = None
         self._btn_all        = None
         self._btn_detailed   = None
+        self._btn_tracks     = None
+
+        # Layout constants for the left panel (view toggles + heatmap)
+        self._LX, self._LW = 0.005, 0.065
+        # Start with a conservative estimate to leave room for ~7 buttons (7 * 0.046 = 0.322)
+        # 0.97 - 0.322 = 0.648.
+        self._ly_post_buttons = 0.62 
 
         # Detailed NUTS (Stage 9) visualisation state.
         self._detailed_mode          = False
+        self._tracks_visible         = True
         self._detailed_bundle_artists = {}   # bid -> [{artist,alpha,lw,is_band,layer}]
         self._grid_rail_artists      = []    # POWER/GND/CLK stripe patches (not per-bundle)
         self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
@@ -945,8 +954,9 @@ class BudaVisualizer:
             for e in self._grid_rail_artists:
                 a = e['artist']
                 layer_on = self._layer_visible.get(e['layer'], True)
+                tracks_on = self._tracks_visible
                 # Rails are resting at 0.15 alpha.
-                a.set_alpha(0.15 if layer_on else 0.0)
+                a.set_alpha(0.15 if (layer_on and tracks_on) else 0.0)
 
         # Draw thin white boundary lines over each selected bundle's segments.
         # Skipped in detailed mode — overlays would cover bit-wire lines entirely.
@@ -1018,6 +1028,63 @@ class BudaVisualizer:
             self._btn_heatmap.label.set_text(label)
         self.fig.canvas.draw_idle()
 
+    def _reset_view(self):
+        """Force all bundles and layers to visible, and clear selection."""
+        self._highlighted      = None
+        self._highlighted_set  = set()
+        self._selected_overlap = None
+        self._overlap_state    = 0
+        self._solo             = False
+        if self._btn_solo is not None:
+             self._btn_solo.label.set_text("Solo OFF")
+             self._btn_solo.ax.set_facecolor('#f0f0f0')
+
+        # Reset design element toggles to True.
+        self._all_vis             = True
+        self._heatmap_visible     = True
+        self._block_names_visible = True
+        self._bustermss_visible   = True
+        self._vias_conns_visible  = True
+        self._tracks_visible      = True
+
+        # Toggle All logic (forced to True)
+        if self._btn_all is not None:
+            self._btn_all.label.set_text('☑ All')
+
+        for lid in self._layer_visible:
+            self._layer_visible[lid] = True
+        if self._btn_all_layers is not None:
+            self._btn_all_layers.label.set_text('☑ All Layers')
+            self._btn_all_layers.ax.set_facecolor('#e8e8e8')
+
+        for bid in self._bundle_visible:
+            self._bundle_visible[bid] = True
+        if self._btn_all_bundles is not None:
+            self._btn_all_bundles.ax.set_facecolor('#e8e8e8')
+
+        # Artist visibility
+        for a in self._heatmap_artists: a.set_visible(True)
+        if self._cbar_ax: self._cbar_ax.set_visible(True)
+        for txt in self._block_name_artists: txt.set_visible(True)
+        for a in self._busterm_artists: a.set_visible(True)
+        for a in self._vias_conns_artists: a.set_visible(True)
+        for e in self._grid_rail_artists:
+             e['artist'].set_visible(self._detailed_mode)
+
+        # Update button labels
+        if self._btn_heatmap is not None: self._btn_heatmap.label.set_text('☑ Heatmap')
+        if self._btn_blknames is not None: self._btn_blknames.label.set_text('☑ Blk Names')
+        if self._btn_bustermss is not None: self._btn_bustermss.label.set_text('☑ Busterms')
+        if self._btn_vias_conns is not None: self._btn_vias_conns.label.set_text('☑ Vias/Conns')
+        if self._btn_tracks is not None:
+             self._btn_tracks.label.set_text('☑ Tracks')
+             self._btn_tracks.ax.set_facecolor('#ffe8cc')
+
+        self._redraw_layer_list()
+        self._redraw_bundle_list()
+        self._refresh_highlight()
+        self.fig.canvas.draw_idle()
+
     def _toggle_all(self):
         self._all_vis = not self._all_vis
         vis = self._all_vis
@@ -1053,6 +1120,15 @@ class BudaVisualizer:
         if self._btn_vias_conns is not None:
             self._btn_vias_conns.label.set_text('☑ Vias/Conns' if vis else '☐ Vias/Conns')
 
+        # Tracks
+        self._tracks_visible = vis
+        if self._btn_tracks is not None:
+            lbl = '☑ Tracks' if vis else '☐ Tracks'
+            self._btn_tracks.label.set_text(lbl)
+            self._btn_tracks.ax.set_facecolor('#ffe8cc' if vis else '#e8f4e8')
+            for e in self._grid_rail_artists:
+                e['artist'].set_visible(self._detailed_mode and vis)
+
         # All layers
         for lid in self._layer_visible:
             self._layer_visible[lid] = vis
@@ -1065,7 +1141,6 @@ class BudaVisualizer:
         for bid in self._bundle_visible:
             self._bundle_visible[bid] = vis
         if self._btn_all_bundles is not None:
-            self._btn_all_bundles.label.set_text('☑ All Bundles' if vis else '☐ All Bundles')
             self._btn_all_bundles.ax.set_facecolor('#e8e8e8' if vis else '#cccccc')
         self._redraw_bundle_list()
 
@@ -1326,6 +1401,16 @@ class BudaVisualizer:
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
 
+        # Update the header button label with global stats if available.
+        if self._btn_all_bundles is not None:
+            all_on = all(self._bundle_visible.values())
+            all_lbl = '☑ All Bundles' if all_on else '☐ All Bundles'
+            if self._detailed_result:
+                n_total = sum(len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
+                              for w in self.bundles if w.candidates)
+                all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
+            self._btn_all_bundles.label.set_text(all_lbl)
+
         n_vis   = self._bundle_list_n_visible()
         bids    = self._bid_list
         n_total = len(bids)
@@ -1359,10 +1444,29 @@ class BudaVisualizer:
                     transform=ax.transAxes,
                     fontsize=7, color=sel_color,
                     va='center', clip_on=True)
+            
+            # Bit stats for this bundle: [unplaced/total]
+            stats_part = ""
+            stats_color = '#111111'
+            if self._detailed_result:
+                # DetailedNUTSResult doesn't easily provide per-bundle unplaced count.
+                # Let's count how many net_segments we have vs how many we expect.
+                w = next(w for w in self.bundles if w.original_bundle.id == bid)
+                n_expected = len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
+                n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
+                n_unp = n_expected - n_placed
+                stats_part = f" [{n_unp}/{n_expected}]"
+                stats_color = '#CC0000' if n_unp > 0 else '#008800'
+
             ax.text(0.20, y, f"{vis_char} {full}",
                     transform=ax.transAxes,
                     fontsize=7, color=txt_color,
                     va='center', clip_on=True)
+            if stats_part:
+                 ax.text(0.85, y, stats_part,
+                        transform=ax.transAxes,
+                        fontsize=7, color=stats_color,
+                        va='center', ha='right', fontweight='bold', clip_on=True)
 
         # Scrollbar thumb on right edge.
         if n_total > n_vis:
@@ -1425,8 +1529,6 @@ class BudaVisualizer:
         for bid in self._bundle_visible:
             self._bundle_visible[bid] = new_state
         if self._btn_all_bundles is not None:
-            self._btn_all_bundles.label.set_text(
-                '☑ All Bundles' if new_state else '☐ All Bundles')
             self._btn_all_bundles.ax.set_facecolor(
                 '#e8e8e8' if new_state else '#cccccc')
         self._redraw_bundle_list()
@@ -1532,6 +1634,14 @@ class BudaVisualizer:
 
     def _open_topo_explorer(self):
         if self._highlighted is None:
+            # Automatically select the first bundle that has candidates.
+            for w in self.bundles:
+                if w.candidates:
+                    self._highlighted = w.original_bundle.id
+                    self._refresh_highlight()
+                    break
+
+        if self._highlighted is None:
             return
         wrapper = next((w for w in self.bundles
                         if w.original_bundle.id == self._highlighted), None)
@@ -1551,6 +1661,10 @@ class BudaVisualizer:
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
+        if event.key == 'a':
+            if self._detailed_mode: self._set_highlight(None)
+            else:                   self._reset_view()
+            return
         if event.key in ('cmd+a', 'ctrl+a'):
             if self._home_xlim is not None:
                 self.ax.set_xlim(self._home_xlim)
@@ -1671,14 +1785,35 @@ class BudaVisualizer:
             a.set_visible(vis)
 
         # Colorbar legend — created once per draw, rebuilt on subsequent calls.
+        self._redraw_colorbar()
+
+    def _redraw_colorbar(self):
+        """Re-create the congestion colorbar in the correct left-panel position."""
+        if not self._heatmap_artists and self._cbar_ax is None:
+            return
+        
+        # Build dummy data for ScalarMappable if we haven't already.
+        import matplotlib.colors as mcolors
+        import numpy as np
+        cmap = plt.cm.get_cmap('RdYlGn_r')
+
         if self._cbar_ax is not None:
             try:
                 self._cbar_ax.remove()
             except Exception:
                 pass
-        self._cbar_ax = self.fig.add_axes([0.040, 0.20, 0.018, 0.46])
-        import matplotlib.colors as mcolors
-        import numpy as np
+
+        # Positioned below the button stack, aligned horizontally with buttons.
+        # Height reduced to 0.35.
+        cb_w = 0.012
+        cb_h = 0.35
+        # Align right edge of heatmap with right edge of buttons:
+        cb_x = self._LX + self._LW - cb_w
+        # Pack below the last button.
+        cb_y = self._ly_post_buttons - cb_h - 0.04
+        
+        self._cbar_ax = self.fig.add_axes([cb_x, cb_y, cb_w, cb_h])
+
         # Build a custom colormap that matches the actual cell appearance:
         # at 0% congestion cells are ~white (low alpha on white bg); at 150%+ they
         # are the full RdYlGn_r red.  Blend from white → RdYlGn_r colours.
@@ -1703,7 +1838,7 @@ class BudaVisualizer:
         cbar.set_label('Congestion', fontsize=8, labelpad=4)
         cbar.ax.yaxis.set_label_position('left')
         cbar.ax.yaxis.set_ticks_position('left')
-        self._cbar_ax.set_visible(vis)
+        self._cbar_ax.set_visible(self._heatmap_visible)
 
     def draw_hanan_grid(self):
         xs, ys = self.fp.get_hanan_grid()
@@ -2003,6 +2138,7 @@ class BudaVisualizer:
                 self._grid_rail_artists.append({'artist': rect, 'layer': lid})
 
         # Draw bit-wire NetSegments.
+        self._detailed_result = detailed_result
         # span_lo/span_hi are already junction-adjusted by DetailedNUTSEngine.
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for ns in detailed_result.net_segments:
@@ -2028,6 +2164,15 @@ class BudaVisualizer:
         for e in self._grid_rail_artists:
             e['artist'].set_visible(False)
 
+        # Reveal control buttons if they exist.
+        if self._btn_detailed is not None:
+            self._btn_detailed.ax.set_visible(True)
+        if self._btn_tracks is not None and self._grid_rail_artists:
+            self._btn_tracks.ax.set_visible(self._detailed_mode)
+
+        # Update bundle list to show bit placement stats.
+        self._redraw_bundle_list()
+
     def _toggle_detailed(self):
         self._detailed_mode = not self._detailed_mode
         active = self._detailed_mode
@@ -2040,14 +2185,33 @@ class BudaVisualizer:
             for e in entries:
                 e['artist'].set_visible(active)
         for e in self._grid_rail_artists:
-            e['artist'].set_visible(active)
+            e['artist'].set_visible(active and self._tracks_visible)
 
         if self._btn_detailed is not None:
             lbl = '☑ Detailed' if active else '☐ Detailed'
             self._btn_detailed.label.set_text(lbl)
             self._btn_detailed.ax.set_facecolor('#ffe8cc' if active else '#e8f4e8')
+            
+        if self._btn_tracks is not None:
+            self._btn_tracks.ax.set_visible(active and bool(self._grid_rail_artists))
 
         # Re-apply highlight/layer/bundle visibility to the now-active set.
+        self._refresh_highlight()
+        self.fig.canvas.draw_idle()
+
+    def _toggle_tracks(self):
+        self._tracks_visible = not self._tracks_visible
+        vis = self._tracks_visible
+        
+        for e in self._grid_rail_artists:
+            # Visibility is hard-gated by detailed_mode, alpha by _refresh_highlight.
+            e['artist'].set_visible(self._detailed_mode and vis)
+            
+        if self._btn_tracks is not None:
+            lbl = '☑ Tracks' if vis else '☐ Tracks'
+            self._btn_tracks.label.set_text(lbl)
+            self._btn_tracks.ax.set_facecolor('#ffe8cc' if vis else '#e8f4e8')
+            
         self._refresh_highlight()
         self.fig.canvas.draw_idle()
 
@@ -2150,13 +2314,13 @@ class BudaVisualizer:
         self._home_ylim = self.ax.get_ylim()
 
         # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
-        # Left panel: x=0.005, width=0.09.  Plot left edge at 0.10.
+        # Left panel: centered area for toggles and heatmap.
         # bottom=0.11 reserves room for x-tick labels above the button row.
         # top=0.97 reclaims the wasted margin above the title.
-        self.fig.subplots_adjust(left=0.10, bottom=0.11, right=0.81, top=0.97)
+        self.fig.subplots_adjust(left=0.13, bottom=0.11, right=0.81, top=0.97)
 
         # ── Left panel: view toggles ──────────────────────────────────────
-        LX, LW = 0.005, 0.088
+        LX, LW = self._LX, self._LW
         BTN_H_L = 0.038
         GAP_L   = 0.008
 
@@ -2169,27 +2333,27 @@ class BudaVisualizer:
 
         ax_all = self.fig.add_axes(_lrect(BTN_H_L))
         self._btn_all = Button(ax_all, '☑ All', color='#d0e8ff')
-        self._btn_all.label.set_fontsize(8)
+        self._btn_all.label.set_fontsize(7.5)
         self._btn_all.on_clicked(lambda _: self._toggle_all())
 
         ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_blknames = Button(ax_blknames, '☑ Blk Names', color='#e8f4e8')
-        self._btn_blknames.label.set_fontsize(8)
+        self._btn_blknames.label.set_fontsize(7.5)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
 
         ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_bustermss = Button(ax_bustermss, '☑ Busterms', color='#e8f4e8')
-        self._btn_bustermss.label.set_fontsize(8)
+        self._btn_bustermss.label.set_fontsize(7.5)
         self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
 
         ax_vias_conns = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_vias_conns = Button(ax_vias_conns, '☑ Vias/Conns', color='#e8f4e8')
-        self._btn_vias_conns.label.set_fontsize(8)
+        self._btn_vias_conns.label.set_fontsize(7.5)
         self._btn_vias_conns.on_clicked(lambda _: self._toggle_vias_conns())
 
         ax_heatmap = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_heatmap = Button(ax_heatmap, '☑ Heatmap', color='#e8f4e8')
-        self._btn_heatmap.label.set_fontsize(8)
+        self._btn_heatmap.label.set_fontsize(7.5)
         self._btn_heatmap.on_clicked(lambda _: self._toggle_heatmap())
         # Heatmap button is only meaningful when a congestion map was drawn.
         if not self._heatmap_artists and self._cbar_ax is None:
@@ -2197,11 +2361,23 @@ class BudaVisualizer:
 
         ax_detailed = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_detailed = Button(ax_detailed, '☐ Detailed', color='#e8f4e8')
-        self._btn_detailed.label.set_fontsize(8)
+        self._btn_detailed.label.set_fontsize(7.5)
         self._btn_detailed.on_clicked(lambda _: self._toggle_detailed())
         # Hidden until draw_detailed_tracks() has been called.
         if not self._detailed_bundle_artists:
             self._btn_detailed.ax.set_visible(False)
+
+        ax_tracks = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_tracks = Button(ax_tracks, '☑ Tracks', color='#ffe8cc')
+        self._btn_tracks.label.set_fontsize(7.5)
+        self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
+        # Only visible when detailed mode is active and there are rail artists.
+        if not self._detailed_mode or not self._grid_rail_artists:
+            self._btn_tracks.ax.set_visible(False)
+
+        # Store the current packing position for the colorbar.
+        self._ly_post_buttons = ly
+        self._redraw_colorbar()
 
         RX, RW   = 0.83, 0.15
         BTN_H    = 0.044
@@ -2226,6 +2402,7 @@ class BudaVisualizer:
         # ── All Layers ──────────────────────────────────────────────────
         ax_all_layers = self.fig.add_axes(_rect(BTN_H))
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
+        self._btn_all_layers.label.set_fontsize(8.5)
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
         # ── Per-layer custom panel ───────────────────────────────────────
@@ -2236,6 +2413,7 @@ class BudaVisualizer:
         # ── All Bundles ──────────────────────────────────────────────────
         ax_all_bundles = self.fig.add_axes(_rect(BTN_H, GAP))
         self._btn_all_bundles = Button(ax_all_bundles, '☑ All Bundles', color='#e8e8e8')
+        self._btn_all_bundles.label.set_fontsize(8.5)
         self._btn_all_bundles.on_clicked(lambda _: self._on_bundle_toggle_all())
 
         # ── Bundle list: ▲ · list · ▼ ───────────────────────────────────
