@@ -1,0 +1,13 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "blocked",
+      "bundle_id": 2,
+      "topo_type": "L_HV@x700@y100",
+      "topo_wl": 1100,
+      "topo_index_hint": 0,
+      "note": "Forced into keepout zone",
+      "selected_at": "2026-05-20T10:00:00"
+    }
+  ]
+}

@@ -736,6 +736,40 @@ class BudaSession:
                     self.fp.set_min_stub_length_layer(lid, val)
                 else:
                     print(f"Error: unknown layer '{lname}'")
+        elif cmd == "add_keepout":
+            # Usage: add_keepout <x1> <y1> <x2> <y2> <layer1> <layer2> ...
+            if len(args) < 5:
+                print("Error: add_keepout requires x1 y1 x2 y2 and at least one layer")
+                return
+            try:
+                x1, y1, x2, y2 = int(args[0]), int(args[1]), int(args[2]), int(args[3])
+                layer_ids = []
+                for name in args[4:]:
+                    if name.isdigit():
+                        layer_ids.append(int(name))
+                    elif name in self._layer_name_map:
+                        layer_ids.append(self._layer_name_map[name])
+                    else:
+                        print(f"Warning: unknown layer '{name}' in add_keepout")
+
+                if not layer_ids:
+                    print("Error: no valid layers specified for add_keepout")
+                    return
+
+                # 1. Update Floorplan (for GlobalRouter / Stage 7)
+                self.fp.add_keepout_zone(x1, y1, x2, y2, layer_ids)
+
+                # 2. Update RoutingGrid (for DetailedNUTS / Stage 9)
+                if self.routing_grid:
+                    for lid in layer_ids:
+                        if self.routing_grid.has_layer(lid):
+                            self.routing_grid.add_keepout(lid, x1, y1, x2, y2)
+
+                print(f"[Floorplan] Added keepout zone at ({x1},{y1})-({x2},{y2}) "
+                      f"for layers {layer_ids}")
+            except (ValueError, IndexError):
+                print("Error: invalid arguments for add_keepout")
+
         elif cmd == "add_net":
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')
@@ -979,10 +1013,25 @@ class BudaSession:
             pat = interconnect.TrackPattern(origin=origin, slots=slots)
             if self.routing_grid is None:
                 self.routing_grid = interconnect.RoutingGridStack()
-            self.routing_grid.define_layer(layer_id, pat)
+
+            # Resolve layer direction.
+            is_h = True
+            if self.layers.has_layer(layer_id):
+                is_h = (self.layers.get_layer_dir(layer_id) == interconnect.LayerDir.HORIZONTAL)
+
+            self.routing_grid.define_layer(layer_id, pat, is_h)
+
+            # Re-apply any existing keepouts to this new layer grid.
+            for koz in self.fp.get_keepout_zones():
+                if layer_id in koz.layer_ids:
+                    self.routing_grid.add_keepout(layer_id, 
+                                                 koz.bbox.x1, koz.bbox.y1, 
+                                                 koz.bbox.x2, koz.bbox.y2)
+
             print(f"[RoutingGrid] Layer {layer_id}: {len(slots)} slots, "
                   f"unit_pitch={pat.unit_pitch():.3f}, "
                   f"signal_density={pat.signal_density():.3f}")
+
         elif cmd == "add_grid_override":
             # Usage: add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...
             if len(args) < 6:

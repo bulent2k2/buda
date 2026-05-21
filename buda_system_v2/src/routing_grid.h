@@ -54,6 +54,10 @@ class RoutingGrid {
 public:
     TrackPattern                global_pattern;
     std::vector<PatternOverride> overrides;
+    std::vector<Rect>           keepouts;
+    bool                        is_horizontal = true;
+
+    void add_keepout(const Rect& bbox) { keepouts.push_back(bbox); }
 
     // Returns the first matching override pattern for point (x,y), else global.
     const TrackPattern& effective_pattern_at(double x, double y) const;
@@ -68,11 +72,15 @@ public:
 // ---------------------------------------------------------------------------
 class RoutingGridStack {
 public:
-    void define_layer(int layer_id, const TrackPattern& pattern);
+    void define_layer(int layer_id, const TrackPattern& pattern, bool is_horizontal);
 
     void add_override(int layer_id,
                       int x1, int y1, int x2, int y2,
                       const TrackPattern& pattern);
+
+    void add_keepout(int layer_id, int x1, int y1, int x2, int y2) {
+        get_layer_grid(layer_id).add_keepout(Rect{x1, y1, x2, y2});
+    }
 
     // Throws std::out_of_range if layer_id is not defined.
     RoutingGrid&       get_layer_grid(int layer_id);

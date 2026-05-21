@@ -1760,6 +1760,27 @@ class BudaVisualizer:
             txt = _draw_block(self.ax, name, rect, self.fp)
             if txt is not None:
                 self._block_name_artists.append(txt)
+        self.draw_keepouts()
+
+    def draw_keepouts(self):
+        """Draw KeepoutZones as hatched rectangles with layer labels."""
+        for koz in self.fp.get_keepout_zones():
+            r = koz.bbox
+            w = r.x2 - r.x1
+            h = r.y2 - r.y1
+            # Red hatched rectangle
+            rect = patches.Rectangle(
+                (r.x1, r.y1), w, h,
+                linewidth=1, edgecolor='red', facecolor='none',
+                hatch='///', alpha=0.4, zorder=1)
+            self.ax.add_patch(rect)
+            
+            # Label with layers
+            layers = sorted(list(koz.layer_ids))
+            layer_str = "KOZ: " + ",".join(_LAYER_LABEL.get(lid, f"M{lid}").split()[0] for lid in layers)
+            self.ax.text((r.x1 + r.x2) / 2, r.y2 + 5,
+                         layer_str, color='red', fontsize=7, 
+                         ha='center', va='bottom', clip_on=True, zorder=2)
 
     def draw_congestion_map(self, cuts, xs, ys):
         """Shade each Hanan (cut × perpendicular-band) cell by utilisation ratio.

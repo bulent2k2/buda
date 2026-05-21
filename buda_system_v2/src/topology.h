@@ -67,9 +67,16 @@ struct MinStubLength {
     std::map<int, int> per_layer;
 };
 
+struct KeepoutZone {
+    Rect bbox;
+    std::set<int> layer_ids;
+};
+
 class Floorplan {
 public:
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
+    void add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids);
+    const std::vector<KeepoutZone>& get_keepout_zones() const { return keepouts_; }
     // Multi-rect block: stores each rect individually; add_block is called
     // internally with the union bounding box for backward compatibility.
     void add_block_rects(const std::string& name, const std::vector<Rect>& rects);
@@ -106,6 +113,7 @@ private:
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};
     MinStubLength min_stub_len_;
+    std::vector<KeepoutZone> keepouts_;
 };
 class TopologyGenerator {
 public:

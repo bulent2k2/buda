@@ -59,9 +59,12 @@ int GlobalRouter::find_band(bool is_vcut, int perp_pos) const {
 static double band_available_length(
         int cut_coord, bool is_vcut,
         const std::vector<std::pair<std::string,Rect>>& blocks,
+        const std::vector<KeepoutZone>& keepouts,
+        int layer_id,
         int band_lo, int band_hi)
 {
     std::vector<std::pair<int,int>> blocked;
+    // 1. Block footprints
     for (const auto& [name, r] : blocks) {
         bool covers = is_vcut
             ? (cut_coord >= r.x1 && cut_coord <= r.x2)
@@ -73,6 +76,21 @@ static double band_available_length(
         int chi = std::min(hi, band_hi);
         if (clo < chi) blocked.push_back({clo, chi});
     }
+    // 2. Keepout zones for this layer
+    for (const auto& koz : keepouts) {
+        if (!koz.layer_ids.count(layer_id)) continue;
+        const Rect& r = koz.bbox;
+        bool covers = is_vcut
+            ? (cut_coord >= r.x1 && cut_coord <= r.x2)
+            : (cut_coord >= r.y1 && cut_coord <= r.y2);
+        if (!covers) continue;
+        int lo = is_vcut ? r.y1 : r.x1;
+        int hi = is_vcut ? r.y2 : r.x2;
+        int clo = std::max(lo, band_lo);
+        int chi = std::min(hi, band_hi);
+        if (clo < chi) blocked.push_back({clo, chi});
+    }
+
     std::sort(blocked.begin(), blocked.end());
     double avail = static_cast<double>(band_hi - band_lo);
     int cur = band_lo;
@@ -92,7 +110,8 @@ void GlobalRouter::_rebuild_cuts() {
     cuts_.clear();
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
-    auto blocks  = floorplan_.get_all_blocks();
+    auto blocks   = floorplan_.get_all_blocks();
+    auto keepouts = floorplan_.get_keepout_zones();
     int n_ybands = (int)y_grid_.size() - 1;
     int n_xbands = (int)x_grid_.size() - 1;
 
@@ -117,10 +136,11 @@ void GlobalRouter::_rebuild_cuts() {
             c.band_usage.assign(n_ybands, 0.0);
             for (int b = 0; b < n_ybands; ++b) {
                 if (is_top) {
-                    c.band_cap[b] = (double)(y_grid_[b+1] - y_grid_[b]);
+                    c.band_cap[b] = band_available_length(
+                            x_mid, true, {}, keepouts, lid, y_grid_[b], y_grid_[b+1]);
                 } else {
                     c.band_cap[b] = band_available_length(
-                            x_mid, true, blocks, y_grid_[b], y_grid_[b+1]);
+                            x_mid, true, blocks, keepouts, lid, y_grid_[b], y_grid_[b+1]);
                 }
             }
             cuts_.push_back(std::move(c));
@@ -143,10 +163,11 @@ void GlobalRouter::_rebuild_cuts() {
             c.band_usage.assign(n_xbands, 0.0);
             for (int b = 0; b < n_xbands; ++b) {
                 if (is_top) {
-                    c.band_cap[b] = (double)(x_grid_[b+1] - x_grid_[b]);
+                    c.band_cap[b] = band_available_length(
+                            y_mid, false, {}, keepouts, lid, x_grid_[b], x_grid_[b+1]);
                 } else {
                     c.band_cap[b] = band_available_length(
-                            y_mid, false, blocks, x_grid_[b], x_grid_[b+1]);
+                            y_mid, false, blocks, keepouts, lid, x_grid_[b], x_grid_[b+1]);
                 }
             }
             cuts_.push_back(std::move(c));

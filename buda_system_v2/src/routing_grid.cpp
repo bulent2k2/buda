@@ -80,9 +80,23 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
     auto all = pat.tracks_in_range(lo, hi);
     std::vector<std::pair<double, TrackSlot>> result;
     result.reserve(all.size());
-    for (auto& p : all)
-        if (p.second.type == "SIGNAL")
-            result.push_back(std::move(p));
+    for (auto& p : all) {
+        if (p.second.type == "SIGNAL") {
+            bool blocked = false;
+            for (const auto& koz : keepouts) {
+                // p.first is the fixed coordinate of the track (Y if horizontal, X if vertical).
+                // x is the coordinate along the track span (X if horizontal, Y if vertical).
+                double px = is_horizontal ? x : p.first;
+                double py = is_horizontal ? p.first : x;
+                if (px >= koz.x1 && px <= koz.x2 &&
+                    py >= koz.y1 && py <= koz.y2) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (!blocked) result.push_back(std::move(p));
+        }
+    }
     return result;
 }
 
@@ -90,8 +104,10 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
 // RoutingGridStack
 // ---------------------------------------------------------------------------
 
-void RoutingGridStack::define_layer(int layer_id, const TrackPattern& pattern) {
-    layers_[layer_id].global_pattern = pattern;
+void RoutingGridStack::define_layer(int layer_id, const TrackPattern& pattern, bool is_horizontal) {
+    auto& g = layers_[layer_id];
+    g.global_pattern = pattern;
+    g.is_horizontal  = is_horizontal;
 }
 
 void RoutingGridStack::add_override(int layer_id,

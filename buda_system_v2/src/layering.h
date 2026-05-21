@@ -27,6 +27,7 @@ public:
     void set_layer_kspan(int id, double kspan);
 
     const Layer* get_layer(int id) const;
+    bool         has_layer(int id) const;
     bool         is_top(int id) const;
     LayerDir     get_layer_dir(int id) const;
     LayerType    get_layer_type(int id) const;

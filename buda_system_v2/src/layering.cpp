@@ -17,6 +17,9 @@ const Layer* LayerStack::get_layer(int id) const {
     for (const auto& l : layers_) if (l.id == id) return &l;
     return nullptr;
 }
+bool LayerStack::has_layer(int id) const {
+    return get_layer(id) != nullptr;
+}
 bool LayerStack::is_top(int id) const {
     const Layer* l = get_layer(id);
     return l && l->type == LayerType::TOP;

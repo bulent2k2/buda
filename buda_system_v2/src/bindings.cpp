@@ -19,7 +19,12 @@ PYBIND11_MODULE(interconnect, m) {
     py::enum_<LayerDir>(m, "LayerDir").value("HORIZONTAL", LayerDir::HORIZONTAL).value("VERTICAL", LayerDir::VERTICAL);
     py::enum_<LayerType>(m, "LayerType").value("TOP", LayerType::TOP).value("LOW", LayerType::LOW);
     py::class_<Point>(m, "Point").def(py::init<int, int>()).def_readwrite("x", &Point::x).def_readwrite("y", &Point::y);
-    py::class_<Rect>(m, "Rect").def_readwrite("x1", &Rect::x1).def_readwrite("y1", &Rect::y1).def_readwrite("x2", &Rect::x2).def_readwrite("y2", &Rect::y2);
+    py::class_<Rect>(m, "Rect")
+        .def(py::init<int, int, int, int>())
+        .def_readwrite("x1", &Rect::x1)
+        .def_readwrite("y1", &Rect::y1)
+        .def_readwrite("x2", &Rect::x2)
+        .def_readwrite("y2", &Rect::y2);
     py::class_<Segment>(m, "Segment").def(py::init<>()).def_readwrite("start", &Segment::start).def_readwrite("end", &Segment::end).def_readwrite("layer_hint", &Segment::layer_hint);
     py::class_<Busterm>(m, "Busterm").def(py::init<>())
         .def_readwrite("block_name", &Busterm::block_name)
@@ -55,6 +60,11 @@ PYBIND11_MODULE(interconnect, m) {
         .def(py::init<>())
         .def_readwrite("dx", &BlockCornerMargin::dx)
         .def_readwrite("dy", &BlockCornerMargin::dy);
+
+    py::class_<KeepoutZone>(m, "KeepoutZone")
+
+        .def_readwrite("layer_ids", &KeepoutZone::layer_ids);
+
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
         .def("add_block",              &Floorplan::add_block)
         .def("add_block_rects", [](Floorplan& fp, const std::string& name,
@@ -65,13 +75,15 @@ PYBIND11_MODULE(interconnect, m) {
                 rects.push_back(Rect{x1,y1,x2,y2});
             fp.add_block_rects(name, rects);
         })
+        .def("add_keepout_zone",        &Floorplan::add_keepout_zone)
+        .def("get_keepout_zones",       &Floorplan::get_keepout_zones)
         .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {
             auto rects = fp.get_block_rects(name);
             std::vector<std::tuple<int,int,int,int>> out;
             for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
             return out;
         })
-        .def("set_block_corner_margin", &Floorplan::set_block_corner_margin)
+
         .def("set_global_corner_margin",&Floorplan::set_global_corner_margin)
         .def("set_min_stub_length",    &Floorplan::set_min_stub_length)
         .def("set_min_stub_length_dir", [](Floorplan& fp, LayerDir dir, int val) {
@@ -92,6 +104,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def("set_layer_span",   &LayerStack::set_layer_span)
         .def("set_layer_kspan",  &LayerStack::set_layer_kspan)
         .def("is_top",           &LayerStack::is_top)
+        .def("has_layer",        &LayerStack::has_layer)
+        .def("get_layer_dir",    &LayerStack::get_layer_dir)
         .def("get_layer_ids_by_dir",   &LayerStack::get_layer_ids_by_dir)
         .def("get_layer_ids_preferred",&LayerStack::get_layer_ids_preferred)
         .def("get_top_layer",    &LayerStack::get_top_layer)
@@ -228,11 +242,13 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<RoutingGridStack>(m, "RoutingGridStack")
         .def(py::init<>())
         .def("define_layer",  &RoutingGridStack::define_layer,
-             py::arg("layer_id"), py::arg("pattern"))
+             py::arg("layer_id"), py::arg("pattern"), py::arg("is_horizontal"))
         .def("add_override",  &RoutingGridStack::add_override,
              py::arg("layer_id"),
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
              py::arg("pattern"))
+        .def("add_keepout",   &RoutingGridStack::add_keepout,
+             py::arg("layer_id"), py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"))
         .def("get_layer_grid", [](RoutingGridStack& s, int id) -> RoutingGrid& {
             return s.get_layer_grid(id);
         }, py::arg("layer_id"), py::return_value_policy::reference_internal)

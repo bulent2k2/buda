@@ -40,6 +40,12 @@ Rect Floorplan::get_block_bounds(const std::string& name) const {
     if (blocks_.count(name)) return blocks_.at(name);
     return Rect{0,0,0,0};
 }
+void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids) {
+    KeepoutZone koz;
+    koz.bbox = Rect{x1, y1, x2, y2};
+    for (int lid : layer_ids) koz.layer_ids.insert(lid);
+    keepouts_.push_back(std::move(koz));
+}
 void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_coords) const {
     for (const auto& [name, r] : blocks_) {
         auto it = block_rects_.find(name);
@@ -52,6 +58,10 @@ void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_c
             x_coords.push_back(r.x1); x_coords.push_back(r.x2);
             y_coords.push_back(r.y1); y_coords.push_back(r.y2);
         }
+    }
+    for (const auto& koz : keepouts_) {
+        x_coords.push_back(koz.bbox.x1); x_coords.push_back(koz.bbox.x2);
+        y_coords.push_back(koz.bbox.y1); y_coords.push_back(koz.bbox.y2);
     }
     std::sort(x_coords.begin(), x_coords.end());
     x_coords.erase(std::unique(x_coords.begin(), x_coords.end()), x_coords.end());
