@@ -31,6 +31,8 @@ def ctx():
         # selected candidate for multi-step assertions
         'selected_cand': None,
         'selected_ct': None,
+        # multi-rect blocks: name -> list of (x1,y1,x2,y2)
+        'block_rects': {},
     }
 
 
@@ -199,6 +201,25 @@ def add_block_with_margin(ctx, name, x1, y1, x2, y2, dx, dy):
     ctx['fp'].set_block_corner_margin(name, int(dx), int(dy))
     ctx.setdefault('block_names', []).append(name)
     ctx.setdefault('block_margins', {})[name] = (int(dx), int(dy))
+
+
+@given(parsers.re(
+    r'a block "(?P<name>[^"]+)" with rects '
+    r'\((?P<x1a>\d+),(?P<y1a>\d+)\)-\((?P<x2a>\d+),(?P<y2a>\d+)\)'
+    r' and '
+    r'\((?P<x1b>\d+),(?P<y1b>\d+)\)-\((?P<x2b>\d+),(?P<y2b>\d+)\)'
+))
+def add_block_two_rects(ctx, name, x1a, y1a, x2a, y2a, x1b, y1b, x2b, y2b):
+    rects = [
+        (int(x1a), int(y1a), int(x2a), int(y2a)),
+        (int(x1b), int(y1b), int(x2b), int(y2b)),
+    ]
+    try:
+        ctx['fp'].add_block_rects(name, rects)
+    except AttributeError:
+        pytest.xfail('multi-rect add_block not yet in C++ API')
+    ctx.setdefault('block_names', []).append(name)
+    ctx['block_rects'][name] = rects
 
 
 @given(parsers.re(
