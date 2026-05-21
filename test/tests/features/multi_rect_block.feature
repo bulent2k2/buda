@@ -160,6 +160,38 @@ Feature: Multi-rect blocks and equivalent busterms
     Then a candidate of type "TRUNK_V@x550" exists
 
   # ---------------------------------------------------------------------------
+  # Equivalent busterms — both endpoints are multi-rect (teg1.buda pattern).
+  # Each block independently selects its nearest rect; a trunk that falls
+  # inside one of the dst's rects produces a Direct connection (no H stub).
+  # ---------------------------------------------------------------------------
+
+  Scenario: Both src and dst are multi-rect; dst is Direct when trunk falls inside one of its rects
+    # src "A" has two vertically stacked rects (bt1-style in teg1.buda).
+    # dst "B" has two horizontally separated rects (bt2-style in teg1.buda).
+    # Trunks are placed at midpoints of adjacent Hanan x-intervals.
+    # Hanan x from A+B: [0,100,200,400,500,700,900] → midpoints include 450 and 800.
+    # x=450 is inside B.rect1 (400–500) → B is Direct (no H stub).
+    # x=800 is inside B.rect2 (700–900) → B is Direct (no H stub).
+    # x=300 is between A and B; B must reach via H stub to its nearest rect (rect1).
+    #
+    #   A.rect1  A.rect2          B.rect1   B.rect2
+    #   0──100   0──200           400─500   700──900
+    #   y=200    y=200            y=200──400 y=200──400
+    #
+    #   V trunk @x=300 ──────────────x           (B: H stub to rect1, length=100)
+    #   V trunk @x=450 ─────────────────x        (B: Direct via rect1, no H stub)
+    #   V trunk @x=800 ──────────────────────────x  (B: Direct via rect2, no H stub)
+    #
+    Given a block "A" with rects (0,200)-(100,400) and (0,600)-(200,800)
+    And a block "B" with rects (400,200)-(500,400) and (700,200)-(900,400)
+    And layer M4 is HORIZONTAL with id 4
+    And layer M5 is VERTICAL with id 5
+    When I generate multicast candidates from "A" to ["B"] using layers M4,M5
+    Then "B" has no H stub in the TRUNK_V@x450 candidate
+    And  "B" has no H stub in the TRUNK_V@x800 candidate
+    And  the H stub from "B" in the TRUNK_V@x300 candidate has length 100
+
+  # ---------------------------------------------------------------------------
   # Selected rect face — not the union bounding box — determines stub position.
   # ---------------------------------------------------------------------------
 
