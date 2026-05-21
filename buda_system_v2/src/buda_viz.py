@@ -820,6 +820,7 @@ class BudaVisualizer:
         self._heatmap_artists = []    # patches + texts created by draw_congestion_map
         self._block_name_artists = [] # text artists created by draw_blocks
         self._heatmap_visible    = True
+        self._keepouts_visible   = True
         self._block_names_visible = True
         self._bustermss_visible  = True
         self._vias_conns_visible = True
@@ -828,7 +829,9 @@ class BudaVisualizer:
         self._home_ylim          = None
         self._busterm_artists    = []    # driver/receiver terminal artists
         self._vias_conns_artists = []    # via and busterm-conn marker artists
+        self._keepout_artists    = []    # hatched rectangles + labels
         self._btn_heatmap    = None
+        self._btn_keepouts   = None
         self._btn_blknames   = None
         self._btn_bustermss  = None
         self._btn_vias_conns = None
@@ -1088,9 +1091,17 @@ class BudaVisualizer:
             a.set_visible(vis)
         if self._cbar_ax is not None:
             self._cbar_ax.set_visible(vis)
-        label = '☑ Heatmap' if vis else '☐ Heatmap'
         if self._btn_heatmap is not None:
-            self._btn_heatmap.label.set_text(label)
+            self._btn_heatmap.label.set_text('☑ Heatmap' if vis else '☐ Heatmap')
+        self.fig.canvas.draw_idle()
+
+    def _toggle_keepouts(self):
+        self._keepouts_visible = not self._keepouts_visible
+        vis = self._keepouts_visible
+        for a in self._keepout_artists:
+            a.set_visible(vis)
+        if self._btn_keepouts is not None:
+            self._btn_keepouts.label.set_text('☑ Keepouts' if vis else '☐ Keepouts')
         self.fig.canvas.draw_idle()
 
     def _reset_view(self):
@@ -1107,6 +1118,7 @@ class BudaVisualizer:
         # Reset design element toggles to True.
         self._all_vis             = True
         self._heatmap_visible     = True
+        self._keepouts_visible    = True
         self._block_names_visible = True
         self._bustermss_visible   = True
         self._vias_conns_visible  = True
@@ -1130,6 +1142,7 @@ class BudaVisualizer:
         # Artist visibility
         for a in self._heatmap_artists: a.set_visible(True)
         if self._cbar_ax: self._cbar_ax.set_visible(True)
+        for a in self._keepout_artists: a.set_visible(True)
         for txt in self._block_name_artists: txt.set_visible(True)
         for a in self._busterm_artists: a.set_visible(True)
         for a in self._vias_conns_artists: a.set_visible(True)
@@ -1138,6 +1151,7 @@ class BudaVisualizer:
 
         # Update button labels
         if self._btn_heatmap is not None: self._btn_heatmap.label.set_text('☑ Heatmap')
+        if self._btn_keepouts is not None: self._btn_keepouts.label.set_text('☑ Keepouts')
         if self._btn_blknames is not None: self._btn_blknames.label.set_text('☑ Blk Names')
         if self._btn_bustermss is not None: self._btn_bustermss.label.set_text('☑ Busterms')
         if self._btn_vias_conns is not None: self._btn_vias_conns.label.set_text('☑ Vias/Conns')
@@ -1762,6 +1776,8 @@ class BudaVisualizer:
 
     def draw_keepouts(self):
         """Draw KeepoutZones as hatched rectangles with layer labels."""
+        self._keepout_artists = []
+        vis = self._keepouts_visible
         for koz in self.fp.get_keepout_zones():
             r = koz.bbox
             w = r.x2 - r.x1
@@ -1770,15 +1786,21 @@ class BudaVisualizer:
             rect = patches.Rectangle(
                 (r.x1, r.y1), w, h,
                 linewidth=1, edgecolor='red', facecolor='none',
-                hatch='///', alpha=0.4, zorder=1)
+                hatch='///', alpha=0.4, zorder=1, visible=vis)
             self.ax.add_patch(rect)
+            self._keepout_artists.append(rect)
             
             # Label with layers
             layers = sorted(list(koz.layer_ids))
             layer_str = "KOZ: " + ",".join(_LAYER_LABEL.get(lid, f"M{lid}").split()[0] for lid in layers)
-            self.ax.text((r.x1 + r.x2) / 2, r.y2 + 5,
+            txt = self.ax.text((r.x1 + r.x2) / 2, r.y2 + 5,
                          layer_str, color='red', fontsize=7, 
-                         ha='center', va='bottom', clip_on=True, zorder=2)
+                         ha='center', va='bottom', clip_on=True, zorder=2, visible=vis)
+            self._keepout_artists.append(txt)
+
+        if self._btn_keepouts is not None:
+             # Only show button if there are keepouts
+             self._btn_keepouts.ax.set_visible(bool(self._keepout_artists))
 
     def draw_congestion_map(self, cuts, xs, ys):
         """Shade each Hanan (cut × perpendicular-band) cell by utilisation ratio.
@@ -2436,6 +2458,14 @@ class BudaVisualizer:
         # Heatmap button is only meaningful when a congestion map was drawn.
         if not self._heatmap_artists and self._cbar_ax is None:
             self._btn_heatmap.ax.set_visible(False)
+
+        ax_keepouts = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_keepouts = Button(ax_keepouts, '☑ Keepouts', color='#e8f4e8')
+        self._btn_keepouts.label.set_fontsize(7.5)
+        self._btn_keepouts.on_clicked(lambda _: self._toggle_keepouts())
+        # Only visible if there are keepouts
+        if not self.fp.get_keepout_zones():
+            self._btn_keepouts.ax.set_visible(False)
 
         ax_detailed = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_detailed = Button(ax_detailed, '☐ Detailed', color='#e8f4e8')
