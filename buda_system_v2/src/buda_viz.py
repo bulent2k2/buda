@@ -1661,7 +1661,10 @@ class BudaVisualizer:
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
-        if event.key == 'a':                  self._reset_view(); return
+        if event.key == 'a':
+            if self._detailed_mode: self._set_highlight(None)
+            else:                   self._reset_view()
+            return
         if event.key in ('cmd+a', 'ctrl+a'):
             if self._home_xlim is not None:
                 self.ax.set_xlim(self._home_xlim)
