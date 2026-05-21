@@ -175,7 +175,15 @@ depth.
 
 - `annotate_endpoints`: tag `seg_busterms` with leaf-node busterm info.
 - `filter_pinched`: remove candidates where any segment collapses to a point.
-- `annotate_and_sort`: sort by `estimated_wirelength`.
+- **`deduplicate`**: remove candidates whose segment geometry is identical to an
+  already-seen candidate.  Two candidates are geometric duplicates when their
+  sorted sets of `(x1,y1,x2,y2)` segment tuples are equal — regardless of type
+  string or which segment is called "trunk" vs. "stub".  The canonical duplicate
+  arises when one block straddles the H-trunk y-line (making it Direct) AND
+  another block straddles the V-trunk x-line (making it Direct): both
+  `SingleHTrunk` and `SingleVTrunk` emit the same two segments.  Keep the first
+  occurrence (shorter type string wins on tiebreak); discard the rest.
+- `annotate_and_sort`: sort by `adjusted_wl`.
 
 ---
 
@@ -777,7 +785,7 @@ All new parameters follow the same resolution hierarchy as `min_stub_length`:
 
 ---
 
-## 11. Topology Type Naming Convention (extended)
+## 12. Topology Type Naming Convention (extended)
 
 To keep the `Topology::type` string human-readable, the unified generator will
 use a structured naming scheme:
@@ -800,7 +808,7 @@ the planner and visualizer to treat feedthru-containing topologies distinctly.
 
 ---
 
-## 12. Implementation Plan
+## 13. Implementation Plan
 
 ### Phase A — Feedthru config (no algorithmic change)
 1. Add `FeedthruConfig` to `Floorplan`.
@@ -843,7 +851,7 @@ the planner and visualizer to treat feedthru-containing topologies distinctly.
 
 ---
 
-## 13. BDD Feature Outline (Gherkin stubs)
+## 14. BDD Feature Outline (Gherkin stubs)
 
 The following features will be fleshed out in `test/tests/features/`:
 
@@ -905,6 +913,191 @@ Feature: Pull preference and pull-balanced trunk generation
   Scenario: More balanced pull breaks tie between equal adjusted_wl/min_slide candidates
   Scenario: lo_pull and hi_pull counts stored on ConnSeg after ConnTopology::build
 ```
+
+---
+
+---
+
+## 15. Multi-Rect Blocks and Equivalent Busterms
+
+### 14.1 Motivation
+
+Two real-world layout situations require connecting to more than one candidate
+face on a single logical block:
+
+**Equivalent busterms** — a bus can exit the block from either of two physical
+ports (e.g., a left-side port and a right-side port that are internally
+equivalent).  The topology should connect to whichever port produces the shorter
+stub for the current trunk position, not always the same face.
+
+**Rectilinear blocks** — a block occupies an L-shaped, T-shaped, or other
+non-rectangular region.  Different topology candidates will naturally want to
+approach the block from different faces (the top of the tall arm vs. the right
+end of the wide base).  A single bounding rectangle misrepresents the available
+faces.
+
+Both problems share one solution: allow a block to carry **multiple rectangles**,
+where each rectangle is an independent candidate connection region (an
+"equivalence group").  The topology generator tries all rectangles and picks the
+one that minimises stub cost for the current trunk position.
+
+### 14.2 Syntax (`add_block` extension)
+
+```
+# Existing (backward-compatible): single rect, no parentheses
+add_block <name> <x1> <y1> <x2> <y2> [corner_margin dx N [dy N]]
+
+# New: multi-rect, each rect in parentheses
+add_block <name> (<x1> <y1> <x2> <y2>) (<x1> <y1> <x2> <y2>) ... \
+    [corner_margin dx N [dy N]]
+```
+
+The parenthesised form is recognised when the first token after `<name>` starts
+with `(`.  At least two rects are expected; corner margin applies uniformly to
+all rects.  The single-rect form continues to parse without parentheses for full
+backward compatibility.
+
+**Rectilinear block example** — L-shaped SRAM:
+
+```
+#      +----+
+#      | A  |   tall left arm
+#      |    +--------+
+#      |    B  wide  |
+#      +--------------+
+
+add_block SRAM_L (0 0 100 200) (0 0 300 100)
+```
+
+**Equivalent busterms example** — CPU block with left and right ports:
+
+```
+add_block CPU (0 100 20 300) (480 100 500 300)
+```
+
+### 14.3 Best-Rect Selection
+
+For each block `b` and each candidate trunk, the generator tries all of `b`'s
+rects and selects the one with minimum stub cost:
+
+```
+best_rect(b, trunk_dir, trunk_pos) =
+    argmin over b.rects r of:
+        stub_cost(r, trunk_dir, trunk_pos)
+
+stub_cost(r, H, y) = |nearest_y_face(r, y) − y|
+stub_cost(r, V, x) = |nearest_x_face(r, x) − x|
+```
+
+Where `nearest_y_face(r, y) = r.y2 if r.y2 < y else r.y1` (whichever face of
+`r` points toward the trunk).
+
+If the trunk passes through `r` (i.e. `r.y1 ≤ y ≤ r.y2` for an H trunk),
+`stub_cost = 0` and the connection is Direct (or feedthru if enabled).
+
+The rect selection is **per-candidate**: the same block may use different rects
+in different topology candidates.  This is expected and correct.
+
+### 14.4 Hanan Grid with Multi-Rect Blocks
+
+The Hanan grid is built from **all rect edges of all blocks**:
+
+```
+hx = sorted unique {r.x1, r.x2  for all blocks b, all rects r ∈ b.rects}
+hy = sorted unique {r.y1, r.y2  for all blocks b, all rects r ∈ b.rects}
+```
+
+This ensures that trunk positions exist at every natural connection boundary,
+regardless of which rect a block ends up connecting through.
+
+### 14.5 Slide Range with the Selected Rect
+
+After a topology is built (Phase 5), the slide-range computation in
+`ConnTopology::compute_slide_ranges` uses the **selected rect's geometry** for
+each block — not the union bounding box of all rects.
+
+The Pass-2 constraint (min-stub-length enforcement) is derived from
+`selected_rect.face_coord` toward the trunk, not from the block's overall
+extreme face.  Using the union bbox would over-constrain the slide range for
+blocks whose selected rect is far from the opposite extreme.
+
+### 14.6 Obstacle vs. Connection Semantics
+
+The multi-rect data serves two distinct purposes:
+
+| Query | Which rects to use |
+|---|---|
+| **Connection point**: where does a stub attach? | Selected rect only (cheapest for this trunk) |
+| **Obstacle / feedthru check**: does the trunk pass through the block? | Union of **all** rects — any rect that straddles the trunk marks the block as a pass-through |
+| **Congestion / area accounting** | Union of all rects (conservative approximation) |
+
+For feedthru, the check is: does **any** of `b.rects` straddle the trunk
+position?  If so, the block is potentially a feedthru candidate; the designer
+must have opted in via `set_feedthru_block`.
+
+### 14.7 Rectilinear Block Decomposition
+
+For an L-shaped block, the two rects need not be non-overlapping.  They
+represent **face groups**, not a partition of area:
+
+```
+Tall arm:   (x1, y_base, x_narrow, y_top)    — exposes top face and left/right of arm
+Wide base:  (x1, y_base, x_wide,   y_bottom) — exposes right face and bottom of base
+```
+
+Rects may overlap in their shared interior region.  The topology generator only
+cares about external faces; overlap in the interior has no effect on stub
+computation.
+
+For congestion accounting, the actual occupied area is the union (computed via
+inclusion-exclusion or a polygon union if a geometry library is available; the
+bounding box is an acceptable conservative estimate for stage-2 coarse planning).
+
+### 14.8 C++ API Changes
+
+```cpp
+// Current
+void Floorplan::add_block(const string& name, int x1, int y1, int x2, int y2);
+
+// New (primary overload)
+void Floorplan::add_block(const string& name, const vector<Rect>& rects);
+
+// Backward-compat thin wrapper (calls new overload with single-element vector)
+void Floorplan::add_block(const string& name, int x1, int y1, int x2, int y2) {
+    add_block(name, {Rect{x1, y1, x2, y2}});
+}
+
+// Existing — returns union bbox of all rects (unchanged for all callers)
+Rect Floorplan::get_block_bounds(const string& name) const;
+
+// New — returns all rects for this block
+const vector<Rect>& Floorplan::get_block_rects(const string& name) const;
+```
+
+The `Busterm` struct gains a `rect_index` field that records which rect was
+selected when the busterm was created:
+
+```cpp
+struct Busterm {
+    // ... existing fields ...
+    int rect_index = 0;   // index into block's rect list; 0 for legacy single-rect blocks
+};
+```
+
+### 14.9 Corner Margin with Multi-Rect Blocks
+
+The `corner_margin` in `add_block` applies uniformly to **all** rects.  Each
+rect is shrunk independently:
+
+```
+effective_rect[i] = rects[i].shrink(dx, dy)
+```
+
+The existing `Rect::shrink` guard (skip shrink if `2*margin ≥ face_extent`)
+applies per-rect, per-axis, so small rects are protected independently.
+
+Per-block margin overrides (via `corner_margin dx N dy N` in the `add_block`
+line) apply the same override to all rects of that block.
 
 ---
 
