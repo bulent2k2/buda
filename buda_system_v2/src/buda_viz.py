@@ -748,6 +748,7 @@ class BudaVisualizer:
         self._overlap_entries = []   # sorted list of OverlapDetail from nuts_result
         self._overlap_scroll = 0
         self._nuts_result    = None  # stored in draw_nuts_tracks for the overlap panel
+        self._detailed_result = None # stored in draw_detailed_tracks for bit stats
         self._topo_explorer  = None
         self._pick_happened  = False
         self._cbar_ax        = None   # colorbar axes for congestion heatmap
@@ -1083,7 +1084,12 @@ class BudaVisualizer:
         for bid in self._bundle_visible:
             self._bundle_visible[bid] = vis
         if self._btn_all_bundles is not None:
-            self._btn_all_bundles.label.set_text('☑ All Bundles' if vis else '☐ All Bundles')
+            all_lbl = '☑ All Bundles' if vis else '☐ All Bundles'
+            if self._detailed_result:
+                n_total = sum(len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
+                              for w in self.bundles if w.candidates)
+                all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
+            self._btn_all_bundles.label.set_text(all_lbl)
             self._btn_all_bundles.ax.set_facecolor('#e8e8e8' if vis else '#cccccc')
         self._redraw_bundle_list()
 
@@ -1377,10 +1383,31 @@ class BudaVisualizer:
                     transform=ax.transAxes,
                     fontsize=7, color=sel_color,
                     va='center', clip_on=True)
+            
+            # Bit stats for this bundle: [unplaced/total]
+            stats_part = ""
+            stats_color = '#111111'
+            if self._detailed_result:
+                # Count unplaced bits for this bundle ID.
+                n_unp = sum(ns.bit_index for ns in self._detailed_result.net_segments if ns.bundle_id == bid) # WRONG logic, bit_index is the ID
+                # Actually, DetailedNUTSResult doesn't easily provide per-bundle unplaced count.
+                # Let's count how many net_segments we have vs how many we expect.
+                w = next(w for w in self.bundles if w.original_bundle.id == bid)
+                n_expected = len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
+                n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
+                n_unp = n_expected - n_placed
+                stats_part = f" [{n_unp}/{n_expected}]"
+                stats_color = '#CC0000' if n_unp > 0 else '#008800'
+
             ax.text(0.20, y, f"{vis_char} {full}",
                     transform=ax.transAxes,
                     fontsize=7, color=txt_color,
                     va='center', clip_on=True)
+            if stats_part:
+                 ax.text(0.85, y, stats_part,
+                        transform=ax.transAxes,
+                        fontsize=7, color=stats_color,
+                        va='center', ha='right', fontweight='bold', clip_on=True)
 
         # Scrollbar thumb on right edge.
         if n_total > n_vis:
@@ -1549,6 +1576,14 @@ class BudaVisualizer:
     # ------------------------------------------------------------------
 
     def _open_topo_explorer(self):
+        if self._highlighted is None:
+            # Automatically select the first bundle that has candidates.
+            for w in self.bundles:
+                if w.candidates:
+                    self._highlighted = w.original_bundle.id
+                    self._refresh_highlight()
+                    break
+
         if self._highlighted is None:
             return
         wrapper = next((w for w in self.bundles
@@ -2042,6 +2077,7 @@ class BudaVisualizer:
                 self._grid_rail_artists.append({'artist': rect, 'layer': lid})
 
         # Draw bit-wire NetSegments.
+        self._detailed_result = detailed_result
         # span_lo/span_hi are already junction-adjusted by DetailedNUTSEngine.
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for ns in detailed_result.net_segments:
