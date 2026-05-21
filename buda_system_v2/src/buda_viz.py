@@ -5,7 +5,6 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib.path import Path as MplPath
 from matplotlib.widgets import Button
 
 import interconnect as ic
@@ -14,47 +13,42 @@ _LAYER_COLOR = {3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#880
 _LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V'}
 
 
-def _rectilinear_boundary_path(rects_raw):
-    """Return a matplotlib Path tracing the outer boundary of the union of
-    axis-aligned rectangles, as a collection of open line segments
-    (MOVETO/LINETO pairs — no winding order required).
+def _rects_disconnected(rects_raw):
+    """Return True if any rect in the group has no touching/overlapping neighbour.
 
-    Uses coordinate compression: for every candidate edge between two adjacent
-    strips, a midpoint test decides whether it lies on the inside/outside
-    boundary of the union.  Works correctly for overlapping, touching, and
-    fully disconnected rect sets.
+    Two rects are considered connected when their x-intervals and y-intervals
+    both overlap or share an edge (i.e. a strictly-positive-area OR edge-only
+    contact).  Uses union-find over all pairs.
     """
-    xs = sorted({x for r in rects_raw for x in (r[0], r[2])})
-    ys = sorted({y for r in rects_raw for y in (r[1], r[3])})
+    n = len(rects_raw)
+    if n <= 1:
+        return False
+    parent = list(range(n))
 
-    def inside(px, py):
-        return any(r[0] < px < r[2] and r[1] < py < r[3] for r in rects_raw)
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
 
-    verts, codes = [], []
-    eps = 0.5
-    for y in ys:
-        for i in range(len(xs) - 1):
-            xm = (xs[i] + xs[i + 1]) * 0.5
-            if inside(xm, y + eps) != inside(xm, y - eps):
-                verts += [(xs[i], y), (xs[i + 1], y)]
-                codes += [MplPath.MOVETO, MplPath.LINETO]
-    for x in xs:
-        for i in range(len(ys) - 1):
-            ym = (ys[i] + ys[i + 1]) * 0.5
-            if inside(x + eps, ym) != inside(x - eps, ym):
-                verts += [(x, ys[i]), (x, ys[i + 1])]
-                codes += [MplPath.MOVETO, MplPath.LINETO]
-    return MplPath(verts, codes) if verts else None
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = rects_raw[i], rects_raw[j]
+            if a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]:
+                parent[find(i)] = find(j)
+
+    return len({find(i) for i in range(n)}) > 1
 
 
 def _draw_block(ax, name, bbox, fp, lw=2, edge='#444444', face='#d9d9d9',
                 alpha=0.6, fontsize=9, zorder=1):
     """Draw one floorplan block.
 
-    For single-rect blocks: one filled rectangle with a solid edge (original
-    behaviour).  For multi-rect blocks: every rect is filled individually and
-    the exact rectilinear union boundary is drawn as an outline, so L-shapes
-    and disconnected equivalent-pin groups show their true geometry.
+    Single-rect blocks: one filled rectangle with a solid edge.
+    Multi-rect blocks: each rect drawn individually with a solid edge.
+    When the rects are disconnected (equivalent-busterm groups) a dashed
+    bounding box is added to show they belong to the same block; for touching
+    or overlapping rects (rectilinear shapes) the individual outlines suffice.
 
     Returns the label text artist (or None if name is empty).
     """
@@ -64,12 +58,13 @@ def _draw_block(ax, name, bbox, fp, lw=2, edge='#444444', face='#d9d9d9',
         for (rx1, ry1, rx2, ry2) in rects_raw:
             ax.add_patch(patches.Rectangle(
                 (rx1, ry1), rx2 - rx1, ry2 - ry1,
-                linewidth=0, facecolor=face, alpha=alpha, zorder=zorder))
-        path = _rectilinear_boundary_path(rects_raw)
-        if path is not None:
-            ax.add_patch(patches.PathPatch(
-                path, linewidth=lw, edgecolor=edge, facecolor='none',
-                capstyle='butt', joinstyle='miter', zorder=zorder + 0.5))
+                linewidth=lw, edgecolor=edge, facecolor=face,
+                alpha=alpha, zorder=zorder))
+        if _rects_disconnected(rects_raw):
+            ax.add_patch(patches.Rectangle(
+                (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
+                linewidth=max(1.0, lw * 0.6), edgecolor=edge, facecolor='none',
+                linestyle='--', alpha=0.5, zorder=zorder + 0.5))
     else:
         ax.add_patch(patches.Rectangle(
             (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
