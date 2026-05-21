@@ -5,12 +5,85 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.path import Path as MplPath
 from matplotlib.widgets import Button
 
 import interconnect as ic
 
 _LAYER_COLOR = {3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC'}
 _LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V'}
+
+
+def _rectilinear_boundary_path(rects_raw):
+    """Return a matplotlib Path tracing the outer boundary of the union of
+    axis-aligned rectangles, as a collection of open line segments
+    (MOVETO/LINETO pairs — no winding order required).
+
+    Uses coordinate compression: for every candidate edge between two adjacent
+    strips, a midpoint test decides whether it lies on the inside/outside
+    boundary of the union.  Works correctly for overlapping, touching, and
+    fully disconnected rect sets.
+    """
+    xs = sorted({x for r in rects_raw for x in (r[0], r[2])})
+    ys = sorted({y for r in rects_raw for y in (r[1], r[3])})
+
+    def inside(px, py):
+        return any(r[0] < px < r[2] and r[1] < py < r[3] for r in rects_raw)
+
+    verts, codes = [], []
+    eps = 0.5
+    for y in ys:
+        for i in range(len(xs) - 1):
+            xm = (xs[i] + xs[i + 1]) * 0.5
+            if inside(xm, y + eps) != inside(xm, y - eps):
+                verts += [(xs[i], y), (xs[i + 1], y)]
+                codes += [MplPath.MOVETO, MplPath.LINETO]
+    for x in xs:
+        for i in range(len(ys) - 1):
+            ym = (ys[i] + ys[i + 1]) * 0.5
+            if inside(x + eps, ym) != inside(x - eps, ym):
+                verts += [(x, ys[i]), (x, ys[i + 1])]
+                codes += [MplPath.MOVETO, MplPath.LINETO]
+    return MplPath(verts, codes) if verts else None
+
+
+def _draw_block(ax, name, bbox, fp, lw=2, edge='#444444', face='#d9d9d9',
+                alpha=0.6, fontsize=9, zorder=1):
+    """Draw one floorplan block.
+
+    For single-rect blocks: one filled rectangle with a solid edge (original
+    behaviour).  For multi-rect blocks: every rect is filled individually and
+    the exact rectilinear union boundary is drawn as an outline, so L-shapes
+    and disconnected equivalent-pin groups show their true geometry.
+
+    Returns the label text artist (or None if name is empty).
+    """
+    rects_raw = fp.get_block_rects(name)
+
+    if rects_raw:
+        for (rx1, ry1, rx2, ry2) in rects_raw:
+            ax.add_patch(patches.Rectangle(
+                (rx1, ry1), rx2 - rx1, ry2 - ry1,
+                linewidth=0, facecolor=face, alpha=alpha, zorder=zorder))
+        path = _rectilinear_boundary_path(rects_raw)
+        if path is not None:
+            ax.add_patch(patches.PathPatch(
+                path, linewidth=lw, edgecolor=edge, facecolor='none',
+                capstyle='butt', joinstyle='miter', zorder=zorder + 0.5))
+    else:
+        ax.add_patch(patches.Rectangle(
+            (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
+            linewidth=lw, edgecolor=edge, facecolor=face,
+            alpha=alpha, zorder=zorder))
+
+    if not name:
+        return None
+    cx = (bbox.x1 + bbox.x2) / 2
+    cy = (bbox.y1 + bbox.y2) / 2
+    return ax.text(cx, cy, name, ha='center', va='center',
+                   fontsize=fontsize, fontweight='bold', color='#333333',
+                   zorder=zorder + 1, clip_on=True)
+
 
 def _toggle_fullscreen(fig):
     mgr = fig.canvas.manager
@@ -658,15 +731,8 @@ class TopologyExplorer:
 
         # Floorplan blocks
         for name, rect in self.fp.get_all_blocks():
-            w = rect.x2 - rect.x1
-            h = rect.y2 - rect.y1
-            ax.add_patch(patches.Rectangle(
-                (rect.x1, rect.y1), w, h,
-                linewidth=1.5, edgecolor='#444444', facecolor='#d9d9d9',
-                alpha=0.55, zorder=1))
-            ax.text((rect.x1 + rect.x2) / 2, (rect.y1 + rect.y2) / 2,
-                    name, ha='center', va='center',
-                    fontsize=8, fontweight='bold', color='#333333', zorder=2)
+            _draw_block(ax, name, rect, self.fp,
+                        lw=1.5, alpha=0.55, fontsize=8)
 
         # Hanan grid
         xs, ys = self.fp.get_hanan_grid()
@@ -1690,17 +1756,9 @@ class BudaVisualizer:
     def draw_blocks(self):
         self._block_name_artists = []
         for name, rect in self.fp.get_all_blocks():
-            w = rect.x2 - rect.x1
-            h = rect.y2 - rect.y1
-            self.ax.add_patch(patches.Rectangle(
-                (rect.x1, rect.y1), w, h,
-                linewidth=2, edgecolor='#444444', facecolor='#d9d9d9',
-                alpha=0.6, zorder=1))
-            cx, cy = (rect.x1 + rect.x2) / 2, (rect.y1 + rect.y2) / 2
-            txt = self.ax.text(cx, cy, name,
-                               ha='center', va='center', fontsize=9, fontweight='bold',
-                               color='#333333', zorder=2, clip_on=True)
-            self._block_name_artists.append(txt)
+            txt = _draw_block(self.ax, name, rect, self.fp)
+            if txt is not None:
+                self._block_name_artists.append(txt)
 
     def draw_congestion_map(self, cuts, xs, ys):
         """Shade each Hanan (cut × perpendicular-band) cell by utilisation ratio.
