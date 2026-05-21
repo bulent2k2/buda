@@ -742,7 +742,8 @@ class BudaSession:
                 print("Error: add_keepout requires x1 y1 x2 y2 and at least one layer")
                 return
             try:
-                x1, y1, x2, y2 = int(args[0]), int(args[1]), int(args[2]), int(args[3])
+                x1, y1 = int(float(args[0])), int(float(args[1]))
+                x2, y2 = int(float(args[2])), int(float(args[3]))
                 layer_ids = []
                 for name in args[4:]:
                     if name.isdigit():
@@ -1038,7 +1039,8 @@ class BudaSession:
                 print("Error: add_grid_override requires layer_id x1 y1 x2 y2 origin [slots...]")
                 return
             layer_id = int(args[0])
-            x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
+            x1, y1 = int(float(args[1])), int(float(args[2]))
+            x2, y2 = int(float(args[3])), int(float(args[4]))
             origin = float(args[5])
             slots = []
             i = 6

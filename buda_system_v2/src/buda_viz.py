@@ -272,8 +272,6 @@ class TopologyExplorer:
 
         self._draw()
 
-        self._draw()
-
     # ------------------------------------------------------------------
 
     @property
