@@ -36,7 +36,8 @@ python3 buda_cli.py comprehensive_demo.buda
 
 | Command | Stage | Description |
 |---|---|---|
-| `add_block <name> <x1> <y1> <x2> <y2> [corner_margin dx <n> [dy <n>]]` | setup | Place a floorplan block; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
+| `add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]` | setup | Place a single-rect floorplan block; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
+| `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]` | setup | Multi-rect block: topology generator picks the best-fit rect per trunk position |
 | `corner_margin dx <n> [dy <n>]` | setup | Set global corner margin for all blocks with no per-block override. Only `dx`/`dy` (absolute); `pct_h`/`pct_v` not valid globally. Single-axis value mirrors to the other axis. |
 | `add_net <name> <driver_pin> <receiver_pins_csv>` | setup | Add a net to the netlist |
 | `add_bus <prefix>[<N>] <drv_pin> <rcv_pin_csv>` | setup | Expand a bus into N nets: `prefix[N]` → `prefix_0`…`prefix_{N-1}`; `prefix[lo:hi]` → explicit range |

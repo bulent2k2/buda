@@ -79,16 +79,25 @@ def_layer 7 M7 V TOP 0.0  span_min 300              # long trunks only
 ```
 add_block <name> <x1> <y1> <x2> <y2> [corner_margin dx <n> [dy <n>]]
 add_block <name> <x1> <y1> <x2> <y2> [corner_margin pct_h <p> [pct_v <p>]]
+add_block <name> rect <x1> <y1> <x2> <y2> [rect <x1> <y1> <x2> <y2> ...] [corner_margin ...]
 ```
 
-Place a rectangular block in the floorplan. Blocks define the Hanan grid
-used by topology generation and the congestion model.
+Place a block in the floorplan. Blocks define the Hanan grid used by topology
+generation and the congestion model.
+
+The first two forms place a single rectangular block. The third form places a
+**multi-rect block**: each `rect` token introduces one candidate connection
+rectangle. The topology generator picks whichever rect minimises stub length
+for each trunk position. The Hanan grid includes all rect edges. The union
+bounding box of all rects is used as the block's overall footprint and as the
+reference dimension for `pct_h`/`pct_v` margin calculations.
 
 | Argument | Type | Description |
 |---|---|---|
 | `name` | str | Instance name, e.g. `u_cpu`. Referred to in `add_net` pin names and `generate_topologies_for_bundle`. |
 | `x1 y1` | int | Lower-left corner (layout units) |
 | `x2 y2` | int | Upper-right corner (layout units) |
+| `rect x1 y1 x2 y2` | keyword | Multi-rect form: one candidate connection rectangle. Repeat for each rect. |
 | `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
 | `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
 | `corner_margin pct_h P` | keyword | Shrink X faces by `P`% of block width. If `pct_v` is omitted, same percentage applies to height. |
@@ -98,11 +107,17 @@ A per-block `corner_margin` overrides the global `corner_margin` command for
 that block. The margin is baked into the block's `Busterm.bbox` at construction;
 topology generation and the Hanan grid use the shrunken bounding box directly.
 
-**Example:**
+**Examples:**
 ```
 add_block u_cpu   0    0  100  100
 add_block u_mem 200    0  300  100  corner_margin dx 5
 add_block u_io  400    0  500  100  corner_margin pct_h 10 pct_v 15
+
+# L-shaped block: tall arm + wide base
+add_block u_l  rect  0  0  100  400  rect  0  0  400  100
+
+# Block with equivalent left and right ports (side-by-side)
+add_block u_dp rect  200  0  300  100  rect  400  0  500  100  corner_margin dx 5
 ```
 
 ---

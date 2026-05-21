@@ -651,13 +651,24 @@ class BudaSession:
         args = parts[1:]
 
         if cmd == "add_block":
-            # add_block <name> <x1> <y1> <x2> <y2>
-            #   [corner_margin dx <n> [dy <n>]]
-            #   [corner_margin pct_h <p> [pct_v <p>]]
+            # Single-rect: add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]
+            # Multi-rect:  add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]
             name = args[0]
-            x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
-            self.fp.add_block(name, x1, y1, x2, y2)
-            rest = list(args[5:])
+            if len(args) > 1 and args[1].lower() == "rect":
+                rects = []
+                i = 1
+                while i < len(args) and args[i].lower() == "rect":
+                    x1r, y1r, x2r, y2r = int(args[i+1]), int(args[i+2]), int(args[i+3]), int(args[i+4])
+                    rects.append((x1r, y1r, x2r, y2r))
+                    i += 5
+                self.fp.add_block_rects(name, rects)
+                x1 = min(r[0] for r in rects); y1 = min(r[1] for r in rects)
+                x2 = max(r[2] for r in rects); y2 = max(r[3] for r in rects)
+                rest = list(args[i:])
+            else:
+                x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
+                self.fp.add_block(name, x1, y1, x2, y2)
+                rest = list(args[5:])
             if rest and rest[0].lower() == "corner_margin":
                 rest = rest[1:]
                 kws = {}
