@@ -823,8 +823,8 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     auto mk_bt = [&](const std::string& n) {
         auto cm  = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
-        Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig};
-        bt.rects = floorplan_.get_block_rects(n);   // empty for single-rect
+        Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
+                   floorplan_.get_block_rects(n)};
         return bt;
     };
     {
@@ -1029,7 +1029,8 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
     auto mk_bt = [&](const std::string& n) {
         auto cm = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
-        return Busterm{n, orig.shrink(cm.dx, cm.dy), orig};
+        return Busterm{n, orig.shrink(cm.dx, cm.dy), orig,
+                       floorplan_.get_block_rects(n)};
     };
     Busterm src_bt = mk_bt(src_name);
     Busterm dst_bt = mk_bt(dst_name);
