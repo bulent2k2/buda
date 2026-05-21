@@ -30,9 +30,12 @@ struct Segment {
 // A busterm is a connection point on a block face.  Currently represented by
 // the block name and its bounding box; can be refined to a pin location later.
 struct Busterm {
-    std::string block_name;
-    Rect        bbox;       // possibly margin-inset
-    Rect        orig_bbox;  // always the full physical extent
+    std::string       block_name;
+    Rect              bbox;       // possibly margin-inset (union of all rects)
+    Rect              orig_bbox;  // always the full physical extent (union)
+    // Non-empty for multi-rect blocks: each element is one candidate connection
+    // rectangle (unshrunk).  Empty = single-rect block (use orig_bbox as before).
+    std::vector<Rect> rects;
 };
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an
@@ -67,6 +70,11 @@ struct MinStubLength {
 class Floorplan {
 public:
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
+    // Multi-rect block: stores each rect individually; add_block is called
+    // internally with the union bounding box for backward compatibility.
+    void add_block_rects(const std::string& name, const std::vector<Rect>& rects);
+    // Returns the individual rects for a multi-rect block, or empty for single-rect.
+    std::vector<Rect> get_block_rects(const std::string& name) const;
     // Set corner margin for a previously-added block (absolute units).
     void set_block_corner_margin(const std::string& name, int dx, int dy);
     // Set global corner margin applied to all blocks that have no per-block override.
@@ -94,6 +102,7 @@ public:
     }
 private:
     std::map<std::string, Rect> blocks_;
+    std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};
     MinStubLength min_stub_len_;

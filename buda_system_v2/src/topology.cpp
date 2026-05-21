@@ -13,6 +13,19 @@ namespace interconnect {
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     blocks_[name] = Rect{x1, y1, x2, y2};
 }
+void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>& rects) {
+    Rect u = rects[0];
+    for (const auto& r : rects) {
+        u.x1 = std::min(u.x1, r.x1); u.y1 = std::min(u.y1, r.y1);
+        u.x2 = std::max(u.x2, r.x2); u.y2 = std::max(u.y2, r.y2);
+    }
+    blocks_[name]      = u;
+    block_rects_[name] = rects;
+}
+std::vector<Rect> Floorplan::get_block_rects(const std::string& name) const {
+    auto it = block_rects_.find(name);
+    return (it != block_rects_.end()) ? it->second : std::vector<Rect>{};
+}
 void Floorplan::set_block_corner_margin(const std::string& name, int dx, int dy) {
     corner_margins_[name] = BlockCornerMargin{dx, dy};
 }
@@ -29,8 +42,16 @@ Rect Floorplan::get_block_bounds(const std::string& name) const {
 }
 void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_coords) const {
     for (const auto& [name, r] : blocks_) {
-        x_coords.push_back(r.x1); x_coords.push_back(r.x2);
-        y_coords.push_back(r.y1); y_coords.push_back(r.y2);
+        auto it = block_rects_.find(name);
+        if (it != block_rects_.end()) {
+            for (const Rect& ri : it->second) {
+                x_coords.push_back(ri.x1); x_coords.push_back(ri.x2);
+                y_coords.push_back(ri.y1); y_coords.push_back(ri.y2);
+            }
+        } else {
+            x_coords.push_back(r.x1); x_coords.push_back(r.x2);
+            y_coords.push_back(r.y1); y_coords.push_back(r.y2);
+        }
     }
     std::sort(x_coords.begin(), x_coords.end());
     x_coords.erase(std::unique(x_coords.begin(), x_coords.end()), x_coords.end());
@@ -469,20 +490,59 @@ static void annotate_and_sort(std::vector<Topology>& v) {
         });
 }
 
+// ---------------------------------------------------------------------------
+// Multi-rect helpers
+// ---------------------------------------------------------------------------
+
+// Return all physical rects for a busterm. Empty rects means single-rect
+// (use orig_bbox). This returns the individual rects when present.
+static std::vector<Rect> bt_all_rects(const Busterm& bt) {
+    return bt.rects.empty() ? std::vector<Rect>{bt.orig_bbox} : bt.rects;
+}
+
+// Best rect for connecting bt to an H trunk at y_trunk: minimises stub length.
+static Rect best_rect_for_h(const Busterm& bt, int y_trunk) {
+    auto rects = bt_all_rects(bt);
+    Rect best = rects[0];
+    int  best_cost = std::abs(best.face_y(y_trunk) - y_trunk);
+    for (size_t k = 1; k < rects.size(); ++k) {
+        int cost = std::abs(rects[k].face_y(y_trunk) - y_trunk);
+        if (cost < best_cost) { best_cost = cost; best = rects[k]; }
+    }
+    return best;
+}
+
+// Best rect for connecting bt to a V trunk at x_trunk.
+static Rect best_rect_for_v(const Busterm& bt, int x_trunk) {
+    auto rects = bt_all_rects(bt);
+    Rect best = rects[0];
+    int  best_cost = std::abs(best.face_x(x_trunk) - x_trunk);
+    for (size_t k = 1; k < rects.size(); ++k) {
+        int cost = std::abs(rects[k].face_x(x_trunk) - x_trunk);
+        if (cost < best_cost) { best_cost = cost; best = rects[k]; }
+    }
+    return best;
+}
+
 static void annotate_endpoints(Topology& topo,
                                 const std::vector<Busterm>& blocks) {
     for (int i = 0; i < (int)topo.segments.size(); ++i) {
         const Segment& seg = topo.segments[i];
         bool horiz = (seg.start.y == seg.end.y);
         for (const Busterm& bt : blocks) {
-            const Rect& r = bt.orig_bbox; // connect to physical faces
+            // For multi-rect blocks check each individual rect so that a stubbed
+            // block whose union-bbox y-range contains the trunk y is NOT falsely
+            // annotated as a Direct connection.
             auto on_face = [&](const Point& P) -> bool {
-                if (horiz)
-                    return (P.x == r.x1 || P.x == r.x2)
-                           && P.y >= r.y1 && P.y <= r.y2;
-                else
-                    return (P.y == r.y1 || P.y == r.y2)
-                           && P.x >= r.x1 && P.x <= r.x2;
+                auto check_rect = [&](const Rect& r) -> bool {
+                    return horiz
+                        ? (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2
+                        : (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
+                };
+                if (bt.rects.empty()) return check_rect(bt.orig_bbox);
+                for (const Rect& ri : bt.rects)
+                    if (check_rect(ri)) return true;
+                return false;
             };
             auto& ep = topo.seg_busterms[i];
             if (!ep.first.has_value()  && on_face(seg.start)) ep.first  = bt;
@@ -512,12 +572,15 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                                      std::vector<Topology>& results)
 {
     int n = (int)pins.size();
-    std::vector<int> conn_y(n), att_x(n);
+    std::vector<int>  conn_y(n), att_x(n);
     std::vector<bool> has_stub(n);
+    std::vector<Rect> best_r(n);   // best rect per block for this trunk y
     for (int i = 0; i < n; ++i) {
-        conn_y[i]   = use_busterm_ ? blocks[i].orig_bbox.face_y(y_trunk) : pins[i].y;
+        best_r[i]   = best_rect_for_h(blocks[i], y_trunk);
+        conn_y[i]   = use_busterm_ ? best_r[i].face_y(y_trunk) : pins[i].y;
         has_stub[i] = (conn_y[i] != y_trunk);
-        att_x[i]    = pins[i].x;
+        // For multi-rect blocks use the best rect's centre; single-rect uses pin.
+        att_x[i]    = blocks[i].rects.empty() ? pins[i].x : best_r[i].center().x;
     }
 
     if (use_busterm_) {
@@ -532,15 +595,17 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         if (!out_of_bbox) {
             int pt_lo = INT_MIN / 2, pt_hi = INT_MAX / 2;
             bool any_pt = false;
+            bool trunk_inside_direct = false;
             for (int i = 0; i < n; ++i) {
                 if (!has_stub[i]) {
                     any_pt = true;
-                    const Rect& b = blocks[i].bbox;
-                    pt_lo = std::max(pt_lo, b.y1);
-                    pt_hi = std::min(pt_hi, b.y2);
+                    if (y_trunk >= best_r[i].y1 && y_trunk <= best_r[i].y2)
+                        trunk_inside_direct = true;
+                    pt_lo = std::max(pt_lo, best_r[i].y1);
+                    pt_hi = std::min(pt_hi, best_r[i].y2);
                 }
             }
-            if (any_pt && pt_lo <= pt_hi) {
+            if (any_pt && pt_lo <= pt_hi && !trunk_inside_direct) {
                 int n_above = 0, n_below = 0;
                 for (int i = 0; i < n; ++i) {
                     if (has_stub[i]) {
@@ -550,26 +615,34 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                 }
                 if      (n_above > 0 && n_below == 0) y_trunk = pt_hi;
                 else if (n_below > 0 && n_above == 0) y_trunk = pt_lo;
-                for (int i = 0; i < n; ++i)
-                    conn_y[i] = blocks[i].orig_bbox.face_y(y_trunk);
+                for (int i = 0; i < n; ++i) {
+                    best_r[i]  = best_rect_for_h(blocks[i], y_trunk);
+                    conn_y[i]  = best_r[i].face_y(y_trunk);
+                    has_stub[i] = (conn_y[i] != y_trunk);
+                }
             }
         }
+        // Helper: x-face of best rect (or shrunk union for single-rect w/ margin).
+        auto x2_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.x2 : best_r[i].x2; };
+        auto x1_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.x1 : best_r[i].x1; };
+        auto x2_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.x2 : best_r[i].x2; };
+        auto x1_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.x1 : best_r[i].x1; };
         {
             int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
             int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
-            if (!has_stub[lo]) att_x[lo] = blocks[lo].orig_bbox.x2;
-            if (!has_stub[hi]) att_x[hi] = blocks[hi].orig_bbox.x1;
+            if (!has_stub[lo]) att_x[lo] = x2_of(lo);
+            if (!has_stub[hi]) att_x[hi] = x1_of(hi);
         }
         for (int iter = 0; iter < n; ++iter) {
             int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
             int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
             bool changed = false;
             if (has_stub[lo]) {
-                int target = blocks[lo].bbox.x2;
+                int target = x2_shrunk(lo);
                 if (target > att_x[lo]) { att_x[lo] = target; changed = true; }
             }
             if (has_stub[hi]) {
-                int target = blocks[hi].bbox.x1;
+                int target = x1_shrunk(hi);
                 if (target < att_x[hi]) { att_x[hi] = target; changed = true; }
             }
             if (!changed) break;
@@ -578,11 +651,11 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
             int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
             int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
             bool changed = false;
-            if (!has_stub[lo] && att_x[lo] != blocks[lo].orig_bbox.x2) {
-                att_x[lo] = blocks[lo].orig_bbox.x2; changed = true;
+            if (!has_stub[lo] && att_x[lo] != x2_of(lo)) {
+                att_x[lo] = x2_of(lo); changed = true;
             }
-            if (!has_stub[hi] && att_x[hi] != blocks[hi].orig_bbox.x1) {
-                att_x[hi] = blocks[hi].orig_bbox.x1; changed = true;
+            if (!has_stub[hi] && att_x[hi] != x1_of(hi)) {
+                att_x[hi] = x1_of(hi); changed = true;
             }
             if (!changed) break;
         }
@@ -620,12 +693,15 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                                      std::vector<Topology>& results)
 {
     int n = (int)pins.size();
-    std::vector<int> conn_x(n), att_y(n);
+    std::vector<int>  conn_x(n), att_y(n);
     std::vector<bool> has_stub(n);
+    std::vector<Rect> best_r(n);   // best rect per block for this trunk x
     for (int i = 0; i < n; ++i) {
-        conn_x[i]   = use_busterm_ ? blocks[i].orig_bbox.face_x(x_trunk) : pins[i].x;
+        best_r[i]   = best_rect_for_v(blocks[i], x_trunk);
+        conn_x[i]   = use_busterm_ ? best_r[i].face_x(x_trunk) : pins[i].x;
         has_stub[i] = (conn_x[i] != x_trunk);
-        att_y[i]    = pins[i].y;
+        // For multi-rect blocks use the best rect's centre; single-rect uses pin.
+        att_y[i]    = blocks[i].rects.empty() ? pins[i].y : best_r[i].center().y;
     }
 
     if (use_busterm_) {
@@ -640,15 +716,17 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         if (!out_of_bbox) {
             int pt_lo = INT_MIN / 2, pt_hi = INT_MAX / 2;
             bool any_pt = false;
+            bool trunk_inside_direct = false;
             for (int i = 0; i < n; ++i) {
                 if (!has_stub[i]) {
                     any_pt = true;
-                    const Rect& b = blocks[i].bbox;
-                    pt_lo = std::max(pt_lo, b.y1);
-                    pt_hi = std::min(pt_hi, b.y2);
+                    if (x_trunk >= best_r[i].x1 && x_trunk <= best_r[i].x2)
+                        trunk_inside_direct = true;
+                    pt_lo = std::max(pt_lo, best_r[i].x1);
+                    pt_hi = std::min(pt_hi, best_r[i].x2);
                 }
             }
-            if (any_pt && pt_lo <= pt_hi) {
+            if (any_pt && pt_lo <= pt_hi && !trunk_inside_direct) {
                 int n_right = 0, n_left = 0;
                 for (int i = 0; i < n; ++i) {
                     if (has_stub[i]) {
@@ -658,26 +736,34 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                 }
                 if      (n_right > 0 && n_left == 0) x_trunk = pt_hi;
                 else if (n_left  > 0 && n_right == 0) x_trunk = pt_lo;
-                for (int i = 0; i < n; ++i)
-                    conn_x[i] = blocks[i].orig_bbox.face_x(x_trunk);
+                for (int i = 0; i < n; ++i) {
+                    best_r[i]  = best_rect_for_v(blocks[i], x_trunk);
+                    conn_x[i]  = best_r[i].face_x(x_trunk);
+                    has_stub[i] = (conn_x[i] != x_trunk);
+                }
             }
         }
+        // Helper: y-face of best rect (or shrunk union for single-rect w/ margin).
+        auto y2_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.y2 : best_r[i].y2; };
+        auto y1_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.y1 : best_r[i].y1; };
+        auto y2_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.y2 : best_r[i].y2; };
+        auto y1_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.y1 : best_r[i].y1; };
         {
             int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
             int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
-            if (!has_stub[lo]) att_y[lo] = blocks[lo].orig_bbox.y2;
-            if (!has_stub[hi]) att_y[hi] = blocks[hi].orig_bbox.y1;
+            if (!has_stub[lo]) att_y[lo] = y2_of(lo);
+            if (!has_stub[hi]) att_y[hi] = y1_of(hi);
         }
         for (int iter = 0; iter < n; ++iter) {
             int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
             int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
             bool changed = false;
             if (has_stub[lo]) {
-                int target = blocks[lo].bbox.y2;
+                int target = y2_shrunk(lo);
                 if (target > att_y[lo]) { att_y[lo] = target; changed = true; }
             }
             if (has_stub[hi]) {
-                int target = blocks[hi].bbox.y1;
+                int target = y1_shrunk(hi);
                 if (target < att_y[hi]) { att_y[hi] = target; changed = true; }
             }
             if (!changed) break;
@@ -686,11 +772,11 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
             int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
             bool changed = false;
-            if (!has_stub[lo] && att_y[lo] != blocks[lo].orig_bbox.y2) {
-                att_y[lo] = blocks[lo].orig_bbox.y2; changed = true;
+            if (!has_stub[lo] && att_y[lo] != y2_of(lo)) {
+                att_y[lo] = y2_of(lo); changed = true;
             }
-            if (!has_stub[hi] && att_y[hi] != blocks[hi].orig_bbox.y1) {
-                att_y[hi] = blocks[hi].orig_bbox.y1; changed = true;
+            if (!has_stub[hi] && att_y[hi] != y1_of(hi)) {
+                att_y[hi] = y1_of(hi); changed = true;
             }
             if (!changed) break;
         }
@@ -735,9 +821,11 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     std::vector<Point>   pins;
     std::vector<Busterm> blocks;
     auto mk_bt = [&](const std::string& n) {
-        auto cm = floorplan_.get_block_corner_margin(n);
+        auto cm  = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
-        return Busterm{n, orig.shrink(cm.dx, cm.dy), orig};
+        Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig};
+        bt.rects = floorplan_.get_block_rects(n);   // empty for single-rect
+        return bt;
     };
     {
         Busterm bt = mk_bt(src_name);
@@ -748,10 +836,21 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
         pins.push_back(bt.bbox.center()); blocks.push_back(bt);
     }
 
+    bool has_multi_rect = false;
+    for (const auto& bt : blocks)
+        if (!bt.rects.empty()) { has_multi_rect = true; break; }
+
+    // Bounding box from all individual rects (not just pin centres) so that
+    // Hanan midpoints between separated rects are not filtered out.
     int x_lo = INT_MAX, x_hi = INT_MIN, y_lo = INT_MAX, y_hi = INT_MIN;
-    for (const auto& p : pins) {
-        x_lo = std::min(x_lo, p.x); x_hi = std::max(x_hi, p.x);
-        y_lo = std::min(y_lo, p.y); y_hi = std::max(y_hi, p.y);
+    for (const auto& bt : blocks) {
+        auto rs = bt.rects.empty() ? std::vector<Rect>{bt.orig_bbox} : bt.rects;
+        for (const Rect& r : rs) {
+            x_lo = std::min({x_lo, r.x1, r.x2});
+            x_hi = std::max({x_hi, r.x1, r.x2});
+            y_lo = std::min({y_lo, r.y1, r.y2});
+            y_hi = std::max({y_hi, r.y1, r.y2});
+        }
     }
 
     bool all_same_x = true, all_same_y = true;
@@ -769,16 +868,24 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
         t.segments.push_back(make_seg(x_lo, pins[0].y, x_hi, pins[0].y, h_layer_));
         results.push_back(t);
     }
-    if (all_same_x || all_same_y) {
+    // For multi-rect blocks, always generate trunk candidates even when pin
+    // centres happen to be collinear — the individual rects span a larger area.
+    if ((all_same_x || all_same_y) && !has_multi_rect) {
         for (auto& t : results) annotate_endpoints(t, blocks);
         return results;
     }
 
-    std::vector<Rect> block_rects;
-    block_rects.reserve(blocks.size());
-    for (const auto& bt : blocks) block_rects.push_back(bt.orig_bbox);
+    // Hanan grid: include edges of every individual rect (not just union bboxes).
+    std::vector<Rect> all_rects_for_hanan;
+    for (const auto& bt : blocks) {
+        if (bt.rects.empty())
+            all_rects_for_hanan.push_back(bt.orig_bbox);
+        else
+            for (const Rect& r : bt.rects)
+                all_rects_for_hanan.push_back(r);
+    }
     std::vector<int> hanan_x, hanan_y;
-    bundle_hanan_grid(block_rects, hanan_x, hanan_y);
+    bundle_hanan_grid(all_rects_for_hanan, hanan_x, hanan_y);
 
     std::set<int> y_set, x_set;
     for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {

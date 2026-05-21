@@ -21,7 +21,10 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<Point>(m, "Point").def(py::init<int, int>()).def_readwrite("x", &Point::x).def_readwrite("y", &Point::y);
     py::class_<Rect>(m, "Rect").def_readwrite("x1", &Rect::x1).def_readwrite("y1", &Rect::y1).def_readwrite("x2", &Rect::x2).def_readwrite("y2", &Rect::y2);
     py::class_<Segment>(m, "Segment").def(py::init<>()).def_readwrite("start", &Segment::start).def_readwrite("end", &Segment::end).def_readwrite("layer_hint", &Segment::layer_hint);
-    py::class_<Busterm>(m, "Busterm").def(py::init<>()).def_readwrite("block_name", &Busterm::block_name).def_readwrite("bbox", &Busterm::bbox);
+    py::class_<Busterm>(m, "Busterm").def(py::init<>())
+        .def_readwrite("block_name", &Busterm::block_name)
+        .def_readwrite("bbox",       &Busterm::bbox)
+        .def_readwrite("rects",      &Busterm::rects);
     py::class_<Topology>(m, "Topology").def(py::init<>())
         .def_readwrite("type",              &Topology::type)
         .def_readwrite("segments",          &Topology::segments)
@@ -54,6 +57,20 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("dy", &BlockCornerMargin::dy);
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
         .def("add_block",              &Floorplan::add_block)
+        .def("add_block_rects", [](Floorplan& fp, const std::string& name,
+                                   const std::vector<std::tuple<int,int,int,int>>& rects_py) {
+            std::vector<Rect> rects;
+            rects.reserve(rects_py.size());
+            for (const auto& [x1,y1,x2,y2] : rects_py)
+                rects.push_back(Rect{x1,y1,x2,y2});
+            fp.add_block_rects(name, rects);
+        })
+        .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {
+            auto rects = fp.get_block_rects(name);
+            std::vector<std::tuple<int,int,int,int>> out;
+            for (const auto& r : rects) out.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            return out;
+        })
         .def("set_block_corner_margin", &Floorplan::set_block_corner_margin)
         .def("set_global_corner_margin",&Floorplan::set_global_corner_margin)
         .def("set_min_stub_length",    &Floorplan::set_min_stub_length)

@@ -137,19 +137,22 @@ Feature: Multi-rect blocks and equivalent busterms
   # ---------------------------------------------------------------------------
 
   Scenario: Hanan grid includes the edges of all rects of a multi-rect block
-    # src (0,0)-(100,100) and B with two rects: left rect (200,0)-(300,100) and
+    # src (0,150)-(100,250) and B with two rects: left rect (200,0)-(300,100) and
     # right rect (500,0)-(600,100).
     # The right rect's edges (x=500,x=600) add Hanan x-lines.
     # Without the right rect, no trunk candidate exists with x between 500 and 600.
     # With the right rect, TRUNK_V@x550 (midpoint of [500,600]) is generated.
+    # src is at a different y-range to ensure a non-degenerate V trunk span.
     #
-    #   [src]              [rect1]          [rect2]
-    #   0─100             200─300          500─600
+    #   y=250 ─  [src]
+    #   y=150 ─  0─100        200─300          500─600
+    #                         [rect1]          [rect2]
+    #   y=100 ─               ───────          ───────
+    #   y=  0 ─
+    #                                             ║  ← TRUNK_V@x550; only reachable
+    #                                             ║    if x=500/600 are Hanan lines
     #
-    #                                         ║  ← TRUNK_V@x550; only reachable
-    #                                         ║    if x=500/600 are Hanan lines
-    #
-    Given a block "src" at (0,0)-(100,100)
+    Given a block "src" at (0,150)-(100,250)
     And a block "B" with rects (200,0)-(300,100) and (500,0)-(600,100)
     And layer M4 is HORIZONTAL with id 4
     And layer M5 is VERTICAL with id 5
