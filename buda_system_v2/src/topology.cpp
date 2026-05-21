@@ -900,25 +900,29 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
     for (int y_t : y_set) add_trunk_h(pins, blocks, y_t, false, results);
     for (int x_t : x_set) add_trunk_v(pins, blocks, x_t, false, results);
 
-    if ((int)hanan_y.size() >= 2) {
-        int margin_y = std::max(1, (int)(0.1 * (hanan_y.back() - hanan_y[0])));
-        for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {
-            int mid = (hanan_y[i] + hanan_y[i+1]) / 2;
-            if (mid < y_lo || mid > y_hi)
-                add_trunk_h(pins, blocks, mid, true, results);
+    {
+        int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/,   v_layer_);
+        int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+        if ((int)hanan_y.size() >= 2) {
+            int margin_y = std::max({m_v, 1, (int)(0.1 * (hanan_y.back() - hanan_y[0]))});
+            for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {
+                int mid = (hanan_y[i] + hanan_y[i+1]) / 2;
+                if (mid < y_lo || mid > y_hi)
+                    add_trunk_h(pins, blocks, mid, true, results);
+            }
+            add_trunk_h(pins, blocks, hanan_y[0]      - margin_y, true, results);
+            add_trunk_h(pins, blocks, hanan_y.back()  + margin_y, true, results);
         }
-        add_trunk_h(pins, blocks, hanan_y[0]      - margin_y, true, results);
-        add_trunk_h(pins, blocks, hanan_y.back()  + margin_y, true, results);
-    }
-    if ((int)hanan_x.size() >= 2) {
-        int margin_x = std::max(1, (int)(0.1 * (hanan_x.back() - hanan_x[0])));
-        for (int i = 0; i + 1 < (int)hanan_x.size(); ++i) {
-            int mid = (hanan_x[i] + hanan_x[i+1]) / 2;
-            if (mid < x_lo || mid > x_hi)
-                add_trunk_v(pins, blocks, mid, true, results);
+        if ((int)hanan_x.size() >= 2) {
+            int margin_x = std::max({m_h, 1, (int)(0.1 * (hanan_x.back() - hanan_x[0]))});
+            for (int i = 0; i + 1 < (int)hanan_x.size(); ++i) {
+                int mid = (hanan_x[i] + hanan_x[i+1]) / 2;
+                if (mid < x_lo || mid > x_hi)
+                    add_trunk_v(pins, blocks, mid, true, results);
+            }
+            add_trunk_v(pins, blocks, hanan_x[0]      - margin_x, true, results);
+            add_trunk_v(pins, blocks, hanan_x.back()  + margin_x, true, results);
         }
-        add_trunk_v(pins, blocks, hanan_x[0]      - margin_x, true, results);
-        add_trunk_v(pins, blocks, hanan_x.back()  + margin_x, true, results);
     }
 
     for (auto& t : results) annotate_endpoints(t, blocks);
@@ -1069,15 +1073,19 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
     for (int i = 0; i + 1 < (int)hanan_y.size(); ++i)
         chan_y.push_back((hanan_y[i] + hanan_y[i+1]) / 2);
 
-    if (hanan_x.size() >= 2) {
-        int margin_x = std::max(1, (int)(0.1 * (hanan_x.back() - hanan_x[0])));
-        chan_x.insert(chan_x.begin(), hanan_x[0]       - margin_x);
-        chan_x.push_back             (hanan_x.back()   + margin_x);
-    }
-    if (hanan_y.size() >= 2) {
-        int margin_y = std::max(1, (int)(0.1 * (hanan_y.back() - hanan_y[0])));
-        chan_y.insert(chan_y.begin(), hanan_y[0]       - margin_y);
-        chan_y.push_back             (hanan_y.back()   + margin_y);
+    {
+        int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+        int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/,   v_layer_);
+        if (hanan_x.size() >= 2) {
+            int margin_x = std::max({m_h, 1, (int)(0.1 * (hanan_x.back() - hanan_x[0]))});
+            chan_x.insert(chan_x.begin(), hanan_x[0]       - margin_x);
+            chan_x.push_back             (hanan_x.back()   + margin_x);
+        }
+        if (hanan_y.size() >= 2) {
+            int margin_y = std::max({m_v, 1, (int)(0.1 * (hanan_y.back() - hanan_y[0]))});
+            chan_y.insert(chan_y.begin(), hanan_y[0]       - margin_y);
+            chan_y.push_back             (hanan_y.back()   + margin_y);
+        }
     }
 
     add_z_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
