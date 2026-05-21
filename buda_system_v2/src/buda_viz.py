@@ -1084,12 +1084,6 @@ class BudaVisualizer:
         for bid in self._bundle_visible:
             self._bundle_visible[bid] = vis
         if self._btn_all_bundles is not None:
-            all_lbl = '☑ All Bundles' if vis else '☐ All Bundles'
-            if self._detailed_result:
-                n_total = sum(len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
-                              for w in self.bundles if w.candidates)
-                all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
-            self._btn_all_bundles.label.set_text(all_lbl)
             self._btn_all_bundles.ax.set_facecolor('#e8e8e8' if vis else '#cccccc')
         self._redraw_bundle_list()
 
@@ -1350,6 +1344,16 @@ class BudaVisualizer:
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
 
+        # Update the header button label with global stats if available.
+        if self._btn_all_bundles is not None:
+            all_on = all(self._bundle_visible.values())
+            all_lbl = '☑ All Bundles' if all_on else '☐ All Bundles'
+            if self._detailed_result:
+                n_total = sum(len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
+                              for w in self.bundles if w.candidates)
+                all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
+            self._btn_all_bundles.label.set_text(all_lbl)
+
         n_vis   = self._bundle_list_n_visible()
         bids    = self._bid_list
         n_total = len(bids)
@@ -1388,9 +1392,7 @@ class BudaVisualizer:
             stats_part = ""
             stats_color = '#111111'
             if self._detailed_result:
-                # Count unplaced bits for this bundle ID.
-                n_unp = sum(ns.bit_index for ns in self._detailed_result.net_segments if ns.bundle_id == bid) # WRONG logic, bit_index is the ID
-                # Actually, DetailedNUTSResult doesn't easily provide per-bundle unplaced count.
+                # DetailedNUTSResult doesn't easily provide per-bundle unplaced count.
                 # Let's count how many net_segments we have vs how many we expect.
                 w = next(w for w in self.bundles if w.original_bundle.id == bid)
                 n_expected = len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
@@ -1470,8 +1472,6 @@ class BudaVisualizer:
         for bid in self._bundle_visible:
             self._bundle_visible[bid] = new_state
         if self._btn_all_bundles is not None:
-            self._btn_all_bundles.label.set_text(
-                '☑ All Bundles' if new_state else '☐ All Bundles')
             self._btn_all_bundles.ax.set_facecolor(
                 '#e8e8e8' if new_state else '#cccccc')
         self._redraw_bundle_list()
@@ -2109,6 +2109,9 @@ class BudaVisualizer:
         if self._btn_tracks is not None and self._grid_rail_artists:
             self._btn_tracks.ax.set_visible(self._detailed_mode)
 
+        # Update bundle list to show bit placement stats.
+        self._redraw_bundle_list()
+
     def _toggle_detailed(self):
         self._detailed_mode = not self._detailed_mode
         active = self._detailed_mode
@@ -2338,6 +2341,7 @@ class BudaVisualizer:
         # ── All Layers ──────────────────────────────────────────────────
         ax_all_layers = self.fig.add_axes(_rect(BTN_H))
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
+        self._btn_all_layers.label.set_fontsize(8.5)
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
         # ── Per-layer custom panel ───────────────────────────────────────
@@ -2348,6 +2352,7 @@ class BudaVisualizer:
         # ── All Bundles ──────────────────────────────────────────────────
         ax_all_bundles = self.fig.add_axes(_rect(BTN_H, GAP))
         self._btn_all_bundles = Button(ax_all_bundles, '☑ All Bundles', color='#e8e8e8')
+        self._btn_all_bundles.label.set_fontsize(8.5)
         self._btn_all_bundles.on_clicked(lambda _: self._on_bundle_toggle_all())
 
         # ── Bundle list: ▲ · list · ▼ ───────────────────────────────────
