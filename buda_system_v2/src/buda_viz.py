@@ -1028,6 +1028,63 @@ class BudaVisualizer:
             self._btn_heatmap.label.set_text(label)
         self.fig.canvas.draw_idle()
 
+    def _reset_view(self):
+        """Force all bundles and layers to visible, and clear selection."""
+        self._highlighted      = None
+        self._highlighted_set  = set()
+        self._selected_overlap = None
+        self._overlap_state    = 0
+        self._solo             = False
+        if self._btn_solo is not None:
+             self._btn_solo.label.set_text("Solo OFF")
+             self._btn_solo.ax.set_facecolor('#f0f0f0')
+
+        # Reset design element toggles to True.
+        self._all_vis             = True
+        self._heatmap_visible     = True
+        self._block_names_visible = True
+        self._bustermss_visible   = True
+        self._vias_conns_visible  = True
+        self._tracks_visible      = True
+
+        # Toggle All logic (forced to True)
+        if self._btn_all is not None:
+            self._btn_all.label.set_text('☑ All')
+
+        for lid in self._layer_visible:
+            self._layer_visible[lid] = True
+        if self._btn_all_layers is not None:
+            self._btn_all_layers.label.set_text('☑ All Layers')
+            self._btn_all_layers.ax.set_facecolor('#e8e8e8')
+
+        for bid in self._bundle_visible:
+            self._bundle_visible[bid] = True
+        if self._btn_all_bundles is not None:
+            self._btn_all_bundles.ax.set_facecolor('#e8e8e8')
+
+        # Artist visibility
+        for a in self._heatmap_artists: a.set_visible(True)
+        if self._cbar_ax: self._cbar_ax.set_visible(True)
+        for txt in self._block_name_artists: txt.set_visible(True)
+        for a in self._busterm_artists: a.set_visible(True)
+        for a in self._vias_conns_artists: a.set_visible(True)
+        for e in self._grid_rail_artists:
+             e['artist'].set_visible(self._detailed_mode)
+
+        # Update button labels
+        if self._btn_heatmap is not None: self._btn_heatmap.label.set_text('☑ Heatmap')
+        if self._btn_blknames is not None: self._btn_blknames.label.set_text('☑ Blk Names')
+        if self._btn_bustermss is not None: self._btn_bustermss.label.set_text('☑ Busterms')
+        if self._btn_vias_conns is not None: self._btn_vias_conns.label.set_text('☑ Vias/Conns')
+        if self._btn_tracks is not None:
+             self._btn_tracks.label.set_text('☑ Tracks')
+             self._btn_tracks.ax.set_facecolor('#ffe8cc')
+
+        self._redraw_layer_list()
+        self._redraw_bundle_list()
+        self._refresh_highlight()
+        self.fig.canvas.draw_idle()
+
     def _toggle_all(self):
         self._all_vis = not self._all_vis
         vis = self._all_vis
@@ -1604,6 +1661,7 @@ class BudaVisualizer:
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
+        if event.key == 'a':                  self._reset_view(); return
         if event.key in ('cmd+a', 'ctrl+a'):
             if self._home_xlim is not None:
                 self.ax.set_xlim(self._home_xlim)
