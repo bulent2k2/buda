@@ -1,5 +1,21 @@
 Future? /agent  (architect, bdd, tdd)
 
+====
+
+❯ That works well when rects are physically connected which is the case for    
+  rectilinear blocks. But, when we use them to represent equivalent busterms,  
+  their "logical connectedness" is not visible. See flow/teg1.buda. Please     
+  suggest some visualization schemes so the user can tell quickly which rects  
+  belong together.                                                             
+
+❯ Let's refine buda_viz so that instead of showing the bbox of the rects, each 
+   rect is drawn individually and a bounding polygon is drawn around them. A   
+  bounding box obscures the actual geometry of rectilinear blocks. It's even   
+  worse when block rects are disconnecting for the case of equivalent term     
+  groups. 
+
+====
+
 gem> Let's add some test-cases that exercise the code that supports min-stub-lengths and make sure we cover each topo type: I, L, Z, U, UU, multi-cast topos with trunks and MSTs.                          
 
 

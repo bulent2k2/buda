@@ -13,6 +13,8 @@ _LAYER_COLOR = {3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#880
 _LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V'}
 
 
+
+# Bulent: no longer used. But keep as ref.
 def _rects_disconnected(rects_raw):
     """Return True if any rect in the group has no touching/overlapping neighbour.
 
@@ -45,13 +47,16 @@ def _draw_block(ax, name, bbox, fp, lw=2, edge='#444444', face='#d9d9d9',
     """Draw one floorplan block.
 
     Single-rect blocks: one filled rectangle with a solid edge.
-    Multi-rect blocks: each rect drawn individually with a solid edge.
-    When the rects are disconnected (equivalent-busterm groups) a dashed
-    bounding box is added to show they belong to the same block; for touching
-    or overlapping rects (rectilinear shapes) the individual outlines suffice.
+    Multi-rect blocks: each rect drawn individually with a solid edge, plus a
+    dashed bounding box around the group to signal they are one logical block.
 
     Returns the label text artist (or None if name is empty).
     """
+    # Bulent: old logic:
+    #    Multi-rect blocks: each rect drawn individually with a solid edge.
+    #    When the rects are disconnected (equivalent-busterm groups) a dashed
+    #    bounding box is added to show they belong to the same block; for touching
+
     rects_raw = fp.get_block_rects(name)
 
     if rects_raw:
@@ -60,11 +65,12 @@ def _draw_block(ax, name, bbox, fp, lw=2, edge='#444444', face='#d9d9d9',
                 (rx1, ry1), rx2 - rx1, ry2 - ry1,
                 linewidth=lw, edgecolor=edge, facecolor=face,
                 alpha=alpha, zorder=zorder))
-        if _rects_disconnected(rects_raw):
-            ax.add_patch(patches.Rectangle(
-                (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
-                linewidth=max(1.0, lw * 0.6), edgecolor=edge, facecolor='none',
-                linestyle='--', alpha=0.5, zorder=zorder + 0.5))
+      # Bulent:
+      # if _rects_disconnected(rects_raw):
+        ax.add_patch(patches.Rectangle(
+            (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
+            linewidth=max(1.0, lw * 0.6), edgecolor=edge, facecolor='none',
+            linestyle='--', alpha=0.5, zorder=zorder + 0.5))
     else:
         ax.add_patch(patches.Rectangle(
             (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
