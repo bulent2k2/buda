@@ -772,7 +772,9 @@ class BudaVisualizer:
 
         # Layout constants for the left panel (view toggles + heatmap)
         self._LX, self._LW = 0.005, 0.065
-        self._ly_post_buttons = 0.97 # top edge
+        # Start with a conservative estimate to leave room for ~7 buttons (7 * 0.046 = 0.322)
+        # 0.97 - 0.322 = 0.648.
+        self._ly_post_buttons = 0.62 
 
         # Detailed NUTS (Stage 9) visualisation state.
         self._detailed_mode          = False
@@ -1687,23 +1689,35 @@ class BudaVisualizer:
             a.set_visible(vis)
 
         # Colorbar legend — created once per draw, rebuilt on subsequent calls.
+        self._redraw_colorbar()
+
+    def _redraw_colorbar(self):
+        """Re-create the congestion colorbar in the correct left-panel position."""
+        if not self._heatmap_artists and self._cbar_ax is None:
+            return
+        
+        # Build dummy data for ScalarMappable if we haven't already.
+        import matplotlib.colors as mcolors
+        import numpy as np
+        cmap = plt.cm.get_cmap('RdYlGn_r')
+
         if self._cbar_ax is not None:
             try:
                 self._cbar_ax.remove()
             except Exception:
                 pass
+
         # Positioned below the button stack, aligned horizontally with buttons.
-        # Height reduced to 0.35; centered horizontally in the toggle area.
+        # Height reduced to 0.35.
         cb_w = 0.012
         cb_h = 0.35
-        # Aligned by vertical centerline with buttons:
-        cb_x = self._LX + (self._LW - cb_w) / 2.0
-        # Pack below the last button (or at a reasonable resting position if buttons aren't drawn yet)
-        cb_y = getattr(self, '_ly_post_buttons', 0.6) - cb_h - 0.04
+        # Align right edge of heatmap with right edge of buttons:
+        cb_x = self._LX + self._LW - cb_w
+        # Pack below the last button.
+        cb_y = self._ly_post_buttons - cb_h - 0.04
         
         self._cbar_ax = self.fig.add_axes([cb_x, cb_y, cb_w, cb_h])
-        import matplotlib.colors as mcolors
-        import numpy as np
+
         # Build a custom colormap that matches the actual cell appearance:
         # at 0% congestion cells are ~white (low alpha on white bg); at 150%+ they
         # are the full RdYlGn_r red.  Blend from white → RdYlGn_r colours.
@@ -1728,7 +1742,7 @@ class BudaVisualizer:
         cbar.set_label('Congestion', fontsize=8, labelpad=4)
         cbar.ax.yaxis.set_label_position('left')
         cbar.ax.yaxis.set_ticks_position('left')
-        self._cbar_ax.set_visible(vis)
+        self._cbar_ax.set_visible(self._heatmap_visible)
 
     def draw_hanan_grid(self):
         xs, ys = self.fp.get_hanan_grid()
@@ -2263,6 +2277,7 @@ class BudaVisualizer:
 
         # Store the current packing position for the colorbar.
         self._ly_post_buttons = ly
+        self._redraw_colorbar()
 
         RX, RW   = 0.83, 0.15
         BTN_H    = 0.044

@@ -9,6 +9,7 @@ dnuts2.buda:run_detailed_nuts
 layer_assignment.buda:# 2. Define track patterns (Required for run_detailed_nuts)
 layer_assignment.buda:run_detailed_nuts
 quickstart.buda:run_detailed_nuts
+talk1.buda:run_detailed_nuts
 two_dnuts_b1.buda:run_detailed_nuts
 two_dnuts_b2.buda:run_detailed_nuts
 two_dnuts.buda:run_detailed_nuts
