@@ -62,7 +62,7 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("dy", &BlockCornerMargin::dy);
 
     py::class_<KeepoutZone>(m, "KeepoutZone")
-
+        .def_readwrite("bbox",      &KeepoutZone::bbox)
         .def_readwrite("layer_ids", &KeepoutZone::layer_ids);
 
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
