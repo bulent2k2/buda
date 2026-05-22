@@ -920,7 +920,7 @@ Feature: Pull preference and pull-balanced trunk generation
 
 ## 15. Multi-Rect Blocks and Equivalent Busterms
 
-### 14.1 Motivation
+### 15.1 Motivation
 
 Two real-world layout situations require connecting to more than one candidate
 face on a single logical block:
@@ -941,7 +941,7 @@ where each rectangle is an independent candidate connection region (an
 "equivalence group").  The topology generator tries all rectangles and picks the
 one that minimises stub cost for the current trunk position.
 
-### 14.2 Syntax (`add_block` extension)
+### 15.2 Syntax (`add_block` extension)
 
 ```
 # Existing (backward-compatible): single rect, no parentheses
@@ -975,7 +975,7 @@ add_block SRAM_L (0 0 100 200) (0 0 300 100)
 add_block CPU (0 100 20 300) (480 100 500 300)
 ```
 
-### 14.3 Best-Rect Selection
+### 15.3 Best-Rect Selection
 
 For each block `b` and each candidate trunk, the generator tries all of `b`'s
 rects and selects the one with minimum stub cost:
@@ -998,7 +998,7 @@ If the trunk passes through `r` (i.e. `r.y1 ≤ y ≤ r.y2` for an H trunk),
 The rect selection is **per-candidate**: the same block may use different rects
 in different topology candidates.  This is expected and correct.
 
-### 14.4 Hanan Grid with Multi-Rect Blocks
+### 15.4 Hanan Grid with Multi-Rect Blocks
 
 The Hanan grid is built from **all rect edges of all blocks**:
 
@@ -1010,7 +1010,7 @@ hy = sorted unique {r.y1, r.y2  for all blocks b, all rects r ∈ b.rects}
 This ensures that trunk positions exist at every natural connection boundary,
 regardless of which rect a block ends up connecting through.
 
-### 14.5 Slide Range with the Selected Rect
+### 15.5 Slide Range with the Selected Rect
 
 After a topology is built (Phase 5), the slide-range computation in
 `ConnTopology::compute_slide_ranges` uses the **selected rect's geometry** for
@@ -1021,7 +1021,7 @@ The Pass-2 constraint (min-stub-length enforcement) is derived from
 extreme face.  Using the union bbox would over-constrain the slide range for
 blocks whose selected rect is far from the opposite extreme.
 
-### 14.6 Obstacle vs. Connection Semantics
+### 15.6 Obstacle vs. Connection Semantics
 
 The multi-rect data serves two distinct purposes:
 
@@ -1035,7 +1035,7 @@ For feedthru, the check is: does **any** of `b.rects` straddle the trunk
 position?  If so, the block is potentially a feedthru candidate; the designer
 must have opted in via `set_feedthru_block`.
 
-### 14.7 Rectilinear Block Decomposition
+### 15.7 Rectilinear Block Decomposition
 
 For an L-shaped block, the two rects need not be non-overlapping.  They
 represent **face groups**, not a partition of area:
@@ -1053,7 +1053,7 @@ For congestion accounting, the actual occupied area is the union (computed via
 inclusion-exclusion or a polygon union if a geometry library is available; the
 bounding box is an acceptable conservative estimate for stage-2 coarse planning).
 
-### 14.8 C++ API Changes
+### 15.8 C++ API Changes
 
 ```cpp
 // Current
@@ -1084,7 +1084,7 @@ struct Busterm {
 };
 ```
 
-### 14.9 Corner Margin with Multi-Rect Blocks
+### 15.9 Corner Margin with Multi-Rect Blocks
 
 The `corner_margin` in `add_block` applies uniformly to **all** rects.  Each
 rect is shrunk independently:

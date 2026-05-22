@@ -1,6 +1,11 @@
 Future? /agent  (architect, bdd, tdd)
 
 ====
+gem> Let's add a feature where a Designer can denote a region to be a keep-out-zone for a given    
+   list of layers. We want the planner and the detailed nuts engines to honor them. Please       
+   suggest some options to get this started.  
+
+====
 
 ❯ That works well when rects are physically connected which is the case for    
   rectilinear blocks. But, when we use them to represent equivalent busterms,  
