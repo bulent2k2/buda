@@ -1023,8 +1023,9 @@ class BudaVisualizer:
                 a = e['artist']
                 layer_on = self._layer_visible.get(e['layer'], True)
                 tracks_on = self._tracks_visible
-                # Rails are resting at 0.15 alpha.
-                a.set_alpha(0.15 if (layer_on and tracks_on) else 0.0)
+                # Use stored base alpha (0.15 for rails, 0.10 for signal)
+                base_alpha = e.get('alpha', 0.15)
+                a.set_alpha(base_alpha if (layer_on and tracks_on) else 0.0)
 
         # Draw thin white boundary lines over each selected bundle's segments.
         # Skipped in detailed mode — overlays would cover bit-wire lines entirely.
@@ -1786,7 +1787,8 @@ class BudaVisualizer:
             rect = patches.Rectangle(
                 (r.x1, r.y1), w, h,
                 linewidth=1, edgecolor='red', facecolor='none',
-                hatch='///', alpha=0.4, zorder=1, visible=vis)
+                hatch='///', alpha=0.4, zorder=1)
+            rect.set_visible(vis)
             self.ax.add_patch(rect)
             self._keepout_artists.append(rect)
             
@@ -1795,7 +1797,8 @@ class BudaVisualizer:
             layer_str = "KOZ: " + ",".join(_LAYER_LABEL.get(lid, f"M{lid}").split()[0] for lid in layers)
             txt = self.ax.text((r.x1 + r.x2) / 2, r.y2 + 5,
                          layer_str, color='red', fontsize=7, 
-                         ha='center', va='bottom', clip_on=True, zorder=2, visible=vis)
+                         ha='center', va='bottom', clip_on=True, zorder=2)
+            txt.set_visible(vis)
             self._keepout_artists.append(txt)
 
         if self._btn_keepouts is not None:
@@ -2222,20 +2225,22 @@ class BudaVisualizer:
 
             all_tracks = pattern.tracks_in_range(lo, hi)
             for centre, slot in all_tracks:
-                col = _RAIL_COLOR.get(slot.type, None)
-                if col is None:
-                    continue   # SIGNAL slots are the transparent gaps
+                # Rails (Power, Ground, CLK) have specific colors.
+                # Signal tracks get a very subtle background.
+                col = _RAIL_COLOR.get(slot.type, '#f9f9f9')
+                alpha = 0.15 if slot.type != 'SIGNAL' else 0.10
+                
                 half = slot.width / 2.0
                 if is_h:
                     rect = patches.Rectangle(
                         (x_min, centre - half), x_max - x_min, slot.width,
-                        linewidth=0, facecolor=col, alpha=0.15, zorder=4)
+                        linewidth=0, facecolor=col, alpha=alpha, zorder=4)
                 else:
                     rect = patches.Rectangle(
                         (centre - half, y_min), slot.width, y_max - y_min,
-                        linewidth=0, facecolor=col, alpha=0.15, zorder=4)
+                        linewidth=0, facecolor=col, alpha=alpha, zorder=4)
                 self.ax.add_patch(rect)
-                self._grid_rail_artists.append({'artist': rect, 'layer': lid})
+                self._grid_rail_artists.append({'artist': rect, 'layer': lid, 'alpha': alpha})
 
         # Draw bit-wire NetSegments.
         self._detailed_result = detailed_result

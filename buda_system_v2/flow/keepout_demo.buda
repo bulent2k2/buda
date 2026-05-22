@@ -5,8 +5,8 @@ def_layer 4 M4 H TOP 1.0
 def_layer 5 M5 V TOP 1.0
 
 # Define a track pattern so we can run detailed NUTS
-def_track_pattern 4 0.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0
-def_track_pattern 5 0.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0
+def_track_pattern 4 0.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 POWER 2.0 2.0 SIGNAL 2.0 2.0
+def_track_pattern 5 0.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 POWER 2.0 2.0 SIGNAL 2.0 2.0
 
 # Blocks
 add_block unit1 100 100 200 200
