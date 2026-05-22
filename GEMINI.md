@@ -10,7 +10,7 @@ BUDA is an open EDA tool designed to help plan interconnect on a microchip. It f
 - **Verification:** Maintain high test coverage. Use the Gherkin-based features in `test/tests/features/` and Python tests in `test/tests/`.
 
 ### Development Lifecycle
-1.  **Setup:** Define layers (`def_layer`), floorplan (`add_block`), and netlist (`add_net`/`add_bus`) in `.buda` scripts.
+1.  **Setup:** Define layers (`def_layer`), floorplan (`add_block`), keepout zones (`add_keepout`), and netlist (`add_net`/`add_bus`) in `.buda` scripts.
 2.  **Bundling:** Group nets using `run_bundler`.
 3.  **Topology Generation:** Enumerate routing candidates using `generate_topologies` or `generate_topologies_for_bundle`.
 4.  **Global Planning:** Select optimal topologies and assign layers using `run_planner`.

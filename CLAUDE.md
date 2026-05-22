@@ -38,6 +38,7 @@ python3 buda_cli.py comprehensive_demo.buda
 |---|---|---|
 | `add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]` | setup | Place a single-rect floorplan block; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
 | `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]` | setup | Multi-rect block: topology generator picks the best-fit rect per trunk position |
+| `add_keepout <x1> <y1> <x2> <y2> <layer_list>` | setup | Define a rectangular keep-out zone for specific routing layers |
 | `corner_margin dx <n> [dy <n>]` | setup | Set global corner margin for all blocks with no per-block override. Only `dx`/`dy` (absolute); `pct_h`/`pct_v` not valid globally. Single-axis value mirrors to the other axis. |
 | `add_net <name> <driver_pin> <receiver_pins_csv>` | setup | Add a net to the netlist |
 | `add_bus <prefix>[<N>] <drv_pin> <rcv_pin_csv>` | setup | Expand a bus into N nets: `prefix[N]` → `prefix_0`…`prefix_{N-1}`; `prefix[lo:hi]` → explicit range |
@@ -133,7 +134,7 @@ Netlist (.buda script)
 - `Rect` — integer bounding box with `.center()`
 - `Segment` — start point, end point, `layer_hint` (integer)
 - `Topology` — type string (`"L_HV"`, `"Z_trunk_x"`, `"U_top"`, …), list of segments, estimated wirelength, trunk location
-- `Floorplan` — block registry; provides `get_hanan_grid()` (sorted unique x and y coordinates of all block edges)
+- `Floorplan` — block registry; manages keepout zones; provides `get_hanan_grid()` (sorted unique x and y coordinates of all block edges and keepouts)
 - `TopologyGenerator` — generates L, Z, U candidates between two named blocks
 
 **Topology shapes:**

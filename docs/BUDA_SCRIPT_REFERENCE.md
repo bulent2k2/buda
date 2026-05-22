@@ -122,6 +122,39 @@ add_block u_dp rect  200  0  300  100  rect  400  0  500  100  corner_margin dx 
 
 ---
 
+### `add_keepout`
+
+```
+add_keepout <x1> <y1> <x2> <y2> <layer1> <layer2> ...
+```
+
+Define a keep-out zone where specific routing layers are prohibited. Both the
+global planner and the detailed router respect these zones.
+
+| Argument | Type | Description |
+|---|---|---|
+| `x1 y1` | int | Lower-left corner of the prohibited region (layout units) |
+| `x2 y2` | int | Upper-right corner of the prohibited region (layout units) |
+| `layerN` | int or str | Layer ID or name (e.g. `4` or `M4`) to block in this zone. |
+
+**Effect:**
+- **Planning**: `run_planner` subtracts the prohibited area from its congestion
+  model, forcing it to choose topologies that detour around the zone.
+- **Detailed Routing**: `run_detailed_nuts` automatically skips any signal
+  tracks that pass through a keep-out zone for the segment's assigned layer.
+- **Visualization**: Keep-out zones appear as red hatched rectangles.
+
+**Example:**
+```
+# Block M4 routing in the middle of the chip
+add_keepout 300 300 500 500 M4
+
+# Block both M4 and M5 over a sensitive analog block
+add_keepout 100 100 250 250 M4 M5
+```
+
+---
+
 ### `add_net`
 
 ```

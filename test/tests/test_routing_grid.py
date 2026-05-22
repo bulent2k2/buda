@@ -191,14 +191,14 @@ def test_signal_tracks_in_narrow_interval():
 def test_routing_grid_stack_define_and_retrieve():
     stack = interconnect.RoutingGridStack()
     p = make_standard_pattern()
-    stack.define_layer(4, p)
+    stack.define_layer(4, p, True)
     grid = stack.get_layer_grid(4)
     assert grid is not None
 
 
 def test_routing_grid_signal_tracks_in_via_stack():
     stack = interconnect.RoutingGridStack()
-    stack.define_layer(4, make_standard_pattern(origin=0.0))
+    stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     grid = stack.get_layer_grid(4)
     tracks = grid.signal_tracks_in(x=0.0, lo=0.0, hi=14.0)
     assert len(tracks) == 4
@@ -208,7 +208,7 @@ def test_routing_grid_signal_tracks_in_via_stack():
 
 def test_routing_grid_signal_tracks_two_units():
     stack = interconnect.RoutingGridStack()
-    stack.define_layer(4, make_standard_pattern(origin=0.0))
+    stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     grid = stack.get_layer_grid(4)
     tracks = grid.signal_tracks_in(x=0.0, lo=0.0, hi=28.0)
     assert len(tracks) == 8  # 4 signal per unit × 2 units
@@ -235,7 +235,7 @@ def make_two_slot_pattern(origin=0.0):
 
 def test_override_pattern_applies_inside_region():
     stack = interconnect.RoutingGridStack()
-    stack.define_layer(4, make_standard_pattern(origin=0.0))
+    stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     override_pat = make_two_slot_pattern(origin=0.0)
     stack.add_override(4, x1=100, y1=0, x2=200, y2=500, pattern=override_pat)
 
@@ -246,7 +246,7 @@ def test_override_pattern_applies_inside_region():
 
 def test_global_pattern_applies_outside_override_region():
     stack = interconnect.RoutingGridStack()
-    stack.define_layer(4, make_standard_pattern(origin=0.0))
+    stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     override_pat = make_two_slot_pattern(origin=0.0)
     stack.add_override(4, x1=100, y1=0, x2=200, y2=500, pattern=override_pat)
 
@@ -258,7 +258,7 @@ def test_global_pattern_applies_outside_override_region():
 def test_first_matching_override_wins():
     """When two overrides cover the same point, the first-added takes precedence."""
     stack = interconnect.RoutingGridStack()
-    stack.define_layer(4, make_standard_pattern(origin=0.0))
+    stack.define_layer(4, make_standard_pattern(origin=0.0), True)
 
     pat_a = make_two_slot_pattern(origin=0.0)           # unit_pitch=2
     pat_b = interconnect.TrackPattern(                   # unit_pitch=6

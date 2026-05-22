@@ -106,6 +106,13 @@ To ensure your layout isn't too "pinched," you can set a minimum stub length:
 `set_min_stub_length 25`
 This ensures that every wire segment connecting to a block has a healthy physical length.
 
+### Keepout Zones
+You can prohibit routing in specific rectangular regions for one or more layers:
+`add_keepout 300 100 500 300 M4`
+*   **Planning**: `run_planner` will automatically choose topologies that detour around these zones.
+*   **Detailed Routing**: `run_detailed_nuts` will skip any tracks that pass through a keepout zone for the assigned layer.
+*   **Visualization**: Keepout zones appear as red hatched rectangles in the visualizer.
+
 ---
 
 ## 6. Getting Help
