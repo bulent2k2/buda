@@ -14,7 +14,7 @@ add_bus bv1[16] u0.tx v0.rx
 add_bus bv2[16] v0.tx u11.rx
 
 # Add a Keepout Zone to verify the toggle button
-add_keepout 650 400 750 600 M4 M5
+# add_keepout 650 400 750 600 M4 M5
 
 run_bundler strict
 generate_topologies
