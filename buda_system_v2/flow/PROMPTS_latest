@@ -1,6 +1,33 @@
 Future? /agent  (architect, bdd, tdd)
 
 ====
+✦ I have committed the final refinements for the Keepouts and Tracks visibility features.
+
+  Summary of Final Changes:
+   1. Enhanced Track Visualization: 
+       * Updated buda_viz.py to render all tracks in the background, including SIGNAL slots
+         (drawn with a very subtle grey). 
+       * This ensures the ☑ Tracks button is always functional and provides a complete visual
+         representation of the available routing resources.
+   2. Robust Toggling: 
+       * Used explicit set_visible() and stored alpha values for grid rail artists and keep-out
+         zones. 
+       * This ensures that toggling visibility is reliable across different visualization modes
+         and doesn't interfere with highlighting logic.
+   3. Updated Demo Scripts:
+       * keepout_demo.buda: Included mixed track patterns (Signal/Power) to verify that all track
+         types are correctly represented and toggleable.
+       * dnuts1.buda: Integrated a keep-out zone to confirm that the UI remains responsive even
+         in complex, high-density layouts.
+
+  The Keep-Out Zone feature and its associated UI controls are now fully implemented, verified,
+  and integrated into the design flow. Ready for the next phase!
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+gem> Please add the keepout zone feature to test/tests/features as well as the USER and REFERENCE  
+   guides + GEMINI and CLAUDE md docs      
+
+====
+
 gem> Let's add a feature where a Designer can denote a region to be a keep-out-zone for a given    
    list of layers. We want the planner and the detailed nuts engines to honor them. Please       
    suggest some options to get this started.  
