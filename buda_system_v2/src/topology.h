@@ -6,6 +6,13 @@
 #include <optional>
 #include "bundler.h"
 namespace interconnect {
+
+// How a multi-rect block handles a trunk that falls in the gap between its rects.
+enum class TegMode {
+    THRU,  // default: connect only the nearest rect; block's internal routing joins sides
+    OVER,  // connect both rects with V stubs + an explicit bridge segment over the block top
+};
+
 struct Point { int x, y; };
 struct Rect {
     int x1, y1, x2, y2;
@@ -36,6 +43,7 @@ struct Busterm {
     // Non-empty for multi-rect blocks: each element is one candidate connection
     // rectangle (unshrunk).  Empty = single-rect block (use orig_bbox as before).
     std::vector<Rect> rects;
+    TegMode           teg_mode = TegMode::THRU;
 };
 // Per-segment busterm annotation: .first = busterm at segment start endpoint,
 // .second = busterm at segment end endpoint.  nullopt means the endpoint is an
@@ -51,6 +59,9 @@ struct Topology {
     // ConnTopology::infer_connections can identify busterm connections without
     // scanning the entire floorplan.  Key = segment index.
     std::map<int, SegEndpoints> seg_busterms;
+    // Over-the-block bridge segments: block_name → bridge Segment.
+    // Non-empty only when teg_mode=OVER and trunk falls in the gap between rects.
+    std::map<std::string, Segment> bridge_segments;
 };
 // Per-block corner margin: keeps trunk/stub connections away from block corners.
 // dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).
@@ -79,9 +90,13 @@ public:
     const std::vector<KeepoutZone>& get_keepout_zones() const { return keepouts_; }
     // Multi-rect block: stores each rect individually; add_block is called
     // internally with the union bounding box for backward compatibility.
-    void add_block_rects(const std::string& name, const std::vector<Rect>& rects);
+    void add_block_rects(const std::string& name, const std::vector<Rect>& rects,
+                         TegMode mode = TegMode::THRU);
     // Returns the individual rects for a multi-rect block, or empty for single-rect.
     std::vector<Rect> get_block_rects(const std::string& name) const;
+    // TEG mode: controls over-the-block bridge generation for multi-rect blocks.
+    void    set_block_teg_mode(const std::string& name, TegMode mode);
+    TegMode get_block_teg_mode(const std::string& name) const;
     // Set corner margin for a previously-added block (absolute units).
     void set_block_corner_margin(const std::string& name, int dx, int dy);
     // Set global corner margin applied to all blocks that have no per-block override.
@@ -108,8 +123,9 @@ public:
         return res;
     }
 private:
-    std::map<std::string, Rect> blocks_;
+    std::map<std::string, Rect>          blocks_;
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
+    std::map<std::string, TegMode>       teg_modes_;
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};
     MinStubLength min_stub_len_;

@@ -668,7 +668,14 @@ class BudaSession:
                     x1r, y1r, x2r, y2r = int(args[i+1]), int(args[i+2]), int(args[i+3]), int(args[i+4])
                     rects.append((x1r, y1r, x2r, y2r))
                     i += 5
-                self.fp.add_block_rects(name, rects)
+                # Optional teg_mode keyword after rects
+                teg_mode = interconnect.TegMode.THRU
+                if i < len(args) and args[i].lower() == "teg_mode":
+                    i += 1
+                    if i < len(args):
+                        teg_mode = interconnect.TegMode.OVER if args[i].lower() == "over" else interconnect.TegMode.THRU
+                        i += 1
+                self.fp.add_block_rects(name, rects, teg_mode)
                 x1 = min(r[0] for r in rects); y1 = min(r[1] for r in rects)
                 x2 = max(r[2] for r in rects); y2 = max(r[3] for r in rects)
                 rest = list(args[i:])
@@ -1101,6 +1108,8 @@ class BudaSession:
                 return
             self._rerun_nuts_layer(layer_id)
         elif cmd == "visualize_topologies":
+            if self.no_viz:
+                return
             # Usage:
             #   visualize_topologies <hint>         — first matching bundle
             #   visualize_topologies -all [hints…]  — all matching bundles

@@ -13,7 +13,8 @@ namespace interconnect {
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     blocks_[name] = Rect{x1, y1, x2, y2};
 }
-void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>& rects) {
+void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>& rects,
+                                 TegMode mode) {
     Rect u = rects[0];
     for (const auto& r : rects) {
         u.x1 = std::min(u.x1, r.x1); u.y1 = std::min(u.y1, r.y1);
@@ -21,6 +22,14 @@ void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>
     }
     blocks_[name]      = u;
     block_rects_[name] = rects;
+    teg_modes_[name]   = mode;
+}
+void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
+    teg_modes_[name] = mode;
+}
+TegMode Floorplan::get_block_teg_mode(const std::string& name) const {
+    auto it = teg_modes_.find(name);
+    return (it != teg_modes_.end()) ? it->second : TegMode::THRU;
 }
 std::vector<Rect> Floorplan::get_block_rects(const std::string& name) const {
     auto it = block_rects_.find(name);
@@ -689,7 +698,56 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
 
     for (int i = 0; i < n; ++i) {
-        if (!has_stub[i]) continue;
+        if (!has_stub[i]) {
+            // Direct connection — but check for over-the-block: even a Direct
+            // block may need the far rect bridged when teg_mode == OVER.
+            // (Handled below in the per-block over check.)
+            continue;
+        }
+
+        // Over-the-block: if trunk is in the gap between rects on both sides,
+        // emit two V stubs (one per side) and a horizontal bridge over the block top.
+        if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
+            const auto& rects = blocks[i].rects;
+            bool trunk_inside_any = false;
+            for (const auto& r : rects)
+                if (y_trunk >= r.y1 && y_trunk <= r.y2) { trunk_inside_any = true; break; }
+
+            if (!trunk_inside_any) {
+                // Partition rects into those fully below and fully above trunk.
+                Rect best_below = rects[0]; bool has_below = false;
+                Rect best_above = rects[0]; bool has_above = false;
+                for (const auto& r : rects) {
+                    if (r.y2 <= y_trunk) {
+                        if (!has_below || r.y2 > best_below.y2) { best_below = r; has_below = true; }
+                    } else if (r.y1 >= y_trunk) {
+                        if (!has_above || r.y1 < best_above.y1) { best_above = r; has_above = true; }
+                    }
+                }
+                if (has_below && has_above) {
+                    int cx_below = best_below.center().x;
+                    int cx_above = best_above.center().x;
+
+                    // V stub down: trunk → top face of lower rect
+                    int idx = (int)t.segments.size();
+                    t.segments.push_back(make_seg(cx_below, best_below.y2, cx_below, y_trunk, v_layer_));
+                    t.seg_busterms[idx].first = blocks[i];
+
+                    // V stub up: trunk → bottom face of upper rect
+                    idx = (int)t.segments.size();
+                    t.segments.push_back(make_seg(cx_above, y_trunk, cx_above, best_above.y1, v_layer_));
+                    t.seg_busterms[idx].first = blocks[i];
+
+                    // Bridge H segment at union_bbox.y2 (over the block top)
+                    const Rect& ub = blocks[i].orig_bbox;
+                    t.bridge_segments[blocks[i].block_name] =
+                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
+                    continue;
+                }
+            }
+        }
+
+        // Normal single stub
         int seg_idx = (int)t.segments.size();
         t.segments.push_back(make_seg(att_x[i], conn_y[i], att_x[i], y_trunk, v_layer_));
         t.seg_busterms[seg_idx].first = blocks[i];
@@ -812,6 +870,48 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) continue;
+
+        // Over-the-block for V trunk: trunk in horizontal gap between rects
+        if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
+            const auto& rects = blocks[i].rects;
+            bool trunk_inside_any = false;
+            for (const auto& r : rects)
+                if (x_trunk >= r.x1 && x_trunk <= r.x2) { trunk_inside_any = true; break; }
+
+            if (!trunk_inside_any) {
+                Rect best_left = rects[0]; bool has_left = false;
+                Rect best_right = rects[0]; bool has_right = false;
+                for (const auto& r : rects) {
+                    if (r.x2 <= x_trunk) {
+                        if (!has_left || r.x2 > best_left.x2) { best_left = r; has_left = true; }
+                    } else if (r.x1 >= x_trunk) {
+                        if (!has_right || r.x1 < best_right.x1) { best_right = r; has_right = true; }
+                    }
+                }
+                if (has_left && has_right) {
+                    int cy_left  = best_left.center().y;
+                    int cy_right = best_right.center().y;
+
+                    // H stub left: trunk → right face of left rect
+                    int idx = (int)t.segments.size();
+                    t.segments.push_back(make_seg(best_left.x2, cy_left, x_trunk, cy_left, h_layer_));
+                    t.seg_busterms[idx].first = blocks[i];
+
+                    // H stub right: trunk → left face of right rect
+                    idx = (int)t.segments.size();
+                    t.segments.push_back(make_seg(x_trunk, cy_right, best_right.x1, cy_right, h_layer_));
+                    t.seg_busterms[idx].first = blocks[i];
+
+                    // Bridge H segment at union_bbox.y2 (over the block top)
+                    const Rect& ub = blocks[i].orig_bbox;
+                    t.bridge_segments[blocks[i].block_name] =
+                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
+                    continue;
+                }
+            }
+        }
+
+        // Normal single stub
         int seg_idx = (int)t.segments.size();
         t.segments.push_back(make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], h_layer_));
         t.seg_busterms[seg_idx].first = blocks[i];
@@ -834,7 +934,8 @@ std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
         auto cm  = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
         Busterm bt{n, orig.shrink(cm.dx, cm.dy), orig,
-                   floorplan_.get_block_rects(n)};
+                   floorplan_.get_block_rects(n),
+                   floorplan_.get_block_teg_mode(n)};
         return bt;
     };
     {
@@ -1040,7 +1141,8 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
         auto cm = floorplan_.get_block_corner_margin(n);
         Rect orig = floorplan_.get_block_bounds(n);
         return Busterm{n, orig.shrink(cm.dx, cm.dy), orig,
-                       floorplan_.get_block_rects(n)};
+                       floorplan_.get_block_rects(n),
+                       floorplan_.get_block_teg_mode(n)};
     };
     Busterm src_bt = mk_bt(src_name);
     Busterm dst_bt = mk_bt(dst_name);

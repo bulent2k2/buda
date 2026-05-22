@@ -28,6 +28,10 @@ PYBIND11_MODULE(interconnect, m) {
         .value("TOP", LayerType::TOP)
         .value("LOW", LayerType::LOW);
 
+    py::enum_<TegMode>(m, "TegMode")
+        .value("THRU", TegMode::THRU)
+        .value("OVER", TegMode::OVER);
+
     py::class_<Point>(m, "Point")
         .def(py::init<int, int>())
         .def_readwrite("x", &Point::x)
@@ -50,7 +54,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def(py::init<>())
         .def_readwrite("block_name", &Busterm::block_name)
         .def_readwrite("bbox",       &Busterm::bbox)
-        .def_readwrite("rects",      &Busterm::rects);
+        .def_readwrite("rects",      &Busterm::rects)
+        .def_readwrite("teg_mode",   &Busterm::teg_mode);
 
     py::class_<Topology>(m, "Topology")
         .def(py::init<>())
@@ -59,7 +64,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("estimated_wirelength", &Topology::estimated_wirelength)
         .def_readwrite("trunk_location",    &Topology::trunk_location)
         .def_readwrite("pass_through_count", &Topology::pass_through_count)
-        .def_readwrite("seg_busterms",      &Topology::seg_busterms);
+        .def_readwrite("seg_busterms",      &Topology::seg_busterms)
+        .def_readwrite("bridge_segments",   &Topology::bridge_segments);
 
     py::class_<Bundle>(m, "Bundle")
         .def(py::init<>())
@@ -108,13 +114,16 @@ PYBIND11_MODULE(interconnect, m) {
     py::class_<Floorplan>(m, "Floorplan").def(py::init<>())
         .def("add_block",              &Floorplan::add_block)
         .def("add_block_rects", [](Floorplan& fp, const std::string& name,
-                                   const std::vector<std::tuple<int,int,int,int>>& rects_py) {
+                                   const std::vector<std::tuple<int,int,int,int>>& rects_py,
+                                   TegMode mode) {
             std::vector<Rect> rects;
             rects.reserve(rects_py.size());
             for (const auto& [x1,y1,x2,y2] : rects_py)
                 rects.push_back(Rect{x1,y1,x2,y2});
-            fp.add_block_rects(name, rects);
-        })
+            fp.add_block_rects(name, rects, mode);
+        }, py::arg("name"), py::arg("rects"), py::arg("teg_mode") = TegMode::THRU)
+        .def("set_block_teg_mode", &Floorplan::set_block_teg_mode)
+        .def("get_block_teg_mode", &Floorplan::get_block_teg_mode)
         .def("add_keepout_zone",        &Floorplan::add_keepout_zone)
         .def("get_keepout_zones",       &Floorplan::get_keepout_zones)
         .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {

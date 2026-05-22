@@ -1,4 +1,38 @@
-Drawing Terminal Equivalence Groups
+Terminal Equivalence Groups
+====
+
+Impl by Claude Code
+====
+
+Good. I have all the context needed. Here's the plan:
+  1. Add TegMode enum + teg_mode on Busterm and Floorplan in topology.h
+  2. Implement bridge generation in add_trunk_h / add_trunk_v in topology.cpp
+  3. Add bridge_segments map to Topology
+  4. Expose in bindings.cpp + update CLI add_block parser
+  5. Build and test
+
+  Starting with the header:
+
+⏺ Update(/Users/ben/src/buda/buda_system_v2/src/topology.h)
+  ⎿  Added 7 lines
+       6  #include <optional>
+       7  #include "bundler.h"
+       8  namespace interconnect {
+       9 + 
+      10 +// How a multi-rect block handles a trunk that falls in the gap between 
+         +its rects. 
+      11 +enum class TegMode { 
+      12 +    THRU,  // default: connect only the nearest rect; block's internal r
+         +outing joins 
+      13 +    OVER,  // connect both rects with V stubs + an explicit bridge segment over the block top 
+      14 +}; 
+      15 + 
+      16  struct Point { int x, y; };
+      17  struct Rect {
+      18      int x1, y1, x2
+
+
+Drawing (by antigravity cli)
 ====
 
 Now that we have multi-rect support in add_block, we can handle not only
