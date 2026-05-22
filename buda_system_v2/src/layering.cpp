@@ -1,11 +1,18 @@
 #include "layering.h"
 namespace interconnect {
 void LayerStack::add_layer(int id, const std::string& name, LayerDir dir, LayerType type) {
-    layers_.push_back({id, name, dir, type});
+    layers_.push_back({id, name, dir, type, 1.0});
     if (type == LayerType::TOP) {
         if (dir == LayerDir::HORIZONTAL) top_horiz_id_ = id;
         else top_vert_id_ = id;
     }
+}
+void LayerStack::set_layer_dilution(int id, double factor) {
+    for (auto& l : layers_) if (l.id == id) { l.dilution_factor = factor; return; }
+}
+void LayerStack::set_layer_overhead(int id, double overhead_percent) {
+    if (overhead_percent >= 100.0) return;
+    set_layer_dilution(id, 100.0 / (100.0 - overhead_percent));
 }
 void LayerStack::set_layer_span(int id, int span_min, int span_max) {
     for (auto& l : layers_) if (l.id == id) { l.span_min = span_min; l.span_max = span_max; return; }
@@ -16,6 +23,10 @@ void LayerStack::set_layer_kspan(int id, double kspan) {
 const Layer* LayerStack::get_layer(int id) const {
     for (const auto& l : layers_) if (l.id == id) return &l;
     return nullptr;
+}
+double LayerStack::get_layer_dilution(int id) const {
+    const Layer* l = get_layer(id);
+    return l ? l->dilution_factor : 1.0;
 }
 bool LayerStack::has_layer(int id) const {
     return get_layer(id) != nullptr;

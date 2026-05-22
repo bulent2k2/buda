@@ -6,25 +6,15 @@
 #include <cmath>
 
 namespace interconnect {
-
 GlobalRouter::GlobalRouter(const Floorplan& fp, const LayerStack& ls)
     : floorplan_(fp), layers_(ls) {}
 
-void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {
-    if (overhead_percent >= 100.0) return;
-    layer_dilution_factors_[layer_id] = 100.0 / (100.0 - overhead_percent);
-}
-
 void GlobalRouter::set_planner_param(const std::string& name, double value) {
+
     if      (name == "kCong")             kCong_             = value;
     else if (name == "kSpan")             kSpan_             = value;
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
-}
-
-double GlobalRouter::get_dilution(int layer_id) const {
-    auto it = layer_dilution_factors_.find(layer_id);
-    return (it != layer_dilution_factors_.end()) ? it->second : 1.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,11 +395,11 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
                 if (si < (int)bw.pinned_seg_layers.size() && bw.pinned_seg_layers[si] != -1) {
                     best_lid = bw.pinned_seg_layers[si];
                     best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
-                    best_ov  = score_segment(seg, best_lid, bw.width * get_dilution(best_lid));
+                    best_ov  = score_segment(seg, best_lid, bw.width * layers_.get_layer_dilution(best_lid));
                 } else {
                     // Iterate highest-ID first so equal-cost layers prefer higher metal.
                     for (int lid : layers_rev) {
-                        double eff  = bw.width * get_dilution(lid);
+                        double eff  = bw.width * layers_.get_layer_dilution(lid);
                         double cong = cong_cost_segment(seg, lid, eff);
                         double span = span_cost_for(seg_span, lid);
                         double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
@@ -421,7 +411,7 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
 
                 // Apply chosen layer so later segments in this topology see
                 // the updated congestion state.
-                apply_segment(seg, best_lid, bw.width * get_dilution(best_lid));
+                apply_segment(seg, best_lid, bw.width * layers_.get_layer_dilution(best_lid));
                 seg_layers.push_back(best_lid);
                 topo_overflow = std::max(topo_overflow, best_ov);
                 topo_score    = std::max(topo_score,    best_s);
@@ -452,7 +442,7 @@ std::vector<BundleAssignment> GlobalRouter::optimize_topologies(
             for (int si = 0; si < (int)winner.segments.size(); ++si)
                 apply_segment(winner.segments[si],
                               best_seg_layers[si],
-                              bw.width * get_dilution(best_seg_layers[si]));
+                              bw.width * layers_.get_layer_dilution(best_seg_layers[si]));
         }
 
         // Derive representative V/H layers for logging (last V/H seg wins).

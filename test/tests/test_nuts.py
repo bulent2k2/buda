@@ -57,7 +57,8 @@ def test_single_segment_placed_in_interval():
     fp = make_floorplan(("src", 0, 100, 100, 200), ("dst", 300, 100, 400, 200))
     w = make_bundle(1, ["net_a"], width=10.0,
                     segments=[{'x1': 0, 'y1': 150, 'x2': 300, 'y2': 150, 'layer': 3}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w])
 
@@ -78,7 +79,8 @@ def test_non_overlapping_spans_no_conflict():
                      segments=[{'x1': 0, 'y1': 150, 'x2': 100, 'y2': 150, 'layer': 3}])
     w2 = make_bundle(2, ["n2"], width=10.0,
                      segments=[{'x1': 150, 'y1': 150, 'x2': 300, 'y2': 150, 'layer': 3}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2])
 
@@ -97,7 +99,8 @@ def test_overlapping_spans_separated():
                      segments=[{'x1': 0, 'y1': 250, 'x2': 300, 'y2': 250, 'layer': 3}])
     w2 = make_bundle(2, ["n2"], width=20.0,
                      segments=[{'x1': 100, 'y1': 250, 'x2': 400, 'y2': 250, 'layer': 3}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2])
 
@@ -125,7 +128,8 @@ def test_nonuniform_widths():
                      segments=[{'x1': 0, 'y1': y_mid, 'x2': 300, 'y2': y_mid, 'layer': 3}])
     w3 = make_bundle(3, ["n3"], width=15.0,
                      segments=[{'x1': 0, 'y1': y_mid, 'x2': 300, 'y2': y_mid, 'layer': 3}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(2.0)
     result = engine.run([w1, w2, w3])
 
@@ -147,7 +151,8 @@ def test_layers_solved_independently():
     # Vertical segment on M4 (same routing range in y)
     wV = make_bundle(2, ["n2"], width=10.0,
                      segments=[{'x1': 150, 'y1': 0, 'x2': 150, 'y2': 300, 'layer': 4}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([wH, wV])
 
@@ -169,7 +174,8 @@ def test_co_starting_two_segments_separated():
                      segments=[{'x1': 0, 'y1': 350, 'x2': 400, 'y2': 350, 'layer': 3}])
     w2 = make_bundle(2, ["n2"], width=10.0,
                      segments=[{'x1': 0, 'y1': 350, 'x2': 300, 'y2': 350, 'layer': 3}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2])
 
@@ -188,7 +194,8 @@ def test_co_starting_three_segments_all_separated():
                      segments=[{'x1': 0, 'y1': 500, 'x2': 400, 'y2': 500, 'layer': 3}])
     w3 = make_bundle(3, ["n3"], width=10.0,
                      segments=[{'x1': 0, 'y1': 500, 'x2': 300, 'y2': 500, 'layer': 3}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2, w3])
 
@@ -204,7 +211,8 @@ def test_interval_too_narrow_violation():
     # width=20, but interval only spans 5 units (105-100)
     w = make_bundle(1, ["n1"], width=20.0,
                     segments=[{'x1': 0, 'y1': 103, 'x2': 300, 'y2': 103, 'layer': 3}])
-    engine = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    engine = interconnect.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w])
 

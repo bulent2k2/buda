@@ -40,7 +40,7 @@ static void build_nuts_maps(
     const Floorplan& floorplan,
     std::map<std::pair<int,int>, double>&                         pull_map,
     std::map<std::pair<int,int>, std::pair<double,double>>&       slide_map,
-    std::set<std::pair<int,int>>                                 trunk_set,
+    std::set<std::pair<int,int>>&                                trunk_set,
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map)
 {
     // Pass 1 — nominal perpendicular position from the topology.
@@ -212,29 +212,19 @@ static void do_span_adjustments(
         auto jt = ts_ptr_map.find(key);
         if (jt == ts_ptr_map.end()) continue;
         TrackSegment* other = jt->second;
-        const double orig_lo = other->span_lo;
-        const double orig_hi = other->span_hi;
-        double lo_ep  = orig_hi, lo_int = orig_hi;
-        double hi_ep  = orig_lo, hi_int = orig_lo;
-        bool has_lo_ep = false, has_lo_int = false;
-        bool has_hi_ep = false, has_hi_int = false;
+        
+        double new_lo = other->span_lo;
+        double new_hi = other->span_hi;
 
         for (const auto& req : reqs) {
             if (req.lo_end) {
-                if (req.is_endpoint) { lo_ep  = std::min(lo_ep,  req.center); has_lo_ep  = true; }
-                else                 { lo_int = std::min(lo_int, req.center); has_lo_int = true; }
+                new_lo = std::min(new_lo, req.center);
             } else {
-                if (req.is_endpoint) { hi_ep  = std::max(hi_ep,  req.center); has_hi_ep  = true; }
-                else                 { hi_int = std::max(hi_int, req.center); has_hi_int = true; }
+                new_hi = std::max(new_hi, req.center);
             }
         }
-        double final_lo = orig_lo, final_hi = orig_hi;
-        if (has_lo_ep) final_lo = lo_ep;
-        if (has_hi_ep) final_hi = hi_ep;
-        if (has_lo_int) final_lo = std::min(final_lo, lo_int);
-        if (has_hi_int) final_hi = std::max(final_hi, hi_int);
-        other->span_lo = final_lo;
-        other->span_hi = final_hi;
+        other->span_lo = new_lo;
+        other->span_hi = new_hi;
     }
 }
 
@@ -279,8 +269,13 @@ static void compute_metrics(NUTSResult& result)
     }
 }
 
-NUTSEngine::NUTSEngine(const Floorplan& fp) : floorplan_(fp) {}
-void NUTSEngine::set_track_pitch(double pitch) { track_pitch_ = pitch; }
+NUTSEngine::NUTSEngine(const Floorplan& fp, const LayerStack& ls) 
+    : floorplan_(fp), layers_(ls) {}
+
+void NUTSEngine::set_track_pitch(double pitch) {
+    track_pitch_ = pitch;
+}
+
 
 std::vector<TrackSegment> NUTSEngine::extract_segments(
     const std::vector<BundleWrapper>& bundles,
@@ -293,20 +288,25 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
         const Topology& topo = bw.candidates[bw.selected_topology_index];
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
+            const bool is_horizontal = (seg.start.y == seg.end.y);
             TrackSegment ts;
             ts.bundle_id = bw.original_bundle.id;
             ts.seg_idx   = si;
-            ts.width     = bw.width;
-            const bool is_horizontal = (seg.start.y == seg.end.y);
+            ts.horiz     = is_horizontal;
+
+            int lid = 0;
             if (si < (int)bw.seg_layers.size() && bw.seg_layers[si] >= 0)
-                ts.layer = bw.seg_layers[si];
+                lid = bw.seg_layers[si];
             else if (!is_horizontal && bw.assigned_v_layer >= 0)
-                ts.layer = bw.assigned_v_layer;
+                lid = bw.assigned_v_layer;
             else if (is_horizontal && bw.assigned_h_layer >= 0)
-                ts.layer = bw.assigned_h_layer;
+                lid = bw.assigned_h_layer;
             else
-                ts.layer = seg.layer_hint;
-            ts.horiz = is_horizontal;
+                lid = seg.layer_hint;
+
+            ts.layer = lid;
+            ts.width = bw.width * layers_.get_layer_dilution(lid);
+
             if (ts.horiz) {
                 ts.span_lo = std::min(seg.start.x, seg.end.x);
                 ts.span_hi = std::max(seg.start.x, seg.end.x);
@@ -476,6 +476,10 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
         solve_layer(layer_segs, pull_map);
         do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
     }
+    // Final pass for all layers to catch cross-layer adjustments from the last-solved layer.
+    for (auto& [layer_id, layer_segs] : by_layer) {
+        do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
+    }
     compute_metrics(result);
     std::cout << "[NUTS] " << result.segments.size() << " segments placed across "
               << by_layer.size() << " layer(s). "
@@ -513,7 +517,10 @@ NUTSResult NUTSEngine::rerun_layer(
     for (auto& ts : result.segments)
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
     solve_layer(layer_segs, pull_map);
-    do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
+    // Final pass for all layers to catch cross-layer adjustments from the re-solved layer.
+    std::vector<TrackSegment*> all_placed;
+    for (auto& ts : result.segments) if (ts.placed) all_placed.push_back(&ts);
+    do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
     compute_metrics(result);
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "

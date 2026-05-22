@@ -332,7 +332,8 @@ def test_nuts_respects_margin_adjusted_range():
     assert lo == 30 and hi == 170, f"Slide range wrong: [{lo}, {hi}]"
 
     # Feed into NUTS and verify the placed position respects the range.
-    nuts = interconnect.NUTSEngine(fp)
+    ls = interconnect.LayerStack()
+    nuts = interconnect.NUTSEngine(fp, ls)
     nuts.set_track_pitch(1.0)
 
     # Build BundleWrapper with the topology segment.

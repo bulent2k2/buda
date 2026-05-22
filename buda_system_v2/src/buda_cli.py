@@ -5,7 +5,6 @@ import sys
 import interconnect
 from buda_viz import BudaVisualizer, TopologyExplorer
 
-
 class _TeeStream:
     """Write to two streams simultaneously.
 
@@ -359,7 +358,7 @@ class BudaSession:
 
         # Single NUTS re-run after all reassignments.
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
-        nuts = interconnect.NUTSEngine(self.fp)
+        nuts = interconnect.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
         self.nuts_result = nuts.run(self.bundles)
 
@@ -442,6 +441,14 @@ class BudaSession:
                 emit(f"[NUTS] {lname}: {len(moved_deltas)}/{n} segments moved "
                      f"(avg |Δperp|={avg_d:.1f}, max={max_d:.1f})")
 
+            # Report physical width used (helps diagnose dilution issues)
+            if segs:
+                total_w = sum(s.width for s in segs)
+                min_p = min(s.track_position - s.width/2.0 for s in segs)
+                max_p = max(s.track_position + s.width/2.0 for s in segs)
+                emit(f"[NUTS] {lname}: total bus width {total_w:.1f} units, "
+                     f"spanning perpendicular interval [{min_p:.1f}, {max_p:.1f}]")
+
             # Local overlaps on this layer.
             local_ov = [od for od in result.overlap_details if od.layer == lid]
             if local_ov:
@@ -506,7 +513,7 @@ class BudaSession:
         """
         layer_names  = self._make_layer_names()
         layer_name   = layer_names.get(layer_id, f"L{layer_id}")
-        nuts = interconnect.NUTSEngine(self.fp)
+        nuts = interconnect.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
         if self.planner is not None:
             nuts.set_extra_grid_points(
@@ -577,7 +584,7 @@ class BudaSession:
                     w.seg_layers = list(asn.seg_layers)
 
         layer_names = self._make_layer_names()
-        nuts = interconnect.NUTSEngine(self.fp)
+        nuts = interconnect.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
         if self.planner is not None:
             nuts.set_extra_grid_points(
@@ -833,9 +840,12 @@ class BudaSession:
                 self.layers.set_layer_kspan(int(lid), kspan_override)
             ovh_val = float(ovh)
             if ovh_val > 0.0:
+                self.layers.set_layer_overhead(int(lid), ovh_val)
                 self._layer_overheads[int(lid)] = ovh_val
             self._layer_name_map[name] = int(lid)
+
         elif cmd == "set_planner_param":
+
             name_p, value_p = args[0], float(args[1])
             if self.planner is None:
                 self._planner_params[name_p] = value_p
@@ -952,8 +962,6 @@ class BudaSession:
                 self._run_post_nuts_planner(v_thresholds, h_thresholds)
             else:
                 self.planner = interconnect.GlobalRouter(self.fp, self.layers)
-                for lid, ovh in self._layer_overheads.items():
-                    self.planner.set_layer_overhead(lid, ovh)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
                 self.planner.build_congestion_map()
@@ -976,8 +984,9 @@ class BudaSession:
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0
             self._nuts_pitch = pitch
-            nuts = interconnect.NUTSEngine(self.fp)
+            nuts = interconnect.NUTSEngine(self.fp, self.layers)
             nuts.set_track_pitch(pitch)
+
             if self.planner is not None:
                 nuts.set_extra_grid_points(
                     list(self.planner.get_x_grid()),
@@ -1021,6 +1030,7 @@ class BudaSession:
                 is_h = (self.layers.get_layer_dir(layer_id) == interconnect.LayerDir.HORIZONTAL)
 
             self.routing_grid.define_layer(layer_id, pat, is_h)
+            self.layers.set_layer_dilution(layer_id, pat.dilution_factor())
 
             # Re-apply any existing keepouts to this new layer grid.
             for koz in self.fp.get_keepout_zones():
@@ -1031,7 +1041,7 @@ class BudaSession:
 
             print(f"[RoutingGrid] Layer {layer_id}: {len(slots)} slots, "
                   f"unit_pitch={pat.unit_pitch():.3f}, "
-                  f"signal_density={pat.signal_density():.3f}")
+                  f"signal_density={pat.signal_density():.3f}, dilution={pat.dilution_factor():.3f}")
 
         elif cmd == "add_grid_override":
             # Usage: add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...

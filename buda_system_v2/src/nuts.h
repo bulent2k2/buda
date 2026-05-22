@@ -52,7 +52,7 @@ struct NUTSResult {
 // perpendicular direction.
 class NUTSEngine {
 public:
-    explicit NUTSEngine(const Floorplan& fp);
+    explicit NUTSEngine(const Floorplan& fp, const LayerStack& ls);
 
     // Minimum gap between adjacent placed buses (default 1.0 layout unit).
     void set_track_pitch(double pitch);
@@ -76,6 +76,7 @@ public:
 
 private:
     const Floorplan& floorplan_;
+    const LayerStack& layers_;
     double track_pitch_ = 1.0;
     std::vector<int> extra_x_, extra_y_;   // additional grid points from GlobalRouter
 

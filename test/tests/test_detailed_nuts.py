@@ -60,7 +60,7 @@ def make_standard_pattern(origin=0.0):
 
 def make_stack_with_standard_pattern(layer_id=4):
     stack = interconnect.RoutingGridStack()
-    stack.define_layer(layer_id, make_standard_pattern(origin=0.0))
+    stack.define_layer(layer_id, make_standard_pattern(origin=0.0), True)
     return stack
 
 

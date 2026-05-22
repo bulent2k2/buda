@@ -11,6 +11,7 @@ struct Layer {
     std::string name;
     LayerDir dir;
     LayerType type;
+    double dilution_factor = 1.0;
     // Span preference: span_cost = kSpan * max(0, span_min-span, span-span_max).
     // Defaults give zero span cost for any segment length.
     int    span_min      = 0;
@@ -21,14 +22,20 @@ struct Layer {
 class LayerStack {
 public:
     void add_layer(int id, const std::string& name, LayerDir dir, LayerType type);
+    // Set dilution factor (total_pitch / signal_pitch) for an already-added layer.
+    void set_layer_dilution(int id, double factor);
+    // Convenience: set dilution from overhead percentage (e.g. 20%).
+    void set_layer_overhead(int id, double overhead_percent);
     // Set span preference window for an already-added layer.
     void set_layer_span(int id, int span_min, int span_max);
     // Override the global kSpan coefficient for one layer.
     void set_layer_kspan(int id, double kspan);
 
     const Layer* get_layer(int id) const;
+    double       get_layer_dilution(int id) const;
     bool         has_layer(int id) const;
     bool         is_top(int id) const;
+
     LayerDir     get_layer_dir(int id) const;
     LayerType    get_layer_type(int id) const;
     // Returns the last-added TOP layer for the given direction (-1 if none).

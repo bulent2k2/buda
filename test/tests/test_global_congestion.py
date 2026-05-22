@@ -184,9 +184,9 @@ def test_dilution_factor_increases_cut_usage():
     ls = interconnect.LayerStack()
     ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
     ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
+    ls.set_layer_overhead(5, 25.0)   # M5 V: 25% overhead
 
     router = interconnect.GlobalRouter(fp, ls)
-    router.set_layer_overhead(5, 25.0)   # M5 V: 25% overhead
     router.build_congestion_map()
 
     seg = make_v_segment(x=150, y_lo=0, y_hi=200, layer=5)

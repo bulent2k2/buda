@@ -44,7 +44,6 @@ struct BundleAssignment {
 class GlobalRouter {
 public:
     GlobalRouter(const Floorplan& fp, const LayerStack& layers);
-    void set_layer_overhead(int layer_id, double overhead_percent);
     // Tune global planner knobs.  Recognised names:
     //   "kCong"            — overflow cost coefficient: cost = kCong*(overflow/cap) (default 1.0)
     //   "kSpan"            — span-mismatch cost per layout-unit (default 0.001)
@@ -68,11 +67,9 @@ private:
     double span_cost_for(double seg_span, int layer_id) const;
 
     int    find_band(bool is_vcut, int perp_pos) const;
-    double get_dilution(int layer_id) const;
 
     const Floorplan&  floorplan_;
     const LayerStack& layers_;
-    std::map<int, double> layer_dilution_factors_;
     std::vector<GlobalCut> cuts_;
     std::vector<int> x_grid_, y_grid_;
 
