@@ -206,26 +206,39 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
             // Example: an H stub connecting to the wide-base right face (y∈[0,100])
             // of an L-shaped block should not be free to slide up to y=400 (the
             // union bbox top).
+            // When multiple rects share the same face (e.g. both rects of an L-block
+            // have y=0 as their bottom face), the stub can reach any of them, so use
+            // the union of all matching rects' extents in the perpendicular direction.
             Rect face_rect = bmap.at(conn.block_name);
             {
                 const auto rects = fp.get_block_rects(conn.block_name);
                 if (!rects.empty()) {
                     if (cs.horiz) {
                         // H segment: face_coord is an x-face; perp_pos is y.
+                        // Union all rects whose x-face matches and contain perp_pos.
+                        int u_y1 = INT_MAX, u_y2 = INT_MIN;
                         for (const Rect& r : rects) {
                             if ((r.x1 == conn.face_coord || r.x2 == conn.face_coord)
                                     && cs.perp_pos >= r.y1 && cs.perp_pos <= r.y2) {
-                                face_rect = r; break;
+                                u_y1 = std::min(u_y1, r.y1);
+                                u_y2 = std::max(u_y2, r.y2);
                             }
                         }
+                        if (u_y1 <= u_y2)
+                            face_rect = Rect(face_rect.x1, u_y1, face_rect.x2, u_y2);
                     } else {
                         // V segment: face_coord is a y-face; perp_pos is x.
+                        // Union all rects whose y-face matches and contain perp_pos.
+                        int u_x1 = INT_MAX, u_x2 = INT_MIN;
                         for (const Rect& r : rects) {
                             if ((r.y1 == conn.face_coord || r.y2 == conn.face_coord)
                                     && cs.perp_pos >= r.x1 && cs.perp_pos <= r.x2) {
-                                face_rect = r; break;
+                                u_x1 = std::min(u_x1, r.x1);
+                                u_x2 = std::max(u_x2, r.x2);
                             }
                         }
+                        if (u_x1 <= u_x2)
+                            face_rect = Rect(u_x1, face_rect.y1, u_x2, face_rect.y2);
                     }
                 }
             }
