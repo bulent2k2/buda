@@ -689,6 +689,57 @@ class TopologyExplorer:
         is_current_selection = self._current_is_selected()
         is_planner_active = (self.idx == self.wrapper.selected_topology_index)
 
+        # ── Pre-compute display geometry for all segments ──────────────────
+        # Minimum pull-arrow length in data units (prevents invisible arrows on
+        # tiny intervals and provides a direction indicator for one-side-constrained
+        # segments where there is no finite interval width to derive from).
+        _MIN_ARROW = 20
+
+        # Pass A: centered perp position + signed pull-arrow length per segment.
+        _draw_perp = []
+        _pull_len  = []
+        for cs in cs_list:
+            lo, hi  = cs.perp_lo, cs.perp_hi
+            lo_ok   = abs(lo) < _UNCONSTRAINED
+            hi_ok   = abs(hi) < _UNCONSTRAINED
+            if lo_ok and hi_ok:
+                dp   = (lo + hi) / 2.0
+                pull = cs.perp_pos - dp
+                if abs(pull) > 1e-6:
+                    plen = max((hi - lo) / 4.0, _MIN_ARROW) * (1.0 if pull > 0 else -1.0)
+                else:
+                    plen = 0.0
+            elif lo_ok:
+                # One-side: lower bound only — segment is attracted toward lo.
+                dp   = float(cs.perp_pos)
+                plen = -_MIN_ARROW if cs.perp_pos > lo else 0.0
+            elif hi_ok:
+                # One-side: upper bound only — segment is attracted toward hi.
+                dp   = float(cs.perp_pos)
+                plen = _MIN_ARROW if cs.perp_pos < hi else 0.0
+            else:
+                dp   = float(cs.perp_pos)
+                plen = 0.0
+            _draw_perp.append(dp)
+            _pull_len.append(plen)
+
+        # Pass B: snap along endpoints to connected segments' display perp.
+        # Each SEG connection "at_pos" in segment i's along direction should
+        # equal one of cs.along_lo/hi; replace that endpoint with the
+        # connected segment's centered display position so segments visually meet.
+        _draw_lo = [float(cs.along_lo) for cs in cs_list]
+        _draw_hi = [float(cs.along_hi) for cs in cs_list]
+        for i, cs in enumerate(cs_list):
+            for conn in cs.conns:
+                if conn.kind != ic.SegConnKind.SEG:
+                    continue
+                adj = _draw_perp[conn.seg_idx]
+                if abs(conn.at_pos - cs.along_lo) <= 1:
+                    _draw_lo[i] = adj
+                elif abs(conn.at_pos - cs.along_hi) <= 1:
+                    _draw_hi[i] = adj
+        # ──────────────────────────────────────────────────────────────────
+
         for i, seg in enumerate(topo.segments):
             lid = -1
             # 1. Pinned layers (from sidecar/active tuning)
@@ -696,33 +747,26 @@ class TopologyExplorer:
                 pinned = sel['seg_layers']
                 if len(pinned) == len(topo.segments):
                     lid = pinned[i]
-            
+
             # 2. Planned layers (from GlobalRouter result)
             if lid == -1 and is_planner_active:
                 if len(self.wrapper.seg_layers) == len(topo.segments):
                     lid = self.wrapper.seg_layers[i]
-            
+
             # 3. Default from topology generator
             if lid == -1:
                 lid = seg.layer_hint
             actual_lids.append(lid)
 
-            col = _LAYER_COLOR.get(lid, '#888888')
+            col      = _LAYER_COLOR.get(lid, '#888888')
+            cs       = cs_list[i]
+            dp       = _draw_perp[i]
+            dlo, dhi = _draw_lo[i], _draw_hi[i]
 
-            # Centered display position within the slide interval
-            cs = cs_list[i]
-            lo, hi = cs.perp_lo, cs.perp_hi
-            both_constrained = (abs(lo) < _UNCONSTRAINED and abs(hi) < _UNCONSTRAINED)
-            if both_constrained:
-                draw_perp = (lo + hi) / 2.0
-                pull = cs.perp_pos - draw_perp
-            else:
-                draw_perp = float(cs.perp_pos)
-                pull = 0.0
             if cs.horiz:
-                x0, y0, x1, y1 = cs.along_lo, draw_perp, cs.along_hi, draw_perp
+                x0, y0, x1, y1 = dlo, dp, dhi, dp
             else:
-                x0, y0, x1, y1 = draw_perp, cs.along_lo, draw_perp, cs.along_hi
+                x0, y0, x1, y1 = dp, dlo, dp, dhi
 
             # Highlight selected segment; dim others
             seg_alpha = 1.0
@@ -742,21 +786,21 @@ class TopologyExplorer:
             ax.plot(x1, y1, 'o',
                     color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
 
-            # Pull arrow: points from the interval center toward the nominal perp_pos,
-            # showing NUTS which side of the interval this segment is attracted to.
-            if both_constrained and abs(pull) > 0.5:
-                mid = (cs.along_lo + cs.along_hi) / 2.0
+            # Pull arrow: direction from display position toward nominal perp_pos.
+            # Length is interval_w/4 (floor _MIN_ARROW) for two-sided constrained
+            # segments, or _MIN_ARROW toward the lone finite bound for one-sided.
+            plen = _pull_len[i]
+            if abs(plen) > 1e-6:
+                mid = (dlo + dhi) / 2.0
                 if cs.horiz:
                     ax.annotate("",
-                        xy=(mid, draw_perp + pull),
-                        xytext=(mid, draw_perp),
+                        xy=(mid, dp + plen), xytext=(mid, dp),
                         arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
                                         mutation_scale=11),
                         zorder=12, alpha=seg_alpha)
                 else:
                     ax.annotate("",
-                        xy=(draw_perp + pull, mid),
-                        xytext=(draw_perp, mid),
+                        xy=(dp + plen, mid), xytext=(dp, mid),
                         arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
                                         mutation_scale=11),
                         zorder=12, alpha=seg_alpha)
