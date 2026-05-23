@@ -32,7 +32,7 @@ History:
   996  claude --help
   997  claude
   998  pip install google-adk
-  999  brew install gemini-cli\n
+  999  brew install gemini-cli
  1000  gemini
 
 2026.05.17

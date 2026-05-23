@@ -111,13 +111,13 @@ def test_two_rotated_buses():
     segs, viols, ovlps = nuts_summary(out)
     assert segs  == 19
     assert viols == 0
-    assert ovlps == 2   # known: B7×B9, B8×B9 (3×8u buses in 30u corridor)
+    assert ovlps == 0   # Resolved: previously 2
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out
     )
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) == 128   # 19 segs × 8 bits − 24 unplaced
-    assert int(dm.group(2)) == 24    # 3 congested segs × 8 bits (Option B)
+    assert int(dm.group(1)) == 152   # 19 segs × 8 bits = 152
+    assert int(dm.group(2)) == 0     # Resolved: previously 24
 
 
 def test_four_blocks_3_bundles():
