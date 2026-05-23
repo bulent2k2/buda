@@ -301,7 +301,7 @@ double NUTSEngine::first_fit(double lo, double hi, double width,
     const double half = width / 2.0;
     const double c_lo = lo + half;
     const double c_hi = hi - half;
-    if (c_lo > c_hi) return -1.0;
+    if (c_lo > c_hi) return std::numeric_limits<double>::quiet_NaN();
     std::vector<double> candidates;
     candidates.push_back(c_lo);
     for (const auto& [occ_lo, occ_hi] : occupied)
@@ -316,7 +316,7 @@ double NUTSEngine::first_fit(double lo, double hi, double width,
         }
         if (!conflict) return c;
     }
-    return -1.0;
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 double NUTSEngine::preferred_fit(
@@ -327,7 +327,7 @@ double NUTSEngine::preferred_fit(
     const double half = width / 2.0;
     const double c_lo = lo + half;
     const double c_hi = hi - half;
-    if (c_lo > c_hi) return -1.0;
+    if (c_lo > c_hi) return std::numeric_limits<double>::quiet_NaN();
     std::vector<double> candidates;
     candidates.push_back(preferred);
     candidates.push_back(c_lo);
@@ -341,7 +341,7 @@ double NUTSEngine::preferred_fit(
             if (c - half < occ_hi && c + half > occ_lo) return false;
         return true;
     };
-    double best      = -1.0;
+    double best      = std::numeric_limits<double>::quiet_NaN();
     double best_dist = std::numeric_limits<double>::max();
     for (double c : candidates) {
         if (!valid(c)) continue;
@@ -425,8 +425,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             pos = preferred_fit(ts->interval_lo, ts->interval_hi,
                                 ts->width, occupied, preferred);
         }
-        if (pos >= 0.0) ts->track_position = pos;
-        else           ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
+        if (!std::isnan(pos)) ts->track_position = pos;
+        else                  ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
         ts->placed = true;
         active.push_back(ev.idx);
     }
