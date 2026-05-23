@@ -713,8 +713,22 @@ class TopologyExplorer:
             ax.plot(seg.end.x, seg.end.y, 'o',
                     color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
 
-        # Update title with layer info (Single concise line)
-        layer_summary = " ".join([_LAYER_LABEL.get(lid, f"L{lid}").split()[0] for lid in actual_lids])
+        # Update title with layer info (Compacted: M4x5 M5x3)
+        counts = {}
+        for lid in actual_lids:
+            counts[lid] = counts.get(lid, 0) + 1
+        
+        # Sort by layer ID for consistency
+        sorted_lids = sorted(counts.keys())
+        layer_summary_parts = []
+        for lid in sorted_lids:
+            lbl = _LAYER_LABEL.get(lid, f"L{lid}").split()[0]
+            cnt = counts[lid]
+            if cnt > 1:
+                layer_summary_parts.append(f"{lbl}x{cnt}")
+            else:
+                layer_summary_parts.append(lbl)
+        layer_summary = " ".join(layer_summary_parts)
         
         title_main = (
             f"{bus_label}B{bid} ({len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
