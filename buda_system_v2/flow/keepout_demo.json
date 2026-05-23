@@ -1,13 +1,3 @@
 {
-  "selections": [
-    {
-      "bundle_hint": "blocked_0",
-      "bundle_id": 2,
-      "topo_type": "U_VHV@y220",
-      "topo_wl": 540,
-      "topo_index_hint": 1,
-      "note": "",
-      "selected_at": "2026-05-21T19:25:06"
-    }
-  ]
+  "selections": []
 }
