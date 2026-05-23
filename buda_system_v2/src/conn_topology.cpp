@@ -416,6 +416,8 @@ std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
 void ConnTopology::compute_net_pull() {
     for (auto& cs : segs_) {
         int pos = 0, neg = 0;
+
+        // Pass 1: neighbours anchored by busterms.
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::SEG) continue;
             const ConnSeg& nb = segs_[conn.seg_idx];
@@ -425,6 +427,32 @@ void ConnTopology::compute_net_pull() {
                 else if (sc.face_coord < cs.perp_pos) ++neg;
             }
         }
+
+        // Pass 2: free-floating neighbours (no busterms on nb).
+        // If cs sits at the lo or hi extreme of nb's stub positions, sliding cs
+        // toward the interior shrinks nb's span.
+        for (const auto& conn : cs.conns) {
+            if (conn.kind != SegConn::SEG) continue;
+            const ConnSeg& nb = segs_[conn.seg_idx];
+
+            bool nb_has_bt = false;
+            for (const auto& sc : nb.conns)
+                if (sc.kind == SegConn::BUSTERM) { nb_has_bt = true; break; }
+            if (nb_has_bt) continue;
+
+            int lo = INT_MAX, hi = INT_MIN;
+            for (const auto& sc : nb.conns) {
+                if (sc.kind != SegConn::SEG) continue;
+                int p = segs_[sc.seg_idx].perp_pos;
+                lo = std::min(lo, p);
+                hi = std::max(hi, p);
+            }
+            if (lo >= hi) continue;
+
+            if      (cs.perp_pos == lo) ++pos;
+            else if (cs.perp_pos == hi) ++neg;
+        }
+
         cs.net_pull = pos - neg;
     }
 }
