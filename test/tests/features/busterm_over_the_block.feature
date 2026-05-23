@@ -163,33 +163,30 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     # L-block: tall arm (0,0)-(100,400) + wide base (0,0)-(400,100).
     # Notch: x=100–400, y=100–400.
     # src at (500,150)-(600,250).
-    # V trunk at x=300 (inside wide-base.x range [0,400], above wide-base.y2=100).
-    # x=300 is in the wide base's x-range → Direct on wide base (no H stub).
-    # Wide-base's top face y=100. Trunk connects at (300,100). No stub.
-    # BUT: x=300 is NOT in tall arm's x-range [0,100].
-    # Over-the-block: tall arm should also be connected via bridge at x=0 (tall arm left face).
     #
-    # Bridge: V segment at x=0 from tall arm's top face (y=400) down to ... hmm.
-    # Actually the bridge should be at the OUTER boundary of the union bbox.
-    # Union bbox: (0,0)-(400,400). For a V trunk gap scenario:
-    # Bridge is a H segment at y=400 (top of union bbox) from tall-arm.cx to wide-base.cx.
+    # Hanan x-grid from individual rects: 0, 100, 400, 500, 600.
+    # In-bbox V trunk candidates (midpoints of each channel):
+    #   (0+100)/2=50, (100+400)/2=250, (400+500)/2=450, (500+600)/2=550.
     #
-    # This scenario exercises the L-shaped block case.
+    # V trunk at x=250 falls inside the wide base's x-range [0,400] but NOT
+    # inside the tall arm's x-range [0,100].
+    # → wide base: Direct (no H stub); trunk connects at y=100 (wide-base top face).
+    # → tall arm: x=250 is outside [0,100] → arm is NOT reachable by a direct stub.
+    # Over-the-block mode: emit a bridge H segment at y=400 (union bbox top) to
+    # signal that the tall arm must be connected externally over the block.
     #
-    #   y=400 ─  +--+·············· bridge H at y=400 ··············+
-    #            |tall arm|                                          :
-    #   y=100 ─  +--+──────────────────────────────────────x        :
-    #            (tall arm and wide base both connect here)         :
-    #   y=  0 ─  +────────────────────────────────────+             :
-    #                                                               :
-    #   x=300 is inside wide base → Direct; bridge runs to x=0     :
+    #   y=400 ─ +──────────────────────+ ← bridge H at y=400 (union bbox top)
+    #           | tall arm |            :
+    #   y=100 ─ +──────────────────────x ← wide-base top; V trunk direct connection
+    #   y=  0 ─ +──────────────────────+
+    #           x=0          x=250  x=400
     #
     Given a block "src" at (500,150)-(600,250)
     And a block "L" with rects (0,0)-(100,400) and (0,0)-(400,100) and teg_mode "over"
     And layer M4 is HORIZONTAL with id 4
     And layer M5 is VERTICAL with id 5
     When I generate multicast candidates from "src" to ["L"] using layers M4,M5
-    Then the TRUNK_V@x300 candidate has a bridge segment for "L"
+    Then the TRUNK_V@x250 candidate has a bridge segment for "L"
     And the bridge segment runs along the top face of "L"'s union bounding box
 
   Scenario: Over-the-block — bridge is omitted when rects are adjacent (no gap)

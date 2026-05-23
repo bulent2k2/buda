@@ -519,6 +519,19 @@ static std::vector<Rect> bt_all_rects(const Busterm& bt) {
     return bt.rects.empty() ? std::vector<Rect>{bt.orig_bbox} : bt.rects;
 }
 
+// True if any two rects have overlapping interiors (strict overlap, not just touching).
+// A block whose rects overlap forms a rectilinear polygon; one with disjoint rects
+// is a true TEG (terminal equivalence group).
+static bool rects_are_rectilinear(const std::vector<Rect>& rects) {
+    for (size_t i = 0; i < rects.size(); ++i)
+        for (size_t j = i + 1; j < rects.size(); ++j) {
+            const Rect& a = rects[i]; const Rect& b = rects[j];
+            if (a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2)
+                return true;
+        }
+    return false;
+}
+
 // Best rect for connecting bt to an H trunk at y_trunk: minimises stub length.
 static Rect best_rect_for_h(const Busterm& bt, int y_trunk) {
     auto rects = bt_all_rects(bt);
@@ -699,9 +712,23 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {
-            // Direct connection — but check for over-the-block: even a Direct
-            // block may need the far rect bridged when teg_mode == OVER.
-            // (Handled below in the per-block over check.)
+            // Direct: trunk is inside the best rect. For OVER mode on a rectilinear
+            // block (rects with overlapping interiors, e.g. L-shape), check if ALL
+            // rects span y_trunk. If not, emit a bridge over the top so the parts
+            // of the block that are outside the trunk's y-range are also connected.
+            // Pure TEG blocks (disjoint rects) are exempt — for them, "trunk inside
+            // one rect" is normal direct-connection behaviour with no bridge.
+            if (blocks[i].teg_mode == TegMode::OVER && !blocks[i].rects.empty()
+                    && rects_are_rectilinear(blocks[i].rects)) {
+                bool all_span = true;
+                for (const auto& r : blocks[i].rects)
+                    if (y_trunk < r.y1 || y_trunk > r.y2) { all_span = false; break; }
+                if (!all_span) {
+                    const Rect& ub = blocks[i].orig_bbox;
+                    t.bridge_segments[blocks[i].block_name] =
+                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
+                }
+            }
             continue;
         }
 
@@ -869,7 +896,24 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
 
     for (int i = 0; i < n; ++i) {
-        if (!has_stub[i]) continue;
+        if (!has_stub[i]) {
+            // Direct: trunk is inside the best rect. For OVER mode on a rectilinear
+            // block (rects with overlapping interiors, e.g. L-shape), check if ALL
+            // rects span x_trunk. If not, emit a bridge over the top.
+            // Pure TEG blocks (disjoint rects) are exempt.
+            if (blocks[i].teg_mode == TegMode::OVER && !blocks[i].rects.empty()
+                    && rects_are_rectilinear(blocks[i].rects)) {
+                bool all_span = true;
+                for (const auto& r : blocks[i].rects)
+                    if (x_trunk < r.x1 || x_trunk > r.x2) { all_span = false; break; }
+                if (!all_span) {
+                    const Rect& ub = blocks[i].orig_bbox;
+                    t.bridge_segments[blocks[i].block_name] =
+                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
+                }
+            }
+            continue;
+        }
 
         // Over-the-block for V trunk: trunk in horizontal gap between rects
         if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
@@ -1191,7 +1235,12 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
 
     add_l_shapes(src_bt, dst_bt, candidates);
     std::vector<int> hanan_x, hanan_y;
-    bundle_hanan_grid({s_orig, d_orig}, hanan_x, hanan_y);
+    {
+        std::vector<Rect> hr;
+        for (const Rect& r : bt_all_rects(src_bt)) hr.push_back(r);
+        for (const Rect& r : bt_all_rects(dst_bt)) hr.push_back(r);
+        bundle_hanan_grid(hr, hanan_x, hanan_y);
+    }
 
     std::vector<int> chan_x, chan_y;
     for (int i = 0; i + 1 < (int)hanan_x.size(); ++i)
