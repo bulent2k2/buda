@@ -11,17 +11,28 @@
 namespace interconnect {
 
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
-    blocks_[name] = Rect{x1, y1, x2, y2};
+    int nx1 = std::min(x1, x2);
+    int nx2 = std::max(x1, x2);
+    int ny1 = std::min(y1, y2);
+    int ny2 = std::max(y1, y2);
+    blocks_[name] = Rect{nx1, ny1, nx2, ny2};
 }
 void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>& rects,
                                  TegMode mode) {
-    Rect u = rects[0];
+    std::vector<Rect> norm_rects;
+    norm_rects.reserve(rects.size());
     for (const auto& r : rects) {
+        norm_rects.push_back({std::min(r.x1, r.x2), std::min(r.y1, r.y2),
+                              std::max(r.x1, r.x2), std::max(r.y1, r.y2)});
+    }
+
+    Rect u = norm_rects[0];
+    for (const auto& r : norm_rects) {
         u.x1 = std::min(u.x1, r.x1); u.y1 = std::min(u.y1, r.y1);
         u.x2 = std::max(u.x2, r.x2); u.y2 = std::max(u.y2, r.y2);
     }
     blocks_[name]      = u;
-    block_rects_[name] = rects;
+    block_rects_[name] = norm_rects;
     teg_modes_[name]   = mode;
 }
 void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
