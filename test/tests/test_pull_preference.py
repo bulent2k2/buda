@@ -376,7 +376,7 @@ def gen_rank_multicast_for_pull(ctx):
     dsts = '"B1","B2","C1"'
     dst_list = re_mod.findall(r'"([^"]+)"', dsts)
     from conftest import _build_gen
-    ctx['candidates'] = _build_gen(ctx).generate_multicast_candidates('A', dst_list)
+    ctx['candidates'] = _build_gen(ctx).generate_candidates('A', dst_list)
 
 
 @then('for any TRUNK_H candidate with equal adjusted_wl to the ~CEN candidate')

@@ -207,8 +207,13 @@ PYBIND11_MODULE(interconnect, m) {
         .def("set_busterm_mode",              &TopologyGenerator::set_busterm_mode)
         .def("set_double_detour",             &TopologyGenerator::set_double_detour)
         .def("set_layer_ids",                 &TopologyGenerator::set_layer_ids)
-        .def("generate_candidates",           &TopologyGenerator::generate_candidates)
-        .def("generate_multicast_candidates", &TopologyGenerator::generate_multicast_candidates);
+        .def("generate_candidates", [](TopologyGenerator& self,
+                                       const std::string& src,
+                                       py::object dsts) {
+            if (py::isinstance<py::str>(dsts))
+                return self.generate_candidates(src, {dsts.cast<std::string>()});
+            return self.generate_candidates(src, dsts.cast<std::vector<std::string>>());
+        });
 
     py::class_<GlobalCut>(m, "GlobalCut")
         .def(py::init<>())

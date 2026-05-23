@@ -279,7 +279,7 @@ def gen_and_rank_candidates(ctx, src, dst):
 ))
 def gen_multicast_candidates(ctx, src, dsts):
     dst_list = re.findall(r'"([^"]+)"', dsts)
-    ctx['candidates'] = _build_gen(ctx).generate_multicast_candidates(src, dst_list)
+    ctx['candidates'] = _build_gen(ctx).generate_candidates(src, dst_list)
 
 
 @when(parsers.re(
@@ -287,7 +287,7 @@ def gen_multicast_candidates(ctx, src, dsts):
 ))
 def gen_and_rank_multicast(ctx, src, dsts):
     dst_list = re.findall(r'"([^"]+)"', dsts)
-    ctx['candidates'] = _build_gen(ctx).generate_multicast_candidates(src, dst_list)
+    ctx['candidates'] = _build_gen(ctx).generate_candidates(src, dst_list)
 
 
 @when('I compute slide ranges for each candidate')

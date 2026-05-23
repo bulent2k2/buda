@@ -60,7 +60,7 @@ def test_min_stub_length_exhaustive():
     # If m_v is 300, this trunk at y=144 should be skipped.
     fp.set_min_stub_length(300)
     # multicast u_s -> [u_d, u_m]
-    mc_cands = tg.generate_multicast_candidates("u_s", ["u_d", "u_m"])
+    mc_cands = tg.generate_candidates("u_s", ["u_d", "u_m"])
     trunk_144 = next((c for c in mc_cands if "@y144" in c.type), None)
     # actually y_mid = (200 + 400) / 2 = 300 might be in hanan grid if we have blocks there.
     # In four_blocks logic, it adds margin-offset trunks.
