@@ -296,17 +296,18 @@ class TopologyExplorer:
 
         for raw_seg, cs in zip(topo.segments, ct.segs()):
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
+            display_perp = self._centered_perp(cs)
             for conn in cs.conns:
                 if conn.kind != ic.SegConnKind.BUSTERM:
                     continue
                 if cs.horiz:
-                    px, py = conn.at_pos, cs.perp_pos
+                    px, py = conn.at_pos, display_perp
                     dx = -8 if px <= (cs.along_lo + cs.along_hi) / 2 else +8
                     dy = 0
                     ha = 'right' if dx < 0 else 'left'
                     va = 'center'
                 else:
-                    px, py = cs.perp_pos, conn.at_pos
+                    px, py = display_perp, conn.at_pos
                     dx = 0
                     dy = -8 if py <= (cs.along_lo + cs.along_hi) / 2 else +8
                     ha = 'center'
@@ -321,6 +322,18 @@ class TopologyExplorer:
                         ha=ha, va=va, zorder=16,
                         bbox=dict(boxstyle='round,pad=0.15', fc='white',
                                   ec='none', alpha=0.7))
+
+    def _centered_perp(self, cs) -> float:
+        """Centered display perp position within the slide interval.
+
+        When both perp_lo and perp_hi are finite, returns the interval midpoint
+        so the drawn segment line never obscures either boundary.  Falls back to
+        the nominal perp_pos when one or both ends are unconstrained.
+        """
+        lo, hi = cs.perp_lo, cs.perp_hi
+        if abs(lo) < _UNCONSTRAINED and abs(hi) < _UNCONSTRAINED:
+            return (lo + hi) / 2.0
+        return float(cs.perp_pos)
 
     def _draw_slide_spans(self, topo, ct):
         """Overlay slide-range bands on the current topology."""
@@ -637,8 +650,9 @@ class TopologyExplorer:
         n     = len(self.topos)
         bid   = self.wrapper.original_bundle.id
         wl    = topo.estimated_wirelength
-        ct     = self._build_conn_topo(topo)
-        viz_lw = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
+        ct      = self._build_conn_topo(topo)
+        cs_list = list(ct.segs())
+        viz_lw  = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
 
         is_sel = self._current_is_selected()
         has_any_sel = self._find_selection() is not None
@@ -694,24 +708,58 @@ class TopologyExplorer:
             actual_lids.append(lid)
 
             col = _LAYER_COLOR.get(lid, '#888888')
-            
+
+            # Centered display position within the slide interval
+            cs = cs_list[i]
+            lo, hi = cs.perp_lo, cs.perp_hi
+            both_constrained = (abs(lo) < _UNCONSTRAINED and abs(hi) < _UNCONSTRAINED)
+            if both_constrained:
+                draw_perp = (lo + hi) / 2.0
+                pull = cs.perp_pos - draw_perp
+            else:
+                draw_perp = float(cs.perp_pos)
+                pull = 0.0
+            if cs.horiz:
+                x0, y0, x1, y1 = cs.along_lo, draw_perp, cs.along_hi, draw_perp
+            else:
+                x0, y0, x1, y1 = draw_perp, cs.along_lo, draw_perp, cs.along_hi
+
             # Highlight selected segment; dim others
             seg_alpha = 1.0
             if self.sidx != -1:
                 if i == self.sidx:
-                    ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
+                    ax.plot([x0, x1], [y0, y1],
                             color='white', linewidth=viz_lw + 4,
                             alpha=0.6, solid_capstyle='round', zorder=9)
                 else:
                     seg_alpha = 0.3
 
-            ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y],
+            ax.plot([x0, x1], [y0, y1],
                     color=col, linewidth=viz_lw,
                     solid_capstyle='round', zorder=10, alpha=seg_alpha)
-            ax.plot(seg.start.x, seg.start.y, 'o',
+            ax.plot(x0, y0, 'o',
                     color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
-            ax.plot(seg.end.x, seg.end.y, 'o',
+            ax.plot(x1, y1, 'o',
                     color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
+
+            # Pull arrow: points from the interval center toward the nominal perp_pos,
+            # showing NUTS which side of the interval this segment is attracted to.
+            if both_constrained and abs(pull) > 0.5:
+                mid = (cs.along_lo + cs.along_hi) / 2.0
+                if cs.horiz:
+                    ax.annotate("",
+                        xy=(mid, draw_perp + pull),
+                        xytext=(mid, draw_perp),
+                        arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
+                                        mutation_scale=11),
+                        zorder=12, alpha=seg_alpha)
+                else:
+                    ax.annotate("",
+                        xy=(draw_perp + pull, mid),
+                        xytext=(draw_perp, mid),
+                        arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
+                                        mutation_scale=11),
+                        zorder=12, alpha=seg_alpha)
 
         # Update title with layer info (Compacted: M4x5 M5x3)
         counts = {}
@@ -773,6 +821,8 @@ class TopologyExplorer:
         handles.append(Line2D([0], [0], marker='D', color='w',
                                markerfacecolor='#888888', markeredgecolor='white',
                                markersize=8, label='bus-term'))
+        handles.append(Line2D([0], [0], color='#888888', lw=1.5, marker='>',
+                               markersize=7, label='pull direction'))
         ax.legend(handles=handles, loc='upper right', fontsize=9)
 
         ax.set_aspect('equal')
