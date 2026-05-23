@@ -923,7 +923,7 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
 // Multi-pin topology generation
 // ---------------------------------------------------------------------------
 
-std::vector<Topology> TopologyGenerator::generate_multicast_candidates(
+std::vector<Topology> TopologyGenerator::generate_npin(
     const std::string& src_name,
     const std::vector<std::string>& dst_names)
 {
@@ -1135,7 +1135,20 @@ void TopologyGenerator::add_multi_trunk_candidates(
     }
 }
 
-std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& src_name, const std::string& dst_name) {
+std::vector<Topology> TopologyGenerator::generate_candidates(
+    const std::string& src_name,
+    const std::vector<std::string>& dst_names)
+{
+    if (dst_names.size() == 1) {
+        bool any_multi_rect = !floorplan_.get_block_rects(src_name).empty() ||
+                              !floorplan_.get_block_rects(dst_names[0]).empty();
+        if (!any_multi_rect)
+            return generate_2pin(src_name, dst_names[0]);
+    }
+    return generate_npin(src_name, dst_names);
+}
+
+std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_name, const std::string& dst_name) {
     std::vector<Topology> candidates;
     auto mk_bt = [&](const std::string& n) {
         auto cm = floorplan_.get_block_corner_margin(n);

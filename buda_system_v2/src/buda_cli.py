@@ -890,12 +890,8 @@ class BudaSession:
             found = False
             for w in self.bundles:
                 if w.original_bundle.get_net_names()[0].startswith(hint):
-                    if len(dsts) == 1:
-                        w.candidates = topo_gen.generate_candidates(src, dsts[0])
-                        label = f"{src}->{dsts[0]}"
-                    else:
-                        w.candidates = topo_gen.generate_multicast_candidates(src, dsts)
-                        label = f"{src}->[{','.join(dsts)}]"
+                    w.candidates = topo_gen.generate_candidates(src, dsts)
+                    label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                     print(f"Generated {len(w.candidates)} topologies for bundle "
                           f"{w.original_bundle.id} ({label})")
                     found = True
@@ -923,12 +919,8 @@ class BudaSession:
                     print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.original_bundle.id}")
                     continue
                 src, dsts = ep
-                if len(dsts) == 1:
-                    w.candidates = topo_gen.generate_candidates(src, dsts[0])
-                    label = f"{src}->{dsts[0]}"
-                else:
-                    w.candidates = topo_gen.generate_multicast_candidates(src, dsts)
-                    label = f"{src}->[{','.join(dsts)}]"
+                w.candidates = topo_gen.generate_candidates(src, dsts)
+                label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.candidates)} topologies for bundle "
                       f"{w.original_bundle.id} ({label})")
 

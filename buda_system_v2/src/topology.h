@@ -55,7 +55,7 @@ struct Topology {
     int estimated_wirelength  = 0;
     int trunk_location        = 0;
     int pass_through_count    = 0;  // blocks whose bbox contains the trunk (no stub generated)
-    // Populated by generate_candidates / generate_multicast_candidates so that
+    // Populated by generate_candidates so that
     // ConnTopology::infer_connections can identify busterm connections without
     // scanning the entire floorplan.  Key = segment index.
     std::map<int, SegEndpoints> seg_busterms;
@@ -151,17 +151,19 @@ public:
     // U route is congested.  Only meaningful in busterm mode.
     void set_double_detour(bool v) { allow_double_detour_ = v; }
 
-    // 2-pin: L / Z / U shapes
+    // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
     std::vector<Topology> generate_candidates(
-        const std::string& src_name,
-        const std::string& dst_name);
-
-    // Multi-pin: trunk + branch shapes (1 driver, N receivers)
-    std::vector<Topology> generate_multicast_candidates(
         const std::string& src_name,
         const std::vector<std::string>& dst_names);
 
 private:
+    // Internal dispatch targets.
+    std::vector<Topology> generate_2pin(
+        const std::string& src_name,
+        const std::string& dst_name);
+    std::vector<Topology> generate_npin(
+        const std::string& src_name,
+        const std::vector<std::string>& dst_names);
     void filter_pinched(std::vector<Topology>& candidates);
     const Floorplan& floorplan_;
     bool use_busterm_         = true;
