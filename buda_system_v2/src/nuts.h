@@ -1,5 +1,6 @@
 #pragma once
 #include "global_router.h"
+#include <limits>
 #include <map>
 #include <string>
 #include <utility>
@@ -19,7 +20,7 @@ struct TrackSegment {
     double span_lo  = 0, span_hi   = 0;   // routing-direction extent
     double interval_lo = 0, interval_hi = 0; // perpendicular placement range (hard)
     double width    = 1.0;                 // bus width in perpendicular direction
-    double track_position = -1.0;         // assigned output
+    double track_position = std::numeric_limits<double>::quiet_NaN(); // assigned output; NaN = unplaced
     bool   placed   = false;
     int    net_pull = 0;                  // from ConnSeg: >0 prefer hi, <0 prefer lo
 };
@@ -94,12 +95,12 @@ private:
                      const std::map<std::pair<int,int>, double>& pull_map) const;
 
     // First-fit: lowest valid placement position within [lo, hi].
-    // Returns -1.0 if the interval is infeasible.
+    // Returns NaN if the interval is infeasible.
     double first_fit(double lo, double hi, double width,
                      const std::vector<std::pair<double,double>>& occupied) const;
 
     // Preferred-fit: valid placement position closest to 'preferred' within [lo, hi].
-    // Returns -1.0 if the interval is infeasible.
+    // Returns NaN if the interval is infeasible.
     double preferred_fit(double lo, double hi, double width,
                          const std::vector<std::pair<double,double>>& occupied,
                          double preferred) const;

@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import sys
 import interconnect
@@ -369,7 +370,7 @@ class BudaSession:
     def _segment_states_from_topology(self) -> dict:
         """Build a 'before' snapshot from topology geometry (no track assignment yet).
 
-        track_position = -1.0 signals 'unplaced'; _nuts_diagnostics skips movement
+        track_position = NaN signals 'unplaced'; _nuts_diagnostics skips movement
         stats for those segments so the same diagnostic code works for both the
         initial run_nuts and per-layer rerun_layer calls.
         """
@@ -391,7 +392,7 @@ class BudaSession:
                     layer   = bw.assigned_v_layer if bw.assigned_v_layer >= 0 else seg.layer_hint
                 states[(bid, si)] = {
                     'layer':          layer,
-                    'track_position': -1.0,   # unplaced sentinel
+                    'track_position': float('nan'),   # unplaced sentinel
                     'span_lo':        span_lo,
                     'span_hi':        span_hi,
                 }
@@ -405,7 +406,7 @@ class BudaSession:
         _rerun_nuts_layer (target_layer=layer_id, focus on one layer).
 
         before: (bid, seg_idx) -> {layer, track_position, span_lo, span_hi}
-            track_position == -1.0  →  unplaced; movement stats suppressed.
+            track_position == NaN  →  unplaced; movement stats suppressed.
         target_layer: if set, only that layer is reported per-layer and other
             layers are treated as 'connected' for span-adjustment analysis.
             If None, all layers are reported; span adjustments shown across all.
@@ -427,11 +428,11 @@ class BudaSession:
             lname = layer_names.get(lid, f'L{lid}')
             n     = len(segs)
 
-            # Movement stats — only when segment was placed before (track_position >= 0).
+            # Movement stats — only when segment was placed before (track_position not NaN).
             moved_deltas: list[float] = []
             for s in segs:
                 bef = before.get((s.bundle_id, s.seg_idx))
-                if bef and bef['track_position'] >= 0:
+                if bef and not math.isnan(bef['track_position']):
                     delta = abs(s.track_position - bef['track_position'])
                     if delta > 1e-6:
                         moved_deltas.append(delta)

@@ -489,7 +489,7 @@ NUTSResult NUTSEngine::rerun_layer(
     NUTSResult result = prev;
     for (auto& ts : result.segments) {
         if (ts.layer != layer_id) continue;
-        ts.track_position = -1.0;
+        ts.track_position = std::numeric_limits<double>::quiet_NaN();
         ts.placed         = false;
     }
     std::map<std::pair<int,int>, double>                         pull_map;
