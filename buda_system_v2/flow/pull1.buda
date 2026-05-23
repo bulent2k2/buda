@@ -1,0 +1,28 @@
+# A floating spine also pulls segs in some cases!
+
+# From dnuts1 which is a snippet from two_rotated_buses.buda
+
+# overhead 33% to match up with track pattern below
+def_layer 4 M4 H TOP 33.33
+def_layer 5 M5 V TOP 33.33
+corner_margin dx 10 dy 8
+
+add_block bottom  200 0   300 100
+add_block topl    0   200 100 300
+add_block topr    400 200 500 300 
+add_bus bus[4]    bottom.o topl.i,topr.i
+add_bus b2[4]     topl.o bottom.i
+add_bus b3[4]     topr.o bottom.i
+add_bus b4[4]     topl.o topr.i
+
+# Add a Keepout Zone to verify the toggle button
+# add_keepout 650 400 750 600 M4 M5
+
+run_bundler strict
+generate_topologies
+run_planner
+run_nuts
+def_track_pattern 4 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+def_track_pattern 5 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+run_detailed_nuts
+visualize

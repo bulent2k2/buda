@@ -1,0 +1,13 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "clk",
+      "bundle_id": 1,
+      "topo_type": "TRUNK_V_OOB@x660",
+      "topo_wl": 370,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-05-23T19:44:58"
+    }
+  ]
+}
