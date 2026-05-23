@@ -639,8 +639,9 @@ class TopologyExplorer:
             self.fig.canvas.draw_idle()
         if result is not None and self._refresh_fn is not None:
             self._refresh_fn(result)
-            if self._main_fig is not None:
-                _raise_window(self._main_fig)
+            # We don't automatically raise the main window here anymore, 
+            # as it snatches focus from the TopologyExplorer.
+            # User can use 'cmd+1' (on Mac) or just click the window.
 
     def _draw(self):
         ax = self.ax
@@ -1831,6 +1832,17 @@ class BudaVisualizer:
                         if w.original_bundle.id == self._highlighted), None)
         if wrapper is None or not wrapper.candidates:
             return
+
+        # Singleton Pattern: check if a TopologyExplorer window is already open.
+        if self._topo_explorer is not None and plt.fignum_exists(self._topo_explorer.fig.number):
+            # If it's for the SAME bundle, just raise it.
+            if self._topo_explorer.wrappers[0].original_bundle.id == self._highlighted:
+                _raise_window(self._topo_explorer.fig)
+                return
+            else:
+                # Different bundle? Close the old one to avoid confusion/clutter.
+                plt.close(self._topo_explorer.fig)
+
         refresh_fn = self._redraw_nuts_tracks if self._rerun_fn is not None else None
         self._topo_explorer = TopologyExplorer(
             self.fp, wrapper,
