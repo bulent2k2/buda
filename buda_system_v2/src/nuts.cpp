@@ -36,7 +36,8 @@ static void build_nuts_maps(
     std::map<std::pair<int,int>, double>&                         pull_map,
     std::map<std::pair<int,int>, std::pair<double,double>>&       slide_map,
     std::set<std::pair<int,int>>&                                trunk_set,
-    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map)
+    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map,
+    std::map<std::pair<int,int>, int>&                            net_pull_map)
 {
     // Pass 1 — nominal perpendicular position from the topology.
     for (const auto& bw : bundles) {
@@ -89,6 +90,7 @@ static void build_nuts_maps(
             // Use cs.net_pull (computed by ConnTopology) to set the preferred
             // placement coordinate.  net_pull > 0 → slide toward perp_hi,
             // net_pull < 0 → slide toward perp_lo.
+            net_pull_map[key] = cs.net_pull;
             if (cs.net_pull != 0) {
                 constexpr double kSentinel = 5e8;
                 double preferred;
@@ -108,6 +110,7 @@ static void apply_interval_constraints(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, std::pair<double,double>>& slide_map,
     const std::set<std::pair<int,int>>&                           trunk_set,
+    const std::map<std::pair<int,int>, int>&                      net_pull_map,
     int only_layer = -1)
 {
     constexpr double kSentinel = 5e8;
@@ -122,11 +125,18 @@ static void apply_interval_constraints(
             if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
         }
 
+        // Propagate net_pull into TrackSegment for use in solve_layer.
+        auto npit = net_pull_map.find(key);
+        if (npit != net_pull_map.end()) ts.net_pull = npit->second;
+
         if (trunk_set.count(key)) {
             double span   = ts.interval_hi - ts.interval_lo;
             double margin = 0.1 * span;
-            double new_lo = ts.interval_lo + margin;
-            double new_hi = ts.interval_hi - margin;
+            // Apply margin only on the side opposite the pull direction so the
+            // preferred edge stays reachable.  Symmetric margin for balanced trunks.
+            int np = ts.net_pull;
+            double new_lo = ts.interval_lo + (np >= 0 ? margin : 0.0);
+            double new_hi = ts.interval_hi - (np <= 0 ? margin : 0.0);
             if (new_hi - new_lo >= ts.width) {
                 ts.interval_lo = new_lo;
                 ts.interval_hi = new_hi;
@@ -345,17 +355,20 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                               const std::map<std::pair<int,int>, double>& pull_map) const {
     if (segs.empty()) return;
     struct Event {
-        double pos; int type; int idx;
+        double pos; int type; int idx; int net_pull_abs = 0;
         bool operator<(const Event& o) const {
             if (pos != o.pos) return pos < o.pos;
-            return type > o.type;
+            if (type != o.type) return type > o.type;  // END before START at same pos
+            // For START events at same position: stronger pull gets placed first.
+            return net_pull_abs > o.net_pull_abs;
         }
     };
     std::vector<Event> events;
     events.reserve(segs.size() * 2);
     for (int i = 0; i < (int)segs.size(); ++i) {
-        events.push_back({segs[i]->span_lo, 0, i});
-        events.push_back({segs[i]->span_hi, 1, i});
+        int npa = std::abs(segs[i]->net_pull);
+        events.push_back({segs[i]->span_lo, 0, i, npa});
+        events.push_back({segs[i]->span_hi, 1, i, 0});
     }
     std::sort(events.begin(), events.end());
     
@@ -439,8 +452,9 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
     std::set<std::pair<int,int>>                                 trunk_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
-    apply_interval_constraints(result.segments, slide_map, trunk_set, -1);
+    std::map<std::pair<int,int>, int>                            net_pull_map;
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map, net_pull_map);
+    apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
@@ -482,8 +496,9 @@ NUTSResult NUTSEngine::rerun_layer(
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
     std::set<std::pair<int,int>>                                 trunk_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
-    apply_interval_constraints(result.segments, slide_map, trunk_set, layer_id);
+    std::map<std::pair<int,int>, int>                            net_pull_map;
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map, net_pull_map);
+    apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;

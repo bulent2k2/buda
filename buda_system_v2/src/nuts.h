@@ -21,6 +21,7 @@ struct TrackSegment {
     double width    = 1.0;                 // bus width in perpendicular direction
     double track_position = -1.0;         // assigned output
     bool   placed   = false;
+    int    net_pull = 0;                  // from ConnSeg: >0 prefer hi, <0 prefer lo
 };
 
 // Exact geometry of one overlap pair, after placement.

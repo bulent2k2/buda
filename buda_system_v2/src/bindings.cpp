@@ -247,7 +247,8 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("interval_hi",   &TrackSegment::interval_hi)
         .def_readwrite("width",         &TrackSegment::width)
         .def_readwrite("track_position", &TrackSegment::track_position)
-        .def_readwrite("placed",        &TrackSegment::placed);
+        .def_readwrite("placed",        &TrackSegment::placed)
+        .def_readwrite("net_pull",      &TrackSegment::net_pull);
 
     py::class_<OverlapDetail>(m, "OverlapDetail")
         .def_readwrite("layer",    &OverlapDetail::layer)
