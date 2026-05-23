@@ -184,29 +184,36 @@ Feature: Multicast topology generation for N-busterm case
   # ---------------------------------------------------------------------------
 
   Scenario: MST topology for spatially scattered blocks
-    # A, B, C in three different quadrants. No single H or V trunk covers all.
-    # MST: A–B trunk at y=250, then B–C trunk at x=340.
+    # A, B, C, D in four quadrants. No single H or V trunk covers all.
+    # MST (one possible tree): A–D, B–C, then A–C connecting the two pairs.
     #
     #   y=500 ─       +------+
     #                 |      |
     #   y=450 ─       |  C   |
     #                 |      |
-    #   y=400 ─       +--x---+        ← C bottom face; V stub down to B–C trunk
-    #                    ||
-    #   y=250 ─  +----+  *============x  B   ← T-junc; H trunk A–B; B right face
-    #            |    x===|            |    |
-    #   y=200 ─  | A  |  *            +----+
-    #            |    |                0  80
-    #   y=150 ─  +----+             300 380
-    #
+    #   y=400 ─       +------+
+    #                200 280
+    #   y=300 ─  +----+              +----+
+    #            |    |              |    |
+    #   y=250 ─  | A  |              | B  |
+    #            |    |              |    |
+    #   y=200 ─  +----+              +----+
+    #              0  80            300 380
+    #   y=100 ─       +------+
+    #                 |      |
+    #   y=050 ─       |  D   |
+    #                 |      |
+    #   y=000 ─       +------+
+    #                100 180
     Given a block "A" at (0,200)-(80,300)
     And a block "B" at (300,200)-(380,300)
     And a block "C" at (200,400)-(280,500)
+    And a block "D" at (100,0)-(180,100)
     And layer M4 is HORIZONTAL with id 4
     And layer M5 is VERTICAL with id 5
-    When I generate multicast candidates from "A" to ["B","C"] using layers M4,M5
+    When I generate multicast candidates from "A" to ["B","C","D"] using layers M4,M5
     Then at least one candidate of type "MST" exists
-    And every MST candidate connects all three blocks
+    And every MST candidate connects all four blocks
     And every MST candidate has no cycles
 
   # ---------------------------------------------------------------------------

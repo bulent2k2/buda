@@ -199,12 +199,41 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     for (auto& cs : segs_) {
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::BUSTERM) continue;
-            const Rect& rect = bmap.at(conn.block_name);
+
+            // For multi-rect blocks use the specific connecting rect rather than
+            // the union bbox so that the perp interval is tight to the actual face.
+            // Example: an H stub connecting to the wide-base right face (y∈[0,100])
+            // of an L-shaped block should not be free to slide up to y=400 (the
+            // union bbox top).
+            Rect face_rect = bmap.at(conn.block_name);
+            {
+                const auto rects = fp.get_block_rects(conn.block_name);
+                if (!rects.empty()) {
+                    if (cs.horiz) {
+                        // H segment: face_coord is an x-face; perp_pos is y.
+                        for (const Rect& r : rects) {
+                            if ((r.x1 == conn.face_coord || r.x2 == conn.face_coord)
+                                    && cs.perp_pos >= r.y1 && cs.perp_pos <= r.y2) {
+                                face_rect = r; break;
+                            }
+                        }
+                    } else {
+                        // V segment: face_coord is a y-face; perp_pos is x.
+                        for (const Rect& r : rects) {
+                            if ((r.y1 == conn.face_coord || r.y2 == conn.face_coord)
+                                    && cs.perp_pos >= r.x1 && cs.perp_pos <= r.x2) {
+                                face_rect = r; break;
+                            }
+                        }
+                    }
+                }
+            }
+
             BlockCornerMargin cm = fp.get_block_corner_margin(conn.block_name);
             if (cs.horiz) {
                 int m  = cm.dy;
-                int lo = rect.y1 + m;
-                int hi = rect.y2 - m;
+                int lo = face_rect.y1 + m;
+                int hi = face_rect.y2 - m;
                 // Guard 1: block too short for both margins.
                 // Guard 2: nominal perp_pos is outside the margin range — this
                 //   happens when the topology generator places the endpoint at the
@@ -212,16 +241,16 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                 //   Applying the margin would exclude the nominal position and
                 //   cause NUTS interval inversions; fall back to full face extent.
                 if (lo > hi || cs.perp_pos < lo || cs.perp_pos > hi) {
-                    lo = rect.y1; hi = rect.y2;
+                    lo = face_rect.y1; hi = face_rect.y2;
                 }
                 cs.perp_lo = std::max(cs.perp_lo, lo);
                 cs.perp_hi = std::min(cs.perp_hi, hi);
             } else {
                 int m  = cm.dx;
-                int lo = rect.x1 + m;
-                int hi = rect.x2 - m;
+                int lo = face_rect.x1 + m;
+                int hi = face_rect.x2 - m;
                 if (lo > hi || cs.perp_pos < lo || cs.perp_pos > hi) {
-                    lo = rect.x1; hi = rect.x2;
+                    lo = face_rect.x1; hi = face_rect.x2;
                 }
                 cs.perp_lo = std::max(cs.perp_lo, lo);
                 cs.perp_hi = std::min(cs.perp_hi, hi);

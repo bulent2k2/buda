@@ -1090,10 +1090,66 @@ std::vector<Topology> TopologyGenerator::generate_npin(
 
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                                            std::vector<Topology>& results) {
-    if (blocks.size() < 2) return;
-    std::vector<std::pair<std::string, Rect>> nodes;
-    for (const auto& bt : blocks) nodes.push_back({bt.block_name, bt.bbox});
-    auto mst_edges = compute_mst(nodes);
+    // MST topologies model daisy-chain connections (each block connects to its
+    // nearest neighbour rather than to a shared trunk spine).  For ≤3 blocks the
+    // MST tree has only 1–2 edges: with 2 blocks it degenerates to an L-shape
+    // already covered by TRUNK candidates; with 3 blocks it is genuinely unique
+    // only in "chain" geometries (one dst geometrically between src and the
+    // other), which are rare in practice.  Starting at 4 blocks the tree
+    // structure is always richer than any single-spine TRUNK.
+    if (blocks.size() < 4) return;
+
+    // Use individual rects for multi-rect blocks so that closest_points finds
+    // a point on an actual physical face, not in the union-bbox interior.
+    auto block_rects = [&](int i) -> std::vector<Rect> {
+        return blocks[i].rects.empty()
+               ? std::vector<Rect>{blocks[i].bbox}
+               : blocks[i].rects;
+    };
+
+    // MST edge weights: minimum manhattan distance across all rect pairs.
+    auto rect_min_dist = [&](int u, int v) -> int {
+        int d = INT_MAX;
+        for (const Rect& ru : block_rects(u))
+            for (const Rect& rv : block_rects(v))
+                d = std::min(d, manhattan_nearest(ru, rv));
+        return d;
+    };
+
+    // Closest point pair across all individual rect pairs of two blocks.
+    auto closest_block_points = [&](int u, int v, Point& p1, Point& p2) {
+        int best = INT_MAX;
+        for (const Rect& ru : block_rects(u)) {
+            for (const Rect& rv : block_rects(v)) {
+                int d = manhattan_nearest(ru, rv);
+                if (d < best) { best = d; closest_points(ru, rv, p1, p2); }
+            }
+        }
+    };
+
+    // Build MST on closest-rect distances.
+    int n = (int)blocks.size();
+    struct RawEdge { int u, v, dist; };
+    std::vector<RawEdge> all_edges;
+    all_edges.reserve(n * (n - 1) / 2);
+    for (int i = 0; i < n; ++i)
+        for (int j = i + 1; j < n; ++j)
+            all_edges.push_back({i, j, rect_min_dist(i, j)});
+    std::sort(all_edges.begin(), all_edges.end(),
+              [](const RawEdge& a, const RawEdge& b){ return a.dist < b.dist; });
+    std::vector<int> par(n); std::iota(par.begin(), par.end(), 0);
+    std::function<int(int)> find = [&](int x) {
+        return par[x] == x ? x : par[x] = find(par[x]);
+    };
+    std::vector<std::pair<int,int>> mst_edges;
+    mst_edges.reserve(n - 1);
+    for (const auto& e : all_edges) {
+        int pu = find(e.u), pv = find(e.v);
+        if (pu == pv) continue;
+        par[pu] = pv;
+        mst_edges.push_back({e.u, e.v});
+        if ((int)mst_edges.size() == n - 1) break;
+    }
 
     int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
     int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
@@ -1102,9 +1158,9 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         Topology mst;
         mst.type = (strategy == 0) ? "MST_HV" : "MST_VH";
         bool valid = true;
-        for (const auto& edge : mst_edges) {
+        for (const auto& [eu, ev] : mst_edges) {
             Point p1, p2;
-            closest_points(nodes[edge.u].second, nodes[edge.v].second, p1, p2);
+            closest_block_points(eu, ev, p1, p2);
             if (p1.x == p2.x && p1.y == p2.y) continue;
             if (p1.x == p2.x) {
                 mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));

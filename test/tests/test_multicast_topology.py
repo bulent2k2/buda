@@ -406,7 +406,7 @@ def mst_exists(ctx):
     assert matches, f'No MST candidate. Got: {[c.type for c in ctx["candidates"]]}'
 
 
-@then('every MST candidate connects all three blocks')
+@then('every MST candidate connects all four blocks')
 def mst_connects_all(ctx):
     for c in ctx['candidates']:
         if not c.type.startswith('MST'):
@@ -418,7 +418,7 @@ def mst_connects_all(ctx):
             for conn in cs.conns:
                 if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
                     blocks.add(conn.block_name)
-        assert len(blocks) >= 3, (
+        assert len(blocks) >= 4, (
             f'{c.type}: only reached blocks {blocks}'
         )
 

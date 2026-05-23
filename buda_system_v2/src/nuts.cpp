@@ -175,6 +175,11 @@ static void do_span_adjustments(
         for (const auto& req : reqs) {
             if (req.lo_end) {
                 new_lo = std::min(new_lo, req.center);
+            } else if (req.is_endpoint) {
+                // Snap stub hi-end to the trunk's actual placed position.
+                // The nominal topology had the stub ending at the trunk's nominal
+                // perp coord; if NUTS moves the trunk closer, the stub must shrink.
+                new_hi = req.center;
             } else {
                 new_hi = std::max(new_hi, req.center);
             }
