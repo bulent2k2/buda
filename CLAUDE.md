@@ -37,7 +37,7 @@ python3 buda_cli.py comprehensive_demo.buda
 | Command | Stage | Description |
 |---|---|---|
 | `add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]` | setup | Place a single-rect floorplan block; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
-| `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [corner_margin ...]` | setup | Multi-rect block: topology generator picks the best-fit rect per trunk position |
+| `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru\|over] [corner_margin ...]` | setup | Multi-rect block: topology generator picks the best-fit rect per trunk position; `teg_mode over` generates an explicit bridge segment over the block's notch when the trunk falls in a gap between rects |
 | `add_keepout <x1> <y1> <x2> <y2> <layer_list>` | setup | Define a rectangular keep-out zone for specific routing layers |
 | `corner_margin dx <n> [dy <n>]` | setup | Set global corner margin for all blocks with no per-block override. Only `dx`/`dy` (absolute); `pct_h`/`pct_v` not valid globally. Single-axis value mirrors to the other axis. |
 | `add_net <name> <driver_pin> <receiver_pins_csv>` | setup | Add a net to the netlist |
@@ -145,6 +145,13 @@ Netlist (.buda script)
 **Layer hints:** L-shape horizontal segment gets hint=3 (M3), vertical gets hint=4 (M4). All candidates use the same convention; the bundle planner may override.
 
 **Corner margins:** At Busterm construction time, each block's bounding box is inset by its `BlockCornerMargin{dx, dy}` via `Rect::shrink(dx, dy)`. All shape functions (L/Z/U/UU/trunk) operate on the shrunken bbox directly — no per-function margin threading. The Hanan grid is built from the shrunken bboxes, so stub and trunk positions automatically land within the margin zone. `dy` applies to vertical faces (left/right, constrains Y); `dx` to horizontal faces (top/bottom, constrains X). Guard: if `2*margin >= face_extent`, the shrink is skipped for that axis.
+
+**TEG mode (`teg_mode thru|over`):** Multi-rect blocks carry a `TegMode` flag set via `add_block … teg_mode over|thru`.
+- **`thru` (default):** Each trunk connects to the nearest rect only. A split connection (trunk in the gap between rects) is left externally disconnected — the block's internal routing joins the sides. No bridge generated.
+- **`over` — disjoint rects (pure TEG):** When the trunk falls in the gap between two rects, both rects get stubs (one to each) and an explicit **bridge segment** is placed along the outer face of the union bounding box (top for H-trunk gap, right for V-trunk gap). Stored in `Topology::bridge_segments[block_name]` (not in `segments`).
+- **`over` — rectilinear rects (L-/C-shape):** When the trunk is inside some but not all rects (partial span), a bridge is emitted at the union bbox outer face. `rects_are_rectilinear()` distinguishes these from pure TEG (requires strict x- AND y-overlap between any two rects).
+- Bridge is **suppressed** when the trunk lands directly inside a rect or the rects are adjacent (touching edges, no gap).
+- The Hanan grid uses **each individual rect's edges** (not just the union bbox), so gap boundaries produce grid lines that trunks snap to naturally.
 
 **Output fed to stage 3:** `vector<Topology>` per bundle, stored in `BundleWrapper::candidates`.
 
