@@ -79,7 +79,7 @@ def_layer 7 M7 V TOP 0.0  span_min 300              # long trunks only
 ```
 add_block <name> <x1> <y1> <x2> <y2> [corner_margin dx <n> [dy <n>]]
 add_block <name> <x1> <y1> <x2> <y2> [corner_margin pct_h <p> [pct_v <p>]]
-add_block <name> rect <x1> <y1> <x2> <y2> [rect <x1> <y1> <x2> <y2> ...] [corner_margin ...]
+add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over] [corner_margin ...]
 ```
 
 Place a block in the floorplan. Blocks define the Hanan grid used by topology
@@ -88,9 +88,11 @@ generation and the congestion model.
 The first two forms place a single rectangular block. The third form places a
 **multi-rect block**: each `rect` token introduces one candidate connection
 rectangle. The topology generator picks whichever rect minimises stub length
-for each trunk position. The Hanan grid includes all rect edges. The union
-bounding box of all rects is used as the block's overall footprint and as the
-reference dimension for `pct_h`/`pct_v` margin calculations.
+for each trunk position. The Hanan grid includes **all individual rect edges**
+(not just the union bounding box), so gap and notch boundaries produce Hanan
+lines that trunks can snap to. The union bounding box of all rects is used as
+the block's overall footprint and as the reference dimension for `pct_h`/`pct_v`
+margin calculations.
 
 | Argument | Type | Description |
 |---|---|---|
@@ -98,6 +100,7 @@ reference dimension for `pct_h`/`pct_v` margin calculations.
 | `x1 y1` | int | Lower-left corner (layout units) |
 | `x2 y2` | int | Upper-right corner (layout units) |
 | `rect x1 y1 x2 y2` | keyword | Multi-rect form: one candidate connection rectangle. Repeat for each rect. |
+| `teg_mode thru\|over` | keyword | Optional; multi-rect form only. Controls how topology generation handles trunks that fall in the gap between rects. Default: `thru`. See **TEG mode** below. |
 | `corner_margin dx N` | keyword | Optional. Shrink the routing face by `N` units in X (top/bottom faces). If `dy` is omitted, the same value applies to Y as well. |
 | `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
 | `corner_margin pct_h P` | keyword | Shrink X faces by `P`% of block width. If `pct_v` is omitted, same percentage applies to height. |
@@ -107,17 +110,54 @@ A per-block `corner_margin` overrides the global `corner_margin` command for
 that block. The margin is baked into the block's `Busterm.bbox` at construction;
 topology generation and the Hanan grid use the shrunken bounding box directly.
 
+#### TEG mode
+
+A multi-rect block models one of two physical situations:
+
+**Disjoint rects (pure TEG — Terminal Equivalence Group):** the rects are
+spatially separated, e.g. a block with ports on both left and right sides
+represented as two narrow rectangles. Each rect is an independent candidate
+connection point; the block can be reached from either side on any given trunk.
+
+**Overlapping rects (rectilinear block):** the rects share area (e.g. an
+L-shaped block defined as a tall arm + a wide base). All rects form one
+connected polygon. A trunk that only crosses part of the polygon must route
+over the block's outer boundary to reach the far portion.
+
+`teg_mode` controls what happens when a horizontal trunk falls in the vertical
+gap between rects (or a vertical trunk falls in the horizontal gap):
+
+| Mode | Behaviour |
+|---|---|
+| `thru` (default) | The topology connects only the **nearest** rect (lowest stub length). The block's internal routing is assumed to join any disconnected portions. No bridge segment is generated. |
+| `over` — disjoint rects | When the trunk falls in the gap between two rects, **both** rects are connected with stubs (one up, one down) and an explicit **bridge segment** is generated along the outer face of the union bounding box. The bridge physically joins the two sides over the notch. |
+| `over` — rectilinear rects | When the trunk is inside some rects but not all (partial span), a bridge segment is generated along the outer face of the union bounding box to annotate that an explicit over-the-block wire is needed. Stubs are only generated for rects that the trunk does not directly hit. |
+
+The bridge segment is stored in the topology's `bridge_segments` map (keyed by
+block name) rather than in the main segment list, so callers can distinguish
+routing wires from bridge annotations.
+
+Over-the-block mode **does not** generate a bridge when:
+- The trunk lands inside a rect (direct connection; no gap crossing).
+- The two rects are adjacent (touching edges, no gap).
+
 **Examples:**
 ```
 add_block u_cpu   0    0  100  100
 add_block u_mem 200    0  300  100  corner_margin dx 5
 add_block u_io  400    0  500  100  corner_margin pct_h 10 pct_v 15
 
-# L-shaped block: tall arm + wide base
-add_block u_l  rect  0  0  100  400  rect  0  0  400  100
+# L-shaped block: tall arm + wide base (rectilinear; teg_mode over emits bridge)
+add_block u_l  rect  0  0  100  400  rect  0  0  400  100  teg_mode over
 
-# Block with equivalent left and right ports (side-by-side)
-add_block u_dp rect  200  0  300  100  rect  400  0  500  100  corner_margin dx 5
+# Block with disjoint left and right ports (pure TEG; thru = default)
+add_block u_dp rect  200  0  300  100  rect  400  0  500  100  teg_mode thru
+
+# Notched block where trunk may fall in gap — explicit over-the-block bridge
+add_block u_notch  rect  200  0  280  100  rect  220  300  300  400  teg_mode over
+
+# Same notched block, relying on internal routing to join the two sides (default)
+add_block u_notch  rect  200  0  280  100  rect  220  300  300  400
 ```
 
 ---
@@ -308,13 +348,25 @@ starts with `<hint>`.
 
 | Type string | Description |
 |---|---|
-| `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. |
-| `TRUNK_V@x{trunk}` | V spine + H stubs. Symmetric. |
+| `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. For receivers with `teg_mode over`, may carry a `bridge_segments` entry (see below). |
+| `TRUNK_V@x{trunk}` | V spine + H stubs. Symmetric. Same bridge logic applies. |
 | `TRUNK_H_OOB@y{trunk}` | H spine outside the pin bounding box + V stubs (detour equivalent of U-shape). |
 | `TRUNK_V_OOB@x{trunk}` | V spine outside the pin bounding box + H stubs. |
 | `MST_HV` | Prim MST on block bboxes, L-bends H-first. Lower total wirelength for scattered pins. |
 | `MST_VH` | Prim MST, L-bends V-first. |
 | `BITRUNK_H` | Two parallel H spines at 25th/75th percentile Y + vertical backbone. Generated for 4+ receivers. |
+
+**Bridge segments (`teg_mode over`):**
+
+When a receiver block uses `teg_mode over` and the trunk falls in the gap
+between its rects, the topology carries a **bridge segment** for that block.
+The bridge is a short wire segment placed along the outer face of the block's
+union bounding box (top face for an H-trunk gap; right face for a V-trunk gap).
+It is stored in `topology.bridge_segments[block_name]` — separate from the main
+`topology.segments` list — so the planner and visualizer can distinguish routing
+wires from bridge annotations. Bridge topologies have higher adjusted wirelength
+than their `thru` counterparts (the bridge adds explicit wire) and are therefore
+ranked after `thru` candidates when all else is equal.
 
 **Notes:**
 - Each call targets exactly one bundle. For N bundles, call N times.
