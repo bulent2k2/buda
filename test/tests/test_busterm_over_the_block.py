@@ -3,10 +3,7 @@ pytest-bdd step definitions for features/busterm_over_the_block.feature.
 
 Over-the-block vs thru-the-block TEG (Terminal Equivalence Group) routing modes.
 
-Scenarios 1–4 and 6–7 test currently-implemented behaviour and must PASS.
-Scenario 5 (L-shaped V-trunk gap) is xfail: TRUNK_V@x300 is not on the
-  Hanan grid for the given geometry; the L-shape notch is not an axis-aligned
-  X-direction gap between rects, which is all the current OVER logic handles.
+Scenarios 1–7 test currently-implemented behaviour and must PASS.
 Scenario 8 (adjusted-wirelength ranking) is xfail: Topology.adjusted_wl and
   per-topology teg_mode attribute are not yet in the C++ API.
 """
@@ -43,11 +40,6 @@ def test_overtheblock__trunk_inside_one_rect__no_bridge_needed():
     pass
 
 
-@pytest.mark.xfail(
-    strict=False,
-    reason='L-shaped V-trunk gap not modeled: TRUNK_V@x300 absent from Hanan grid; '
-           'OVER only handles axis-aligned gaps between rects',
-)
 @scenario('features/busterm_over_the_block.feature',
           'Over-the-block — L-shaped block with H trunk above notch')
 def test_overtheblock__lshaped_block_with_h_trunk_above_notch():
@@ -320,7 +312,7 @@ def then_has_bridge(ctx, trunk_key, block):
     r'the bridge segment runs along the top face of "(?P<block>[^"]+)"\'s union bounding box'
 ))
 def then_bridge_along_top(ctx, block):
-    c = _find_by_trunk(ctx['candidates'], 'TRUNK_V@x300')
+    c = _find_by_trunk(ctx['candidates'], 'TRUNK_V@x250')
     assert c is not None, 'TRUNK_V@x300 not found'
     bridge = _bridge_for_block(c, block)
     assert bridge is not None, f'No bridge for {block!r}'
