@@ -696,17 +696,28 @@ class TopologyExplorer:
         _MIN_ARROW = 20
 
         # Pass A: centered perp position + signed pull-arrow length per segment.
+        # _is_bidir[i] = True when the segment is constrained but exactly centred
+        # (pull == 0).  In that case plen gives the half-arm length of a <-> arrow
+        # rather than a one-directional -> arrow.
         _draw_perp = []
         _pull_len  = []
+        _is_bidir  = []
         for cs in cs_list:
             lo, hi  = cs.perp_lo, cs.perp_hi
             lo_ok   = abs(lo) < _UNCONSTRAINED
             hi_ok   = abs(hi) < _UNCONSTRAINED
+            bidir   = False
             if lo_ok and hi_ok:
                 dp   = (lo + hi) / 2.0
                 pull = cs.perp_pos - dp
                 if abs(pull) > 1e-6:
                     plen = max((hi - lo) / 4.0, _MIN_ARROW) * (1.0 if pull > 0 else -1.0)
+                elif (hi - lo) > 1:
+                    # Segment is centred in a non-trivial interval — show a
+                    # bidirectional <-> arrow so the slide range is visually
+                    # flagged even though there is no preferred direction.
+                    plen  = max((hi - lo) / 4.0, _MIN_ARROW)
+                    bidir = True
                 else:
                     plen = 0.0
             elif lo_ok:
@@ -722,6 +733,7 @@ class TopologyExplorer:
                 plen = 0.0
             _draw_perp.append(dp)
             _pull_len.append(plen)
+            _is_bidir.append(bidir)
 
         # Pass B: snap along endpoints to connected segments' display perp.
         # Each SEG connection "at_pos" in segment i's along direction should
@@ -789,19 +801,23 @@ class TopologyExplorer:
             # Pull arrow: direction from display position toward nominal perp_pos.
             # Length is interval_w/4 (floor _MIN_ARROW) for two-sided constrained
             # segments, or _MIN_ARROW toward the lone finite bound for one-sided.
-            plen = _pull_len[i]
+            # Bidirectional (<->) when the segment is exactly centred in its
+            # interval (no preferred direction but slide range exists).
+            plen  = _pull_len[i]
+            bidir = _is_bidir[i]
             if abs(plen) > 1e-6:
-                mid = (dlo + dhi) / 2.0
+                mid     = (dlo + dhi) / 2.0
+                astyle  = '<->' if bidir else '->'
                 if cs.horiz:
                     ax.annotate("",
-                        xy=(mid, dp + plen), xytext=(mid, dp),
-                        arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
+                        xy=(mid, dp + plen), xytext=(mid, dp - plen if bidir else dp),
+                        arrowprops=dict(arrowstyle=astyle, color=col, lw=1.5,
                                         mutation_scale=11),
                         zorder=12, alpha=seg_alpha)
                 else:
                     ax.annotate("",
-                        xy=(dp + plen, mid), xytext=(dp, mid),
-                        arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
+                        xy=(dp + plen, mid), xytext=(dp - plen if bidir else dp, mid),
+                        arrowprops=dict(arrowstyle=astyle, color=col, lw=1.5,
                                         mutation_scale=11),
                         zorder=12, alpha=seg_alpha)
 
@@ -866,7 +882,7 @@ class TopologyExplorer:
                                markerfacecolor='#888888', markeredgecolor='white',
                                markersize=8, label='bus-term'))
         handles.append(Line2D([0], [0], color='#888888', lw=1.5, marker='>',
-                               markersize=7, label='pull direction'))
+                               markersize=7, label='pull direction (→ or ↔ centred)'))
         ax.legend(handles=handles, loc='upper right', fontsize=9)
 
         ax.set_aspect('equal')
