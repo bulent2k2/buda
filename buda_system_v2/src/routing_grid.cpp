@@ -35,13 +35,9 @@ TrackPattern::tracks_in_range(double lo, double hi) const {
     double up = unit_pitch();
     if (up <= 0.0 || slots.empty() || lo > hi) return {};
 
-    // First unit index n such that the unit starting at origin + n*up
-    // could still have centres >= lo.
-    int n_start = 0;
-    if (origin < lo) {
-        n_start = static_cast<int>(std::floor((lo - origin) / up));
-        if (n_start > 0) --n_start;  // step back one unit to be safe
-    }
+    // Calculate the first unit index n such that origin + n*up could contain centres >= lo.
+    // std::floor handles negative offsets correctly.
+    int n_start = static_cast<int>(std::floor((lo - origin) / up)) - 1;
 
     std::vector<std::pair<double, TrackSlot>> result;
     for (int n = n_start; ; ++n) {
