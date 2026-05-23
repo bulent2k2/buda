@@ -50,6 +50,11 @@ struct ConnSeg {
     int  perp_pos  = 0;
     int  perp_lo   = INT_MIN / 2;
     int  perp_hi   = INT_MAX / 2;
+    // net_pull > 0: more connected-stub anchors lie above perp_pos (slide up/right
+    //              reduces total connected wirelength).
+    // net_pull < 0: more anchors lie below → prefer sliding down/left.
+    // net_pull == 0: balanced or no stub connections → no preferred direction.
+    int  net_pull  = 0;
     std::vector<SegConn> conns;
 };
 
@@ -105,6 +110,7 @@ private:
     std::vector<ConnSeg> segs_;
     void infer_connections(const Topology& topo, const Floorplan& fp);
     void compute_slide_ranges(const Floorplan& fp);
+    void compute_net_pull();
 };
 
 } // namespace interconnect

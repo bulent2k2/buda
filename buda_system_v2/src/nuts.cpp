@@ -86,24 +86,19 @@ static void build_nuts_maps(
                 rev_conn_map[t_key].push_back({ bid, si, lo_end, is_ep });
             }
 
-            std::vector<double> targets;
-            for (const auto& conn : cs.conns) {
-                if (conn.kind != SegConn::SEG) continue;
-                const ConnSeg& other = conn_segs[conn.seg_idx];
-                for (const auto& other_conn : other.conns) {
-                    if (other_conn.kind != SegConn::BUSTERM) continue;
-                    targets.push_back(static_cast<double>(other_conn.at_pos));
-                }
-            }
-            if (!targets.empty()) {
-                std::sort(targets.begin(), targets.end());
-                double median;
-                std::size_t n = targets.size();
-                if (n % 2 == 1)
-                    median = targets[n / 2];
+            // Use cs.net_pull (computed by ConnTopology) to set the preferred
+            // placement coordinate.  net_pull > 0 → slide toward perp_hi,
+            // net_pull < 0 → slide toward perp_lo.
+            if (cs.net_pull != 0) {
+                constexpr double kSentinel = 5e8;
+                double preferred;
+                if (cs.net_pull > 0)
+                    preferred = (cs.perp_hi < kSentinel) ? static_cast<double>(cs.perp_hi)
+                                                         : pull_map[key]; // fallback
                 else
-                    median = (targets[n / 2 - 1] + targets[n / 2]) / 2.0;
-                pull_map[key] = median;
+                    preferred = (cs.perp_lo > -kSentinel) ? static_cast<double>(cs.perp_lo)
+                                                          : pull_map[key]; // fallback
+                pull_map[key] = preferred;
             }
         }
     }

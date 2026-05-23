@@ -183,6 +183,7 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("perp_pos", &ConnSeg::perp_pos)
         .def_readwrite("perp_lo",  &ConnSeg::perp_lo)
         .def_readwrite("perp_hi",  &ConnSeg::perp_hi)
+        .def_readwrite("net_pull", &ConnSeg::net_pull)
         .def_readwrite("conns",    &ConnSeg::conns);
 
     py::class_<MSTEdge>(m, "MSTEdge")

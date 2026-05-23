@@ -37,6 +37,7 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
 
     infer_connections(topo, fp);
     compute_slide_ranges(fp);
+    compute_net_pull();
 }
 
 // ── ConnTopology::infer_connections ───────────────────────────────────────────
@@ -400,6 +401,32 @@ std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
             nodes.emplace_back(name, rect);
 
     return compute_mst(nodes);
+}
+
+// ── ConnTopology::compute_net_pull ────────────────────────────────────────────
+//
+// For each segment S, count how many BUSTERM anchors in SEG-connected neighbours
+// lie above vs. below S.perp_pos.  Moving S toward a BUSTERM at face_coord f
+// shortens the connecting stub by |f - perp_pos|.
+//
+//   net_pull > 0  →  more anchors above perp_pos  →  sliding up/right reduces WL
+//   net_pull < 0  →  more anchors below perp_pos  →  sliding down/left reduces WL
+//   net_pull == 0 →  balanced (or no connected stubs)  →  no preferred direction
+//
+void ConnTopology::compute_net_pull() {
+    for (auto& cs : segs_) {
+        int pos = 0, neg = 0;
+        for (const auto& conn : cs.conns) {
+            if (conn.kind != SegConn::SEG) continue;
+            const ConnSeg& nb = segs_[conn.seg_idx];
+            for (const auto& sc : nb.conns) {
+                if (sc.kind != SegConn::BUSTERM) continue;
+                if      (sc.face_coord > cs.perp_pos) ++pos;
+                else if (sc.face_coord < cs.perp_pos) ++neg;
+            }
+        }
+        cs.net_pull = pos - neg;
+    }
 }
 
 } // namespace interconnect
