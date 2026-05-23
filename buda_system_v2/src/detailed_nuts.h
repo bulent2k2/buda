@@ -1,4 +1,5 @@
 #pragma once
+#include <limits>
 #include <map>
 #include <string>
 #include <tuple>
@@ -21,8 +22,8 @@ struct BusSegment {
     // seg_idx of the adjacent perpendicular segment at each span end (-1 = block face)
     int         lo_adj_seg_idx    = -1;
     int         hi_adj_seg_idx    = -1;
-    // Abstract NUTS track_position used as anchor for Option B ordering; -1 = unset (fallback)
-    double      abstract_pos      = -1.0;
+    // Abstract NUTS track_position used as anchor for Option B ordering; NaN = unset (fallback)
+    double      abstract_pos      = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct NetSegment {

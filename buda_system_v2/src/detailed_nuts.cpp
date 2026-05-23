@@ -1,5 +1,6 @@
 #include "detailed_nuts.h"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -31,7 +32,7 @@ bool DetailedNUTSEngine::signals_contiguous(
 // claimed tracks in the same span+interval block those tracks from reuse,
 // preserving the topological ordering set by abstract NUTS.
 //
-// When abstract_pos < 0 (sentinel "unset"), the code falls back to the
+// When abstract_pos is NaN (sentinel "unset"), the code falls back to the
 // original behaviour: LO_HI picks the first valid window, HI_LO picks the
 // last valid window.
 // ---------------------------------------------------------------------------
@@ -56,8 +57,8 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             continue;
         }
 
-        // Sort by abstract_pos; unset (-1) sorts before 0, which places
-        // them at the lo end — consistent with their fallback behaviour.
+        // Sort by abstract_pos; NaN (unset) sorts last — those fall back
+        // to LO_HI/HI_LO window search after anchored segments are placed.
         std::sort(indices.begin(), indices.end(), [&](int a, int b) {
             return bus_segs[a].abstract_pos < bus_segs[b].abstract_pos;
         });
@@ -117,13 +118,13 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             //   avoids fragmentation when reserved tracks split the     //
             //   space.  Sort chosen tracks by position for assignment.  //
             //                                                           //
-            // Path B — timing-critical or fallback (abstract_pos < 0): //
+            // Path B — timing-critical or fallback (abstract_pos is NaN): //
             //   Scan windows of N consecutive signal-track indices.     //
             //   Timing-critical also requires physical contiguity       //
             //   (no non-signal track between adjacent pair).            //
             //   Fallback: first valid window (LO_HI) or last (HI_LO).  //
             // ------------------------------------------------------- //
-            const bool use_anchor = (bs.abstract_pos >= 0.0);
+            const bool use_anchor = !std::isnan(bs.abstract_pos);
             const int  bw = bs.bit_width;
 
             // chosen_indices: the bw signal-track indices to use,
