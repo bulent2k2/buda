@@ -168,12 +168,16 @@ static void do_span_adjustments(
         double new_hi = other->span_hi;
 
         for (const auto& req : reqs) {
-            if (req.lo_end) {
+            if (req.lo_end && req.is_endpoint) {
+                // Snap stub lo-end to the trunk's actual placed position.
+                // Symmetric with the hi-end snap below: if the trunk moves up,
+                // the stub must shrink (not leave its lo end dangling below).
+                new_lo = req.center;
+            } else if (req.lo_end) {
+                // T-junction in lo half: extend lo only if trunk moves below.
                 new_lo = std::min(new_lo, req.center);
             } else if (req.is_endpoint) {
                 // Snap stub hi-end to the trunk's actual placed position.
-                // The nominal topology had the stub ending at the trunk's nominal
-                // perp coord; if NUTS moves the trunk closer, the stub must shrink.
                 new_hi = req.center;
             } else {
                 new_hi = std::max(new_hi, req.center);
