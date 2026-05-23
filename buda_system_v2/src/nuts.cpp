@@ -22,11 +22,6 @@ static void merge_grid(std::vector<int>& grid, const std::vector<int>& extra) {
 }
 
 // Return the index i such that grid[i] <= v <= grid[i+1], or -1 if out of range.
-static int find_grid_cell(const std::vector<int>& grid, int v) {
-    for (int i = 0; i + 1 < (int)grid.size(); ++i)
-        if (v >= grid[i] && v <= grid[i + 1]) return i;
-    return -1;
-}
 
 // Internal type: records how segment S's span must follow T's track position.
 struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
@@ -45,7 +40,7 @@ static void build_nuts_maps(
 {
     // Pass 1 — nominal perpendicular position from the topology.
     for (const auto& bw : bundles) {
-        if (bw.candidates.empty()) continue;
+        if (bw.candidates.empty() || bw.selected_topology_index < 0) continue;
         const Topology& topo = bw.candidates[bw.selected_topology_index];
         int bid = bw.original_bundle.id;
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
@@ -59,7 +54,7 @@ static void build_nuts_maps(
 
     // Pass 2 — connectivity-based override.
     for (const auto& bw : bundles) {
-        if (bw.candidates.empty()) continue;
+        if (bw.candidates.empty() || bw.selected_topology_index < 0) continue;
         const Topology& topo = bw.candidates[bw.selected_topology_index];
         int bid = bw.original_bundle.id;
 
@@ -118,9 +113,7 @@ static void apply_interval_constraints(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, std::pair<double,double>>& slide_map,
     const std::set<std::pair<int,int>>&                           trunk_set,
-    int only_layer = -1,
-    const std::vector<int>* x_grid = nullptr,
-    const std::vector<int>* y_grid = nullptr)
+    int only_layer = -1)
 {
     constexpr double kSentinel = 5e8;
     for (auto& ts : segments) {
@@ -130,45 +123,8 @@ static void apply_interval_constraints(
         auto sit = slide_map.find(key);
         if (sit != slide_map.end()) {
             auto [slo, shi] = sit->second;
-            double hanan_lo = ts.interval_lo;
-            double hanan_hi = ts.interval_hi;
             if (slo > -kSentinel) ts.interval_lo = std::max(ts.interval_lo, slo);
             if (shi <  kSentinel) ts.interval_hi = std::min(ts.interval_hi, shi);
-
-            if (ts.interval_lo >= ts.interval_hi) {
-                double v = ts.interval_lo;
-                const std::vector<int>* g = ts.horiz ? y_grid : x_grid;
-
-                if (g && g->size() >= 2) {
-                    if (std::abs(v - hanan_hi) < 1.5 && slo > -kSentinel) {
-                        auto it = std::lower_bound(g->begin(), g->end(),
-                                                   static_cast<int>(v + 0.5));
-                        if (it != g->end() && std::next(it) != g->end()) {
-                            double new_lo = static_cast<double>(*it);
-                            double new_hi = static_cast<double>(*std::next(it));
-                            if (new_lo >= v - 0.5) {
-                                ts.interval_lo = new_lo;
-                                ts.interval_hi = new_hi;
-                            }
-                        }
-                    }
-                    else if (std::abs(v - hanan_lo) < 1.5 && shi < kSentinel) {
-                        auto it = std::lower_bound(g->begin(), g->end(),
-                                                   static_cast<int>(v + 0.5));
-                        if (it != g->begin()) {
-                            --it;
-                            if (it != g->begin()) {
-                                double new_hi = static_cast<double>(*it);
-                                double new_lo = static_cast<double>(*std::prev(it));
-                                if (new_hi <= v + 0.5) {
-                                    ts.interval_lo = new_lo;
-                                    ts.interval_hi = new_hi;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         if (trunk_set.count(key)) {
@@ -310,25 +266,14 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
             if (ts.horiz) {
                 ts.span_lo = std::min(seg.start.x, seg.end.x);
                 ts.span_hi = std::max(seg.start.x, seg.end.x);
-                int cell = find_grid_cell(y_grid, seg.start.y);
-                if (cell >= 0) {
-                    ts.interval_lo = y_grid[cell];
-                    ts.interval_hi = y_grid[cell + 1];
-                } else {
-                    ts.interval_lo = seg.start.y - 50;
-                    ts.interval_hi = seg.start.y + 50;
-                }
+                // Unlock Hanan bands: use full chip boundary as initial interval.
+                ts.interval_lo = static_cast<double>(y_grid.front());
+                ts.interval_hi = static_cast<double>(y_grid.back());
             } else {
                 ts.span_lo = std::min(seg.start.y, seg.end.y);
                 ts.span_hi = std::max(seg.start.y, seg.end.y);
-                int cell = find_grid_cell(x_grid, seg.start.x);
-                if (cell >= 0) {
-                    ts.interval_lo = x_grid[cell];
-                    ts.interval_hi = x_grid[cell + 1];
-                } else {
-                    ts.interval_lo = seg.start.x - 50;
-                    ts.interval_hi = seg.start.x + 50;
-                }
+                ts.interval_lo = static_cast<double>(x_grid.front());
+                ts.interval_hi = static_cast<double>(x_grid.back());
             }
             result.push_back(ts);
         }
@@ -409,6 +354,10 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         events.push_back({segs[i]->span_hi, 1, i});
     }
     std::sort(events.begin(), events.end());
+    
+    // Incorporate KeepoutZones into 'occupied' list.
+    auto kozs = floorplan_.get_keepout_zones();
+
     std::vector<int> active;
     for (const auto& ev : events) {
         if (ev.type == 1) {
@@ -417,6 +366,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         }
         TrackSegment* ts = segs[ev.idx];
         std::vector<std::pair<double,double>> occupied;
+        
+        // 1. Existing placed segments
         for (int ai : active) {
             if (segs[ai]->placed) {
                 const double c = segs[ai]->track_position;
@@ -424,6 +375,26 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                 occupied.push_back({c - h, c + h});
             }
         }
+        
+        // 2. KeepoutZones for this layer that intersect segment span
+        for (const auto& koz : kozs) {
+            if (!koz.layer_ids.count(ts->layer)) continue;
+            
+            bool intersects = false;
+            if (ts->horiz) {
+                // Horizontal segment on M-even: span in X, pos in Y
+                // Blocks Y if span intersects koz.x
+                intersects = (ts->span_lo < koz.bbox.x2 && ts->span_hi > koz.bbox.x1);
+                if (intersects) occupied.push_back({static_cast<double>(koz.bbox.y1),
+                                                    static_cast<double>(koz.bbox.y2)});
+            } else {
+                // Vertical segment on M-odd: span in Y, pos in X
+                intersects = (ts->span_lo < koz.bbox.y2 && ts->span_hi > koz.bbox.y1);
+                if (intersects) occupied.push_back({static_cast<double>(koz.bbox.x1),
+                                                    static_cast<double>(koz.bbox.x2)});
+            }
+        }
+
         std::sort(occupied.begin(), occupied.end());
         double pos;
         {
@@ -465,7 +436,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::set<std::pair<int,int>>                                 trunk_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
-    apply_interval_constraints(result.segments, slide_map, trunk_set, -1, &x_grid, &y_grid);
+    apply_interval_constraints(result.segments, slide_map, trunk_set, -1);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
@@ -508,8 +479,7 @@ NUTSResult NUTSEngine::rerun_layer(
     std::set<std::pair<int,int>>                                 trunk_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map);
-    apply_interval_constraints(result.segments, slide_map, trunk_set, layer_id,
-                               &x_grid, &y_grid);
+    apply_interval_constraints(result.segments, slide_map, trunk_set, layer_id);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
