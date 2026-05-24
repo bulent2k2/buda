@@ -37,6 +37,7 @@ Options:
     --min-span  D         (bipartite) Drop buses with src→dst distance < D µm (default: 5)
     --out       FILE      Write busterms/buses to FILE in BUDA add_block format
     --hist                Print fanout and cluster-size histograms
+    --hpwl                Print half-perimeter wirelength distribution (all nets)
 """
 
 import argparse, re, sys, math
@@ -398,6 +399,101 @@ def _min_y(pts): return min(p[1] for p in pts)
 def _max_x(pts): return max(p[0] for p in pts)
 def _max_y(pts): return max(p[1] for p in pts)
 
+# ── HPWL analysis ────────────────────────────────────────────────────────────
+
+def compute_hpwl(net_pin_pos):
+    """Return {net_name: hpwl} for all nets with ≥2 resolved pin positions."""
+    result = {}
+    for name, pts in net_pin_pos.items():
+        if len(pts) < 2:
+            continue
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        result[name] = (max(xs) - min(xs)) + (max(ys) - min(ys))
+    return result
+
+
+def report_hpwl(net_pin_pos, die):
+    """Print HPWL distribution: per-fanout breakdown and log-spaced histogram."""
+    hpwl = compute_hpwl(net_pin_pos)
+    if not hpwl:
+        print("  No nets with ≥2 pins.")
+        return
+
+    vals = list(hpwl.values())
+    vals.sort()
+    n = len(vals)
+    total = sum(vals)
+    die_perimeter = 2 * (die[0] + die[1])
+
+    print(f"\n  Nets analysed : {n:,}")
+    print(f"  Total HPWL    : {total:,.1f} µm")
+    print(f"  Die perimeter : {die_perimeter:.1f} µm  "
+          f"(total = {total/die_perimeter:.0f}× perimeter)")
+
+    def pct(p):
+        return vals[max(0, int(p / 100 * n) - 1)]
+
+    print(f"\n  Percentiles (µm):")
+    print(f"    p10={pct(10):.2f}  p25={pct(25):.2f}  p50={pct(50):.2f}  "
+          f"p75={pct(75):.2f}  p90={pct(90):.2f}  p95={pct(95):.2f}  "
+          f"p99={pct(99):.2f}  max={vals[-1]:.2f}")
+
+    # Log-spaced histogram — boundaries chosen to work for any die size
+    boundaries = [0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500,
+                  1000, 2000, 5000, 10000]
+    boundaries = [b for b in boundaries if b <= vals[-1] * 2]
+    boundaries.append(vals[-1] + 1)
+
+    print(f"\n  HPWL histogram  (bar = % of count, ● = % of total wirelength):")
+    print(f"  {'Range (µm)':<22}  {'Count':>7}  {'%cnt':>5}  {'%WL':>5}  bar")
+    print(f"  {'-'*70}")
+
+    prev = 0.0
+    for b in boundaries:
+        bucket = [v for v in vals if prev <= v < b]
+        if not bucket:
+            prev = b
+            continue
+        cnt = len(bucket)
+        wl  = sum(bucket)
+        pct_cnt = 100 * cnt / n
+        pct_wl  = 100 * wl  / total
+        bar = '█' * int(pct_cnt / 2) + '·' * int(pct_wl / 2)
+        lo = f"{prev:.1f}" if prev > 0 else "0"
+        hi = f"{b:.1f}" if b < vals[-1] + 1 else f"{vals[-1]:.1f}+"
+        label = f"[{lo}, {hi})"
+        print(f"  {label:<22}  {cnt:>7,}  {pct_cnt:>5.1f}  {pct_wl:>5.1f}  {bar}")
+        prev = b
+
+    # Per-fanout breakdown
+    fanout_buckets = defaultdict(list)
+    for name, pts in net_pin_pos.items():
+        fo = len(pts)
+        if name in hpwl:
+            fanout_buckets[fo].append(hpwl[name])
+
+    print(f"\n  Per-fanout HPWL breakdown:")
+    print(f"  {'Fanout':<8}  {'Nets':>7}  {'%nets':>6}  {'Median µm':>10}  "
+          f"{'Mean µm':>9}  {'% of total WL':>14}")
+    print(f"  {'-'*65}")
+    fo_groups = [(2,2),(3,4),(5,8),(9,16),(17,32),(33,64),(65,256),(257,99999)]
+    for lo, hi in fo_groups:
+        combined = []
+        for fo, wls in fanout_buckets.items():
+            if lo <= fo <= hi:
+                combined.extend(wls)
+        if not combined:
+            continue
+        combined.sort()
+        label = str(lo) if lo == hi else f"{lo}–{hi}"
+        median = combined[len(combined)//2]
+        mean   = sum(combined) / len(combined)
+        pct_wl = 100 * sum(combined) / total
+        print(f"  {label:<8}  {len(combined):>7,}  {100*len(combined)/n:>6.1f}  "
+              f"{median:>10.2f}  {mean:>9.2f}  {pct_wl:>13.1f}%")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -420,7 +516,9 @@ def main():
     ap.add_argument('--out',      default=None,
                     help='Output file for BUDA add_block busterms')
     ap.add_argument('--hist',     action='store_true',
-                    help='Print histograms')
+                    help='Print fanout and cluster-size histograms')
+    ap.add_argument('--hpwl',     action='store_true',
+                    help='Print half-perimeter wirelength distribution (all nets)')
     args = ap.parse_args()
 
     print(f"Parsing LEF: {args.lef_file}")
@@ -446,6 +544,10 @@ def main():
 def _run_centroid(args, die, nets, components, lef_pins):
     net_pin_pos = compute_pin_positions(components, nets, lef_pins)
     print(f"  {len(net_pin_pos)} nets with resolved pin positions")
+
+    if args.hpwl:
+        print("\nHPWL analysis:")
+        report_hpwl(net_pin_pos, die)
 
     if args.hist:
         from collections import Counter
@@ -497,6 +599,13 @@ def _run_bipartite(args, die, nets, components, lef_pins, max_nets, min_span, gr
     net_endpoints = compute_driver_receiver_positions(components, nets, lef_pins)
     total_eligible = len(net_endpoints)
     print(f"  {total_eligible} nets with driver+receiver positions")
+
+    if args.hpwl:
+        # Build unified pin-pos map from endpoints for HPWL reporting
+        unified = {n: [ep['driver']] + ep['receivers']
+                   for n, ep in net_endpoints.items()}
+        print("\nHPWL analysis:")
+        report_hpwl(unified, die)
 
     if grid:
         print(f"\nClustering bipartite-grid (cell={grid} µm, min_nets={args.min}, "

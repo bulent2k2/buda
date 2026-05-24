@@ -293,3 +293,63 @@ Grid clustering results:
 
   Practical coverage: 5-15% of nets per design → a BUDA std-cell scenario would improve ~10% of nets.
   Macro designs (MemPool, NVDLA, BlackParrot) can model 100% of the critical bus nets by construction.
+
+
+HPWL distribution analysis — tools/def_cluster.py --hpwl
+====
+Half-perimeter wirelength (HPWL) = (x_max−x_min) + (y_max−y_min) across all pins of a net.
+Standard lower-bound wirelength estimator; computed for every signal net with ≥2 resolved pins.
+
+  ┌───────────────┬────────────────┬──────────────────────────────────────────────┬─────────────────┐
+  │   Testcase    │  Total HPWL    │  Percentiles (µm)                            │  ×die perimeter │
+  ├───────────────┼────────────────┼──────────────────────────────────────────────┼─────────────────┤
+  │ test1 (10K)   │  46,134 µm     │  p50=4.7  p90=41  p95=74  p99=118  max=166  │  78×             │
+  │ test3 (8K)    │  71,527 µm     │  p50=3.8  p90=19  p95=34  p99=72   max=207  │  92×             │
+  │ test5 (28K)   │ 683,004 µm     │  p50=3.0  p90=49  p95=142 p99=420  max=1262 │ 188×             │
+  └───────────────┴────────────────┴──────────────────────────────────────────────┴─────────────────┘
+
+  HPWL category breakdown (test1 vs test5):
+
+  ┌──────────────────┬───────────────────────────────┬───────────────────────────────┐
+  │   Category       │   test1 (148×146 µm die)       │   test5 (906×906 µm die)      │
+  ├──────────────────┼───────────────────────────────┼───────────────────────────────┤
+  │ Short (<5 µm)    │  51.3% of nets,  5.5% of WL   │  70.4% of nets,  8.6% of WL  │
+  │ Medium (5–50 µm) │  40.1% of nets, 44.4% of WL   │  21.2% of nets, 14.3% of WL  │
+  │ Long (≥50 µm)    │   8.7% of nets, 50.2% of WL   │   8.3% of nets, 77.1% of WL  │
+  └──────────────────┴───────────────────────────────┴───────────────────────────────┘
+
+  Per-fanout HPWL (test1):
+    Fanout 2 (61.9% of nets):    median 2.5 µm,  18.7% of total WL   ← short local wires
+    Fanout 3–4 (24.6%):          median 12.5 µm, 27.9% of total WL
+    Fanout 17–32 (2.2%):         median 69.6 µm, 10.1% of total WL
+    Fanout 33–64 (5.8%):         median 83.9 µm, 34.6% of total WL   ← prime BUDA targets
+
+  Per-fanout HPWL (test5):
+    Fanout 2 (81.0% of nets):    median 2.4 µm,  30.9% of total WL   ← mostly local
+    Fanout 9–16 (2.2%):          median 191.8 µm, 21.5% of total WL  ← multicast nets!
+    Fanout 17–32 (0.8%):         median 258.2 µm, 10.5% of total WL
+
+  Key finding — two distinct BUDA opportunity classes:
+
+  1. MULTI-NET GROUPED BUSES (grid clustering, current approach):
+     → Captures medium-range wires sharing a routing corridor
+     → test1: 5.1% of nets, 7.1% of total WL
+     → test5: 4.1% of nets, 9.1% of total WL
+     → Bused nets are 73% medium-range (5–50 µm), 9% long
+
+  2. INDIVIDUAL HIGH-FANOUT NETS (each net IS a 1-bit multicast bus):
+     → Each high-fanout net = 1 driver + N scattered receivers = ready-made BUDA bus
+     → No grouping needed; BUDA trunk+branch topology applied per net
+     → test5: 779 nets with fanout≥5 AND HPWL≥50 µm carry 35.5% of total WL
+     → test1: 183 nets with fanout 33–64 carry 34.6% of total WL (median HPWL 84 µm)
+
+  Combined BUDA potential (both classes):
+     → ~8–10% of nets, ~40–45% of total wirelength
+     → Remaining 55–60% of WL: short local wires and fanout-2 P2P connections (not BUDA targets)
+
+  Routing implication:
+     The 85–95% "unclustered" nets break down as:
+       ~50–70%: short wires (<5 µm) — purely local, no trunk benefit
+       ~20–40%: medium fanout-2 P2P wires — individual connections, ungroupable
+     These are correctly left to conventional point-to-point detailed routing.
+     BUDA should target the OTHER 10%: grouped buses + high-fanout multicast nets.
