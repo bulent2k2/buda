@@ -15,6 +15,7 @@ struct Bundle {
     int id;
     std::vector<std::string> net_names;
     std::string reason;
+    int num_terminals = 0;
     std::vector<std::string> get_net_names() const { return net_names; }
 };
 enum class Strategy { STRICT, CONVERGENT };

@@ -69,10 +69,11 @@ PYBIND11_MODULE(interconnect, m) {
 
     py::class_<Bundle>(m, "Bundle")
         .def(py::init<>())
-        .def_readwrite("id",        &Bundle::id)
-        .def_readwrite("net_names", &Bundle::net_names)
-        .def_readwrite("reason",    &Bundle::reason)
-        .def("get_net_names",       &Bundle::get_net_names);
+        .def_readwrite("id",            &Bundle::id)
+        .def_readwrite("net_names",     &Bundle::net_names)
+        .def_readwrite("reason",        &Bundle::reason)
+        .def_readwrite("num_terminals", &Bundle::num_terminals)
+        .def("get_net_names",           &Bundle::get_net_names);
 
     py::class_<BundleAssignment>(m, "BundleAssignment")
         .def_readwrite("bundle_id",  &BundleAssignment::bundle_id)

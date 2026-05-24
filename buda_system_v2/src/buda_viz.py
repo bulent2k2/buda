@@ -136,18 +136,6 @@ def _disable_default_keymaps():
 _UNCONSTRAINED = 1_000_000_000
 
 
-def _get_nterms(topo):
-    """Return the number of unique blocks connected by this topology metadata."""
-    names = set()
-    # 1. Block connections stored during topology generation
-    for eps in topo.seg_busterms.values():
-        if eps[0] is not None: names.add(eps[0].block_name)
-        if eps[1] is not None: names.add(eps[1].block_name)
-    # 2. Bridge segments (for multi-rect TEG blocks)
-    for bname in topo.bridge_segments.keys():
-        names.add(bname)
-    return len(names)
-
 
 class TopologyExplorer:
     """Cycle through topology candidates across one or more bundles.
@@ -832,7 +820,7 @@ class TopologyExplorer:
                 layer_summary_parts.append(lbl)
         layer_summary = " ".join(layer_summary_parts)
         
-        nterms = _get_nterms(topo)
+        nterms = self.wrapper.original_bundle.num_terminals
         title_main = (
             f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
             f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
@@ -1179,12 +1167,17 @@ class BudaVisualizer:
             bname = self._bundle_name(bundle_id)
             nbits = self._bundle_bits(bundle_id)
 
-            # Get busterm count from the active topology.
             wrapper = next((w for w in self.bundles if w.original_bundle.id == bundle_id), None)
-            nterms = 0
-            if wrapper and wrapper.candidates and wrapper.selected_topology_index >= 0:
-                topo = wrapper.candidates[wrapper.selected_topology_index]
-                nterms = _get_nterms(topo)
+
+            # for ref only. Old code:
+            # Get busterm count from the active topology.
+            # nterms = 0
+            # if wrapper and wrapper.candidates and wrapper.selected_topology_index >= 0:
+            #    topo = wrapper.candidates[wrapper.selected_topology_index]
+            #    nterms = _get_nterms(topo)
+
+            # Get busterm count from the bundle metadata.
+            nterms = wrapper.original_bundle.num_terminals
 
             bits_str = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
             # For ref, old title had: f"(click again or click background to deselect)"
@@ -1193,9 +1186,8 @@ class BudaVisualizer:
                 fontsize=13)
         else:
             # For ref, old title also had: "— click a bus-term or bus-seg to highlight"
+            # self.ax.set_title("BUDA: Non-Uniform Track Sharing (NUTS)", fontsize=13)
             self.ax.set_title(stat_title, fontsize=13)
-
-        self._redraw_bundle_list()
         self._redraw_overlap_list()
         self.fig.canvas.draw_idle()
 
@@ -2723,3 +2715,16 @@ class BudaVisualizer:
         btn_topos.on_clicked(lambda _: self._open_topo_explorer())
 
         plt.show()
+
+# Just for ref. No longer used.
+def _get_nterms(topo):
+    """Return the number of unique blocks connected by this topology metadata."""
+    names = set()
+    # 1. Block connections stored during topology generation
+    for eps in topo.seg_busterms.values():
+        if eps[0] is not None: names.add(eps[0].block_name)
+        if eps[1] is not None: names.add(eps[1].block_name)
+    # 2. Bridge segments (for multi-rect TEG blocks)
+    for bname in topo.bridge_segments.keys():
+        names.add(bname)
+    return len(names)

@@ -40,7 +40,19 @@ std::vector<Bundle> Bundler::run(const Netlist& netlist) {
     }
     int bundle_id_counter = 0;
     for (const auto& [sig, net_list] : groups) {
-        Bundle b; b.id = ++bundle_id_counter; b.net_names = net_list; b.reason = sig;
+        Bundle b;
+	b.id = ++bundle_id_counter;
+	b.net_names = net_list;
+	b.reason = sig;
+	const Net* first_net = nullptr;
+	for (const auto& net : netlist.get_nets()) {
+	  if (net.name == net_list[0]) {
+	    first_net = &net; break;
+	  }
+	}
+	if (first_net) {
+	  b.num_terminals = 1 + (int)first_net->get_receiver_instances().size();
+	}
         bundles.push_back(b);
     }
     return bundles;
