@@ -136,16 +136,16 @@ def _disable_default_keymaps():
 _UNCONSTRAINED = 1_000_000_000
 
 
-def _get_nterms(topo, fp):
-    """Return the number of unique blocks connected by this topology."""
-    import interconnect as ic
-    ct = ic.ConnTopology()
-    ct.build(topo, fp)
+def _get_nterms(topo):
+    """Return the number of unique blocks connected by this topology metadata."""
     names = set()
-    for cs in ct.segs():
-        for c in cs.conns:
-            if c.kind == ic.SegConnKind.BUSTERM:
-                names.add(c.block_name)
+    # 1. Block connections stored during topology generation
+    for eps in topo.seg_busterms.values():
+        if eps[0] is not None: names.add(eps[0].block_name)
+        if eps[1] is not None: names.add(eps[1].block_name)
+    # 2. Bridge segments (for multi-rect TEG blocks)
+    for bname in topo.bridge_segments.keys():
+        names.add(bname)
     return len(names)
 
 
@@ -832,7 +832,7 @@ class TopologyExplorer:
                 layer_summary_parts.append(lbl)
         layer_summary = " ".join(layer_summary_parts)
         
-        nterms = _get_nterms(topo, self.fp)
+        nterms = _get_nterms(topo)
         title_main = (
             f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
             f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
@@ -1184,7 +1184,7 @@ class BudaVisualizer:
             nterms = 0
             if wrapper and wrapper.candidates and wrapper.selected_topology_index >= 0:
                 topo = wrapper.candidates[wrapper.selected_topology_index]
-                nterms = _get_nterms(topo, self.fp)
+                nterms = _get_nterms(topo)
 
             bits_str = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
             # For ref, old title had: f"(click again or click background to deselect)"
@@ -2536,9 +2536,7 @@ class BudaVisualizer:
         self._update_layer_ids()
 
         self.ax.set_aspect('equal')
-        self.ax.set_title(
-            stat_title,
-            fontsize=13)
+        self.ax.set_title(stat_title, fontsize=13)
 
         from matplotlib.lines import Line2D
         legend_handles = [
