@@ -17,7 +17,23 @@ def_layer 4 M4 V LOW 25 span_min 0  span_max 130
 def_layer 5 M5 H TOP 20 span_min 50 span_max 360
 def_layer 6 M6 V TOP 20 span_min 50 span_max 280
 
+# NanGate45 track patterns (from NangateOpenCellLibrary.tech.lef + make_tracks.tcl)
+# Pattern: 4 SIGNAL + POWER (2× width, same min-space) + 4 SIGNAL + GROUND per period
+# M3: H, width=0.07 µm, pitch=0.14 µm, origin=0.07 µm
+def_track_pattern 3 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 POWER 0.14 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 GROUND 0.14 0.07
+# M4: V, width=0.14 µm, pitch=0.28 µm, origin=0.095 µm
+def_track_pattern 4 0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+# M5: H, width=0.14 µm, pitch=0.28 µm, origin=0.07 µm
+def_track_pattern 5 0.07 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+# M6: V, width=0.14 µm, pitch=0.28 µm, origin=0.095 µm
+def_track_pattern 6 0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+
 corner_margin dx 5 dy 5
+
+# Block U-topologies above y=265 (above the I-cache top edge, outside die at y=280).
+# Without this, core2_ifetch/core3_ifetch pick U-shapes with trunk at y≈287 which
+# creates a 5 µm Hanan cell too narrow for 32 bits on M5.
+add_keepout 0 266 360 290 5 6
 
 # ── Floorplan ─────────────────────────────────────────────────────────────
 # 4 Snitch cores — 2×2, left half, each 80×80 µm
@@ -58,10 +74,13 @@ add_bus core2_req[64] core_2.tcdm_master bank_r0c0.slave,bank_r0c1.slave,bank_r0
 add_bus core3_req[64] core_3.tcdm_master bank_r0c0.slave,bank_r0c1.slave,bank_r0c2.slave,bank_r0c3.slave,bank_r1c0.slave,bank_r1c1.slave,bank_r1c2.slave,bank_r1c3.slave,bank_r2c0.slave,bank_r2c1.slave,bank_r2c2.slave,bank_r2c3.slave,bank_r3c0.slave,bank_r3c1.slave,bank_r3c2.slave,bank_r3c3.slave
 
 # Instruction fetch: each core → its shared L1 I-cache macro (128-bit AXI)
-add_bus core0_ifetch[128] core_0.aw_master icache_0.aw_slave
-add_bus core1_ifetch[128] core_1.aw_master icache_0.aw_slave
-add_bus core2_ifetch[128] core_2.aw_master icache_1.aw_slave
-add_bus core3_ifetch[128] core_3.aw_master icache_1.aw_slave
+# I-fetch width: 32 bits (one instruction word, RV32 ILEN).
+# The 128-bit AXI cache-line refill is a group-level concern; at tile level
+# each core fetches one 32-bit word per cycle from the shared L1 I-cache.
+add_bus core0_ifetch[32] core_0.aw_master icache_0.aw_slave
+add_bus core1_ifetch[32] core_1.aw_master icache_0.aw_slave
+add_bus core2_ifetch[32] core_2.aw_master icache_1.aw_slave
+add_bus core3_ifetch[32] core_3.aw_master icache_1.aw_slave
 
 # ── Pipeline ──────────────────────────────────────────────────────────────
 run_bundler strict
@@ -80,5 +99,6 @@ generate_topologies_for_bundle core3_ifetch core_3 icache_1
 
 run_planner 50
 run_nuts 1.0
+run_detailed_nuts
 
 visualize
