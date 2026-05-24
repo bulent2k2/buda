@@ -1185,9 +1185,9 @@ class BudaVisualizer:
                 f"BUDA — B{bundle_id} {bname}{bits_str} selected{solo_hint}",
                 fontsize=13)
         else:
-            # For ref, old title also had: "— click a bus-term or bus-seg to highlight"
-            # self.ax.set_title("BUDA: Non-Uniform Track Sharing (NUTS)", fontsize=13)
             self.ax.set_title(stat_title, fontsize=13)
+
+        self._redraw_bundle_list()
         self._redraw_overlap_list()
         self.fig.canvas.draw_idle()
 
@@ -1621,13 +1621,19 @@ class BudaVisualizer:
             # y coordinate: top row at y≈1, bottom row at y≈0.
             y = 1.0 - (row + 0.5) / n_vis
 
-            # Build label: "B{bid} {name} ({nbits} bits)", truncated to fit.
+            # Build label: "B{bid} {name} (N bits/M bterms)", truncated to fit.
             name  = self._bundle_name(bid)
             nbits = self._bundle_bits(bid)
+
+            # Get busterm count from metadata
+            w = next(w for w in self.bundles if w.original_bundle.id == bid)
+            nterms = w.original_bundle.num_terminals
+
+            #bits_suffix = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
             bits_suffix = f" ({nbits} bits)" if nbits > 0 else ""
             prefix = f"B{bid} "
             max_name = max(4, 20 - len(prefix) - len(bits_suffix))
-            name_part = name if len(name) <= max_name else name[:max_name - 1] + '…'
+            name_part = name if len(name) <= max_name else name[:max_name - 1] + "…"
             full  = f"{prefix}{name_part}{bits_suffix}"
 
             # Radio indicator (left, for selection) and checkbox (for visibility).
