@@ -582,7 +582,7 @@ static void annotate_endpoints(Topology& topo,
                         ? (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2
                         : (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
                 };
-                if (bt.rects.empty()) return check_rect(bt.orig_bbox);
+                if (bt.rects.empty()) return check_rect(bt.orig_bbox) || check_rect(bt.bbox);
                 for (const Rect& ri : bt.rects)
                     if (check_rect(ri)) return true;
                 return false;
