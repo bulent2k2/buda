@@ -45,6 +45,32 @@ Three MemPool BUDA files created in buda_system_v2/flow
     signal_density = 0.364 (same for M5-M10); dilution = 2.750; M3 density also 0.364 with 0.07 µm signal width
 
 
+MacroPlacement benchmark designs (TILOS-AI-Institute/MacroPlacement, NanGate45)
+====
+Two designs extracted from the MacroPlacement repo's NanGate45 placed-macro DEFs.
+Block positions are centroid ± half-macro-size derived from fp_placed_macros.def.
+
+  ┌──────────────────────────┬──────────────┬──────────────────────────────────────┬───────────────────────────────────────┬─────────┬───────────────────────────────────┬─────────────────────────────────────┐
+  │           File           │     Die      │              Blocks                  │                  Buses                │ Bundles │          Abstract NUTS            │           Detailed NUTS             │
+  ├──────────────────────────┼──────────────┼──────────────────────────────────────┼───────────────────────────────────────┼─────────┼───────────────────────────────────┼─────────────────────────────────────┤
+  │ nvdla_cbuf.buda          │ 2354×2353 µm │ 31 (cbuf_ctrl + 30 cbuf banks)       │ 1×8-bit cbuf_addr (1→30 multicast)    │ 1       │ 0 violations, 4 span adjustments  │ 240 net segments, 0 bits unplaced ✓ │
+  ├──────────────────────────┼──────────────┼──────────────────────────────────────┼───────────────────────────────────────┼─────────┼───────────────────────────────────┼─────────────────────────────────────┤
+  │ ariane133_cache.buda     │ 1357×1357 µm │ 24 (ctrl + 7 d_tag + 8 d_data +      │ 4×8-bit (d_tag_addr 1→7, d_data_addr  │ 4       │ 10 violations, 3 overlaps         │ 168 net segments, 0 bits unplaced ✓ │
+  │                          │              │      1 d_valid + 3 i_tag + 4 i_data) │ 1→8, i_data_fetch 1→4, i_tag_addr 1→3│         │                                   │                                     │
+  └──────────────────────────┴──────────────┴──────────────────────────────────────┴───────────────────────────────────────┴─────────┴───────────────────────────────────┴─────────────────────────────────────┘
+
+  Key design decisions:
+  - NVDLA cbuf: 91 fakeram45_256x64 SRAMs (4 KB each) in 30 banks; cbuf_addr is the key multicast bus broadcasting the
+    same row-address to all banks simultaneously so data can be read in parallel.
+    corner_margin dx=10 dy=10 (not 30) because banks are 140×70 µm — dy=30 shrinks Y to 10 µm, too narrow for 8-bit M9 bus.
+    cbuf_we omitted: STRICT bundler merges it with cbuf_addr (same driver + same 30 receivers = identical signature → 9-bit bundle).
+    M7/M8 span_max extended to full die (2354/2353 µm) to allow M7's finer pitch (signal spacing 1.1 µm) for stubs throughout.
+  - Ariane133 cache: 61 fakeram45_256x16 SRAMs (512 B each); cache data SRAMs are scattered across a wide area in the
+    MacroPlacement bus-unaware result — BUDA's planning would cluster them around a coherent trunk.
+    10 abstract NUTS violations from d_data blocks that overlap in Y after shrink; DetailedNUTS recovers all bits (0 unplaced).
+    Source: MacroPlacement Flows/NanGate45/ariane133/def/ariane133_fp_placed_macros.def
+
+
 
 > Look at the LEF file for MemPool to derive track definitions so we can run detailed nuts, too.
 ====
@@ -83,3 +109,12 @@ Tech
 
   Pattern: 4 SIGNAL + POWER (2× width) + 4 SIGNAL + GROUND per period, power spacing = 1× min space. Now adding def_track_pattern and run_detailed_nuts to all three files.
 
+
+All three files are committed and pushed. Summary
+====
+
+  - group and cluster: 0 bits unplaced — clean detailed NUTS results
+  - tile: 768 bits unplaced — this is real congestion (35 abstract NUTS interval violations on the tightly packed 360×280 µm die), not a bug; the keepout above y=266 eliminates the out-of-die routing
+  issue that was producing an extra 96 unplaced bits
+
+  The docs/research.md table now includes a Detailed NUTS column with these results and the key design notes (32-bit ifetch width, keepout rationale, NanGate45 track pattern summary).

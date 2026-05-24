@@ -1,0 +1,109 @@
+# ariane133_cache.buda — CVA6/Ariane133 Cache Bus Planning (NanGate45)
+#
+# Source:  Ariane133 from MacroPlacement repo (TILOS-AI-Institute/MacroPlacement)
+#          Flows/NanGate45/ariane133/def/ariane133_fp_placed_macros.def
+#
+# Hierarchy: ariane (CVA6 core) with 61 × fakeram45_256x16 SRAMs (512 B each).
+#   i_nbdcache: 8-way non-blocking L1 D-cache, each way = tag_sram + 8× data_sram
+#   i_icache:   4-way set-associative L1 I-cache, each way = tag_sram + data_sram
+#   valid_dirty_sram: 1 SRAM for D-cache valid/dirty bits
+#
+# Key buses (all originate from the cache controller in the CPU core):
+#   d_tag_addr[8]  : address to all 7 D-cache tag SRAMs simultaneously (parallel
+#                    tag lookup across all ways). 8 bits = log2(256 entries).
+#   d_data_addr[8] : address to all 8 D-cache data SRAM groups (speculative
+#                    data read during tag lookup). Same 8-bit index.
+#   i_access[8]    : address to I-cache tag + data SRAMs (4-way parallel fetch).
+#
+# Die: 1357 × 1357 µm (NanGate45; UNITS DISTANCE MICRONS 2000 in DEF)
+# Layer stack: M5/M6 for local stubs, M7/M8 for group-spanning trunks.
+# (Same convention as mempool_group.buda)
+#
+# Block positions: centroid of each SRAM sub-group from MacroPlacement DEF.
+# Block sizes: ±30 µm × ±20 µm (1–2 macros), ±50 µm × ±40 µm (3–6 macros).
+# The MacroPlacement placement scatters data SRAMs from the same cache way
+# across a wide area — a bus-unaware result that BUDA's planning would improve.
+
+def_layer 5 M5 H LOW 20 span_min 0   span_max 600
+def_layer 6 M6 V LOW 20 span_min 0   span_max 600
+def_layer 7 M7 H TOP 15 span_min 200 span_max 1357
+def_layer 8 M8 V TOP 15 span_min 200 span_max 1357
+
+# NanGate45 track patterns (NangateOpenCellLibrary.tech.lef)
+def_track_pattern 5 0.07 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 6 0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 7 0.07 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+def_track_pattern 8 0.095 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+
+corner_margin dx 10 dy 10
+
+# ── Floorplan ─────────────────────────────────────────────────────────────
+# Cache controller (load/store unit, miss handler) — virtual block at the
+# geometric centroid of the standard cell core (~650 × 650 µm), 80 × 80 µm.
+add_block cache_ctrl  610  610  690  690
+
+# ── D-cache tag SRAMs (one per way; 7 of 8 ways identified in DEF) ──────
+# Positions from MacroPlacement placement; all near the bottom of the die.
+# sram_block[N].tag_sram centroid ± 30 × 20 µm.
+add_block d_tag0   583   -6   643   34
+add_block d_tag1   651   -4   711   36
+add_block d_tag2   651  142   711  182
+add_block d_tag3   516   72   576  112
+add_block d_tag4   685   75   745  115
+add_block d_tag5   854  163   914  203
+add_block d_tag7   651  292   711  332
+
+# ── D-cache data SRAM groups (8 ways; sram_block[N].data_sram centroid) ─
+# These are highly scattered in the MacroPlacement result — each group's
+# sub-SRAMs span 200–600 µm. Centroid ± 50 × 40 µm used here.
+add_block d_data0  451  844   551  924
+add_block d_data1  360  878   460  958
+add_block d_data2  666  944   766 1024
+add_block d_data3  620 1015   720 1095
+add_block d_data4  727 1118   827 1198
+add_block d_data5  578  877   678  957
+add_block d_data6  610  882   710  962
+add_block d_data7  418  903   518  983
+
+# valid/dirty SRAM (small, treat as single block)
+add_block d_valid  516  285   576  325
+
+# ── I-cache tag SRAMs ────────────────────────────────────────────────────
+add_block i_tag0   921  390   981  430
+add_block i_tag1   888  453   948  493
+add_block i_tag3   921  309   981  349
+
+# ── I-cache data SRAM groups ─────────────────────────────────────────────
+add_block i_data0  1172  612  1272  692
+add_block i_data1  1149  302  1249  382
+add_block i_data2  1150  627  1250  707
+add_block i_data3  1084  639  1184  719
+
+# ── Buses ─────────────────────────────────────────────────────────────────
+# D-cache tag address broadcast: controller → 7 tag SRAMs (1→7 multicast).
+# During every D-cache access the index bits are sent to all ways in parallel.
+add_bus d_tag_addr[8] cache_ctrl.tag_out d_tag0.addr,d_tag1.addr,d_tag2.addr,d_tag3.addr,d_tag4.addr,d_tag5.addr,d_tag7.addr
+
+# D-cache data address broadcast: controller → 8 data SRAM groups (1→8).
+# Speculative data read during tag comparison (data selected after tag hit).
+add_bus d_data_addr[8] cache_ctrl.data_out d_data0.addr,d_data1.addr,d_data2.addr,d_data3.addr,d_data4.addr,d_data5.addr,d_data6.addr,d_data7.addr
+
+# I-cache access: controller → 4 data SRAM groups (1→4 multicast).
+add_bus i_data_fetch[8] cache_ctrl.ifetch_out i_data0.addr,i_data1.addr,i_data2.addr,i_data3.addr
+
+# I-cache tag lookup: controller → 3 identified tag groups (1→3 multicast).
+add_bus i_tag_addr[8] cache_ctrl.itag_out i_tag0.addr,i_tag1.addr,i_tag3.addr
+
+# ── Pipeline ──────────────────────────────────────────────────────────────
+run_bundler strict
+
+generate_topologies_for_bundle d_tag_addr cache_ctrl d_tag0 d_tag1 d_tag2 d_tag3 d_tag4 d_tag5 d_tag7
+generate_topologies_for_bundle d_data_addr cache_ctrl d_data0 d_data1 d_data2 d_data3 d_data4 d_data5 d_data6 d_data7
+generate_topologies_for_bundle i_data_fetch cache_ctrl i_data0 i_data1 i_data2 i_data3
+generate_topologies_for_bundle i_tag_addr cache_ctrl i_tag0 i_tag1 i_tag3
+
+run_planner 50
+run_nuts 1.0
+run_detailed_nuts
+
+visualize
