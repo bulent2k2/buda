@@ -118,3 +118,24 @@ All three files are committed and pushed. Summary
   issue that was producing an extra 96 unplaced bits
 
   The docs/research.md table now includes a Detailed NUTS column with these results and the key design notes (32-bit ifetch width, keepout rationale, NanGate45 track pattern summary).
+
+
+Summary of what's now in the benchmark suite:
+====
+
+  ┌──────────────────────┬──────────────┬─────────────────────────────────────┬────────────────────────────────────────┐
+  │         File         │     Die      │                Buses                │             Detailed NUTS              │
+  ├──────────────────────┼──────────────┼─────────────────────────────────────┼────────────────────────────────────────┤
+  │ mempool_tile.buda    │ 360×280 µm   │ 8 (4×64-bit TCDM + 4×32-bit ifetch) │ 768 bits unplaced (genuine congestion) │
+  ├──────────────────────┼──────────────┼─────────────────────────────────────┼────────────────────────────────────────┤
+  │ mempool_group.buda   │ 1100×1100 µm │ 3×36-bit multicast 1→16             │ 0 unplaced ✓                           │
+  ├──────────────────────┼──────────────┼─────────────────────────────────────┼────────────────────────────────────────┤
+  │ mempool_cluster.buda │ 2350×2350 µm │ 12×64-bit P2P inter-group           │ 0 unplaced ✓                           │
+  ├──────────────────────┼──────────────┼─────────────────────────────────────┼────────────────────────────────────────┤
+  │ nvdla_cbuf.buda      │ 2354×2353 µm │ 1×8-bit multicast 1→30              │ 0 unplaced ✓                           │
+  ├──────────────────────┼──────────────┼─────────────────────────────────────┼────────────────────────────────────────┤
+  │ ariane133_cache.buda │ 1357×1357 µm │ 4×8-bit multicast (1→7/8/4/3)       │ 0 unplaced ✓                           │
+  └──────────────────────┴──────────────┴─────────────────────────────────────┴────────────────────────────────────────┘
+
+  The two key lessons from the MacroPlacement designs: corner_margin needs to match the actual macro size (10 µm for 70 µm-tall banks, not 30), and STRICT bundling merges buses with identical
+  driver+receiver sets (so cbuf_we had to be dropped).
