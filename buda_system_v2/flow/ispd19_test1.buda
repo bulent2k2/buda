@@ -1,0 +1,1768 @@
+# Auto-generated BUDA script from /tmp/ispd19/ispd19_test1/ispd19_test1.input.def
+# Die: 148.4 x 146.0 µm
+# 297 buses: 28 grid-clustered + 269 high-fanout
+
+def_layer 5  M5  H LOW 20 span_min 0  span_max 149
+def_layer 6  M6  V LOW 20 span_min 0  span_max 146
+def_layer 7  M7  H TOP 15 span_min 0  span_max 149
+def_layer 8  M8  V TOP 15 span_min 0  span_max 146
+
+def_track_pattern 5  0.07  SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 6  0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 7  0.07  SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+def_track_pattern 8  0.095 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+
+corner_margin dx 1 dy 1
+
+# ── Grid-clustered buses (27) ─────────────────────────────────
+add_block g_1_src  60 41  70 47  # 10 nets
+add_block g_1_dst  45 28  70 82  # 10 nets
+add_bus g_1[10]  g_1_src.out  g_1_dst.in
+
+add_block g_2_src  60 90  70 99  # 7 nets
+add_block g_2_dst  47 75  64 108  # 7 nets
+add_bus g_2[7]  g_2_src.out  g_2_dst.in
+
+add_block g_3_src  120 71  124 78  # 7 nets
+add_block g_3_dst  112 69  124 80  # 7 nets
+add_bus g_3[7]  g_3_src.out  g_3_dst.in
+
+add_block g_4_src  80 43  90 47  # 7 nets
+add_block g_4_dst  48 41  93 49  # 7 nets
+add_bus g_4[7]  g_4_src.out  g_4_dst.in
+
+add_block g_5_src  60 111  68 118  # 7 nets
+add_block g_5_dst  44 91  65 129  # 7 nets
+add_bus g_5[7]  g_5_src.out  g_5_dst.in
+
+add_block g_6_src  41 83  50 88  # 6 nets
+add_block g_6_dst  37 77  90 94  # 6 nets
+add_bus g_6[6]  g_6_src.out  g_6_dst.in
+
+add_block g_7_src  20 90  28 100  # 6 nets
+add_block g_7_dst  11 87  25 100  # 6 nets
+add_bus g_7[6]  g_7_src.out  g_7_dst.in
+
+add_block g_8_src  40 102  45 108  # 6 nets
+add_block g_8_dst  25 98  51 113  # 6 nets
+add_bus g_8[6]  g_8_src.out  g_8_dst.in
+
+add_block g_9_src  51 74  59 80  # 6 nets
+add_block g_9_dst  41 68  57 81  # 6 nets
+add_bus g_9[6]  g_9_src.out  g_9_dst.in
+
+add_block g_10_src  61 81  70 89  # 6 nets
+add_block g_10_dst  41 77  65 89  # 6 nets
+add_bus g_10[6]  g_10_src.out  g_10_dst.in
+
+add_block g_11_src  83 71  88 78  # 6 nets
+add_block g_11_dst  48 71  95 84  # 6 nets
+add_bus g_11[6]  g_11_src.out  g_11_dst.in
+
+add_block g_12_src  131 73  135 79  # 6 nets
+add_block g_12_dst  121 71  134 85  # 6 nets
+add_bus g_12[6]  g_12_src.out  g_12_dst.in
+
+add_block g_13_src  101 95  106 98  # 6 nets
+add_block g_13_dst  45 71  131 116  # 6 nets
+add_bus g_13[6]  g_13_src.out  g_13_dst.in
+
+add_block g_14_src  64 75  69 80  # 5 nets
+add_block g_14_dst  59 77  67 97  # 5 nets
+add_bus g_14[5]  g_14_src.out  g_14_dst.in
+
+add_block g_15_src  90 91  100 100  # 5 nets
+add_block g_15_dst  45 84  100 101  # 5 nets
+add_bus g_15[5]  g_15_src.out  g_15_dst.in
+
+add_block g_16_src  81 92  89 99  # 5 nets
+add_block g_16_dst  65 81  89 103  # 5 nets
+add_bus g_16[5]  g_16_src.out  g_16_dst.in
+
+add_block g_17_src  40 112  46 117  # 5 nets
+add_block g_17_dst  32 111  45 121  # 5 nets
+add_bus g_17[5]  g_17_src.out  g_17_dst.in
+
+add_block g_18_src  43 52  50 57  # 5 nets
+add_block g_18_dst  46 52  62 64  # 5 nets
+add_bus g_18[5]  g_18_src.out  g_18_dst.in
+
+add_block g_19_src  32 111  39 118  # 5 nets
+add_block g_19_dst  40 114  49 119  # 5 nets
+add_bus g_19[5]  g_19_src.out  g_19_dst.in
+
+add_block g_20_src  63 90  68 93  # 5 nets
+add_block g_20_dst  59 75  69 102  # 5 nets
+add_bus g_20[5]  g_20_src.out  g_20_dst.in
+
+add_block g_21_src  110 60  118 69  # 5 nets
+add_block g_21_dst  49 47  134 83  # 5 nets
+add_bus g_21[5]  g_21_src.out  g_21_dst.in
+
+add_block g_22_src  105 94  110 98  # 5 nets
+add_block g_22_dst  51 64  133 113  # 5 nets
+add_bus g_22[5]  g_22_src.out  g_22_dst.in
+
+add_block g_23_src  64 100  68 106  # 5 nets
+add_block g_23_dst  57 75  67 106  # 5 nets
+add_bus g_23[5]  g_23_src.out  g_23_dst.in
+
+add_block g_24_src  82 42  90 48  # 5 nets
+add_block g_24_dst  89 41  97 46  # 5 nets
+add_bus g_24[5]  g_24_src.out  g_24_dst.in
+
+add_block g_25_src  130 81  138 89  # 5 nets
+add_block g_25_dst  125 80  136 90  # 5 nets
+add_bus g_25[5]  g_25_src.out  g_25_dst.in
+
+add_block g_26_src  72 90  78 97  # 5 nets
+add_block g_26_dst  63 91  122 100  # 5 nets
+add_bus g_26[5]  g_26_src.out  g_26_dst.in
+
+add_block g_27_src  41 63  50 70  # 5 nets
+add_block g_27_dst  37 60  55 89  # 5 nets
+add_bus g_27[5]  g_27_src.out  g_27_dst.in
+
+
+# ── High-fanout buses (267) ──────────────────────────────────────
+# net4  fanout=60  HPWL=166.0 µm  span=49.0 µm
+add_block hf_1_src  128 63  132 67  corner_margin dx 1 dy 1
+add_block hf_1_dst  30 53  140 110
+add_bus hf_1[1]  hf_1_src.out  hf_1_dst.in
+
+# net40  fanout=44  HPWL=162.8 µm  span=18.3 µm
+add_block hf_2_src  38 17  42 21  corner_margin dx 1 dy 1
+add_block hf_2_dst  22 2  65 122
+add_bus hf_2[1]  hf_2_src.out  hf_2_dst.in
+
+# net28  fanout=52  HPWL=160.6 µm  span=7.5 µm
+add_block hf_3_src  95 34  99 38  corner_margin dx 1 dy 1
+add_block hf_3_dst  48 10  108 111
+add_bus hf_3[1]  hf_3_src.out  hf_3_dst.in
+
+# net19  fanout=56  HPWL=159.1 µm  span=28.6 µm
+add_block hf_4_src  98 22  102 26  corner_margin dx 1 dy 1
+add_block hf_4_dst  19 19  112 86
+add_bus hf_4[1]  hf_4_src.out  hf_4_dst.in
+
+# net16  fanout=57  HPWL=156.0 µm  span=40.6 µm
+add_block hf_5_src  11 103  15 107  corner_margin dx 1 dy 1
+add_block hf_5_dst  8 54  111 107
+add_bus hf_5[1]  hf_5_src.out  hf_5_dst.in
+
+# net6  fanout=59  HPWL=154.0 µm  span=29.9 µm
+add_block hf_6_src  96 48  100 52  corner_margin dx 1 dy 1
+add_block hf_6_dst  25 45  113 111
+add_bus hf_6[1]  hf_6_src.out  hf_6_dst.in
+
+# net18  fanout=57  HPWL=150.3 µm  span=15.2 µm
+add_block hf_7_src  129 127  133 131  corner_margin dx 1 dy 1
+add_block hf_7_dst  24 106  137 143
+add_bus hf_7[1]  hf_7_src.out  hf_7_dst.in
+
+# net3  fanout=65  HPWL=143.2 µm  span=21.1 µm
+add_block hf_8_src  97 52  101 56  corner_margin dx 1 dy 1
+add_block hf_8_dst  38 48  132 98
+add_bus hf_8[1]  hf_8_src.out  hf_8_dst.in
+
+# net5  fanout=60  HPWL=142.8 µm  span=22.0 µm
+add_block hf_9_src  96 34  100 38  corner_margin dx 1 dy 1
+add_block hf_9_dst  39 35  126 90
+add_bus hf_9[1]  hf_9_src.out  hf_9_dst.in
+
+# net17  fanout=57  HPWL=142.6 µm  span=55.7 µm
+add_block hf_10_src  10 111  14 115  corner_margin dx 1 dy 1
+add_block hf_10_dst  14 37  67 125
+add_bus hf_10[1]  hf_10_src.out  hf_10_dst.in
+
+# net2  fanout=65  HPWL=142.0 µm  span=23.9 µm
+add_block hf_11_src  66 82  70 86  corner_margin dx 1 dy 1
+add_block hf_11_dst  32 52  129 98
+add_bus hf_11[1]  hf_11_src.out  hf_11_dst.in
+
+# net11  fanout=58  HPWL=136.8 µm  span=39.0 µm
+add_block hf_12_src  126 68  130 72  corner_margin dx 1 dy 1
+add_block hf_12_dst  36 54  130 98
+add_bus hf_12[1]  hf_12_src.out  hf_12_dst.in
+
+# net29  fanout=52  HPWL=135.5 µm  span=20.7 µm
+add_block hf_13_src  17 54  21 58  corner_margin dx 1 dy 1
+add_block hf_13_dst  3 48  63 124
+add_bus hf_13[1]  hf_13_src.out  hf_13_dst.in
+
+# net49  fanout=39  HPWL=135.4 µm  span=12.3 µm
+add_block hf_14_src  93 16  97 20  corner_margin dx 1 dy 1
+add_block hf_14_dst  86 2  117 106
+add_bus hf_14[1]  hf_14_src.out  hf_14_dst.in
+
+# net32  fanout=50  HPWL=134.1 µm  span=16.1 µm
+add_block hf_15_src  106 30  110 34  corner_margin dx 1 dy 1
+add_block hf_15_dst  53 26  121 92
+add_bus hf_15[1]  hf_15_src.out  hf_15_dst.in
+
+# net61  fanout=33  HPWL=133.8 µm  span=27.6 µm
+add_block hf_16_src  77 109  81 113  corner_margin dx 1 dy 1
+add_block hf_16_dst  15 89  118 120
+add_bus hf_16[1]  hf_16_src.out  hf_16_dst.in
+
+# net59  fanout=33  HPWL=132.5 µm  span=19.1 µm
+add_block hf_17_src  79 33  83 37  corner_margin dx 1 dy 1
+add_block hf_17_dst  52 25  114 96
+add_bus hf_17[1]  hf_17_src.out  hf_17_dst.in
+
+# net56  fanout=33  HPWL=131.0 µm  span=10.5 µm
+add_block hf_18_src  103 94  107 98  corner_margin dx 1 dy 1
+add_block hf_18_dst  51 64  133 113
+add_bus hf_18[1]  hf_18_src.out  hf_18_dst.in
+
+# net7  fanout=59  HPWL=129.8 µm  span=19.1 µm
+add_block hf_19_src  108 52  112 56  corner_margin dx 1 dy 1
+add_block hf_19_dst  28 41  130 69
+add_bus hf_19[1]  hf_19_src.out  hf_19_dst.in
+
+# net55  fanout=33  HPWL=129.0 µm  span=38.1 µm
+add_block hf_20_src  68 31  72 35  corner_margin dx 1 dy 1
+add_block hf_20_dst  28 38  77 112
+add_bus hf_20[1]  hf_20_src.out  hf_20_dst.in
+
+# net39  fanout=44  HPWL=125.8 µm  span=7.1 µm
+add_block hf_21_src  89 33  93 37  corner_margin dx 1 dy 1
+add_block hf_21_dst  66 22  107 106
+add_bus hf_21[1]  hf_21_src.out  hf_21_dst.in
+
+# net21  fanout=55  HPWL=125.4 µm  span=35.1 µm
+add_block hf_22_src  71 81  75 85  corner_margin dx 1 dy 1
+add_block hf_22_dst  70 24  111 108
+add_bus hf_22[1]  hf_22_src.out  hf_22_dst.in
+
+# net72  fanout=33  HPWL=124.9 µm  span=13.7 µm
+add_block hf_23_src  101 94  105 98  corner_margin dx 1 dy 1
+add_block hf_23_dst  45 72  131 111
+add_bus hf_23[1]  hf_23_src.out  hf_23_dst.in
+
+# net225  fanout=28  HPWL=124.9 µm  span=32.8 µm
+add_block hf_24_src  54 78  58 82  corner_margin dx 1 dy 1
+add_block hf_24_dst  21 48  115 78
+add_bus hf_24[1]  hf_24_src.out  hf_24_dst.in
+
+# net138  fanout=33  HPWL=121.8 µm  span=44.0 µm
+add_block hf_25_src  92 93  96 97  corner_margin dx 1 dy 1
+add_block hf_25_dst  26 93  96 144
+add_bus hf_25[1]  hf_25_src.out  hf_25_dst.in
+
+# net44  fanout=43  HPWL=120.4 µm  span=17.8 µm
+add_block hf_26_src  116 63  120 67  corner_margin dx 1 dy 1
+add_block hf_26_dst  49 47  134 83
+add_bus hf_26[1]  hf_26_src.out  hf_26_dst.in
+
+# net74  fanout=33  HPWL=118.5 µm  span=43.5 µm
+add_block hf_27_src  85 87  89 91  corner_margin dx 1 dy 1
+add_block hf_27_dst  86 57  118 143
+add_bus hf_27[1]  hf_27_src.out  hf_27_dst.in
+
+# net69  fanout=33  HPWL=117.9 µm  span=31.3 µm
+add_block hf_28_src  80 43  84 47  corner_margin dx 1 dy 1
+add_block hf_28_dst  92 27  119 108
+add_bus hf_28[1]  hf_28_src.out  hf_28_dst.in
+
+# net25  fanout=54  HPWL=117.8 µm  span=21.3 µm
+add_block hf_29_src  42 106  46 110  corner_margin dx 1 dy 1
+add_block hf_29_dst  13 45  58 117
+add_bus hf_29[1]  hf_29_src.out  hf_29_dst.in
+
+# net10  fanout=59  HPWL=116.8 µm  span=34.9 µm
+add_block hf_30_src  93 32  97 36  corner_margin dx 1 dy 1
+add_block hf_30_dst  89 26  140 92
+add_bus hf_30[1]  hf_30_src.out  hf_30_dst.in
+
+# net35  fanout=48  HPWL=116.1 µm  span=10.0 µm
+add_block hf_31_src  48 22  52 26  corner_margin dx 1 dy 1
+add_block hf_31_dst  46 12  67 107
+add_bus hf_31[1]  hf_31_src.out  hf_31_dst.in
+
+# net64  fanout=33  HPWL=115.2 µm  span=37.1 µm
+add_block hf_32_src  87 37  91 41  corner_margin dx 1 dy 1
+add_block hf_32_dst  98 36  135 105
+add_bus hf_32[1]  hf_32_src.out  hf_32_dst.in
+
+# net154  fanout=33  HPWL=113.7 µm  span=26.7 µm
+add_block hf_33_src  82 97  86 101  corner_margin dx 1 dy 1
+add_block hf_33_dst  57 80  131 119
+add_bus hf_33[1]  hf_33_src.out  hf_33_dst.in
+
+# net9  fanout=59  HPWL=113.5 µm  span=31.9 µm
+add_block hf_34_src  93 16  97 20  corner_margin dx 1 dy 1
+add_block hf_34_dst  94 2  136 72
+add_bus hf_34[1]  hf_34_src.out  hf_34_dst.in
+
+# net8  fanout=59  HPWL=112.9 µm  span=9.2 µm
+add_block hf_35_src  80 16  84 20  corner_margin dx 1 dy 1
+add_block hf_35_dst  54 2  88 80
+add_bus hf_35[1]  hf_35_src.out  hf_35_dst.in
+
+# net103  fanout=33  HPWL=112.8 µm  span=20.5 µm
+add_block hf_36_src  81 92  85 96  corner_margin dx 1 dy 1
+add_block hf_36_dst  54 82  127 122
+add_bus hf_36[1]  hf_36_src.out  hf_36_dst.in
+
+# net65  fanout=33  HPWL=110.6 µm  span=37.7 µm
+add_block hf_37_src  62 43  66 47  corner_margin dx 1 dy 1
+add_block hf_37_dst  18 37  62 102
+add_bus hf_37[1]  hf_37_src.out  hf_37_dst.in
+
+# net83  fanout=33  HPWL=109.8 µm  span=39.8 µm
+add_block hf_38_src  68 86  72 90  corner_margin dx 1 dy 1
+add_block hf_38_dst  6 70  93 93
+add_bus hf_38[1]  hf_38_src.out  hf_38_dst.in
+
+# net77  fanout=33  HPWL=108.6 µm  span=27.9 µm
+add_block hf_39_src  79 92  83 96  corner_margin dx 1 dy 1
+add_block hf_39_dst  34 80  96 126
+add_bus hf_39[1]  hf_39_src.out  hf_39_dst.in
+
+# net78  fanout=33  HPWL=108.5 µm  span=51.6 µm
+add_block hf_40_src  81 88  85 92  corner_margin dx 1 dy 1
+add_block hf_40_dst  22 51  90 91
+add_bus hf_40[1]  hf_40_src.out  hf_40_dst.in
+
+# net68  fanout=33  HPWL=108.1 µm  span=43.8 µm
+add_block hf_41_src  80 90  84 94  corner_margin dx 1 dy 1
+add_block hf_41_dst  9 64  84 96
+add_bus hf_41[1]  hf_41_src.out  hf_41_dst.in
+
+# net26  fanout=54  HPWL=107.7 µm  span=26.6 µm
+add_block hf_42_src  12 124  16 128  corner_margin dx 1 dy 1
+add_block hf_42_dst  12 70  58 131
+add_bus hf_42[1]  hf_42_src.out  hf_42_dst.in
+
+# net267  fanout=13  HPWL=107.3 µm  span=69.2 µm
+add_block hf_43_src  58 44  62 48  corner_margin dx 1 dy 1
+add_block hf_43_dst  14 92  54 107
+add_bus hf_43[1]  hf_43_src.out  hf_43_dst.in
+
+# net75  fanout=33  HPWL=107.1 µm  span=40.7 µm
+add_block hf_44_src  60 41  64 45  corner_margin dx 1 dy 1
+add_block hf_44_dst  15 38  47 98
+add_bus hf_44[1]  hf_44_src.out  hf_44_dst.in
+
+# net229  fanout=27  HPWL=106.6 µm  span=36.7 µm
+add_block hf_45_src  72 72  76 76  corner_margin dx 1 dy 1
+add_block hf_45_dst  24 47  75 104
+add_bus hf_45[1]  hf_45_src.out  hf_45_dst.in
+
+# net67  fanout=33  HPWL=106.3 µm  span=17.2 µm
+add_block hf_46_src  90 40  94 44  corner_margin dx 1 dy 1
+add_block hf_46_dst  93 19  115 103
+add_bus hf_46[1]  hf_46_src.out  hf_46_dst.in
+
+# net71  fanout=33  HPWL=104.5 µm  span=18.6 µm
+add_block hf_47_src  84 29  88 33  corner_margin dx 1 dy 1
+add_block hf_47_dst  41 26  92 80
+add_bus hf_47[1]  hf_47_src.out  hf_47_dst.in
+
+# net63  fanout=33  HPWL=104.1 µm  span=25.8 µm
+add_block hf_48_src  50 28  54 32  corner_margin dx 1 dy 1
+add_block hf_48_dst  22 27  51 102
+add_bus hf_48[1]  hf_48_src.out  hf_48_dst.in
+
+# net66  fanout=33  HPWL=104.0 µm  span=56.6 µm
+add_block hf_49_src  78 93  82 97  corner_margin dx 1 dy 1
+add_block hf_49_dst  5 70  81 99
+add_bus hf_49[1]  hf_49_src.out  hf_49_dst.in
+
+# net121  fanout=33  HPWL=102.1 µm  span=12.4 µm
+add_block hf_50_src  75 44  79 48  corner_margin dx 1 dy 1
+add_block hf_50_dst  31 22  89 67
+add_bus hf_50[1]  hf_50_src.out  hf_50_dst.in
+
+# net86  fanout=33  HPWL=101.8 µm  span=37.0 µm
+add_block hf_51_src  77 93  81 97  corner_margin dx 1 dy 1
+add_block hf_51_dst  30 75  67 128
+add_bus hf_51[1]  hf_51_src.out  hf_51_dst.in
+
+# net90  fanout=33  HPWL=101.1 µm  span=54.6 µm
+add_block hf_52_src  83 86  87 90  corner_margin dx 1 dy 1
+add_block hf_52_dst  7 70  89 89
+add_bus hf_52[1]  hf_52_src.out  hf_52_dst.in
+
+# net119  fanout=33  HPWL=99.7 µm  span=14.3 µm
+add_block hf_53_src  38 34  42 38  corner_margin dx 1 dy 1
+add_block hf_53_dst  32 32  78 86
+add_bus hf_53[1]  hf_53_src.out  hf_53_dst.in
+
+# net247  fanout=21  HPWL=99.2 µm  span=71.9 µm
+add_block hf_54_src  97 101  101 105  corner_margin dx 1 dy 1
+add_block hf_54_dst  88 18  102 101
+add_bus hf_54[1]  hf_54_src.out  hf_54_dst.in
+
+# net37  fanout=45  HPWL=99.0 µm  span=9.1 µm
+add_block hf_55_src  87 26  91 30  corner_margin dx 1 dy 1
+add_block hf_55_dst  53 18  120 50
+add_bus hf_55[1]  hf_55_src.out  hf_55_dst.in
+
+# net187  fanout=32  HPWL=97.3 µm  span=30.3 µm
+add_block hf_56_src  85 86  89 90  corner_margin dx 1 dy 1
+add_block hf_56_dst  42 52  98 93
+add_bus hf_56[1]  hf_56_src.out  hf_56_dst.in
+
+# net159  fanout=33  HPWL=97.1 µm  span=43.1 µm
+add_block hf_57_src  51 85  55 89  corner_margin dx 1 dy 1
+add_block hf_57_dst  35 102  76 144
+add_bus hf_57[1]  hf_57_src.out  hf_57_dst.in
+
+# net84  fanout=33  HPWL=97.0 µm  span=23.0 µm
+add_block hf_58_src  66 92  70 96  corner_margin dx 1 dy 1
+add_block hf_58_dst  23 85  83 123
+add_bus hf_58[1]  hf_58_src.out  hf_58_dst.in
+
+# net82  fanout=33  HPWL=96.9 µm  span=36.5 µm
+add_block hf_59_src  70 36  74 40  corner_margin dx 1 dy 1
+add_block hf_59_dst  19 32  58 76
+add_bus hf_59[1]  hf_59_src.out  hf_59_dst.in
+
+# net92  fanout=33  HPWL=96.6 µm  span=31.0 µm
+add_block hf_60_src  77 92  81 96  corner_margin dx 1 dy 1
+add_block hf_60_dst  34 91  94 128
+add_bus hf_60[1]  hf_60_src.out  hf_60_dst.in
+
+# net105  fanout=33  HPWL=95.9 µm  span=50.5 µm
+add_block hf_61_src  72 82  76 86  corner_margin dx 1 dy 1
+add_block hf_61_dst  10 58  78 86
+add_bus hf_61[1]  hf_61_src.out  hf_61_dst.in
+
+# net89  fanout=33  HPWL=95.7 µm  span=25.8 µm
+add_block hf_62_src  46 44  50 48  corner_margin dx 1 dy 1
+add_block hf_62_dst  13 39  46 100
+add_bus hf_62[1]  hf_62_src.out  hf_62_dst.in
+
+# net47  fanout=41  HPWL=95.4 µm  span=7.3 µm
+add_block hf_63_src  27 19  31 23  corner_margin dx 1 dy 1
+add_block hf_63_dst  14 6  38 77
+add_bus hf_63[1]  hf_63_src.out  hf_63_dst.in
+
+# net99  fanout=33  HPWL=94.9 µm  span=27.0 µm
+add_block hf_64_src  97 94  101 98  corner_margin dx 1 dy 1
+add_block hf_64_dst  70 83  114 135
+add_bus hf_64[1]  hf_64_src.out  hf_64_dst.in
+
+# net234  fanout=25  HPWL=94.6 µm  span=10.5 µm
+add_block hf_65_src  138 93  142 97  corner_margin dx 1 dy 1
+add_block hf_65_dst  92 67  145 109
+add_bus hf_65[1]  hf_65_src.out  hf_65_dst.in
+
+# net208  fanout=31  HPWL=94.4 µm  span=27.4 µm
+add_block hf_66_src  54 90  58 94  corner_margin dx 1 dy 1
+add_block hf_66_dst  22 78  70 125
+add_bus hf_66[1]  hf_66_src.out  hf_66_dst.in
+
+# net236  fanout=24  HPWL=93.7 µm  span=31.5 µm
+add_block hf_67_src  77 94  81 98  corner_margin dx 1 dy 1
+add_block hf_67_dst  25 87  73 126
+add_bus hf_67[1]  hf_67_src.out  hf_67_dst.in
+
+# net46  fanout=41  HPWL=93.7 µm  span=11.3 µm
+add_block hf_68_src  31 92  35 96  corner_margin dx 1 dy 1
+add_block hf_68_dst  10 76  60 119
+add_bus hf_68[1]  hf_68_src.out  hf_68_dst.in
+
+# net162  fanout=33  HPWL=93.4 µm  span=41.0 µm
+add_block hf_69_src  92 90  96 94  corner_margin dx 1 dy 1
+add_block hf_69_dst  89 86  130 138
+add_bus hf_69[1]  hf_69_src.out  hf_69_dst.in
+
+# net199  fanout=32  HPWL=93.2 µm  span=31.5 µm
+add_block hf_70_src  48 95  52 99  corner_margin dx 1 dy 1
+add_block hf_70_dst  4 91  68 121
+add_bus hf_70[1]  hf_70_src.out  hf_70_dst.in
+
+# net100  fanout=33  HPWL=92.5 µm  span=32.6 µm
+add_block hf_71_src  50 40  54 44  corner_margin dx 1 dy 1
+add_block hf_71_dst  14 42  45 97
+add_bus hf_71[1]  hf_71_src.out  hf_71_dst.in
+
+# net91  fanout=33  HPWL=92.3 µm  span=50.6 µm
+add_block hf_72_src  71 82  75 86  corner_margin dx 1 dy 1
+add_block hf_72_dst  7 66  79 87
+add_bus hf_72[1]  hf_72_src.out  hf_72_dst.in
+
+# net115  fanout=33  HPWL=92.2 µm  span=43.5 µm
+add_block hf_73_src  88 90  92 94  corner_margin dx 1 dy 1
+add_block hf_73_dst  89 62  140 102
+add_bus hf_73[1]  hf_73_src.out  hf_73_dst.in
+
+# net93  fanout=33  HPWL=92.1 µm  span=33.5 µm
+add_block hf_74_src  41 43  45 47  corner_margin dx 1 dy 1
+add_block hf_74_dst  2 46  40 96
+add_bus hf_74[1]  hf_74_src.out  hf_74_dst.in
+
+# net144  fanout=33  HPWL=91.9 µm  span=61.8 µm
+add_block hf_75_src  78 92  82 96  corner_margin dx 1 dy 1
+add_block hf_75_dst  3 88  45 103
+add_bus hf_75[1]  hf_75_src.out  hf_75_dst.in
+
+# net207  fanout=31  HPWL=91.7 µm  span=17.9 µm
+add_block hf_76_src  126 105  130 109  corner_margin dx 1 dy 1
+add_block hf_76_dst  84 72  139 108
+add_bus hf_76[1]  hf_76_src.out  hf_76_dst.in
+
+# net139  fanout=33  HPWL=91.2 µm  span=40.4 µm
+add_block hf_77_src  89 88  93 92  corner_margin dx 1 dy 1
+add_block hf_77_dst  88 79  116 143
+add_bus hf_77[1]  hf_77_src.out  hf_77_dst.in
+
+# net76  fanout=33  HPWL=91.1 µm  span=34.6 µm
+add_block hf_78_src  78 88  82 92  corner_margin dx 1 dy 1
+add_block hf_78_dst  43 48  90 93
+add_bus hf_78[1]  hf_78_src.out  hf_78_dst.in
+
+# net141  fanout=33  HPWL=90.8 µm  span=41.2 µm
+add_block hf_79_src  65 82  69 86  corner_margin dx 1 dy 1
+add_block hf_79_dst  20 47  73 86
+add_bus hf_79[1]  hf_79_src.out  hf_79_dst.in
+
+# net116  fanout=33  HPWL=89.8 µm  span=11.8 µm
+add_block hf_80_src  68 25  72 29  corner_margin dx 1 dy 1
+add_block hf_80_dst  57 20  84 82
+add_bus hf_80[1]  hf_80_src.out  hf_80_dst.in
+
+# net52  fanout=36  HPWL=89.1 µm  span=42.1 µm
+add_block hf_81_src  65 84  69 88  corner_margin dx 1 dy 1
+add_block hf_81_dst  8 85  66 115
+add_bus hf_81[1]  hf_81_src.out  hf_81_dst.in
+
+# net165  fanout=33  HPWL=88.7 µm  span=45.9 µm
+add_block hf_82_src  64 84  68 88  corner_margin dx 1 dy 1
+add_block hf_82_dst  13 50  62 86
+add_bus hf_82[1]  hf_82_src.out  hf_82_dst.in
+
+# net96  fanout=33  HPWL=88.7 µm  span=6.9 µm
+add_block hf_83_src  71 30  75 34  corner_margin dx 1 dy 1
+add_block hf_83_dst  56 8  78 75
+add_bus hf_83[1]  hf_83_src.out  hf_83_dst.in
+
+# net101  fanout=33  HPWL=87.9 µm  span=14.2 µm
+add_block hf_84_src  66 29  70 33  corner_margin dx 1 dy 1
+add_block hf_84_dst  49 13  66 81
+add_bus hf_84[1]  hf_84_src.out  hf_84_dst.in
+
+# net88  fanout=33  HPWL=87.0 µm  span=22.0 µm
+add_block hf_85_src  56 37  60 41  corner_margin dx 1 dy 1
+add_block hf_85_dst  21 26  53 76
+add_bus hf_85[1]  hf_85_src.out  hf_85_dst.in
+
+# net140  fanout=33  HPWL=87.0 µm  span=25.1 µm
+add_block hf_86_src  101 98  105 102  corner_margin dx 1 dy 1
+add_block hf_86_dst  92 72  131 120
+add_bus hf_86[1]  hf_86_src.out  hf_86_dst.in
+
+# net107  fanout=33  HPWL=86.9 µm  span=14.3 µm
+add_block hf_87_src  127 45  131 49  corner_margin dx 1 dy 1
+add_block hf_87_dst  104 37  133 94
+add_bus hf_87[1]  hf_87_src.out  hf_87_dst.in
+
+# net137  fanout=33  HPWL=86.8 µm  span=35.3 µm
+add_block hf_88_src  84 91  88 95  corner_margin dx 1 dy 1
+add_block hf_88_dst  85 81  131 122
+add_bus hf_88[1]  hf_88_src.out  hf_88_dst.in
+
+# net272  fanout=12  HPWL=86.5 µm  span=65.5 µm
+add_block hf_89_src  65 44  69 48  corner_margin dx 1 dy 1
+add_block hf_89_dst  59 96  75 117
+add_bus hf_89[1]  hf_89_src.out  hf_89_dst.in
+
+# net80  fanout=33  HPWL=86.4 µm  span=23.6 µm
+add_block hf_90_src  92 97  96 101  corner_margin dx 1 dy 1
+add_block hf_90_dst  75 89  119 131
+add_bus hf_90[1]  hf_90_src.out  hf_90_dst.in
+
+# net177  fanout=33  HPWL=86.2 µm  span=3.7 µm
+add_block hf_91_src  26 126  30 130  corner_margin dx 1 dy 1
+add_block hf_91_dst  13 105  70 135
+add_bus hf_91[1]  hf_91_src.out  hf_91_dst.in
+
+# net132  fanout=33  HPWL=85.8 µm  span=4.9 µm
+add_block hf_92_src  127 47  131 51  corner_margin dx 1 dy 1
+add_block hf_92_dst  111 31  138 90
+add_bus hf_92[1]  hf_92_src.out  hf_92_dst.in
+
+# net226  fanout=28  HPWL=85.8 µm  span=2.4 µm
+add_block hf_93_src  20 115  24 119  corner_margin dx 1 dy 1
+add_block hf_93_dst  10 96  66 126
+add_bus hf_93[1]  hf_93_src.out  hf_93_dst.in
+
+# net213  fanout=31  HPWL=85.7 µm  span=34.6 µm
+add_block hf_94_src  103 97  107 101  corner_margin dx 1 dy 1
+add_block hf_94_dst  102 78  144 122
+add_bus hf_94[1]  hf_94_src.out  hf_94_dst.in
+
+# net106  fanout=33  HPWL=85.5 µm  span=48.8 µm
+add_block hf_95_src  70 86  74 90  corner_margin dx 1 dy 1
+add_block hf_95_dst  7 72  71 93
+add_bus hf_95[1]  hf_95_src.out  hf_95_dst.in
+
+# net193  fanout=32  HPWL=84.9 µm  span=19.5 µm
+add_block hf_96_src  100 31  104 35  corner_margin dx 1 dy 1
+add_block hf_96_dst  107 28  126 90
+add_bus hf_96[1]  hf_96_src.out  hf_96_dst.in
+
+# net118  fanout=33  HPWL=84.7 µm  span=18.6 µm
+add_block hf_97_src  78 94  82 98  corner_margin dx 1 dy 1
+add_block hf_97_dst  42 86  89 124
+add_bus hf_97[1]  hf_97_src.out  hf_97_dst.in
+
+# net129  fanout=33  HPWL=83.9 µm  span=38.7 µm
+add_block hf_98_src  99 98  103 102  corner_margin dx 1 dy 1
+add_block hf_98_dst  98 89  136 135
+add_bus hf_98[1]  hf_98_src.out  hf_98_dst.in
+
+# net217  fanout=30  HPWL=83.2 µm  span=29.0 µm
+add_block hf_99_src  85 99  89 103  corner_margin dx 1 dy 1
+add_block hf_99_dst  37 94  84 128
+add_bus hf_99[1]  hf_99_src.out  hf_99_dst.in
+
+# net231  fanout=26  HPWL=83.1 µm  span=31.0 µm
+add_block hf_100_src  59 72  63 76  corner_margin dx 1 dy 1
+add_block hf_100_dst  11 61  58 94
+add_bus hf_100[1]  hf_100_src.out  hf_100_dst.in
+
+# net156  fanout=33  HPWL=82.7 µm  span=29.4 µm
+add_block hf_101_src  82 92  86 96  corner_margin dx 1 dy 1
+add_block hf_101_dst  70 90  107 136
+add_bus hf_101[1]  hf_101_src.out  hf_101_dst.in
+
+# net189  fanout=32  HPWL=82.7 µm  span=17.9 µm
+add_block hf_102_src  35 45  39 49  corner_margin dx 1 dy 1
+add_block hf_102_dst  17 44  39 104
+add_bus hf_102[1]  hf_102_src.out  hf_102_dst.in
+
+# net223  fanout=29  HPWL=82.6 µm  span=6.7 µm
+add_block hf_103_src  108 121  112 125  corner_margin dx 1 dy 1
+add_block hf_103_dst  89 84  130 126
+add_bus hf_103[1]  hf_103_src.out  hf_103_dst.in
+
+# net235  fanout=25  HPWL=82.6 µm  span=36.4 µm
+add_block hf_104_src  84 116  88 120  corner_margin dx 1 dy 1
+add_block hf_104_dst  27 105  90 124
+add_bus hf_104[1]  hf_104_src.out  hf_104_dst.in
+
+# net98  fanout=33  HPWL=82.4 µm  span=22.3 µm
+add_block hf_105_src  49 32  53 36  corner_margin dx 1 dy 1
+add_block hf_105_dst  19 29  50 79
+add_bus hf_105[1]  hf_105_src.out  hf_105_dst.in
+
+# net209  fanout=31  HPWL=82.3 µm  span=23.9 µm
+add_block hf_106_src  45 80  49 84  corner_margin dx 1 dy 1
+add_block hf_106_dst  14 54  65 86
+add_bus hf_106[1]  hf_106_src.out  hf_106_dst.in
+
+# net126  fanout=33  HPWL=81.9 µm  span=8.0 µm
+add_block hf_107_src  69 25  73 29  corner_margin dx 1 dy 1
+add_block hf_107_dst  55 16  74 79
+add_bus hf_107[1]  hf_107_src.out  hf_107_dst.in
+
+# net112  fanout=33  HPWL=81.9 µm  span=22.8 µm
+add_block hf_108_src  47 45  51 49  corner_margin dx 1 dy 1
+add_block hf_108_dst  16 37  46 86
+add_bus hf_108[1]  hf_108_src.out  hf_108_dst.in
+
+# net212  fanout=31  HPWL=81.8 µm  span=28.8 µm
+add_block hf_109_src  43 80  47 84  corner_margin dx 1 dy 1
+add_block hf_109_dst  12 49  57 87
+add_bus hf_109[1]  hf_109_src.out  hf_109_dst.in
+
+# net155  fanout=33  HPWL=81.7 µm  span=33.6 µm
+add_block hf_110_src  91 96  95 100  corner_margin dx 1 dy 1
+add_block hf_110_dst  86 77  100 144
+add_bus hf_110[1]  hf_110_src.out  hf_110_dst.in
+
+# net210  fanout=31  HPWL=81.1 µm  span=37.5 µm
+add_block hf_111_src  55 79  59 83  corner_margin dx 1 dy 1
+add_block hf_111_dst  7 61  64 85
+add_bus hf_111[1]  hf_111_src.out  hf_111_dst.in
+
+# net113  fanout=33  HPWL=80.9 µm  span=29.7 µm
+add_block hf_112_src  46 45  50 49  corner_margin dx 1 dy 1
+add_block hf_112_dst  12 45  46 90
+add_bus hf_112[1]  hf_112_src.out  hf_112_dst.in
+
+# net117  fanout=33  HPWL=79.9 µm  span=44.0 µm
+add_block hf_113_src  56 85  60 89  corner_margin dx 1 dy 1
+add_block hf_113_dst  7 58  52 86
+add_bus hf_113[1]  hf_113_src.out  hf_113_dst.in
+
+# net109  fanout=33  HPWL=79.9 µm  span=30.6 µm
+add_block hf_114_src  93 96  97 100  corner_margin dx 1 dy 1
+add_block hf_114_dst  79 82  97 143
+add_bus hf_114[1]  hf_114_src.out  hf_114_dst.in
+
+# net196  fanout=32  HPWL=79.7 µm  span=34.0 µm
+add_block hf_115_src  61 64  65 68  corner_margin dx 1 dy 1
+add_block hf_115_dst  14 54  65 83
+add_bus hf_115[1]  hf_115_src.out  hf_115_dst.in
+
+# net200  fanout=32  HPWL=79.4 µm  span=35.1 µm
+add_block hf_116_src  79 90  83 94  corner_margin dx 1 dy 1
+add_block hf_116_dst  69 90  118 120
+add_bus hf_116[1]  hf_116_src.out  hf_116_dst.in
+
+# net198  fanout=32  HPWL=79.3 µm  span=24.2 µm
+add_block hf_117_src  101 97  105 101  corner_margin dx 1 dy 1
+add_block hf_117_dst  94 72  136 110
+add_bus hf_117[1]  hf_117_src.out  hf_117_dst.in
+
+# net170  fanout=33  HPWL=79.2 µm  span=8.1 µm
+add_block hf_118_src  120 52  124 56  corner_margin dx 1 dy 1
+add_block hf_118_dst  110 50  141 98
+add_bus hf_118[1]  hf_118_src.out  hf_118_dst.in
+
+# net130  fanout=33  HPWL=78.9 µm  span=32.6 µm
+add_block hf_119_src  101 90  105 94  corner_margin dx 1 dy 1
+add_block hf_119_dst  91 72  143 100
+add_bus hf_119[1]  hf_119_src.out  hf_119_dst.in
+
+# net110  fanout=33  HPWL=78.5 µm  span=21.1 µm
+add_block hf_120_src  99 94  103 98  corner_margin dx 1 dy 1
+add_block hf_120_dst  89 76  128 116
+add_bus hf_120[1]  hf_120_src.out  hf_120_dst.in
+
+# net143  fanout=33  HPWL=78.5 µm  span=26.6 µm
+add_block hf_121_src  98 97  102 101  corner_margin dx 1 dy 1
+add_block hf_121_dst  95 72  136 110
+add_bus hf_121[1]  hf_121_src.out  hf_121_dst.in
+
+# net122  fanout=33  HPWL=78.3 µm  span=19.8 µm
+add_block hf_122_src  102 96  106 100  corner_margin dx 1 dy 1
+add_block hf_122_dst  84 74  135 101
+add_bus hf_122[1]  hf_122_src.out  hf_122_dst.in
+
+# net104  fanout=33  HPWL=78.2 µm  span=15.0 µm
+add_block hf_123_src  67 44  71 48  corner_margin dx 1 dy 1
+add_block hf_123_dst  45 30  70 82
+add_bus hf_123[1]  hf_123_src.out  hf_123_dst.in
+
+# net160  fanout=33  HPWL=77.9 µm  span=8.1 µm
+add_block hf_124_src  35 136  39 140  corner_margin dx 1 dy 1
+add_block hf_124_dst  19 100  52 145
+add_bus hf_124[1]  hf_124_src.out  hf_124_dst.in
+
+# net183  fanout=33  HPWL=76.4 µm  span=20.0 µm
+add_block hf_125_src  95 99  99 103  corner_margin dx 1 dy 1
+add_block hf_125_dst  93 95  134 130
+add_bus hf_125[1]  hf_125_src.out  hf_125_dst.in
+
+# net166  fanout=33  HPWL=76.3 µm  span=37.7 µm
+add_block hf_126_src  93 91  97 95  corner_margin dx 1 dy 1
+add_block hf_126_dst  77 85  96 143
+add_bus hf_126[1]  hf_126_src.out  hf_126_dst.in
+
+# net134  fanout=33  HPWL=76.3 µm  span=22.0 µm
+add_block hf_127_src  52 40  56 44  corner_margin dx 1 dy 1
+add_block hf_127_dst  15 36  52 73
+add_bus hf_127[1]  hf_127_src.out  hf_127_dst.in
+
+# net250  fanout=20  HPWL=75.6 µm  span=7.0 µm
+add_block hf_128_src  110 105  114 109  corner_margin dx 1 dy 1
+add_block hf_128_dst  66 93  124 111
+add_bus hf_128[1]  hf_128_src.out  hf_128_dst.in
+
+# net249  fanout=20  HPWL=75.4 µm  span=19.9 µm
+add_block hf_129_src  70 88  74 92  corner_margin dx 1 dy 1
+add_block hf_129_dst  49 88  90 123
+add_bus hf_129[1]  hf_129_src.out  hf_129_dst.in
+
+# net190  fanout=32  HPWL=75.2 µm  span=27.2 µm
+add_block hf_130_src  77 79  81 83  corner_margin dx 1 dy 1
+add_block hf_130_dst  40 47  78 83
+add_bus hf_130[1]  hf_130_src.out  hf_130_dst.in
+
+# net133  fanout=33  HPWL=75.1 µm  span=18.2 µm
+add_block hf_131_src  56 40  60 44  corner_margin dx 1 dy 1
+add_block hf_131_dst  19 22  55 58
+add_bus hf_131[1]  hf_131_src.out  hf_131_dst.in
+
+# net127  fanout=33  HPWL=74.2 µm  span=18.0 µm
+add_block hf_132_src  91 92  95 96  corner_margin dx 1 dy 1
+add_block hf_132_dst  82 71  106 122
+add_bus hf_132[1]  hf_132_src.out  hf_132_dst.in
+
+# net123  fanout=33  HPWL=73.8 µm  span=9.1 µm
+add_block hf_133_src  106 118  110 122  corner_margin dx 1 dy 1
+add_block hf_133_dst  94 74  119 123
+add_bus hf_133[1]  hf_133_src.out  hf_133_dst.in
+
+# net188  fanout=32  HPWL=73.7 µm  span=11.8 µm
+add_block hf_134_src  84 49  88 53  corner_margin dx 1 dy 1
+add_block hf_134_dst  51 48  89 84
+add_bus hf_134[1]  hf_134_src.out  hf_134_dst.in
+
+# net114  fanout=33  HPWL=72.7 µm  span=15.4 µm
+add_block hf_135_src  71 43  75 47  corner_margin dx 1 dy 1
+add_block hf_135_dst  65 15  80 73
+add_bus hf_135[1]  hf_135_src.out  hf_135_dst.in
+
+# net150  fanout=33  HPWL=72.6 µm  span=21.6 µm
+add_block hf_136_src  101 94  105 98  corner_margin dx 1 dy 1
+add_block hf_136_dst  94 71  134 103
+add_bus hf_136[1]  hf_136_src.out  hf_136_dst.in
+
+# net94  fanout=33  HPWL=72.5 µm  span=8.3 µm
+add_block hf_137_src  75 20  79 24  corner_margin dx 1 dy 1
+add_block hf_137_dst  66 19  94 63
+add_bus hf_137[1]  hf_137_src.out  hf_137_dst.in
+
+# net13  fanout=58  HPWL=72.3 µm  span=13.6 µm
+add_block hf_138_src  28 24  32 28  corner_margin dx 1 dy 1
+add_block hf_138_dst  27 17  69 47
+add_bus hf_138[1]  hf_138_src.out  hf_138_dst.in
+
+# net192  fanout=32  HPWL=72.3 µm  span=29.1 µm
+add_block hf_139_src  94 90  98 94  corner_margin dx 1 dy 1
+add_block hf_139_dst  93 75  110 130
+add_bus hf_139[1]  hf_139_src.out  hf_139_dst.in
+
+# net181  fanout=33  HPWL=72.1 µm  span=20.0 µm
+add_block hf_140_src  56 43  60 47  corner_margin dx 1 dy 1
+add_block hf_140_dst  44 7  62 61
+add_bus hf_140[1]  hf_140_src.out  hf_140_dst.in
+
+# net261  fanout=15  HPWL=71.9 µm  span=17.5 µm
+add_block hf_141_src  87 117  91 121  corner_margin dx 1 dy 1
+add_block hf_141_dst  64 83  97 123
+add_bus hf_141[1]  hf_141_src.out  hf_141_dst.in
+
+# net201  fanout=32  HPWL=71.6 µm  span=31.7 µm
+add_block hf_142_src  40 97  44 101  corner_margin dx 1 dy 1
+add_block hf_142_dst  1 98  55 116
+add_bus hf_142[1]  hf_142_src.out  hf_142_dst.in
+
+# net218  fanout=30  HPWL=70.7 µm  span=18.0 µm
+add_block hf_143_src  47 100  51 104  corner_margin dx 1 dy 1
+add_block hf_143_dst  21 83  52 123
+add_bus hf_143[1]  hf_143_src.out  hf_143_dst.in
+
+# net120  fanout=33  HPWL=70.6 µm  span=13.9 µm
+add_block hf_144_src  98 94  102 98  corner_margin dx 1 dy 1
+add_block hf_144_dst  88 75  117 117
+add_bus hf_144[1]  hf_144_src.out  hf_144_dst.in
+
+# net242  fanout=22  HPWL=70.4 µm  span=8.7 µm
+add_block hf_145_src  98 52  102 56  corner_margin dx 1 dy 1
+add_block hf_145_dst  94 50  112 103
+add_bus hf_145[1]  hf_145_src.out  hf_145_dst.in
+
+# net79  fanout=33  HPWL=70.4 µm  span=17.9 µm
+add_block hf_146_src  91 98  95 102  corner_margin dx 1 dy 1
+add_block hf_146_dst  79 81  103 126
+add_bus hf_146[1]  hf_146_src.out  hf_146_dst.in
+
+# net168  fanout=33  HPWL=70.3 µm  span=33.0 µm
+add_block hf_147_src  92 92  96 96  corner_margin dx 1 dy 1
+add_block hf_147_dst  77 87  95 138
+add_bus hf_147[1]  hf_147_src.out  hf_147_dst.in
+
+# net176  fanout=33  HPWL=70.2 µm  span=38.8 µm
+add_block hf_148_src  52 90  56 94  corner_margin dx 1 dy 1
+add_block hf_148_dst  4 74  52 94
+add_bus hf_148[1]  hf_148_src.out  hf_148_dst.in
+
+# net227  fanout=28  HPWL=69.6 µm  span=24.5 µm
+add_block hf_149_src  58 100  62 104  corner_margin dx 1 dy 1
+add_block hf_149_dst  27 99  68 128
+add_bus hf_149[1]  hf_149_src.out  hf_149_dst.in
+
+# net157  fanout=33  HPWL=69.3 µm  span=6.4 µm
+add_block hf_150_src  57 20  61 24  corner_margin dx 1 dy 1
+add_block hf_150_dst  50 10  61 69
+add_bus hf_150[1]  hf_150_src.out  hf_150_dst.in
+
+# net173  fanout=33  HPWL=69.1 µm  span=17.2 µm
+add_block hf_151_src  69 40  73 44  corner_margin dx 1 dy 1
+add_block hf_151_dst  59 9  76 61
+add_bus hf_151[1]  hf_151_src.out  hf_151_dst.in
+
+# net174  fanout=33  HPWL=68.8 µm  span=14.4 µm
+add_block hf_152_src  76 118  80 122  corner_margin dx 1 dy 1
+add_block hf_152_dst  47 104  81 139
+add_bus hf_152[1]  hf_152_src.out  hf_152_dst.in
+
+# net171  fanout=33  HPWL=68.8 µm  span=15.4 µm
+add_block hf_153_src  103 93  107 97  corner_margin dx 1 dy 1
+add_block hf_153_dst  100 71  128 112
+add_bus hf_153[1]  hf_153_src.out  hf_153_dst.in
+
+# net147  fanout=33  HPWL=68.7 µm  span=9.3 µm
+add_block hf_154_src  65 14  69 18  corner_margin dx 1 dy 1
+add_block hf_154_dst  61 8  71 67
+add_bus hf_154[1]  hf_154_src.out  hf_154_dst.in
+
+# net222  fanout=30  HPWL=68.3 µm  span=7.9 µm
+add_block hf_155_src  116 34  120 38  corner_margin dx 1 dy 1
+add_block hf_155_dst  109 32  122 87
+add_bus hf_155[1]  hf_155_src.out  hf_155_dst.in
+
+# net178  fanout=33  HPWL=67.3 µm  span=3.8 µm
+add_block hf_156_src  50 27  54 31  corner_margin dx 1 dy 1
+add_block hf_156_dst  42 20  71 58
+add_bus hf_156[1]  hf_156_src.out  hf_156_dst.in
+
+# net142  fanout=33  HPWL=66.6 µm  span=14.1 µm
+add_block hf_157_src  68 38  72 42  corner_margin dx 1 dy 1
+add_block hf_157_dst  66 13  84 61
+add_bus hf_157[1]  hf_157_src.out  hf_157_dst.in
+
+# net131  fanout=33  HPWL=66.5 µm  span=7.4 µm
+add_block hf_158_src  64 43  68 47  corner_margin dx 1 dy 1
+add_block hf_158_dst  46 25  69 68
+add_bus hf_158[1]  hf_158_src.out  hf_158_dst.in
+
+# net50  fanout=37  HPWL=66.2 µm  span=7.0 µm
+add_block hf_159_src  25 122  29 126  corner_margin dx 1 dy 1
+add_block hf_159_dst  20 110  56 140
+add_bus hf_159[1]  hf_159_src.out  hf_159_dst.in
+
+# net111  fanout=33  HPWL=66.2 µm  span=25.3 µm
+add_block hf_160_src  88 92  92 96  corner_margin dx 1 dy 1
+add_block hf_160_dst  78 77  95 126
+add_bus hf_160[1]  hf_160_src.out  hf_160_dst.in
+
+# net195  fanout=32  HPWL=65.8 µm  span=30.3 µm
+add_block hf_161_src  43 84  47 88  corner_margin dx 1 dy 1
+add_block hf_161_dst  7 58  44 87
+add_bus hf_161[1]  hf_161_src.out  hf_161_dst.in
+
+# net215  fanout=31  HPWL=64.6 µm  span=29.1 µm
+add_block hf_162_src  40 90  44 94  corner_margin dx 1 dy 1
+add_block hf_162_dst  3 78  46 100
+add_bus hf_162[1]  hf_162_src.out  hf_162_dst.in
+
+# net206  fanout=32  HPWL=64.4 µm  span=23.5 µm
+add_block hf_163_src  53 104  57 108  corner_margin dx 1 dy 1
+add_block hf_163_dst  54 103  80 141
+add_bus hf_163[1]  hf_163_src.out  hf_163_dst.in
+
+# net33  fanout=49  HPWL=64.2 µm  span=8.5 µm
+add_block hf_164_src  38 28  42 32  corner_margin dx 1 dy 1
+add_block hf_164_dst  28 28  67 53
+add_bus hf_164[1]  hf_164_src.out  hf_164_dst.in
+
+# net148  fanout=33  HPWL=64.0 µm  span=21.0 µm
+add_block hf_165_src  95 98  99 102  corner_margin dx 1 dy 1
+add_block hf_165_dst  87 96  113 134
+add_bus hf_165[1]  hf_165_src.out  hf_165_dst.in
+
+# net161  fanout=33  HPWL=63.9 µm  span=17.2 µm
+add_block hf_166_src  101 96  105 100  corner_margin dx 1 dy 1
+add_block hf_166_dst  99 77  127 113
+add_bus hf_166[1]  hf_166_src.out  hf_166_dst.in
+
+# net211  fanout=31  HPWL=63.7 µm  span=34.5 µm
+add_block hf_167_src  45 84  49 88  corner_margin dx 1 dy 1
+add_block hf_167_dst  8 61  43 85
+add_bus hf_167[1]  hf_167_src.out  hf_167_dst.in
+
+# net164  fanout=33  HPWL=63.7 µm  span=17.7 µm
+add_block hf_168_src  97 31  101 35  corner_margin dx 1 dy 1
+add_block hf_168_dst  100 20  124 58
+add_bus hf_168[1]  hf_168_src.out  hf_168_dst.in
+
+# net365  fanout=5  HPWL=63.6 µm  span=27.1 µm
+add_block hf_169_src  103 43  107 47  corner_margin dx 1 dy 1
+add_block hf_169_dst  48 42  107 47
+add_bus hf_169[1]  hf_169_src.out  hf_169_dst.in
+
+# net14  fanout=58  HPWL=62.4 µm  span=15.0 µm
+add_block hf_170_src  19 24  23 28  corner_margin dx 1 dy 1
+add_block hf_170_dst  7 24  25 69
+add_bus hf_170[1]  hf_170_src.out  hf_170_dst.in
+
+# net205  fanout=32  HPWL=62.4 µm  span=13.2 µm
+add_block hf_171_src  118 90  122 94  corner_margin dx 1 dy 1
+add_block hf_171_dst  103 76  127 114
+add_bus hf_171[1]  hf_171_src.out  hf_171_dst.in
+
+# net252  fanout=19  HPWL=62.0 µm  span=24.0 µm
+add_block hf_172_src  113 43  117 47  corner_margin dx 1 dy 1
+add_block hf_172_dst  115 48  126 96
+add_bus hf_172[1]  hf_172_src.out  hf_172_dst.in
+
+# net197  fanout=32  HPWL=61.9 µm  span=16.7 µm
+add_block hf_173_src  96 93  100 97  corner_margin dx 1 dy 1
+add_block hf_173_dst  97 74  116 117
+add_bus hf_173[1]  hf_173_src.out  hf_173_dst.in
+
+# net194  fanout=32  HPWL=61.2 µm  span=6.8 µm
+add_block hf_174_src  79 46  83 50  corner_margin dx 1 dy 1
+add_block hf_174_dst  52 47  84 76
+add_bus hf_174[1]  hf_174_src.out  hf_174_dst.in
+
+# net27  fanout=53  HPWL=60.9 µm  span=4.4 µm
+add_block hf_175_src  45 22  49 26  corner_margin dx 1 dy 1
+add_block hf_175_dst  38 15  68 46
+add_bus hf_175[1]  hf_175_src.out  hf_175_dst.in
+
+# net169  fanout=33  HPWL=60.6 µm  span=15.4 µm
+add_block hf_176_src  104 93  108 97  corner_margin dx 1 dy 1
+add_block hf_176_dst  105 75  126 114
+add_bus hf_176[1]  hf_176_src.out  hf_176_dst.in
+
+# net124  fanout=33  HPWL=59.7 µm  span=21.3 µm
+add_block hf_177_src  95 96  99 100  corner_margin dx 1 dy 1
+add_block hf_177_dst  94 84  111 126
+add_bus hf_177[1]  hf_177_src.out  hf_177_dst.in
+
+# net158  fanout=33  HPWL=59.3 µm  span=5.8 µm
+add_block hf_178_src  67 21  71 25  corner_margin dx 1 dy 1
+add_block hf_178_dst  64 13  73 63
+add_bus hf_178[1]  hf_178_src.out  hf_178_dst.in
+
+# net221  fanout=30  HPWL=59.1 µm  span=6.7 µm
+add_block hf_179_src  10 97  14 101  corner_margin dx 1 dy 1
+add_block hf_179_dst  3 85  46 101
+add_bus hf_179[1]  hf_179_src.out  hf_179_dst.in
+
+# net182  fanout=33  HPWL=58.5 µm  span=22.1 µm
+add_block hf_180_src  102 91  106 95  corner_margin dx 1 dy 1
+add_block hf_180_dst  100 82  133 107
+add_bus hf_180[1]  hf_180_src.out  hf_180_dst.in
+
+# net228  fanout=28  HPWL=58.4 µm  span=6.0 µm
+add_block hf_181_src  42 46  46 50  corner_margin dx 1 dy 1
+add_block hf_181_dst  37 28  54 70
+add_bus hf_181[1]  hf_181_src.out  hf_181_dst.in
+
+# net219  fanout=30  HPWL=58.3 µm  span=23.8 µm
+add_block hf_182_src  41 66  45 70  corner_margin dx 1 dy 1
+add_block hf_182_dst  11 58  44 83
+add_bus hf_182[1]  hf_182_src.out  hf_182_dst.in
+
+# net30  fanout=51  HPWL=58.1 µm  span=5.3 µm
+add_block hf_183_src  41 28  45 32  corner_margin dx 1 dy 1
+add_block hf_183_dst  33 23  67 47
+add_bus hf_183[1]  hf_183_src.out  hf_183_dst.in
+
+# net179  fanout=33  HPWL=57.8 µm  span=20.9 µm
+add_block hf_184_src  67 40  71 44  corner_margin dx 1 dy 1
+add_block hf_184_dst  60 6  68 55
+add_bus hf_184[1]  hf_184_src.out  hf_184_dst.in
+
+# net296  fanout=9  HPWL=57.4 µm  span=20.3 µm
+add_block hf_185_src  79 91  83 95  corner_margin dx 1 dy 1
+add_block hf_185_dst  37 83  85 90
+add_bus hf_185[1]  hf_185_src.out  hf_185_dst.in
+
+# net163  fanout=33  HPWL=57.3 µm  span=18.8 µm
+add_block hf_186_src  97 39  101 43  corner_margin dx 1 dy 1
+add_block hf_186_dst  97 25  126 54
+add_bus hf_186[1]  hf_186_src.out  hf_186_dst.in
+
+# net232  fanout=26  HPWL=57.2 µm  span=25.6 µm
+add_block hf_187_src  36 88  40 92  corner_margin dx 1 dy 1
+add_block hf_187_dst  6 83  35 108
+add_bus hf_187[1]  hf_187_src.out  hf_187_dst.in
+
+# net284  fanout=10  HPWL=56.8 µm  span=17.0 µm
+add_block hf_188_src  89 43  93 47  corner_margin dx 1 dy 1
+add_block hf_188_dst  90 46  105 86
+add_bus hf_188[1]  hf_188_src.out  hf_188_dst.in
+
+# net48  fanout=40  HPWL=56.4 µm  span=4.4 µm
+add_block hf_189_src  54 9  58 13  corner_margin dx 1 dy 1
+add_block hf_189_dst  47 3  70 36
+add_bus hf_189[1]  hf_189_src.out  hf_189_dst.in
+
+# net167  fanout=33  HPWL=56.3 µm  span=12.8 µm
+add_block hf_190_src  47 42  51 46  corner_margin dx 1 dy 1
+add_block hf_190_dst  47 16  54 66
+add_bus hf_190[1]  hf_190_src.out  hf_190_dst.in
+
+# net371  fanout=5  HPWL=56.3 µm  span=26.6 µm
+add_block hf_191_src  86 91  90 95  corner_margin dx 1 dy 1
+add_block hf_191_dst  46 83  93 90
+add_bus hf_191[1]  hf_191_src.out  hf_191_dst.in
+
+# net203  fanout=32  HPWL=56.2 µm  span=1.3 µm
+add_block hf_192_src  67 110  71 114  corner_margin dx 1 dy 1
+add_block hf_192_dst  51 93  78 122
+add_bus hf_192[1]  hf_192_src.out  hf_192_dst.in
+
+# net220  fanout=30  HPWL=55.1 µm  span=24.4 µm
+add_block hf_193_src  36 75  40 79  corner_margin dx 1 dy 1
+add_block hf_193_dst  7 64  37 88
+add_bus hf_193[1]  hf_193_src.out  hf_193_dst.in
+
+# net31  fanout=51  HPWL=54.3 µm  span=7.9 µm
+add_block hf_194_src  49 10  53 14  corner_margin dx 1 dy 1
+add_block hf_194_dst  43 8  68 37
+add_bus hf_194[1]  hf_194_src.out  hf_194_dst.in
+
+# net45  fanout=43  HPWL=54.0 µm  span=7.6 µm
+add_block hf_195_src  106 29  110 33  corner_margin dx 1 dy 1
+add_block hf_195_dst  96 15  112 52
+add_bus hf_195[1]  hf_195_src.out  hf_195_dst.in
+
+# net294  fanout=9  HPWL=54.0 µm  span=12.2 µm
+add_block hf_196_src  71 86  75 90  corner_margin dx 1 dy 1
+add_block hf_196_dst  59 72  96 89
+add_bus hf_196[1]  hf_196_src.out  hf_196_dst.in
+
+# net295  fanout=9  HPWL=53.9 µm  span=15.3 µm
+add_block hf_197_src  62 81  66 85  corner_margin dx 1 dy 1
+add_block hf_197_dst  56 49  75 84
+add_bus hf_197[1]  hf_197_src.out  hf_197_dst.in
+
+# net307  fanout=8  HPWL=53.8 µm  span=22.0 µm
+add_block hf_198_src  86 106  90 110  corner_margin dx 1 dy 1
+add_block hf_198_dst  58 86  89 107
+add_bus hf_198[1]  hf_198_src.out  hf_198_dst.in
+
+# net239  fanout=23  HPWL=53.8 µm  span=11.3 µm
+add_block hf_199_src  58 109  62 113  corner_margin dx 1 dy 1
+add_block hf_199_dst  44 91  61 129
+add_bus hf_199[1]  hf_199_src.out  hf_199_dst.in
+
+# net364  fanout=5  HPWL=52.7 µm  span=27.7 µm
+add_block hf_200_src  57 44  61 48  corner_margin dx 1 dy 1
+add_block hf_200_dst  22 48  44 62
+add_bus hf_200[1]  hf_200_src.out  hf_200_dst.in
+
+# net53  fanout=35  HPWL=52.0 µm  span=5.5 µm
+add_block hf_201_src  31 31  35 35  corner_margin dx 1 dy 1
+add_block hf_201_dst  21 31  58 47
+add_bus hf_201[1]  hf_201_src.out  hf_201_dst.in
+
+# net23  fanout=55  HPWL=51.5 µm  span=6.3 µm
+add_block hf_202_src  137 44  141 48  corner_margin dx 1 dy 1
+add_block hf_202_dst  112 34  146 51
+add_bus hf_202[1]  hf_202_src.out  hf_202_dst.in
+
+# net246  fanout=22  HPWL=50.6 µm  span=18.3 µm
+add_block hf_203_src  39 104  43 108  corner_margin dx 1 dy 1
+add_block hf_203_dst  14 108  52 118
+add_bus hf_203[1]  hf_203_src.out  hf_203_dst.in
+
+# net38  fanout=45  HPWL=49.7 µm  span=15.0 µm
+add_block hf_204_src  73 15  77 19  corner_margin dx 1 dy 1
+add_block hf_204_dst  53 4  74 32
+add_bus hf_204[1]  hf_204_src.out  hf_204_dst.in
+
+# net243  fanout=22  HPWL=49.6 µm  span=2.3 µm
+add_block hf_205_src  120 40  124 44  corner_margin dx 1 dy 1
+add_block hf_205_dst  115 34  130 69
+add_bus hf_205[1]  hf_205_src.out  hf_205_dst.in
+
+# net237  fanout=24  HPWL=49.6 µm  span=8.4 µm
+add_block hf_206_src  64 115  68 119  corner_margin dx 1 dy 1
+add_block hf_206_dst  47 113  88 121
+add_bus hf_206[1]  hf_206_src.out  hf_206_dst.in
+
+# net34  fanout=49  HPWL=49.3 µm  span=4.7 µm
+add_block hf_207_src  130 52  134 56  corner_margin dx 1 dy 1
+add_block hf_207_dst  112 52  144 69
+add_bus hf_207[1]  hf_207_src.out  hf_207_dst.in
+
+# net172  fanout=33  HPWL=49.0 µm  span=20.7 µm
+add_block hf_208_src  115 94  119 98  corner_margin dx 1 dy 1
+add_block hf_208_dst  116 76  141 100
+add_bus hf_208[1]  hf_208_src.out  hf_208_dst.in
+
+# net254  fanout=18  HPWL=48.9 µm  span=4.0 µm
+add_block hf_209_src  127 62  131 66  corner_margin dx 1 dy 1
+add_block hf_209_dst  120 54  137 86
+add_bus hf_209[1]  hf_209_src.out  hf_209_dst.in
+
+# net287  fanout=10  HPWL=48.7 µm  span=10.8 µm
+add_block hf_210_src  96 97  100 101  corner_margin dx 1 dy 1
+add_block hf_210_dst  89 88  117 110
+add_bus hf_210[1]  hf_210_src.out  hf_210_dst.in
+
+# net42  fanout=44  HPWL=48.0 µm  span=3.9 µm
+add_block hf_211_src  140 54  144 58  corner_margin dx 1 dy 1
+add_block hf_211_dst  113 52  147 66
+add_bus hf_211[1]  hf_211_src.out  hf_211_dst.in
+
+# net185  fanout=33  HPWL=47.3 µm  span=22.3 µm
+add_block hf_212_src  115 98  119 102  corner_margin dx 1 dy 1
+add_block hf_212_dst  119 78  143 98
+add_bus hf_212[1]  hf_212_src.out  hf_212_dst.in
+
+# net368  fanout=5  HPWL=47.0 µm  span=24.0 µm
+add_block hf_213_src  67 84  71 88  corner_margin dx 1 dy 1
+add_block hf_213_dst  37 71  63 77
+add_bus hf_213[1]  hf_213_src.out  hf_213_dst.in
+
+# net263  fanout=15  HPWL=46.7 µm  span=26.6 µm
+add_block hf_214_src  40 85  44 89  corner_margin dx 1 dy 1
+add_block hf_214_dst  8 81  41 93
+add_bus hf_214[1]  hf_214_src.out  hf_214_dst.in
+
+# net41  fanout=44  HPWL=46.0 µm  span=5.9 µm
+add_block hf_215_src  49 20  53 24  corner_margin dx 1 dy 1
+add_block hf_215_dst  43 19  69 40
+add_bus hf_215[1]  hf_215_src.out  hf_215_dst.in
+
+# net180  fanout=33  HPWL=46.0 µm  span=21.5 µm
+add_block hf_216_src  112 93  116 97  corner_margin dx 1 dy 1
+add_block hf_216_dst  117 78  142 96
+add_bus hf_216[1]  hf_216_src.out  hf_216_dst.in
+
+# net51  fanout=37  HPWL=45.5 µm  span=4.8 µm
+add_block hf_217_src  31 23  35 27  corner_margin dx 1 dy 1
+add_block hf_217_dst  20 18  44 40
+add_bus hf_217[1]  hf_217_src.out  hf_217_dst.in
+
+# net95  fanout=33  HPWL=45.3 µm  span=15.6 µm
+add_block hf_218_src  89 46  93 50  corner_margin dx 1 dy 1
+add_block hf_218_dst  92 36  115 57
+add_bus hf_218[1]  hf_218_src.out  hf_218_dst.in
+
+# net24  fanout=55  HPWL=45.1 µm  span=3.5 µm
+add_block hf_219_src  135 25  139 29  corner_margin dx 1 dy 1
+add_block hf_219_dst  122 17  145 39
+add_bus hf_219[1]  hf_219_src.out  hf_219_dst.in
+
+# net241  fanout=23  HPWL=44.9 µm  span=9.8 µm
+add_block hf_220_src  63 45  67 49  corner_margin dx 1 dy 1
+add_block hf_220_dst  54 28  62 62
+add_bus hf_220[1]  hf_220_src.out  hf_220_dst.in
+
+# net240  fanout=23  HPWL=44.6 µm  span=10.9 µm
+add_block hf_221_src  67 111  71 115  corner_margin dx 1 dy 1
+add_block hf_221_dst  52 106  71 133
+add_bus hf_221[1]  hf_221_src.out  hf_221_dst.in
+
+# net245  fanout=22  HPWL=42.0 µm  span=3.2 µm
+add_block hf_222_src  127 55  131 59  corner_margin dx 1 dy 1
+add_block hf_222_dst  115 50  132 75
+add_bus hf_222[1]  hf_222_src.out  hf_222_dst.in
+
+# net262  fanout=15  HPWL=41.8 µm  span=10.1 µm
+add_block hf_223_src  50 121  54 125  corner_margin dx 1 dy 1
+add_block hf_223_dst  29 108  54 125
+add_bus hf_223[1]  hf_223_src.out  hf_223_dst.in
+
+# net265  fanout=14  HPWL=41.4 µm  span=13.0 µm
+add_block hf_224_src  73 39  77 43  corner_margin dx 1 dy 1
+add_block hf_224_dst  72 38  103 47
+add_bus hf_224[1]  hf_224_src.out  hf_224_dst.in
+
+# net289  fanout=10  HPWL=41.2 µm  span=7.8 µm
+add_block hf_225_src  78 41  82 45  corner_margin dx 1 dy 1
+add_block hf_225_dst  53 41  90 45
+add_bus hf_225[1]  hf_225_src.out  hf_225_dst.in
+
+# net43  fanout=44  HPWL=40.6 µm  span=4.9 µm
+add_block hf_226_src  124 21  128 25  corner_margin dx 1 dy 1
+add_block hf_226_dst  113 11  131 34
+add_bus hf_226[1]  hf_226_src.out  hf_226_dst.in
+
+# net186  fanout=33  HPWL=40.4 µm  span=18.1 µm
+add_block hf_227_src  118 90  122 94  corner_margin dx 1 dy 1
+add_block hf_227_dst  120 75  143 90
+add_bus hf_227[1]  hf_227_src.out  hf_227_dst.in
+
+# net280  fanout=11  HPWL=40.2 µm  span=25.2 µm
+add_block hf_228_src  72 88  76 92  corner_margin dx 1 dy 1
+add_block hf_228_dst  75 93  106 99
+add_bus hf_228[1]  hf_228_src.out  hf_228_dst.in
+
+# net216  fanout=31  HPWL=40.1 µm  span=3.3 µm
+add_block hf_229_src  123 117  127 121  corner_margin dx 1 dy 1
+add_block hf_229_dst  110 101  131 120
+add_bus hf_229[1]  hf_229_src.out  hf_229_dst.in
+
+# net308  fanout=8  HPWL=40.0 µm  span=11.6 µm
+add_block hf_230_src  71 91  75 95  corner_margin dx 1 dy 1
+add_block hf_230_dst  60 95  82 111
+add_bus hf_230[1]  hf_230_src.out  hf_230_dst.in
+
+# net320  fanout=7  HPWL=39.2 µm  span=4.1 µm
+add_block hf_231_src  89 92  93 96  corner_margin dx 1 dy 1
+add_block hf_231_dst  74 84  99 99
+add_bus hf_231[1]  hf_231_src.out  hf_231_dst.in
+
+# net191  fanout=32  HPWL=38.9 µm  span=4.3 µm
+add_block hf_232_src  72 46  76 50  corner_margin dx 1 dy 1
+add_block hf_232_dst  58 47  81 63
+add_bus hf_232[1]  hf_232_src.out  hf_232_dst.in
+
+# net282  fanout=11  HPWL=37.8 µm  span=13.2 µm
+add_block hf_233_src  75 87  79 91  corner_margin dx 1 dy 1
+add_block hf_233_dst  72 87  98 99
+add_bus hf_233[1]  hf_233_src.out  hf_233_dst.in
+
+# net298  fanout=9  HPWL=37.8 µm  span=10.5 µm
+add_block hf_234_src  85 43  89 47  corner_margin dx 1 dy 1
+add_block hf_234_dst  58 42  90 49
+add_bus hf_234[1]  hf_234_src.out  hf_234_dst.in
+
+# net321  fanout=7  HPWL=36.0 µm  span=5.6 µm
+add_block hf_235_src  64 88  68 92  corner_margin dx 1 dy 1
+add_block hf_235_dst  59 75  68 102
+add_bus hf_235[1]  hf_235_src.out  hf_235_dst.in
+
+# net258  fanout=16  HPWL=35.9 µm  span=14.9 µm
+add_block hf_236_src  76 87  80 91  corner_margin dx 1 dy 1
+add_block hf_236_dst  79 89  105 98
+add_bus hf_236[1]  hf_236_src.out  hf_236_dst.in
+
+# net184  fanout=33  HPWL=35.1 µm  span=19.2 µm
+add_block hf_237_src  118 86  122 90  corner_margin dx 1 dy 1
+add_block hf_237_dst  120 76  144 87
+add_bus hf_237[1]  hf_237_src.out  hf_237_dst.in
+
+# net36  fanout=48  HPWL=35.0 µm  span=5.1 µm
+add_block hf_238_src  126 19  130 23  corner_margin dx 1 dy 1
+add_block hf_238_dst  121 20  136 40
+add_bus hf_238[1]  hf_238_src.out  hf_238_dst.in
+
+# net377  fanout=5  HPWL=34.5 µm  span=21.6 µm
+add_block hf_239_src  91 42  95 46  corner_margin dx 1 dy 1
+add_block hf_239_dst  98 54  103 69
+add_bus hf_239[1]  hf_239_src.out  hf_239_dst.in
+
+# net251  fanout=20  HPWL=34.1 µm  span=2.7 µm
+add_block hf_240_src  126 56  130 60  corner_margin dx 1 dy 1
+add_block hf_240_dst  119 50  130 73
+add_bus hf_240[1]  hf_240_src.out  hf_240_dst.in
+
+# net372  fanout=5  HPWL=34.0 µm  span=20.9 µm
+add_block hf_241_src  62 75  66 79  corner_margin dx 1 dy 1
+add_block hf_241_dst  65 72  93 77
+add_bus hf_241[1]  hf_241_src.out  hf_241_dst.in
+
+# net268  fanout=13  HPWL=33.4 µm  span=3.8 µm
+add_block hf_242_src  67 114  71 118  corner_margin dx 1 dy 1
+add_block hf_242_dst  52 108  79 114
+add_bus hf_242[1]  hf_242_src.out  hf_242_dst.in
+
+# net277  fanout=12  HPWL=32.9 µm  span=16.2 µm
+add_block hf_243_src  71 87  75 91  corner_margin dx 1 dy 1
+add_block hf_243_dst  72 88  94 99
+add_bus hf_243[1]  hf_243_src.out  hf_243_dst.in
+
+# net319  fanout=7  HPWL=32.4 µm  span=16.9 µm
+add_block hf_244_src  121 64  125 68  corner_margin dx 1 dy 1
+add_block hf_244_dst  119 64  125 91
+add_bus hf_244[1]  hf_244_src.out  hf_244_dst.in
+
+# net285  fanout=10  HPWL=31.3 µm  span=15.5 µm
+add_block hf_245_src  64 86  68 90  corner_margin dx 1 dy 1
+add_block hf_245_dst  41 83  63 89
+add_bus hf_245[1]  hf_245_src.out  hf_245_dst.in
+
+# net244  fanout=22  HPWL=30.0 µm  span=8.6 µm
+add_block hf_246_src  94 106  98 110  corner_margin dx 1 dy 1
+add_block hf_246_dst  95 102  107 120
+add_bus hf_246[1]  hf_246_src.out  hf_246_dst.in
+
+# net324  fanout=7  HPWL=29.2 µm  span=2.0 µm
+add_block hf_247_src  74 87  78 91  corner_margin dx 1 dy 1
+add_block hf_247_dst  69 86  92 91
+add_bus hf_247[1]  hf_247_src.out  hf_247_dst.in
+
+# net312  fanout=8  HPWL=28.9 µm  span=11.9 µm
+add_block hf_248_src  84 93  88 97  corner_margin dx 1 dy 1
+add_block hf_248_dst  69 83  85 94
+add_bus hf_248[1]  hf_248_src.out  hf_248_dst.in
+
+# net297  fanout=9  HPWL=28.5 µm  span=5.9 µm
+add_block hf_249_src  84 43  88 47  corner_margin dx 1 dy 1
+add_block hf_249_dst  68 42  93 46
+add_bus hf_249[1]  hf_249_src.out  hf_249_dst.in
+
+# net346  fanout=6  HPWL=27.7 µm  span=12.6 µm
+add_block hf_250_src  91 44  95 48  corner_margin dx 1 dy 1
+add_block hf_250_dst  96 46  104 63
+add_bus hf_250[1]  hf_250_src.out  hf_250_dst.in
+
+# net326  fanout=7  HPWL=27.0 µm  span=13.1 µm
+add_block hf_251_src  80 91  84 95  corner_margin dx 1 dy 1
+add_block hf_251_dst  64 85  84 92
+add_bus hf_251[1]  hf_251_src.out  hf_251_dst.in
+
+# net224  fanout=29  HPWL=27.0 µm  span=4.9 µm
+add_block hf_252_src  110 27  114 31  corner_margin dx 1 dy 1
+add_block hf_252_dst  105 18  117 34
+add_bus hf_252[1]  hf_252_src.out  hf_252_dst.in
+
+# net293  fanout=10  HPWL=26.9 µm  span=9.7 µm
+add_block hf_253_src  78 96  82 100  corner_margin dx 1 dy 1
+add_block hf_253_dst  81 100  97 108
+add_bus hf_253[1]  hf_253_src.out  hf_253_dst.in
+
+# net374  fanout=5  HPWL=26.8 µm  span=12.3 µm
+add_block hf_254_src  57 74  61 78  corner_margin dx 1 dy 1
+add_block hf_254_dst  41 68  57 77
+add_bus hf_254[1]  hf_254_src.out  hf_254_dst.in
+
+# net370  fanout=5  HPWL=26.3 µm  span=11.8 µm
+add_block hf_255_src  79 111  83 115  corner_margin dx 1 dy 1
+add_block hf_255_dst  59 111  80 115
+add_bus hf_255[1]  hf_255_src.out  hf_255_dst.in
+
+# net311  fanout=8  HPWL=25.1 µm  span=6.3 µm
+add_block hf_256_src  115 86  119 90  corner_margin dx 1 dy 1
+add_block hf_256_dst  113 74  122 90
+add_bus hf_256[1]  hf_256_src.out  hf_256_dst.in
+
+# net338  fanout=6  HPWL=24.9 µm  span=8.2 µm
+add_block hf_257_src  88 93  92 97  corner_margin dx 1 dy 1
+add_block hf_257_dst  78 89  96 96
+add_bus hf_257[1]  hf_257_src.out  hf_257_dst.in
+
+# net345  fanout=6  HPWL=24.5 µm  span=12.3 µm
+add_block hf_258_src  102 43  106 47  corner_margin dx 1 dy 1
+add_block hf_258_dst  108 49  111 62
+add_bus hf_258[1]  hf_258_src.out  hf_258_dst.in
+
+# net276  fanout=12  HPWL=24.3 µm  span=13.5 µm
+add_block hf_259_src  89 40  93 44  corner_margin dx 1 dy 1
+add_block hf_259_dst  71 42  89 46
+add_bus hf_259[1]  hf_259_src.out  hf_259_dst.in
+
+# net309  fanout=8  HPWL=24.2 µm  span=7.7 µm
+add_block hf_260_src  85 93  89 97  corner_margin dx 1 dy 1
+add_block hf_260_dst  75 89  93 94
+add_bus hf_260[1]  hf_260_src.out  hf_260_dst.in
+
+# net290  fanout=10  HPWL=24.0 µm  span=2.8 µm
+add_block hf_261_src  107 54  111 58  corner_margin dx 1 dy 1
+add_block hf_261_dst  107 52  112 72
+add_bus hf_261[1]  hf_261_src.out  hf_261_dst.in
+
+# net323  fanout=7  HPWL=24.0 µm  span=3.9 µm
+add_block hf_262_src  74 42  78 46  corner_margin dx 1 dy 1
+add_block hf_262_dst  63 41  82 46
+add_bus hf_262[1]  hf_262_src.out  hf_262_dst.in
+
+# net299  fanout=9  HPWL=23.7 µm  span=5.6 µm
+add_block hf_263_src  89 96  93 100  corner_margin dx 1 dy 1
+add_block hf_263_dst  87 93  106 96
+add_bus hf_263[1]  hf_263_src.out  hf_263_dst.in
+
+# net344  fanout=6  HPWL=23.6 µm  span=9.7 µm
+add_block hf_264_src  81 90  85 94  corner_margin dx 1 dy 1
+add_block hf_264_dst  65 89  85 93
+add_bus hf_264[1]  hf_264_src.out  hf_264_dst.in
+
+# net322  fanout=7  HPWL=23.5 µm  span=12.1 µm
+add_block hf_265_src  91 40  95 44  corner_margin dx 1 dy 1
+add_block hf_265_dst  96 33  107 42
+add_bus hf_265[1]  hf_265_src.out  hf_265_dst.in
+
+# net300  fanout=9  HPWL=23.1 µm  span=8.5 µm
+add_block hf_266_src  88 94  92 98  corner_margin dx 1 dy 1
+add_block hf_266_dst  89 93  106 99
+add_bus hf_266[1]  hf_266_src.out  hf_266_dst.in
+
+# net248  fanout=21  HPWL=20.3 µm  span=3.9 µm
+add_block hf_267_src  143 102  147 106  corner_margin dx 1 dy 1
+add_block hf_267_dst  138 92  146 102
+add_bus hf_267[1]  hf_267_src.out  hf_267_dst.in
+
+run_bundler strict
+
+generate_topologies_for_bundle g_1  g_1_src  g_1_dst
+generate_topologies_for_bundle g_2  g_2_src  g_2_dst
+generate_topologies_for_bundle g_3  g_3_src  g_3_dst
+generate_topologies_for_bundle g_4  g_4_src  g_4_dst
+generate_topologies_for_bundle g_5  g_5_src  g_5_dst
+generate_topologies_for_bundle g_6  g_6_src  g_6_dst
+generate_topologies_for_bundle g_7  g_7_src  g_7_dst
+generate_topologies_for_bundle g_8  g_8_src  g_8_dst
+generate_topologies_for_bundle g_9  g_9_src  g_9_dst
+generate_topologies_for_bundle g_10  g_10_src  g_10_dst
+generate_topologies_for_bundle g_11  g_11_src  g_11_dst
+generate_topologies_for_bundle g_12  g_12_src  g_12_dst
+generate_topologies_for_bundle g_13  g_13_src  g_13_dst
+generate_topologies_for_bundle g_14  g_14_src  g_14_dst
+generate_topologies_for_bundle g_15  g_15_src  g_15_dst
+generate_topologies_for_bundle g_16  g_16_src  g_16_dst
+generate_topologies_for_bundle g_17  g_17_src  g_17_dst
+generate_topologies_for_bundle g_18  g_18_src  g_18_dst
+generate_topologies_for_bundle g_19  g_19_src  g_19_dst
+generate_topologies_for_bundle g_20  g_20_src  g_20_dst
+generate_topologies_for_bundle g_21  g_21_src  g_21_dst
+generate_topologies_for_bundle g_22  g_22_src  g_22_dst
+generate_topologies_for_bundle g_23  g_23_src  g_23_dst
+generate_topologies_for_bundle g_24  g_24_src  g_24_dst
+generate_topologies_for_bundle g_25  g_25_src  g_25_dst
+generate_topologies_for_bundle g_26  g_26_src  g_26_dst
+generate_topologies_for_bundle g_27  g_27_src  g_27_dst
+generate_topologies_for_bundle g_28  g_28_src  g_28_dst
+
+generate_topologies_for_bundle hf_1  hf_1_src  hf_1_dst
+generate_topologies_for_bundle hf_2  hf_2_src  hf_2_dst
+generate_topologies_for_bundle hf_3  hf_3_src  hf_3_dst
+generate_topologies_for_bundle hf_4  hf_4_src  hf_4_dst
+generate_topologies_for_bundle hf_5  hf_5_src  hf_5_dst
+generate_topologies_for_bundle hf_6  hf_6_src  hf_6_dst
+generate_topologies_for_bundle hf_7  hf_7_src  hf_7_dst
+generate_topologies_for_bundle hf_8  hf_8_src  hf_8_dst
+generate_topologies_for_bundle hf_9  hf_9_src  hf_9_dst
+generate_topologies_for_bundle hf_10  hf_10_src  hf_10_dst
+generate_topologies_for_bundle hf_11  hf_11_src  hf_11_dst
+generate_topologies_for_bundle hf_12  hf_12_src  hf_12_dst
+generate_topologies_for_bundle hf_13  hf_13_src  hf_13_dst
+generate_topologies_for_bundle hf_14  hf_14_src  hf_14_dst
+generate_topologies_for_bundle hf_15  hf_15_src  hf_15_dst
+generate_topologies_for_bundle hf_16  hf_16_src  hf_16_dst
+generate_topologies_for_bundle hf_17  hf_17_src  hf_17_dst
+generate_topologies_for_bundle hf_18  hf_18_src  hf_18_dst
+generate_topologies_for_bundle hf_19  hf_19_src  hf_19_dst
+generate_topologies_for_bundle hf_20  hf_20_src  hf_20_dst
+generate_topologies_for_bundle hf_21  hf_21_src  hf_21_dst
+generate_topologies_for_bundle hf_22  hf_22_src  hf_22_dst
+generate_topologies_for_bundle hf_23  hf_23_src  hf_23_dst
+generate_topologies_for_bundle hf_24  hf_24_src  hf_24_dst
+generate_topologies_for_bundle hf_25  hf_25_src  hf_25_dst
+generate_topologies_for_bundle hf_26  hf_26_src  hf_26_dst
+generate_topologies_for_bundle hf_27  hf_27_src  hf_27_dst
+generate_topologies_for_bundle hf_28  hf_28_src  hf_28_dst
+generate_topologies_for_bundle hf_29  hf_29_src  hf_29_dst
+generate_topologies_for_bundle hf_30  hf_30_src  hf_30_dst
+generate_topologies_for_bundle hf_31  hf_31_src  hf_31_dst
+generate_topologies_for_bundle hf_32  hf_32_src  hf_32_dst
+generate_topologies_for_bundle hf_33  hf_33_src  hf_33_dst
+generate_topologies_for_bundle hf_34  hf_34_src  hf_34_dst
+generate_topologies_for_bundle hf_35  hf_35_src  hf_35_dst
+generate_topologies_for_bundle hf_36  hf_36_src  hf_36_dst
+generate_topologies_for_bundle hf_37  hf_37_src  hf_37_dst
+generate_topologies_for_bundle hf_38  hf_38_src  hf_38_dst
+generate_topologies_for_bundle hf_39  hf_39_src  hf_39_dst
+generate_topologies_for_bundle hf_40  hf_40_src  hf_40_dst
+generate_topologies_for_bundle hf_41  hf_41_src  hf_41_dst
+generate_topologies_for_bundle hf_42  hf_42_src  hf_42_dst
+generate_topologies_for_bundle hf_43  hf_43_src  hf_43_dst
+generate_topologies_for_bundle hf_44  hf_44_src  hf_44_dst
+generate_topologies_for_bundle hf_45  hf_45_src  hf_45_dst
+generate_topologies_for_bundle hf_46  hf_46_src  hf_46_dst
+generate_topologies_for_bundle hf_47  hf_47_src  hf_47_dst
+generate_topologies_for_bundle hf_48  hf_48_src  hf_48_dst
+generate_topologies_for_bundle hf_49  hf_49_src  hf_49_dst
+generate_topologies_for_bundle hf_50  hf_50_src  hf_50_dst
+generate_topologies_for_bundle hf_51  hf_51_src  hf_51_dst
+generate_topologies_for_bundle hf_52  hf_52_src  hf_52_dst
+generate_topologies_for_bundle hf_53  hf_53_src  hf_53_dst
+generate_topologies_for_bundle hf_54  hf_54_src  hf_54_dst
+generate_topologies_for_bundle hf_55  hf_55_src  hf_55_dst
+generate_topologies_for_bundle hf_56  hf_56_src  hf_56_dst
+generate_topologies_for_bundle hf_57  hf_57_src  hf_57_dst
+generate_topologies_for_bundle hf_58  hf_58_src  hf_58_dst
+generate_topologies_for_bundle hf_59  hf_59_src  hf_59_dst
+generate_topologies_for_bundle hf_60  hf_60_src  hf_60_dst
+generate_topologies_for_bundle hf_61  hf_61_src  hf_61_dst
+generate_topologies_for_bundle hf_62  hf_62_src  hf_62_dst
+generate_topologies_for_bundle hf_63  hf_63_src  hf_63_dst
+generate_topologies_for_bundle hf_64  hf_64_src  hf_64_dst
+generate_topologies_for_bundle hf_65  hf_65_src  hf_65_dst
+generate_topologies_for_bundle hf_66  hf_66_src  hf_66_dst
+generate_topologies_for_bundle hf_67  hf_67_src  hf_67_dst
+generate_topologies_for_bundle hf_68  hf_68_src  hf_68_dst
+generate_topologies_for_bundle hf_69  hf_69_src  hf_69_dst
+generate_topologies_for_bundle hf_70  hf_70_src  hf_70_dst
+generate_topologies_for_bundle hf_71  hf_71_src  hf_71_dst
+generate_topologies_for_bundle hf_72  hf_72_src  hf_72_dst
+generate_topologies_for_bundle hf_73  hf_73_src  hf_73_dst
+generate_topologies_for_bundle hf_74  hf_74_src  hf_74_dst
+generate_topologies_for_bundle hf_75  hf_75_src  hf_75_dst
+generate_topologies_for_bundle hf_76  hf_76_src  hf_76_dst
+generate_topologies_for_bundle hf_77  hf_77_src  hf_77_dst
+generate_topologies_for_bundle hf_78  hf_78_src  hf_78_dst
+generate_topologies_for_bundle hf_79  hf_79_src  hf_79_dst
+generate_topologies_for_bundle hf_80  hf_80_src  hf_80_dst
+generate_topologies_for_bundle hf_81  hf_81_src  hf_81_dst
+generate_topologies_for_bundle hf_82  hf_82_src  hf_82_dst
+generate_topologies_for_bundle hf_83  hf_83_src  hf_83_dst
+generate_topologies_for_bundle hf_84  hf_84_src  hf_84_dst
+generate_topologies_for_bundle hf_85  hf_85_src  hf_85_dst
+generate_topologies_for_bundle hf_86  hf_86_src  hf_86_dst
+generate_topologies_for_bundle hf_87  hf_87_src  hf_87_dst
+generate_topologies_for_bundle hf_88  hf_88_src  hf_88_dst
+generate_topologies_for_bundle hf_89  hf_89_src  hf_89_dst
+generate_topologies_for_bundle hf_90  hf_90_src  hf_90_dst
+generate_topologies_for_bundle hf_91  hf_91_src  hf_91_dst
+generate_topologies_for_bundle hf_92  hf_92_src  hf_92_dst
+generate_topologies_for_bundle hf_93  hf_93_src  hf_93_dst
+generate_topologies_for_bundle hf_94  hf_94_src  hf_94_dst
+generate_topologies_for_bundle hf_95  hf_95_src  hf_95_dst
+generate_topologies_for_bundle hf_96  hf_96_src  hf_96_dst
+generate_topologies_for_bundle hf_97  hf_97_src  hf_97_dst
+generate_topologies_for_bundle hf_98  hf_98_src  hf_98_dst
+generate_topologies_for_bundle hf_99  hf_99_src  hf_99_dst
+generate_topologies_for_bundle hf_100  hf_100_src  hf_100_dst
+generate_topologies_for_bundle hf_101  hf_101_src  hf_101_dst
+generate_topologies_for_bundle hf_102  hf_102_src  hf_102_dst
+generate_topologies_for_bundle hf_103  hf_103_src  hf_103_dst
+generate_topologies_for_bundle hf_104  hf_104_src  hf_104_dst
+generate_topologies_for_bundle hf_105  hf_105_src  hf_105_dst
+generate_topologies_for_bundle hf_106  hf_106_src  hf_106_dst
+generate_topologies_for_bundle hf_107  hf_107_src  hf_107_dst
+generate_topologies_for_bundle hf_108  hf_108_src  hf_108_dst
+generate_topologies_for_bundle hf_109  hf_109_src  hf_109_dst
+generate_topologies_for_bundle hf_110  hf_110_src  hf_110_dst
+generate_topologies_for_bundle hf_111  hf_111_src  hf_111_dst
+generate_topologies_for_bundle hf_112  hf_112_src  hf_112_dst
+generate_topologies_for_bundle hf_113  hf_113_src  hf_113_dst
+generate_topologies_for_bundle hf_114  hf_114_src  hf_114_dst
+generate_topologies_for_bundle hf_115  hf_115_src  hf_115_dst
+generate_topologies_for_bundle hf_116  hf_116_src  hf_116_dst
+generate_topologies_for_bundle hf_117  hf_117_src  hf_117_dst
+generate_topologies_for_bundle hf_118  hf_118_src  hf_118_dst
+generate_topologies_for_bundle hf_119  hf_119_src  hf_119_dst
+generate_topologies_for_bundle hf_120  hf_120_src  hf_120_dst
+generate_topologies_for_bundle hf_121  hf_121_src  hf_121_dst
+generate_topologies_for_bundle hf_122  hf_122_src  hf_122_dst
+generate_topologies_for_bundle hf_123  hf_123_src  hf_123_dst
+generate_topologies_for_bundle hf_124  hf_124_src  hf_124_dst
+generate_topologies_for_bundle hf_125  hf_125_src  hf_125_dst
+generate_topologies_for_bundle hf_126  hf_126_src  hf_126_dst
+generate_topologies_for_bundle hf_127  hf_127_src  hf_127_dst
+generate_topologies_for_bundle hf_128  hf_128_src  hf_128_dst
+generate_topologies_for_bundle hf_129  hf_129_src  hf_129_dst
+generate_topologies_for_bundle hf_130  hf_130_src  hf_130_dst
+generate_topologies_for_bundle hf_131  hf_131_src  hf_131_dst
+generate_topologies_for_bundle hf_132  hf_132_src  hf_132_dst
+generate_topologies_for_bundle hf_133  hf_133_src  hf_133_dst
+generate_topologies_for_bundle hf_134  hf_134_src  hf_134_dst
+generate_topologies_for_bundle hf_135  hf_135_src  hf_135_dst
+generate_topologies_for_bundle hf_136  hf_136_src  hf_136_dst
+generate_topologies_for_bundle hf_137  hf_137_src  hf_137_dst
+generate_topologies_for_bundle hf_138  hf_138_src  hf_138_dst
+generate_topologies_for_bundle hf_139  hf_139_src  hf_139_dst
+generate_topologies_for_bundle hf_140  hf_140_src  hf_140_dst
+generate_topologies_for_bundle hf_141  hf_141_src  hf_141_dst
+generate_topologies_for_bundle hf_142  hf_142_src  hf_142_dst
+generate_topologies_for_bundle hf_143  hf_143_src  hf_143_dst
+generate_topologies_for_bundle hf_144  hf_144_src  hf_144_dst
+generate_topologies_for_bundle hf_145  hf_145_src  hf_145_dst
+generate_topologies_for_bundle hf_146  hf_146_src  hf_146_dst
+generate_topologies_for_bundle hf_147  hf_147_src  hf_147_dst
+generate_topologies_for_bundle hf_148  hf_148_src  hf_148_dst
+generate_topologies_for_bundle hf_149  hf_149_src  hf_149_dst
+generate_topologies_for_bundle hf_150  hf_150_src  hf_150_dst
+generate_topologies_for_bundle hf_151  hf_151_src  hf_151_dst
+generate_topologies_for_bundle hf_152  hf_152_src  hf_152_dst
+generate_topologies_for_bundle hf_153  hf_153_src  hf_153_dst
+generate_topologies_for_bundle hf_154  hf_154_src  hf_154_dst
+generate_topologies_for_bundle hf_155  hf_155_src  hf_155_dst
+generate_topologies_for_bundle hf_156  hf_156_src  hf_156_dst
+generate_topologies_for_bundle hf_157  hf_157_src  hf_157_dst
+generate_topologies_for_bundle hf_158  hf_158_src  hf_158_dst
+generate_topologies_for_bundle hf_159  hf_159_src  hf_159_dst
+generate_topologies_for_bundle hf_160  hf_160_src  hf_160_dst
+generate_topologies_for_bundle hf_161  hf_161_src  hf_161_dst
+generate_topologies_for_bundle hf_162  hf_162_src  hf_162_dst
+generate_topologies_for_bundle hf_163  hf_163_src  hf_163_dst
+generate_topologies_for_bundle hf_164  hf_164_src  hf_164_dst
+generate_topologies_for_bundle hf_165  hf_165_src  hf_165_dst
+generate_topologies_for_bundle hf_166  hf_166_src  hf_166_dst
+generate_topologies_for_bundle hf_167  hf_167_src  hf_167_dst
+generate_topologies_for_bundle hf_168  hf_168_src  hf_168_dst
+generate_topologies_for_bundle hf_169  hf_169_src  hf_169_dst
+generate_topologies_for_bundle hf_170  hf_170_src  hf_170_dst
+generate_topologies_for_bundle hf_171  hf_171_src  hf_171_dst
+generate_topologies_for_bundle hf_172  hf_172_src  hf_172_dst
+generate_topologies_for_bundle hf_173  hf_173_src  hf_173_dst
+generate_topologies_for_bundle hf_174  hf_174_src  hf_174_dst
+generate_topologies_for_bundle hf_175  hf_175_src  hf_175_dst
+generate_topologies_for_bundle hf_176  hf_176_src  hf_176_dst
+generate_topologies_for_bundle hf_177  hf_177_src  hf_177_dst
+generate_topologies_for_bundle hf_178  hf_178_src  hf_178_dst
+generate_topologies_for_bundle hf_179  hf_179_src  hf_179_dst
+generate_topologies_for_bundle hf_180  hf_180_src  hf_180_dst
+generate_topologies_for_bundle hf_181  hf_181_src  hf_181_dst
+generate_topologies_for_bundle hf_182  hf_182_src  hf_182_dst
+generate_topologies_for_bundle hf_183  hf_183_src  hf_183_dst
+generate_topologies_for_bundle hf_184  hf_184_src  hf_184_dst
+generate_topologies_for_bundle hf_185  hf_185_src  hf_185_dst
+generate_topologies_for_bundle hf_186  hf_186_src  hf_186_dst
+generate_topologies_for_bundle hf_187  hf_187_src  hf_187_dst
+generate_topologies_for_bundle hf_188  hf_188_src  hf_188_dst
+generate_topologies_for_bundle hf_189  hf_189_src  hf_189_dst
+generate_topologies_for_bundle hf_190  hf_190_src  hf_190_dst
+generate_topologies_for_bundle hf_191  hf_191_src  hf_191_dst
+generate_topologies_for_bundle hf_192  hf_192_src  hf_192_dst
+generate_topologies_for_bundle hf_193  hf_193_src  hf_193_dst
+generate_topologies_for_bundle hf_194  hf_194_src  hf_194_dst
+generate_topologies_for_bundle hf_195  hf_195_src  hf_195_dst
+generate_topologies_for_bundle hf_196  hf_196_src  hf_196_dst
+generate_topologies_for_bundle hf_197  hf_197_src  hf_197_dst
+generate_topologies_for_bundle hf_198  hf_198_src  hf_198_dst
+generate_topologies_for_bundle hf_199  hf_199_src  hf_199_dst
+generate_topologies_for_bundle hf_200  hf_200_src  hf_200_dst
+generate_topologies_for_bundle hf_201  hf_201_src  hf_201_dst
+generate_topologies_for_bundle hf_202  hf_202_src  hf_202_dst
+generate_topologies_for_bundle hf_203  hf_203_src  hf_203_dst
+generate_topologies_for_bundle hf_204  hf_204_src  hf_204_dst
+generate_topologies_for_bundle hf_205  hf_205_src  hf_205_dst
+generate_topologies_for_bundle hf_206  hf_206_src  hf_206_dst
+generate_topologies_for_bundle hf_207  hf_207_src  hf_207_dst
+generate_topologies_for_bundle hf_208  hf_208_src  hf_208_dst
+generate_topologies_for_bundle hf_209  hf_209_src  hf_209_dst
+generate_topologies_for_bundle hf_210  hf_210_src  hf_210_dst
+generate_topologies_for_bundle hf_211  hf_211_src  hf_211_dst
+generate_topologies_for_bundle hf_212  hf_212_src  hf_212_dst
+generate_topologies_for_bundle hf_213  hf_213_src  hf_213_dst
+generate_topologies_for_bundle hf_214  hf_214_src  hf_214_dst
+generate_topologies_for_bundle hf_215  hf_215_src  hf_215_dst
+generate_topologies_for_bundle hf_216  hf_216_src  hf_216_dst
+generate_topologies_for_bundle hf_217  hf_217_src  hf_217_dst
+generate_topologies_for_bundle hf_218  hf_218_src  hf_218_dst
+generate_topologies_for_bundle hf_219  hf_219_src  hf_219_dst
+generate_topologies_for_bundle hf_220  hf_220_src  hf_220_dst
+generate_topologies_for_bundle hf_221  hf_221_src  hf_221_dst
+generate_topologies_for_bundle hf_222  hf_222_src  hf_222_dst
+generate_topologies_for_bundle hf_223  hf_223_src  hf_223_dst
+generate_topologies_for_bundle hf_224  hf_224_src  hf_224_dst
+generate_topologies_for_bundle hf_225  hf_225_src  hf_225_dst
+generate_topologies_for_bundle hf_226  hf_226_src  hf_226_dst
+generate_topologies_for_bundle hf_227  hf_227_src  hf_227_dst
+generate_topologies_for_bundle hf_228  hf_228_src  hf_228_dst
+generate_topologies_for_bundle hf_229  hf_229_src  hf_229_dst
+generate_topologies_for_bundle hf_230  hf_230_src  hf_230_dst
+generate_topologies_for_bundle hf_231  hf_231_src  hf_231_dst
+generate_topologies_for_bundle hf_232  hf_232_src  hf_232_dst
+generate_topologies_for_bundle hf_233  hf_233_src  hf_233_dst
+generate_topologies_for_bundle hf_234  hf_234_src  hf_234_dst
+generate_topologies_for_bundle hf_235  hf_235_src  hf_235_dst
+generate_topologies_for_bundle hf_236  hf_236_src  hf_236_dst
+generate_topologies_for_bundle hf_237  hf_237_src  hf_237_dst
+generate_topologies_for_bundle hf_238  hf_238_src  hf_238_dst
+generate_topologies_for_bundle hf_239  hf_239_src  hf_239_dst
+generate_topologies_for_bundle hf_240  hf_240_src  hf_240_dst
+generate_topologies_for_bundle hf_241  hf_241_src  hf_241_dst
+generate_topologies_for_bundle hf_242  hf_242_src  hf_242_dst
+generate_topologies_for_bundle hf_243  hf_243_src  hf_243_dst
+generate_topologies_for_bundle hf_244  hf_244_src  hf_244_dst
+generate_topologies_for_bundle hf_245  hf_245_src  hf_245_dst
+generate_topologies_for_bundle hf_246  hf_246_src  hf_246_dst
+generate_topologies_for_bundle hf_247  hf_247_src  hf_247_dst
+generate_topologies_for_bundle hf_248  hf_248_src  hf_248_dst
+generate_topologies_for_bundle hf_249  hf_249_src  hf_249_dst
+generate_topologies_for_bundle hf_250  hf_250_src  hf_250_dst
+generate_topologies_for_bundle hf_251  hf_251_src  hf_251_dst
+generate_topologies_for_bundle hf_252  hf_252_src  hf_252_dst
+generate_topologies_for_bundle hf_253  hf_253_src  hf_253_dst
+generate_topologies_for_bundle hf_254  hf_254_src  hf_254_dst
+generate_topologies_for_bundle hf_255  hf_255_src  hf_255_dst
+generate_topologies_for_bundle hf_256  hf_256_src  hf_256_dst
+generate_topologies_for_bundle hf_257  hf_257_src  hf_257_dst
+generate_topologies_for_bundle hf_258  hf_258_src  hf_258_dst
+generate_topologies_for_bundle hf_259  hf_259_src  hf_259_dst
+generate_topologies_for_bundle hf_260  hf_260_src  hf_260_dst
+generate_topologies_for_bundle hf_261  hf_261_src  hf_261_dst
+generate_topologies_for_bundle hf_262  hf_262_src  hf_262_dst
+generate_topologies_for_bundle hf_263  hf_263_src  hf_263_dst
+generate_topologies_for_bundle hf_264  hf_264_src  hf_264_dst
+generate_topologies_for_bundle hf_265  hf_265_src  hf_265_dst
+generate_topologies_for_bundle hf_266  hf_266_src  hf_266_dst
+generate_topologies_for_bundle hf_267  hf_267_src  hf_267_dst
+generate_topologies_for_bundle hf_268  hf_268_src  hf_268_dst
+generate_topologies_for_bundle hf_269  hf_269_src  hf_269_dst
+
+run_planner 50
+run_nuts 1.0
+run_detailed_nuts
+
+visualize

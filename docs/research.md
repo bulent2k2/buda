@@ -398,3 +398,40 @@ Default filters: --min-fanout 5, --max-fanout 256, --min-hpwl 20 µm, --src-marg
 
   Design implication: high-fanout extraction alone is a stronger BUDA entry point than grid clustering
   for std-cell designs, because each output bus is already a perfect 1-driver→N-receiver multicast topology.
+
+
+DEF→BUDA end-to-end pipeline — tools/def_cluster.py --bipartite --grid N --high-fanout --out
+====
+Complete .buda scripts are now generated automatically and stored in buda_system_v2/flow/ispd19_test*.buda.
+Command: python3 def_cluster.py <DEF> <LEF> --bipartite --grid 10 --min 5 --high-fanout --min-fanout 5 --min-hpwl 20 --out <file>
+
+Script structure:
+  - Header: def_layer (NanGate45 M5–M8 for die_max<400 µm, M7–M10 for die_max≥400 µm), def_track_pattern (4 sig + POWER + 4 sig + GND per period), corner_margin dx 1 dy 1
+  - Grid buses: add_block + add_bus lines for each (src_grid_cell, dst_grid_cell) cluster
+  - HF buses: add_block + add_bus lines for each high-fanout net (src = driver±margin, dst = receiver bbox)
+  - Pipeline: run_bundler strict → generate_topologies_for_bundle (per valid bus) → run_planner 50 → run_nuts 1.0 → run_detailed_nuts → visualize
+  - Validity filter: _topo_valid() pre-filters degenerate pairs (block too small after cm shrink, or blocks that touch without overlapping) before emitting generate_topologies_for_bundle
+
+  ┌─────────────┬──────────┬──────────┬──────────┬─────────┬─────────┬────────────────────────────────┬──────────────────────────────────────┐
+  │  Testcase   │ Die (µm) │ Grid bus │  HF bus  │ Skipped │ Bundles │      Abstract NUTS             │          Detailed NUTS               │
+  ├─────────────┼──────────┼──────────┼──────────┼─────────┼─────────┼────────────────────────────────┼──────────────────────────────────────┤
+  │ test1 (10K) │ 148×146  │   27     │   267    │    3    │   294   │ 376 segs, 267 viol, 641 ovlp   │  372 placed, 133 unplaced            │
+  │ test3 (8K)  │ 195×195  │   60     │   377    │    0    │   437   │ 742 segs, 441 viol, 4012 ovlp  │  845 placed, 546 unplaced            │
+  │ test5 (28K) │ 906×906  │   30     │   714    │    0    │   744   │ 1286 segs, 751 viol, 982 ovlp  │ 1061 placed, 444 unplaced            │
+  │ test2 (72K) │ 873×589  │  (TBD)   │  (TBD)   │   —     │  5639   │ (not run — 11278 blocks)       │ —                                    │
+  │ test7 (360K)│1581×1517 │  (TBD)   │  (TBD)   │   —     │ 28312   │ (not run — 56624 blocks)       │ —                                    │
+  └─────────────┴──────────┴──────────┴──────────┴─────────┴─────────┴────────────────────────────────┴──────────────────────────────────────┘
+
+  Notes:
+  - "Skipped" = pairs filtered by _topo_valid() before generate_topologies_for_bundle; zero "Generated 0 topologies" warnings in all runs ✓
+  - Violations/overlaps are high because NUTS has no awareness of global routing guides; the planner assigns all buses to M7/M8 without topology-specific per-bundle congestion routing
+  - D-NUTS "insufficient signal tracks" warnings indicate NUTS placed a bus into a Hanan cell narrower than its bit-width; DetailedNUTS marks those bits unplaced
+  - test2 and test7 scripts were generated (5639/28312 buses) but not run — the large block count requires staged topology generation or parallelism improvements
+  - Layer selection: test1/test3 (die_max<400 µm) use M5+M6 (LOW) + M7+M8 (TOP); test5/test2/test7 (die_max≥400 µm) use M7+M8 (LOW) + M9+M10 (TOP)
+
+  Key insight on topology validity (_topo_valid):
+  The BUDA topology generator silently returns 0 candidates when — after corner margin shrink — src and dst blocks touch
+  (share a boundary point/edge) without strictly overlapping or being strictly separated. This is distinct from the
+  "inside" case (overlap), which generates L-shapes correctly. _topo_valid() catches two failure modes:
+    1. Block degenerates: (x2-x1) ≤ 2*cm or (y2-y1) ≤ 2*cm after integer rounding
+    2. Touching without separation or interior overlap: shrunken blocks share only a boundary line/point

@@ -441,6 +441,22 @@ def extract_high_fanout_buses(net_endpoints, min_fanout=5, max_fanout=256,
         if hpwl < min_hpwl:
             continue
 
+        rx1, ry1, rx2, ry2 = _min_x(rcv), _min_y(rcv), _max_x(rcv), _max_y(rcv)
+        # Skip if shrunken src block touches (but doesn't overlap) shrunken dst block —
+        # the topology generator returns 0 candidates for this degenerate geometry.
+        # Uses cm=1 (global corner_margin in generated scripts) and src_margin.
+        _cm = 1
+        sx1s = round(drv[0] - src_margin) + _cm
+        sy1s = round(drv[1] - src_margin) + _cm
+        sx2s = round(drv[0] + src_margin) - _cm
+        sy2s = round(drv[1] + src_margin) - _cm
+        dx1s = round(rx1) + _cm;  dy1s = round(ry1) + _cm
+        dx2s = round(rx2) - _cm;  dy2s = round(ry2) - _cm
+        strict_sep  = (sx2s < dx1s or dx2s < sx1s or sy2s < dy1s or dy2s < sy1s)
+        strict_over = (sx1s < dx2s and sx2s > dx1s and sy1s < dy2s and sy2s > dy1s)
+        if not strict_sep and not strict_over:
+            continue  # src and dst touch but don't overlap — degenerate for L/Z/U topo
+
         dst_cx = sum(p[0] for p in rcv) / len(rcv)
         dst_cy = sum(p[1] for p in rcv) / len(rcv)
         span = math.sqrt((drv[0] - dst_cx) ** 2 + (drv[1] - dst_cy) ** 2)
@@ -600,13 +616,30 @@ def main():
     print(f"  UNITS={units}, Die={die[0]:.1f}×{die[1]:.1f} µm")
     print(f"  {len(components)} instances, {len(nets)} signal nets")
 
-    if args.high_fanout:
-        print("Computing pin positions (mode=high-fanout)...")
-        _run_high_fanout(args, die, nets, components, lef_pins)
-    elif args.bipartite:
-        print("Computing pin positions (mode=bipartite)...")
-        _run_bipartite(args, die, nets, components, lef_pins,
-                       args.max_nets, args.min_span, args.grid)
+    use_bipartite = args.bipartite or (args.grid is not None)
+
+    grid_buses = []
+    hf_buses   = []
+
+    if use_bipartite or args.high_fanout:
+        print("Computing driver/receiver pin positions...")
+        net_endpoints = compute_driver_receiver_positions(components, nets, lef_pins)
+        print(f"  {len(net_endpoints)} nets with driver+receiver positions")
+
+        if use_bipartite:
+            print(f"\nClustering (mode=bipartite, grid={args.grid} µm)...")
+            grid_buses = _run_bipartite(args, die, net_endpoints,
+                                         args.max_nets, args.min_span, args.grid)
+
+        if args.high_fanout:
+            print(f"\nExtracting high-fanout buses "
+                  f"(fanout {args.min_fanout}–{args.max_fanout}, "
+                  f"HPWL≥{args.min_hpwl} µm)...")
+            hf_buses = _run_high_fanout(args, die, net_endpoints)
+
+        if args.out:
+            write_buda_script(args.out, die, args.def_file,
+                              grid_buses, hf_buses, args)
     else:
         print("Computing pin positions (mode=centroid)...")
         _run_centroid(args, die, nets, components, lef_pins)
@@ -666,10 +699,8 @@ def _run_centroid(args, die, nets, components, lef_pins):
         print(f"\nWrote {len(clusters)} busterms to {args.out}")
 
 
-def _run_bipartite(args, die, nets, components, lef_pins, max_nets, min_span, grid):
-    net_endpoints = compute_driver_receiver_positions(components, nets, lef_pins)
+def _run_bipartite(args, die, net_endpoints, max_nets, min_span, grid):
     total_eligible = len(net_endpoints)
-    print(f"  {total_eligible} nets with driver+receiver positions")
 
     if args.hpwl:
         # Build unified pin-pos map from endpoints for HPWL reporting
@@ -709,36 +740,16 @@ def _run_bipartite(args, die, nets, components, lef_pins, max_nets, min_span, gr
     if len(buses) > 30:
         print(f"  ... {len(buses)-30} more buses")
 
-    if args.out:
-        with open(args.out, 'w') as f:
-            f.write(f"# Bipartite net clusters from {args.def_file}\n")
-            f.write(f"# eps={args.eps} µm, min_nets={args.min}\n")
-            f.write(f"# Die: {die[0]:.1f} x {die[1]:.1f} µm\n\n")
-            for i, b in enumerate(buses):
-                n = len(b['nets'])
-                sx1, sy1, sx2, sy2 = b['src_bbox']
-                dx1, dy1, dx2, dy2 = b['dst_bbox']
-                f.write(f"add_block src_{i+1}  "
-                        f"{sx1:.2f} {sy1:.2f}  {sx2:.2f} {sy2:.2f}  # {n} nets\n")
-                f.write(f"add_block dst_{i+1}  "
-                        f"{dx1:.2f} {dy1:.2f}  {dx2:.2f} {dy2:.2f}  # {n} nets\n")
-                f.write(f"add_bus bus_{i+1}[{n}] src_{i+1}.out dst_{i+1}.in\n\n")
-        print(f"\nWrote {len(buses)} buses ({2*len(buses)} blocks) to {args.out}")
+    return buses
 
 
-def _run_high_fanout(args, die, nets, components, lef_pins):
-    net_endpoints = compute_driver_receiver_positions(components, nets, lef_pins)
-    print(f"  {len(net_endpoints)} nets with driver+receiver positions")
-
+def _run_high_fanout(args, die, net_endpoints):
     if args.hpwl:
         unified = {n: [ep['driver']] + ep['receivers']
                    for n, ep in net_endpoints.items()}
         print("\nHPWL analysis:")
         report_hpwl(unified, die)
 
-    print(f"\nExtracting high-fanout buses "
-          f"(fanout {args.min_fanout}–{args.max_fanout}, "
-          f"HPWL≥{args.min_hpwl} µm, src_margin={args.src_margin} µm)...")
     buses = extract_high_fanout_buses(
         net_endpoints,
         min_fanout=args.min_fanout,
@@ -788,28 +799,166 @@ def _run_high_fanout(args, die, nets, components, lef_pins):
             print(f"    fanout {label:<7}: {cnt:5d} buses, "
                   f"aggregate HPWL = {wl:,.0f} µm")
 
-    if args.out:
-        with open(args.out, 'w') as f:
-            f.write(f"# High-fanout 1-bit multicast buses from {args.def_file}\n")
-            f.write(f"# fanout {args.min_fanout}–{args.max_fanout}, "
-                    f"HPWL≥{args.min_hpwl} µm, src_margin={args.src_margin} µm\n")
-            f.write(f"# Die: {die[0]:.1f} x {die[1]:.1f} µm\n")
-            f.write(f"# {len(buses)} buses, aggregate HPWL = {total_hpwl:,.0f} µm\n")
-            f.write(f"#\n# Add def_layer / def_track_pattern / corner_margin header before use.\n\n")
-            for i, b in enumerate(buses):
-                sx1, sy1, sx2, sy2 = b['src_bbox']
-                dx1, dy1, dx2, dy2 = b['dst_bbox']
-                f.write(f"# {b['net']}  fanout={b['fanout']}  "
-                        f"HPWL={b['hpwl']:.1f} µm  span={b['span']:.1f} µm\n")
-                f.write(f"add_block hf_{i+1}_src  "
-                        f"{sx1:.2f} {sy1:.2f}  {sx2:.2f} {sy2:.2f}  "
-                        f"corner_margin dx 1 dy 1\n")
-                f.write(f"add_block hf_{i+1}_dst  "
-                        f"{dx1:.2f} {dy1:.2f}  {dx2:.2f} {dy2:.2f}\n")
-                f.write(f"add_bus hf_{i+1}[1]  hf_{i+1}_src.out  hf_{i+1}_dst.in\n")
-                f.write(f"generate_topologies_for_bundle hf_{i+1}  "
-                        f"hf_{i+1}_src  hf_{i+1}_dst\n\n")
-        print(f"\nWrote {len(buses)} buses ({2*len(buses)} blocks) to {args.out}")
+    return buses
+
+
+# ── .buda script generation ───────────────────────────────────────────────────
+
+_TP_M56 = ('SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 '
+            'POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 '
+            'SIGNAL 0.14 0.14 GROUND 0.28 0.14')
+_TP_M78  = ('SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 '
+            'POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 '
+            'SIGNAL 0.4 0.4 GROUND 0.8 0.4')
+_TP_M910 = ('SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 '
+            'POWER 1.6 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 '
+            'SIGNAL 0.8 0.8 GROUND 1.6 0.8')
+
+
+def _buda_layer_stack(die_w, die_h):
+    """Return (layer_lines, track_lines) for the NanGate45 stack that fits this die."""
+    w, h = int(math.ceil(die_w)), int(math.ceil(die_h))
+    if max(die_w, die_h) < 400:
+        layers = [
+            f'def_layer 5  M5  H LOW 20 span_min 0  span_max {w}',
+            f'def_layer 6  M6  V LOW 20 span_min 0  span_max {h}',
+            f'def_layer 7  M7  H TOP 15 span_min 0  span_max {w}',
+            f'def_layer 8  M8  V TOP 15 span_min 0  span_max {h}',
+        ]
+        tracks = [
+            f'def_track_pattern 5  0.07  {_TP_M56}',
+            f'def_track_pattern 6  0.095 {_TP_M56}',
+            f'def_track_pattern 7  0.07  {_TP_M78}',
+            f'def_track_pattern 8  0.095 {_TP_M78}',
+        ]
+    else:
+        layers = [
+            f'def_layer 7  M7  H LOW 20 span_min 0  span_max {w}',
+            f'def_layer 8  M8  V LOW 20 span_min 0  span_max {h}',
+            f'def_layer 9  M9  H TOP 15 span_min 0  span_max {w}',
+            f'def_layer 10 M10 V TOP 15 span_min 0  span_max {h}',
+        ]
+        tracks = [
+            f'def_track_pattern 7  0.07  {_TP_M78}',
+            f'def_track_pattern 8  0.095 {_TP_M78}',
+            f'def_track_pattern 9  0.07  {_TP_M910}',
+            f'def_track_pattern 10 0.095 {_TP_M910}',
+        ]
+    return layers, tracks
+
+
+def _topo_valid(sx1, sy1, sx2, sy2, dx1, dy1, dx2, dy2, cm=1):
+    """Return True if a src/dst block pair will yield ≥1 topology after corner margins.
+
+    Two failure modes:
+    1. Either block shrinks to zero (width or height ≤ 2*cm).
+    2. Shrunken src and dst TOUCH (share boundary but not interior) → topology
+       generator returns 0 candidates.
+    Overlapping (src inside dst or dst inside src) is allowed — the generator handles it.
+    """
+    # Check non-degenerate after shrink
+    for x1, y1, x2, y2 in [(sx1, sy1, sx2, sy2), (dx1, dy1, dx2, dy2)]:
+        if (x2 - x1) <= 2 * cm or (y2 - y1) <= 2 * cm:
+            return False
+    # Shrunken rects
+    ssx1, ssy1, ssx2, ssy2 = sx1+cm, sy1+cm, sx2-cm, sy2-cm
+    sdx1, sdy1, sdx2, sdy2 = dx1+cm, dy1+cm, dx2-cm, dy2-cm
+    # Strictly separated (gap ≥ 1 between boundaries)?
+    sep = (ssx2 < sdx1 or sdx2 < ssx1 or ssy2 < sdy1 or sdy2 < ssy1)
+    # Strictly overlapping (shared interior)?
+    over = (ssx1 < sdx2 and ssx2 > sdx1 and ssy1 < sdy2 and ssy2 > sdy1)
+    # Valid iff separated or overlapping; touching (neither) → 0 topologies
+    return sep or over
+
+
+def write_buda_script(path, die, def_file, grid_buses, hf_buses, args):
+    """Write a complete runnable .buda script combining grid and high-fanout buses."""
+    die_w, die_h = die
+    layers, tracks = _buda_layer_stack(die_w, die_h)
+    # Global corner_margin: 1 µm for tiny src blocks; HF src get per-block override too
+    cm = 1
+
+    n_grid = len(grid_buses)
+    n_hf   = len(hf_buses)
+
+    with open(path, 'w') as f:
+        f.write(f"# Auto-generated BUDA script from {def_file}\n")
+        f.write(f"# Die: {die_w:.1f} x {die_h:.1f} µm\n")
+        f.write(f"# {n_grid + n_hf} buses: {n_grid} grid-clustered + {n_hf} high-fanout\n\n")
+
+        for line in layers:
+            f.write(line + '\n')
+        f.write('\n')
+        for line in tracks:
+            f.write(line + '\n')
+        f.write(f'\ncorner_margin dx {cm} dy {cm}\n')
+
+        # ── Block + bus declarations ──────────────────────────────────────────
+        def _ic(v):  # float µm → integer µm (BUDA C++ takes int coords)
+            return int(round(v))
+
+        grid_valid = []
+        for b in grid_buses:
+            sx1, sy1, sx2, sy2 = [_ic(v) for v in b['src_bbox']]
+            dx1, dy1, dx2, dy2 = [_ic(v) for v in b['dst_bbox']]
+            if _topo_valid(sx1, sy1, sx2, sy2, dx1, dy1, dx2, dy2, cm):
+                grid_valid.append((b, sx1, sy1, sx2, sy2, dx1, dy1, dx2, dy2))
+
+        hf_valid = []
+        for b in hf_buses:
+            sx1, sy1, sx2, sy2 = [_ic(v) for v in b['src_bbox']]
+            dx1, dy1, dx2, dy2 = [_ic(v) for v in b['dst_bbox']]
+            if _topo_valid(sx1, sy1, sx2, sy2, dx1, dy1, dx2, dy2, cm):
+                hf_valid.append((b, sx1, sy1, sx2, sy2, dx1, dy1, dx2, dy2))
+
+        skipped = (n_grid - len(grid_valid)) + (n_hf - len(hf_valid))
+
+        if grid_valid:
+            f.write(f'\n# ── Grid-clustered buses ({len(grid_valid)}) '
+                    f'─────────────────────────────────\n')
+            for i, (b, sx1, sy1, sx2, sy2, dx1, dy1, dx2, dy2) in enumerate(grid_valid):
+                n = len(b['nets'])
+                f.write(f'add_block g_{i+1}_src  '
+                        f'{sx1} {sy1}  {sx2} {sy2}  # {n} nets\n')
+                f.write(f'add_block g_{i+1}_dst  '
+                        f'{dx1} {dy1}  {dx2} {dy2}  # {n} nets\n')
+                f.write(f'add_bus g_{i+1}[{n}]  g_{i+1}_src.out  g_{i+1}_dst.in\n\n')
+
+        if hf_valid:
+            f.write(f'\n# ── High-fanout buses ({len(hf_valid)}) '
+                    f'──────────────────────────────────────\n')
+            for i, (b, sx1, sy1, sx2, sy2, dx1, dy1, dx2, dy2) in enumerate(hf_valid):
+                f.write(f'# {b["net"]}  fanout={b["fanout"]}  '
+                        f'HPWL={b["hpwl"]:.1f} µm  span={b["span"]:.1f} µm\n')
+                f.write(f'add_block hf_{i+1}_src  '
+                        f'{sx1} {sy1}  {sx2} {sy2}  '
+                        f'corner_margin dx 1 dy 1\n')
+                f.write(f'add_block hf_{i+1}_dst  '
+                        f'{dx1} {dy1}  {dx2} {dy2}\n')
+                f.write(f'add_bus hf_{i+1}[1]  hf_{i+1}_src.out  hf_{i+1}_dst.in\n\n')
+
+        # ── Pipeline ─────────────────────────────────────────────────────────
+        f.write('run_bundler strict\n\n')
+
+        if grid_buses:
+            for i, b in enumerate(grid_buses):
+                f.write(f'generate_topologies_for_bundle g_{i+1}  '
+                        f'g_{i+1}_src  g_{i+1}_dst\n')
+            f.write('\n')
+
+        if hf_buses:
+            for i in range(n_hf):
+                f.write(f'generate_topologies_for_bundle hf_{i+1}  '
+                        f'hf_{i+1}_src  hf_{i+1}_dst\n')
+            f.write('\n')
+
+        f.write('run_planner 50\n')
+        f.write('run_nuts 1.0\n')
+        f.write('run_detailed_nuts\n\n')
+        f.write('visualize\n')
+
+    total = n_grid + n_hf
+    print(f'\nWrote {total} buses ({2*total} blocks) to {path}')
 
 
 if __name__ == '__main__':

@@ -1603,7 +1603,7 @@ class BudaVisualizer:
             all_lbl = '☑ All Bundles' if all_on else '☐ All Bundles'
             if self._detailed_result:
                 n_total = sum(len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
-                              for w in self.bundles if w.candidates)
+                              for w in self.bundles if w.candidates and 0 <= w.selected_topology_index < len(w.candidates))
                 all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
             self._btn_all_bundles.label.set_text(all_lbl)
 
@@ -1654,6 +1654,9 @@ class BudaVisualizer:
                 # DetailedNUTSResult doesn't easily provide per-bundle unplaced count.
                 # Let's count how many net_segments we have vs how many we expect.
                 w = next(w for w in self.bundles if w.original_bundle.id == bid)
+                if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
+                    stats_part = ' [no topo]'; stats_color = '#888888'
+                    continue
                 n_expected = len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
                 n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
                 n_unp = n_expected - n_placed
@@ -2179,6 +2182,8 @@ class BudaVisualizer:
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
             bid      = wrapper.original_bundle.id
+            if not wrapper.candidates or wrapper.selected_topology_index < 0 or wrapper.selected_topology_index >= len(wrapper.candidates):
+                continue
             topo     = wrapper.candidates[wrapper.selected_topology_index]
             viz_lw   = 3.0 + math.log2(1 + wrapper.width) * 2.0
             offset   = (i % 3 - 1) * 2.0
@@ -2219,6 +2224,8 @@ class BudaVisualizer:
 
         for i, wrapper in enumerate(self.bundles):
             bid    = wrapper.original_bundle.id
+            if not wrapper.candidates or wrapper.selected_topology_index < 0 or wrapper.selected_topology_index >= len(wrapper.candidates):
+                continue
             topo   = wrapper.candidates[wrapper.selected_topology_index]
             viz_lw = 3.0 + math.log2(1 + wrapper.width) * 2.0
             msz     = max(4, viz_lw)

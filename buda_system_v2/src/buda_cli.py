@@ -163,6 +163,8 @@ class BudaSession:
             bid   = w.original_bundle.id
             nets  = w.original_bundle.get_net_names()
             hint  = nets[0] if nets else f"B{bid}"
+            if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
+                continue  # bundle has no topology (e.g. src==dst or no candidates generated)
             topo  = w.candidates[w.selected_topology_index]
             for si, seg in enumerate(topo.segments):
                 lname = layer_names.get(seg.layer_hint, f"L{seg.layer_hint}")
@@ -330,6 +332,8 @@ class BudaSession:
                 # Update per-segment layers for segments of this direction.
                 # If seg_layers is populated (from run_planner), update it directly;
                 # otherwise fall back to the legacy assigned_v/h_layer attribute.
+                if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
+                    continue
                 topo = w.candidates[w.selected_topology_index]
                 if w.seg_layers:
                     sl = list(w.seg_layers)
@@ -376,7 +380,7 @@ class BudaSession:
         """
         states: dict[tuple, dict] = {}
         for bw in self.bundles:
-            if not bw.candidates:
+            if not bw.candidates or bw.selected_topology_index < 0 or bw.selected_topology_index >= len(bw.candidates):
                 continue
             topo = bw.candidates[bw.selected_topology_index]
             bid  = bw.original_bundle.id
@@ -613,6 +617,9 @@ class BudaSession:
         # Build ConnTopology per bundle for endpoint adj info.
         bid_to_cs = {}
         for w in self.bundles:
+            if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
+                bid_to_cs[w.original_bundle.id] = []
+                continue
             ct = interconnect.ConnTopology()
             ct.build(w.candidates[w.selected_topology_index], self.fp)
             bid_to_cs[w.original_bundle.id] = list(ct.segs())
