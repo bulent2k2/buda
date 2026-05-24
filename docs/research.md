@@ -47,17 +47,21 @@ Three MemPool BUDA files created in buda_system_v2/flow
 
 MacroPlacement benchmark designs (TILOS-AI-Institute/MacroPlacement, NanGate45)
 ====
-Two designs extracted from the MacroPlacement repo's NanGate45 placed-macro DEFs.
-Block positions are centroid ± half-macro-size derived from fp_placed_macros.def.
+Three designs extracted from the MacroPlacement repo's NanGate45 placed-macro DEFs.
+Block positions derived from exact lower-left corners in bsg_chip_fp_placed_macros.def
+(UNITS DISTANCE MICRONS 2000; divide raw DEF coords by 2000).
 
-  ┌──────────────────────────┬──────────────┬──────────────────────────────────────┬───────────────────────────────────────┬─────────┬───────────────────────────────────┬─────────────────────────────────────┐
-  │           File           │     Die      │              Blocks                  │                  Buses                │ Bundles │          Abstract NUTS            │           Detailed NUTS             │
-  ├──────────────────────────┼──────────────┼──────────────────────────────────────┼───────────────────────────────────────┼─────────┼───────────────────────────────────┼─────────────────────────────────────┤
-  │ nvdla_cbuf.buda          │ 2354×2353 µm │ 31 (cbuf_ctrl + 30 cbuf banks)       │ 1×8-bit cbuf_addr (1→30 multicast)    │ 1       │ 0 violations, 4 span adjustments  │ 240 net segments, 0 bits unplaced ✓ │
-  ├──────────────────────────┼──────────────┼──────────────────────────────────────┼───────────────────────────────────────┼─────────┼───────────────────────────────────┼─────────────────────────────────────┤
-  │ ariane133_cache.buda     │ 1357×1357 µm │ 24 (ctrl + 7 d_tag + 8 d_data +      │ 4×8-bit (d_tag_addr 1→7, d_data_addr  │ 4       │ 10 violations, 3 overlaps         │ 168 net segments, 0 bits unplaced ✓ │
-  │                          │              │      1 d_valid + 3 i_tag + 4 i_data) │ 1→8, i_data_fetch 1→4, i_tag_addr 1→3│         │                                   │                                     │
-  └──────────────────────────┴──────────────┴──────────────────────────────────────┴───────────────────────────────────────┴─────────┴───────────────────────────────────┴─────────────────────────────────────┘
+  ┌──────────────────────────┬──────────────┬───────────────────────────────────────┬────────────────────────────────────────────┬─────────┬───────────────────────────────────┬─────────────────────────────────────┐
+  │           File           │     Die      │               Blocks                  │                   Buses                    │ Bundles │          Abstract NUTS            │           Detailed NUTS             │
+  ├──────────────────────────┼──────────────┼───────────────────────────────────────┼────────────────────────────────────────────┼─────────┼───────────────────────────────────┼─────────────────────────────────────┤
+  │ nvdla_cbuf.buda          │ 2354×2353 µm │ 31 (cbuf_ctrl + 30 cbuf banks)        │ 1×8-bit cbuf_addr (1→30 multicast)         │ 1       │ 0 violations, 4 span adjustments  │ 240 net segments, 0 bits unplaced ✓ │
+  ├──────────────────────────┼──────────────┼───────────────────────────────────────┼────────────────────────────────────────────┼─────────┼───────────────────────────────────┼─────────────────────────────────────┤
+  │ ariane133_cache.buda     │ 1357×1357 µm │ 24 (ctrl + 7 d_tag + 8 d_data +       │ 4×8-bit (d_tag_addr 1→7, d_data_addr 1→8,  │ 4       │ 10 violations, 3 overlaps         │ 168 net segments, 0 bits unplaced ✓ │
+  │                          │              │      1 d_valid + 3 i_tag + 4 i_data)  │  i_data_fetch 1→4, i_tag_addr 1→3)         │         │                                   │                                     │
+  ├──────────────────────────┼──────────────┼───────────────────────────────────────┼────────────────────────────────────────────┼─────────┼───────────────────────────────────┼─────────────────────────────────────┤
+  │ bp_tile.buda             │ 2907×2906 µm │ 20 (core + 8 icd + 8 dcd + 4 grouped) │ 8 buses: dcache_addr 1→8, icache_addr 1→8, │ 8       │ 0 violations, 1 overlap           │ 207 net segments, 0 bits unplaced ✓ │
+  │                          │              │                                        │  l2_addr/l2_tag/cce_dir/cce_inst/tags P2P  │         │                                   │                                     │
+  └──────────────────────────┴──────────────┴───────────────────────────────────────┴────────────────────────────────────────────┴─────────┴───────────────────────────────────┴─────────────────────────────────────┘
 
   Key design decisions:
   - NVDLA cbuf: 91 fakeram45_256x64 SRAMs (4 KB each) in 30 banks; cbuf_addr is the key multicast bus broadcasting the
@@ -69,6 +73,14 @@ Block positions are centroid ± half-macro-size derived from fp_placed_macros.de
     MacroPlacement bus-unaware result — BUDA's planning would cluster them around a coherent trunk.
     10 abstract NUTS violations from d_data blocks that overlap in Y after shrink; DetailedNUTS recovers all bits (0 unplaced).
     Source: MacroPlacement Flows/NanGate45/ariane133/def/ariane133_fp_placed_macros.def
+  - BlackParrot bp_tile: 43 SRAMs per tile in a bp_quad (4-tile) chip (2907×2906 µm die). Tile y_0__x_0 modelled.
+    The bp_quad tile layout is NOT a clean 2×2 quadrant — tiles are physically interleaved; tile macros span
+    nearly the full die height (Y=22–2716 µm). Key buses: dcache_addr and icache_addr each 1→8 to individually
+    scattered ~120×75 µm fakeram45_512x64 macros.
+    L2 data (bottom, Y=22–780) to core (Y=1200–1400) to caches (top, Y=2116–2716): ~2300 µm vertical span.
+    corner_margin dx=5 dy=5 chosen because fakeram45_64x62 CCE dir macros are only 32×40 µm.
+    Planner picks H trunk (M9) at Y≈2394–2409 with V stubs (M10) down to each scattered SRAM — correct tree shape.
+    Source: MacroPlacement Flows/NanGate45/bp_quad/def/bsg_chip_fp_placed_macros.def
 
 
 
