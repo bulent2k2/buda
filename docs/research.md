@@ -245,4 +245,51 @@ Epsilon calibration: NanGate45 row height = 1.4 µm. eps=1.0 µm ≈ sub-row pro
     3. For each (driver_cluster, receiver_cluster) pair with ≥N shared nets → one BUDA bus
 
   The current def_cluster.py implements step 1 approximation (net centroid ≈ midpoint of driver+receiver).
-  Next step: separate driver-side and receiver-side clustering to produce proper source+dest busterms.
+
+
+Bipartite clustering — tools/def_cluster.py v2 (--bipartite mode)
+====
+Driver/receiver separation: LEF DIRECTION field (OUTPUT → driver, INPUT → receiver, INOUT → filtered
+by USE=POWER/GROUND so no real signal INOUT exists in test1/test3/test5 NanGate45 libs).
+
+Three algorithms implemented (--bipartite flag + optional --grid CELLSIZE):
+
+  1. Centroid DBSCAN (default, no flags):
+     DBSCAN on net centroids → routing hotspots. Good for visualizing congestion regions.
+
+  2. Bipartite DBSCAN (--bipartite):
+     DBSCAN on driver positions; DBSCAN on receiver centroids; match by (src_label, dst_label) pair.
+     Problem: DBSCAN chaining merges most nets into one giant cluster (dropped by --max-nets 64),
+     leaving only 7 buses / 3.6% coverage at eps=2.0 for test1.
+
+  3. Bipartite grid (--bipartite --grid CELLSIZE):
+     Each net maps to a fixed (src_cell, dst_cell) grid pair — no chaining possible.
+     Compactness filters: --max-nets 64 (drop wide clusters), --min-span 5 µm (drop local paths).
+     Best approach for BUDA bus generation from std-cell DEFs.
+
+Grid clustering results:
+
+  ┌─────────────┬───────────┬──────────┬──────────┬──────────────────────────────────────────────────────────┐
+  │  Testcase   │ Grid / min│ Buses    │ Coverage │ Top bus example                                          │
+  ├─────────────┼───────────┼──────────┼──────────┼──────────────────────────────────────────────────────────┤
+  │ test1 (10K) │  10 µm/5  │  28      │  5.1%    │ 7 nets, src 9.5×3.6 µm → dst 44.6×7.5 µm (H strip)     │
+  │ test1 (10K) │  15 µm/5  │  57      │ 14.9%    │ 39 nets, src 14.6×14.3 µm → dst 27.9×43.3 µm           │
+  ├─────────────┼───────────┼──────────┼──────────┼──────────────────────────────────────────────────────────┤
+  │ test5 (28K) │  10 µm/5  │  35      │  0.7%    │ 13 nets, src 9.4×8 µm → dst 18×8 µm                    │
+  │ test5 (28K) │  30 µm/5  │ 142      │  4.1%    │ 20 nets, src 27.8×20 µm → dst 33×56 µm                 │
+  │             │           │          │          │ 16 nets, src 14×0 µm (single-row!) → dst 42.6×24 µm ✓   │
+  └─────────────┴───────────┴──────────┴──────────┴──────────────────────────────────────────────────────────┘
+
+  Grid cell sizing rule: target ~30 instances per cell (enough for a 5-bit bus plus noise).
+    For NanGate45: density(test1) ≈ 0.41 inst/µm² → grid=10 µm (41 inst/cell)
+                   density(test5) ≈ 0.034 inst/µm² → grid=30 µm (30 inst/cell)
+  Formula: grid_size = sqrt(target_count / density) = sqrt(30 / (instances / die_area))
+
+  Verified quality signals:
+  - test5 bus4: src bbox height=0 (all 16 drivers on the SAME row) → confirmed register strip
+  - test1 bus4: src 9.5×3.6 µm → dst 44.6×7.5 µm horizontal strip → 7-bit bus driving ~30 columns
+  - Net numbers in buses are NOT sequential (gaps 10-788) → routing corridors, not architectural buses
+  - ~85-95% of nets remain unclustered at any grid size — std-cell P2P wiring is inherently distributed
+
+  Practical coverage: 5-15% of nets per design → a BUDA std-cell scenario would improve ~10% of nets.
+  Macro designs (MemPool, NVDLA, BlackParrot) can model 100% of the critical bus nets by construction.
