@@ -187,35 +187,15 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
 
     // ── Pass 1 ──
-    // Constrain to the block face extent, optionally shrunk by the block's corner
-    // margin (set via Floorplan::set_block_corner_margin).
-    //
-    //   H segment on left/right face (face runs in Y) → margin = dy
-    //     slide becomes [rect.y1+dy, rect.y2-dy]
-    //   V segment on top/bottom face (face runs in X) → margin = dx
-    //     slide becomes [rect.x1+dx, rect.x2-dx]
-    //
-    // Guard: if the margin would invert the interval (block smaller than 2×margin),
-    // fall back to the full face extent for that axis.
     for (auto& cs : segs_) {
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::BUSTERM) continue;
 
-            // For multi-rect blocks use the specific connecting rect rather than
-            // the union bbox so that the perp interval is tight to the actual face.
-            // Example: an H stub connecting to the wide-base right face (y∈[0,100])
-            // of an L-shaped block should not be free to slide up to y=400 (the
-            // union bbox top).
-            // When multiple rects share the same face (e.g. both rects of an L-block
-            // have y=0 as their bottom face), the stub can reach any of them, so use
-            // the union of all matching rects' extents in the perpendicular direction.
             Rect face_rect = bmap.at(conn.block_name);
             {
                 const auto rects = fp.get_block_rects(conn.block_name);
                 if (!rects.empty()) {
                     if (cs.horiz) {
-                        // H segment: face_coord is an x-face; perp_pos is y.
-                        // Union all rects whose x-face matches and contain perp_pos.
                         int u_y1 = INT_MAX, u_y2 = INT_MIN;
                         for (const Rect& r : rects) {
                             if ((r.x1 == conn.face_coord || r.x2 == conn.face_coord)
@@ -227,8 +207,6 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         if (u_y1 <= u_y2)
                             face_rect = Rect(face_rect.x1, u_y1, face_rect.x2, u_y2);
                     } else {
-                        // V segment: face_coord is a y-face; perp_pos is x.
-                        // Union all rects whose y-face matches and contain perp_pos.
                         int u_x1 = INT_MAX, u_x2 = INT_MIN;
                         for (const Rect& r : rects) {
                             if ((r.y1 == conn.face_coord || r.y2 == conn.face_coord)
@@ -248,12 +226,6 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                 int m  = cm.dy;
                 int lo = face_rect.y1 + m;
                 int hi = face_rect.y2 - m;
-                // Guard 1: block too short for both margins.
-                // Guard 2: nominal perp_pos is outside the margin range — this
-                //   happens when the topology generator places the endpoint at the
-                //   face boundary (e.g. y=rect.y1 for a below-to-above L).
-                //   Applying the margin would exclude the nominal position and
-                //   cause NUTS interval inversions; fall back to full face extent.
                 if (lo > hi || cs.perp_pos < lo || cs.perp_pos > hi) {
                     lo = face_rect.y1; hi = face_rect.y2;
                 }
@@ -273,13 +245,6 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     }
 
     // ── Pass 2 ──
-    // Iterate to convergence (usually 1 pass suffices for a tree).
-    // Only segments with ≥2 SEG connections are genuine spines; only they need
-    // indirect busterm constraints propagated from their stubs.  Terminal stubs
-    // (1 SEG connection + 1 BUSTERM) are fully constrained by Pass 1 already.
-    // Applying Pass 2 from a stub's perspective would treat the spine's annotated
-    // endpoint BUSTERMs as if they were its own stub's far-end anchor, producing
-    // inverted intervals for multicast TRUNK_H/V topologies.
     bool changed = true;
     while (changed) {
         changed = false;
@@ -288,19 +253,21 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                 if (conn.kind != SegConn::SEG) continue;
                 const ConnSeg& stub = segs_[conn.seg_idx];
 
-                // stub must be perpendicular to cs (always true in a valid topology).
                 for (const auto& sc : stub.conns) {
                     if (sc.kind != SegConn::BUSTERM) continue;
 
                     if (cs.horiz && !stub.horiz) {
                         // cs = H spine, stub = V stub anchored at rect's y-face
-                        int f = sc.face_coord;  // the busterm y-face stub endpoint
+                        int f = sc.face_coord;
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
 
-                        // Enforce robust stub length.
-                        int m = fp.get_min_stub_length(1 /*VERTICAL*/, stub.layer_id);
-                        if (cs.perp_pos >= f) new_lo = std::max(new_lo, f + m);
-                        else                   new_hi = std::min(new_hi, f - m);
+                        // Only enforce push-out if this is an actual relay stub (length > 0).
+                        // Direct connections (perp_pos == f) are exempt from Pass 2 push-out.
+                        if (std::abs(cs.perp_pos - f) > 0) {
+                            int m = fp.get_min_stub_length(1 /*VERTICAL*/, stub.layer_id);
+                            if (cs.perp_pos > f) new_lo = std::max(new_lo, f + m);
+                            else                  new_hi = std::min(new_hi, f - m);
+                        }
 
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
@@ -311,9 +278,11 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         int f = sc.face_coord;
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
 
-                        int m = fp.get_min_stub_length(0 /*HORIZONTAL*/, stub.layer_id);
-                        if (cs.perp_pos >= f) new_lo = std::max(new_lo, f + m);
-                        else                   new_hi = std::min(new_hi, f - m);
+                        if (std::abs(cs.perp_pos - f) > 0) {
+                            int m = fp.get_min_stub_length(0 /*HORIZONTAL*/, stub.layer_id);
+                            if (cs.perp_pos > f) new_lo = std::max(new_lo, f + m);
+                            else                  new_hi = std::min(new_hi, f - m);
+                        }
 
                         if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
@@ -326,19 +295,11 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
     }
 }
 
-// ── manhattan_nearest ─────────────────────────────────────────────────────────
-//
-// Minimum Manhattan distance between the closest points of two rectangles.
-// The gap in each axis is max(0, lo_of_right - hi_of_left) after sorting.
-// Overlapping or touching rects → gap 0, distance = 0.
-
 int manhattan_nearest(const Rect& a, const Rect& b) {
     int dx = std::max(0, std::max(a.x1 - b.x2, b.x1 - a.x2));
     int dy = std::max(0, std::max(a.y1 - b.y2, b.y1 - a.y2));
     return dx + dy;
 }
-
-// ── seg_bbox ──────────────────────────────────────────────────────────────────
 
 Rect seg_bbox(const ConnSeg& cs) {
     if (cs.horiz)
@@ -347,18 +308,11 @@ Rect seg_bbox(const ConnSeg& cs) {
         return Rect{ cs.perp_pos, cs.along_lo, cs.perp_pos, cs.along_hi };
 }
 
-// ── compute_mst (Kruskal's) ───────────────────────────────────────────────────
-//
-// Build every pairwise edge, sort by Manhattan distance, then greedily add
-// edges that join two previously disconnected components (union-find).
-
 std::vector<MSTEdge> compute_mst(
     const std::vector<std::pair<std::string, Rect>>& nodes)
 {
     int n = (int)nodes.size();
     if (n <= 1) return {};
-
-    // Enumerate all O(N²) edges.
     struct RawEdge { int u, v, dist; };
     std::vector<RawEdge> edges;
     edges.reserve(n * (n - 1) / 2);
@@ -370,7 +324,6 @@ std::vector<MSTEdge> compute_mst(
     std::sort(edges.begin(), edges.end(),
               [](const RawEdge& a, const RawEdge& b){ return a.dist < b.dist; });
 
-    // Union-find: path-compressed.
     std::vector<int> parent(n);
     std::iota(parent.begin(), parent.end(), 0);
     std::function<int(int)> find = [&](int x) {
@@ -390,23 +343,14 @@ std::vector<MSTEdge> compute_mst(
     return mst;
 }
 
-// ── ConnTopology::trunk_mst ───────────────────────────────────────────────────
-//
-// Collect all blocks in fp whose name does NOT appear in any BUSTERM conn of
-// segs_[trunk_idx].  Build a node list: node 0 = trunk (degenerate bbox),
-// nodes 1..k = unconnected blocks.  Return their MST.
-
 std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
                                               const Floorplan& fp) const
 {
     const ConnSeg& trunk = segs_[trunk_idx];
-
-    // Collect already-connected block names.
     std::set<std::string> connected;
     for (const auto& c : trunk.conns)
         if (c.kind == SegConn::BUSTERM) connected.insert(c.block_name);
 
-    // Build node list: trunk first, then unconnected blocks.
     std::vector<std::pair<std::string, Rect>> nodes;
     nodes.emplace_back("trunk", seg_bbox(trunk));
     for (const auto& [name, rect] : fp.get_all_blocks())
@@ -416,21 +360,9 @@ std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
     return compute_mst(nodes);
 }
 
-// ── ConnTopology::compute_net_pull ────────────────────────────────────────────
-//
-// For each segment S, count how many BUSTERM anchors in SEG-connected neighbours
-// lie above vs. below S.perp_pos.  Moving S toward a BUSTERM at face_coord f
-// shortens the connecting stub by |f - perp_pos|.
-//
-//   net_pull > 0  →  more anchors above perp_pos  →  sliding up/right reduces WL
-//   net_pull < 0  →  more anchors below perp_pos  →  sliding down/left reduces WL
-//   net_pull == 0 →  balanced (or no connected stubs)  →  no preferred direction
-//
 void ConnTopology::compute_net_pull() {
     for (auto& cs : segs_) {
         int pos = 0, neg = 0;
-
-        // Pass 1: neighbours anchored by busterms.
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::SEG) continue;
             const ConnSeg& nb = segs_[conn.seg_idx];
@@ -440,19 +372,13 @@ void ConnTopology::compute_net_pull() {
                 else if (sc.face_coord < cs.perp_pos) ++neg;
             }
         }
-
-        // Pass 2: free-floating neighbours (no busterms on nb).
-        // If cs sits at the lo or hi extreme of nb's stub positions, sliding cs
-        // toward the interior shrinks nb's span.
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::SEG) continue;
             const ConnSeg& nb = segs_[conn.seg_idx];
-
             bool nb_has_bt = false;
             for (const auto& sc : nb.conns)
                 if (sc.kind == SegConn::BUSTERM) { nb_has_bt = true; break; }
             if (nb_has_bt) continue;
-
             int lo = INT_MAX, hi = INT_MIN;
             for (const auto& sc : nb.conns) {
                 if (sc.kind != SegConn::SEG) continue;
@@ -460,12 +386,11 @@ void ConnTopology::compute_net_pull() {
                 lo = std::min(lo, p);
                 hi = std::max(hi, p);
             }
-            if (lo >= hi) continue;
-
-            if      (cs.perp_pos == lo) ++pos;
-            else if (cs.perp_pos == hi) ++neg;
+            if (lo < hi) {
+                if      (cs.perp_pos == lo) ++pos;
+                else if (cs.perp_pos == hi) ++neg;
+            }
         }
-
         cs.net_pull = pos - neg;
     }
 }
