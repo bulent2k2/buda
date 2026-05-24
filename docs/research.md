@@ -184,10 +184,20 @@ Note: ISPD 2018 benchmarks return HTTP 404; all 9 testcases come from ISPD 2019.
   │ ispd19_test10   │~900,000 │    —   │      —       │  111 MB  │
   └─────────────────┴─────────┴────────┴──────────────┴──────────┘
 
+  Confirmed die sizes (parsed from actual DEF files):
+  - test1:  8,879 inst,  3,152 nets, 148×146 µm
+  - test3:  8,283 inst,  8,952 nets, 195×195 µm
+  - test5: 27,528 inst, 29,415 nets, 906×906 µm  (UNITS=1000, not 2000)
+  - test2: 72,094 inst, 72,410 nets, 873×589 µm
+  - test7: 359,746 inst, 358,720 nets, 1581×1517 µm
+  - test9: 899,341 inst, 895,253 nets, 2006×2151 µm
+
   Scale grouping:
-  - ~10K:  test1, test3, test5  (note: test5 is 29K — no true 10K third case available)
-  - ~100K: test2, test6, test7
-  - ~1M:   test8, test9, test10 (tops out at ~900K; none exceeds 1M in this set)
+  - ~10K:  test1 (8.9K), test3 (8.3K)
+  - ~30K:  test5 (27.5K)
+  - ~70K:  test2 (72K)
+  - ~360K: test7 (360K)
+  - ~900K: test9 (899K)
 
   DEF structure confirmed (test1 + test3 downloaded and parsed):
   - COMPONENTS: inst<N> <CellType> + PLACED ( x y ) <orient>  [no routing geometry]
@@ -199,3 +209,40 @@ Note: ISPD 2018 benchmarks return HTTP 404; all 9 testcases come from ISPD 2019.
   Key parsing note: actual signal pin position =
     cell_placed_origin + rotate(pin_rect_center, orientation)
   where rotate() handles N (identity), FN (flip-x), S (rotate 180°), FS (flip-x + rotate 180°).
+
+
+Spatial clustering results — tools/def_cluster.py
+====
+Tool: DBSCAN on net centroids (driver + receiver pin midpoint). Output = busterms for BUDA.
+Epsilon calibration: NanGate45 row height = 1.4 µm. eps=1.0 µm ≈ sub-row proximity.
+
+  ┌─────────────┬──────────────┬──────────┬──────────────────────────────────────────────────┐
+  │  Testcase   │  eps / min   │ Clusters │ Notes                                            │
+  ├─────────────┼──────────────┼──────────┼──────────────────────────────────────────────────┤
+  │ test1 (10K) │ 1.0 µm / 5  │  87      │ max 16 nets, compact bboxes (6–62 µm wide)       │
+  │             │              │ 572 nets │ narrow horizontal strips look like row-level buses│
+  ├─────────────┼──────────────┼──────────┼──────────────────────────────────────────────────┤
+  │ test3 (8K)  │ 1.0 µm / 5  │ 397      │ max 169 nets — 3× net density vs test1;          │
+  │             │              │5023 nets │ clusters are still routing hotspots, just larger  │
+  ├─────────────┼──────────────┼──────────┼──────────────────────────────────────────────────┤
+  │ test5 (28K) │ 3.0 µm / 5  │ 398      │ top clusters have 100s–1000s of nets (too large) │
+  │             │              │25753 nets│ sparse design (10× less dense than test1/test3)  │
+  │             │              │          │ thin strips (86×14 µm, 141×14 µm) are routing    │
+  │             │              │          │ corridors — promising busterm candidates          │
+  └─────────────┴──────────────┴──────────┴──────────────────────────────────────────────────┘
+
+  Key finding (test1 cluster 1 inspection):
+  - 16-net cluster, bbox 61.2×7.3 µm (Y=39.9–47.2 µm horizontal band, ~5 cell rows)
+  - ALL nets are fanout=2 (point-to-point) from DIFFERENT drivers (no shared driver)
+  - Sequential net numbers (net2834–net3140) suggest synthesized bus bits scattered by placement
+  - This is a ROUTING CORRIDOR, not an architectural bus: independent bits in the same spatial channel
+
+  Architectural conclusion:
+  Pure net-centroid DBSCAN finds routing hotspots — regions where many wires cross the same zone.
+  For proper BUDA bus generation, the right model is BIPARTITE clustering:
+    1. Cluster DRIVER pins → source busterms (where the data originates)
+    2. Cluster RECEIVER pins → destination busterms (where the data lands)
+    3. For each (driver_cluster, receiver_cluster) pair with ≥N shared nets → one BUDA bus
+
+  The current def_cluster.py implements step 1 approximation (net centroid ≈ midpoint of driver+receiver).
+  Next step: separate driver-side and receiver-side clustering to produce proper source+dest busterms.
