@@ -1019,27 +1019,6 @@ std::vector<Topology> TopologyGenerator::generate_npin(
         }
     }
 
-    bool all_same_x = true, all_same_y = true;
-    for (const auto& p : pins) {
-        if (p.x != pins[0].x) all_same_x = false;
-        if (p.y != pins[0].y) all_same_y = false;
-    }
-    if (all_same_x) {
-        Topology t; t.type = "I_V";
-        t.segments.push_back(make_seg(pins[0].x, y_lo, pins[0].x, y_hi, v_layer_));
-        results.push_back(t);
-    }
-    if (all_same_y) {
-        Topology t; t.type = "I_H";
-        t.segments.push_back(make_seg(x_lo, pins[0].y, x_hi, pins[0].y, h_layer_));
-        results.push_back(t);
-    }
-    // For multi-rect blocks, always generate trunk candidates even when pin
-    // centres happen to be collinear — the individual rects span a larger area.
-    if ((all_same_x || all_same_y) && !has_multi_rect) {
-        for (auto& t : results) annotate_endpoints(t, blocks);
-        return results;
-    }
 
     // Hanan grid: include edges of every individual rect (not just union bboxes).
     std::vector<Rect> all_rects_for_hanan;
@@ -1275,6 +1254,10 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     const Rect& s_orig = src_bt.orig_bbox;
     const Rect& d_orig = dst_bt.orig_bbox;
 
+    // Direct I_H/I_V: when bbox y- or x-ranges overlap, a single-segment connection
+    // between the facing faces is valid and not covered by L/Z/U shapes (which all
+    // require at least one bend).  Only in the single-rect 2-pin path; the npin path
+    // uses TRUNK_H/V which subsume this case.
     if (use_busterm_) {
         int xo_lo = std::max(src.x1, dst.x1), xo_hi = std::min(src.x2, dst.x2);
         if (xo_lo < xo_hi) {
