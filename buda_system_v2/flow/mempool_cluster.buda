@@ -1,0 +1,92 @@
+# mempool_cluster.buda — MemPool Cluster Level (NanGate45)
+#
+# Source:  MemPool paper (Riedel et al., 2023); ISPD24 MemPool-Cluster benchmark
+# Hierarchy: 1 cluster = 4 groups in a 2×2 arrangement
+# Die area:  2350 × 2350 µm (estimated: 2 × 1100 + 150 µm routing margin)
+#
+# Physical topology: each group connects to the 3 other groups via point-to-point
+# TCDM SPM interconnects (the "north", "northeast", "east" ports of each tile,
+# aggregated at the group boundary).
+#
+# Bus of interest: inter-group TCDM request channels.
+#   Each directional link carries NumTilesPerGroup=16 independent TCDM channels.
+#   Per channel: tcdm_master_req_t = 63 bits.
+#   Aggregate per link: 16 × 63 = 1008 bits.
+#   Here modelled as 64 bits (one representative tile channel) to keep
+#   NUTS track counts tractable; multiply by 16 for full physical width.
+#
+# Group layout (2×2):
+#
+#   group_2 (TL)    group_3 (TR)       y = 1200–2300
+#   group_0 (BL)    group_1 (BR)       y = 50–1150
+#       x = 50–1150    x = 1200–2300
+#
+# Inter-group connections (each link is bidirectional; modelled as two buses):
+#   g0 ↔ g1  East/West
+#   g0 ↔ g2  North/South
+#   g0 ↔ g3  NE/SW diagonal
+#   g1 ↔ g2  NW/SE diagonal
+#   g1 ↔ g3  North/South
+#   g2 ↔ g3  East/West
+#
+# Layer stack: M7/M8 for intra-cluster stubs, M9/M10 for die-spanning trunks.
+
+def_layer 7  M7  H LOW 20 span_min 0    span_max 800
+def_layer 8  M8  V LOW 20 span_min 0    span_max 800
+def_layer 9  M9  H TOP 15 span_min 400  span_max 2350
+def_layer 10 M10 V TOP 15 span_min 400  span_max 2350
+
+corner_margin dx 30 dy 30
+
+# ── Floorplan ─────────────────────────────────────────────────────────────
+# Four group blocks, each 1100 × 1100 µm.
+# Gap between groups: 100 µm (routing channel for inter-group wires).
+#
+#   group_2  group_3       (top row, y = 1200–2300)
+#   group_0  group_1       (bottom row, y = 50–1150)
+
+add_block group_0    50   50  1150 1150
+add_block group_1  1200   50  2300 1150
+add_block group_2    50 1200  1150 2300
+add_block group_3  1200 1200  2300 2300
+
+# ── Buses ─────────────────────────────────────────────────────────────────
+# Width: 64 bits per bus (= 1 TCDM request channel; physical width = 16×).
+#
+# Naming: <src>_to_<dst>_<direction>
+#   Direction labels follow the MemPool convention: each group's remote ports
+#   are labelled N (north), NE (northeast), E (east) from the source group's
+#   frame of reference. The return path is the symmetric port on the peer group.
+
+# ── g0 ↔ g1: East / West ──────────────────────────────────────────────────
+add_bus g0_to_g1_east[64] group_0.east_out group_1.west_in
+add_bus g1_to_g0_west[64] group_1.west_out group_0.east_in
+
+# ── g0 ↔ g2: North / South ────────────────────────────────────────────────
+add_bus g0_to_g2_north[64] group_0.north_out group_2.south_in
+add_bus g2_to_g0_south[64] group_2.south_out group_0.north_in
+
+# ── g0 ↔ g3: NE / SW diagonal ────────────────────────────────────────────
+add_bus g0_to_g3_ne[64] group_0.ne_out group_3.sw_in
+add_bus g3_to_g0_sw[64] group_3.sw_out group_0.ne_in
+
+# ── g1 ↔ g2: NW / SE diagonal ────────────────────────────────────────────
+add_bus g1_to_g2_nw[64] group_1.nw_out group_2.se_in
+add_bus g2_to_g1_se[64] group_2.se_out group_1.nw_in
+
+# ── g1 ↔ g3: North / South ────────────────────────────────────────────────
+add_bus g1_to_g3_north[64] group_1.north_out group_3.south_in
+add_bus g3_to_g1_south[64] group_3.south_out group_1.north_in
+
+# ── g2 ↔ g3: East / West ──────────────────────────────────────────────────
+add_bus g2_to_g3_east[64] group_2.east_out group_3.west_in
+add_bus g3_to_g2_west[64] group_3.west_out group_2.east_in
+
+# ── Pipeline ──────────────────────────────────────────────────────────────
+# STRICT: each bus has a unique (driver, receiver) pair → 12 separate bundles.
+run_bundler strict
+generate_topologies
+run_planner 50
+run_nuts 1.0
+
+visualize

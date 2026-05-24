@@ -1,7 +1,7 @@
 **/build/
 **/__pycache__/
-**/src/interconnect.cpython-313-darwin.so
 **/*~
+buda_system/src/interconnect.cpython-313-darwin.so
 buda_system_v2/flow/four_blocks_nuts.log
 buda_system_v2/flow/nuts.log
 buda_system_v2/flow/sel_topo_4pin_nuts.log
