@@ -9,10 +9,10 @@ from matplotlib.widgets import Button
 
 import interconnect as ic
 
-_LAYER_COLOR = {3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC'}
-_LAYER_LABEL = {3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V'}
+_LAYER_COLOR = {1: '#000075', 2: '#a9a9a9', 3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC', 8: '#F032E6', 9: '#42D4F4', 10: '#9A6324'}
+_LAYER_LABEL = {1: 'M1 V', 2: 'M2 H', 3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V', 8: 'M8 H', 9: 'M9 V', 10: 'M10 H'}
 
-
+stat_title = "Bundle-based Design Assistant (BUDA) with Non-Uniform Track Sharing (NUTS)"
 
 # Bulent: no longer used. But keep as ref.
 def _rects_disconnected(rects_raw):
@@ -134,6 +134,19 @@ def _disable_default_keymaps():
 # Values beyond this magnitude are the INT_MIN/2 or INT_MAX/2 sentinels
 # that ConnTopology uses for "unconstrained" slide ranges.
 _UNCONSTRAINED = 1_000_000_000
+
+
+def _get_nterms(topo, fp):
+    """Return the number of unique blocks connected by this topology."""
+    import interconnect as ic
+    ct = ic.ConnTopology()
+    ct.build(topo, fp)
+    names = set()
+    for cs in ct.segs():
+        for c in cs.conns:
+            if c.kind == ic.SegConnKind.BUSTERM:
+                names.add(c.block_name)
+    return len(names)
 
 
 class TopologyExplorer:
@@ -819,8 +832,9 @@ class TopologyExplorer:
                 layer_summary_parts.append(lbl)
         layer_summary = " ".join(layer_summary_parts)
         
+        nterms = _get_nterms(topo, self.fp)
         title_main = (
-            f"{bus_label}B{bid} ({len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
+            f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
             f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
         )
         ax.set_title(title_main, fontsize=12, pad=10, color='#886600' if is_sel else 'black')
@@ -1158,23 +1172,28 @@ class BudaVisualizer:
                 msg = f"Bundle {od.bid_a} highlighted · Bundle {od.bid_b} dimmed{layer_str}"
             else:
                 msg = f"Bundle {od.bid_a} dimmed · Bundle {od.bid_b} highlighted{layer_str}"
-            self.ax.set_title(
-                f"BUDA — Overlap: {msg}  (click row to cycle, All Overlaps to clear)",
-                fontsize=13)
+            # For ref: old title had f"BUDA — Overlap: {msg}  (click row to cycle, All Overlaps to clear)"
+            self.ax.set_title(f"BUDA — Overlap: {msg}", fontsize=13)
         elif bundle_id is not None:
             solo_hint = "  [Solo ON]" if self._solo else ""
             bname = self._bundle_name(bundle_id)
             nbits = self._bundle_bits(bundle_id)
-            bits_str = f" ({nbits} bits)" if nbits > 0 else ""
+
+            # Get busterm count from the active topology.
+            wrapper = next((w for w in self.bundles if w.original_bundle.id == bundle_id), None)
+            nterms = 0
+            if wrapper and wrapper.candidates and wrapper.selected_topology_index >= 0:
+                topo = wrapper.candidates[wrapper.selected_topology_index]
+                nterms = _get_nterms(topo, self.fp)
+
+            bits_str = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
+            # For ref, old title had: f"(click again or click background to deselect)"
             self.ax.set_title(
-                f"BUDA — B{bundle_id} {bname}{bits_str} selected{solo_hint}  "
-                f"(click again or click background to deselect)",
+                f"BUDA — B{bundle_id} {bname}{bits_str} selected{solo_hint}",
                 fontsize=13)
         else:
-            self.ax.set_title(
-                "BUDA: Non-Uniform Track Sharing (NUTS)  "
-                "— click a bus-term or bus-seg to highlight",
-                fontsize=13)
+            # For ref, old title also had: "— click a bus-term or bus-seg to highlight"
+            self.ax.set_title(stat_title, fontsize=13)
 
         self._redraw_bundle_list()
         self._redraw_overlap_list()
@@ -2518,8 +2537,7 @@ class BudaVisualizer:
 
         self.ax.set_aspect('equal')
         self.ax.set_title(
-            "BUDA: Non-Uniform Track Sharing (NUTS)  "
-            "— click a bus-term or bus-seg to highlight",
+            stat_title,
             fontsize=13)
 
         from matplotlib.lines import Line2D
