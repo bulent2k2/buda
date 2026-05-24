@@ -151,3 +151,51 @@ Summary of what's now in the benchmark suite:
 
   The two key lessons from the MacroPlacement designs: corner_margin needs to match the actual macro size (10 µm for 70 µm-tall banks, not 30), and STRICT bundling merges buses with identical
   driver+receiver sets (so cbuf_we had to be dropped).
+
+
+ISPD 2019 std-cell benchmarks for spatial net clustering (next research challenge)
+====
+Goal: develop a new BUDA bundler mode that clusters nets by spatial proximity of their placed pins
+(instead of named bus discovery). Busterms = bounding box of each pin cluster. Compare BUDA's
+bus-trunk routing plan against OpenROAD-routed reference DEF.
+
+Source: ISPD 2019 Initial Detailed Routing Contest — http://www.ispd.cc/contests/19/
+Format: LEF/DEF 5.8; placed DEF as input + routing guides; UNITS DISTANCE MICRONS 2000.
+All instance names (inst8879) and net names (net3153) are fully mangled → spatial clustering only.
+Each net has PLACED ( x y ) for every cell; LEF provides exact pin RECT geometry per cell type.
+Reference routing: OpenROAD TritonRoute applied to the same placed DEF.
+
+Download: http://www.ispd.cc/contests/19/benchmarks/ispd19_<name>.tgz (no auth required).
+Note: ISPD 2018 benchmarks return HTTP 404; all 9 testcases come from ISPD 2019.
+
+  ┌─────────────────┬─────────┬────────┬──────────────┬──────────┐
+  │    Testcase     │  Cells  │  Nets  │   Die (µm)   │ Archive  │
+  ├─────────────────┼─────────┼────────┼──────────────┼──────────┤
+  │ ispd19_test1    │   8,879 │  3,153 │  148 × 146   │  352 KB  │  ← verified ✓
+  │ ispd19_test3    │   8,283 │  8,953 │  195 × 195   │  644 KB  │  ← verified ✓
+  │ ispd19_test5    │  28,920 │ 29,416 │  453 × 453   │  1.6 MB  │  ← verified ✓
+  ├─────────────────┼─────────┼────────┼──────────────┼──────────┤
+  │ ispd19_test2    │  72,094 │ 72,410 │  873 × 589   │  7.1 MB  │  ← verified ✓
+  │ ispd19_test6    │~180,000 │    —   │      —       │   18 MB  │
+  │ ispd19_test7    │~360,000 │    —   │      —       │   43 MB  │
+  ├─────────────────┼─────────┼────────┼──────────────┼──────────┤
+  │ ispd19_test8    │~540,000 │    —   │      —       │   66 MB  │
+  │ ispd19_test9    │~900,000 │    —   │      —       │  109 MB  │
+  │ ispd19_test10   │~900,000 │    —   │      —       │  111 MB  │
+  └─────────────────┴─────────┴────────┴──────────────┴──────────┘
+
+  Scale grouping:
+  - ~10K:  test1, test3, test5  (note: test5 is 29K — no true 10K third case available)
+  - ~100K: test2, test6, test7
+  - ~1M:   test8, test9, test10 (tops out at ~900K; none exceeds 1M in this set)
+
+  DEF structure confirmed (test1 + test3 downloaded and parsed):
+  - COMPONENTS: inst<N> <CellType> + PLACED ( x y ) <orient>  [no routing geometry]
+  - NETS: net<N> \n  ( inst<A> <pin> ) ( inst<B> <pin> ) ...
+  - LEF: 93–208 cell types; each PIN has exact RECT geometry within the cell bbox
+  - Fanout: mostly 2-pin nets; max observed 2035 (clock) in test1, 130 in test3
+  - Orientation values: N, S, FN, FS (row-based placement, no 90° rotation)
+
+  Key parsing note: actual signal pin position =
+    cell_placed_origin + rotate(pin_rect_center, orientation)
+  where rotate() handles N (identity), FN (flip-x), S (rotate 180°), FS (flip-x + rotate 180°).
