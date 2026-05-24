@@ -2,7 +2,7 @@
 """
 def_cluster.py — Spatial net clustering from placed DEF + LEF.
 
-Two modes:
+Three modes:
 
   centroid (default):
     Computes the physical centre of every signal-net pin, then clusters nets
@@ -25,6 +25,15 @@ Two modes:
     based on driver pin and receiver centroid positions. Avoids DBSCAN chaining.
     CELLSIZE is the grid square side in µm (e.g., 10).
 
+  high-fanout (--high-fanout):
+    Each net with fanout ≥ min-fanout is extracted as a standalone 1-bit multicast
+    bus candidate — no grouping with other nets.
+      src block = driver pin ± src-margin µm  (tiny block, corner_margin dx 1 dy 1)
+      dst block = bbox of all receiver pins
+    Nets are sorted by HPWL descending so the highest-impact candidates come first.
+    Filters: --min-fanout (default 5), --max-fanout (default 256),
+             --min-hpwl (default 20 µm), --src-margin (default 2 µm).
+
 Usage:
     python3 def_cluster.py <design.input.def> <design.input.lef> [options]
 
@@ -35,7 +44,12 @@ Options:
     --grid      CELLSIZE  (bipartite) Grid cell size µm — replaces DBSCAN (default: off)
     --max-nets  N         (bipartite) Drop buses with more than N nets (default: 64)
     --min-span  D         (bipartite) Drop buses with src→dst distance < D µm (default: 5)
-    --out       FILE      Write busterms/buses to FILE in BUDA add_block format
+    --high-fanout         Extract each high-fanout net as a 1-bit BUDA multicast bus
+    --min-fanout  N       (high-fanout) Minimum fanout (default 5)
+    --max-fanout  N       (high-fanout) Maximum fanout — exclude global signals (default 256)
+    --min-hpwl    D       (high-fanout) Minimum HPWL in µm (default 20)
+    --src-margin  D       (high-fanout) Driver pin block half-size in µm (default 2)
+    --out         FILE    Write busterms/buses to FILE in BUDA add_block format
     --hist                Print fanout and cluster-size histograms
     --hpwl                Print half-perimeter wirelength distribution (all nets)
 """
@@ -399,6 +413,51 @@ def _min_y(pts): return min(p[1] for p in pts)
 def _max_x(pts): return max(p[0] for p in pts)
 def _max_y(pts): return max(p[1] for p in pts)
 
+# ── High-fanout net extraction ────────────────────────────────────────────────
+
+def extract_high_fanout_buses(net_endpoints, min_fanout=5, max_fanout=256,
+                               min_hpwl=20.0, src_margin=2.0):
+    """Extract each high-fanout net as a standalone 1-bit BUDA multicast bus.
+
+    Every net with total fanout in [min_fanout, max_fanout] and HPWL >= min_hpwl
+    becomes its own bus record:
+      src_bbox  — driver pin ± src_margin (tiny block; use corner_margin dx 1 dy 1)
+      dst_bbox  — bbox of all receiver pins
+      span      — Euclidean distance from driver to receiver centroid
+
+    Returns list sorted by hpwl descending (highest-impact first).
+    """
+    buses = []
+    for name, ep in net_endpoints.items():
+        fanout = 1 + len(ep['receivers'])
+        if not (min_fanout <= fanout <= max_fanout):
+            continue
+
+        drv = ep['driver']
+        rcv = ep['receivers']
+        all_pts = [drv] + rcv
+        hpwl = (_max_x(all_pts) - _min_x(all_pts) +
+                _max_y(all_pts) - _min_y(all_pts))
+        if hpwl < min_hpwl:
+            continue
+
+        dst_cx = sum(p[0] for p in rcv) / len(rcv)
+        dst_cy = sum(p[1] for p in rcv) / len(rcv)
+        span = math.sqrt((drv[0] - dst_cx) ** 2 + (drv[1] - dst_cy) ** 2)
+
+        buses.append({
+            'net':      name,
+            'fanout':   fanout,
+            'hpwl':     hpwl,
+            'span':     span,
+            'src_bbox': (drv[0] - src_margin, drv[1] - src_margin,
+                         drv[0] + src_margin, drv[1] + src_margin),
+            'dst_bbox': (_min_x(rcv), _min_y(rcv), _max_x(rcv), _max_y(rcv)),
+        })
+
+    buses.sort(key=lambda b: -b['hpwl'])
+    return buses
+
 # ── HPWL analysis ────────────────────────────────────────────────────────────
 
 def compute_hpwl(net_pin_pos):
@@ -513,6 +572,16 @@ def main():
                     help='(bipartite) Drop buses with more than N nets (default 64)')
     ap.add_argument('--min-span', type=float, default=5.0,
                     help='(bipartite) Drop buses with src→dst distance < D µm (default 5)')
+    ap.add_argument('--high-fanout', action='store_true',
+                    help='Extract each high-fanout net as a 1-bit BUDA multicast bus')
+    ap.add_argument('--min-fanout', type=int,   default=5,
+                    help='(high-fanout) Minimum fanout (default 5)')
+    ap.add_argument('--max-fanout', type=int,   default=256,
+                    help='(high-fanout) Maximum fanout — exclude global signals (default 256)')
+    ap.add_argument('--min-hpwl',  type=float, default=20.0,
+                    help='(high-fanout) Minimum HPWL in µm (default 20)')
+    ap.add_argument('--src-margin', type=float, default=2.0,
+                    help='(high-fanout) Driver pin block half-size in µm (default 2)')
     ap.add_argument('--out',      default=None,
                     help='Output file for BUDA add_block busterms')
     ap.add_argument('--hist',     action='store_true',
@@ -531,13 +600,15 @@ def main():
     print(f"  UNITS={units}, Die={die[0]:.1f}×{die[1]:.1f} µm")
     print(f"  {len(components)} instances, {len(nets)} signal nets")
 
-    mode = 'bipartite' if args.bipartite else 'centroid'
-    print(f"Computing pin positions (mode={mode})...")
-
-    if mode == 'bipartite':
+    if args.high_fanout:
+        print("Computing pin positions (mode=high-fanout)...")
+        _run_high_fanout(args, die, nets, components, lef_pins)
+    elif args.bipartite:
+        print("Computing pin positions (mode=bipartite)...")
         _run_bipartite(args, die, nets, components, lef_pins,
                        args.max_nets, args.min_span, args.grid)
     else:
+        print("Computing pin positions (mode=centroid)...")
         _run_centroid(args, die, nets, components, lef_pins)
 
 
@@ -652,6 +723,92 @@ def _run_bipartite(args, die, nets, components, lef_pins, max_nets, min_span, gr
                 f.write(f"add_block dst_{i+1}  "
                         f"{dx1:.2f} {dy1:.2f}  {dx2:.2f} {dy2:.2f}  # {n} nets\n")
                 f.write(f"add_bus bus_{i+1}[{n}] src_{i+1}.out dst_{i+1}.in\n\n")
+        print(f"\nWrote {len(buses)} buses ({2*len(buses)} blocks) to {args.out}")
+
+
+def _run_high_fanout(args, die, nets, components, lef_pins):
+    net_endpoints = compute_driver_receiver_positions(components, nets, lef_pins)
+    print(f"  {len(net_endpoints)} nets with driver+receiver positions")
+
+    if args.hpwl:
+        unified = {n: [ep['driver']] + ep['receivers']
+                   for n, ep in net_endpoints.items()}
+        print("\nHPWL analysis:")
+        report_hpwl(unified, die)
+
+    print(f"\nExtracting high-fanout buses "
+          f"(fanout {args.min_fanout}–{args.max_fanout}, "
+          f"HPWL≥{args.min_hpwl} µm, src_margin={args.src_margin} µm)...")
+    buses = extract_high_fanout_buses(
+        net_endpoints,
+        min_fanout=args.min_fanout,
+        max_fanout=args.max_fanout,
+        min_hpwl=args.min_hpwl,
+        src_margin=args.src_margin,
+    )
+
+    total_hpwl = sum(b['hpwl'] for b in buses)
+    all_hpwl   = sum(
+        (_max_x([ep['driver']] + ep['receivers']) -
+         _min_x([ep['driver']] + ep['receivers']) +
+         _max_y([ep['driver']] + ep['receivers']) -
+         _min_y([ep['driver']] + ep['receivers']))
+        for ep in net_endpoints.values()
+        if len(ep['receivers']) >= 1
+    )
+    print(f"  {len(buses)} buses, aggregate HPWL = {total_hpwl:,.0f} µm "
+          f"({100*total_hpwl/max(1,all_hpwl):.1f}% of all-net HPWL)\n")
+
+    hdr = (f"{'#':>5}  {'Net':<14}  {'Fo':>4}  {'HPWL µm':>9}  "
+           f"{'Driver (µm)':^20}  {'Rcv bbox W×H':^16}  {'Span µm':>8}")
+    print(hdr)
+    print("-" * len(hdr))
+    for i, b in enumerate(buses[:40]):
+        sx1, sy1, sx2, sy2 = b['src_bbox']
+        dx1, dy1, dx2, dy2 = b['dst_bbox']
+        drv_x = (sx1 + sx2) / 2
+        drv_y = (sy1 + sy2) / 2
+        print(f"{i+1:5d}  {b['net']:<14}  {b['fanout']:>4}  {b['hpwl']:>9.1f}  "
+              f"({drv_x:7.1f},{drv_y:7.1f})  "
+              f"{dx2-dx1:6.1f}×{dy2-dy1:6.1f}  "
+              f"{b['span']:>8.1f}")
+    if len(buses) > 40:
+        print(f"  ... {len(buses)-40} more buses")
+
+    # Fanout distribution of extracted buses
+    from collections import Counter
+    fo_dist = Counter(b['fanout'] for b in buses)
+    print(f"\n  Fanout distribution of extracted buses:")
+    for fo_lo, fo_hi in [(5,8),(9,16),(17,32),(33,64),(65,128),(129,256)]:
+        cnt = sum(v for k, v in fo_dist.items() if fo_lo <= k <= fo_hi)
+        if cnt:
+            wl = sum(b['hpwl'] for b in buses
+                     if fo_lo <= b['fanout'] <= fo_hi)
+            label = f"{fo_lo}–{fo_hi}"
+            print(f"    fanout {label:<7}: {cnt:5d} buses, "
+                  f"aggregate HPWL = {wl:,.0f} µm")
+
+    if args.out:
+        with open(args.out, 'w') as f:
+            f.write(f"# High-fanout 1-bit multicast buses from {args.def_file}\n")
+            f.write(f"# fanout {args.min_fanout}–{args.max_fanout}, "
+                    f"HPWL≥{args.min_hpwl} µm, src_margin={args.src_margin} µm\n")
+            f.write(f"# Die: {die[0]:.1f} x {die[1]:.1f} µm\n")
+            f.write(f"# {len(buses)} buses, aggregate HPWL = {total_hpwl:,.0f} µm\n")
+            f.write(f"#\n# Add def_layer / def_track_pattern / corner_margin header before use.\n\n")
+            for i, b in enumerate(buses):
+                sx1, sy1, sx2, sy2 = b['src_bbox']
+                dx1, dy1, dx2, dy2 = b['dst_bbox']
+                f.write(f"# {b['net']}  fanout={b['fanout']}  "
+                        f"HPWL={b['hpwl']:.1f} µm  span={b['span']:.1f} µm\n")
+                f.write(f"add_block hf_{i+1}_src  "
+                        f"{sx1:.2f} {sy1:.2f}  {sx2:.2f} {sy2:.2f}  "
+                        f"corner_margin dx 1 dy 1\n")
+                f.write(f"add_block hf_{i+1}_dst  "
+                        f"{dx1:.2f} {dy1:.2f}  {dx2:.2f} {dy2:.2f}\n")
+                f.write(f"add_bus hf_{i+1}[1]  hf_{i+1}_src.out  hf_{i+1}_dst.in\n")
+                f.write(f"generate_topologies_for_bundle hf_{i+1}  "
+                        f"hf_{i+1}_src  hf_{i+1}_dst\n\n")
         print(f"\nWrote {len(buses)} buses ({2*len(buses)} blocks) to {args.out}")
 
 

@@ -353,3 +353,48 @@ Standard lower-bound wirelength estimator; computed for every signal net with �
        ~20–40%: medium fanout-2 P2P wires — individual connections, ungroupable
      These are correctly left to conventional point-to-point detailed routing.
      BUDA should target the OTHER 10%: grouped buses + high-fanout multicast nets.
+
+
+High-fanout net extraction — tools/def_cluster.py --high-fanout
+====
+Each net with fanout ≥ min-fanout is its own standalone 1-bit BUDA multicast bus:
+  src block  = driver pin ± src_margin (tiny block; corner_margin dx 1 dy 1 prevents global margin from zeroing it)
+  dst block  = bounding box of all receiver pins
+  bus line   = add_bus hf_N[1]  hf_N_src.out  hf_N_dst.in
+
+Nets sorted by HPWL descending → highest-impact candidates first in output file.
+
+Default filters: --min-fanout 5, --max-fanout 256, --min-hpwl 20 µm, --src-margin 2 µm.
+
+  ┌─────────────┬───────────────┬────────────────────────────────┬──────────────────────────────────────────────────────────┐
+  │  Testcase   │    Buses      │       Aggregate HPWL           │ Top bus example                                          │
+  ├─────────────┼───────────────┼────────────────────────────────┼──────────────────────────────────────────────────────────┤
+  │ test1 (10K) │ 322 buses     │ 23,609 µm  (51.2% of all-net) │ net4, fanout=60, HPWL=166.0 µm, dst 109.6×56.4 µm       │
+  │ test5 (28K) │ 959 buses     │196,904 µm  (36.6% of all-net) │ FE_OFN548_n_9502, fanout=26, HPWL=966.4 µm, span=350 µm │
+  └─────────────┴───────────────┴────────────────────────────────┴──────────────────────────────────────────────────────────┘
+
+  Fanout breakdown (test1):
+    fanout  5–8  :  124 buses, aggregate HPWL =  5,498 µm
+    fanout  9–16 :   16 buses, aggregate HPWL =  2,175 µm
+    fanout 17–32 :    —
+    fanout 33–64 :  182 buses, aggregate HPWL = 15,936 µm   ← dominant contributor
+
+  Fanout breakdown (test5):
+    fanout  5–8  :  688 buses, aggregate HPWL = 78,621 µm
+    fanout  9–16 :  213 buses, aggregate HPWL = 83,484 µm
+    fanout 17–32 :   55 buses, aggregate HPWL = 32,154 µm
+    fanout 33–64 :    3 buses, aggregate HPWL =  2,645 µm
+
+  Key observations:
+  - test5 nets have real names (FE_OFN*, FE_PHN* prefix) — synthesis-inserted fanout-enable buffers
+    This confirms these are exactly the candidates a synthesis tool already identified as needing fanout management.
+  - test1 nets are mangled (net4, net97 …) — anonymous flattened netlist; fanout-60 net4 is likely a clock or reset
+  - 51% of test1 total WL comes from just 322 nets (10% of all nets) → high-fanout mode covers the most WL per bus
+  - Output file format: ready-made BUDA snippet; add def_layer/def_track_pattern/corner_margin header before use
+
+  Combined high-fanout + grid clustering coverage:
+    test1: ~51% (HF) + ~5–15% (grid, net overlap possible) → ~55% of total WL addressable by BUDA
+    test5: ~37% (HF) + ~4–9% (grid) → ~40% of total WL
+
+  Design implication: high-fanout extraction alone is a stronger BUDA entry point than grid clustering
+  for std-cell designs, because each output bus is already a perfect 1-driver→N-receiver multicast topology.
