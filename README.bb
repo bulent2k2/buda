@@ -34,7 +34,12 @@ History:
   998  pip install google-adk
   999  brew install gemini-cli
  1000  gemini
-
+ 2000  brew install codex
+ 2001  cd ~/src/git/buda
+ 2002  mv claude codex
+ 2003  cd codex
+ 2004  codex
+ 
 2026.05.17
   /Users/ben/src/buda/test/tests
       59 test_bundler.py
