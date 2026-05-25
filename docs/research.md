@@ -412,21 +412,37 @@ Script structure:
   - Pipeline: run_bundler strict → generate_topologies_for_bundle (per valid bus) → run_planner 50 → run_nuts 1.0 → run_detailed_nuts → visualize
   - Validity filter: _topo_valid() pre-filters degenerate pairs (block too small after cm shrink, or blocks that touch without overlapping) before emitting generate_topologies_for_bundle
 
-  ┌─────────────┬──────────┬──────────┬──────────┬─────────┬─────────┬────────────────────────────────┬──────────────────────────────────────┐
-  │  Testcase   │ Die (µm) │ Grid bus │  HF bus  │ Skipped │ Bundles │      Abstract NUTS             │          Detailed NUTS               │
-  ├─────────────┼──────────┼──────────┼──────────┼─────────┼─────────┼────────────────────────────────┼──────────────────────────────────────┤
-  │ test1 (10K) │ 148×146  │   27     │   267    │    3    │   294   │ 376 segs, 267 viol, 641 ovlp   │  372 placed, 133 unplaced            │
-  │ test3 (8K)  │ 195×195  │   60     │   377    │    0    │   437   │ 742 segs, 441 viol, 4012 ovlp  │  845 placed, 546 unplaced            │
-  │ test5 (28K) │ 906×906  │   30     │   714    │    0    │   744   │ 1286 segs, 751 viol, 982 ovlp  │ 1061 placed, 444 unplaced            │
-  │ test2 (72K) │ 873×589  │  (TBD)   │  (TBD)   │   —     │  5639   │ (not run — 11278 blocks)       │ —                                    │
-  │ test7 (360K)│1581×1517 │  (TBD)   │  (TBD)   │   —     │ 28312   │ (not run — 56624 blocks)       │ —                                    │
-  └─────────────┴──────────┴──────────┴──────────┴─────────┴─────────┴────────────────────────────────┴──────────────────────────────────────┘
+  ┌─────────────┬──────────┬──────────┬──────────┬─────────┬─────────┬──────────────────────────────────────┬──────────────────────────────────────┐
+  │  Testcase   │ Die (µm) │ Grid bus │  HF bus  │ Skipped │ Bundles │         Abstract NUTS                │          Detailed NUTS               │
+  ├─────────────┼──────────┼──────────┼──────────┼─────────┼─────────┼──────────────────────────────────────┼──────────────────────────────────────┤
+  │ test1 (10K) │ 148×146  │   27     │   267    │    3    │   294   │  376 segs, 267 viol,   641 ovlp      │  372 placed,  133 unplaced (70.9%)   │
+  │ test3 (8K)  │ 195×195  │   60     │   377    │    0    │   437   │  742 segs, 441 viol,  4012 ovlp      │  845 placed,  546 unplaced           │
+  │ test5 (28K) │ 906×906  │   30     │   714    │    0    │   744   │ 1286 segs, 751 viol,   982 ovlp      │ 1061 placed,  444 unplaced           │
+  │ test2 (72K) │ 873×589  │  —       │  —       │   —     │  5405   │ 7477 segs, 5116 viol, 65368 ovlp     │ 5322 placed, 6255 unplaced (46.0%)   │
+  │ test7 (360K)│1581×1517 │  —       │  —       │   —     │ 26821   │37188 segs,25182 viol,559813 ovlp     │25358 placed,35293 unplaced (41.8%)   │
+  └─────────────┴──────────┴──────────┴──────────┴─────────┴─────────┴──────────────────────────────────────┴──────────────────────────────────────┘
+
+  Runtime and memory:
+
+  ┌─────────────┬──────────────┬──────────┬─────────────────────────────────────────────────────┐
+  │  Testcase   │  Wall time   │ Peak RSS │ Notes                                               │
+  ├─────────────┼──────────────┼──────────┼─────────────────────────────────────────────────────┤
+  │ test1 (294) │   3 s        │   72 MB  │                                                     │
+  │ test3 (437) │   6 s        │   80 MB  │                                                     │
+  │ test5 (744) │  29 s        │  167 MB  │                                                     │
+  │ test2 (5405)│  827 s       │  237 MB  │ 14 min; ~30× longer than test5 for ~7× more bundles │
+  │ test7(26821)│ 26555 s      │  869 MB  │ 7.4 h; topology generation dominates at this scale  │
+  └─────────────┴──────────────┴──────────┴─────────────────────────────────────────────────────┘
+
+  Runtime scaling: super-linear (~30× for 10× more bundles). Topology generation
+  (generate_topologies_for_bundle called once per bundle against the full Hanan grid)
+  is the bottleneck — O(bundles × grid_lines²). Memory scales roughly linearly with
+  bundle count and stays manageable through test7 (869 MB for 26821 bundles).
 
   Notes:
   - "Skipped" = pairs filtered by _topo_valid() before generate_topologies_for_bundle; zero "Generated 0 topologies" warnings in all runs ✓
-  - Violations/overlaps are high because NUTS has no awareness of global routing guides; the planner assigns all buses to M7/M8 without topology-specific per-bundle congestion routing
-  - D-NUTS "insufficient signal tracks" warnings indicate NUTS placed a bus into a Hanan cell narrower than its bit-width; DetailedNUTS marks those bits unplaced
-  - test2 and test7 scripts were generated (5639/28312 buses) but not run — the large block count requires staged topology generation or parallelism improvements
+  - NUTS violations/overlaps are high because the planner assigns all buses to M7/M8 without per-bundle congestion awareness
+  - D-NUTS place rate degrades sharply at scale: 71% (test1) → 42% (test7); both failure modes worsen with more bundles competing for the same track bands
   - Layer selection: test1/test3 (die_max<400 µm) use M5+M6 (LOW) + M7+M8 (TOP); test5/test2/test7 (die_max≥400 µm) use M7+M8 (LOW) + M9+M10 (TOP)
 
   Key insight on topology validity (_topo_valid):
@@ -435,3 +451,46 @@ Script structure:
   "inside" case (overlap), which generates L-shapes correctly. _topo_valid() catches two failure modes:
     1. Block degenerates: (x2-x1) ≤ 2*cm or (y2-y1) ≤ 2*cm after integer rounding
     2. Touching without separation or interior overlap: shrunken blocks share only a boundary line/point
+
+
+D-NUTS failure analysis — test1 deep dive
+====
+147 bits unplaced (out of 505 total bit-slots, 70.9% placed) break into two root causes.
+
+  Failure mode 1 — Narrow Hanan cell (22 segments, 115 bits = 78% of unplaced):
+  The signal_tracks_in(interval_lo, interval_hi) query returns fewer tracks than the bus
+  bit_width. D-NUTS skips the entire segment (no partial placement); num_unplaced += bit_width.
+  Worst offenders (gap = tracks_needed − tracks_available):
+
+  ┌──────────────────────────────┬─────────┬──────┬───────┬──────────────────────────┐
+  │  Interval (L7 M7=H)          │ span µm │ avail│  need │ bits lost (full segment) │
+  ├──────────────────────────────┼─────────┼──────┼───────┼──────────────────────────┤
+  │ [78,79] and [91,92]          │   1     │  0   │   5   │  5 each → 10 total       │
+  │ [44,46]                      │   2     │  3   │   7   │  7                       │
+  │ [95,97]                      │   2     │  1   │   5   │  5                       │
+  │ [84,87], [115,117], [102,105]│  2–3    │  2–3 │  5–6  │  3–6 each                │
+  └──────────────────────────────┴─────────┴──────┴───────┴──────────────────────────┘
+
+  The 1 µm spans ([78,79], [91,92]) hold 0 signal tracks because the M7 pitch is 0.8 µm and
+  a 0.8 µm period yields only 4 signal tracks per 4.8 µm unit; a 1 µm Hanan gap falls between
+  track positions entirely. These degenerate cells arise when NUTS violates its interval (pushes
+  a wide bus outside its Hanan cell) and the residual gap is smaller than one M7 pitch.
+
+  Failure mode 2 — Reservation conflict (32 segments, 32 bits = 22% of unplaced):
+  D-NUTS processes segments in abstract_pos order; a bus that claims all tracks in a narrow
+  interval leaves none for later buses in the same span+interval region. All 32 conflicts
+  involve 1-bit HF buses whose abstract_pos was pushed by NUTS into the same 2 µm band.
+  Hotspot: interval [87,89] on M7 had 6 consecutive reservation failures — a 2 µm band with
+  only 2 signal tracks where NUTS stacked 8+ overlapping stubs from distinct HF buses.
+
+  Root cause (one sentence):
+  NUTS generates 267 interval violations on M7/M8 (buses pushed outside their Hanan cells by
+  congestion), which produces sub-pitch residual intervals and overlapping abstract positions
+  that cascade into both D-NUTS failure modes.
+
+  Fix direction:
+  - Upstream: reduce NUTS violations by adding a track-density term to the planner's layer cost,
+    so the planner steers wide buses away from heavily contested M7 bands
+  - Downstream: if an interval holds fewer tracks than bit_width, D-NUTS could attempt a
+    "split-and-route" — place as many bits as the interval allows and defer the rest to an
+    adjacent interval, at the cost of introducing a jog in the bit-wire fan-out
