@@ -1,40 +1,40 @@
 {
   "selections": [
     {
-      "bundle_hint": "b1",
+      "bundle_hint": "b1_0",
       "bundle_id": 1,
       "topo_type": "U_VHV@y105",
-      "topo_wl": 60,
+      "topo_wl": 62,
       "topo_index_hint": 1,
       "note": "",
-      "selected_at": "2026-05-16T13:40:56"
+      "selected_at": "2026-05-26T14:33:00"
     },
     {
-      "bundle_hint": "b2",
+      "bundle_hint": "b2_0",
       "bundle_id": 2,
       "topo_type": "TRUNK_V@x125",
-      "topo_wl": 125,
+      "topo_wl": 127,
       "topo_index_hint": 3,
       "note": "",
-      "selected_at": "2026-05-15T19:48:52"
+      "selected_at": "2026-05-26T14:33:15"
     },
     {
-      "bundle_hint": "b3",
+      "bundle_hint": "b3_0",
       "bundle_id": 3,
-      "topo_type": "BITRUNK_H",
-      "topo_wl": 450,
-      "topo_index_hint": 8,
+      "topo_type": "TRUNK_H@y125",
+      "topo_wl": 152,
+      "topo_index_hint": 0,
       "note": "",
-      "selected_at": "2026-05-16T07:42:43"
+      "selected_at": "2026-05-26T14:33:52"
     },
     {
-      "bundle_hint": "b4",
+      "bundle_hint": "b4_0",
       "bundle_id": 4,
       "topo_type": "TRUNK_V@x125",
-      "topo_wl": 160,
+      "topo_wl": 152,
       "topo_index_hint": 1,
       "note": "",
-      "selected_at": "2026-05-04T18:44:29"
+      "selected_at": "2026-05-26T14:34:07"
     }
   ]
 }

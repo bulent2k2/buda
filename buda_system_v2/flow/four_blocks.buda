@@ -2,13 +2,15 @@
 # ============================================================
 
 # Layers
-def_layer 5 M5 V TOP 0.0
-def_layer 6 M6 H TOP 0.0
+#def_layer 5 M5 V TOP 0.0
+#def_layer 6 M6 H TOP 0.0
+source tracks.buda
 
-corner_margin 10 10
-set_min_stub_length 10
-set_min_stub_length_dir V 20
-set_min_stub_length_layer M5 5
+# corner_margin 10 10
+corner_margin 1 1
+set_min_stub_length 1
+set_min_stub_length_dir V 2
+set_min_stub_length_layer M5 3
 
 # ── Floorplan ────────────────────────────────────────────────
 add_block u1    50   50   100 100
@@ -17,10 +19,17 @@ add_block u3    50  150   100 200
 add_block u4    150 150   200 200
 
 # ── Net ──────────────────────────────────────────────────────
-add_net b1 u1.tx u2.rx
-add_net b2 u1.tx u2.rx,u3.rx
-add_net b3 u1.tx u2.rx,u3.rx,u4.rx
-add_net b4 u2.tx u3.rx,u4.rx,u1.tx
+#add_net b1 u1.tx u2.rx
+#add_net b2 u1.tx u2.rx,u3.rx
+#add_net b3 u1.tx u2.rx,u3.rx,u4.rx
+#add_net b4 u2.tx u3.rx,u4.rx,u1.tx
+
+#  Turned into small bundles:
+add_bus b1[2] u1.tx u2.rx
+add_bus b2[3] u1.tx u2.rx,u3.rx
+add_bus b3[4] u1.tx u2.rx,u3.rx,u4.rx
+add_bus b4[5] u2.tx u3.rx,u4.rx,u1.tx
+
 # ── Pipeline ─────────────────────────────────────────────────
 run_bundler strict
 
@@ -39,7 +48,9 @@ run_planner 1
 # nominal (connected) coordinates, which is correct for tree shapes.
 # visualize_topologies -all
 
-run_nuts 2.0
+#run_nuts 2.0
+run_nuts
+run_detailed_nuts
 
 # Full visualize shows the planner-selected topology with the
 # congestion map overlaid.
