@@ -170,11 +170,12 @@ PYBIND11_MODULE(interconnect, m) {
         .def("get_layer_dilution",      &LayerStack::get_layer_dilution);
 
     py::class_<SegConn>(m, "SegConn")
-        .def_readwrite("kind",       &SegConn::kind)
-        .def_readwrite("block_name", &SegConn::block_name)
-        .def_readwrite("face_coord", &SegConn::face_coord)
-        .def_readwrite("seg_idx",    &SegConn::seg_idx)
-        .def_readwrite("at_pos",     &SegConn::at_pos);
+        .def_readwrite("kind",        &SegConn::kind)
+        .def_readwrite("block_name",  &SegConn::block_name)
+        .def_readwrite("face_coord",  &SegConn::face_coord)
+        .def_readwrite("seg_idx",     &SegConn::seg_idx)
+        .def_readwrite("at_pos",      &SegConn::at_pos)
+        .def_readwrite("is_endpoint", &SegConn::is_endpoint);
 
     py::enum_<SegConn::Kind>(m, "SegConnKind")
         .value("BUSTERM", SegConn::BUSTERM)
@@ -330,8 +331,10 @@ PYBIND11_MODULE(interconnect, m) {
 
     py::class_<BusSegmentConn>(m, "BusSegmentConn")
         .def(py::init<>())
-        .def_readwrite("seg_idx", &BusSegmentConn::seg_idx)
-        .def_readwrite("at_pos",  &BusSegmentConn::at_pos);
+        .def_readwrite("seg_idx",     &BusSegmentConn::seg_idx)
+        .def_readwrite("at_pos",      &BusSegmentConn::at_pos)
+        .def_readwrite("is_endpoint", &BusSegmentConn::is_endpoint)
+        .def_readwrite("lo_end",      &BusSegmentConn::lo_end);
 
     py::class_<BusSegment>(m, "BusSegment")
         .def(py::init<>())

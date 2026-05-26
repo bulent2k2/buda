@@ -40,6 +40,7 @@ run_bundler strict
 #generate_topologies_for_bundle b3 u1 u2 u3 u4
 #generate_topologies_for_bundle b4 u2 u3 u4 u1
 generate_topologies
+check_connectivity topo
 run_planner 1
 
 # Step through all 18 topologies in wirelength order.
@@ -50,7 +51,9 @@ run_planner 1
 
 #run_nuts 2.0
 run_nuts
+check_connectivity nuts
 run_detailed_nuts
+check_connectivity dnuts
 
 # Full visualize shows the planner-selected topology with the
 # congestion map overlaid.

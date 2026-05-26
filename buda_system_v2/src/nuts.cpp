@@ -82,9 +82,7 @@ static void build_nuts_maps(
                 auto t_key = std::make_pair(bid, conn.seg_idx);
                 double mid = 0.5 * (cs.along_lo + cs.along_hi);
                 bool lo_end   = (conn.at_pos <= mid);
-                bool is_ep    = (conn.at_pos == cs.along_lo ||
-                                 conn.at_pos == cs.along_hi);
-                rev_conn_map[t_key].push_back({ bid, si, lo_end, is_ep });
+                rev_conn_map[t_key].push_back({ bid, si, lo_end, conn.is_endpoint });
             }
 
             // Use cs.net_pull (computed by ConnTopology) to set the preferred
@@ -174,14 +172,30 @@ static void do_span_adjustments(
         if (jt == ts_ptr_map.end()) continue;
         TrackSegment* other = jt->second;
         
+        bool has_lo = false, has_hi = false;
+        double min_lo = std::numeric_limits<double>::infinity();
+        double max_hi = -std::numeric_limits<double>::infinity();
+        bool all_lo_endpoints = true, all_hi_endpoints = true;
+
         for (const auto& req : reqs) {
             if (req.lo_end) {
-                // Connection in lo half: extend lo to reach it if it's further out.
-                other->span_lo = std::min(other->span_lo, req.center);
+                has_lo = true;
+                min_lo = std::min(min_lo, req.center);
+                if (!req.is_endpoint) all_lo_endpoints = false;
             } else {
-                // Connection in hi half: extend hi to reach it if it's further out.
-                other->span_hi = std::max(other->span_hi, req.center);
+                has_hi = true;
+                max_hi = std::max(max_hi, req.center);
+                if (!req.is_endpoint) all_hi_endpoints = false;
             }
+        }
+
+        if (has_lo) {
+            if (all_lo_endpoints) other->span_lo = min_lo;
+            else other->span_lo = std::min(other->span_lo, min_lo);
+        }
+        if (has_hi) {
+            if (all_hi_endpoints) other->span_hi = max_hi;
+            else other->span_hi = std::max(other->span_hi, max_hi);
         }
     }
 }

@@ -645,8 +645,11 @@ class BudaSession:
                 for conn in cs.conns:
                     if conn.kind == interconnect.SegConnKind.SEG:
                         c = interconnect.BusSegmentConn()
-                        c.seg_idx = conn.seg_idx
-                        c.at_pos  = float(conn.at_pos)
+                        c.seg_idx     = conn.seg_idx
+                        c.at_pos      = float(conn.at_pos)
+                        c.is_endpoint = conn.is_endpoint
+                        mid = 0.5 * (cs.along_lo + cs.along_hi)
+                        c.lo_end      = (c.at_pos <= mid)
                         bs.connections.append(c)
 
             bus_segs.append(bs)
@@ -1109,6 +1112,37 @@ class BudaSession:
                 print("Error: run_nuts must be called before run_nuts_on_layer")
                 return
             self._rerun_nuts_layer(layer_id)
+        elif cmd == "select_topology":
+            # Usage: select_topology <bundle_id> <topo_index>
+            if len(args) < 2:
+                print("Error: select_topology requires bundle_id and topo_index")
+                return
+            bid  = int(args[0])
+            tidx = int(args[1])
+            found = False
+            for w in self.bundles:
+                if w.original_bundle.id == bid:
+                    if tidx < 0 or tidx >= len(w.candidates):
+                        print(f"Error: invalid topology index {tidx} for bundle {bid}")
+                    else:
+                        w.selected_topology_index = tidx
+                        print(f"Selected topology {tidx} for bundle {bid}")
+                    found = True
+                    break
+            if not found: print(f"Error: bundle {bid} not found")
+
+        elif cmd == "check_connectivity":
+            # Usage: check_connectivity [topo|nuts|dnuts]
+            stage = args[0].lower() if args else "dnuts"
+            if stage == "topo":
+                self._check_connectivity_topo()
+            elif stage == "nuts":
+                self._check_connectivity_nuts()
+            elif stage == "dnuts":
+                self._check_connectivity_dnuts()
+            else:
+                print(f"Error: unknown stage '{stage}' — use topo, nuts, or dnuts")
+
         elif cmd == "visualize_topologies":
             if self.no_viz:
                 return
@@ -1200,6 +1234,97 @@ class BudaSession:
                             self.do_command(line)
             finally:
                 self._script_stack.pop()
+
+    def _check_connectivity_topo(self):
+        print("[Check] Verifying topology-level connectivity...")
+        opens = 0
+        for w in self.bundles:
+            if not w.candidates or w.selected_topology_index < 0: continue
+            topo = w.candidates[w.selected_topology_index]
+            ct = interconnect.ConnTopology()
+            ct.build(topo, self.fp)
+            # ConnTopology.build already checks for disconnected segments
+            # and might throw or leave them disconnected.
+            # But here we want to verify that every SEG connection is visually touching.
+            cs_list = list(ct.segs())
+            for i, cs in enumerate(cs_list):
+                for conn in cs.conns:
+                    if conn.kind == interconnect.SegConnKind.SEG:
+                        other = cs_list[conn.seg_idx]
+                        # Junction should be at (conn.at_pos, cs.perp_pos) in cs coords
+                        # and (cs.perp_pos, other.perp_pos) in junctions? No.
+                        # Junction is at conn.at_pos along cs, and cs.perp_pos along other.
+                        # verify that other.along_lo <= cs.perp_pos <= other.along_hi
+                        if not (other.along_lo <= cs.perp_pos <= other.along_hi):
+                            print(f"  OPEN in Bundle {w.original_bundle.id} (topo): "
+                                  f"Seg {i} does not reach Seg {conn.seg_idx} at {cs.perp_pos}")
+                            opens += 1
+        if opens == 0: print("  Success: no opens found.")
+
+    def _check_connectivity_nuts(self):
+        print("[Check] Verifying NUTS-level connectivity...")
+        if self.nuts_result is None:
+            print("  Error: run_nuts required first.")
+            return
+        opens = 0
+        ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in self.nuts_result.segments}
+        for w in self.bundles:
+            if not w.candidates or w.selected_topology_index < 0: continue
+            bid = w.original_bundle.id
+            topo = w.candidates[w.selected_topology_index]
+            ct = interconnect.ConnTopology()
+            ct.build(topo, self.fp)
+            cs_list = list(ct.segs())
+            for i, cs in enumerate(cs_list):
+                ts = ts_map.get((bid, i))
+                if not ts or not ts.placed: continue
+                for conn in cs.conns:
+                    if conn.kind == interconnect.SegConnKind.SEG:
+                        other_ts = ts_map.get((bid, conn.seg_idx))
+                        if not other_ts or not other_ts.placed: continue
+                        # Junction is at other_ts.track_position along ts
+                        # and ts.track_position along other_ts.
+                        ts_touches = ts.span_lo <= other_ts.track_position <= ts.span_hi
+                        other_touches = other_ts.span_lo <= ts.track_position <= other_ts.span_hi
+                        if not ts_touches or not other_touches:
+                            print(f"  OPEN in Bundle {bid} (nuts): Seg {i} and Seg {conn.seg_idx} disconnected.")
+                            if not ts_touches: print(f"    Seg {i} span [{ts.span_lo}, {ts.span_hi}] misses {other_ts.track_position}")
+                            if not other_touches: print(f"    Seg {conn.seg_idx} span [{other_ts.span_lo}, {other_ts.span_hi}] misses {ts.track_position}")
+                            opens += 1
+        if opens == 0: print("  Success: no opens found.")
+
+    def _check_connectivity_dnuts(self):
+        print("[Check] Verifying Detailed NUTS-level connectivity (bit-level)...")
+        if self.detailed_result is None:
+            print("  Error: run_detailed_nuts required first.")
+            return
+        opens = 0
+        # Map (bundle_id, seg_idx, bit_index) -> NetSegment
+        ns_map = {}
+        for ns in self.detailed_result.net_segments:
+            ns_map[(ns.bundle_id, ns.seg_idx, ns.bit_index)] = ns
+            
+        for w in self.bundles:
+            if not w.candidates or w.selected_topology_index < 0: continue
+            bid = w.original_bundle.id
+            topo = w.candidates[w.selected_topology_index]
+            ct = interconnect.ConnTopology()
+            ct.build(topo, self.fp)
+            cs_list = list(ct.segs())
+            for i, cs in enumerate(cs_list):
+                for bit in range(len(w.original_bundle.get_net_names())):
+                    ns = ns_map.get((bid, i, bit))
+                    if not ns: continue
+                    for conn in cs.conns:
+                        if conn.kind == interconnect.SegConnKind.SEG:
+                            other_ns = ns_map.get((bid, conn.seg_idx, bit))
+                            if not other_ns: continue
+                            ns_touches = ns.span_lo <= other_ns.track_position <= ns.span_hi
+                            other_touches = other_ns.span_lo <= ns.track_position <= other_ns.span_hi
+                            if not ns_touches or not other_touches:
+                                print(f"  OPEN in Bundle {bid} Bit {bit} (dnuts): Seg {i} and Seg {conn.seg_idx} disconnected.")
+                                opens += 1
+        if opens == 0: print("  Success: no opens found.")
 
 def main():
     parser = argparse.ArgumentParser()

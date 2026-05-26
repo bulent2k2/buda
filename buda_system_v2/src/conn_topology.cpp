@@ -137,19 +137,23 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
 
                 if (on_j) {
                     // Connection from i to j: at_pos = position along i
+                    int at_i = ci.horiz ? P.x : P.y;
                     {
                         SegConn c;
                         c.kind    = SegConn::SEG;
                         c.seg_idx = j;
-                        c.at_pos  = ci.horiz ? P.x : P.y;
+                        c.at_pos  = at_i;
+                        c.is_endpoint = (at_i == ci.along_lo || at_i == ci.along_hi);
                         add_conn(i, std::move(c));
                     }
                     // Reciprocal T-junction from j to i: at_pos = position along j
+                    int at_j = ci.horiz ? P.y : P.x;
                     {
                         SegConn c;
                         c.kind    = SegConn::SEG;
                         c.seg_idx = i;
-                        c.at_pos  = ci.horiz ? P.y : P.x;
+                        c.at_pos  = at_j;
+                        c.is_endpoint = (at_j == cj.along_lo || at_j == cj.along_hi);
                         add_conn(j, std::move(c));
                     }
                 }

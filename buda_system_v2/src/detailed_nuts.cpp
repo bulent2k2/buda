@@ -258,8 +258,10 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
             if (!bs_ptr) continue;
 
-            const double along_lo = bs_ptr->span_lo;
-            const double along_hi = bs_ptr->span_hi;
+            bool has_lo = false, has_hi = false;
+            double min_lo = std::numeric_limits<double>::infinity();
+            double max_hi = -std::numeric_limits<double>::infinity();
+            bool all_lo_endpoints = true, all_hi_endpoints = true;
 
             for (const auto& conn : bs_ptr->connections) {
                 auto it = idx_map.find({ns.bundle_id, conn.seg_idx, ns.bit_index});
@@ -268,14 +270,24 @@ DetailedNUTSResult DetailedNUTSEngine::run(
                 const auto& other_ns = result.net_segments[it->second];
                 const double other_pos = other_ns.track_position;
                 
-                if (conn.at_pos <= along_lo) {
-                    ns.span_lo = std::min(ns.span_lo, other_pos);
-                } else if (conn.at_pos >= along_hi) {
-                    ns.span_hi = std::max(ns.span_hi, other_pos);
+                if (conn.lo_end) {
+                    has_lo = true;
+                    min_lo = std::min(min_lo, other_pos);
+                    if (!conn.is_endpoint) all_lo_endpoints = false;
                 } else {
-                    ns.span_lo = std::min(ns.span_lo, other_pos);
-                    ns.span_hi = std::max(ns.span_hi, other_pos);
+                    has_hi = true;
+                    max_hi = std::max(max_hi, other_pos);
+                    if (!conn.is_endpoint) all_hi_endpoints = false;
                 }
+            }
+
+            if (has_lo) {
+                if (all_lo_endpoints) ns.span_lo = min_lo;
+                else ns.span_lo = std::min(ns.span_lo, min_lo);
+            }
+            if (has_hi) {
+                if (all_hi_endpoints) ns.span_hi = max_hi;
+                else ns.span_hi = std::max(ns.span_hi, max_hi);
             }
         }
     }

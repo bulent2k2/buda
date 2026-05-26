@@ -26,6 +26,7 @@ struct SegConn {
     // SEG: the endpoint (or T-junction) meets another segment.
     int seg_idx;              // index into ConnTopology::segs()
     int at_pos;               // position along THIS segment where the junction is
+    bool is_endpoint = false; // true if at_pos is at either end of THIS segment
 };
 
 // ── ConnSeg ───────────────────────────────────────────────────────────────────

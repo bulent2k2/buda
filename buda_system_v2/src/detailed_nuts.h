@@ -9,8 +9,10 @@
 namespace interconnect {
 
 struct BusSegmentConn {
-    int    seg_idx = -1;
-    double at_pos  = 0.0;
+    int    seg_idx     = -1;
+    double at_pos      = 0.0;
+    bool   is_endpoint = false;
+    bool   lo_end      = false; // true if connection is at the lo-half of this segment
 };
 
 struct BusSegment {
