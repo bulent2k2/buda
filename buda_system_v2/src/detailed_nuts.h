@@ -8,6 +8,11 @@
 
 namespace interconnect {
 
+struct BusSegmentConn {
+    int    seg_idx = -1;
+    double at_pos  = 0.0;
+};
+
 struct BusSegment {
     int         bundle_id         = 0;
     int         seg_idx           = 0;
@@ -19,9 +24,10 @@ struct BusSegment {
     int         bit_width         = 1;
     std::string bit_order         = "LO_HI";  // "LO_HI" or "HI_LO"
     bool        timing_critical   = false;
-    // seg_idx of the adjacent perpendicular segment at each span end (-1 = block face)
-    int         lo_adj_seg_idx    = -1;
-    int         hi_adj_seg_idx    = -1;
+    
+    // Explicit connectivity list for bit-wire span adjustment.
+    std::vector<BusSegmentConn> connections;
+
     // Abstract NUTS track_position used as anchor for Option B ordering; NaN = unset (fallback)
     double      abstract_pos      = std::numeric_limits<double>::quiet_NaN();
 };

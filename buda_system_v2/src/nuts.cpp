@@ -174,27 +174,15 @@ static void do_span_adjustments(
         if (jt == ts_ptr_map.end()) continue;
         TrackSegment* other = jt->second;
         
-        double new_lo = other->span_lo;
-        double new_hi = other->span_hi;
-
         for (const auto& req : reqs) {
-            if (req.lo_end && req.is_endpoint) {
-                // Snap stub lo-end to the trunk's actual placed position.
-                // Symmetric with the hi-end snap below: if the trunk moves up,
-                // the stub must shrink (not leave its lo end dangling below).
-                new_lo = req.center;
-            } else if (req.lo_end) {
-                // T-junction in lo half: extend lo only if trunk moves below.
-                new_lo = std::min(new_lo, req.center);
-            } else if (req.is_endpoint) {
-                // Snap stub hi-end to the trunk's actual placed position.
-                new_hi = req.center;
+            if (req.lo_end) {
+                // Connection in lo half: extend lo to reach it if it's further out.
+                other->span_lo = std::min(other->span_lo, req.center);
             } else {
-                new_hi = std::max(new_hi, req.center);
+                // Connection in hi half: extend hi to reach it if it's further out.
+                other->span_hi = std::max(other->span_hi, req.center);
             }
         }
-        other->span_lo = new_lo;
-        other->span_hi = new_hi;
     }
 }
 

@@ -145,7 +145,6 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
                         add_conn(i, std::move(c));
                     }
                     // Reciprocal T-junction from j to i: at_pos = position along j
-                    // (only needed when P is interior to j, i.e. not j's own endpoint)
                     {
                         SegConn c;
                         c.kind    = SegConn::SEG;
@@ -153,7 +152,6 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
                         c.at_pos  = ci.horiz ? P.y : P.x;
                         add_conn(j, std::move(c));
                     }
-                    break;
                 }
             }
         }

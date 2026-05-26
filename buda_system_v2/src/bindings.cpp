@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
 #include <pybind11/iostream.h>
 #include "bundler.h"
 #include "topology.h"
@@ -13,7 +14,10 @@
 namespace py = pybind11;
 using namespace interconnect;
 
+PYBIND11_MAKE_OPAQUE(std::vector<BusSegmentConn>);
+
 PYBIND11_MODULE(interconnect, m) {
+    py::bind_vector<std::vector<BusSegmentConn>>(m, "BusSegmentConnList");
     py::add_ostream_redirect(m, "ostream_redirect");
 
     py::enum_<Strategy>(m, "Strategy")
@@ -324,6 +328,11 @@ PYBIND11_MODULE(interconnect, m) {
         }, py::arg("layer_id"), py::return_value_policy::reference_internal)
         .def("has_layer",      &RoutingGridStack::has_layer, py::arg("layer_id"));
 
+    py::class_<BusSegmentConn>(m, "BusSegmentConn")
+        .def(py::init<>())
+        .def_readwrite("seg_idx", &BusSegmentConn::seg_idx)
+        .def_readwrite("at_pos",  &BusSegmentConn::at_pos);
+
     py::class_<BusSegment>(m, "BusSegment")
         .def(py::init<>())
         .def_readwrite("bundle_id",       &BusSegment::bundle_id)
@@ -336,8 +345,7 @@ PYBIND11_MODULE(interconnect, m) {
         .def_readwrite("bit_width",       &BusSegment::bit_width)
         .def_readwrite("bit_order",       &BusSegment::bit_order)
         .def_readwrite("timing_critical", &BusSegment::timing_critical)
-        .def_readwrite("lo_adj_seg_idx",  &BusSegment::lo_adj_seg_idx)
-        .def_readwrite("hi_adj_seg_idx",  &BusSegment::hi_adj_seg_idx)
+        .def_readwrite("connections",     &BusSegment::connections)
         .def_readwrite("abstract_pos",    &BusSegment::abstract_pos);
 
     py::class_<NetSegment>(m, "NetSegment")

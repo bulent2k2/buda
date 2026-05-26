@@ -67,6 +67,7 @@ DetailedNUTSResult DetailedNUTSEngine::run(
 
         // Assignments already made on this layer; used to reserve tracks.
         struct LayerAssignment {
+            int bundle_id;
             double span_lo, span_hi, interval_lo, interval_hi;
             std::vector<double> track_positions;
         };
@@ -93,8 +94,11 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             }
 
             // Collect track positions already reserved by competing segments.
+            // Segments from the SAME bundle are allowed to share tracks.
             std::set<double> reserved;
             for (const auto& asgn : layer_assigns) {
+                if (asgn.bundle_id == bs.bundle_id) continue;
+
                 bool span_ov = asgn.span_lo < bs.span_hi && asgn.span_hi > bs.span_lo;
                 bool itvl_ov = asgn.interval_lo < bs.interval_hi &&
                                asgn.interval_hi > bs.interval_lo;
@@ -228,25 +232,25 @@ DetailedNUTSResult DetailedNUTSEngine::run(
                 result.net_segments.push_back(ns);
                 assigned.push_back(signal_tracks[ti].first);
             }
-            layer_assigns.push_back({bs.span_lo, bs.span_hi,
+            layer_assigns.push_back({bs.bundle_id, bs.span_lo, bs.span_hi,
                                      bs.interval_lo, bs.interval_hi,
                                      std::move(assigned)});
         }
     }
 
     // ------------------------------------------------------------------ //
-    // 4. Span-adjustment post-pass: extend bit-wire endpoints that        //
-    //    connect to a perpendicular segment to its exact track_position.  //
+    // 4. Span-adjustment post-pass: extend bit-wire endpoints to reach    //
+    //    all connected perpendicular segments' exact track_positions.     //
     // ------------------------------------------------------------------ //
     {
         using Key = std::tuple<int,int,int>; // bundle_id, seg_idx, bit_index
-        std::map<Key, int>              idx_map;
-        std::map<std::pair<int,int>, const BusSegment*> bs_map;
-
+        std::map<Key, int> idx_map;
         for (int i = 0; i < (int)result.net_segments.size(); ++i) {
             const auto& ns = result.net_segments[i];
             idx_map[{ns.bundle_id, ns.seg_idx, ns.bit_index}] = i;
         }
+
+        std::map<std::pair<int,int>, const BusSegment*> bs_map;
         for (const auto& bs : bus_segs)
             bs_map[{bs.bundle_id, bs.seg_idx}] = &bs;
 
@@ -254,15 +258,24 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
             if (!bs_ptr) continue;
 
-            if (bs_ptr->lo_adj_seg_idx >= 0) {
-                auto it = idx_map.find({ns.bundle_id, bs_ptr->lo_adj_seg_idx, ns.bit_index});
-                if (it != idx_map.end())
-                    ns.span_lo = result.net_segments[it->second].track_position;
-            }
-            if (bs_ptr->hi_adj_seg_idx >= 0) {
-                auto it = idx_map.find({ns.bundle_id, bs_ptr->hi_adj_seg_idx, ns.bit_index});
-                if (it != idx_map.end())
-                    ns.span_hi = result.net_segments[it->second].track_position;
+            const double along_lo = bs_ptr->span_lo;
+            const double along_hi = bs_ptr->span_hi;
+
+            for (const auto& conn : bs_ptr->connections) {
+                auto it = idx_map.find({ns.bundle_id, conn.seg_idx, ns.bit_index});
+                if (it == idx_map.end()) continue;
+                
+                const auto& other_ns = result.net_segments[it->second];
+                const double other_pos = other_ns.track_position;
+                
+                if (conn.at_pos <= along_lo) {
+                    ns.span_lo = std::min(ns.span_lo, other_pos);
+                } else if (conn.at_pos >= along_hi) {
+                    ns.span_hi = std::max(ns.span_hi, other_pos);
+                } else {
+                    ns.span_lo = std::min(ns.span_lo, other_pos);
+                    ns.span_hi = std::max(ns.span_hi, other_pos);
+                }
             }
         }
     }

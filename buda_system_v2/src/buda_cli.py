@@ -637,16 +637,18 @@ class BudaSession:
             bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
             bs.bit_order   = bit_order
             bs.abstract_pos = ts.track_position
-            # Populate lo/hi adj from ConnTopology.
+
+            # Populate connections from ConnTopology.
             cs_list = bid_to_cs.get(ts.bundle_id, [])
             if ts.seg_idx < len(cs_list):
                 cs = cs_list[ts.seg_idx]
                 for conn in cs.conns:
                     if conn.kind == interconnect.SegConnKind.SEG:
-                        if conn.at_pos == cs.along_lo:
-                            bs.lo_adj_seg_idx = conn.seg_idx
-                        elif conn.at_pos == cs.along_hi:
-                            bs.hi_adj_seg_idx = conn.seg_idx
+                        c = interconnect.BusSegmentConn()
+                        c.seg_idx = conn.seg_idx
+                        c.at_pos  = float(conn.at_pos)
+                        bs.connections.append(c)
+
             bus_segs.append(bs)
 
         engine = interconnect.DetailedNUTSEngine(self.routing_grid)
