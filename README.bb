@@ -1,3 +1,8 @@
+export PYTHONPATH=/users/ben/src/buda/buda_system_v2/build:/users/ben/src/buda/buda_system_v2/src
+cd ~/src/buda/flow/lefdef
+python3 ~/src/buda/src/buda_cli.py ~/src/buda/flow/four_blocks.buda
+python3 ~/src/buda/tools/def_viz_o1.py ~/src/
+
 To run:
   cd buda_system_v2
   export PYTHONPATH=build:src
@@ -40,6 +45,15 @@ History:
  2003  cd codex
  2004  codex
  
+docs
+test/tests
+test/tests/features
+buda_system_v2/src
+buda_system_v2/flow
+
+2026.05.24:
+cc> recap: Added five real-chip BUDA benchmark flows from MacroPlacement and MemPool DEFs (NVDLA, Ariane133, BlackParrot, three MemPool levels), all running clean through DetailedNUTS. All committed and pushed; no pending work.
+
 2026.05.17
   /Users/ben/src/buda/test/tests
       59 test_bundler.py

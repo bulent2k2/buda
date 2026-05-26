@@ -1,0 +1,109 @@
+# Bundle g_1 — 10 nets extracted from ispd19_test1
+# Cells: actual placed positions + LEF size
+
+def_layer 5  M5  H  LOW   0
+def_layer 6  M6  V  LOW   0
+def_layer 7  M7  H  TOP   0
+def_layer 8  M8  V  TOP   0
+
+def_track_pattern 7  0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  POWER 0.8 0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  GROUND 0.8 0.0
+def_track_pattern 8  0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  POWER 0.8 0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  GROUND 0.8 0.0
+
+corner_margin dx 0.5 dy 0.5
+
+add_block inst4241  68.300 74.200  73.700 75.400
+add_block inst4305  68.200 75.400  69.600 76.600
+add_block inst4658  57.700 58.600  59.100 59.800
+add_block inst4660  59.500 61.000  60.900 62.200
+add_block inst4664  67.500 63.400  68.900 64.600
+add_block inst4726  58.000 41.800  59.300 43.000
+add_block inst4795  60.000 41.800  61.100 43.000
+add_block inst4800  69.000 44.200  69.700 45.400
+add_block inst4815  66.100 63.400  67.500 64.600
+add_block inst4875  65.300 59.800  66.700 61.000
+add_block inst4943  67.900 45.400  68.800 46.600
+add_block inst5019  64.700 46.600  65.400 47.800
+add_block inst5088  67.600 43.000  68.300 44.200
+add_block inst5090  66.000 44.200  66.700 45.400
+add_block inst5163  69.000 43.000  69.700 44.200
+add_block inst5233  57.300 41.800  58.000 43.000
+add_block inst5234  59.900 40.600  61.000 41.800
+add_block inst5385  59.100 44.200  60.400 45.400
+add_block inst5457  56.200 31.000  57.600 32.200
+add_block inst5460  59.600 43.000  60.300 44.200
+add_block inst5465  60.200 51.400  61.600 52.600
+add_block inst5547  53.700 37.000  55.100 38.200
+add_block inst5548  56.300 43.000  57.600 44.200
+add_block inst5549  60.300 43.000  61.200 44.200
+add_block inst5622  56.500 34.600  57.900 35.800
+add_block inst5623  60.800 45.400  61.500 46.600
+add_block inst5637  47.000 81.400  48.400 82.600
+add_block inst5708  47.900 43.000  48.600 44.200
+add_block inst5709  53.100 43.000  54.000 44.200
+add_block inst5710  57.400 45.400  58.100 46.600
+add_block inst5711  52.200 43.000  53.100 44.200
+add_block inst5714  61.600 51.400  63.000 52.600
+add_block inst5716  59.100 46.600  63.300 47.800
+add_block inst5717  52.700 47.800  56.900 49.000
+add_block inst5718  57.300 49.000  59.800 50.200
+add_block inst5798  63.300 46.600  64.700 47.800
+add_block inst5870  55.100 37.000  56.500 38.200
+add_block inst5872  59.300 41.800  60.000 43.000
+add_block inst5874  59.700 38.200  61.100 39.400
+add_block inst5942  55.500 27.400  56.900 28.600
+add_block inst5943  58.300 29.800  59.700 31.000
+add_block inst5944  59.700 35.800  61.100 37.000
+add_block inst5945  57.900 34.600  59.300 35.800
+add_block inst5949  58.300 47.800  59.700 49.000
+add_block inst6021  57.700 32.200  59.100 33.400
+add_block inst6023  58.300 35.800  59.700 37.000
+add_block inst6025  50.900 41.800  51.800 43.000
+add_block inst6039  44.600 79.000  46.000 80.200
+add_block inst6099  56.200 29.800  57.600 31.000
+add_block inst6102  56.900 35.800  58.300 37.000
+add_block inst6177  57.600 31.000  59.000 32.200
+add_block inst6178  53.700 34.600  55.100 35.800
+add_block inst6182  53.900 61.000  55.300 62.200
+add_block inst6260  50.900 37.000  52.300 38.200
+add_block inst6335  51.300 35.800  52.700 37.000
+add_block inst6336  48.100 37.000  49.500 38.200
+add_block inst6338  48.300 39.400  49.700 40.600
+add_block inst6429  48.500 35.800  49.900 37.000
+add_block inst6431  49.500 37.000  50.900 38.200
+add_block inst6432  47.800 38.200  49.200 39.400
+add_block inst6433  45.700 35.800  47.100 37.000
+add_block inst6510  49.900 35.800  51.300 37.000
+add_block inst6511  46.400 38.200  47.800 39.400
+add_block inst6512  52.300 34.600  53.700 35.800
+add_block inst6513  50.900 34.600  52.300 35.800
+add_block inst6583  52.000 29.800  53.400 31.000
+add_block inst6586  54.900 32.200  56.300 33.400
+add_block inst6588  53.400 29.800  54.800 31.000
+add_block inst6658  54.800 31.000  56.200 32.200
+add_block inst6733  55.900 33.400  57.300 34.600
+add_block inst6955  55.300 28.600  56.700 29.800
+add_block inst7014  54.500 33.400  55.900 34.600
+add_block inst7015  52.400 39.400  53.800 40.600
+add_block inst7016  50.600 38.200  52.000 39.400
+add_block inst7074  49.200 38.200  50.600 39.400
+add_block inst7135  56.700 28.600  58.100 29.800
+add_block inst7221  55.000 76.600  56.400 77.800
+add_block inst7282  49.700 81.400  51.100 82.600
+
+add_net net104  inst4943.Y  inst4241.E,inst4305.S0,inst4664.S0,inst4815.S0,inst4875.S0,inst5637.S0,inst6039.S0,inst6260.S0,inst6335.S0,inst6336.S0,inst6338.S0,inst6429.S0,inst6431.S0,inst6432.S0,inst6433.S0,inst6510.S0,inst6511.S0,inst6512.S0,inst6513.S0,inst6583.S0,inst6586.S0,inst6588.S0,inst6658.S0,inst6733.S0,inst6955.S0,inst7014.S0,inst7015.S0,inst7016.S0,inst7074.S0,inst7135.S0,inst7221.S0,inst7282.S0
+add_net net241  inst5019.Y  inst4658.S0,inst4660.S0,inst5457.S0,inst5465.S0,inst5547.S0,inst5622.S0,inst5714.S0,inst5870.S0,inst5872.A,inst5874.S0,inst5942.S0,inst5943.S0,inst5944.S0,inst5945.S0,inst5949.S0,inst6021.S0,inst6023.S0,inst6099.S0,inst6102.S0,inst6177.S0,inst6178.S0,inst6182.S0
+add_net net730  inst5716.Q  inst5717.SI,inst5718.B0,inst5798.B
+add_net net905  inst4800.Y  inst5090.A,inst5708.A,inst5711.A
+add_net net936  inst5088.Y  inst5163.A,inst5709.A,inst6025.A
+add_net net1809  inst5385.Y  inst5460.A
+add_net net1841  inst5549.Y  inst5548.A
+add_net net2230  inst4795.Y  inst4726.A
+add_net net2338  inst5623.Y  inst5710.A
+add_net net2757  inst5234.Y  inst5233.A
+
+run_bundler STRICT
+generate_topologies
+run_planner 20
+run_nuts
+run_detailed_nuts lo_hi
+visualize

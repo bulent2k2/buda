@@ -2,6 +2,11 @@ Future? /agent  (architect, bdd, tdd)
 
 ====
 
+gem> I see two opens in bundles b3 and b4 after detailed nuts (dnuts) in: python3 ~/src/buda/src/buda_cli.py ~/src/buda/flow/four_blocks.buda                                                               
+
+
+====
+
 gem> Let's add busterm count for the selected bundle right after the bit count (within the paranthesis) in the main Buda window. E.g. B<id> <busname> (4 bits/3 bterms). Also remove the info that comes after: "(click again or click background to deselect)", or "-- click a bus-term or bus-seg to highlight", or "(click row to cycle, All Overlaps to clear)". In TopologyExplorer, add it before num of segs. E.g., B<id> (5 terms/4 segs)      
 
 ====

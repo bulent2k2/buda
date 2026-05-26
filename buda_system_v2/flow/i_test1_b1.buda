@@ -1,0 +1,31 @@
+# Auto-generated BUDA script from /tmp/ispd19/ispd19_test1/ispd19_test1.input.def
+# Die: 148.4 x 146.0 µm
+# 297 buses: 28 grid-clustered + 269 high-fanout
+
+def_layer 5  M5  H LOW 20 span_min 0  span_max 149
+def_layer 6  M6  V LOW 20 span_min 0  span_max 146
+def_layer 7  M7  H TOP 15 span_min 0  span_max 149
+def_layer 8  M8  V TOP 15 span_min 0  span_max 146
+
+def_track_pattern 5  0.07  SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 6  0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+def_track_pattern 7  0.07  SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+def_track_pattern 8  0.095 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+
+corner_margin dx 1 dy 1
+
+# ── Grid-clustered buses (27) ─────────────────────────────────
+add_block g_1_src  60 41  70 47  # 10 nets
+add_block g_1_dst  45 28  70 82  # 10 nets
+add_bus g_1[10]  g_1_src.out  g_1_dst.in
+
+run_bundler strict
+
+generate_topologies
+
+run_planner 50
+run_nuts 1.0
+run_detailed_nuts
+
+visualize
+

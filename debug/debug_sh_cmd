@@ -3,6 +3,270 @@ See:
 and
   ~/src/buda/buda_system_v2/flow/tmp/README
 
+29) New viz tool! 
+Bash(python3 -c "
+      import sys
+      sys.path.insert(0,'tools')
+      # Test just the imports and non-GUI code path
+      import os, re
+      from def_cluster import parse_def, parse_lef
+
+      def _parse_cell_sizes(lef_path):
+          with open(lef_path) as f:
+              content = f.read()
+          sizes = {}
+          for m in re.finditer(r'MACRO\s+(\S+).*?SIZE\s+([\d.]+)\s+BY\s+([\d.]+)\s*;', content, re.DOTALL):
+              sizes[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+          return sizes
+
+      DEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.def'
+      LEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.lef'
+      units, die, components, nets_raw = parse_def(DEF)
+      lef_pins = parse_lef(LEF)
+      cell_sizes = _parse_cell_sizes(LEF)
+      print(f'DEF parsed OK: {len(nets_raw)} nets, {len(components)} components')
+
+      # Test tkinter import
+      import tkinter as tk
+      root = tk.Tk()
+      root.withdraw()
+      print('Tkinter OK')
+      root.destroy()
+
+      # Test matplotlib TkAgg
+      import matplotlib
+      matplotlib.use('TkAgg')
+      from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+      print('Matplotlib TkAgg OK')
+      " 2>&1)
+  ⎿  DEF parsed OK: 3152 nets, 8879 components
+     Tkinter OK
+     Matplotlib TkAgg OK
+
+⏺ Bash(python3 -c "
+      import sys, os, re, tkinter as tk
+      sys.path.insert(0,'tools')
+      import matplotlib
+      matplotlib.use('TkAgg')
+      from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+      from matplotlib.figure import Figure
+
+      root = tk.Tk()
+      root.title('test')
+      root.geometry('400x300')
+      fig = Figure(figsize=(3,2))
+      canvas = FigureCanvasTkAgg(fig, master=root)
+      toolbar = NavigationToolbar2Tk(canvas, root)
+      toolbar.update()
+      canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+      root.lift()
+      root.attributes('-topmost', True)
+      root.after(3000, root.destroy)
+      print('Window created, running mainloop for 3s...')
+      root.mainloop()
+      print('Done')
+      " 2>&1)
+
+
+28) Parse LEF/DEF
+
+python3 - <<'PYEOF'
+   import sys, re
+   sys.path.insert(0, 'tools')
+   from def_cluster import parse_def, parse_lef
+
+   DEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.def'
+   LEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.lef'
+
+   with open(LEF) as f:
+       lef_content = f.read()
+   cell_sizes = {}
+   for m in re.finditer(r'MACRO (\S+).*?SIZE\s+([\d.]+)\s+BY\s+([\d.]+)\s*;', lef_content, re.DOTALL):
+       cell_sizes[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+
+   units, die, components, nets = parse_def(DEF)
+   lef_pins = parse_lef(LEF)
+
+   TARGET_NETS = ['net104','net241','net730','net905','net936',
+                  'net1809','net1841','net2230','net2338','net2757']
+
+   all_insts = {}
+   net_data = {}
+
+   for net_name in TARGET_NETS:
+       conn = nets[net_name]
+       drv = None
+       rcvs = []
+       for (inst, pin) in conn:
+           if inst not in components:
+               continue
+           cell, dx, dy, orient = components[inst]
+           x1 = dx / units
+           y1 = dy / units
+           w, h = cell_sizes.get(cell, (1.0, 1.0))
+           x2 = x1 + w
+           y2 = y1 + h
+           all_insts[inst] = {'cell': cell, 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}
+           pin_dir = 'UNKNOWN'
+           if cell in lef_pins and pin in lef_pins[cell]:
+               pin_dir = lef_pins[cell][pin][2]
+           if pin_dir == 'OUTPUT':
+               drv = (inst, pin)
+           else:
+               rcvs.append((inst, pin))
+       net_data[net_name] = {'drv': drv, 'rcv': rcvs}
+
+   # Write the .buda script
+   OUT = '/Users/ben/src/buda/buda_system_v2/flow/g1_bundle.buda'
+   lines = []
+   lines.append("# Bundle g_1 — 10 nets extracted from ispd19_test1")
+   lines.append("# Cells: actual placed positions + LEF size")
+   lines.append("")
+   # Layer stack matching test1 (die_max < 400µm → M5/M6 LOW, M7/M8 TOP)
+   lines.append("def_layer 5  M5  H  LOW   0")
+   lines.append("def_layer 6  M6  V  LOW   0")
+   lines.append("def_layer 7  M7  H  TOP   0")
+   lines.append("def_layer 8  M8  V  TOP   0")
+   lines.append("")
+   # Track patterns (NanGate45 M7/M8, pitch=0.8µm)
+   lines.append("def_track_pattern 7  0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  POWER 0.8 0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  GROUND 0.8
+   0.0")
+   lines.append("def_track_pattern 8  0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  POWER 0.8 0.0  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  SIGNAL 0.4 0.4  GROUND 0.8
+   0.0")
+   lines.append("")
+   lines.append("corner_margin dx 0.5 dy 0.5")
+   lines.append("")
+
+   # add_block for each instance
+   for inst in sorted(all_insts):
+       d = all_insts[inst]
+       lines.append(f"add_block {inst}  {d['x1']:.3f} {d['y1']:.3f}  {d['x2']:.3f} {d['y2']:.3f}")
+
+   lines.append("")
+
+   # add_net for each net
+   for net_name in TARGET_NETS:
+       d = net_data[net_name]
+       if d['drv'] is None:
+           lines.append(f"# WARNING: no driver found for {net_name}")
+           continue
+       drv_str = f"{d['drv'][0]}.{d['drv'][1]}"
+       rcv_str = ",".join(f"{i}.{p}" for i, p in d['rcv'])
+       lines.append(f"add_net {net_name}  {drv_str}  {rcv_str}")
+
+   lines.append("")
+   lines.append("run_bundler STRICT")
+   lines.append("generate_topologies")
+   lines.append("run_planner 20")
+   lines.append("run_nuts")
+   lines.append("run_detailed_nuts lo_hi")
+   lines.append("visualize")
+
+   with open(OUT, 'w') as f:
+       f.write('\n'.join(lines) + '\n')
+
+   print(f"Written {OUT}")
+   print(f"Instances: {len(all_insts)}, Nets: {len(TARGET_NETS)}")
+   PYEOF
+   Generate g1_bundle.buda script
+
+
+Older
+
+python3 - <<'PYEOF'
+   import sys, re
+   sys.path.insert(0, 'tools')
+   from def_cluster import parse_def, parse_lef
+
+   DEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.def'
+   LEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.lef'
+
+   with open(LEF) as f:
+       lef_content = f.read()
+   cell_sizes = {}
+   for m in re.finditer(r'MACRO (\S+).*?SIZE\s+([\d.]+)\s+BY\s+([\d.]+)\s*;', lef_content, re.DOTALL):
+       cell_sizes[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+
+   units, die, components, nets = parse_def(DEF)
+   lef_pins = parse_lef(LEF)  # {cell: {pin: (cx, cy, dir)}}
+
+   TARGET_NETS = ['net104','net241','net730','net905','net936',
+                  'net1809','net1841','net2230','net2338','net2757']
+
+   # Collect all instances and identify drivers
+   all_insts = {}  # inst -> {'cell', 'x1','y1','x2','y2'}
+   net_data = {}   # net -> {'drv': (inst,pin), 'rcv': [(inst,pin),...]}
+
+   for net_name in TARGET_NETS:
+       conn = nets[net_name]  # [(inst, pin), ...]
+       drv = None
+       rcvs = []
+       for (inst, pin) in conn:
+           if inst not in components:
+               continue
+           cell, dx, dy, orient = components[inst]
+           x1 = dx / units
+           y1 = dy / units
+           w, h = cell_sizes.get(cell, (1.0, 1.0))
+           x2 = x1 + w
+           y2 = y1 + h
+           all_insts[inst] = {'cell': cell, 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}
+           # determine direction from lef_pins
+           pin_dir = 'UNKNOWN'
+           if cell in lef_pins and pin in lef_pins[cell]:
+               pin_dir = lef_pins[cell][pin][2]
+           if pin_dir == 'OUTPUT':
+               drv = (inst, pin)
+           else:
+               rcvs.append((inst, pin))
+       net_data[net_name] = {'drv': drv, 'rcv': rcvs}
+
+   # Quick check
+   for net_name in TARGET_NETS:
+       d = net_data[net_name]
+       print(f"{net_name}: drv={d['drv']}, #rcv={len(d['rcv'])}")
+   print(f"\nTotal instances: {len(all_insts)}")
+   PYEOF
+   Build net_data and all_insts for the 10 nets
+
+older:
+
+python3 - <<'PYEOF'
+   import sys
+   sys.path.insert(0, 'tools')
+   from def_cluster import parse_def, parse_lef
+
+   DEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.def'
+   LEF = '/tmp/ispd19/ispd19_test1/ispd19_test1.input.lef'
+
+   units, die, components, nets = parse_def(DEF)
+   lef_cells, lef_pins = parse_lef(LEF)
+
+   # The 10 nets in bundle g_1
+   TARGET_NETS = ['net104','net241','net730','net905','net936',
+                  'net1809','net1841','net2230','net2338','net2757']
+
+   # Print a few net entries to understand the structure
+   for n in TARGET_NETS[:2]:
+       print(f"net {n}: {nets[n][:5]}")
+   print()
+
+   # Print component structure for a couple instances
+   sample_insts = ['inst4795', 'inst5637']
+   for inst in sample_insts:
+       print(f"component {inst}: {components.get(inst)}")
+   print()
+
+   # Print LEF cell info
+   sample_cells = {components[i]['cell'] for i in sample_insts if i in components}
+   for c in sample_cells:
+       print(f"LEF cell {c}: bbox={lef_cells.get(c)}")
+       if c in lef_pins:
+           print(f"  pins: {list(lef_pins[c].keys())[:8]}")
+   PYEOF
+   Inspect DEF/LEF structure for net and cell data
+
+ Contains brace with quote character (expansion obfuscation)
 
 27) ⏺ Done. The span-adjustment post-pass now lives in DetailedNUTSEngine::run()
   where it belongs — NetSegment.span_lo/span_hi are fully resolved by the time

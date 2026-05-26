@@ -50,7 +50,7 @@ DetailedNUTSResult DetailedNUTSEngine::run(
 
     for (auto& [layer, indices] : by_layer) {
         if (!stack_.has_layer(layer)) {
-            std::cout << "[DetailedNUTS] Warning: Layer " << layer 
+            std::cout << "[DetailedNUTS] Warning: Layer " << layer
                       << " has no track pattern defined. Skipping " << indices.size()
                       << " segment(s)." << std::endl;
             for (int idx : indices) result.num_unplaced += bus_segs[idx].bit_width;
@@ -83,10 +83,11 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             int n_sig = (int)signal_tracks.size();
 
             if (n_sig < bs.bit_width) {
-                std::cout << "[DetailedNUTS] Warning: Layer " << layer 
-                          << " has insufficient signal tracks (" << n_sig 
-                          << ") for bus width " << bs.bit_width 
-                          << " in interval [" << bs.interval_lo << ", " << bs.interval_hi << "]" << std::endl;
+                std::cout << "[DetailedNUTS] Warning: Layer " << layer
+                          << " has insufficient signal tracks (" << n_sig
+                          << ") for bus width " << bs.bit_width
+                          << " in interval [" << bs.interval_lo << ", " << bs.interval_hi << "]"
+                          << std::endl;
                 result.num_unplaced += bs.bit_width;
                 continue;
             }
@@ -140,6 +141,12 @@ DetailedNUTSResult DetailedNUTSEngine::run(
                         avail.push_back(k);
 
                 if ((int)avail.size() < bw) {
+                    std::cout << "[DetailedNUTS] Warning: Layer " << layer
+                              << " has " << avail.size() << " unreserved tracks"
+                              << " (need " << bw << ") in interval ["
+                              << bs.interval_lo << ", " << bs.interval_hi
+                              << "] — reservation conflict (bundle " << bs.bundle_id << ")"
+                              << std::endl;
                     result.num_unplaced += bw;
                     continue;
                 }
@@ -188,6 +195,11 @@ DetailedNUTSResult DetailedNUTSEngine::run(
                 }
 
                 if (best_start < 0) {
+                    std::cout << "[DetailedNUTS] Warning: Layer " << layer
+                              << " no valid window of " << bw << " tracks in interval ["
+                              << bs.interval_lo << ", " << bs.interval_hi
+                              << "] after reservation (bundle " << bs.bundle_id << ")"
+                              << std::endl;
                     result.num_unplaced += bw;
                     continue;
                 }
