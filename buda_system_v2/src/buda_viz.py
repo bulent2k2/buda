@@ -878,9 +878,12 @@ class TopologyExplorer:
 
 class BudaVisualizer:
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
-                 rerun_fn=None, routing_grid=None, layer_stack=None):
+                 rerun_fn=None, routing_grid=None, layer_stack=None,
+                 net_endpoints=None, ipc_session=None):
         self.fp           = floorplan
         self.bundles      = bundles
+        self._ipc_session = ipc_session
+        self._ipc         = None
         self.routing_grid = routing_grid
         self.layer_stack  = layer_stack
         self._selections_path = (
@@ -959,6 +962,23 @@ class BudaVisualizer:
         self._grid_rail_artists      = []    # POWER/GND/CLK stripe patches (not per-bundle)
         self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
 
+        # IPC: bundle_id -> set of instance names (driver + receivers, 'top' excluded)
+        self._bundle_insts: dict = {}
+        if net_endpoints:
+            for w in bundles:
+                bid   = w.original_bundle.id
+                insts = set()
+                for net_name in w.original_bundle.get_net_names():
+                    ep = net_endpoints.get(net_name)
+                    if ep:
+                        drv, rcvs = ep
+                        if drv and drv != 'top':
+                            insts.add(drv.rsplit('.', 1)[0])
+                        for r in rcvs:
+                            if r and r != 'top':
+                                insts.add(r.rsplit('.', 1)[0])
+                self._bundle_insts[bid] = insts
+
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
         self.fig.canvas.mpl_connect('key_press_event',    self._on_key)
@@ -1035,6 +1055,35 @@ class BudaVisualizer:
         self._selected_overlap = None
         self._overlap_state    = 0
         self._refresh_highlight()
+        self._ipc_send_highlight(bundle_id)
+
+    def _ipc_send_highlight(self, bundle_id):
+        if self._ipc is None:
+            return
+        if bundle_id is None:
+            self._ipc.send({'type': 'clear'})
+            return
+        w = next((w for w in self.bundles if w.original_bundle.id == bundle_id), None)
+        net_names  = list(w.original_bundle.get_net_names()) if w else []
+        inst_names = sorted(self._bundle_insts.get(bundle_id, set()))
+        self._ipc.send({
+            'type': 'select_bundle',
+            'bundle_id': bundle_id,
+            'net_names': net_names,
+            'inst_names': inst_names,
+        })
+
+    def _on_ipc_message(self, msg: dict):
+        kind = msg.get('type')
+        if kind == 'select_inst':
+            inst_names = set(msg.get('inst_names', []))
+            matching = [bid for bid, insts in self._bundle_insts.items()
+                        if insts & inst_names]
+            if matching:
+                self._set_highlight(matching[0])
+        elif kind == 'clear':
+            if self._highlighted is not None or self._highlighted_set:
+                self._set_highlight(None)
 
     def _set_overlap_highlight(self, od):
         """Cycle through 4 states on repeated clicks of the same overlap row.
@@ -2726,6 +2775,20 @@ class BudaVisualizer:
 
         btn_topos = Button(ax_topos, 'View Topologies  ↗', color='#fff0cc')
         btn_topos.on_clicked(lambda _: self._open_topo_explorer())
+
+        if self._ipc_session:
+            import sys as _sys, os as _os
+            _tools = _os.path.normpath(
+                _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'tools'))
+            if _tools not in _sys.path:
+                _sys.path.insert(0, _tools)
+            from viz_ipc import VizIPC, POLL_MS
+            self._ipc = VizIPC(self._ipc_session)
+            self._ipc.on_message = self._on_ipc_message
+            self._ipc.connect_or_serve()
+            self._ipc_timer = self.fig.canvas.new_timer(interval=POLL_MS)
+            self._ipc_timer.add_callback(self._ipc.poll)
+            self._ipc_timer.start()
 
         plt.show()
 

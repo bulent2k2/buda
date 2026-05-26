@@ -1143,12 +1143,16 @@ class BudaSession:
                 return
             rerun_layer_fn = self._rerun_nuts_layer if self.nuts_result is not None else None
             rerun_all_fn   = self._rerun_all        if self.nuts_result is not None else None
+            ipc_session = (os.path.splitext(os.path.basename(self.script_path))[0]
+                           if self.script_path else None)
             viz = BudaVisualizer(self.fp, self.bundles,
                                  sidecar_path=self.script_path,
                                  rerun_layer_fn=rerun_layer_fn,
                                  rerun_fn=rerun_all_fn,
                                  routing_grid=self.routing_grid,
-                                 layer_stack=self.layers)
+                                 layer_stack=self.layers,
+                                 net_endpoints=self._net_endpoints,
+                                 ipc_session=ipc_session)
             viz.draw_blocks()
             if self.planner is not None:
                 cuts = self.planner.get_cuts()
