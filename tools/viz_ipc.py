@@ -48,6 +48,10 @@ class VizIPC:
         """Try to connect as client; if that fails, bind as server."""
         if self._connected:
             return
+        if self._srv is not None:
+            # Already bound as server — only accept, never try to connect elsewhere.
+            self._try_accept_nonblocking()
+            return
         if self._try_connect():
             return
         self._try_serve()
@@ -108,6 +112,7 @@ class VizIPC:
                 self._sock = s
                 self._connected = True
             self._start_recv_thread(s)
+            print(f'[viz_ipc] connected to {self._path}')
             return True
         except OSError:
             s.close()
@@ -122,6 +127,7 @@ class VizIPC:
         # Clean up stale socket (previous process crashed without cleanup).
         if os.path.exists(self._path):
             if not self._try_connect():   # double-check it's really stale
+                print(f'[viz_ipc] unlinking stale {self._path}')
                 try:
                     os.unlink(self._path)
                 except OSError:
@@ -134,6 +140,7 @@ class VizIPC:
             srv.listen(1)
             srv.setblocking(False)
             self._srv = srv
+            print(f'[viz_ipc] listening on {self._path}')
         except OSError as exc:
             print(f'[viz_ipc] could not bind server: {exc}')
 
@@ -143,14 +150,16 @@ class VizIPC:
             return
         try:
             conn, _ = self._srv.accept()
+            conn.setblocking(True)   # macOS inherits O_NONBLOCK from server socket
             with self._lock:
                 self._sock = conn
                 self._connected = True
             self._start_recv_thread(conn)
+            print(f'[viz_ipc] accepted connection on {self._path}')
         except BlockingIOError:
             pass
-        except OSError:
-            pass
+        except OSError as exc:
+            print(f'[viz_ipc] accept error: {exc}')
 
     def _start_recv_thread(self, sock: socket.socket):
         t = threading.Thread(target=self._recv_loop, args=(sock,), daemon=True)

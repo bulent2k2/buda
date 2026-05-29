@@ -61,6 +61,7 @@ class DefViz:
         self.inst_nets  = {}   # inst_name -> set(net_names)
         self.inst_roles = {}   # (net_name, inst_name) -> 'driver'|'receiver'
         self._all_nets  = []   # sorted list of all net names
+        self._pending_ipc_msg = None   # IPC selection that arrived before DEF loaded
 
         # ── Selection state ───────────────────────────────────────────────────
         self.selected_nets  = set()
@@ -264,6 +265,10 @@ class DefViz:
             f'Loaded: {len(self._all_nets)} nets · {len(self.inst_info)} instances · '
             f'die {die[0]:.1f}×{die[1]:.1f} µm')
 
+        if self._pending_ipc_msg is not None:
+            msg, self._pending_ipc_msg = self._pending_ipc_msg, None
+            self._on_ipc_message(msg)
+
     # ── Net listbox ───────────────────────────────────────────────────────────
 
     def _refresh_net_list(self):
@@ -362,6 +367,9 @@ class DefViz:
     def _on_ipc_message(self, msg: dict):
         kind = msg.get('type')
         if kind == 'select_bundle':
+            if not self._all_nets:
+                self._pending_ipc_msg = msg
+                return
             net_names = [n for n in msg.get('net_names', []) if n in set(self._all_nets)]
             if not net_names:
                 return
@@ -464,7 +472,8 @@ class DefViz:
         # Labels: only when cells are large enough on screen
         # Estimate pixel size of the smallest cell
         fig_w_pt = self._fig.get_size_inches()[0] * self._fig.get_dpi()
-        data_w   = (xs2 - xs1) + 2 * pw
+        xlo, xhi = ax.get_xlim()
+        data_w   = xhi - xlo
         pt_per_um = fig_w_pt / data_w if data_w > 0 else 0
         min_cell_w = min(
             (info['x2'] - info['x1']) for info in
@@ -595,9 +604,13 @@ def main():
         ipc.on_message = app._on_ipc_message
         ipc.connect_or_serve()
         app._ipc = ipc
+        print(f'[def_viz] IPC session={ipc_name!r} connected={ipc._connected}')
 
         def _ipc_tick():
-            ipc.poll()
+            try:
+                ipc.poll()
+            except Exception as exc:
+                print(f'[def_viz] _ipc_tick error: {exc}')
             root.after(POLL_MS, _ipc_tick)
         root.after(POLL_MS, _ipc_tick)
 

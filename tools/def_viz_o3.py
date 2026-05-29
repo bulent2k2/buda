@@ -35,6 +35,7 @@ class DefVizV3:
 
         self.data          = DefVizData()
         self.selected_nets = set()
+        self._pending_ipc_msg = None
         self._net_items    = []
         self._inst_items   = []
         self._patch_inst   = {}
@@ -175,6 +176,9 @@ class DefVizV3:
         self._refresh_net_list(); self._inst_items = []; self._inst_lb.delete(0, tk.END)
         self._rebuild_grp_panel(); self._draw_canvas()
         self._status.set(f'Loaded: {msg}')
+        if self._pending_ipc_msg is not None:
+            pending, self._pending_ipc_msg = self._pending_ipc_msg, None
+            self._on_ipc_message(pending)
 
     def _save_groups(self):
         self.data.save_groups()
@@ -241,6 +245,9 @@ class DefVizV3:
         kind = msg.get('type')
         if kind == 'select_bundle':
             all_nets = set(getattr(self.data, 'all_nets', []))
+            if not all_nets:
+                self._pending_ipc_msg = msg
+                return
             net_names = [n for n in msg.get('net_names', []) if n in all_nets]
             if not net_names:
                 return

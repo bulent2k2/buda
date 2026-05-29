@@ -1066,12 +1066,13 @@ class BudaVisualizer:
         w = next((w for w in self.bundles if w.original_bundle.id == bundle_id), None)
         net_names  = list(w.original_bundle.get_net_names()) if w else []
         inst_names = sorted(self._bundle_insts.get(bundle_id, set()))
-        self._ipc.send({
+        msg = {
             'type': 'select_bundle',
             'bundle_id': bundle_id,
             'net_names': net_names,
             'inst_names': inst_names,
-        })
+        }
+        self._ipc.send(msg)
 
     def _on_ipc_message(self, msg: dict):
         kind = msg.get('type')
@@ -2786,9 +2787,11 @@ class BudaVisualizer:
             self._ipc = VizIPC(self._ipc_session)
             self._ipc.on_message = self._on_ipc_message
             self._ipc.connect_or_serve()
+            print(f'[buda_viz] IPC session={self._ipc_session!r} connected={self._ipc._connected}')
             self._ipc_timer = self.fig.canvas.new_timer(interval=POLL_MS)
             self._ipc_timer.add_callback(self._ipc.poll)
             self._ipc_timer.start()
+            print(f'[buda_viz] IPC timer started (backend={self.fig.canvas.__class__.__name__})')
 
         plt.show()
 
