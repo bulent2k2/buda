@@ -1,5 +1,8 @@
 # Clustering and DEF Visualization tools
 
+> cd ~/src/buda
+> python3 tools/def_viz.py flow/lefdef/gcd/gcd.def flow/lefdef/gcd/Nangate45.lef &
+
 First Buda viz:
 > rm -f /tmp/buda_ipc_four_blocks.sock
 > cd /Users/ben/src/buda/src
