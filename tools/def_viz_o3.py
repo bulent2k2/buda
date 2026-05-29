@@ -485,8 +485,7 @@ def main():
         def _tick(): ipc.poll(); root.after(POLL_MS, _tick)
         root.after(POLL_MS, _tick)
 
-    root.lift(); root.attributes('-topmost', True)
-    root.after(500, lambda: root.attributes('-topmost', False))
+    root.lift(); root.focus_force()
     root.mainloop()
 
 if __name__ == '__main__':

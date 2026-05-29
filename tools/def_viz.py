@@ -615,8 +615,7 @@ def main():
         root.after(POLL_MS, _ipc_tick)
 
     root.lift()
-    root.attributes('-topmost', True)
-    root.after(500, lambda: root.attributes('-topmost', False))
+    root.focus_force()
     root.mainloop()
 
 
