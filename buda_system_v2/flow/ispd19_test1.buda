@@ -2,8 +2,8 @@
 # Die: 148.4 x 146.0 µm
 # 297 buses: 28 grid-clustered + 269 high-fanout
 
-def_layer 5  M5  H LOW 20 span_min 0  span_max 149
-def_layer 6  M6  V LOW 20 span_min 0  span_max 146
+def_layer 5  M5  H TOP 20 span_min 0  span_max 149
+def_layer 6  M6  V TOP 20 span_min 0  span_max 146
 def_layer 7  M7  H TOP 15 span_min 0  span_max 149
 def_layer 8  M8  V TOP 15 span_min 0  span_max 146
 
