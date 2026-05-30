@@ -62,6 +62,7 @@ class DefVizV3:
     def _build_ui(self):
         root = self.root
 
+        # ── Top bar: file paths ───────────────────────────────────────────────
         top = ttk.Frame(root, padding=(6,4)); top.pack(side=tk.TOP, fill=tk.X)
         ttk.Label(top, text='DEF:').grid(row=0, column=0, sticky='w', padx=(0,4))
         self._def_var = tk.StringVar()
@@ -75,14 +76,24 @@ class DefVizV3:
             row=0, column=3, rowspan=2, padx=10, sticky='ns')
         top.columnconfigure(1, weight=1)
 
+        # ── Status bar ────────────────────────────────────────────────────────
+        self._status = tk.StringVar(value='Load a DEF/LEF to begin.')
+        ttk.Label(root, textvariable=self._status, relief=tk.SUNKEN,
+                  anchor='w', padding=(6,2)).pack(side=tk.BOTTOM, fill=tk.X)
+
+        # ── Main area ─────────────────────────────────────────────────────────
         main = ttk.Frame(root); main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
 
-        # ── Left column: Nets + Groups ─────────────────────────────────────────
-        left = ttk.Frame(main, width=210); left.pack(side=tk.LEFT, fill=tk.Y, padx=(0,4))
-        left.pack_propagate(False)
+        # ── Column 1: Nets (top) + Instances (bottom), vertically resizable ───
+        col1 = ttk.Frame(main, width=215); col1.pack(side=tk.LEFT, fill=tk.Y, padx=(0,3))
+        col1.pack_propagate(False)
 
-        np = ttk.LabelFrame(left, text='Nets', padding=4)
-        np.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        vpane = ttk.PanedWindow(col1, orient=tk.VERTICAL)
+        vpane.pack(fill=tk.BOTH, expand=True)
+
+        # Nets panel
+        np = ttk.LabelFrame(vpane, text='Nets', padding=4)
+        vpane.add(np, weight=1)
         nf = ttk.Frame(np); nf.pack(fill=tk.X, pady=(0,2))
         ttk.Label(nf, text='Filter:').pack(side=tk.LEFT)
         self._net_filter = tk.StringVar()
@@ -92,22 +103,41 @@ class DefVizV3:
         self._net_lb = tk.Listbox(nlb_f, selectmode=tk.EXTENDED, width=24,
                                    exportselection=False, font=('Courier', 9))
         nsb = ttk.Scrollbar(nlb_f, orient=tk.VERTICAL, command=self._net_lb.yview)
-        self._net_lb.configure(yscrollcommand=nsb.set); self._net_lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); nsb.pack(side=tk.LEFT, fill=tk.Y)
+        self._net_lb.configure(yscrollcommand=nsb.set)
+        self._net_lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); nsb.pack(side=tk.LEFT, fill=tk.Y)
         self._net_lb.bind('<<ListboxSelect>>', self._on_net_select)
         ttk.Button(np, text='Clear selection', command=self._clear_selection).pack(fill=tk.X, pady=(4,0))
         ttk.Checkbutton(np, text='Show all instances',
                         variable=self._show_all_bg, command=self._draw_canvas).pack(anchor='w', pady=(2,0))
 
-        # Groups sub-panel (fixed height at bottom of left column)
-        gp = ttk.LabelFrame(left, text='Groups', padding=4)
-        gp.pack(side=tk.BOTTOM, fill=tk.X)
+        # Instances panel
+        ip = ttk.LabelFrame(vpane, text='Instances', padding=4)
+        vpane.add(ip, weight=1)
+        iff = ttk.Frame(ip); iff.pack(fill=tk.X, pady=(0,2))
+        ttk.Label(iff, text='Filter:').pack(side=tk.LEFT)
+        self._inst_filter = tk.StringVar()
+        self._inst_filter.trace_add('write', lambda *_: self._refresh_inst_list())
+        ttk.Entry(iff, textvariable=self._inst_filter).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4,0))
+        ilb_f = ttk.Frame(ip); ilb_f.pack(fill=tk.BOTH, expand=True)
+        self._inst_lb = tk.Listbox(ilb_f, selectmode=tk.EXTENDED, width=24,
+                                    exportselection=False, font=('Courier', 9))
+        isb = ttk.Scrollbar(ilb_f, orient=tk.VERTICAL, command=self._inst_lb.yview)
+        self._inst_lb.configure(yscrollcommand=isb.set)
+        self._inst_lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); isb.pack(side=tk.LEFT, fill=tk.Y)
+        self._inst_lb.bind('<<ListboxSelect>>', self._on_inst_select)
+        grp_bf = ttk.Frame(ip); grp_bf.pack(fill=tk.X, pady=(4,0))
+        ttk.Button(grp_bf, text='Add to group',  command=self._add_insts_to_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(grp_bf, text='Rm from group', command=self._rm_insts_from_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Scrollable groups list
+        # ── Column 2: Groups (full height) ────────────────────────────────────
+        gp = ttk.LabelFrame(main, text='Groups', padding=4, width=220)
+        gp.pack(side=tk.LEFT, fill=tk.Y, padx=(0,3))
+        gp.pack_propagate(False)
+
+        # Scrollable groups list — fills all available vertical space
         glist_f = ttk.Frame(gp); glist_f.pack(fill=tk.BOTH, expand=True)
-        self._grp_canvas = tk.Canvas(glist_f, height=160, highlightthickness=0,
-                                      bg='#f8f8f8')
-        gscroll = ttk.Scrollbar(glist_f, orient=tk.VERTICAL,
-                                 command=self._grp_canvas.yview)
+        self._grp_canvas = tk.Canvas(glist_f, highlightthickness=0, bg='#f8f8f8')
+        gscroll = ttk.Scrollbar(glist_f, orient=tk.VERTICAL, command=self._grp_canvas.yview)
         self._grp_canvas.configure(yscrollcommand=gscroll.set)
         self._grp_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         gscroll.pack(side=tk.LEFT, fill=tk.Y)
@@ -115,32 +145,18 @@ class DefVizV3:
         self._grp_canvas.create_window((0,0), window=self._grp_inner, anchor='nw')
         self._grp_inner.bind('<Configure>',
             lambda e: self._grp_canvas.configure(scrollregion=self._grp_canvas.bbox('all')))
+        # Mouse-wheel scrolling on the groups canvas
+        self._grp_canvas.bind('<Enter>',
+            lambda _: self._grp_canvas.bind_all('<MouseWheel>', self._grp_scroll))
+        self._grp_canvas.bind('<Leave>',
+            lambda _: self._grp_canvas.unbind_all('<MouseWheel>'))
 
-        bf = ttk.Frame(gp); bf.pack(fill=tk.X, pady=(3,0))
-        ttk.Button(bf, text='+ From selection',  command=self._new_group_from_sel).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(bf, text='Add sub-group',      command=self._add_sub_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        bf2 = ttk.Frame(gp); bf2.pack(fill=tk.X, pady=(2,0))
-        ttk.Button(bf2, text='Utilities…',        command=self._open_utilities).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(bf2, text='Save',              command=self._save_groups).pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # ── Inst panel ────────────────────────────────────────────────────────
-        ip = ttk.LabelFrame(main, text='Instances', padding=4, width=215)
-        ip.pack(side=tk.LEFT, fill=tk.Y, padx=(0,4)); ip.pack_propagate(False)
-        iff = ttk.Frame(ip); iff.pack(fill=tk.X, pady=(0,2))
-        ttk.Label(iff, text='Filter:').pack(side=tk.LEFT)
-        self._inst_filter = tk.StringVar()
-        self._inst_filter.trace_add('write', lambda *_: self._refresh_inst_list())
-        ttk.Entry(iff, textvariable=self._inst_filter).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4,0))
-        ilb_f = ttk.Frame(ip); ilb_f.pack(fill=tk.BOTH, expand=True)
-        self._inst_lb = tk.Listbox(ilb_f, selectmode=tk.EXTENDED, width=25,
-                                    exportselection=False, font=('Courier', 9))
-        isb = ttk.Scrollbar(ilb_f, orient=tk.VERTICAL, command=self._inst_lb.yview)
-        self._inst_lb.configure(yscrollcommand=isb.set); self._inst_lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); isb.pack(side=tk.LEFT, fill=tk.Y)
-        self._inst_lb.bind('<<ListboxSelect>>', self._on_inst_select)
-        # Add/remove from selected group
-        grp_bf = ttk.Frame(ip); grp_bf.pack(fill=tk.X, pady=(4,0))
-        ttk.Button(grp_bf, text='Add to group',    command=self._add_insts_to_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(grp_bf, text='Rm from group',   command=self._rm_insts_from_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        bf = ttk.Frame(gp); bf.pack(side=tk.BOTTOM, fill=tk.X, pady=(3,0))
+        ttk.Button(bf, text='Utilities…', command=self._open_utilities).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(bf, text='Save',       command=self._save_groups).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        bf2 = ttk.Frame(gp); bf2.pack(side=tk.BOTTOM, fill=tk.X, pady=(2,0))
+        ttk.Button(bf2, text='+ From selection', command=self._new_group_from_sel).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(bf2, text='Add sub-group',    command=self._add_sub_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # ── Canvas ────────────────────────────────────────────────────────────
         cv_f = ttk.Frame(main); cv_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -151,10 +167,6 @@ class DefVizV3:
         self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._canvas.mpl_connect('button_press_event', self._on_canvas_click)
         self._canvas.mpl_connect('motion_notify_event', self._on_hover)
-
-        self._status = tk.StringVar(value='Load a DEF/LEF to begin.')
-        ttk.Label(root, textvariable=self._status, relief=tk.SUNKEN,
-                  anchor='w', padding=(6,2)).pack(side=tk.BOTTOM, fill=tk.X)
 
     # ── File ops ──────────────────────────────────────────────────────────────
 
@@ -301,6 +313,9 @@ class DefVizV3:
                 self._clear_selection()
 
     # ── Groups panel ─────────────────────────────────────────────────────────
+
+    def _grp_scroll(self, event):
+        self._grp_canvas.yview_scroll(int(-1 * (event.delta / 120)), 'units')
 
     def _rebuild_grp_panel(self):
         """Rebuild the scrollable groups list from scratch."""
