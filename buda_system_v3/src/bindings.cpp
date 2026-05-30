@@ -12,11 +12,11 @@
 #include "detailed_nuts.h"
 
 namespace py = pybind11;
-using namespace interconnect;
+using namespace buda;
 
 PYBIND11_MAKE_OPAQUE(std::vector<BusSegmentConn>);
 
-PYBIND11_MODULE(interconnect, m) {
+PYBIND11_MODULE(buda, m) {
     py::bind_vector<std::vector<BusSegmentConn>>(m, "BusSegmentConnList");
     py::add_ostream_redirect(m, "ostream_redirect");
 

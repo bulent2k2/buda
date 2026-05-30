@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.widgets import Button
 
-import interconnect as ic
+import buda as ic
 
 _LAYER_COLOR = {1: '#000075', 2: '#a9a9a9', 3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC', 8: '#F032E6', 9: '#42D4F4', 10: '#9A6324'}
 _LAYER_LABEL = {1: 'M1 V', 2: 'M2 H', 3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V', 8: 'M8 H', 9: 'M9 V', 10: 'M10 H'}
@@ -1441,7 +1441,7 @@ class BudaVisualizer:
         We include all layers defined in the LayerStack, plus anything
         actually present in the current drawing (e.g. from topology hints).
         """
-        import interconnect as ic_mod
+        import buda as ic_mod
         ids = set()
         if self.layer_stack:
             for d in (ic_mod.LayerDir.HORIZONTAL, ic_mod.LayerDir.VERTICAL):
@@ -2373,7 +2373,7 @@ class BudaVisualizer:
         All artists are created hidden; the [Detailed] toggle button makes them
         visible and hides the abstract NUTS artists.
         """
-        import interconnect as ic_mod
+        import buda as ic_mod
 
         # Build layer direction map from the LayerStack.
         h_ids = set(layer_stack.get_layer_ids_by_dir(ic_mod.LayerDir.HORIZONTAL))

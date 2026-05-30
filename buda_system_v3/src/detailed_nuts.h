@@ -6,7 +6,7 @@
 #include <vector>
 #include "routing_grid.h"
 
-namespace interconnect {
+namespace buda {
 
 struct BusSegmentConn {
     int    seg_idx     = -1;
@@ -65,4 +65,4 @@ private:
         const std::vector<std::pair<double, TrackSlot>>& all_tracks);
 };
 
-} // namespace interconnect
+} // namespace buda

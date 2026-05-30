@@ -5,7 +5,7 @@
 #include <numeric>
 #include <cmath>
 
-namespace interconnect {
+namespace buda {
 CongestionPlanner::CongestionPlanner(const Floorplan& fp, const LayerStack& ls)
     : floorplan_(fp), layers_(ls) {}
 
@@ -486,4 +486,4 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     return assignments;
 }
 
-} // namespace interconnect
+} // namespace buda

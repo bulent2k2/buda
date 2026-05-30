@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <tuple>
 
-namespace interconnect {
+namespace buda {
 
 DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
     : stack_(stack) {}
@@ -295,4 +295,4 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     return result;
 }
 
-} // namespace interconnect
+} // namespace buda

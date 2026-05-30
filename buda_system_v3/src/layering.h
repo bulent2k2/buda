@@ -3,7 +3,7 @@
 #include <string>
 #include <algorithm>
 #include "topology.h"
-namespace interconnect {
+namespace buda {
 enum class LayerDir { HORIZONTAL, VERTICAL };
 enum class LayerType { TOP, LOW };  // LOW kept for backward compatibility; treated as non-TOP
 struct Layer {

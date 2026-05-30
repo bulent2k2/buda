@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace interconnect {
+namespace buda {
 
 // One bus segment after track assignment.
 // span_lo/span_hi  = extent along the routing direction (x for H, y for V)
@@ -106,4 +106,4 @@ private:
                          double preferred) const;
 };
 
-} // namespace interconnect
+} // namespace buda

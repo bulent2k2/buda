@@ -3,7 +3,7 @@
 #include <string>
 #include <map>
 #include <set>
-namespace interconnect {
+namespace buda {
 struct Net {
     std::string name;
     std::string driver_pin;

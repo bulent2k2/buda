@@ -3,7 +3,7 @@
 #include <cmath>
 #include <stdexcept>
 
-namespace interconnect {
+namespace buda {
 
 // ---------------------------------------------------------------------------
 // TrackPattern
@@ -136,4 +136,4 @@ bool RoutingGridStack::has_layer(int layer_id) const {
     return layers_.count(layer_id) > 0;
 }
 
-} // namespace interconnect
+} // namespace buda

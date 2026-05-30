@@ -1,5 +1,5 @@
 #include "layering.h"
-namespace interconnect {
+namespace buda {
 void LayerStack::add_layer(int id, const std::string& name, LayerDir dir, LayerType type) {
     layers_.push_back({id, name, dir, type, 1.0});
     if (type == LayerType::TOP) {

@@ -5,7 +5,7 @@
 #include <vector>
 #include "topology.h"  // Rect
 
-namespace interconnect {
+namespace buda {
 
 // ---------------------------------------------------------------------------
 // TrackSlot — one track position in a repeating pattern unit
@@ -92,4 +92,4 @@ private:
     std::map<int, RoutingGrid> layers_;
 };
 
-} // namespace interconnect
+} // namespace buda

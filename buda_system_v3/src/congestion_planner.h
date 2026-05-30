@@ -2,7 +2,7 @@
 #include "bundler.h"
 #include "topology.h"
 #include "layering.h"
-namespace interconnect {
+namespace buda {
 
 // One Hanan-grid cut subdivided into perpendicular bands.
 // V-cut (dir=VERTICAL):   x fixed, bands along Y grid → counts H-segments crossing it.
@@ -79,4 +79,4 @@ private:
     double base_cost_non_top_ = 0.5;
 };
 
-} // namespace interconnect
+} // namespace buda

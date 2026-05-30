@@ -3,7 +3,7 @@ import json
 import math
 import os
 import sys
-import interconnect
+import buda
 from buda_viz import BudaVisualizer, TopologyExplorer
 
 class _TeeStream:
@@ -37,10 +37,10 @@ class _TeeStream:
 
 class BudaSession:
     def __init__(self):
-        self.fp = interconnect.Floorplan()
-        self.netlist = interconnect.Netlist()
-        self.layers = interconnect.LayerStack()
-        self.bundler = interconnect.Bundler()
+        self.fp = buda.Floorplan()
+        self.netlist = buda.Netlist()
+        self.layers = buda.LayerStack()
+        self.bundler = buda.Bundler()
         self.planner = None
         self.bundles = []
         self.nuts_result = None
@@ -294,8 +294,8 @@ class BudaSession:
         def _reassign_dir(dir_enum, thresholds: tuple[float, float]):
             short_thresh, long_thresh = thresholds
             layers_sorted = sorted(self.layers.get_layer_ids_by_dir(dir_enum))
-            dir_label = "V" if dir_enum == interconnect.LayerDir.VERTICAL else "H"
-            is_v = (dir_enum == interconnect.LayerDir.VERTICAL)
+            dir_label = "V" if dir_enum == buda.LayerDir.VERTICAL else "H"
+            is_v = (dir_enum == buda.LayerDir.VERTICAL)
             if len(layers_sorted) < 2:
                 print(f"[Planner] post_nuts {dir_label}: fewer than 2 {dir_label} layers — nothing to reassign")
                 return
@@ -357,13 +357,13 @@ class BudaSession:
             extra_lines.append(msg)
 
         if v_thresholds is not None:
-            _reassign_dir(interconnect.LayerDir.VERTICAL, v_thresholds)
+            _reassign_dir(buda.LayerDir.VERTICAL, v_thresholds)
         if h_thresholds is not None:
-            _reassign_dir(interconnect.LayerDir.HORIZONTAL, h_thresholds)
+            _reassign_dir(buda.LayerDir.HORIZONTAL, h_thresholds)
 
         # Single NUTS re-run after all reassignments.
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
-        nuts = interconnect.NUTSEngine(self.fp, self.layers)
+        nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
         self.nuts_result = nuts.run(self.bundles)
 
@@ -518,7 +518,7 @@ class BudaSession:
         """
         layer_names  = self._make_layer_names()
         layer_name   = layer_names.get(layer_id, f"L{layer_id}")
-        nuts = interconnect.NUTSEngine(self.fp, self.layers)
+        nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
         if self.planner is not None:
             nuts.set_extra_grid_points(
@@ -541,7 +541,7 @@ class BudaSession:
         print(pre_msg)
 
         # C++ also prints its own [NUTS] rerun_layer(...) line here.
-        with interconnect.ostream_redirect():
+        with buda.ostream_redirect():
             self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
 
         diag = self._nuts_diagnostics(self.nuts_result, layer_names, before,
@@ -589,7 +589,7 @@ class BudaSession:
                     w.seg_layers = list(asn.seg_layers)
 
         layer_names = self._make_layer_names()
-        nuts = interconnect.NUTSEngine(self.fp, self.layers)
+        nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
         if self.planner is not None:
             nuts.set_extra_grid_points(
@@ -620,13 +620,13 @@ class BudaSession:
             if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
                 bid_to_cs[w.original_bundle.id] = []
                 continue
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(w.candidates[w.selected_topology_index], self.fp)
             bid_to_cs[w.original_bundle.id] = list(ct.segs())
 
         bus_segs = []
         for ts in self.nuts_result.segments:
-            bs = interconnect.BusSegment()
+            bs = buda.BusSegment()
             bs.bundle_id   = ts.bundle_id
             bs.seg_idx     = ts.seg_idx
             bs.layer       = ts.layer
@@ -643,8 +643,8 @@ class BudaSession:
             if ts.seg_idx < len(cs_list):
                 cs = cs_list[ts.seg_idx]
                 for conn in cs.conns:
-                    if conn.kind == interconnect.SegConnKind.SEG:
-                        c = interconnect.BusSegmentConn()
+                    if conn.kind == buda.SegConnKind.SEG:
+                        c = buda.BusSegmentConn()
                         c.seg_idx     = conn.seg_idx
                         c.at_pos      = float(conn.at_pos)
                         c.is_endpoint = conn.is_endpoint
@@ -654,8 +654,8 @@ class BudaSession:
 
             bus_segs.append(bs)
 
-        engine = interconnect.DetailedNUTSEngine(self.routing_grid)
-        with interconnect.ostream_redirect():
+        engine = buda.DetailedNUTSEngine(self.routing_grid)
+        with buda.ostream_redirect():
             self.detailed_result = engine.run(bus_segs)
 
         n_net = len(self.detailed_result.net_segments)
@@ -682,11 +682,11 @@ class BudaSession:
                     rects.append((x1r, y1r, x2r, y2r))
                     i += 5
                 # Optional teg_mode keyword after rects
-                teg_mode = interconnect.TegMode.THRU
+                teg_mode = buda.TegMode.THRU
                 if i < len(args) and args[i].lower() == "teg_mode":
                     i += 1
                     if i < len(args):
-                        teg_mode = interconnect.TegMode.OVER if args[i].lower() == "over" else interconnect.TegMode.THRU
+                        teg_mode = buda.TegMode.OVER if args[i].lower() == "over" else buda.TegMode.THRU
                         i += 1
                 self.fp.add_block_rects(name, rects, teg_mode)
                 x1 = min(r[0] for r in rects); y1 = min(r[1] for r in rects)
@@ -749,9 +749,9 @@ class BudaSession:
                 dstr = args[0].upper()
                 val = int(args[1])
                 if dstr in ("H", "HORIZONTAL"):
-                    self.fp.set_min_stub_length_dir(interconnect.LayerDir.HORIZONTAL, val)
+                    self.fp.set_min_stub_length_dir(buda.LayerDir.HORIZONTAL, val)
                 elif dstr in ("V", "VERTICAL"):
-                    self.fp.set_min_stub_length_dir(interconnect.LayerDir.VERTICAL, val)
+                    self.fp.set_min_stub_length_dir(buda.LayerDir.VERTICAL, val)
                 else:
                     print(f"Error: unknown direction '{args[0]}' — use H or V")
         elif cmd == "set_min_stub_length_layer":
@@ -849,8 +849,8 @@ class BudaSession:
                 elif kw == "span_max":  span_max = int(rest[i+1]);    i += 2
                 elif kw == "kspan":     kspan_override = float(rest[i+1]); i += 2
                 else: i += 1
-            ldir  = interconnect.LayerDir.HORIZONTAL if dirstr.upper()=="H" else interconnect.LayerDir.VERTICAL
-            ltype = interconnect.LayerType.TOP if typestr == "TOP" else interconnect.LayerType.LOW
+            ldir  = buda.LayerDir.HORIZONTAL if dirstr.upper()=="H" else buda.LayerDir.VERTICAL
+            ltype = buda.LayerType.TOP if typestr == "TOP" else buda.LayerType.LOW
             self.layers.add_layer(int(lid), name, ldir, ltype)
             if span_min is not None or span_max is not None:
                 smin = span_min if span_min is not None else 0
@@ -872,11 +872,11 @@ class BudaSession:
             else:
                 self.planner.set_planner_param(name_p, value_p)
         elif cmd == "run_bundler":
-            self.bundler.set_strategy(interconnect.Strategy.STRICT)
+            self.bundler.set_strategy(buda.Strategy.STRICT)
             raw_bundles = self.bundler.run(self.netlist)
             self.bundles = []
             for b in raw_bundles:
-                w = interconnect.BundleWrapper()
+                w = buda.BundleWrapper()
                 w.original_bundle = b
                 w.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
@@ -891,9 +891,9 @@ class BudaSession:
             use_double_detour = "double_detour" in args
             pos_args = [a for a in args if a not in ("center_mode", "double_detour")]
             hint = pos_args[0]; src = pos_args[1]; dsts = pos_args[2:]
-            topo_gen = interconnect.TopologyGenerator(self.fp)
-            h_layer = self.layers.get_top_layer(interconnect.LayerDir.HORIZONTAL)
-            v_layer = self.layers.get_top_layer(interconnect.LayerDir.VERTICAL)
+            topo_gen = buda.TopologyGenerator(self.fp)
+            h_layer = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
+            v_layer = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
             if h_layer != -1 and v_layer != -1:
                 topo_gen.set_layer_ids(h_layer, v_layer)
             if use_center:
@@ -916,9 +916,9 @@ class BudaSession:
             # deriving src/dst block names from the netlist automatically.
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
-            topo_gen = interconnect.TopologyGenerator(self.fp)
-            h_layer = self.layers.get_top_layer(interconnect.LayerDir.HORIZONTAL)
-            v_layer = self.layers.get_top_layer(interconnect.LayerDir.VERTICAL)
+            topo_gen = buda.TopologyGenerator(self.fp)
+            h_layer = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
+            v_layer = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
             if h_layer != -1 and v_layer != -1:
                 topo_gen.set_layer_ids(h_layer, v_layer)
             if use_center:
@@ -973,7 +973,7 @@ class BudaSession:
                     v_thresholds = _V_DEFAULTS
                 self._run_post_nuts_planner(v_thresholds, h_thresholds)
             else:
-                self.planner = interconnect.CongestionPlanner(self.fp, self.layers)
+                self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
                 self.planner.build_congestion_map()
@@ -981,7 +981,7 @@ class BudaSession:
                 # planner scores the correct topology and assigns layers for it.
                 self._apply_selections()
                 self._planner_iterations = int(args[0]) if args else 5
-                with interconnect.ostream_redirect():
+                with buda.ostream_redirect():
                     assignments = self.planner.optimize_topologies(self.bundles, self._planner_iterations)
                 # Apply planner layer decisions (vector copy in C++ means we must apply here).
                 bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
@@ -996,7 +996,7 @@ class BudaSession:
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0
             self._nuts_pitch = pitch
-            nuts = interconnect.NUTSEngine(self.fp, self.layers)
+            nuts = buda.NUTSEngine(self.fp, self.layers)
             nuts.set_track_pitch(pitch)
 
             if self.planner is not None:
@@ -1006,7 +1006,7 @@ class BudaSession:
             # Snapshot topology-derived initial spans before the solve.
             before = self._segment_states_from_topology()
             # C++ prints its own [NUTS] N segments placed across K layer(s) line.
-            with interconnect.ostream_redirect():
+            with buda.ostream_redirect():
                 self.nuts_result = nuts.run(self.bundles)
             layer_names = self._make_layer_names()
             diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
@@ -1025,21 +1025,21 @@ class BudaSession:
                 slot_type   = args[i]
                 width       = float(args[i + 1])
                 space_after = float(args[i + 2])
-                slots.append(interconnect.TrackSlot(
+                slots.append(buda.TrackSlot(
                     type=slot_type, label=slot_type.lower(),
                     width=width, space_after=space_after))
                 i += 3
             if not slots:
                 print("Error: def_track_pattern requires at least one slot triple")
                 return
-            pat = interconnect.TrackPattern(origin=origin, slots=slots)
+            pat = buda.TrackPattern(origin=origin, slots=slots)
             if self.routing_grid is None:
-                self.routing_grid = interconnect.RoutingGridStack()
+                self.routing_grid = buda.RoutingGridStack()
 
             # Resolve layer direction.
             is_h = True
             if self.layers.has_layer(layer_id):
-                is_h = (self.layers.get_layer_dir(layer_id) == interconnect.LayerDir.HORIZONTAL)
+                is_h = (self.layers.get_layer_dir(layer_id) == buda.LayerDir.HORIZONTAL)
 
             self.routing_grid.define_layer(layer_id, pat, is_h)
             self.layers.set_layer_dilution(layer_id, pat.dilution_factor())
@@ -1070,16 +1070,16 @@ class BudaSession:
                 slot_type   = args[i]
                 width       = float(args[i + 1])
                 space_after = float(args[i + 2])
-                slots.append(interconnect.TrackSlot(
+                slots.append(buda.TrackSlot(
                     type=slot_type, label=slot_type.lower(),
                     width=width, space_after=space_after))
                 i += 3
             if not slots:
                 print("Error: add_grid_override requires at least one slot triple")
                 return
-            pat = interconnect.TrackPattern(origin=origin, slots=slots)
+            pat = buda.TrackPattern(origin=origin, slots=slots)
             if self.routing_grid is None:
-                self.routing_grid = interconnect.RoutingGridStack()
+                self.routing_grid = buda.RoutingGridStack()
             self.routing_grid.add_override(layer_id, x1, y1, x2, y2, pat)
             print(f"[RoutingGrid] Override on layer {layer_id} "
                   f"region=({x1},{y1})-({x2},{y2}): "
@@ -1241,7 +1241,7 @@ class BudaSession:
         for w in self.bundles:
             if not w.candidates or w.selected_topology_index < 0: continue
             topo = w.candidates[w.selected_topology_index]
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(topo, self.fp)
             # ConnTopology.build already checks for disconnected segments
             # and might throw or leave them disconnected.
@@ -1249,7 +1249,7 @@ class BudaSession:
             cs_list = list(ct.segs())
             for i, cs in enumerate(cs_list):
                 for conn in cs.conns:
-                    if conn.kind == interconnect.SegConnKind.SEG:
+                    if conn.kind == buda.SegConnKind.SEG:
                         other = cs_list[conn.seg_idx]
                         # Junction should be at (conn.at_pos, cs.perp_pos) in cs coords
                         # and (cs.perp_pos, other.perp_pos) in junctions? No.
@@ -1272,14 +1272,14 @@ class BudaSession:
             if not w.candidates or w.selected_topology_index < 0: continue
             bid = w.original_bundle.id
             topo = w.candidates[w.selected_topology_index]
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(topo, self.fp)
             cs_list = list(ct.segs())
             for i, cs in enumerate(cs_list):
                 ts = ts_map.get((bid, i))
                 if not ts or not ts.placed: continue
                 for conn in cs.conns:
-                    if conn.kind == interconnect.SegConnKind.SEG:
+                    if conn.kind == buda.SegConnKind.SEG:
                         other_ts = ts_map.get((bid, conn.seg_idx))
                         if not other_ts or not other_ts.placed: continue
                         # Junction is at other_ts.track_position along ts
@@ -1308,7 +1308,7 @@ class BudaSession:
             if not w.candidates or w.selected_topology_index < 0: continue
             bid = w.original_bundle.id
             topo = w.candidates[w.selected_topology_index]
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(topo, self.fp)
             cs_list = list(ct.segs())
             for i, cs in enumerate(cs_list):
@@ -1316,7 +1316,7 @@ class BudaSession:
                     ns = ns_map.get((bid, i, bit))
                     if not ns: continue
                     for conn in cs.conns:
-                        if conn.kind == interconnect.SegConnKind.SEG:
+                        if conn.kind == buda.SegConnKind.SEG:
                             other_ns = ns_map.get((bid, conn.seg_idx, bit))
                             if not other_ns: continue
                             ns_touches = ns.span_lo <= other_ns.track_position <= ns.span_hi

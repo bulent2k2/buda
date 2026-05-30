@@ -5,7 +5,7 @@
 #include <map>
 #include <optional>
 #include "bundler.h"
-namespace interconnect {
+namespace buda {
 
 // How a multi-rect block handles a trunk that falls in the gap between its rects.
 enum class TegMode {

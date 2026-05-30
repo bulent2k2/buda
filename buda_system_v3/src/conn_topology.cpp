@@ -5,7 +5,7 @@
 #include <set>
 #include <climits>
 
-namespace interconnect {
+namespace buda {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -397,4 +397,4 @@ void ConnTopology::compute_net_pull() {
     }
 }
 
-} // namespace interconnect
+} // namespace buda

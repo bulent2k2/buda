@@ -5,7 +5,7 @@
 #include <vector>
 #include <climits>
 
-namespace interconnect {
+namespace buda {
 
 // ── Connection ────────────────────────────────────────────────────────────────
 //
@@ -114,4 +114,4 @@ private:
     void compute_net_pull();
 };
 
-} // namespace interconnect
+} // namespace buda

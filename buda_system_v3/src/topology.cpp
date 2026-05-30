@@ -8,7 +8,7 @@
 #include <numeric>
 #include <functional>
 
-namespace interconnect {
+namespace buda {
 
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     int nx1 = std::min(x1, x2);
@@ -1342,4 +1342,4 @@ void TopologyGenerator::filter_pinched(std::vector<Topology>& candidates) {
     candidates = std::move(filtered);
 }
 
-} // namespace interconnect
+} // namespace buda

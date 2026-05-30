@@ -7,7 +7,7 @@
 #include <numeric>
 #include <set>
 
-namespace interconnect {
+namespace buda {
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -520,4 +520,4 @@ NUTSResult NUTSEngine::rerun_layer(
     return result;
 }
 
-} // namespace interconnect
+} // namespace buda

@@ -1,7 +1,7 @@
 #include "bundler.h"
 #include <sstream>
 #include <algorithm>
-namespace interconnect {
+namespace buda {
 std::string extract_instance(const std::string& pin) {
     size_t last_dot = pin.find_last_of('.');
     if (last_dot == std::string::npos) return "top";
