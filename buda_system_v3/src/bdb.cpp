@@ -282,7 +282,7 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     std::regex comp_re(
         R"(-\s+(\S+)\s+(\S+)\s+\+\s+(?:PLACED|FIXED)\s+\(\s*(\d+)\s+(\d+)\s*\)\s+(\S+))");
     std::regex conn_re(R"(\(\s*(\S+)\s+(\S+)\s*\))");
-    std::regex net_hdr_re(R"(^-\s+(\S+))");
+    std::regex net_hdr_re(R"(^\s*-\s+(\S+))");
 
     while (std::getline(f, line)) {
         // ── section transitions ──────────────────────────────────────────
@@ -336,8 +336,10 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
 
         // ── nets section ─────────────────────────────────────────────────
         if (state == State::IN_NETS) {
-            // New net header: "- net_name"
-            if (!line.empty() && line[0]=='-') {
+            // New net header: "- net_name" or "  - net_name" (leading whitespace allowed)
+            {
+                auto first = line.find_first_not_of(" \t");
+                if (first != std::string::npos && line[first] == '-') {
                 std::smatch m;
                 if (std::regex_search(line, m, net_hdr_re)) {
                     cur_net = m[1];
@@ -350,7 +352,7 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
                         sqlite3_step(s_np); sqlite3_reset(s_np);
                     }
                 }
-            }
+                }} // end net-header block
             // Connection tokens: ( inst pin )
             if (cur_net.empty()) continue;
             int net_id = get_net_id(cur_net);
