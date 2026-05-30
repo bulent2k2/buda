@@ -50,6 +50,11 @@ class DefVizV3:
         self._sel_gid:  str = None   # currently selected group
         self._canvas_sel_insts: set = set()  # insts rubber-banded on canvas
 
+        # Group utilities
+        self._utils_win     = None
+        self._rect_selector = None
+        self._rect_active   = False
+
         self._build_ui()
 
     # ── UI ────────────────────────────────────────────────────────────────────
@@ -114,7 +119,9 @@ class DefVizV3:
         bf = ttk.Frame(gp); bf.pack(fill=tk.X, pady=(3,0))
         ttk.Button(bf, text='+ From selection',  command=self._new_group_from_sel).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(bf, text='Add sub-group',      command=self._add_sub_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(bf, text='Save',               command=self._save_groups).pack(fill=tk.X, pady=(2,0))
+        bf2 = ttk.Frame(gp); bf2.pack(fill=tk.X, pady=(2,0))
+        ttk.Button(bf2, text='Utilities…',        command=self._open_utilities).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(bf2, text='Save',              command=self._save_groups).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # ── Inst panel ────────────────────────────────────────────────────────
         ip = ttk.LabelFrame(main, text='Instances', padding=4, width=215)
@@ -177,6 +184,9 @@ class DefVizV3:
         self._refresh_net_list(); self._inst_items = []; self._inst_lb.delete(0, tk.END)
         self._rebuild_grp_panel(); self._draw_canvas()
         self._status.set(f'Loaded: {msg}')
+        if self._utils_win and self._utils_win.winfo_exists():
+            self._hpwl_refresh()
+            self._common_nets_refresh()
         if self._pending_ipc_msg is not None:
             pending, self._pending_ipc_msg = self._pending_ipc_msg, None
             self._on_ipc_message(pending)
@@ -398,6 +408,7 @@ class DefVizV3:
 
     def _on_canvas_click(self, event):
         if event.inaxes != self._ax: return
+        if self._rect_active: return   # RectangleSelector owns these events
         tb = getattr(self._canvas, 'toolbar', None)
         if tb and getattr(tb, 'mode', '') != '': return
         for patch, gid in list(self._patch_group.items()):
@@ -438,6 +449,272 @@ class DefVizV3:
             try: self._hover_ann.remove()
             except Exception: pass
             self._hover_ann = None; self._canvas.draw_idle()
+
+
+    # ── Group Utilities panel ─────────────────────────────────────────────────
+
+    def _open_utilities(self):
+        if self._utils_win and self._utils_win.winfo_exists():
+            self._utils_win.lift(); return
+        win = tk.Toplevel(self.root)
+        win.title('Group Utilities'); win.geometry('500x360')
+        win.resizable(False, False); self._utils_win = win
+        win.transient(self.root)
+
+        nb = ttk.Notebook(win); nb.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        hf = ttk.Frame(nb); nb.add(hf, text='  HPWL Range  ')
+        self._build_hpwl_tab(hf)
+
+        rf = ttk.Frame(nb); nb.add(rf, text='  Rect Select  ')
+        self._build_rect_tab(rf)
+
+        cf = ttk.Frame(nb); nb.add(cf, text='  Common Nets  ')
+        self._build_common_nets_tab(cf)
+
+        nb.bind('<<NotebookTabChanged>>',
+                lambda e: self._on_utils_tab(nb.index('current')))
+        win.protocol('WM_DELETE_WINDOW', self._on_utils_close)
+
+        if self.data.all_nets:
+            self._hpwl_refresh()
+            self._common_nets_refresh()
+
+    def _on_utils_close(self):
+        self._rect_deactivate()
+        if self._utils_win:
+            self._utils_win.destroy()
+            self._utils_win = None
+
+    def _on_utils_tab(self, idx):
+        if idx != 1:   # leaving rect tab → deactivate rect mode
+            self._rect_deactivate()
+        if idx == 2:   # entering common nets tab → refresh group lists
+            self._common_nets_refresh()
+
+    # ── HPWL Range tab ───────────────────────────────────────────────────────
+
+    def _build_hpwl_tab(self, parent):
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+        fig = Figure(figsize=(4.8, 1.5), facecolor='#f0f0f0')
+        ax = fig.add_subplot(111); ax.set_facecolor('#f8f8f8')
+        fig.subplots_adjust(left=0.07, right=0.97, bottom=0.22, top=0.90)
+        ax.set_xlabel('HPWL (µm)', fontsize=7); ax.tick_params(labelsize=7)
+        fc = FigureCanvasTkAgg(fig, master=parent)
+        fc.get_tk_widget().pack(fill=tk.X, padx=4, pady=(4, 2))
+        self._hpwl_fig = fig; self._hpwl_ax = ax; self._hpwl_fc = fc
+        self._hpwl_lo_line = self._hpwl_hi_line = None
+
+        sf = ttk.Frame(parent); sf.pack(fill=tk.X, padx=10, pady=2)
+        ttk.Label(sf, text='Lo (µm):').grid(row=0, column=0, sticky='w')
+        self._hpwl_lo = tk.DoubleVar(value=0.0)
+        self._hpwl_lo_sc = tk.Scale(sf, variable=self._hpwl_lo, orient=tk.HORIZONTAL,
+                                     from_=0, to=200, resolution=0.5, length=170,
+                                     command=lambda _: self._hpwl_update())
+        self._hpwl_lo_sc.grid(row=0, column=1, padx=4)
+        ttk.Label(sf, text='Hi (µm):').grid(row=0, column=2, sticky='w', padx=(8, 0))
+        self._hpwl_hi = tk.DoubleVar(value=200.0)
+        self._hpwl_hi_sc = tk.Scale(sf, variable=self._hpwl_hi, orient=tk.HORIZONTAL,
+                                     from_=0, to=200, resolution=0.5, length=170,
+                                     command=lambda _: self._hpwl_update())
+        self._hpwl_hi_sc.grid(row=0, column=3, padx=4)
+
+        self._hpwl_count = tk.StringVar(value='—')
+        ttk.Label(parent, textvariable=self._hpwl_count,
+                  anchor='center', font=('TkDefaultFont', 9, 'italic')).pack(pady=2)
+        ttk.Button(parent, text='Create Net Group', command=self._hpwl_create).pack(
+            fill=tk.X, padx=80, pady=(0, 6))
+
+    def _hpwl_refresh(self):
+        """Redraw histogram and set slider range from current data."""
+        dist = self.data.hpwl_distribution()
+        if not dist:
+            return
+        vals = [v for _, v in dist]
+        max_h = max(vals)
+        for sc in (self._hpwl_lo_sc, self._hpwl_hi_sc):
+            sc.configure(to=max_h)
+        self._hpwl_hi.set(max_h)
+
+        ax = self._hpwl_ax; ax.clear()
+        ax.hist(vals, bins=40, color='#4477cc', alpha=0.75, linewidth=0)
+        ax.set_xlabel('HPWL (µm)', fontsize=7); ax.tick_params(labelsize=7)
+        ax.set_facecolor('#f8f8f8')
+        lo, hi = self._hpwl_lo.get(), self._hpwl_hi.get()
+        self._hpwl_lo_line = ax.axvline(lo, color='#e66', lw=1.2, ls='--')
+        self._hpwl_hi_line = ax.axvline(hi, color='#c33', lw=1.5)
+        self._hpwl_fc.draw_idle()
+        self._hpwl_update()
+
+    def _hpwl_update(self):
+        lo, hi = self._hpwl_lo.get(), self._hpwl_hi.get()
+        if lo > hi:
+            self._hpwl_lo.set(hi); lo = hi
+        # update lines
+        if self._hpwl_lo_line:
+            self._hpwl_lo_line.set_xdata([lo, lo])
+            self._hpwl_hi_line.set_xdata([hi, hi])
+            self._hpwl_fc.draw_idle()
+        # count matching nets
+        if self.data.bdb is not None:
+            n = len(self.data.bdb.nets_by_hpwl(lo, hi))
+        else:
+            n = sum(1 for net in self.data.all_nets
+                    if lo <= self.data._net_hpwl(net) <= hi)
+        self._hpwl_count.set(f'{n} net(s) in [{lo:.1f}, {hi:.1f}] µm')
+
+    def _hpwl_create(self):
+        lo, hi = self._hpwl_lo.get(), self._hpwl_hi.get()
+        g = self.data.group_nets(lo, hi)
+        if g is None:
+            self._status.set('No nets in that HPWL range.'); return
+        self._sel_gid = g.id
+        self._rebuild_grp_panel(); self._draw_canvas()
+        self._status.set(f'Created group "{g.name}".')
+
+    # ── Rect Select tab ───────────────────────────────────────────────────────
+
+    def _build_rect_tab(self, parent):
+        ttk.Label(parent, text=(
+            'Click and drag on the canvas to select\n'
+            'instances in a rectangular region.\n\n'
+            'Each release creates a new inst group.\n'
+            'Click the button again to deactivate.'
+        ), justify=tk.CENTER, font=('TkDefaultFont', 10)).pack(pady=20)
+        self._rect_btn_var = tk.StringVar(value='Activate Rect Selection')
+        self._rect_btn = ttk.Button(parent, textvariable=self._rect_btn_var,
+                                    command=self._rect_toggle)
+        self._rect_btn.pack(fill=tk.X, padx=60, pady=4)
+        self._rect_status = tk.StringVar(value='')
+        ttk.Label(parent, textvariable=self._rect_status,
+                  anchor='center', foreground='#336633').pack(pady=4)
+
+    def _rect_toggle(self):
+        if self._rect_active:
+            self._rect_deactivate()
+        else:
+            self._rect_activate()
+
+    def _rect_activate(self):
+        from matplotlib.widgets import RectangleSelector
+        # Clear any toolbar zoom/pan mode
+        tb = getattr(self._canvas, 'toolbar', None)
+        if tb:
+            try: tb.mode = ''
+            except Exception: pass
+        self._rect_selector = RectangleSelector(
+            self._ax, self._on_rect_selected,
+            useblit=True, button=[1],
+            minspanx=0.5, minspany=0.5,
+            spancoords='data', interactive=False)
+        self._rect_selector.set_active(True)
+        self._rect_active = True
+        self._rect_btn_var.set('Deactivate Rect Selection')
+        self._rect_status.set('Active — drag on canvas')
+        self._status.set('Rect mode: drag on the canvas to group instances.')
+
+    def _rect_deactivate(self):
+        if self._rect_selector is not None:
+            try: self._rect_selector.set_active(False)
+            except Exception: pass
+            self._rect_selector = None
+        self._rect_active = False
+        if hasattr(self, '_rect_btn_var'):
+            self._rect_btn_var.set('Activate Rect Selection')
+        if hasattr(self, '_rect_status'):
+            self._rect_status.set('')
+        self._status.set('Rect mode deactivated.')
+
+    def _on_rect_selected(self, eclick, erelease):
+        xl = min(eclick.xdata, erelease.xdata)
+        xh = max(eclick.xdata, erelease.xdata)
+        yl = min(eclick.ydata, erelease.ydata)
+        yh = max(eclick.ydata, erelease.ydata)
+        g = self.data.group_insts(xl, yl, xh, yh)
+        if g is None:
+            self._rect_status.set('No instances in rect — try again.')
+            return
+        self._sel_gid = g.id
+        self._rebuild_grp_panel(); self._draw_canvas()
+        self._rect_status.set(f'Created "{g.name}".')
+        self._status.set(f'Created group "{g.name}" from rect selection.')
+
+    # ── Common Nets tab ───────────────────────────────────────────────────────
+
+    def _build_common_nets_tab(self, parent):
+        ttk.Label(parent, text=(
+            'Find nets connecting instances in two groups.\n'
+            'Select one inst-group for each endpoint.'
+        ), justify=tk.CENTER).pack(pady=(12, 6))
+
+        gf = ttk.Frame(parent); gf.pack(fill=tk.X, padx=20, pady=4)
+        ttk.Label(gf, text='Group 1:', width=9).grid(row=0, column=0, sticky='w', pady=3)
+        self._cn_g1 = tk.StringVar()
+        self._cn_cb1 = ttk.Combobox(gf, textvariable=self._cn_g1,
+                                     state='readonly', width=28)
+        self._cn_cb1.grid(row=0, column=1, padx=4)
+        self._cn_cb1.bind('<<ComboboxSelected>>', lambda _: self._common_nets_update())
+
+        ttk.Label(gf, text='Group 2:', width=9).grid(row=1, column=0, sticky='w', pady=3)
+        self._cn_g2 = tk.StringVar()
+        self._cn_cb2 = ttk.Combobox(gf, textvariable=self._cn_g2,
+                                     state='readonly', width=28)
+        self._cn_cb2.grid(row=1, column=1, padx=4)
+        self._cn_cb2.bind('<<ComboboxSelected>>', lambda _: self._common_nets_update())
+
+        self._cn_count = tk.StringVar(value='—')
+        ttk.Label(parent, textvariable=self._cn_count,
+                  anchor='center', font=('TkDefaultFont', 9, 'italic')).pack(pady=4)
+        ttk.Button(parent, text='Create Net Group',
+                   command=self._common_nets_create).pack(fill=tk.X, padx=80, pady=(0, 6))
+
+        # Refresh dropdowns when tab is shown
+        self._cn_gid_map: dict[str, str] = {}   # display label → gid
+
+    def _common_nets_refresh(self):
+        """Rebuild the two group comboboxes from current groups."""
+        choices = []
+        gid_map = {}
+        for g, _ in self.data.groups.walk():
+            insts = self.data.groups.all_insts(g.id)
+            if not insts:
+                continue
+            label = f'{g.name} ({len(insts)} insts)'
+            choices.append(label)
+            gid_map[label] = g.id
+        self._cn_gid_map = gid_map
+        for cb in (self._cn_cb1, self._cn_cb2):
+            cb['values'] = choices
+        self._cn_count.set('—')
+
+    def _common_nets_update(self):
+        g1_label = self._cn_g1.get(); g2_label = self._cn_g2.get()
+        gid1 = self._cn_gid_map.get(g1_label)
+        gid2 = self._cn_gid_map.get(g2_label)
+        if not gid1 or not gid2 or gid1 == gid2:
+            self._cn_count.set('—'); return
+        insts1 = self.data.groups.all_insts(gid1)
+        insts2 = self.data.groups.all_insts(gid2)
+        n = sum(1 for ni in self.data.net_insts.values()
+                if ni & insts1 and ni & insts2)
+        self._cn_count.set(f'{n} common net(s) found')
+
+    def _common_nets_create(self):
+        g1_label = self._cn_g1.get(); g2_label = self._cn_g2.get()
+        gid1 = self._cn_gid_map.get(g1_label)
+        gid2 = self._cn_gid_map.get(g2_label)
+        if not gid1 or not gid2:
+            self._status.set('Select both groups first.'); return
+        if gid1 == gid2:
+            self._status.set('Groups must be different.'); return
+        g = self.data.group_common_nets(gid1, gid2)
+        if g is None:
+            self._status.set('No common nets found between those groups.'); return
+        self._sel_gid = g.id
+        self._rebuild_grp_panel(); self._draw_canvas()
+        self._status.set(f'Created group "{g.name}".')
 
 
 def _draw_group_boxes_filtered(ax, groups, inst_info, visible_gids, highlight_id=None):

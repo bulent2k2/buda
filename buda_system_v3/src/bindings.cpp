@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 #include <pybind11/iostream.h>
+#include "bdb.h"
 #include "bundler.h"
 #include "topology.h"
 #include "conn_topology.h"
@@ -370,4 +371,69 @@ PYBIND11_MODULE(buda, m) {
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
         .def(py::init<const RoutingGridStack&>())
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
+
+    // ── BDB row types ──────────────────────────────────────────────────────
+    py::class_<ComponentRow>(m, "ComponentRow")
+        .def_readwrite("id",            &ComponentRow::id)
+        .def_readwrite("name",          &ComponentRow::name)
+        .def_readwrite("cell",          &ComponentRow::cell)
+        .def_readwrite("parent_id",     &ComponentRow::parent_id)
+        .def_readwrite("depth",         &ComponentRow::depth)
+        .def_readwrite("x1",            &ComponentRow::x1)
+        .def_readwrite("y1",            &ComponentRow::y1)
+        .def_readwrite("x2",            &ComponentRow::x2)
+        .def_readwrite("y2",            &ComponentRow::y2)
+        .def_readwrite("is_leaf",       &ComponentRow::is_leaf)
+        .def_readwrite("is_replicated", &ComponentRow::is_replicated);
+
+    py::class_<NetRow>(m, "NetRow")
+        .def_readwrite("id",   &NetRow::id)
+        .def_readwrite("name", &NetRow::name);
+
+    py::class_<PinRow>(m, "PinRow")
+        .def_readwrite("net_id",   &PinRow::net_id)
+        .def_readwrite("comp_id",  &PinRow::comp_id)
+        .def_readwrite("pin_name", &PinRow::pin_name)
+        .def_readwrite("dir",      &PinRow::dir)
+        .def_readwrite("px",       &PinRow::px)
+        .def_readwrite("py",       &PinRow::py);
+
+    py::class_<GrpRow>(m, "GrpRow")
+        .def_readwrite("id",        &GrpRow::id)
+        .def_readwrite("name",      &GrpRow::name)
+        .def_readwrite("color",     &GrpRow::color)
+        .def_readwrite("parent_id", &GrpRow::parent_id);
+
+    // ── BDB ────────────────────────────────────────────────────────────────
+    py::class_<BDB>(m, "BDB")
+        .def(py::init<const std::string&>())
+        .def("import_def_lef",  &BDB::import_def_lef,
+             py::arg("def_path"), py::arg("lef_path"))
+        .def("import_verilog",  &BDB::import_verilog, py::arg("v_path"))
+        .def("compute_hpwl",    &BDB::compute_hpwl)
+        .def("compute_fanout",  &BDB::compute_fanout)
+        .def("compute_all",     &BDB::compute_all)
+        .def("all_components",  &BDB::all_components)
+        .def("all_nets",        &BDB::all_nets)
+        .def("all_pins",        &BDB::all_pins)
+        .def("all_busterms",    &BDB::all_busterms)
+        .def("all_bundles",     &BDB::all_bundles)
+        .def("nets_by_hpwl",    &BDB::nets_by_hpwl,
+             py::arg("lo"), py::arg("hi"))
+        .def("comps_in_rect",   &BDB::comps_in_rect,
+             py::arg("xl"), py::arg("yl"), py::arg("xh"), py::arg("yh"))
+        .def("common_nets",     &BDB::common_nets,
+             py::arg("bundle_id1"), py::arg("bundle_id2"))
+        .def("new_group",       &BDB::new_group,
+             py::arg("name"), py::arg("color"), py::arg("parent_id") = "")
+        .def("add_grp_member",  &BDB::add_grp_member,
+             py::arg("gid"), py::arg("kind"), py::arg("ref"))
+        .def("remove_grp_member", &BDB::remove_grp_member,
+             py::arg("gid"), py::arg("kind"), py::arg("ref"))
+        .def("delete_group",    &BDB::delete_group, py::arg("gid"))
+        .def("all_groups",      &BDB::all_groups)
+        .def("units",           &BDB::units)
+        .def("die_w",           &BDB::die_w)
+        .def("die_h",           &BDB::die_h)
+        .def_static("db_path",  &BDB::db_path, py::arg("def_path"));
 }

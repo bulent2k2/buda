@@ -5,7 +5,7 @@
 
 #include <string>
 #include <vector>
-#include <optional>
+#include <unordered_map>
 #include "sqlite3.h"
 
 namespace buda {
@@ -33,6 +33,7 @@ struct PinRow {
     int         comp_id;
     std::string pin_name;
     std::string dir;          // INPUT OUTPUT INOUT
+    double      px, py;       // absolute pin position in µm (-1 if unknown)
 };
 
 struct NetPropsRow {
@@ -89,6 +90,7 @@ public:
     // ── Queries ────────────────────────────────────────────────────────────
     std::vector<ComponentRow> all_components() const;
     std::vector<NetRow>       all_nets()        const;
+    std::vector<PinRow>       all_pins()        const;
     std::vector<BustermRow>   all_busterms()    const;
     std::vector<BundleRow>    all_bundles()      const;
 
@@ -108,13 +110,29 @@ public:
     void        delete_group(const std::string& gid);
     std::vector<GrpRow> all_groups() const;
 
+    // ── Metadata ───────────────────────────────────────────────────────────
+    int    units() const;
+    double die_w() const;
+    double die_h() const;
+
     // ── Static helpers ─────────────────────────────────────────────────────
     static std::string db_path(const std::string& def_path);   // .def → .bdb
 
 private:
     sqlite3* _db = nullptr;
+    int    _units = 1000;
+    double _die_w = 0.0, _die_h = 0.0;
+
     void _exec(const char* sql);
     void _create_schema();
+    // parsers
+    struct LefCell { double w, h; };
+    struct LefPin  { double ox, oy; std::string dir; };  // offset from cell origin
+    using LefCells = std::unordered_map<std::string, LefCell>;
+    using LefPins  = std::unordered_map<std::string,
+                         std::unordered_map<std::string, LefPin>>;
+    static LefCells _parse_lef_sizes(const std::string& lef_path);
+    static LefPins  _parse_lef_pins (const std::string& lef_path);
 };
 
 }  // namespace buda

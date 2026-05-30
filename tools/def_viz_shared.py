@@ -10,9 +10,20 @@ import sys
 import matplotlib.patches as mpatches
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+_V3_SRC = os.path.join(os.path.dirname(_HERE), 'buda_system_v3', 'src')
 sys.path.insert(0, _HERE)
+if _V3_SRC not in sys.path:
+    sys.path.insert(0, _V3_SRC)
 from def_cluster import parse_def, parse_lef
 from group_tree import GroupTree, lighten_color
+
+# Try to import the fast C++ BDB module
+try:
+    import buda as _buda_mod
+    _BDB_AVAILABLE = True
+except ImportError:
+    _buda_mod = None
+    _BDB_AVAILABLE = False
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 _C_DRIVER   = '#FF8C66'
@@ -51,20 +62,81 @@ class DefVizData:
         self.inst_roles = {}   # (net_name, inst_name) -> 'driver'|'receiver'
         self.all_nets   = []   # sorted list
         self.groups     = GroupTree()
+        self.bdb        = None  # BDB object when available
 
     def load(self, def_path: str, lef_path: str) -> str:
         """Parse DEF+LEF, rebuild indexes, auto-load group sidecar. Returns status string."""
+        self.def_path   = def_path
+        self.inst_info  = {}
+        self.net_insts  = {}
+        self.inst_nets  = {}
+        self.inst_roles = {}
+        self.bdb        = None
+
+        if _BDB_AVAILABLE:
+            self._load_via_bdb(def_path, lef_path)
+        else:
+            self._load_via_python(def_path, lef_path)
+
+        self.groups = GroupTree()
+        sc = GroupTree.sidecar_path(def_path)
+        if os.path.exists(sc):
+            try:
+                self.groups.load(sc)
+            except Exception:
+                pass
+
+        dw, dh = self.die
+        return (f'{len(self.all_nets)} nets · {len(self.inst_info)} instances · '
+                f'die {dw:.1f}×{dh:.1f} µm')
+
+    def _load_via_bdb(self, def_path: str, lef_path: str):
+        """Fast load using the BDB C++ module."""
+        import os as _os
+        db_path = _buda_mod.BDB.db_path(def_path)
+        # Remove stale db so we always get a fresh import
+        if _os.path.exists(db_path):
+            _os.remove(db_path)
+        db = _buda_mod.BDB(db_path)
+        db.import_def_lef(def_path, lef_path)
+        db.compute_all()
+        self.bdb   = db
+        self.units = db.units()
+        self.die   = (db.die_w(), db.die_h())
+
+        # inst_info from component table
+        for c in db.all_components():
+            self.inst_info[c.name] = {
+                'x1': c.x1, 'y1': c.y1, 'x2': c.x2, 'y2': c.y2, 'cell': c.cell
+            }
+
+        # Build net→inst and inst→net maps from pin table
+        # Use id→name caches to avoid O(N) lookups
+        net_id_name  = {n.id: n.name for n in db.all_nets()}
+        comp_id_name = {c.id: c.name for c in db.all_components()}
+
+        for p in db.all_pins():
+            net_name  = net_id_name.get(p.net_id)
+            inst_name = comp_id_name.get(p.comp_id)
+            if net_name is None or inst_name is None:
+                continue
+            self.net_insts.setdefault(net_name, set()).add(inst_name)
+            self.inst_nets.setdefault(inst_name, set()).add(net_name)
+            role = 'driver' if p.dir == 'OUTPUT' else 'receiver'
+            key = (net_name, inst_name)
+            if key not in self.inst_roles or role == 'driver':
+                self.inst_roles[key] = role
+
+        self.all_nets = sorted(net_id_name.values())
+
+    def _load_via_python(self, def_path: str, lef_path: str):
+        """Fallback Python-only parser."""
         units, die, components, nets_raw = parse_def(def_path)
         lef_pins   = parse_lef(lef_path)
         cell_sizes = parse_cell_sizes(lef_path)
 
-        self.def_path  = def_path
-        self.units     = units
-        self.die       = die
-        self.inst_info = {}
-        self.net_insts = {}
-        self.inst_nets = {}
-        self.inst_roles= {}
+        self.units = units
+        self.die   = die
 
         for net_name, conns in nets_raw.items():
             inst_set = set()
@@ -91,17 +163,6 @@ class DefVizData:
 
         self.all_nets = sorted(nets_raw.keys())
 
-        self.groups = GroupTree()
-        sc = GroupTree.sidecar_path(def_path)
-        if os.path.exists(sc):
-            try:
-                self.groups.load(sc)
-            except Exception:
-                pass
-
-        return (f'{len(self.all_nets)} nets · {len(self.inst_info)} instances · '
-                f'die {die[0]:.1f}×{die[1]:.1f} µm')
-
     def save_groups(self):
         if self.def_path:
             self.groups.save(GroupTree.sidecar_path(self.def_path))
@@ -120,6 +181,76 @@ class DefVizData:
         if 'driver' in roles:
             return _C_DRIVER
         return _C_RECEIVER
+
+    def hpwl_distribution(self) -> list:
+        """Sorted list of (net_name, hpwl) for all nets with known positions."""
+        if self.bdb is not None:
+            import sqlite3
+            db_path = _buda_mod.BDB.db_path(self.def_path)
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute(
+                'SELECT n.name, np.hpwl FROM net_props np '
+                'JOIN net n ON n.id=np.net_id WHERE np.hpwl IS NOT NULL'
+            ).fetchall()
+            conn.close()
+            return sorted(rows, key=lambda r: r[1])
+        pairs = []
+        for net in self.all_nets:
+            h = self._net_hpwl(net)
+            if h > 0:
+                pairs.append((net, h))
+        return sorted(pairs, key=lambda r: r[1])
+
+    def _net_hpwl(self, net: str) -> float:
+        placed = [self.inst_info[i]
+                  for i in self.net_insts.get(net, set()) if i in self.inst_info]
+        if len(placed) < 2:
+            return 0.0
+        return (max(p['x2'] for p in placed) - min(p['x1'] for p in placed) +
+                max(p['y2'] for p in placed) - min(p['y1'] for p in placed))
+
+    def group_nets(self, lo: float, hi: float, name: str = None):
+        """Create a net group for nets with HPWL in [lo, hi] µm."""
+        if self.bdb is not None:
+            nets = self.bdb.nets_by_hpwl(lo, hi)
+        else:
+            nets = [n for n in self.all_nets if lo <= self._net_hpwl(n) <= hi]
+        if not nets:
+            return None
+        g = self.groups.new_group(name or f'HPWL {lo:.1f}–{hi:.1f}µm ({len(nets)} nets)')
+        for net in nets:
+            self.groups.add_member(g.id, 'net', net)
+        return g
+
+    def group_insts(self, xl: float, yl: float, xh: float, yh: float, name: str = None):
+        """Create an inst group for instances overlapping [xl, yl, xh, yh]."""
+        if self.bdb is not None:
+            insts = self.bdb.comps_in_rect(xl, yl, xh, yh)
+        else:
+            insts = [i for i, info in self.inst_info.items()
+                     if info['x1'] < xh and info['x2'] > xl
+                     and info['y1'] < yh and info['y2'] > yl]
+        if not insts:
+            return None
+        g = self.groups.new_group(name or f'rect ({len(insts)} insts)')
+        for inst in insts:
+            self.groups.add_member(g.id, 'inst', inst)
+        return g
+
+    def group_common_nets(self, gid1: str, gid2: str, name: str = None):
+        """Create a net group for nets connecting instances of gid1 and gid2."""
+        insts1 = self.groups.all_insts(gid1)
+        insts2 = self.groups.all_insts(gid2)
+        common = [n for n, ni in self.net_insts.items()
+                  if ni & insts1 and ni & insts2]
+        if not common:
+            return None
+        g1n = getattr(self.groups.get(gid1), 'name', '?')
+        g2n = getattr(self.groups.get(gid2), 'name', '?')
+        g = self.groups.new_group(name or f'{g1n}↔{g2n} ({len(common)} nets)')
+        for net in common:
+            self.groups.add_member(g.id, 'net', net)
+        return g
 
     def group_highlight(self, gid: str) -> tuple[set, set]:
         """
