@@ -22,9 +22,10 @@ import matplotlib.patches as mpatches
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
-from def_viz_shared import (DefVizData, GroupStore,
+from def_viz_shared import (DefVizData,
                              draw_die, draw_bg_instances,
                              draw_selected_instances, draw_group_boxes, fit_view)
+from group_tree import GroupTree, lighten_color
 
 
 class DefVizV3:
@@ -182,7 +183,7 @@ class DefVizV3:
 
     def _save_groups(self):
         self.data.save_groups()
-        self._status.set(f'Groups saved → {GroupStore.sidecar_path(self.data.def_path)}')
+        self._status.set(f'Groups saved → {GroupTree.sidecar_path(self.data.def_path)}')
 
     # ── Net / inst ────────────────────────────────────────────────────────────
 
@@ -310,17 +311,19 @@ class DefVizV3:
                          f'{len(self.data.groups.all_insts(gid))} instance(s).')
 
     def _new_group_from_sel(self):
-        """Create a new group from currently selected instances (inst panel selection)."""
-        sel = {self._inst_items[i] for i in self._inst_lb.curselection() if i < len(self._inst_items)}
-        if not sel:
-            self._status.set('Select instances in the Instances panel first.'); return
+        """Create a new group from currently selected instances and/or nets."""
+        insts = {self._inst_items[i] for i in self._inst_lb.curselection() if i < len(self._inst_items)}
+        nets  = {self._net_items[i]  for i in self._net_lb.curselection()  if i < len(self._net_items)}
+        if not insts and not nets:
+            self._status.set('Select instances or nets first.'); return
         name = simpledialog.askstring('New Group', 'Group name:')
         if not name: return
         g = self.data.groups.new_group(name)
-        for inst in sel: self.data.groups.add_inst(g.id, inst)
+        for inst in insts: self.data.groups.add_member(g.id, 'inst', inst)
+        for net  in nets:  self.data.groups.add_member(g.id, 'net',  net)
         self._sel_gid = g.id
         self._rebuild_grp_panel(); self._draw_canvas()
-        self._status.set(f'Created group "{name}" with {len(sel)} instance(s).')
+        self._status.set(f'Created group "{name}" with {len(insts)} inst(s), {len(nets)} net(s).')
 
     def _add_sub_group(self):
         if not self._sel_gid:
@@ -339,17 +342,20 @@ class DefVizV3:
     def _add_insts_to_group(self):
         if not self._sel_gid:
             self._status.set('Select a group in the Groups panel first.'); return
-        sel = {self._inst_items[i] for i in self._inst_lb.curselection() if i < len(self._inst_items)}
-        if not sel:
-            self._status.set('Select instances in the Instances panel first.'); return
-        for inst in sel: self.data.groups.add_inst(self._sel_gid, inst)
+        insts = {self._inst_items[i] for i in self._inst_lb.curselection() if i < len(self._inst_items)}
+        nets  = {self._net_items[i]  for i in self._net_lb.curselection()  if i < len(self._net_items)}
+        if not insts and not nets:
+            self._status.set('Select instances or nets to add.'); return
+        for inst in insts: self.data.groups.add_member(self._sel_gid, 'inst', inst)
+        for net  in nets:  self.data.groups.add_member(self._sel_gid, 'net',  net)
         self._rebuild_grp_panel(); self._draw_canvas()
-        self._status.set(f'Added {len(sel)} instance(s) to "{self.data.groups.get(self._sel_gid).name}".')
+        gname = self.data.groups.get(self._sel_gid).name
+        self._status.set(f'Added {len(insts)} inst(s), {len(nets)} net(s) to "{gname}".')
 
     def _rm_insts_from_group(self):
         if not self._sel_gid: return
-        sel = {self._inst_items[i] for i in self._inst_lb.curselection() if i < len(self._inst_items)}
-        for inst in sel: self.data.groups.remove_inst(self._sel_gid, inst)
+        sel_insts = {self._inst_items[i] for i in self._inst_lb.curselection() if i < len(self._inst_items)}
+        for inst in sel_insts: self.data.groups.remove_member(self._sel_gid, 'inst', inst)
         insts = self.data.groups.all_insts(self._sel_gid)
         self._refresh_inst_list(override_list=insts)
         self._rebuild_grp_panel(); self._draw_canvas()
@@ -362,21 +368,32 @@ class DefVizV3:
         draw_die(ax, self.data.die)
         if self._show_all_bg.get(): draw_bg_instances(ax, self.data.inst_info)
 
-        vis = self.data.visible_insts(self.selected_nets)
-        self._patch_inst = draw_selected_instances(ax, vis, self.data, self.selected_nets)
+        vis = set(self.data.visible_insts(self.selected_nets))
+        inst_highlight = None
+        if self._sel_gid:
+            direct, net_reached = self.data.group_highlight(self._sel_gid)
+            vis |= direct | net_reached
+            g = self.data.groups.get(self._sel_gid)
+            if g:
+                inst_highlight = {}
+                for inst in direct:
+                    inst_highlight[inst] = g.color
+                for inst in net_reached:
+                    if inst not in inst_highlight:
+                        inst_highlight[inst] = lighten_color(g.color)
+        self._patch_inst = draw_selected_instances(ax, sorted(vis), self.data, self.selected_nets,
+                                                    inst_highlight=inst_highlight)
 
         # Only draw visible groups
         visible_gids = {gid for gid, var in self._grp_vis.items() if var.get()}
-        # Temporarily hide invisible groups by drawing only visible ones
-        # We re-use draw_group_boxes but filter by visibility
         self._patch_group = _draw_group_boxes_filtered(
             ax, self.data.groups, self.data.inst_info,
             visible_gids, highlight_id=self._sel_gid)
 
-        fit_view(ax, vis, self.data.inst_info, self.data.die, full_die=self._show_all_bg.get())
+        fit_view(ax, sorted(vis), self.data.inst_info, self.data.die, full_die=self._show_all_bg.get())
         ax.set_aspect('equal')
         ax.set_title(f'{len(vis)} inst(s) · {len(self.selected_nets)} net(s) · '
-                     f'{len(self.data.groups.all_groups())} group(s)', fontsize=11)
+                     f'{len(self.data.groups)} group(s)', fontsize=11)
         self._canvas.draw_idle()
 
     def _on_canvas_click(self, event):
@@ -400,7 +417,7 @@ class DefVizV3:
             if patch.contains(event)[0]:
                 info = self.data.inst_info.get(inst, {})
                 nets = sorted(self.data.inst_nets.get(inst, set()))
-                grps = [g.name for g in self.data.groups.groups_containing(inst)]
+                grps = [g.name for g in self.data.groups.groups_containing_inst(inst)]
                 tip  = f'{inst}\n{info.get("cell","")}'
                 if nets: tip += f'\nnets: {", ".join(nets[:3])}{"…" if len(nets)>3 else ""}'
                 if grps: tip += f'\ngroups: {", ".join(grps)}'
@@ -449,9 +466,8 @@ def _draw_group_boxes_filtered(ax, groups, inst_info, visible_gids, highlight_id
         ax.text(x1-pad, y2+pad, g.name,
                 fontsize=8, color=g.color, fontweight='bold',
                 va='bottom', clip_on=True, zorder=5+depth)
-        for child_id in g.children:
-            child = groups.get(child_id)
-            if child: _draw(child, depth+1)
+        for child in groups.children(g.id):
+            _draw(child, depth+1)
 
     for root_g in groups.roots(): _draw(root_g, 0)
     return patch_group

@@ -19,9 +19,10 @@ from matplotlib.figure import Figure
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
-from def_viz_shared import (DefVizData, GroupStore,
+from def_viz_shared import (DefVizData,
                              draw_die, draw_bg_instances,
                              draw_selected_instances, draw_group_boxes, fit_view)
+from group_tree import GroupTree, lighten_color
 
 
 class DefVizV1:
@@ -186,7 +187,7 @@ class DefVizV1:
 
     def _save_groups(self):
         self.data.save_groups()
-        self._status.set(f'Groups saved → {GroupStore.sidecar_path(self.data.def_path)}')
+        self._status.set(f'Groups saved → {GroupTree.sidecar_path(self.data.def_path)}')
 
     # ── Net list ──────────────────────────────────────────────────────────────
 
@@ -275,14 +276,15 @@ class DefVizV1:
     def _refresh_tv(self):
         self._tv.delete(*self._tv.get_children())
         def _insert(g, parent_tv_id=''):
-            n   = len(self.data.groups.all_insts(g.id))
+            ni = len(self.data.groups.all_insts(g.id))
+            nn = len(self.data.groups.all_nets(g.id))
+            label = f'{ni}i' + (f' {nn}n' if nn else '')
             iid = self._tv.insert(parent_tv_id, 'end', iid=g.id,
-                                  text=f'  {g.name}', values=(n,),
+                                  text=f'  {g.name}', values=(label,),
                                   tags=(g.id,))
             self._tv.tag_configure(g.id, foreground=g.color)
-            for child_id in g.children:
-                child = self.data.groups.get(child_id)
-                if child: _insert(child, iid)
+            for child in self.data.groups.children(g.id):
+                _insert(child, iid)
         for g in self.data.groups.roots():
             _insert(g)
 
@@ -314,8 +316,10 @@ class DefVizV1:
             menu.add_command(label='New child group',  command=lambda: self._new_child_group(gid))
             menu.add_command(label='Rename',           command=lambda: self._rename_group(gid))
             menu.add_separator()
-            menu.add_command(label='Add selected instances',    command=lambda: self._add_insts(gid))
-            menu.add_command(label='Remove selected instances', command=lambda: self._remove_insts(gid))
+            menu.add_command(label='Add selected instances', command=lambda: self._add_members(gid, 'inst'))
+            menu.add_command(label='Add selected nets',      command=lambda: self._add_members(gid, 'net'))
+            menu.add_command(label='Remove selected instances', command=lambda: self._remove_members(gid, 'inst'))
+            menu.add_command(label='Remove selected nets',      command=lambda: self._remove_members(gid, 'net'))
             menu.add_separator()
             menu.add_command(label='Delete group',     command=lambda: self._delete_group(gid))
         menu.tk_popup(event.x_root, event.y_root)
@@ -341,19 +345,31 @@ class DefVizV1:
             self.data.groups.rename_group(gid, name)
             self._refresh_tv()
 
-    def _add_insts(self, gid):
-        sel = {self._inst_items[i] for i in self._inst_lb.curselection()
-               if i < len(self._inst_items)}
+    def _add_members(self, gid, kind):
+        if kind == 'inst':
+            sel = {self._inst_items[i] for i in self._inst_lb.curselection()
+                   if i < len(self._inst_items)}
+            noun = 'instance(s)'
+        else:
+            sel = {self._net_items[i] for i in self._net_lb.curselection()
+                   if i < len(self._net_items)}
+            noun = 'net(s)'
         if not sel:
-            self._status.set('Select instances in the Instances panel first.'); return
-        for inst in sel: self.data.groups.add_inst(gid, inst)
+            self._status.set(f'Select {noun} first.'); return
+        for ref in sel:
+            self.data.groups.add_member(gid, kind, ref)
         self._refresh_tv(); self._draw_canvas()
-        self._status.set(f'Added {len(sel)} instance(s) to group.')
+        self._status.set(f'Added {len(sel)} {noun} to group.')
 
-    def _remove_insts(self, gid):
-        sel = {self._inst_items[i] for i in self._inst_lb.curselection()
-               if i < len(self._inst_items)}
-        for inst in sel: self.data.groups.remove_inst(gid, inst)
+    def _remove_members(self, gid, kind):
+        if kind == 'inst':
+            sel = {self._inst_items[i] for i in self._inst_lb.curselection()
+                   if i < len(self._inst_items)}
+        else:
+            sel = {self._net_items[i] for i in self._net_lb.curselection()
+                   if i < len(self._net_items)}
+        for ref in sel:
+            self.data.groups.remove_member(gid, kind, ref)
         self._refresh_tv(); self._draw_canvas()
 
     def _delete_group(self, gid):
@@ -371,15 +387,25 @@ class DefVizV1:
         draw_die(ax, self.data.die)
         if self._show_all_bg.get(): draw_bg_instances(ax, self.data.inst_info)
 
-        vis = self.data.visible_insts(self.selected_nets)
-        self._patch_inst = draw_selected_instances(ax, vis, self.data, self.selected_nets)
+        vis = set(self.data.visible_insts(self.selected_nets))
+        inst_highlight = None
+        if self._highlight_gid:
+            g = self.data.groups.get(self._highlight_gid)
+            if g:
+                direct, net_reached = self.data.group_highlight(self._highlight_gid)
+                inst_highlight = ({i: g.color for i in direct} |
+                                  {i: lighten_color(g.color) for i in net_reached})
+                vis |= direct | net_reached
+        vis = sorted(vis)
+        self._patch_inst = draw_selected_instances(ax, vis, self.data, self.selected_nets,
+                                                   inst_highlight=inst_highlight)
         self._patch_group = draw_group_boxes(ax, self.data.groups, self.data.inst_info,
                                              highlight_id=self._highlight_gid)
         fit_view(ax, vis, self.data.inst_info, self.data.die,
                  full_die=self._show_all_bg.get())
         ax.set_aspect('equal')
         ax.set_title(f'{len(vis)} inst(s) · {len(self.selected_nets)} net(s) · '
-                     f'{len(self.data.groups.all_groups())} group(s)', fontsize=11)
+                     f'{len(self.data.groups)} group(s)', fontsize=11)
         self._canvas.draw_idle()
 
     def _on_canvas_click(self, event):
@@ -407,7 +433,7 @@ class DefVizV1:
             if patch.contains(event)[0]:
                 info  = self.data.inst_info.get(inst, {})
                 nets  = sorted(self.data.inst_nets.get(inst, set()))
-                grps  = [g.name for g in self.data.groups.groups_containing(inst)]
+                grps  = [g.name for g in self.data.groups.groups_containing_inst(inst)]
                 tip   = f'{inst}\n{info.get("cell","")}'
                 if nets: tip += f'\nnets: {", ".join(nets[:3])}{"…" if len(nets)>3 else ""}'
                 if grps: tip += f'\ngroups: {", ".join(grps)}'
