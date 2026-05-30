@@ -1,0 +1,73 @@
+# Realistic Large Chip: 50-unit SoC top-level floorplan
+# Inspired by fig/Buda-topo-1.png (Diverse block sizes)
+
+def_layer 3 M3 V TOP 0.0
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+def_layer 6 M6 H TOP 0.0
+def_layer 7 M7 V TOP 0.0
+
+add_block u_cpu_c0_core0 200 200 400 400
+add_block u_cpu_c0_core1 500 200 700 400
+add_block u_cpu_c0_core2 800 200 1000 400
+add_block u_cpu_c0_core3 1100 200 1300 400
+add_block u_cpu_c0_core4 200 500 400 700
+add_block u_cpu_c0_core5 500 500 700 700
+add_block u_cpu_c0_core6 800 500 1000 700
+add_block u_cpu_c0_core7 1100 500 1300 700
+add_block u_cpu_c0_noc 1400 200 1800 700
+add_block u_cpu_c1_core0 8200 200 8400 400
+add_block u_cpu_c1_core1 8500 200 8700 400
+add_block u_cpu_c1_core2 8800 200 9000 400
+add_block u_cpu_c1_core3 9100 200 9300 400
+add_block u_cpu_c1_core4 8200 500 8400 700
+add_block u_cpu_c1_core5 8500 500 8700 700
+add_block u_cpu_c1_core6 8800 500 9000 700
+add_block u_cpu_c1_core7 9100 500 9300 700
+add_block u_cpu_c1_noc 9400 200 9800 700
+add_block u_cpu_c2_core0 200 4200 400 4400
+add_block u_cpu_c2_core1 500 4200 700 4400
+add_block u_cpu_c2_core2 800 4200 1000 4400
+add_block u_cpu_c2_core3 1100 4200 1300 4400
+add_block u_cpu_c2_core4 200 4500 400 4700
+add_block u_cpu_c2_core5 500 4500 700 4700
+add_block u_cpu_c2_core6 800 4500 1000 4700
+add_block u_cpu_c2_core7 1100 4500 1300 4700
+add_block u_cpu_c2_noc 1400 4200 1800 4700
+add_block u_cpu_c3_core0 8200 4200 8400 4400
+add_block u_cpu_c3_core1 8500 4200 8700 4400
+add_block u_cpu_c3_core2 8800 4200 9000 4400
+add_block u_cpu_c3_core3 9100 4200 9300 4400
+add_block u_cpu_c3_core4 8200 4500 8400 4700
+add_block u_cpu_c3_core5 8500 4500 8700 4700
+add_block u_cpu_c3_core6 8800 4500 9000 4700
+add_block u_cpu_c3_core7 9100 4500 9300 4700
+add_block u_cpu_c3_noc 9400 4200 9800 4700
+add_block u_l3_cache 3000 2000 7000 4000
+add_block u_system_noc 3000 4200 7000 6200
+add_block u_gpu 3000 6400 7000 9400
+add_block u_hbm0 0 2000 150 4000
+add_block u_hbm1 0 4200 150 6200
+add_block u_hbm2 9850 2000 10000 4000
+add_block u_hbm3 9850 4200 10000 6200
+add_block u_ddr0 3000 0 4800 150
+add_block u_ddr1 5200 0 7000 150
+add_block u_ddr2 3000 9850 4800 10000
+add_block u_ddr3 5200 9850 7000 10000
+add_block u_npu 200 7000 1500 8500
+add_block u_isp 200 8700 1500 9800
+add_block u_display 8000 7000 9500 8000
+add_block u_pcie 8000 8200 9500 9200
+add_block u_usb 8000 9400 9500 10000
+
+add_bus sys_rst[1] u_system_noc.out u_cpu_c0_core0.rst,u_cpu_c0_core1.rst,u_cpu_c0_core2.rst,u_cpu_c0_core3.rst,u_cpu_c0_core4.rst,u_cpu_c0_core5.rst,u_cpu_c0_core6.rst,u_cpu_c0_core7.rst,u_cpu_c0_noc.rst,u_cpu_c1_core0.rst,u_cpu_c1_core1.rst,u_cpu_c1_core2.rst,u_cpu_c1_core3.rst,u_cpu_c1_core4.rst,u_cpu_c1_core5.rst,u_cpu_c1_core6.rst,u_cpu_c1_core7.rst,u_cpu_c1_noc.rst,u_cpu_c2_core0.rst,u_cpu_c2_core1.rst,u_cpu_c2_core2.rst,u_cpu_c2_core3.rst,u_cpu_c2_core4.rst,u_cpu_c2_core5.rst,u_cpu_c2_core6.rst,u_cpu_c2_core7.rst,u_cpu_c2_noc.rst,u_cpu_c3_core0.rst,u_cpu_c3_core1.rst,u_cpu_c3_core2.rst,u_cpu_c3_core3.rst,u_cpu_c3_core4.rst,u_cpu_c3_core5.rst,u_cpu_c3_core6.rst,u_cpu_c3_core7.rst,u_cpu_c3_noc.rst,u_l3_cache.rst,u_gpu.rst,u_hbm0.rst,u_hbm1.rst,u_hbm2.rst,u_hbm3.rst,u_ddr0.rst,u_ddr1.rst,u_ddr2.rst,u_ddr3.rst,u_npu.rst,u_isp.rst,u_display.rst,u_pcie.rst,u_usb.rst
+
+add_bus l3_to_cpu[256] u_l3_cache.out u_cpu_c0_noc.in,u_cpu_c1_noc.in,u_cpu_c2_noc.in,u_cpu_c3_noc.in
+
+add_bus gpu_mem[512] u_gpu.out u_hbm0.in,u_hbm1.in,u_hbm2.in,u_hbm3.in
+
+run_bundler strict
+generate_topologies
+run_planner 5
+run_nuts 1.0
+visualize

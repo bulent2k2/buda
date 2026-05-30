@@ -1,0 +1,15 @@
+def_layer 5 M5 V TOP 0.33
+def_layer 6 M6 H TOP 0.33
+
+corner_margin dx 20 dy 10
+add_block blk1n 0 200 200 600
+add_block blk1  0 400 300 800
+add_block blk5  400 0  700 100
+add_block blk5n 500 50 700 150
+
+add_bus bus[8] blk1.o blk5.i
+run_bundler strict
+generate_topologies
+run_planner
+run_nuts
+visualize

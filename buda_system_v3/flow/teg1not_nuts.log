@@ -1,0 +1,25 @@
+NUTS Overlap Report — teg1not.buda
+Generated : 2026-05-21T11:36:44
+
+[NUTS] M5: no local overlaps
+[NUTS] M6: no local overlaps
+[NUTS] Span adjustments: M5:1
+
+[NUTS] 7 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 0.
+Overlaps  : 0  ()
+
+No overlaps.
+
+============================================================
+  Re-run: topo-rerun  —  teg1not.buda
+  At        : 2026-05-21T11:37:07
+============================================================
+
+[NUTS] M5: no local overlaps
+[NUTS] M6: no local overlaps
+[NUTS] Span adjustments: M5:1, M6:1
+
+[NUTS] 8 segments placed across 2 layer(s). Interval violations: 1, Track overlaps: 0.
+Overlaps  : 0  ()
+
+No overlaps.

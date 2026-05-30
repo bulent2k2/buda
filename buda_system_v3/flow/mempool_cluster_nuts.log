@@ -1,0 +1,150 @@
+NUTS Overlap Report — mempool_cluster.buda
+Generated : 2026-05-23T21:26:44
+
+[NUTS] M7: total bus width 528.0 units, spanning perpendicular interval [1230.0, 1882.0]
+[NUTS] M7: no local overlaps
+[NUTS] M8: total bus width 528.0 units, spanning perpendicular interval [856.0, 1882.0]
+[NUTS] M8: no local overlaps
+[NUTS] M9: total bus width 3432.0 units, spanning perpendicular interval [326.0, 2554.5]
+[NUTS] M9 local overlaps: 14 → B1×B2, B1×B7, B1×B8, B2×B3, B2×B7, B2×B4, B2×B7, B2×B8, B3×B5, B3×B7, B4×B7, B4×B8, B5×B7, B7×B8
+[NUTS] M10: total bus width 3168.0 units, spanning perpendicular interval [326.0, 2554.5]
+[NUTS] M10 local overlaps: 4 → B1×B4, B1×B3, B1×B7, B4×B6
+[NUTS] Span adjustments: M7:1, M8:1, M9:13, M10:12
+
+[NUTS] 29 segments placed across 4 layer(s). Interval violations: 2, Track overlaps: 18.
+Overlaps  : 18  (M9=14  M10=4)
+
+============================================================
+  M9  —  14 overlap(s)
+============================================================
+  [  1]  B1.M9[1]  ×  B2.M9[2]
+         overlap span  [1150.0, 1302.0]  len=152.0
+         overlap perp  [1760.00, 1882.00]  depth=122.00  area=18544.00
+         B1.M9[1]:
+    span=[458.0, 1750.0]  perp_center=1892.00  width=264.00  → perp=[1760.00, 2024.00]  interval=[1170.0, 2389.5]
+         B2.M9[2]:
+    span=[1150.0, 1302.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+  [  2]  B1.M9[1]  ×  B7.M9[0]
+         overlap span  [1150.0, 1567.0]  len=417.0
+         overlap perp  [1760.00, 1882.00]  depth=122.00  area=50874.00
+         B1.M9[1]:
+    span=[458.0, 1750.0]  perp_center=1892.00  width=264.00  → perp=[1760.00, 2024.00]  interval=[1170.0, 2389.5]
+         B7.M9[0]:
+    span=[1150.0, 1567.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+  [  3]  B1.M9[1]  ×  B8.M9[0]
+         overlap span  [1150.0, 1750.0]  len=600.0
+         overlap perp  [1760.00, 1882.00]  depth=122.00  area=73200.00
+         B1.M9[1]:
+    span=[458.0, 1750.0]  perp_center=1892.00  width=264.00  → perp=[1760.00, 2024.00]  interval=[1170.0, 2389.5]
+         B8.M9[0]:
+    span=[1150.0, 2422.5]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+  [  4]  B2.M9[0]  ×  B3.M9[0]
+         overlap span  [1150.0, 1302.0]  len=152.0
+         overlap perp  [468.00, 590.00]  depth=122.00  area=18544.00
+         B2.M9[0]:
+    span=[1150.0, 1302.0]  perp_center=458.00  width=264.00  → perp=[326.00, 590.00]  interval=[80.0, 1120.0]
+         B3.M9[0]:
+    span=[1150.0, 1832.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+  [  5]  B2.M9[0]  ×  B7.M9[2]
+         overlap span  [1150.0, 1302.0]  len=152.0
+         overlap perp  [468.00, 590.00]  depth=122.00  area=18544.00
+         B2.M9[0]:
+    span=[1150.0, 1302.0]  perp_center=458.00  width=264.00  → perp=[326.00, 590.00]  interval=[80.0, 1120.0]
+         B7.M9[2]:
+    span=[1150.0, 1567.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+  [  6]  B2.M9[2]  ×  B4.M9[1]
+         overlap span  [1150.0, 1302.0]  len=152.0
+         overlap perp  [1618.00, 1759.00]  depth=141.00  area=21432.00
+         B2.M9[2]:
+    span=[1150.0, 1302.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+         B4.M9[1]:
+    span=[600.0, 2097.0]  perp_center=1627.00  width=264.00  → perp=[1495.00, 1759.00]  interval=[1170.0, 2389.5]
+  [  7]  B2.M9[2]  ×  B7.M9[0]
+         overlap span  [1150.0, 1302.0]  len=152.0
+         overlap perp  [1618.00, 1882.00]  depth=264.00  area=40128.00
+         B2.M9[2]:
+    span=[1150.0, 1302.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+         B7.M9[0]:
+    span=[1150.0, 1567.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+  [  8]  B2.M9[2]  ×  B8.M9[0]
+         overlap span  [1150.0, 1302.0]  len=152.0
+         overlap perp  [1618.00, 1882.00]  depth=264.00  area=40128.00
+         B2.M9[2]:
+    span=[1150.0, 1302.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+         B8.M9[0]:
+    span=[1150.0, 2422.5]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+  [  9]  B3.M9[0]  ×  B5.M9[0]
+         overlap span  [1150.0, 1200.0]  len=50.0
+         overlap perp  [591.00, 732.00]  depth=141.00  area=7050.00
+         B3.M9[0]:
+    span=[1150.0, 1832.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+         B5.M9[0]:
+    span=[988.0, 1200.0]  perp_center=723.00  width=264.00  → perp=[591.00, 855.00]  interval=[80.0, 1120.0]
+  [ 10]  B3.M9[0]  ×  B7.M9[2]
+         overlap span  [1150.0, 1567.0]  len=417.0
+         overlap perp  [468.00, 732.00]  depth=264.00  area=110088.00
+         B3.M9[0]:
+    span=[1150.0, 1832.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+         B7.M9[2]:
+    span=[1150.0, 1567.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+  [ 11]  B4.M9[1]  ×  B7.M9[0]
+         overlap span  [1150.0, 1567.0]  len=417.0
+         overlap perp  [1618.00, 1759.00]  depth=141.00  area=58797.00
+         B4.M9[1]:
+    span=[600.0, 2097.0]  perp_center=1627.00  width=264.00  → perp=[1495.00, 1759.00]  interval=[1170.0, 2389.5]
+         B7.M9[0]:
+    span=[1150.0, 1567.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+  [ 12]  B4.M9[1]  ×  B8.M9[0]
+         overlap span  [1150.0, 2097.0]  len=947.0
+         overlap perp  [1618.00, 1759.00]  depth=141.00  area=133527.00
+         B4.M9[1]:
+    span=[600.0, 2097.0]  perp_center=1627.00  width=264.00  → perp=[1495.00, 1759.00]  interval=[1170.0, 2389.5]
+         B8.M9[0]:
+    span=[1150.0, 2422.5]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+  [ 13]  B5.M9[0]  ×  B7.M9[2]
+         overlap span  [1150.0, 1200.0]  len=50.0
+         overlap perp  [591.00, 732.00]  depth=141.00  area=7050.00
+         B5.M9[0]:
+    span=[988.0, 1200.0]  perp_center=723.00  width=264.00  → perp=[591.00, 855.00]  interval=[80.0, 1120.0]
+         B7.M9[2]:
+    span=[1150.0, 1567.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+  [ 14]  B7.M9[0]  ×  B8.M9[0]
+         overlap span  [1150.0, 1567.0]  len=417.0
+         overlap perp  [1618.00, 1882.00]  depth=264.00  area=110088.00
+         B7.M9[0]:
+    span=[1150.0, 1567.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+         B8.M9[0]:
+    span=[1150.0, 2422.5]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+
+============================================================
+  M10  —  4 overlap(s)
+============================================================
+  [  1]  B1.M10[0]  ×  B4.M10[2]
+         overlap span  [1150.0, 1627.0]  len=477.0
+         overlap perp  [468.00, 590.00]  depth=122.00  area=58194.00
+         B1.M10[0]:
+    span=[1150.0, 1892.0]  perp_center=458.00  width=264.00  → perp=[326.00, 590.00]  interval=[80.0, 1120.0]
+         B4.M10[2]:
+    span=[1150.0, 1627.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+  [  2]  B1.M10[2]  ×  B3.M10[1]
+         overlap span  [1150.0, 1200.0]  len=50.0
+         overlap perp  [1700.00, 1882.00]  depth=182.00  area=9100.00
+         B1.M10[2]:
+    span=[1150.0, 1892.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+         B3.M10[1]:
+    span=[600.0, 1200.0]  perp_center=1832.00  width=264.00  → perp=[1700.00, 1964.00]  interval=[1230.0, 2270.0]
+  [  3]  B1.M10[2]  ×  B7.M10[1]
+         overlap span  [1150.0, 1750.0]  len=600.0
+         overlap perp  [1618.00, 1699.00]  depth=81.00  area=48600.00
+         B1.M10[2]:
+    span=[1150.0, 1892.0]  perp_center=1750.00  width=264.00  → perp=[1618.00, 1882.00]  interval=[1230.0, 2270.0]
+         B7.M10[1]:
+    span=[600.0, 1750.0]  perp_center=1567.00  width=264.00  → perp=[1435.00, 1699.00]  interval=[1170.0, 2389.5]
+  [  4]  B4.M10[2]  ×  B6.M10[1]
+         overlap span  [1150.0, 1362.0]  len=212.0
+         overlap perp  [591.00, 732.00]  depth=141.00  area=29892.00
+         B4.M10[2]:
+    span=[1150.0, 1627.0]  perp_center=600.00  width=264.00  → perp=[468.00, 732.00]  interval=[80.0, 1120.0]
+         B6.M10[1]:
+    span=[988.0, 1362.0]  perp_center=723.00  width=264.00  → perp=[591.00, 855.00]  interval=[-39.5, 1180.0]
+

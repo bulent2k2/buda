@@ -1,0 +1,23 @@
+[RoutingGrid] Layer 7: 10 slots, unit_pitch=8.800, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 8: 10 slots, unit_pitch=8.800, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 9: 10 slots, unit_pitch=17.600, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 10: 10 slots, unit_pitch=17.600, signal_density=0.364, dilution=2.750
+Bundler created 1 bundles.
+Generated 53 topologies for bundle 1 (cbuf_ctrl->[cbuf_bank0,cbuf_bank1,cbuf_bank2,cbuf_bank3,cbuf_bank4,cbuf_bank5,cbuf_bank6,cbuf_bank7,cbuf_bank8,cbuf_bank11,cbuf_bank12,cbuf_bank13,cbuf_bank14,cbuf_bank15,cbuf_bank16,cbuf_bank17,cbuf_bank18,cbuf_bank19,cbuf_bank20,cbuf_bank21,cbuf_bank22,cbuf_bank23,cbuf_bank24,cbuf_bank25,cbuf_bank26,cbuf_bank27,cbuf_bank28,cbuf_bank29,cbuf_bank30,cbuf_bank31])
+[Planner] Grid extended: 2 X, 2 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M8 (V)  min_band_cap=0
+  M10 (V)  min_band_cap=1
+  M7 (H)  min_band_cap=0
+  M9 (H)  min_band_cap=5
+[Planner] Bundle 1 (12 units wide) -> TRUNK_V@x1164  [V→M10 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M7 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9 H→M9]  overflow=62
+[NUTS] 30 segments placed across 3 layer(s). Interval violations: 0, Track overlaps: 4.
+[NUTS] M7: total bus width 33.0 units, spanning perpendicular interval [1947.5, 1980.5]
+[NUTS] M7: no local overlaps
+[NUTS] M9: total bus width 924.0 units, spanning perpendicular interval [420.0, 2110.0]
+[NUTS] M9 local overlaps: 4 → B1×B1, B1×B1, B1×B1, B1×B1
+[NUTS] M10: total bus width 33.0 units, spanning perpendicular interval [1182.0, 1215.0]
+[NUTS] M10: no local overlaps
+[NUTS] Span adjustments: M7:1, M9:28, M10:1
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/nvdla_cbuf_nuts.log
+[DetailedNUTS] 240 net segments placed, 0 bits unplaced.

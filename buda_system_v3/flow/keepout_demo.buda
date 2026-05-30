@@ -1,0 +1,37 @@
+# Keepout Zone Demo
+# Demonstrates routing around a prohibited region
+
+def_layer 4 M4 H TOP 1.0
+def_layer 5 M5 V TOP 1.0
+
+# Define a track pattern so we can run detailed NUTS
+def_track_pattern 4 0.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 POWER 2.0 2.0 SIGNAL 2.0 2.0
+def_track_pattern 5 0.0 SIGNAL 2.0 2.0 SIGNAL 2.0 2.0 POWER 2.0 2.0 SIGNAL 2.0 2.0
+
+# Blocks
+add_block unit1 100 100 200 200
+add_block unit2 700 700 800 800
+add_block unit3 700 100 800 200
+
+# 4-bit bus (will route around KOZ)
+add_bus bus[4] unit1.tx unit2.rx
+
+# 4-bit bus forced into KOZ (should fail in DetailedNUTS)
+# Connecting unit1 to unit3 makes it a different signature from bus.
+add_bus blocked[4] unit1.tx unit3.rx
+
+# Define a Keepout Zone on M4 (Horizontal)
+# This zone is directly in the path of the simplest L-HV shape for both bundles.
+add_keepout 300 100 500 300 M4
+
+run_bundler strict
+generate_topologies
+
+# Pin 'blocked' to L_HV topology which passes through y=100, x=[300, 500]
+# We'll use the sidecar keepout_demo.json for this.
+
+run_planner
+run_nuts
+run_detailed_nuts
+
+visualize

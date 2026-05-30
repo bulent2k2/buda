@@ -1,0 +1,15 @@
+Bundler created 5 bundles.
+Generated 8 topologies for bundle 1 (u0->u11)
+Generated 8 topologies for bundle 2 (u0->u12)
+Generated 8 topologies for bundle 3 (u0->u13)
+Generated 7 topologies for bundle 4 (u0->u14)
+Generated 8 topologies for bundle 5 (u0->u15)
+Pinned bundle 'n11' to topology 3 (Z_HVH@x375@y580, WL=490)
+Pinned bundle 'n12' to topology 2 (L_VH@y620@x235, WL=385)
+Pinned bundle 'n13' to topology 0 (I_H, WL=450)
+Pinned bundle 'n14' to topology 0 (I_H, WL=550)
+Pinned bundle 'n15' to topology 0 (I_H, WL=650)
+[NUTS] M4: no local overlaps
+[NUTS] M5: no local overlaps
+[NUTS] Span adjustments: M4:1, M5:2
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/two_busterms_nuts.log

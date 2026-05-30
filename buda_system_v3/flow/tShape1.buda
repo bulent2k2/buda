@@ -1,0 +1,18 @@
+# From: lShape.buda Scenario 5 — L-shaped block with over-the-block teg_mode
+
+add_block src 500 150 600 250
+add_block L rect 200 0 300 400 rect 0 0 400 100 teg_mode over
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+add_net clk src.tx L.rx
+
+run_bundler STRICT
+generate_topologies_for_bundle clk src L
+run_planner
+run_nuts
+
+#visualize_topologies clk
+visualize
+

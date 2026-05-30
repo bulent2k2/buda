@@ -1,0 +1,104 @@
+# mempool_tile.buda — MemPool Tile Level (NanGate45)
+#
+# Source:  MemPool paper (Riedel et al., 2023); ISPD24 MemPool-Tile benchmark
+# Hierarchy: 1 tile = 4 Snitch RISC-V cores + 16 SRAM banks (1 KiB each)
+#             + shared L1 instruction cache (2 × 2 KiB 4-way SA macros)
+# Die area: 360 × 280 µm (estimated; 1/16 of MemPool-Group die)
+#
+# Key bus: tile-local TCDM crossbar.
+#   Each core has full access to all 16 SPM banks via a 5×16 crossbar.
+#   tcdm_slave_req_t = data(32) amo(4) core_id(2) meta_id(4) wen(1)
+#                      be(4) tgt_addr(12) ini_addr(4) → 63 bits; use 64.
+#
+# Layer stack: M3/M4 for local crossbar wires, M5/M6 for I-cache refill.
+
+def_layer 3 M3 H LOW 25 span_min 0  span_max 130
+def_layer 4 M4 V LOW 25 span_min 0  span_max 130
+def_layer 5 M5 H TOP 20 span_min 50 span_max 360
+def_layer 6 M6 V TOP 20 span_min 50 span_max 280
+
+# NanGate45 track patterns (from NangateOpenCellLibrary.tech.lef + make_tracks.tcl)
+# Pattern: 4 SIGNAL + POWER (2× width, same min-space) + 4 SIGNAL + GROUND per period
+# M3: H, width=0.07 µm, pitch=0.14 µm, origin=0.07 µm
+def_track_pattern 3 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 POWER 0.14 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 SIGNAL 0.07 0.07 GROUND 0.14 0.07
+# M4: V, width=0.14 µm, pitch=0.28 µm, origin=0.095 µm
+def_track_pattern 4 0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+# M5: H, width=0.14 µm, pitch=0.28 µm, origin=0.07 µm
+def_track_pattern 5 0.07 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+# M6: V, width=0.14 µm, pitch=0.28 µm, origin=0.095 µm
+def_track_pattern 6 0.095 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 POWER 0.28 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 SIGNAL 0.14 0.14 GROUND 0.28 0.14
+
+corner_margin dx 5 dy 5
+
+# Block U-topologies above y=265 (above the I-cache top edge, outside die at y=280).
+# Without this, core2_ifetch/core3_ifetch pick U-shapes with trunk at y≈287 which
+# creates a 5 µm Hanan cell too narrow for 32 bits on M5.
+add_keepout 0 266 360 290 5 6
+
+# ── Floorplan ─────────────────────────────────────────────────────────────
+# 4 Snitch cores — 2×2, left half, each 80×80 µm
+add_block core_0   10  10   90  90
+add_block core_1  100  10  180  90
+add_block core_2   10 100   90 180
+add_block core_3  100 100  180 180
+
+# 16 SPM banks — 4×4, right half, each 35×45 µm (fakeram45_256x32 = 1 KiB)
+add_block bank_r0c0  195  10  230  55
+add_block bank_r0c1  235  10  270  55
+add_block bank_r0c2  275  10  310  55
+add_block bank_r0c3  315  10  350  55
+add_block bank_r1c0  195  65  230 110
+add_block bank_r1c1  235  65  270 110
+add_block bank_r1c2  275  65  310 110
+add_block bank_r1c3  315  65  350 110
+add_block bank_r2c0  195 120  230 165
+add_block bank_r2c1  235 120  270 165
+add_block bank_r2c2  275 120  310 165
+add_block bank_r2c3  315 120  350 165
+add_block bank_r3c0  195 175  230 220
+add_block bank_r3c1  235 175  270 220
+add_block bank_r3c2  275 175  310 220
+add_block bank_r3c3  315 175  350 220
+
+# L1 instruction cache — 2 macros (fakeram45_64x64 × 2), above the cores
+add_block icache_0   10 195   90 265
+add_block icache_1  100 195  180 265
+
+# ── Buses ─────────────────────────────────────────────────────────────────
+# TCDM request buses: each core → all 16 local SPM banks (multicast tree).
+# 4 separate bundles under STRICT (one per core; each is 1-to-16 multicast).
+# Width: 64 bits (tcdm_slave_req_t rounded up).
+add_bus core0_req[64] core_0.tcdm_master bank_r0c0.slave,bank_r0c1.slave,bank_r0c2.slave,bank_r0c3.slave,bank_r1c0.slave,bank_r1c1.slave,bank_r1c2.slave,bank_r1c3.slave,bank_r2c0.slave,bank_r2c1.slave,bank_r2c2.slave,bank_r2c3.slave,bank_r3c0.slave,bank_r3c1.slave,bank_r3c2.slave,bank_r3c3.slave
+add_bus core1_req[64] core_1.tcdm_master bank_r0c0.slave,bank_r0c1.slave,bank_r0c2.slave,bank_r0c3.slave,bank_r1c0.slave,bank_r1c1.slave,bank_r1c2.slave,bank_r1c3.slave,bank_r2c0.slave,bank_r2c1.slave,bank_r2c2.slave,bank_r2c3.slave,bank_r3c0.slave,bank_r3c1.slave,bank_r3c2.slave,bank_r3c3.slave
+add_bus core2_req[64] core_2.tcdm_master bank_r0c0.slave,bank_r0c1.slave,bank_r0c2.slave,bank_r0c3.slave,bank_r1c0.slave,bank_r1c1.slave,bank_r1c2.slave,bank_r1c3.slave,bank_r2c0.slave,bank_r2c1.slave,bank_r2c2.slave,bank_r2c3.slave,bank_r3c0.slave,bank_r3c1.slave,bank_r3c2.slave,bank_r3c3.slave
+add_bus core3_req[64] core_3.tcdm_master bank_r0c0.slave,bank_r0c1.slave,bank_r0c2.slave,bank_r0c3.slave,bank_r1c0.slave,bank_r1c1.slave,bank_r1c2.slave,bank_r1c3.slave,bank_r2c0.slave,bank_r2c1.slave,bank_r2c2.slave,bank_r2c3.slave,bank_r3c0.slave,bank_r3c1.slave,bank_r3c2.slave,bank_r3c3.slave
+
+# Instruction fetch: each core → its shared L1 I-cache macro (128-bit AXI)
+# I-fetch width: 32 bits (one instruction word, RV32 ILEN).
+# The 128-bit AXI cache-line refill is a group-level concern; at tile level
+# each core fetches one 32-bit word per cycle from the shared L1 I-cache.
+add_bus core0_ifetch[32] core_0.aw_master icache_0.aw_slave
+add_bus core1_ifetch[32] core_1.aw_master icache_0.aw_slave
+add_bus core2_ifetch[32] core_2.aw_master icache_1.aw_slave
+add_bus core3_ifetch[32] core_3.aw_master icache_1.aw_slave
+
+# ── Pipeline ──────────────────────────────────────────────────────────────
+run_bundler strict
+
+# Core-to-banks: 1 core → 16 banks (multicast MST topology per core)
+generate_topologies_for_bundle core0_req core_0 bank_r0c0 bank_r0c1 bank_r0c2 bank_r0c3 bank_r1c0 bank_r1c1 bank_r1c2 bank_r1c3 bank_r2c0 bank_r2c1 bank_r2c2 bank_r2c3 bank_r3c0 bank_r3c1 bank_r3c2 bank_r3c3
+generate_topologies_for_bundle core1_req core_1 bank_r0c0 bank_r0c1 bank_r0c2 bank_r0c3 bank_r1c0 bank_r1c1 bank_r1c2 bank_r1c3 bank_r2c0 bank_r2c1 bank_r2c2 bank_r2c3 bank_r3c0 bank_r3c1 bank_r3c2 bank_r3c3
+generate_topologies_for_bundle core2_req core_2 bank_r0c0 bank_r0c1 bank_r0c2 bank_r0c3 bank_r1c0 bank_r1c1 bank_r1c2 bank_r1c3 bank_r2c0 bank_r2c1 bank_r2c2 bank_r2c3 bank_r3c0 bank_r3c1 bank_r3c2 bank_r3c3
+generate_topologies_for_bundle core3_req core_3 bank_r0c0 bank_r0c1 bank_r0c2 bank_r0c3 bank_r1c0 bank_r1c1 bank_r1c2 bank_r1c3 bank_r2c0 bank_r2c1 bank_r2c2 bank_r2c3 bank_r3c0 bank_r3c1 bank_r3c2 bank_r3c3
+
+# I-cache fetch: 2-pin buses
+generate_topologies_for_bundle core0_ifetch core_0 icache_0
+generate_topologies_for_bundle core1_ifetch core_1 icache_0
+generate_topologies_for_bundle core2_ifetch core_2 icache_1
+generate_topologies_for_bundle core3_ifetch core_3 icache_1
+
+run_planner 50
+run_nuts 1.0
+run_detailed_nuts
+
+visualize

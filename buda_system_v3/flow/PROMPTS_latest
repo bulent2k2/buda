@@ -1,0 +1,670 @@
+Future? /agent  (architect, bdd, tdd)
+
+====
+
+gem> I see two opens in bundles b3 and b4 after detailed nuts (dnuts) in: python3 ~/src/buda/src/buda_cli.py ~/src/buda/flow/four_blocks.buda                                                               
+
+
+====
+
+gem> Let's add busterm count for the selected bundle right after the bit count (within the paranthesis) in the main Buda window. E.g. B<id> <busname> (4 bits/3 bterms). Also remove the info that comes after: "(click again or click background to deselect)", or "-- click a bus-term or bus-seg to highlight", or "(click row to cycle, All Overlaps to clear)". In TopologyExplorer, add it before num of segs. E.g., B<id> (5 terms/4 segs)      
+
+====
+See ../../docs/research.md
+
+====
+claude code:
+
+⏺ Fully absorbed. Here's what came in:
+
+  - Commit 3387f88 — "Document and test Designer Keepout Zones": adds add_keepout to the
+  script reference and user guide, adds a Gherkin feature file + pytest-bdd
+  implementation for keepout zones, and fixes test_routing_grid.py to match an updated
+  C++ API signature.
+  - BUDA_SCRIPT_REFERENCE.md — now comprehensive: all 9 stages fully documented,
+  including add_keepout, post-NUTS stub reassignment, detailed NUTS, and the full
+  visualizer control reference.
+  - USER_GUIDE.md — updated with keepout zone usage under "Key Concepts for Novices."
+  - test_keepout_zone.py / keepout_zone.feature — two BDD scenarios: global planner
+  detours around a keepout, and detailed router blocks tracks inside one.
+  - CLAUDE.md — minor update adding add_keepout to the command table.
+
+  The existing discrepancy_analysis.md is still accurate — the keepout zone work already
+  corresponds to extension §2.1 in the analysis.
+
+  ---
+  Now, before diving into the discrepancies, here's a proposed order from easiest to
+  hardest, grouped by effort: 
+  
+  Quick fixes (code correctness / dead code)
+  1. §3.2 — Bundler::depth_ is stored but never read in generate_signature() — remove or
+  activate
+  2. §4.1 — NUTS sweep: END events at the same coordinate as START are processed after,
+  creating phantom conflicts — reverse tie-break
+  3. §4.3 — first_fit() exists but solve_layer() never calls it — remove or wire it in
+
+  Feature additions (medium effort)
+  4. §1.4 — Topology flexibility metric (range size) — add to Topology, expose in
+  explorer
+  5. §1.5 — Layer assignment wirelength lookup table — add to CLI
+  6. §1.9 — Hierarchy depth infrastructure (even a partial version: filter blocks by
+  depth N)
+  7. §1.13 — Performance benchmark harness
+
+  Larger architectural work (deferred)
+  8. §1.11 — Expose nominal "add-wires" positions as a distinct pre-NUTS artifact
+  9. §1.1/1.2 — Full busterm generation modes + TEG support
+  10. §1.10 — Multi-pass hierarchical obstacle flow
+
+  Where would you like to start?
+  
+✻ Cooked for 1m 4s
+
+※ recap: We're analyzing and fixing discrepancies between BUDA's implementation and its 
+  original Galaxy paper and talk. We've written and pushed the analysis doc, and are 
+  ready to tackle the quick-fix discrepancies starting with the dead `depth_` field in 
+  the Bundler. (disable recaps in /config)
+
+❯ Let's work on a good design with Gherkin/Cucumber BBD on full busterm generation       
+  modes. Basics of TEG support are there. But, a challenge is to find a good             
+  hierarchical HDL we can convert to BUDA and use as a vehicle to spell out tricky       
+  details. BTW. a potential application of this tool is to redeem row based cell         
+  placements by discovering bundles to reduce the entropy of per net global and detailed 
+   routing flows which is the industry standart. Please see if you can find some good    
+  examples from open source EDA industry, github, etc. 
+
+⏺ Let me do two things in parallel: research open-source hierarchical EDA examples, and
+  study the current busterm/TEG foundation in the codebase to inform the BDD design.
+
+⏺ Agent(Research open-source hierarchical EDA netlists for BUDA vehicle)
+  ⎿  Done (31 tool uses · 39.6k tokens · 4m 23s)
+  (ctrl+o to expand)
+     
+  Searched for 2 patterns (ctrl+o to expand)
+     
+⏺ Bash(find /Users/ben/src/buda/test/tests -name "*.feature" | xargs grep -l
+      "busterm\|TEG\|multi.rect\|equivalen" 2>/dev/null; find
+      /Users/ben/src/buda/test/tests -na…)
+  ⎿  /Users/ben/src/buda/test/tests/features/multicast_topology.feature
+     /Users/ben/src/buda/test/tests/features/multi_level_trunk.feature
+     /Users/ben/src/buda/test/tests/features/topology_flexibility.feature
+     … +21 lines (ctrl+o to expand)
+      
+⏺ There are already relevant feature files I need to read. Let me absorb them all before
+  designing new ones.
+
+  Read 4 files (ctrl+o to expand)
+
+⏺ Excellent research output. Now I have a clear picture. Let me read a few more of the
+  key existing feature files before designing the new ones.
+     
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+⏺ Let me check which features have corresponding test files and which are aspirational
+  specs.
+ 
+⏺ Bash(ls /Users/ben/src/buda/test/tests/features/ | sed 's/\.feature//' | while read f;
+      do
+        tf="test_${f}.py"…)
+  ⎿  ❌ bundler_hierarchy (no test file)
+     ❌ bundler_logic (no test file)
+     ✅ connector_shape
+     … +19 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/ben/src/buda/test/tests && python3 -m pytest --collect-only -q 2>&1 |
+▗ ▗   ▖ ▖  Claude Code v2.1.144
+           Sonnet 4.6 · Claude Pro
+  ▘▘ ▝▝    ~/src/buda
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Read ../../test/tests/features/busterm_over_the_block.feature (235 lines)
+  ⎿  Read ../../test/tests/test_keepout_zone.py (151 lines)
+  ⎿  Read ../../test/tests/features/keepout_zone.feature (32 lines)
+  ⎿  Read ../../docs/USER_GUIDE.md (121 lines)
+  ⎿  Referenced file ../../docs/BUDA_SCRIPT_REFERENCE.md
+
+  Read 4 files, listed 1 directory (ctrl+o to expand)
+
+⏺ Now I'll write the hierarchy depth planning feature file. Let me examine the talk
+  contents for the Nehalem hierarchy specifics first.
+
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+⏺ Now I have all the context I need. Let me write the hierarchy_depth_planning.feature
+  file:
+
+⏺ Write(~/src/buda/test/tests/features/hierarchy_depth_planning.feature)
+  ⎿  Wrote 357 lines to ../../test/tests/features/hierarchy_depth_planning.feature
+       2   As a chip plannerDepth Busterm Generation
+       3   I want to control which hierarchy level of blocks are used as busterm e
+         ndpoints
+          coarseat I can plan routes at the appropriate level of abstraction, from
+       5   partition outlines down to individual functional blocks, mirroring the
+       6   depth=0..N multi-pass Nehalem planning flow.
+       8   # Background: Hierarchy-depth planning (Intel Galaxy, Ekici et al.)
+       9   #
+      10   #   In the Nehalem case study (Slides 17-23) a unit is planned at succe
+         ssive
+     … +391 lines (ctrl+o to expand)
+
+⏺ Good. Now let me verify the file looks right and also check if there's a
+  test_busterm_over_the_block.py test file that needs to be created as a companion.
+
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+⏺ Now I'll write the two test Python files — one for busterm_over_the_block.feature and
+  one for hierarchy_depth_planning.feature. Both will be xfail since the underlying C++
+  APIs don't exist yet.
+
+⏺ Write(~/src/buda/test/tests/test_busterm_over_the_block.py)
+  ⎿  Wrote 353 lines to ../../test/tests/test_busterm_over_the_block.py
+       2 pytest-bdd step definitions for features/busterm_over_the_block.feature.
+       3 
+       4 Over-the-block vs thru-the-block TEG (Terminal Equivalence Group) routing
+          modes.
+       5 
+       6 The teg_mode flag per block and the bridge segment generation are not yet
+       7 implemented in the C++ API; all scenarios are xfail.
+       8 """
+       9 import pytest
+      10 import interconnect
+     … +395 lines (ctrl+o to expand)
+
+⏺ Write(~/src/buda/test/tests/test_hierarchy_depth_planning.py)
+  ⎿  Wrote 371 lines to ../../test/tests/test_hierarchy_depth_planning.py
+       2 pytest-bdd step definitions for features/hierarchy_depth_planning.feature
+         .
+       4 Hierarchy-depth busterm generation: blocks carry a depth and parent annot
+         ation;
+       5 generate_topologies with a depth parameter rolls up deeper blocks to thei
+       6 depth-N ancestors and skips intra-ancestor nets.
+       7
+         ementedth/parent API on add_block and generate_topologies is not yet impl
+       9 in the C++ engine; all scenarios are xfail.
+      10 """
+     … +395 lines (ctrl+o to expand)
+
+⏺ Now let me verify both files parse correctly by running a quick syntax check, and also
+  confirm the existing test suite still passes:
+
+⏺ Bash(cd /Users/ben/src/buda && python3 -m py_compile
+      test/tests/test_busterm_over_the_block.py && echo "busterm: OK" && python3 -m
+      py_compile test/tests/test_hierarc…)
+  ⎿  busterm: OK
+     hierarchy: OK
+
+⏺ Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 -m pytest ../../test/tests/
+      -x -q --tb=no 2>&1 | tail -20)
+  ⎿  ...xxxxxxxx.......................................xxxxxx.F
+     =========================== short test summary info ===========================
+     =
+     … +5 lines (ctrl+o to expand)
+
+⏺ The test_two_rotated failure is pre-existing (not caused by our changes). Let me verify
+   that with a quick check:
+
+⏺ Bash(cd /Users/ben/src/buda && git stash && cd buda_system_v2/src && python3 -m pytest
+      ../../test/tests/test_flow_scripts.py::test_two_rotated -q --tb=short 2>&1 | t…)
+  ⎿  Saved working directory and index state WIP on main: 21c81c9 Merge remote-track
+     ing branch 'origin/main'
+     E       File "/Users/ben/src/buda/buda_system_v2/src/buda_cli.py", line 1204, i
+     … +20 lines (ctrl+o to expand)
+
+⏺ Pre-existing failure. Let me restore our work:
+
+⏺ Bash(cd /Users/ben/src/buda && git stash pop)
+  ⎿  On branch main
+     Your branch is up to date with 'origin/main'.
+     … +14 lines (ctrl+o to expand)
+ 
+⏺ Good — the test_two_rotated failure is pre-existing, unrelated to our new files. Let me
+   run specifically the new tests to confirm they xfail as expected:
+
+⏺ Bash(cd /Users/ben/src/buda/buda_system_v2/src && python3 -m pytest
+      ../../test/tests/test_busterm_over_the_block.py
+      ../../test/tests/test_hierarchy_depth_planning.py…)
+  ⎿  ============================= test session starts =============================
+     =
+     platform darwin -- Python 3.13.5, pytest-8.3.4, pluggy-1.5.0 -- /usr/local/anac
+     … +29 lines (ctrl+o to expand)
+
+⏺ All 16 scenarios xfail cleanly. Here's a summary of what was created:
+
+  test/tests/features/hierarchy_depth_planning.feature — 8 BDD scenarios covering the
+  Nehalem depth-planning flow:
+  - Depth=0: only top-level outline; all sub-block nets invisible (0 candidates)
+  - Depth=1: cluster outlines are busterms; FUBs rolled up; TRUNK_H@y2000 generated
+  - Depth=2: precise FUB endpoints; new Hanan lines from FUB boundaries
+  - Rollup correctness: a depth=3 net's driver rolls up to its depth=1 ancestor
+  - Self-loop suppression: both endpoints in same ancestor → 0 candidates
+  - Multi-pass: depth=2 NUTS result promoted as keepout for depth=1 pass (Nehalem
+  ICLUST→IEXEC) 
+  - Bundler depth: same rolled-up endpoints → one bundle; distinct → separate bundles
+  - .buda script syntax: add_block ... depth N parent P and generate_topologies depth N
+  
+  test/tests/test_busterm_over_the_block.py and
+  test/tests/test_hierarchy_depth_planning.py — full step definitions for both feature
+  files, all marked xfail with the reason pointing to the missing C++ APIs
+  (teg_mode/bridge generation and depth_ rollup respectively).
+  
+✻ Crunched for 15m 49s
+
+※ recap: Writing BDD feature files to spec TEG busterm generation and hierarchy-depth 
+  planning. Just created both feature files and their xfail test harnesses. Next: 
+  implement `teg_mode` and `add_block_rects` in the C++ API.
+
+
+====
+
+gem> dnuts.buda: notice the discrepancy between the actual "bus segment width" after               
+   run_detailed_nuts and the bus segment used in run_nuts. Let's improve the estimate so that    
+   they match better. But, first analyze and tell me exactly why the estimate is off. 
+
+====
+
+✦ I have committed the final refinements for the Keepouts and Tracks visibility features.
+
+  Summary of Final Changes:
+   1. Enhanced Track Visualization: 
+       * Updated buda_viz.py to render all tracks in the background, including SIGNAL slots
+         (drawn with a very subtle grey). 
+       * This ensures the ☑ Tracks button is always functional and provides a complete visual
+         representation of the available routing resources.
+   2. Robust Toggling: 
+       * Used explicit set_visible() and stored alpha values for grid rail artists and keep-out
+         zones. 
+       * This ensures that toggling visibility is reliable across different visualization modes
+         and doesn't interfere with highlighting logic.
+   3. Updated Demo Scripts:
+       * keepout_demo.buda: Included mixed track patterns (Signal/Power) to verify that all track
+         types are correctly represented and toggleable.
+       * dnuts1.buda: Integrated a keep-out zone to confirm that the UI remains responsive even
+         in complex, high-density layouts.
+
+  The Keep-Out Zone feature and its associated UI controls are now fully implemented, verified,
+  and integrated into the design flow. Ready for the next phase!
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+gem> Please add the keepout zone feature to test/tests/features as well as the USER and REFERENCE  
+   guides + GEMINI and CLAUDE md docs      
+
+====
+
+gem> Let's add a feature where a Designer can denote a region to be a keep-out-zone for a given    
+   list of layers. We want the planner and the detailed nuts engines to honor them. Please       
+   suggest some options to get this started.  
+
+====
+
+❯ That works well when rects are physically connected which is the case for    
+  rectilinear blocks. But, when we use them to represent equivalent busterms,  
+  their "logical connectedness" is not visible. See flow/teg1.buda. Please     
+  suggest some visualization schemes so the user can tell quickly which rects  
+  belong together.                                                             
+
+❯ Let's refine buda_viz so that instead of showing the bbox of the rects, each 
+   rect is drawn individually and a bounding polygon is drawn around them. A   
+  bounding box obscures the actual geometry of rectilinear blocks. It's even   
+  worse when block rects are disconnecting for the case of equivalent term     
+  groups. 
+
+====
+
+gem> Let's add some test-cases that exercise the code that supports min-stub-lengths and make sure we cover each topo type: I, L, Z, U, UU, multi-cast topos with trunks and MSTs.                          
+
+
+====
+
+> flow/dnuts1.buda testcase has four bundles. b1 and b2 each has a
+problem. 1) b1 has a Z-topo but after DNUTS, the wires for the lower H
+seg that connects to u11 busterm are missing. 2) b2 is missing the
+L-topo that minimizes the wirelength. Compare this to
+flow/two_dnuts_b2.buda where the same bundle has two L-topos.
+
+===
+
+❯ Yes, Option B is the right solution now. But, before we implement it,
+  notice that Abstract NUTS is using the utilization % settings in def_layer,
+  however, Detailed NUTS is using the def_track_pattern. Let's improve the 
+  def_layer setting for this test-case so that it matches correctly the bus 
+  segment width after detailed NUTS. 
+
+Now let me understand how abstract NUTS uses the overhead% and how the track
+  pattern signals relate.
+
+⏺ Now I have the full picture. Let me compute the correct overhead% for the
+  track patterns in the test scripts.
+
+⏺ The track pattern has unit_pitch=18, total signal pitch=12 (8 signals × 1.5
+  each). The overhead is (18−12)/18 = 33.33%. This makes eff_width = 12 × 1.5 =
+   18 — the planner correctly sees each bus filling one full pattern period.
+
+  Let me update all four .buda files and also check whether any other scripts
+  have the same mismatch.
+
+⏺ The pattern POWER 2 1 / SIGNAL 1 0.5 ×4 / GROUND 2 1 / SIGNAL 1 0.5 ×4 has
+  unit_pitch=18, total signal pitch=12. Correct overhead is 100×(18−12)/18 =
+  33.33%. I'll update the four manually-run scripts (not the test-suite scripts
+   which would need count re-validation).
+
+===
+
+⏺ Done. The key insight: the heuristic failed because the M5 signal tracks
+  (placed near the lo end of the M5 interval) landed closer to the H stub's src
+   face than to its abstract bend coordinate. ConnTopology.SegConn already
+  knows exactly which end of each segment meets another segment vs. a block
+  face — using at_pos == along_lo/hi maps each SEG connection to the correct
+  lo_adj_seg_idx or hi_adj_seg_idx, and the engine adjusts exactly those ends.
+
+✻ Worked for 5m 28s
+
+❯ Now, let's improve DetailedNutsEngine to use tracks that are closest to the  
+  abstract segment location. But, watch for neighboring bus segments (running  
+  in adjacent or nearby tracks) and bus segments that share the same tracks.   
+  We want to keep the overall "topological" relationships between bus segments 
+   within the same or adjacent Hanan Grids. In a way, we need                  
+  DetailedNutsEngine to work hand in hand with the abstract older brother.     
+  Give me some options.                             
+
+===
+
+❯ See two_dnuts_b1.buda. The end point of M4 wires that connect to u0          
+  (busterm) and also to M5 wires are adjusted towards the wrong direction.     
+  DetailedNutsEngine needs to use the ConnTopology info to do this correctly.  
+
+===
+
+· Compacting conversation… (2m 40s · ↑ 292 tokens · almost done thinking)
+  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱ 77%
+  ⎿  Tip: Use Plan Mode to prepare for a complex request before making changes.
+     Press shift+tab twice to enable.
+
+Last prompt:
+❯ two_dnuts.buda has two buses 8 bits each. I only see 12 wires per segment. And there are overlaps. 
+
+> Let's rebuild. Fetched new code.
+
+/Users/ben/src/git/buda/gem/buda_system_v2/src/topology.cpp:56:9: warning: unused va │
+│ riable 'm_h' [-Wunused-variable]                                                     │
+│    56 |     int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);    │
+│       |         ^~~                                                                  │
+│ 1 warning generated.                                                                 │
+│ [ 30%] Building CXX object CMakeFiles/interconnect.dir/src/routing_grid.cpp.o        │
+│ [ 40%] Building CXX object CMakeFiles/interconnect.dir/src/detailed_nuts.cpp.o       │
+│ [ 50%] Linking CXX shared module interconnect.cpython-313-darwin.so                  │
+│ [100%] Built target interconnect                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────╯
+
+✦ I have successfully rebuilt the project using the newly fetched code. 
+
+  Build Summary:
+   - Environment: Configured using CMake, built with Make.
+   - Compiled Modules: 
+       - topology.cpp (with a minor unused variable warning for m_h)
+       - routing_grid.cpp (New)
+       - detailed_nuts.cpp (New)
+   - Output: Built the shared library
+     buda_system_v2/build/interconnect.cpython-313-darwin.so.
+
+  I noticed that two new files, routing_grid.cpp/.h and detailed_nuts.cpp/.h, have been
+  added to the src directory and integrated into the build. These appear to be new
+  components for more granular routing or track assignment.
+
+  The build is clean and the shared library is ready for use. Ready for the next task!
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+
+> Let's find out when the unused variable was introduced.
+ 
+✦ The unused variable m_h was introduced in commit 6ad74967 on Saturday, May 16, 2026.
+
+  This commit implemented the hierarchical configurable MIN_STUB_LEN settings. While both
+  m_v (minimum vertical stub length) and m_h (minimum horizontal stub length) were retrieved
+  from the Floorplan settings at the start of add_l_shapes, only m_v is currently being used
+  in the construction of the L-topologies in that function.
+
+   1 // From buda_system_v2/src/topology.cpp (Line 55-56)
+   2 int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+   3 int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+
+  I can remove the unused variable or investigate if it was intended to be used in one of
+  the L-shape options. Would you like me to clean it up now?
+▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ > Thanks to 90 degree rotational symmetry,  I expect both are useful. Maybe m_h is misused 
+   in one of the options?  
+
+❯ Z_HVH splits the H track usage from one long H to two short H tracks. But, it
+   has the extra V track use. Let's improve the hanan grid cost calculation to
+  account for this. We want Z topos only when an I topo can find no single
+  track to go through the whole hanan grid.
+
+❯ Compare the two simple testcases under flow/ two_b7.buda vs two_b7_b11.buda. two_b7.buda gives us:
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=50
+  M4 (H)  min_band_cap=200
+[Planner] Grid extended: 0 X, 2 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=50
+  M4 (H)  min_band_cap=20
+[Planner] Bundle 1 (1.5 units wide) -> Z_HVH@x75@y420  [H→M4 V→M5 H→M4]  overflow=0
+
+two_b11.buda gives us: 
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=50
+  M4 (H)  min_band_cap=50
+[Planner] Grid extended: 1 X, 3 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=20
+  M4 (H)  min_band_cap=5
+[Planner] Bundle 1 (1.5 units wide) -> I_H  [H→M4]  overflow=0
+[Planner] Bundle 2 (1.5 units wide) -> I_H  [H→M4]  overflow=0
+
+I don't understand why the planner makes those decisions. Please analyze.    
+
+
+❯ Not ready to make that decision, yet. Please document this as a future        
+  enhancement to Topology Generation and NUTS under docs/future/                
+
+⏺ Write(docs/future/spread_z_trunk_squeeze.md)
+  ⎿  Wrote 96 lines to docs/future/spread_z_trunk_squeeze.md
+       2 # Future Enhancement: Spread-Z Trunk Squeezing
+       3 ## Problem
+       5 When two blocks share the same perpendicular centre (e.g. both c
+         entred at `y=500`), the topology generator produces **spread-Z**
+          one block to the bottom edge of the other. The trunk currently 
+         spans the full block height (`[y1, y2]`) regardless of where the
+       6  two H stubs are actually placed.
+       7 ### Concrete example (`two_b7.buda`)            
+       9 ```
+      10 u0:   x=[200,300]  y=[400,600]  (shrunken: y=[420,580])
+     … +130 lines (ctrl+o to expand)
+
+⏺ Bash(git add docs/future/spread_z_trunk_squeeze.md && git commit -m "$(cat
+      <<'EOF'
+      Add future enhancement doc: spread-Z trunk squeezing…)
+  ⎿  [main 8b3d9bf] Add future enhancement doc: spread-Z trunk squeezing
+      1 file changed, 96 insertions(+)
+      create mode 100644 docs/future/spread_z_trunk_squeeze.md
+
+⏺ Committed to docs/future/spread_z_trunk_squeeze.md. The doc covers:
+
+  - The problem in two forms: the current two_b7 case (first-fit already
+  collapses the trunk naturally, but congestion accounting and the planner's
+  wirelength estimate are still inflated) and the harder general case (partially
+   overlapping intervals where first-fit can leave the stubs far apart).
+  - Part A — topology generator: estimate the trunk's wirelength from the
+  interval intersection rather than the full nominal span.
+  - Part B — NUTS engine: a post-first-fit trunk-squeeze pass that identifies
+  stub–trunk–stub triples, slides stubs toward each other within their
+  intervals, and updates the trunk's reported span.
+  - The coupling signal (coupled_stubs field on TrackSegment) that ties the two
+  parts together.
+  - What's explicitly out of scope to keep the change bounded.
+
+✻ Churned for 57s
+
+※ recap: Implementing the BUDA EDA routing pipeline stages 8 and 9, plus fixing 
+  topology bugs. We just documented a future spread-Z trunk-squeezing 
+  enhancement. Next: resume wherever the user wants to continue. (disable recaps
+   in /config)
+
+
+❯ Z topos now look good. But, notice that the wirelength could be reduced by    
+  moving the two H segs towards each other which makes the V trunk that connect 
+   them shorter. This would need an enhancement to NUTS engine, I believe. In   
+  similar Z-topos, when the slide ranges of the two outer segs do not overlap,  
+  the pull preference does the trick. But, in this case, the slide ranges are   
+  identical. But, in any similar situation when they overlap, this enhancement  
+  is useful. Let me know if you have any ideas.                                 
+  
+⏺ This is a good design problem. Let me reason through the mechanics first, then
+   offer concrete directions.
+     
+  What actually happens today:
+
+  For the two_b7 spread-Z, both H stubs live on the same layer (M4) and their
+  routing-direction spans are adjacent, not overlapping ([-50,75] and [75,200]).
+   So NUTS's first-fit places them both at y=420 (interval bottom), the trunk's
+  effective length collapses to zero, and the result is already optimal. The
+  problem you're describing — paying for a full [420,580] trunk in congestion
+  accounting even when the stubs can meet — is real but the placement itself is
+  already good here.
+
+  The interesting general case is when the stubs have partially overlapping
+  intervals and first-fit doesn't naturally bring them together:
+
+  stub A interval: [100, 300]   first-fit → 100
+  stub B interval: [200, 400]   first-fit → 200          
+  trunk effective length: |100 - 200| = 100
+  optimal: both at 200 → trunk = 0
+
+  Three ideas, roughly ranked by tractability:
+
+  ---
+  1. Post-NUTS trunk-squeeze pass (local search)
+  
+  After the per-layer first-fit placement, run a second pass over connected
+  stub–trunk–stub triples. For each triple:
+  - Compute the midpoint of the two stubs' current track positions.
+  - Try sliding each stub toward that midpoint inside its interval, checking
+  only the segments whose spans it actually overlaps on that layer. 
+  - Accept any move that reduces trunk effective length without creating a new
+  conflict.
+  - Iterate to convergence (usually 1–2 rounds).
+  
+  This fits cleanly into the existing architecture — it's a post-processing step
+   inside NUTSEngine::run(), and per-layer independence is preserved. The
+  triples can be identified from the topology's seg_busterms map (the trunk
+  segment already knows which block faces it connects to) or from ConnTopology.
+  The main bookkeeping addition: the trunk TrackSegment needs to record which
+  two stubs determine its effective span, so the output can report accurate wire
+   length.
+
+  ---
+  2. Preferred-position hint on stubs
+  
+  Add an optional preferred_pos field to TrackSegment. In first-fit, try
+  preferred_pos as a candidate before interval_lo. For spread-Z stubs, the
+  topology generator would set preferred_pos = (interval_lo + interval_hi) / 2 —
+   both stubs would converge naturally to the center in first-fit without
+  touching the trunk logic at all.
+                                                         
+  Cheaper to implement, but less general: it only works when you can precompute
+  the ideal position at topology-generation time, and it doesn't adapt to other
+  segments on the same layer that might already occupy the center.
+  
+  ---                                                    
+  3. Telescope the trunk span in the topology itself
+  
+  Instead of representing the trunk as a fixed-span segment [y1, y2], represent
+  it as a zero-span "stub connector" at the nominal position. Generate the
+  spread-Z with the trunk initialised to a degenerate span [center, center],
+  letting the stubs' actual Hanan-interval constraints expand it only if forced
+  to. This changes the wirelength estimate immediately (the planner would
+  correctly rank it cheaper) and removes the congestion inflation on the V
+  layer.
+
+  The trade-off: it requires a new segment kind or a flag in TrackSegment, and
+  NUTS needs to handle the "telescoping" span during sweep. More architectural
+  change than ideas 1 or 2.
+  
+  ---                                                    
+  Which to pursue:
+  
+  Idea 1 is the most general and most architecturally honest — trunk length
+  really is a cross-layer derived quantity, and a post-pass is the right place
+  to handle it. Ideas 2 and 3 bake in assumptions at topology-generation time
+  and will miss cases the topology generator can't anticipate.
+  
+  The one missing piece for idea 1: a way for the NUTS engine to know which two
+  stubs determine a trunk's span. The cleanest carrier for that is the
+  TrackSegment — add a coupled_seg_indices: pair<int,int> field that the CLI
+  populates from ConnTopology when building the NUTS input. The post-pass then
+  has everything it needs without any geometric re-analysis.
+
+✻ Churned for 2m 51s
+
+※ recap: Working on the BUDA EDA routing pipeline. The last fix corrected 
+  spread-Z topology slide ranges; the current discussion is around a NUTS 
+  enhancement to minimize trunk length when stub intervals overlap. No immediate
+   action pending. (disable recaps in /config)           
+
+────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ accept edits on (shift+tab to cycle)                3% until auto-compact
+
+
+❯ Z topos now look good. But, notice that the wirelength could be reduced by    
+  moving the two H segs towards each other which makes the V trunk that connect 
+   them shorter. This would need an enhancement to NUTS engine, I believe. In   
+  similar Z-topos, when the slide ranges of the two outer segs do not overlap,  
+  the pull preference does the trick. But, in this case, the slide ranges are   
+  identical. But, in any similar situation when they overlap, this enhancement  
+  is useful. Let me know if you have any ideas. 
+
+✻ Symbioting… (54s · almost done thinking)
+  ⎿  Tip: Use /agents to optimize specific tasks. Eg. Software Architect, Code Writer, Code Reviewer
+─────────────────────────────────
+
+> testcase flow/two_b7, has one bundle. Topos 4 and 5 are both Z-topos. The slide range of the middle segment in each seems wrong.
+
+❯ There are some future tasks we've defined (see GEMINI.md as well as CLAUDE.md). Please    
+  propose a list of items for which we need to design Cucumber tests for Behavior Driven    
+  Design (BDD) and extensive tests for Test-Driven Development (TDD).  
+
+See: test/README
+
+> Testcase: four_blocks_b1. Selected topo. corner_margin setting seems to be ignored for the two V segs. Similarly for other topos and H segs. 
+
+
+To CC> Here is the problem with this solution: def_layer settings are not honored. After re-run the main window shows H layer used for V routing and vice versa!     
+To GM> testcase one3.buda. Topo 3 (L_VH) has the wrong slide range for H segment. It should be the y-span of u13 above the y-span of u0. 
+
+In parallel to C: > I find myself selecting a topo for a bundle and come back and re-run planning and nuts and go back select a different for another bundle and re-iterate. Let's improve the GUI, maybe add a new flow-chart window with clickable buttons. A new button on the main viz menu brings up a that? Or maybe do that from the topo-viz menu? Please suggest some options. We also need to refresh the layout after NUTS is re-run.
+
+ > Same testcase has another issue: L- topo selection doesn't disambiguate between the two L-topos. WL is the same for both.                                                               > See simplified testcase: one5.buda. The slides changes when u14 is added! It is not a busterm for the bundle.             > Now, please explain why two cells in the heatmap are marked as BLOCK? I see ample over-the-block routing space.                                                                         > two_busterms.buda test case bundle 3, topos 2 and 3, both L-topos have bad slides.                                                    
+ > Let's review the code for congestion measurment and heatmap code on hanan-grid, document how exactly it works given the selected topology and layer assignments for each bundle. And then debug the    
+   heatmap for two_busterms.buda testcase. 200% OVF on a few grid cells don't look correct.
+
+ > This looks good. Thanks. There is an old bug to fix: test5bug.buda. Fourth topo is selected in .json file. The topology and seg slides look good. But, nuts places one of the vertical segs too far    
+
+Gem > See test-case two.buda, bundle 2, topo 4 of 8: Z_VHV. The slide for H is [600, 600]. That's trivial and can not be used to route this bus. Let's add the right logic to eliminate such topos.          
+
+CC ❯ Doesn't it make sense to apply corner margins on the busterm.rect and then use those rects to create the hanan grid? Then, topo generation code get simpler by using busterm.rects as is.
+
+"two.buda" topologies for Bundle 13 have a few issues: 1) 
+
+test case "two.buda" [Planner] Bundle 13 (1.5 units wide) -> L_HV  [H→M4 V→M5]  overflow=0. slide ranges are too tiny for both segs. Second issue: for topo 2 (L_VH) the segs are placed outside the slide ranges. 
+
+bundle 1, topo 1 (L_HV): the ranges are good, but each seg is placed outside its range. They are pulled all the way to the corner. They should stay within their slide-ranges. Topo 2 (L_VH) has a good V seg, but the H seg has the same problem as in topo 1. Finally, topo 5 (U_HVH): The V segment can have a wider slide-range. It should not be limited to one hanan grid, because it is detouring outside of the bbox of the busterms anyway.
+
+two_busterms.buda, bundle 4: some topos (e.g., topos 1, 2, 3 and more) use wrong busterm label (u13) instead of the correct one (u14). 
+
+two_busterms, bundle 3: Same bundle is missing another L-topo. See the busterms partially overlap in y. So, we have two options for the H trunk: 1) under the busterm on the right. 2) above the busterm on the left. We have only the first. Second one is missing. As I said earlier, we need to consider all H hanan grids as a potential H trunk location and see if a V stub makes sense. If the two busterms partially overlap in  x, we have the symmetric case. 
+
+DONE. Test:
+Testcase two_busterms.buda has variations of the same L-topo problem: 1) topo 3 of bundle 3, 2) topos 2 and 3 of bundle 4, 3) topos 3 and 4 of bundle 5
+
+FIXED 1) Testcase: two_busterms_rotated.buda. Bundle 3. Topo 4. What's the sliding range for the H seg? It should be the whole right edge.
+FIXED 2) Testcase: two.buda. Bundle 4. Topo 1 (I_H): slide-in-y=[500, 580]. Shouldn't it be [460, 580]? Similarly for Topo 3, H-seg connecting to u14. 
+FIXED 3) Same test case, same bundle. Why does `run_planner` pick that topo? There are shorter topos?

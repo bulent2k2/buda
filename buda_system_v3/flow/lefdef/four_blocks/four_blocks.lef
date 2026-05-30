@@ -1,0 +1,24 @@
+VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+
+MACRO BLOCK_MACRO
+  CLASS BLOCK ;
+  SIZE 50 BY 50 ;
+  PIN tx
+    DIRECTION OUTPUT ;
+    PORT
+      LAYER M5 ;
+      RECT 24.5 47.5 25.5 48.5 ;
+    END
+  END tx
+  PIN rx
+    DIRECTION INPUT ;
+    PORT
+      LAYER M5 ;
+      RECT 24.5 1.5 25.5 2.5 ;
+    END
+  END rx
+END BLOCK_MACRO
+
+END LIBRARY

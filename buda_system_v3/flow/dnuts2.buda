@@ -1,0 +1,28 @@
+# ~/src/git/buda/gem/buda_system_v2/flow/four_blocks_b1.buda
+
+def_layer 5 M5 V TOP 33.33
+def_layer 6 M6 H TOP 33.33
+
+corner_margin 10 10
+set_min_stub_length 10
+set_min_stub_length_dir V 20
+set_min_stub_length_layer M5 5
+
+add_block u1    50   50   100 100
+add_block u2    150  50   200 100
+add_block u3    50  150   100 200
+add_block u4    150 150   200 200
+
+add_bus b1[4] u1.tx u2.rx
+add_bus b2[4] u1.tx u4.rx
+add_bus b3[4] u2.tx u3.rx
+add_bus b4[4] u1.tx u3.rx
+
+run_bundler strict
+generate_topologies double_detour
+run_planner 1
+run_nuts
+def_track_pattern 6 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+def_track_pattern 5 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+run_detailed_nuts
+visualize

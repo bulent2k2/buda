@@ -1,0 +1,117 @@
+#pragma once
+#include "topology.h"
+#include <string>
+#include <utility>
+#include <vector>
+#include <climits>
+
+namespace interconnect {
+
+// ── Connection ────────────────────────────────────────────────────────────────
+//
+// A connection from one endpoint (or T-junction point) on a segment to either
+// a busterm face or another segment.
+//
+// at_pos: coordinate ALONG this segment where the connection occurs.
+//   H segment → at_pos is an x value  (the column where the other thing attaches)
+//   V segment → at_pos is a y value   (the row where the other thing attaches)
+//
+struct SegConn {
+    enum Kind { BUSTERM, SEG } kind;
+
+    // BUSTERM: the segment endpoint lies on this block face.
+    std::string block_name;   // block name in the Floorplan
+    int         face_coord;   // the face coordinate  (x for x-face, y for y-face)
+
+    // SEG: the endpoint (or T-junction) meets another segment.
+    int seg_idx;              // index into ConnTopology::segs()
+    int at_pos;               // position along THIS segment where the junction is
+    bool is_endpoint = false; // true if at_pos is at either end of THIS segment
+};
+
+// ── ConnSeg ───────────────────────────────────────────────────────────────────
+//
+// A segment extended with explicit connectivity and computed slide range.
+//
+//  along_span [along_lo, along_hi]   extent in the segment's primary direction
+//    H → x-range     V → y-range
+//
+//  perp_pos                          current (nominal) perpendicular position
+//    H → y            V → x
+//
+//  perp_slide [perp_lo, perp_hi]     range perp_pos can take while all
+//    connections remain valid.  Anchored by direct busterm constraints (pass 1)
+//    and tightened by stub-propagated busterm constraints (pass 2).
+//
+struct ConnSeg {
+    bool horiz     = false;
+    int  layer_id  = -1;
+    int  along_lo  = 0;
+    int  along_hi  = 0;
+    int  perp_pos  = 0;
+    int  perp_lo   = INT_MIN / 2;
+    int  perp_hi   = INT_MAX / 2;
+    // net_pull > 0: more connected-stub anchors lie above perp_pos (slide up/right
+    //              reduces total connected wirelength).
+    // net_pull < 0: more anchors lie below → prefer sliding down/left.
+    // net_pull == 0: balanced or no stub connections → no preferred direction.
+    int  net_pull  = 0;
+    std::vector<SegConn> conns;
+};
+
+// ── Manhattan nearest-point distance ─────────────────────────────────────────
+//
+// Minimum Manhattan distance between any point in rect a and any point in
+// rect b.  Treats each rect as a closed axis-aligned rectangle.  For a
+// segment pass its degenerate bounding box (x1==x2 for V, y1==y2 for H).
+//
+int manhattan_nearest(const Rect& a, const Rect& b);
+
+// Return the bounding-box Rect of a ConnSeg (degenerate in the perp direction).
+Rect seg_bbox(const ConnSeg& cs);
+
+// ── MST types ─────────────────────────────────────────────────────────────────
+
+struct MSTEdge {
+    int         u, v;      // indices into the nodes vector (0-based)
+    int         dist;      // Manhattan nearest-point distance
+    std::string u_name;
+    std::string v_name;
+};
+
+// Kruskal's MST over a set of named rectangular nodes.
+// Distances = manhattan_nearest between bounding boxes.
+// Returns exactly (nodes.size()-1) edges, sorted ascending by dist.
+std::vector<MSTEdge> compute_mst(
+    const std::vector<std::pair<std::string, Rect>>& nodes);
+
+// ── ConnTopology ──────────────────────────────────────────────────────────────
+//
+// Augments a raw Topology with:
+//   • explicit connectivity (busterm faces ↔ segments, segment ↔ segment)
+//   • computed perp_slide ranges for every segment
+//
+// build() infers connections geometrically (shared endpoints / T-junctions /
+// busterm face membership) then propagates slide constraints bottom-up from
+// the busterms, which act as the fixed anchors of the routing tree.
+//
+class ConnTopology {
+public:
+    void build(const Topology& topo, const Floorplan& fp);
+    const std::vector<ConnSeg>& segs() const { return segs_; }
+
+    // For the trunk segment at segs()[trunk_idx], gather all blocks in fp that
+    // are NOT yet directly connected (no BUSTERM conn on that segment), then
+    // return the MST over {trunk} ∪ {unconnected blocks}.
+    // Node 0 in the result is the trunk; nodes 1..n are the unconnected blocks
+    // in the order returned by fp.get_all_blocks() minus already-connected ones.
+    std::vector<MSTEdge> trunk_mst(int trunk_idx, const Floorplan& fp) const;
+
+private:
+    std::vector<ConnSeg> segs_;
+    void infer_connections(const Topology& topo, const Floorplan& fp);
+    void compute_slide_ranges(const Floorplan& fp);
+    void compute_net_pull();
+};
+
+} // namespace interconnect

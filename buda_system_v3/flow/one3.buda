@@ -1,0 +1,20 @@
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+
+corner_margin dx 15 dy 20
+
+add_block u0    50   400  250   600
+add_block u11   500  800  600  1000
+add_block u12   600  600  700  1000
+add_block u13   700  500  800  1000
+add_block u14   800  400  900  1000
+add_block u15   900  200  1000 1000
+
+add_net n13 u0.tx u13.rx
+
+run_bundler strict
+generate_topologies
+visualize_topologies
+#run_planner 1
+#run_nuts
+#visualize

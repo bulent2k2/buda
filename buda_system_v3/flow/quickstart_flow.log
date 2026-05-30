@@ -1,0 +1,24 @@
+[RoutingGrid] Layer 4: 7 slots, unit_pitch=16.500, signal_density=0.242
+[RoutingGrid] Layer 5: 7 slots, unit_pitch=16.500, signal_density=0.242
+Bundler created 4 bundles.
+Generated 10 topologies for bundle 1 (CPU->[MEM,GPU,PLL])
+Generated 8 topologies for bundle 2 (MEM->CPU)
+Generated 12 topologies for bundle 3 (MEM->[CPU,GPU])
+Generated 8 topologies for bundle 4 (MEM->GPU)
+Pinned bundle 'cntr' to topology 3 (TRUNK_V@x350, WL=1200)
+Warning: selection for 'data_0' matched by index hint (type/WL changed?) — using topo 0
+Pinned bundle 'data_0' to topology 0 (TRUNK_H@y600, WL=920)
+[Planner] Grid extended: 2 X, 3 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=40
+  M4 (H)  min_band_cap=30
+[Planner] Bundle 2 (12 units wide) -> L_HV@x280@y520  [H→M4 V→M5]  overflow=0
+[Planner] Bundle 4 (12 units wide) -> L_HV@x580@y680  [H→M4 V→M5]  overflow=0
+[Planner] Bundle 3 (6 units wide) -> TRUNK_H@y600 [pinned]  [H→M4 V→M5 V→M5]  overflow=0
+[Planner] Bundle 1 (1.5 units wide) -> TRUNK_V@x350 [pinned]  [V→M5 H→M4 H→M4 H→M4 H→M4]  overflow=0
+[NUTS] 12 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 0.
+[NUTS] M4: no local overlaps
+[NUTS] M5: no local overlaps
+[NUTS] Span adjustments: M4:3, M5:5
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/quickstart_nuts.log
+[DetailedNUTS] 49 net segments placed, 0 bits unplaced.

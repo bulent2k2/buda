@@ -1,0 +1,10 @@
+NUTS Overlap Report — i_test1_b1.buda
+Generated : 2026-05-25T23:38:26
+
+[NUTS] M8: total bus width 41.3 units, spanning perpendicular interval [44.4, 85.6]
+[NUTS] M8: no local overlaps
+
+[NUTS] 1 segments placed across 1 layer(s). Interval violations: 1, Track overlaps: 0.
+Overlaps  : 0  ()
+
+No overlaps.

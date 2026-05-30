@@ -1,0 +1,38 @@
+# Hierarchical Minimum Stub Length Exhaustive Test
+# Covers: I, L, Z, U, UU, and multicast
+
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+
+corner_margin dx 15 dy 20
+
+# ── Floorplan ────────────────────────────────────────────────
+add_block u_s    50   400  250   600
+add_block u_d    700  500  800  1000
+add_block u_m    800  400  900  1000
+
+# ── Hierarchical Settings ────────────────────────────────────
+# Global default
+set_min_stub_length 25
+
+# Directional override (Vertical stubs)
+set_min_stub_length_dir V 40
+
+# Layer override (M5 is vertical)
+set_min_stub_length_layer M5 60
+
+# ── Nets ─────────────────────────────────────────────────────
+# 2-pin: u_s -> u_d (I, L, Z, U, UU)
+add_net n1 u_s.tx u_d.rx
+
+# Multicast: u_s -> [u_d, u_m] (Trunk, MST)
+add_net n_mc u_s.tx u_d.rx,u_m.lx
+
+run_bundler strict
+generate_topologies
+run_planner 1
+run_nuts 2.0
+
+# ── Cleanup ──────────────────────────────────────────────────
+# (No changes needed, just verify log)
+visualize

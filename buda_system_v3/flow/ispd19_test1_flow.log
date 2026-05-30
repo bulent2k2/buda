@@ -1,0 +1,1072 @@
+[RoutingGrid] Layer 5: 10 slots, unit_pitch=3.080, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 6: 10 slots, unit_pitch=3.080, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 7: 10 slots, unit_pitch=8.800, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 8: 10 slots, unit_pitch=8.800, signal_density=0.364, dilution=2.750
+Bundler created 294 bundles.
+Generated 6 topologies for bundle 1 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 2 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 3 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 4 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 5 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 6 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 7 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 8 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 9 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 10 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 11 (g_1_src->g_1_dst)
+Generated 6 topologies for bundle 12 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 13 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 14 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 15 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 16 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 17 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 18 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 19 (g_2_src->g_2_dst)
+Generated 6 topologies for bundle 20 (g_2_src->g_2_dst)
+Generated 3 topologies for bundle 21 (g_3_src->g_3_dst)
+Generated 3 topologies for bundle 22 (g_4_src->g_4_dst)
+Generated 6 topologies for bundle 23 (g_5_src->g_5_dst)
+Generated 3 topologies for bundle 24 (g_6_src->g_6_dst)
+Generated 6 topologies for bundle 25 (g_7_src->g_7_dst)
+Generated 3 topologies for bundle 26 (g_8_src->g_8_dst)
+Generated 6 topologies for bundle 27 (g_9_src->g_9_dst)
+Generated 6 topologies for bundle 1 (g_10_src->g_10_dst)
+Generated 6 topologies for bundle 2 (g_11_src->g_11_dst)
+Generated 6 topologies for bundle 3 (g_12_src->g_12_dst)
+Generated 4 topologies for bundle 4 (g_13_src->g_13_dst)
+Generated 6 topologies for bundle 5 (g_14_src->g_14_dst)
+Generated 6 topologies for bundle 6 (g_15_src->g_15_dst)
+Generated 6 topologies for bundle 7 (g_16_src->g_16_dst)
+Generated 6 topologies for bundle 8 (g_17_src->g_17_dst)
+Generated 6 topologies for bundle 9 (g_18_src->g_18_dst)
+Generated 5 topologies for bundle 10 (g_19_src->g_19_dst)
+Generated 4 topologies for bundle 12 (g_20_src->g_20_dst)
+Generated 6 topologies for bundle 13 (g_21_src->g_21_dst)
+Generated 6 topologies for bundle 14 (g_22_src->g_22_dst)
+Generated 6 topologies for bundle 15 (g_23_src->g_23_dst)
+Generated 5 topologies for bundle 16 (g_24_src->g_24_dst)
+Generated 3 topologies for bundle 17 (g_25_src->g_25_dst)
+Generated 6 topologies for bundle 18 (g_26_src->g_26_dst)
+Generated 6 topologies for bundle 19 (g_27_src->g_27_dst)
+Warning: Could not find bundle matching hint g_28
+Generated 6 topologies for bundle 28 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 29 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 30 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 31 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 32 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 33 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 34 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 35 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 36 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 37 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 38 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 39 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 40 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 41 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 42 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 43 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 44 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 45 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 46 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 47 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 48 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 49 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 50 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 51 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 52 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 53 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 54 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 55 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 56 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 57 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 58 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 59 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 60 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 61 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 62 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 63 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 64 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 65 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 66 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 67 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 68 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 69 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 70 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 71 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 72 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 73 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 74 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 75 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 76 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 77 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 78 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 79 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 80 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 81 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 82 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 83 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 84 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 85 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 86 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 87 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 88 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 89 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 90 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 91 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 92 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 93 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 94 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 95 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 96 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 97 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 98 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 99 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 100 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 101 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 102 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 103 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 104 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 105 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 106 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 107 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 108 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 109 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 110 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 111 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 112 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 113 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 114 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 115 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 116 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 117 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 118 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 119 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 120 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 121 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 122 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 123 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 124 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 125 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 126 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 127 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 128 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 129 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 130 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 131 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 132 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 133 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 134 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 135 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 136 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 137 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 138 (hf_1_src->hf_1_dst)
+Generated 6 topologies for bundle 139 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 140 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 141 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 142 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 143 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 144 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 145 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 146 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 147 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 148 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 149 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 150 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 151 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 152 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 153 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 154 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 155 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 156 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 157 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 158 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 159 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 160 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 161 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 162 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 163 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 164 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 165 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 166 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 167 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 168 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 169 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 170 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 171 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 172 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 173 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 174 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 175 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 176 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 177 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 178 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 179 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 180 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 181 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 182 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 183 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 184 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 185 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 186 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 187 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 188 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 189 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 190 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 191 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 192 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 193 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 194 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 195 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 196 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 197 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 198 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 199 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 200 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 201 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 202 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 203 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 204 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 205 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 206 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 207 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 208 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 209 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 210 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 211 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 212 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 213 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 214 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 215 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 216 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 217 (hf_2_src->hf_2_dst)
+Generated 6 topologies for bundle 218 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 219 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 220 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 221 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 222 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 223 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 224 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 225 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 226 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 227 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 228 (hf_3_src->hf_3_dst)
+Generated 6 topologies for bundle 229 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 230 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 231 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 232 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 233 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 234 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 235 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 236 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 237 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 238 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 239 (hf_4_src->hf_4_dst)
+Generated 6 topologies for bundle 240 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 241 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 242 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 243 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 244 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 245 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 246 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 247 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 248 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 249 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 250 (hf_5_src->hf_5_dst)
+Generated 6 topologies for bundle 251 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 252 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 253 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 254 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 255 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 256 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 257 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 258 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 259 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 260 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 261 (hf_6_src->hf_6_dst)
+Generated 6 topologies for bundle 262 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 263 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 264 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 265 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 266 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 267 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 268 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 269 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 270 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 271 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 272 (hf_7_src->hf_7_dst)
+Generated 6 topologies for bundle 273 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 274 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 275 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 276 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 277 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 278 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 279 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 280 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 281 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 282 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 283 (hf_8_src->hf_8_dst)
+Generated 6 topologies for bundle 284 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 285 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 286 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 287 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 288 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 289 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 290 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 291 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 292 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 293 (hf_9_src->hf_9_dst)
+Generated 6 topologies for bundle 294 (hf_9_src->hf_9_dst)
+Generated 4 topologies for bundle 28 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 29 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 30 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 31 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 32 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 33 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 34 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 35 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 36 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 37 (hf_10_src->hf_10_dst)
+Generated 4 topologies for bundle 38 (hf_10_src->hf_10_dst)
+Generated 6 topologies for bundle 39 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 40 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 41 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 42 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 43 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 44 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 45 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 46 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 47 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 48 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 49 (hf_11_src->hf_11_dst)
+Generated 6 topologies for bundle 50 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 51 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 52 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 53 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 54 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 55 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 56 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 57 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 58 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 59 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 60 (hf_12_src->hf_12_dst)
+Generated 6 topologies for bundle 61 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 62 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 63 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 64 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 65 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 66 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 67 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 68 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 69 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 70 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 71 (hf_13_src->hf_13_dst)
+Generated 6 topologies for bundle 72 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 73 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 74 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 75 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 76 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 77 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 78 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 79 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 80 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 81 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 82 (hf_14_src->hf_14_dst)
+Generated 6 topologies for bundle 83 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 84 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 85 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 86 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 87 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 88 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 89 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 90 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 91 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 92 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 93 (hf_15_src->hf_15_dst)
+Generated 6 topologies for bundle 94 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 95 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 96 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 97 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 98 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 99 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 100 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 101 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 102 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 103 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 104 (hf_16_src->hf_16_dst)
+Generated 6 topologies for bundle 105 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 106 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 107 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 108 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 109 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 110 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 111 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 112 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 113 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 114 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 115 (hf_17_src->hf_17_dst)
+Generated 6 topologies for bundle 116 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 117 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 118 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 119 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 120 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 121 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 122 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 123 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 124 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 125 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 126 (hf_18_src->hf_18_dst)
+Generated 6 topologies for bundle 127 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 128 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 129 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 130 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 131 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 132 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 133 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 134 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 135 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 136 (hf_19_src->hf_19_dst)
+Generated 6 topologies for bundle 137 (hf_19_src->hf_19_dst)
+Generated 5 topologies for bundle 139 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 140 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 141 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 142 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 143 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 144 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 145 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 146 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 147 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 148 (hf_20_src->hf_20_dst)
+Generated 5 topologies for bundle 149 (hf_20_src->hf_20_dst)
+Generated 6 topologies for bundle 150 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 151 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 152 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 153 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 154 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 155 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 156 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 157 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 158 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 159 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 160 (hf_21_src->hf_21_dst)
+Generated 6 topologies for bundle 161 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 162 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 163 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 164 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 165 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 166 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 167 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 168 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 169 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 170 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 171 (hf_22_src->hf_22_dst)
+Generated 6 topologies for bundle 172 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 173 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 174 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 175 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 176 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 177 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 178 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 179 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 180 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 181 (hf_23_src->hf_23_dst)
+Generated 6 topologies for bundle 182 (hf_23_src->hf_23_dst)
+Generated 4 topologies for bundle 183 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 184 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 185 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 186 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 187 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 188 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 189 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 190 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 191 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 192 (hf_24_src->hf_24_dst)
+Generated 4 topologies for bundle 193 (hf_24_src->hf_24_dst)
+Generated 6 topologies for bundle 194 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 195 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 196 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 197 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 198 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 199 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 200 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 201 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 202 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 203 (hf_25_src->hf_25_dst)
+Generated 6 topologies for bundle 204 (hf_25_src->hf_25_dst)
+Generated 3 topologies for bundle 205 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 206 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 207 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 208 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 209 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 210 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 211 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 212 (hf_26_src->hf_26_dst)
+Generated 3 topologies for bundle 213 (hf_26_src->hf_26_dst)
+Generated 6 topologies for bundle 214 (hf_27_src->hf_27_dst)
+Generated 5 topologies for bundle 215 (hf_28_src->hf_28_dst)
+Generated 6 topologies for bundle 216 (hf_29_src->hf_29_dst)
+Generated 6 topologies for bundle 218 (hf_30_src->hf_30_dst)
+Generated 6 topologies for bundle 219 (hf_31_src->hf_31_dst)
+Generated 5 topologies for bundle 220 (hf_32_src->hf_32_dst)
+Generated 3 topologies for bundle 221 (hf_33_src->hf_33_dst)
+Generated 6 topologies for bundle 222 (hf_34_src->hf_34_dst)
+Generated 6 topologies for bundle 223 (hf_35_src->hf_35_dst)
+Generated 6 topologies for bundle 224 (hf_36_src->hf_36_dst)
+Generated 4 topologies for bundle 225 (hf_37_src->hf_37_dst)
+Generated 6 topologies for bundle 226 (hf_38_src->hf_38_dst)
+Generated 6 topologies for bundle 227 (hf_39_src->hf_39_dst)
+Generated 6 topologies for bundle 229 (hf_40_src->hf_40_dst)
+Generated 6 topologies for bundle 230 (hf_41_src->hf_41_dst)
+Generated 6 topologies for bundle 231 (hf_42_src->hf_42_dst)
+Generated 5 topologies for bundle 232 (hf_43_src->hf_43_dst)
+Generated 5 topologies for bundle 233 (hf_44_src->hf_44_dst)
+Generated 6 topologies for bundle 234 (hf_45_src->hf_45_dst)
+Generated 5 topologies for bundle 235 (hf_46_src->hf_46_dst)
+Generated 6 topologies for bundle 236 (hf_47_src->hf_47_dst)
+Generated 5 topologies for bundle 237 (hf_48_src->hf_48_dst)
+Generated 6 topologies for bundle 238 (hf_49_src->hf_49_dst)
+Generated 6 topologies for bundle 240 (hf_50_src->hf_50_dst)
+Generated 5 topologies for bundle 241 (hf_51_src->hf_51_dst)
+Generated 6 topologies for bundle 242 (hf_52_src->hf_52_dst)
+Generated 6 topologies for bundle 243 (hf_53_src->hf_53_dst)
+Generated 4 topologies for bundle 244 (hf_54_src->hf_54_dst)
+Generated 6 topologies for bundle 245 (hf_55_src->hf_55_dst)
+Generated 6 topologies for bundle 246 (hf_56_src->hf_56_dst)
+Generated 5 topologies for bundle 247 (hf_57_src->hf_57_dst)
+Generated 6 topologies for bundle 248 (hf_58_src->hf_58_dst)
+Generated 5 topologies for bundle 249 (hf_59_src->hf_59_dst)
+Generated 6 topologies for bundle 251 (hf_60_src->hf_60_dst)
+Generated 6 topologies for bundle 252 (hf_61_src->hf_61_dst)
+Generated 4 topologies for bundle 253 (hf_62_src->hf_62_dst)
+Generated 6 topologies for bundle 254 (hf_63_src->hf_63_dst)
+Generated 6 topologies for bundle 255 (hf_64_src->hf_64_dst)
+Generated 6 topologies for bundle 256 (hf_65_src->hf_65_dst)
+Generated 6 topologies for bundle 257 (hf_66_src->hf_66_dst)
+Generated 5 topologies for bundle 258 (hf_67_src->hf_67_dst)
+Generated 6 topologies for bundle 259 (hf_68_src->hf_68_dst)
+Generated 6 topologies for bundle 260 (hf_69_src->hf_69_dst)
+Generated 6 topologies for bundle 262 (hf_70_src->hf_70_dst)
+Generated 2 topologies for bundle 263 (hf_71_src->hf_71_dst)
+Generated 6 topologies for bundle 264 (hf_72_src->hf_72_dst)
+Generated 6 topologies for bundle 265 (hf_73_src->hf_73_dst)
+Generated 4 topologies for bundle 266 (hf_74_src->hf_74_dst)
+Generated 5 topologies for bundle 267 (hf_75_src->hf_75_dst)
+Generated 6 topologies for bundle 268 (hf_76_src->hf_76_dst)
+Generated 6 topologies for bundle 269 (hf_77_src->hf_77_dst)
+Generated 6 topologies for bundle 270 (hf_78_src->hf_78_dst)
+Generated 6 topologies for bundle 271 (hf_79_src->hf_79_dst)
+Generated 3 topologies for bundle 273 (hf_80_src->hf_80_dst)
+Generated 5 topologies for bundle 274 (hf_81_src->hf_81_dst)
+Generated 2 topologies for bundle 275 (hf_82_src->hf_82_dst)
+Generated 6 topologies for bundle 276 (hf_83_src->hf_83_dst)
+Generated 4 topologies for bundle 277 (hf_84_src->hf_84_dst)
+Generated 5 topologies for bundle 278 (hf_85_src->hf_85_dst)
+Generated 6 topologies for bundle 279 (hf_86_src->hf_86_dst)
+Generated 6 topologies for bundle 280 (hf_87_src->hf_87_dst)
+Generated 6 topologies for bundle 281 (hf_88_src->hf_88_dst)
+Generated 5 topologies for bundle 282 (hf_89_src->hf_89_dst)
+Generated 6 topologies for bundle 284 (hf_90_src->hf_90_dst)
+Generated 6 topologies for bundle 285 (hf_91_src->hf_91_dst)
+Generated 6 topologies for bundle 286 (hf_92_src->hf_92_dst)
+Generated 6 topologies for bundle 287 (hf_93_src->hf_93_dst)
+Generated 6 topologies for bundle 288 (hf_94_src->hf_94_dst)
+Generated 5 topologies for bundle 289 (hf_95_src->hf_95_dst)
+Generated 5 topologies for bundle 290 (hf_96_src->hf_96_dst)
+Generated 6 topologies for bundle 291 (hf_97_src->hf_97_dst)
+Generated 6 topologies for bundle 292 (hf_98_src->hf_98_dst)
+Generated 5 topologies for bundle 293 (hf_99_src->hf_99_dst)
+Generated 5 topologies for bundle 28 (hf_100_src->hf_100_dst)
+Generated 6 topologies for bundle 29 (hf_101_src->hf_101_dst)
+Generated 6 topologies for bundle 30 (hf_102_src->hf_102_dst)
+Generated 6 topologies for bundle 31 (hf_103_src->hf_103_dst)
+Generated 6 topologies for bundle 32 (hf_104_src->hf_104_dst)
+Generated 5 topologies for bundle 33 (hf_105_src->hf_105_dst)
+Generated 6 topologies for bundle 34 (hf_106_src->hf_106_dst)
+Generated 6 topologies for bundle 35 (hf_107_src->hf_107_dst)
+Generated 5 topologies for bundle 36 (hf_108_src->hf_108_dst)
+Generated 6 topologies for bundle 37 (hf_109_src->hf_109_dst)
+Generated 3 topologies for bundle 39 (hf_110_src->hf_110_dst)
+Generated 6 topologies for bundle 40 (hf_111_src->hf_111_dst)
+Generated 4 topologies for bundle 41 (hf_112_src->hf_112_dst)
+Generated 4 topologies for bundle 42 (hf_113_src->hf_113_dst)
+Generated 6 topologies for bundle 43 (hf_114_src->hf_114_dst)
+Generated 6 topologies for bundle 44 (hf_115_src->hf_115_dst)
+Generated 6 topologies for bundle 45 (hf_116_src->hf_116_dst)
+Generated 6 topologies for bundle 46 (hf_117_src->hf_117_dst)
+Generated 6 topologies for bundle 47 (hf_118_src->hf_118_dst)
+Generated 6 topologies for bundle 48 (hf_119_src->hf_119_dst)
+Generated 3 topologies for bundle 50 (hf_120_src->hf_120_dst)
+Generated 6 topologies for bundle 51 (hf_121_src->hf_121_dst)
+Generated 6 topologies for bundle 52 (hf_122_src->hf_122_dst)
+Generated 6 topologies for bundle 53 (hf_123_src->hf_123_dst)
+Generated 6 topologies for bundle 54 (hf_124_src->hf_124_dst)
+Generated 6 topologies for bundle 55 (hf_125_src->hf_125_dst)
+Generated 6 topologies for bundle 56 (hf_126_src->hf_126_dst)
+Generated 4 topologies for bundle 57 (hf_127_src->hf_127_dst)
+Generated 6 topologies for bundle 58 (hf_128_src->hf_128_dst)
+Generated 6 topologies for bundle 59 (hf_129_src->hf_129_dst)
+Generated 5 topologies for bundle 61 (hf_130_src->hf_130_dst)
+Generated 5 topologies for bundle 62 (hf_131_src->hf_131_dst)
+Generated 6 topologies for bundle 63 (hf_132_src->hf_132_dst)
+Generated 6 topologies for bundle 64 (hf_133_src->hf_133_dst)
+Generated 6 topologies for bundle 65 (hf_134_src->hf_134_dst)
+Generated 6 topologies for bundle 66 (hf_135_src->hf_135_dst)
+Generated 6 topologies for bundle 67 (hf_136_src->hf_136_dst)
+Generated 6 topologies for bundle 68 (hf_137_src->hf_137_dst)
+Generated 6 topologies for bundle 69 (hf_138_src->hf_138_dst)
+Generated 6 topologies for bundle 70 (hf_139_src->hf_139_dst)
+Generated 6 topologies for bundle 72 (hf_140_src->hf_140_dst)
+Generated 6 topologies for bundle 73 (hf_141_src->hf_141_dst)
+Generated 6 topologies for bundle 74 (hf_142_src->hf_142_dst)
+Generated 6 topologies for bundle 75 (hf_143_src->hf_143_dst)
+Generated 3 topologies for bundle 76 (hf_144_src->hf_144_dst)
+Generated 6 topologies for bundle 77 (hf_145_src->hf_145_dst)
+Generated 6 topologies for bundle 78 (hf_146_src->hf_146_dst)
+Generated 6 topologies for bundle 79 (hf_147_src->hf_147_dst)
+Generated 4 topologies for bundle 80 (hf_148_src->hf_148_dst)
+Generated 6 topologies for bundle 81 (hf_149_src->hf_149_dst)
+Generated 6 topologies for bundle 83 (hf_150_src->hf_150_dst)
+Generated 6 topologies for bundle 84 (hf_151_src->hf_151_dst)
+Generated 6 topologies for bundle 85 (hf_152_src->hf_152_dst)
+Generated 6 topologies for bundle 86 (hf_153_src->hf_153_dst)
+Generated 6 topologies for bundle 87 (hf_154_src->hf_154_dst)
+Generated 6 topologies for bundle 88 (hf_155_src->hf_155_dst)
+Generated 6 topologies for bundle 89 (hf_156_src->hf_156_dst)
+Generated 6 topologies for bundle 90 (hf_157_src->hf_157_dst)
+Generated 6 topologies for bundle 91 (hf_158_src->hf_158_dst)
+Generated 6 topologies for bundle 92 (hf_159_src->hf_159_dst)
+Generated 6 topologies for bundle 94 (hf_160_src->hf_160_dst)
+Generated 5 topologies for bundle 95 (hf_161_src->hf_161_dst)
+Generated 6 topologies for bundle 96 (hf_162_src->hf_162_dst)
+Generated 6 topologies for bundle 97 (hf_163_src->hf_163_dst)
+Generated 6 topologies for bundle 98 (hf_164_src->hf_164_dst)
+Generated 6 topologies for bundle 99 (hf_165_src->hf_165_dst)
+Generated 6 topologies for bundle 100 (hf_166_src->hf_166_dst)
+Generated 4 topologies for bundle 101 (hf_167_src->hf_167_dst)
+Generated 5 topologies for bundle 102 (hf_168_src->hf_168_dst)
+Generated 6 topologies for bundle 103 (hf_169_src->hf_169_dst)
+Generated 6 topologies for bundle 105 (hf_170_src->hf_170_dst)
+Generated 6 topologies for bundle 106 (hf_171_src->hf_171_dst)
+Generated 2 topologies for bundle 107 (hf_172_src->hf_172_dst)
+Generated 3 topologies for bundle 108 (hf_173_src->hf_173_dst)
+Generated 6 topologies for bundle 109 (hf_174_src->hf_174_dst)
+Generated 6 topologies for bundle 110 (hf_175_src->hf_175_dst)
+Generated 6 topologies for bundle 111 (hf_176_src->hf_176_dst)
+Generated 6 topologies for bundle 112 (hf_177_src->hf_177_dst)
+Generated 6 topologies for bundle 113 (hf_178_src->hf_178_dst)
+Generated 6 topologies for bundle 114 (hf_179_src->hf_179_dst)
+Generated 6 topologies for bundle 116 (hf_180_src->hf_180_dst)
+Generated 6 topologies for bundle 117 (hf_181_src->hf_181_dst)
+Generated 6 topologies for bundle 118 (hf_182_src->hf_182_dst)
+Generated 6 topologies for bundle 119 (hf_183_src->hf_183_dst)
+Generated 5 topologies for bundle 120 (hf_184_src->hf_184_dst)
+Generated 5 topologies for bundle 121 (hf_185_src->hf_185_dst)
+Generated 6 topologies for bundle 122 (hf_186_src->hf_186_dst)
+Generated 5 topologies for bundle 123 (hf_187_src->hf_187_dst)
+Generated 5 topologies for bundle 124 (hf_188_src->hf_188_dst)
+Generated 6 topologies for bundle 125 (hf_189_src->hf_189_dst)
+Generated 6 topologies for bundle 127 (hf_190_src->hf_190_dst)
+Generated 5 topologies for bundle 128 (hf_191_src->hf_191_dst)
+Generated 6 topologies for bundle 129 (hf_192_src->hf_192_dst)
+Generated 5 topologies for bundle 130 (hf_193_src->hf_193_dst)
+Generated 6 topologies for bundle 131 (hf_194_src->hf_194_dst)
+Generated 6 topologies for bundle 132 (hf_195_src->hf_195_dst)
+Generated 6 topologies for bundle 133 (hf_196_src->hf_196_dst)
+Generated 6 topologies for bundle 134 (hf_197_src->hf_197_dst)
+Generated 5 topologies for bundle 135 (hf_198_src->hf_198_dst)
+Generated 6 topologies for bundle 136 (hf_199_src->hf_199_dst)
+Generated 4 topologies for bundle 139 (hf_200_src->hf_200_dst)
+Generated 6 topologies for bundle 140 (hf_201_src->hf_201_dst)
+Generated 6 topologies for bundle 141 (hf_202_src->hf_202_dst)
+Generated 4 topologies for bundle 142 (hf_203_src->hf_203_dst)
+Generated 5 topologies for bundle 143 (hf_204_src->hf_204_dst)
+Generated 3 topologies for bundle 144 (hf_205_src->hf_205_dst)
+Generated 3 topologies for bundle 145 (hf_206_src->hf_206_dst)
+Generated 6 topologies for bundle 146 (hf_207_src->hf_207_dst)
+Generated 6 topologies for bundle 147 (hf_208_src->hf_208_dst)
+Generated 6 topologies for bundle 148 (hf_209_src->hf_209_dst)
+Generated 3 topologies for bundle 150 (hf_210_src->hf_210_dst)
+Generated 6 topologies for bundle 151 (hf_211_src->hf_211_dst)
+Generated 4 topologies for bundle 152 (hf_212_src->hf_212_dst)
+Generated 4 topologies for bundle 153 (hf_213_src->hf_213_dst)
+Generated 3 topologies for bundle 154 (hf_214_src->hf_214_dst)
+Generated 6 topologies for bundle 155 (hf_215_src->hf_215_dst)
+Generated 5 topologies for bundle 156 (hf_216_src->hf_216_dst)
+Generated 6 topologies for bundle 157 (hf_217_src->hf_217_dst)
+Generated 5 topologies for bundle 158 (hf_218_src->hf_218_dst)
+Generated 6 topologies for bundle 159 (hf_219_src->hf_219_dst)
+Generated 5 topologies for bundle 161 (hf_220_src->hf_220_dst)
+Generated 6 topologies for bundle 162 (hf_221_src->hf_221_dst)
+Generated 6 topologies for bundle 163 (hf_222_src->hf_222_dst)
+Generated 6 topologies for bundle 164 (hf_223_src->hf_223_dst)
+Generated 6 topologies for bundle 165 (hf_224_src->hf_224_dst)
+Generated 3 topologies for bundle 166 (hf_225_src->hf_225_dst)
+Generated 6 topologies for bundle 167 (hf_226_src->hf_226_dst)
+Generated 2 topologies for bundle 168 (hf_227_src->hf_227_dst)
+Generated 4 topologies for bundle 169 (hf_228_src->hf_228_dst)
+Generated 6 topologies for bundle 170 (hf_229_src->hf_229_dst)
+Generated 4 topologies for bundle 172 (hf_230_src->hf_230_dst)
+Generated 6 topologies for bundle 173 (hf_231_src->hf_231_dst)
+Generated 6 topologies for bundle 174 (hf_232_src->hf_232_dst)
+Generated 6 topologies for bundle 175 (hf_233_src->hf_233_dst)
+Generated 3 topologies for bundle 176 (hf_234_src->hf_234_dst)
+Generated 6 topologies for bundle 177 (hf_235_src->hf_235_dst)
+Generated 2 topologies for bundle 178 (hf_236_src->hf_236_dst)
+Generated 2 topologies for bundle 179 (hf_237_src->hf_237_dst)
+Generated 3 topologies for bundle 180 (hf_238_src->hf_238_dst)
+Generated 4 topologies for bundle 181 (hf_239_src->hf_239_dst)
+Generated 6 topologies for bundle 183 (hf_240_src->hf_240_dst)
+Generated 2 topologies for bundle 184 (hf_241_src->hf_241_dst)
+Generated 4 topologies for bundle 185 (hf_242_src->hf_242_dst)
+Generated 6 topologies for bundle 186 (hf_243_src->hf_243_dst)
+Generated 6 topologies for bundle 187 (hf_244_src->hf_244_dst)
+Generated 5 topologies for bundle 188 (hf_245_src->hf_245_dst)
+Generated 6 topologies for bundle 189 (hf_246_src->hf_246_dst)
+Generated 6 topologies for bundle 190 (hf_247_src->hf_247_dst)
+Generated 4 topologies for bundle 191 (hf_248_src->hf_248_dst)
+Generated 6 topologies for bundle 192 (hf_249_src->hf_249_dst)
+Generated 2 topologies for bundle 194 (hf_250_src->hf_250_dst)
+Generated 5 topologies for bundle 195 (hf_251_src->hf_251_dst)
+Generated 6 topologies for bundle 196 (hf_252_src->hf_252_dst)
+Generated 4 topologies for bundle 197 (hf_253_src->hf_253_dst)
+Generated 4 topologies for bundle 198 (hf_254_src->hf_254_dst)
+Generated 3 topologies for bundle 199 (hf_255_src->hf_255_dst)
+Generated 3 topologies for bundle 200 (hf_256_src->hf_256_dst)
+Generated 6 topologies for bundle 201 (hf_257_src->hf_257_dst)
+Generated 4 topologies for bundle 202 (hf_258_src->hf_258_dst)
+Generated 2 topologies for bundle 203 (hf_259_src->hf_259_dst)
+Generated 5 topologies for bundle 205 (hf_260_src->hf_260_dst)
+Generated 3 topologies for bundle 206 (hf_261_src->hf_261_dst)
+Generated 6 topologies for bundle 207 (hf_262_src->hf_262_dst)
+Generated 4 topologies for bundle 208 (hf_263_src->hf_263_dst)
+Generated 6 topologies for bundle 209 (hf_264_src->hf_264_dst)
+Generated 2 topologies for bundle 210 (hf_265_src->hf_265_dst)
+Generated 3 topologies for bundle 211 (hf_266_src->hf_266_dst)
+Generated 4 topologies for bundle 212 (hf_267_src->hf_267_dst)
+Warning: Could not find bundle matching hint hf_268
+Warning: Could not find bundle matching hint hf_269
+[Planner] Grid extended: 11 X, 8 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M6 (V)  min_band_cap=1
+  M8 (V)  min_band_cap=1
+  M5 (H)  min_band_cap=1
+  M7 (H)  min_band_cap=1
+[Planner] Bundle 11 (15 units wide) -> I_V  [V→M6]  overflow=40.25
+[Planner] Bundle 23 (10.5 units wide) -> I_V  [V→M6]  overflow=27.875
+[Planner] Bundle 22 (10.5 units wide) -> I_H  [H→M5]  overflow=27.875
+[Planner] Bundle 21 (10.5 units wide) -> I_H  [H→M5]  overflow=27.875
+[Planner] Bundle 20 (10.5 units wide) -> I_V  [V→M6]  overflow=27.875
+[Planner] Bundle 27 (9 units wide) -> I_V  [V→M6]  overflow=23.75
+[Planner] Bundle 1 (9 units wide) -> I_V  [V→M6]  overflow=23.75
+[Planner] Bundle 4 (9 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 3 (9 units wide) -> I_H  [H→M5]  overflow=23.75
+[Planner] Bundle 2 (9 units wide) -> I_H  [H→M5]  overflow=23.75
+[Planner] Bundle 24 (9 units wide) -> I_H  [H→M5]  overflow=23.75
+[Planner] Bundle 25 (9 units wide) -> I_V  [V→M6]  overflow=23.75
+[Planner] Bundle 26 (9 units wide) -> I_H  [H→M5]  overflow=23.75
+[Planner] Bundle 7 (7.5 units wide) -> I_V  [V→M6]  overflow=19.625
+[Planner] Bundle 8 (7.5 units wide) -> I_V  [V→M6]  overflow=19.625
+[Planner] Bundle 9 (7.5 units wide) -> I_V  [V→M6]  overflow=19.625
+[Planner] Bundle 10 (7.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 6 (7.5 units wide) -> I_V  [V→M6]  overflow=19.625
+[Planner] Bundle 12 (7.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 13 (7.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 15 (7.5 units wide) -> I_H  [H→M5]  overflow=19.625
+[Planner] Bundle 16 (7.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 17 (7.5 units wide) -> I_H  [H→M5]  overflow=19.625
+[Planner] Bundle 18 (7.5 units wide) -> I_V  [V→M6]  overflow=19.625
+[Planner] Bundle 19 (7.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 5 (7.5 units wide) -> I_H  [H→M5]  overflow=19.625
+[Planner] Bundle 14 (7.5 units wide) -> I_H  [H→M5]  overflow=19.625
+[Planner] Bundle 148 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 294 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 30 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 31 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 32 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 33 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 34 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 35 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 36 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 37 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 38 (1.5 units wide) -> U_HVH@x-10  [H→M5 V→M8 H→M5]  overflow=3.125
+[Planner] Bundle 39 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 40 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 41 (1.5 units wide) -> U_VHV@y25  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 42 (1.5 units wide) -> U_HVH@x80  [H→M5 V→M8 H→M5]  overflow=3.125
+[Planner] Bundle 43 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 44 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 45 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 46 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 47 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 48 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 49 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 50 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 51 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 52 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 53 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 54 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 55 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 56 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 57 (1.5 units wide) -> U_HVH@x76  [H→M5 V→M8 H→M5]  overflow=3.125
+[Planner] Bundle 58 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 59 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 60 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 61 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 62 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 63 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 64 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 65 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 66 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 67 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 68 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 69 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 70 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 71 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 72 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 73 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 74 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 75 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 76 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 77 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 78 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 79 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 80 (1.5 units wide) -> U_VHV@y114  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 81 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 82 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 83 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 84 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 85 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 86 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 87 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 88 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 89 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 90 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 91 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 92 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 93 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 94 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 95 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 96 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 97 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 98 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 99 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 100 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 101 (1.5 units wide) -> U_HVH@x69  [H→M7 V→M8 H→M5]  overflow=3.125
+[Planner] Bundle 102 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 103 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 104 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 105 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 106 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 107 (1.5 units wide) -> U_HVH@x93  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 108 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 109 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 110 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 111 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 112 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 113 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 114 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 115 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 116 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 117 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 118 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 119 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 120 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 121 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 122 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 123 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 124 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 125 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 126 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 127 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 128 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 129 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 130 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 131 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 132 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 133 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 134 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 135 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 136 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 137 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 138 (1.5 units wide) -> I_H  [H→M5]  overflow=2.125
+[Planner] Bundle 139 (1.5 units wide) -> U_HVH@x81  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 140 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 141 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 142 (1.5 units wide) -> U_VHV@y84  [V→M6 H→M7 V→M6]  overflow=3.125
+[Planner] Bundle 143 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 144 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 145 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 146 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 147 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 28 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 149 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 150 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 151 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 152 (1.5 units wide) -> U_HVH@x95  [H→M7 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 153 (1.5 units wide) -> U_HVH@x91  [H→M7 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 154 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 155 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 156 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 157 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 158 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 159 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 160 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 161 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 29 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 163 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 164 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 165 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 166 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 167 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 168 (1.5 units wide) -> U_HVH@x98  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 169 (1.5 units wide) -> U_HVH@x52  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 170 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 171 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 172 (1.5 units wide) -> U_VHV@y71  [V→M6 H→M7 V→M6]  overflow=3.125
+[Planner] Bundle 173 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 174 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 175 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 176 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 177 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 178 (1.5 units wide) -> U_VHV@y67  [V→M6 H→M7 V→M6]  overflow=3.125
+[Planner] Bundle 179 (1.5 units wide) -> U_HVH@x98  [H→M5 V→M8 H→M5]  overflow=3.125
+[Planner] Bundle 180 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 181 (1.5 units wide) -> U_HVH@x71  [H→M7 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 182 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 183 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 184 (1.5 units wide) -> U_VHV@y99  [V→M6 H→M7 V→M6]  overflow=3.125
+[Planner] Bundle 185 (1.5 units wide) -> U_VHV@y138  [V→M6 H→M7 V→M6]  overflow=3.125
+[Planner] Bundle 186 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 187 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 188 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 189 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 190 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 191 (1.5 units wide) -> U_HVH@x108  [H→M7 V→M8 H→M7]  overflow=3.125
+[Planner] Bundle 192 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 193 (1.5 units wide) -> U_VHV@y102  [V→M6 H→M7 V→M6]  overflow=3.125
+[Planner] Bundle 194 (1.5 units wide) -> U_VHV@y24  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 195 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 196 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 197 (1.5 units wide) -> U_HVH@x58  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 198 (1.5 units wide) -> U_VHV@y98  [V→M6 H→M5 V→M8]  overflow=3.125
+[Planner] Bundle 199 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 200 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 201 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 202 (1.5 units wide) -> U_HVH@x131  [H→M7 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 203 (1.5 units wide) -> U_VHV@y20  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 204 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 205 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 206 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 207 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 208 (1.5 units wide) -> U_HVH@x67  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 209 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 210 (1.5 units wide) -> U_VHV@y64  [V→M6 H→M5 V→M8]  overflow=3.125
+[Planner] Bundle 211 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 212 (1.5 units wide) -> U_HVH@x167  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 213 (1.5 units wide) -> I_H  [H→M5]  overflow=2.125
+[Planner] Bundle 214 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 215 (1.5 units wide) -> U_VHV@y7  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 216 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 217 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 218 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 219 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 220 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 221 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 222 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 223 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 224 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 225 (1.5 units wide) -> U_VHV@y17  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 226 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 227 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 228 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 229 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 230 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 231 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 232 (1.5 units wide) -> Z_VHV@y70@x59  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 233 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 234 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 235 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 236 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 237 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 238 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 239 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 240 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 241 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 242 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 243 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 244 (1.5 units wide) -> U_HVH@x122  [H→M5 V→M6 H→M5]  overflow=3.125
+[Planner] Bundle 245 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 246 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 247 (1.5 units wide) -> I_V  [V→M8]  overflow=3.125
+[Planner] Bundle 248 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 249 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 250 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 251 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 252 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 253 (1.5 units wide) -> U_HVH@x70  [H→M7 V→M8 H→M7]  overflow=3.125
+[Planner] Bundle 254 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 255 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 256 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 257 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 258 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 259 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 260 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 261 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 262 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 263 (1.5 units wide) -> U_VHV@y20  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 264 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 265 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 266 (1.5 units wide) -> U_VHV@y23  [V→M6 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 267 (1.5 units wide) -> U_VHV@y68  [V→M8 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 268 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 269 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 270 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 271 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 272 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 273 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 274 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 275 (1.5 units wide) -> U_VHV@y108  [V→M8 H→M5 V→M6]  overflow=3.125
+[Planner] Bundle 276 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 277 (1.5 units wide) -> U_HVH@x90  [H→M7 V→M8 H→M7]  overflow=3.125
+[Planner] Bundle 278 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 279 (1.5 units wide) -> I_H  [H→M7]  overflow=3.125
+[Planner] Bundle 280 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 281 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 282 (1.5 units wide) -> I_V  [V→M6]  overflow=3.125
+[Planner] Bundle 283 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 284 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 285 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 286 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 287 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 288 (1.5 units wide) -> I_V  [V→M8]  overflow=0
+[Planner] Bundle 289 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 290 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 291 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 292 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[Planner] Bundle 293 (1.5 units wide) -> I_H  [H→M7]  overflow=0
+[Planner] Bundle 162 (1.5 units wide) -> I_H  [H→M5]  overflow=3.125
+[NUTS] 372 segments placed across 4 layer(s). Interval violations: 302, Track overlaps: 449.
+[NUTS] M5: total bus width 1027.1 units, spanning perpendicular interval [2.9, 140.1]
+[NUTS] M5 local overlaps: 349 → B2×B42, B2×B42, B2×B101, B2×B153, B2×B168, B2×B179, B2×B179, B2×B242, B3×B17, B5×B42, B5×B42, B5×B101, B5×B153, B5×B168, B5×B169, B5×B177, B14×B52, B14×B86, B14×B152, B14×B168, B14×B179, B14×B244, B15×B168, B15×B169, B15×B197, B15×B197, B15×B208, B15×B208, B15×B275, B21×B244, B22×B65, B22×B109, B22×B115, B22×B139, B22×B139, B22×B181, B22×B236, B24×B34, B24×B101, B24×B168, B24×B168, B24×B169, B24×B169, B24×B197, B24×B208, B24×B208, B24×B262, B26×B74, B26×B80, B26×B96, B26×B168, B26×B169, B26×B197, B26×B197, B26×B208, B26×B208, B29×B168, B29×B208, B29×B208, B29×B224, B34×B101, B34×B168, B37×B101, B37×B168, B38×B38, B40×B101, B40×B168, B41×B69, B41×B110, B41×B217, B41×B266, B42×B49, B42×B59, B42×B133, B42×B169, B42×B171, B42×B175, B42×B177, B42×B179, B42×B186, B42×B226, B42×B229, B42×B242, B42×B246, B42×B252, B42×B264, B42×B270, B42×B153, B43×B79, B43×B204, B43×B284, B44×B267, B45×B168, B45×B179, B45×B208, B45×B229, B45×B230, B46×B52, B46×B67, B46×B100, B46×B244, B47×B202, B48×B67, B48×B168, B48×B179, B49×B101, B49×B168, B49×B179, B49×B179, B49×B226, B50×B51, B50×B76, B50×B168, B50×B292, B51×B76, B51×B244, B51×B292, B52×B67, B52×B86, B52×B100, B53×B57, B53×B57, B53×B139, B55×B99, B55×B112, B55×B150, B56×B79, B56×B168, B56×B204, B56×B260, B57×B57, B57×B72, B57×B90, B57×B139, B57×B166, B57×B240, B57×B249, B57×B72, B57×B90, B57×B139, B57×B166, B57×B240, B57×B249, B57×B278, B58×B244, B59×B168, B59×B169, B59×B179, B65×B139, B67×B100, B67×B168, B68×B203, B70×B168, B70×B179, B70×B255, B74×B169, B74×B197, B74×B197, B74×B208, B76×B168, B76×B292, B77×B107, B78×B211, B79×B168, B79×B204, B79×B269, B81×B197, B81×B197, B81×B198, B81×B208, B82×B194, B86×B168, B93×B132, B93×B290, B94×B168, B94×B173, B94×B208, B96×B168, B96×B169, B96×B169, B96×B208, B97×B197, B97×B275, B99×B112, B99×B150, B99×B255, B101×B168, B101×B171, B101×B179, B101×B252, B101×B264, B106×B147, B107×B122, B107×B139, B107×B139, B107×B261, B107×B283, B108×B112, B108×B150, B108×B168, B108×B255, B109×B139, B109×B139, B112×B150, B112×B255, B114×B208, B118×B267, B129×B162, B132×B290, B133×B168, B133×B179, B133×B186, B133×B252, B139×B166, B139×B174, B139×B176, B139×B240, B139×B261, B139×B174, B139×B261, B139×B283, B146×B202, B147×B168, B150×B255, B152×B179, B152×B269, B155×B219, B155×B263, B163×B183, B163×B202, B168×B169, B168×B169, B168×B173, B168×B175, B168×B177, B168×B179, B168×B186, B168×B204, B168×B208, B168×B211, B168×B214, B168×B224, B168×B226, B168×B227, B168×B229, B168×B230, B168×B242, B168×B246, B168×B251, B168×B255, B168×B257, B168×B258, B168×B260, B168×B265, B168×B269, B168×B270, B168×B281, B168×B291, B168×B171, B168×B179, B168×B252, B168×B264, B169×B177, B169×B179, B169×B226, B169×B257, B169×B259, B169×B197, B169×B208, B169×B208, B169×B257, B169×B258, B169×B259, B169×B262, B171×B179, B171×B252, B173×B211, B173×B265, B175×B179, B175×B270, B179×B186, B179×B214, B179×B226, B179×B229, B179×B230, B179×B242, B179×B246, B179×B252, B179×B260, B179×B264, B179×B265, B179×B269, B179×B270, B179×B252, B179×B264, B181×B283, B183×B202, B194×B239, B197×B198, B197×B208, B197×B208, B197×B251, B197×B258, B197×B259, B197×B262, B197×B198, B198×B208, B203×B223, B208×B208, B208×B221, B208×B224, B208×B227, B208×B251, B208×B258, B208×B259, B208×B262, B208×B291, B208×B224, B208×B227, B208×B230, B208×B251, B208×B257, B208×B258, B208×B259, B208×B262, B208×B281, B208×B291, B211×B265, B214×B281, B217×B263, B217×B266, B218×B228, B218×B294, B220×B228, B220×B294, B227×B230, B227×B270, B227×B291, B228×B294, B229×B230, B232×B267, B244×B292, B251×B270, B251×B291, B252×B264, B261×B283, B263×B266, B265×B269, B280×B286
+[NUTS] M6: total bus width 503.2 units, spanning perpendicular interval [-1.2, 169.1]
+[NUTS] M6 local overlaps: 43 → B6×B7, B6×B152, B6×B184, B6×B201, B7×B20, B7×B152, B7×B172, B7×B184, B7×B201, B8×B80, B8×B80, B9×B181, B11×B41, B20×B172, B20×B184, B20×B193, B20×B193, B20×B198, B20×B232, B20×B282, B23×B80, B27×B232, B27×B267, B27×B282, B39×B152, B41×B263, B80×B193, B80×B193, B142×B142, B142×B267, B142×B267, B152×B201, B172×B172, B184×B282, B184×B201, B185×B185, B193×B193, B193×B198, B193×B198, B194×B203, B194×B215, B203×B215, B263×B266
+[NUTS] M7: total bus width 338.3 units, spanning perpendicular interval [13.9, 142.1]
+[NUTS] M7 local overlaps: 50 → B12×B101, B12×B134, B16×B181, B36×B181, B36×B253, B62×B181, B62×B233, B62×B253, B62×B253, B63×B191, B63×B191, B66×B181, B66×B253, B66×B253, B84×B181, B84×B253, B84×B253, B101×B134, B101×B153, B101×B188, B101×B271, B101×B274, B101×B289, B117×B181, B120×B181, B120×B253, B120×B253, B126×B152, B126×B191, B126×B279, B127×B181, B127×B233, B127×B253, B152×B182, B152×B279, B161×B181, B161×B253, B161×B253, B181×B233, B181×B253, B181×B253, B182×B191, B184×B199, B191×B191, B233×B253, B233×B253, B241×B248, B253×B253, B271×B274, B277×B277
+[NUTS] M8: total bus width 198.0 units, spanning perpendicular interval [-14.1, 139.1]
+[NUTS] M8 local overlaps: 7 → B111×B191, B121×B267, B190×B267, B195×B209, B195×B267, B198×B247, B209×B267
+[NUTS] Span adjustments: M5:40, M6:44, M7:17, M8:12
+NUTS overlap log → /Users/ben/src/buda/flow/ispd19_test1_nuts.log
+[DetailedNUTS] Warning: Layer 5 has insufficient signal tracks (5) for bus width 7 in interval [44, 46]
+[DetailedNUTS] Warning: Layer 5 has insufficient signal tracks (2) for bus width 5 in interval [78, 79]
+[DetailedNUTS] Warning: Layer 5 has insufficient signal tracks (4) for bus width 5 in interval [95, 97]
+[DetailedNUTS] Warning: Layer 6 has insufficient signal tracks (0) for bus width 1 in interval [167, 167]
+[DetailedNUTS] Warning: Layer 7 has 0 unreserved tracks (need 1) in interval [42, 44] — reservation conflict (bundle 233)
+[DetailedNUTS] Warning: Layer 7 has 0 unreserved tracks (need 1) in interval [43, 45] — reservation conflict (bundle 181)
+[DetailedNUTS] Warning: Layer 7 has insufficient signal tracks (4) for bus width 5 in interval [43, 47]
+[DetailedNUTS] Warning: Layer 7 has insufficient signal tracks (0) for bus width 1 in interval [87, 88]
+[DetailedNUTS] Warning: Layer 7 has insufficient signal tracks (0) for bus width 5 in interval [91, 92]
+[DetailedNUTS] Warning: Layer 7 has 0 unreserved tracks (need 1) in interval [95, 97] — reservation conflict (bundle 126)
+[DetailedNUTS] Warning: Layer 7 has 0 unreserved tracks (need 1) in interval [95, 97] — reservation conflict (bundle 182)
+[DetailedNUTS] Warning: Layer 7 has 0 unreserved tracks (need 1) in interval [99, 101] — reservation conflict (bundle 152)
+[DetailedNUTS] Warning: Layer 7 has insufficient signal tracks (2) for bus width 5 in interval [115, 117]
+[DetailedNUTS] Warning: Layer 8 has insufficient signal tracks (3) for bus width 6 in interval [102, 105]
+[DetailedNUTS] 456 net segments placed, 45 bits unplaced.

@@ -1,0 +1,69 @@
+# Large Fan-out Test Case: 50-unit CPU/GPU floorplan
+def_layer 3 M3 V TOP 0.0
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+def_layer 6 M6 H TOP 0.0
+def_layer 7 M7 V TOP 0.0
+
+add_block u_0_0 0 0 100 100
+add_block u_0_1 0 200 100 300
+add_block u_0_2 0 400 100 500
+add_block u_0_3 0 600 100 700
+add_block u_0_4 0 800 100 900
+add_block u_1_0 200 0 300 100
+add_block u_1_1 200 200 300 300
+add_block u_1_2 200 400 300 500
+add_block u_1_3 200 600 300 700
+add_block u_1_4 200 800 300 900
+add_block u_2_0 400 0 500 100
+add_block u_2_1 400 200 500 300
+add_block u_2_2 400 400 500 500
+add_block u_2_3 400 600 500 700
+add_block u_2_4 400 800 500 900
+add_block u_3_0 600 0 700 100
+add_block u_3_1 600 200 700 300
+add_block u_3_2 600 400 700 500
+add_block u_3_3 600 600 700 700
+add_block u_3_4 600 800 700 900
+add_block u_4_0 800 0 900 100
+add_block u_4_1 800 200 900 300
+add_block u_4_2 800 400 900 500
+add_block u_4_3 800 600 900 700
+add_block u_4_4 800 800 900 900
+add_block u_5_0 1000 0 1100 100
+add_block u_5_1 1000 200 1100 300
+add_block u_5_2 1000 400 1100 500
+add_block u_5_3 1000 600 1100 700
+add_block u_5_4 1000 800 1100 900
+add_block u_6_0 1200 0 1300 100
+add_block u_6_1 1200 200 1300 300
+add_block u_6_2 1200 400 1300 500
+add_block u_6_3 1200 600 1300 700
+add_block u_6_4 1200 800 1300 900
+add_block u_7_0 1400 0 1500 100
+add_block u_7_1 1400 200 1500 300
+add_block u_7_2 1400 400 1500 500
+add_block u_7_3 1400 600 1500 700
+add_block u_7_4 1400 800 1500 900
+add_block u_8_0 1600 0 1700 100
+add_block u_8_1 1600 200 1700 300
+add_block u_8_2 1600 400 1700 500
+add_block u_8_3 1600 600 1700 700
+add_block u_8_4 1600 800 1700 900
+add_block u_9_0 1800 0 1900 100
+add_block u_9_1 1800 200 1900 300
+add_block u_9_2 1800 400 1900 500
+add_block u_9_3 1800 600 1900 700
+add_block u_9_4 1800 800 1900 900
+
+add_bus broadcast[32] u_0_0.out u_0_1,u_0_2,u_0_3,u_0_4,u_1_0,u_1_1,u_1_2,u_1_3,u_1_4,u_2_0,u_2_1,u_2_2,u_2_3,u_2_4,u_3_0,u_3_1,u_3_2,u_3_3,u_3_4,u_4_0,u_4_1,u_4_2,u_4_3,u_4_4,u_5_0,u_5_1,u_5_2,u_5_3,u_5_4,u_6_0,u_6_1,u_6_2,u_6_3,u_6_4,u_7_0,u_7_1,u_7_2,u_7_3,u_7_4,u_8_0,u_8_1,u_8_2,u_8_3,u_8_4,u_9_0,u_9_1,u_9_2,u_9_3,u_9_4
+
+add_bus col_to_col[64] u_0_2.out u_9_0.in,u_9_1.in,u_9_2.in,u_9_3.in,u_9_4.in
+
+add_bus center_to_corners[16] u_4_2.out u_0_0.in,u_0_4.in,u_9_0.in,u_9_4.in
+
+run_bundler strict
+generate_topologies
+run_planner 5
+run_nuts 1.0
+visualize

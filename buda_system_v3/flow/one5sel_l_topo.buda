@@ -1,0 +1,20 @@
+# Issue:
+# U topo H seg clears the block (so V topo is not trivial)
+# But, L topos don't. 
+
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+
+corner_margin dx 15 dy 20
+
+add_block u0    50   400  250   600
+add_block u15   900  200  1000 1000
+add_block u14   800  400  900  1000
+
+add_net n15 u0.tx u15.rx
+
+run_bundler strict
+generate_topologies
+run_planner 1
+run_nuts
+#visualize

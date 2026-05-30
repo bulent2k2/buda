@@ -1,0 +1,21 @@
+claude code debug takes long!
+
+Copied the latest from /tmp to ./latest
+
+  /tmp:
+  total used in directory 48 available 132.9 GiB
+  drwxrwxrwt  121 root  wheel  3872 May 12 18:40 .
+* -rw-r--r--    1 ben   wheel  2436 May 12 18:48 debug_topo.py
+* -rw-r--r--    1 ben   wheel  1966 May 12 18:41 debug_grid.py
+* -rw-r--r--    1 ben   wheel  1501 May 12 18:38 debug_ct_full.py
+* -rw-r--r--    1 ben   wheel  1880 May 12 18:37 debug_ct.py
+* -rw-r--r--    1 ben   wheel  1534 May 12 18:28 debug_v2.py
+* -rw-r--r--    1 ben   wheel  3223 May 12 18:21 debug_violations.py
+
+Earlier:
+  -rw-r--r--    1 ben   wheel  1902 May 12 18:40 debug_grid.py
+  -rw-r--r--    1 ben   wheel  1501 May 12 18:38 debug_ct_full.py
+  -rw-r--r--    1 ben   wheel  1880 May 12 18:37 debug_ct.py
+  -rw-r--r--    1 ben   wheel  1574 May 12 18:34 debug_topo.py
+  -rw-r--r--    1 ben   wheel  1534 May 12 18:28 debug_v2.py
+  -rw-r--r--    1 ben   wheel  3223 May 12 18:21 debug_violations.py

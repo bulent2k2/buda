@@ -1,0 +1,13 @@
+NUTS Overlap Report — keepout_demo.buda
+Generated : 2026-05-22T19:12:22
+
+[NUTS] M4: total bus width 32.0 units, spanning perpendicular interval [228.0, 716.0]
+[NUTS] M4: no local overlaps
+[NUTS] M5: total bus width 48.0 units, spanning perpendicular interval [167.0, 716.0]
+[NUTS] M5: no local overlaps
+[NUTS] Span adjustments: M4:2, M5:3
+
+[NUTS] 5 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 0.
+Overlaps  : 0  ()
+
+No overlaps.

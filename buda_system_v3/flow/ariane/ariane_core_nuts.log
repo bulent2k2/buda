@@ -1,0 +1,109 @@
+NUTS Overlap Report — ariane_core.buda
+Generated : 2026-05-17T20:29:08
+
+[NUTS] M3: no local overlaps
+[NUTS] M4: no local overlaps
+[NUTS] M5 local overlaps: 6 → B7×B8, B7×B9, B7×B8, B7×B9, B8×B9, B8×B9
+[NUTS] M6 local overlaps: 1 → B3×B7
+[NUTS] Span adjustments: M3:2, M4:3, M5:5, M6:9
+
+[NUTS] 27 segments placed across 4 layer(s). Interval violations: 5, Track overlaps: 7.
+Overlaps  : 7  (M5=6  M6=1)
+
+============================================================
+  M5  —  6 overlap(s)
+============================================================
+  [  1]  B7.M7[0]  ×  B8.M7[0]
+         overlap span  [45.0, 60.0]  len=15.0
+         overlap perp  [104.00, 112.50]  depth=8.50  area=127.50
+         B7.M7[0]:
+    span=[45.0, 60.0]  perp_center=105.00  width=15.00  → perp=[97.50, 112.50]  interval=[92.0, 117.0]
+         B8.M7[0]:
+    span=[45.0, 86.0]  perp_center=110.00  width=12.00  → perp=[104.00, 116.00]  interval=[103.0, 117.0]
+  [  2]  B7.M7[0]  ×  B9.M7[2]
+         overlap span  [45.0, 60.0]  len=15.0
+         overlap perp  [100.00, 109.00]  depth=9.00  area=135.00
+         B7.M7[0]:
+    span=[45.0, 60.0]  perp_center=105.00  width=15.00  → perp=[97.50, 112.50]  interval=[92.0, 117.0]
+         B9.M7[2]:
+    span=[45.0, 60.0]  perp_center=104.50  width=9.00  → perp=[100.00, 109.00]  interval=[92.0, 117.0]
+  [  3]  B7.M7[2]  ×  B8.M7[0]
+         overlap span  [60.0, 75.0]  len=15.0
+         overlap perp  [104.00, 112.50]  depth=8.50  area=127.50
+         B7.M7[2]:
+    span=[60.0, 75.0]  perp_center=105.00  width=15.00  → perp=[97.50, 112.50]  interval=[93.0, 117.0]
+         B8.M7[0]:
+    span=[45.0, 86.0]  perp_center=110.00  width=12.00  → perp=[104.00, 116.00]  interval=[103.0, 117.0]
+  [  4]  B7.M7[2]  ×  B9.M7[0]
+         overlap span  [60.0, 75.0]  len=15.0
+         overlap perp  [100.50, 109.50]  depth=9.00  area=135.00
+         B7.M7[2]:
+    span=[60.0, 75.0]  perp_center=105.00  width=15.00  → perp=[97.50, 112.50]  interval=[93.0, 117.0]
+         B9.M7[0]:
+    span=[60.0, 75.0]  perp_center=105.00  width=9.00  → perp=[100.50, 109.50]  interval=[93.0, 117.0]
+  [  5]  B8.M7[0]  ×  B9.M7[0]
+         overlap span  [60.0, 75.0]  len=15.0
+         overlap perp  [104.00, 109.50]  depth=5.50  area=82.50
+         B8.M7[0]:
+    span=[45.0, 86.0]  perp_center=110.00  width=12.00  → perp=[104.00, 116.00]  interval=[103.0, 117.0]
+         B9.M7[0]:
+    span=[60.0, 75.0]  perp_center=105.00  width=9.00  → perp=[100.50, 109.50]  interval=[93.0, 117.0]
+  [  6]  B8.M7[0]  ×  B9.M7[2]
+         overlap span  [45.0, 60.0]  len=15.0
+         overlap perp  [104.00, 109.00]  depth=5.00  area=75.00
+         B8.M7[0]:
+    span=[45.0, 86.0]  perp_center=110.00  width=12.00  → perp=[104.00, 116.00]  interval=[103.0, 117.0]
+         B9.M7[2]:
+    span=[45.0, 60.0]  perp_center=104.50  width=9.00  → perp=[100.00, 109.00]  interval=[92.0, 117.0]
+
+============================================================
+  M6  —  1 overlap(s)
+============================================================
+  [  1]  B3.M6[1]  ×  B7.M6[1]
+         overlap span  [105.0, 105.0]  len=0.0
+         overlap perp  [52.50, 55.00]  depth=2.50  area=0.00
+         B3.M6[1]:
+    span=[30.5, 127.0]  perp_center=50.50  width=9.00  → perp=[46.00, 55.00]  interval=[45.0, 55.0]
+         B7.M6[1]:
+    span=[105.0, 105.0]  perp_center=60.00  width=15.00  → perp=[52.50, 67.50]  interval=[65.0, 55.0]
+
+
+============================================================
+  Re-run: post_nuts  —  ariane_core.buda
+  At        : 2026-05-17T20:29:08
+============================================================
+
+[Planner] post_nuts V: short<20→M3 (5b), medium (2b), long>38→M7 (3b)
+
+[NUTS] 27 segments placed across 5 layer(s). Interval violations: 5, Track overlaps: 3.
+Overlaps  : 3  (M3=2  M6=1)
+
+============================================================
+  M3  —  2 overlap(s)
+============================================================
+  [  1]  B7.M7[0]  ×  B9.M7[2]
+         overlap span  [45.0, 60.0]  len=15.0
+         overlap perp  [100.00, 109.00]  depth=9.00  area=135.00
+         B7.M7[0]:
+    span=[45.0, 60.0]  perp_center=105.00  width=15.00  → perp=[97.50, 112.50]  interval=[92.0, 117.0]
+         B9.M7[2]:
+    span=[45.0, 60.0]  perp_center=104.50  width=9.00  → perp=[100.00, 109.00]  interval=[92.0, 117.0]
+  [  2]  B7.M7[2]  ×  B9.M7[0]
+         overlap span  [60.0, 75.0]  len=15.0
+         overlap perp  [100.50, 109.50]  depth=9.00  area=135.00
+         B7.M7[2]:
+    span=[60.0, 75.0]  perp_center=104.00  width=15.00  → perp=[96.50, 111.50]  interval=[93.0, 117.0]
+         B9.M7[0]:
+    span=[60.0, 75.0]  perp_center=105.00  width=9.00  → perp=[100.50, 109.50]  interval=[93.0, 117.0]
+
+============================================================
+  M6  —  1 overlap(s)
+============================================================
+  [  1]  B3.M6[1]  ×  B7.M6[1]
+         overlap span  [104.0, 105.0]  len=1.0
+         overlap perp  [52.50, 55.00]  depth=2.50  area=2.50
+         B3.M6[1]:
+    span=[30.5, 127.0]  perp_center=50.50  width=9.00  → perp=[46.00, 55.00]  interval=[45.0, 55.0]
+         B7.M6[1]:
+    span=[104.0, 105.0]  perp_center=60.00  width=15.00  → perp=[52.50, 67.50]  interval=[65.0, 55.0]
+

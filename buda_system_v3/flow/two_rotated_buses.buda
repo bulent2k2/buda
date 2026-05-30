@@ -1,0 +1,60 @@
+# two_rotated.buda with all nets promoted to 8-bit buses.
+# Bundle width = 8 nets × 1.5 units/bit = 12 layout units each.
+# bit_width = 12 → detailed NUTS needs 12 signal tracks per segment.
+
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+
+# dy reduced from 15 to 8: gives u11 (50-unit Y span) a 34-unit usable stub
+# interval, wide enough for 12 signal tracks (bit_width=12 at unit_pitch=18).
+corner_margin dx 20 dy 8
+
+add_block u0    400  450  600  550
+
+add_block u11   800  200 1000  250
+add_block u12   600  150 1000  200
+add_block u13   500  100 1000  150
+add_block u14   400   50 1000  100
+add_block u15   200    0 1000   50
+
+add_block u21   500  850  600  900
+add_block u22   400  800  600  850
+add_block u23   300  750  600  800
+
+add_block u31   450  700  550  750
+add_block u32   400  650  550  700
+add_block u33   350  600  550  650
+
+add_block u41   200  250  400  350
+add_block u51   100  150  300  250
+
+add_bus n11[8] u0.tx u11.rx
+add_bus n12[8] u0.tx u12.rx
+add_bus n13[8] u0.tx u13.rx
+add_bus n14[8] u0.tx u14.rx
+add_bus n15[8] u0.tx u15.rx
+
+add_bus n21[8] u0.tx u21.rx
+add_bus n22[8] u0.tx u22.rx
+add_bus n23[8] u0.tx u23.rx
+
+add_bus n31[8] u0.tx u31.rx
+add_bus n32[8] u0.tx u32.rx
+add_bus n33[8] u0.tx u33.rx
+
+add_bus n41[8] u0.tx u41.rx
+add_bus n51[8] u0.tx u51.rx
+
+run_bundler strict
+generate_topologies
+run_planner 1
+run_nuts
+
+# Denser grid — unit_pitch=18, 8 signal tracks per unit.
+# Narrower tracks fit bit_width=12 inside the tightest Hanan intervals (~30 units).
+def_track_pattern 4 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+def_track_pattern 5 0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
+
+run_detailed_nuts
+
+visualize

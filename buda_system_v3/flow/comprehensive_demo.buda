@@ -1,0 +1,49 @@
+# ==========================================
+# BUDA Demo: L, Z, and U Topologies
+# ==========================================
+
+# 1. Define Layers (M4=H, M5=V, M6=H long-haul trunk)
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+def_layer 6 M6 H TOP 0.0
+
+# 2. Define Blocks & Connectivity
+
+# --- Bundle 1: The Simple L-Topo ---
+add_block u_cpu 100 100 250 250
+add_block u_mem 750 750 900 900
+add_bus b1[3] u_cpu.tx u_mem.rx
+
+# --- Bundle 2: The True Z-Topo (using intermediate blocks) ---
+add_block u_gpu  100 450 250 550
+add_block u_disp 750 500 900 600
+# Intermediate blocks provide Hanan grid lines for Z-trunks
+add_block u_noc_A 400 300 500 400
+add_block u_noc_B 500 650 600 750
+add_bus b2[2] u_gpu.tx u_disp.rx
+
+# --- Bundle 3: The U-Topo (Detour around obstacle) ---
+add_block u_io_src 450 50  550 150
+add_block u_io_dst 450 850 550 950
+# Wide obstacle between them forces a U-shape
+add_block u_wide_obs 200 280 800 620
+add_bus b3[2] u_io_src.tx u_io_dst.rx
+
+# 3. Execution Flow
+run_bundler strict
+
+# Manually link bundles to block instances for topology generation
+# (In a real system, the bundler would figure this out)
+generate_topologies_for_bundle b1_ u_cpu u_mem
+generate_topologies_for_bundle b2_ u_gpu u_disp
+generate_topologies_for_bundle b3_ u_io_src u_io_dst
+
+# Run the planner (uses mock selection based on 'b2_'/'b3_' hints)
+run_planner 5
+
+# Non-Uniform Track Sharing: assign actual perpendicular track positions
+# per layer so that no two buses with overlapping spans collide.
+# Argument is the minimum spacing (track pitch) between placed buses.
+run_nuts 2.0
+
+visualize

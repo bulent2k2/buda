@@ -1,0 +1,13 @@
+NUTS Overlap Report — dnuts2.buda
+Generated : 2026-05-23T17:21:52
+
+[NUTS] M5: total bus width 27.0 units, spanning perpendicular interval [70.5, 169.0]
+[NUTS] M5: no local overlaps
+[NUTS] M6: total bus width 27.0 units, spanning perpendicular interval [61.0, 90.0]
+[NUTS] M6: no local overlaps
+[NUTS] Span adjustments: M5:2, M6:2
+
+[NUTS] 6 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 0.
+Overlaps  : 0  ()
+
+No overlaps.

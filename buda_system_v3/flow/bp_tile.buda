@@ -1,0 +1,145 @@
+# bp_tile.buda — BlackParrot bp_quad Single Tile Cache Buses (NanGate45)
+#
+# Source:  BlackParrot bp_quad from MacroPlacement repo (TILOS-AI-Institute/MacroPlacement)
+#          Flows/NanGate45/bp_quad/def/bsg_chip_fp_placed_macros.def
+#          Tile y_0__x_0 (southwest tile, instance prefix:
+#          bp_processor/cc/y_0__x_0__tile_node/)
+#
+# Hierarchy: bp_quad = 4 identical RISC-V tiles in 2×2 arrangement.
+#   Each tile: cache-coherent RISC-V core (BlackParrot) + private L1 D/I-caches + shared L2.
+#
+# Per-tile SRAM inventory (tile y_0__x_0, all from DEF):
+#   16 × fakeram45_512x64  — L2 data (8 banks × 2 sub-banks)
+#    2 × fakeram45_128x116 — L2 tag
+#    8 × fakeram45_64x62   — CCE directory
+#    1 × fakeram45_256x48  — CCE instruction RAM
+#    8 × fakeram45_512x64  — D-cache data
+#    2 × fakeram45_64x124  — D-cache tag
+#    8 × fakeram45_512x64  — I-cache data
+#    2 × fakeram45_64x124  — I-cache tag
+#    8 × fakeram45_32x32   — Integer register file
+#
+# BUDA modelling strategy:
+#   D-cache data and I-cache data SRAMs are modelled INDIVIDUALLY (1→8 multicast)
+#   to expose how the bus-unaware MacroPlacement scatter inflates wire demand.
+#   L2 data, CCE directory, and tag/regfile groups use a single bounding-box block.
+#
+# Die: 2907 × 2906 µm (NanGate45 bp_quad full chip; tile y_0__x_0 macros occupy
+#      X=[5,1608], Y=[22,2716] — all within the die).
+# Layer stack: M7/M8 for local stubs, M9/M10 for long cross-die trunks.
+
+def_layer 7  M7  H LOW 20 span_min 0    span_max 2907
+def_layer 8  M8  V LOW 20 span_min 0    span_max 2906
+def_layer 9  M9  H TOP 15 span_min 0    span_max 2907
+def_layer 10 M10 V TOP 15 span_min 0    span_max 2906
+
+# NanGate45 track patterns (NangateOpenCellLibrary.tech.lef)
+def_track_pattern 7  0.07  SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+def_track_pattern 8  0.095 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 POWER 0.8 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 SIGNAL 0.4 0.4 GROUND 0.8 0.4
+def_track_pattern 9  0.07  SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 POWER 1.6 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 GROUND 1.6 0.8
+def_track_pattern 10 0.095 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 POWER 1.6 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 SIGNAL 0.8 0.8 GROUND 1.6 0.8
+
+# dx/dy=5 µm: small blocks (fakeram45_64x62 = 32×40 µm) need a tight margin.
+corner_margin dx 5 dy 5
+
+# ── Floorplan ─────────────────────────────────────────────────────────────
+# Virtual core block: CPU pipeline + load-store unit + CCE + LCE logic.
+# Standard cells occupy the middle region; placed between the L2 cluster
+# (bottom, Y≈22–780) and the cache clusters (top, Y≈2116–2716).
+add_block core   600 1200  820 1400
+
+# ── L2 cache data (16 × fakeram45_512x64, ~120×75 µm each) ──────────────
+# All 16 SRAMs are grouped as one cluster bounding box.
+# Centroid (275, 351); DEF extent X=[5,727], Y=[22,780].
+add_block l2_data   0   15  740  795
+
+# ── L2 cache tag (2 × fakeram45_128x116, ~60×80 µm each) ────────────────
+add_block l2_tag  480  765  590  990
+
+# ── CCE directory (8 × fakeram45_64x62, ~32×40 µm each) ─────────────────
+# Tightly packed in a 320×280 µm region; grouped for routing simplicity.
+# Centroid (647, 2086); DEF extent X=[526,820], Y=[1952,2222].
+add_block cce_dir  510 1942  835 2232
+
+# ── CCE instruction RAM (1 × fakeram45_256x48, ~120×40 µm) ──────────────
+add_block cce_inst  845 2015  975 2065
+
+# ── D-cache data (8 × fakeram45_512x64, modelled individually) ──────────
+# MacroPlacement scatters these across X=[1038,1608], Y=[2116,2716].
+# Each block is the DEF lower-left + ~120×75 µm macro footprint.
+add_block dcd0  1248 2378  1368 2453
+add_block dcd1  1038 2452  1158 2527
+add_block dcd2  1368 2365  1488 2440
+add_block dcd3  1273 2116  1393 2191
+add_block dcd4  1283 2641  1403 2716
+add_block dcd5  1162 2641  1282 2716
+add_block dcd6  1488 2365  1608 2440
+add_block dcd7  1403 2635  1523 2710
+
+# ── D-cache tag (2 × fakeram45_64x124, ~32×80 µm each) ──────────────────
+add_block dcache_tag   830 2553  990 2658
+
+# ── I-cache data (8 × fakeram45_512x64, modelled individually) ──────────
+# MacroPlacement scatters these across X=[5,508], Y=[2265,2696].
+add_block icd0   133 2572  253 2647
+add_block icd1   259 2603  379 2678
+add_block icd2   125 2293  245 2368
+add_block icd3   365 2265  485 2340
+add_block icd4     9 2621  129 2696
+add_block icd5   388 2593  508 2668
+add_block icd6     5 2346  125 2421
+add_block icd7   245 2286  365 2361
+
+# ── I-cache tag (2 × fakeram45_64x124, ~32×80 µm each) ──────────────────
+add_block icache_tag   595 2285  655 2521
+
+# ── Integer register file (8 × fakeram45_32x32, ~20×25 µm each) ─────────
+# All 8 tightly clustered in a 55×352 µm strip.
+add_block regfile  925 2133  980 2485
+
+# ── Buses ─────────────────────────────────────────────────────────────────
+# L2 data address: 9 bits (log2(512)), core → L2 cluster.
+# Long vertical run: core Y≈1300 → L2 centroid Y≈351, Δ≈950 µm.
+add_bus l2_addr[9]      core.l2_out      l2_data.addr
+
+# L2 tag address: 7 bits (log2(128)), core → L2 tag cluster.
+add_bus l2_tag_addr[7]  core.l2tag_out   l2_tag.addr
+
+# CCE directory address: 6 bits (log2(64)), core → CCE directory cluster.
+add_bus cce_dir_addr[6] core.cce_dir_out cce_dir.addr
+
+# CCE instruction RAM address: 8 bits (log2(256)), core → CCE inst RAM.
+add_bus cce_inst_addr[8] core.cce_inst_out cce_inst.addr
+
+# D-cache data address: 9 bits, 1→8 multicast.
+# Bus-unaware scatter: SRAMs span ~600×600 µm; BUDA must find a trunk that
+# serves all 8 destinations from a single core-side driver.
+add_bus dcache_addr[9]  core.dc_out  dcd0.addr,dcd1.addr,dcd2.addr,dcd3.addr,dcd4.addr,dcd5.addr,dcd6.addr,dcd7.addr
+
+# D-cache tag address: 6 bits (log2(64)), core → D-cache tag cluster.
+add_bus dcache_tag_addr[6] core.dctag_out dcache_tag.addr
+
+# I-cache data address: 9 bits, 1→8 multicast.
+# Bus-unaware scatter: SRAMs span ~500×430 µm upper-left.
+add_bus icache_addr[9]  core.ic_out  icd0.addr,icd1.addr,icd2.addr,icd3.addr,icd4.addr,icd5.addr,icd6.addr,icd7.addr
+
+# I-cache tag address: 6 bits (log2(64)), core → I-cache tag cluster.
+add_bus icache_tag_addr[6] core.ictag_out icache_tag.addr
+
+# ── Pipeline ──────────────────────────────────────────────────────────────
+run_bundler strict
+
+generate_topologies_for_bundle l2_addr       core l2_data
+generate_topologies_for_bundle l2_tag_addr   core l2_tag
+generate_topologies_for_bundle cce_dir_addr  core cce_dir
+generate_topologies_for_bundle cce_inst_addr core cce_inst
+generate_topologies_for_bundle dcache_addr   core dcd0 dcd1 dcd2 dcd3 dcd4 dcd5 dcd6 dcd7
+generate_topologies_for_bundle dcache_tag_addr core dcache_tag
+generate_topologies_for_bundle icache_addr   core icd0 icd1 icd2 icd3 icd4 icd5 icd6 icd7
+generate_topologies_for_bundle icache_tag_addr core icache_tag
+
+run_planner 50
+run_nuts 1.0
+run_detailed_nuts
+
+visualize

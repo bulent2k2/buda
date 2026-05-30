@@ -1,0 +1,25 @@
+[RoutingGrid] Layer 5: 10 slots, unit_pitch=3.080, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 6: 10 slots, unit_pitch=3.080, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 7: 10 slots, unit_pitch=8.800, signal_density=0.364, dilution=2.750
+[RoutingGrid] Layer 8: 10 slots, unit_pitch=8.800, signal_density=0.364, dilution=2.750
+Bundler created 3 bundles.
+Generated 16 topologies for bundle 3 (north_ic->[tile_r0c0,tile_r0c1,tile_r0c2,tile_r0c3,tile_r1c0,tile_r1c1,tile_r1c2,tile_r1c3,tile_r2c0,tile_r2c1,tile_r2c2,tile_r2c3,tile_r3c0,tile_r3c1,tile_r3c2,tile_r3c3])
+Generated 16 topologies for bundle 1 (east_ic->[tile_r0c0,tile_r0c1,tile_r0c2,tile_r0c3,tile_r1c0,tile_r1c1,tile_r1c2,tile_r1c3,tile_r2c0,tile_r2c1,tile_r2c2,tile_r2c3,tile_r3c0,tile_r3c1,tile_r3c2,tile_r3c3])
+Generated 17 topologies for bundle 2 (ne_ic->[tile_r0c0,tile_r0c1,tile_r0c2,tile_r0c3,tile_r1c0,tile_r1c1,tile_r1c2,tile_r1c3,tile_r2c0,tile_r2c1,tile_r2c2,tile_r2c3,tile_r3c0,tile_r3c1,tile_r3c2,tile_r3c3])
+[Planner] Grid extended: 2 X, 4 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M6 (V)  min_band_cap=0
+  M8 (V)  min_band_cap=80
+  M5 (H)  min_band_cap=0
+  M7 (H)  min_band_cap=8
+[Planner] Bundle 1 (54 units wide) -> BITRUNK_H  [H→M7 H→M7 V→M8 V→M8 V→M8 V→M8 V→M8 V→M8 V→M8 V→M8 V→M8]  overflow=0
+[Planner] Bundle 2 (54 units wide) -> MST_HV  [H→M7 V→M8 H→M7 H→M7 H→M7 H→M7 V→M8 H→M7 V→M8 V→M8 H→M7 V→M8 H→M7 H→M7 V→M8 H→M7 V→M8]  overflow=0
+[Planner] Bundle 3 (54 units wide) -> MST_HV  [V→M8 H→M7 H→M7 V→M8 V→M8 H→M7 V→M8 V→M8 H→M7 V→M8 V→M8 V→M8 V→M8 H→M7 H→M7 V→M8]  overflow=0
+[NUTS] 44 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 8.
+[NUTS] M7: total bus width 2673.0 units, spanning perpendicular interval [-88.8, 1188.5]
+[NUTS] M7: no local overlaps
+[NUTS] M8: total bus width 3861.0 units, spanning perpendicular interval [-88.8, 1114.8]
+[NUTS] M8 local overlaps: 8 → B1×B3, B1×B2, B1×B2, B1×B3, B1×B3, B1×B2, B1×B2, B2×B2
+[NUTS] Span adjustments: M7:1, M8:9
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/mempool_group_nuts.log
+[DetailedNUTS] 1584 net segments placed, 0 bits unplaced.

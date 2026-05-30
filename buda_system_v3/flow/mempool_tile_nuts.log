@@ -1,0 +1,1593 @@
+NUTS Overlap Report — mempool_tile.buda
+Generated : 2026-05-23T21:24:28
+
+[NUTS] M3: total bus width 3300.0 units, spanning perpendicular interval [-15.0, 290.0]
+[NUTS] M3 local overlaps: 18 → B3×B5, B3×B5, B3×B5, B3×B5, B3×B5, B3×B5, B3×B5, B3×B5, B3×B5, B5×B5, B5×B5, B5×B5, B5×B5, B5×B5, B5×B5, B5×B5, B5×B5, B5×B5
+[NUTS] M4: total bus width 3696.0 units, spanning perpendicular interval [-16.0, 464.5]
+[NUTS] M4 local overlaps: 34 → B1×B1, B1×B1, B1×B1, B1×B7, B1×B7, B1×B7, B1×B7, B1×B1, B1×B1, B1×B7, B1×B7, B1×B7, B1×B7, B1×B1, B1×B7, B1×B7, B1×B7, B1×B7, B1×B7, B1×B7, B1×B7, B1×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7
+[NUTS] M5: total bus width 4356.0 units, spanning perpendicular interval [-33.5, 274.5]
+[NUTS] M5 local overlaps: 50 → B1×B3, B1×B3, B1×B3, B1×B3, B1×B3, B1×B3, B1×B3, B1×B3, B1×B3, B1×B3, B1×B5, B1×B5, B1×B5, B1×B5, B1×B6, B1×B7, B3×B3, B3×B3, B3×B5, B3×B7, B3×B3, B3×B5, B3×B7, B3×B3, B3×B3, B3×B5, B3×B7, B3×B5, B3×B7, B3×B3, B3×B3, B3×B5, B3×B7, B3×B3, B3×B5, B3×B7, B3×B5, B3×B7, B3×B3, B3×B5, B3×B7, B3×B5, B3×B7, B3×B5, B3×B7, B5×B7, B5×B7, B5×B7, B5×B6, B5×B7
+[NUTS] M6: total bus width 5280.0 units, spanning perpendicular interval [-82.0, 464.5]
+[NUTS] M6 local overlaps: 121 → B1×B1, B1×B1, B1×B1, B1×B2, B1×B3, B1×B4, B1×B5, B1×B6, B1×B7, B1×B7, B1×B7, B1×B1, B1×B1, B1×B1, B1×B2, B1×B3, B1×B4, B1×B5, B1×B5, B1×B6, B1×B7, B1×B7, B1×B7, B1×B7, B1×B1, B1×B1, B1×B3, B1×B4, B1×B5, B1×B5, B1×B6, B1×B7, B1×B7, B1×B7, B1×B7, B1×B1, B1×B3, B1×B4, B1×B5, B1×B5, B1×B6, B1×B7, B1×B7, B1×B7, B1×B7, B1×B3, B1×B4, B1×B5, B1×B5, B1×B6, B1×B7, B1×B7, B1×B7, B1×B7, B1×B1, B1×B1, B1×B1, B1×B2, B1×B3, B1×B4, B1×B5, B1×B6, B1×B1, B1×B1, B1×B3, B1×B5, B1×B6, B1×B1, B1×B3, B1×B5, B1×B6, B1×B3, B1×B5, B1×B6, B2×B3, B2×B3, B2×B4, B2×B4, B2×B5, B2×B5, B2×B6, B2×B7, B3×B4, B3×B5, B3×B6, B3×B4, B3×B5, B3×B6, B3×B7, B3×B7, B3×B7, B3×B7, B4×B5, B4×B6, B4×B7, B4×B7, B4×B7, B4×B7, B4×B5, B4×B6, B5×B6, B5×B7, B5×B7, B5×B7, B5×B7, B5×B6, B5×B6, B5×B7, B5×B7, B5×B7, B5×B7, B6×B7, B6×B7, B6×B7, B6×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7, B7×B7
+[NUTS] Span adjustments: M3:1, M4:13, M5:3, M6:16
+
+[NUTS] 67 segments placed across 4 layer(s). Interval violations: 35, Track overlaps: 223.
+Overlaps  : 223  (M3=18  M4=34  M5=50  M6=121)
+
+============================================================
+  M3  —  18 overlap(s)
+============================================================
+  [  1]  B3.M5[1]  ×  B5.M5[4]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[1]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[4]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  2]  B3.M5[1]  ×  B5.M5[9]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[1]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  3]  B3.M5[1]  ×  B5.M5[10]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 249.00]  depth=243.50  area=3652.50
+         B3.M5[1]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[10]:
+    span=[225.0, 240.0]  perp_center=117.00  width=264.00  → perp=[-15.00, 249.00]  interval=[-15.0, 290.0]
+  [  4]  B3.M5[6]  ×  B5.M5[2]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [26.00, 269.50]  depth=243.50  area=3652.50
+         B3.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[2]:
+    span=[265.0, 280.0]  perp_center=158.00  width=264.00  → perp=[26.00, 290.00]  interval=[-15.0, 290.0]
+  [  5]  B3.M5[6]  ×  B5.M5[5]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[5]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  6]  B3.M5[6]  ×  B5.M5[11]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[11]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  7]  B3.M5[11]  ×  B5.M5[1]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [26.00, 269.50]  depth=243.50  area=3652.50
+         B3.M5[11]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[1]:
+    span=[305.0, 320.0]  perp_center=158.00  width=264.00  → perp=[26.00, 290.00]  interval=[-15.0, 290.0]
+  [  8]  B3.M5[11]  ×  B5.M5[7]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[11]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  9]  B3.M5[11]  ×  B5.M5[8]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[11]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 10]  B5.M5[1]  ×  B5.M5[7]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [26.00, 269.50]  depth=243.50  area=3652.50
+         B5.M5[1]:
+    span=[305.0, 320.0]  perp_center=158.00  width=264.00  → perp=[26.00, 290.00]  interval=[-15.0, 290.0]
+         B5.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 11]  B5.M5[1]  ×  B5.M5[8]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [26.00, 269.50]  depth=243.50  area=3652.50
+         B5.M5[1]:
+    span=[305.0, 320.0]  perp_center=158.00  width=264.00  → perp=[26.00, 290.00]  interval=[-15.0, 290.0]
+         B5.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 12]  B5.M5[2]  ×  B5.M5[5]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [26.00, 269.50]  depth=243.50  area=3652.50
+         B5.M5[2]:
+    span=[265.0, 280.0]  perp_center=158.00  width=264.00  → perp=[26.00, 290.00]  interval=[-15.0, 290.0]
+         B5.M5[5]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 13]  B5.M5[2]  ×  B5.M5[11]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [26.00, 269.50]  depth=243.50  area=3652.50
+         B5.M5[2]:
+    span=[265.0, 280.0]  perp_center=158.00  width=264.00  → perp=[26.00, 290.00]  interval=[-15.0, 290.0]
+         B5.M5[11]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 14]  B5.M5[4]  ×  B5.M5[9]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B5.M5[4]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 15]  B5.M5[4]  ×  B5.M5[10]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 249.00]  depth=243.50  area=3652.50
+         B5.M5[4]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[10]:
+    span=[225.0, 240.0]  perp_center=117.00  width=264.00  → perp=[-15.00, 249.00]  interval=[-15.0, 290.0]
+  [ 16]  B5.M5[5]  ×  B5.M5[11]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B5.M5[5]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[11]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 17]  B5.M5[7]  ×  B5.M5[8]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B5.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 18]  B5.M5[9]  ×  B5.M5[10]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 249.00]  depth=243.50  area=3652.50
+         B5.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[10]:
+    span=[225.0, 240.0]  perp_center=117.00  width=264.00  → perp=[-15.00, 249.00]  interval=[-15.0, 290.0]
+
+============================================================
+  M4  —  34 overlap(s)
+============================================================
+  [  1]  B1.M6[6]  ×  B1.M6[7]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=7280.00
+         B1.M6[6]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[7]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [  2]  B1.M6[6]  ×  B1.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=5980.00
+         B1.M6[6]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[8]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [  3]  B1.M6[6]  ×  B1.M6[9]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=4680.00
+         B1.M6[6]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[9]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [  4]  B1.M6[6]  ×  B7.M6[5]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [80.50, 344.50]  depth=264.00  area=8580.00
+         B1.M6[6]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[5]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [  5]  B1.M6[6]  ×  B7.M6[6]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=7280.00
+         B1.M6[6]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[6]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [  6]  B1.M6[6]  ×  B7.M6[7]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=5980.00
+         B1.M6[6]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[7]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [  7]  B1.M6[6]  ×  B7.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=4680.00
+         B1.M6[6]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[8]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [  8]  B1.M6[7]  ×  B1.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=7280.00
+         B1.M6[7]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B1.M6[8]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [  9]  B1.M6[7]  ×  B1.M6[9]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=5980.00
+         B1.M6[7]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B1.M6[9]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 10]  B1.M6[7]  ×  B7.M6[5]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=7280.00
+         B1.M6[7]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[5]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 11]  B1.M6[7]  ×  B7.M6[6]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [120.50, 384.50]  depth=264.00  area=8580.00
+         B1.M6[7]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[6]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 12]  B1.M6[7]  ×  B7.M6[7]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=7280.00
+         B1.M6[7]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[7]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 13]  B1.M6[7]  ×  B7.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=5980.00
+         B1.M6[7]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[8]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 14]  B1.M6[8]  ×  B1.M6[9]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=7280.00
+         B1.M6[8]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B1.M6[9]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 15]  B1.M6[8]  ×  B7.M6[5]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=5980.00
+         B1.M6[8]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[5]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 16]  B1.M6[8]  ×  B7.M6[6]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=7280.00
+         B1.M6[8]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[6]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 17]  B1.M6[8]  ×  B7.M6[7]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 424.50]  depth=264.00  area=8580.00
+         B1.M6[8]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[7]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 18]  B1.M6[8]  ×  B7.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=7280.00
+         B1.M6[8]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[8]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 19]  B1.M6[9]  ×  B7.M6[5]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=4680.00
+         B1.M6[9]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[5]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 20]  B1.M6[9]  ×  B7.M6[6]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=5980.00
+         B1.M6[9]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[6]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 21]  B1.M6[9]  ×  B7.M6[7]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=7280.00
+         B1.M6[9]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[7]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 22]  B1.M6[9]  ×  B7.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 464.50]  depth=264.00  area=8580.00
+         B1.M6[9]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[8]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 23]  B7.M6[5]  ×  B7.M6[6]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=7280.00
+         B7.M6[5]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[6]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 24]  B7.M6[5]  ×  B7.M6[7]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=5980.00
+         B7.M6[5]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[7]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 25]  B7.M6[5]  ×  B7.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=4680.00
+         B7.M6[5]:
+    span=[110.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[8]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 26]  B7.M6[6]  ×  B7.M6[7]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=7280.00
+         B7.M6[6]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[7]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 27]  B7.M6[6]  ×  B7.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=5980.00
+         B7.M6[6]:
+    span=[110.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[8]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 28]  B7.M6[7]  ×  B7.M6[8]
+         overlap span  [110.0, 142.5]  len=32.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=7280.00
+         B7.M6[7]:
+    span=[110.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[8]:
+    span=[110.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 29]  B7.M6[9]  ×  B7.M6[10]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=7280.00
+         B7.M6[9]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[10]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 30]  B7.M6[9]  ×  B7.M6[11]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=5980.00
+         B7.M6[9]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[11]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 31]  B7.M6[9]  ×  B7.M6[12]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=4680.00
+         B7.M6[9]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[12]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 32]  B7.M6[10]  ×  B7.M6[11]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=7280.00
+         B7.M6[10]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[11]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 33]  B7.M6[10]  ×  B7.M6[12]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=5980.00
+         B7.M6[10]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[12]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 34]  B7.M6[11]  ×  B7.M6[12]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=7280.00
+         B7.M6[11]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[12]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+
+============================================================
+  M5  —  50 overlap(s)
+============================================================
+  [  1]  B1.M5[0]  ×  B3.M5[0]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[0]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  2]  B1.M5[0]  ×  B3.M5[2]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[2]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  3]  B1.M5[0]  ×  B3.M5[3]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[3]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  4]  B1.M5[0]  ×  B3.M5[4]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[4]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  5]  B1.M5[0]  ×  B3.M5[5]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[5]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  6]  B1.M5[0]  ×  B3.M5[7]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  7]  B1.M5[0]  ×  B3.M5[8]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  8]  B1.M5[0]  ×  B3.M5[9]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [  9]  B1.M5[0]  ×  B3.M5[10]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[10]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 10]  B1.M5[0]  ×  B3.M5[15]
+         overlap span  [175.0, 200.0]  len=25.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=6475.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B3.M5[15]:
+    span=[175.0, 200.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 11]  B1.M5[0]  ×  B5.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B5.M5[0]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 12]  B1.M5[0]  ×  B5.M5[3]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B5.M5[3]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 13]  B1.M5[0]  ×  B5.M5[6]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B5.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 14]  B1.M5[0]  ×  B5.M5[15]
+         overlap span  [85.0, 200.0]  len=115.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=29785.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B5.M5[15]:
+    span=[85.0, 200.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 15]  B1.M5[0]  ×  B6.M5[1]
+         overlap span  [50.0, 140.0]  len=90.0
+         overlap perp  [10.50, 98.50]  depth=88.00  area=7920.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B6.M5[1]:
+    span=[50.0, 140.0]  perp_center=32.50  width=132.00  → perp=[-33.50, 98.50]  interval=[-15.0, 80.0]
+  [ 16]  B1.M5[0]  ×  B7.M5[0]
+         overlap span  [180.0, 332.5]  len=152.5
+         overlap perp  [10.50, 274.50]  depth=264.00  area=40260.00
+         B1.M5[0]:
+    span=[50.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 17]  B3.M5[0]  ×  B3.M5[2]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[0]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[2]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 18]  B3.M5[0]  ×  B3.M5[4]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[0]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[4]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 19]  B3.M5[0]  ×  B5.M5[6]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[0]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 20]  B3.M5[0]  ×  B7.M5[0]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[0]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 21]  B3.M5[2]  ×  B3.M5[4]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[2]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[4]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 22]  B3.M5[2]  ×  B5.M5[6]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[2]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 23]  B3.M5[2]  ×  B7.M5[0]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[2]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 24]  B3.M5[3]  ×  B3.M5[7]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[3]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 25]  B3.M5[3]  ×  B3.M5[8]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[3]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 26]  B3.M5[3]  ×  B5.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[3]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[0]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 27]  B3.M5[3]  ×  B7.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[3]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 28]  B3.M5[4]  ×  B5.M5[6]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[4]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 29]  B3.M5[4]  ×  B7.M5[0]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[4]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 30]  B3.M5[5]  ×  B3.M5[9]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[5]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 31]  B3.M5[5]  ×  B3.M5[10]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[5]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[10]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 32]  B3.M5[5]  ×  B5.M5[3]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[5]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[3]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 33]  B3.M5[5]  ×  B7.M5[0]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[5]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 34]  B3.M5[7]  ×  B3.M5[8]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 35]  B3.M5[7]  ×  B5.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[0]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 36]  B3.M5[7]  ×  B7.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[7]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 37]  B3.M5[8]  ×  B5.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[0]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 38]  B3.M5[8]  ×  B7.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[8]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 39]  B3.M5[9]  ×  B3.M5[10]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B3.M5[10]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 40]  B3.M5[9]  ×  B5.M5[3]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[3]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 41]  B3.M5[9]  ×  B7.M5[0]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[9]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 42]  B3.M5[10]  ×  B5.M5[3]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=3960.00
+         B3.M5[10]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[3]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 43]  B3.M5[10]  ×  B7.M5[0]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B3.M5[10]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 44]  B3.M5[15]  ×  B5.M5[15]
+         overlap span  [175.0, 200.0]  len=25.0
+         overlap perp  [5.50, 269.50]  depth=264.00  area=6600.00
+         B3.M5[15]:
+    span=[175.0, 200.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B5.M5[15]:
+    span=[85.0, 200.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+  [ 45]  B3.M5[15]  ×  B7.M5[0]
+         overlap span  [180.0, 200.0]  len=20.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=5180.00
+         B3.M5[15]:
+    span=[175.0, 200.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 46]  B5.M5[0]  ×  B7.M5[0]
+         overlap span  [305.0, 320.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B5.M5[0]:
+    span=[305.0, 320.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 47]  B5.M5[3]  ×  B7.M5[0]
+         overlap span  [225.0, 240.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B5.M5[3]:
+    span=[225.0, 240.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 48]  B5.M5[6]  ×  B7.M5[0]
+         overlap span  [265.0, 280.0]  len=15.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=3885.00
+         B5.M5[6]:
+    span=[265.0, 280.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+  [ 49]  B5.M5[15]  ×  B6.M5[1]
+         overlap span  [85.0, 140.0]  len=55.0
+         overlap perp  [5.50, 98.50]  depth=93.00  area=5115.00
+         B5.M5[15]:
+    span=[85.0, 200.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B6.M5[1]:
+    span=[50.0, 140.0]  perp_center=32.50  width=132.00  → perp=[-33.50, 98.50]  interval=[-15.0, 80.0]
+  [ 50]  B5.M5[15]  ×  B7.M5[0]
+         overlap span  [180.0, 200.0]  len=20.0
+         overlap perp  [10.50, 269.50]  depth=259.00  area=5180.00
+         B5.M5[15]:
+    span=[85.0, 200.0]  perp_center=137.50  width=264.00  → perp=[5.50, 269.50]  interval=[-15.0, 290.0]
+         B7.M5[0]:
+    span=[180.0, 332.5]  perp_center=142.50  width=264.00  → perp=[10.50, 274.50]  interval=[130.0, 155.0]
+
+============================================================
+  M6  —  121 overlap(s)
+============================================================
+  [  1]  B1.M6[1]  ×  B1.M6[2]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [80.50, 182.00]  depth=101.50  area=5328.75
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [  2]  B1.M6[1]  ×  B1.M6[3]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [120.50, 182.00]  depth=61.50  area=3228.75
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [  3]  B1.M6[1]  ×  B1.M6[4]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [160.50, 182.00]  depth=21.50  area=1128.75
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [  4]  B1.M6[1]  ×  B2.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [-16.00, 116.00]  depth=132.00  area=6930.00
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+  [  5]  B1.M6[1]  ×  B3.M6[14]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [48.00, 182.00]  depth=134.00  area=2680.00
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [  6]  B1.M6[1]  ×  B4.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [74.00, 182.00]  depth=108.00  area=5670.00
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [  7]  B1.M6[1]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [48.00, 182.00]  depth=134.00  area=2680.00
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [  8]  B1.M6[1]  ×  B6.M6[2]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [74.00, 182.00]  depth=108.00  area=5670.00
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [  9]  B1.M6[1]  ×  B7.M6[1]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [80.50, 182.00]  depth=101.50  area=5328.75
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 10]  B1.M6[1]  ×  B7.M6[2]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [120.50, 182.00]  depth=61.50  area=3228.75
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 11]  B1.M6[1]  ×  B7.M6[3]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [160.50, 182.00]  depth=21.50  area=1128.75
+         B1.M6[1]:
+    span=[90.0, 142.5]  perp_center=50.00  width=264.00  → perp=[-82.00, 182.00]  interval=[15.0, 85.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 12]  B1.M6[2]  ×  B1.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=19600.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 13]  B1.M6[2]  ×  B1.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=16100.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 14]  B1.M6[2]  ×  B1.M6[5]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=12600.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 15]  B1.M6[2]  ×  B2.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [80.50, 116.00]  depth=35.50  area=1863.75
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+  [ 16]  B1.M6[2]  ×  B3.M6[14]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=4630.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 17]  B1.M6[2]  ×  B4.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [80.50, 206.00]  depth=125.50  area=6588.75
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 18]  B1.M6[2]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=4630.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 19]  B1.M6[2]  ×  B5.M6[14]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=3472.50
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 20]  B1.M6[2]  ×  B6.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [80.50, 206.00]  depth=125.50  area=10981.25
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 21]  B1.M6[2]  ×  B7.M6[1]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [80.50, 344.50]  depth=264.00  area=23100.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 22]  B1.M6[2]  ×  B7.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=19600.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 23]  B1.M6[2]  ×  B7.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=16100.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 24]  B1.M6[2]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=12600.00
+         B1.M6[2]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 25]  B1.M6[3]  ×  B1.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=19600.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 26]  B1.M6[3]  ×  B1.M6[5]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=16100.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 27]  B1.M6[3]  ×  B3.M6[14]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=3830.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 28]  B1.M6[3]  ×  B4.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [120.50, 206.00]  depth=85.50  area=4488.75
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 29]  B1.M6[3]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=3830.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 30]  B1.M6[3]  ×  B5.M6[14]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=2872.50
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 31]  B1.M6[3]  ×  B6.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [120.50, 206.00]  depth=85.50  area=7481.25
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 32]  B1.M6[3]  ×  B7.M6[1]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=19600.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 33]  B1.M6[3]  ×  B7.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [120.50, 384.50]  depth=264.00  area=23100.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 34]  B1.M6[3]  ×  B7.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=19600.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 35]  B1.M6[3]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=16100.00
+         B1.M6[3]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 36]  B1.M6[4]  ×  B1.M6[5]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=19600.00
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 37]  B1.M6[4]  ×  B3.M6[14]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=3030.00
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 38]  B1.M6[4]  ×  B4.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [160.50, 206.00]  depth=45.50  area=2388.75
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 39]  B1.M6[4]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=3030.00
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 40]  B1.M6[4]  ×  B5.M6[14]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=2272.50
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 41]  B1.M6[4]  ×  B6.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 206.00]  depth=45.50  area=3981.25
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 42]  B1.M6[4]  ×  B7.M6[1]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=16100.00
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 43]  B1.M6[4]  ×  B7.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=19600.00
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 44]  B1.M6[4]  ×  B7.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 424.50]  depth=264.00  area=23100.00
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 45]  B1.M6[4]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=19600.00
+         B1.M6[4]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 46]  B1.M6[5]  ×  B3.M6[14]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=2230.00
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 47]  B1.M6[5]  ×  B4.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [200.50, 206.00]  depth=5.50  area=288.75
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 48]  B1.M6[5]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=2230.00
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 49]  B1.M6[5]  ×  B5.M6[14]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=1672.50
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 50]  B1.M6[5]  ×  B6.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 206.00]  depth=5.50  area=481.25
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 51]  B1.M6[5]  ×  B7.M6[1]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=12600.00
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 52]  B1.M6[5]  ×  B7.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=16100.00
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 53]  B1.M6[5]  ×  B7.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=19600.00
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 54]  B1.M6[5]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 464.50]  depth=264.00  area=23100.00
+         B1.M6[5]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 55]  B1.M6[10]  ×  B1.M6[11]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=7280.00
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[11]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 56]  B1.M6[10]  ×  B1.M6[12]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=5980.00
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[12]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 57]  B1.M6[10]  ×  B1.M6[13]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=4680.00
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B1.M6[13]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 58]  B1.M6[10]  ×  B2.M6[0]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [80.50, 116.00]  depth=35.50  area=1153.75
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+  [ 59]  B1.M6[10]  ×  B3.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=3472.50
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 60]  B1.M6[10]  ×  B4.M6[2]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [80.50, 116.00]  depth=35.50  area=1153.75
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B4.M6[2]:
+    span=[142.5, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+  [ 61]  B1.M6[10]  ×  B5.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=3472.50
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 62]  B1.M6[10]  ×  B6.M6[2]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [80.50, 206.00]  depth=125.50  area=4078.75
+         B1.M6[10]:
+    span=[142.5, 175.0]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 63]  B1.M6[11]  ×  B1.M6[12]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=7280.00
+         B1.M6[11]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B1.M6[12]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 64]  B1.M6[11]  ×  B1.M6[13]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=5980.00
+         B1.M6[11]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B1.M6[13]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 65]  B1.M6[11]  ×  B3.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=2872.50
+         B1.M6[11]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 66]  B1.M6[11]  ×  B5.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=2872.50
+         B1.M6[11]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 67]  B1.M6[11]  ×  B6.M6[2]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [120.50, 206.00]  depth=85.50  area=2778.75
+         B1.M6[11]:
+    span=[142.5, 175.0]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 68]  B1.M6[12]  ×  B1.M6[13]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=7280.00
+         B1.M6[12]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B1.M6[13]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 69]  B1.M6[12]  ×  B3.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=2272.50
+         B1.M6[12]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 70]  B1.M6[12]  ×  B5.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=2272.50
+         B1.M6[12]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 71]  B1.M6[12]  ×  B6.M6[2]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [160.50, 206.00]  depth=45.50  area=1478.75
+         B1.M6[12]:
+    span=[142.5, 175.0]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 72]  B1.M6[13]  ×  B3.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=1672.50
+         B1.M6[13]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 73]  B1.M6[13]  ×  B5.M6[13]
+         overlap span  [160.0, 175.0]  len=15.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=1672.50
+         B1.M6[13]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 74]  B1.M6[13]  ×  B6.M6[2]
+         overlap span  [142.5, 175.0]  len=32.5
+         overlap perp  [200.50, 206.00]  depth=5.50  area=178.75
+         B1.M6[13]:
+    span=[142.5, 175.0]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 75]  B2.M6[0]  ×  B3.M6[13]
+         overlap span  [160.0, 180.0]  len=20.0
+         overlap perp  [48.00, 116.00]  depth=68.00  area=1360.00
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 76]  B2.M6[0]  ×  B3.M6[14]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [48.00, 116.00]  depth=68.00  area=1360.00
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 77]  B2.M6[0]  ×  B4.M6[0]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [74.00, 116.00]  depth=42.00  area=2205.00
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 78]  B2.M6[0]  ×  B4.M6[2]
+         overlap span  [142.5, 195.0]  len=52.5
+         overlap perp  [-16.00, 116.00]  depth=132.00  area=6930.00
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B4.M6[2]:
+    span=[142.5, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+  [ 79]  B2.M6[0]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [48.00, 116.00]  depth=68.00  area=1360.00
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 80]  B2.M6[0]  ×  B5.M6[13]
+         overlap span  [160.0, 180.0]  len=20.0
+         overlap perp  [48.00, 116.00]  depth=68.00  area=1360.00
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 81]  B2.M6[0]  ×  B6.M6[2]
+         overlap span  [90.0, 195.0]  len=105.0
+         overlap perp  [74.00, 116.00]  depth=42.00  area=4410.00
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 82]  B2.M6[0]  ×  B7.M6[1]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [80.50, 116.00]  depth=35.50  area=1863.75
+         B2.M6[0]:
+    span=[90.0, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 83]  B3.M6[13]  ×  B4.M6[2]
+         overlap span  [160.0, 180.0]  len=20.0
+         overlap perp  [48.00, 116.00]  depth=68.00  area=1360.00
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B4.M6[2]:
+    span=[142.5, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+  [ 84]  B3.M6[13]  ×  B5.M6[13]
+         overlap span  [160.0, 180.0]  len=20.0
+         overlap perp  [48.00, 312.00]  depth=264.00  area=5280.00
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 85]  B3.M6[13]  ×  B6.M6[2]
+         overlap span  [160.0, 180.0]  len=20.0
+         overlap perp  [74.00, 206.00]  depth=132.00  area=2640.00
+         B3.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 86]  B3.M6[14]  ×  B4.M6[0]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [74.00, 206.00]  depth=132.00  area=2640.00
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 87]  B3.M6[14]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [48.00, 312.00]  depth=264.00  area=5280.00
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 88]  B3.M6[14]  ×  B6.M6[2]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [74.00, 206.00]  depth=132.00  area=2640.00
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 89]  B3.M6[14]  ×  B7.M6[1]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=4630.00
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 90]  B3.M6[14]  ×  B7.M6[2]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=3830.00
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 91]  B3.M6[14]  ×  B7.M6[3]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=3030.00
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 92]  B3.M6[14]  ×  B7.M6[4]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=2230.00
+         B3.M6[14]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 93]  B4.M6[0]  ×  B5.M6[12]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [74.00, 206.00]  depth=132.00  area=2640.00
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [ 94]  B4.M6[0]  ×  B6.M6[2]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [74.00, 206.00]  depth=132.00  area=6930.00
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [ 95]  B4.M6[0]  ×  B7.M6[1]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [80.50, 206.00]  depth=125.50  area=6588.75
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [ 96]  B4.M6[0]  ×  B7.M6[2]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [120.50, 206.00]  depth=85.50  area=4488.75
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [ 97]  B4.M6[0]  ×  B7.M6[3]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [160.50, 206.00]  depth=45.50  area=2388.75
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [ 98]  B4.M6[0]  ×  B7.M6[4]
+         overlap span  [90.0, 142.5]  len=52.5
+         overlap perp  [200.50, 206.00]  depth=5.50  area=288.75
+         B4.M6[0]:
+    span=[90.0, 142.5]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [ 99]  B4.M6[2]  ×  B5.M6[13]
+         overlap span  [160.0, 180.0]  len=20.0
+         overlap perp  [48.00, 116.00]  depth=68.00  area=1360.00
+         B4.M6[2]:
+    span=[142.5, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+  [100]  B4.M6[2]  ×  B6.M6[2]
+         overlap span  [142.5, 195.0]  len=52.5
+         overlap perp  [74.00, 116.00]  depth=42.00  area=2205.00
+         B4.M6[2]:
+    span=[142.5, 195.0]  perp_center=50.00  width=132.00  → perp=[-16.00, 116.00]  interval=[15.0, 85.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [101]  B5.M6[12]  ×  B6.M6[2]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [74.00, 206.00]  depth=132.00  area=2640.00
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [102]  B5.M6[12]  ×  B7.M6[1]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=4630.00
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [103]  B5.M6[12]  ×  B7.M6[2]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=3830.00
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [104]  B5.M6[12]  ×  B7.M6[3]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=3030.00
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [105]  B5.M6[12]  ×  B7.M6[4]
+         overlap span  [105.0, 125.0]  len=20.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=2230.00
+         B5.M6[12]:
+    span=[105.0, 125.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [106]  B5.M6[13]  ×  B6.M6[2]
+         overlap span  [160.0, 180.0]  len=20.0
+         overlap perp  [74.00, 206.00]  depth=132.00  area=2640.00
+         B5.M6[13]:
+    span=[160.0, 180.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [107]  B5.M6[14]  ×  B6.M6[2]
+         overlap span  [50.0, 70.0]  len=20.0
+         overlap perp  [74.00, 206.00]  depth=132.00  area=2640.00
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+  [108]  B5.M6[14]  ×  B7.M6[1]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [80.50, 312.00]  depth=231.50  area=3472.50
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [109]  B5.M6[14]  ×  B7.M6[2]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [120.50, 312.00]  depth=191.50  area=2872.50
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [110]  B5.M6[14]  ×  B7.M6[3]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [160.50, 312.00]  depth=151.50  area=2272.50
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [111]  B5.M6[14]  ×  B7.M6[4]
+         overlap span  [55.0, 70.0]  len=15.0
+         overlap perp  [200.50, 312.00]  depth=111.50  area=1672.50
+         B5.M6[14]:
+    span=[50.0, 70.0]  perp_center=180.00  width=264.00  → perp=[48.00, 312.00]  interval=[-24.0, 384.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [112]  B6.M6[2]  ×  B7.M6[1]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [80.50, 206.00]  depth=125.50  area=10981.25
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+  [113]  B6.M6[2]  ×  B7.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [120.50, 206.00]  depth=85.50  area=7481.25
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [114]  B6.M6[2]  ×  B7.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 206.00]  depth=45.50  area=3981.25
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [115]  B6.M6[2]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 206.00]  depth=5.50  area=481.25
+         B6.M6[2]:
+    span=[32.5, 195.0]  perp_center=140.00  width=132.00  → perp=[74.00, 206.00]  interval=[105.0, 175.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [116]  B7.M6[1]  ×  B7.M6[2]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [120.50, 344.50]  depth=224.00  area=19600.00
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+  [117]  B7.M6[1]  ×  B7.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 344.50]  depth=184.00  area=16100.00
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [118]  B7.M6[1]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 344.50]  depth=144.00  area=12600.00
+         B7.M6[1]:
+    span=[55.0, 142.5]  perp_center=212.50  width=264.00  → perp=[80.50, 344.50]  interval=[200.0, 225.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [119]  B7.M6[2]  ×  B7.M6[3]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [160.50, 384.50]  depth=224.00  area=19600.00
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+  [120]  B7.M6[2]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 384.50]  depth=184.00  area=16100.00
+         B7.M6[2]:
+    span=[55.0, 142.5]  perp_center=252.50  width=264.00  → perp=[120.50, 384.50]  interval=[240.0, 265.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+  [121]  B7.M6[3]  ×  B7.M6[4]
+         overlap span  [55.0, 142.5]  len=87.5
+         overlap perp  [200.50, 424.50]  depth=224.00  area=19600.00
+         B7.M6[3]:
+    span=[55.0, 142.5]  perp_center=292.50  width=264.00  → perp=[160.50, 424.50]  interval=[280.0, 305.0]
+         B7.M6[4]:
+    span=[55.0, 142.5]  perp_center=332.50  width=264.00  → perp=[200.50, 464.50]  interval=[320.0, 345.0]
+

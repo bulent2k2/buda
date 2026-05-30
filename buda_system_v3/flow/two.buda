@@ -1,0 +1,53 @@
+# TODO: rotate x<->y
+
+def_layer 4 M4 H TOP 0.0
+def_layer 5 M5 V TOP 0.0
+
+corner_margin dx 15 dy 20
+
+# top edge: y=600
+add_block u0    200  400  300   600
+
+# top edge above top edge of u0:
+add_block u11   500  800  550  1000
+add_block u12   550  600  600  1000
+add_block u13   600  500  650  1000
+add_block u14   650  400  700  1000
+add_block u15   700  200  750  1000
+
+# top edge aligned:
+add_block u21 -150  500 -100 600
+add_block u22 -100  400 -50  600
+add_block u23  -50  300   0  600
+
+# top edge inside:
+add_block u31    0  450  50  550
+add_block u32   50  400 100  550
+add_block u33  100  350 150  550
+
+# top edge aligned to bottom edge of u0:
+add_block u41  400  200 500 400
+add_block u51  500  100 600 300
+
+add_net n11 u0.tx u11.rx
+add_net n12 u0.tx u12.rx
+add_net n13 u0.tx u13.rx
+add_net n14 u0.tx u14.rx
+add_net n15 u0.tx u15.rx
+
+add_net n21 u0.tx u21.rx
+add_net n22 u0.tx u22.rx
+add_net n23 u0.tx u23.rx
+
+add_net n31 u0.tx u31.rx
+add_net n32 u0.tx u32.rx
+add_net n33 u0.tx u33.rx
+
+add_net n41 u0.tx u41.rx
+add_net n51 u0.tx u51.rx
+
+run_bundler strict
+generate_topologies
+run_planner 1
+run_nuts
+visualize

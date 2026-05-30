@@ -1,0 +1,23 @@
+Bundler created 4 bundles.
+Generated 5 topologies for bundle 1 (u1->u2)
+Generated 5 topologies for bundle 2 (u1->u3)
+Generated 8 topologies for bundle 3 (u1->u4)
+Generated 8 topologies for bundle 4 (u2->u3)
+[Planner] Grid extended: 3 X, 3 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=5
+  M6 (H)  min_band_cap=5
+[Planner] Bundle 1 (6 units wide) -> I_H  [H→M6]  overflow=0
+[Planner] Bundle 2 (6 units wide) -> I_V  [V→M5]  overflow=0
+[Planner] Bundle 3 (6 units wide) -> L_HV@x160@y90  [H→M6 V→M5]  overflow=0
+[Planner] Bundle 4 (6 units wide) -> L_HV@x90@y90  [H→M6 V→M5]  overflow=0
+[NUTS] 6 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 0.
+[NUTS] M5: total bus width 27.0 units, spanning perpendicular interval [70.5, 169.0]
+[NUTS] M5: no local overlaps
+[NUTS] M6: total bus width 27.0 units, spanning perpendicular interval [61.0, 90.0]
+[NUTS] M6: no local overlaps
+[NUTS] Span adjustments: M5:2, M6:2
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/dnuts2_nuts.log
+[RoutingGrid] Layer 6: 10 slots, unit_pitch=18.000, signal_density=0.444, dilution=2.250
+[RoutingGrid] Layer 5: 10 slots, unit_pitch=18.000, signal_density=0.444, dilution=2.250
+[DetailedNUTS] 24 net segments placed, 0 bits unplaced.

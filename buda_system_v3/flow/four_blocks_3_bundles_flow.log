@@ -1,0 +1,19 @@
+Bundler created 3 bundles.
+Generated 5 topologies for bundle 1 (u1->u2)
+Generated 5 topologies for bundle 2 (u1->u3)
+Generated 8 topologies for bundle 3 (u1->u4)
+[Planner] Grid extended: 2 X, 2 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=20
+  M4 (H)  min_band_cap=20
+  M6 (H)  min_band_cap=20
+[Planner] Bundle 1 (1.5 units wide) -> I_H  [H→M6]  overflow=0
+[Planner] Bundle 2 (1.5 units wide) -> I_V  [V→M5]  overflow=0
+[Planner] Bundle 3 (1.5 units wide) -> L_HV@x150@y100  [H→M6 V→M5]  overflow=0
+[NUTS] 4 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 0.
+[NUTS] M5: total bus width 3.0 units, spanning perpendicular interval [74.2, 151.5]
+[NUTS] M5: no local overlaps
+[NUTS] M6: total bus width 3.0 units, spanning perpendicular interval [74.2, 100.0]
+[NUTS] M6: no local overlaps
+[NUTS] Span adjustments: M5:1, M6:1
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/four_blocks_3_bundles_nuts.log

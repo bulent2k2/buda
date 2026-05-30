@@ -1,0 +1,12 @@
+Bundler created 2 bundles.
+Generated 5 topologies for bundle 1 (u0->u22)
+Generated 8 topologies for bundle 2 (u0->u33)
+[Planner] Grid extended: 1 X, 3 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M5 (V)  min_band_cap=20
+  M4 (H)  min_band_cap=5
+[Planner] Bundle 1 (1.5 units wide) -> I_H  [H→M4]  overflow=0
+[Planner] Bundle 2 (1.5 units wide) -> I_H  [H→M4]  overflow=0
+[NUTS] 2 segments placed across 1 layer(s). Interval violations: 0, Track overlaps: 0.
+[NUTS] M4: no local overlaps
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/two_b7_b11_nuts.log

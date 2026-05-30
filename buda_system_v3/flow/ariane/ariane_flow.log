@@ -1,0 +1,35 @@
+Bundler created 9 bundles.
+Generated 6 topologies for bundle 1 (u_dcache_hi->u_lsu)
+Generated 5 topologies for bundle 2 (u_dcache_lo->u_lsu)
+Generated 3 topologies for bundle 3 (u_execute->u_frontend)
+Generated 3 topologies for bundle 4 (u_execute->u_lsu)
+Generated 3 topologies for bundle 5 (u_frontend->u_execute)
+Generated 5 topologies for bundle 6 (u_frontend->u_icache)
+Generated 5 topologies for bundle 7 (u_icache->u_frontend)
+Generated 5 topologies for bundle 8 (u_lsu->u_dcache_hi)
+Generated 5 topologies for bundle 9 (u_lsu->u_dcache_lo)
+[Planner] Grid extended: 2 X, 2 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M3 (V)  min_band_cap=2
+  M5 (V)  min_band_cap=2
+  M7 (V)  min_band_cap=2
+  M4 (H)  min_band_cap=2
+  M6 (H)  min_band_cap=2
+[Planner] Bundle 9 (36 units wide) -> I_H  [H→M6]  overflow=0
+[Planner] Bundle 7 (30 units wide) -> I_V  [V→M5]  overflow=0
+[Planner] Bundle 1 (21 units wide) -> L_VH@y117@x93  [V→M5 H→M6]  overflow=0
+[Planner] Bundle 2 (21 units wide) -> I_H  [H→M4]  overflow=0
+[Planner] Bundle 5 (15 units wide) -> I_H  [H→M6]  overflow=0
+[Planner] Bundle 6 (12 units wide) -> I_V  [V→M5]  overflow=0
+[Planner] Bundle 8 (12 units wide) -> I_V  [V→M5]  overflow=0
+[Planner] Bundle 3 (9 units wide) -> I_H  [H→M6]  overflow=0
+[Planner] Bundle 4 (9 units wide) -> I_H  [H→M6]  overflow=0
+[NUTS] 10 segments placed across 3 layer(s). Interval violations: 0, Track overlaps: 1.
+[NUTS] M4: total bus width 21.0 units, spanning perpendicular interval [57.5, 78.5]
+[NUTS] M4: no local overlaps
+[NUTS] M5: total bus width 75.0 units, spanning perpendicular interval [17.5, 136.0]
+[NUTS] M5 local overlaps: 1 → B6×B7
+[NUTS] M6: total bus width 90.0 units, spanning perpendicular interval [50.0, 117.0]
+[NUTS] M6: no local overlaps
+[NUTS] Span adjustments: M5:1, M6:1
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/ariane/ariane_nuts.log

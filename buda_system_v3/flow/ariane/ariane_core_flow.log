@@ -1,0 +1,41 @@
+Bundler created 12 bundles.
+Generated 8 topologies for bundle 1 (u_alu->u_frontend)
+Generated 8 topologies for bundle 2 (u_alu->u_issue)
+Generated 7 topologies for bundle 3 (u_alu->u_regfile)
+Generated 5 topologies for bundle 4 (u_frontend->u_id_stage)
+Generated 5 topologies for bundle 5 (u_id_stage->u_issue)
+Generated 8 topologies for bundle 6 (u_issue->u_alu)
+Generated 7 topologies for bundle 7 (u_issue->u_lsu)
+Generated 8 topologies for bundle 8 (u_issue->u_mult)
+Generated 8 topologies for bundle 9 (u_lsu->u_issue)
+Generated 7 topologies for bundle 10 (u_lsu->u_regfile)
+Generated 7 topologies for bundle 11 (u_mult->u_regfile)
+Generated 7 topologies for bundle 12 (u_regfile->u_issue)
+[Planner] Grid extended: 4 X, 2 Y points from topology candidates.
+[Planner] Layer channel capacities:
+  M3 (V)  min_band_cap=1
+  M5 (V)  min_band_cap=1
+  M7 (V)  min_band_cap=1
+  M4 (H)  min_band_cap=12
+  M6 (H)  min_band_cap=12
+[Planner] Bundle 12 (30 units wide) -> Z_HVH@x124@y22  [H→M6 V→M5 H→M6]  overflow=0
+[Planner] Bundle 5 (18 units wide) -> I_H  [H→M6]  overflow=0
+[Planner] Bundle 7 (15 units wide) -> Z_VHV@y60@x105  [V→M5 H→M6 V→M5]  overflow=0
+[Planner] Bundle 4 (12 units wide) -> I_H  [H→M6]  overflow=0
+[Planner] Bundle 6 (12 units wide) -> L_HV@x35@y40  [H→M4 V→M5]  overflow=0
+[Planner] Bundle 8 (12 units wide) -> L_VH@y80@x92  [V→M5 H→M6]  overflow=0
+[Planner] Bundle 2 (9 units wide) -> L_HV@x92@y80  [H→M4 V→M3]  overflow=0
+[Planner] Bundle 3 (9 units wide) -> L_VH@y55@x35  [V→M3 H→M6]  overflow=0
+[Planner] Bundle 9 (9 units wide) -> Z_VHV@y60@x104  [V→M5 H→M6 V→M5]  overflow=0
+[Planner] Bundle 10 (9 units wide) -> Z_HVH@x124@y80  [H→M6 V→M5 H→M6]  overflow=0
+[Planner] Bundle 11 (9 units wide) -> L_VH@y55@x78  [V→M5 H→M4]  overflow=0
+[Planner] Bundle 1 (6 units wide) -> Z_VHV@y60@x24  [V→M5 H→M6 V→M5]  overflow=0
+[NUTS] 27 segments placed across 4 layer(s). Interval violations: 5, Track overlaps: 7.
+[NUTS] M3: no local overlaps
+[NUTS] M4: no local overlaps
+[NUTS] M5 local overlaps: 6 → B7×B8, B7×B9, B7×B8, B7×B9, B8×B9, B8×B9
+[NUTS] M6 local overlaps: 1 → B3×B7
+[NUTS] Span adjustments: M3:2, M4:3, M5:5, M6:9
+NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/ariane/ariane_core_nuts.log
+[Planner] post_nuts V: short<20→M3 (5b), medium (2b), long>38→M7 (3b)
+NUTS overlap log appended to /Users/ben/src/buda/buda_system_v2/flow/ariane/ariane_core_nuts.log

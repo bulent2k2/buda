@@ -1,0 +1,23 @@
+NUTS Overlap Report — bp_tile.buda
+Generated : 2026-05-24T01:22:47
+
+[NUTS] M9: total bus width 160.9 units, spanning perpendicular interval [956.1, 2582.8]
+[NUTS] M9: no local overlaps
+[NUTS] M10: total bus width 693.0 units, spanning perpendicular interval [86.9, 1468.0]
+[NUTS] M10 local overlaps: 1 → B5×B6
+[NUTS] Span adjustments: M9:5, M10:17
+
+[NUTS] 25 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 1.
+Overlaps  : 1  (M10=1)
+
+============================================================
+  M10  —  1 overlap(s)
+============================================================
+  [  1]  B5.M10[0]  ×  B6.M10[1]
+         overlap span  [1400.0, 2285.0]  len=885.0
+         overlap perp  [615.12, 639.88]  depth=24.75  area=21903.75
+         B5.M10[0]:
+    span=[1400.0, 2285.0]  perp_center=627.50  width=24.75  → perp=[615.12, 639.88]  interval=[605.0, 650.0]
+         B6.M10[1]:
+    span=[1400.0, 2423.0]  perp_center=623.56  width=37.13  → perp=[605.00, 642.12]  interval=[605.0, 815.0]
+

@@ -1,0 +1,40 @@
+# Scenario 5 — L-shaped block with over-the-block teg_mode
+#
+# Geometry:
+#   L-block: tall arm (0,0)-(100,400)  +  wide base (0,0)-(400,100)
+#   Notch region: x=100–400, y=100–400
+#   src block:    (500,150)-(600,250)
+#
+# What to look for in the topology explorer:
+#   • All V-trunk candidates land at Hanan-grid x values: 0, 100, 400, 500, 600
+#     and at midpoints: x=50, x=250, x=450, x=550.
+#     x=300 is NOT a Hanan-grid coordinate — that is why the BDD test
+#     "TRUNK_V@x300 has a bridge segment" is xfail.
+#   • For any V trunk (e.g. TRUNK_V@x250), x=250 is inside the wide base's
+#     x range [0,400], so block L is connected "Direct" — no H stub needed
+#     and no bridge is generated (trunk_inside_any = true in C++ logic).
+#   • The OVER mode bridge would only fire when the trunk falls in an
+#     axis-aligned GAP between rects in X.  The L-shape's notch is a
+#     diagonal notch, not a simple X-direction gap, so the OVER logic
+#     never triggers.
+#
+# To extend the implementation to handle L-shapes, you would need to detect
+# cases where the trunk is inside one rect but NOT inside another rect of
+# the same block, and generate a bridge to connect the unreachable rect.
+
+add_block src 500 150 600 250
+add_block L rect 0 0 100 400 rect 0 0 400 100 teg_mode over
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+add_net clk src.tx L.rx
+
+run_bundler STRICT
+generate_topologies_for_bundle clk src L
+run_planner
+run_nuts
+
+#visualize_topologies clk
+visualize
+
