@@ -102,7 +102,22 @@ void BDB::_create_schema() {
             ref    TEXT,
             PRIMARY KEY (grp_id, kind, ref)
         );
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
     )");
+    // Load any previously persisted metadata
+    sqlite3_stmt* mq;
+    sqlite3_prepare_v2(_db, "SELECT key,value FROM meta", -1, &mq, nullptr);
+    while (sqlite3_step(mq) == SQLITE_ROW) {
+        std::string k = (const char*)sqlite3_column_text(mq, 0);
+        std::string v = (const char*)sqlite3_column_text(mq, 1);
+        if (k == "units") _units = std::stoi(v);
+        else if (k == "die_w") _die_w = std::stod(v);
+        else if (k == "die_h") _die_h = std::stod(v);
+    }
+    sqlite3_finalize(mq);
 }
 
 std::string BDB::db_path(const std::string& def_path) {
@@ -380,6 +395,20 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
             }
         }
     }
+
+    // Persist die metadata so direct .bdb opens work without re-parsing
+    sqlite3_stmt* sm;
+    sqlite3_prepare_v2(_db,
+        "INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", -1, &sm, nullptr);
+    auto save_meta = [&](const char* k, const std::string& v) {
+        sqlite3_bind_text(sm,1,k,-1,SQLITE_STATIC);
+        sqlite3_bind_text(sm,2,v.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_step(sm); sqlite3_reset(sm);
+    };
+    save_meta("units", std::to_string(_units));
+    save_meta("die_w", std::to_string(_die_w));
+    save_meta("die_h", std::to_string(_die_h));
+    sqlite3_finalize(sm);
 
     _exec("COMMIT");
     sqlite3_finalize(s_comp); sqlite3_finalize(s_net);

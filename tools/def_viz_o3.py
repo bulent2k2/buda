@@ -158,28 +158,52 @@ class DefVizV3:
 
     # ── File ops ──────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _find_lef(def_path: str) -> str:
+        """Return a LEF path for the given DEF, or '' if none found."""
+        stem = re.sub(r'\.def$', '', def_path, flags=re.IGNORECASE)
+        for c in [stem + '.lef', stem.replace('.input', '') + '.lef']:
+            if os.path.exists(c):
+                return c
+        d = os.path.dirname(def_path)
+        lefs = [f for f in sorted(os.listdir(d)) if f.lower().endswith('.lef')]
+        return os.path.join(d, lefs[0]) if len(lefs) == 1 else ''
+
     def _browse_def(self):
-        p = filedialog.askopenfilename(filetypes=[('DEF', '*.def'), ('All', '*')])
+        p = filedialog.askopenfilename(
+            filetypes=[('DEF / BDB', '*.def *.bdb'), ('All', '*')])
         if not p: return
         self._def_var.set(p)
-        d = os.path.dirname(p); stem = re.sub(r'\.def$', '', p)
-        for c in [stem+'.lef', stem.replace('.input','')+'.lef']:
-            if os.path.exists(c): self._lef_var.set(c); return
-        for f in sorted(os.listdir(d)):
-            if f.endswith('.lef'): self._lef_var.set(os.path.join(d, f)); return
+        if p.lower().endswith('.bdb'):
+            self._lef_var.set('')   # LEF not needed for direct BDB load
+            return
+        lef = self._find_lef(p)
+        if lef: self._lef_var.set(lef)
 
     def _browse_lef(self):
         p = filedialog.askopenfilename(filetypes=[('LEF', '*.lef'), ('All', '*')])
         if p: self._lef_var.set(p)
 
     def _load(self):
-        def_p = self._def_var.get().strip(); lef_p = self._lef_var.get().strip()
-        for lbl, p in [('DEF', def_p), ('LEF', lef_p)]:
-            if not p or not os.path.exists(p):
-                self._status.set(f'{lbl} not found.'); return
-        self._status.set('Parsing…'); self.root.update_idletasks()
-        try: msg = self.data.load(def_p, lef_p)
-        except Exception as e: self._status.set(f'Error: {e}'); return
+        def_p = self._def_var.get().strip()
+        lef_p = self._lef_var.get().strip()
+        if not def_p or not os.path.exists(def_p):
+            self._status.set('DEF/BDB not found.'); return
+        # Direct BDB load — no LEF required
+        if def_p.lower().endswith('.bdb'):
+            self._status.set('Loading BDB…'); self.root.update_idletasks()
+            try: msg = self.data.load_bdb(def_p)
+            except Exception as e: self._status.set(f'Error: {e}'); return
+        else:
+            # Auto-find LEF if field is empty
+            if not lef_p:
+                lef_p = self._find_lef(def_p)
+                if lef_p: self._lef_var.set(lef_p)
+            if not lef_p or not os.path.exists(lef_p):
+                self._status.set('LEF not found.'); return
+            self._status.set('Parsing…'); self.root.update_idletasks()
+            try: msg = self.data.load(def_p, lef_p)
+            except Exception as e: self._status.set(f'Error: {e}'); return
         self.selected_nets.clear(); self._sel_gid = None
         self._refresh_net_list(); self._inst_items = []; self._inst_lb.delete(0, tk.END)
         self._rebuild_grp_panel(); self._draw_canvas()
@@ -508,18 +532,19 @@ class DefVizV3:
         self._hpwl_lo_line = self._hpwl_hi_line = None
 
         sf = ttk.Frame(parent); sf.pack(fill=tk.X, padx=10, pady=2)
-        ttk.Label(sf, text='Lo (µm):').grid(row=0, column=0, sticky='w')
+        sf.columnconfigure(1, weight=1)
+        ttk.Label(sf, text='Lo (µm):').grid(row=0, column=0, sticky='w', pady=1)
         self._hpwl_lo = tk.DoubleVar(value=0.0)
         self._hpwl_lo_sc = tk.Scale(sf, variable=self._hpwl_lo, orient=tk.HORIZONTAL,
-                                     from_=0, to=200, resolution=0.5, length=170,
+                                     from_=0, to=200, resolution=0.5,
                                      command=lambda _: self._hpwl_update())
-        self._hpwl_lo_sc.grid(row=0, column=1, padx=4)
-        ttk.Label(sf, text='Hi (µm):').grid(row=0, column=2, sticky='w', padx=(8, 0))
+        self._hpwl_lo_sc.grid(row=0, column=1, sticky='ew', padx=4)
+        ttk.Label(sf, text='Hi (µm):').grid(row=1, column=0, sticky='w', pady=1)
         self._hpwl_hi = tk.DoubleVar(value=200.0)
         self._hpwl_hi_sc = tk.Scale(sf, variable=self._hpwl_hi, orient=tk.HORIZONTAL,
-                                     from_=0, to=200, resolution=0.5, length=170,
+                                     from_=0, to=200, resolution=0.5,
                                      command=lambda _: self._hpwl_update())
-        self._hpwl_hi_sc.grid(row=0, column=3, padx=4)
+        self._hpwl_hi_sc.grid(row=1, column=1, sticky='ew', padx=4)
 
         self._hpwl_count = tk.StringVar(value='—')
         ttk.Label(parent, textvariable=self._hpwl_count,
@@ -764,8 +789,14 @@ def main():
     try: root.tk.call('tk', 'scaling', 2.0)
     except Exception: pass
     app = DefVizV3(root)
-    if len(args) >= 1: app._def_var.set(os.path.abspath(args[0]))
-    if len(args) >= 2: app._lef_var.set(os.path.abspath(args[1]))
+    if len(args) >= 1:
+        def_abs = os.path.abspath(args[0])
+        app._def_var.set(def_abs)
+        if len(args) >= 2:
+            app._lef_var.set(os.path.abspath(args[1]))
+        elif not def_abs.lower().endswith('.bdb'):
+            lef = DefVizV3._find_lef(def_abs)
+            if lef: app._lef_var.set(lef)
     if len(args) >= 1 and os.path.exists(args[0]):
         root.after(200, app._load)
         if ipc_name is None:

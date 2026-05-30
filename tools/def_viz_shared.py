@@ -91,30 +91,58 @@ class DefVizData:
                 f'die {dw:.1f}×{dh:.1f} µm')
 
     def _load_via_bdb(self, def_path: str, lef_path: str):
-        """Fast load using the BDB C++ module."""
+        """Fast load using the BDB C++ module. Reuses existing .bdb if newer than .def."""
         import os as _os
         db_path = _buda_mod.BDB.db_path(def_path)
-        # Remove stale db so we always get a fresh import
-        if _os.path.exists(db_path):
-            _os.remove(db_path)
+        reuse = (
+            _os.path.exists(db_path) and
+            _os.path.getmtime(db_path) >= _os.path.getmtime(def_path)
+        )
         db = _buda_mod.BDB(db_path)
-        db.import_def_lef(def_path, lef_path)
-        db.compute_all()
+        if not reuse:
+            db.import_def_lef(def_path, lef_path)
+            db.compute_all()
+        self.bdb   = db
+        self.units = db.units()
+        self.die   = (db.die_w(), db.die_h())
+        self._build_maps_from_bdb(db)
+
+    def load_bdb(self, bdb_path: str) -> str:
+        """Load directly from an existing .bdb file (no DEF/LEF needed)."""
+        if not _BDB_AVAILABLE:
+            raise RuntimeError('buda module not built — cannot load .bdb directly')
+        self.def_path   = bdb_path
+        self.inst_info  = {}
+        self.net_insts  = {}
+        self.inst_nets  = {}
+        self.inst_roles = {}
+        self.bdb        = None
+
+        db = _buda_mod.BDB(bdb_path)
         self.bdb   = db
         self.units = db.units()
         self.die   = (db.die_w(), db.die_h())
 
-        # inst_info from component table
+        self._build_maps_from_bdb(db)
+
+        self.groups = GroupTree()
+        sc = GroupTree.sidecar_path(bdb_path)
+        if os.path.exists(sc):
+            try: self.groups.load(sc)
+            except Exception: pass
+
+        dw, dh = self.die
+        return (f'{len(self.all_nets)} nets · {len(self.inst_info)} instances · '
+                f'die {dw:.1f}×{dh:.1f} µm  [from BDB]')
+
+    def _build_maps_from_bdb(self, db):
+        """Populate inst_info, net_insts, inst_nets, inst_roles from an open BDB."""
         for c in db.all_components():
             self.inst_info[c.name] = {
                 'x1': c.x1, 'y1': c.y1, 'x2': c.x2, 'y2': c.y2, 'cell': c.cell
             }
-
-        # Build net→inst and inst→net maps from pin table
-        # Use id→name caches to avoid O(N) lookups
         net_id_name  = {n.id: n.name for n in db.all_nets()}
         comp_id_name = {c.id: c.name for c in db.all_components()}
-
         for p in db.all_pins():
             net_name  = net_id_name.get(p.net_id)
             inst_name = comp_id_name.get(p.comp_id)
@@ -126,7 +154,6 @@ class DefVizData:
             key = (net_name, inst_name)
             if key not in self.inst_roles or role == 'driver':
                 self.inst_roles[key] = role
-
         self.all_nets = sorted(net_id_name.values())
 
     def _load_via_python(self, def_path: str, lef_path: str):
