@@ -166,6 +166,10 @@ class DefVizV2:
         self._canvas.mpl_connect('button_press_event', self._on_canvas_click)
         self._canvas.mpl_connect('motion_notify_event', self._on_hover)
 
+        root.bind('<f>', lambda e: root.attributes('-fullscreen', not root.attributes('-fullscreen')))
+        root.bind('<Escape>', lambda e: root.attributes('-fullscreen', False))
+        root.bind('<q>', lambda e: root.destroy())
+
         self._status = tk.StringVar(value='Load a DEF/LEF to begin.')
         ttk.Label(root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor='w', padding=(6,2)).pack(side=tk.BOTTOM, fill=tk.X)

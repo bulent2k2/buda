@@ -176,6 +176,10 @@ class DefVizV3:
         self._canvas.mpl_connect('button_press_event', self._on_canvas_click)
         self._canvas.mpl_connect('motion_notify_event', self._on_hover)
 
+        root.bind('<f>', lambda e: root.attributes('-fullscreen', not root.attributes('-fullscreen')))
+        root.bind('<Escape>', lambda e: root.attributes('-fullscreen', False))
+        root.bind('<q>', lambda e: root.destroy())
+
     # ── File ops ──────────────────────────────────────────────────────────────
 
     @staticmethod
