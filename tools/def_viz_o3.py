@@ -134,8 +134,8 @@ class DefVizV3:
         self._inst_lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); isb.pack(side=tk.LEFT, fill=tk.Y)
         self._inst_lb.bind('<<ListboxSelect>>', self._on_inst_select)
         grp_bf = ttk.Frame(ip); grp_bf.pack(fill=tk.X, pady=(4,0))
-        ttk.Button(grp_bf, text='Add to group',  command=self._add_insts_to_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(grp_bf, text='Rm from group', command=self._rm_insts_from_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(grp_bf, text='+ grp',  command=self._add_insts_to_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(grp_bf, text='− grp',  command=self._rm_insts_from_group).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # ── Column 2: Groups (full height) ────────────────────────────────────
         gp = ttk.LabelFrame(main, text='Groups', padding=4, width=220)
