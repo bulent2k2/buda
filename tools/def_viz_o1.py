@@ -19,7 +19,7 @@ from matplotlib.figure import Figure
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
-from def_viz_shared import (DefVizData,
+from def_viz_shared import (DefVizData, bdb_is_fresh,
                              draw_die, draw_bg_instances,
                              draw_selected_instances, draw_group_boxes, fit_view)
 from group_tree import GroupTree, lighten_color
@@ -162,9 +162,11 @@ class DefVizV1:
     # ── File ops ──────────────────────────────────────────────────────────────
 
     def _browse_def(self):
-        p = filedialog.askopenfilename(filetypes=[('DEF', '*.def'), ('All', '*')])
+        p = filedialog.askopenfilename(filetypes=[('DEF / BDB', '*.def *.bdb'), ('All', '*')])
         if not p: return
         self._def_var.set(p)
+        if p.lower().endswith('.bdb'):
+            self._lef_var.set(''); return
         d = os.path.dirname(p)
         stem = re.sub(r'\.def$', '', p)
         for c in [stem + '.lef', stem.replace('.input','') + '.lef']:
@@ -179,14 +181,27 @@ class DefVizV1:
     def _load(self):
         def_p = self._def_var.get().strip()
         lef_p = self._lef_var.get().strip()
-        for lbl, p in [('DEF', def_p), ('LEF', lef_p)]:
-            if not p or not os.path.exists(p):
-                self._status.set(f'{lbl} not found.'); return
-        self._status.set('Parsing…'); self.root.update_idletasks()
-        try:
-            msg = self.data.load(def_p, lef_p)
-        except Exception as e:
-            self._status.set(f'Error: {e}'); return
+        if not def_p or not os.path.exists(def_p):
+            self._status.set('DEF not found.'); return
+        if def_p.lower().endswith('.bdb'):
+            self._status.set('Loading BDB…'); self.root.update_idletasks()
+            try: msg = self.data.load_bdb(def_p)
+            except Exception as e: self._status.set(f'Error: {e}'); return
+        else:
+            if not lef_p:
+                d = os.path.dirname(def_p); stem = re.sub(r'\.def$', '', def_p)
+                for c in [stem + '.lef', stem.replace('.input', '') + '.lef']:
+                    if os.path.exists(c): lef_p = c; self._lef_var.set(c); break
+                if not lef_p:
+                    lefs = [f for f in sorted(os.listdir(d)) if f.lower().endswith('.lef')]
+                    if len(lefs) == 1: lef_p = os.path.join(d, lefs[0]); self._lef_var.set(lef_p)
+            if not lef_p or not os.path.exists(lef_p):
+                if not bdb_is_fresh(def_p):
+                    self._status.set('LEF not found.'); return
+                lef_p = ''
+            self._status.set('Parsing…'); self.root.update_idletasks()
+            try: msg = self.data.load(def_p, lef_p)
+            except Exception as e: self._status.set(f'Error: {e}'); return
         self.selected_nets.clear(); self._hl_active = False
         self._refresh_net_list()
         self._inst_items = []; self._inst_lb.delete(0, tk.END)
@@ -502,8 +517,13 @@ def main():
     try: root.tk.call('tk', 'scaling', 2.0)
     except Exception: pass
     app = DefVizV1(root)
-    if len(args) >= 1: app._def_var.set(os.path.abspath(args[0]))
-    if len(args) >= 2: app._lef_var.set(os.path.abspath(args[1]))
+    if len(args) >= 1:
+        def_abs = os.path.abspath(args[0])
+        app._def_var.set(def_abs)
+        if len(args) >= 2:
+            app._lef_var.set(os.path.abspath(args[1]))
+        elif def_abs.lower().endswith('.bdb'):
+            app._lef_var.set('')
     if len(args) >= 1 and os.path.exists(args[0]):
         root.after(200, app._load)
         if ipc_name is None:

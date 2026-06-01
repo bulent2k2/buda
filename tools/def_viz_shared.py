@@ -25,6 +25,15 @@ except ImportError:
     _buda_mod = None
     _BDB_AVAILABLE = False
 
+
+def bdb_is_fresh(def_path: str) -> bool:
+    """Return True if a up-to-date .bdb already exists for def_path (no LEF needed)."""
+    if not _BDB_AVAILABLE:
+        return False
+    db_path = _buda_mod.BDB.db_path(def_path)
+    return (os.path.exists(db_path) and
+            os.path.getmtime(db_path) >= os.path.getmtime(def_path))
+
 # ── Palette ───────────────────────────────────────────────────────────────────
 _C_DRIVER   = '#FF8C66'
 _C_RECEIVER = '#66AAFF'
