@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <unordered_set>
+#include <functional>
 
 namespace buda {
 
@@ -132,6 +134,18 @@ double BDB::die_h() const { return _die_h; }
 // ── LEF parsers ───────────────────────────────────────────────────────────────
 // Both parsers use a line-by-line state machine — std::regex multiline flag
 // only affects ^ / $ anchors, NOT '.', so whole-file regex cannot span lines.
+
+// Strip DEF escaping (\[ and \]) so names match Verilog-elaborated paths
+static std::string normalize_def_name(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\\' && i+1 < s.size() && (s[i+1]=='[' || s[i+1]==']'))
+            continue;
+        out += s[i];
+    }
+    return out;
+}
 
 static std::vector<std::string> split_ws(const std::string& s) {
     std::istringstream ss(s);
@@ -319,7 +333,7 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
         if (state == State::IN_COMPONENTS) {
             std::smatch m;
             if (!std::regex_search(line, m, comp_re)) continue;
-            std::string inst=m[1], cell=m[2];
+            std::string inst=normalize_def_name(m[1]), cell=m[2];
             double x1 = std::stoi(m[3]) / double(_units);
             double y1 = std::stoi(m[4]) / double(_units);
             double w=0.5, h=0.5;
@@ -560,8 +574,365 @@ std::vector<std::string> BDB::common_nets(const std::string& gid1,
     return names;
 }
 
-// ── Stub impls ────────────────────────────────────────────────────────────────
-void BDB::import_verilog(const std::string&) {}
+// ── Verilog importer ──────────────────────────────────────────────────────────
+//
+// Parses a gate-level Verilog netlist and populates component/net/pin tables.
+// Designed for Cadence Genus synthesis output (ariane, nvdla, mempool_tile, etc.).
+//
+// Strategy: record only "interesting" instances — those whose cell type is itself
+// a defined module (hierarchical), or whose instance name uses Verilog escaped
+// identifier syntax (\name<sp>), which Genus uses for macro instances like
+// \macro_mem[0].i_ram.  Standard cells (INV_X1 g94) are silently dropped.
+//
+// Net scoping: each net gets a fully-qualified name using the elaborated
+// instance path as a prefix (e.g. "i_cache_subsystem/i_icache/clk_i").
+// Port connections propagate the parent-scope net name down to child modules so
+// that the same physical wire has one canonical name across all hierarchy levels.
+//
+// Merge behaviour: does NOT clear the component table, so DEF-loaded placement
+// coordinates survive.  Clears net/pin tables first (safe to call after
+// import_def_lef).
+
+void BDB::import_verilog(const std::string& v_path) {
+
+    // ── Phase 1: collect defined module names (one fast pass) ────────────────
+    // Also keep definition order: the top module is typically defined last.
+    std::unordered_set<std::string> defined_mods;
+    std::vector<std::string>        defined_order; // preserves file order
+    {
+        std::ifstream f(v_path);
+        if (!f) throw std::runtime_error("BDB: cannot open: " + v_path);
+        std::string line;
+        while (std::getline(f, line)) {
+            auto tok = split_ws(line);
+            if (tok.size() >= 2 && tok[0] == "module") {
+                std::string nm = tok[1];
+                auto p = nm.find('(');
+                if (p != std::string::npos) nm.resize(p);
+                if (!nm.empty() && !defined_mods.count(nm)) {
+                    defined_mods.insert(nm);
+                    defined_order.push_back(nm);
+                }
+            }
+        }
+    }
+
+    // ── local helpers ─────────────────────────────────────────────────────────
+
+    // Extract simple net name from a port-map value expression.
+    // Skips constants, concatenations, UNCONNECTED stubs; strips bit selects.
+    auto clean_net = [](const std::string& expr) -> std::string {
+        std::string e = expr;
+        while (!e.empty() && std::isspace((unsigned char)e.front())) e.erase(e.begin());
+        while (!e.empty() && std::isspace((unsigned char)e.back()))  e.pop_back();
+        if (e.empty() || std::isdigit((unsigned char)e[0]) || e[0] == '{') return "";
+        if (e[0] == '\\') e.erase(e.begin());   // strip verilog escape prefix
+        auto br = e.find('[');
+        if (br != std::string::npos) e.resize(br);
+        while (!e.empty() && std::isspace((unsigned char)e.back())) e.pop_back();
+        if (e.size() >= 11 && e.substr(0,11) == "UNCONNECTED") return "";
+        return e;
+    };
+
+    // Parse ".port (net), ..." text → vector of (port, net) pairs
+    auto parse_portmap = [&](const std::string& text)
+        -> std::vector<std::pair<std::string,std::string>>
+    {
+        std::vector<std::pair<std::string,std::string>> result;
+        size_t i = 0, sz = text.size();
+        while (i < sz) {
+            if (text[i] != '.') { ++i; continue; }
+            ++i;
+            // port name (plain or \escaped)
+            std::string port;
+            if (i < sz && text[i] == '\\') {
+                ++i;
+                size_t j = i;
+                while (j < sz && text[j] != '(' && !std::isspace((unsigned char)text[j])) ++j;
+                port = text.substr(i, j - i);
+                i = j;
+            } else {
+                size_t j = i;
+                while (j < sz && text[j] != '(' && text[j] != ',' &&
+                       !std::isspace((unsigned char)text[j])) ++j;
+                port = text.substr(i, j - i);
+                i = j;
+            }
+            while (i < sz && text[i] != '(') ++i;
+            if (i >= sz) break;
+            ++i;
+            // find matching ')'
+            int depth = 1; size_t k = i;
+            while (k < sz && depth > 0) {
+                if (text[k] == '(') ++depth;
+                else if (text[k] == ')') --depth;
+                ++k;
+            }
+            std::string net = clean_net(text.substr(i, k - i - 1));
+            if (!port.empty() && !net.empty())
+                result.emplace_back(port, net);
+            i = k;
+        }
+        return result;
+    };
+
+    // ── Phase 2: parse module bodies ─────────────────────────────────────────
+
+    struct VInst {
+        std::string cell, name;   // cell type, instance name (both unescaped)
+        std::vector<std::pair<std::string,std::string>> portmap;
+    };
+    struct VMod { std::vector<VInst> insts; };
+    std::unordered_map<std::string, VMod> mod_lib;
+
+    static const std::unordered_set<std::string> kws = {
+        "input","output","inout","wire","reg","assign","parameter","localparam",
+        "always","initial","begin","end","if","else","case","casez","casex",
+        "default","task","function","generate","endgenerate","for","while",
+        "repeat","posedge","negedge","integer","real","time","event",
+        "supply0","supply1","tri","genvar","defparam","specify","endspecify",
+        "table","endtable","primitive","endprimitive","fork","join"
+    };
+
+    {
+        std::ifstream f(v_path);
+        std::string line, cur_mod, accum;
+        bool in_header = false, in_body = false, accumulating = false;
+
+        // Process a complete accumulated instance text
+        auto finish_inst = [&](const std::string& text) {
+            size_t i = 0, sz = text.size();
+            while (i < sz && std::isspace((unsigned char)text[i])) ++i;
+            // cell type
+            std::string cell;
+            bool esc_cell = (i < sz && text[i] == '\\');
+            if (esc_cell) {
+                ++i;
+                size_t j = i;
+                while (j < sz && !std::isspace((unsigned char)text[j])) ++j;
+                cell = text.substr(i, j - i); i = j;
+            } else {
+                size_t j = i;
+                while (j < sz && !std::isspace((unsigned char)text[j]) && text[j] != '(') ++j;
+                cell = text.substr(i, j - i); i = j;
+            }
+            while (i < sz && std::isspace((unsigned char)text[i])) ++i;
+            // instance name
+            std::string inst_nm;
+            bool esc_inst = (i < sz && text[i] == '\\');
+            if (esc_inst) {
+                ++i;
+                size_t j = i;
+                while (j < sz && !std::isspace((unsigned char)text[j])) ++j;
+                inst_nm = text.substr(i, j - i); i = j;
+            } else {
+                size_t j = i;
+                while (j < sz && !std::isspace((unsigned char)text[j]) && text[j] != '(') ++j;
+                inst_nm = text.substr(i, j - i); i = j;
+            }
+            if (cell.empty() || inst_nm.empty()) return;
+            bool is_defined = defined_mods.count(cell);
+            // Skip standard cells: cell not a defined module AND inst name unescaped
+            if (!is_defined && !esc_inst) return;
+            // Skip uppercase standard cells even with escaped instance names
+            // (e.g. "DFFR_X1 \arb_sel_q_reg[0]" in Genus output).
+            // Real macros (fakeram45_*, etc.) contain lowercase letters.
+            if (!is_defined && esc_inst) {
+                bool has_lower = false;
+                for (char c : cell) if (std::islower((unsigned char)c)) { has_lower=true; break; }
+                if (!has_lower) return;
+            }
+            while (i < sz && text[i] != '(') ++i;
+            VInst vi{ cell, inst_nm, {} };
+            if (i < sz) vi.portmap = parse_portmap(text.substr(i));
+            mod_lib[cur_mod].insts.push_back(std::move(vi));
+        };
+
+        while (std::getline(f, line)) {
+            // strip // comments
+            auto ci = line.find("//");
+            if (ci != std::string::npos) line.resize(ci);
+
+            if (!in_body && !in_header) {
+                auto tok = split_ws(line);
+                if (tok.size() >= 2 && tok[0] == "module") {
+                    std::string nm = tok[1];
+                    auto p = nm.find('('); if (p != std::string::npos) nm.resize(p);
+                    cur_mod = nm;
+                    mod_lib.emplace(cur_mod, VMod{});
+                    if (line.find(';') != std::string::npos) in_body = true;
+                    else in_header = true;
+                }
+                continue;
+            }
+            if (in_header) {
+                if (line.find(';') != std::string::npos) { in_header = false; in_body = true; }
+                continue;
+            }
+
+            // ── in module body ────────────────────────────────────────────────
+            if (line.find("endmodule") != std::string::npos) {
+                if (accumulating) { finish_inst(accum); accum.clear(); accumulating = false; }
+                in_body = false; cur_mod.clear(); continue;
+            }
+            if (accumulating) {
+                accum += ' '; accum += line;
+                std::string trimmed = line;
+                while (!trimmed.empty() && std::isspace((unsigned char)trimmed.back()))
+                    trimmed.pop_back();
+                if (!trimmed.empty() && trimmed.back() == ';') {
+                    // ends with ); → complete instance; ends with just ; → discard
+                    if (trimmed.size() >= 2 && trimmed[trimmed.size()-2] == ')')
+                        finish_inst(accum);
+                    accum.clear(); accumulating = false;
+                }
+                continue;
+            }
+            // Check if line could start an instance declaration
+            auto tok = split_ws(line);
+            if (tok.empty() || kws.count(tok[0])) continue;
+            accum = line;
+            std::string trimmed = line;
+            while (!trimmed.empty() && std::isspace((unsigned char)trimmed.back()))
+                trimmed.pop_back();
+            if (!trimmed.empty() && trimmed.back() == ';') {
+                if (trimmed.size() >= 2 && trimmed[trimmed.size()-2] == ')')
+                    finish_inst(accum);
+                accum.clear();
+            } else {
+                accumulating = true;
+            }
+        }
+        if (accumulating && !accum.empty()) { finish_inst(accum); accum.clear(); }
+    }
+
+    // ── Phase 3: find top module ──────────────────────────────────────────────
+    // The top module is the one never instantiated by any other module.
+    // There may be multiple (unused utility modules); pick the LAST one in the
+    // file — by convention Genus places the top module at the end of the netlist.
+    std::string top_mod;
+    {
+        std::unordered_set<std::string> instantiated;
+        for (auto& [mn, mod] : mod_lib)
+            for (auto& vi : mod.insts)
+                instantiated.insert(vi.cell);
+        for (auto it = defined_order.rbegin(); it != defined_order.rend(); ++it)
+            if (!instantiated.count(*it)) { top_mod = *it; break; }
+    }
+    if (top_mod.empty()) return;
+
+    // ── Phase 4: elaborate hierarchy → BDB ───────────────────────────────────
+    // Preserve component placement from any prior import_def_lef call.
+    // Clear only net/pin tables.
+    _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net;");
+
+    sqlite3_stmt *s_comp=nullptr, *s_net=nullptr, *s_pin=nullptr, *s_np=nullptr;
+    // UPSERT: keep existing x1/y1/x2/y2 (from DEF), update hierarchy fields
+    sqlite3_prepare_v2(_db, R"(
+        INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf)
+        VALUES(?,?,?,?,-1,-1,-1,-1,?)
+        ON CONFLICT(name) DO UPDATE SET
+          cell=excluded.cell, parent_id=excluded.parent_id,
+          depth=excluded.depth, is_leaf=excluded.is_leaf
+    )", -1, &s_comp, nullptr);
+    sqlite3_prepare_v2(_db, "INSERT OR IGNORE INTO net(name) VALUES(?)",
+                       -1, &s_net, nullptr);
+    sqlite3_prepare_v2(_db,
+        "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
+        " VALUES(?,?,?,?,?,?)", -1, &s_pin, nullptr);
+    sqlite3_prepare_v2(_db,
+        "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)", -1, &s_np, nullptr);
+
+    _exec("BEGIN");
+
+    std::unordered_map<std::string,int> comp_ids, net_ids;
+
+    auto upsert_comp = [&](const std::string& path, const std::string& cell,
+                           int par_id, int depth, bool is_leaf) -> int {
+        sqlite3_bind_text(s_comp,1,path.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_bind_text(s_comp,2,cell.c_str(),-1,SQLITE_TRANSIENT);
+        if (par_id >= 0) sqlite3_bind_int(s_comp,3,par_id);
+        else             sqlite3_bind_null(s_comp,3);
+        sqlite3_bind_int(s_comp,4,depth);
+        sqlite3_bind_int(s_comp,5,is_leaf ? 1 : 0);
+        sqlite3_step(s_comp); sqlite3_reset(s_comp);
+        int id = (int)sqlite3_last_insert_rowid(_db);
+        // last_insert_rowid returns 0 on conflict-update (row existed); need SELECT
+        if (id == 0) {
+            sqlite3_stmt* q;
+            sqlite3_prepare_v2(_db,"SELECT id FROM component WHERE name=?",-1,&q,nullptr);
+            sqlite3_bind_text(q,1,path.c_str(),-1,SQLITE_TRANSIENT);
+            if (sqlite3_step(q) == SQLITE_ROW) id = sqlite3_column_int(q,0);
+            sqlite3_finalize(q);
+        }
+        comp_ids[path] = id;
+        return id;
+    };
+
+    auto get_net = [&](const std::string& name) -> int {
+        auto it = net_ids.find(name);
+        if (it != net_ids.end()) return it->second;
+        sqlite3_bind_text(s_net,1,name.c_str(),-1,SQLITE_TRANSIENT);
+        sqlite3_step(s_net);
+        int id = (int)sqlite3_last_insert_rowid(_db);
+        sqlite3_reset(s_net);
+        sqlite3_bind_int(s_np,1,id); sqlite3_step(s_np); sqlite3_reset(s_np);
+        net_ids[name] = id;
+        return id;
+    };
+
+    // Recursive elaboration.
+    // ctx maps (local wire name → fully-qualified root-scope net name)
+    // so port connections propagate the parent net name into child scopes.
+    using Ctx = std::unordered_map<std::string,std::string>;
+
+    std::function<void(const std::string&, const std::string&, int, int, const Ctx&)>
+    elaborate = [&](const std::string& mod_nm, const std::string& path,
+                    int par_id, int depth, const Ctx& ctx)
+    {
+        auto mit = mod_lib.find(mod_nm);
+        if (mit == mod_lib.end()) return;
+
+        for (auto& vi : mit->second.insts) {
+            bool is_leaf = !defined_mods.count(vi.cell);
+            // Instance path uses unescaped name (matches DEF convention)
+            std::string inst_path = path.empty() ? vi.name : path + "/" + vi.name;
+
+            int cid = upsert_comp(inst_path, vi.cell, par_id, depth, is_leaf);
+
+            // Build child context and create pin records
+            Ctx child_ctx;
+            for (auto& [port, local_net] : vi.portmap) {
+                // Resolve local_net through current ctx (port connections from parent)
+                auto it = ctx.find(local_net);
+                std::string qnet = (it != ctx.end())
+                    ? it->second
+                    : (path.empty() ? local_net : path + "/" + local_net);
+
+                child_ctx[port] = qnet;
+
+                int nid = get_net(qnet);
+                if (nid <= 0 || cid <= 0) continue;
+                sqlite3_bind_int   (s_pin,1,nid);
+                sqlite3_bind_int   (s_pin,2,cid);
+                sqlite3_bind_text  (s_pin,3,port.c_str(),-1,SQLITE_TRANSIENT);
+                sqlite3_bind_text  (s_pin,4,"UNKNOWN",-1,SQLITE_STATIC);
+                sqlite3_bind_double(s_pin,5,-1.0);
+                sqlite3_bind_double(s_pin,6,-1.0);
+                sqlite3_step(s_pin); sqlite3_reset(s_pin);
+            }
+
+            if (!is_leaf)
+                elaborate(vi.cell, inst_path, cid, depth + 1, child_ctx);
+        }
+    };
+
+    elaborate(top_mod, "", -1, 0, {});
+    _exec("COMMIT");
+
+    sqlite3_finalize(s_comp); sqlite3_finalize(s_net);
+    sqlite3_finalize(s_pin);  sqlite3_finalize(s_np);
+}
 std::vector<BustermRow>  BDB::all_busterms() const { return {}; }
 std::vector<BundleRow>   BDB::all_bundles()   const { return {}; }
 

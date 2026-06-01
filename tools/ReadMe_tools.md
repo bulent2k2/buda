@@ -1,6 +1,11 @@
 # Clustering and DEF Visualization tools
 
+[Also see research doc](../docs/research.md)
+
+## Some quick commands:
 > cd ~/src/buda
+> python3 tools/def_viz_o3.py chip_designs/ariane136/ariane136.bdb
+> python3 tools/def_viz_o3.py chip_designs/ariane136/ariane136_fp_placed_macros.bdb &
 > python3 tools/def_viz.py flow/lefdef/gcd/gcd.def flow/lefdef/gcd/Nangate45.lef &
 
 First Buda viz:
@@ -49,8 +54,6 @@ Terminal 1 — buda_viz:
   u3 in def_viz → bundles b2, b3, b4 (all touching u3) highlight in buda_viz.
 
 ## ispd19 test1
-
-
 
   Setup — two terminal windows
 

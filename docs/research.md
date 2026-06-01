@@ -1,3 +1,5 @@
+[Also see tools info](../tools/ReadMe_tools.md)
+
 Open-source hierarchical HDL vehicles found
 ====
 - MemPool Group (ETH Zürich, ISPD24 benchmark) — best fit. Three-level hierarchy: Tile 
@@ -494,3 +496,57 @@ D-NUTS failure analysis — test1 deep dive
   - Downstream: if an interval holds fewer tracks than bit_width, D-NUTS could attempt a
     "split-and-route" — place as many bits as the interval allows and defer the rest to an
     adjacent interval, at the cost of introducing a jog in the bit-wire fan-out
+
+
+New hier designs for BDB (.v + def) 2026.05.31
+====
+⏺ The floorplan DEFs only contain macro placement and I/O port pin declarations (no signal nets inside), which is correct — these are contest inputs for macro placement. Port pins aren't showing up
+  because our PINS parser looks for net-connected pins rather than the DEF port declarations. Still very useful for macro layout visualization.
+
+  All 5 designs + 15 LEF files downloaded successfully:
+
+  ┌───────────────┬────────┬──────────────┬───────────┐
+  │    Design     │ Macros │   Die size   │ Load time │
+  ├───────────────┼────────┼──────────────┼───────────┤
+  │ ariane136     │ 136    │ 1720×1720 µm │ 79ms      │
+  ├───────────────┼────────┼──────────────┼───────────┤
+  │ bp_quad       │ 220    │ 2907×2906 µm │ 96ms      │
+  ├───────────────┼────────┼──────────────┼───────────┤
+  │ mempool_tile  │ 20     │ 900×900 µm   │ 98ms      │
+  ├───────────────┼────────┼──────────────┼───────────┤
+  │ nvdla         │ 128    │ 2354×2353 µm │ 101ms     │
+  ├───────────────┼────────┼──────────────┼───────────┤
+  │ mempool_group │ 324    │ 3384×3381 µm │ 602ms     │
+  └───────────────┴────────┴──────────────┴───────────┘
+  
+  To open any of them in def_viz_o3:
+  cd /Users/ben/src/buda
+  python3 tools/def_viz_o3.py \
+    ~/chip_designs/ariane136/ariane136_fp_placed_macros.def \
+    ~/chip_designs/lef_ng45/NangateOpenCellLibrary.macro.mod.lef
+
+  python3 tools/def_viz_o3.py \
+    ~/chip_designs/mempool_tile/
+	
+⏺ All four are gate-level netlists (Cadence Genus synthesis output — wire declarations + standard-cell instantiations). Here's the complete picture:
+  
+  ┌───────────────┬────────────────────┬────────────────────────┬─────────┬───────┬─────────────────────────────┐
+  │    Design     │        Type        │          File          │ Modules │ Lines │            Notes            │
+  ├───────────────┼────────────────────┼────────────────────────┼─────────┼───────┼─────────────────────────────┤
+  │ ariane136     │ Gate-level netlist │ ariane.v               │ 83      │ 251K  │ RISC-V 5-wide superscalar   │
+  ├───────────────┼────────────────────┼────────────────────────┼─────────┼───────┼─────────────────────────────┤
+  │ nvdla         │ Gate-level netlist │ NV_NVDLA_partition_c.v │ 296     │ 369K  │ NVIDIA DLA partition        │
+  ├───────────────┼────────────────────┼────────────────────────┼─────────┼───────┼─────────────────────────────┤
+  │ mempool_tile  │ Gate-level netlist │ mempool_tile_wrap.v    │ 632     │ 336K  │ MemPool tile (×16 in group) │
+  ├───────────────┼────────────────────┼────────────────────────┼─────────┼───────┼─────────────────────────────┤
+  │ bp_quad       │ Gate-level netlist │ bsg_chip_block.sv2v.v  │ 494     │ 404K  │ BlackParrot quad-core       │
+  ├───────────────┼────────────────────┼────────────────────────┼─────────┼───────┼─────────────────────────────┤
+  │ mempool_group │ —                  │ (no netlist in repo)   │ —       │ —     │ Use mempool_tile ×16        │
+  └───────────────┴────────────────────┴────────────────────────┴─────────┴───────┴─────────────────────────────┘
+
+  All ready in ~/chip_designs/. To use with BUDA's import_verilog, you'd pair e.g.:
+  ariane.v  +  ariane136_fp_placed_macros.def  (DEF gives physical placement, V gives net connectivity)
+  
+  Want to wire up BDB's import_verilog() to actually parse these, or test def_viz first with the placement-only DEFs to verify the macro visualization?
+
+	
