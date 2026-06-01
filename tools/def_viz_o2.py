@@ -41,7 +41,8 @@ class DefVizV2:
         self._patch_group  = {}
         self._hover_ann    = None
         self._updating     = False
-        self._show_all_bg  = tk.BooleanVar(value=False)
+        self._depth_var    = tk.IntVar(value=0)
+        self._hl_active    = False
 
         # Breadcrumb nav state: list of group ids; empty = root level
         self._nav_path: list[str] = []
@@ -87,8 +88,15 @@ class DefVizV2:
         self._net_lb.configure(yscrollcommand=nsb.set); self._net_lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True); nsb.pack(side=tk.LEFT, fill=tk.Y)
         self._net_lb.bind('<<ListboxSelect>>', self._on_net_select)
         ttk.Button(np, text='Clear selection', command=self._clear_selection).pack(fill=tk.X, pady=(4,0))
-        ttk.Checkbutton(np, text='Show all instances',
-                        variable=self._show_all_bg, command=self._draw_canvas).pack(anchor='w', pady=(2,0))
+        depth_f = ttk.Frame(np); depth_f.pack(fill=tk.X, pady=(4,0))
+        ttk.Label(depth_f, text='Depth:').pack(side=tk.LEFT)
+        self._depth_sb = ttk.Spinbox(depth_f, textvariable=self._depth_var,
+                                      from_=0, to=10, width=4,
+                                      command=self._draw_canvas)
+        self._depth_sb.pack(side=tk.LEFT, padx=4)
+        self._depth_sb.bind('<Return>', lambda _: self._draw_canvas())
+        self._depth_sb.bind('<FocusOut>', lambda _: self._draw_canvas())
+        ttk.Button(np, text='Highlight Nets', command=self._highlight_nets).pack(fill=tk.X, pady=(2,0))
 
         # ── Inst panel ────────────────────────────────────────────────────────
         ip = ttk.LabelFrame(main, text='Instances', padding=4, width=200)
@@ -186,8 +194,12 @@ class DefVizV2:
         self._status.set('Parsing…'); self.root.update_idletasks()
         try: msg = self.data.load(def_p, lef_p)
         except Exception as e: self._status.set(f'Error: {e}'); return
-        self.selected_nets.clear(); self._nav_path = []; self._sel_gid = None
+        self.selected_nets.clear(); self._nav_path = []; self._sel_gid = None; self._hl_active = False
         self._refresh_net_list(); self._inst_items = []; self._inst_lb.delete(0, tk.END)
+        depths = self.data.available_depths()
+        if depths:
+            self._depth_sb.configure(from_=min(depths), to=max(depths))
+            self._depth_var.set(max(depths))
         self._refresh_grp_nav(); self._draw_canvas()
         self._status.set(f'Loaded: {msg}')
         if self._pending_ipc_msg is not None:
@@ -215,11 +227,13 @@ class DefVizV2:
         if self._updating: return
         self.selected_nets = {self._net_items[i] for i in self._net_lb.curselection()
                               if i < len(self._net_items)}
-        self._refresh_inst_list(); self._draw_canvas()
+        self._hl_active = False
+        self._refresh_inst_list()
 
     def _clear_selection(self):
         self.selected_nets.clear(); self._net_lb.selection_clear(0, tk.END)
-        self._inst_items = []; self._inst_lb.delete(0, tk.END); self._draw_canvas()
+        self._inst_items = []; self._inst_lb.delete(0, tk.END)
+        self._hl_active = False; self._draw_canvas()
         if getattr(self, '_ipc', None):
             self._ipc.send({'type': 'clear'})
 
@@ -245,6 +259,7 @@ class DefVizV2:
             for i, n in enumerate(self._net_items):
                 if n in self.selected_nets: self._net_lb.selection_set(i)
         finally: self._updating = False
+        self._hl_active = True
         self._refresh_inst_list(); self._draw_canvas()
         if getattr(self, '_ipc', None) and sel:
             self._ipc.send({'type': 'select_inst', 'inst_names': sorted(sel)})
@@ -270,6 +285,7 @@ class DefVizV2:
                         self._net_lb.selection_set(i)
             finally:
                 self._updating = False
+            self._hl_active = True
             self._refresh_inst_list(); self._draw_canvas()
         elif kind == 'clear':
             if self.selected_nets:
@@ -396,14 +412,23 @@ class DefVizV2:
             self.data.groups.remove_member(self._sel_gid, kind, ref)
         self._refresh_contents(); self._draw_canvas()
 
+    def _highlight_nets(self):
+        if not self.selected_nets:
+            self._status.set('Select nets first.'); return
+        self._hl_active = True
+        self._draw_canvas()
+
     # ── Canvas ────────────────────────────────────────────────────────────────
 
     def _draw_canvas(self):
         ax = self._ax; ax.clear()
         self._patch_inst.clear(); self._patch_group.clear(); self._hover_ann = None
         draw_die(ax, self.data.die)
-        if self._show_all_bg.get(): draw_bg_instances(ax, self.data.inst_info)
-        vis = set(self.data.visible_insts(self.selected_nets))
+        depth = self._depth_var.get()
+        depth_insts = {k: v for k, v in self.data.inst_info.items() if v.get('depth') == depth}
+        if depth_insts:
+            draw_bg_instances(ax, depth_insts)
+        vis = set(self.data.visible_insts(self.selected_nets)) if self._hl_active else set()
         inst_highlight = None
         if self._sel_gid:
             direct, net_reached = self.data.group_highlight(self._sel_gid)
@@ -417,10 +442,14 @@ class DefVizV2:
                                                      inst_highlight=inst_highlight)
         self._patch_group = draw_group_boxes(ax, self.data.groups, self.data.inst_info,
                                              highlight_id=self._sel_gid)
-        fit_view(ax, sorted(vis), self.data.inst_info, self.data.die, full_die=self._show_all_bg.get())
+        fit_view(ax, sorted(vis), self.data.inst_info, self.data.die, full_die=not vis)
         ax.set_aspect('equal')
-        ax.set_title(f'{len(vis)} inst(s) · {len(self.selected_nets)} net(s) · '
-                     f'{len(self.data.groups)} group(s)', fontsize=11)
+        parts = [f'depth={depth}: {len(depth_insts)} bg inst(s)']
+        if self._hl_active and vis:
+            parts.append(f'{len(vis)} highlighted')
+        if self.data.groups:
+            parts.append(f'{len(self.data.groups)} group(s)')
+        ax.set_title('  ·  '.join(parts), fontsize=11)
         self._canvas.draw_idle()
 
     def _on_canvas_click(self, event):

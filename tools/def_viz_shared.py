@@ -137,12 +137,39 @@ class DefVizData:
 
     def _build_maps_from_bdb(self, db):
         """Populate inst_info, net_insts, inst_nets, inst_roles from an open BDB."""
-        for c in db.all_components():
+        comps = db.all_components()
+
+        # Bottom-up bbox propagation: intermediate hierarchy nodes from import_verilog
+        # get placeholder coords (-1). Compute their bbox from placed leaf descendants.
+        children = {}  # id -> [child_id]
+        for c in comps:
+            if c.parent_id is not None:
+                children.setdefault(c.parent_id, []).append(c.id)
+        computed = {}  # id -> (x1, y1, x2, y2)
+        max_depth = max((c.depth for c in comps), default=0)
+        for d in range(max_depth, -1, -1):
+            for c in comps:
+                if c.depth != d:
+                    continue
+                if c.x1 > 0:
+                    computed[c.id] = (c.x1, c.y1, c.x2, c.y2)
+                else:
+                    kids = [computed[cid] for cid in children.get(c.id, []) if cid in computed]
+                    if kids:
+                        computed[c.id] = (min(b[0] for b in kids), min(b[1] for b in kids),
+                                          max(b[2] for b in kids), max(b[3] for b in kids))
+
+        for c in comps:
+            bbox = computed.get(c.id)
+            if bbox is None:
+                continue
             self.inst_info[c.name] = {
-                'x1': c.x1, 'y1': c.y1, 'x2': c.x2, 'y2': c.y2, 'cell': c.cell
+                'x1': bbox[0], 'y1': bbox[1], 'x2': bbox[2], 'y2': bbox[3],
+                'cell': c.cell, 'depth': c.depth,
             }
+
         net_id_name  = {n.id: n.name for n in db.all_nets()}
-        comp_id_name = {c.id: c.name for c in db.all_components()}
+        comp_id_name = {c.id: c.name for c in comps}
         for p in db.all_pins():
             net_name  = net_id_name.get(p.net_id)
             inst_name = comp_id_name.get(p.comp_id)
@@ -175,7 +202,7 @@ class DefVizData:
                 y1 = dy / units
                 w, h = cell_sizes.get(cell, (0.5, 0.5))
                 self.inst_info[inst] = {
-                    'x1': x1, 'y1': y1, 'x2': x1 + w, 'y2': y1 + h, 'cell': cell
+                    'x1': x1, 'y1': y1, 'x2': x1 + w, 'y2': y1 + h, 'cell': cell, 'depth': 0
                 }
                 inst_set.add(inst)
                 pin_dir = 'UNKNOWN'
@@ -292,6 +319,16 @@ class DefVizData:
             net_reached |= self.net_insts.get(net, set())
         net_reached -= direct
         return direct, net_reached
+
+    def available_depths(self) -> list:
+        """Sorted list of distinct depth values present in inst_info."""
+        depths = {info['depth'] for info in self.inst_info.values() if 'depth' in info}
+        return sorted(depths)
+
+    def insts_at_depth(self, depth: int) -> list:
+        """Sorted list of instance names at the given hierarchy depth."""
+        return sorted(inst for inst, info in self.inst_info.items()
+                      if info.get('depth') == depth)
 
 
 # ── Canvas drawing helpers ────────────────────────────────────────────────────
