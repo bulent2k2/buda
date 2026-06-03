@@ -1250,6 +1250,7 @@ class BudaVisualizer:
             idx = (self._bid_list.index(self._highlighted) + delta) % len(self._bid_list)
         self._highlighted = self._bid_list[idx]
         self._refresh_highlight()
+        self._ipc_send_highlight(self._highlighted)
 
     def _toggle_heatmap(self):
         self._heatmap_visible = not self._heatmap_visible
