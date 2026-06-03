@@ -37,6 +37,7 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
 
     infer_connections(topo, fp);
     compute_slide_ranges(fp);
+    tighten_passthrough_ranges(topo, fp);
     compute_net_pull();
 }
 
@@ -293,6 +294,58 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                     }
                 }
             }
+        }
+    }
+}
+
+// ── ConnTopology::tighten_passthrough_ranges ──────────────────────────────────
+//
+// For every segment that spans a connected block without an explicit BUSTERM
+// endpoint on that segment, tighten [perp_lo, perp_hi] so that NUTS cannot
+// slide the segment out of that block's perpendicular face extent.
+//
+// "Spans" means: at the segment's nominal perp_pos, the along-range overlaps
+// at least one rect of the block.  The constraint applied is the union perp
+// span of all such matching rects (with corner margin), intersected into the
+// already-computed [perp_lo, perp_hi].
+
+void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
+                                               const Floorplan& fp)
+{
+    for (auto& cs : segs_) {
+        // Collect blocks already anchored to this segment by a BUSTERM conn.
+        std::set<std::string> anchored;
+        for (const auto& conn : cs.conns)
+            if (conn.kind == SegConn::BUSTERM)
+                anchored.insert(conn.block_name);
+
+        for (const auto& bname : topo.connected_block_names) {
+            if (anchored.count(bname)) continue;
+
+            auto rects = fp.get_block_rects(bname);
+            if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+
+            // Union perp span of every rect this segment actually spans.
+            int span_lo = INT_MAX, span_hi = INT_MIN;
+            for (const Rect& r : rects) {
+                bool through = cs.horiz
+                    ? (cs.perp_pos >= r.y1 && cs.perp_pos <= r.y2
+                       && cs.along_lo <= r.x2 && cs.along_hi >= r.x1)
+                    : (cs.perp_pos >= r.x1 && cs.perp_pos <= r.x2
+                       && cs.along_lo <= r.y2 && cs.along_hi >= r.y1);
+                if (!through) continue;
+                if (cs.horiz) { span_lo = std::min(span_lo, r.y1); span_hi = std::max(span_hi, r.y2); }
+                else          { span_lo = std::min(span_lo, r.x1); span_hi = std::max(span_hi, r.x2); }
+            }
+            if (span_lo > span_hi) continue; // segment doesn't span this block
+
+            BlockCornerMargin cm = fp.get_block_corner_margin(bname);
+            int margin = cs.horiz ? cm.dy : cm.dx;
+            int lo = span_lo + margin;
+            int hi = span_hi - margin;
+            if (lo > hi) { lo = span_lo; hi = span_hi; } // margin too large: skip
+            cs.perp_lo = std::max(cs.perp_lo, lo);
+            cs.perp_hi = std::min(cs.perp_hi, hi);
         }
     }
 }

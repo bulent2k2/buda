@@ -111,6 +111,9 @@ private:
     std::vector<ConnSeg> segs_;
     void infer_connections(const Topology& topo, const Floorplan& fp);
     void compute_slide_ranges(const Floorplan& fp);
+    // Tighten perp_lo/perp_hi for segments that pass through connected blocks
+    // with no explicit BUSTERM endpoint, ensuring NUTS keeps them spanned.
+    void tighten_passthrough_ranges(const Topology& topo, const Floorplan& fp);
     void compute_net_pull();
 };
 
