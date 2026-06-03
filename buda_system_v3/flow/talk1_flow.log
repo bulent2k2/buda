@@ -27,6 +27,5 @@ Pinned bundle 'bus_0' to topology 2 (TRUNK_H@y450, WL=1520)
 [NUTS] M7: total bus width 27.3 units, spanning perpendicular interval [420.0, 447.3]
 [NUTS] M7: no local overlaps
 [NUTS] Span adjustments: M6:1
-NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/talk1_nuts.log
+NUTS overlap log → /Users/ben/src/buda/buda_system_v3/flow/talk1_nuts.log
 [DetailedNUTS] 40 net segments placed, 0 bits unplaced.
-Loaded 1 selection(s) from /Users/ben/src/buda/buda_system_v2/flow/talk1.json

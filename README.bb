@@ -10,6 +10,11 @@ To run:
 
 The original session:
     	   ~/src/buda/.claude
+    claude --resume 6d5ea3c2-ebcf-4afc-8cc1-265ee4e7f1d0
+    gemini --resume ced8e711-630f-4f66-9d2a-cdd6e79696c5
+    codex resume 019e5833-dbe5-72e3-8e36-6aa623f34bde
+
+old:
     gemini --resume 1fd0e79e-4db9-4fbc-a533-52d3c08f1fb0
     	   Moved from: ~/src/buda/ -> ~/src/git/buda/gem
 
