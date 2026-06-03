@@ -33,13 +33,9 @@ Pinned bundle 'b4_0' to topology 1 (TRUNK_V@x125, WL=152)
 [NUTS] M6: total bus width 111.6 units, spanning perpendicular interval [72.5, 177.5]
 [NUTS] M6: no local overlaps
 [NUTS] Span adjustments: M5:4, M6:5
-NUTS overlap log → /Users/ben/src/buda/buda_system_v2/flow/four_blocks_nuts.log
+NUTS overlap log → /Users/ben/src/buda/buda_system_v3/flow/four_blocks_nuts.log
 [Check] Verifying NUTS-level connectivity...
   Success: no opens found.
 [DetailedNUTS] 63 net segments placed, 0 bits unplaced.
-[Check] Verifying Detailed NUTS-level connectivity (bit-level)...
+[Check] Verifying Detailed NUTS-level connectivity...
   Success: no opens found.
-[viz_ipc] listening on /tmp/buda_ipc_four_blocks.sock
-[buda_viz] IPC session='four_blocks' connected=False
-[buda_viz] IPC timer started (backend=FigureCanvasMac)
-[viz_ipc] accepted connection on /tmp/buda_ipc_four_blocks.sock

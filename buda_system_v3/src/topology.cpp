@@ -1075,6 +1075,10 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     add_multi_trunk_candidates(pins, blocks, results);
     annotate_and_sort(results);
     filter_pinched(results);
+    for (auto& t : results)
+        if (t.connected_block_names.empty())
+            for (const auto& b : blocks)
+                t.connected_block_names.push_back(b.block_name);
     return results;
 }
 
@@ -1320,6 +1324,9 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
     annotate_and_sort(candidates);
     filter_pinched(candidates);
+    for (auto& t : candidates)
+        if (t.connected_block_names.empty())
+            t.connected_block_names = {src_name, dst_name};
     return candidates;
 }
 

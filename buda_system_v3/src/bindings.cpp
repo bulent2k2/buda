@@ -11,6 +11,7 @@
 #include "nuts.h"
 #include "routing_grid.h"
 #include "detailed_nuts.h"
+#include "verify.h"
 
 namespace py = pybind11;
 using namespace buda;
@@ -69,8 +70,9 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("estimated_wirelength", &Topology::estimated_wirelength)
         .def_readwrite("trunk_location",    &Topology::trunk_location)
         .def_readwrite("pass_through_count", &Topology::pass_through_count)
-        .def_readwrite("seg_busterms",      &Topology::seg_busterms)
-        .def_readwrite("bridge_segments",   &Topology::bridge_segments);
+        .def_readwrite("seg_busterms",           &Topology::seg_busterms)
+        .def_readwrite("bridge_segments",        &Topology::bridge_segments)
+        .def_readwrite("connected_block_names",  &Topology::connected_block_names);
 
     py::class_<Bundle>(m, "Bundle")
         .def(py::init<>())
@@ -436,4 +438,32 @@ PYBIND11_MODULE(buda, m) {
         .def("die_w",           &BDB::die_w)
         .def("die_h",           &BDB::die_h)
         .def_static("db_path",  &BDB::db_path, py::arg("def_path"));
+
+    // ── verify ─────────────────────────────────────────────────────────────
+
+    py::enum_<ViolationKind>(m, "ViolationKind")
+        .value("SEG_OPEN",     ViolationKind::SEG_OPEN)
+        .value("BUSTERM_OPEN", ViolationKind::BUSTERM_OPEN)
+        .value("BUSTERM_FACE", ViolationKind::BUSTERM_FACE);
+
+    py::class_<ConnViolation>(m, "ConnViolation")
+        .def_readwrite("kind",       &ConnViolation::kind)
+        .def_readwrite("bundle_id",  &ConnViolation::bundle_id)
+        .def_readwrite("seg_idx",    &ConnViolation::seg_idx)
+        .def_readwrite("seg_idx2",   &ConnViolation::seg_idx2)
+        .def_readwrite("bit_index",  &ConnViolation::bit_index)
+        .def_readwrite("block_name", &ConnViolation::block_name)
+        .def_readwrite("message",    &ConnViolation::message);
+
+    py::class_<ConnResult>(m, "ConnResult")
+        .def_readwrite("violations", &ConnResult::violations)
+        .def("ok",                   &ConnResult::ok);
+
+    m.def("check_topo",  &check_topo,
+          py::arg("ct"), py::arg("topo"), py::arg("fp"), py::arg("bundle_id"));
+    m.def("check_nuts",  &check_nuts,
+          py::arg("ct"), py::arg("nuts"), py::arg("fp"), py::arg("bundle_id"));
+    m.def("check_dnuts", &check_dnuts,
+          py::arg("ct"), py::arg("dnuts"), py::arg("fp"), py::arg("bundle_id"),
+          py::arg("num_bits"));
 }

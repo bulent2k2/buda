@@ -62,6 +62,10 @@ struct Topology {
     // Over-the-block bridge segments: block_name → bridge Segment.
     // Non-empty only when teg_mode=OVER and trunk falls in the gap between rects.
     std::map<std::string, Segment> bridge_segments;
+    // All block names this topology must connect (src + all dsts).
+    // Set by generate_candidates; used by connectivity verifier to detect
+    // pass-through blocks that have no explicit BUSTERM endpoint connection.
+    std::vector<std::string> connected_block_names;
 };
 // Per-block corner margin: keeps trunk/stub connections away from block corners.
 // dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).

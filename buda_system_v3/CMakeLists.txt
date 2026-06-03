@@ -26,6 +26,7 @@ set(SOURCE_FILES
     src/busterm.cpp
     src/bundler.cpp
     src/bundle_refiner.cpp
+    src/verify.cpp
 )
 
 # SQLite amalgamation is C, not C++

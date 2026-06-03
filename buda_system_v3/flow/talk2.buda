@@ -1,0 +1,19 @@
+source tracks.buda
+
+add_block blk1 rect 100 0 700 100
+add_block blk2 rect 0 300   200 700  rect 0   600 300 700
+add_block blk3 rect 500 200 800 400  rect 600 400 800 500
+
+add_bus bus[8] blk1.o blk2.i,blk3.i
+
+corner_margin dx 20 dy 10
+
+run_bundler strict
+generate_topologies
+run_planner
+check_connectivity topo
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+visualize
