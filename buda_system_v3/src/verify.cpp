@@ -333,7 +333,21 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
         }
     }
 
-    // 3. Block coverage per bit: pass-through blocks must be spanned for every bit.
+    // 3. Unplaced bits: every (seg_idx, bit) in [0,n) × [0,num_bits) must have
+    //    a NetSegment; absence means DetailedNUTS could not find a valid track.
+    for (int i = 0; i < n; ++i) {
+        for (int bit = 0; bit < num_bits; ++bit) {
+            if (ns_map.count({i, bit})) continue;
+            ConnViolation v;
+            v.kind = ViolationKind::UNPLACED;
+            v.bundle_id = bundle_id; v.seg_idx = i; v.bit_index = bit;
+            v.message = "Seg " + std::to_string(i) + " Bit " + std::to_string(bit)
+                + " has no placed track (unplaced in DetailedNUTS)";
+            result.violations.push_back(std::move(v));
+        }
+    }
+
+    // 4. Pass-through block coverage per bit.
     std::set<std::string> explicitly_connected;
     for (const auto& cs : segs)
         for (const auto& conn : cs.conns)

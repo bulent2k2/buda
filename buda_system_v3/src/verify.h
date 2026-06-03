@@ -12,6 +12,7 @@ enum class ViolationKind {
     SEG_OPEN,     // two connected segments fail to touch after placement
     BUSTERM_OPEN, // a required block has no BUSTERM conn and no pass-through segment
     BUSTERM_FACE, // a BUSTERM conn's perp position is outside the block face
+    UNPLACED,     // a bit has no concrete track assignment after DetailedNUTS
 };
 
 struct ConnViolation {

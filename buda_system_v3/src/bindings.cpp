@@ -444,7 +444,8 @@ PYBIND11_MODULE(buda, m) {
     py::enum_<ViolationKind>(m, "ViolationKind")
         .value("SEG_OPEN",     ViolationKind::SEG_OPEN)
         .value("BUSTERM_OPEN", ViolationKind::BUSTERM_OPEN)
-        .value("BUSTERM_FACE", ViolationKind::BUSTERM_FACE);
+        .value("BUSTERM_FACE", ViolationKind::BUSTERM_FACE)
+        .value("UNPLACED",     ViolationKind::UNPLACED);
 
     py::class_<ConnViolation>(m, "ConnViolation")
         .def_readwrite("kind",       &ConnViolation::kind)
