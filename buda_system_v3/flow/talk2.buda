@@ -10,6 +10,7 @@ corner_margin dx 20 dy 10
 
 run_bundler strict
 generate_topologies
+check_connectivity topo
 run_planner
 check_connectivity topo
 run_nuts

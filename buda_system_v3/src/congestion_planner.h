@@ -19,7 +19,7 @@ struct GlobalCut {
 struct BundleWrapper {
     Bundle original_bundle;
     std::vector<Topology> candidates;
-    int selected_topology_index = 0;
+    int selected_topology_index = -1;
     bool topology_pinned = false;
     double width = 1.0;
     // Per-segment layer assignments set by CongestionPlanner (primary).

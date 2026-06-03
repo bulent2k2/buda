@@ -1132,14 +1132,14 @@ class BudaSession:
             if not found: print(f"Error: bundle {bid} not found")
 
         elif cmd == "check_connectivity":
-            # Usage: check_connectivity [topo|nuts|dnuts]
-            stage = args[0].lower() if args else "dnuts"
-            if stage == "topo":
-                self._check_connectivity("topo")
-            elif stage == "nuts":
-                self._check_connectivity("nuts")
-            elif stage == "dnuts":
-                self._check_connectivity("dnuts")
+            # Usage: check_connectivity [topo|nuts|dnuts] [all]
+            # 'all' is only meaningful for the topo stage: checks every candidate
+            # topology, not just the selected one.  Automatically used when no
+            # topology has been selected yet (i.e. before run_planner).
+            stage     = args[0].lower() if args else "dnuts"
+            all_cands = len(args) > 1 and args[1].lower() == "all"
+            if stage in ("topo", "nuts", "dnuts"):
+                self._check_connectivity(stage, all_candidates=all_cands)
             else:
                 print(f"Error: unknown stage '{stage}' — use topo, nuts, or dnuts")
 
@@ -1235,10 +1235,7 @@ class BudaSession:
             finally:
                 self._script_stack.pop()
 
-    def _check_connectivity(self, stage: str):
-        labels = {"topo": "topology", "nuts": "NUTS", "dnuts": "Detailed NUTS"}
-        print(f"[Check] Verifying {labels[stage]}-level connectivity...")
-
+    def _check_connectivity(self, stage: str, all_candidates: bool = False):
         if stage in ("nuts", "dnuts") and self.nuts_result is None:
             print("  Error: run_nuts required first.")
             return
@@ -1246,26 +1243,52 @@ class BudaSession:
             print("  Error: run_detailed_nuts required first.")
             return
 
+        # For the topo stage, auto-switch to all-candidates mode when no
+        # topology has been selected yet (before run_planner).
+        if stage == "topo" and not all_candidates:
+            no_selection = all(
+                not w.candidates or w.selected_topology_index < 0
+                for w in self.bundles
+            )
+            if no_selection:
+                all_candidates = True
+
+        labels = {"topo": "topology", "nuts": "NUTS", "dnuts": "Detailed NUTS"}
+        suffix = " (all candidates)" if (all_candidates and stage == "topo") else ""
+        print(f"[Check] Verifying {labels[stage]}-level connectivity{suffix}...")
+
         total = 0
         for w in self.bundles:
-            if not w.candidates or w.selected_topology_index < 0:
+            if not w.candidates:
                 continue
-            bid  = w.original_bundle.id
-            topo = w.candidates[w.selected_topology_index]
-            ct   = buda.ConnTopology()
-            ct.build(topo, self.fp)
+            bid = w.original_bundle.id
 
-            if stage == "topo":
-                res = buda.check_topo(ct, topo, self.fp, bid)
-            elif stage == "nuts":
-                res = buda.check_nuts(ct, self.nuts_result, self.fp, bid)
+            if all_candidates and stage == "topo":
+                to_check = list(enumerate(w.candidates))
+            elif w.selected_topology_index >= 0:
+                idx = w.selected_topology_index
+                to_check = [(idx, w.candidates[idx])]
             else:
-                num_bits = len(w.original_bundle.get_net_names())
-                res = buda.check_dnuts(ct, self.detailed_result, self.fp, bid, num_bits)
+                continue
 
-            for v in res.violations:
-                print(f"  Bundle {bid}: {v.message}")
-                total += 1
+            for topo_idx, topo in to_check:
+                ct = buda.ConnTopology()
+                ct.build(topo, self.fp)
+
+                if stage == "topo":
+                    res = buda.check_topo(ct, topo, self.fp, bid)
+                elif stage == "nuts":
+                    res = buda.check_nuts(ct, self.nuts_result, self.fp, bid)
+                else:
+                    num_bits = len(w.original_bundle.get_net_names())
+                    res = buda.check_dnuts(ct, self.detailed_result, self.fp, bid, num_bits)
+
+                for v in res.violations:
+                    if all_candidates and stage == "topo":
+                        print(f"  Bundle {bid} topo[{topo_idx}] ({topo.type}): {v.message}")
+                    else:
+                        print(f"  Bundle {bid}: {v.message}")
+                    total += 1
 
         if total == 0:
             print("  Success: no opens found.")
