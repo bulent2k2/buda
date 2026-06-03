@@ -1278,10 +1278,10 @@ class BudaSession:
                 if stage == "topo":
                     res = buda.check_topo(ct, topo, self.fp, bid)
                 elif stage == "nuts":
-                    res = buda.check_nuts(ct, self.nuts_result, self.fp, bid)
+                    res = buda.check_nuts(ct, self.nuts_result, topo, self.fp, bid)
                 else:
                     num_bits = len(w.original_bundle.get_net_names())
-                    res = buda.check_dnuts(ct, self.detailed_result, self.fp, bid, num_bits)
+                    res = buda.check_dnuts(ct, self.detailed_result, topo, self.fp, bid, num_bits)
 
                 for v in res.violations:
                     if all_candidates and stage == "topo":

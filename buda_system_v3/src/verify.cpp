@@ -144,7 +144,7 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
 // ── check_nuts ────────────────────────────────────────────────────────────────
 
 ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
-                      const Floorplan& fp, int bundle_id)
+                      const Topology& topo, const Floorplan& fp, int bundle_id)
 {
     ConnResult result;
     const auto& segs = ct.segs();
@@ -214,13 +214,50 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
         }
     }
 
+    // 3. Block coverage: pass-through blocks must still be spanned at placed positions.
+    std::set<std::string> explicitly_connected;
+    for (const auto& cs : segs)
+        for (const auto& conn : cs.conns)
+            if (conn.kind == SegConn::BUSTERM)
+                explicitly_connected.insert(conn.block_name);
+
+    for (const auto& bname : topo.connected_block_names) {
+        if (explicitly_connected.count(bname)) continue;
+        auto rects = fp.get_block_rects(bname);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        bool covered = false;
+        for (const auto& ts : nuts.segments) {
+            if (ts.bundle_id != bundle_id || !ts.placed || covered) continue;
+            if (ts.seg_idx < 0 || ts.seg_idx >= n) continue;
+            const ConnSeg& cs = segs[ts.seg_idx];
+            for (const Rect& r : rects) {
+                bool through = cs.horiz
+                    ? (ts.track_position >= r.y1 && ts.track_position <= r.y2
+                       && ts.span_lo <= r.x2 && ts.span_hi >= r.x1)
+                    : (ts.track_position >= r.x1 && ts.track_position <= r.x2
+                       && ts.span_lo <= r.y2 && ts.span_hi >= r.y1);
+                if (through) { covered = true; break; }
+            }
+        }
+        if (!covered) {
+            ConnViolation v;
+            v.kind = ViolationKind::BUSTERM_OPEN;
+            v.bundle_id = bundle_id; v.seg_idx = -1;
+            v.block_name = bname;
+            v.message = "Block '" + bname
+                + "' has no pass-through segment at placed track positions (nuts)";
+            result.violations.push_back(std::move(v));
+        }
+    }
+
     return result;
 }
 
 // ── check_dnuts ───────────────────────────────────────────────────────────────
 
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
-                       const Floorplan& fp, int bundle_id, int num_bits)
+                       const Topology& topo, const Floorplan& fp,
+                       int bundle_id, int num_bits)
 {
     ConnResult result;
     const auto& segs = ct.segs();
@@ -292,6 +329,45 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                     v.message = msg.str();
                     result.violations.push_back(std::move(v));
                 }
+            }
+        }
+    }
+
+    // 3. Block coverage per bit: pass-through blocks must be spanned for every bit.
+    std::set<std::string> explicitly_connected;
+    for (const auto& cs : segs)
+        for (const auto& conn : cs.conns)
+            if (conn.kind == SegConn::BUSTERM)
+                explicitly_connected.insert(conn.block_name);
+
+    for (const auto& bname : topo.connected_block_names) {
+        if (explicitly_connected.count(bname)) continue;
+        auto rects = fp.get_block_rects(bname);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        for (int bit = 0; bit < num_bits; ++bit) {
+            bool covered = false;
+            for (int i = 0; i < n && !covered; ++i) {
+                auto it = ns_map.find({i, bit});
+                if (it == ns_map.end()) continue;
+                const NetSegment& ns = *it->second;
+                const ConnSeg& cs = segs[i];
+                for (const Rect& r : rects) {
+                    bool through = cs.horiz
+                        ? (ns.track_position >= r.y1 && ns.track_position <= r.y2
+                           && ns.span_lo <= r.x2 && ns.span_hi >= r.x1)
+                        : (ns.track_position >= r.x1 && ns.track_position <= r.x2
+                           && ns.span_lo <= r.y2 && ns.span_hi >= r.y1);
+                    if (through) { covered = true; break; }
+                }
+            }
+            if (!covered) {
+                ConnViolation v;
+                v.kind = ViolationKind::BUSTERM_OPEN;
+                v.bundle_id = bundle_id; v.seg_idx = -1; v.bit_index = bit;
+                v.block_name = bname;
+                v.message = "Block '" + bname + "' Bit " + std::to_string(bit)
+                    + " has no pass-through segment at placed track positions (dnuts)";
+                result.violations.push_back(std::move(v));
             }
         }
     }

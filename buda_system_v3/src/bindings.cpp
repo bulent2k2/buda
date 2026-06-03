@@ -462,8 +462,9 @@ PYBIND11_MODULE(buda, m) {
     m.def("check_topo",  &check_topo,
           py::arg("ct"), py::arg("topo"), py::arg("fp"), py::arg("bundle_id"));
     m.def("check_nuts",  &check_nuts,
-          py::arg("ct"), py::arg("nuts"), py::arg("fp"), py::arg("bundle_id"));
+          py::arg("ct"), py::arg("nuts"), py::arg("topo"), py::arg("fp"),
+          py::arg("bundle_id"));
     m.def("check_dnuts", &check_dnuts,
-          py::arg("ct"), py::arg("dnuts"), py::arg("fp"), py::arg("bundle_id"),
-          py::arg("num_bits"));
+          py::arg("ct"), py::arg("dnuts"), py::arg("topo"), py::arg("fp"),
+          py::arg("bundle_id"), py::arg("num_bits"));
 }

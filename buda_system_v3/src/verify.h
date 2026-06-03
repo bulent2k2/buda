@@ -36,11 +36,14 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
                       const Floorplan& fp, int bundle_id);
 
 // NUTS-level check: same topology structure but positions from TrackSegments.
+// Includes block-coverage check for pass-through blocks at placed positions.
 ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
-                      const Floorplan& fp, int bundle_id);
+                      const Topology& topo, const Floorplan& fp, int bundle_id);
 
 // Detailed-NUTS-level: per-bit connectivity check using NetSegment positions.
+// Includes block-coverage check for pass-through blocks at placed positions.
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
-                       const Floorplan& fp, int bundle_id, int num_bits);
+                       const Topology& topo, const Floorplan& fp,
+                       int bundle_id, int num_bits);
 
 } // namespace buda
