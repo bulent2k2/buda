@@ -809,6 +809,7 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         // For multi-rect blocks use the best rect's centre; single-rect uses pin.
         att_y[i]    = blocks[i].rects.empty() ? pins[i].y : best_r[i].center().y;
     }
+    std::vector<bool> stub_suppressed(n, false);
 
     if (use_busterm_) {
         // Enforce horizontal stub length for multicast stubs.
@@ -886,10 +887,29 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             }
             if (!changed) break;
         }
+
+        // Suppress stubs made redundant by a longer same-side stub whose att_y
+        // already passes through the shorter stub's block.
+        for (int i = 0; i < n; ++i) {
+            if (!has_stub[i]) continue;
+            for (int j = 0; j < n; ++j) {
+                if (i == j || !has_stub[j]) continue;
+                int di = conn_x[i] - x_trunk, dj = conn_x[j] - x_trunk;
+                if (di == 0 || dj == 0) continue;
+                if ((di > 0) != (dj > 0)) continue;          // opposite sides of trunk
+                if (std::abs(dj) <= std::abs(di)) continue;  // j not farther
+                // Does stub j's att_y lie within block i's original y-extent?
+                if (att_y[j] >= blocks[i].orig_bbox.y1 &&
+                    att_y[j] <= blocks[i].orig_bbox.y2) {
+                    stub_suppressed[i] = true; break;
+                }
+            }
+        }
     }
 
     int y_lo = INT_MAX, y_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
+        if (stub_suppressed[i]) continue;
         y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]);
     }
     if (y_lo >= y_hi) return;
@@ -966,7 +986,8 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             }
         }
 
-        // Normal single stub
+        // Normal single stub — skip if made redundant by a longer stub's pass-through
+        if (stub_suppressed[i]) continue;
         int seg_idx = (int)t.segments.size();
         t.segments.push_back(make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], h_layer_));
         t.seg_busterms[seg_idx].first = blocks[i];
