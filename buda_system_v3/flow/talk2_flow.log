@@ -21,26 +21,14 @@ Pinned bundle 'bus_0' to topology 9 (TRUNK_V@x550, WL=750)
 [Check] Verifying topology-level connectivity...
   Success: no opens found.
 [NUTS] 2 segments placed across 2 layer(s). Interval violations: 0, Track overlaps: 0.
-[NUTS] M5: total bus width 24.0 units, spanning perpendicular interval [320.0, 344.0]
+[NUTS] M5: total bus width 24.0 units, spanning perpendicular interval [520.0, 544.0]
 [NUTS] M5: no local overlaps
 [NUTS] M6: total bus width 25.5 units, spanning perpendicular interval [600.0, 625.5]
 [NUTS] M6: no local overlaps
 [NUTS] Span adjustments: M5:1, M6:1
-NUTS overlap log → /Users/ben/src/buda/flow/talk2_nuts.log
+NUTS overlap log → /Users/ben/src/buda/buda_system_v3/flow/talk2_nuts.log
 [Check] Verifying NUTS-level connectivity...
-  Bundle 1: Block 'blk3' has no pass-through segment at placed track positions (nuts)
+  Success: no opens found.
 [DetailedNUTS] 16 net segments placed, 0 bits unplaced.
 [Check] Verifying Detailed NUTS-level connectivity...
-  Bundle 1: Block 'blk3' Bit 0 has no pass-through segment at placed track positions (dnuts)
-  Bundle 1: Block 'blk3' Bit 1 has no pass-through segment at placed track positions (dnuts)
-  Bundle 1: Block 'blk3' Bit 2 has no pass-through segment at placed track positions (dnuts)
-  Bundle 1: Block 'blk3' Bit 3 has no pass-through segment at placed track positions (dnuts)
-  Bundle 1: Block 'blk3' Bit 4 has no pass-through segment at placed track positions (dnuts)
-  Bundle 1: Block 'blk3' Bit 5 has no pass-through segment at placed track positions (dnuts)
-  Bundle 1: Block 'blk3' Bit 6 has no pass-through segment at placed track positions (dnuts)
-  Bundle 1: Block 'blk3' Bit 7 has no pass-through segment at placed track positions (dnuts)
-[viz_ipc] unlinking stale /tmp/buda_ipc_talk2.sock
-[viz_ipc] listening on /tmp/buda_ipc_talk2.sock
-[buda_viz] IPC session='talk2' connected=False
-[buda_viz] IPC timer started (backend=FigureCanvasMac)
-Loaded 1 selection(s) from /Users/ben/src/buda/flow/talk2.json
+  Success: no opens found.
