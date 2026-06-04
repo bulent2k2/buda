@@ -2,9 +2,9 @@
 # ============================================================
 
 # Layers
-#def_layer 5 M5 V TOP 0.0
-#def_layer 6 M6 H TOP 0.0
 source tracks.buda
+# TODO: basic congestion problem:
+# source tracks4top.buda
 
 # corner_margin 10 10
 corner_margin 1 1

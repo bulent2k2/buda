@@ -1,3 +1,6 @@
+python3 tools/def_viz_o3.py chip_designs/ariane136/ariane_buda5.bdb &
+python3 src/buda_cli.py flow/ariane_buda5.buda &
+
 export PYTHONPATH=/users/ben/src/buda/buda_system_v2/build:/users/ben/src/buda/buda_system_v2/src
 cd ~/src/buda/flow/lefdef
 python3 ~/src/buda/src/buda_cli.py ~/src/buda/flow/four_blocks.buda
@@ -11,6 +14,7 @@ To run:
 The original session:
     	   ~/src/buda/.claude
     claude --resume 6d5ea3c2-ebcf-4afc-8cc1-265ee4e7f1d0
+        python3 tools/def_viz_o3.py chip_designs/microwatt/microwatt_macros.bdb
     gemini --resume ced8e711-630f-4f66-9d2a-cdd6e79696c5
     codex resume 019e5833-dbe5-72e3-8e36-6aa623f34bde
 
