@@ -16,20 +16,19 @@ The core engine is **C++20** exposed to Python via **pybind11**, with a Python C
 ## Build
 
 ```bash
-cd buda_system_v2/
 mkdir -p build && cd build
 cmake .. && make -j4
 # install overwrites without interactive prompt
-install build/interconnect.cpython-313-darwin.so src/
+install build/buda.cpython-313-darwin.so src/
 ```
 
-CMake builds a single shared library module (`interconnect`) with `-O3 -march=native -Wall -Wextra`.
+CMake builds a single shared library module (`buda`) with `-O3 -march=native -Wall -Wextra`.
 
 ## Run
 
 ```bash
-cd buda_system_v2/src/
-python3 buda_cli.py comprehensive_demo.buda
+cd src/
+python3 buda_cli.py ../flow/comprehensive_demo.buda
 ```
 
 `.buda` script command reference:
@@ -343,11 +342,6 @@ PlacedSegmentBase          kind, layer, span, track_position, width, placed
 The raw geometry type `Segment` in `topology.h` (start/end points + layer_hint) is a **pre-placement** concept and remains separate from this hierarchy. `PlacedSegmentBase` and its subtypes are **post-placement** and live in `nuts.h` / `detailed_nuts.h`.
 
 ---
-
-## Two System Versions
-
-- `buda_system/` — v1 (older, kept for reference)
-- `buda_system_v2/` — v2 (current, all active development)
 
 ---
 
