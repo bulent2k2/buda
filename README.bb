@@ -1,3 +1,5 @@
+cd ~/src/buda
+export PYTHONPATH=build:src:tools
 python3 tools/def_viz_o3.py chip_designs/ariane136/ariane_buda5.bdb &
 python3 src/buda_cli.py flow/ariane_buda5.buda &
 
@@ -123,3 +125,28 @@ buda_system_v2/src:
   staged as deleted in commit dc2f9c9. Both are still fully recoverable via git
   show dc2f9c9~1:buda_system_v2/src/buda_viz.py or by checking out the previous
   commit. Only buda_system_v3/ remains as the active codebase.
+
+Gemini to antigravity-cli:
+
+ ▝▜▄    Gemini CLI v0.43.0
+   ▝▜▄
+   ▗▟▀  Signed in with Google /auth
+ ▗▟▀    Plan: Gemini Code Assist in Google One AI Pro /upgrade
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Gemini CLI will stop serving requests to Google One and                      │
+│ unpaid tiers on June 18. Please migrate to Antigravity CLI before then at    │
+│ https://antigravity.google/product/antigravity-cli                           │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+⚠  Theme 'Default' (dark) might look incorrect on your light terminal
+   background. Type /theme to change theme.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Gemini CLI update available! 0.43.0 → 0.45.1                                 │
+│ Installed via Homebrew. Please update with "brew upgrade gemini-cli".        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+
+                                                                ? for shortcuts
