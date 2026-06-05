@@ -908,6 +908,67 @@ void BDB::import_verilog(const std::string& v_path) {
     _exec("COMMIT");
 }
 
+// ── Mutations ─────────────────────────────────────────────────────────────────
+
+void BDB::move_comp(const std::string& name, double x, double y) {
+    Stmt q(_db, "SELECT x1, y1, x2, y2 FROM component WHERE name=?");
+    sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) != SQLITE_ROW)
+        throw std::runtime_error("move_comp: not found: " + name);
+    double w = sqlite3_column_double(q, 2) - sqlite3_column_double(q, 0);
+    double h = sqlite3_column_double(q, 3) - sqlite3_column_double(q, 1);
+    Stmt u(_db, "UPDATE component SET x1=?, y1=?, x2=?, y2=? WHERE name=?");
+    sqlite3_bind_double(u, 1, x);
+    sqlite3_bind_double(u, 2, y);
+    sqlite3_bind_double(u, 3, x + w);
+    sqlite3_bind_double(u, 4, y + h);
+    sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(u);
+    compute_hpwl();
+}
+
+void BDB::resize_cell(const std::string& cell, double w, double h) {
+    Stmt u(_db, "UPDATE component SET x2=x1+?, y2=y1+? WHERE cell=?");
+    sqlite3_bind_double(u, 1, w);
+    sqlite3_bind_double(u, 2, h);
+    sqlite3_bind_text  (u, 3, cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(u);
+    compute_hpwl();
+}
+
+int BDB::add_comp(const std::string& name, const std::string& cell,
+                  const std::string& parent_name,
+                  double x1, double y1, double x2, double y2, bool is_leaf) {
+    int par_id = -1, depth = 0;
+    if (!parent_name.empty()) {
+        Stmt qp(_db, "SELECT id, depth FROM component WHERE name=?");
+        sqlite3_bind_text(qp, 1, parent_name.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(qp) != SQLITE_ROW)
+            throw std::runtime_error("add_comp: parent not found: " + parent_name);
+        par_id = sqlite3_column_int(qp, 0);
+        depth  = sqlite3_column_int(qp, 1) + 1;
+    }
+    Stmt ins(_db, R"(
+        INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf)
+        VALUES(?,?,?,?,?,?,?,?,?)
+    )");
+    sqlite3_bind_text  (ins, 1, name.c_str(),   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (ins, 2, cell.c_str(),   -1, SQLITE_TRANSIENT);
+    if (par_id >= 0) sqlite3_bind_int(ins, 3, par_id);
+    else             sqlite3_bind_null(ins, 3);
+    sqlite3_bind_int   (ins, 4, depth);
+    sqlite3_bind_double(ins, 5, x1);
+    sqlite3_bind_double(ins, 6, y1);
+    sqlite3_bind_double(ins, 7, x2);
+    sqlite3_bind_double(ins, 8, y2);
+    sqlite3_bind_int   (ins, 9, is_leaf ? 1 : 0);
+    if (sqlite3_step(ins) != SQLITE_DONE)
+        throw std::runtime_error("add_comp: insert failed (name exists?): " + name);
+    int id = (int)sqlite3_last_insert_rowid(_db);
+    compute_hpwl();
+    return id;
+}
+
 std::vector<BustermRow>  BDB::all_busterms() const { return {}; }
 std::vector<BundleRow>   BDB::all_bundles()   const { return {}; }
 

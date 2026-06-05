@@ -437,7 +437,15 @@ PYBIND11_MODULE(buda, m) {
         .def("units",           &BDB::units)
         .def("die_w",           &BDB::die_w)
         .def("die_h",           &BDB::die_h)
-        .def_static("db_path",  &BDB::db_path, py::arg("def_path"));
+        .def_static("db_path",  &BDB::db_path, py::arg("def_path"))
+        .def("move_comp",   &BDB::move_comp,
+             py::arg("name"), py::arg("x"), py::arg("y"))
+        .def("resize_cell", &BDB::resize_cell,
+             py::arg("cell"), py::arg("w"), py::arg("h"))
+        .def("add_comp",    &BDB::add_comp,
+             py::arg("name"), py::arg("cell"), py::arg("parent_name"),
+             py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
+             py::arg("is_leaf") = true);
 
     // ── verify ─────────────────────────────────────────────────────────────
 

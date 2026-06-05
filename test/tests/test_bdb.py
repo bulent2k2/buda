@@ -6,6 +6,7 @@ import buda
 
 scenarios('features/bdb_import.feature')
 scenarios('features/bdb_combined.feature')
+scenarios('features/bdb_mutations.feature')
 
 # ---------------------------------------------------------------------------
 # Verilog fixture
@@ -328,3 +329,36 @@ def check_comps_in_rect(context, xl, yl, xh, yh, names):
     result   = sorted(context['db'].comps_in_rect(
         float(xl), float(yl), float(xh), float(yh)))
     assert result == expected, f"Expected {expected}, got {result}"
+
+
+# ---------------------------------------------------------------------------
+# Mutation steps
+# ---------------------------------------------------------------------------
+
+def _refresh(context):
+    """Re-read all_components into context after a mutation."""
+    context['comps'] = {r.name: r for r in context['db'].all_components()}
+
+
+@when(parsers.re(r'I move component "(?P<name>[^"]+)" to \((?P<x>[\d.]+), (?P<y>[\d.]+)\)'))
+def step_move_comp(context, name, x, y):
+    context['db'].move_comp(name, float(x), float(y))
+    _refresh(context)
+
+
+@when(parsers.re(r'I resize cell "(?P<cell>[^"]+)" to (?P<w>[\d.]+) by (?P<h>[\d.]+)'))
+def step_resize_cell(context, cell, w, h):
+    context['db'].resize_cell(cell, float(w), float(h))
+    _refresh(context)
+
+
+@when(parsers.re(
+    r'I add component "(?P<name>[^"]+)" of cell "(?P<cell>[^"]+)" '
+    r'under parent "(?P<parent>[^"]+)" '
+    r'at \((?P<x1>[\d.]+), (?P<y1>[\d.]+)\)-\((?P<x2>[\d.]+), (?P<y2>[\d.]+)\)'
+))
+def step_add_comp(context, name, cell, parent, x1, y1, x2, y2):
+    par = "" if parent == "-" else parent
+    context['db'].add_comp(name, cell, par,
+                           float(x1), float(y1), float(x2), float(y2))
+    _refresh(context)

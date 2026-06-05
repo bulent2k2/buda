@@ -82,6 +82,18 @@ public:
     void import_def_lef(const std::string& def_path, const std::string& lef_path);
     void import_verilog(const std::string& v_path);
 
+    // ── Mutations ──────────────────────────────────────────────────────────
+    // Move a single instance to new origin (x,y); size is preserved.
+    void move_comp(const std::string& name, double x, double y);
+    // Update x2/y2 of every instance of cell type to x1+w, y1+h.
+    void resize_cell(const std::string& cell, double w, double h);
+    // Insert a new component row; parent_name="" for a root instance.
+    // Returns the new row id.  Throws if name already exists.
+    int  add_comp(const std::string& name, const std::string& cell,
+                  const std::string& parent_name,
+                  double x1, double y1, double x2, double y2,
+                  bool is_leaf = true);
+
     // ── Computed properties ────────────────────────────────────────────────
     void compute_hpwl();
     void compute_fanout();

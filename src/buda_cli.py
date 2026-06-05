@@ -57,6 +57,7 @@ class BudaSession:
         self.routing_grid = None     # RoutingGridStack (stage 8)
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self.no_viz = False          # set by --no-viz CLI flag
+        self.bdb = None              # BDB (opened by open_bdb command)
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -1203,6 +1204,55 @@ class BudaSession:
             else:
                 viz.draw_buses()
             viz.show()
+        # ── BDB ────────────────────────────────────────────────────────────
+        elif cmd == "open_bdb":
+            # open_bdb <path>
+            if not args:
+                print("Error: open_bdb requires a file path"); return
+            self.bdb = buda.BDB(args[0])
+        elif cmd == "import_def_lef":
+            # import_def_lef <def_path> <lef_path>
+            if len(args) < 2:
+                print("Error: import_def_lef requires <def_path> <lef_path>"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            self.bdb.import_def_lef(args[0], args[1])
+        elif cmd == "import_verilog":
+            # import_verilog <v_path>
+            if not args:
+                print("Error: import_verilog requires a file path"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            self.bdb.import_verilog(args[0])
+        elif cmd == "move_comp":
+            # move_comp <name> <x> <y>
+            if len(args) < 3:
+                print("Error: move_comp requires <name> <x> <y>"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            self.bdb.move_comp(args[0], float(args[1]), float(args[2]))
+        elif cmd == "resize_cell":
+            # resize_cell <cell> <w> <h>
+            if len(args) < 3:
+                print("Error: resize_cell requires <cell> <w> <h>"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            self.bdb.resize_cell(args[0], float(args[1]), float(args[2]))
+        elif cmd == "add_comp":
+            # add_comp <name> <cell> <parent|-> <x1> <y1> <x2> <y2> [leaf]
+            # Use "-" for parent to create a root instance.
+            if len(args) < 7:
+                print("Error: add_comp requires <name> <cell> <parent|-> "
+                      "<x1> <y1> <x2> <y2> [leaf]"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            parent = "" if args[2] == "-" else args[2]
+            is_leaf = True
+            if len(args) >= 8:
+                is_leaf = args[7].lower() not in ("0", "false", "no", "nonleaf")
+            self.bdb.add_comp(args[0], args[1], parent,
+                              float(args[3]), float(args[4]),
+                              float(args[5]), float(args[6]), is_leaf)
         elif cmd == "source":
             if not args:
                 print("Error: source command requires a file path")
