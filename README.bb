@@ -117,3 +117,9 @@ buda_system_v2/src:
      127 routing_grid.cpp
      919 topology.cpp
     2906 total
+
+
+⏺ Done. buda_system/ (v1) and buda_system_v2/ are gone from the working tree and
+  staged as deleted in commit dc2f9c9. Both are still fully recoverable via git
+  show dc2f9c9~1:buda_system_v2/src/buda_viz.py or by checking out the previous
+  commit. Only buda_system_v3/ remains as the active codebase.
