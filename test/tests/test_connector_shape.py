@@ -7,7 +7,7 @@ slide range.
 """
 import re
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import (
     _find_candidate, _segs_of, _build_all_cts, _connector_type,
@@ -28,7 +28,7 @@ def _find_trunk_with_range(ctx, is_horiz, perp_lo, perp_hi):
     Returns (Topology, ConnTopology) or (None, None).
     """
     for c in ctx['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         for cs in _segs_of(ct):
             if cs.horiz == is_horiz and cs.perp_lo == perp_lo and cs.perp_hi == perp_hi:

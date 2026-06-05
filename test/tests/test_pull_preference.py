@@ -8,7 +8,7 @@ expected behaviour without blocking CI until the C++ implementation lands.
 """
 import math
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import (
     _find_candidate, _segs_of, _build_all_cts,
@@ -50,12 +50,12 @@ def _trunk_conn_seg(ct, is_horiz):
     candidates = [
         cs for cs in segs
         if cs.horiz == is_horiz
-        and sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.SEG) >= 1
+        and sum(1 for c in cs.conns if c.kind == buda.SegConnKind.SEG) >= 1
     ]
     if not candidates:
         return None
     # Among candidates, prefer the one with the most SEG connections (root trunk)
-    return max(candidates, key=lambda cs: sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.SEG))
+    return max(candidates, key=lambda cs: sum(1 for c in cs.conns if c.kind == buda.SegConnKind.SEG))
 
 
 def _v_seg_for(ct, prefix_type):
@@ -97,7 +97,7 @@ def l_hv_v_pull(ctx, hi, lo):
         return
     # Geometric approximation: V seg in L_HV goes from bend to B's face
     # If B's face is above the bend → hi_pull; else lo_pull
-    bt_conns = [c for c in v_cs.conns if c.kind == interconnect.SegConnKind.BUSTERM]
+    bt_conns = [c for c in v_cs.conns if c.kind == buda.SegConnKind.BUSTERM]
     assert bt_conns, 'V seg has no BUSTERM connection'
     at_pos = bt_conns[0].at_pos
     if at_pos == v_cs.along_hi:
@@ -119,7 +119,7 @@ def l_hv_v_pull_balance(ctx, pb):
     if hasattr(v_cs, 'pull_balance'):
         assert math.isclose(v_cs.pull_balance, pb, abs_tol=1e-9)
         return
-    bt_conns = [c for c in v_cs.conns if c.kind == interconnect.SegConnKind.BUSTERM]
+    bt_conns = [c for c in v_cs.conns if c.kind == buda.SegConnKind.BUSTERM]
     at_pos = bt_conns[0].at_pos
     hi = 1 if at_pos == v_cs.along_hi else 0
     lo = 1 - hi
@@ -145,7 +145,7 @@ def l_vh_v_pull(ctx, lo, hi):
         assert v_cs.lo_pull == lo
         assert v_cs.hi_pull == hi
         return
-    bt_conns = [c for c in v_cs.conns if c.kind == interconnect.SegConnKind.BUSTERM]
+    bt_conns = [c for c in v_cs.conns if c.kind == buda.SegConnKind.BUSTERM]
     assert bt_conns, 'V seg has no BUSTERM connection'
     at_pos = bt_conns[0].at_pos
     if at_pos == v_cs.along_lo:
@@ -167,7 +167,7 @@ def l_vh_v_pull_balance(ctx, pb):
     if hasattr(v_cs, 'pull_balance'):
         assert math.isclose(v_cs.pull_balance, pb, abs_tol=1e-9)
         return
-    bt_conns = [c for c in v_cs.conns if c.kind == interconnect.SegConnKind.BUSTERM]
+    bt_conns = [c for c in v_cs.conns if c.kind == buda.SegConnKind.BUSTERM]
     at_pos = bt_conns[0].at_pos
     lo = 1 if at_pos == v_cs.along_lo else 0
     hi = 1 - lo
@@ -315,7 +315,7 @@ def cen_pull(ctx, lo, hi):
     lo, hi = int(lo), int(hi)
     cen = next((c for c in ctx['candidates'] if '~CEN' in c.type), None)
     assert cen is not None, 'No ~CEN candidate'
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(cen, ctx['fp'])
     trunk = _trunk_conn_seg(ct, True)
     assert trunk is not None, 'No trunk in ~CEN candidate'
@@ -338,13 +338,13 @@ def cen_suffix_exists(ctx):
 def cen_at_median(ctx):
     cen = next((c for c in ctx['candidates'] if '~CEN' in c.type), None)
     assert cen is not None, 'No ~CEN candidate'
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(cen, ctx['fp'])
     # Collect all BUSTERM face positions for V stubs
     face_ys = []
     for cs in _segs_of(ct):
         for conn in cs.conns:
-            if conn.kind == interconnect.SegConnKind.BUSTERM:
+            if conn.kind == buda.SegConnKind.BUSTERM:
                 face_ys.append(conn.face_coord)
     face_ys.sort()
     n = len(face_ys)
@@ -447,7 +447,7 @@ def pull_sum_equals_stubs(ctx):
         trunk = _trunk_conn_seg(ct, True) or _trunk_conn_seg(ct, False)
         if trunk is None:
             continue
-        n_stubs = sum(1 for c in trunk.conns if c.kind == interconnect.SegConnKind.SEG)
+        n_stubs = sum(1 for c in trunk.conns if c.kind == buda.SegConnKind.SEG)
         if hasattr(trunk, 'lo_pull'):
             total = trunk.lo_pull + trunk.hi_pull
         else:
@@ -465,8 +465,8 @@ def stub_pull_zero(ctx):
     for ctype, ct in ctx['conn_topologies'].items():
         for cs in _segs_of(ct):
             # A stub is a segment that is NOT the trunk: only one BUSTERM, no sub-stubs
-            n_bt = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.BUSTERM)
-            n_seg = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.SEG)
+            n_bt = sum(1 for c in cs.conns if c.kind == buda.SegConnKind.BUSTERM)
+            n_seg = sum(1 for c in cs.conns if c.kind == buda.SegConnKind.SEG)
             if n_bt == 1 and n_seg <= 1:
                 if hasattr(cs, 'lo_pull'):
                     assert cs.lo_pull == 0 and cs.hi_pull == 0, (

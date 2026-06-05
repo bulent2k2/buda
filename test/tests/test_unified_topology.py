@@ -5,7 +5,7 @@ Covers I / L / Z / U / UU shapes for 2-pin connections, plus
 partial-overlap scenarios and generator completeness checks.
 """
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import _find_candidate, _segs_of, _build_all_cts
 
@@ -141,7 +141,7 @@ def both_faces_have_busterms(ctx):
     ct = ctx['conn_topologies'][key]
     for cs in _segs_of(ct):
         for conn in cs.conns:
-            if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+            if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                 rect = ctx['fp'].get_block_bounds(conn.block_name)
                 on_face = conn.face_coord in (rect.x1, rect.x2, rect.y1, rect.y2)
                 assert on_face, (
@@ -344,7 +344,7 @@ def u_hvh_outer_busterms(ctx):
         blocks_reached = set()
         for cs in _segs_of(ct):
             for conn in cs.conns:
-                if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+                if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                     blocks_reached.add(conn.block_name)
         assert 'A' in blocks_reached and 'B' in blocks_reached, (
             f'{ctype}: blocks reached = {blocks_reached}'
@@ -401,7 +401,7 @@ def u_vhv_outer_busterms(ctx):
         blocks_reached = set()
         for cs in _segs_of(ct):
             for conn in cs.conns:
-                if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+                if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                     blocks_reached.add(conn.block_name)
         assert 'A' in blocks_reached and 'B' in blocks_reached, (
             f'{ctype}: blocks reached = {blocks_reached}'
@@ -454,7 +454,7 @@ def i_h_no_v_stubs(ctx):
             continue
         for cs in _segs_of(ct):
             if not cs.horiz:
-                has_bt = any(c.kind == interconnect.SegConnKind.BUSTERM for c in cs.conns)
+                has_bt = any(c.kind == buda.SegConnKind.BUSTERM for c in cs.conns)
                 assert not has_bt, (
                     f'{ctype}: found V stub (should be Direct-only for I_H)'
                 )

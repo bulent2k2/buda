@@ -1,5 +1,5 @@
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 
 scenarios('features/no_tiny_stubs.feature')
@@ -10,7 +10,7 @@ def test_state():
 
 @given('a floorplan')
 def setup_floorplan(test_state):
-    test_state['fp'] = interconnect.Floorplan()
+    test_state['fp'] = buda.Floorplan()
 
 @given(parsers.parse('block "{name}" at {x1:d}, {y1:d} to {x2:d}, {y2:d}'))
 def add_block(test_state, name, x1, y1, x2, y2):
@@ -27,7 +27,7 @@ def setup_bundle(test_state, src, dst):
 
 @when('I generate topologies')
 def generate_topos(test_state):
-    gen = interconnect.TopologyGenerator(test_state['fp'])
+    gen = buda.TopologyGenerator(test_state['fp'])
     # Strip face hints like .tx or .rx
     src = test_state['src'].split('.')[0]
     dst = test_state['dst'].split('.')[0]
@@ -46,17 +46,17 @@ def check_l_shape_slides(test_state):
 def check_slide_overlap(test_state):
     fp = test_state['fp']
     for cand in test_state['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(cand, fp)
         for i, cs in enumerate(ct.segs()):
-            is_stub = any(c.kind == interconnect.SegConnKind.BUSTERM for c in cs.conns)
+            is_stub = any(c.kind == buda.SegConnKind.BUSTERM for c in cs.conns)
             if not is_stub:
                 for conn in cs.conns:
-                    if conn.kind == interconnect.SegConnKind.SEG:
+                    if conn.kind == buda.SegConnKind.SEG:
                         stub_idx = conn.seg_idx
                         stub_cs = list(ct.segs())[stub_idx]
                         for sconn in stub_cs.conns:
-                            if sconn.kind == interconnect.SegConnKind.BUSTERM:
+                            if sconn.kind == buda.SegConnKind.BUSTERM:
                                 block_name = sconn.block_name
                                 rect = fp.get_block_bounds(block_name)
                                 cm = fp.get_block_corner_margin(block_name)
@@ -73,10 +73,10 @@ def check_slide_overlap(test_state):
 def check_min_stub_length(test_state):
     fp = test_state['fp']
     for cand in test_state['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(cand, fp)
         for cs in ct.segs():
-            is_stub = any(c.kind == interconnect.SegConnKind.BUSTERM for c in cs.conns)
+            is_stub = any(c.kind == buda.SegConnKind.BUSTERM for c in cs.conns)
             if is_stub:
                 length = abs(cs.along_hi - cs.along_lo)
                 assert length >= 20, f"Tiny stub in {cand.type}: length={length}"
@@ -86,11 +86,11 @@ def check_physical_face(test_state):
     fp = test_state['fp']
     for cand in test_state['candidates']:
         if 'L_' not in cand.type: continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(cand, fp)
         for cs in ct.segs():
             for conn in cs.conns:
-                if conn.kind == interconnect.SegConnKind.BUSTERM:
+                if conn.kind == buda.SegConnKind.BUSTERM:
                     rect = fp.get_block_bounds(conn.block_name)
                     # Check if the segment spans TO the face
                     if cs.horiz:
@@ -109,7 +109,7 @@ def check_u_shape_slides(test_state):
     u_shapes = [c for c in test_state['candidates'] if 'U_' in c.type]
     assert len(u_shapes) > 0, "No U-shapes generated"
     for cand in u_shapes:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(cand, test_state['fp'])
         trunk = list(ct.segs())[1] # Trunk is always middle segment
         assert trunk.perp_hi > trunk.perp_lo, f"U-trunk in {cand.type} has trivial slide"

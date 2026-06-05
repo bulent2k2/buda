@@ -8,7 +8,7 @@ import re
 import sys
 import os
 import pytest
-import interconnect
+import buda
 from pytest_bdd import given, when, then, parsers
 
 # ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ from pytest_bdd import given, when, then, parsers
 @pytest.fixture
 def ctx():
     return {
-        'fp': interconnect.Floorplan(),
+        'fp': buda.Floorplan(),
         'layer_h': 4,
         'layer_v': 5,
         'candidates': [],        # list[Topology]
@@ -41,7 +41,7 @@ def ctx():
 # ---------------------------------------------------------------------------
 
 def _build_gen(ctx):
-    g = interconnect.TopologyGenerator(ctx['fp'])
+    g = buda.TopologyGenerator(ctx['fp'])
     g.set_layer_ids(ctx['layer_h'], ctx['layer_v'])
     return g
 
@@ -50,7 +50,7 @@ def _build_all_cts(ctx):
     """Build ConnTopology for every candidate; store by type string."""
     ctx['conn_topologies'] = {}
     for c in ctx['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         ctx['conn_topologies'][c.type] = ct
 
@@ -73,7 +73,7 @@ def _trunk_seg(ct, is_horiz):
     for cs in segs:
         if cs.horiz != is_horiz:
             continue
-        seg_conns = [c for c in cs.conns if c.kind == interconnect.SegConnKind.SEG]
+        seg_conns = [c for c in cs.conns if c.kind == buda.SegConnKind.SEG]
         if len(seg_conns) >= 1:
             return cs
     return None
@@ -83,7 +83,7 @@ def _stub_seg_for_block(ct, block_name):
     """Return the ConnSeg that has a BUSTERM to block_name (the stub or direct conn)."""
     for cs in _segs_of(ct):
         for conn in cs.conns:
-            if (conn.kind == interconnect.SegConnKind.BUSTERM
+            if (conn.kind == buda.SegConnKind.BUSTERM
                     and conn.block_name == block_name):
                 return cs
     return None
@@ -99,13 +99,13 @@ def _connector_type(ct, block_name, trunk_is_horiz):
     segs = _segs_of(ct)
     for cs in segs:
         for conn in cs.conns:
-            if (conn.kind == interconnect.SegConnKind.BUSTERM
+            if (conn.kind == buda.SegConnKind.BUSTERM
                     and conn.block_name == block_name):
                 if cs.horiz == trunk_is_horiz:
                     return 'Direct'
                 # It's a stub; check what the stub connects to
                 for c2 in cs.conns:
-                    if c2.kind == interconnect.SegConnKind.SEG:
+                    if c2.kind == buda.SegConnKind.SEG:
                         parent = segs[c2.seg_idx]
                         if parent.horiz == trunk_is_horiz:
                             return 'L'
@@ -126,11 +126,11 @@ def _compute_pull(ct, trunk_seg):
     segs = _segs_of(ct)
     perp_pos = trunk_seg.perp_pos
     for conn in trunk_seg.conns:
-        if conn.kind != interconnect.SegConnKind.SEG:
+        if conn.kind != buda.SegConnKind.SEG:
             continue
         stub = segs[conn.seg_idx]
         for sc in stub.conns:
-            if sc.kind == interconnect.SegConnKind.BUSTERM:
+            if sc.kind == buda.SegConnKind.BUSTERM:
                 if sc.at_pos < perp_pos:
                     lo += 1
                 elif sc.at_pos > perp_pos:
@@ -145,7 +145,7 @@ def _stub_length(cs):
 
 def _is_stub(cs):
     """True if cs has exactly one BUSTERM connection (leaf stub)."""
-    bt_count = sum(1 for c in cs.conns if c.kind == interconnect.SegConnKind.BUSTERM)
+    bt_count = sum(1 for c in cs.conns if c.kind == buda.SegConnKind.BUSTERM)
     return bt_count == 1
 
 
@@ -160,7 +160,7 @@ def _has_no_cycles(ct):
         visited[idx] = True
         in_stack[idx] = True
         for conn in segs[idx].conns:
-            if conn.kind != interconnect.SegConnKind.SEG:
+            if conn.kind != buda.SegConnKind.SEG:
                 continue
             nxt = conn.seg_idx
             if not visited[nxt]:
@@ -328,12 +328,12 @@ def at_least_one_connects_all(ctx, n):
     assert len(ctx['candidates']) >= 1, 'No candidates generated'
     # Each candidate is expected to connect all blocks; just check count
     for c in ctx['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         blocks_reached = set()
         for cs in _segs_of(ct):
             for conn in cs.conns:
-                if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+                if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                     blocks_reached.add(conn.block_name)
         if len(blocks_reached) >= n:
             return

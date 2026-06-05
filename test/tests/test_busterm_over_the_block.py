@@ -8,7 +8,7 @@ Scenario 8 (adjusted-wirelength ranking) is xfail: Topology.adjusted_wl and
   per-topology teg_mode attribute are not yet in the C++ API.
 """
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenario, given, when, then, parsers
 
 
@@ -80,7 +80,7 @@ def test_overtheblock_bridge_topology_has_higher_adjusted_wirelength_than_thru()
 ))
 def given_multi_rect_block_with_teg(ctx, name, rx1, ry1, rx2, ry2,
                                     sx1, sy1, sx2, sy2, mode):
-    teg = interconnect.TegMode.OVER if mode.lower() == 'over' else interconnect.TegMode.THRU
+    teg = buda.TegMode.OVER if mode.lower() == 'over' else buda.TegMode.THRU
     ctx['fp'].add_block_rects(
         name,
         [(int(rx1), int(ry1), int(rx2), int(ry2)),

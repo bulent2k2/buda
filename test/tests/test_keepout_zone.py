@@ -3,7 +3,7 @@ Keepout Zone feature tests.
 Covers the scenarios in features/keepout_zone.feature.
 """
 import pytest
-import interconnect
+import buda
 from pytest_bdd import given, when, then, parsers, scenario
 
 # ---------------------------------------------------------------------------
@@ -24,11 +24,11 @@ def test_detailed_router_blocks_tracks_in_keepout():
 
 @given('a layer stack with:')
 def given_layer_stack(ctx, datatable):
-    ls = interconnect.LayerStack()
+    ls = buda.LayerStack()
     for name, lid_str, dir_str, type_str in datatable[1:]:
         lid = int(lid_str)
-        dir = interconnect.LayerDir.HORIZONTAL if dir_str == "HORIZONTAL" else interconnect.LayerDir.VERTICAL
-        type = interconnect.LayerType.TOP if type_str == "TOP" else interconnect.LayerType.LOW
+        dir = buda.LayerDir.HORIZONTAL if dir_str == "HORIZONTAL" else buda.LayerDir.VERTICAL
+        type = buda.LayerType.TOP if type_str == "TOP" else buda.LayerType.LOW
         ls.add_layer(lid, name, dir, type)
     ctx['ls'] = ls
 
@@ -50,7 +50,7 @@ def given_keepout_zone_id(ctx, x1, y1, x2, y2, layer_id):
 
 @when(parsers.parse('I generate topologies for bundle "{bundle_hint}"'))
 def when_generate_topologies(ctx, bundle_hint):
-    gen = interconnect.TopologyGenerator(ctx['fp'])
+    gen = buda.TopologyGenerator(ctx['fp'])
     gen.set_layer_ids(ctx['layer_h'], ctx['layer_v'])
     
     # We need to find the blocks for this bundle.
@@ -62,17 +62,17 @@ def when_generate_topologies(ctx, bundle_hint):
 def when_run_global_planner(ctx):
     ls = ctx.get('ls')
     if ls is None:
-        ls = interconnect.LayerStack()
-        ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-        ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
+        ls = buda.LayerStack()
+        ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+        ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
 
-    router = interconnect.GlobalRouter(ctx['fp'], ls)
+    router = buda.CongestionPlanner(ctx['fp'], ls)
     router.build_congestion_map()
 
-    bundle = interconnect.Bundle()
+    bundle = buda.Bundle()
     bundle.id = 1
 
-    w = interconnect.BundleWrapper()
+    w = buda.BundleWrapper()
     w.original_bundle = bundle
     w.width = 10.0
     w.candidates = ctx['candidates']
@@ -120,9 +120,9 @@ def then_topology_detour(ctx, type_prefix):
 
 @given(parsers.parse('a track pattern for layer {layer_id:d} with "{type}" width {width:f} and spacing {spacing:f}'), target_fixture='grid_stack')
 def given_track_pattern(layer_id, type, width, spacing):
-    stack = interconnect.RoutingGridStack()
-    slots = [interconnect.TrackSlot(type, type.lower(), width, spacing)]
-    pat = interconnect.TrackPattern(0.0, slots)
+    stack = buda.RoutingGridStack()
+    slots = [buda.TrackSlot(type, type.lower(), width, spacing)]
+    pat = buda.TrackPattern(0.0, slots)
     # Assume horizontal for layer 4 for testing
     stack.define_layer(layer_id, pat, layer_id == 4)
     return stack

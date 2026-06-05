@@ -1,6 +1,6 @@
 import pytest
 import random
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 
 # Load Gherkin features (if any exist for specific scenarios)
@@ -16,8 +16,8 @@ def calculate_manhattan_dist(p1, p2):
 
 @pytest.fixture
 def topology_setup():
-    fp = interconnect.Floorplan()
-    gen = interconnect.TopologyGenerator(fp)
+    fp = buda.Floorplan()
+    gen = buda.TopologyGenerator(fp)
     return fp, gen
 
 # --- Random Test Generator ---
@@ -100,7 +100,7 @@ def test_random_topologies(topology_setup):
 def _make_spread_z_floorplan():
     """Two blocks at identical Y range, side-by-side in X.
     Their shrunken centres share the same Y → spread-Z candidates generated."""
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.set_global_corner_margin(15, 20)
     fp.add_block("u0",   200, 400, 300, 600)
     fp.add_block("u22", -100, 400,  -50, 600)
@@ -115,7 +115,7 @@ def test_spread_z_hvh_trunk_has_bounded_slide_range():
     for the trunk and an unbounded slide interval.
     """
     fp = _make_spread_z_floorplan()
-    gen = interconnect.TopologyGenerator(fp)
+    gen = buda.TopologyGenerator(fp)
     gen.set_layer_ids(4, 5)
     candidates = gen.generate_candidates("u0", "u22")
 
@@ -123,7 +123,7 @@ def test_spread_z_hvh_trunk_has_bounded_slide_range():
     assert len(spread_z) >= 1, "Expected at least one spread Z_HVH candidate"
 
     BOUND = 10_000  # anything larger than the floorplan is effectively unbounded
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     for topo in spread_z:
         ct.build(topo, fp)
         for j, cs in enumerate(ct.segs()):
@@ -143,18 +143,18 @@ def test_spread_z_hvh_trunk_has_bounded_slide_range():
 def test_spread_z_hvh_trunk_has_two_seg_connections():
     """Each spread Z_HVH trunk must be connected to both H stubs."""
     fp = _make_spread_z_floorplan()
-    gen = interconnect.TopologyGenerator(fp)
+    gen = buda.TopologyGenerator(fp)
     gen.set_layer_ids(4, 5)
     candidates = gen.generate_candidates("u0", "u22")
 
     spread_z = [t for t in candidates if t.type.startswith("Z_HVH")]
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     for topo in spread_z:
         ct.build(topo, fp)
         for j, cs in enumerate(ct.segs()):
             if not cs.horiz:  # V trunk
                 seg_conns = [c for c in cs.conns
-                             if c.kind == interconnect.SegConnKind.SEG]
+                             if c.kind == buda.SegConnKind.SEG]
                 assert len(seg_conns) == 2, (
                     f"Trunk in {topo.type} seg{j} has {len(seg_conns)} SEG "
                     f"connections, expected 2"

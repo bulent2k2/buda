@@ -13,7 +13,7 @@ Pass 1 of ConnTopology.compute_slide_ranges shrinks the face extent inward:
 Guard: if 2*margin >= face extent, the full extent is kept (no inversion).
 """
 import pytest
-import interconnect
+import buda
 
 
 # ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ import interconnect
 # ---------------------------------------------------------------------------
 
 def make_fp_with_block(name, x1, y1, x2, y2, dx=0, dy=0):
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block(name, x1, y1, x2, y2)
     if dx > 0 or dy > 0:
         fp.set_block_corner_margin(name, dx, dy)
@@ -36,15 +36,15 @@ def make_topo_h_on_left_face(blk_name, fp):
     src_blk = "src_helper"
     fp.add_block(src_blk, rect.x1 + 500, rect.y1, rect.x1 + 600, rect.y2)
 
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_H_LEFT"
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(rect.x1, mid_y)
-    seg.end   = interconnect.Point(rect.x1 + 500, mid_y)
+    seg = buda.Segment()
+    seg.start = buda.Point(rect.x1, mid_y)
+    seg.end   = buda.Point(rect.x1 + 500, mid_y)
     seg.layer_hint = 4
     topo.segments = [seg]
     # Annotate: start endpoint = blk_name
-    bt = interconnect.Busterm()
+    bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
     topo.seg_busterms[0] = (bt, None)
@@ -57,14 +57,14 @@ def make_topo_h_on_right_face(blk_name, fp):
     mid_y = (rect.y1 + rect.y2) // 2
     fp.add_block("src_helper2", rect.x2 - 600, rect.y1, rect.x2 - 500, rect.y2)
 
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_H_RIGHT"
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(rect.x2 - 500, mid_y)
-    seg.end   = interconnect.Point(rect.x2, mid_y)
+    seg = buda.Segment()
+    seg.start = buda.Point(rect.x2 - 500, mid_y)
+    seg.end   = buda.Point(rect.x2, mid_y)
     seg.layer_hint = 4
     topo.segments = [seg]
-    bt = interconnect.Busterm()
+    bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
     topo.seg_busterms[0] = (None, bt)
@@ -77,14 +77,14 @@ def make_topo_v_on_top_face(blk_name, fp):
     mid_x = (rect.x1 + rect.x2) // 2
     fp.add_block("src_helper3", rect.x1, rect.y2 - 600, rect.x2, rect.y2 - 500)
 
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_V_TOP"
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(mid_x, rect.y2 - 500)
-    seg.end   = interconnect.Point(mid_x, rect.y2)
+    seg = buda.Segment()
+    seg.start = buda.Point(mid_x, rect.y2 - 500)
+    seg.end   = buda.Point(mid_x, rect.y2)
     seg.layer_hint = 5
     topo.segments = [seg]
-    bt = interconnect.Busterm()
+    bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
     topo.seg_busterms[0] = (None, bt)
@@ -97,14 +97,14 @@ def make_topo_v_on_bottom_face(blk_name, fp):
     mid_x = (rect.x1 + rect.x2) // 2
     fp.add_block("src_helper4", rect.x1, rect.y1 + 500, rect.x2, rect.y1 + 600)
 
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_V_BOT"
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(mid_x, rect.y1)
-    seg.end   = interconnect.Point(mid_x, rect.y1 + 500)
+    seg = buda.Segment()
+    seg.start = buda.Point(mid_x, rect.y1)
+    seg.end   = buda.Point(mid_x, rect.y1 + 500)
     seg.layer_hint = 5
     topo.segments = [seg]
-    bt = interconnect.Busterm()
+    bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
     topo.seg_busterms[0] = (bt, None)
@@ -126,7 +126,7 @@ def test_no_margin_full_face_extent():
     fp = make_fp_with_block("blk", 0, 0, 100, 200)
     topo = make_topo_h_on_left_face("blk", fp)
 
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
 
     lo, hi = slide_range(ct)
@@ -143,7 +143,7 @@ def test_absolute_dy_shrinks_vertical_face():
     fp = make_fp_with_block("blk", 0, 0, 100, 200, dy=20)
     topo = make_topo_h_on_left_face("blk", fp)
 
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
 
     lo, hi = slide_range(ct)
@@ -160,7 +160,7 @@ def test_absolute_dx_shrinks_horizontal_face():
     fp = make_fp_with_block("blk", 0, 0, 200, 100, dx=15)
     topo = make_topo_v_on_top_face("blk", fp)
 
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
 
     lo, hi = slide_range(ct)
@@ -181,7 +181,7 @@ def test_pct_v_margin_computes_dy():
     fp.set_block_corner_margin("blk", 0, dy)
 
     topo = make_topo_h_on_right_face("blk", fp)
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
 
     lo, hi = slide_range(ct)
@@ -202,7 +202,7 @@ def test_pct_h_margin_computes_dx():
     fp.set_block_corner_margin("blk", dx, 0)
 
     topo = make_topo_v_on_bottom_face("blk", fp)
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
 
     lo, hi = slide_range(ct)
@@ -221,7 +221,7 @@ def test_small_block_guard_prevents_inversion():
     fp = make_fp_with_block("blk", 0, 0, 100, 30, dy=20)
     topo = make_topo_h_on_left_face("blk", fp)
 
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
 
     lo, hi = slide_range(ct)
@@ -243,19 +243,19 @@ def test_nominal_at_lower_face_boundary_skips_margin():
     """
     fp = make_fp_with_block("src", 200, 400, 300, 600, dy=20)
     # H segment: start on src's right face at y=400 (= src.y1), end in open space.
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_H_BOUNDARY"
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(300, 400)
-    seg.end   = interconnect.Point(900, 400)  # open space — no block there
+    seg = buda.Segment()
+    seg.start = buda.Point(300, 400)
+    seg.end   = buda.Point(900, 400)  # open space — no block there
     seg.layer_hint = 4
     topo.segments = [seg]
-    bt = interconnect.Busterm()
+    bt = buda.Busterm()
     bt.block_name = "src"
     bt.bbox = fp.get_block_bounds("src")
     topo.seg_busterms[0] = (bt, None)  # only start annotated
 
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
     lo, hi = slide_range(ct)
     assert lo == 400, f"Expected perp_lo=400 (guard: nominal at boundary), got {lo}"
@@ -272,19 +272,19 @@ def test_nominal_at_upper_face_boundary_skips_margin():
     """
     fp = make_fp_with_block("src", 200, 400, 300, 600, dx=15)
     # V segment: start on src's right face at x=300, going downward to open space.
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_V_BOUNDARY"
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(300, 400)
-    seg.end   = interconnect.Point(300, 0)   # open space — no block there
+    seg = buda.Segment()
+    seg.start = buda.Point(300, 400)
+    seg.end   = buda.Point(300, 0)   # open space — no block there
     seg.layer_hint = 5
     topo.segments = [seg]
-    bt = interconnect.Busterm()
+    bt = buda.Busterm()
     bt.block_name = "src"
     bt.bbox = fp.get_block_bounds("src")
     topo.seg_busterms[0] = (bt, None)  # only start annotated
 
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
     lo, hi = slide_range(ct)
     assert lo == 200, f"Expected perp_lo=200 (guard: nominal at boundary), got {lo}"
@@ -297,7 +297,7 @@ def test_dx_dy_applied_independently():
 
     # H segment on left face → uses dy=25
     topo_h = make_topo_h_on_left_face("blk", fp)
-    ct_h = interconnect.ConnTopology()
+    ct_h = buda.ConnTopology()
     ct_h.build(topo_h, fp)
     lo_h, hi_h = slide_range(ct_h)
     assert lo_h == 25  and hi_h == 175, f"H slide range wrong: [{lo_h}, {hi_h}]"
@@ -305,7 +305,7 @@ def test_dx_dy_applied_independently():
     # V segment on top face → uses dx=25 (fresh fp to avoid helper block collisions)
     fp2 = make_fp_with_block("blk", 0, 0, 200, 200, dx=25, dy=25)
     topo_v = make_topo_v_on_top_face("blk", fp2)
-    ct_v = interconnect.ConnTopology()
+    ct_v = buda.ConnTopology()
     ct_v.build(topo_v, fp2)
     lo_v, hi_v = slide_range(ct_v)
     assert lo_v == 25 and hi_v == 175, f"V slide range wrong: [{lo_v}, {hi_v}]"
@@ -325,20 +325,20 @@ def test_nuts_respects_margin_adjusted_range():
     fp.add_block("dst", 600, 50, 700, 150)
     topo = make_topo_h_on_left_face("blk", fp)
 
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(topo, fp)
 
     lo, hi = slide_range(ct)
     assert lo == 30 and hi == 170, f"Slide range wrong: [{lo}, {hi}]"
 
     # Feed into NUTS and verify the placed position respects the range.
-    ls = interconnect.LayerStack()
-    nuts = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    nuts = buda.NUTSEngine(fp, ls)
     nuts.set_track_pitch(1.0)
 
     # Build BundleWrapper with the topology segment.
     seg_h = topo.segments[0]
-    track_seg = interconnect.TrackSegment()
+    track_seg = buda.TrackSegment()
     track_seg.bundle_id   = 1
     track_seg.seg_idx     = 0
     track_seg.layer       = seg_h.layer_hint
@@ -350,9 +350,9 @@ def test_nuts_respects_margin_adjusted_range():
     track_seg.track_position = ct.segs()[0].perp_pos  # nominal = 100
 
     # NUTS result wrapping
-    bundle = interconnect.Bundle()
+    bundle = buda.Bundle()
     bundle.id = 1
-    bw = interconnect.BundleWrapper()
+    bw = buda.BundleWrapper()
     bw.original_bundle = bundle
     bw.width = 10.0
     bw.selected_topology_index = 0
@@ -381,7 +381,7 @@ def test_cli_pct_parsing_produces_correct_margin():
     expected_dx = round((x2 - x1) * pct_h / 100.0)  # 20
     expected_dy = round((y2 - y1) * pct_v / 100.0)  # 20
 
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block("blk", x1, y1, x2, y2)
     fp.set_block_corner_margin("blk", expected_dx, expected_dy)
 
@@ -398,7 +398,7 @@ def test_global_margin_applies_to_unoverridden_block():
     """Scenario: Global margin applies to blocks with no per-block override.
     global dy=20 → block 'a' (no override) gets [20,180]; block 'b' (dy=10) gets [10,190].
     """
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.set_global_corner_margin(20, 20)
     fp.add_block("a", 0, 0, 100, 200)            # no per-block override → global dy=20
     fp.add_block("b", 0, 0, 100, 200)            # per-block dy=10 overrides global
@@ -406,7 +406,7 @@ def test_global_margin_applies_to_unoverridden_block():
 
     # Block "a" should use global margin dy=20.
     topo_a = make_topo_h_on_left_face("a", fp)
-    ct_a = interconnect.ConnTopology()
+    ct_a = buda.ConnTopology()
     ct_a.build(topo_a, fp)
     lo_a, hi_a = slide_range(ct_a)
     assert lo_a == 20 and hi_a == 180, \
@@ -416,20 +416,20 @@ def test_global_margin_applies_to_unoverridden_block():
     # Build the topology inline — do NOT add a helper block at the segment endpoint,
     # because the geometric busterm fallback would pick it up and apply the global
     # margin, masking the per-block margin under test.
-    fp2 = interconnect.Floorplan()
+    fp2 = buda.Floorplan()
     fp2.set_global_corner_margin(20, 20)
     fp2.add_block("b", 0, 0, 100, 200)
     fp2.set_block_corner_margin("b", 10, 10)
     rect_b = fp2.get_block_bounds("b")
     mid_y_b = (rect_b.y1 + rect_b.y2) // 2
-    topo_b = interconnect.Topology()
+    topo_b = buda.Topology()
     topo_b.type = "TEST_H_LEFT_B"
-    seg_b = interconnect.Segment()
-    seg_b.start = interconnect.Point(rect_b.x1, mid_y_b)   # on "b"'s left face
-    seg_b.end   = interconnect.Point(rect_b.x1 + 499, mid_y_b)  # open space, no block
+    seg_b = buda.Segment()
+    seg_b.start = buda.Point(rect_b.x1, mid_y_b)   # on "b"'s left face
+    seg_b.end   = buda.Point(rect_b.x1 + 499, mid_y_b)  # open space, no block
     seg_b.layer_hint = 4
     topo_b.segments = [seg_b]
-    ct_b = interconnect.ConnTopology()
+    ct_b = buda.ConnTopology()
     ct_b.build(topo_b, fp2)
     lo_b, hi_b = slide_range(ct_b)
     assert lo_b == 10 and hi_b == 190, \

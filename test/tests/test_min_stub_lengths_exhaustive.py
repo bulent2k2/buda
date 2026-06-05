@@ -1,8 +1,8 @@
 import pytest
-import interconnect
+import buda
 
 def test_min_stub_length_exhaustive():
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     
     # ── Setup Floorplan ──────────────────────────────────────────────────
     # u_s: [50, 400] to [250, 600]
@@ -20,7 +20,7 @@ def test_min_stub_length_exhaustive():
     # M5: Vertical, ID=5
     
     # ── Test 1: Default (20) ─────────────────────────────────────────────
-    tg = interconnect.TopologyGenerator(fp)
+    tg = buda.TopologyGenerator(fp)
     tg.set_layer_ids(4, 5)
     
     # Check L_VH Candidate (Option B: above src)
@@ -36,7 +36,7 @@ def test_min_stub_length_exhaustive():
     assert l_vh_above is not None, "Expected L_VH@y640 with global min_stub=40"
     
     # ── Test 3: Directional Override (V=60) ──────────────────────────────
-    fp.set_min_stub_length_dir(interconnect.LayerDir.VERTICAL, 60)
+    fp.set_min_stub_length_dir(buda.LayerDir.VERTICAL, 60)
     cands = tg.generate_candidates("u_s", "u_d")
     l_vh_above = next((c for c in cands if "L_VH@y660" in c.type), None)
     assert l_vh_above is not None, "Expected L_VH@y660 with V min_stub=60"
@@ -66,30 +66,30 @@ def test_min_stub_length_exhaustive():
     # In four_blocks logic, it adds margin-offset trunks.
     # Let's just verify that NO multicast candidate has a tiny stub.
     for cand in mc_cands:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(cand, fp)
         for cs in ct.segs():
-            is_stub = any(c.kind == interconnect.SegConnKind.BUSTERM for c in cs.conns)
+            is_stub = any(c.kind == buda.SegConnKind.BUSTERM for c in cs.conns)
             if is_stub:
                 length = abs(cs.along_hi - cs.along_lo)
-                m = fp.get_min_stub_length(interconnect.LayerDir.VERTICAL if not cs.horiz else interconnect.LayerDir.HORIZONTAL, cs.layer_id)
+                m = fp.get_min_stub_length(buda.LayerDir.VERTICAL if not cs.horiz else buda.LayerDir.HORIZONTAL, cs.layer_id)
                 assert length >= m, f"Multicast stub in {cand.type} too short: {length} < {m}"
 
 def test_z_u_uu_min_stub():
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block("u1", 0, 0, 100, 100)
     fp.add_block("u2", 200, 200, 300, 300)
     fp.set_min_stub_length(50)
     
-    tg = interconnect.TopologyGenerator(fp)
+    tg = buda.TopologyGenerator(fp)
     tg.set_layer_ids(4, 5)
     candidates = tg.generate_candidates("u1", "u2")
     
     for cand in candidates:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(cand, fp)
         for cs in ct.segs():
-            is_stub = any(c.kind == interconnect.SegConnKind.BUSTERM for c in cs.conns)
+            is_stub = any(c.kind == buda.SegConnKind.BUSTERM for c in cs.conns)
             if is_stub:
                 length = abs(cs.along_hi - cs.along_lo)
                 # Check for Z, U, UU

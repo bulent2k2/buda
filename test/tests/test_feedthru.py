@@ -8,7 +8,7 @@ metadata on the Topology object.
 None of these fields exist yet in the C++ API; all scenarios are xfail.
 """
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import _find_candidate, _segs_of, _build_all_cts
 
@@ -39,7 +39,7 @@ def _v_seg_for_block(ct, blk):
         if cs.horiz:
             continue
         for conn in cs.conns:
-            if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name == blk:
+            if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name == blk:
                 return cs
     return None
 
@@ -72,7 +72,7 @@ def no_v_stub_feedthru(ctx, blk):
         feedthru = getattr(c, 'feedthru_blocks', []) or []
         if blk not in feedthru:
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         v_stub = _v_seg_for_block(ct, blk)
         assert v_stub is None, (
@@ -104,7 +104,7 @@ def appears_in_feedthru_blocks(ctx, blk):
 def trunk_split_two_h_segs(ctx, x1, x2):
     x1, x2 = int(x1), int(x2)
     for c in ctx['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         endpoints = _h_seg_endpoints(ct)
         if x1 in endpoints and x2 in endpoints:
@@ -118,7 +118,7 @@ def trunk_split_two_h_segs(ctx, x1, x2):
 def left_segment_span(ctx, x1, x2):
     x1, x2 = int(x1), int(x2)
     for c in ctx['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         for cs in _segs_of(ct):
             if cs.horiz and cs.along_lo == x1 and cs.along_hi == x2:
@@ -132,7 +132,7 @@ def left_segment_span(ctx, x1, x2):
 def right_segment_span(ctx, x1, x2):
     x1, x2 = int(x1), int(x2)
     for c in ctx['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         for cs in _segs_of(ct):
             if cs.horiz and cs.along_lo == x1 and cs.along_hi == x2:
@@ -151,12 +151,12 @@ def feedthru_path_exists(ctx, b1, b2, ft):
     for c in ctx['candidates']:
         feedthru = getattr(c, 'feedthru_blocks', None) or []
         if ft in feedthru:
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(c, ctx['fp'])
             blocks = set()
             for cs in _segs_of(ct):
                 for conn in cs.conns:
-                    if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+                    if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                         blocks.add(conn.block_name)
             if {b1, b2} <= blocks:
                 return
@@ -172,7 +172,7 @@ def no_v_stub_in_selected(ctx, blk):
         feedthru = getattr(c, 'feedthru_blocks', []) or []
         if blk not in feedthru:
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         v_stub = _v_seg_for_block(ct, blk)
         assert v_stub is None, f'{c.type}: V stub found for "{blk}"'
@@ -211,7 +211,7 @@ def feedthru_blocks_contains(ctx, blk):
 ))
 def trunk_passes_through_no_stub(ctx, blk):
     for c in ctx['candidates']:
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         v_stub = _v_seg_for_block(ct, blk)
         if v_stub is None:

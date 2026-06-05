@@ -7,7 +7,7 @@ NUTSEngine.run() so that the C++ algorithm can be exercised without
 needing a full .buda script.
 """
 import pytest
-import interconnect
+import buda
 
 
 # ---------------------------------------------------------------------------
@@ -16,24 +16,24 @@ import interconnect
 
 def make_bundle(bundle_id, nets, width, segments):
     """Build a BundleWrapper with a single pre-built topology."""
-    bundle = interconnect.Bundle()
+    bundle = buda.Bundle()
     bundle.id = bundle_id
     bundle.net_names = nets          # list[str]
 
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST"
     # Build the segment list first, then assign in one shot.
     # Assigning via append to the pybind11 proxy would modify a copy, not the C++ vector.
     seg_list = []
     for s in segments:
-        seg = interconnect.Segment()
-        seg.start = interconnect.Point(s['x1'], s['y1'])
-        seg.end   = interconnect.Point(s['x2'], s['y2'])
+        seg = buda.Segment()
+        seg.start = buda.Point(s['x1'], s['y1'])
+        seg.end   = buda.Point(s['x2'], s['y2'])
         seg.layer_hint = s['layer']
         seg_list.append(seg)
     topo.segments = seg_list
 
-    wrapper = interconnect.BundleWrapper()
+    wrapper = buda.BundleWrapper()
     wrapper.original_bundle = bundle
     wrapper.width = width
     wrapper.candidates = [topo]
@@ -43,7 +43,7 @@ def make_bundle(bundle_id, nets, width, segments):
 
 def make_floorplan(*blocks):
     """blocks: (name, x1, y1, x2, y2)"""
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     for b in blocks:
         fp.add_block(b[0], b[1], b[2], b[3], b[4])
     return fp
@@ -57,8 +57,8 @@ def test_single_segment_placed_in_interval():
     fp = make_floorplan(("src", 0, 100, 100, 200), ("dst", 300, 100, 400, 200))
     w = make_bundle(1, ["net_a"], width=10.0,
                     segments=[{'x1': 0, 'y1': 150, 'x2': 300, 'y2': 150, 'layer': 3}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w])
 
@@ -79,8 +79,8 @@ def test_non_overlapping_spans_no_conflict():
                      segments=[{'x1': 0, 'y1': 150, 'x2': 100, 'y2': 150, 'layer': 3}])
     w2 = make_bundle(2, ["n2"], width=10.0,
                      segments=[{'x1': 150, 'y1': 150, 'x2': 300, 'y2': 150, 'layer': 3}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2])
 
@@ -99,8 +99,8 @@ def test_overlapping_spans_separated():
                      segments=[{'x1': 0, 'y1': 250, 'x2': 300, 'y2': 250, 'layer': 3}])
     w2 = make_bundle(2, ["n2"], width=20.0,
                      segments=[{'x1': 100, 'y1': 250, 'x2': 400, 'y2': 250, 'layer': 3}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2])
 
@@ -128,8 +128,8 @@ def test_nonuniform_widths():
                      segments=[{'x1': 0, 'y1': y_mid, 'x2': 300, 'y2': y_mid, 'layer': 3}])
     w3 = make_bundle(3, ["n3"], width=15.0,
                      segments=[{'x1': 0, 'y1': y_mid, 'x2': 300, 'y2': y_mid, 'layer': 3}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(2.0)
     result = engine.run([w1, w2, w3])
 
@@ -151,8 +151,8 @@ def test_layers_solved_independently():
     # Vertical segment on M4 (same routing range in y)
     wV = make_bundle(2, ["n2"], width=10.0,
                      segments=[{'x1': 150, 'y1': 0, 'x2': 150, 'y2': 300, 'layer': 4}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([wH, wV])
 
@@ -174,8 +174,8 @@ def test_co_starting_two_segments_separated():
                      segments=[{'x1': 0, 'y1': 350, 'x2': 400, 'y2': 350, 'layer': 3}])
     w2 = make_bundle(2, ["n2"], width=10.0,
                      segments=[{'x1': 0, 'y1': 350, 'x2': 300, 'y2': 350, 'layer': 3}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2])
 
@@ -194,8 +194,8 @@ def test_co_starting_three_segments_all_separated():
                      segments=[{'x1': 0, 'y1': 500, 'x2': 400, 'y2': 500, 'layer': 3}])
     w3 = make_bundle(3, ["n3"], width=10.0,
                      segments=[{'x1': 0, 'y1': 500, 'x2': 300, 'y2': 500, 'layer': 3}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w1, w2, w3])
 
@@ -211,8 +211,8 @@ def test_interval_too_narrow_violation():
     # width=20, but interval only spans 5 units (105-100)
     w = make_bundle(1, ["n1"], width=20.0,
                     segments=[{'x1': 0, 'y1': 103, 'x2': 300, 'y2': 103, 'layer': 3}])
-    ls = interconnect.LayerStack()
-    engine = interconnect.NUTSEngine(fp, ls)
+    ls = buda.LayerStack()
+    engine = buda.NUTSEngine(fp, ls)
     engine.set_track_pitch(1.0)
     result = engine.run([w])
 

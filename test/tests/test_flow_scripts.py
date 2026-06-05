@@ -11,16 +11,15 @@ import sys
 from pathlib import Path
 
 _ROOT   = Path(__file__).parents[2]
-FLOW    = _ROOT / "buda_system_v2" / "flow"
-CLI     = _ROOT / "buda_system_v2" / "src" / "buda_cli.py"
+FLOW    = _ROOT / "flow"
+CLI     = _ROOT / "src" / "buda_cli.py"
 SRC_DIR = CLI.parent
 
 
 def run_script(name: str) -> tuple[str, int]:
     """Run a .buda script with --no-viz; return (combined output, returncode)."""
-    BUILD_DIR = _ROOT / "buda_system_v2" / "build"
-    # Ensure build and src are both in PYTHONPATH
-    env = {**os.environ, "PYTHONPATH": f"{SRC_DIR}:{BUILD_DIR}"}
+    # Ensure src (where buda.so lives) is in PYTHONPATH
+    env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
     r = subprocess.run(
         [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
         capture_output=True, text=True, env=env,

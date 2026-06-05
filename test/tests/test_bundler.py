@@ -1,14 +1,14 @@
 import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
-import interconnect
+import buda
 
 scenarios('features/bundler_logic.feature')
 
 @pytest.fixture
 def context():
     return {
-        'netlist': interconnect.Netlist(),
-        'bundler': interconnect.Bundler(),
+        'netlist': buda.Netlist(),
+        'bundler': buda.Bundler(),
         'results': []
     }
 
@@ -24,9 +24,9 @@ def setup_netlist(context, datatable):
 @when(parsers.parse('I run the bundler with "{strategy}"'))
 def run_bundler_with_strategy(context, strategy):
     if strategy == "strict_connectivity":
-        context['bundler'].set_strategy(interconnect.Strategy.STRICT)
+        context['bundler'].set_strategy(buda.Strategy.STRICT)
     elif strategy == "shared_receivers_only":
-        context['bundler'].set_strategy(interconnect.Strategy.CONVERGENT)
+        context['bundler'].set_strategy(buda.Strategy.CONVERGENT)
     context['results'] = context['bundler'].run(context['netlist'])
 
 @when('I run the bundler')

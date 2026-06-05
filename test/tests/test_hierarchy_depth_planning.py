@@ -9,7 +9,7 @@ The depth/parent API on add_block and generate_topologies is not yet implemented
 in the C++ engine; all scenarios are xfail.
 """
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 
 pytestmark = pytest.mark.xfail(
@@ -38,7 +38,7 @@ def given_hierarchical_floorplan(ctx, datatable):
     """
     Datatable columns: Name | x1 | y1 | x2 | y2 | depth | parent
     """
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     hierarchy = {}  # name → {depth, parent}
     for row in datatable[1:]:
         name, x1, y1, x2, y2, depth, parent = row
@@ -54,7 +54,7 @@ def given_hierarchical_floorplan(ctx, datatable):
 
 @given(parsers.re(r'a net "(?P<name>[^"]+)" from "(?P<drv>[^"]+)" to "(?P<rcv>[^"]+)"'))
 def given_net(ctx, name, drv, rcv):
-    nl = ctx.setdefault('netlist', interconnect.Netlist())
+    nl = ctx.setdefault('netlist', buda.Netlist())
     nl.add_net(name, f'{drv}.tx', f'{rcv}.rx')
     ctx['netlist'] = nl
 
@@ -82,7 +82,7 @@ def given_buda_script(ctx, text):
 
 @when(parsers.re(r'I generate topologies at depth (?P<depth>\d+)'))
 def when_generate_at_depth(ctx, depth):
-    gen = interconnect.TopologyGenerator(ctx['fp'])
+    gen = buda.TopologyGenerator(ctx['fp'])
     gen.set_layer_ids(ctx['layer_h'], ctx['layer_v'])
     gen.set_depth(int(depth))
     nl = ctx.get('netlist')
@@ -99,7 +99,7 @@ def when_generate_at_depth(ctx, depth):
 
 @when(parsers.re(r'I run the bundler at depth (?P<depth>\d+)'))
 def when_run_bundler_at_depth(ctx, depth):
-    from interconnect import Bundler, BundlerStrategy
+    from buda import Bundler, BundlerStrategy
     b = Bundler()
     b.set_depth(int(depth))
     nl = ctx.get('netlist')
@@ -112,7 +112,7 @@ def when_run_bundler_at_depth(ctx, depth):
     r'I run pass 1: generate and place "(?P<net>[^"]+)" at depth (?P<depth>\d+)'
 ))
 def when_pass1(ctx, net, depth):
-    gen = interconnect.TopologyGenerator(ctx['fp'])
+    gen = buda.TopologyGenerator(ctx['fp'])
     gen.set_layer_ids(ctx['layer_h'], ctx['layer_v'])
     gen.set_depth(int(depth))
     nl = ctx.get('netlist')
@@ -121,8 +121,8 @@ def when_pass1(ctx, net, depth):
     rcv = net_obj.receiver_instances()[0]
     cands = gen.generate_candidates(drv, rcv)
     # Run NUTS to place; store result for keepout promotion
-    engine = interconnect.NUTSEngine()
-    from interconnect import BundleWrapper
+    engine = buda.NUTSEngine()
+    from buda import BundleWrapper
     w = BundleWrapper()
     w.candidates = cands
     result = engine.solve([w])
@@ -153,7 +153,7 @@ def when_promote_keepout(ctx, depth, layer):
     r'I run pass 2: generate topologies for "(?P<net>[^"]+)" at depth (?P<depth>\d+)'
 ))
 def when_pass2(ctx, net, depth):
-    gen = interconnect.TopologyGenerator(ctx['fp'])
+    gen = buda.TopologyGenerator(ctx['fp'])
     gen.set_layer_ids(ctx['layer_h'], ctx['layer_v'])
     gen.set_depth(int(depth))
     nl = ctx.get('netlist')
@@ -165,12 +165,12 @@ def when_pass2(ctx, net, depth):
 
 @when(parsers.re(r'I run the global planner for "(?P<net>[^"]+)"'))
 def when_run_planner(ctx, net):
-    ls = interconnect.LayerStack()
-    ls.add_layer(ctx['layer_h'], 'M4', interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(ctx['layer_v'], 'M5', interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
-    router = interconnect.GlobalRouter(ctx['fp'], ls)
+    ls = buda.LayerStack()
+    ls.add_layer(ctx['layer_h'], 'M4', buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(ctx['layer_v'], 'M5', buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+    router = buda.GlobalRouter(ctx['fp'], ls)
     router.build_congestion_map()
-    from interconnect import BundleWrapper, Bundle
+    from buda import BundleWrapper, Bundle
     b = Bundle()
     b.id = 1
     w = BundleWrapper()

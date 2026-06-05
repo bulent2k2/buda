@@ -6,29 +6,29 @@ All tests are expected to FAIL until the C++ implementation is complete.
 That is intentional — this file is the red phase of TDD.
 
 Expected Python API (to be implemented):
-    interconnect.TrackSlot(type, label, width, space_after)
-    interconnect.TrackPattern(origin, slots)
-    interconnect.RoutingGridStack()
+    buda.TrackSlot(type, label, width, space_after)
+    buda.TrackPattern(origin, slots)
+    buda.RoutingGridStack()
       .define_layer(layer_id, pattern)
-    interconnect.BusSegment()
+    buda.BusSegment()
       .bundle_id, .seg_idx, .layer
       .span_lo, .span_hi
       .interval_lo, .interval_hi
       .bit_width             int  — number of signal tracks needed
       .bit_order             str  — "LO_HI" or "HI_LO"
       .timing_critical       bool
-    interconnect.DetailedNUTSEngine(routing_grid_stack)
+    buda.DetailedNUTSEngine(routing_grid_stack)
       .run(bus_segments) -> DetailedNUTSResult
-    interconnect.DetailedNUTSResult
+    buda.DetailedNUTSResult
       .net_segments          list[NetSegment]
       .num_unplaced          int
-    interconnect.NetSegment
+    buda.NetSegment
       .bundle_id, .seg_idx, .bit_index
       .track_position        float
       .width                 float
 """
 import pytest
-import interconnect
+import buda
 
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ import interconnect
 # ---------------------------------------------------------------------------
 
 def make_slot(slot_type, label, width, space_after):
-    return interconnect.TrackSlot(
+    return buda.TrackSlot(
         type=slot_type, label=label, width=width, space_after=space_after
     )
 
@@ -55,11 +55,11 @@ def make_standard_pattern(origin=0.0):
         make_slot("SIGNAL", "sig", 1.0, 1.0),
         make_slot("SIGNAL", "sig", 1.0, 1.0),
     ]
-    return interconnect.TrackPattern(origin=origin, slots=slots)
+    return buda.TrackPattern(origin=origin, slots=slots)
 
 
 def make_stack_with_standard_pattern(layer_id=4):
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     stack.define_layer(layer_id, make_standard_pattern(origin=0.0), True)
     return stack
 
@@ -69,7 +69,7 @@ def make_bus_segment(bundle_id=1, seg_idx=0, layer=4,
                      interval_lo=0.0, interval_hi=14.0,
                      bit_width=1, bit_order="LO_HI",
                      timing_critical=False):
-    seg = interconnect.BusSegment()
+    seg = buda.BusSegment()
     seg.bundle_id      = bundle_id
     seg.seg_idx        = seg_idx
     seg.layer          = layer
@@ -97,7 +97,7 @@ def net_segs_for(result, bundle_id):
 def test_lo_hi_two_bits_assigned_from_lowest_signal_tracks():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bit_width=2, interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     segs = net_segs_for(result, bundle_id=1)
@@ -109,7 +109,7 @@ def test_lo_hi_two_bits_assigned_from_lowest_signal_tracks():
 def test_lo_hi_four_bits_fills_all_signal_tracks_in_unit():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bit_width=4, interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     assert result.num_unplaced == 0
@@ -124,7 +124,7 @@ def test_lo_hi_four_bits_fills_all_signal_tracks_in_unit():
 def test_hi_lo_two_bits_assigned_from_highest_signal_tracks():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bit_width=2, interval_lo=0.0, interval_hi=14.0, bit_order="HI_LO")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     segs = net_segs_for(result, bundle_id=1)
@@ -140,7 +140,7 @@ def test_hi_lo_two_bits_assigned_from_highest_signal_tracks():
 def test_power_and_ground_track_centres_never_assigned():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bit_width=4, interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     positions = {s.track_position for s in result.net_segments}
@@ -156,7 +156,7 @@ def test_narrow_interval_returns_subset_of_signal_tracks():
     stack = make_stack_with_standard_pattern()
     # [4.0, 11.0] contains signal tracks at 5.5 and 10.5 only
     seg = make_bus_segment(bit_width=2, interval_lo=4.0, interval_hi=11.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     positions = [s.track_position for s in net_segs_for(result, 1)]
@@ -173,7 +173,7 @@ def test_timing_critical_selects_contiguous_pair_at_lo_end():
     # (3.5, 5.5) is contiguous; (5.5, 10.5) has GROUND@8.0 between → not contiguous
     seg = make_bus_segment(bit_width=2, interval_lo=0.0, interval_hi=14.0,
                            bit_order="LO_HI", timing_critical=True)
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     positions = [s.track_position for s in net_segs_for(result, 1)]
@@ -187,7 +187,7 @@ def test_timing_critical_skips_non_contiguous_and_finds_next_window():
     # (10.5, 12.5): nothing between → contiguous
     seg = make_bus_segment(bit_width=2, interval_lo=5.0, interval_hi=14.0,
                            bit_order="LO_HI", timing_critical=True)
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     positions = [s.track_position for s in net_segs_for(result, 1)]
@@ -200,7 +200,7 @@ def test_timing_critical_with_no_valid_window_leaves_bus_unplaced():
     # No contiguous window of size 3 → unplaced
     seg = make_bus_segment(bit_width=3, interval_lo=0.0, interval_hi=14.0,
                            bit_order="LO_HI", timing_critical=True)
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     assert result.num_unplaced == 3
@@ -214,7 +214,7 @@ def test_num_unplaced_when_more_bits_than_signal_tracks():
     stack = make_stack_with_standard_pattern()
     # Only 4 signal tracks in [0,14]; requesting 6
     seg = make_bus_segment(bit_width=6, interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     assert result.num_unplaced == 6   # entire bus unplaced
@@ -223,7 +223,7 @@ def test_num_unplaced_when_more_bits_than_signal_tracks():
 def test_num_unplaced_zero_when_all_bits_fit():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bit_width=4, interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     assert result.num_unplaced == 0
@@ -236,7 +236,7 @@ def test_num_unplaced_zero_when_all_bits_fit():
 def test_net_segment_width_matches_track_slot_width():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bit_width=1, interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     assert len(result.net_segments) == 1
@@ -247,7 +247,7 @@ def test_net_segment_width_matches_track_slot_width():
 def test_net_segment_bit_index_is_zero_based():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bit_width=3, interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     indices = sorted(s.bit_index for s in result.net_segments)
@@ -258,7 +258,7 @@ def test_net_segment_bundle_id_and_seg_idx_propagated():
     stack = make_stack_with_standard_pattern()
     seg = make_bus_segment(bundle_id=7, seg_idx=2, bit_width=1,
                            interval_lo=0.0, interval_hi=14.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     ns = result.net_segments[0]
@@ -276,7 +276,7 @@ def test_two_bus_segments_expanded_independently():
                              bit_order="LO_HI")
     seg_b = make_bus_segment(bundle_id=2, bit_width=2, interval_lo=7.0,  interval_hi=14.0,
                              bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg_a, seg_b])
 
     assert result.num_unplaced == 0
@@ -296,7 +296,7 @@ def test_interval_spanning_two_units_yields_eight_signal_tracks():
     stack = make_stack_with_standard_pattern()
     # [0, 28] = two full units → 4 signal tracks each = 8 total
     seg = make_bus_segment(bit_width=8, interval_lo=0.0, interval_hi=28.0, bit_order="LO_HI")
-    engine = interconnect.DetailedNUTSEngine(stack)
+    engine = buda.DetailedNUTSEngine(stack)
     result = engine.run([seg])
 
     assert result.num_unplaced == 0

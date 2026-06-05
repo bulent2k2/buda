@@ -4,7 +4,7 @@ pytest-bdd step definitions for features/multicast_topology.feature.
 Covers TRUNK_H / TRUNK_V / TRUNK_H_OOB / MST / BITRUNK multicast topologies.
 """
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import (
     _find_candidate, _segs_of, _build_all_cts,
@@ -24,7 +24,7 @@ def _trunk_segs(ct, is_horiz):
     return [
         cs for cs in segs
         if cs.horiz == is_horiz
-        and any(c.kind == interconnect.SegConnKind.SEG for c in cs.conns)
+        and any(c.kind == buda.SegConnKind.SEG for c in cs.conns)
     ]
 
 
@@ -33,7 +33,7 @@ def _stub_segs(ct, is_horiz):
     return [
         cs for cs in _segs_of(ct)
         if cs.horiz == is_horiz
-        and any(c.kind == interconnect.SegConnKind.BUSTERM for c in cs.conns)
+        and any(c.kind == buda.SegConnKind.BUSTERM for c in cs.conns)
     ]
 
 
@@ -116,7 +116,7 @@ def trunk_h_stub_to_b(ctx):
     for c in ctx['candidates']:
         if not c.type.startswith('TRUNK_H') or 'OOB' in c.type:
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         # Determine trunk y from perp_pos of first H segment
         trunk_segs = [cs for cs in _segs_of(ct) if cs.horiz]
@@ -138,7 +138,7 @@ def trunk_h_stub_to_c(ctx):
     for c in ctx['candidates']:
         if not c.type.startswith('TRUNK_H') or 'OOB' in c.type:
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         trunk_segs = [cs for cs in _segs_of(ct) if cs.horiz]
         if not trunk_segs:
@@ -167,7 +167,7 @@ def trunk_v_h_stubs(ctx):
     for c in ctx['candidates']:
         if not c.type.startswith('TRUNK_V') or 'OOB' in c.type:
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         trunk_segs = [cs for cs in _segs_of(ct) if not cs.horiz]
         if not trunk_segs:
@@ -204,7 +204,7 @@ def trunk_h_topology_connects_three(ctx, ttype, b1, b2, b3):
             y = int(m.group(1))
             for cand in ctx['candidates']:
                 if cand.type.startswith('TRUNK_H') and 'OOB' not in cand.type:
-                    ct_tmp = interconnect.ConnTopology()
+                    ct_tmp = buda.ConnTopology()
                     ct_tmp.build(cand, ctx['fp'])
                     for cs in _segs_of(ct_tmp):
                         if cs.horiz and cs.perp_pos == y:
@@ -217,7 +217,7 @@ def trunk_h_topology_connects_three(ctx, ttype, b1, b2, b3):
     blocks_reached = set()
     for cs in _segs_of(ct):
         for conn in cs.conns:
-            if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+            if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                 blocks_reached.add(conn.block_name)
     for blk in (b1, b2, b3):
         assert blk in blocks_reached, (
@@ -235,7 +235,7 @@ def trunk_h_at_y_pass_through_at_least(ctx, y, n):
         y_int = int(y)
         for cand in ctx['candidates']:
             if cand.type.startswith('TRUNK_H') and 'OOB' not in cand.type:
-                ct = interconnect.ConnTopology()
+                ct = buda.ConnTopology()
                 ct.build(cand, ctx['fp'])
                 for cs in _segs_of(ct):
                     if cs.horiz and cs.perp_pos == y_int:
@@ -259,7 +259,7 @@ def trunk_h_at_y_includes_v_stub(ctx, y, blk):
     if ct is None:
         for cand in ctx['candidates']:
             if cand.type.startswith('TRUNK_H') and 'OOB' not in cand.type:
-                ct_tmp = interconnect.ConnTopology()
+                ct_tmp = buda.ConnTopology()
                 ct_tmp.build(cand, ctx['fp'])
                 for cs in _segs_of(ct_tmp):
                     if cs.horiz and cs.perp_pos == y:
@@ -292,12 +292,12 @@ def trunk_h_oob_connects_all(ctx):
     for c in ctx['candidates']:
         if not c.type.startswith('TRUNK_H_OOB'):
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         blocks_reached = set()
         for cs in _segs_of(ct):
             for conn in cs.conns:
-                if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+                if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                     blocks_reached.add(conn.block_name)
         if expected.issubset(blocks_reached):
             return
@@ -313,7 +313,7 @@ def trunk_h_oob_below(ctx, y):
     for c in ctx['candidates']:
         if not c.type.startswith('TRUNK_H_OOB'):
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         for cs in _segs_of(ct):
             if cs.horiz:
@@ -334,7 +334,7 @@ def trunk_h_at_y_exists(ctx, y):
     y = int(y)
     for c in ctx['candidates']:
         if c.type.startswith('TRUNK_H') and 'OOB' not in c.type:
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(c, ctx['fp'])
             for cs in _segs_of(ct):
                 if cs.horiz and cs.perp_pos == y:
@@ -358,7 +358,7 @@ def block_has_pass_through(ctx, y, blk, n):
         y_int = int(y)
         for cand in ctx['candidates']:
             if cand.type.startswith('TRUNK_H') and 'OOB' not in cand.type:
-                ct = interconnect.ConnTopology()
+                ct = buda.ConnTopology()
                 ct.build(cand, ctx['fp'])
                 for cs in _segs_of(ct):
                     if cs.horiz and cs.perp_pos == y_int:
@@ -382,7 +382,7 @@ def block_has_v_stub_at_y(ctx, y, blk):
     if ct is None:
         for cand in ctx['candidates']:
             if cand.type.startswith('TRUNK_H') and 'OOB' not in cand.type:
-                ct_tmp = interconnect.ConnTopology()
+                ct_tmp = buda.ConnTopology()
                 ct_tmp.build(cand, ctx['fp'])
                 for cs in _segs_of(ct_tmp):
                     if cs.horiz and cs.perp_pos == y:
@@ -411,12 +411,12 @@ def mst_connects_all(ctx):
     for c in ctx['candidates']:
         if not c.type.startswith('MST'):
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         blocks = set()
         for cs in _segs_of(ct):
             for conn in cs.conns:
-                if conn.kind == interconnect.SegConnKind.BUSTERM and conn.block_name:
+                if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
                     blocks.add(conn.block_name)
         assert len(blocks) >= 4, (
             f'{c.type}: only reached blocks {blocks}'
@@ -429,7 +429,7 @@ def mst_no_cycles(ctx):
     for c in ctx['candidates']:
         if not c.type.startswith('MST'):
             continue
-        ct = interconnect.ConnTopology()
+        ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
         assert _has_no_cycles(ct), f'{c.type}: cycle detected in ConnTopology'
 

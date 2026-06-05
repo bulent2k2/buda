@@ -17,7 +17,7 @@ lightly-used cut via boundary effects.
 Ties broken toward higher layer ID (higher metal preferred when costs are equal).
 """
 import pytest
-import interconnect
+import buda
 
 
 # ---------------------------------------------------------------------------
@@ -25,20 +25,20 @@ import interconnect
 # ---------------------------------------------------------------------------
 
 def make_h_segment(x_lo, x_hi, y, layer=4):
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(x_lo, y)
-    seg.end   = interconnect.Point(x_hi, y)
+    seg = buda.Segment()
+    seg.start = buda.Point(x_lo, y)
+    seg.end   = buda.Point(x_hi, y)
     seg.layer_hint = layer
     return seg
 
 
 def make_bundle_wrapper(bid, width, seg):
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_H"
     topo.segments = [seg]
-    bundle = interconnect.Bundle()
+    bundle = buda.Bundle()
     bundle.id = bid
-    w = interconnect.BundleWrapper()
+    w = buda.BundleWrapper()
     w.original_bundle = bundle
     w.width = width
     w.candidates = [topo]
@@ -48,7 +48,7 @@ def make_bundle_wrapper(bid, width, seg):
 
 def open_channel_fp():
     """Two blocks with a large gap — ample H routing capacity."""
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block("src", 0,   0, 100, 200)
     fp.add_block("dst", 900, 0, 1000, 200)
     return fp
@@ -64,7 +64,7 @@ def bottleneck_fp():
       band[1] = [96,100] → capacity 4  (open gap)
     H segments at y=98 cross x=300 and land in band 1 (capacity=4).
     """
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block("src",      0,   0, 100, 100)
     fp.add_block("dst",    500,   0, 600, 100)
     fp.add_block("blocker", 100,  0, 500,  96)
@@ -75,20 +75,20 @@ def make_ls_m4_m6(span_max_m4=None, span_min_m6=None,
                   kspan_m4=None, kspan_m6=None,
                   include_m2=False, m2_span_max=None):
     """Build a layer stack with M4-H-TOP, M6-H-TOP, M5-V-TOP, optional M2-H-non-TOP."""
-    ls = interconnect.LayerStack()
-    ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
+    ls = buda.LayerStack()
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
     if span_max_m4 is not None:
         ls.set_layer_span(4, 0, span_max_m4)
     if kspan_m4 is not None:
         ls.set_layer_kspan(4, kspan_m4)
-    ls.add_layer(6, "M6", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
+    ls.add_layer(6, "M6", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
     if span_min_m6 is not None:
         ls.set_layer_span(6, span_min_m6, 1_000_000_000)
     if kspan_m6 is not None:
         ls.set_layer_kspan(6, kspan_m6)
-    ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL, interconnect.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL, buda.LayerType.TOP)
     if include_m2:
-        ls.add_layer(2, "M2", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.LOW)
+        ls.add_layer(2, "M2", buda.LayerDir.HORIZONTAL, buda.LayerType.LOW)
         if m2_span_max is not None:
             ls.set_layer_span(2, 0, m2_span_max)
     return ls
@@ -108,7 +108,7 @@ def test_short_seg_prefers_m4():
     fp = open_channel_fp()
     ls = make_ls_m4_m6(span_max_m4=500, span_min_m6=400)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     # Short H segment: x from 100 to 300 (span=200), well within M4's window
@@ -136,7 +136,7 @@ def test_long_seg_prefers_m6():
     fp = open_channel_fp()
     ls = make_ls_m4_m6(span_max_m4=500, span_min_m6=400)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     # Long H segment: x from 100 to 900 (span=800), well within M6's window
@@ -164,7 +164,7 @@ def test_non_top_layer_base_cost():
     fp = open_channel_fp()
     ls = make_ls_m4_m6(include_m2=True, m2_span_max=300)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     seg = make_h_segment(100, 200, y=100)  # span=100
@@ -192,12 +192,12 @@ def test_congestion_spill_to_span_mismatched_layer():
     fp = bottleneck_fp()
     ls = make_ls_m4_m6(span_max_m4=500, span_min_m6=400)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     # Confirm the open band (y=[96,100]) has capacity 4 on M4.
     v_cuts_m4 = [c for c in router.get_cuts()
-                 if c.dir == interconnect.LayerDir.VERTICAL and c.layer_id == 4]
+                 if c.dir == buda.LayerDir.VERTICAL and c.layer_id == 4]
     assert v_cuts_m4, "Need V-cuts on M4"
     bottleneck_cap = min(min(c.band_cap) for c in v_cuts_m4 if c.band_cap)
     assert bottleneck_cap == pytest.approx(4.0), (
@@ -237,12 +237,12 @@ def test_overflow_threshold_congestion():
     (2+2=4 = cap); bundle 3 would overflow M6 (4+2=6 > 4) and is routed to M4.
     """
     fp = bottleneck_fp()   # V-cut at x=300, open band capacity=4
-    ls = interconnect.LayerStack()
-    ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(6, "M6", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
+    ls = buda.LayerStack()
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(6, "M6", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     seg1 = make_h_segment(100, 500, y=98)
@@ -277,7 +277,7 @@ def test_per_layer_kspan_zero_removes_span_penalty():
     fp = open_channel_fp()
     ls = make_ls_m4_m6(span_max_m4=500, span_min_m6=400, kspan_m6=0.0)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     seg = make_h_segment(100, 200, y=100)  # span=100, well below M6 span_min=400
@@ -309,12 +309,12 @@ def test_set_planner_param_kcong():
     M6 is congested).
     """
     fp = bottleneck_fp()  # V-cut at x=300, open band capacity=4
-    ls = interconnect.LayerStack()
-    ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(6, "M6", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
+    ls = buda.LayerStack()
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(6, "M6", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.set_planner_param("kCong", 100.0)  # huge congestion penalty
     router.build_congestion_map()
 

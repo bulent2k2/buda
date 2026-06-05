@@ -7,7 +7,7 @@ correct best-rect selection, Hanan grid contributions, and stub geometry.
 All scenarios xfail until add_block_rects is implemented in C++.
 """
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import (
     _find_candidate, _segs_of,
@@ -29,7 +29,7 @@ def _cand_ct(ctx, type_str):
             f'No candidate of type {type_str!r}; '
             'multi-rect block support not yet in C++'
         )
-    ct = interconnect.ConnTopology()
+    ct = buda.ConnTopology()
     ct.build(cand, ctx['fp'])
     return ct
 

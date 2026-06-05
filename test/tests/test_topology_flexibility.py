@@ -9,7 +9,7 @@ those scenarios are marked xfail.
 """
 import math
 import pytest
-import interconnect
+import buda
 from pytest_bdd import scenarios, given, when, then, parsers
 from conftest import (
     _find_candidate, _segs_of, _build_all_cts,
@@ -91,7 +91,7 @@ def z_hvh_v_trunk_perp(ctx, x, lo, hi):
     # The trunk is the V segment with SEG connections
     trunk = next(
         (cs for cs in v_segs
-         if any(c.kind == interconnect.SegConnKind.SEG for c in cs.conns)),
+         if any(c.kind == buda.SegConnKind.SEG for c in cs.conns)),
         v_segs[0]
     )
     assert trunk.perp_lo == lo, f'V trunk perp_lo={trunk.perp_lo}, expected {lo}'
@@ -111,7 +111,7 @@ def z_hvh_v_trunk_slide(ctx, x, s):
     assert v_segs, f'No V segment in {prefix}'
     trunk = next(
         (cs for cs in v_segs
-         if any(c.kind == interconnect.SegConnKind.SEG for c in cs.conns)),
+         if any(c.kind == buda.SegConnKind.SEG for c in cs.conns)),
         v_segs[0]
     )
     slide = trunk.perp_hi - trunk.perp_lo
@@ -136,7 +136,7 @@ def each_candidate_adjusted_wl(ctx):
             pytest.xfail('adjusted_wl not yet in C++ API')
         ct = ctx['conn_topologies'].get(c.type)
         if ct is None:
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(c, ctx['fp'])
         min_sl = _min_slide(ct)
         expected = _adjusted_wl(c.estimated_wirelength, min_sl, kflex, ref_slide)
@@ -274,7 +274,7 @@ def find_zero_slide_candidate(ctx):
     for c in ctx['candidates']:
         ct = ctx['conn_topologies'].get(c.type)
         if ct is None:
-            ct = interconnect.ConnTopology()
+            ct = buda.ConnTopology()
             ct.build(c, ctx['fp'])
         if _min_slide(ct) == 0:
             ctx['zero_slide_cand'] = c

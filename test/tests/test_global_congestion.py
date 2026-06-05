@@ -11,7 +11,7 @@ to step defs).  The two new scenarios are exercised as plain pytest
 functions below.
 """
 import pytest
-import interconnect
+import buda
 
 
 # ---------------------------------------------------------------------------
@@ -20,23 +20,23 @@ import interconnect
 
 def make_v_segment(x, y_lo, y_hi, layer):
     """Return a Segment with a vertical span (start.x == end.x)."""
-    seg = interconnect.Segment()
-    seg.start = interconnect.Point(x, y_lo)
-    seg.end   = interconnect.Point(x, y_hi)
+    seg = buda.Segment()
+    seg.start = buda.Point(x, y_lo)
+    seg.end   = buda.Point(x, y_hi)
     seg.layer_hint = layer
     return seg
 
 
 def make_bundle_wrapper(bid, width, seg):
     """BundleWrapper with a single-segment topology."""
-    topo = interconnect.Topology()
+    topo = buda.Topology()
     topo.type = "TEST_V"
     topo.segments = [seg]
 
-    bundle = interconnect.Bundle()
+    bundle = buda.Bundle()
     bundle.id = bid
 
-    w = interconnect.BundleWrapper()
+    w = buda.BundleWrapper()
     w.original_bundle = bundle
     w.width = width
     w.candidates = [topo]
@@ -56,17 +56,17 @@ def test_optimise_returns_bundle_assignments():
     The return value must be a list of BundleAssignment objects.
     """
     # Wide open channel: two tall blocks with a large gap between them.
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block("src_blk", 0,   0, 100, 500)
     fp.add_block("dst_blk", 400, 0, 500, 500)
 
-    ls = interconnect.LayerStack()
-    ls.add_layer(3, "M3", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
-    ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
-    ls.add_layer(7, "M7", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
+    ls = buda.LayerStack()
+    ls.add_layer(3, "M3", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+    ls.add_layer(7, "M7", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     # V segment crossing the central horizontal cut (y=250 is inside both blocks → cut is unblocked there)
@@ -114,22 +114,22 @@ def test_v_layer_spill_m3_to_m5():
     # Unblocked x range = gap at x=[8,12] = width 4.
     # Bundle width = 3  →  first bundle uses 3/4 of M3 capacity.
     # Second bundle needs 3 more but only 1 left → overflow on M3, spill to M5.
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block("wall_left",  0,  0,  8, 100)
     fp.add_block("wall_right", 12, 0, 20, 100)
 
-    ls = interconnect.LayerStack()
-    ls.add_layer(3, "M3", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
-    ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
+    ls = buda.LayerStack()
+    ls.add_layer(3, "M3", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     # Confirm the bottleneck cut has the expected small per-band capacity.
     # Hanan X grid: [0,8,12,20]; V-segments at x=10 land in band [8,12] (idx 1).
     h_cuts = [c for c in router.get_cuts()
-              if c.dir == interconnect.LayerDir.HORIZONTAL and c.layer_id == 3]
+              if c.dir == buda.LayerDir.HORIZONTAL and c.layer_id == 3]
     assert h_cuts, "Should have at least one H-cut for M3"
     # Band index 1 = [8,12], fully open (neither block covers it).
     min_band_cap = min(c.band_cap[1] for c in h_cuts if len(c.band_cap) > 1)
@@ -177,16 +177,16 @@ def test_dilution_factor_increases_cut_usage():
     We verify this indirectly: after optimizing, the H-cut current_usage
     should reflect the diluted width.
     """
-    fp = interconnect.Floorplan()
+    fp = buda.Floorplan()
     fp.add_block("blk_a", 0, 0, 100, 200)
     fp.add_block("blk_b", 200, 0, 300, 200)
 
-    ls = interconnect.LayerStack()
-    ls.add_layer(4, "M4", interconnect.LayerDir.HORIZONTAL, interconnect.LayerType.TOP)
-    ls.add_layer(5, "M5", interconnect.LayerDir.VERTICAL,   interconnect.LayerType.TOP)
+    ls = buda.LayerStack()
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
     ls.set_layer_overhead(5, 25.0)   # M5 V: 25% overhead
 
-    router = interconnect.GlobalRouter(fp, ls)
+    router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
     seg = make_v_segment(x=150, y_lo=0, y_hi=200, layer=5)
@@ -198,7 +198,7 @@ def test_dilution_factor_increases_cut_usage():
     # optimize_topologies extends the Hanan grid with segment endpoint x=150,
     # so the exact band index is not fixed — find it dynamically.
     h_cuts_m5 = [c for c in router.get_cuts()
-                 if c.dir == interconnect.LayerDir.HORIZONTAL and c.layer_id == 5]
+                 if c.dir == buda.LayerDir.HORIZONTAL and c.layer_id == 5]
     crossed = [c for c in h_cuts_m5 if any(u > 0 for u in c.band_usage)]
     assert crossed, "At least one M5 H-cut should have non-zero band usage"
 

@@ -7,23 +7,23 @@ and exposed via pybind11.  That is intentional — this file is the
 red phase of TDD.
 
 Expected Python API (to be implemented):
-    interconnect.TrackSlot(type, label, width, space_after)
-    interconnect.TrackPattern(origin, slots)
+    buda.TrackSlot(type, label, width, space_after)
+    buda.TrackPattern(origin, slots)
       .unit_pitch()         -> float
       .signal_density()     -> float
       .dilution_factor()    -> float
       .tracks_in_range(lo, hi) -> list[(centre: float, slot: TrackSlot)]
-    interconnect.RoutingGridStack()
+    buda.RoutingGridStack()
       .define_layer(layer_id: int, pattern: TrackPattern)
       .add_override(layer_id, x1, y1, x2, y2, pattern: TrackPattern)
       .get_layer_grid(layer_id) -> RoutingGrid
-    interconnect.RoutingGrid
+    buda.RoutingGrid
       .effective_pattern_at(x, y) -> TrackPattern
       .signal_tracks_in(x, lo, hi) -> list[(centre: float, slot: TrackSlot)]
 """
 import math
 import pytest
-import interconnect
+import buda
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ import interconnect
 # ---------------------------------------------------------------------------
 
 def make_slot(slot_type, label, width, space_after):
-    return interconnect.TrackSlot(
+    return buda.TrackSlot(
         type=slot_type, label=label, width=width, space_after=space_after
     )
 
@@ -50,7 +50,7 @@ def make_standard_pattern(origin=0.0):
         make_slot("SIGNAL", "sig", 1.0, 1.0),
         make_slot("SIGNAL", "sig", 1.0, 1.0),
     ]
-    return interconnect.TrackPattern(origin=origin, slots=slots)
+    return buda.TrackPattern(origin=origin, slots=slots)
 
 
 def centres_of(tracks):
@@ -74,7 +74,7 @@ def test_unit_pitch_sum_of_width_plus_space_after():
 
 
 def test_unit_pitch_single_slot():
-    p = interconnect.TrackPattern(
+    p = buda.TrackPattern(
         origin=0.0,
         slots=[make_slot("SIGNAL", "s", width=3.0, space_after=2.0)]
     )
@@ -97,7 +97,7 @@ def test_dilution_factor_reciprocal_of_signal_density():
 
 
 def test_all_signal_slots_density_is_one():
-    p = interconnect.TrackPattern(
+    p = buda.TrackPattern(
         origin=0.0,
         slots=[
             make_slot("SIGNAL", "s", 1.0, 0.0),
@@ -189,7 +189,7 @@ def test_signal_tracks_in_narrow_interval():
 # ---------------------------------------------------------------------------
 
 def test_routing_grid_stack_define_and_retrieve():
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     p = make_standard_pattern()
     stack.define_layer(4, p, True)
     grid = stack.get_layer_grid(4)
@@ -197,7 +197,7 @@ def test_routing_grid_stack_define_and_retrieve():
 
 
 def test_routing_grid_signal_tracks_in_via_stack():
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     grid = stack.get_layer_grid(4)
     tracks = grid.signal_tracks_in(x=0.0, lo=0.0, hi=14.0)
@@ -207,7 +207,7 @@ def test_routing_grid_signal_tracks_in_via_stack():
 
 
 def test_routing_grid_signal_tracks_two_units():
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     grid = stack.get_layer_grid(4)
     tracks = grid.signal_tracks_in(x=0.0, lo=0.0, hi=28.0)
@@ -215,7 +215,7 @@ def test_routing_grid_signal_tracks_two_units():
 
 
 def test_get_undefined_layer_raises():
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     with pytest.raises(Exception):
         stack.get_layer_grid(99)
 
@@ -230,11 +230,11 @@ def make_two_slot_pattern(origin=0.0):
         make_slot("POWER",  "VDD", 1.0, 0.0),
         make_slot("SIGNAL", "sig", 1.0, 0.0),
     ]
-    return interconnect.TrackPattern(origin=origin, slots=slots)
+    return buda.TrackPattern(origin=origin, slots=slots)
 
 
 def test_override_pattern_applies_inside_region():
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     override_pat = make_two_slot_pattern(origin=0.0)
     stack.add_override(4, x1=100, y1=0, x2=200, y2=500, pattern=override_pat)
@@ -245,7 +245,7 @@ def test_override_pattern_applies_inside_region():
 
 
 def test_global_pattern_applies_outside_override_region():
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     stack.define_layer(4, make_standard_pattern(origin=0.0), True)
     override_pat = make_two_slot_pattern(origin=0.0)
     stack.add_override(4, x1=100, y1=0, x2=200, y2=500, pattern=override_pat)
@@ -257,11 +257,11 @@ def test_global_pattern_applies_outside_override_region():
 
 def test_first_matching_override_wins():
     """When two overrides cover the same point, the first-added takes precedence."""
-    stack = interconnect.RoutingGridStack()
+    stack = buda.RoutingGridStack()
     stack.define_layer(4, make_standard_pattern(origin=0.0), True)
 
     pat_a = make_two_slot_pattern(origin=0.0)           # unit_pitch=2
-    pat_b = interconnect.TrackPattern(                   # unit_pitch=6
+    pat_b = buda.TrackPattern(                   # unit_pitch=6
         origin=0.0,
         slots=[make_slot("SIGNAL", "s", 3.0, 3.0)]
     )
