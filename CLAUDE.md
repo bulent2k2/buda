@@ -11,6 +11,7 @@ The core engine is **C++20** exposed to Python via **pybind11**, with a Python C
 ## Useful Docs
 - [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
 - [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation.
+- [BDB Reference](docs/BDB_REFERENCE.md) — Physical design database: schema, `.buda` commands, Python API.
 - [Detailed NUTS](docs/detailed_nuts.md) — Internal design of bit-level track assignment.
 
 ## Build

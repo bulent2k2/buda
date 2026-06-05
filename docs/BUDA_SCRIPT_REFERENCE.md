@@ -34,6 +34,8 @@ Commands run in the following order. Later stages depend on earlier ones.
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
+| BDB | `open_bdb`, `import_def_lef`, `import_verilog` | Open / populate the physical design database |
+| BDB | `move_comp`, `resize_cell`, `add_comp` | Mutate placement data in the database |
 
 ---
 
@@ -952,4 +954,44 @@ run_detailed_nuts        # lo_hi ordering (default)
 
 # ── Visualise ────────────────────────────────────────────────
 visualize
+```
+
+---
+
+## BDB — Physical Design Database
+
+BDB commands operate on a persistent SQLite store for component placements,
+nets, pins, and hierarchy. They can appear anywhere in a script but are
+independent of the BUDA routing pipeline (stages 1–9).
+
+Full reference: **[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**
+
+### Quick reference
+
+| Command | Description |
+|---|---|
+| `open_bdb <path>` | Open or create a `.bdb` file. Use before any other BDB command. |
+| `import_def_lef <def> <lef>` | Import placements from DEF + cell sizes from LEF. Clears all tables. |
+| `import_verilog <v>` | Elaborate hierarchy from Verilog; preserves coordinates from a prior `import_def_lef`. |
+| `move_comp <name> <x> <y>` | Shift instance `name` to new origin `(x, y)`; preserves cell size. |
+| `resize_cell <cell> <w> <h>` | Set `x2=x1+w`, `y2=y1+h` for every instance of cell type `cell`. |
+| `add_comp <name> <cell> <parent\|-> <x1> <y1> <x2> <y2> [leaf\|nonleaf]` | Insert a new component. Use `−` as parent for a root instance. |
+
+**Common patterns:**
+
+```buda
+# DEF + Verilog merge
+open_bdb  flow/lefdef/gcd/gcd.bdb
+import_def_lef  flow/lefdef/gcd/gcd.def  flow/lefdef/gcd/gcd.lef
+import_verilog  flow/lefdef/gcd/gcd.v
+
+# Fixup after import
+move_comp   u_regfile  10.0  10.0
+resize_cell DFFRX1     5.6   4.0
+
+# Build from scratch
+open_bdb  flow/manual/tiny.bdb
+add_comp  u_a  blk  -      0   0  100 100 nonleaf
+add_comp  u_b  blk  -    200   0  300 100 nonleaf
+add_comp  u_a/x0  cell  u_a   10  10   50  50 leaf
 ```
