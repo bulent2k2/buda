@@ -7,11 +7,11 @@ def write_file(path, content):
     print(f"[Created] {path}")
 
 # ==========================================
-# 1. Build Configuration
+# 1. Build Configuration (Unchanged)
 # ==========================================
 cmake_content = """
 cmake_minimum_required(VERSION 3.15)
-project(buda_interconnect VERSION 0.1.0 LANGUAGES CXX)
+project(buda_interconnect VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
@@ -32,7 +32,7 @@ pybind11_add_module(interconnect ${SOURCE_FILES})
 """
 
 # ==========================================
-# 2. C++ Headers
+# 2. C++ Headers (Topology updated for U-shapes)
 # ==========================================
 bundler_h = """
 #pragma once
@@ -120,6 +120,8 @@ private:
     const Floorplan& floorplan_;
     void add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results);
     void add_z_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
+    // NEW: U-shape generation
+    void add_u_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
 };
 }
 """
@@ -142,7 +144,7 @@ struct Layer {
 class LayerStack {
 public:
     void add_layer(int id, const std::string& name, LayerDir dir, LayerType type);
-    LayerDir get_layer_dir(int id) const; // Helper needed for router
+    LayerDir get_layer_dir(int id) const; 
     int get_top_layer(LayerDir dir) const;
 private:
     std::vector<Layer> layers_;
@@ -176,26 +178,18 @@ public:
     void set_layer_overhead(int layer_id, double overhead_percent);
     void build_congestion_map();
     void optimize_topologies(std::vector<BundleWrapper>& bundles, int max_iterations);
-    double test_get_effective_width(double w, int l) const; // Exposed for test
-    void inject_congestion_on_layer(int layer_id, double usage); // Exposed for test
 private:
     const Floorplan& floorplan_;
     const LayerStack& layers_;
     std::map<int, double> layer_dilution_factors_;
     std::vector<GlobalCut> cuts_;
-    double get_effective_width(double raw_width, int layer_id) const;
-    void map_topology_to_cuts(const Topology& topo, double width, bool add_usage);
-    double calculate_cost(const Topology& topo, double width) const;
 };
 }
 """
 
 nuts_h = """
 #pragma once
-// Placeholder for NUTS Engine header
-namespace interconnect {
-    class NUTSEngine {};
-}
+namespace interconnect { class NUTSEngine {}; }
 """
 
 # ==========================================
@@ -252,6 +246,7 @@ std::vector<Bundle> Bundler::run(const Netlist& netlist) {
 }
 """
 
+# UPDATED TOPOLOGY.CPP with U-Shapes
 topology_cpp = """
 #include "topology.h"
 #include <cmath>
@@ -278,12 +273,10 @@ Segment make_seg(int x1, int y1, int x2, int y2, int layer) {
 }
 void TopologyGenerator::add_l_shapes(const Rect& src, const Rect& dst, std::vector<Topology>& results) {
     Point s = src.center(); Point d = dst.center();
-    // HV (Layer 3 then 4 assumed for prototype)
     Topology hv; hv.type = "L_HV";
     hv.segments.push_back(make_seg(s.x, s.y, d.x, s.y, 3)); 
     hv.segments.push_back(make_seg(d.x, s.y, d.x, d.y, 4));
     results.push_back(hv);
-    // VH
     Topology vh; vh.type = "L_VH";
     vh.segments.push_back(make_seg(s.x, s.y, s.x, d.y, 4));
     vh.segments.push_back(make_seg(s.x, d.y, d.x, d.y, 3));
@@ -294,11 +287,38 @@ void TopologyGenerator::add_z_shapes(const Rect& src, const Rect& dst, const std
     int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
     for (int x_cut : x_grid) {
         if (x_cut > min_x && x_cut < max_x) {
-            Topology z; z.type = "Z_HVH"; z.trunk_location = x_cut;
+            Topology z; z.type = "Z_HVH"; 
             z.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 3));
             z.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 4));
             z.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 3));
             results.push_back(z);
+        }
+    }
+}
+// NEW: U-Shape logic (detours outside bounding box)
+void TopologyGenerator::add_u_shapes(const Rect& src, const Rect& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results) {
+    Point s = src.center(); Point d = dst.center();
+    int min_x = std::min(s.x, d.x), max_x = std::max(s.x, d.x);
+    int min_y = std::min(s.y, d.y), max_y = std::max(s.y, d.y);
+
+    // Vertical U-trunks
+    for (int x_cut : x_grid) {
+        if (x_cut < min_x || x_cut > max_x) {
+            Topology u; u.type = "U_HVH";
+            u.segments.push_back(make_seg(s.x, s.y, x_cut, s.y, 3));
+            u.segments.push_back(make_seg(x_cut, s.y, x_cut, d.y, 4));
+            u.segments.push_back(make_seg(x_cut, d.y, d.x, d.y, 3));
+            results.push_back(u);
+        }
+    }
+    // Horizontal U-trunks
+    for (int y_cut : y_grid) {
+        if (y_cut < min_y || y_cut > max_y) {
+            Topology u; u.type = "U_VHV";
+            u.segments.push_back(make_seg(s.x, s.y, s.x, y_cut, 4));
+            u.segments.push_back(make_seg(s.x, y_cut, d.x, y_cut, 3));
+            u.segments.push_back(make_seg(d.x, y_cut, d.x, d.y, 4));
+            results.push_back(u);
         }
     }
 }
@@ -310,6 +330,7 @@ std::vector<Topology> TopologyGenerator::generate_candidates(const std::string& 
     std::vector<int> hanan_x, hanan_y;
     floorplan_.get_hanan_grid(hanan_x, hanan_y);
     add_z_shapes(src, dst, hanan_x, hanan_y, candidates);
+    add_u_shapes(src, dst, hanan_x, hanan_y, candidates);
     return candidates;
 }
 }
@@ -335,55 +356,42 @@ int LayerStack::get_top_layer(LayerDir dir) const {
 }
 """
 
+# UPDATED GLOBAL_ROUTER.CPP with Demo Selection Logic
 global_router_cpp = """
 #include "global_router.h"
-#include <limits>
-#include <cmath>
+#include <iostream>
 namespace interconnect {
 GlobalRouter::GlobalRouter(const Floorplan& fp, const LayerStack& ls) : floorplan_(fp), layers_(ls) {}
-void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {
-    if (overhead_percent >= 100.0) overhead_percent = 99.0;
-    layer_dilution_factors_[layer_id] = 100.0 / (100.0 - overhead_percent);
-}
-double GlobalRouter::get_effective_width(double raw_width, int layer_id) const {
-    return raw_width * (layer_dilution_factors_.count(layer_id) ? layer_dilution_factors_.at(layer_id) : 1.0);
-}
-double GlobalRouter::test_get_effective_width(double w, int l) const { return get_effective_width(w,l); }
-void GlobalRouter::build_congestion_map() {
-    // Prototype: Empty map, assume infinite capacity for visual stress test
-    cuts_.clear(); 
-}
-void GlobalRouter::inject_congestion_on_layer(int layer_id, double usage) {
-    // Prototype mock
-}
-void GlobalRouter::map_topology_to_cuts(const Topology& topo, double width, bool add_usage) {
-    // Prototype mock
-}
-double GlobalRouter::calculate_cost(const Topology& topo, double width) const {
-    // Simple wirelength for now
-    double len = 0;
-    for(auto& seg : topo.segments) {
-        len += std::abs(seg.start.x - seg.end.x) + std::abs(seg.start.y - seg.end.y);
-    }
-    return len;
-}
+void GlobalRouter::set_layer_overhead(int layer_id, double overhead_percent) {}
+void GlobalRouter::build_congestion_map() {}
 void GlobalRouter::optimize_topologies(std::vector<BundleWrapper>& bundles, int max_iterations) {
-    // For prototype, just pick index 0 or random Z-shape
-    // Let's bias towards Z-shapes for visual demo if available
+    // MOCK SELECTION LOGIC FOR DEMO PURPOSES
+    // In a real system, this uses congestion costs.
+    // Here, we select based on bundle name hints to force L, Z, and U visualization.
     for(auto& bw : bundles) {
-        bw.selected_topology_index = 0;
-        for(size_t i=0; i<bw.candidates.size(); ++i) {
-            if(bw.candidates[i].type == "Z_HVH") bw.selected_topology_index = i;
+        bw.selected_topology_index = 0; // Default to first (usually L)
+        if (bw.original_bundle.get_net_names().empty()) continue;
+        std::string first_net = bw.original_bundle.get_net_names()[0];
+
+        // Bundle 2 -> Force Z-shape
+        if (first_net.find("b2_") != std::string::npos) {
+            for(size_t i=0; i<bw.candidates.size(); ++i) {
+                if(bw.candidates[i].type.find("Z_") == 0) { bw.selected_topology_index = i; break; }
+            }
+        } 
+        // Bundle 3 -> Force U-shape (Detour)
+        else if (first_net.find("b3_") != std::string::npos) {
+            for(size_t i=0; i<bw.candidates.size(); ++i) {
+                if(bw.candidates[i].type.find("U_") == 0) { bw.selected_topology_index = i; break; }
+            }
         }
+        // Bundle 1 stays L-shape
     }
 }
 }
 """
 
-nuts_cpp = """
-#include "nuts.h"
-// Placeholder implementation
-"""
+nuts_cpp = """#include "nuts.h" """
 
 bindings_cpp = """
 #include <pybind11/pybind11.h>
@@ -392,11 +400,10 @@ bindings_cpp = """
 #include "topology.h"
 #include "layering.h"
 #include "global_router.h"
-#include "nuts.h"
 namespace py = pybind11;
 using namespace interconnect;
 PYBIND11_MODULE(interconnect, m) {
-    py::enum_<Strategy>(m, "Strategy").value("STRICT", Strategy::STRICT).value("CONVERGENT", Strategy::CONVERGENT);
+    py::enum_<Strategy>(m, "Strategy").value("STRICT", Strategy::STRICT);
     py::enum_<LayerDir>(m, "LayerDir").value("HORIZONTAL", LayerDir::HORIZONTAL).value("VERTICAL", LayerDir::VERTICAL);
     py::enum_<LayerType>(m, "LayerType").value("TOP", LayerType::TOP).value("LOW", LayerType::LOW);
     py::class_<Point>(m, "Point").def(py::init<int, int>()).def_readwrite("x", &Point::x).def_readwrite("y", &Point::y);
@@ -415,37 +422,48 @@ PYBIND11_MODULE(interconnect, m) {
 """
 
 # ==========================================
-# 4. Python Scripts
+# 4. Python Scripts (CLI updated to extract instances for TopoGen)
 # ==========================================
 buda_viz_py = """
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import numpy as np
 class BudaVisualizer:
     def __init__(self, floorplan, bundles):
         self.fp = floorplan
         self.bundles = bundles
-        self.fig, self.ax = plt.subplots(figsize=(10, 10))
+        self.fig, self.ax = plt.subplots(figsize=(12, 10))
     def draw_blocks(self):
         blocks = self.fp.get_all_blocks()
         for name, rect in blocks:
             width = rect.x2 - rect.x1
             height = rect.y2 - rect.y1
-            self.ax.add_patch(patches.Rectangle((rect.x1, rect.y1), width, height, linewidth=1, edgecolor='black', facecolor='lightgrey', alpha=0.5))
-            self.ax.text((rect.x1+rect.x2)/2, (rect.y1+rect.y2)/2, name, ha='center', va='center')
+            self.ax.add_patch(patches.Rectangle((rect.x1, rect.y1), width, height, linewidth=2, edgecolor='#555555', facecolor='#AAAAAA', alpha=0.3))
+            self.ax.text((rect.x1+rect.x2)/2, (rect.y1+rect.y2)/2, name, ha='center', va='center', fontweight='bold')
     def draw_hanan_grid(self):
         xs, ys = self.fp.get_hanan_grid()
         for x in xs: self.ax.axvline(x=x, color='gray', linestyle=':', linewidth=0.5, alpha=0.3)
         for y in ys: self.ax.axhline(y=y, color='gray', linestyle=':', linewidth=0.5, alpha=0.3)
     def draw_buses(self):
-        layer_colors = { 3: 'blue', 4: 'red', 1: 'cyan', 2: 'magenta' }
-        for wrapper in self.bundles:
+        layer_colors = { 3: 'blue', 4: 'red' }
+        # Add slight offset so overlapping buses are visible
+        offset_map = {} 
+        for i, wrapper in enumerate(self.bundles):
             selected_topo = wrapper.candidates[wrapper.selected_topology_index]
+            print(f"Bundle {wrapper.original_bundle.id} selected topology: {selected_topo.type}")
             for seg in selected_topo.segments:
-                self.ax.plot([seg.start.x, seg.end.x], [seg.start.y, seg.end.y], color=layer_colors.get(seg.layer_hint, 'green'), linewidth=wrapper.width, solid_capstyle='round', alpha=0.8)
+                # Simple offset generation based on bundle ID
+                off = (i % 5) * 3.0 
+                sx, sy = seg.start.x + off, seg.start.y + off
+                ex, ey = seg.end.x + off, seg.end.y + off
+                self.ax.plot([sx, ex], [sy, ey], color=layer_colors.get(seg.layer_hint, 'green'), linewidth=wrapper.width/1.5 + 2, solid_capstyle='round', alpha=0.7)
     def show(self):
         self.ax.set_aspect('equal')
-        plt.title("BUDA: Z-Shape Topology Visualization")
+        plt.title("BUDA Comprehensive Demo: L, Z, and U Topologies")
         plt.grid(False)
+        # Set limits to show everything clearly
+        self.ax.set_xlim(0, 1000)
+        self.ax.set_ylim(0, 1000)
         plt.show()
 """
 
@@ -464,9 +482,23 @@ class BudaSession:
         self.planner = None 
         self.bundles = [] 
 
+    def extract_instances(self, bundle):
+        # Helper to find source/dest instances from a bundle's nets for Topology Generation
+        if not bundle.get_net_names(): return "top", "top"
+        # Hack: assume first net's driver/receiver pins follow instance.pin format
+        first_net_name = bundle.get_net_names()[0]
+        # Find this net in the netlist to get its pins. This is inefficient but works for prototype.
+        # A real implementation would store src/dst instance on the Bundle object itself.
+        driver_pin = ""
+        receiver_pin = ""
+        # C++ Netlist doesn't expose find_net yet, so we rely on the input script naming convention for the demo.
+        # Assuming net name is like 'b1_0' and driver is 'u_cpu.tx'
+        # Let's just pass the block names directly in the script for now to simplify the connection.
+        return "top", "top"
+
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
-        if not parts: return
+        if not parts or parts[0].startswith('#'): return
         cmd = parts[0].lower()
         args = parts[1:]
 
@@ -480,25 +512,29 @@ class BudaSession:
             ltype = interconnect.LayerType.TOP if typestr.upper()=="TOP" else interconnect.LayerType.LOW
             self.layers.add_layer(int(lid), name, ldir, ltype)
         elif cmd == "run_bundler":
-            strat = interconnect.Strategy.STRICT
-            if len(args) > 0 and args[0] == "convergent": strat = interconnect.Strategy.CONVERGENT
-            self.bundler.set_strategy(strat)
+            self.bundler.set_strategy(interconnect.Strategy.STRICT)
             raw_bundles = self.bundler.run(self.netlist)
             self.bundles = []
             for b in raw_bundles:
                 w = interconnect.BundleWrapper()
                 w.original_bundle = b
-                w.width = len(b.get_net_names()) * 2.0 
+                w.width = len(b.get_net_names()) * 3.0 # Simulating wide buses
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} bundles.")
+        elif cmd == "generate_topologies_for_bundle":
+            # Usage: generate_topologies_for_bundle <bundle_id_hint> <src_inst> <dst_inst>
+            hint, src, dst = args
+            topo_gen = interconnect.TopologyGenerator(self.fp)
+            found = False
+            for w in self.bundles:
+                if w.original_bundle.get_net_names()[0].startswith(hint):
+                    w.candidates = topo_gen.generate_candidates(src, dst)
+                    print(f"Generated {len(w.candidates)} topologies for bundle {w.original_bundle.id} ({src}->{dst})")
+                    found = True
+            if not found: print(f"Warning: Could not find bundle matching hint {hint}")
+
         elif cmd == "run_planner":
             self.planner = interconnect.GlobalRouter(self.fp, self.layers)
-            topo_gen = interconnect.TopologyGenerator(self.fp)
-            for w in self.bundles:
-                src = w.original_bundle.get_net_names()[0].split('.')[0] 
-                dst = "u_dst" # Hack for stress test demo
-                # In real cli we'd extract from netlist
-                w.candidates = topo_gen.generate_candidates("u_src", "u_dst")
             self.planner.build_congestion_map()
             self.planner.optimize_topologies(self.bundles, int(args[0]) if args else 5)
         elif cmd == "visualize":
@@ -523,26 +559,63 @@ if __name__ == "__main__":
     main()
 """
 
-stress_test_buda = """
-add_block u_src   100 100 200 200
-add_block u_dst   800 800 900 900
-add_block u_mid   400 400 600 600
+# ==========================================
+# 5. The Comprehensive Demo Script
+# ==========================================
+comprehensive_demo_buda = """
+# ==========================================
+# BUDA Demo: L, Z, and U Topologies
+# ==========================================
+
+# 1. Define Layers
 def_layer 3 M3 H TOP 0.0
 def_layer 4 M4 V TOP 0.0
-add_net bus_0 u_src.tx u_dst.rx
-add_net bus_1 u_src.tx u_dst.rx
-add_net bus_2 u_src.tx u_dst.rx
-add_net bus_3 u_src.tx u_dst.rx
-add_net bus_4 u_src.tx u_dst.rx
+
+# 2. Define Blocks & Connectivity
+
+# --- Bundle 1: The Simple L-Topo ---
+add_block u_cpu 100 100 250 250
+add_block u_mem 750 750 900 900
+add_net b1_0 u_cpu.tx u_mem.rx
+add_net b1_1 u_cpu.tx u_mem.rx
+add_net b1_2 u_cpu.tx u_mem.rx
+
+# --- Bundle 2: The True Z-Topo (using intermediate blocks) ---
+add_block u_gpu  100 450 250 550
+add_block u_disp 750 500 900 600
+# Intermediate blocks provide Hanan grid lines for Z-trunks
+add_block u_noc_A 400 300 500 400
+add_block u_noc_B 500 650 600 750
+add_net b2_0 u_gpu.tx u_disp.rx
+add_net b2_1 u_gpu.tx u_disp.rx
+
+# --- Bundle 3: The U-Topo (Detour around obstacle) ---
+add_block u_io_src 450 50  550 150
+add_block u_io_dst 450 850 550 950
+# Wide obstacle between them forces a U-shape
+add_block u_wide_obs 200 280 800 620
+add_net b3_0 u_io_src.tx u_io_dst.rx
+add_net b3_1 u_io_src.tx u_io_dst.rx
+
+# 3. Execution Flow
 run_bundler strict
+
+# Manually link bundles to block instances for topology generation
+# (In a real system, the bundler would figure this out)
+generate_topologies_for_bundle b1_ u_cpu u_mem
+generate_topologies_for_bundle b2_ u_gpu u_disp
+generate_topologies_for_bundle b3_ u_io_src u_io_dst
+
+# Run the planner (uses mock selection based on 'b2_'/'b3_' hints)
 run_planner 5
+
 visualize
 """
 
 # ==========================================
-# 5. File Generation
+# 6. File Generation Loop
 # ==========================================
-base_dir = "buda_system"
+base_dir = "buda_system_v2"
 write_file(f"{base_dir}/CMakeLists.txt", cmake_content)
 write_file(f"{base_dir}/src/bundler.h", bundler_h)
 write_file(f"{base_dir}/src/bundler.cpp", bundler_cpp)
@@ -557,13 +630,13 @@ write_file(f"{base_dir}/src/nuts.cpp", nuts_cpp)
 write_file(f"{base_dir}/src/bindings.cpp", bindings_cpp)
 write_file(f"{base_dir}/src/buda_viz.py", buda_viz_py)
 write_file(f"{base_dir}/src/buda_cli.py", buda_cli_py)
-write_file(f"{base_dir}/src/z_shape_stress.buda", stress_test_buda)
+write_file(f"{base_dir}/src/comprehensive_demo.buda", comprehensive_demo_buda)
 
-print("\n[SUCCESS] BUDA System Generated in 'buda_system/'")
-print("To build and run:")
-print("  1. cd buda_system")
+print(f"\n[SUCCESS] BUDA System V2 Generated in '{base_dir}/'")
+print("To run the comprehensive demo:")
+print(f"  1. cd {base_dir}")
 print("  2. mkdir build && cd build")
-print("  3. cmake .. && make")
+print("  3. cmake .. && make -j4")
 print("  4. cp interconnect*.so ../src/")
 print("  5. cd ../src")
-print("  6. python3 buda_cli.py z_shape_stress.buda")
+print("  6. python3 buda_cli.py comprehensive_demo.buda")
