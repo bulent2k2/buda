@@ -224,9 +224,7 @@ class DefVizV3:
                 lef_p = self._find_lef(def_p)
                 if lef_p: self._lef_var.set(lef_p)
             if not lef_p or not os.path.exists(lef_p):
-                if not bdb_is_fresh(def_p):
-                    self._status.set('LEF not found.'); return
-                lef_p = ''   # BDB is fresh — LEF not needed for reload
+                lef_p = ''   # sizes inferred from placement spacing when no LEF
             self._status.set('Parsing…'); self.root.update_idletasks()
             try: msg = self.data.load(def_p, lef_p)
             except Exception as e: self._status.set(f'Error: {e}'); return

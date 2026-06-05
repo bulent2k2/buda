@@ -10,10 +10,7 @@ import sys
 import matplotlib.patches as mpatches
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_V3_SRC = os.path.join(os.path.dirname(_HERE), 'buda_system_v3', 'src')
 sys.path.insert(0, _HERE)
-if _V3_SRC not in sys.path:
-    sys.path.insert(0, _V3_SRC)
 from def_cluster import parse_def, parse_lef
 from group_tree import GroupTree, lighten_color
 
@@ -44,6 +41,55 @@ _C_DIE_EDGE = '#999999'
 
 
 # ── Parsing ───────────────────────────────────────────────────────────────────
+
+def infer_cell_sizes_from_def(def_path: str) -> dict:
+    """Return {cell_type: (w_um, h_um)} by finding minimum placement spacing per type.
+
+    Works for macros-only DEFs where the same cell type is placed on a regular grid.
+    For a cell type with only one instance, falls back to 0.5 × 0.5 µm.
+    """
+    by_type: dict = {}
+    units = 1000
+    comp_re = re.compile(
+        r'-\s+\S+\s+(\S+)\s+\+\s+(?:PLACED|FIXED)\s+\(\s*(\d+)\s+(\d+)\s*\)')
+    with open(def_path) as f:
+        in_comp = False
+        for line in f:
+            s = line.strip()
+            if 'UNITS DISTANCE MICRONS' in s:
+                m = re.search(r'MICRONS\s+(\d+)', s)
+                if m:
+                    units = int(m.group(1))
+            elif s.startswith('COMPONENTS'):
+                in_comp = True
+            elif 'END COMPONENTS' in s:
+                break
+            elif in_comp:
+                m = comp_re.search(s)
+                if m:
+                    cell = m.group(1)
+                    by_type.setdefault(cell, []).append(
+                        (int(m.group(2)), int(m.group(3))))
+    sizes = {}
+    for cell, positions in by_type.items():
+        xs = sorted(set(p[0] for p in positions))
+        ys = sorted(set(p[1] for p in positions))
+        dxs = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+        dys = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+        w = min(dxs) / units if dxs else 0.5
+        h = min(dys) / units if dys else 0.5
+        sizes[cell] = (w, h)
+    return sizes
+
+
+def _synthetic_lef(cell_sizes: dict) -> str:
+    """Build a minimal LEF string from a {cell: (w, h)} dict."""
+    lines = ['VERSION 5.8 ;']
+    for cell, (w, h) in cell_sizes.items():
+        lines += [f'MACRO {cell}', f'  SIZE {w:.4f} BY {h:.4f} ;', f'END {cell}']
+    lines.append('END LIBRARY')
+    return '\n'.join(lines)
+
 
 def parse_cell_sizes(lef_path: str) -> dict:
     with open(lef_path) as f:
@@ -101,7 +147,7 @@ class DefVizData:
 
     def _load_via_bdb(self, def_path: str, lef_path: str):
         """Fast load using the BDB C++ module. Reuses existing .bdb if newer than .def."""
-        import os as _os
+        import os as _os, tempfile
         db_path = _buda_mod.BDB.db_path(def_path)
         reuse = (
             _os.path.exists(db_path) and
@@ -109,8 +155,26 @@ class DefVizData:
         )
         db = _buda_mod.BDB(db_path)
         if not reuse:
-            db.import_def_lef(def_path, lef_path)
-            db.compute_all()
+            effective_lef = lef_path
+            tmp_lef = None
+            if not effective_lef or not _os.path.exists(effective_lef):
+                sizes = infer_cell_sizes_from_def(def_path)
+                if sizes:
+                    tmp_lef = tempfile.NamedTemporaryFile(
+                        mode='w', suffix='.lef', delete=False)
+                    tmp_lef.write(_synthetic_lef(sizes))
+                    tmp_lef.close()
+                    effective_lef = tmp_lef.name
+                    print(f'[def_viz] no LEF — inferred sizes for: '
+                          f'{", ".join(sizes)}')
+                else:
+                    effective_lef = ''
+            try:
+                db.import_def_lef(def_path, effective_lef)
+                db.compute_all()
+            finally:
+                if tmp_lef is not None:
+                    _os.unlink(tmp_lef.name)
         self.bdb   = db
         self.units = db.units()
         self.die   = (db.die_w(), db.die_h())
@@ -195,8 +259,15 @@ class DefVizData:
     def _load_via_python(self, def_path: str, lef_path: str):
         """Fallback Python-only parser."""
         units, die, components, nets_raw = parse_def(def_path)
-        lef_pins   = parse_lef(lef_path)
-        cell_sizes = parse_cell_sizes(lef_path)
+        if lef_path and os.path.exists(lef_path):
+            lef_pins   = parse_lef(lef_path)
+            cell_sizes = parse_cell_sizes(lef_path)
+        else:
+            lef_pins   = {}
+            cell_sizes = infer_cell_sizes_from_def(def_path)
+            if cell_sizes:
+                print(f'[def_viz] no LEF — inferred sizes for: '
+                      f'{", ".join(cell_sizes)}')
 
         self.units = units
         self.die   = die
