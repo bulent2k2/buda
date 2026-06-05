@@ -1,0 +1,83 @@
+# Many overlaps in NUTS to debug
+
+# ariane136_l2.buda — depth-2 (individual sram_block group) BUDA flow
+# 25 sram_block groups as BUDA blocks; CONVERGENT bundling
+# Blocks: hybrid non-overlapping assignment — 0 block overlaps
+#   ic_data/ic_tag/dc_tag: centroid-bbox strips
+#   dc_data: centroid X × union Y strips (128µm tall, fits 96-unit buses)
+#   dc_vld:  centroid ±(60,80)
+
+def_layer 4 M4 H TOP 30
+def_layer 5 M5 V TOP 30
+def_layer 6 M6 H TOP 30
+def_layer 7 M7 V TOP 30
+
+corner_margin dx 20 dy 20
+
+add_block cpu_core 1300 1150 1700 1600
+
+# icache: 4 ways × (data_sram + tag_sram)
+add_block ic_data_0 1245 630 1315 783
+add_block ic_data_1 1315 630 1384 783
+add_block ic_data_2 1176 630 1245 783
+add_block ic_data_3 1384 630 1453 783
+add_block ic_tag_0 677 626 816 681
+add_block ic_tag_1 677 463 816 518
+add_block ic_tag_2 677 572 816 626
+add_block ic_tag_3 677 518 816 572
+
+# dcache: 8 ways × (data_sram + tag_sram) + valid_dirty
+add_block dc_data_0 496 809 725 937
+add_block dc_data_1 496 682 725 809
+add_block dc_data_2 496 1320 725 1448
+add_block dc_data_3 496 1576 725 1703
+add_block dc_data_4 496 1448 725 1576
+add_block dc_data_5 496 1192 725 1320
+add_block dc_data_6 496 1065 725 1192
+add_block dc_data_7 496 937 725 1065
+add_block dc_tag_0 385 205 552 243
+add_block dc_tag_1 385 130 552 168
+add_block dc_tag_2 385 281 552 319
+add_block dc_tag_3 385 92 552 130
+add_block dc_tag_4 385 243 552 281
+add_block dc_tag_5 385 168 552 205
+add_block dc_tag_6 385 319 552 357
+add_block dc_tag_7 385 54 552 92
+add_block dc_vld 855 173 975 333
+
+add_bus clk[1] cpu_core.clk_out ic_data_0.clk,ic_data_1.clk,ic_data_2.clk,ic_data_3.clk,ic_tag_0.clk,ic_tag_1.clk,ic_tag_2.clk,ic_tag_3.clk,dc_data_0.clk,dc_data_1.clk,dc_data_2.clk,dc_data_3.clk,dc_data_4.clk,dc_data_5.clk,dc_data_6.clk,dc_data_7.clk,dc_tag_0.clk,dc_tag_1.clk,dc_tag_2.clk,dc_tag_3.clk,dc_tag_4.clk,dc_tag_5.clk,dc_tag_6.clk,dc_tag_7.clk,dc_vld.clk
+
+add_bus ic_addr[8] cpu_core.ic_addr ic_data_0.addr,ic_data_1.addr,ic_data_2.addr,ic_data_3.addr,ic_tag_0.addr,ic_tag_1.addr,ic_tag_2.addr,ic_tag_3.addr
+
+add_bus ic_data_0_rdata[128] ic_data_0.rdata cpu_core.ic_data_0_rd
+add_bus ic_data_1_rdata[128] ic_data_1.rdata cpu_core.ic_data_1_rd
+add_bus ic_data_2_rdata[128] ic_data_2.rdata cpu_core.ic_data_2_rd
+add_bus ic_data_3_rdata[128] ic_data_3.rdata cpu_core.ic_data_3_rd
+
+add_bus dc_addr[8] cpu_core.dc_addr dc_data_0.addr,dc_data_1.addr,dc_data_2.addr,dc_data_3.addr,dc_data_4.addr,dc_data_5.addr,dc_data_6.addr,dc_data_7.addr,dc_tag_0.addr,dc_tag_1.addr,dc_tag_2.addr,dc_tag_3.addr,dc_tag_4.addr,dc_tag_5.addr,dc_tag_6.addr,dc_tag_7.addr,dc_vld.addr
+
+add_bus dc_ctrl[4] cpu_core.dc_ctrl dc_data_0.ctrl,dc_data_1.ctrl,dc_data_2.ctrl,dc_data_3.ctrl,dc_data_4.ctrl,dc_data_5.ctrl,dc_data_6.ctrl,dc_data_7.ctrl,dc_tag_0.ctrl,dc_tag_1.ctrl,dc_tag_2.ctrl,dc_tag_3.ctrl,dc_tag_4.ctrl,dc_tag_5.ctrl,dc_tag_6.ctrl,dc_tag_7.ctrl,dc_vld.ctrl
+
+add_bus dc_wdata[64] cpu_core.dc_wdata dc_data_0.wdata,dc_data_1.wdata,dc_data_2.wdata,dc_data_3.wdata,dc_data_4.wdata,dc_data_5.wdata,dc_data_6.wdata,dc_data_7.wdata
+
+add_bus dc_data_0_rdata[64] dc_data_0.rdata cpu_core.dc_data_0_rd
+add_bus dc_data_1_rdata[64] dc_data_1.rdata cpu_core.dc_data_1_rd
+add_bus dc_data_2_rdata[64] dc_data_2.rdata cpu_core.dc_data_2_rd
+add_bus dc_data_3_rdata[64] dc_data_3.rdata cpu_core.dc_data_3_rd
+add_bus dc_data_4_rdata[64] dc_data_4.rdata cpu_core.dc_data_4_rd
+add_bus dc_data_5_rdata[64] dc_data_5.rdata cpu_core.dc_data_5_rd
+add_bus dc_data_6_rdata[64] dc_data_6.rdata cpu_core.dc_data_6_rd
+add_bus dc_data_7_rdata[64] dc_data_7.rdata cpu_core.dc_data_7_rd
+
+run_bundler CONVERGENT
+
+generate_topologies
+
+set_planner_param kCong 2.0
+run_planner 200
+
+run_nuts
+
+run_planner post_nuts V 300 1000
+
+visualize

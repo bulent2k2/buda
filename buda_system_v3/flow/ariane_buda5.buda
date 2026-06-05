@@ -1,0 +1,39 @@
+# copy of ariane136.buda
+# for IPC to:
+# python3 tools/def_viz_o3.py chip_designs/ariane136/ariane_buda5.bdb
+
+# ariane136 full-chip BUDA flow
+# 136 fakeram45_256x16 macros, 5 functional blocks, 7 buses
+# Blocks: centroid ± half-extent (not union bbox) — avoids overlap from bus-unaware placement
+
+source tracks_ariane136.buda
+
+add_block cpu_core   1300 1150 1700 1600
+add_block icache_data 1194  625 1434  785
+add_block icache_tag   650  506  850  626
+add_block dcache_data  515 1208  755 1368
+add_block dcache_tag   440  142  640  262
+
+add_bus clk[1] cpu_core.clk_out icache_tag.clk,icache_data.clk,dcache_data.clk,dcache_tag.clk
+add_bus icache_addr[8] cpu_core.icache_addr icache_tag.addr,icache_data.addr
+add_bus icache_rdata[128] icache_data.rdata cpu_core.icache_rdata
+add_bus dcache_addr[8] cpu_core.dcache_addr dcache_tag.addr,dcache_data.addr
+add_bus dcache_wdata[64] cpu_core.dcache_wdata dcache_data.wdata
+add_bus dcache_rdata[64] dcache_data.rdata cpu_core.dcache_rdata
+add_bus dcache_ctrl[4] cpu_core.dcache_ctrl dcache_tag.ctrl,dcache_data.ctrl
+
+run_bundler STRICT
+
+generate_topologies
+
+set_planner_param kCong 2.0
+run_planner 200
+
+run_nuts
+
+# move short V stubs from M7 → M5 to clear overlap with wide icache_rdata bundle
+run_planner post_nuts V 300 1000
+
+run_detailed_nuts
+
+visualize

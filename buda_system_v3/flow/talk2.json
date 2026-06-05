@@ -1,0 +1,13 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "bus_0",
+      "bundle_id": 1,
+      "topo_type": "TRUNK_H@y650",
+      "topo_wl": 1100,
+      "topo_index_hint": 15,
+      "note": "",
+      "selected_at": "2026-06-05T01:08:58"
+    }
+  ]
+}
