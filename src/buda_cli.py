@@ -1238,6 +1238,24 @@ class BudaSession:
             if self.bdb is None:
                 print("Error: open_bdb first"); return
             self.bdb.resize_cell(args[0], float(args[1]), float(args[2]))
+        elif cmd == "add_cell":
+            # add_cell <name> <width> <height>
+            if len(args) < 3:
+                print("Error: add_cell requires <name> <width> <height>"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            self.bdb.add_cell(args[0], float(args[1]), float(args[2]))
+        elif cmd == "add_inst":
+            # add_inst <inst_name> <cell_name> <parent|-> <x> <y>
+            # x,y are relative to parent's origin; absolute when parent is "-"
+            if len(args) < 5:
+                print("Error: add_inst requires <inst_name> <cell_name> "
+                      "<parent|-> <x> <y>"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            parent = "" if args[2] == "-" else args[2]
+            self.bdb.add_inst(args[0], args[1], parent,
+                              float(args[3]), float(args[4]))
         elif cmd == "add_comp":
             # add_comp <name> <cell> <parent|-> <x1> <y1> <x2> <y2> [leaf]
             # Use "-" for parent to create a root instance.

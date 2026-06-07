@@ -7,6 +7,7 @@ import buda
 scenarios('features/bdb_import.feature')
 scenarios('features/bdb_combined.feature')
 scenarios('features/bdb_mutations.feature')
+scenarios('features/bdb_cell_inst.feature')
 
 # ---------------------------------------------------------------------------
 # Verilog fixture
@@ -339,6 +340,67 @@ def _refresh(context):
     """Re-read all_components into context after a mutation."""
     context['comps'] = {r.name: r for r in context['db'].all_components()}
 
+
+# ---------------------------------------------------------------------------
+# Cell definition and add_inst steps
+# ---------------------------------------------------------------------------
+
+@given("an empty in-memory BDB")
+def empty_bdb(context):
+    db = buda.BDB(":memory:")
+    context['db']    = db
+    context['comps'] = {}
+    context['cells'] = {}
+
+
+def _refresh_cells(context):
+    context['cells'] = {r.name: r for r in context['db'].all_cells()}
+
+
+@when(parsers.re(r'I define cell "(?P<name>[^"]+)" with size (?P<w>[\d.]+) by (?P<h>[\d.]+)'))
+def step_add_cell(context, name, w, h):
+    context['db'].add_cell(name, float(w), float(h))
+    _refresh_cells(context)
+    _refresh(context)
+
+
+@when(parsers.re(
+    r'I place instance "(?P<inst>[^"]+)" of cell "(?P<cell>[^"]+)" '
+    r'under "(?P<parent>[^"]+)" at \((?P<x>[\d.]+), (?P<y>[\d.]+)\)'
+))
+def step_add_inst(context, inst, cell, parent, x, y):
+    par = "" if parent == "-" else parent
+    context['db'].add_inst(inst, cell, par, float(x), float(y))
+    _refresh(context)
+
+
+@then(parsers.re(r'cell "(?P<name>[^"]+)" has width (?P<w>[\d.]+) and height (?P<h>[\d.]+)'))
+def check_cell_size(context, name, w, h):
+    _refresh_cells(context)
+    r = context['cells'].get(name)
+    assert r is not None, f"Cell {name!r} not in cell table. Present: {sorted(context['cells'])}"
+    assert r.width  == pytest.approx(float(w)), f"{name}.width: expected {w}, got {r.width}"
+    assert r.height == pytest.approx(float(h)), f"{name}.height: expected {h}, got {r.height}"
+
+
+@then(parsers.parse("the cell table contains {count:d} cells"))
+def check_cell_count(context, count):
+    _refresh_cells(context)
+    assert len(context['cells']) == count, (
+        f"Expected {count} cells, got {len(context['cells'])}: {sorted(context['cells'])}"
+    )
+
+
+@then(parsers.re(r'component "(?P<name>[^"]+)" has depth (?P<depth>\d+)'))
+def check_component_depth(context, name, depth):
+    r = context['comps'].get(name)
+    assert r is not None, f"Component {name!r} not found"
+    assert r.depth == int(depth), f"{name!r}: expected depth {depth}, got {r.depth}"
+
+
+# ---------------------------------------------------------------------------
+# Mutation steps
+# ---------------------------------------------------------------------------
 
 @when(parsers.re(r'I move component "(?P<name>[^"]+)" to \((?P<x>[\d.]+), (?P<y>[\d.]+)\)'))
 def step_move_comp(context, name, x, y):

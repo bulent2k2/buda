@@ -116,6 +116,11 @@ void BDB::_create_schema() {
             ref    TEXT,
             PRIMARY KEY (grp_id, kind, ref)
         );
+        CREATE TABLE IF NOT EXISTS cell (
+            name   TEXT PRIMARY KEY,
+            width  REAL NOT NULL,
+            height REAL NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
@@ -251,7 +256,8 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     auto lef_sizes = _parse_lef_sizes(lef_path);
     auto lef_pins  = _parse_lef_pins(lef_path);
 
-    _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; DELETE FROM component;");
+    _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
+          "DELETE FROM component; DELETE FROM cell;");
 
     std::ifstream f(def_path);
     if (!f) throw std::runtime_error("BDB: cannot open DEF: " + def_path);
@@ -272,6 +278,17 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     Stmt s_find_comp(_db, "SELECT id FROM component WHERE name=?");
     Stmt s_find_net (_db, "SELECT id FROM net WHERE name=?");
     Stmt s_find_cell(_db, "SELECT cell,x1,y1 FROM component WHERE id=?");
+
+    // Populate cell table from LEF sizes
+    {
+        Stmt sc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+        for (auto& [cname, sz] : lef_sizes) {
+            sqlite3_bind_text  (sc, 1, cname.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_double(sc, 2, sz.w);
+            sqlite3_bind_double(sc, 3, sz.h);
+            sqlite3_step(sc); sqlite3_reset(sc);
+        }
+    }
 
     _exec("BEGIN");
 
@@ -928,6 +945,13 @@ void BDB::move_comp(const std::string& name, double x, double y) {
 }
 
 void BDB::resize_cell(const std::string& cell, double w, double h) {
+    // Keep the cell definition in sync
+    Stmt uc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+    sqlite3_bind_text  (uc, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(uc, 2, w);
+    sqlite3_bind_double(uc, 3, h);
+    sqlite3_step(uc);
+    // Update every instance's bounding box
     Stmt u(_db, "UPDATE component SET x2=x1+?, y2=y1+? WHERE cell=?");
     sqlite3_bind_double(u, 1, w);
     sqlite3_bind_double(u, 2, h);
@@ -964,6 +988,73 @@ int BDB::add_comp(const std::string& name, const std::string& cell,
     sqlite3_bind_int   (ins, 9, is_leaf ? 1 : 0);
     if (sqlite3_step(ins) != SQLITE_DONE)
         throw std::runtime_error("add_comp: insert failed (name exists?): " + name);
+    int id = (int)sqlite3_last_insert_rowid(_db);
+    compute_hpwl();
+    return id;
+}
+
+void BDB::add_cell(const std::string& name, double w, double h) {
+    Stmt ins(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+    sqlite3_bind_text  (ins, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(ins, 2, w);
+    sqlite3_bind_double(ins, 3, h);
+    if (sqlite3_step(ins) != SQLITE_DONE)
+        throw std::runtime_error("add_cell: failed for: " + name);
+}
+
+std::vector<CellRow> BDB::all_cells() const {
+    Stmt q(_db, "SELECT name, width, height FROM cell ORDER BY name");
+    std::vector<CellRow> result;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        result.push_back({ (const char*)sqlite3_column_text(q,0),
+                           sqlite3_column_double(q,1),
+                           sqlite3_column_double(q,2) });
+    return result;
+}
+
+int BDB::add_inst(const std::string& inst_name, const std::string& cell_name,
+                  const std::string& parent_name, double x, double y) {
+    // Look up cell size
+    Stmt qc(_db, "SELECT width, height FROM cell WHERE name=?");
+    sqlite3_bind_text(qc, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(qc) != SQLITE_ROW)
+        throw std::runtime_error("add_inst: cell not defined: " + cell_name);
+    double w = sqlite3_column_double(qc, 0);
+    double h = sqlite3_column_double(qc, 1);
+
+    // Resolve parent — coordinates are relative to parent's x1,y1
+    int par_id = -1, depth = 0;
+    double abs_x = x, abs_y = y;
+    if (!parent_name.empty()) {
+        Stmt qp(_db, "SELECT id, depth, x1, y1 FROM component WHERE name=?");
+        sqlite3_bind_text(qp, 1, parent_name.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(qp) != SQLITE_ROW)
+            throw std::runtime_error("add_inst: parent not found: " + parent_name);
+        par_id = sqlite3_column_int   (qp, 0);
+        depth  = sqlite3_column_int   (qp, 1) + 1;
+        abs_x  = sqlite3_column_double(qp, 2) + x;
+        abs_y  = sqlite3_column_double(qp, 3) + y;
+        // Mark parent as non-leaf now that it has a child
+        Stmt ul(_db, "UPDATE component SET is_leaf=0 WHERE id=?");
+        sqlite3_bind_int(ul, 1, par_id);
+        sqlite3_step(ul);
+    }
+
+    Stmt ins(_db, R"(
+        INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf)
+        VALUES(?,?,?,?,?,?,?,?,1)
+    )");
+    sqlite3_bind_text  (ins, 1, inst_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (ins, 2, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+    if (par_id >= 0) sqlite3_bind_int(ins, 3, par_id);
+    else             sqlite3_bind_null(ins, 3);
+    sqlite3_bind_int   (ins, 4, depth);
+    sqlite3_bind_double(ins, 5, abs_x);
+    sqlite3_bind_double(ins, 6, abs_y);
+    sqlite3_bind_double(ins, 7, abs_x + w);
+    sqlite3_bind_double(ins, 8, abs_y + h);
+    if (sqlite3_step(ins) != SQLITE_DONE)
+        throw std::runtime_error("add_inst: insert failed (name exists?): " + inst_name);
     int id = (int)sqlite3_last_insert_rowid(_db);
     compute_hpwl();
     return id;

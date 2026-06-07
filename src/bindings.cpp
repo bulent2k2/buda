@@ -406,6 +406,11 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("color",     &GrpRow::color)
         .def_readwrite("parent_id", &GrpRow::parent_id);
 
+    py::class_<CellRow>(m, "CellRow")
+        .def_readwrite("name",   &CellRow::name)
+        .def_readwrite("width",  &CellRow::width)
+        .def_readwrite("height", &CellRow::height);
+
     // ── BDB ────────────────────────────────────────────────────────────────
     py::class_<BDB>(m, "BDB")
         .def(py::init<const std::string&>())
@@ -445,7 +450,13 @@ PYBIND11_MODULE(buda, m) {
         .def("add_comp",    &BDB::add_comp,
              py::arg("name"), py::arg("cell"), py::arg("parent_name"),
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
-             py::arg("is_leaf") = true);
+             py::arg("is_leaf") = true)
+        .def("add_cell",    &BDB::add_cell,
+             py::arg("name"), py::arg("w"), py::arg("h"))
+        .def("all_cells",   &BDB::all_cells)
+        .def("add_inst",    &BDB::add_inst,
+             py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),
+             py::arg("x"), py::arg("y"));
 
     // ── verify ─────────────────────────────────────────────────────────────
 
