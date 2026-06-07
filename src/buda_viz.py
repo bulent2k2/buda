@@ -853,12 +853,26 @@ class TopologyExplorer:
             net0  = names_[0] if names_ else f"B{bid_}"
             self.fig.canvas.manager.set_window_title(f"{net0} (Bundle {bid_})")
 
+        # Identify blocks that have busterm connections in this topology
+        highlight_blocks = set()
+        for cs in ct.segs():
+            for conn in cs.conns:
+                if conn.kind == ic.SegConnKind.BUSTERM:
+                    highlight_blocks.add(conn.block_name)
+
         # Floorplan blocks
         self._block_patch_artists = []
         self._block_name_artists = []
         for name, rect in self.fp.get_all_blocks():
-            ps, txt = _draw_block(ax, name, rect, self.fp,
-                                  lw=0.8, alpha=0.10, fontsize=7)
+            if name in highlight_blocks:
+                # Highlighted style for busterm blocks
+                ps, txt = _draw_block(ax, name, rect, self.fp,
+                                      lw=1.5, edge='#444444', face='#e8f4e8',
+                                      alpha=0.45, fontsize=8, zorder=1.5)
+            else:
+                # Dimmed style for the rest
+                ps, txt = _draw_block(ax, name, rect, self.fp,
+                                      lw=0.8, alpha=0.10, fontsize=7)
             self._block_patch_artists.extend(ps)
             if txt is not None:
                 self._block_name_artists.append(txt)
