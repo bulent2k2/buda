@@ -185,7 +185,7 @@ instance.
 |---|---|---|---|
 | `name` | str | — | Unique instance path, e.g. `di` or `ai/a3i`. |
 | `cell` | str | — | Cell type name, e.g. `d`. |
-| `parent` | str | — | Parent instance path, or `-` for root. |
+| `parent` | str | — | **Instance path** of the parent (e.g. `u_cpu/core0`), not the cell name. Use `-` for a root instance. |
 | `x1 y1` | float | — | Lower-left corner in µm. |
 | `x2 y2` | float | — | Upper-right corner in µm. |
 | `leaf\|nonleaf` | keyword | `leaf` | `leaf` — stdcell / no children; `nonleaf` — hierarchical. |
@@ -383,16 +383,27 @@ not present in the DEF get `x1=y1=x2=y2=−1`.
 
 ### Manual placement from scratch
 
+All coordinates are **absolute µm**. When nesting instances, add the
+parent's origin to get the child's absolute position.
+
 ```buda
 open_bdb  flow/manual/my_design.bdb
 
-# Add top-level blocks
+# Depth 0 — top-level blocks
 add_comp  u_cpu  cpu  -       0    0  500 400 nonleaf
 add_comp  u_mem  mem  -     600    0 1100 400 nonleaf
 
-# Add leaf cells inside u_cpu
-add_comp  u_cpu/core0  core  u_cpu   50  50 200 200 leaf
-add_comp  u_cpu/core1  core  u_cpu  250  50 400 200 leaf
+# Depth 1 — mid-level blocks; parent = instance path, not cell name
+#   u_cpu origin (0,0): core0 at local (50,50)  → absolute (50,50)
+#   u_cpu origin (0,0): core1 at local (250,50) → absolute (250,50)
+add_comp  u_cpu/core0  core  u_cpu   50  50 200 200 nonleaf
+add_comp  u_cpu/core1  core  u_cpu  250  50 400 200 nonleaf
+
+# Depth 2 — leaf cells; parent = instance path of the enclosing instance
+#   core0 origin (50,50): c1 at local (10,10) → absolute (60,60)
+#   core0 origin (50,50): c2 at local (80,80) → absolute (130,130)
+add_comp  u_cpu/core0/c1  c  u_cpu/core0   60  60 120 120 leaf
+add_comp  u_cpu/core0/c2  c  u_cpu/core0  130 130 190 190 leaf
 ```
 
 ### Post-import fixup

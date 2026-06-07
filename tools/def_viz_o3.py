@@ -229,7 +229,7 @@ class DefVizV3:
             try: msg = self.data.load(def_p, lef_p)
             except Exception as e: self._status.set(f'Error: {e}'); return
         self.selected_nets.clear(); self._sel_gid = None; self._hl_active = False
-        self._refresh_net_list(); self._inst_items = []; self._inst_lb.delete(0, tk.END)
+        self._refresh_net_list(); self._refresh_inst_list()
         depths = self.data.available_depths()
         if depths:
             self._depth_sb.configure(from_=min(depths), to=max(depths))

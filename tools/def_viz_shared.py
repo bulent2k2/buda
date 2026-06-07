@@ -302,6 +302,8 @@ class DefVizData:
             self.groups.save(GroupTree.sidecar_path(self.def_path))
 
     def visible_insts(self, selected_nets: set) -> list:
+        if not selected_nets or not self.all_nets:
+            return sorted(self.inst_info.keys())
         result = set()
         for net in selected_nets:
             result |= self.net_insts.get(net, set())
