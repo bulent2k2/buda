@@ -325,8 +325,9 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
             auto rects = fp.get_block_rects(bname);
             if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
 
-            // Union perp span of every rect this segment actually spans.
+            // Union perp span and along span of every rect this segment actually spans.
             int span_lo = INT_MAX, span_hi = INT_MIN;
+            int along_lo_B = INT_MAX, along_hi_B = INT_MIN;
             for (const Rect& r : rects) {
                 bool through = cs.horiz
                     ? (cs.perp_pos >= r.y1 && cs.perp_pos <= r.y2
@@ -334,8 +335,13 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
                     : (cs.perp_pos >= r.x1 && cs.perp_pos <= r.x2
                        && cs.along_lo <= r.y2 && cs.along_hi >= r.y1);
                 if (!through) continue;
-                if (cs.horiz) { span_lo = std::min(span_lo, r.y1); span_hi = std::max(span_hi, r.y2); }
-                else          { span_lo = std::min(span_lo, r.x1); span_hi = std::max(span_hi, r.x2); }
+                if (cs.horiz) {
+                    span_lo = std::min(span_lo, r.y1); span_hi = std::max(span_hi, r.y2);
+                    along_lo_B = std::min(along_lo_B, r.x1); along_hi_B = std::max(along_hi_B, r.x2);
+                } else {
+                    span_lo = std::min(span_lo, r.x1); span_hi = std::max(span_hi, r.x2);
+                    along_lo_B = std::min(along_lo_B, r.y1); along_hi_B = std::max(along_hi_B, r.y2);
+                }
             }
             if (span_lo > span_hi) continue; // segment doesn't span this block
 
@@ -346,6 +352,24 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
             if (lo > hi) { lo = span_lo; hi = span_hi; } // margin too large: skip
             cs.perp_lo = std::max(cs.perp_lo, lo);
             cs.perp_hi = std::min(cs.perp_hi, hi);
+
+            // When cs passes through B via a suppressed stub, the spine segment T
+            // connected at cs's endpoint must stay on the far side of B so that
+            // do_span_adjustments cannot retract cs.span_hi (or span_lo) below B's
+            // near face, which would break the pass-through at placed positions.
+            for (const auto& conn : cs.conns) {
+                if (conn.kind != SegConn::SEG || !conn.is_endpoint) continue;
+                ConnSeg& T = segs_[conn.seg_idx];
+                if (conn.at_pos == cs.along_hi) {
+                    // T is at hi end; after span adj, span_hi = T.track_position.
+                    // Need T.track_position >= along_lo_B.
+                    T.perp_lo = std::max(T.perp_lo, along_lo_B);
+                } else if (conn.at_pos == cs.along_lo) {
+                    // T is at lo end; after span adj, span_lo = T.track_position.
+                    // Need T.track_position <= along_hi_B.
+                    T.perp_hi = std::min(T.perp_hi, along_hi_B);
+                }
+            }
         }
     }
 }
