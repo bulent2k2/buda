@@ -1281,6 +1281,7 @@ class BudaVisualizer:
 
         self._redraw_bundle_list()
         self._redraw_overlap_list()
+        self._redraw_blocks(bundle_id)
         self.fig.canvas.draw_idle()
 
     def _step_bundle(self, delta):
@@ -1354,8 +1355,7 @@ class BudaVisualizer:
         for a in self._heatmap_artists: a.set_visible(True)
         if self._cbar_ax: self._cbar_ax.set_visible(True)
         for a in self._keepout_artists: a.set_visible(True)
-        for p in self._block_patch_artists: p.set_visible(True)
-        for txt in self._block_name_artists: txt.set_visible(True)
+        self._redraw_blocks()   # restores default (all blocks equal) style
         for a in self._busterm_artists: a.set_visible(True)
         for a in self._vias_conns_artists: a.set_visible(True)
         for e in self._grid_rail_artists:
@@ -2017,14 +2017,53 @@ class BudaVisualizer:
     # Drawing
     # ------------------------------------------------------------------
 
-    def draw_blocks(self):
+    def _redraw_blocks(self, highlight_bid=None):
+        """Clear and redraw floorplan blocks.
+
+        When highlight_bid is set, blocks connected to that bundle's selected
+        topology (via topo.connected_block_names) are drawn with a green fill
+        and bold border; all others are dimmed.  When None, all blocks use the
+        default style.
+        """
+        for p in self._block_patch_artists:
+            try: p.remove()
+            except Exception: pass
+        for txt in self._block_name_artists:
+            try: txt.remove()
+            except Exception: pass
         self._block_patch_artists = []
-        self._block_name_artists = []
+        self._block_name_artists  = []
+
+        highlight_blocks = set()
+        if highlight_bid is not None:
+            wrapper = next((w for w in self.bundles
+                            if w.original_bundle.id == highlight_bid), None)
+            if (wrapper and wrapper.candidates and
+                    0 <= wrapper.selected_topology_index < len(wrapper.candidates)):
+                topo = wrapper.candidates[wrapper.selected_topology_index]
+                highlight_blocks = set(topo.connected_block_names)
+
         for name, rect in self.fp.get_all_blocks():
-            ps, txt = _draw_block(self.ax, name, rect, self.fp)
+            if name in highlight_blocks:
+                ps, txt = _draw_block(self.ax, name, rect, self.fp,
+                                      lw=1.8, edge='#333333', face='#d0f0d0',
+                                      alpha=0.50, fontsize=8, zorder=1.5)
+            elif highlight_blocks:
+                ps, txt = _draw_block(self.ax, name, rect, self.fp,
+                                      lw=0.8, alpha=0.12, fontsize=7)
+            else:
+                ps, txt = _draw_block(self.ax, name, rect, self.fp)
             self._block_patch_artists.extend(ps)
             if txt is not None:
                 self._block_name_artists.append(txt)
+
+        for p in self._block_patch_artists:
+            p.set_visible(self._blocks_visible)
+        for txt in self._block_name_artists:
+            txt.set_visible(self._blocks_visible and self._block_names_visible)
+
+    def draw_blocks(self):
+        self._redraw_blocks()
         self.draw_keepouts()
 
     def draw_keepouts(self):
