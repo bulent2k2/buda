@@ -853,12 +853,8 @@ class TopologyExplorer:
             net0  = names_[0] if names_ else f"B{bid_}"
             self.fig.canvas.manager.set_window_title(f"{net0} (Bundle {bid_})")
 
-        # Identify blocks that have busterm connections in this topology
-        highlight_blocks = set()
-        for cs in ct.segs():
-            for conn in cs.conns:
-                if conn.kind == ic.SegConnKind.BUSTERM:
-                    highlight_blocks.add(conn.block_name)
+        # Identify blocks that this topology must connect (endpoints + passthru)
+        highlight_blocks = set(topo.connected_block_names)
 
         # Floorplan blocks
         self._block_patch_artists = []

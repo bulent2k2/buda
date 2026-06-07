@@ -18,8 +18,12 @@ SRC_DIR = CLI.parent
 
 def run_script(name: str) -> tuple[str, int]:
     """Run a .buda script with --no-viz; return (combined output, returncode)."""
-    # Ensure src (where buda.so lives) is in PYTHONPATH
-    env = {**os.environ, "PYTHONPATH": str(SRC_DIR)}
+    # Ensure build (where buda.so lives) and tools are in PYTHONPATH
+    build_dir = _ROOT / "build"
+    tools_dir = _ROOT / "tools"
+    ppath = os.environ.get("PYTHONPATH", "")
+    new_ppath = f"{build_dir}:{tools_dir}:{ppath}" if ppath else f"{build_dir}:{tools_dir}"
+    env = {**os.environ, "PYTHONPATH": new_ppath}
     r = subprocess.run(
         [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
         capture_output=True, text=True, env=env,
