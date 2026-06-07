@@ -157,26 +157,28 @@ Netlist (.buda script)
 
 ---
 
-### Stage 3 — Bundle Planner / Global Router (`global_router.h/cpp`)
+### Stage 3 — Bundle Planner / Congestion Planner (`congestion_planner.h/cpp`)
 
-**Responsibility:** Select one topology per bundle and assign it a layer, trading off congestion across all bundles simultaneously.
+**Responsibility:** Select one topology per bundle and assign layers to its segments, minimizing congestion across all bundles simultaneously.
 
 **Key types:**
-- `GlobalCut` — a Hanan grid line segment with `capacity` and `current_usage`
-- `BundleWrapper` — wraps a `Bundle` with its topology candidates, the selected index, and the bus `width` (logical, in layout units)
+- `GlobalCut` — a Hanan grid line segment subdivided into bands, tracking `band_cap` and `band_usage`.
+- `BundleWrapper` — wraps a `Bundle` with its topology candidates, selected index, and bus `width`.
+- `BundleAssignment` — selected topology index and per-segment layer assignments for a bundle.
+- `CongestionPlanner` — congestion-aware global router.
 
-**Algorithm (current: mock):** Iterates bundles; selects topology index 0 by default; overrides for bundles whose first net name contains `"b2_"` (force Z) or `"b3_"` (force U). Real implementation will minimise congestion across cuts using the dilution formula:
-```
-effective_width = raw_width × (100 / (100 − overhead_percent))
-```
-`overhead_percent` is set per layer via `set_layer_overhead()`.
+**Algorithm:** Processes widest buses first (greedy heuristic). For each bundle candidate, it evaluates:
+1. Congestion cost across cuts (using band usage/capacity, factoring in layer overhead/dilution).
+2. Span-mismatch cost (penalizing segment length outside `[span_min, span_max]`).
+3. Flat penalty for non-`TOP` layers.
+It selects the candidate topology and layer assignments that minimize total cost, updates band usage, and returns the assignments.
 
 **After this stage**, each `BundleWrapper::candidates[selected_topology_index]` contains segments where:
 - `layer_hint` is the assigned metal layer
 - `start`/`end` coordinates define a soft routing-direction span
 - The perpendicular coordinate implicitly defines the Hanan grid cell (hard interval for stage 4)
 
-**Output fed to stage 4:** mutated `vector<BundleWrapper>` with `selected_topology_index` set.
+**Output fed to stage 4:** mutated `vector<BundleWrapper>` with `selected_topology_index` and segment layers set.
 
 ---
 

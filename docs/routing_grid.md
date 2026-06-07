@@ -156,6 +156,6 @@ Tests live in `test/tests/test_routing_grid.py` (21 unit tests) and the BDD scen
 
 | File | Contents |
 |---|---|
-| `buda_system_v2/src/routing_grid.h` | `TrackSlot`, `TrackPattern`, `PatternOverride`, `RoutingGrid`, `RoutingGridStack` declarations |
-| `buda_system_v2/src/routing_grid.cpp` | Implementation of all methods |
-| `buda_system_v2/src/bindings.cpp` | pybind11 bindings for all five types |
+| `src/routing_grid.h` | `TrackSlot`, `TrackPattern`, `PatternOverride`, `RoutingGrid`, `RoutingGridStack` declarations |
+| `src/routing_grid.cpp` | Implementation of all methods |
+| `src/bindings.cpp` | pybind11 bindings for all five types |

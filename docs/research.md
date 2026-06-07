@@ -22,7 +22,7 @@ Bus planning as entropy reduction (academic grounding):
 - US Patent 11694016 (Synopsys) — commercial embodiment of the same idea: discovering
   buses before detailed routing to guide track assignment.
 
-Three MemPool BUDA files created in buda_system_v2/flow
+Three MemPool BUDA files created in flow
 ====
   
   ┌──────────────────────┬──────────────┬────────────────────────────────┬────────────────────────────────────────────────────┬─────────┬───────────────────────────────────────┬────────────────────────────────────────────────────┐
@@ -404,7 +404,7 @@ Default filters: --min-fanout 5, --max-fanout 256, --min-hpwl 20 µm, --src-marg
 
 DEF→BUDA end-to-end pipeline — tools/def_cluster.py --bipartite --grid N --high-fanout --out
 ====
-Complete .buda scripts are now generated automatically and stored in buda_system_v2/flow/ispd19_test*.buda.
+Complete .buda scripts are now generated automatically and stored in flow/ispd19_test*.buda.
 Command: python3 def_cluster.py <DEF> <LEF> --bipartite --grid 10 --min 5 --high-fanout --min-fanout 5 --min-hpwl 20 --out <file>
 
 Script structure:

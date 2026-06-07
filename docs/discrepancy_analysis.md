@@ -4,7 +4,7 @@
 - `docs/origin/paper.md` — *"Assisted and Auto Bus Planning in Full-Chip Layout"* (Ekici, Basaran et al., Intel Galaxy tool)
 - `docs/origin/talk.pdf` / `docs/origin/talk_contents.md` — 25-slide conference presentation of the same work
 
-**Implementation under review:** `buda_system_v2/`
+**Implementation under review:** `src/` / root repository
 
 The talk is the presentation version of the paper and largely covers the same concepts, but adds concrete performance benchmarks, explicit flow diagrams, a detailed hierarchy-depth case study (Nehalem slides 17–23), and some design intent statements that have implications for the implementation. Discrepancies unique to the talk are marked **[Talk]**.
 
