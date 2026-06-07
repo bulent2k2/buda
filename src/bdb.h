@@ -121,6 +121,16 @@ public:
                           const std::string& child_cell,
                           double x, double y);
 
+    // Mirror all descendants left-right (flip_x=true) or up-down (flip_x=false)
+    // about the component's own centre.  The root bounding box is unchanged
+    // (rectangular bbox is symmetric); only child absolute coords are updated.
+    void flip_comp(const std::string& name, bool flip_x);
+
+    // Rotate the component and all descendants CCW by 90, 180, or 270 degrees,
+    // keeping the lower-left corner fixed.  For 90/270 the root bbox width and
+    // height are swapped; for 180 the bbox is unchanged.
+    void rotate_comp(const std::string& name, int degrees);
+
     // ── Computed properties ────────────────────────────────────────────────
     void compute_hpwl();
     void compute_fanout();

@@ -18,7 +18,7 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
    - [Row types](#row-types)
    - [Ingestion](#ingestion)
    - [Cell definitions and hierarchy](#cell-definitions-and-hierarchy)
-   - [Mutations](#mutations)
+   - [Mutations](#mutations) — `move_comp`, `resize_cell`, `flip_comp`, `rotate_comp`, `add_comp`
    - [Computed properties](#computed-properties)
    - [Queries](#queries)
    - [Group management](#group-management)
@@ -311,6 +311,59 @@ any fallback instances.
 
 ---
 
+### `flip_comp`
+
+```
+flip_comp <name> <x|y>
+```
+
+Mirror a component and all of its descendants in place.
+
+| Argument | Type | Description |
+|---|---|---|
+| `name` | str | Full instance path of the root component to flip, e.g. `u1`. |
+| `x\|y` | str | `x` — mirror left-right about the component's vertical centre; `y` — mirror up-down about the horizontal centre. |
+
+The root component's bounding box is unchanged.  Each descendant `d` is
+repositioned so that:
+- **flip x**: `new_x1 = root.x1 + root.x2 − d.x2`, `new_x2 = root.x1 + root.x2 − d.x1`
+- **flip y**: `new_y1 = root.y1 + root.y2 − d.y2`, `new_y2 = root.y1 + root.y2 − d.y1`
+
+Throws if `name` does not exist.
+
+---
+
+### `rotate_comp`
+
+```
+rotate_comp <name> <90|180|270>
+```
+
+Rotate a component and all of its descendants counter-clockwise by the given
+angle, keeping the component's lower-left corner fixed.
+
+| Argument | Type | Description |
+|---|---|---|
+| `name` | str | Full instance path of the root component to rotate, e.g. `u1`. |
+| `90\|180\|270` | int | Rotation in degrees CCW (only multiples of 90 are supported). |
+
+For 90° and 270° the root's width and height are swapped (the bounding box
+becomes `(x1, y1) – (x1+H, y1+W)` where `W` and `H` are the original
+width and height).  For 180° the root bbox is unchanged.
+
+Each descendant `d` with relative position `(crx, cry)` and size `(cw, ch)`
+within the root `(W×H)` is repositioned as follows:
+
+| Rotation | New position in absolute coords |
+|---|---|
+| 90° CCW | `x1 = rx1 + (H − cry − ch)`, `y1 = ry1 + crx`, size `ch × cw` |
+| 180°    | `x1 = rx1 + (W − crx − cw)`, `y1 = ry1 + (H − cry − ch)`, size `cw × ch` |
+| 270° CCW| `x1 = rx1 + cry`, `y1 = ry1 + (W − crx − cw)`, size `ch × cw` |
+
+Throws if `name` does not exist or degrees is not 90, 180, or 270.
+
+---
+
 ### `add_comp`
 
 ```
@@ -464,6 +517,20 @@ db.resize_cell(cell: str, w: float, h: float)
 ```
 Update the `cell` table and set `x2 = x1 + w`, `y2 = y1 + h` for every
 `component` instance of that cell type.
+
+```python
+db.flip_comp(name: str, flip_x: bool)
+```
+Mirror the component subtree rooted at `name`.  `flip_x=True` mirrors
+left-right (about the vertical centre); `flip_x=False` mirrors up-down.
+The root's bounding box is unchanged; all descendants are repositioned.
+
+```python
+db.rotate_comp(name: str, degrees: int)
+```
+Rotate the component subtree rooted at `name` by `degrees` CCW (90, 180,
+or 270).  The root's lower-left corner is fixed.  For 90° and 270° the
+root's width and height are swapped.
 
 ```python
 id: int = db.add_comp(name, cell, parent_name, x1, y1, x2, y2, is_leaf=True)

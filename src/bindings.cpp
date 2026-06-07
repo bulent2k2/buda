@@ -459,7 +459,11 @@ PYBIND11_MODULE(buda, m) {
              py::arg("x"), py::arg("y"))
         .def("add_inst_to_cell", &BDB::add_inst_to_cell,
              py::arg("parent_cell"), py::arg("inst_name"),
-             py::arg("child_cell"), py::arg("x"), py::arg("y"));
+             py::arg("child_cell"), py::arg("x"), py::arg("y"))
+        .def("flip_comp",   &BDB::flip_comp,
+             py::arg("name"), py::arg("flip_x"))
+        .def("rotate_comp", &BDB::rotate_comp,
+             py::arg("name"), py::arg("degrees"));
 
     // ── verify ─────────────────────────────────────────────────────────────
 

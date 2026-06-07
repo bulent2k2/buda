@@ -9,6 +9,8 @@ scenarios('features/bdb_combined.feature')
 scenarios('features/bdb_mutations.feature')
 scenarios('features/bdb_cell_inst.feature')
 scenarios('features/bdb_add_blocks.feature')
+scenarios('features/bdb_inst_to_cell.feature')
+scenarios('features/bdb_flip_rotate.feature')
 
 # ---------------------------------------------------------------------------
 # Verilog fixture
@@ -94,8 +96,10 @@ def load_hier_test1(context, tmp_path):
 # Component steps
 # ---------------------------------------------------------------------------
 
-@then(parsers.parse("the database contains {count:d} components"))
+@then(parsers.re(r'the database contains (?P<count>\d+) components?'))
 def check_component_count(context, count):
+    count = int(count)
+    _refresh(context)
     assert len(context['comps']) == count, (
         f"Expected {count} components, got {len(context['comps'])}: "
         f"{sorted(context['comps'])}"
@@ -524,3 +528,42 @@ def check_fp_block_count(context, count):
 def check_fp_no_block(context, name):
     actual = _fp_block_names(context['session'])
     assert name not in actual, f"Block {name!r} should not be in floorplan"
+
+
+# ---------------------------------------------------------------------------
+# add_inst_to_cell steps
+# ---------------------------------------------------------------------------
+
+@when(parsers.re(
+    r'cell "(?P<parent_cell>[^"]+)" contains "(?P<inst_name>[^"]+)" '
+    r'of "(?P<child_cell>[^"]+)" at \((?P<x>-?\d+), (?P<y>-?\d+)\)'
+))
+def step_add_inst_to_cell(context, parent_cell, inst_name, child_cell, x, y):
+    context['db'].add_inst_to_cell(parent_cell, inst_name, child_cell, int(x), int(y))
+    _refresh(context)
+
+
+@then(parsers.re(r'component "(?P<name>[^"]+)" does not exist'))
+def check_component_absent(context, name):
+    _refresh(context)
+    assert name not in context['comps'], (
+        f"Component {name!r} unexpectedly found in DB"
+    )
+
+
+# ---------------------------------------------------------------------------
+# flip_comp / rotate_comp steps
+# ---------------------------------------------------------------------------
+
+@when(parsers.re(
+    r'I flip component "(?P<name>[^"]+)" in the (?P<axis>x|y) direction'
+))
+def step_flip_comp(context, name, axis):
+    context['db'].flip_comp(name, axis == 'x')
+    _refresh(context)
+
+
+@when(parsers.re(r'I rotate component "(?P<name>[^"]+)" by (?P<degrees>\d+) degrees'))
+def step_rotate_comp(context, name, degrees):
+    context['db'].rotate_comp(name, int(degrees))
+    _refresh(context)

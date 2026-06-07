@@ -1171,6 +1171,124 @@ void BDB::_expand_cell_children(int parent_comp_id,
     }
 }
 
+// ── flip_comp / rotate_comp ────────────────────────────────────────────────
+
+// Internal: get root bbox, then collect all descendants via recursive CTE.
+// Returns root in rows[0], descendants in rows[1..].
+namespace {
+struct BBoxRow { int id; double x1,y1,x2,y2; };
+
+void gather_subtree(sqlite3* db, const std::string& name,
+                    std::vector<BBoxRow>& rows) {
+    // Root
+    {
+        Stmt q(db, "SELECT id,x1,y1,x2,y2 FROM component WHERE name=?");
+        sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(q) != SQLITE_ROW)
+            throw std::runtime_error("component not found: " + name);
+        rows.push_back({sqlite3_column_int(q,0),
+                        sqlite3_column_double(q,1), sqlite3_column_double(q,2),
+                        sqlite3_column_double(q,3), sqlite3_column_double(q,4)});
+    }
+    // Descendants (exclude root; start CTE from root's children)
+    {
+        Stmt q(db, R"(
+            WITH RECURSIVE sub(id,x1,y1,x2,y2) AS (
+                SELECT id,x1,y1,x2,y2 FROM component WHERE parent_id=?
+                UNION ALL
+                SELECT c.id,c.x1,c.y1,c.x2,c.y2
+                FROM component c JOIN sub ON c.parent_id=sub.id
+            )
+            SELECT id,x1,y1,x2,y2 FROM sub
+        )");
+        sqlite3_bind_int(q, 1, rows[0].id);
+        while (sqlite3_step(q) == SQLITE_ROW)
+            rows.push_back({sqlite3_column_int(q,0),
+                            sqlite3_column_double(q,1), sqlite3_column_double(q,2),
+                            sqlite3_column_double(q,3), sqlite3_column_double(q,4)});
+    }
+}
+} // anonymous namespace
+
+void BDB::flip_comp(const std::string& name, bool flip_x) {
+    std::vector<BBoxRow> rows;
+    gather_subtree(_db, name, rows);
+
+    const auto& root = rows[0];
+    Stmt upd(_db, "UPDATE component SET x1=?,y1=?,x2=?,y2=? WHERE id=?");
+
+    // Root bbox is unchanged for flip (rectangular → symmetric about centre).
+    // Transform each descendant's absolute coords.
+    for (size_t i = 1; i < rows.size(); ++i) {
+        const auto& d = rows[i];
+        double nx1=d.x1, ny1=d.y1, nx2=d.x2, ny2=d.y2;
+        if (flip_x) {
+            // Mirror about vertical centre: x' = root.x1 + root.x2 − x
+            nx1 = root.x1 + root.x2 - d.x2;
+            nx2 = root.x1 + root.x2 - d.x1;
+        } else {
+            // Mirror about horizontal centre: y' = root.y1 + root.y2 − y
+            ny1 = root.y1 + root.y2 - d.y2;
+            ny2 = root.y1 + root.y2 - d.y1;
+        }
+        sqlite3_reset(upd);
+        sqlite3_bind_double(upd,1,nx1); sqlite3_bind_double(upd,2,ny1);
+        sqlite3_bind_double(upd,3,nx2); sqlite3_bind_double(upd,4,ny2);
+        sqlite3_bind_int   (upd,5,d.id);
+        sqlite3_step(upd);
+    }
+    compute_hpwl();
+}
+
+void BDB::rotate_comp(const std::string& name, int degrees) {
+    if (degrees != 90 && degrees != 180 && degrees != 270)
+        throw std::runtime_error("rotate_comp: degrees must be 90, 180, or 270");
+
+    std::vector<BBoxRow> rows;
+    gather_subtree(_db, name, rows);
+
+    const auto& root = rows[0];
+    double rx1=root.x1, ry1=root.y1;
+    double W=root.x2-rx1, H=root.y2-ry1;
+
+    Stmt upd(_db, "UPDATE component SET x1=?,y1=?,x2=?,y2=? WHERE id=?");
+    auto do_upd = [&](int id, double nx1,double ny1,double nx2,double ny2) {
+        sqlite3_reset(upd);
+        sqlite3_bind_double(upd,1,nx1); sqlite3_bind_double(upd,2,ny1);
+        sqlite3_bind_double(upd,3,nx2); sqlite3_bind_double(upd,4,ny2);
+        sqlite3_bind_int   (upd,5,id);
+        sqlite3_step(upd);
+    };
+
+    // Root: swap width/height for 90/270, unchanged for 180
+    if (degrees == 90 || degrees == 270)
+        do_upd(root.id, rx1, ry1, rx1+H, ry1+W);
+
+    // Descendants: transform relative to original root lower-left
+    for (size_t i = 1; i < rows.size(); ++i) {
+        const auto& d = rows[i];
+        double crx = d.x1-rx1, cry = d.y1-ry1;   // relative lower-left
+        double cw  = d.x2-d.x1, ch  = d.y2-d.y1; // child size
+
+        double nx1, ny1, nx2, ny2;
+        if (degrees == 90) {
+            // CCW 90°: new_rel = (H−cry−ch, crx); child size swaps to ch×cw
+            nx1 = rx1 + (H - cry - ch);  ny1 = ry1 + crx;
+            nx2 = nx1 + ch;               ny2 = ny1 + cw;
+        } else if (degrees == 270) {
+            // CW 90°: new_rel = (cry, W−crx−cw); child size swaps to ch×cw
+            nx1 = rx1 + cry;              ny1 = ry1 + (W - crx - cw);
+            nx2 = nx1 + ch;               ny2 = ny1 + cw;
+        } else {
+            // 180°: reflect both axes
+            nx1 = rx1 + (W - crx - cw);  ny1 = ry1 + (H - cry - ch);
+            nx2 = nx1 + cw;               ny2 = ny1 + ch;
+        }
+        do_upd(d.id, nx1, ny1, nx2, ny2);
+    }
+    compute_hpwl();
+}
+
 std::vector<BustermRow>  BDB::all_busterms() const { return {}; }
 std::vector<BundleRow>   BDB::all_bundles()   const { return {}; }
 

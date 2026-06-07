@@ -1378,6 +1378,27 @@ class BudaSession:
                 print("Error: open_bdb first"); return
             self.bdb.add_inst_to_cell(args[0], args[1], args[2],
                                       float(args[3]), float(args[4]))
+        elif cmd == "flip_comp":
+            # flip_comp <name> x|y
+            if len(args) < 2:
+                print("Error: flip_comp requires <name> x|y"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            axis = args[1].lower()
+            if axis not in ('x', 'y'):
+                print(f"Error: flip_comp axis must be 'x' or 'y', got {args[1]!r}"); return
+            self.bdb.flip_comp(args[0], axis == 'x')
+        elif cmd == "rotate_comp":
+            # rotate_comp <name> 90|180|270
+            if len(args) < 2:
+                print("Error: rotate_comp requires <name> 90|180|270"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            try:
+                degrees = int(args[1])
+            except ValueError:
+                print("Error: rotate_comp degrees must be 90, 180, or 270"); return
+            self.bdb.rotate_comp(args[0], degrees)
         elif cmd == "add_comp":
             # add_comp <name> <cell> <parent|-> <x1> <y1> <x2> <y2> [leaf]
             # Use "-" for parent to create a root instance.
