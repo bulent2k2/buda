@@ -1,4 +1,9 @@
 **/*.log
+**/*.so
+**/*.bdb
+**/*.bdb-shm
+**/*.bdb-wal
+**/*.sqbpro
 **/build/
 **/__pycache__/
 **/*~
