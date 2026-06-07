@@ -125,6 +125,100 @@ class BudaSession:
             print(f"Pinned bundle '{hint}' to topology {resolved} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']})")
 
+    def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):
+        """Walk BDB hierarchy and call fp.add_block() for components at `depth`.
+
+        mode="deepest": DFS — go down to `depth`; if a branch ends before
+            reaching depth, add that branch's deepest component instead.
+        mode="skip": only add components whose .depth == requested depth;
+            shallower branches produce no block.
+        mode="error": like deepest but prints a warning and returns early
+            if any branch is shorter than the requested depth.
+        Components without valid placement (x1 < 0) are always skipped.
+        """
+        comps = self.bdb.all_components()
+
+        # Build id → row and id → children maps
+        by_id       = {r.id: r for r in comps}
+        children_of = {}          # parent_id → list[ComponentRow]
+        for r in comps:
+            children_of.setdefault(r.parent_id, []).append(r)
+
+        blocks_to_add = []   # (ComponentRow, fallback: bool)
+
+        if mode == "skip":
+            blocks_to_add = [(r, False) for r in comps if r.depth == depth]
+
+        else:  # deepest or error
+            shallow_names = []
+
+            def collect(node, cur_depth):
+                if cur_depth == depth:
+                    blocks_to_add.append((node, False))
+                    return
+                children = children_of.get(node.id, [])
+                if not children:
+                    # Branch ended before requested depth
+                    shallow_names.append(
+                        f"{node.name!r} (depth {cur_depth}, requested {depth})")
+                    if mode == "deepest":
+                        blocks_to_add.append((node, True))
+                    # error mode: record but don't add; will abort after DFS
+                    return
+                for child in children:
+                    collect(child, cur_depth + 1)
+
+            roots = [r for r in comps if r.parent_id == -1]
+            for root in roots:
+                collect(root, 0)
+
+            if shallow_names and mode == "error":
+                print(f"[BDB] Error: {len(shallow_names)} branch(es) shallower "
+                      f"than depth {depth}:")
+                for s in shallow_names[:10]:
+                    print(f"  {s}")
+                if len(shallow_names) > 10:
+                    print(f"  … and {len(shallow_names)-10} more")
+                return
+
+        # Add blocks to floorplan
+        added_rows = []   # (ComponentRow, is_fallback) for placed blocks
+        skipped_unplaced = fallback_count = 0
+        for r, is_fallback in blocks_to_add:
+            if r.x1 < 0 or r.y1 < 0:
+                skipped_unplaced += 1
+                continue
+            self.fp.add_block(r.name,
+                              int(round(r.x1)), int(round(r.y1)),
+                              int(round(r.x2)), int(round(r.y2)))
+            added_rows.append((r, is_fallback))
+            if is_fallback:
+                fallback_count += 1
+
+        added = len(added_rows)
+        parts = [f"[BDB] Added {added} blocks at depth {depth} (mode={mode})"]
+        if fallback_count:
+            parts.append(f"{fallback_count} used deepest-available fallback")
+        if skipped_unplaced:
+            parts.append(f"{skipped_unplaced} skipped (unplaced)")
+        print("; ".join(parts))
+
+        # Write block names to log file
+        if self.script_path:
+            log_path = os.path.splitext(self.script_path)[0] + '_bdb_blocks.log'
+        else:
+            log_path = 'bdb_blocks.log'
+        try:
+            with open(log_path, 'w') as f:
+                f.write(f"# add_blocks_from_bdb depth={depth} mode={mode}\n")
+                f.write(f"# {added} blocks added\n")
+                for r, is_fallback in added_rows:
+                    tag = " [deepest-fallback]" if is_fallback else ""
+                    f.write(f"{r.name}{tag}\n")
+            print(f"[BDB] Block list written to {log_path}")
+        except OSError as e:
+            print(f"[BDB] Warning: could not write block log {log_path}: {e}")
+
     def _make_layer_names(self):
         """Build a layer_id -> name dict from def_layer commands, with fallback defaults."""
         names = {4: 'M4', 5: 'M5', 6: 'M6'}
@@ -1209,7 +1303,13 @@ class BudaSession:
             # open_bdb <path>
             if not args:
                 print("Error: open_bdb requires a file path"); return
-            self.bdb = buda.BDB(args[0])
+            bdb_path = args[0]
+            if (self._script_stack
+                    and not os.path.isabs(bdb_path)
+                    and bdb_path != ':memory:'):
+                parent_dir = os.path.dirname(self._script_stack[-1])
+                bdb_path = os.path.normpath(os.path.join(parent_dir, bdb_path))
+            self.bdb = buda.BDB(bdb_path)
         elif cmd == "import_def_lef":
             # import_def_lef <def_path> <lef_path>
             if len(args) < 2:
@@ -1224,6 +1324,17 @@ class BudaSession:
             if self.bdb is None:
                 print("Error: open_bdb first"); return
             self.bdb.import_verilog(args[0])
+        elif cmd == "add_blocks_from_bdb":
+            # add_blocks_from_bdb <depth> [deepest|skip|error]
+            if not args:
+                print("Error: add_blocks_from_bdb requires <depth>"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            depth    = int(args[0])
+            mode     = args[1].lower() if len(args) > 1 else "deepest"
+            if mode not in ("deepest", "skip", "error"):
+                print(f"Error: unknown mode {mode!r}; use deepest|skip|error"); return
+            self._add_blocks_from_bdb(depth, mode)
         elif cmd == "move_comp":
             # move_comp <name> <x> <y>
             if len(args) < 3:

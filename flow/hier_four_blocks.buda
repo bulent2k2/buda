@@ -1,0 +1,129 @@
+# ============================================================
+# hier_four_blocks.buda
+# Full-flow demo: three-tier BDB hierarchy → NUTS → dnuts
+#
+# Tier 0 (depth 0): u1..u4          — top-level blocks
+# Tier 1 (depth 1): u1/u11..u4/u44 — sub-blocks (4 per top)
+# Tier 2 (depth 2): u*/u**/l1,l2   — leaf cells (2 per sub)
+#
+# add_blocks_from_bdb 2  →  32 leaf blocks enter the floorplan
+# Four buses cross top-level boundaries at the leaf level.
+#
+# Re-runnable: uses :memory: BDB (no .bdb file to delete).
+# ============================================================
+
+# ── Layers ────────────────────────────────────────────────
+source tracks.buda
+
+corner_margin 1 1
+set_min_stub_length 1
+set_min_stub_length_dir V 2
+set_min_stub_length_layer M5 3
+
+# ── BDB: cell definitions ─────────────────────────────────
+# blk  300×230 — top-level quadrant
+# sub  120×90  — sub-block (4 per blk, 2×2 grid)
+# leaf  45×50  — leaf cell (2 per sub, side by side)
+open_bdb :memory:
+add_cell blk  300 230
+add_cell sub  120  90
+add_cell leaf  45  50
+
+# ── Tier 0: top-level blocks (depth 0) ────────────────────
+#          x    y
+add_inst u1  blk  -    50   50
+add_inst u2  blk  -   400   50
+add_inst u3  blk  -    50  330
+add_inst u4  blk  -   400  330
+
+# ── Tier 1: sub-blocks (depth 1) ─────────────────────────
+# Each blk is 300×230; 4 subs of 120×90 sit in a 2×2 grid
+# with 15-unit margins and 20-unit gap between columns/rows.
+# Column offsets: 15, 155   Row offsets: 15, 125
+
+add_inst u1/u11  sub  u1   15  15
+add_inst u1/u12  sub  u1  155  15
+add_inst u1/u13  sub  u1   15 125
+add_inst u1/u14  sub  u1  155 125
+
+add_inst u2/u21  sub  u2   15  15
+add_inst u2/u22  sub  u2  155  15
+add_inst u2/u23  sub  u2   15 125
+add_inst u2/u24  sub  u2  155 125
+
+add_inst u3/u31  sub  u3   15  15
+add_inst u3/u32  sub  u3  155  15
+add_inst u3/u33  sub  u3   15 125
+add_inst u3/u34  sub  u3  155 125
+
+add_inst u4/u41  sub  u4   15  15
+add_inst u4/u42  sub  u4  155  15
+add_inst u4/u43  sub  u4   15 125
+add_inst u4/u44  sub  u4  155 125
+
+# ── Tier 2: leaf cells (depth 2) ─────────────────────────
+# Each sub is 120×90; 2 leaves of 45×50 at (10,20) and (65,20).
+
+add_inst u1/u11/l1  leaf  u1/u11   10 20
+add_inst u1/u11/l2  leaf  u1/u11   65 20
+add_inst u1/u12/l1  leaf  u1/u12   10 20
+add_inst u1/u12/l2  leaf  u1/u12   65 20
+add_inst u1/u13/l1  leaf  u1/u13   10 20
+add_inst u1/u13/l2  leaf  u1/u13   65 20
+add_inst u1/u14/l1  leaf  u1/u14   10 20
+add_inst u1/u14/l2  leaf  u1/u14   65 20
+
+add_inst u2/u21/l1  leaf  u2/u21   10 20
+add_inst u2/u21/l2  leaf  u2/u21   65 20
+add_inst u2/u22/l1  leaf  u2/u22   10 20
+add_inst u2/u22/l2  leaf  u2/u22   65 20
+add_inst u2/u23/l1  leaf  u2/u23   10 20
+add_inst u2/u23/l2  leaf  u2/u23   65 20
+add_inst u2/u24/l1  leaf  u2/u24   10 20
+add_inst u2/u24/l2  leaf  u2/u24   65 20
+
+add_inst u3/u31/l1  leaf  u3/u31   10 20
+add_inst u3/u31/l2  leaf  u3/u31   65 20
+add_inst u3/u32/l1  leaf  u3/u32   10 20
+add_inst u3/u32/l2  leaf  u3/u32   65 20
+add_inst u3/u33/l1  leaf  u3/u33   10 20
+add_inst u3/u33/l2  leaf  u3/u33   65 20
+add_inst u3/u34/l1  leaf  u3/u34   10 20
+add_inst u3/u34/l2  leaf  u3/u34   65 20
+
+add_inst u4/u41/l1  leaf  u4/u41   10 20
+add_inst u4/u41/l2  leaf  u4/u41   65 20
+add_inst u4/u42/l1  leaf  u4/u42   10 20
+add_inst u4/u42/l2  leaf  u4/u42   65 20
+add_inst u4/u43/l1  leaf  u4/u43   10 20
+add_inst u4/u43/l2  leaf  u4/u43   65 20
+add_inst u4/u44/l1  leaf  u4/u44   10 20
+add_inst u4/u44/l2  leaf  u4/u44   65 20
+
+# ── Populate floorplan from BDB ───────────────────────────
+# depth 2 = tier 3 (leaf level); skip mode: all branches reach depth 2
+add_blocks_from_bdb 2 skip
+
+# ── Buses ─────────────────────────────────────────────────
+# b1: u1 NW leaf → u2 NW leaf  (horizontal crossing)
+add_bus b1[4]  u1/u11/l1.tx  u2/u21/l1.rx
+
+# b2: u1 SE leaf → u3 SE leaf  (vertical crossing)
+add_bus b2[3]  u1/u14/l2.tx  u3/u34/l2.rx
+
+# b3: u2 SW leaf → u4 SW leaf  (diagonal)
+add_bus b3[2]  u2/u23/l1.tx  u4/u43/l1.rx
+
+# b4: u3 NW leaf → u1/u2/u4 leaves  (multicast from lower-left)
+add_bus b4[5]  u3/u31/l1.tx  u1/u11/l2.rx,u2/u21/l2.rx,u4/u41/l2.rx
+
+# ── Pipeline ─────────────────────────────────────────────
+run_bundler strict
+generate_topologies
+check_connectivity topo
+run_planner 1
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+visualize

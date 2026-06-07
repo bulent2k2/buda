@@ -8,6 +8,7 @@ scenarios('features/bdb_import.feature')
 scenarios('features/bdb_combined.feature')
 scenarios('features/bdb_mutations.feature')
 scenarios('features/bdb_cell_inst.feature')
+scenarios('features/bdb_add_blocks.feature')
 
 # ---------------------------------------------------------------------------
 # Verilog fixture
@@ -424,3 +425,102 @@ def step_add_comp(context, name, cell, parent, x1, y1, x2, y2):
     context['db'].add_comp(name, cell, par,
                            float(x1), float(y1), float(x2), float(y2))
     _refresh(context)
+
+
+# ---------------------------------------------------------------------------
+# add_blocks_from_bdb steps
+# ---------------------------------------------------------------------------
+#
+# Fixture hierarchy (mixed depths to exercise all three modes):
+#
+#   u_a  (depth 0)  placed
+#     u_a/sub0  (depth 1)  placed
+#       u_a/sub0/leaf0  (depth 2)  placed
+#       u_a/sub0/leaf1  (depth 2)  placed
+#   u_b  (depth 0)  placed
+#     u_b/sub0  (depth 1)  placed
+#       u_b/sub0/leaf0  (depth 2)  placed
+#       u_b/sub0/unplaced  (depth 2)  x1=-1 (no placement)
+#   u_c  (depth 0, no children — shallow branch)  placed
+#
+# At depth 2: deepest adds leaf0/leaf1/leaf0 + u_c fallback = 4
+#             skip   adds leaf0/leaf1/leaf0 only            = 3
+#             error  aborts (u_c is shallow)                = 0
+
+
+import sys
+import io
+from buda_cli import BudaSession
+
+
+def _make_routing_bdb(tmp_path):
+    """Build a BDB with the mixed-depth hierarchy above."""
+    db = buda.BDB(":memory:")
+    rows = [
+        # (name, cell, parent, x1, y1, x2, y2)
+        ("u_a",                "A",  "",         0,   0, 200, 200),
+        ("u_a/sub0",           "S",  "u_a",     10,  10, 190, 190),
+        ("u_a/sub0/leaf0",     "L",  "u_a/sub0", 10,  10,  60,  60),
+        ("u_a/sub0/leaf1",     "L",  "u_a/sub0", 70,  10, 120,  60),
+        ("u_b",                "B",  "",        300,   0, 500, 200),
+        ("u_b/sub0",           "S",  "u_b",      10,  10, 190, 190),
+        ("u_b/sub0/leaf0",     "L",  "u_b/sub0", 10,  10,  60,  60),
+        ("u_b/sub0/unplaced",  "L",  "u_b/sub0", -1,  -1,  -1,  -1),
+        ("u_c",                "C",  "",        600,   0, 700, 100),
+    ]
+    for name, cell, par, x1, y1, x2, y2 in rows:
+        db.add_comp(name, cell, par, x1, y1, x2, y2)
+    return db
+
+
+@given("a BDB with a mixed-depth hierarchy for routing tests")
+def load_routing_bdb(context, tmp_path):
+    context['db'] = _make_routing_bdb(tmp_path)
+    context['comps'] = {r.name: r for r in context['db'].all_components()}
+    context['nets']  = {}
+    context['pins']  = []
+    # A BudaSession gives us a real Floorplan to inspect after add_blocks
+    context['session'] = BudaSession()
+    context['session'].bdb = context['db']
+
+
+@when(parsers.re(r'I call add_blocks_from_bdb at depth (?P<depth>\d+) mode (?P<mode>\w+)'))
+def step_add_blocks(context, depth, mode):
+    # Capture stdout so error-mode warnings don't pollute test output
+    buf = io.StringIO()
+    old = sys.stdout
+    sys.stdout = buf
+    try:
+        context['session']._add_blocks_from_bdb(int(depth), mode)
+    finally:
+        sys.stdout = old
+    context['add_blocks_output'] = buf.getvalue()
+
+
+def _fp_block_names(session):
+    """Return the set of block names currently in the floorplan."""
+    return {name for name, _rect in session.fp.get_all_blocks()}
+
+
+@then(parsers.re(r'the floorplan contains blocks "(?P<names>[^"]+)"'))
+def check_fp_blocks(context, names):
+    expected = {n.strip() for n in names.split(',')}
+    actual   = _fp_block_names(context['session'])
+    assert expected == actual, (
+        f"Expected blocks {sorted(expected)}, got {sorted(actual)}"
+    )
+
+
+@then(parsers.parse("the floorplan block count is {count:d}"))
+def check_fp_block_count(context, count):
+    actual = len(_fp_block_names(context['session']))
+    assert actual == count, (
+        f"Expected {count} blocks, got {actual}: "
+        f"{sorted(_fp_block_names(context['session']))}"
+    )
+
+
+@then(parsers.re(r'the floorplan does not contain block "(?P<name>[^"]+)"'))
+def check_fp_no_block(context, name):
+    actual = _fp_block_names(context['session'])
+    assert name not in actual, f"Block {name!r} should not be in floorplan"

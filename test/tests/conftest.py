@@ -11,6 +11,11 @@ import pytest
 import buda
 from pytest_bdd import given, when, then, parsers
 
+# Make src/ importable (needed for buda_cli and other Python-only modules)
+_src = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
+if _src not in sys.path:
+    sys.path.insert(0, _src)
+
 # ---------------------------------------------------------------------------
 # Shared context fixture
 # ---------------------------------------------------------------------------
