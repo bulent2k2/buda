@@ -161,8 +161,9 @@ public:
 
     // ── Metadata ───────────────────────────────────────────────────────────
     int    units() const;
-    double die_w() const;
-    double die_h() const;
+    double die_w() const;   // explicit die_w, or union-bbox of all comps if unset
+    double die_h() const;   // explicit die_h, or union-bbox of all comps if unset
+    void   set_die(double w, double h);
 
     // ── Static helpers ─────────────────────────────────────────────────────
     static std::string db_path(const std::string& def_path);   // .def → .bdb

@@ -442,6 +442,7 @@ PYBIND11_MODULE(buda, m) {
         .def("units",           &BDB::units)
         .def("die_w",           &BDB::die_w)
         .def("die_h",           &BDB::die_h)
+        .def("set_die",         &BDB::set_die, py::arg("w"), py::arg("h"))
         .def_static("db_path",  &BDB::db_path, py::arg("def_path"))
         .def("move_comp",   &BDB::move_comp,
              py::arg("name"), py::arg("x"), py::arg("y"))

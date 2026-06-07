@@ -1335,6 +1335,11 @@ class BudaSession:
             if mode not in ("deepest", "skip", "error"):
                 print(f"Error: unknown mode {mode!r}; use deepest|skip|error"); return
             self._add_blocks_from_bdb(depth, mode)
+        elif cmd == "set_die":
+            # set_die <w> <h>
+            if len(args) < 2:
+                print("Error: set_die requires <w> <h>"); return
+            self.bdb.set_die(float(args[0]), float(args[1]))
         elif cmd == "move_comp":
             # move_comp <name> <x> <y>
             if len(args) < 3:

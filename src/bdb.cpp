@@ -149,9 +149,41 @@ std::string BDB::db_path(const std::string& def_path) {
     return (dot == std::string::npos ? def_path : def_path.substr(0, dot)) + ".bdb";
 }
 
-int    BDB::units() const { return _units; }
-double BDB::die_w() const { return _die_w; }
-double BDB::die_h() const { return _die_h; }
+int BDB::units() const { return _units; }
+
+void BDB::set_die(double w, double h) {
+    _die_w = w; _die_h = h;
+    auto upsert = [&](const char* key, double val) {
+        std::string sql = "INSERT INTO meta(key,value) VALUES('" + std::string(key) +
+                          "','" + std::to_string(val) +
+                          "') ON CONFLICT(key) DO UPDATE SET value=excluded.value";
+        _exec(sql.c_str());
+    };
+    upsert("die_w", w);
+    upsert("die_h", h);
+}
+
+static double _union_bbox_dim(sqlite3* db, bool want_w) {
+    const char* sql = want_w
+        ? "SELECT MAX(x2) FROM component WHERE x1 >= 0"
+        : "SELECT MAX(y2) FROM component WHERE y1 >= 0";
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(db, sql, -1, &s, nullptr) != SQLITE_OK) return 0.0;
+    double v = 0.0;
+    if (sqlite3_step(s) == SQLITE_ROW && sqlite3_column_type(s, 0) != SQLITE_NULL)
+        v = sqlite3_column_double(s, 0);
+    sqlite3_finalize(s);
+    return v;
+}
+
+double BDB::die_w() const {
+    if (_die_w > 0.0) return _die_w;
+    return _union_bbox_dim(_db, true);
+}
+double BDB::die_h() const {
+    if (_die_h > 0.0) return _die_h;
+    return _union_bbox_dim(_db, false);
+}
 
 // ── LEF parsers ───────────────────────────────────────────────────────────────
 // Both parsers use a line-by-line state machine — std::regex multiline flag

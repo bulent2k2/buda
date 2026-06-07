@@ -145,6 +145,28 @@ is preserved via UPSERT.
 
 ---
 
+### `set_die`
+
+```
+set_die <w> <h>
+```
+
+Explicitly set the die dimensions.  These values are returned by `die_w()` and
+`die_h()` and are used by the visualizer and routing stages.
+
+| Argument | Type | Description |
+|---|---|---|
+| `w` | float | Die width in µm. |
+| `h` | float | Die height in µm. |
+
+For designs built with `import_def_lef`, the die size is read from the DEF
+`DIEAREA` statement automatically.  For scratch designs (built with `add_cell`
+/ `add_inst`) `die_w()` and `die_h()` fall back to the union bounding box of
+all placed components when not set explicitly; call `set_die` when you need a
+larger canvas (e.g. routing margin around the blocks).
+
+---
+
 ### `move_comp`
 
 ```
@@ -506,6 +528,13 @@ no component rows are created until `add_inst` places an occurrence of
 ---
 
 ### Mutations
+
+```python
+db.set_die(w: float, h: float)
+```
+Explicitly set die dimensions and persist them to the `meta` table.  When
+`_die_w` is 0 (unset), `die_w()` / `die_h()` automatically fall back to the
+`MAX(x2)` / `MAX(y2)` of all placed components.
 
 ```python
 db.move_comp(name: str, x: float, y: float)
