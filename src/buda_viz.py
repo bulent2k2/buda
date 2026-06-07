@@ -42,48 +42,53 @@ def _rects_disconnected(rects_raw):
     return len({find(i) for i in range(n)}) > 1
 
 
-def _draw_block(ax, name, bbox, fp, lw=2, edge='#444444', face='#d9d9d9',
-                alpha=0.6, fontsize=9, zorder=1):
+def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#aaaaaa', face='#f0f0f0',
+                alpha=0.15, fontsize=8, zorder=1):
     """Draw one floorplan block.
 
     Single-rect blocks: one filled rectangle with a solid edge.
     Multi-rect blocks: each rect drawn individually with a solid edge, plus a
     dashed bounding box around the group to signal they are one logical block.
 
-    Returns the label text artist (or None if name is empty).
+    Returns ([patches], label_text_artist).
     """
-    # Bulent: old logic:
-    #    Multi-rect blocks: each rect drawn individually with a solid edge.
-    #    When the rects are disconnected (equivalent-busterm groups) a dashed
-    #    bounding box is added to show they belong to the same block; for touching
-
     rects_raw = fp.get_block_rects(name)
+    added_patches = []
 
     if rects_raw:
         for (rx1, ry1, rx2, ry2) in rects_raw:
-            ax.add_patch(patches.Rectangle(
+            p = patches.Rectangle(
                 (rx1, ry1), rx2 - rx1, ry2 - ry1,
                 linewidth=lw, edgecolor=edge, facecolor=face,
-                alpha=alpha, zorder=zorder))
-      # Bulent:
-      # if _rects_disconnected(rects_raw):
-        ax.add_patch(patches.Rectangle(
+                alpha=alpha, zorder=zorder)
+            ax.add_patch(p)
+            added_patches.append(p)
+
+        # Dashed bounding box for multi-rect blocks
+        p_bb = patches.Rectangle(
             (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
-            linewidth=max(1.0, lw * 0.6), edgecolor=edge, facecolor='none',
-            linestyle='--', alpha=0.5, zorder=zorder + 0.5))
+            linewidth=max(0.8, lw * 0.6), edgecolor=edge, facecolor='none',
+            linestyle='--', alpha=alpha * 0.8, zorder=zorder + 0.5)
+        ax.add_patch(p_bb)
+        added_patches.append(p_bb)
     else:
-        ax.add_patch(patches.Rectangle(
+        p = patches.Rectangle(
             (bbox.x1, bbox.y1), bbox.x2 - bbox.x1, bbox.y2 - bbox.y1,
             linewidth=lw, edgecolor=edge, facecolor=face,
-            alpha=alpha, zorder=zorder))
+            alpha=alpha, zorder=zorder)
+        ax.add_patch(p)
+        added_patches.append(p)
 
     if not name:
-        return None
+        return added_patches, None
+
     cx = (bbox.x1 + bbox.x2) / 2
     cy = (bbox.y1 + bbox.y2) / 2
-    return ax.text(cx, cy, name, ha='center', va='center',
-                   fontsize=fontsize, fontweight='bold', color='#333333',
-                   zorder=zorder + 1, clip_on=True)
+    txt = ax.text(cx, cy, name, ha='center', va='center',
+                  fontsize=fontsize, fontweight='bold', color='#444444',
+                  alpha=min(1.0, alpha * 4.0), # label slightly brighter than block
+                  zorder=zorder + 1, clip_on=True)
+    return added_patches, txt
 
 
 def _toggle_fullscreen(fig):
@@ -155,6 +160,12 @@ class TopologyExplorer:
         self._main_fig   = main_fig    # back-reference to main viz figure for cmd-1
         self._rerun_fn   = rerun_fn    # () -> NUTSResult | None
         self._refresh_fn = refresh_fn  # (NUTSResult) -> None
+        
+        self._blocks_visible = True
+        self._block_names_visible = True
+        self._block_patch_artists = []
+        self._block_name_artists = []
+
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         self.bidx     = 0   # current bundle index
@@ -523,6 +534,14 @@ class TopologyExplorer:
         self._reset_rerun_btn()
         self._draw()
 
+    def _toggle_blocks(self):
+        self._blocks_visible = not self._blocks_visible
+        for p in self._block_patch_artists:
+            p.set_visible(self._blocks_visible)
+        for t in self._block_name_artists:
+            t.set_visible(self._blocks_visible)
+        self.fig.canvas.draw_idle()
+
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
@@ -539,6 +558,7 @@ class TopologyExplorer:
         if event.key in ('down', 'j'):          self._step_segment(+1)
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
         if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
+        if event.key == 'b':                    self._toggle_blocks()
         if event.key == 's':
             if self._current_is_selected(): self._deselect_current()
             else:                           self._select_current()
@@ -834,9 +854,17 @@ class TopologyExplorer:
             self.fig.canvas.manager.set_window_title(f"{net0} (Bundle {bid_})")
 
         # Floorplan blocks
+        self._block_patch_artists = []
+        self._block_name_artists = []
         for name, rect in self.fp.get_all_blocks():
-            _draw_block(ax, name, rect, self.fp,
-                        lw=1.5, alpha=0.55, fontsize=8)
+            ps, txt = _draw_block(ax, name, rect, self.fp,
+                                  lw=0.8, alpha=0.10, fontsize=7)
+            self._block_patch_artists.extend(ps)
+            if txt is not None:
+                self._block_name_artists.append(txt)
+        
+        for p in self._block_patch_artists: p.set_visible(self._blocks_visible)
+        for t in self._block_name_artists:  t.set_visible(self._blocks_visible)
 
         # Hanan grid
         xs, ys = self.fp.get_hanan_grid()
@@ -928,10 +956,12 @@ class BudaVisualizer:
         self._pick_happened  = False
         self._cbar_ax        = None   # colorbar axes for congestion heatmap
         self._heatmap_artists = []    # patches + texts created by draw_congestion_map
+        self._block_patch_artists = [] # block rectangle patches
         self._block_name_artists = [] # text artists created by draw_blocks
         self._heatmap_visible    = True
         self._keepouts_visible   = True
         self._block_names_visible = True
+        self._blocks_visible     = True
         self._bustermss_visible  = True
         self._vias_conns_visible = True
         self._all_vis            = True
@@ -943,6 +973,7 @@ class BudaVisualizer:
         self._btn_heatmap    = None
         self._btn_keepouts   = None
         self._btn_blknames   = None
+        self._btn_blocks     = None
         self._btn_bustermss  = None
         self._btn_vias_conns = None
         self._btn_all        = None
@@ -1287,6 +1318,7 @@ class BudaVisualizer:
         self._all_vis             = True
         self._heatmap_visible     = True
         self._keepouts_visible    = True
+        self._blocks_visible      = True
         self._block_names_visible = True
         self._bustermss_visible   = True
         self._vias_conns_visible  = True
@@ -1311,6 +1343,7 @@ class BudaVisualizer:
         for a in self._heatmap_artists: a.set_visible(True)
         if self._cbar_ax: self._cbar_ax.set_visible(True)
         for a in self._keepout_artists: a.set_visible(True)
+        for p in self._block_patch_artists: p.set_visible(True)
         for txt in self._block_name_artists: txt.set_visible(True)
         for a in self._busterm_artists: a.set_visible(True)
         for a in self._vias_conns_artists: a.set_visible(True)
@@ -1320,6 +1353,7 @@ class BudaVisualizer:
         # Update button labels
         if self._btn_heatmap is not None: self._btn_heatmap.label.set_text('☑ Heatmap')
         if self._btn_keepouts is not None: self._btn_keepouts.label.set_text('☑ Keepouts')
+        if self._btn_blocks is not None: self._btn_blocks.label.set_text('☑ Blocks')
         if self._btn_blknames is not None: self._btn_blknames.label.set_text('☑ Blk Names')
         if self._btn_bustermss is not None: self._btn_bustermss.label.set_text('☑ Busterms')
         if self._btn_vias_conns is not None: self._btn_vias_conns.label.set_text('☑ Vias/Conns')
@@ -1352,6 +1386,13 @@ class BudaVisualizer:
             txt.set_visible(vis)
         if self._btn_blknames is not None:
             self._btn_blknames.label.set_text('☑ Blk Names' if vis else '☐ Blk Names')
+
+        # Blocks
+        self._blocks_visible = vis
+        for p in self._block_patch_artists:
+            p.set_visible(vis)
+        if self._btn_blocks is not None:
+            self._btn_blocks.label.set_text('☑ Blocks' if vis else '☐ Blocks')
 
         # Busterms
         self._bustermss_visible = vis
@@ -1410,6 +1451,16 @@ class BudaVisualizer:
             a.set_visible(vis)
         label = '☑ Vias/Conns' if vis else '☐ Vias/Conns'
         self._btn_vias_conns.label.set_text(label)
+        self.fig.canvas.draw_idle()
+
+    def _toggle_blocks(self):
+        self._blocks_visible = not self._blocks_visible
+        vis = self._blocks_visible
+        for p in self._block_patch_artists:
+            p.set_visible(vis)
+        label = '☑ Blocks' if vis else '☐ Blocks'
+        if self._btn_blocks is not None:
+            self._btn_blocks.label.set_text(label)
         self.fig.canvas.draw_idle()
 
     def _toggle_block_names(self):
@@ -1948,6 +1999,7 @@ class BudaVisualizer:
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key in ('v', 't', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
+        if event.key == 'b':                  self._toggle_blocks()
         if event.key == 'd' and self._detailed_bundle_artists: self._toggle_detailed()
 
     # ------------------------------------------------------------------
@@ -1955,9 +2007,11 @@ class BudaVisualizer:
     # ------------------------------------------------------------------
 
     def draw_blocks(self):
+        self._block_patch_artists = []
         self._block_name_artists = []
         for name, rect in self.fp.get_all_blocks():
-            txt = _draw_block(self.ax, name, rect, self.fp)
+            ps, txt = _draw_block(self.ax, name, rect, self.fp)
+            self._block_patch_artists.extend(ps)
             if txt is not None:
                 self._block_name_artists.append(txt)
         self.draw_keepouts()
@@ -2628,6 +2682,11 @@ class BudaVisualizer:
         self._btn_all = Button(ax_all, '☑ All', color='#d0e8ff')
         self._btn_all.label.set_fontsize(7.5)
         self._btn_all.on_clicked(lambda _: self._toggle_all())
+
+        ax_blocks = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_blocks = Button(ax_blocks, '☑ Blocks', color='#e8f4e8')
+        self._btn_blocks.label.set_fontsize(7.5)
+        self._btn_blocks.on_clicked(lambda _: self._toggle_blocks())
 
         ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_blknames = Button(ax_blknames, '☑ Blk Names', color='#e8f4e8')

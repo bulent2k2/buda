@@ -428,7 +428,7 @@ def draw_bg_instances(ax, inst_info: dict):
         ax.add_patch(mpatches.Rectangle(
             (info['x1'], info['y1']),
             info['x2'] - info['x1'], info['y2'] - info['y1'],
-            linewidth=0, facecolor='#bbbbbb', alpha=0.18, zorder=1))
+            linewidth=0.5, edgecolor='#dddddd', facecolor='#bbbbbb', alpha=0.08, zorder=1))
 
 
 def draw_selected_instances(ax, visible: list, data: DefVizData,
