@@ -42,8 +42,8 @@ def _rects_disconnected(rects_raw):
     return len({find(i) for i in range(n)}) > 1
 
 
-def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#aaaaaa', face='#f0f0f0',
-                alpha=0.15, fontsize=8, zorder=1):
+def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#888888', face='#e8e8e8',
+                alpha=0.20, fontsize=8, zorder=1):
     """Draw one floorplan block.
 
     Single-rect blocks: one filled rectangle with a solid edge.
@@ -867,12 +867,12 @@ class TopologyExplorer:
             if name in highlight_blocks:
                 # Highlighted style for busterm blocks
                 ps, txt = _draw_block(ax, name, rect, self.fp,
-                                      lw=1.5, edge='#444444', face='#e8f4e8',
-                                      alpha=0.45, fontsize=8, zorder=1.5)
+                                      lw=1.8, edge='#333333', face='#d0f0d0',
+                                      alpha=0.50, fontsize=8, zorder=1.5)
             else:
                 # Dimmed style for the rest
                 ps, txt = _draw_block(ax, name, rect, self.fp,
-                                      lw=0.8, alpha=0.10, fontsize=7)
+                                      lw=1.0, alpha=0.18, fontsize=7)
             self._block_patch_artists.extend(ps)
             if txt is not None:
                 self._block_name_artists.append(txt)
@@ -883,9 +883,10 @@ class TopologyExplorer:
         # Hanan grid
         xs, ys = self.fp.get_hanan_grid()
         for x in xs:
-            ax.axvline(x=x, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
+            ax.axvline(x=x, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
         for y in ys:
-            ax.axhline(y=y, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
+            ax.axhline(y=y, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
+
 
         # Slide-range bands (drawn before segments so segments sit on top)
         self._draw_slide_spans(topo, ct)
@@ -2199,11 +2200,12 @@ class BudaVisualizer:
         self._cbar_ax.set_visible(self._heatmap_visible)
 
     def draw_hanan_grid(self):
+        # Hanan grid
         xs, ys = self.fp.get_hanan_grid()
         for x in xs:
-            self.ax.axvline(x=x, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
+            ax.axvline(x=x, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
         for y in ys:
-            self.ax.axhline(y=y, color='#cccccc', linestyle='--', linewidth=0.5, zorder=0)
+            ax.axhline(y=y, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
 
     @staticmethod
     def _busterm_positions(topo, ct, ts_map=None, bid=None, offset=0.0):
