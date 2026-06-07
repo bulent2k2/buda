@@ -197,6 +197,6 @@ Tests live in `test/tests/test_detailed_nuts.py` (15 unit tests) and BDD scenari
 
 | File | Contents |
 |---|---|
-| `buda_system_v2/src/detailed_nuts.h` | `BusSegment`, `NetSegment`, `DetailedNUTSResult`, `DetailedNUTSEngine` declarations |
-| `buda_system_v2/src/detailed_nuts.cpp` | Full algorithm: LO_HI/HI_LO ordering, contiguity check, window search |
-| `buda_system_v2/src/bindings.cpp` | pybind11 bindings for all four types |
+| `src/detailed_nuts.h` | `BusSegment`, `NetSegment`, `DetailedNUTSResult`, `DetailedNUTSEngine` declarations |
+| `src/detailed_nuts.cpp` | Full algorithm: LO_HI/HI_LO ordering, contiguity check, window search |
+| `src/bindings.cpp` | pybind11 bindings for all four types |

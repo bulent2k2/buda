@@ -50,7 +50,7 @@ If the engine finds a conflict (e.g., you changed the floorplan and the pinned t
 
 ## 4. Example Script: `quickstart.buda`
 
-Save this as a `.buda` file and run it using `python3 buda_cli.py your_file.buda`.
+Save this as a `.buda` file and run it from the repository root using `python3 src/buda_cli.py your_file.buda`.
 
 ```python
 # ── Step 1: Define Technology ──

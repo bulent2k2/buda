@@ -18,18 +18,22 @@ BUDA is an open EDA tool designed to help plan interconnect on a microchip. It f
 
 ## Project Structure
 
-- `buda_system_v2/`: Current active development version.
-  - `src/`: C++ engines and Python bindings/CLI.
-    - `bundler.cpp`/`.h`: Engine for grouping nets.
-    - `topology.cpp`/`.h`: Engine for generating routing candidates.
-    - `global_router.cpp`/`.h`: Congestion-aware planner.
-    - `nuts.cpp`/`.h`: Track assignment solver.
-    - `buda_cli.py`: Main entry point for executing `.buda` scripts.
-    - `buda_viz.py`: Matplotlib-based visualization.
-  - `flow/`: Example `.buda` scripts and test cases.
-  - `docs/`: Design documentation.
-- `buda_system/`: Legacy/alternative implementation.
-- `test/`: Comprehensive test suite.
+- `src/`: C++ engines, physical database (BDB), and Python bindings/CLI.
+  - `bundler.cpp`/`.h`: Engine for grouping nets.
+  - `bundle_refiner.cpp`/`.h`: Engine for refining net bundling.
+  - `topology.cpp`/`.h`: Engine for generating routing candidates.
+  - `conn_topology.cpp`/`.h`: Rich connectivity generator and analysis.
+  - `congestion_planner.cpp`/`.h`: Congestion-aware planner (formerly `global_router`).
+  - `nuts.cpp`/`.h`: Track assignment solver.
+  - `routing_grid.cpp`/`.h`: Physical track patterns and grid overrides.
+  - `detailed_nuts.cpp`/`.h`: Snaps bus segments to concrete signal tracks.
+  - `bdb.cpp`/`.h`: Buda Physical Design Database (SQLite-backed layout store).
+  - `verify.cpp`/`.h`: Verification and design rule checking.
+  - `buda_cli.py`: Main entry point for executing `.buda` scripts.
+  - `buda_viz.py`: Matplotlib-based visualization.
+- `flow/`: Example `.buda` scripts and test cases.
+- `docs/`: Design documentation.
+- `test/`: Comprehensive pytest/pytest-bdd test suite.
 
 ## Key References
 - [Principles](CLAUDE.md)

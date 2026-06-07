@@ -9,10 +9,8 @@ netlist, groups related nets into buses, generates candidate bus topologies,
 chooses topology/layer assignments with a congestion-aware global planner, then
 assigns abstract and detailed tracks.
 
-The active implementation is `buda_system_v2`. The older `buda_system`
-directory appears to be a previous generation with a similar shape but fewer
-newer concepts. Most core algorithms are implemented in C++20 and exposed to
-Python through a `pybind11` module named `interconnect`. Python provides the
+Most core algorithms are implemented in C++20 and exposed to
+Python through a `pybind11` module named `buda`. Python provides the
 script runner, session orchestration, visualization, sidecar persistence, and
 diagnostic logging.
 
@@ -20,39 +18,40 @@ diagnostic logging.
 
 Primary directories:
 
-- `buda_system_v2/src`: active C++ engines, Python CLI, and visualizer.
-- `buda_system_v2/flow`: `.buda` example/design scripts and sidecar `.json`
-  selections.
-- `buda_system_v2/docs`: implementation notes for selected v2 features.
-- `docs`: user-facing and design documentation.
+- `src/`: C++ engines, Buda Physical Design Database (BDB), Python CLI, and visualizer.
+- `flow/`: `.buda` example/design scripts and sidecar `.json` selections.
+- `docs/`: User-facing and design documentation.
 - `test/tests`: pytest and pytest-bdd coverage for the C++ module via Python.
-- `tools`: DEF/LEF helper tooling, currently including `def_cluster.py`.
-- `buda_system`: older implementation kept alongside v2.
-- `debug`, `log`, `history`, `fig`: exploratory scripts, notes, logs, and
-  figures.
+- `tools`: Helper tooling, including DEF/LEF clustering and visualization utilities.
+- `debug`, `log`, `history`, `fig`: Exploratory scripts, notes, logs, and figures.
 
 ## Build And Runtime Model
 
-`buda_system_v2/CMakeLists.txt` builds a single Python extension module:
+`CMakeLists.txt` builds a single Python extension module:
 
 ```text
-interconnect
+buda
 ```
 
 The extension includes:
 
 - `bindings.cpp`
+- `bdb.cpp`
+- `sqlite3.c`
 - `bundler.cpp`
+- `bundle_refiner.cpp`
 - `topology.cpp`
 - `conn_topology.cpp`
 - `layering.cpp`
-- `global_router.cpp`
+- `congestion_planner.cpp`
 - `nuts.cpp`
 - `routing_grid.cpp`
 - `detailed_nuts.cpp`
+- `busterm.cpp`
+- `verify.cpp`
 
-The Python entry point is `buda_system_v2/src/buda_cli.py`. It imports
-`interconnect`, interprets `.buda` files line by line, and stores mutable flow
+The Python entry point is `src/buda_cli.py`. It imports
+`buda`, interprets `.buda` files line by line, and stores mutable flow
 state in `BudaSession`.
 
 Typical flow:
@@ -188,9 +187,9 @@ Defines the metal stack:
 
 Layering feeds both global routing costs and later physical track assignment.
 
-### `global_router.h/.cpp`
+### `congestion_planner.h/.cpp`
 
-The global router chooses topology and layer assignments. Its public knobs are:
+The congestion planner chooses topology and layer assignments. Its public knobs are:
 
 - `kCong`
 - `kSpan`
@@ -401,10 +400,9 @@ actual Python-facing C++ module rather than isolated C++ internals.
    currently carries net names but not canonical source/destination block
    metadata. This is a recurring source of lookup and convention dependency.
 
-5. `buda_system` and `buda_system_v2` duplicate concepts
+5. Codebase has been cleaned up
 
-   Keeping both trees may be useful historically, but it raises the chance of
-   accidental edits to the wrong implementation and makes onboarding less clear.
+   The repository has been restructured to merge active development files into a clean root-level layout, eliminating duplicate or legacy directories.
 
 6. Visualization is tightly coupled to runtime state
 
@@ -416,7 +414,7 @@ actual Python-facing C++ module rather than isolated C++ internals.
 
    The codebase has good notes, but users must read several files to understand
    the current architecture: `README.md`, `docs/USER_GUIDE.md`,
-   `docs/BUDA_SCRIPT_REFERENCE.md`, `buda_system_v2/src/DESIGN_NOTES.md`, and
+   `docs/BUDA_SCRIPT_REFERENCE.md`, `src/DESIGN_NOTES.md`, and
    feature-specific docs.
 
 ## Suggested Next Improvements
@@ -448,10 +446,9 @@ actual Python-facing C++ module rather than isolated C++ internals.
    A small parser layer would make the command surface easier to extend and
    easier to test. It does not need to be a heavy language implementation.
 
-5. Clarify active versus legacy directories
+5. Clarify active directories
 
-   Add a short note at the repository root stating that `buda_system_v2` is the
-   active implementation and `buda_system` is legacy/reference.
+   The project directories have been flattened. Active source files reside under `src/` and design runs under `flow/`.
 
 6. Keep expanding flow-level regression tests
 
@@ -466,11 +463,11 @@ For a new developer, the shortest path through the codebase is:
 
 1. Read `docs/USER_GUIDE.md` for the pipeline.
 2. Read `docs/BUDA_SCRIPT_REFERENCE.md` for command syntax.
-3. Run or inspect `buda_system_v2/flow/quickstart.buda`.
-4. Read `buda_system_v2/src/buda_cli.py` to understand orchestration.
+3. Run or inspect `flow/quickstart.buda`.
+4. Read `src/buda_cli.py` to understand orchestration.
 5. Read the C++ headers in this order:
-   `bundler.h`, `topology.h`, `conn_topology.h`, `layering.h`,
-   `global_router.h`, `nuts.h`, `routing_grid.h`, `detailed_nuts.h`.
+   `bdb.h`, `bundler.h`, `topology.h`, `conn_topology.h`, `layering.h`,
+   `congestion_planner.h`, `nuts.h`, `routing_grid.h`, `detailed_nuts.h`.
 6. Use tests in `test/tests` as executable examples of expected behavior.
 
 ## Bottom Line

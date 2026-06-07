@@ -13,7 +13,7 @@ Good. I have all the context needed. Here's the plan:
 
   Starting with the header:
 
-⏺ Update(/Users/ben/src/buda/buda_system_v2/src/topology.h)
+⏺ Update(src/topology.h)
   ⎿  Added 7 lines
        6  #include <optional>
        7  #include "bundler.h"
@@ -80,7 +80,7 @@ use two separate add_block definitions.
   show the shape clearly; the dashed box is only needed when there's a gap
   between them. I'll add a connectivity check.
   
-See [`def _rects_disconnected(rects_raw)`](../../buda_system_v2/src/buda_viz.py)
+See [`def _rects_disconnected(rects_raw)`](../../src/buda_viz.py)
 
 ※ recap: Added multi-rect block support end to end: CLI syntax, C++ API, and 
   visualization. The viz now draws individual rects with a dashed grouping box 

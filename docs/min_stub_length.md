@@ -56,7 +56,7 @@ How does the user set min stub lengths?
    3. Exhaustive Test Suite:
        * test/tests/test_min_stub_lengths_exhaustive.py: A new Python test that verifies the hierarchy (Layer > Direction > Global) and ensures no candidate for any shape type has a stub shorter than
          the required minimum.
-       * buda_system_v2/flow/min_stub_exhaustive.buda: A corresponding regression script for the BUDA CLI.
+       * flow/min_stub_exhaustive.buda: A corresponding regression script for the BUDA CLI.
    4. Advanced API Exposure: Exposed ConnSeg.layer_id in the Python bindings, allowing tests to verify layer-specific routing rules directly.
 
   Verification Results:
