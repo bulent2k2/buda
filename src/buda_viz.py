@@ -2203,9 +2203,9 @@ class BudaVisualizer:
         # Hanan grid
         xs, ys = self.fp.get_hanan_grid()
         for x in xs:
-            ax.axvline(x=x, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
+            self.ax.axvline(x=x, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
         for y in ys:
-            ax.axhline(y=y, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
+            self.ax.axhline(y=y, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
 
     @staticmethod
     def _busterm_positions(topo, ct, ts_map=None, bid=None, offset=0.0):
