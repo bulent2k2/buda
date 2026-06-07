@@ -1,13 +1,12 @@
 Quick
 ===
-python3 tools/def_viz_o3.py test/tests/hier_test1.bdb
-python src/buda_cli.py design/small.buda
-python tools/def_viz_o3.py flow/manual/small_1.bdb
+viz flow/hier_4_units.bdb
+viz test/tests/hier_test1.bdb
+buda design/small.buda
+viz flow/manual/small_1.bdb
 
-
-Setup
+Setup (old)
 ===
-
 export PYTHONPATH=/users/ben/src/buda/build
 BDB=/Users/ben/src/buda/test/tests/hier_test1.bdb
 BDB=chip_designs/ariane136/ariane_buda5.bdb

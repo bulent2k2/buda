@@ -22,6 +22,7 @@ set_min_stub_length_layer M5 3
 
 # ── BDB: cell sizes ───────────────────────────────────────
 open_bdb :memory:
+# open_bdb hier_4_units.bdb
 add_cell blk  300 230
 add_cell sub  120  90
 add_cell leaf  45  50
@@ -35,8 +36,8 @@ add_inst_to_cell  blk  s3    sub   15  125
 add_inst_to_cell  blk  s4    sub  155  125
 
 # sub contains 2 leaves side by side
-add_inst_to_cell  sub  l1    leaf  10   20
-add_inst_to_cell  sub  l2    leaf  65   20
+add_inst_to_cell  sub  l    leaf  10   20
+add_inst_to_cell  sub  r    leaf  65   20
 
 # ── BDB: place top-level instances ────────────────────────
 # Each add_inst eagerly expands: 1 blk + 4 subs + 8 leaves = 13 rows
@@ -50,16 +51,16 @@ add_blocks_from_bdb 2 skip
 
 # ── Buses ─────────────────────────────────────────────────
 # b1: u1 NW leaf → u2 NW leaf  (horizontal crossing)
-add_bus b1[4]  u1/s1/l1.tx  u2/s1/l1.rx
+add_bus b1[4]  u1/s1/l.tx  u2/s1/l.rx
 
 # b2: u1 SE leaf → u3 SE leaf  (vertical crossing)
-add_bus b2[3]  u1/s4/l2.tx  u3/s4/l2.rx
+add_bus b2[3]  u1/s4/r.tx  u3/s4/r.rx
 
 # b3: u2 SW leaf → u4 SW leaf  (diagonal)
-add_bus b3[2]  u2/s3/l1.tx  u4/s3/l1.rx
+add_bus b3[2]  u2/s3/l.tx  u4/s3/l.rx
 
 # b4: u3 NW leaf → u1/u2/u4 leaves  (multicast from lower-left)
-add_bus b4[5]  u3/s1/l1.tx  u1/s1/l2.rx,u2/s1/l2.rx,u4/s1/l2.rx
+add_bus b4[5]  u3/s1/l.tx  u1/s1/r.rx,u2/s1/r.rx,u4/s1/r.rx
 
 # ── Pipeline ─────────────────────────────────────────────
 run_bundler strict
