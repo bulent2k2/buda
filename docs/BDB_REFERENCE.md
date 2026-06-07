@@ -17,6 +17,7 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 3. [Python API](#3-python-api)
    - [Row types](#row-types)
    - [Ingestion](#ingestion)
+   - [Cell definitions and hierarchy](#cell-definitions-and-hierarchy)
    - [Mutations](#mutations)
    - [Computed properties](#computed-properties)
    - [Queries](#queries)
@@ -32,6 +33,11 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 ```
 component        id, name, cell, parent_id→component, depth,
                  x1, y1, x2, y2, is_leaf, is_replicated
+
+cell             name (PK), width, height
+
+cell_children    parent_cell→cell, inst_name, child_cell→cell, x, y
+                 PRIMARY KEY (parent_cell, inst_name)
 
 net              id, name
 
@@ -60,6 +66,13 @@ Unresolved pin positions are stored as `−1`.
 
 `parent_id` in `component` is `NULL` for top-level (depth-0) instances.
 Python returns `−1` for a `NULL` parent.
+
+**`cell` / `cell_children`** store the *structural* definition of a cell type —
+its canonical size and which child instances it contains at what relative
+positions.  `component` stores the *physical* occurrences (one row per placed
+instance).  When `add_inst` places a cell that has `cell_children` rows, the
+engine recursively creates all descendant `component` rows automatically
+(eager expansion).
 
 ---
 
@@ -172,14 +185,142 @@ Silently does nothing if no instances of `cell` exist. Triggers
 
 ---
 
+### `add_cell`
+
+```
+add_cell <name> <width> <height>
+```
+
+Define (or redefine) a cell type with a canonical size.  This is idempotent —
+a second call with the same name overwrites the previous size.  The `cell`
+table is also populated automatically by `import_def_lef` from LEF `MACRO SIZE`
+entries.
+
+| Argument | Type | Description |
+|---|---|---|
+| `name` | str | Cell type name, e.g. `cpu`. |
+| `width` | float | Width in µm. |
+| `height` | float | Height in µm. |
+
+---
+
+### `add_inst`
+
+```
+add_inst <inst_name> <cell_name> <parent|-> <x> <y>
+```
+
+Place one occurrence of a defined cell.  Coordinates are **relative to the
+parent's lower-left corner**; use `-` as the parent to place at absolute
+coordinates.
+
+| Argument | Type | Description |
+|---|---|---|
+| `inst_name` | str | Full instance path, e.g. `u1` or `u1/s1`. |
+| `cell_name` | str | Must exist in the `cell` table. |
+| `parent` | str | Instance path of the parent, or `-` for a root instance. |
+| `x` | float | X offset from parent origin (or absolute x for root). |
+| `y` | float | Y offset from parent origin (or absolute y for root). |
+
+The bounding box is computed as `(abs_x, abs_y) – (abs_x + cell.width,
+abs_y + cell.height)`.  The parent is automatically marked `is_leaf=0`.
+
+**Eager expansion:** if `cell_children` rows exist for `cell_name`, all
+descendant component rows are created recursively before `add_inst` returns.
+All `add_inst_to_cell` calls for a cell must therefore precede the `add_inst`
+calls that place it.
+
+Throws if `cell_name` is not in the `cell` table or `parent` is not found.
+Triggers `compute_hpwl()`.
+
+---
+
+### `add_inst_to_cell`
+
+```
+add_inst_to_cell <parent_cell> <inst_name> <child_cell> <x> <y>
+```
+
+Define the structural contents of a cell type: "inside every occurrence of
+`parent_cell`, there is an instance named `inst_name` of `child_cell` at
+relative offset `(x, y)`."
+
+This writes to `cell_children` only — no `component` rows are created.
+Expansion happens when `add_inst` places an occurrence of `parent_cell`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `parent_cell` | str | Cell type that will contain the child. |
+| `inst_name` | str | Instance name within the cell (leaf segment of the path). |
+| `child_cell` | str | Cell type of the child instance. |
+| `x` | float | X offset from parent cell origin in µm. |
+| `y` | float | Y offset from parent cell origin in µm. |
+
+Throws if either cell is not defined. Idempotent — re-issuing the same call
+updates the position.
+
+**Example** (equivalent to placing 52 instances explicitly):
+
+```buda
+open_bdb :memory:
+add_cell blk  300 230
+add_cell sub  120  90
+add_cell leaf  45  50
+
+# Define blk's contents: 2×2 grid of sub-blocks
+add_inst_to_cell  blk  s1  sub   15  15
+add_inst_to_cell  blk  s2  sub  155  15
+add_inst_to_cell  blk  s3  sub   15 125
+add_inst_to_cell  blk  s4  sub  155 125
+
+# Define sub's contents: 2 leaves side by side
+add_inst_to_cell  sub  l1  leaf  10  20
+add_inst_to_cell  sub  l2  leaf  65  20
+
+# Place 4 top-level occurrences — each expands to 13 component rows
+add_inst u1  blk  -   50   50
+add_inst u2  blk  -  400   50
+add_inst u3  blk  -   50  330
+add_inst u4  blk  -  400  330
+# Result: 4×(1 blk + 4 sub + 8 leaf) = 52 component rows total
+```
+
+---
+
+### `add_blocks_from_bdb`
+
+```
+add_blocks_from_bdb <depth> [deepest|skip|error]
+```
+
+Walk the component hierarchy and call `add_block` on every component at the
+requested depth, making them available to the routing engine.
+
+| Argument | Default | Description |
+|---|---|---|
+| `depth` | — | Target component depth (0 = root level). |
+| `deepest` | ✓ | If a branch ends before `depth`, add that branch's deepest component. |
+| `skip` | — | Only add components at exactly `depth`; shallower branches produce nothing. |
+| `error` | — | Abort (add no blocks) if any branch is shallower than `depth`. |
+
+Components with `x1 < 0` (unplaced) are always silently skipped.
+
+A log file named `<script_stem>_bdb_blocks.log` is written alongside the
+script listing every block name added, with `[deepest-fallback]` annotating
+any fallback instances.
+
+---
+
 ### `add_comp`
 
 ```
 add_comp <name> <cell> <parent|-> <x1> <y1> <x2> <y2> [leaf|nonleaf]
 ```
 
-Insert a new component row. Use `−` as the parent to create a root (depth-0)
-instance.
+Insert a new component row using **explicit absolute coordinates**.
+Prefer `add_inst` for new work — `add_comp` is retained for backward
+compatibility and for cases where the bounding box differs from the cell's
+canonical size.  Use `−` as the parent for a root (depth-0) instance.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
@@ -192,7 +333,7 @@ instance.
 
 `depth` is computed automatically as `parent.depth + 1` (or 0 for root).
 Throws if `name` already exists or `parent` is not found. Triggers
-`compute_hpwl()`.
+`compute_hpwl()`. Does **not** expand `cell_children`.
 
 **Example:**
 ```buda
@@ -248,6 +389,14 @@ All query methods return lists of typed row objects with read-write attributes.
 | `dir` | str | `INPUT`, `OUTPUT`, `INOUT`, or `UNKNOWN` |
 | `px, py` | float | Absolute pin position (µm); `−1` if unknown |
 
+**`CellRow`**
+
+| Attribute | Type | Description |
+|---|---|---|
+| `name` | str | Cell type name |
+| `width` | float | Canonical width (µm) |
+| `height` | float | Canonical height (µm) |
+
 **`GrpRow`**
 
 | Attribute | Type | Description |
@@ -274,6 +423,35 @@ command above.
 
 ---
 
+### Cell definitions and hierarchy
+
+```python
+db.add_cell(name: str, w: float, h: float)
+```
+Define or overwrite a cell type.  Idempotent.
+
+```python
+rows: list[CellRow] = db.all_cells()
+```
+Return all defined cell types ordered by name.
+
+```python
+id: int = db.add_inst(inst_name, cell_name, parent_name, x, y)
+```
+Place one occurrence of `cell_name` at `(x, y)` relative to `parent_name`'s
+origin (`parent_name=""` for absolute placement).  Eagerly expands
+`cell_children` recursively.  Returns the new component row id.
+
+```python
+db.add_inst_to_cell(parent_cell, inst_name, child_cell, x, y)
+```
+Define the structural contents of `parent_cell`: one child occurrence of
+`child_cell` at relative offset `(x, y)`.  Writes to `cell_children` only;
+no component rows are created until `add_inst` places an occurrence of
+`parent_cell`.
+
+---
+
 ### Mutations
 
 ```python
@@ -284,13 +462,15 @@ Move instance `name` to origin `(x, y)`, preserving size.
 ```python
 db.resize_cell(cell: str, w: float, h: float)
 ```
-Set `x2 = x1 + w`, `y2 = y1 + h` for every instance of `cell`.
+Update the `cell` table and set `x2 = x1 + w`, `y2 = y1 + h` for every
+`component` instance of that cell type.
 
 ```python
 id: int = db.add_comp(name, cell, parent_name, x1, y1, x2, y2, is_leaf=True)
 ```
-Insert a new component. `parent_name=""` for a root instance. Returns the new
-row's `id`.
+Insert a new component using explicit absolute coordinates.
+`parent_name=""` for a root instance. Does not expand `cell_children`.
+Returns the new row's `id`.
 
 ---
 
@@ -406,6 +586,41 @@ add_comp  u_cpu/core0/c1  c  u_cpu/core0   60  60 120 120 leaf
 add_comp  u_cpu/core0/c2  c  u_cpu/core0  130 130 190 190 leaf
 ```
 
+### Cell-based hierarchy (most compact)
+
+Define cell sizes and structure once; `add_inst` places top-level occurrences
+and the engine automatically expands the full subtree.
+
+```buda
+open_bdb :memory:
+
+# 1. Define cell sizes
+add_cell top  1000 800
+add_cell blk   300 230
+add_cell sub   120  90
+add_cell leaf   45  50
+
+# 2. Define structure (no component rows yet)
+add_inst_to_cell  top  u1  blk   50   50
+add_inst_to_cell  top  u2  blk  400   50
+add_inst_to_cell  top  u3  blk   50  330
+add_inst_to_cell  top  u4  blk  400  330
+
+add_inst_to_cell  blk  s1  sub   15  15
+add_inst_to_cell  blk  s2  sub  155  15
+add_inst_to_cell  blk  s3  sub   15 125
+add_inst_to_cell  blk  s4  sub  155 125
+
+add_inst_to_cell  sub  l1  leaf  10  20
+add_inst_to_cell  sub  l2  leaf  65  20
+
+# 3. Place the single top-level occurrence; 1+4+16+32 = 53 rows created
+add_inst chip  top  -  0  0
+
+# 4. Feed the leaf cells (depth 3) to the routing engine
+add_blocks_from_bdb 3 skip
+```
+
 ### Post-import fixup
 
 ```buda
@@ -463,6 +678,20 @@ canonical component id (see `bdb.cpp::upsert_comp`).
 `add_comp` uses a plain `INSERT` (no UPSERT), so it throws on a duplicate
 name. Use it to add brand-new instances. If you need to update an existing
 component's hierarchy fields, re-run `import_verilog`.
+
+**`add_inst_to_cell` ordering constraint**  
+`add_inst_to_cell` only writes to `cell_children`; expansion happens eagerly
+when `add_inst` is called.  All `add_inst_to_cell` calls for a cell must
+therefore appear in the script *before* the `add_inst` that places an
+occurrence of that cell.  Adding structure to a cell after its occurrences
+have already been placed has no effect on the existing component rows.
+
+**`add_inst` vs `add_comp`**  
+Prefer `add_inst` for new designs — it reads cell dimensions from the `cell`
+table and supports eager expansion via `cell_children`.  `add_comp` accepts
+explicit absolute coordinates and is retained for backward compatibility and
+for cases where the placed bounding box differs from the canonical cell size.
+`add_comp` does **not** expand `cell_children`.
 
 **WAL mode**  
 The database is opened with `PRAGMA journal_mode=WAL`. This creates
