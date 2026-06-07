@@ -1654,8 +1654,8 @@ class BudaVisualizer:
             for e in entries:
                 try: e['artist'].remove()
                 except Exception: pass
-        for art in self._grid_rail_artists:
-            try: art.remove()
+        for e in self._grid_rail_artists:
+            try: e['artist'].remove()
             except Exception: pass
         self._detailed_bundle_artists.clear()
         self._grid_rail_artists.clear()

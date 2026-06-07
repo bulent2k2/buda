@@ -1,9 +1,12 @@
 import argparse
+import faulthandler
 import json
 import math
 import os
 import sys
 import buda
+
+faulthandler.enable()
 from buda_viz import BudaVisualizer, TopologyExplorer
 
 class _TeeStream:
@@ -1276,6 +1279,21 @@ class BudaSession:
             rerun_all_fn   = self._rerun_all        if self.nuts_result is not None else None
             ipc_session = (os.path.splitext(os.path.basename(self.script_path))[0]
                            if self.script_path else None)
+            # On macOS the native 'macosx' backend can segfault when two processes
+            # use AppKit GUI simultaneously (e.g. running buda & while another viz
+            # is open).  If an IPC server is already listening for this session,
+            # switch to TkAgg before creating any matplotlib figures.
+            if ipc_session:
+                import matplotlib as _mpl
+                if _mpl.get_backend().lower() == 'macosx':
+                    _ipc_path = f'/tmp/buda_ipc_{ipc_session}.sock'
+                    if os.path.exists(_ipc_path):
+                        try:
+                            import matplotlib.pyplot as _plt
+                            _plt.switch_backend('TkAgg')
+                            print('[viz] Switched to TkAgg (another buda viz already running).')
+                        except Exception as _be:
+                            print(f'[viz] Warning: backend switch failed: {_be}')
             viz = BudaVisualizer(self.fp, self.bundles,
                                  sidecar_path=self.script_path,
                                  rerun_layer_fn=rerun_layer_fn,
