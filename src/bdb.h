@@ -106,9 +106,20 @@ public:
     // Place a named instance of a defined cell at (x,y) relative to the
     // parent's origin (absolute when parent_name="").  Cell size comes from
     // the cell table; parent is automatically marked non-leaf.
+    // If cell_children rows exist for cell_name they are eagerly expanded:
+    // all descendant component rows are created recursively.
     // Returns the new component row id.  Throws if cell or parent not found.
     int  add_inst(const std::string& inst_name, const std::string& cell_name,
                   const std::string& parent_name, double x, double y);
+
+    // Define the structural contents of a cell: "inside parent_cell, there is
+    // an instance named inst_name of child_cell at relative position (x,y)."
+    // Does not create component rows; expansion happens when add_inst places
+    // an occurrence of parent_cell.  Throws if either cell is not defined.
+    void add_inst_to_cell(const std::string& parent_cell,
+                          const std::string& inst_name,
+                          const std::string& child_cell,
+                          double x, double y);
 
     // ── Computed properties ────────────────────────────────────────────────
     void compute_hpwl();
@@ -153,6 +164,15 @@ private:
 
     void _exec(const char* sql);
     void _create_schema();
+    // Recursively create component rows for all cell_children of cell_name,
+    // rooted at parent_comp_id / parent_comp_name at absolute (abs_x, abs_y).
+    // child_depth is the depth to assign to the immediate children.
+    // Uses INSERT OR IGNORE — safe to call on already-expanded subtrees.
+    void _expand_cell_children(int parent_comp_id,
+                                const std::string& parent_comp_name,
+                                const std::string& cell_name,
+                                double abs_x, double abs_y,
+                                int child_depth);
     // parsers
     struct LefCell { double w, h; };
     struct LefPin  { double ox, oy; std::string dir; };  // offset from cell origin

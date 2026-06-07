@@ -621,7 +621,7 @@ class TopologyExplorer:
         self._select_current()
         # Visual feedback while running.
         if self._btn_rerun is not None:
-            self._btn_rerun.label.set_text('⏳ Running…')
+            self._btn_rerun.label.set_text('Running…')
             self._btn_rerun.ax.set_facecolor('#ffcc88')
             self.fig.canvas.draw_idle()
             self.fig.canvas.flush_events()

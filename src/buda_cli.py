@@ -1367,6 +1367,17 @@ class BudaSession:
             parent = "" if args[2] == "-" else args[2]
             self.bdb.add_inst(args[0], args[1], parent,
                               float(args[3]), float(args[4]))
+        elif cmd == "add_inst_to_cell":
+            # add_inst_to_cell <parent_cell> <inst_name> <child_cell> <x> <y>
+            # Defines the structural contents of parent_cell; no component rows
+            # are created until add_inst places an occurrence of parent_cell.
+            if len(args) < 5:
+                print("Error: add_inst_to_cell requires <parent_cell> <inst_name> "
+                      "<child_cell> <x> <y>"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            self.bdb.add_inst_to_cell(args[0], args[1], args[2],
+                                      float(args[3]), float(args[4]))
         elif cmd == "add_comp":
             # add_comp <name> <cell> <parent|-> <x1> <y1> <x2> <y2> [leaf]
             # Use "-" for parent to create a root instance.

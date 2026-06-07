@@ -121,6 +121,14 @@ void BDB::_create_schema() {
             width  REAL NOT NULL,
             height REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS cell_children (
+            parent_cell TEXT NOT NULL REFERENCES cell(name),
+            inst_name   TEXT NOT NULL,
+            child_cell  TEXT NOT NULL REFERENCES cell(name),
+            x           REAL NOT NULL DEFAULT 0,
+            y           REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (parent_cell, inst_name)
+        );
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
@@ -1056,8 +1064,111 @@ int BDB::add_inst(const std::string& inst_name, const std::string& cell_name,
     if (sqlite3_step(ins) != SQLITE_DONE)
         throw std::runtime_error("add_inst: insert failed (name exists?): " + inst_name);
     int id = (int)sqlite3_last_insert_rowid(_db);
+    _expand_cell_children(id, inst_name, cell_name, abs_x, abs_y, depth + 1);
     compute_hpwl();
     return id;
+}
+
+void BDB::add_inst_to_cell(const std::string& parent_cell,
+                            const std::string& inst_name,
+                            const std::string& child_cell,
+                            double x, double y) {
+    Stmt qp(_db, "SELECT 1 FROM cell WHERE name=?");
+    sqlite3_bind_text(qp, 1, parent_cell.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(qp) != SQLITE_ROW)
+        throw std::runtime_error("add_inst_to_cell: parent cell not defined: " + parent_cell);
+
+    Stmt qc(_db, "SELECT 1 FROM cell WHERE name=?");
+    sqlite3_bind_text(qc, 1, child_cell.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(qc) != SQLITE_ROW)
+        throw std::runtime_error("add_inst_to_cell: child cell not defined: " + child_cell);
+
+    Stmt ins(_db, R"(
+        INSERT OR REPLACE INTO cell_children(parent_cell,inst_name,child_cell,x,y)
+        VALUES(?,?,?,?,?)
+    )");
+    sqlite3_bind_text  (ins, 1, parent_cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (ins, 2, inst_name.c_str(),   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (ins, 3, child_cell.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(ins, 4, x);
+    sqlite3_bind_double(ins, 5, y);
+    sqlite3_step(ins);
+}
+
+void BDB::_expand_cell_children(int parent_comp_id,
+                                  const std::string& parent_comp_name,
+                                  const std::string& cell_name,
+                                  double abs_x, double abs_y,
+                                  int child_depth) {
+    // Collect cell_children rows (avoid nested prepared statements sharing the db handle)
+    struct ChildDef { std::string inst_name, child_cell; double x, y; };
+    std::vector<ChildDef> children;
+    {
+        Stmt q(_db, "SELECT inst_name,child_cell,x,y FROM cell_children WHERE parent_cell=?");
+        sqlite3_bind_text(q, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(q) == SQLITE_ROW) {
+            children.push_back({
+                (const char*)sqlite3_column_text(q, 0),
+                (const char*)sqlite3_column_text(q, 1),
+                sqlite3_column_double(q, 2),
+                sqlite3_column_double(q, 3)
+            });
+        }
+    }
+    if (children.empty()) return;
+
+    // Parent has children → mark non-leaf
+    {
+        Stmt ul(_db, "UPDATE component SET is_leaf=0 WHERE id=?");
+        sqlite3_bind_int(ul, 1, parent_comp_id);
+        sqlite3_step(ul);
+    }
+
+    for (const auto& ch : children) {
+        // Look up child cell size
+        double cw = 0, ch_h = 0;
+        {
+            Stmt qsz(_db, "SELECT width,height FROM cell WHERE name=?");
+            sqlite3_bind_text(qsz, 1, ch.child_cell.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(qsz) != SQLITE_ROW) continue; // unknown cell — skip
+            cw   = sqlite3_column_double(qsz, 0);
+            ch_h = sqlite3_column_double(qsz, 1);
+        }
+
+        double cx = abs_x + ch.x;
+        double cy = abs_y + ch.y;
+        std::string child_path = parent_comp_name + "/" + ch.inst_name;
+
+        {
+            Stmt ins(_db, R"(
+                INSERT OR IGNORE INTO component
+                    (name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf)
+                VALUES(?,?,?,?,?,?,?,?,1)
+            )");
+            sqlite3_bind_text  (ins, 1, child_path.c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text  (ins, 2, ch.child_cell.c_str(),-1, SQLITE_TRANSIENT);
+            sqlite3_bind_int   (ins, 3, parent_comp_id);
+            sqlite3_bind_int   (ins, 4, child_depth);
+            sqlite3_bind_double(ins, 5, cx);
+            sqlite3_bind_double(ins, 6, cy);
+            sqlite3_bind_double(ins, 7, cx + cw);
+            sqlite3_bind_double(ins, 8, cy + ch_h);
+            sqlite3_step(ins);
+        }
+
+        // Retrieve id (may have been inserted just now or already existed)
+        int child_id = -1;
+        {
+            Stmt qid(_db, "SELECT id FROM component WHERE name=?");
+            sqlite3_bind_text(qid, 1, child_path.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(qid) == SQLITE_ROW)
+                child_id = sqlite3_column_int(qid, 0);
+        }
+
+        if (child_id >= 0)
+            _expand_cell_children(child_id, child_path, ch.child_cell,
+                                   cx, cy, child_depth + 1);
+    }
 }
 
 std::vector<BustermRow>  BDB::all_busterms() const { return {}; }

@@ -456,7 +456,10 @@ PYBIND11_MODULE(buda, m) {
         .def("all_cells",   &BDB::all_cells)
         .def("add_inst",    &BDB::add_inst,
              py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),
-             py::arg("x"), py::arg("y"));
+             py::arg("x"), py::arg("y"))
+        .def("add_inst_to_cell", &BDB::add_inst_to_cell,
+             py::arg("parent_cell"), py::arg("inst_name"),
+             py::arg("child_cell"), py::arg("x"), py::arg("y"));
 
     // ── verify ─────────────────────────────────────────────────────────────
 
