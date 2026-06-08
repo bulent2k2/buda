@@ -16,11 +16,24 @@ The core engine is **C++20** exposed to Python via **pybind11**, with a Python C
 
 ## Build
 
+Use the provided build wrapper script `bb` at the repository root to perform a clean build:
+
+```bash
+./bb
+```
+
+To build and run all tests:
+
+```bash
+./bb test
+```
+
+Manual build:
+
 ```bash
 mkdir -p build && cd build
 cmake .. && make -j4
-# install overwrites without interactive prompt
-install build/buda.cpython-313-darwin.so src/
+cp build/buda.cpython-*.so src/
 ```
 
 CMake builds a single shared library module (`buda`) with `-O3 -march=native -Wall -Wextra`.
