@@ -76,6 +76,13 @@ struct CellRow {
     double      width, height;
 };
 
+struct CellPinRow {
+    std::string cell;
+    std::string pin_name;
+    std::string dir;        // INPUT | OUTPUT | INOUT
+    double      px, py;     // offset from cell origin (-1 = unset)
+};
+
 // ── BDB ───────────────────────────────────────────────────────────────────
 
 class BDB {
@@ -88,9 +95,24 @@ public:
     void import_verilog(const std::string& v_path);
 
     // ── Cell definitions ───────────────────────────────────────────────────
-    // Upsert a cell definition (name, width, height).
     void add_cell(const std::string& name, double w, double h);
     std::vector<CellRow> all_cells() const;
+
+    // ── Cell-level pins (port interface) ──────────────────────────────────
+    // Define or update a port on a cell type.  px/py are offsets from the
+    // cell's lower-left origin (-1 means position unset / use centroid).
+    void add_cell_pin(const std::string& cell, const std::string& pin_name,
+                      const std::string& dir = "INOUT",
+                      double px = -1.0, double py = -1.0);
+    std::vector<CellPinRow> all_cell_pins() const;
+
+    // Add a net and derive instance-level pins from "inst/path.pin_name"
+    // endpoint notation.  Also inserts interface pins at each ancestor
+    // component strictly between the leaf and the common ancestor of all
+    // endpoints (hierarchy propagation).  Returns the net id.
+    int add_net_pins(const std::string& net_name,
+                     const std::string& drv,
+                     const std::vector<std::string>& rcvs);
 
     // ── Mutations ──────────────────────────────────────────────────────────
     // Move a single instance to new origin (x,y); size is preserved.
@@ -175,6 +197,10 @@ private:
 
     void _exec(const char* sql);
     void _create_schema();
+    // Insert a pin for net_id at the component named inst_path, auto-register
+    // the cell-type port (INSERT OR IGNORE in cell_pin).
+    void _add_pin_by_path(int net_id, const std::string& inst_path,
+                          const std::string& pin_name, const std::string& dir);
     // Recursively create component rows for all cell_children of cell_name,
     // rooted at parent_comp_id / parent_comp_name at absolute (abs_x, abs_y).
     // child_depth is the depth to assign to the immediate children.

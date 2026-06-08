@@ -39,6 +39,9 @@ cell             name (PK), width, height
 cell_children    parent_cell→cell, inst_name, child_cell→cell, x, y
                  PRIMARY KEY (parent_cell, inst_name)
 
+cell_pin         cell→cell, pin_name, dir (INPUT|OUTPUT|INOUT), px, py
+                 PRIMARY KEY (cell, pin_name)
+
 net              id, name
 
 pin              net_id→net, comp_id→component, pin_name,
@@ -142,6 +145,52 @@ is preserved via UPSERT.
 - One `net` row per elaborated wire; internal wires are scoped
   (`ai/w1`); wires connected through port bindings keep the caller's net name.
 - One `pin` row per port connection per instance.
+
+---
+
+### `bdb_net_mode`
+
+```
+bdb_net_mode on|off
+```
+
+Toggle whether `add_net` and `add_bus` also write connectivity into the open
+BDB.  Off by default.  Requires an open BDB (`open_bdb`).
+
+When **on**, every `add_net` / `add_bus` call writes to the BDB `net` and
+`pin` tables in addition to the routing `Netlist`:
+
+- A row is inserted into `net` for the net name.
+- A `pin` row is created at the directly-named leaf component (driver
+  `OUTPUT`, receivers `INPUT`).
+- **Hierarchy propagation**: at each ancestor component strictly between
+  the leaf and the common ancestor of all endpoints, an additional `pin` row
+  is inserted using the net name as the interface pin name.  This records
+  which nets cross each cell boundary.
+- For each new pin, the corresponding cell-type port is auto-registered in
+  `cell_pin` with direction set and position `−1` (centroid fallback), unless
+  an explicit position was already defined by `add_cell_pin`.
+
+---
+
+### `add_cell_pin`
+
+```
+add_cell_pin <cell> <pin_name> [INPUT|OUTPUT|INOUT] [<px> <py>]
+```
+
+Define (or update) a port on a cell type.  The position `(px, py)` is
+relative to the cell's lower-left origin in µm.  Omit coordinates (or use
+`−1`) to leave the position unset; the pin's absolute position will then
+default to the component's centroid when pins are created by `add_net_pins`.
+
+| Argument | Default | Description |
+|---|---|---|
+| `cell` | — | Cell type name; must exist in the `cell` table. |
+| `pin_name` | — | Port name, e.g. `out`, `in`, `clk`. |
+| `INPUT\|OUTPUT\|INOUT` | `INOUT` | Pin direction. |
+| `px` | `−1` | X offset from cell origin (µm). |
+| `py` | `−1` | Y offset from cell origin (µm). |
 
 ---
 
@@ -472,6 +521,16 @@ All query methods return lists of typed row objects with read-write attributes.
 | `width` | float | Canonical width (µm) |
 | `height` | float | Canonical height (µm) |
 
+**`CellPinRow`**
+
+| Attribute | Type | Description |
+|---|---|---|
+| `cell` | str | Cell type name |
+| `pin_name` | str | Port name |
+| `dir` | str | `INPUT`, `OUTPUT`, or `INOUT` |
+| `px` | float | X offset from cell origin (µm); `−1` if unset |
+| `py` | float | Y offset from cell origin (µm); `−1` if unset |
+
 **`GrpRow`**
 
 | Attribute | Type | Description |
@@ -524,6 +583,25 @@ Define the structural contents of `parent_cell`: one child occurrence of
 `child_cell` at relative offset `(x, y)`.  Writes to `cell_children` only;
 no component rows are created until `add_inst` places an occurrence of
 `parent_cell`.
+
+```python
+db.add_cell_pin(cell, pin_name, dir="INOUT", px=-1.0, py=-1.0)
+```
+Define or update a port on a cell type.  `px`/`py` are offsets from the
+cell's lower-left origin in µm; `−1` means unset (centroid fallback).
+
+```python
+rows: list[CellPinRow] = db.all_cell_pins()
+```
+Return all cell-type port definitions ordered by `(cell, pin_name)`.
+
+```python
+net_id: int = db.add_net_pins(net_name, drv, rcvs)
+```
+Add a net and derive instance-level pins from `"inst/path.pin_name"` endpoint
+strings.  Propagates interface pins up the hierarchy to each ancestor strictly
+between the leaf and the common ancestor of all endpoints.  `rcvs` is a
+`list[str]`.  Idempotent for existing net names.
 
 ---
 

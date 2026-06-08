@@ -61,6 +61,7 @@ class BudaSession:
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self.no_viz = False          # set by --no-viz CLI flag
         self.bdb = None              # BDB (opened by open_bdb command)
+        self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -896,6 +897,23 @@ class BudaSession:
             except (ValueError, IndexError):
                 print("Error: invalid arguments for add_keepout")
 
+        elif cmd == "bdb_net_mode":
+            # bdb_net_mode on|off
+            if len(args) < 1 or args[0].lower() not in ('on', 'off'):
+                print("Error: bdb_net_mode requires on|off"); return
+            self.bdb_net_mode = (args[0].lower() == 'on')
+            print(f"[BDB] net mode {'enabled' if self.bdb_net_mode else 'disabled'}")
+        elif cmd == "add_cell_pin":
+            # add_cell_pin <cell> <pin_name> [INPUT|OUTPUT|INOUT] [<px> <py>]
+            if self.bdb is None:
+                print("Error: add_cell_pin requires an open BDB (use open_bdb first)"); return
+            if len(args) < 2:
+                print("Error: add_cell_pin requires <cell> <pin_name> [dir] [px py]"); return
+            cell_name = args[0]; pin_name = args[1]
+            direction = args[2].upper() if len(args) > 2 else "INOUT"
+            px = float(args[3]) if len(args) > 3 else -1.0
+            py = float(args[4]) if len(args) > 4 else -1.0
+            self.bdb.add_cell_pin(cell_name, pin_name, direction, px, py)
         elif cmd == "add_net":
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')
@@ -904,6 +922,8 @@ class BudaSession:
                 drv_pin.split('.')[0],
                 [r.split('.')[0] for r in rcv_pins],
             )
+            if self.bdb is not None and self.bdb_net_mode:
+                self.bdb.add_net_pins(name, drv_pin, rcv_pins)
         elif cmd == "add_bus":
             # Syntax: add_bus <prefix>[<N>] <drv_pin> <rcv_pin>
             #      or add_bus <prefix>[<lo>:<hi>] <drv_pin> <rcv_pin>
@@ -926,6 +946,8 @@ class BudaSession:
                 net_name = f"{prefix}_{i}"
                 self.netlist.add_net(net_name, drv_pin, rcv_pins)
                 self._net_endpoints[net_name] = (drv_inst, rcv_insts)
+                if self.bdb is not None and self.bdb_net_mode:
+                    self.bdb.add_net_pins(net_name, drv_pin, rcv_pins)
         elif cmd == "def_layer":
             # def_layer <id> <name> <H|V> [TOP|LOW] <overhead%>
             #           [span_min N] [span_max N] [kSpan K]

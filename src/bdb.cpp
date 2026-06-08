@@ -129,6 +129,14 @@ void BDB::_create_schema() {
             y           REAL NOT NULL DEFAULT 0,
             PRIMARY KEY (parent_cell, inst_name)
         );
+        CREATE TABLE IF NOT EXISTS cell_pin (
+            cell      TEXT NOT NULL REFERENCES cell(name),
+            pin_name  TEXT NOT NULL,
+            dir       TEXT NOT NULL DEFAULT 'INOUT',
+            px        REAL NOT NULL DEFAULT -1,
+            py        REAL NOT NULL DEFAULT -1,
+            PRIMARY KEY (cell, pin_name)
+        );
         CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
@@ -147,6 +155,161 @@ void BDB::_create_schema() {
 std::string BDB::db_path(const std::string& def_path) {
     auto dot = def_path.rfind('.');
     return (dot == std::string::npos ? def_path : def_path.substr(0, dot)) + ".bdb";
+}
+
+// ── Cell-level pins ──────────────────────────────────────────────────────────
+
+void BDB::add_cell_pin(const std::string& cell, const std::string& pin_name,
+                       const std::string& dir, double px, double py) {
+    Stmt s(_db,
+        "INSERT INTO cell_pin(cell,pin_name,dir,px,py) VALUES(?,?,?,?,?)"
+        " ON CONFLICT(cell,pin_name) DO UPDATE SET"
+        "   dir=excluded.dir, px=excluded.px, py=excluded.py");
+    sqlite3_bind_text  (s, 1, cell.c_str(),     -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 2, pin_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 3, dir.c_str(),      -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(s, 4, px);
+    sqlite3_bind_double(s, 5, py);
+    sqlite3_step(s);
+}
+
+std::vector<CellPinRow> BDB::all_cell_pins() const {
+    Stmt q(_db, "SELECT cell, pin_name, dir, px, py FROM cell_pin ORDER BY cell, pin_name");
+    std::vector<CellPinRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        CellPinRow r;
+        r.cell     = (const char*)sqlite3_column_text(q, 0);
+        r.pin_name = (const char*)sqlite3_column_text(q, 1);
+        r.dir      = (const char*)sqlite3_column_text(q, 2);
+        r.px       = sqlite3_column_double(q, 3);
+        r.py       = sqlite3_column_double(q, 4);
+        out.push_back(r);
+    }
+    return out;
+}
+
+// Insert a pin for net_id at the component named inst_path, with pin_name and dir.
+// Absolute pin position is derived from cell_pin relative coords when available,
+// otherwise defaults to the component's centroid.
+// Also auto-registers the port on the cell type (INSERT OR IGNORE in cell_pin).
+void BDB::_add_pin_by_path(int net_id, const std::string& inst_path,
+                            const std::string& pin_name, const std::string& dir) {
+    Stmt q(_db, "SELECT id, cell, x1, y1, x2, y2 FROM component WHERE name=?");
+    sqlite3_bind_text(q, 1, inst_path.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) != SQLITE_ROW) return;  // component not in DB; skip silently
+    int comp_id = sqlite3_column_int(q, 0);
+    std::string cell_name = (const char*)sqlite3_column_text(q, 1);
+    double x1 = sqlite3_column_double(q, 2), y1 = sqlite3_column_double(q, 3);
+    double x2 = sqlite3_column_double(q, 4), y2 = sqlite3_column_double(q, 5);
+
+    // Derive absolute pin position from cell_pin offset when available.
+    double px = (x1 + x2) / 2.0, py = (y1 + y2) / 2.0;
+    if (!cell_name.empty()) {
+        Stmt cp(_db, "SELECT px, py FROM cell_pin WHERE cell=? AND pin_name=?");
+        sqlite3_bind_text(cp, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(cp, 2, pin_name.c_str(),  -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(cp) == SQLITE_ROW) {
+            double rx = sqlite3_column_double(cp, 0);
+            double ry = sqlite3_column_double(cp, 1);
+            if (rx >= 0) px = x1 + rx;
+            if (ry >= 0) py = y1 + ry;
+        }
+    }
+
+    // Insert instance-level pin (idempotent).
+    Stmt ins(_db,
+        "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py) VALUES(?,?,?,?,?,?)");
+    sqlite3_bind_int   (ins, 1, net_id);
+    sqlite3_bind_int   (ins, 2, comp_id);
+    sqlite3_bind_text  (ins, 3, pin_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (ins, 4, dir.c_str(),      -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(ins, 5, px);
+    sqlite3_bind_double(ins, 6, py);
+    sqlite3_step(ins);
+
+    // Auto-register the port on the cell type without overwriting user-defined entries.
+    if (!cell_name.empty()) {
+        Stmt cp(_db,
+            "INSERT OR IGNORE INTO cell_pin(cell,pin_name,dir,px,py) VALUES(?,?,?,-1,-1)");
+        sqlite3_bind_text(cp, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(cp, 2, pin_name.c_str(),  -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(cp, 3, dir.c_str(),       -1, SQLITE_TRANSIENT);
+        sqlite3_step(cp);
+    }
+}
+
+int BDB::add_net_pins(const std::string& net_name,
+                      const std::string& drv,
+                      const std::vector<std::string>& rcvs) {
+    // Insert net (idempotent).
+    Stmt ins_net(_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
+    sqlite3_bind_text(ins_net, 1, net_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(ins_net);
+
+    Stmt q_net(_db, "SELECT id FROM net WHERE name=?");
+    sqlite3_bind_text(q_net, 1, net_name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q_net) != SQLITE_ROW)
+        throw std::runtime_error("add_net_pins: failed to insert net " + net_name);
+    int net_id = sqlite3_column_int(q_net, 0);
+
+    // Parse "inst/path.pin_name" into (path, pin_name, dir).
+    struct Ep { std::string path, pin, dir; };
+    auto parse = [](const std::string& s, const std::string& d) -> Ep {
+        auto dot = s.rfind('.');
+        if (dot == std::string::npos) return {s, s, d};
+        return {s.substr(0, dot), s.substr(dot + 1), d};
+    };
+
+    std::vector<Ep> eps;
+    eps.push_back(parse(drv, "OUTPUT"));
+    for (const auto& r : rcvs) eps.push_back(parse(r, "INPUT"));
+
+    // Split a path into '/' segments.
+    auto split = [](const std::string& p) {
+        std::vector<std::string> v;
+        std::string seg;
+        for (char c : p) {
+            if (c == '/') { if (!seg.empty()) { v.push_back(seg); seg.clear(); } }
+            else seg += c;
+        }
+        if (!seg.empty()) v.push_back(seg);
+        return v;
+    };
+
+    std::vector<std::vector<std::string>> all_segs;
+    for (const auto& ep : eps) all_segs.push_back(split(ep.path));
+
+    // Longest common prefix of all endpoint paths.
+    size_t common = all_segs[0].size();
+    for (size_t i = 1; i < all_segs.size(); ++i) {
+        size_t k = 0;
+        while (k < common && k < all_segs[i].size() &&
+               all_segs[0][k] == all_segs[i][k]) ++k;
+        common = k;
+    }
+
+    // Add leaf pin + interface pins at each ancestor strictly above the leaf
+    // and strictly below the common ancestor.
+    for (size_t i = 0; i < eps.size(); ++i) {
+        const auto& ep = eps[i];
+        const auto& seg = all_segs[i];
+
+        // Leaf: explicit pin_name with declared direction.
+        _add_pin_by_path(net_id, ep.path, ep.pin, ep.dir);
+
+        // Intermediate ancestors: use net_name as the interface pin_name.
+        // Direction: OUTPUT if on the driver side, INPUT if on a receiver side.
+        for (size_t d = seg.size() - 1; d > common; --d) {
+            std::string anc;
+            for (size_t k = 0; k < d; ++k) {
+                if (k > 0) anc += '/';
+                anc += seg[k];
+            }
+            _add_pin_by_path(net_id, anc, net_name, ep.dir);
+        }
+    }
+
+    return net_id;
 }
 
 int BDB::units() const { return _units; }

@@ -411,6 +411,13 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("width",  &CellRow::width)
         .def_readwrite("height", &CellRow::height);
 
+    py::class_<CellPinRow>(m, "CellPinRow")
+        .def_readwrite("cell",     &CellPinRow::cell)
+        .def_readwrite("pin_name", &CellPinRow::pin_name)
+        .def_readwrite("dir",      &CellPinRow::dir)
+        .def_readwrite("px",       &CellPinRow::px)
+        .def_readwrite("py",       &CellPinRow::py);
+
     // ── BDB ────────────────────────────────────────────────────────────────
     py::class_<BDB>(m, "BDB")
         .def(py::init<const std::string&>())
@@ -464,7 +471,13 @@ PYBIND11_MODULE(buda, m) {
         .def("flip_comp",   &BDB::flip_comp,
              py::arg("name"), py::arg("flip_x"))
         .def("rotate_comp", &BDB::rotate_comp,
-             py::arg("name"), py::arg("degrees"));
+             py::arg("name"), py::arg("degrees"))
+        .def("add_cell_pin", &BDB::add_cell_pin,
+             py::arg("cell"), py::arg("pin_name"),
+             py::arg("dir") = "INOUT", py::arg("px") = -1.0, py::arg("py") = -1.0)
+        .def("all_cell_pins", &BDB::all_cell_pins)
+        .def("add_net_pins", &BDB::add_net_pins,
+             py::arg("net_name"), py::arg("drv"), py::arg("rcvs"));
 
     // ── verify ─────────────────────────────────────────────────────────────
 
