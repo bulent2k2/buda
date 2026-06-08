@@ -179,11 +179,19 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
             };
             gen_lhv(bend_x);
             // When the primary bend (dst nearest face) is too close to src's face
-            // (e.g. adjacent blocks share an x-edge), also try exclusive-zone
-            // midpoints — the same fallback used by the "collapsed H" path above.
+            // (e.g. adjacent blocks share an x-edge), also try the nearest x
+            // that just clears the min-stub threshold from src's original face.
+            // Using the midpoint like the "collapsed H" path would overshoot;
+            // here we want the shortest valid stub.
             if (std::abs(bend_x - s_orig.face_x(bend_x)) < m_h) {
-                if (dst.x1 < src.x1) gen_lhv((dst.x1 + src.x1) / 2);
-                if (dst.x2 > src.x2) gen_lhv((src.x2 + dst.x2) / 2);
+                if (dst.x1 < src.x1) {
+                    int bx = std::min(s_orig.x1 - m_h, dst.x2);
+                    if (bx >= d_orig.x1) gen_lhv(bx);
+                }
+                if (dst.x2 > src.x2) {
+                    int bx = std::max(s_orig.x2 + m_h, dst.x1);
+                    if (bx <= d_orig.x2) gen_lhv(bx);
+                }
             }
         } else {
             int hy = s.y, dy = d.y;
