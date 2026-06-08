@@ -82,6 +82,15 @@ struct MinStubLength {
     std::map<int, int> per_layer;
 };
 
+// Per-direction outer margin for U-shape (and UU-shape) detour trunks.
+// -1 means "auto" (topology generator uses its internal heuristic).
+struct DetourChannelSpec {
+    int north = -1;  // margin above the bundle bounding box (larger Y)
+    int south = -1;  // margin below the bundle bounding box (smaller Y)
+    int east  = -1;  // margin right of the bundle bounding box (larger X)
+    int west  = -1;  // margin left  of the bundle bounding box (smaller X)
+};
+
 struct KeepoutZone {
     Rect bbox;
     std::set<int> layer_ids;
@@ -117,6 +126,12 @@ public:
         return min_stub_len_.global;
     }
 
+    // Detour channel outer margin.
+    // dirs is any combination of N/S/E/W, or the shorthands Y (N+S), X (E+W), A (all).
+    // size < 0 resets the specified directions back to auto.
+    void set_detour_channel(const std::string& dirs, int size);
+    const DetourChannelSpec& get_detour_channel() const { return detour_channel_; }
+
     Rect get_block_bounds(const std::string& name) const;
     // Returns per-block margin if set, else global margin, else {0,0}.
     BlockCornerMargin get_block_corner_margin(const std::string& name) const;
@@ -133,6 +148,7 @@ private:
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};
     MinStubLength min_stub_len_;
+    DetourChannelSpec detour_channel_;
     std::vector<KeepoutZone> keepouts_;
 };
 class TopologyGenerator {

@@ -60,6 +60,21 @@ Rect Floorplan::get_block_bounds(const std::string& name) const {
     if (blocks_.count(name)) return blocks_.at(name);
     return Rect{0,0,0,0};
 }
+void Floorplan::set_detour_channel(const std::string& dirs, int size) {
+    for (char c : dirs) {
+        switch (std::toupper(static_cast<unsigned char>(c))) {
+            case 'N': detour_channel_.north = size; break;
+            case 'S': detour_channel_.south = size; break;
+            case 'E': detour_channel_.east  = size; break;
+            case 'W': detour_channel_.west  = size; break;
+            case 'Y': detour_channel_.north = detour_channel_.south = size; break;
+            case 'X': detour_channel_.east  = detour_channel_.west  = size; break;
+            case 'A': detour_channel_.north = detour_channel_.south =
+                      detour_channel_.east  = detour_channel_.west  = size; break;
+            default: break;
+        }
+    }
+}
 void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids) {
     KeepoutZone koz;
     koz.bbox = Rect{x1, y1, x2, y2};
@@ -1326,15 +1341,20 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     {
         int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
         int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/,   v_layer_);
+        const auto& dc = floorplan_.get_detour_channel();
         if (hanan_x.size() >= 2) {
-            int margin_x = std::max({m_h, 1, (int)(0.1 * (hanan_x.back() - hanan_x[0]))});
-            chan_x.insert(chan_x.begin(), hanan_x[0]       - margin_x);
-            chan_x.push_back             (hanan_x.back()   + margin_x);
+            int auto_m = std::max({m_h, 1, (int)(0.1 * (hanan_x.back() - hanan_x[0]))});
+            int mw = (dc.west  >= 0) ? dc.west  : auto_m;
+            int me = (dc.east  >= 0) ? dc.east  : auto_m;
+            chan_x.insert(chan_x.begin(), hanan_x[0]       - mw);
+            chan_x.push_back             (hanan_x.back()   + me);
         }
         if (hanan_y.size() >= 2) {
-            int margin_y = std::max({m_v, 1, (int)(0.1 * (hanan_y.back() - hanan_y[0]))});
-            chan_y.insert(chan_y.begin(), hanan_y[0]       - margin_y);
-            chan_y.push_back             (hanan_y.back()   + margin_y);
+            int auto_m = std::max({m_v, 1, (int)(0.1 * (hanan_y.back() - hanan_y[0]))});
+            int ms = (dc.south >= 0) ? dc.south : auto_m;
+            int mn = (dc.north >= 0) ? dc.north : auto_m;
+            chan_y.insert(chan_y.begin(), hanan_y[0]       - ms);
+            chan_y.push_back             (hanan_y.back()   + mn);
         }
     }
 

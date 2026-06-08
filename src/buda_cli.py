@@ -862,6 +862,22 @@ class BudaSession:
                     self.fp.set_min_stub_length_layer(lid, val)
                 else:
                     print(f"Error: unknown layer '{lname}'")
+        elif cmd == "detour_channel":
+            # Usage: detour_channel <dir> <size> [<dir> <size> ...]
+            # dir : N/S/E/W (single), Y (N+S), X (E+W), A (all four).
+            # size: outer-band width in layout units; negative resets to auto.
+            # Multiple dir/size pairs may appear in one command, e.g.:
+            #   detour_channel Y 50 X 30
+            i = 0
+            while i + 1 < len(args):
+                dirs = args[i]
+                try:
+                    size = int(args[i + 1])
+                except ValueError:
+                    print(f"Error: detour_channel size must be an integer, got '{args[i+1]}'")
+                    break
+                self.fp.set_detour_channel(dirs, size)
+                i += 2
         elif cmd == "add_keepout":
             # Usage: add_keepout <x1> <y1> <x2> <y2> <layer1> <layer2> ...
             if len(args) < 5:

@@ -150,6 +150,14 @@ PYBIND11_MODULE(buda, m) {
         .def("get_min_stub_length", [](const Floorplan& fp, LayerDir dir, int layer_id) {
             return fp.get_min_stub_length(static_cast<int>(dir), layer_id);
         })
+        .def("set_detour_channel",      &Floorplan::set_detour_channel)
+        .def("get_detour_channel", [](const Floorplan& fp) {
+            const auto& dc = fp.get_detour_channel();
+            py::dict d;
+            d["north"] = dc.north; d["south"] = dc.south;
+            d["east"]  = dc.east;  d["west"]  = dc.west;
+            return d;
+        })
         .def("get_block_corner_margin", &Floorplan::get_block_corner_margin)
         .def("get_block_bounds",        &Floorplan::get_block_bounds)
         .def("get_hanan_grid", [](const Floorplan& fp) {
