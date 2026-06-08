@@ -152,14 +152,17 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                 }
             }
         } else if (use_busterm_) {
-            if (std::abs(bend_x - s_orig.face_x(bend_x)) >= m_h) {
+            // Generate L_HV options for a given bend x.  Skipped silently when the
+            // H stub (src orig-face → bx) is shorter than the minimum stub length.
+            auto gen_lhv = [&](int bx) {
+                if (std::abs(bx - s_orig.face_x(bx)) < m_h) return;
                 // Option 1: H below dst, V up to dst.y1
                 if (s_orig.y1 < d_orig.y1) {
                     int hy = std::min(src.y2, d_orig.y1 - m_v);
                     if (hy >= src.y1 && hy <= d_orig.y1 - m_v) {
-                        Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
-                        hv.segments.push_back(make_seg(s_orig.face_x(bend_x), hy, bend_x, hy, h_layer_));
-                        hv.segments.push_back(make_seg(bend_x, hy, bend_x, d_orig.y1, v_layer_));
+                        Topology hv; hv.type = "L_HV@x" + std::to_string(bx) + "@y" + std::to_string(hy);
+                        hv.segments.push_back(make_seg(s_orig.face_x(bx), hy, bx, hy, h_layer_));
+                        hv.segments.push_back(make_seg(bx, hy, bx, d_orig.y1, v_layer_));
                         results.push_back(hv);
                     }
                 }
@@ -167,12 +170,20 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                 if (s_orig.y2 > d_orig.y2) {
                     int hy = std::max(src.y1, d_orig.y2 + m_v);
                     if (hy >= d_orig.y2 + m_v && hy <= src.y2) {
-                        Topology hv; hv.type = "L_HV@x" + std::to_string(bend_x) + "@y" + std::to_string(hy);
-                        hv.segments.push_back(make_seg(s_orig.face_x(bend_x), hy, bend_x, hy, h_layer_));
-                        hv.segments.push_back(make_seg(bend_x, hy, bend_x, d_orig.y2, v_layer_));
+                        Topology hv; hv.type = "L_HV@x" + std::to_string(bx) + "@y" + std::to_string(hy);
+                        hv.segments.push_back(make_seg(s_orig.face_x(bx), hy, bx, hy, h_layer_));
+                        hv.segments.push_back(make_seg(bx, hy, bx, d_orig.y2, v_layer_));
                         results.push_back(hv);
                     }
                 }
+            };
+            gen_lhv(bend_x);
+            // When the primary bend (dst nearest face) is too close to src's face
+            // (e.g. adjacent blocks share an x-edge), also try exclusive-zone
+            // midpoints — the same fallback used by the "collapsed H" path above.
+            if (std::abs(bend_x - s_orig.face_x(bend_x)) < m_h) {
+                if (dst.x1 < src.x1) gen_lhv((dst.x1 + src.x1) / 2);
+                if (dst.x2 > src.x2) gen_lhv((src.x2 + dst.x2) / 2);
             }
         } else {
             int hy = s.y, dy = d.y;
