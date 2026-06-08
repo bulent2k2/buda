@@ -5,15 +5,37 @@ set -e
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
-echo "=== Cleaning and Building BUDA ==="
+# Parse arguments
+CLEAN=false
+RUN_TESTS=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --clean|-c)
+            CLEAN=true
+            ;;
+        --test|-t|test)
+            RUN_TESTS=true
+            ;;
+    esac
+done
+
+if [ "$CLEAN" = true ]; then
+    echo "=== Cleaning and Building BUDA (Clean Build) ==="
+else
+    echo "=== Building BUDA (Incremental Build) ==="
+fi
+
 mkdir -p build
 cd build
 
 echo "Configuring with CMake..."
 cmake ..
 
-echo "Cleaning previous build..."
-make clean
+if [ "$CLEAN" = true ]; then
+    echo "Cleaning previous build..."
+    make clean
+fi
 
 echo "Building target (buda)..."
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
@@ -23,14 +45,6 @@ echo "Copying library to src/..."
 cp buda.cpython-*.so ../src/
 
 echo "=== BUDA build successful ==="
-
-# Check if tests should be run
-RUN_TESTS=false
-for arg in "$@"; do
-    if [ "$arg" = "--test" ] || [ "$arg" = "-t" ] || [ "$arg" = "test" ]; then
-        RUN_TESTS=true
-    fi
-done
 
 if [ "$RUN_TESTS" = true ]; then
     echo "=== Running Tests ==="
