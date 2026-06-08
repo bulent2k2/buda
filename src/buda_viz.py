@@ -169,7 +169,8 @@ class TopologyExplorer:
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         self.bidx     = 0   # current bundle index
-        self.idx      = 0   # current topology index within bundle
+        w0_selected   = self.wrappers[0].selected_topology_index
+        self.idx      = w0_selected if w0_selected >= 0 else 0
         self.sidx     = -1  # current selected segment index within current topology
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
@@ -529,7 +530,8 @@ class TopologyExplorer:
 
     def _step_bundle(self, delta):
         self.bidx = (self.bidx + delta) % len(self.wrappers)
-        self.idx  = 0
+        w_selected = self.wrappers[self.bidx].selected_topology_index
+        self.idx  = w_selected if w_selected >= 0 else 0
         self.sidx = -1
         self._reset_rerun_btn()
         self._draw()
@@ -703,13 +705,22 @@ class TopologyExplorer:
         n_bt = sum(1 for cs in ct.segs()
                    for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
         bus_label = (f"bus {self.bidx + 1}/{nb} · " if nb > 1 else "")
-        sel_badge = "  ★ SELECTED" if is_sel else ""
+        
+        is_planner_active = (self.idx == self.wrapper.selected_topology_index)
+        is_current_selection = self._current_is_selected()
+        
+        if is_planner_active and is_current_selection:
+            sel_badge = "  ★ PLANNER SELECTED (PINNED)"
+        elif is_planner_active:
+            sel_badge = "  ★ PLANNER SELECTED"
+        elif is_current_selection:
+            sel_badge = "  ★ PINNED"
+        else:
+            sel_badge = ""
 
         # Topology segments — width proportional to bundle width
         actual_lids = []
         sel = self._find_selection()
-        is_current_selection = self._current_is_selected()
-        is_planner_active = (self.idx == self.wrapper.selected_topology_index)
 
         # ── Pre-compute display geometry for all segments ──────────────────
         # Minimum pull-arrow length in data units (prevents invisible arrows on
@@ -845,7 +856,16 @@ class TopologyExplorer:
             f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
             f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
         )
-        ax.set_title(title_main, fontsize=12, pad=10, color='#886600' if is_sel else 'black')
+        
+        title_color = 'black'
+        if is_planner_active and is_current_selection:
+            title_color = '#666600'  # mixture
+        elif is_current_selection:
+            title_color = '#886600'  # gold
+        elif is_planner_active:
+            title_color = '#005588'  # blue
+
+        ax.set_title(title_main, fontsize=12, pad=10, color=title_color)
 
         if self.fig.canvas.manager:
             bid_  = self.wrapper.original_bundle.id
