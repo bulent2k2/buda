@@ -1,22 +1,40 @@
+# From hier_four_blocks_cell.buda
 source tracks.buda
 
-add_block blk1  0     0 200 200
-add_block blk1a 100   0 200 100
-add_block blk1b 0   100 100 200
-add_block blk2  400 400 600 600
-add_block blk2a 500 400 600 500
-add_block blk2b 400 500 500 600
+open_bdb :memory:
+#open_bdb foo.bdb
+add_cell blk  300 230
+add_cell sub  120  90
+add_cell leaf  45  50
 
-add_bus bus[8]  blk1.o blk2.i
-add_bus busa[4] blk1.o blk2a.i,blk2b.i
-add_bus busb[4] blk1a.o blk1b.i,blk2a.i
+add_inst_to_cell  blk  s1    sub   15   15
+add_inst_to_cell  blk  s2    sub  155   15
+add_inst_to_cell  blk  s3    sub   15  125
+add_inst_to_cell  blk  s4    sub  155  125
 
-corner_margin dx 20 dy 10
+add_inst_to_cell  sub  l    leaf  10   20
+add_inst_to_cell  sub  r    leaf  65   20
+
+add_inst u1  blk  -   50   50
+add_inst u2  blk  -  400   50
+add_inst u3  blk  -   50  330
+add_inst u4  blk  -  400  330
+
+add_blocks_from_bdb 2 skip
+
+bdb_net_mode on
+
+add_bus a1[4]  u1/s1/l.tx  u4/s1/l.rx
+add_bus a2[4]  u1/s1/r.tx  u4/s2/r.rx
+add_bus a3[4]  u1/s3/l.tx  u4/s3/l.rx
+add_bus a4[4]  u1/s3/r.tx  u4/s4/r.rx
+add_bus b1[4]  u3/s1/l.tx  u2/s1/r.rx,u4/s1/r.rx
+add_bus b2[4]  u3/s3/r.tx  u2/s1/r.rx,u4/s1/r.rx
 
 run_bundler strict
 generate_topologies
 check_connectivity topo
-run_planner
+run_planner 1
 run_nuts
 check_connectivity nuts
 run_detailed_nuts

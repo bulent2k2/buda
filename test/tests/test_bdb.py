@@ -11,6 +11,7 @@ scenarios('features/bdb_cell_inst.feature')
 scenarios('features/bdb_add_blocks.feature')
 scenarios('features/bdb_inst_to_cell.feature')
 scenarios('features/bdb_flip_rotate.feature')
+scenarios('features/bdb_net_pins.feature')
 
 # ---------------------------------------------------------------------------
 # Verilog fixture
@@ -567,3 +568,205 @@ def step_flip_comp(context, name, axis):
 def step_rotate_comp(context, name, degrees):
     context['db'].rotate_comp(name, int(degrees))
     _refresh(context)
+
+
+# ---------------------------------------------------------------------------
+# Net / pin / bdb_net_mode steps
+# ---------------------------------------------------------------------------
+
+def _make_two_level_bdb():
+    """
+    Two top-level blocks (u1, u2), each containing one leaf instance (l1).
+    Cell 'blk': 200×100.  Cell 'leaf': 100×50.
+    u1 at (0,0), u1/l1 at relative (60,35) → absolute (60,35).
+    u2 at (300,0), u2/l1 at relative (60,35) → absolute (360,35).
+    """
+    db = buda.BDB(":memory:")
+    db.add_cell('blk',  200.0, 100.0)
+    db.add_cell('leaf', 100.0,  50.0)
+    db.add_inst('u1',    'blk',  '',   0.0,   0.0)
+    db.add_inst('u1/l1', 'leaf', 'u1', 60.0, 35.0)
+    db.add_inst('u2',    'blk',  '',  300.0,  0.0)
+    db.add_inst('u2/l1', 'leaf', 'u2', 60.0, 35.0)
+    return db
+
+
+def _make_three_level_bdb():
+    """
+    top → mid + mid2, each with a leaf child.
+    Cell 'top': 500×300.  Cell 'mid': 200×100.  Cell 'leaf': 80×40.
+    """
+    db = buda.BDB(":memory:")
+    db.add_cell('top',  500.0, 300.0)
+    db.add_cell('mid',  200.0, 100.0)
+    db.add_cell('leaf',  80.0,  40.0)
+    db.add_inst('top',          'top',  '',       0.0,   0.0)
+    db.add_inst('top/mid',      'mid',  'top',   50.0,  50.0)
+    db.add_inst('top/mid/leaf', 'leaf', 'top/mid', 20.0, 10.0)
+    db.add_inst('top/mid2',     'mid',  'top',  300.0,  50.0)
+    db.add_inst('top/mid2/leaf','leaf', 'top/mid2', 20.0, 10.0)
+    return db
+
+
+@given("an empty in-memory BDB with net support")
+def empty_bdb_net(context):
+    db = buda.BDB(":memory:")
+    context['db']        = db
+    context['comps']     = {}
+    context['cells']     = {}
+    context['cell_pins'] = {}
+
+
+@given("an empty in-memory BDB with a two-level hierarchy")
+def empty_bdb_two_level(context):
+    db = _make_two_level_bdb()
+    context['db']        = db
+    context['comps']     = {r.name: r for r in db.all_components()}
+    context['nets']      = {r.name: r for r in db.all_nets()}
+    context['pins']      = db.all_pins()
+    context['cell_pins'] = {(r.cell, r.pin_name): r for r in db.all_cell_pins()}
+
+
+@given("an empty in-memory BDB with a three-level hierarchy")
+def empty_bdb_three_level(context):
+    db = _make_three_level_bdb()
+    context['db']        = db
+    context['comps']     = {r.name: r for r in db.all_components()}
+    context['nets']      = {r.name: r for r in db.all_nets()}
+    context['pins']      = db.all_pins()
+    context['cell_pins'] = {(r.cell, r.pin_name): r for r in db.all_cell_pins()}
+
+
+def _refresh_pins(context):
+    context['nets']      = {r.name: r for r in context['db'].all_nets()}
+    context['pins']      = context['db'].all_pins()
+    context['cell_pins'] = {(r.cell, r.pin_name): r for r in context['db'].all_cell_pins()}
+    _refresh(context)
+
+
+@when(parsers.re(r'I add cell pin "(?P<cell>[^"]+)"\."(?P<pin>[^"]+)" direction (?P<dir>\w+) at \((?P<px>-?[\d.]+), (?P<py>-?[\d.]+)\)'))
+def step_add_cell_pin(context, cell, pin, dir, px, py):
+    context['db'].add_cell_pin(cell, pin, dir, float(px), float(py))
+    _refresh_pins(context)
+
+
+@when(parsers.re(r'I add cell pin "(?P<cell>[^"]+)"\."(?P<pin>[^"]+)" direction (?P<dir>\w+) without position'))
+def step_add_cell_pin_no_pos(context, cell, pin, dir):
+    context['db'].add_cell_pin(cell, pin, dir)
+    _refresh_pins(context)
+
+
+@when(parsers.re(
+    r'I call add_net_pins "(?P<net>[^"]+)" driver "(?P<drv>[^"]+)" receivers "(?P<rcvs>[^"]+)"'
+))
+def step_add_net_pins(context, net, drv, rcvs):
+    rcv_list = [r.strip() for r in rcvs.split(',')]
+    context['db'].add_net_pins(net, drv, rcv_list)
+    _refresh_pins(context)
+
+
+@then(parsers.re(r'cell pin "(?P<cell>[^"]+)"\."(?P<pin>[^"]+)" has direction (?P<dir>\w+) and offset \((?P<px>-?[\d.]+), (?P<py>-?[\d.]+)\)'))
+def check_cell_pin(context, cell, pin, dir, px, py):
+    key = (cell, pin)
+    cp = context['cell_pins'].get(key)
+    assert cp is not None, f"cell_pin ({cell!r}, {pin!r}) not found. Present: {sorted(context['cell_pins'])}"
+    assert cp.dir == dir, f"({cell}.{pin}).dir: expected {dir!r}, got {cp.dir!r}"
+    assert cp.px == pytest.approx(float(px)), f"({cell}.{pin}).px: expected {px}, got {cp.px}"
+    assert cp.py == pytest.approx(float(py)), f"({cell}.{pin}).py: expected {py}, got {cp.py}"
+
+
+@then(parsers.re(r'net "(?P<name>[^"]+)" exists in BDB'))
+def check_net_in_bdb(context, name):
+    assert name in context['nets'], (
+        f"Net {name!r} not found. Present: {sorted(context['nets'])}"
+    )
+
+
+@then(parsers.re(r'net "(?P<net>[^"]+)" has (?P<count>\d+) pins total'))
+def check_net_pin_count_total(context, net, count):
+    count = int(count)
+    assert net in context['nets'], f"Net {net!r} not found"
+    net_id = context['nets'][net].id
+    pins = [p for p in context['pins'] if p.net_id == net_id]
+    assert len(pins) == count, (
+        f"Net {net!r}: expected {count} pins, got {len(pins)}: "
+        + str([(p.comp_id, p.pin_name) for p in pins])
+    )
+
+
+@then(parsers.re(
+    r'pin on net "(?P<net>[^"]+)" at component "(?P<comp>[^"]+)" is named "(?P<pin>[^"]+)" with direction (?P<dir>\w+)'
+))
+def check_pin_direction(context, net, comp, pin, dir):
+    assert net  in context['nets'],  f"Net {net!r} not found"
+    assert comp in context['comps'], f"Component {comp!r} not found"
+    net_id  = context['nets'][net].id
+    comp_id = context['comps'][comp].id
+    matches = [p for p in context['pins']
+               if p.net_id == net_id and p.comp_id == comp_id and p.pin_name == pin]
+    assert matches, (
+        f"No pin ({net!r} → {comp!r}.{pin}). "
+        f"Pins on {net!r}: "
+        + str([(p.comp_id, p.pin_name) for p in context['pins'] if p.net_id == net_id])
+    )
+    assert matches[0].dir == dir, f"Pin ({comp}.{pin}) dir: expected {dir!r}, got {matches[0].dir!r}"
+
+
+@then(parsers.re(
+    r'pin on net "(?P<net>[^"]+)" at component "(?P<comp>[^"]+)" has absolute position \((?P<px>[\d.]+), (?P<py>[\d.]+)\)'
+))
+def check_pin_abs_position(context, net, comp, px, py):
+    assert net  in context['nets'],  f"Net {net!r} not found"
+    assert comp in context['comps'], f"Component {comp!r} not found"
+    net_id  = context['nets'][net].id
+    comp_id = context['comps'][comp].id
+    matches = [p for p in context['pins'] if p.net_id == net_id and p.comp_id == comp_id]
+    assert matches, f"No pin for ({net!r} → {comp!r})"
+    assert matches[0].px == pytest.approx(float(px), abs=1e-6), \
+        f"Pin ({comp}).px: expected {px}, got {matches[0].px}"
+    assert matches[0].py == pytest.approx(float(py), abs=1e-6), \
+        f"Pin ({comp}).py: expected {py}, got {matches[0].py}"
+
+
+# ---------------------------------------------------------------------------
+# BudaSession CLI steps for bdb_net_mode
+# ---------------------------------------------------------------------------
+
+@given("a BudaSession with an open BDB and a two-level hierarchy")
+def session_with_bdb(context):
+    db = _make_two_level_bdb()
+    session = BudaSession()
+    session.bdb = db
+    context['db']      = db
+    context['session'] = session
+
+
+@when(parsers.re(r'I run "(?P<cmd_line>[^"]+)" through the session'))
+def step_run_session_cmd(context, cmd_line):
+    context['session'].do_command(cmd_line)
+    _refresh_pins(context)
+
+
+@then(parsers.re(r'net "(?P<name>[^"]+)" is not present in the session BDB'))
+def check_net_absent_in_bdb(context, name):
+    nets = {r.name for r in context['db'].all_nets()}
+    assert name not in nets, f"Net {name!r} should not be in BDB, but was found"
+
+
+@then(parsers.re(r'net "(?P<name>[^"]+)" exists in the session BDB'))
+def check_net_present_in_session_bdb(context, name):
+    nets = {r.name for r in context['db'].all_nets()}
+    assert name in nets, f"Net {name!r} not found in session BDB. Present: {sorted(nets)}"
+
+
+@then(parsers.re(r'the session BDB has (?P<count>\d+) pins for net "(?P<net>[^"]+)"'))
+def check_session_net_pin_count(context, count, net):
+    count = int(count)
+    nets = {r.name: r for r in context['db'].all_nets()}
+    assert net in nets, f"Net {net!r} not found"
+    net_id = nets[net].id
+    pins = [p for p in context['db'].all_pins() if p.net_id == net_id]
+    assert len(pins) == count, (
+        f"Net {net!r}: expected {count} pins, got {len(pins)}: "
+        + str([(p.comp_id, p.pin_name) for p in pins])
+    )
