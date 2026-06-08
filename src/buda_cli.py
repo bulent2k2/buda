@@ -39,6 +39,19 @@ class _TeeStream:
         return self._primary.fileno()
 
 class BudaSession:
+    def _get_log_path(self, suffix):
+        """Get the log path for a given suffix, ensuring the log directory exists."""
+        if self.script_path:
+            script_dir = os.path.dirname(self.script_path)
+            script_stem = os.path.splitext(os.path.basename(self.script_path))[0]
+            log_dir = os.path.join(script_dir, 'log')
+            os.makedirs(log_dir, exist_ok=True)
+            return os.path.join(log_dir, f"{script_stem}_{suffix}")
+        else:
+            log_dir = 'log'
+            os.makedirs(log_dir, exist_ok=True)
+            return os.path.join(log_dir, suffix)
+
     def __init__(self):
         self.fp = buda.Floorplan()
         self.netlist = buda.Netlist()
@@ -208,10 +221,7 @@ class BudaSession:
         print("; ".join(parts))
 
         # Write block names to log file
-        if self.script_path:
-            log_path = os.path.splitext(self.script_path)[0] + '_bdb_blocks.log'
-        else:
-            log_path = 'bdb_blocks.log'
+        log_path = self._get_log_path('bdb_blocks.log')
         try:
             with open(log_path, 'w') as f:
                 f.write(f"# add_blocks_from_bdb depth={depth} mode={mode}\n")
@@ -248,10 +258,7 @@ class BudaSession:
         if layer_names is None:
             layer_names = self._make_layer_names()
 
-        if self.script_path:
-            log_path = os.path.splitext(self.script_path)[0] + '_nuts.log'
-        else:
-            log_path = 'nuts.log'
+        log_path = self._get_log_path('nuts.log')
 
         details = self.nuts_result.overlap_details
         per_layer = self.nuts_result.overlaps_per_layer
@@ -1566,7 +1573,7 @@ def main():
         # Install TeeStream so all Python print() output is mirrored to a flow log.
         # C++ extensions write directly to fd 1 (terminal) and are NOT captured here;
         # their key [NUTS] metrics are mirrored into the nuts log from Python data.
-        flow_log_path = os.path.splitext(session.script_path)[0] + '_flow.log'
+        flow_log_path = session._get_log_path('flow.log')
         try:
             _flow_log_file = open(flow_log_path, 'w', buffering=1)
             sys.stdout = _TeeStream(sys.stdout, _flow_log_file)
