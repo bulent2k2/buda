@@ -20,6 +20,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin) |
 | Setup | `corner_margin` | Set global corner margin for all blocks without a per-block override |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
+| Setup | `detour_channel` | Set outer-band width for U-shape / UU-shape detour trunks per compass direction |
 | 1 | `run_bundler` | Group nets into buses |
 | 2 | `generate_topologies` | Enumerate topology candidates for **all** bundles (src/dst auto-derived) |
 | 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** bundle |
@@ -270,6 +271,89 @@ inverting the face if the block is smaller than `2 × margin`.
 ```
 corner_margin dx 8          # 8-unit margin on all faces for all blocks
 corner_margin dx 5 dy 10    # 5-unit X margin, 10-unit Y margin
+```
+
+---
+
+### `detour_channel`
+
+```
+detour_channel <dir> <size> [<dir> <size> …]
+```
+
+Set the **outer-band width** for U-shape (and UU-shape) detour trunks in the
+specified compass direction(s). Must be called before `generate_topologies` or
+`generate_topologies_for_bundle`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `dir` | str | Direction shorthand — see table below |
+| `size` | int | Outer band width in layout units. Negative value resets the direction to auto. |
+
+**Direction shorthands:**
+
+| `dir` | Directions set |
+|---|---|
+| `N` | North — above the bundle bounding box (larger Y) |
+| `S` | South — below the bundle bounding box (smaller Y) |
+| `E` | East — right of the bundle bounding box (larger X) |
+| `W` | West — left of the bundle bounding box (smaller X) |
+| `Y` | Both N and S |
+| `X` | Both E and W |
+| `A` | All four directions |
+
+Multiple `dir size` pairs may appear in one command.
+
+**Background — why this matters:**
+
+The topology generator places U-shape trunks at a distance of
+`max(min_stub_length, 0.1 × block_span)` beyond the bundle bounding box
+(default `min_stub_length` = 20 layout units). This creates an **outer band**
+in the congestion model whose capacity equals that distance.
+
+If the outer band is narrower than a bus's effective width
+(`bus_width × dilution_factor`), every U-topology candidate will overflow that
+band more severely than the direct I-shape overflows the primary channel. The
+planner then correctly — but unhelpfully — prefers the direct topology, leaving
+congestion unresolved and DetailedNUTS unable to place all bits.
+
+Setting a larger outer margin gives detour topologies a band wide enough to
+carry the bus, allowing the planner to route one bus through the main channel
+and the other through the detour at zero overflow.
+
+**Sizing rules of thumb:**
+
+| Goal | Minimum `size` |
+|---|---|
+| Abstract NUTS passes (no overflow) | `≥ max_bus_width × dilution_factor` |
+| DetailedNUTS places all bits | `≥ one full layer track-pattern unit pitch` (printed as `unit_pitch` by `[RoutingGrid]` at startup) |
+
+In practice, setting `size` to the full primary channel width (the Y or X span
+of the busiest block pair) satisfies both conditions for typical bus widths.
+
+**Notes:**
+- Calling `detour_channel` multiple times is additive: later calls override only
+  the specified directions; unspecified directions keep their previous value.
+- Negative `size` resets the named directions back to the auto heuristic.
+- The command has no effect on Z-shapes, L-shapes, I-shapes, or multicast
+  TRUNK topologies — only on U-shape and UU-shape outer trunks.
+
+**Examples:**
+```buda
+# Set both north and south outer bands to 100 units
+detour_channel Y 100
+
+# Asymmetric: wide detour above, narrow below
+detour_channel N 120  S 40
+
+# Wide detour in all directions
+detour_channel A 100
+
+# East/West detour for vertical routing channels
+detour_channel X 80
+
+# Reset south to auto
+detour_channel S -1
 ```
 
 ---
@@ -915,6 +999,15 @@ def_layer 7 M7 V TOP 0.0
 add_block u_a   0    0  100  100
 add_block u_b 200    0  300  100
 add_block u_c 200  200  300  300
+
+# ── Detour channel (optional) ───────────────────────────────
+# Set the outer-band width for U-shape detour trunks.
+# Without this, the default margin (~20 units) may be too narrow for wide
+# buses, causing the planner to prefer congested direct routes over detours.
+# Rule of thumb: use the primary-channel span or ≥ the layer unit_pitch.
+# corner_margin dx 8          # example: constrain stubs away from block corners
+# detour_channel Y 100        # 100-unit north+south outer band
+# detour_channel A 100        # 100-unit band in all four directions
 
 # ── Netlist ─────────────────────────────────────────────────
 add_net  sig0   u_a.tx  u_b.rx
