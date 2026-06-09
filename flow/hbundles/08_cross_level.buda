@@ -1,0 +1,147 @@
+# ============================================================
+# hbundles/08_cross_level.buda
+#
+# Clone of 04_deep_hierarchy.buda extended with buses that
+# intentionally connect endpoints at DIFFERENT hierarchy depths
+# (cross-level buses).  Tests the HierarchicalBundler's ability
+# to classify and route nets where driver and receiver terminate
+# at different levels of the cell hierarchy.
+#
+# Same cell structure and floorplan as 04:
+#   chip_cell  400×500  (depth 0, 2 instances: left, right)
+#   blk_cell   180×230  (depth 1, 2 per chip: top, bot)
+#   leaf_cell   70×130  (depth 2, 2 per blk: lo, hi)
+#
+# Absolute block positions (same as 04):
+#   left  (0,0)–(400,500)    left/top   (10,260)–(190,490)
+#                              left/bot   (10, 10)–(190,240)
+#   right (450,0)–(850,500)  right/top  (460,260)–(640,490)
+#                              right/bot  (460, 10)–(640,240)
+#   Leaves (lo=left half, hi=right half within each blk):
+#     left/top/lo  ( 20,310)–( 90,440)   left/top/hi  (100,310)–(170,440)
+#     left/bot/lo  ( 20, 60)–( 90,190)   left/bot/hi  (100, 60)–(170,190)
+#     right/top/lo (470,310)–(540,440)  right/top/hi  (550,310)–(620,440)
+#     right/bot/lo (470, 60)–(540,190)  right/bot/hi  (550, 60)–(620,190)
+#
+# Buses:
+#
+#   Same-level buses (from 04, unchanged):
+#     x_top      left/top/hi  → right/top/lo    D0 cross-chip, leaf→leaf
+#     x_bot      left/bot/hi  → right/bot/lo    D0 cross-chip, leaf→leaf
+#     l_tb       left/top/lo  → left/bot/hi     D1 intra-chip, leaf→leaf
+#     b_lohi_*   lo           → hi              D2 intra-blk,  leaf→leaf  (×4)
+#
+#   Cross-level buses (new, D1 blk ↔ D2 leaf):
+#     xl_b2l_ht  left/top     → right/top/lo    blk→leaf, cross-chip, horizontal top
+#     xl_b2l_hb  left/bot     → right/bot/lo    blk→leaf, cross-chip, horizontal bot
+#     xl_l2b_dt  right/top/hi → left/bot        leaf→blk, cross-chip, diagonal (top-R→bot-L)
+#     xl_l2b_db  right/bot/hi → left/top        leaf→blk, cross-chip, anti-diag (bot-R→top-L)
+#     xl_ic_b2l  left/top     → left/bot/lo     blk→leaf, intra-chip, downward
+#     xl_ic_l2b  left/bot/hi  → left/top        leaf→blk, intra-chip, upward
+#
+#   Extreme cross-level buses (D0 chip ↔ D2 leaf):
+#     xl_c2l     left         → right/bot/hi    chip→leaf, cross-chip
+#     xl_l2c     right/top/hi → right           leaf→chip, intra-right-chip
+#
+# Pipeline result (observed):
+#   15 HBundles (D0:2 D1:6 D2:7), 69 candidates, 18 expanded wrappers
+#   25 segments placed; 0 NUTS overlaps
+#   check_connectivity: Success — no opens found
+#
+#   Bundler cross-level classification:
+#     D0 bundle 1 (left→right): absorbs xl_b2l_ht, xl_b2l_hb, xl_c2l alongside x_top/x_bot
+#     D0 bundle 2 (right→left): xl_l2b_dt, xl_l2b_db, xl_l2c
+#     D1 (cell:chip_cell): xl_ic_b2l and xl_ic_l2b produce new intra-chip bundles
+#       alongside the original l_tb; bundler correctly detects the shared
+#       blk↔leaf pattern as a cell-level template (top↔bot within chip_cell)
+#
+# ============================================================
+
+source ../tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── BDB: cell sizes ────────────────────────────────────────
+open_bdb :memory:
+
+add_cell chip_cell  400 500
+add_cell blk_cell   180 230
+add_cell leaf_cell   70 130
+
+# ── BDB: cell hierarchy ────────────────────────────────────
+add_inst_to_cell  chip_cell  top   blk_cell   10  260
+add_inst_to_cell  chip_cell  bot   blk_cell   10   10
+
+add_inst_to_cell  blk_cell   lo    leaf_cell  10   50
+add_inst_to_cell  blk_cell   hi    leaf_cell  90   50
+
+# ── BDB: place top-level instances ────────────────────────
+add_inst left   chip_cell  -     0    0
+add_inst right  chip_cell  -   450    0
+
+# ── Derive busterms (all three levels) ────────────────────
+derive_busterms 2
+
+# ── Populate floorplan with blocks at all routing levels ───
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+# ── Buses (written to BDB) ─────────────────────────────────
+bdb_net_mode on
+
+# ── Same-level buses (from 04, unchanged) ──────────────────
+
+# Depth-0 cross-chip buses (leaf→leaf)
+add_bus x_top[4]   left/top/hi.out   right/top/lo.in
+add_bus x_bot[4]   left/bot/hi.out   right/bot/lo.in
+
+# Depth-1 intra-chip bus (leaf→leaf, top to bot)
+add_bus l_tb[4]    left/top/lo.out   left/bot/hi.in
+
+# Depth-2 intra-blk buses (leaf→leaf, lo to hi — all 4 blk instances)
+add_bus b_lohi_lt[4]  left/top/lo.out    left/top/hi.in
+add_bus b_lohi_lb[4]  left/bot/lo.out    left/bot/hi.in
+add_bus b_lohi_rt[4]  right/top/lo.out   right/top/hi.in
+add_bus b_lohi_rb[4]  right/bot/lo.out   right/bot/hi.in
+
+# ── Cross-level buses: D1 blk ↔ D2 leaf ───────────────────
+# These have one endpoint at blk depth (depth 1) and the other
+# at leaf depth (depth 2), testing the bundler's handling of
+# mixed-depth endpoint classification.
+
+# blk→leaf, cross-chip (left blk drives right leaf)
+add_bus xl_b2l_ht[4]  left/top.out      right/top/lo.in   # horizontal, top row
+add_bus xl_b2l_hb[4]  left/bot.out      right/bot/lo.in   # horizontal, bot row
+
+# leaf→blk, cross-chip (right leaf drives left blk input)
+add_bus xl_l2b_dt[4]  right/top/hi.out  left/bot.in       # diagonal  (top-R → bot-L)
+add_bus xl_l2b_db[4]  right/bot/hi.out  left/top.in       # anti-diag (bot-R → top-L)
+
+# blk→leaf, intra-chip (within left: top blk drives bot leaf)
+add_bus xl_ic_b2l[4]  left/top.out      left/bot/lo.in    # downward
+
+# leaf→blk, intra-chip (within left: bot leaf drives top blk input)
+add_bus xl_ic_l2b[4]  left/bot/hi.out   left/top.in       # upward
+
+# ── Extreme cross-level buses: D0 chip ↔ D2 leaf ──────────
+# Chip-boundary endpoint paired with a leaf endpoint —
+# the most distant combination in the three-level hierarchy.
+
+# chip→leaf, cross-chip (left chip-level output to right leaf)
+add_bus xl_c2l[4]     left.out          right/bot/hi.in
+
+# leaf→chip, intra-chip (right leaf feeds right chip-level input)
+add_bus xl_l2c[4]     right/top/hi.out  right.in
+
+# ── HBundle pipeline ───────────────────────────────────────
+run_hier_bundler depth 2
+
+generate_hier_topologies
+
+run_planner hier 5
+
+run_nuts
+
+check_connectivity nuts
