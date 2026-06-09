@@ -363,8 +363,26 @@ class TopologyExplorer:
         def clamp_x(v): return x_lo_v if v < -_UNCONSTRAINED else (x_hi_v if v > _UNCONSTRAINED else v)
         def clamp_y(v): return y_lo_v if v < -_UNCONSTRAINED else (y_hi_v if v > _UNCONSTRAINED else v)
 
-        for raw_seg, cs in zip(topo.segments, ct.segs()):
+        cs_list = list(ct.segs())
+        cs_map  = {j: cs_list[j] for j in range(len(cs_list))}
+
+        for raw_seg, cs in zip(topo.segments, cs_list):
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
+
+            # Extend the along range to cover the perp intervals of perpendicular
+            # stubs connected at our endpoints.  A trunk's band should span the
+            # full distance the trunk may need to reach, not just its nominal span.
+            ext_lo, ext_hi = cs.along_lo, cs.along_hi
+            for conn in cs.conns:
+                if conn.kind != ic.SegConnKind.SEG or not conn.is_endpoint:
+                    continue
+                other = cs_map.get(conn.seg_idx)
+                if other is None or other.horiz == cs.horiz:
+                    continue  # same-direction connection — skip
+                if abs(other.perp_lo) < _UNCONSTRAINED:
+                    ext_lo = min(ext_lo, other.perp_lo)
+                if abs(other.perp_hi) < _UNCONSTRAINED:
+                    ext_hi = max(ext_hi, other.perp_hi)
 
             if cs.horiz:
                 band_y0 = clamp_y(cs.perp_lo)
@@ -372,13 +390,13 @@ class TopologyExplorer:
                 if band_y0 >= band_y1:
                     continue
                 ax.add_patch(patches.Rectangle(
-                    (cs.along_lo, band_y0), cs.along_hi - cs.along_lo, band_y1 - band_y0,
+                    (ext_lo, band_y0), ext_hi - ext_lo, band_y1 - band_y0,
                     linewidth=0, facecolor=col, alpha=0.10, zorder=3))
                 for y_b, label in ((cs.perp_lo, 'lo'), (cs.perp_hi, 'hi')):
                     if abs(y_b) < _UNCONSTRAINED:
-                        ax.plot([cs.along_lo, cs.along_hi], [y_b, y_b],
+                        ax.plot([ext_lo, ext_hi], [y_b, y_b],
                                 color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
-                        ax.text((cs.along_lo + cs.along_hi) / 2, y_b, f' {y_b}',
+                        ax.text((ext_lo + ext_hi) / 2, y_b, f' {y_b}',
                                 fontsize=6, color=col, va='bottom' if label == 'lo' else 'top',
                                 ha='center', zorder=5, alpha=0.85)
             else:
@@ -387,13 +405,13 @@ class TopologyExplorer:
                 if band_x0 >= band_x1:
                     continue
                 ax.add_patch(patches.Rectangle(
-                    (band_x0, cs.along_lo), band_x1 - band_x0, cs.along_hi - cs.along_lo,
+                    (band_x0, ext_lo), band_x1 - band_x0, ext_hi - ext_lo,
                     linewidth=0, facecolor=col, alpha=0.10, zorder=3))
                 for x_b, label in ((cs.perp_lo, 'lo'), (cs.perp_hi, 'hi')):
                     if abs(x_b) < _UNCONSTRAINED:
-                        ax.plot([x_b, x_b], [cs.along_lo, cs.along_hi],
+                        ax.plot([x_b, x_b], [ext_lo, ext_hi],
                                 color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
-                        ax.text(x_b, (cs.along_lo + cs.along_hi) / 2, f' {x_b}',
+                        ax.text(x_b, (ext_lo + ext_hi) / 2, f' {x_b}',
                                 fontsize=6, color=col, va='center',
                                 ha='left' if label == 'lo' else 'right', zorder=5, alpha=0.85)
 
