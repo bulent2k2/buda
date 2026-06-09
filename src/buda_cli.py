@@ -284,6 +284,76 @@ class BudaSession:
         except (ValueError, IndexError):
             return None, []
 
+    @staticmethod
+    def _offset_topology(topo, dx, dy):
+        """Return a new Topology with every segment shifted by (dx, dy)."""
+        new_t = buda.Topology()
+        new_t.type                  = topo.type
+        new_t.estimated_wirelength  = topo.estimated_wirelength
+        new_t.trunk_location        = topo.trunk_location   # metadata only; not transformed
+        new_t.pass_through_count    = topo.pass_through_count
+        new_t.connected_block_names = topo.connected_block_names
+        new_segs = []
+        for s in topo.segments:
+            ns = buda.Segment()
+            ns.start      = buda.Point(s.start.x + dx, s.start.y + dy)
+            ns.end        = buda.Point(s.end.x   + dx, s.end.y   + dy)
+            ns.layer_hint = s.layer_hint
+            new_segs.append(ns)
+        new_t.segments = new_segs
+        return new_t
+
+    @staticmethod
+    def _clone_hbundle_with_id(b, new_id):
+        """Return a shallow clone of HBundle b with id replaced by new_id."""
+        nb = buda.HBundle()
+        nb.id                = new_id
+        nb.net_names         = b.net_names
+        nb.reason            = b.reason
+        nb.num_terminals     = b.num_terminals
+        nb.level             = b.level
+        nb.cell_context      = b.cell_context
+        nb.instances         = b.instances
+        nb.parent_id         = b.parent_id
+        nb.child_ids         = b.child_ids
+        nb.entry_busterm_ids = b.entry_busterm_ids
+        nb.exit_busterm_ids  = b.exit_busterm_ids
+        return nb
+
+    def _expand_hier_bundles(self, bundles):
+        """Expand cell-level BundleWrappers to per-instance absolute-coord wrappers.
+
+        Cross-block bundles are kept as-is (candidates already absolute).
+        Cell-level bundles (cell_context set) are replaced by one wrapper
+        per entry in b.instances, each with candidates offset to that
+        instance's absolute position.  Each expanded wrapper gets a unique
+        HBundle ID so assignment matching is unambiguous.
+        """
+        comps = {c.name: c for c in self.bdb.all_components()}
+        # Start synthetic IDs above any real bundle ID in the set.
+        max_id = max((w.original_bundle.id for w in bundles), default=-1)
+        next_id = max_id + 1
+        result = []
+        for w in bundles:
+            b = w.original_bundle
+            if not b.cell_context or not b.instances:
+                result.append(w)
+                continue
+            for inst_name in b.instances:
+                parent = comps.get(inst_name)
+                if parent is None:
+                    continue
+                dx = int(round(parent.x1))
+                dy = int(round(parent.y1))
+                new_w = buda.BundleWrapper()
+                new_w.original_bundle = self._clone_hbundle_with_id(b, next_id)
+                next_id += 1
+                new_w.width = w.width
+                new_w.candidates = [self._offset_topology(t, dx, dy)
+                                    for t in w.candidates]
+                result.append(new_w)
+        return result
+
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False):
         """Create a TopologyGenerator on fp with the current layer stack."""
         tg = buda.TopologyGenerator(fp)
@@ -1260,6 +1330,40 @@ class BudaSession:
                 if v_thresholds is None and h_thresholds is None:
                     v_thresholds = _V_DEFAULTS
                 self._run_post_nuts_planner(v_thresholds, h_thresholds)
+            elif args and args[0] == "hier":
+                # run_planner hier [N]
+                # Hierarchy-aware planning: expand cell-level bundles to per-instance
+                # absolute-coord wrappers, assign priorities, then run the flat planner.
+                if self.bdb is None:
+                    print("Error: run_planner hier requires an open BDB"); return
+                iterations = int(args[1]) if len(args) > 1 else 5
+                # Expand cell-level bundles → per-instance absolute-coord wrappers.
+                # Each expanded wrapper gets a unique HBundle ID.
+                expanded = self._expand_hier_bundles(self.bundles)
+                # priority = -(level * 10000 + n_candidates): higher routes first.
+                # Depth-0 before depth-1; fewer candidates (less flexibility) first.
+                for w in expanded:
+                    b = w.original_bundle
+                    w.priority = -(b.level * 10_000 + len(w.candidates))
+                self.planner = buda.CongestionPlanner(self.fp, self.layers)
+                for pname, pval in self._planner_params.items():
+                    self.planner.set_planner_param(pname, pval)
+                self.planner.build_congestion_map()
+                self._planner_iterations = iterations
+                with buda.ostream_redirect():
+                    assignments = self.planner.optimize_topologies(expanded, iterations)
+                # Apply assignments.  Each expanded wrapper has a unique HBundle ID so
+                # this lookup is unambiguous even for multiple cell instances.
+                bid_to_wrapper = {w.original_bundle.id: w for w in expanded}
+                for asn in assignments:
+                    w = bid_to_wrapper.get(asn.bundle_id)
+                    if w is not None:
+                        w.selected_topology_index = asn.topo_index
+                        w.assigned_v_layer = asn.v_layer_id
+                        w.assigned_h_layer = asn.h_layer_id
+                        w.seg_layers = list(asn.seg_layers)
+                self.bundles = expanded
+                print(f"run_planner hier: {len(self.bundles)} wrappers after expansion")
             else:
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():

@@ -349,10 +349,13 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
     auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
 
-    // Process widest buses first so they claim the best paths early.
+    // Sort: higher priority first (depth-0 before depth-1, constrained first);
+    // within the same priority, process widest buses first.
     std::vector<int> order(bundles.size());
     std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(), [&](int a, int b) {
+        if (bundles[a].priority != bundles[b].priority)
+            return bundles[a].priority > bundles[b].priority;
         return bundles[a].width > bundles[b].width;
     });
 
