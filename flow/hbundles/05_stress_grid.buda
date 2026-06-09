@@ -1,0 +1,218 @@
+# ============================================================
+# hbundles/05_stress_grid.buda
+#
+# Stress test: 3×2 grid of blk_cell instances exercising the
+# full HBundle pipeline at three hierarchy levels with a rich
+# mix of bus shapes, widths, and multicast fans.
+#
+# Cell structure (same geometry as hier_bundle2.buda):
+#   blk_cell  300×230  — top-level (6 instances: u1..u6)
+#   sub_cell  120× 90  — 4 per blk: s1(15,15) s2(155,15)
+#                                    s3(15,125) s4(155,125)
+#   leaf_cell  45× 50  — 2 per sub: l(10,20)  r(65,20)
+#
+# Floorplan (50-unit gutters between blk cells):
+#
+#   col →      C0 (x= 50)   C1 (x=400)   C2 (x=750)
+#   row 0      u1            u2            u3
+#   (y= 50)    (50,50)       (400,50)      (750,50)
+#              -(350,280)    -(700,280)    -(1050,280)
+#
+#   row 1      u4            u5            u6
+#   (y=330)    (50,330)      (400,330)     (750,330)
+#              -(350,560)    -(700,560)    -(1050,560)
+#
+# Buses by depth:
+#
+#   Depth-0 — 13 cross-blk bundles (mix of 8-bit and 4-bit):
+#     Horizontal row 0:  h01 u1→u2   h02 u2→u3
+#     Horizontal row 1:  h03 u4→u5   h04 u5→u6
+#     Vertical cols:     v01 u1→u4   v02 u2→u5   v03 u3→u6
+#     Diagonal skip:     d01 u1→u5   d02 u2→u6
+#     Long diagonal:     d03 u1→u6
+#     Multicast fans:    fan_r  u1→{u2,u3}
+#                        fan_d  u1→{u4,u5}
+#                        cross  u3→{u4,u6}
+#
+#   Depth-1 — 4 cell-level bundles on blk_cell (6 instances each
+#             → 24 expanded wrappers after run_planner hier):
+#     ib_s1s2  s1/r → s2/l   (H, top sub pair)
+#     ib_s3s4  s3/r → s4/l   (H, bottom sub pair)
+#     ib_s1s3  s1/l → s3/l   (V, left sub pair)
+#     ib_s2s4  s2/r → s4/r   (V, right sub pair)
+#
+#   Depth-2 — 1 cell-level bundle on sub_cell (24 instances
+#             → 24 expanded wrappers after run_planner hier):
+#     is_lr    l.out → r.in  (H within sub, leaf-to-leaf)
+#
+# Expected HBundle counts after run_hier_bundler depth 2:
+#   D0:  13 bundles  (one per distinct cross-blk connection)
+#   D1:  37 bundles  (4 cell-level on blk_cell + 33 absolute sub-level
+#                     connections produced by the D0 buses)
+#   D2:  61 bundles  (1 cell-level on sub_cell + leaf-level connections
+#                     from D0/D1 buses resolved at depth 2)
+#   Total: 111 bundles, ~505 topology candidates
+#
+# Expanded wrappers after run_planner hier: ~154
+# ============================================================
+
+source ../tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── BDB: cell sizes ────────────────────────────────────────
+open_bdb :memory:
+
+add_cell blk_cell   300 230
+add_cell sub_cell   120  90
+add_cell leaf_cell   45  50
+
+# ── BDB: cell hierarchy ────────────────────────────────────
+add_inst_to_cell  blk_cell  s1   sub_cell   15   15
+add_inst_to_cell  blk_cell  s2   sub_cell  155   15
+add_inst_to_cell  blk_cell  s3   sub_cell   15  125
+add_inst_to_cell  blk_cell  s4   sub_cell  155  125
+
+add_inst_to_cell  sub_cell  l    leaf_cell  10   20
+add_inst_to_cell  sub_cell  r    leaf_cell  65   20
+
+# ── BDB: place top-level instances (3-col × 2-row grid) ────
+add_inst u1  blk_cell  -    50   50
+add_inst u2  blk_cell  -   400   50
+add_inst u3  blk_cell  -   750   50
+add_inst u4  blk_cell  -    50  330
+add_inst u5  blk_cell  -   400  330
+add_inst u6  blk_cell  -   750  330
+
+# ── Derive busterms (all three levels) ────────────────────
+derive_busterms 2
+
+# ── Populate floorplan with blocks at all routing levels ───
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+# ── Buses (written to BDB) ─────────────────────────────────
+bdb_net_mode on
+
+# ── Depth-0: cross-blk buses ───────────────────────────────
+# Each (src_blk, dst_blk) pair forms a separate D0 HBundle.
+# Pin suffixes encode direction; leaf component determines depth.
+
+# Row-0 horizontal neighbours (left → right)
+add_bus h01[8]   u1/s2/r.out   u2/s1/l.in
+add_bus h02[8]   u2/s2/r.out   u3/s1/l.in
+
+# Row-1 horizontal neighbours
+add_bus h03[8]   u4/s2/r.out   u5/s1/l.in
+add_bus h04[8]   u5/s2/r.out   u6/s1/l.in
+
+# Column verticals (top → bottom)
+add_bus v01[8]   u1/s3/l.out   u4/s1/l.in
+add_bus v02[8]   u2/s3/l.out   u5/s1/l.in
+add_bus v03[8]   u3/s3/l.out   u6/s1/l.in
+
+# One-hop diagonal skips (row 0 → row 1, skip one column)
+add_bus d01[4]   u1/s4/r.out   u5/s3/l.in
+add_bus d02[4]   u2/s4/r.out   u6/s3/l.in
+
+# Long diagonal (corner to corner: u1 → u6)
+add_bus d03[4]   u1/s4/l.out   u6/s3/r.in
+
+# Multicast fans
+add_bus fan_r[4]  u1/s1/r.out   u2/s2/l.in,u3/s2/l.in   # u1 → right row
+add_bus fan_d[4]  u1/s3/r.out   u4/s2/r.in,u5/s2/r.in   # u1 → below + diagonal
+add_bus cross[4]  u3/s1/l.out   u4/s2/l.in,u6/s1/r.in   # u3 → cross-lane
+
+# ── Depth-1: intra-blk buses (cell-level on blk_cell) ─────
+# Same local topology replicated across all 6 blk instances.
+# The HierarchicalBundler merges these into 4 cell-level
+# HBundles with instances=[u1,u2,u3,u4,u5,u6].
+
+# ib_s1s2: s1 right-leaf → s2 left-leaf (horizontal, top sub pair)
+add_bus ib_s1s2_u1[4]  u1/s1/r.out  u1/s2/l.in
+add_bus ib_s1s2_u2[4]  u2/s1/r.out  u2/s2/l.in
+add_bus ib_s1s2_u3[4]  u3/s1/r.out  u3/s2/l.in
+add_bus ib_s1s2_u4[4]  u4/s1/r.out  u4/s2/l.in
+add_bus ib_s1s2_u5[4]  u5/s1/r.out  u5/s2/l.in
+add_bus ib_s1s2_u6[4]  u6/s1/r.out  u6/s2/l.in
+
+# ib_s3s4: s3 right-leaf → s4 left-leaf (horizontal, bottom sub pair)
+add_bus ib_s3s4_u1[4]  u1/s3/r.out  u1/s4/l.in
+add_bus ib_s3s4_u2[4]  u2/s3/r.out  u2/s4/l.in
+add_bus ib_s3s4_u3[4]  u3/s3/r.out  u3/s4/l.in
+add_bus ib_s3s4_u4[4]  u4/s3/r.out  u4/s4/l.in
+add_bus ib_s3s4_u5[4]  u5/s3/r.out  u5/s4/l.in
+add_bus ib_s3s4_u6[4]  u6/s3/r.out  u6/s4/l.in
+
+# ib_s1s3: s1 left-leaf → s3 left-leaf (vertical, left sub column)
+add_bus ib_s1s3_u1[4]  u1/s1/l.out  u1/s3/l.in
+add_bus ib_s1s3_u2[4]  u2/s1/l.out  u2/s3/l.in
+add_bus ib_s1s3_u3[4]  u3/s1/l.out  u3/s3/l.in
+add_bus ib_s1s3_u4[4]  u4/s1/l.out  u4/s3/l.in
+add_bus ib_s1s3_u5[4]  u5/s1/l.out  u5/s3/l.in
+add_bus ib_s1s3_u6[4]  u6/s1/l.out  u6/s3/l.in
+
+# ib_s2s4: s2 right-leaf → s4 right-leaf (vertical, right sub column)
+add_bus ib_s2s4_u1[4]  u1/s2/r.out  u1/s4/r.in
+add_bus ib_s2s4_u2[4]  u2/s2/r.out  u2/s4/r.in
+add_bus ib_s2s4_u3[4]  u3/s2/r.out  u3/s4/r.in
+add_bus ib_s2s4_u4[4]  u4/s2/r.out  u4/s4/r.in
+add_bus ib_s2s4_u5[4]  u5/s2/r.out  u5/s4/r.in
+add_bus ib_s2s4_u6[4]  u6/s2/r.out  u6/s4/r.in
+
+# ── Depth-2: intra-sub buses (cell-level on sub_cell) ──────
+# Same local topology (l → r) replicated across all 24 sub
+# instances.  Merged into 1 cell-level HBundle with 24 entries
+# in instances[]; expanded to 24 per-instance wrappers.
+
+add_bus is_lr_u1s1[2]  u1/s1/l.out  u1/s1/r.in
+add_bus is_lr_u1s2[2]  u1/s2/l.out  u1/s2/r.in
+add_bus is_lr_u1s3[2]  u1/s3/l.out  u1/s3/r.in
+add_bus is_lr_u1s4[2]  u1/s4/l.out  u1/s4/r.in
+
+add_bus is_lr_u2s1[2]  u2/s1/l.out  u2/s1/r.in
+add_bus is_lr_u2s2[2]  u2/s2/l.out  u2/s2/r.in
+add_bus is_lr_u2s3[2]  u2/s3/l.out  u2/s3/r.in
+add_bus is_lr_u2s4[2]  u2/s4/l.out  u2/s4/r.in
+
+add_bus is_lr_u3s1[2]  u3/s1/l.out  u3/s1/r.in
+add_bus is_lr_u3s2[2]  u3/s2/l.out  u3/s2/r.in
+add_bus is_lr_u3s3[2]  u3/s3/l.out  u3/s3/r.in
+add_bus is_lr_u3s4[2]  u3/s4/l.out  u3/s4/r.in
+
+add_bus is_lr_u4s1[2]  u4/s1/l.out  u4/s1/r.in
+add_bus is_lr_u4s2[2]  u4/s2/l.out  u4/s2/r.in
+add_bus is_lr_u4s3[2]  u4/s3/l.out  u4/s3/r.in
+add_bus is_lr_u4s4[2]  u4/s4/l.out  u4/s4/r.in
+
+add_bus is_lr_u5s1[2]  u5/s1/l.out  u5/s1/r.in
+add_bus is_lr_u5s2[2]  u5/s2/l.out  u5/s2/r.in
+add_bus is_lr_u5s3[2]  u5/s3/l.out  u5/s3/r.in
+add_bus is_lr_u5s4[2]  u5/s4/l.out  u5/s4/r.in
+
+add_bus is_lr_u6s1[2]  u6/s1/l.out  u6/s1/r.in
+add_bus is_lr_u6s2[2]  u6/s2/l.out  u6/s2/r.in
+add_bus is_lr_u6s3[2]  u6/s3/l.out  u6/s3/r.in
+add_bus is_lr_u6s4[2]  u6/s4/l.out  u6/s4/r.in
+
+# ── HBundle pipeline ───────────────────────────────────────
+# Phase C: group nets into HBundles at depths 0, 1, and 2
+run_hier_bundler depth 2
+
+# Phase D: generate topology candidates
+#   D0 bundles: absolute floorplan candidates (L/Z/U shapes)
+#   D1 bundles: cell-local blk_cell candidates
+#   D2 bundles: cell-local sub_cell candidates
+generate_hier_topologies
+
+# Phase E: expand cell-level templates to per-instance wrappers
+#   then route: D0 first, D1 next, D2 last;
+#   within each depth, fewer-candidate bundles routed first
+run_planner hier 5
+
+# Abstract track placement across all 61 expanded wrappers
+run_nuts
+
+check_connectivity nuts
