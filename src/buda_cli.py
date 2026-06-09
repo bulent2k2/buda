@@ -351,6 +351,15 @@ class BudaSession:
                 new_w.width = w.width
                 new_w.candidates = [self._offset_topology(t, dx, dy)
                                     for t in w.candidates]
+                # Rewrite cell-local block names to absolute paths so that
+                # ConnTopology can look them up in the global floorplan.
+                # Cell-local names have no "/" (e.g. "pa_i"); absolute names
+                # already contain the hierarchy separator.
+                for topo in new_w.candidates:
+                    topo.connected_block_names = [
+                        inst_name + "/" + n if "/" not in n else n
+                        for n in topo.connected_block_names
+                    ]
                 result.append(new_w)
         return result
 

@@ -1,0 +1,106 @@
+# ============================================================
+# hbundles/01_pipeline_hier.buda
+#
+# Minimal end-to-end test of the full HBundle pipeline:
+#
+#   run_hier_bundler  →  generate_hier_topologies
+#                     →  run_planner hier
+#                     →  run_nuts
+#
+# Design:  src_i  →  proc_i  →  snk_i
+#
+#   depth-0 blocks (top-level instances):
+#     src_i   src_cell  200×200   (  50,  50)–( 250, 250)
+#     proc_i  proc_cell 420×200   ( 350,  50)–( 770, 250)
+#     snk_i   snk_cell  200×200   ( 870,  50)–(1070, 250)
+#
+#   depth-1 leaf cells (routing endpoints):
+#     src_i/buf_i    buf_cell    80×80
+#     proc_i/pa_i    pipe_cell  110×80
+#     proc_i/pb_i    pipe_cell  110×80
+#     proc_i/pc_i    pipe_cell  110×80
+#     snk_i/rcv_i    rcv_cell    80×80
+#
+#   Buses (4 × 8 bits):
+#     s2p    src_i/buf_i  → proc_i/pa_i     cross-block (depth-0)
+#     pa_pb  proc_i/pa_i  → proc_i/pb_i     intra-proc  (depth-1, cell-level)
+#     pb_pc  proc_i/pb_i  → proc_i/pc_i     intra-proc  (depth-1, cell-level)
+#     p2s    proc_i/pc_i  → snk_i/rcv_i     cross-block (depth-0)
+#
+# Expected behaviour:
+#   · run_hier_bundler → 4 HBundles (D0: s2p, p2s; D1: pa_pb, pb_pc)
+#   · pa_pb and pb_pc get cell_context="proc_cell"
+#   · generate_hier_topologies → intra-cell bundles use cell-local floorplan;
+#     cross-block bundles use depth-0 floorplan
+#   · run_planner hier → D0 bundles routed first; D1 bundles after,
+#     with fewer-candidate bundles prioritised
+#   · run_nuts → track positions assigned for all selected segments
+# ============================================================
+
+source ../tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── BDB: cell sizes ────────────────────────────────────────
+open_bdb :memory:
+
+add_cell src_cell    200 200
+add_cell proc_cell   420 200
+add_cell snk_cell    200 200
+add_cell gen_cell     80  80
+add_cell buf_cell     80  80
+add_cell pipe_cell   110  80
+add_cell rcv_cell     80  80
+add_cell store_cell   80  80
+
+# ── BDB: cell hierarchy ────────────────────────────────────
+add_inst_to_cell src_cell  gen_i    gen_cell    20  60
+add_inst_to_cell src_cell  buf_i    buf_cell   100  60
+
+add_inst_to_cell proc_cell pa_i     pipe_cell   20  60
+add_inst_to_cell proc_cell pb_i     pipe_cell  155  60
+add_inst_to_cell proc_cell pc_i     pipe_cell  290  60
+
+add_inst_to_cell snk_cell  rcv_i    rcv_cell    20  60
+add_inst_to_cell snk_cell  store_i  store_cell 100  60
+
+# ── BDB: place top-level instances ────────────────────────
+add_inst src_i   src_cell  -    50  50
+add_inst proc_i  proc_cell -   350  50
+add_inst snk_i   snk_cell  -   870  50
+
+# ── Derive busterms (depth 0 and 1) ───────────────────────
+derive_busterms 1
+
+# ── Populate floorplan with blocks at all routing levels ───
+# depth-0 blocks: needed by D0 cross-block topology candidates
+# depth-1 blocks: needed by D1 cross-block and expanded cell-level candidates
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+# ── Buses written to BDB ───────────────────────────────────
+bdb_net_mode on
+
+add_bus s2p[8]    src_i/buf_i.out    proc_i/pa_i.in
+add_bus pa_pb[8]  proc_i/pa_i.out   proc_i/pb_i.in
+add_bus pb_pc[8]  proc_i/pb_i.out   proc_i/pc_i.in
+add_bus p2s[8]    proc_i/pc_i.out   snk_i/rcv_i.in
+
+# ── HBundle pipeline ───────────────────────────────────────
+# Phase C: group nets into hierarchy-aware bundles
+run_hier_bundler depth 1
+
+# Phase D: generate topology candidates (cell-local for intra-cell,
+#          depth-0 absolute for cross-block)
+generate_hier_topologies
+
+# Phase E: hierarchy-aware planning — depth-0 first, constraint-first
+#          ordering within each depth; expand cell-level bundles to
+#          per-instance absolute-coordinate wrappers
+run_planner hier 5
+
+# Abstract track placement
+run_nuts
+
+check_connectivity nuts
