@@ -327,24 +327,21 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
                 // Spread Z_HVH
                 int sy_hi = src.y2; int sy_lo = src.y1;
                 int dy_hi = dst.y2; int dy_lo = dst.y1;
-                int h1_len = x_cut - sx;
-                int ovlp   = h1_len / 20;
-                if (ovlp == 0) ovlp = (h1_len >= 0 ? 1 : -1);
 
                 if (std::abs(x_cut - s_orig.face_x(x_cut)) >= m_h &&
                     std::abs(x_cut - d_orig.face_x(x_cut)) >= m_h) {
                     if (sy_hi != dy_lo) {
                         Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut) + "@y" + std::to_string(sy_hi);
-                        z.segments.push_back(make_seg(s_orig.face_x(x_cut), sy_hi, x_cut + ovlp, sy_hi, h_layer_));
-                        z.segments.push_back(make_seg(x_cut,        sy_hi, x_cut,        dy_lo, v_layer_));
-                        z.segments.push_back(make_seg(x_cut - ovlp, dy_lo, d_orig.face_x(x_cut), dy_lo, h_layer_));
+                        z.segments.push_back(make_seg(s_orig.face_x(x_cut), sy_hi, x_cut, sy_hi, h_layer_));
+                        z.segments.push_back(make_seg(x_cut, sy_hi, x_cut, dy_lo, v_layer_));
+                        z.segments.push_back(make_seg(x_cut, dy_lo, d_orig.face_x(x_cut), dy_lo, h_layer_));
                         results.push_back(z);
                     }
                     if (sy_lo != dy_hi) {
                         Topology z; z.type = "Z_HVH@x" + std::to_string(x_cut) + "@y" + std::to_string(sy_lo);
-                        z.segments.push_back(make_seg(s_orig.face_x(x_cut), sy_lo, x_cut + ovlp, sy_lo, h_layer_));
-                        z.segments.push_back(make_seg(x_cut,        sy_lo, x_cut,        dy_hi, v_layer_));
-                        z.segments.push_back(make_seg(x_cut - ovlp, dy_hi, d_orig.face_x(x_cut), dy_hi, h_layer_));
+                        z.segments.push_back(make_seg(s_orig.face_x(x_cut), sy_lo, x_cut, sy_lo, h_layer_));
+                        z.segments.push_back(make_seg(x_cut, sy_lo, x_cut, dy_hi, v_layer_));
+                        z.segments.push_back(make_seg(x_cut, dy_hi, d_orig.face_x(x_cut), dy_hi, h_layer_));
                         results.push_back(z);
                     }
                 }
@@ -376,9 +373,6 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
             } else if (use_busterm_ && sy != y_cut && y_cut != dy) {
                 // Spread Z_VHV
                 int vx_hi = src.x2; int vx_lo = src.x1;
-                int v1_len = y_cut - sy;
-                int ovlp   = v1_len / 20;
-                if (ovlp == 0) ovlp = (v1_len >= 0 ? 1 : -1);
 
                 if (std::abs(y_cut - s_orig.face_y(y_cut)) >= m_v &&
                     std::abs(y_cut - d_orig.face_y(y_cut)) >= m_v) {
@@ -389,9 +383,9 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
                         // Reject: dst stub must land within dst's x-range
                         if (x2 < d_orig.x1 || x2 > d_orig.x2) continue;
                         Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut) + "@x" + std::to_string(x1);
-                        z.segments.push_back(make_seg(x1, s_orig.face_y(y_cut), x1, y_cut + ovlp, v_layer_));
-                        z.segments.push_back(make_seg(x1, y_cut,        x2, y_cut,        h_layer_));
-                        z.segments.push_back(make_seg(x2, y_cut - ovlp, x2, d_orig.face_y(y_cut), v_layer_));
+                        z.segments.push_back(make_seg(x1, s_orig.face_y(y_cut), x1, y_cut, v_layer_));
+                        z.segments.push_back(make_seg(x1, y_cut, x2, y_cut, h_layer_));
+                        z.segments.push_back(make_seg(x2, y_cut, x2, d_orig.face_y(y_cut), v_layer_));
                         results.push_back(z);
                     }
                 }
