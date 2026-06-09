@@ -43,17 +43,22 @@
 #     xl_c2l     left         → right/bot/hi    chip→leaf, cross-chip
 #     xl_l2c     right/top/hi → right           leaf→chip, intra-right-chip
 #
-# Pipeline result (observed):
-#   15 HBundles (D0:2 D1:6 D2:7), 69 candidates, 18 expanded wrappers
-#   25 segments placed; 0 NUTS overlaps
+# Pipeline result:
+#   18 HBundles (D0:6 D1:5 D2:7), 98 candidates, 21 expanded wrappers
+#   26 segments placed; 0 NUTS overlaps
 #   check_connectivity: Success — no opens found
 #
-#   Bundler cross-level classification:
-#     D0 bundle 1 (left→right): absorbs xl_b2l_ht, xl_b2l_hb, xl_c2l alongside x_top/x_bot
-#     D0 bundle 2 (right→left): xl_l2b_dt, xl_l2b_db, xl_l2c
-#     D1 (cell:chip_cell): xl_ic_b2l and xl_ic_l2b produce new intra-chip bundles
-#       alongside the original l_tb; bundler correctly detects the shared
-#       blk↔leaf pattern as a cell-level template (top↔bot within chip_cell)
+#   Bundler cross-level classification (each cross-level bus in its own bundle):
+#     D0 bundle: xl_b2l_ht  (left/top→right/top/lo)  [D1→D2 cross-chip]
+#     D0 bundle: xl_b2l_hb  (left/bot→right/bot/lo)  [D1→D2 cross-chip]
+#     D0 bundle: xl_l2b_dt  (right/top/hi→left/bot)  [D2→D1 cross-chip diagonal]
+#     D0 bundle: xl_l2b_db  (right/bot/hi→left/top)  [D2→D1 cross-chip anti-diag]
+#     D0 bundle: xl_c2l     (left→right/bot/hi)       [D0→D2 cross-chip]
+#     D0 bundle: x_top+x_bot (left→right, same-level, merged)
+#     D1 bundle: xl_ic_b2l  (left/top→left/bot/lo)   [D1→D2 intra-chip]
+#     D1 bundle: xl_ic_l2b  (left/bot/hi→left/top)   [D2→D1 intra-chip]
+#     Note: xl_l2c (right/top/hi→right) is degenerate (receiver is ancestor
+#           of driver) and silently dropped; not yet supported.
 #
 # ============================================================
 

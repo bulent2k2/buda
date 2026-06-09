@@ -324,6 +324,10 @@ class BudaSession:
         nb.child_ids         = b.child_ids
         nb.entry_busterm_ids = b.entry_busterm_ids
         nb.exit_busterm_ids  = b.exit_busterm_ids
+        nb.drv_spec_depth    = b.drv_spec_depth
+        nb.rcv_spec_depth    = b.rcv_spec_depth
+        nb.drv_spec_path     = b.drv_spec_path
+        nb.rcv_spec_paths    = b.rcv_spec_paths
         return nb
 
     def _expand_hier_bundles(self, bundles):
@@ -1256,8 +1260,9 @@ class BudaSession:
             # generate_hier_topologies [center_mode] [double_detour]
             # Generates topology candidates for all HBundles produced by
             # run_hier_bundler.  Three cases per bundle:
-            #   (a) cell-level (cell_context set) → cell-local floorplan
-            #   (b) cross-block any depth         → BDB depth-D floorplan
+            #   (a) cell-level (cell_context set)     → cell-local floorplan
+            #   (c) cross-level (drv_spec_depth >= 0) → custom floorplan from actual endpoint blocks
+            #   (b) same-level cross-block             → BDB depth-D floorplan
             if self.bdb is None:
                 print("Error: generate_hier_topologies requires an open BDB"); return
             use_center        = "center_mode"   in args
@@ -1266,6 +1271,7 @@ class BudaSession:
             # Cache floorplans keyed by (depth, is_cell_local, instance_or_empty)
             fp_cache = {}
             total_candidates = 0
+            comps_by_name = {c.name: c for c in self.bdb.all_components()}
 
             for w in self.bundles:
                 b = w.original_bundle
@@ -1291,8 +1297,45 @@ class BudaSession:
                     label = f"{src_local}→{dsts_local[0]}"
                     print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
                           f"{len(w.candidates)} candidates  [cell:{b.cell_context}]")
+
+                elif b.drv_spec_depth >= 0:
+                    # ── Case (c): cross-level bundle — custom floorplan from actual endpoint blocks ──
+                    # The driver and receiver are at different hierarchy depths, so neither the
+                    # single-depth BDB floorplan nor a cell-local floorplan is correct.
+                    # Build a custom floorplan containing exactly the specified endpoint blocks.
+                    drv_comp = comps_by_name.get(b.drv_spec_path)
+                    if drv_comp is None:
+                        print(f"  Warning: driver comp {b.drv_spec_path!r} not found — skipping bundle {b.id}")
+                        continue
+                    fp = buda.Floorplan()
+                    dx, dy = self._corner_margin
+                    if dx or dy:
+                        fp.set_global_corner_margin(dx, dy)
+                    fp.add_block(b.drv_spec_path,
+                                 int(round(drv_comp.x1)), int(round(drv_comp.y1)),
+                                 int(round(drv_comp.x2)), int(round(drv_comp.y2)))
+                    ok = True
+                    for rpath in b.rcv_spec_paths:
+                        rc = comps_by_name.get(rpath)
+                        if rc is None:
+                            print(f"  Warning: receiver comp {rpath!r} not found — skipping bundle {b.id}")
+                            ok = False; break
+                        fp.add_block(rpath,
+                                     int(round(rc.x1)), int(round(rc.y1)),
+                                     int(round(rc.x2)), int(round(rc.y2)))
+                    if not ok:
+                        continue
+                    tg = self._make_topo_gen(fp, use_center, use_double_detour)
+                    w.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
+                    label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
+                             if len(b.rcv_spec_paths) == 1
+                             else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
+                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                          f"{len(w.candidates)} candidates  "
+                          f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]")
+
                 else:
-                    # ── Case (b): cross-block bundle — BDB depth-D floorplan ──
+                    # ── Case (b): same-level cross-block bundle — BDB depth-D floorplan ──
                     cache_key = ('depth', b.level)
                     if cache_key not in fp_cache:
                         fp_cache[cache_key] = self._build_bdb_floorplan(b.level)

@@ -1,6 +1,7 @@
 #include "bundler.h"
 #include <sstream>
 #include <algorithm>
+#include <climits>
 namespace buda {
 std::string extract_instance(const std::string& pin) {
     size_t last_dot = pin.find_last_of('.');
@@ -116,11 +117,135 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
     // Depth-0 bundle index for parent linkage: sig → bundle id
     std::unordered_map<std::string, int> depth0_by_sig;
 
+    // ── 1b. Pre-compute per-net leaf (most-specific endpoint) info ────────────
+    // Ancestor pin propagation (add_net_pins) inserts pins for every ancestor
+    // between the specified endpoint and the common ancestor.  For a cross-level
+    // bus (driver and receiver at different hierarchy depths) the propagated pins
+    // make the net appear at EVERY ancestor depth, causing it to be merged with
+    // same-level buses that happen to share the same ancestor-level component names.
+    // Fix: detect cross-level nets by comparing the deepest driver/receiver depths,
+    // then process them at their correct bundle_depth using the actual leaf paths.
+
+    struct NetLeafInfo {
+        int drv_spec_comp_id = -1;
+        int drv_spec_depth   = -1;
+        std::string drv_spec_path;
+        std::vector<int>         rcv_spec_comp_ids;
+        int                      rcv_spec_depth = -1;
+        std::vector<std::string> rcv_spec_paths;
+        int  bundle_depth   = 0;
+        bool is_cross       = false;
+        bool is_degenerate  = false;
+    };
+
+    // Count matching leading path segments (e.g. "left/top/hi", "left/top/lo" → 2).
+    auto path_common = [](const std::string& a, const std::string& b) -> int {
+        size_t ia = 0, ib = 0; int depth = 0;
+        while (ia < a.size() && ib < b.size()) {
+            size_t pa = a.find('/', ia); if (pa == std::string::npos) pa = a.size();
+            size_t pb = b.find('/', ib); if (pb == std::string::npos) pb = b.size();
+            size_t la = pa - ia, lb = pb - ib;
+            if (la != lb || a.compare(ia, la, b, ib, lb) != 0) break;
+            ++depth; ia = pa + 1; ib = pb + 1;
+        }
+        return depth;
+    };
+
+    // True when prefix is a path-prefix of path (i.e. path == prefix or path starts with prefix+'/').
+    auto is_prefix = [](const std::string& prefix, const std::string& path) -> bool {
+        return path.size() >= prefix.size() &&
+               path.compare(0, prefix.size(), prefix) == 0 &&
+               (path.size() == prefix.size() || path[prefix.size()] == '/');
+    };
+
+    std::unordered_map<int, NetLeafInfo> net_leaf;
+    for (const auto& [net_id, pins] : pins_by_net) {
+        NetLeafInfo info;
+        for (const auto& p : pins) {
+            auto it = comp_by_id.find(p.comp_id);
+            if (it == comp_by_id.end()) continue;
+            int d = it->second.depth;
+            if (p.dir == "OUTPUT") {
+                if (d > info.drv_spec_depth) {
+                    info.drv_spec_depth   = d;
+                    info.drv_spec_comp_id = p.comp_id;
+                    info.drv_spec_path    = it->second.name;
+                }
+            } else if (p.dir == "INPUT") {
+                if (d > info.rcv_spec_depth) {
+                    info.rcv_spec_depth    = d;
+                    info.rcv_spec_comp_ids = {p.comp_id};
+                    info.rcv_spec_paths    = {it->second.name};
+                } else if (d == info.rcv_spec_depth) {
+                    info.rcv_spec_comp_ids.push_back(p.comp_id);
+                    info.rcv_spec_paths.push_back(it->second.name);
+                }
+            }
+        }
+        if (info.drv_spec_depth < 0 || info.rcv_spec_depth < 0) continue;
+        info.is_cross = (info.drv_spec_depth != info.rcv_spec_depth);
+        if (info.is_cross) {
+            int min_common = INT_MAX;
+            for (const auto& rp : info.rcv_spec_paths)
+                min_common = std::min(min_common, path_common(info.drv_spec_path, rp));
+            info.bundle_depth = (min_common == INT_MAX) ? 0 : min_common;
+            // Degenerate: one endpoint is an ancestor of the other.
+            for (const auto& rp : info.rcv_spec_paths) {
+                if (is_prefix(info.drv_spec_path, rp) || is_prefix(rp, info.drv_spec_path)) {
+                    info.is_degenerate = true; break;
+                }
+            }
+        }
+        net_leaf[net_id] = std::move(info);
+    }
+
     // ── 2. Per-depth bundling ─────────────────────────────────────────────────
     for (int depth = 0; depth <= max_depth; ++depth) {
         auto ep_map = _endpoints_at_depth(pins_by_net, comp_by_id, depth);
 
-        // Group nets by STRICT signature at this depth.
+        // ── 2a. Cross-level nets whose bundle_depth == depth ──────────────────
+        // Use the actual leaf paths as the signature so they can't collide with
+        // same-level bundles that share ancestor-level component names.
+        {
+            std::map<std::string, std::vector<int>> xl_sig_to_nets;
+            for (const auto& [net_id, info] : net_leaf) {
+                if (!info.is_cross || info.is_degenerate) continue;
+                if (info.bundle_depth != depth) continue;
+                auto sorted_rcv = info.rcv_spec_paths;
+                std::sort(sorted_rcv.begin(), sorted_rcv.end());
+                xl_sig_to_nets[_strict_sig(info.drv_spec_path, sorted_rcv)].push_back(net_id);
+            }
+            for (const auto& [sig, net_ids] : xl_sig_to_nets) {
+                HBundle b;
+                b.id    = ++next_id;
+                b.level = depth;
+                b.reason = sig;
+                for (int nid : net_ids) {
+                    auto it = net_name.find(nid);
+                    if (it != net_name.end()) b.net_names.push_back(it->second);
+                }
+                std::sort(b.net_names.begin(), b.net_names.end());
+                const auto& info0 = net_leaf.at(net_ids[0]);
+                b.num_terminals  = 1 + (int)info0.rcv_spec_paths.size();
+                b.drv_spec_depth = info0.drv_spec_depth;
+                b.rcv_spec_depth = info0.rcv_spec_depth;
+                b.drv_spec_path  = info0.drv_spec_path;
+                b.rcv_spec_paths = info0.rcv_spec_paths;
+                id_to_idx[b.id] = (int)bundles.size();
+                bundles.push_back(std::move(b));
+            }
+        }
+
+        // ── 2b. Same-level nets: exclude cross-level from ep_map ─────────────
+        for (auto it = ep_map.begin(); it != ep_map.end(); ) {
+            auto li = net_leaf.find(it->first);
+            if (li != net_leaf.end() && li->second.is_cross)
+                it = ep_map.erase(it);
+            else
+                ++it;
+        }
+
+        // Group same-level nets by STRICT signature at this depth.
         std::map<std::string, std::vector<int>> sig_to_nets;
         for (const auto& [net_id, ep] : ep_map) {
             auto drv_it = comp_by_id.find(ep.driver_comp_id);

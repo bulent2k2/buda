@@ -88,6 +88,10 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("child_ids",          &HBundle::child_ids)
         .def_readwrite("entry_busterm_ids",  &HBundle::entry_busterm_ids)
         .def_readwrite("exit_busterm_ids",   &HBundle::exit_busterm_ids)
+        .def_readwrite("drv_spec_depth",     &HBundle::drv_spec_depth)
+        .def_readwrite("rcv_spec_depth",     &HBundle::rcv_spec_depth)
+        .def_readwrite("drv_spec_path",      &HBundle::drv_spec_path)
+        .def_readwrite("rcv_spec_paths",     &HBundle::rcv_spec_paths)
         .def("get_net_names",                &HBundle::get_net_names);
 
     py::class_<BundleAssignment>(m, "BundleAssignment")

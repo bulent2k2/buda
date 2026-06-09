@@ -28,6 +28,13 @@ struct HBundle {
     std::vector<std::string> entry_busterm_ids;
     std::vector<std::string> exit_busterm_ids;
 
+    // Cross-level endpoint info (set when driver and receiver are at different depths).
+    // drv_spec_depth >= 0 distinguishes cross-level bundles from same-level ones.
+    int drv_spec_depth = -1;
+    int rcv_spec_depth = -1;
+    std::string drv_spec_path;
+    std::vector<std::string> rcv_spec_paths;
+
     std::vector<std::string> get_net_names() const { return net_names; }
 };
 enum class Strategy { STRICT, CONVERGENT };
