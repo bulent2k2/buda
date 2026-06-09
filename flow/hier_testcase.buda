@@ -1,0 +1,95 @@
+# ============================================================
+# hier_testcase.buda — hierarchical test vehicle
+#
+# Three-block data-pipeline:  src_i  →  proc_i  →  snk_i
+#
+# depth 0 (top-level blocks):
+#   src_i   src_cell  200×200   bbox ( 50, 50)–( 250, 250)
+#   proc_i  proc_cell 420×200   bbox (350, 50)–( 770, 250)
+#   snk_i   snk_cell  200×200   bbox (870, 50)–(1070, 250)
+#
+# depth 1 (leaf cells — routing endpoints):
+#   src_i/gen_i    gen_cell   80×80    abs ( 70,110)–(150,190)
+#   src_i/buf_i    buf_cell   80×80    abs (150,110)–(230,190)
+#   proc_i/pa_i    pipe_cell 110×80    abs (370,110)–(480,190)
+#   proc_i/pb_i    pipe_cell 110×80    abs (505,110)–(615,190)
+#   proc_i/pc_i    pipe_cell 110×80    abs (640,110)–(750,190)
+#   snk_i/rcv_i    rcv_cell   80×80    abs (890,110)–(970,190)
+#   snk_i/store_i  store_cell 80×80    abs (970,110)–(1050,190)
+#
+# Nets (all 8-bit buses routed at the leaf level):
+#   s2p    src_i/buf_i  → proc_i/pa_i     (cross-block: src→proc)
+#   pa_pb  proc_i/pa_i  → proc_i/pb_i     (intra-proc: stage A→B)
+#   pb_pc  proc_i/pb_i  → proc_i/pc_i     (intra-proc: stage B→C)
+#   p2s    proc_i/pc_i  → snk_i/rcv_i     (cross-block: proc→snk)
+#
+# Key properties:
+#   · pipe_cell used 3× inside proc_i → primary multiple-occurrence pattern
+#   · 2 cross-block bundles + 2 intra-proc bundles = 4 hbundles
+#   · derive_busterms 1 → 10 busterms (3 at depth 0, 7 at depth 1)
+# ============================================================
+
+# ── Metal layers (sourced from shared definition) ──────────
+source tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── BDB: cell sizes ────────────────────────────────────────
+open_bdb :memory:
+
+add_cell src_cell    200 200
+add_cell proc_cell   420 200
+add_cell snk_cell    200 200
+add_cell gen_cell     80  80
+add_cell buf_cell     80  80
+add_cell pipe_cell   110  80
+add_cell rcv_cell     80  80
+add_cell store_cell   80  80
+
+# ── BDB: cell structure (no component rows yet) ────────────
+add_inst_to_cell src_cell  gen_i    gen_cell    20  60
+add_inst_to_cell src_cell  buf_i    buf_cell   100  60
+
+add_inst_to_cell proc_cell pa_i     pipe_cell   20  60
+add_inst_to_cell proc_cell pb_i     pipe_cell  155  60
+add_inst_to_cell proc_cell pc_i     pipe_cell  290  60
+
+add_inst_to_cell snk_cell  rcv_i    rcv_cell    20  60
+add_inst_to_cell snk_cell  store_i  store_cell 100  60
+
+# ── BDB: place top-level instances ────────────────────────
+# Each add_inst eagerly expands its cell_children subtree.
+#   src_i:   1 parent + 2 leaves = 3 rows
+#   proc_i:  1 parent + 3 leaves = 4 rows
+#   snk_i:   1 parent + 2 leaves = 3 rows   → total 10 component rows
+add_inst src_i   src_cell  -    50  50
+add_inst proc_i  proc_cell -   350  50
+add_inst snk_i   snk_cell  -   870  50
+
+# ── Derive busterms for depth 0 and 1 ─────────────────────
+# Creates 10 busterms:  3 at depth 0 (one per top-level block)
+#                     + 7 at depth 1 (one per leaf cell)
+derive_busterms 1
+
+# ── Populate floorplan with depth-1 leaf blocks ────────────
+add_blocks_from_bdb 1 skip
+
+# ── Buses (also written to BDB via bdb_net_mode) ──────────
+bdb_net_mode on
+
+add_bus s2p[8]    src_i/buf_i.out    proc_i/pa_i.in
+add_bus pa_pb[8]  proc_i/pa_i.out   proc_i/pb_i.in
+add_bus pb_pc[8]  proc_i/pb_i.out   proc_i/pc_i.in
+add_bus p2s[8]    proc_i/pc_i.out   snk_i/rcv_i.in
+
+# ── Routing pipeline ───────────────────────────────────────
+run_bundler strict
+generate_topologies
+check_connectivity topo
+run_planner 1
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+visualize
