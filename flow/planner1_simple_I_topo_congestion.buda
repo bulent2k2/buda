@@ -1,0 +1,27 @@
+# ============================================================
+# From four_blocks. Create congestion for planner to kick in.
+# ============================================================
+
+source tracks2top.buda
+
+corner_margin dx 5 dy 5
+
+add_block u1    50   50   100 100
+add_block u2    150  50   200 100
+
+add_bus b1[8] u1.tx u2.rx
+add_bus b2[8] u2.tx u1.rx
+
+run_bundler strict
+
+# try N instead of S:
+detour_channel S 75
+generate_topologies
+check_connectivity topo
+run_planner 1
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize
