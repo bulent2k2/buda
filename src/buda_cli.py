@@ -1032,6 +1032,28 @@ class BudaSession:
                 w.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} hbundles.")
+        elif cmd == "run_hier_bundler":
+            # run_hier_bundler [depth <N>]
+            if self.bdb is None:
+                print("Error: run_hier_bundler requires an open BDB (use open_bdb first)"); return
+            max_depth = 1
+            if "depth" in args:
+                idx = list(args).index("depth")
+                if idx + 1 < len(args):
+                    max_depth = int(args[idx + 1])
+            hb = buda.HierarchicalBundler(self.bdb)
+            raw_bundles = hb.run(max_depth)
+            self.bundles = []
+            for b in raw_bundles:
+                w = buda.BundleWrapper()
+                w.original_bundle = b
+                w.width = len(b.get_net_names()) * 1.5
+                self.bundles.append(w)
+            counts = {}
+            for b in raw_bundles:
+                counts[b.level] = counts.get(b.level, 0) + 1
+            summary = ", ".join(f"D{d}: {n}" for d, n in sorted(counts.items()))
+            print(f"HierBundler: {len(raw_bundles)} hbundles ({summary})")
         elif cmd == "generate_topologies_for_bundle":
             # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...] [center_mode] [double_detour]
             # Single dst  → 2-pin L/Z/U candidates

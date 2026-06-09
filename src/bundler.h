@@ -3,6 +3,8 @@
 #include <string>
 #include <map>
 #include <set>
+#include <unordered_map>
+#include "bdb.h"
 namespace buda {
 struct Net {
     std::string name;
@@ -46,5 +48,33 @@ private:
     Strategy current_strategy_;
     int depth_ = 0;
     std::string generate_signature(const Net& net) const;
+};
+
+// Hierarchy-aware bundler: reads nets+pins directly from BDB and produces
+// HBundles at each depth level 0..max_depth.  See docs/HIER_BUNDLER.md.
+class HierarchicalBundler {
+public:
+    explicit HierarchicalBundler(BDB& db);
+    std::vector<HBundle> run(int max_depth = 1);
+
+private:
+    BDB& _db;
+
+    struct NetEndpoints {
+        int driver_comp_id = -1;
+        std::vector<int> receiver_comp_ids;
+    };
+
+    // Returns, for each net that has both a driver and ≥1 receiver at
+    // exactly depth D, its driver and receiver component ids.
+    std::unordered_map<int, NetEndpoints> _endpoints_at_depth(
+        const std::unordered_map<int, std::vector<PinRow>>& pins_by_net,
+        const std::unordered_map<int, ComponentRow>& comp_by_id,
+        int depth) const;
+
+    // Build STRICT sig: "DRV:<drv_name>|REC:<rcv1>,<rcv2>,…"
+    static std::string _strict_sig(
+        const std::string& drv_name,
+        const std::vector<std::string>& sorted_rcv_names);
 };
 }

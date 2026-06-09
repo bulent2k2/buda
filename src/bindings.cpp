@@ -118,6 +118,10 @@ PYBIND11_MODULE(buda, m) {
         .def("set_strategy", &Bundler::set_strategy)
         .def("run",          &Bundler::run);
 
+    py::class_<HierarchicalBundler>(m, "HierarchicalBundler")
+        .def(py::init<BDB&>())
+        .def("run", &HierarchicalBundler::run, py::arg("max_depth") = 1);
+
     py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
         .def(py::init<>())
         .def_readwrite("dx", &BlockCornerMargin::dx)

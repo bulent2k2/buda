@@ -1,0 +1,222 @@
+# HierarchicalBundler — Algorithm and Design
+
+## 1. Role in the Pipeline
+
+`HierarchicalBundler` replaces the flat `Bundler` for designs loaded through
+BDB (hierarchical mode). It reads component/net/pin data from BDB and produces
+`vector<HBundle>` where each bundle belongs to a specific hierarchy depth and
+carries optional `cell_context` / `instances` fields for multiple-occurrence
+routing template support.
+
+Prerequisite BDB state before calling `run()`:
+1. `add_cell` + `add_inst_to_cell` + `add_inst` — component hierarchy
+2. `add_net_pins` (or `bdb_net_mode on` + `add_bus`) — net/pin data with
+   hierarchy propagation
+3. `derive_busterms` — busterm rows (used for `entry/exit_busterm_ids`)
+
+---
+
+## 2. How `add_net_pins` Propagates the Hierarchy
+
+`add_net_pins(net, driver_path.pin, [rcv_path.pin, …])` computes the longest
+common path prefix of all endpoints, then inserts:
+
+- One **leaf pin** per endpoint at its component
+- One **interface pin** at every ancestor that is strictly below the common
+  ancestor and strictly above the leaf
+
+Direction: driver endpoint → `OUTPUT`; receiver endpoints → `INPUT`.  Interface
+pins inherit the same direction as their leaf's endpoint.
+
+### Example — cross-block net `s2p_0`
+
+```
+add_net_pins("s2p_0", "src_i/buf_i.out", ["proc_i/pa_i.in"])
+
+common prefix = ""  (src_i ≠ proc_i at depth 0)
+
+pins inserted:
+  depth 1   src_i/buf_i   "out"    OUTPUT   ← leaf
+  depth 0   src_i         "s2p_0"  OUTPUT   ← interface
+  depth 1   proc_i/pa_i   "in"     INPUT    ← leaf
+  depth 0   proc_i        "s2p_0"  INPUT    ← interface
+```
+
+### Example — intra-block net `pa_pb_0`
+
+```
+add_net_pins("pa_pb_0", "proc_i/pa_i.out", ["proc_i/pb_i.in"])
+
+common prefix = "proc_i"  (both live inside proc_i, depth-0 component)
+→ loop condition d > common (1 > 1) is false immediately; no interface pins.
+
+pins inserted:
+  depth 1   proc_i/pa_i   "out"    OUTPUT   ← leaf only
+  depth 1   proc_i/pb_i   "in"     INPUT    ← leaf only
+```
+
+**Key consequence**: intra-block nets appear only at depth 1; cross-block nets
+appear at both depth 0 and depth 1.
+
+---
+
+## 3. Algorithm — `HierarchicalBundler::run(int max_depth)`
+
+### Step 1 — Index BDB
+
+```
+comp_by_id   : map<int, ComponentRow>          from all_components()
+net_name     : map<int, string>                 from all_nets()
+pins_by_net  : map<int, vector<PinRow>>         from all_pins()
+```
+
+### Step 2 — Per-depth loop (D = 0 … max_depth)
+
+#### 2a. Find endpoints at depth D
+
+```
+for each net N in pins_by_net:
+  driver_comp_id = first pin where comp.depth == D AND dir == "OUTPUT"
+  recv_comp_ids  = [pin.comp_id where comp.depth == D AND dir == "INPUT"]
+  if driver_comp_id valid AND recv_comp_ids non-empty:
+    ep_map[N] = { driver_comp_id, recv_comp_ids }
+```
+
+Cross-block nets appear in ep_map at D=0 AND D=1.  
+Intra-block nets appear only at D=1 (and deeper).
+
+#### 2b. Group by STRICT signature
+
+```
+sig = "DRV:" + comp_name[driver] + "|REC:" + sorted(comp_names[recv]), joined by ","
+sig_to_nets: map<sig, [net_id]>
+```
+
+#### 2c. Create one HBundle per group
+
+Fields set here:
+
+| Field | Value |
+|---|---|
+| `id` | auto-increment |
+| `level` | current depth D |
+| `net_names` | net names in this group |
+| `num_terminals` | 1 + len(recv_comps) for first net |
+| `reason` | the sig string (for debugging) |
+
+### Step 3 — Cell context
+
+After creating the HBundle, examine the first net's endpoints at depth D:
+
+```
+drv_comp = comp_by_id[ep0.driver_comp_id]
+if drv_comp.parent_id >= 0:                          // not a root component
+  par = comp_by_id[drv_comp.parent_id]
+  if ALL receiver endpoints also have parent == par:  // same parent → intra-cell
+    b.cell_context          = par.cell               // e.g. "proc_cell"
+    b.instances             = [par.name]             // e.g. ["proc_i"]
+    b.entry_busterm_ids     = ["bt:" + drv_comp.name]
+    b.exit_busterm_ids      = ["bt:" + rcv.name for each rcv]
+```
+
+Cross-block bundles (different parents) leave `cell_context` empty.
+
+### Step 4 — Depth linkage for cross-block bundles
+
+For depth-D (D ≥ 1) cross-block bundles:
+
+```
+par_drv = parent of driver comp → its name is the depth-(D-1) driver
+par_rcvs = [parent of each recv comp]
+d0_sig   = build STRICT sig from par_drv and par_rcvs
+Look up d0_sig in depth0_bundle_by_sig index.
+If found:  b.parent_id = d0_bundle.id;  d0_bundle.child_ids += [b.id]
+```
+
+### Step 5 — Multiple-occurrence detection
+
+After all depth levels are processed:
+
+```
+Group HBundles with non-empty cell_context by (cell_context, cell-local reason):
+  local_reason = b.reason with b.instances[0]+"/" stripped everywhere
+
+For each group of size ≥ 2:
+  template = first bundle in group
+  for each replica (remaining bundles in group):
+    template.instances += replica.instances   // accumulate all parent paths
+    replica.parent_id   = template.id
+    template.child_ids += [replica.id]
+```
+
+**Example** (hypothetical two-proc design):
+```
+  proc_i1/pa_i → proc_i1/pb_i  →  cell_sig = "proc_cell::DRV:pa_i|REC:pb_i,"
+  proc_i2/pa_i → proc_i2/pb_i  →  cell_sig = "proc_cell::DRV:pa_i|REC:pb_i,"
+  → merged: template.instances = ["proc_i1", "proc_i2"]
+```
+
+In the single-proc_i test vehicle, pa_pb and pb_pc have different local
+signatures ("pa_i→pb_i" vs "pb_i→pc_i") so they are NOT merged.
+
+---
+
+## 4. Expected Output for the Pipeline Test Vehicle
+
+After `run(max_depth=1)` with 4 buses of 8 bits each:
+
+```
+depth 0 (2 bundles):
+  hbundle-1   level=0  nets=[s2p_0..7]    reason="DRV:src_i|REC:proc_i,"
+  hbundle-2   level=0  nets=[p2s_0..7]    reason="DRV:proc_i|REC:snk_i,"
+
+depth 1 (4 bundles):
+  hbundle-3   level=1  nets=[s2p_0..7]    cell_context=""        parent=hbundle-1
+  hbundle-4   level=1  nets=[pa_pb_0..7]  cell_context=proc_cell instances=["proc_i"]
+  hbundle-5   level=1  nets=[pb_pc_0..7]  cell_context=proc_cell instances=["proc_i"]
+  hbundle-6   level=1  nets=[p2s_0..7]    cell_context=""        parent=hbundle-2
+```
+
+Total: 6 HBundles.
+
+---
+
+## 5. CLI Command
+
+```
+run_hier_bundler [depth <N>]
+```
+
+Default max_depth = 1. Requires an open BDB with nets populated via
+`bdb_net_mode on` before this call. Stores result in `session.bundles`.
+
+Output:
+```
+HierBundler: N hbundles (D0: a, D1: b, …)
+```
+
+---
+
+## 6. Differences from Flat Bundler
+
+| Aspect | Flat `Bundler` | `HierarchicalBundler` |
+|--------|---------------|----------------------|
+| Input | `Netlist` (in-memory) | `BDB` (with pins) |
+| Depth awareness | No | Yes — runs depth 0..max_depth |
+| Intra-cell nets | Bundled normally | Only visible at their natural depth |
+| Cell context | None | `cell_context` + `instances` |
+| Multiple occurrence | None | Merged by cell-local sig |
+| Depth linkage | None | parent/child HBundle ids |
+
+---
+
+## 7. Files Modified / Created
+
+| File | Change |
+|------|--------|
+| `src/bundler.h` | Add `HierarchicalBundler` class |
+| `src/bundler.cpp` | Implement `HierarchicalBundler::run()` |
+| `src/bindings.cpp` | Expose `HierarchicalBundler` to Python |
+| `src/buda_cli.py` | Add `run_hier_bundler` command |
+| `test/tests/features/hier_bundler.feature` | BDD scenarios |
+| `test/tests/test_hier_bundler.py` | Step defs + standalone tests |
