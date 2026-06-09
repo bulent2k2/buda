@@ -11,11 +11,21 @@ struct Net {
     std::string get_driver_instance() const;
     std::set<std::string> get_receiver_instances() const;
 };
-struct Bundle {
+struct HBundle {
     int id;
     std::vector<std::string> net_names;
     std::string reason;
     int num_terminals = 0;
+
+    // Hierarchy fields
+    int level = 0;                          // 0 = top-level, ≥1 = sub-level
+    std::string cell_context;               // "" for top-level; cell type for cell-level designs
+    std::vector<std::string> instances;     // instance paths this hbundle covers
+    int parent_id = -1;                     // -1 for top-level hbundles
+    std::vector<int> child_ids;
+    std::vector<std::string> entry_busterm_ids;
+    std::vector<std::string> exit_busterm_ids;
+
     std::vector<std::string> get_net_names() const { return net_names; }
 };
 enum class Strategy { STRICT, CONVERGENT };
@@ -31,7 +41,7 @@ public:
     Bundler() : current_strategy_(Strategy::STRICT) {}
     void set_strategy(Strategy s) { current_strategy_ = s; }
     void set_depth(int d) { depth_ = d; }
-    std::vector<Bundle> run(const Netlist& netlist);
+    std::vector<HBundle> run(const Netlist& netlist);
 private:
     Strategy current_strategy_;
     int depth_ = 0;

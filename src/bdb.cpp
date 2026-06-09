@@ -1,6 +1,7 @@
 #include "bdb.h"
 #include <stdexcept>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <regex>
 #include <algorithm>
@@ -1484,7 +1485,94 @@ void BDB::rotate_comp(const std::string& name, int degrees) {
     compute_hpwl();
 }
 
-std::vector<BustermRow>  BDB::all_busterms() const { return {}; }
+void BDB::add_busterm(const BustermRow& bt) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO busterm(id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,parent_id)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?)");
+    sqlite3_bind_text  (s, 1, bt.id.c_str(),         -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 2, bt.comp_id);
+    sqlite3_bind_text  (s, 3, bt.hier_path.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 4, bt.depth);
+    sqlite3_bind_double(s, 5, bt.x1);
+    sqlite3_bind_double(s, 6, bt.y1);
+    sqlite3_bind_double(s, 7, bt.x2);
+    sqlite3_bind_double(s, 8, bt.y2);
+    sqlite3_bind_text  (s, 9, bt.resolution.c_str(), -1, SQLITE_TRANSIENT);
+    if (bt.parent_id.empty())
+        sqlite3_bind_null(s, 10);
+    else
+        sqlite3_bind_text(s, 10, bt.parent_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+void BDB::clear_busterms() {
+    _exec("DELETE FROM busterm");
+}
+
+std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
+    std::vector<ComponentRow> rows;
+    Stmt q(_db,
+        "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
+        " FROM component WHERE depth=? ORDER BY id");
+    sqlite3_bind_int(q, 1, depth);
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        ComponentRow r;
+        r.id           = sqlite3_column_int(q, 0);
+        r.name         = (const char*)sqlite3_column_text(q, 1);
+        r.cell         = (const char*)sqlite3_column_text(q, 2);
+        r.parent_id    = sqlite3_column_int(q, 3);
+        r.depth        = sqlite3_column_int(q, 4);
+        r.x1           = sqlite3_column_double(q, 5);
+        r.y1           = sqlite3_column_double(q, 6);
+        r.x2           = sqlite3_column_double(q, 7);
+        r.y2           = sqlite3_column_double(q, 8);
+        r.is_leaf      = sqlite3_column_int(q, 9);
+        r.is_replicated= sqlite3_column_int(q, 10);
+        rows.push_back(r);
+    }
+    return rows;
+}
+
+std::vector<PinRow> BDB::pins_by_comp(int comp_id) const {
+    std::vector<PinRow> rows;
+    Stmt q(_db,
+        "SELECT net_id,comp_id,pin_name,dir,px,py FROM pin WHERE comp_id=?");
+    sqlite3_bind_int(q, 1, comp_id);
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        PinRow r;
+        r.net_id   = sqlite3_column_int(q, 0);
+        r.comp_id  = sqlite3_column_int(q, 1);
+        r.pin_name = (const char*)sqlite3_column_text(q, 2);
+        r.dir      = (const char*)sqlite3_column_text(q, 3);
+        r.px       = sqlite3_column_double(q, 4);
+        r.py       = sqlite3_column_double(q, 5);
+        rows.push_back(r);
+    }
+    return rows;
+}
+
+std::vector<BustermRow> BDB::all_busterms() const {
+    std::vector<BustermRow> rows;
+    Stmt q(_db,
+        "SELECT id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,COALESCE(parent_id,'')"
+        " FROM busterm ORDER BY depth,id");
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        BustermRow r;
+        r.id         = (const char*)sqlite3_column_text(q, 0);
+        r.comp_id    = sqlite3_column_int(q, 1);
+        r.hier_path  = (const char*)sqlite3_column_text(q, 2);
+        r.depth      = sqlite3_column_int(q, 3);
+        r.x1         = sqlite3_column_double(q, 4);
+        r.y1         = sqlite3_column_double(q, 5);
+        r.x2         = sqlite3_column_double(q, 6);
+        r.y2         = sqlite3_column_double(q, 7);
+        r.resolution = (const char*)sqlite3_column_text(q, 8);
+        r.parent_id  = (const char*)sqlite3_column_text(q, 9);
+        rows.push_back(r);
+    }
+    return rows;
+}
+
 std::vector<BundleRow>   BDB::all_bundles()   const { return {}; }
 
 std::string BDB::new_group(const std::string&, const std::string&,

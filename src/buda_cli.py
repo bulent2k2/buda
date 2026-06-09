@@ -1031,7 +1031,7 @@ class BudaSession:
                 w.original_bundle = b
                 w.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
-            print(f"Bundler created {len(self.bundles)} bundles.")
+            print(f"Bundler created {len(self.bundles)} hbundles.")
         elif cmd == "generate_topologies_for_bundle":
             # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...] [center_mode] [double_detour]
             # Single dst  → 2-pin L/Z/U candidates
@@ -1523,6 +1523,16 @@ class BudaSession:
             self.bdb.add_comp(args[0], args[1], parent,
                               float(args[3]), float(args[4]),
                               float(args[5]), float(args[6]), is_leaf)
+        elif cmd == "derive_busterms":
+            # derive_busterms [max_depth]
+            # Populate BDB busterm table from the component hierarchy.
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            max_depth = int(args[0]) if args else 1
+            gen = buda.BustermGen(self.bdb)
+            gen.derive(max_depth)
+            bts = self.bdb.all_busterms()
+            print(f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth}).")
         elif cmd == "source":
             if not args:
                 print("Error: source command requires a file path")

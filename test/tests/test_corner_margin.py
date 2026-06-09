@@ -350,7 +350,7 @@ def test_nuts_respects_margin_adjusted_range():
     track_seg.track_position = ct.segs()[0].perp_pos  # nominal = 100
 
     # NUTS result wrapping
-    bundle = buda.Bundle()
+    bundle = buda.HBundle()
     bundle.id = 1
     bw = buda.BundleWrapper()
     bw.original_bundle = bundle

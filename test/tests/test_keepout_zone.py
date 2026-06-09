@@ -69,7 +69,7 @@ def when_run_global_planner(ctx):
     router = buda.CongestionPlanner(ctx['fp'], ls)
     router.build_congestion_map()
 
-    bundle = buda.Bundle()
+    bundle = buda.HBundle()
     bundle.id = 1
 
     w = buda.BundleWrapper()

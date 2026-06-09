@@ -32,15 +32,15 @@ std::string Bundler::generate_signature(const Net& net) const {
     }
     return signature.str();
 }
-std::vector<Bundle> Bundler::run(const Netlist& netlist) {
-    std::vector<Bundle> bundles;
+std::vector<HBundle> Bundler::run(const Netlist& netlist) {
+    std::vector<HBundle> bundles;
     std::map<std::string, std::vector<std::string>> groups;
     for (const auto& net : netlist.get_nets()) {
         groups[generate_signature(net)].push_back(net.name);
     }
     int bundle_id_counter = 0;
     for (const auto& [sig, net_list] : groups) {
-        Bundle b;
+        HBundle b;
 	b.id = ++bundle_id_counter;
 	b.net_names = net_list;
 	b.reason = sig;

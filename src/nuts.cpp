@@ -1,6 +1,7 @@
 #include "nuts.h"
 #include "conn_topology.h"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <map>

@@ -17,7 +17,7 @@ struct GlobalCut {
 };
 
 struct BundleWrapper {
-    Bundle original_bundle;
+    HBundle original_bundle;
     std::vector<Topology> candidates;
     int selected_topology_index = -1;
     bool topology_pinned = false;

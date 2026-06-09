@@ -1,5 +1,6 @@
 #include "conn_topology.h"
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <numeric>
 #include <set>
