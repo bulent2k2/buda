@@ -82,9 +82,11 @@ def _draw_block(ax, name, bbox, fp, lw=1.0, edge='#888888', face='#e8e8e8',
     if not name:
         return added_patches, None
 
-    cx = (bbox.x1 + bbox.x2) / 2
-    cy = (bbox.y1 + bbox.y2) / 2
-    txt = ax.text(cx, cy, name, ha='center', va='center',
+    import matplotlib.transforms as mtransforms
+    offset_trans = mtransforms.offset_copy(
+        ax.transData, fig=ax.figure, x=4, y=4, units='points')
+    txt = ax.text(bbox.x1, bbox.y1, name, transform=offset_trans,
+                  ha='left', va='bottom',
                   fontsize=fontsize, fontweight='bold', color='#444444',
                   alpha=min(1.0, alpha * 4.0), # label slightly brighter than block
                   zorder=zorder + 1, clip_on=True)
