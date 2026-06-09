@@ -36,6 +36,7 @@ static void build_nuts_maps(
     std::map<std::pair<int,int>, double>&                         pull_map,
     std::map<std::pair<int,int>, std::pair<double,double>>&       slide_map,
     std::set<std::pair<int,int>>&                                trunk_set,
+    std::set<std::pair<int,int>>&                                busterm_set,
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map,
     std::map<std::pair<int,int>, int>&                            net_pull_map)
 {
@@ -76,6 +77,7 @@ static void build_nuts_maps(
                 else                        ++n_bt;
             }
             if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
+            if (n_bt >= 1)               busterm_set.insert(key);
 
             for (const auto& conn : cs.conns) {
                 if (conn.kind != SegConn::SEG) continue;
@@ -108,6 +110,7 @@ static void relax_boundary_intervals(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, double>& pull_map,
     const std::map<std::pair<int,int>, int>& net_pull_map,
+    const std::set<std::pair<int,int>>& busterm_set,
     int only_layer = -1)
 {
     // When the preferred position equals an interval boundary, preferred_fit
@@ -116,13 +119,19 @@ static void relax_boundary_intervals(
     // This makes trunks overshoot block faces and pull-targets miss their mark.
     //
     // Fix: extend the interval by one full width outward so the bus CENTER can
-    // land exactly at the preferred coordinate.  Applies to both topology-
-    // nominal (net_pull == 0) and pull-driven (net_pull != 0) cases: in both,
-    // the center should reach the boundary, not just the edge.
-    (void)net_pull_map;   // reserved for future selective suppression
+    // land exactly at the preferred coordinate.
+    //
+    // Exception: segments with a direct busterm connection (endpoint stubs at a
+    // block face). For these, preferred_fit already places the bus inner edge
+    // AT the block face, which is correct — bits must lie within the block face
+    // extent. Relaxing would shift the center to the face boundary, pushing half
+    // the bus outside the block's perpendicular extent and causing DNUTS opens.
+    (void)net_pull_map;
     for (auto& ts : segments) {
         if (only_layer >= 0 && ts.layer != only_layer) continue;
-        auto it = pull_map.find({ts.bundle_id, ts.seg_idx});
+        auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
+        if (busterm_set.count(key)) continue;   // block-face stubs: leave interval alone
+        auto it = pull_map.find(key);
         if (it == pull_map.end()) continue;
         const double preferred = it->second;
         if (std::abs(preferred - ts.interval_hi) < 0.5) {
@@ -482,11 +491,12 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::map<std::pair<int,int>, double>                         pull_map;
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
     std::set<std::pair<int,int>>                                 trunk_set;
+    std::set<std::pair<int,int>>                                 busterm_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     std::map<std::pair<int,int>, int>                            net_pull_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map, net_pull_map);
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map);
     apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
-    relax_boundary_intervals(result.segments, pull_map, net_pull_map);
+    relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
@@ -527,11 +537,12 @@ NUTSResult NUTSEngine::rerun_layer(
     std::map<std::pair<int,int>, double>                         pull_map;
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
     std::set<std::pair<int,int>>                                 trunk_set;
+    std::set<std::pair<int,int>>                                 busterm_set;
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     std::map<std::pair<int,int>, int>                            net_pull_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map, net_pull_map);
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map);
     apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
-    relax_boundary_intervals(result.segments, pull_map, net_pull_map, layer_id);
+    relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set, layer_id);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
