@@ -7,14 +7,16 @@ this directory.  Feature-specific steps live in the corresponding test_*.py.
 import re
 import sys
 import os
-import pytest
-import buda
-from pytest_bdd import given, when, then, parsers
 
-# Make src/ importable (needed for buda_cli and other Python-only modules)
+# Insert src/ at the front of sys.path BEFORE importing buda, so the freshly
+# built library in src/ is always found first — never a stale copy elsewhere.
 _src = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 if _src not in sys.path:
     sys.path.insert(0, _src)
+
+import pytest
+import buda
+from pytest_bdd import given, when, then, parsers
 
 # ---------------------------------------------------------------------------
 # Shared context fixture
