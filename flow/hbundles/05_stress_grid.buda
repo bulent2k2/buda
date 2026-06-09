@@ -214,5 +214,10 @@ run_planner hier 5
 
 # Abstract track placement across all 61 expanded wrappers
 run_nuts
-
 check_connectivity nuts
+
+# Full glory (bb :-)
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize

@@ -78,3 +78,8 @@ run_planner 5
 run_nuts
 
 check_connectivity nuts
+
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize
