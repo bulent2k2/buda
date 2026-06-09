@@ -1,0 +1,146 @@
+# ============================================================
+# hbundles/07_wide_fan_stress.buda
+#
+# Stress test for wide-fan multicast buses: every bus has
+# 7 through 12 pins (1 driver + 6..11 receivers).
+# Extends 06_multipin_stress.buda into the "wide fan" regime.
+#
+# Bus strategy:
+#   7- and 8-pin  — 1 intra-blk receiver + cross-blk fans
+#   9- to 12-pin  — 3–5 intra-blk receivers + cross-blk fans
+#   D1 templates  — purely intra-blk (max is 8-pin on this cell)
+#
+# Cell structure / floorplan: identical to 05 and 06.
+#
+#   blk_cell  300×230  (6 instances: u1..u6, 3-col × 2-row grid)
+#   sub_cell  120× 90  (4 per blk: s1 top-left, s2 top-right,
+#                                  s3 bot-left, s4 bot-right)
+#   leaf_cell  45× 50  (2 per sub: l left, r right)
+#
+#   col →     C0 (x= 50)   C1 (x=400)   C2 (x=750)
+#   row 0     u1            u2            u3
+#   row 1     u4            u5            u6
+#
+# Leaf pins per blk (8 total):
+#   s1/l, s1/r, s2/l, s2/r, s3/l, s3/r, s4/l, s4/r
+#
+# Buses:
+#
+#   Depth-0 mixed multicast (intra-blk + cross-blk):
+#     7-pin  (×2): mp7_a, mp7_b
+#     8-pin  (×2): mp8_a, mp8_b
+#     9-pin  (×2): mp9_a, mp9_b
+#     10-pin (×2): mp10_a, mp10_b
+#     11-pin (×2): mp11_a, mp11_b
+#     12-pin (×2): mp12_a, mp12_b
+#
+#   Depth-1 cell-level intra-blk (all 6 instances):
+#     7-pin template: d1_mp7  s1/r → s2/l, s2/r, s3/l, s3/r, s4/l, s4/r
+#     8-pin template: d1_mp8  s1/l → s1/r, s2/l, s2/r, s3/l, s3/r, s4/l, s4/r
+#     (8-pin is the maximum intra-blk fan: 1 driver + all 7 other leaves)
+#
+# Pipeline result (observed):
+#   51 HBundles (D0:9 D1:18 D2:24), 855 candidates, 56 expanded wrappers
+#   346 segments placed; 39 NUTS overlaps (congested by design)
+#   check_connectivity: Success — no opens found
+#
+# ============================================================
+
+source ../tracks.buda
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# ── BDB: cell sizes ────────────────────────────────────────
+open_bdb :memory:
+
+add_cell blk_cell   300 230
+add_cell sub_cell   120  90
+add_cell leaf_cell   45  50
+
+# ── BDB: cell hierarchy ────────────────────────────────────
+add_inst_to_cell  blk_cell  s1   sub_cell   15   15
+add_inst_to_cell  blk_cell  s2   sub_cell  155   15
+add_inst_to_cell  blk_cell  s3   sub_cell   15  125
+add_inst_to_cell  blk_cell  s4   sub_cell  155  125
+
+add_inst_to_cell  sub_cell  l    leaf_cell  10   20
+add_inst_to_cell  sub_cell  r    leaf_cell  65   20
+
+# ── BDB: place top-level instances (3-col × 2-row grid) ────
+add_inst u1  blk_cell  -    50   50
+add_inst u2  blk_cell  -   400   50
+add_inst u3  blk_cell  -   750   50
+add_inst u4  blk_cell  -    50  330
+add_inst u5  blk_cell  -   400  330
+add_inst u6  blk_cell  -   750  330
+
+# ── Derive busterms (all three levels) ────────────────────
+derive_busterms 2
+
+# ── Populate floorplan with blocks at all routing levels ───
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+
+# ── Buses (written to BDB) ─────────────────────────────────
+bdb_net_mode on
+
+# ── Depth-0: cross-blk multicast buses ─────────────────────
+# All buses mix at least one intra-blk receiver with cross-blk receivers.
+
+# 7-pin ── 1 intra-blk + 5 cross-blk receivers
+add_bus mp7_a[4]   u1/s1/r.out   u1/s2/l.in,u2/s1/l.in,u2/s2/l.in,u3/s1/l.in,u4/s1/l.in,u5/s1/l.in
+add_bus mp7_b[4]   u6/s4/l.out   u6/s3/l.in,u5/s4/l.in,u5/s3/l.in,u4/s4/l.in,u3/s4/l.in,u2/s4/l.in
+
+# 8-pin ── 2 intra-blk + 5 cross-blk receivers
+add_bus mp8_a[4]   u1/s3/r.out   u1/s4/r.in,u1/s4/l.in,u2/s3/l.in,u2/s4/l.in,u3/s3/l.in,u4/s4/l.in,u5/s3/l.in
+add_bus mp8_b[4]   u6/s2/l.out   u6/s1/l.in,u6/s1/r.in,u5/s2/r.in,u5/s1/r.in,u4/s2/r.in,u3/s1/r.in,u2/s2/r.in
+
+# 9-pin ── 3 intra-blk + 5 cross-blk receivers
+add_bus mp9_a[2]   u2/s1/l.out   u2/s2/l.in,u2/s3/l.in,u2/s4/l.in,u1/s1/l.in,u1/s2/l.in,u3/s1/l.in,u3/s2/l.in,u5/s1/l.in
+add_bus mp9_b[2]   u5/s4/r.out   u5/s3/r.in,u5/s2/r.in,u5/s1/r.in,u4/s4/r.in,u4/s3/r.in,u6/s4/r.in,u6/s3/r.in,u2/s4/r.in
+
+# 10-pin ── 3 intra-blk + 6 cross-blk receivers
+add_bus mp10_a[2]  u3/s2/r.out   u3/s1/r.in,u3/s3/r.in,u3/s4/r.in,u1/s2/r.in,u1/s3/r.in,u2/s2/r.in,u2/s3/r.in,u6/s2/r.in,u4/s2/r.in
+add_bus mp10_b[2]  u4/s3/l.out   u4/s4/l.in,u4/s1/l.in,u4/s2/l.in,u5/s3/l.in,u5/s4/l.in,u6/s3/l.in,u6/s4/l.in,u1/s3/l.in,u2/s3/l.in
+
+# 11-pin ── 4 intra-blk + 6 cross-blk receivers
+add_bus mp11_a[1]  u1/s4/l.out   u1/s1/l.in,u1/s2/l.in,u1/s3/l.in,u1/s4/r.in,u4/s4/l.in,u4/s3/l.in,u4/s2/l.in,u2/s4/l.in,u2/s3/l.in,u5/s4/l.in
+add_bus mp11_b[1]  u6/s1/r.out   u6/s2/r.in,u6/s3/r.in,u6/s4/r.in,u6/s1/l.in,u3/s1/r.in,u3/s2/r.in,u3/s3/r.in,u5/s1/r.in,u5/s2/r.in,u2/s1/r.in
+
+# 12-pin ── 5 intra-blk + 6 cross-blk receivers
+add_bus mp12_a[1]  u2/s2/l.out   u2/s1/l.in,u2/s3/l.in,u2/s4/l.in,u2/s1/r.in,u2/s2/r.in,u1/s2/l.in,u1/s3/l.in,u1/s4/l.in,u3/s2/l.in,u3/s3/l.in,u5/s2/l.in
+add_bus mp12_b[1]  u5/s3/r.out   u5/s4/r.in,u5/s1/r.in,u5/s2/r.in,u5/s4/l.in,u5/s3/l.in,u4/s3/r.in,u4/s4/r.in,u4/s2/r.in,u6/s3/r.in,u6/s4/r.in,u3/s3/r.in
+
+# ── Depth-1: intra-blk cell-level multicast ────────────────
+# Each template replicated across all 6 blk instances so the
+# HierarchicalBundler detects the shared pattern and creates
+# one cell-level HBundle per template.
+
+# d1_mp7 (7-pin): s1/r → all 6 leaves in s2, s3, s4
+add_bus d1_mp7_u1[2]  u1/s1/r.out  u1/s2/l.in,u1/s2/r.in,u1/s3/l.in,u1/s3/r.in,u1/s4/l.in,u1/s4/r.in
+add_bus d1_mp7_u2[2]  u2/s1/r.out  u2/s2/l.in,u2/s2/r.in,u2/s3/l.in,u2/s3/r.in,u2/s4/l.in,u2/s4/r.in
+add_bus d1_mp7_u3[2]  u3/s1/r.out  u3/s2/l.in,u3/s2/r.in,u3/s3/l.in,u3/s3/r.in,u3/s4/l.in,u3/s4/r.in
+add_bus d1_mp7_u4[2]  u4/s1/r.out  u4/s2/l.in,u4/s2/r.in,u4/s3/l.in,u4/s3/r.in,u4/s4/l.in,u4/s4/r.in
+add_bus d1_mp7_u5[2]  u5/s1/r.out  u5/s2/l.in,u5/s2/r.in,u5/s3/l.in,u5/s3/r.in,u5/s4/l.in,u5/s4/r.in
+add_bus d1_mp7_u6[2]  u6/s1/r.out  u6/s2/l.in,u6/s2/r.in,u6/s3/l.in,u6/s3/r.in,u6/s4/l.in,u6/s4/r.in
+
+# d1_mp8 (8-pin): s1/l → all 7 other leaves — maximum intra-blk fan
+add_bus d1_mp8_u1[1]  u1/s1/l.out  u1/s1/r.in,u1/s2/l.in,u1/s2/r.in,u1/s3/l.in,u1/s3/r.in,u1/s4/l.in,u1/s4/r.in
+add_bus d1_mp8_u2[1]  u2/s1/l.out  u2/s1/r.in,u2/s2/l.in,u2/s2/r.in,u2/s3/l.in,u2/s3/r.in,u2/s4/l.in,u2/s4/r.in
+add_bus d1_mp8_u3[1]  u3/s1/l.out  u3/s1/r.in,u3/s2/l.in,u3/s2/r.in,u3/s3/l.in,u3/s3/r.in,u3/s4/l.in,u3/s4/r.in
+add_bus d1_mp8_u4[1]  u4/s1/l.out  u4/s1/r.in,u4/s2/l.in,u4/s2/r.in,u4/s3/l.in,u4/s3/r.in,u4/s4/l.in,u4/s4/r.in
+add_bus d1_mp8_u5[1]  u5/s1/l.out  u5/s1/r.in,u5/s2/l.in,u5/s2/r.in,u5/s3/l.in,u5/s3/r.in,u5/s4/l.in,u5/s4/r.in
+add_bus d1_mp8_u6[1]  u6/s1/l.out  u6/s1/r.in,u6/s2/l.in,u6/s2/r.in,u6/s3/l.in,u6/s3/r.in,u6/s4/l.in,u6/s4/r.in
+
+# ── HBundle pipeline ───────────────────────────────────────
+run_hier_bundler depth 2
+
+generate_hier_topologies
+
+run_planner hier 5
+
+run_nuts
+
+check_connectivity nuts
