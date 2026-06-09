@@ -65,10 +65,24 @@ if [ "$RUN_TESTS" = true ]; then
     TEST_START=$(date +%s)
 
     cd ..
-    pytest
+    mkdir -p log
+    TEST_LOG="log/pytest_$(date +%Y%m%d_%H%M%S).log"
+    echo "Running pytest... (output redirected to $TEST_LOG)"
+    
+    # Run pytest, capturing output to the log file.
+    # Use tee to also show the short test summary info and failures on console,
+    # but filter out the noisy [Planner] and [NUTS] C++ printouts.
+    set +e
+    pytest -v > >(tee "$TEST_LOG" | awk '/===|---|FAILURES|test_.*FAILED/ {print}' | uniq) 2>&1
+    PYTEST_RC=$?
+    set -e
 
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))
+    
+    if [ $PYTEST_RC -ne 0 ]; then
+        echo "Tests failed. See $TEST_LOG for details."
+    fi
 fi
 
 END_TIME=$(date +%s)
