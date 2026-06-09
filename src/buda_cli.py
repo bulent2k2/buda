@@ -83,6 +83,7 @@ class BudaSession:
         self.no_viz = False          # set by --no-viz CLI flag
         self.bdb = None              # BDB (opened by open_bdb command)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
+        self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -240,6 +241,61 @@ class BudaSession:
             print(f"[BDB] Block list written to {log_path}")
         except OSError as e:
             print(f"[BDB] Warning: could not write block log {log_path}: {e}")
+
+    # ── Hierarchical topology helpers ─────────────────────────────────────────
+
+    def _build_bdb_floorplan(self, depth):
+        """Build a Floorplan with placed components at exactly this depth from BDB."""
+        fp = buda.Floorplan()
+        dx, dy = self._corner_margin
+        if dx or dy:
+            fp.set_global_corner_margin(dx, dy)
+        for c in self.bdb.all_components():
+            if c.depth == depth and c.x1 >= 0:
+                fp.add_block(c.name, int(round(c.x1)), int(round(c.y1)),
+                             int(round(c.x2)), int(round(c.y2)))
+        return fp
+
+    def _build_cell_local_floorplan(self, parent_comp_name):
+        """Build a Floorplan in cell-local coords for sub-components of parent."""
+        comps = {c.name: c for c in self.bdb.all_components()}
+        parent = comps.get(parent_comp_name)
+        if parent is None:
+            return None
+        fp = buda.Floorplan()
+        for c in comps.values():
+            if c.parent_id == parent.id and c.x1 >= 0:
+                local_name = c.name.rsplit('/', 1)[-1]
+                lx1 = int(round(c.x1 - parent.x1))
+                ly1 = int(round(c.y1 - parent.y1))
+                lx2 = int(round(c.x2 - parent.x1))
+                ly2 = int(round(c.y2 - parent.y1))
+                fp.add_block(local_name, lx1, ly1, lx2, ly2)
+        return fp
+
+    @staticmethod
+    def _parse_bundle_reason(reason):
+        """Parse 'DRV:x|REC:a,b,' → ('x', ['a', 'b']).  Returns (None, []) on failure."""
+        try:
+            drv_part, rec_part = reason.split('|REC:')
+            src = drv_part[4:]              # strip leading "DRV:"
+            dsts = [n for n in rec_part.split(',') if n]
+            return src, dsts
+        except (ValueError, IndexError):
+            return None, []
+
+    def _make_topo_gen(self, fp, use_center=False, use_double_detour=False):
+        """Create a TopologyGenerator on fp with the current layer stack."""
+        tg = buda.TopologyGenerator(fp)
+        h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
+        v = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
+        if h != -1 and v != -1:
+            tg.set_layer_ids(h, v)
+        if use_center:
+            tg.set_busterm_mode(False)
+        if use_double_detour:
+            tg.set_double_detour(True)
+        return tg
 
     def _make_layer_names(self):
         """Build a layer_id -> name dict from def_layer commands, with fallback defaults."""
@@ -856,6 +912,7 @@ class BudaSession:
             if "dx" in kws and "dy" not in kws: cm_dy = cm_dx
             if "dy" in kws and "dx" not in kws: cm_dx = cm_dy
             self.fp.set_global_corner_margin(cm_dx, cm_dy)
+            self._corner_margin = (cm_dx, cm_dy)
         elif cmd == "set_min_stub_length":
             if args: self.fp.set_min_stub_length(int(args[0]))
         elif cmd == "set_min_stub_length_dir":
@@ -1109,6 +1166,64 @@ class BudaSession:
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.candidates)} topologies for bundle "
                       f"{w.original_bundle.id} ({label})")
+
+        elif cmd == "generate_hier_topologies":
+            # generate_hier_topologies [center_mode] [double_detour]
+            # Generates topology candidates for all HBundles produced by
+            # run_hier_bundler.  Three cases per bundle:
+            #   (a) cell-level (cell_context set) → cell-local floorplan
+            #   (b) cross-block any depth         → BDB depth-D floorplan
+            if self.bdb is None:
+                print("Error: generate_hier_topologies requires an open BDB"); return
+            use_center        = "center_mode"   in args
+            use_double_detour = "double_detour" in args
+
+            # Cache floorplans keyed by (depth, is_cell_local, instance_or_empty)
+            fp_cache = {}
+            total_candidates = 0
+
+            for w in self.bundles:
+                b = w.original_bundle
+
+                if b.cell_context and b.entry_busterm_ids:
+                    # ── Case (a): intra-cell bundle — cell-local floorplan ──
+                    parent_name = b.instances[0] if b.instances else None
+                    if parent_name is None:
+                        print(f"  Warning: bundle {b.id} has cell_context but no instances — skipping")
+                        continue
+                    cache_key = ('cell', parent_name)
+                    if cache_key not in fp_cache:
+                        fp_cache[cache_key] = self._build_cell_local_floorplan(parent_name)
+                    cell_fp = fp_cache[cache_key]
+                    if cell_fp is None:
+                        print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
+                        continue
+                    tg = self._make_topo_gen(cell_fp, use_center, use_double_detour)
+                    src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
+                    dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1]
+                                  for e in b.exit_busterm_ids]
+                    w.candidates = tg.generate_candidates(src_local, dsts_local)
+                    label = f"{src_local}→{dsts_local[0]}"
+                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                          f"{len(w.candidates)} candidates  [cell:{b.cell_context}]")
+                else:
+                    # ── Case (b): cross-block bundle — BDB depth-D floorplan ──
+                    cache_key = ('depth', b.level)
+                    if cache_key not in fp_cache:
+                        fp_cache[cache_key] = self._build_bdb_floorplan(b.level)
+                    depth_fp = fp_cache[cache_key]
+                    tg = self._make_topo_gen(depth_fp, use_center, use_double_detour)
+                    src, dsts = self._parse_bundle_reason(b.reason)
+                    if src is None:
+                        print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
+                        continue
+                    w.candidates = tg.generate_candidates(src, dsts)
+                    label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
+                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                          f"{len(w.candidates)} candidates")
+                total_candidates += len(w.candidates)
+            print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
+                  f"{total_candidates} total candidates")
 
         elif cmd == "run_planner":
             if args and args[0] == "post_nuts":
