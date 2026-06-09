@@ -5,7 +5,13 @@ import math
 import os
 import sys
 
-# On macOS the native 'macosx' backend can intermittently segfault, 
+# Ensure the compiled extension is loaded from build/ rather than a stale
+# copy that might exist alongside this script.
+_build = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'build'))
+if _build not in sys.path:
+    sys.path.insert(0, _build)
+
+# On macOS the native 'macosx' backend can intermittently segfault,
 # especially with the IPC timer or when multiple windows open.
 # Force TkAgg to ensure stability.
 if sys.platform == 'darwin':

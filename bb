@@ -54,10 +54,6 @@ fi
 echo "Building target (buda)..."
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-echo "Copying library to src/..."
-# Copy the compiled shared library (supports different Python suffixes on macOS/Linux)
-cp buda.cpython-*.so ../src/
-
 BUILD_END=$(date +%s)
 BUILD_DURATION=$((BUILD_END - BUILD_START))
 
@@ -67,10 +63,10 @@ TEST_DURATION=0
 if [ "$RUN_TESTS" = true ]; then
     echo "=== Running Tests ==="
     TEST_START=$(date +%s)
-    
-    cd ../test/tests
-    PYTHONPATH=../../src pytest
-    
+
+    cd ..
+    pytest
+
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))
 fi
