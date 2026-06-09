@@ -104,6 +104,38 @@ static void build_nuts_maps(
     }
 }
 
+static void relax_boundary_intervals(
+    std::vector<TrackSegment>& segments,
+    const std::map<std::pair<int,int>, double>& pull_map,
+    const std::map<std::pair<int,int>, int>& net_pull_map,
+    int only_layer = -1)
+{
+    // When the preferred (nominal) position is exactly at an interval boundary,
+    // NUTS clamps the bus center to interval_hi - half_width (or interval_lo +
+    // half_width), placing it half a bus-width inside the block.  Extend the
+    // interval by one full width in the outward direction so the bus center can
+    // land at the nominal block-face coordinate, preventing the connected trunk
+    // from overstretching past the face.
+    //
+    // Only applies to topology-nominal preferred positions (net_pull == 0).
+    // Net-pull driven segments already want to be at the boundary; extending
+    // the interval there would move them in the wrong direction.
+    for (auto& ts : segments) {
+        if (only_layer >= 0 && ts.layer != only_layer) continue;
+        auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
+        auto npit = net_pull_map.find(key);
+        if (npit != net_pull_map.end() && npit->second != 0) continue;
+        auto it = pull_map.find(key);
+        if (it == pull_map.end()) continue;
+        const double preferred = it->second;
+        if (std::abs(preferred - ts.interval_hi) < 0.5) {
+            ts.interval_hi += ts.width;
+        } else if (std::abs(preferred - ts.interval_lo) < 0.5) {
+            ts.interval_lo -= ts.width;
+        }
+    }
+}
+
 static void apply_interval_constraints(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, std::pair<double,double>>& slide_map,
@@ -457,6 +489,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::map<std::pair<int,int>, int>                            net_pull_map;
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map, net_pull_map);
     apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
+    relax_boundary_intervals(result.segments, pull_map, net_pull_map);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
@@ -501,6 +534,7 @@ NUTSResult NUTSEngine::rerun_layer(
     std::map<std::pair<int,int>, int>                            net_pull_map;
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, rev_conn_map, net_pull_map);
     apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
+    relax_boundary_intervals(result.segments, pull_map, net_pull_map, layer_id);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;

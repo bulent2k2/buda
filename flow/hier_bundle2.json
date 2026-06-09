@@ -1,0 +1,31 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "a3_0",
+      "bundle_id": 5,
+      "topo_type": "Z_VHV@y360@x120",
+      "topo_wl": 535,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-06-08T15:13:55"
+    },
+    {
+      "bundle_hint": "d1_0",
+      "bundle_id": 3,
+      "topo_type": "TRUNK_V@x502",
+      "topo_wl": 708,
+      "topo_index_hint": 2,
+      "note": "",
+      "selected_at": "2026-06-08T15:15:23"
+    },
+    {
+      "bundle_hint": "e1_0",
+      "bundle_id": 7,
+      "topo_type": "TRUNK_V@x370",
+      "topo_wl": 925,
+      "topo_index_hint": 4,
+      "note": "",
+      "selected_at": "2026-06-08T15:12:24"
+    }
+  ]
+}

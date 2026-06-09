@@ -1,0 +1,52 @@
+# From hier_four_blocks_cell.buda
+source tracks.buda
+
+open_bdb :memory:
+#open_bdb hier_bundle2.bdb
+add_cell blk  300 230
+add_cell sub  120  90
+add_cell leaf  45  50
+
+add_inst_to_cell  blk  s1    sub   15   15
+add_inst_to_cell  blk  s2    sub  155   15
+add_inst_to_cell  blk  s3    sub   15  125
+add_inst_to_cell  blk  s4    sub  155  125
+
+add_inst_to_cell  sub  l    leaf  10   20
+add_inst_to_cell  sub  r    leaf  65   20
+
+add_inst u1  blk  -   50   50
+add_inst u2  blk  -  400   50
+add_inst u3  blk  -   50  330
+add_inst u4  blk  -  400  330
+
+add_blocks_from_bdb 2 skip
+
+bdb_net_mode on
+
+add_bus a1[4]  u1/s1/l.o  u4/s1/l.i
+add_bus a2[4]  u1/s1/r.o  u4/s2/r.i
+add_bus a3[4]  u1/s3/l.o  u4/s3/l.i
+add_bus a4[4]  u1/s3/r.o  u4/s4/r.i
+
+add_bus b1[4]  u3/s1/l.o  u2/s1/r.i,u4/s1/r.i
+add_bus b2[4]  u3/s3/r.o  u2/s1/r.i,u4/s1/r.i
+
+add_bus c1[2]  u3/s3/l.o  u3/s4/l.i,u1/s4/r.i,u2/s4/l.i
+add_bus c2[2]  u3/s3/l.o  u3/s4/r.i,u1/s4/l.i,u2/s2/l.i
+
+add_bus d1[2]  u1/s2/l.o  u1/s2/r.i,u4/s2/l.i,u4/s3/r.i,u4/s4/l.i
+add_bus d2[2]  u1/s2/r.i  u1/s2/r.o,u4/s2/l.i,u4/s3/r.i,u4/s4/l.i
+
+add_bus e1[1]  u2/s1/l.o  u2/s2/r.i,u2/s3/r.i,u2/s3/l.i,u2/s4/r.i,u3/s1/r.i,u3/s2/l.i,u3/s2/r.i
+add_bus e2[1]  u2/s1/r.o  u2/s2/l.i,u2/s3/r.i,u2/s3/l.i,u2/s4/r.i,u3/s1/r.i,u3/s2/l.i,u3/s2/r.i
+
+run_bundler strict
+generate_topologies
+check_connectivity topo
+run_planner 1
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+visualize
