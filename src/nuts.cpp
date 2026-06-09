@@ -110,22 +110,19 @@ static void relax_boundary_intervals(
     const std::map<std::pair<int,int>, int>& net_pull_map,
     int only_layer = -1)
 {
-    // When the preferred (nominal) position is exactly at an interval boundary,
-    // NUTS clamps the bus center to interval_hi - half_width (or interval_lo +
-    // half_width), placing it half a bus-width inside the block.  Extend the
-    // interval by one full width in the outward direction so the bus center can
-    // land at the nominal block-face coordinate, preventing the connected trunk
-    // from overstretching past the face.
+    // When the preferred position equals an interval boundary, preferred_fit
+    // clamps the bus center to interval_hi - half_width (or interval_lo +
+    // half_width), so the bus edge — not its center — lands at the boundary.
+    // This makes trunks overshoot block faces and pull-targets miss their mark.
     //
-    // Only applies to topology-nominal preferred positions (net_pull == 0).
-    // Net-pull driven segments already want to be at the boundary; extending
-    // the interval there would move them in the wrong direction.
+    // Fix: extend the interval by one full width outward so the bus CENTER can
+    // land exactly at the preferred coordinate.  Applies to both topology-
+    // nominal (net_pull == 0) and pull-driven (net_pull != 0) cases: in both,
+    // the center should reach the boundary, not just the edge.
+    (void)net_pull_map;   // reserved for future selective suppression
     for (auto& ts : segments) {
         if (only_layer >= 0 && ts.layer != only_layer) continue;
-        auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
-        auto npit = net_pull_map.find(key);
-        if (npit != net_pull_map.end() && npit->second != 0) continue;
-        auto it = pull_map.find(key);
+        auto it = pull_map.find({ts.bundle_id, ts.seg_idx});
         if (it == pull_map.end()) continue;
         const double preferred = it->second;
         if (std::abs(preferred - ts.interval_hi) < 0.5) {
