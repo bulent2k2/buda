@@ -221,7 +221,9 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                 int vx2 = (dst.x2 + src.x2) / 2;
                 int dx2 = d_orig.face_x(vx2);
                 int bend_y_fixed = d_orig.face_y(sy);
-                if (std::abs(vx2 - s_orig.face_x(vx2)) >= m_h && std::abs(bend_y_fixed - sy) >= m_v) {
+                // vx2 must lie within src's x-range; H stub is vx2→dx2
+                if (vx2 >= src.x1 && vx2 <= src.x2 &&
+                    std::abs(vx2 - dx2) >= m_h && std::abs(bend_y_fixed - sy) >= m_v) {
                     Topology vh; vh.type = "L_VH@x" + std::to_string(vx2);
                     if (s_orig.face_y(bend_y_fixed) != bend_y_fixed) vh.segments.push_back(make_seg(vx2, s_orig.face_y(bend_y_fixed), vx2, bend_y_fixed, v_layer_));
                     if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y_fixed, dx2, bend_y_fixed, h_layer_));
@@ -232,7 +234,9 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
                 int vx2 = (src.x1 + dst.x1) / 2;
                 int dx2 = d_orig.face_x(vx2);
                 int bend_y_fixed = d_orig.face_y(sy);
-                if (std::abs(vx2 - s_orig.face_x(vx2)) >= m_h && std::abs(bend_y_fixed - sy) >= m_v) {
+                // vx2 must lie within src's x-range; H stub is vx2→dx2
+                if (vx2 >= src.x1 && vx2 <= src.x2 &&
+                    std::abs(vx2 - dx2) >= m_h && std::abs(bend_y_fixed - sy) >= m_v) {
                     Topology vh; vh.type = "L_VH@x" + std::to_string(vx2);
                     if (s_orig.face_y(bend_y_fixed) != bend_y_fixed) vh.segments.push_back(make_seg(vx2, s_orig.face_y(bend_y_fixed), vx2, bend_y_fixed, v_layer_));
                     if (vx2 != dx2)   vh.segments.push_back(make_seg(vx2, bend_y_fixed, dx2, bend_y_fixed, h_layer_));
@@ -382,6 +386,8 @@ void TopologyGenerator::add_z_shapes(const Busterm& s_bt, const Busterm& d_bt,
                         int x1 = flip ? vx_lo : vx_hi;
                         int x2 = flip ? vx_hi : vx_lo;
                         if (x1 == x2) continue;
+                        // Reject: dst stub must land within dst's x-range
+                        if (x2 < d_orig.x1 || x2 > d_orig.x2) continue;
                         Topology z; z.type = "Z_VHV@y" + std::to_string(y_cut) + "@x" + std::to_string(x1);
                         z.segments.push_back(make_seg(x1, s_orig.face_y(y_cut), x1, y_cut + ovlp, v_layer_));
                         z.segments.push_back(make_seg(x1, y_cut,        x2, y_cut,        h_layer_));

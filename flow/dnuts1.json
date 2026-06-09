@@ -1,31 +1,4 @@
 {
   "selections": [
-    {
-      "bundle_hint": "bv2_0",
-      "bundle_id": 4,
-      "topo_type": "I_V",
-      "topo_wl": 200,
-      "topo_index_hint": 0,
-      "note": "",
-      "selected_at": "2026-05-20T21:25:14"
-    },
-    {
-      "bundle_hint": "n11_0",
-      "bundle_id": 1,
-      "topo_type": "L_HV@x810@y458",
-      "topo_wl": 418,
-      "topo_index_hint": 1,
-      "note": "",
-      "selected_at": "2026-05-20T21:21:24"
-    },
-    {
-      "bundle_hint": "n12_0",
-      "bundle_id": 2,
-      "topo_type": "Z_VHV@y325@x590",
-      "topo_wl": 270,
-      "topo_index_hint": 1,
-      "note": "",
-      "selected_at": "2026-05-20T21:26:29"
-    }
   ]
 }

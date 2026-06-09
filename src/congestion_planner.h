@@ -59,10 +59,16 @@ public:
 private:
     void _rebuild_cuts();
     // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.
-    double cong_cost_segment(const Segment& seg, int layer_id, double eff_width) const;
+    // perp_pos_override: if != INT_MIN, replaces seg.start.x/y for the perpendicular band
+    // lookup.  Pass the ConnTopology interval centre so grid-boundary stubs land in the
+    // correct Hanan cell rather than the adjacent one chosen by find_band's half-open rule.
+    double cong_cost_segment(const Segment& seg, int layer_id, double eff_width,
+                             int perp_pos_override = INT_MIN) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
-    double score_segment(const Segment& seg, int layer_id, double eff_width) const;
-    void   apply_segment(const Segment& seg, int layer_id, double eff_width);
+    double score_segment(const Segment& seg, int layer_id, double eff_width,
+                         int perp_pos_override = INT_MIN) const;
+    void   apply_segment(const Segment& seg, int layer_id, double eff_width,
+                         int perp_pos_override = INT_MIN);
     // Span-mismatch cost: kSpan(layer) * max(0, span_min-span, span-span_max).
     double span_cost_for(double seg_span, int layer_id) const;
 

@@ -1206,6 +1206,54 @@ class BudaSession:
                   f"unit_pitch={pat.unit_pitch():.3f}, "
                   f"signal_density={pat.signal_density():.3f}, dilution={pat.dilution_factor():.3f}")
 
+        elif cmd == "report_overhead":
+            # Usage: report_overhead
+            # For each layer, compare the overhead% set in def_layer against the
+            # overhead implied by the track pattern.  Prints a suggested corrected
+            # def_layer command for any layer where the two values diverge.
+            layer_names = self._make_layer_names()
+
+            # Collect all layer IDs that have either a def_layer overhead or a track pattern.
+            all_lids: set[int] = set(self._layer_overheads.keys())
+            if self.routing_grid is not None:
+                for lid in (self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL) +
+                            self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL)):
+                    if self.routing_grid.has_layer(lid):
+                        all_lids.add(lid)
+
+            if not all_lids:
+                print("[report_overhead] No layers defined.")
+                return
+
+            print("[report_overhead] Layer overhead analysis:")
+            print(f"  {'Layer':<10} {'def_layer%':>11} {'actual%':>9} {'dilution':>9}  status")
+            print(f"  {'-'*10} {'-'*11} {'-'*9} {'-'*9}  ------")
+            for lid in sorted(all_lids):
+                lname    = layer_names.get(lid, f"L{lid}")
+                def_ovh  = self._layer_overheads.get(lid)
+                def_str  = f"{def_ovh:.2f}%" if def_ovh is not None else "(not set)"
+
+                if self.routing_grid is not None and self.routing_grid.has_layer(lid):
+                    pat          = self.routing_grid.get_layer_grid(lid).effective_pattern_at(0.0, 0.0)
+                    actual_ovh   = (1.0 - pat.signal_density()) * 100.0
+                    actual_dil   = pat.dilution_factor()
+
+                    if def_ovh is None:
+                        status = "MISSING in def_layer"
+                    else:
+                        diff   = abs(actual_ovh - def_ovh)
+                        status = "OK" if diff < 0.05 else f"MISMATCH (diff={diff:.2f}%)"
+
+                    print(f"  {lname:<10} {def_str:>11} {actual_ovh:>8.2f}% {actual_dil:>9.4f}  {status}")
+
+                    if def_ovh is None or abs(actual_ovh - def_ovh) >= 0.05:
+                        if self.layers.has_layer(lid):
+                            dir_str  = "H" if self.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL else "V"
+                            type_str = " TOP" if self.layers.is_top(lid) else ""
+                            print(f"    -> suggested: def_layer {lid} {lname} {dir_str}{type_str} {actual_ovh:.2f}")
+                else:
+                    print(f"  {lname:<10} {def_str:>11} {'(no pattern)':>9}  {'':>9}  no track pattern defined")
+
         elif cmd == "add_grid_override":
             # Usage: add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...
             if len(args) < 6:

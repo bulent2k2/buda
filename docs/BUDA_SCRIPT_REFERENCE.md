@@ -31,6 +31,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 4c | `run_planner post_nuts` | Reassign stub layers to resolve channel pin conflicts; single NUTS re-run |
 | 8 | `def_track_pattern` | Define the repeating POWER/SIGNAL/GROUND track pattern for a layer |
 | 8 | `add_grid_override` | Override the track pattern for a specific floorplan region on a layer |
+| 8 | `report_overhead` | Compare `def_layer` overhead% against the track pattern; print corrected `def_layer` commands for any mismatch |
 | 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
@@ -807,6 +808,43 @@ First-match wins: if a point falls in multiple override regions, the first one d
 # Dense SRAM macro at (200,0)-(400,500) uses half-pitch POWER/SIGNAL layout
 add_grid_override 4  200 0 400 500  0.0  POWER 1.5 0.5  SIGNAL 0.5 0.5  SIGNAL 0.5 0.5  GROUND 1.5 0.5  SIGNAL 0.5 0.5  SIGNAL 0.5 0.5
 ```
+
+---
+
+### `report_overhead`
+
+```
+report_overhead
+```
+
+Compares the overhead percentage set in each `def_layer` command against the overhead implied by the layer's `def_track_pattern`. Call this after defining track patterns to verify that the two values are consistent — a mismatch means abstract NUTS (which uses the `def_layer` dilution) and detailed NUTS (which uses the actual track geometry) will disagree on how much space a bus occupies.
+
+For each layer the command prints:
+
+| Column | Meaning |
+|---|---|
+| `def_layer%` | Overhead set in `def_layer` (or `(not set)` if omitted / zero) |
+| `actual%` | Overhead derived from the track pattern: `(1 − signal_density) × 100` |
+| `dilution` | `unit_pitch / signal_width_sum` from the track pattern |
+| `status` | `OK` if the two values agree within 0.05%, otherwise `MISMATCH` |
+
+For any layer with a mismatch, the command also prints a corrected `def_layer` line ready to paste back into the script.
+
+**Example output** for a layer with 33.33% set in `def_layer` but a track pattern whose actual overhead is 55.56%:
+```
+[report_overhead] Layer overhead analysis:
+  Layer       def_layer%   actual%  dilution  status
+  ---------- ----------- --------- ---------  ------
+  M4              33.33%    55.56%    2.2500  MISMATCH (diff=22.23%)
+    -> suggested: def_layer 4 M4 H TOP 55.56
+  M5              33.33%    55.56%    2.2500  MISMATCH (diff=22.23%)
+    -> suggested: def_layer 5 M5 V TOP 55.56
+```
+
+**Notes:**
+- `report_overhead` is read-only — it does not change any layer settings.
+- Only the global pattern per layer is checked; per-region overrides (`add_grid_override`) are not compared.
+- Layers with no track pattern defined show `(no pattern)` in the `actual%` column.
 
 ---
 
