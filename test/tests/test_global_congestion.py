@@ -33,7 +33,7 @@ def make_bundle_wrapper(bid, width, seg):
     topo.type = "TEST_V"
     topo.segments = [seg]
 
-    bundle = buda.Bundle()
+    bundle = buda.HBundle()
     bundle.id = bid
 
     w = buda.BundleWrapper()

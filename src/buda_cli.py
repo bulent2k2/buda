@@ -83,6 +83,7 @@ class BudaSession:
         self.no_viz = False          # set by --no-viz CLI flag
         self.bdb = None              # BDB (opened by open_bdb command)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
+        self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -240,6 +241,140 @@ class BudaSession:
             print(f"[BDB] Block list written to {log_path}")
         except OSError as e:
             print(f"[BDB] Warning: could not write block log {log_path}: {e}")
+
+    # ── Hierarchical topology helpers ─────────────────────────────────────────
+
+    def _build_bdb_floorplan(self, depth):
+        """Build a Floorplan with placed components at exactly this depth from BDB."""
+        fp = buda.Floorplan()
+        dx, dy = self._corner_margin
+        if dx or dy:
+            fp.set_global_corner_margin(dx, dy)
+        for c in self.bdb.all_components():
+            if c.depth == depth and c.x1 >= 0:
+                fp.add_block(c.name, int(round(c.x1)), int(round(c.y1)),
+                             int(round(c.x2)), int(round(c.y2)))
+        return fp
+
+    def _build_cell_local_floorplan(self, parent_comp_name):
+        """Build a Floorplan in cell-local coords for sub-components of parent."""
+        comps = {c.name: c for c in self.bdb.all_components()}
+        parent = comps.get(parent_comp_name)
+        if parent is None:
+            return None
+        fp = buda.Floorplan()
+        for c in comps.values():
+            if c.parent_id == parent.id and c.x1 >= 0:
+                local_name = c.name.rsplit('/', 1)[-1]
+                lx1 = int(round(c.x1 - parent.x1))
+                ly1 = int(round(c.y1 - parent.y1))
+                lx2 = int(round(c.x2 - parent.x1))
+                ly2 = int(round(c.y2 - parent.y1))
+                fp.add_block(local_name, lx1, ly1, lx2, ly2)
+        return fp
+
+    @staticmethod
+    def _parse_bundle_reason(reason):
+        """Parse 'DRV:x|REC:a,b,' → ('x', ['a', 'b']).  Returns (None, []) on failure."""
+        try:
+            drv_part, rec_part = reason.split('|REC:')
+            src = drv_part[4:]              # strip leading "DRV:"
+            dsts = [n for n in rec_part.split(',') if n]
+            return src, dsts
+        except (ValueError, IndexError):
+            return None, []
+
+    @staticmethod
+    def _offset_topology(topo, dx, dy):
+        """Return a new Topology with every segment shifted by (dx, dy)."""
+        new_t = buda.Topology()
+        new_t.type                  = topo.type
+        new_t.estimated_wirelength  = topo.estimated_wirelength
+        new_t.trunk_location        = topo.trunk_location   # metadata only; not transformed
+        new_t.pass_through_count    = topo.pass_through_count
+        new_t.connected_block_names = topo.connected_block_names
+        new_segs = []
+        for s in topo.segments:
+            ns = buda.Segment()
+            ns.start      = buda.Point(s.start.x + dx, s.start.y + dy)
+            ns.end        = buda.Point(s.end.x   + dx, s.end.y   + dy)
+            ns.layer_hint = s.layer_hint
+            new_segs.append(ns)
+        new_t.segments = new_segs
+        return new_t
+
+    @staticmethod
+    def _clone_hbundle_with_id(b, new_id):
+        """Return a shallow clone of HBundle b with id replaced by new_id."""
+        nb = buda.HBundle()
+        nb.id                = new_id
+        nb.net_names         = b.net_names
+        nb.reason            = b.reason
+        nb.num_terminals     = b.num_terminals
+        nb.level             = b.level
+        nb.cell_context      = b.cell_context
+        nb.instances         = b.instances
+        nb.parent_id         = b.parent_id
+        nb.child_ids         = b.child_ids
+        nb.entry_busterm_ids = b.entry_busterm_ids
+        nb.exit_busterm_ids  = b.exit_busterm_ids
+        return nb
+
+    def _expand_hier_bundles(self, bundles):
+        """Expand cell-level BundleWrappers to per-instance absolute-coord wrappers.
+
+        Cross-block bundles are kept as-is (candidates already absolute).
+        Cell-level bundles (cell_context set) are replaced by one wrapper
+        per entry in b.instances, each with candidates offset to that
+        instance's absolute position.  Each expanded wrapper gets a unique
+        HBundle ID so assignment matching is unambiguous.
+        """
+        comps = {c.name: c for c in self.bdb.all_components()}
+        # Start synthetic IDs above any real bundle ID in the set.
+        max_id = max((w.original_bundle.id for w in bundles), default=-1)
+        next_id = max_id + 1
+        result = []
+        for w in bundles:
+            b = w.original_bundle
+            if not b.cell_context or not b.instances:
+                result.append(w)
+                continue
+            for inst_name in b.instances:
+                parent = comps.get(inst_name)
+                if parent is None:
+                    continue
+                dx = int(round(parent.x1))
+                dy = int(round(parent.y1))
+                new_w = buda.BundleWrapper()
+                new_w.original_bundle = self._clone_hbundle_with_id(b, next_id)
+                next_id += 1
+                new_w.width = w.width
+                new_w.candidates = [self._offset_topology(t, dx, dy)
+                                    for t in w.candidates]
+                # Rewrite cell-local block names to absolute paths so that
+                # ConnTopology can look them up in the global floorplan.
+                # Cell-local names have no "/" (e.g. "pa_i"); absolute names
+                # already contain the hierarchy separator.
+                for topo in new_w.candidates:
+                    topo.connected_block_names = [
+                        inst_name + "/" + n if "/" not in n else n
+                        for n in topo.connected_block_names
+                    ]
+                result.append(new_w)
+        return result
+
+    def _make_topo_gen(self, fp, use_center=False, use_double_detour=False):
+        """Create a TopologyGenerator on fp with the current layer stack."""
+        tg = buda.TopologyGenerator(fp)
+        h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
+        v = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
+        if h != -1 and v != -1:
+            tg.set_layer_ids(h, v)
+        if use_center:
+            tg.set_busterm_mode(False)
+        if use_double_detour:
+            tg.set_double_detour(True)
+        return tg
 
     def _make_layer_names(self):
         """Build a layer_id -> name dict from def_layer commands, with fallback defaults."""
@@ -856,6 +991,7 @@ class BudaSession:
             if "dx" in kws and "dy" not in kws: cm_dy = cm_dx
             if "dy" in kws and "dx" not in kws: cm_dx = cm_dy
             self.fp.set_global_corner_margin(cm_dx, cm_dy)
+            self._corner_margin = (cm_dx, cm_dy)
         elif cmd == "set_min_stub_length":
             if args: self.fp.set_min_stub_length(int(args[0]))
         elif cmd == "set_min_stub_length_dir":
@@ -1031,7 +1167,29 @@ class BudaSession:
                 w.original_bundle = b
                 w.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
-            print(f"Bundler created {len(self.bundles)} bundles.")
+            print(f"Bundler created {len(self.bundles)} hbundles.")
+        elif cmd == "run_hier_bundler":
+            # run_hier_bundler [depth <N>]
+            if self.bdb is None:
+                print("Error: run_hier_bundler requires an open BDB (use open_bdb first)"); return
+            max_depth = 1
+            if "depth" in args:
+                idx = list(args).index("depth")
+                if idx + 1 < len(args):
+                    max_depth = int(args[idx + 1])
+            hb = buda.HierarchicalBundler(self.bdb)
+            raw_bundles = hb.run(max_depth)
+            self.bundles = []
+            for b in raw_bundles:
+                w = buda.BundleWrapper()
+                w.original_bundle = b
+                w.width = len(b.get_net_names()) * 1.5
+                self.bundles.append(w)
+            counts = {}
+            for b in raw_bundles:
+                counts[b.level] = counts.get(b.level, 0) + 1
+            summary = ", ".join(f"D{d}: {n}" for d, n in sorted(counts.items()))
+            print(f"HierBundler: {len(raw_bundles)} hbundles ({summary})")
         elif cmd == "generate_topologies_for_bundle":
             # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...] [center_mode] [double_detour]
             # Single dst  → 2-pin L/Z/U candidates
@@ -1088,6 +1246,64 @@ class BudaSession:
                 print(f"Generated {len(w.candidates)} topologies for bundle "
                       f"{w.original_bundle.id} ({label})")
 
+        elif cmd == "generate_hier_topologies":
+            # generate_hier_topologies [center_mode] [double_detour]
+            # Generates topology candidates for all HBundles produced by
+            # run_hier_bundler.  Three cases per bundle:
+            #   (a) cell-level (cell_context set) → cell-local floorplan
+            #   (b) cross-block any depth         → BDB depth-D floorplan
+            if self.bdb is None:
+                print("Error: generate_hier_topologies requires an open BDB"); return
+            use_center        = "center_mode"   in args
+            use_double_detour = "double_detour" in args
+
+            # Cache floorplans keyed by (depth, is_cell_local, instance_or_empty)
+            fp_cache = {}
+            total_candidates = 0
+
+            for w in self.bundles:
+                b = w.original_bundle
+
+                if b.cell_context and b.entry_busterm_ids:
+                    # ── Case (a): intra-cell bundle — cell-local floorplan ──
+                    parent_name = b.instances[0] if b.instances else None
+                    if parent_name is None:
+                        print(f"  Warning: bundle {b.id} has cell_context but no instances — skipping")
+                        continue
+                    cache_key = ('cell', parent_name)
+                    if cache_key not in fp_cache:
+                        fp_cache[cache_key] = self._build_cell_local_floorplan(parent_name)
+                    cell_fp = fp_cache[cache_key]
+                    if cell_fp is None:
+                        print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
+                        continue
+                    tg = self._make_topo_gen(cell_fp, use_center, use_double_detour)
+                    src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
+                    dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1]
+                                  for e in b.exit_busterm_ids]
+                    w.candidates = tg.generate_candidates(src_local, dsts_local)
+                    label = f"{src_local}→{dsts_local[0]}"
+                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                          f"{len(w.candidates)} candidates  [cell:{b.cell_context}]")
+                else:
+                    # ── Case (b): cross-block bundle — BDB depth-D floorplan ──
+                    cache_key = ('depth', b.level)
+                    if cache_key not in fp_cache:
+                        fp_cache[cache_key] = self._build_bdb_floorplan(b.level)
+                    depth_fp = fp_cache[cache_key]
+                    tg = self._make_topo_gen(depth_fp, use_center, use_double_detour)
+                    src, dsts = self._parse_bundle_reason(b.reason)
+                    if src is None:
+                        print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
+                        continue
+                    w.candidates = tg.generate_candidates(src, dsts)
+                    label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
+                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                          f"{len(w.candidates)} candidates")
+                total_candidates += len(w.candidates)
+            print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
+                  f"{total_candidates} total candidates")
+
         elif cmd == "run_planner":
             if args and args[0] == "post_nuts":
                 # Stage 4c: post-NUTS stub layer reassignment.
@@ -1123,6 +1339,40 @@ class BudaSession:
                 if v_thresholds is None and h_thresholds is None:
                     v_thresholds = _V_DEFAULTS
                 self._run_post_nuts_planner(v_thresholds, h_thresholds)
+            elif args and args[0] == "hier":
+                # run_planner hier [N]
+                # Hierarchy-aware planning: expand cell-level bundles to per-instance
+                # absolute-coord wrappers, assign priorities, then run the flat planner.
+                if self.bdb is None:
+                    print("Error: run_planner hier requires an open BDB"); return
+                iterations = int(args[1]) if len(args) > 1 else 5
+                # Expand cell-level bundles → per-instance absolute-coord wrappers.
+                # Each expanded wrapper gets a unique HBundle ID.
+                expanded = self._expand_hier_bundles(self.bundles)
+                # priority = -(level * 10000 + n_candidates): higher routes first.
+                # Depth-0 before depth-1; fewer candidates (less flexibility) first.
+                for w in expanded:
+                    b = w.original_bundle
+                    w.priority = -(b.level * 10_000 + len(w.candidates))
+                self.planner = buda.CongestionPlanner(self.fp, self.layers)
+                for pname, pval in self._planner_params.items():
+                    self.planner.set_planner_param(pname, pval)
+                self.planner.build_congestion_map()
+                self._planner_iterations = iterations
+                with buda.ostream_redirect():
+                    assignments = self.planner.optimize_topologies(expanded, iterations)
+                # Apply assignments.  Each expanded wrapper has a unique HBundle ID so
+                # this lookup is unambiguous even for multiple cell instances.
+                bid_to_wrapper = {w.original_bundle.id: w for w in expanded}
+                for asn in assignments:
+                    w = bid_to_wrapper.get(asn.bundle_id)
+                    if w is not None:
+                        w.selected_topology_index = asn.topo_index
+                        w.assigned_v_layer = asn.v_layer_id
+                        w.assigned_h_layer = asn.h_layer_id
+                        w.seg_layers = list(asn.seg_layers)
+                self.bundles = expanded
+                print(f"run_planner hier: {len(self.bundles)} wrappers after expansion")
             else:
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
@@ -1523,6 +1773,16 @@ class BudaSession:
             self.bdb.add_comp(args[0], args[1], parent,
                               float(args[3]), float(args[4]),
                               float(args[5]), float(args[6]), is_leaf)
+        elif cmd == "derive_busterms":
+            # derive_busterms [max_depth]
+            # Populate BDB busterm table from the component hierarchy.
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            max_depth = int(args[0]) if args else 1
+            gen = buda.BustermGen(self.bdb)
+            gen.derive(max_depth)
+            bts = self.bdb.all_busterms()
+            print(f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth}).")
         elif cmd == "source":
             if not args:
                 print("Error: source command requires a file path")

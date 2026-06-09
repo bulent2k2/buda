@@ -36,7 +36,7 @@ def make_bundle_wrapper(bid, width, seg):
     topo = buda.Topology()
     topo.type = "TEST_H"
     topo.segments = [seg]
-    bundle = buda.Bundle()
+    bundle = buda.HBundle()
     bundle.id = bid
     w = buda.BundleWrapper()
     w.original_bundle = bundle
@@ -57,16 +57,20 @@ def open_channel_fp():
 def bottleneck_fp():
     """Floorplan with a narrow H-routing gap.
 
-    src (x=0..100), dst (x=500..600), blocker (x=100..500, y=0..96).
+    src (x=0..100, y=96..100), dst (x=500..600, y=96..100),
+    blocker (x=100..500, y=0..96).
     Hanan Y-grid: [0, 96, 100].
     V-cut at x=300 (midpoint of [100,500]):
-      band[0] = [0,96]  → capacity 0  (covered by blocker)
-      band[1] = [96,100] → capacity 4  (open gap)
+      band[0] = [0,96)  → capacity 0  (covered by blocker)
+      band[1] = [96,100) → capacity 4  (open gap)
     H segments at y=98 cross x=300 and land in band 1 (capacity=4).
+
+    src/dst are intentionally narrow in Y so ConnTopology computes
+    perp_lo/perp_hi = [96,100], centre=98 → find_band returns band 1.
     """
     fp = buda.Floorplan()
-    fp.add_block("src",      0,   0, 100, 100)
-    fp.add_block("dst",    500,   0, 600, 100)
+    fp.add_block("src",      0,  96, 100, 100)
+    fp.add_block("dst",    500,  96, 600, 100)
     fp.add_block("blocker", 100,  0, 500,  96)
     return fp
 

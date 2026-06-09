@@ -54,7 +54,7 @@ def nuts_summary(out: str):
 def test_two():
     out, rc = run_script("two.buda")
     assert_clean(out, rc, "two.buda")
-    assert "Bundler created 13 bundles." in out
+    assert "Bundler created 13 hbundles." in out
     segs, viols, ovlps = nuts_summary(out)
     assert segs  == 19
     assert viols == 0
@@ -68,7 +68,7 @@ def test_two():
 def test_two_rotated():
     out, rc = run_script("two_rotated.buda")
     assert_clean(out, rc, "two_rotated.buda")
-    assert "Bundler created 13 bundles." in out
+    assert "Bundler created 13 hbundles." in out
     segs, viols, ovlps = nuts_summary(out)
     assert segs  == 19
     assert viols == 0
@@ -89,7 +89,7 @@ def test_two_rotated():
 def test_comprehensive_demo():
     out, rc = run_script("comprehensive_demo.buda")
     assert_clean(out, rc, "comprehensive_demo.buda")
-    assert "Bundler created 3 bundles." in out
+    assert "Bundler created 3 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)
     assert segs  == 4
     assert ovlps == 0
@@ -110,7 +110,7 @@ def test_comprehensive_demo():
 def test_two_rotated_buses():
     out, rc = run_script("two_rotated_buses.buda")
     assert_clean(out, rc, "two_rotated_buses.buda")
-    assert "Bundler created 13 bundles." in out
+    assert "Bundler created 13 hbundles." in out
     segs, viols, ovlps = nuts_summary(out)
     assert segs  == 19
     assert viols == 0
@@ -126,7 +126,7 @@ def test_two_rotated_buses():
 def test_four_blocks_3_bundles():
     out, rc = run_script("four_blocks_3_bundles.buda")
     assert_clean(out, rc, "four_blocks_3_bundles.buda")
-    assert "Bundler created 3 bundles." in out
+    assert "Bundler created 3 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)
     assert segs  == 4   # b1=I_H(1), b2=I_V(1), b3=L_HV(2)
     assert ovlps == 0

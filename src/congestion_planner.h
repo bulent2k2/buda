@@ -1,4 +1,5 @@
 #pragma once
+#include <climits>
 #include "bundler.h"
 #include "topology.h"
 #include "layering.h"
@@ -17,11 +18,12 @@ struct GlobalCut {
 };
 
 struct BundleWrapper {
-    Bundle original_bundle;
+    HBundle original_bundle;
     std::vector<Topology> candidates;
     int selected_topology_index = -1;
     bool topology_pinned = false;
     double width = 1.0;
+    double priority = 0.0;  // Higher = route first. Set by run_planner hier.
     // Per-segment layer assignments set by CongestionPlanner (primary).
     // Index matches topo.segments of the selected topology.
     std::vector<int> seg_layers;

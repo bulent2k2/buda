@@ -158,8 +158,18 @@ public:
     void compute_fanout();
     void compute_all();
 
+    // ── Busterm management ────────────────────────────────────────────────
+    // Insert or replace one busterm row. Idempotent on the same id.
+    void add_busterm(const BustermRow& bt);
+    // Delete all busterm rows (used before re-deriving from scratch).
+    void clear_busterms();
+
     // ── Queries ────────────────────────────────────────────────────────────
     std::vector<ComponentRow> all_components() const;
+    // Components at exactly the given hierarchy depth.
+    std::vector<ComponentRow> components_at_depth(int depth) const;
+    // Pins that belong to the given component id.
+    std::vector<PinRow>       pins_by_comp(int comp_id) const;
     std::vector<NetRow>       all_nets()        const;
     std::vector<PinRow>       all_pins()        const;
     std::vector<BustermRow>   all_busterms()    const;

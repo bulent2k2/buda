@@ -8,6 +8,12 @@ else()
     add_compile_options(-O3 -march=native -Wall -Wextra -fPIC)
 endif()
 
+execute_process(
+    COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
+    OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+list(APPEND CMAKE_PREFIX_PATH "${PYBIND11_CMAKE_DIR}")
 find_package(pybind11 REQUIRED)
 
 set(SOURCE_FILES

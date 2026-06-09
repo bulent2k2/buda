@@ -4,6 +4,7 @@
 #include <pybind11/iostream.h>
 #include "bdb.h"
 #include "bundler.h"
+#include "busterm.h"
 #include "topology.h"
 #include "conn_topology.h"
 #include "layering.h"
@@ -74,13 +75,20 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("bridge_segments",        &Topology::bridge_segments)
         .def_readwrite("connected_block_names",  &Topology::connected_block_names);
 
-    py::class_<Bundle>(m, "Bundle")
+    py::class_<HBundle>(m, "HBundle")
         .def(py::init<>())
-        .def_readwrite("id",            &Bundle::id)
-        .def_readwrite("net_names",     &Bundle::net_names)
-        .def_readwrite("reason",        &Bundle::reason)
-        .def_readwrite("num_terminals", &Bundle::num_terminals)
-        .def("get_net_names",           &Bundle::get_net_names);
+        .def_readwrite("id",                 &HBundle::id)
+        .def_readwrite("net_names",          &HBundle::net_names)
+        .def_readwrite("reason",             &HBundle::reason)
+        .def_readwrite("num_terminals",      &HBundle::num_terminals)
+        .def_readwrite("level",              &HBundle::level)
+        .def_readwrite("cell_context",       &HBundle::cell_context)
+        .def_readwrite("instances",          &HBundle::instances)
+        .def_readwrite("parent_id",          &HBundle::parent_id)
+        .def_readwrite("child_ids",          &HBundle::child_ids)
+        .def_readwrite("entry_busterm_ids",  &HBundle::entry_busterm_ids)
+        .def_readwrite("exit_busterm_ids",   &HBundle::exit_busterm_ids)
+        .def("get_net_names",                &HBundle::get_net_names);
 
     py::class_<BundleAssignment>(m, "BundleAssignment")
         .def_readwrite("bundle_id",  &BundleAssignment::bundle_id)
@@ -99,7 +107,8 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("pinned_seg_layers",       &BundleWrapper::pinned_seg_layers)
         .def_readwrite("assigned_v_layer",        &BundleWrapper::assigned_v_layer)
         .def_readwrite("assigned_h_layer",        &BundleWrapper::assigned_h_layer)
-        .def_readwrite("topology_pinned",         &BundleWrapper::topology_pinned);
+        .def_readwrite("topology_pinned",         &BundleWrapper::topology_pinned)
+        .def_readwrite("priority",                &BundleWrapper::priority);
 
     py::class_<Netlist>(m, "Netlist")
         .def(py::init<>())
@@ -109,6 +118,10 @@ PYBIND11_MODULE(buda, m) {
         .def(py::init<>())
         .def("set_strategy", &Bundler::set_strategy)
         .def("run",          &Bundler::run);
+
+    py::class_<HierarchicalBundler>(m, "HierarchicalBundler")
+        .def(py::init<BDB&>())
+        .def("run", &HierarchicalBundler::run, py::arg("max_depth") = 1);
 
     py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
         .def(py::init<>())
@@ -382,6 +395,30 @@ PYBIND11_MODULE(buda, m) {
         .def(py::init<const RoutingGridStack&>())
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
 
+    // ── HierBusterm / BustermGen ───────────────────────────────────────────
+    py::enum_<BustermResolution>(m, "BustermResolution")
+        .value("BLOCK",            BustermResolution::BLOCK)
+        .value("SPATIAL_CLUSTER",  BustermResolution::SPATIAL_CLUSTER)
+        .value("PORT",             BustermResolution::PORT);
+
+    py::class_<HierBusterm>(m, "HierBusterm")
+        .def(py::init<>())
+        .def_readwrite("id",         &HierBusterm::id)
+        .def_readwrite("hier_path",  &HierBusterm::hier_path)
+        .def_readwrite("depth",      &HierBusterm::depth)
+        .def_readwrite("x1",         &HierBusterm::x1)
+        .def_readwrite("y1",         &HierBusterm::y1)
+        .def_readwrite("x2",         &HierBusterm::x2)
+        .def_readwrite("y2",         &HierBusterm::y2)
+        .def_readwrite("resolution", &HierBusterm::resolution)
+        .def_readwrite("parent_id",  &HierBusterm::parent_id);
+
+    py::class_<BustermGen>(m, "BustermGen")
+        .def(py::init<BDB&>(), py::arg("db"))
+        .def("derive", &BustermGen::derive, py::arg("max_depth") = 0)
+        .def("refine", &BustermGen::refine)
+        .def("all",    &BustermGen::all);
+
     // ── BDB row types ──────────────────────────────────────────────────────
     py::class_<ComponentRow>(m, "ComponentRow")
         .def_readwrite("id",            &ComponentRow::id)
@@ -426,6 +463,19 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("px",       &CellPinRow::px)
         .def_readwrite("py",       &CellPinRow::py);
 
+    py::class_<BustermRow>(m, "BustermRow")
+        .def(py::init<>())
+        .def_readwrite("id",         &BustermRow::id)
+        .def_readwrite("comp_id",    &BustermRow::comp_id)
+        .def_readwrite("hier_path",  &BustermRow::hier_path)
+        .def_readwrite("depth",      &BustermRow::depth)
+        .def_readwrite("x1",         &BustermRow::x1)
+        .def_readwrite("y1",         &BustermRow::y1)
+        .def_readwrite("x2",         &BustermRow::x2)
+        .def_readwrite("y2",         &BustermRow::y2)
+        .def_readwrite("resolution", &BustermRow::resolution)
+        .def_readwrite("parent_id",  &BustermRow::parent_id);
+
     // ── BDB ────────────────────────────────────────────────────────────────
     py::class_<BDB>(m, "BDB")
         .def(py::init<const std::string&>())
@@ -435,7 +485,11 @@ PYBIND11_MODULE(buda, m) {
         .def("compute_hpwl",    &BDB::compute_hpwl)
         .def("compute_fanout",  &BDB::compute_fanout)
         .def("compute_all",     &BDB::compute_all)
-        .def("all_components",  &BDB::all_components)
+        .def("all_components",       &BDB::all_components)
+        .def("components_at_depth",  &BDB::components_at_depth, py::arg("depth"))
+        .def("pins_by_comp",         &BDB::pins_by_comp, py::arg("comp_id"))
+        .def("add_busterm",          &BDB::add_busterm, py::arg("bt"))
+        .def("clear_busterms",       &BDB::clear_busterms)
         .def("all_nets",        &BDB::all_nets)
         .def("all_pins",        &BDB::all_pins)
         .def("all_busterms",    &BDB::all_busterms)

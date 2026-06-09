@@ -16,7 +16,7 @@ import buda
 
 def make_bundle(bundle_id, nets, width, segments):
     """Build a BundleWrapper with a single pre-built topology."""
-    bundle = buda.Bundle()
+    bundle = buda.HBundle()
     bundle.id = bundle_id
     bundle.net_names = nets          # list[str]
 
