@@ -1,4 +1,5 @@
 #pragma once
+#include <climits>
 #include "bundler.h"
 #include "topology.h"
 #include "layering.h"
