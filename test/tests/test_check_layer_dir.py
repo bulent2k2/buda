@@ -137,7 +137,7 @@ def test_select_topology_after_run_planner_replans_layers():
     planner_idx = w.selected_topology_index
     new_idx = next(i for i, c in enumerate(w.candidates)
                    if i != planner_idx and len(c.segments) > 1)
-    s.do_command(f"select_topology 1 {new_idx}")
+    s.do_command(f"select_topology 1 {new_idx + 1}")
 
     assert w.topology_pinned, "select_topology must pin the choice"
     assert w.selected_topology_index == new_idx, "pinned index must survive the re-plan"

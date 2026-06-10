@@ -2030,6 +2030,8 @@ class BudaVisualizer:
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
+        if event.key == 'z': self._interactive_zoom(event, zoom_in=True); return
+        if event.key == 'Z': self._interactive_zoom(event, zoom_in=False); return
         if event.key == 'a':
             if self._detailed_mode: self._set_highlight(None)
             else:                   self._reset_view()
@@ -2722,6 +2724,26 @@ class BudaVisualizer:
         self.ax.set_ylim(y0 - pad_y, y1 + pad_y)
         self.fig.canvas.draw_idle()
 
+    def _interactive_zoom(self, event, zoom_in: bool):
+        scale = 0.8 if zoom_in else 1.25
+        ax = self.ax
+        x, y = event.xdata, event.ydata
+        if event.inaxes != ax or x is None or y is None:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            x = (xlim[0] + xlim[1]) / 2
+            y = (ylim[0] + ylim[1]) / 2
+
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        new_xlim = (x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
+        new_ylim = (y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
+        
+        ax.set_xlim(new_xlim)
+        ax.set_ylim(new_ylim)
+        self.fig.canvas.draw_idle()
+
     def show(self):
         self._bid_list = sorted(self._bundle_artists.keys())
         self._bundle_visible = {bid: True for bid in self._bid_list}
@@ -2910,8 +2932,7 @@ class BudaVisualizer:
         ax_bprev = self.fig.add_axes([0.02, _by, 0.14, _bh])
         ax_solo  = self.fig.add_axes([0.17, _by, 0.12, _bh])
         ax_bnext = self.fig.add_axes([0.30, _by, 0.14, _bh])
-        ax_zoom  = self.fig.add_axes([0.45, _by, 0.12, _bh])
-        ax_topos = self.fig.add_axes([0.58, _by, 0.21, _bh])
+        ax_topos = self.fig.add_axes([0.45, _by, 0.21, _bh])
 
         btn_bprev = Button(ax_bprev, '◀  Prev Bundle', color='#ddeeff')
         btn_bprev.on_clicked(lambda _: self._step_bundle(-1))
@@ -2921,9 +2942,6 @@ class BudaVisualizer:
 
         btn_bnext = Button(ax_bnext, 'Next Bundle  ▶', color='#ddeeff')
         btn_bnext.on_clicked(lambda _: self._step_bundle(+1))
-
-        self._btn_zoom = Button(ax_zoom, '[Z] Zoom to Sel', color='#f0f0f0')
-        self._btn_zoom.on_clicked(self._zoom_to_bundle)
 
         btn_topos = Button(ax_topos, 'View Topologies  ↗', color='#fff0cc')
         btn_topos.on_clicked(lambda _: self._open_topo_explorer())
