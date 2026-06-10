@@ -2026,26 +2026,27 @@ class BudaVisualizer:
             layer_stack=self.layer_stack)
         self._topo_explorer.fig.show()
 
+    def _zoom_home(self):
+        if self._home_xlim is not None:
+            self.ax.set_xlim(self._home_xlim)
+            self.ax.set_ylim(self._home_ylim)
+            toolbar = getattr(self.fig.canvas, 'toolbar', None)
+            if toolbar is not None:
+                toolbar.update()   # reset toolbar nav stack to current limits
+        else:
+            self.ax.autoscale()
+        self.fig.canvas.draw_idle()
+
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'): plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+z', 'ctrl+z'): self._zoom_to_bundle(); return
         if event.key == 'z': self._interactive_zoom(event, zoom_in=True); return
         if event.key == 'Z': self._interactive_zoom(event, zoom_in=False); return
+        if event.key in ('h', 'H', 'cmd+a', 'ctrl+a'): self._zoom_home(); return
         if event.key == 'a':
             if self._detailed_mode: self._set_highlight(None)
             else:                   self._reset_view()
-            return
-        if event.key in ('cmd+a', 'ctrl+a'):
-            if self._home_xlim is not None:
-                self.ax.set_xlim(self._home_xlim)
-                self.ax.set_ylim(self._home_ylim)
-                toolbar = getattr(self.fig.canvas, 'toolbar', None)
-                if toolbar is not None:
-                    toolbar.update()   # reset toolbar nav stack to current limits
-            else:
-                self.ax.autoscale()
-            self.fig.canvas.draw_idle()
             return
         if event.key in ('n', 'cmd+n', 'ctrl+n'): self._step_bundle(+1)
         if event.key in ('p', 'cmd+p', 'ctrl+p'): self._step_bundle(-1)
