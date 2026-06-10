@@ -470,6 +470,25 @@ add_comp di/x1i  x1  di   1910 150 1960 200 leaf
 
 ---
 
+### `derive_busterms`
+
+```
+derive_busterms [<max_depth>]
+```
+
+Extract physical port locations (busterms) from the placed component hierarchy and write them to the BDB database.
+
+| Argument | Description |
+|---|---|
+| `max_depth` | Optional. Maximum traversal depth for hierarchy derivation (defaults to `1`). |
+
+**Example:**
+```buda
+derive_busterms 1
+```
+
+---
+
 ## 3. Python API
 
 ```python
@@ -554,6 +573,12 @@ db.import_verilog(v_path)
 ```
 Elaborate Verilog hierarchy; preserves placement coordinates. See script
 command above.
+
+```python
+gen = buda.BustermGen(db)
+gen.derive(max_depth=1)
+```
+Extract physical port locations (busterms) from the placed component hierarchy and write them to the database.
 
 ---
 
