@@ -19,13 +19,15 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `def_layer` | Register metal layers |
 | Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin) |
 | Setup | `corner_margin` | Set global corner margin for all blocks without a per-block override |
+| Setup | `set_min_stub_length`, `_dir`, `_layer` | Set minimum stub length globally, per direction, or per layer |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | Setup | `detour_channel` | Set outer-band width for U-shape / UU-shape detour trunks per compass direction |
-| 1 | `run_bundler` | Group nets into buses |
-| 2 | `generate_topologies` | Enumerate topology candidates for **all** bundles (src/dst auto-derived) |
+| 1 | `run_bundler`, `run_hier_bundler` | Group nets into flat or hierarchy-aware buses |
+| 2 | `generate_topologies`, `generate_hier_topologies` | Enumerate topology candidates for flat or hierarchical bundles |
 | 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** bundle |
 | 3 | `set_planner_param` | Tune planner cost coefficients (must be called before `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
+| 3b | `select_topology` | Manually pin a specific topology candidate for a bundle |
 | 4 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
 | 4c | `run_planner post_nuts` | Reassign stub layers to resolve channel pin conflicts; single NUTS re-run |
@@ -33,11 +35,15 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 8 | `add_grid_override` | Override the track pattern for a specific floorplan region on a layer |
 | 8 | `report_overhead` | Compare `def_layer` overhead% against the track pattern; print corrected `def_layer` commands for any mismatch |
 | 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
+| Verify | `check_connectivity` | Verify connectivity at topo, nuts, or dnuts stages and detect opens |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
 | BDB | `open_bdb`, `import_def_lef`, `import_verilog` | Open / populate the physical design database |
-| BDB | `move_comp`, `resize_cell`, `add_comp` | Mutate placement data in the database |
+| BDB | `move_comp`, `resize_cell`, `add_comp`, `flip_comp`, `rotate_comp`, `add_cell`, `add_inst`, `add_inst_to_cell`, `add_cell_pin` | Mutate placement and cell/pin definition data in the database |
+| BDB | `bdb_net_mode` | Toggle whether netlist is written to BDB database |
+| BDB | `add_blocks_from_bdb` | Import floorplan block boundaries at a given hierarchy depth |
+| BDB | `derive_busterms` | Extract busterms from hierarchy |
 
 ---
 
@@ -359,6 +365,65 @@ detour_channel S -1
 
 ---
 
+### `set_min_stub_length`
+
+```
+set_min_stub_length <len>
+```
+
+Set the global minimum stub length for routing to and from block boundary pins.
+
+| Argument | Type | Description |
+|---|---|---|
+| `len` | int | Minimum length in layout units. |
+
+**Example:**
+```buda
+set_min_stub_length 20
+```
+
+---
+
+### `set_min_stub_length_dir`
+
+```
+set_min_stub_length_dir <dir> <len>
+```
+
+Set the minimum stub length for a specific direction: horizontal (`H` or `HORIZONTAL`) or vertical (`V` or `VERTICAL`).
+
+| Argument | Type | Description |
+|---|---|---|
+| `dir` | str | Direction: `H` (or `HORIZONTAL`), or `V` (or `VERTICAL`). |
+| `len` | int | Minimum length in layout units. |
+
+**Example:**
+```buda
+set_min_stub_length_dir H 15
+```
+
+---
+
+### `set_min_stub_length_layer`
+
+```
+set_min_stub_length_layer <layer_name> <len>
+```
+
+Set the minimum stub length for a specific metal layer.
+
+| Argument | Type | Description |
+|---|---|---|
+| `layer_name` | str | Metal layer name (e.g. `M3`). |
+| `len` | int | Minimum length in layout units. |
+
+**Example:**
+```buda
+set_min_stub_length_layer M3 10
+```
+
+---
+
 ## Stage 1 — Bundler
 
 ### `run_bundler`
@@ -386,6 +451,27 @@ choices (architect overrides).
 **Example:**
 ```
 run_bundler strict
+```
+
+---
+
+### `run_hier_bundler`
+
+```
+run_hier_bundler [depth <N>]
+```
+
+Group nets into hierarchy-aware bundles (HBundles) by querying the component hierarchy in the open BDB. Must be called after `open_bdb` and populating the database.
+
+| Argument | Type | Description |
+|---|---|---|
+| `depth N` | keyword+int | Optional. Maximum hierarchy depth to traverse and group (defaults to `1`). |
+
+HBundles group signals that cross cell boundaries at different levels of the physical hierarchy, allowing the planner and routing engines to distinguish local intra-cell routing from top-level inter-cell interconnect.
+
+**Example:**
+```buda
+run_hier_bundler depth 1
 ```
 
 ---
@@ -508,6 +594,34 @@ run_planner 5
 
 ---
 
+### `generate_hier_topologies`
+
+```
+generate_hier_topologies [center_mode] [double_detour]
+```
+
+Generate routing topology candidates for all HBundles generated by `run_hier_bundler`. Must be called after `run_hier_bundler` and before `run_planner`.
+
+The topology generator automatically determines the routing context for each HBundle:
+1. **Intra-cell / Same-level local routing**: generates candidates relative to the cell's local floorplan and boundaries.
+2. **Cross-level routing**: generates candidates spanning between different depths in the hierarchy using absolute global coordinates.
+
+**Optional flags** (same as `generate_topologies_for_bundle`):
+
+| Flag | Effect |
+|---|---|
+| `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
+| `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
+
+**Example:**
+```buda
+run_hier_bundler depth 1
+generate_hier_topologies
+run_planner hier 5
+```
+
+---
+
 ## Stage 3 — Global router / planner
 
 ### `set_planner_param`
@@ -571,6 +685,27 @@ and overflow estimate.
 **Example:**
 ```
 run_planner 5
+```
+
+---
+
+### `select_topology`
+
+```
+select_topology <bundle_id> <topo_index>
+```
+
+Manually pin a specific topology candidate for a given bundle by its numeric ID and topology candidate index. This manually overrides the planner's selection.
+
+| Argument | Type | Description |
+|---|---|---|
+| `bundle_id` | int | Numeric ID of the bundle (e.g. `2`). |
+| `topo_index` | int | 0-based index of the topology candidate to pin (e.g. `1`). |
+
+**Example:**
+```buda
+# Pin topology candidate 1 for bundle 2
+select_topology 2 1
 ```
 
 ---
@@ -892,6 +1027,29 @@ run_detailed_nuts hi_lo
 
 ---
 
+## Verification commands
+
+### `check_connectivity`
+
+```
+check_connectivity [stage] [all]
+```
+
+Verify signal/bus electrical connectivity and report any open connections, missing stubs, or track routing violations.
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `stage` | str | `dnuts` | Routing stage to verify: `topo` (topology candidates), `nuts` (abstract track sharing), or `dnuts` (detailed bit placement). |
+| `all` | keyword | — | Checks all candidate topologies instead of just the selected one. Only applicable for the `topo` stage. Automatically enabled if no topology is selected yet. |
+
+**Example:**
+```buda
+# Check detailed NUTS placement for opens (typically at the end of script)
+check_connectivity dnuts
+```
+
+---
+
 ## Visualisation commands
 
 ### `visualize`
@@ -1104,9 +1262,19 @@ Full reference: **[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**
 | `open_bdb <path>` | Open or create a `.bdb` file. Use before any other BDB command. |
 | `import_def_lef <def> <lef>` | Import placements from DEF + cell sizes from LEF. Clears all tables. |
 | `import_verilog <v>` | Elaborate hierarchy from Verilog; preserves coordinates from a prior `import_def_lef`. |
+| `bdb_net_mode on\|off` | Toggle whether nets/buses are written directly to BDB database. |
+| `add_blocks_from_bdb <depth> [deepest\|skip\|error]` | Populate the BUDA floorplan from BDB instances at hierarchy depth `N`. |
+| `set_die <w> <h>` | Set die size (bounding box) dimensions in the database. |
+| `add_cell <name> <width> <height>` | Define a cell template and its size in BDB. |
+| `add_inst <inst> <cell> <parent\|-> <x> <y>` | Place a new instance at coordinates relative to parent or root (`-`). |
+| `add_inst_to_cell <parent_cell> <inst> <child_cell> <x> <y>` | Place a sub-instance inside a parent cell template. |
+| `add_cell_pin <cell> <pin> [INPUT\|OUTPUT\|INOUT] [<px> <py>]` | Add a pin with optional offset coordinates to a cell definition. |
 | `move_comp <name> <x> <y>` | Shift instance `name` to new origin `(x, y)`; preserves cell size. |
 | `resize_cell <cell> <w> <h>` | Set `x2=x1+w`, `y2=y1+h` for every instance of cell type `cell`. |
+| `flip_comp <name> x\|y` | Mirror component `name` horizontally or vertically. |
+| `rotate_comp <name> 90\|180\|270` | Rotate component `name` by specified degrees. |
 | `add_comp <name> <cell> <parent\|-> <x1> <y1> <x2> <y2> [leaf\|nonleaf]` | Insert a new component. Use `−` as parent for a root instance. |
+| `derive_busterms [max_depth]` | Extract physical port locations from the hierarchy and write to BDB. |
 
 **Common patterns:**
 
