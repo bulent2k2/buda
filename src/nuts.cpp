@@ -127,11 +127,20 @@ static void relax_boundary_intervals(
     // AT the block face, which is correct — bits must lie within the block face
     // extent. Relaxing would shift the center to the face boundary, pushing half
     // the bus outside the block's perpendicular extent and causing DNUTS opens.
-    (void)net_pull_map;
+    //
+    // Exception: net_pull-driven segments. Their preferred coordinate IS the
+    // hard slide bound (perp_lo/perp_hi), which encodes min-stub-length for the
+    // centerline. Edge-at-bound keeps every bit within [bound - width, bound],
+    // so every per-bit stub keeps >= min_stub length. Center-at-bound would
+    // spread bits half a width past the bound — past the block faces the stubs
+    // descend from — making them unreachable (DNUTS opens, e.g. the U_VHV
+    // detour trunk in flow/hbundles/08_cross_level.buda bundle 6).
     for (auto& ts : segments) {
         if (only_layer >= 0 && ts.layer != only_layer) continue;
         auto key = std::make_pair(ts.bundle_id, ts.seg_idx);
         if (busterm_set.count(key)) continue;   // block-face stubs: leave interval alone
+        auto npit = net_pull_map.find(key);
+        if (npit != net_pull_map.end() && npit->second != 0) continue;
         auto it = pull_map.find(key);
         if (it == pull_map.end()) continue;
         const double preferred = it->second;

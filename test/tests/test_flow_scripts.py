@@ -48,7 +48,8 @@ def nuts_summary(out: str):
 
 
 # ---------------------------------------------------------------------------
-# two.buda — 13 bundles, 19 segments, 0 violations, 0 overlaps
+# two.buda — 13 bundles, 21 segments, 0 violations, 0 overlaps, clean
+# connectivity at topo/nuts/dnuts levels (PSI: perp slide interval case)
 # ---------------------------------------------------------------------------
 
 def test_two():
@@ -56,9 +57,14 @@ def test_two():
     assert_clean(out, rc, "two.buda")
     assert "Bundler created 13 hbundles." in out
     segs, viols, ovlps = nuts_summary(out)
-    assert segs  == 19
+    assert segs  == 21
     assert viols == 0
     assert ovlps == 0
+    assert out.count("Success: no opens found.") == 3
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(2)) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -130,3 +136,24 @@ def test_four_blocks_3_bundles():
     segs, _viols, ovlps = nuts_summary(out)
     assert segs  == 4   # b1=I_H(1), b2=I_V(1), b3=L_HV(2)
     assert ovlps == 0
+
+
+# ---------------------------------------------------------------------------
+# hbundles/08_cross_level.buda — bundle 6 routes a U_VHV through the south
+# detour channel.  Its H trunk's pull-preferred coordinate sits at the hard
+# slide bound (y=-2, min stub length below the chips at y=0); the bus EDGE
+# must land there, not its center.  Regression: relax_boundary_intervals
+# extended the interval past the bound, spreading trunk bits to y=3..14
+# inside the chips where the descending stubs cannot reach them (6 opens).
+# ---------------------------------------------------------------------------
+
+def test_08_cross_level_detour_trunk_connectivity():
+    out, rc = run_script("hbundles/08_cross_level.buda")
+    assert_clean(out, rc, "hbundles/08_cross_level.buda")
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 26
+    assert viols == 0
+    assert ovlps == 0
+    assert "disconnected" not in out
+    # topo check is not run in this flow; nuts + dnuts must both be clean
+    assert out.count("Success: no opens found.") == 2
