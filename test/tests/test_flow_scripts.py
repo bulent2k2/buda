@@ -139,19 +139,22 @@ def test_four_blocks_3_bundles():
 
 
 # ---------------------------------------------------------------------------
-# hbundles/08_cross_level.buda — bundle 6 routes a U_VHV through the south
-# detour channel.  Its H trunk's pull-preferred coordinate sits at the hard
-# slide bound (y=-2, min stub length below the chips at y=0); the bus EDGE
-# must land there, not its center.  Regression: relax_boundary_intervals
-# extended the interval past the bound, spreading trunk bits to y=3..14
-# inside the chips where the descending stubs cannot reach them (6 opens).
+# hbundles/08_cross_level.buda — bundle 6 (12 wide, left→right chip) must take
+# the direct I_H (1 segment, WL 50), not the U_VHV south detour (3 segments,
+# WL 310).  The centre-only band lookup used to price I_H as congested because
+# its nominal y=250 sat on a 20-cap Hanan sliver; the slide-aware lookup sees
+# the 130-cap bands inside its slide interval, and the kWL term breaks the
+# resulting zero-congestion tie toward the shorter topology.
 # ---------------------------------------------------------------------------
 
 def test_08_cross_level_detour_trunk_connectivity():
     out, rc = run_script("hbundles/08_cross_level.buda")
     assert_clean(out, rc, "hbundles/08_cross_level.buda")
+    assert re.search(r"\[Planner\] Bundle 6 .*-> topo \d+ of \d+: I_H\b", out), (
+        "Bundle 6 should select the direct I_H topology"
+    )
     segs, viols, ovlps = nuts_summary(out)
-    assert segs  == 26
+    assert segs  == 24   # bundle 6: I_H (1 seg) instead of U_VHV (3 segs)
     assert viols == 0
     assert ovlps == 0
     assert "disconnected" not in out

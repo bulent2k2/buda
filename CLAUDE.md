@@ -59,7 +59,7 @@ python3 buda_cli.py ../flow/comprehensive_demo.buda
 | `run_bundler <STRICT\|CONVERGENT>` | 1 | Group nets into buses |
 | `generate_topologies [center_mode] [double_detour]` | 2 | Generate candidates for all bundles (src/dst auto-derived from netlist) |
 | `generate_topologies_for_bundle <hint> <src> <dst...> [center_mode] [double_detour]` | 2 | Generate candidates for a specific bundle; multiple dst → multicast trunk+branch shapes |
-| `set_planner_param <name> <value>` | 3 | Set a planner tuning knob before or after `run_planner`. Known params: `kCong` (congestion weight), `kSpan` (span-length weight), `base_cost_non_top` (penalty for non-TOP layers) |
+| `set_planner_param <name> <value>` | 3 | Set a planner tuning knob; takes effect at the next `run_planner` (knobs may be changed between runs to re-plan). Known params: `kCong` (congestion weight), `kSpan` (span-length weight), `base_cost_non_top` (penalty for non-TOP layers), `kWL` (wirelength weight) |
 | `run_planner <iterations>` | 3 | Layer assign + topology select |
 | `run_planner post_nuts [V [short long]] [H [short long]]` | 3 | Post-NUTS stub layer reassignment: short/long stubs on V or H layers are moved to cheaper layers |
 | `run_nuts [pitch]` | 4 | Abstract track placement |

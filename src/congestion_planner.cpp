@@ -15,6 +15,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     if      (name == "kCong")             kCong_             = value;
     else if (name == "kSpan")             kSpan_             = value;
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
+    else if (name == "kWL")               kWL_               = value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
 
@@ -285,6 +286,42 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
     return peak_cost;
 }
 
+// Slide-aware band choice.  cong_cost_segment charges the whole bus to the
+// single band containing the lookup coordinate; using the slide-interval
+// centre for that lookup is a point estimate that can land in an arbitrarily
+// narrow band even though NUTS may slide the bus into a wide neighbouring
+// band (e.g. a chip-to-chip I_H centring on the thin sliver between two
+// block rows).  Scan every band the slide interval overlaps by at least
+// eff_width and return the cheapest usable coordinate instead.
+int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
+                                      double eff_width,
+                                      int slide_lo, int slide_hi) const {
+    bool is_h = (seg.start.y == seg.end.y);
+    const auto& grid = is_h ? y_grid_ : x_grid_;
+    const int centre = (slide_lo + slide_hi) / 2;
+    if ((int)grid.size() < 2) return centre;
+
+    int    best_pp   = centre;
+    double best_cost = cong_cost_segment(seg, layer_id, eff_width, centre);
+    int    best_dist = 0;
+
+    for (int b = 0; b + 1 < (int)grid.size(); ++b) {
+        int win_lo = std::max(grid[b],     slide_lo);
+        int win_hi = std::min(grid[b + 1], slide_hi);
+        if (win_hi - win_lo < eff_width) continue;   // band can't host the bus
+        int pp = (win_lo + win_hi) / 2;              // centre of the usable window
+        double cost = cong_cost_segment(seg, layer_id, eff_width, pp);
+        int dist = std::abs(pp - centre);
+        if (cost < best_cost - 1e-9 ||
+            (std::abs(cost - best_cost) < 1e-9 && dist < best_dist)) {
+            best_cost = cost;
+            best_pp   = pp;
+            best_dist = dist;
+        }
+    }
+    return best_pp;
+}
+
 // Span-mismatch cost: kSpan(layer) * excess outside [span_min, span_max].
 double CongestionPlanner::span_cost_for(double seg_span, int layer_id) const {
     const Layer* layer = layers_.get_layer(layer_id);
@@ -412,41 +449,53 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                     ? (double)std::abs(seg.end.x - seg.start.x)
                     : (double)std::abs(seg.end.y - seg.start.y);
 
-                // Derive the perpendicular-band lookup position from the ConnTopology
-                // interval centre.  For segments at a Hanan grid boundary this places
-                // them in the same cell that NUTS's interval constraint will use,
-                // avoiding the mismatch where find_band's half-open [lo,hi) rule would
-                // assign them to the adjacent (wrong) cell.
-                int perp_pos = INT_MIN;
+                // Derive the perpendicular-band lookup window from the ConnTopology
+                // slide range.  The segment can slide anywhere within it, so the
+                // congestion charge goes to the cheapest band that can host the bus
+                // (best_band_perp) rather than a point estimate at the centre —
+                // which can land in an arbitrarily narrow band the bus would never
+                // use.  Sentinel (unbounded) sides are clamped to the grid extent.
+                int slide_lo = INT_MIN, slide_hi = INT_MIN;
                 if (si < (int)conn_segs.size()) {
                     const ConnSeg& cs = conn_segs[si];
-                    if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel)
-                        perp_pos = (cs.perp_lo + cs.perp_hi) / 2;
+                    const auto& pgrid = is_h ? y_grid_ : x_grid_;
+                    if (!pgrid.empty()) {
+                        slide_lo = std::max(cs.perp_lo, pgrid.front());
+                        slide_hi = std::min(cs.perp_hi, pgrid.back());
+                        if (slide_lo > slide_hi) { slide_lo = INT_MIN; slide_hi = INT_MIN; }
+                    }
                 }
+                auto band_perp = [&](int lid, double eff) {
+                    if (slide_lo == INT_MIN) return INT_MIN;   // no window: nominal lookup
+                    return best_band_perp(seg, lid, eff, slide_lo, slide_hi);
+                };
 
                 int    best_lid = layers_rev[0];
                 double best_s   = std::numeric_limits<double>::max();
                 double best_ov  = 0.0;
+                int    best_pp  = INT_MIN;
 
                 // Respect manual layer overrides if present for this segment.
                 if (si < (int)bw.pinned_seg_layers.size() && bw.pinned_seg_layers[si] != -1) {
                     best_lid = bw.pinned_seg_layers[si];
                     best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
-                    best_ov  = score_segment(seg, best_lid,
-                                             bw.width * layers_.get_layer_dilution(best_lid),
-                                             perp_pos);
+                    double eff = bw.width * layers_.get_layer_dilution(best_lid);
+                    best_pp  = band_perp(best_lid, eff);
+                    best_ov  = score_segment(seg, best_lid, eff, best_pp);
                 } else {
                     // Iterate highest-ID first so equal-cost layers prefer higher metal.
                     for (int lid : layers_rev) {
                         double eff  = bw.width * layers_.get_layer_dilution(lid);
-                        double cong = cong_cost_segment(seg, lid, eff, perp_pos);
+                        int    pp   = band_perp(lid, eff);
+                        double cong = cong_cost_segment(seg, lid, eff, pp);
                         double span = span_cost_for(seg_span, lid);
                         double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
                         double s    = cong + span + base;
-                        double ov   = score_segment(seg, lid, eff, perp_pos);
-                        if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; }
+                        double ov   = score_segment(seg, lid, eff, pp);
+                        if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                     }
                 }
+                int perp_pos = best_pp;
 
                 // Feasibility: the bus (eff_width in the perpendicular direction)
                 // must fit within the sliding range ConnTopology computed for this
@@ -470,6 +519,11 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 topo_overflow = std::max(topo_overflow, best_ov);
                 topo_score    = std::max(topo_score,    best_s);
             }
+
+            // Wirelength term: with congestion/span/layer costs equal, shorter
+            // topologies win — a detour must buy real congestion relief to be
+            // worth its extra length.
+            topo_score += kWL_ * topo.estimated_wirelength;
 
             if (topo_infeasible) {
                 cuts_ = cuts_snapshot;

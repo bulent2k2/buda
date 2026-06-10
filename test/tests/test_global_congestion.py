@@ -103,20 +103,27 @@ def test_optimise_returns_bundle_assignments():
 
 def test_v_layer_spill_m3_to_m5():
     """
-    Scenario: Multi-layer V routing — spill from M3 to M5 under congestion
+    Scenario: Multi-layer V routing — spill from M5 to M3 under congestion
 
-    A narrow bottleneck channel (two blocks that span almost the full X range,
-    leaving only a tiny gap) limits the H-cut capacity to < 2 × bundle width.
-    The first (heavier) bundle fills M3; the second must spill to M5.
+    A narrow bottleneck channel limits the M5 H-cut capacity to < 2 × bundle
+    width.  The first bundle fills M5; the second must spill to M3.
+
+    Block footprints don't reduce capacity on TOP layers, and the slide-aware
+    band lookup lets a bundle slide sideways into any band with room — so the
+    walls alone no longer force a spill (see test_v_layer_slide_within_m5).
+    M5 keepouts over both walls zero those bands, leaving the 4-wide gap as
+    the only M5 capacity.
     """
     # Blocks span x=[0,8] and x=[12,20] at y=[0,100].
     # The H-cut at y_mid=50 passes through both blocks.
-    # Unblocked x range = gap at x=[8,12] = width 4.
-    # Bundle width = 3  →  first bundle uses 3/4 of M3 capacity.
-    # Second bundle needs 3 more but only 1 left → overflow on M3, spill to M5.
+    # M5 keepouts over the walls → usable M5 x range = gap [8,12] = width 4.
+    # Bundle width = 3  →  first bundle uses 3/4 of M5 gap capacity.
+    # Second bundle needs 3 more but only 1 left → overflow on M5, spill to M3.
     fp = buda.Floorplan()
     fp.add_block("wall_left",  0,  0,  8, 100)
     fp.add_block("wall_right", 12, 0, 20, 100)
+    fp.add_keepout_zone(0,  0,  8, 100, [5])
+    fp.add_keepout_zone(12, 0, 20, 100, [5])
 
     ls = buda.LayerStack()
     ls.add_layer(3, "M3", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
@@ -126,16 +133,15 @@ def test_v_layer_spill_m3_to_m5():
     router = buda.CongestionPlanner(fp, ls)
     router.build_congestion_map()
 
-    # Confirm the bottleneck cut has the expected small per-band capacity.
+    # Confirm the bottleneck: M5 has only the 4-wide gap band open.
     # Hanan X grid: [0,8,12,20]; V-segments at x=10 land in band [8,12] (idx 1).
-    h_cuts = [c for c in router.get_cuts()
-              if c.dir == buda.LayerDir.HORIZONTAL and c.layer_id == 3]
-    assert h_cuts, "Should have at least one H-cut for M3"
-    # Band index 1 = [8,12], fully open (neither block covers it).
-    min_band_cap = min(c.band_cap[1] for c in h_cuts if len(c.band_cap) > 1)
-    assert min_band_cap == pytest.approx(4.0), (
-        f"Expected bottleneck band capacity 4.0, got {min_band_cap}"
-    )
+    m5_cuts = [c for c in router.get_cuts()
+               if c.dir == buda.LayerDir.HORIZONTAL and c.layer_id == 5]
+    assert m5_cuts, "Should have at least one H-cut for M5"
+    for c in m5_cuts:
+        assert list(c.band_cap) == pytest.approx([0.0, 4.0, 0.0]), (
+            f"M5 keepouts should leave only the gap band open, got {list(c.band_cap)}"
+        )
 
     # Two equal-width bundles; planner processes widest first (they're equal
     # so order is stable by index — bundle id=1 comes first).
@@ -162,6 +168,58 @@ def test_v_layer_spill_m3_to_m5():
     # With M5 as TOP (zero affinity), Bundle 1 claims M5; Bundle 2 spills to M3.
     assert by_id[1].v_layer_id == 5, f"Bundle 1 should claim M5 (TOP), got M{by_id[1].v_layer_id}"
     assert by_id[2].v_layer_id == 3, f"Bundle 2 should spill to M3, got M{by_id[2].v_layer_id}"
+
+
+# ---------------------------------------------------------------------------
+# Scenario: slide-aware band lookup avoids a layer spill
+# ---------------------------------------------------------------------------
+
+def test_v_layer_slide_within_m5():
+    """
+    Scenario: slide-aware band lookup — slide sideways instead of spilling
+
+    Same walls as test_v_layer_spill_m3_to_m5 but WITHOUT the M5 keepouts:
+    block footprints don't reduce TOP-layer capacity, so the over-wall bands
+    [0,8] and [12,20] have cap 8 each.  The gap band [8,12] (cap 4) fits only
+    one width-3 bundle; the second bundle's slide-aware lookup must find the
+    free over-wall band on M5 rather than spill to M3.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("wall_left",  0,  0,  8, 100)
+    fp.add_block("wall_right", 12, 0, 20, 100)
+
+    ls = buda.LayerStack()
+    ls.add_layer(3, "M3", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+
+    router = buda.CongestionPlanner(fp, ls)
+    router.build_congestion_map()
+
+    w1 = make_bundle_wrapper(bid=1, width=3.0, seg=make_v_segment(x=10, y_lo=0, y_hi=100, layer=5))
+    w2 = make_bundle_wrapper(bid=2, width=3.0, seg=make_v_segment(x=10, y_lo=0, y_hi=100, layer=5))
+
+    assignments = router.optimize_topologies([w1, w2], 1)
+
+    # Both bundles fit on M5 — no spill.
+    assert {a.v_layer_id for a in assignments} == {5}, (
+        f"Both bundles should stay on M5 via sideways slide; got "
+        f"{[(a.bundle_id, a.v_layer_id) for a in assignments]}"
+    )
+
+    # The M5 cut must show demand in two different bands: the gap (idx 1,
+    # nominal x=10) and exactly one over-wall band — proof the second bundle
+    # was charged to a slid position, not stacked into the full gap.
+    m5_cuts = [c for c in router.get_cuts()
+               if c.dir == buda.LayerDir.HORIZONTAL and c.layer_id == 5]
+    assert m5_cuts
+    for c in m5_cuts:
+        usage = list(c.band_usage)
+        assert usage[1] == pytest.approx(3.0), f"Gap band should hold one bundle, got {usage}"
+        wall_usage = sorted((usage[0], usage[2]))
+        assert wall_usage == pytest.approx([0.0, 3.0]), (
+            f"Second bundle should slide to exactly one over-wall band, got {usage}"
+        )
 
 
 # ---------------------------------------------------------------------------

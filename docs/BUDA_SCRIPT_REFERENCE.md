@@ -25,7 +25,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 1 | `run_bundler`, `run_hier_bundler` | Group nets into flat or hierarchy-aware buses |
 | 2 | `generate_topologies`, `generate_hier_topologies` | Enumerate topology candidates for flat or hierarchical bundles |
 | 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** bundle |
-| 3 | `set_planner_param` | Tune planner cost coefficients (must be called before `run_planner`) |
+| 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
 | 3b | `select_topology` | Manually pin a specific topology candidate for a bundle |
 | 4 | `run_nuts` | Abstract 1.5-D track placement |
@@ -630,20 +630,23 @@ run_planner hier 5
 set_planner_param <name> <value>
 ```
 
-Tune a global planner cost coefficient. Must be called before `run_planner`
-(or immediately before if the planner is already active).
+Tune a global planner cost coefficient. Takes effect at the next `run_planner`:
+each run seeds a fresh planner from all values set so far, so knobs may be
+adjusted between runs to re-plan with different weights.
 
 | Parameter | Default | Description |
 |---|---|---|
 | `kCong` | `1.0` | Congestion cost coefficient. Multiplies the hyperbolic term `u/(1−u)` for each channel band. Larger values make the planner avoid congested channels more aggressively. |
 | `kSpan` | `0.001` | Span-mismatch cost coefficient. Multiplies the excess span outside a layer's `[span_min, span_max]` window. Guides long segments to higher metal and short stubs to lower metal. |
 | `base_cost_non_top` | `0.5` | Flat penalty per segment for using a non-`TOP` layer. Keeps the default preference on top layers without hard-blocking lower ones. |
+| `kWL` | `0.001` | Wirelength cost per layout unit, added to the topology score. Steers equal-congestion choices toward shorter topologies, so a detour wins only when it avoids real congestion. |
 
 **Example:**
 ```
 set_planner_param kCong 2.0          # stronger congestion avoidance
 set_planner_param kSpan 0.005        # stronger span preference
 set_planner_param base_cost_non_top 0.1
+set_planner_param kWL 0.01           # stronger preference for short routes
 ```
 
 ---
@@ -661,7 +664,10 @@ Runs the global congestion-aware router. Bundles are processed widest-first
 2. Scores every topology candidate — for each segment independently selects
    the best layer from the direction-appropriate set (H layers for H segments,
    V layers for V segments).  Segment score = `kCong·u/(1−u) + kSpan·excess + base_cost_non_top`.
-   Topology score = maximum segment score (weakest-link).
+   The congestion charge goes to the cheapest Hanan band the segment's slide
+   interval can host the bus in (slide-aware lookup), not just the band at the
+   interval centre.
+   Topology score = maximum segment score (weakest-link) `+ kWL·wirelength`.
 3. Selects the topology with the lowest score. Ties broken by candidate index
    (shortest wirelength first, since candidates are sorted).
 4. Commits the winning topology's per-segment layer choices to the running

@@ -50,6 +50,9 @@ public:
     //   "kCong"            — overflow cost coefficient: cost = kCong*(overflow/cap) (default 1.0)
     //   "kSpan"            — span-mismatch cost per layout-unit (default 0.001)
     //   "base_cost_non_top"— flat penalty for non-TOP layers (default 0.5)
+    //   "kWL"              — wirelength cost per layout-unit (default 0.001);
+    //                        steers ties toward shorter topologies so detours
+    //                        only win when they avoid real congestion
     void set_planner_param(const std::string& name, double value);
     void build_congestion_map();
     std::vector<BundleAssignment> optimize_topologies(
@@ -76,6 +79,15 @@ private:
 
     int    find_band(bool is_vcut, int perp_pos) const;
 
+    // Slide-aware band choice: among the Hanan bands that overlap the
+    // segment's slide interval [slide_lo, slide_hi] by at least eff_width
+    // (i.e. NUTS could legally place the bus there), return a perpendicular
+    // coordinate inside the band with the lowest peak congestion cost across
+    // the cuts the segment crosses.  Ties break toward the interval centre.
+    // Falls back to the interval centre when no band can host the bus.
+    int best_band_perp(const Segment& seg, int layer_id, double eff_width,
+                       int slide_lo, int slide_hi) const;
+
     const Floorplan&  floorplan_;
     const LayerStack& layers_;
     std::vector<GlobalCut> cuts_;
@@ -85,6 +97,7 @@ private:
     double kCong_             = 1.0;
     double kSpan_             = 0.001;
     double base_cost_non_top_ = 0.5;
+    double kWL_               = 0.001;
 };
 
 } // namespace buda
