@@ -1162,11 +1162,12 @@ class BudaSession:
             self._layer_name_map[name] = int(lid)
 
         elif cmd == "set_planner_param":
-
             name_p, value_p = args[0], float(args[1])
-            if self.planner is None:
-                self._planner_params[name_p] = value_p
-            else:
+            # Always record in the stash: run_planner builds a fresh
+            # CongestionPlanner seeded from _planner_params, so a value set
+            # between runs must survive until the next run.
+            self._planner_params[name_p] = value_p
+            if self.planner is not None:
                 self.planner.set_planner_param(name_p, value_p)
         elif cmd == "run_bundler":
             self.bundler.set_strategy(buda.Strategy.STRICT)

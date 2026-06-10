@@ -335,3 +335,45 @@ def test_set_planner_param_kcong():
     # Bundle 2: M6 overflows (3+3=6 > 4) → cong=kCong*(2/4)=50; M4 no overflow → M4 wins.
     assert layers[0] == 6, f"First bundle should claim M6 (highest ID, both empty); got M{layers[0]}"
     assert layers[1] == 4, f"Second bundle: kCong=100, M6 at 75% → cost=300 → should spill to M4; got M{layers[1]}"
+
+
+# ---------------------------------------------------------------------------
+# Scenario: set_planner_param between run_planner calls survives the re-run
+# ---------------------------------------------------------------------------
+
+def test_set_planner_param_between_runs():
+    """
+    Scenario: CLI set_planner_param after run_planner applies to the next run
+
+    Each run_planner builds a fresh CongestionPlanner seeded from the
+    session's stashed params.  Regression: a param set AFTER the first
+    run_planner used to be applied only to the live (about-to-be-replaced)
+    planner and was silently lost on re-run.
+    """
+    from buda_cli import BudaSession
+
+    s = BudaSession()
+    for line in [
+        "def_layer 3 M3 V TOP 0.0",
+        "def_layer 4 M4 H TOP 0.0",
+        "def_layer 5 M5 V TOP 0.0",
+        "add_block a 0 0 20 20",
+        "add_block b 0 100 20 120",
+        "add_net n1 a.o b.i",
+        "run_bundler",
+        "generate_topologies",
+        "run_planner 1",
+    ]:
+        s.do_command(line)
+
+    s.do_command("set_planner_param kCong 7.5")
+    assert s._planner_params.get("kCong") == 7.5, (
+        "param set between runs must be stashed for the next run_planner"
+    )
+
+    old_planner = s.planner
+    s.do_command("run_planner 1")
+    assert s.planner is not old_planner, "run_planner should build a fresh planner"
+    # The fresh planner was seeded from the stash (set_planner_param has no
+    # getter, so the stash surviving + reseed path is the observable contract).
+    assert s._planner_params.get("kCong") == 7.5
