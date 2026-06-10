@@ -147,6 +147,41 @@ def test_four_blocks_3_bundles():
 # resulting zero-congestion tie toward the shorter topology.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# nuts_relax_range_reg.buda — pinned U_VHV detour (select_topology after
+# run_planner).  Guards two regressions:
+# 1. select_topology must re-plan layer assignments: stale seg_layers from the
+#    planner's I_H pick put the left V stub on M4 (an H layer) at coordinates
+#    from the wrong axis — and the dnuts connectivity check passed anyway.
+#    The planner line must show the pinned U with per-direction layers.
+# 2. relax_boundary_intervals edge-at-bound: the H trunk's pull target is the
+#    hard slide bound y=-2 (min stub length below the blocks at y=0); the bus
+#    EDGE must land at -2.0, not spread past it.
+# ---------------------------------------------------------------------------
+
+def test_nuts_relax_range_reg_pinned_u_detour():
+    out, rc = run_script("nuts_relax_range_reg.buda")
+    assert_clean(out, rc, "nuts_relax_range_reg.buda")
+    assert re.search(
+        r"\[Planner\] Bundle 1 .*U_VHV@y-100 \[pinned\]\s+\[V→M5 H→M4 V→M5\]", out
+    ), "select_topology must re-plan: pinned U with V segs on M5, H trunk on M4"
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 3
+    assert viols == 0
+    assert ovlps == 0
+    # Trunk bus upper edge exactly at the hard slide bound y=-2.
+    m = re.search(r"\[NUTS\] M4: total bus width .* interval \[(-?[\d.]+), (-?[\d.]+)\]", out)
+    assert m, "M4 NUTS summary line not found"
+    assert float(m.group(2)) == -2.0
+    dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) == 18
+    assert int(dm.group(2)) == 0
+    assert "disconnected" not in out
+    assert "unbuildable" not in out
+    assert out.count("Success: no opens found.") == 1
+
+
 def test_08_cross_level_detour_trunk_connectivity():
     out, rc = run_script("hbundles/08_cross_level.buda")
     assert_clean(out, rc, "hbundles/08_cross_level.buda")

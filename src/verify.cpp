@@ -144,7 +144,8 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
 // ── check_nuts ────────────────────────────────────────────────────────────────
 
 ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
-                      const Topology& topo, const Floorplan& fp, int bundle_id)
+                      const Topology& topo, const Floorplan& fp,
+                      const LayerStack& layers, int bundle_id)
 {
     ConnResult result;
     const auto& segs = ct.segs();
@@ -154,6 +155,29 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
     for (const auto& ts : nuts.segments)
         if (ts.bundle_id == bundle_id)
             ts_map[ts.seg_idx] = &ts;
+
+    // 0. Layer-direction validity: a segment on a layer whose routing
+    //    direction doesn't match its orientation is unbuildable, and its
+    //    track_position came from the wrong axis — the coordinate-based
+    //    checks below can then pass coincidentally.
+    for (const auto& [si, tsp] : ts_map) {
+        const TrackSegment& ts = *tsp;
+        bool dir_ok = layers.has_layer(ts.layer) &&
+            (layers.get_layer_dir(ts.layer) == LayerDir::HORIZONTAL) == ts.horiz;
+        if (!dir_ok) {
+            ConnViolation v;
+            v.kind = ViolationKind::LAYER_DIR;
+            v.bundle_id = bundle_id; v.seg_idx = si;
+            std::ostringstream msg;
+            msg << "Seg " << si << " runs " << (ts.horiz ? "H" : "V")
+                << " but is on layer M" << ts.layer << " ("
+                << (!layers.has_layer(ts.layer) ? "undefined"
+                    : layers.get_layer_dir(ts.layer) == LayerDir::HORIZONTAL ? "H" : "V")
+                << ") — unbuildable (nuts)";
+            v.message = msg.str();
+            result.violations.push_back(std::move(v));
+        }
+    }
 
     // 1. SEG connection continuity.
     for (int i = 0; i < n; ++i) {
@@ -257,7 +281,7 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
 
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const Topology& topo, const Floorplan& fp,
-                       int bundle_id, int num_bits)
+                       const LayerStack& layers, int bundle_id, int num_bits)
 {
     ConnResult result;
     const auto& segs = ct.segs();
@@ -267,6 +291,31 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     for (const auto& ns : dnuts.net_segments)
         if (ns.bundle_id == bundle_id)
             ns_map[{ns.seg_idx, ns.bit_index}] = &ns;
+
+    // 0. Layer-direction validity (see check_nuts).  All bits of a segment
+    //    share its layer, so report once per (seg, layer).
+    std::set<std::pair<int,int>> dir_reported;
+    for (const auto& [key, nsp] : ns_map) {
+        int si = key.first;
+        if (si < 0 || si >= n) continue;
+        const NetSegment& ns = *nsp;
+        bool seg_horiz = segs[si].horiz;
+        bool dir_ok = layers.has_layer(ns.layer) &&
+            (layers.get_layer_dir(ns.layer) == LayerDir::HORIZONTAL) == seg_horiz;
+        if (!dir_ok && dir_reported.insert({si, ns.layer}).second) {
+            ConnViolation v;
+            v.kind = ViolationKind::LAYER_DIR;
+            v.bundle_id = bundle_id; v.seg_idx = si;
+            std::ostringstream msg;
+            msg << "Seg " << si << " runs " << (seg_horiz ? "H" : "V")
+                << " but its bit wires are on layer M" << ns.layer << " ("
+                << (!layers.has_layer(ns.layer) ? "undefined"
+                    : layers.get_layer_dir(ns.layer) == LayerDir::HORIZONTAL ? "H" : "V")
+                << ") — unbuildable (dnuts)";
+            v.message = msg.str();
+            result.violations.push_back(std::move(v));
+        }
+    }
 
     // 1. BUSTERM face check at placed per-bit track_position.
     for (int i = 0; i < n; ++i) {

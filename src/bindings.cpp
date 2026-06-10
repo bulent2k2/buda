@@ -551,7 +551,8 @@ PYBIND11_MODULE(buda, m) {
         .value("SEG_OPEN",     ViolationKind::SEG_OPEN)
         .value("BUSTERM_OPEN", ViolationKind::BUSTERM_OPEN)
         .value("BUSTERM_FACE", ViolationKind::BUSTERM_FACE)
-        .value("UNPLACED",     ViolationKind::UNPLACED);
+        .value("UNPLACED",     ViolationKind::UNPLACED)
+        .value("LAYER_DIR",    ViolationKind::LAYER_DIR);
 
     py::class_<ConnViolation>(m, "ConnViolation")
         .def_readwrite("kind",       &ConnViolation::kind)
@@ -570,8 +571,8 @@ PYBIND11_MODULE(buda, m) {
           py::arg("ct"), py::arg("topo"), py::arg("fp"), py::arg("bundle_id"));
     m.def("check_nuts",  &check_nuts,
           py::arg("ct"), py::arg("nuts"), py::arg("topo"), py::arg("fp"),
-          py::arg("bundle_id"));
+          py::arg("layers"), py::arg("bundle_id"));
     m.def("check_dnuts", &check_dnuts,
           py::arg("ct"), py::arg("dnuts"), py::arg("topo"), py::arg("fp"),
-          py::arg("bundle_id"), py::arg("num_bits"));
+          py::arg("layers"), py::arg("bundle_id"), py::arg("num_bits"));
 }

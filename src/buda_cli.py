@@ -821,6 +821,31 @@ class BudaSession:
 
         return self.nuts_result
 
+    def _replan_layers(self):
+        """Re-run planner layer assignment on the live planner, honoring
+        topology_pinned wrappers, and copy the assignments back onto the
+        wrappers.  Band usage is reset first (build_congestion_map): the
+        previous run's demand is still recorded on the cuts, and re-planning
+        on top of it would double-count every bundle.
+
+        No-op when the planner has not run yet — the pinned selection is
+        then honored by the next run_planner.
+        """
+        if self.planner is None:
+            return
+        self.planner.build_congestion_map()
+        with buda.ostream_redirect():
+            assignments = self.planner.optimize_topologies(
+                self.bundles, self._planner_iterations)
+        bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
+        for asn in assignments:
+            w = bid_to_wrapper.get(asn.bundle_id)
+            if w is not None:
+                w.selected_topology_index = asn.topo_index
+                w.assigned_v_layer = asn.v_layer_id
+                w.assigned_h_layer = asn.h_layer_id
+                w.seg_layers = list(asn.seg_layers)
+
     def _rerun_all(self):
         """Apply sidecar topology selections, re-run planner layer assignment,
         then re-run full NUTS.
@@ -835,17 +860,7 @@ class BudaSession:
         # are updated to match the new topology's segment directions.  The planner
         # respects topology_pinned=True set by _apply_selections() and will not
         # override the user's topology choice.
-        if self.planner is not None:
-            assignments = self.planner.optimize_topologies(
-                self.bundles, self._planner_iterations)
-            bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
-            for asn in assignments:
-                w = bid_to_wrapper.get(asn.bundle_id)
-                if w is not None:
-                    w.selected_topology_index = asn.topo_index
-                    w.assigned_v_layer = asn.v_layer_id
-                    w.assigned_h_layer = asn.h_layer_id
-                    w.seg_layers = list(asn.seg_layers)
+        self._replan_layers()
 
         layer_names = self._make_layer_names()
         nuts = buda.NUTSEngine(self.fp, self.layers)
@@ -1625,7 +1640,13 @@ class BudaSession:
                         print(f"Error: invalid topology index {tidx} for bundle {bid}")
                     else:
                         w.selected_topology_index = tidx
+                        w.topology_pinned = True
                         print(f"Selected topology {tidx} for bundle {bid}")
+                        # If the planner already ran, its per-segment layer
+                        # assignments (seg_layers) describe the PREVIOUS
+                        # topology's segment list; re-run layer assignment so
+                        # NUTS doesn't route the new topology with stale layers.
+                        self._replan_layers()
                     found = True
                     break
             if not found: print(f"Error: bundle {bid} not found")
@@ -1908,10 +1929,11 @@ class BudaSession:
                 if stage == "topo":
                     res = buda.check_topo(ct, topo, self.fp, bid)
                 elif stage == "nuts":
-                    res = buda.check_nuts(ct, self.nuts_result, topo, self.fp, bid)
+                    res = buda.check_nuts(ct, self.nuts_result, topo, self.fp, self.layers, bid)
                 else:
                     num_bits = len(w.original_bundle.get_net_names())
-                    res = buda.check_dnuts(ct, self.detailed_result, topo, self.fp, bid, num_bits)
+                    res = buda.check_dnuts(ct, self.detailed_result, topo, self.fp,
+                                           self.layers, bid, num_bits)
 
                 for v in res.violations:
                     if all_candidates and stage == "topo":

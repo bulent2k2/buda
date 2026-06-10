@@ -1,6 +1,7 @@
 #pragma once
 #include "conn_topology.h"
 #include "topology.h"
+#include "layering.h"
 #include "nuts.h"
 #include "detailed_nuts.h"
 #include <string>
@@ -13,6 +14,8 @@ enum class ViolationKind {
     BUSTERM_OPEN, // a required block has no BUSTERM conn and no pass-through segment
     BUSTERM_FACE, // a BUSTERM conn's perp position is outside the block face
     UNPLACED,     // a bit has no concrete track assignment after DetailedNUTS
+    LAYER_DIR,    // a segment is assigned to a layer whose routing direction
+                  // does not match the segment's orientation (unbuildable wire)
 };
 
 struct ConnViolation {
@@ -37,14 +40,17 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
                       const Floorplan& fp, int bundle_id);
 
 // NUTS-level check: same topology structure but positions from TrackSegments.
-// Includes block-coverage check for pass-through blocks at placed positions.
+// Includes block-coverage check for pass-through blocks at placed positions
+// and layer-direction validity (H segment on H layer, V on V).
 ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
-                      const Topology& topo, const Floorplan& fp, int bundle_id);
+                      const Topology& topo, const Floorplan& fp,
+                      const LayerStack& layers, int bundle_id);
 
 // Detailed-NUTS-level: per-bit connectivity check using NetSegment positions.
-// Includes block-coverage check for pass-through blocks at placed positions.
+// Includes block-coverage check for pass-through blocks at placed positions
+// and layer-direction validity (H segment on H layer, V on V).
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const Topology& topo, const Floorplan& fp,
-                       int bundle_id, int num_bits);
+                       const LayerStack& layers, int bundle_id, int num_bits);
 
 } // namespace buda

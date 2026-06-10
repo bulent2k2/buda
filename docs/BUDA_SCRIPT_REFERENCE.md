@@ -703,6 +703,11 @@ select_topology <bundle_id> <topo_index>
 
 Manually pin a specific topology candidate for a given bundle by its numeric ID and topology candidate index. This manually overrides the planner's selection.
 
+If the planner has already run, layer assignment is automatically re-run with
+the pin in place (logged with a `[pinned]` marker), so per-segment layers
+always describe the pinned topology's segment list. Pins set before
+`run_planner` are honored when it runs.
+
 | Argument | Type | Description |
 |---|---|---|
 | `bundle_id` | int | Numeric ID of the bundle (e.g. `2`). |
@@ -1041,7 +1046,10 @@ run_detailed_nuts hi_lo
 check_connectivity [stage] [all]
 ```
 
-Verify signal/bus electrical connectivity and report any open connections, missing stubs, or track routing violations.
+Verify signal/bus electrical connectivity and report any open connections, missing stubs, or track routing violations. The `nuts` and `dnuts` stages also
+flag layer-direction violations: a segment (or its bit wires) assigned to a
+layer whose routing direction does not match the segment's orientation is
+reported as unbuildable.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
