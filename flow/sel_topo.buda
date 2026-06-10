@@ -1,0 +1,19 @@
+source tracks2top.buda
+add_block drv1    50  380  230  620
+add_block rcv1   680  120  880  500
+add_block rcv2   350   50  550  230
+
+add_bus a[4] drv1.o rcv1.i,rcv2.i
+add_bus b[4] rcv1.o drv1.i,rcv2.i
+# note the typo! rcv2 block is both the driver and one of the receivers
+add_bus c[4] rcv2.o drv1.i,rcv2.i
+
+run_bundler strict
+generate_topologies
+select_topology 1 3
+select_topology 2 2
+select_topology 3 1
+run_planner
+run_nuts
+run_detailed_nuts
+visualize
