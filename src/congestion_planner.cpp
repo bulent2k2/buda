@@ -207,7 +207,8 @@ static bool h_seg_crosses_vcut(int x1, int x2, int cx) {
 // For H-segments: checks V-cuts on that H-layer, in the Y-band of the segment.
 // For V-segments: checks H-cuts on that V-layer, in the X-band of the segment.
 double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
-                                   double eff_width, int perp_pos_override) const {
+                                   double eff_width, int perp_pos_override,
+                                   int slide_lo, int slide_hi) const {
     bool   is_h = (seg.start.y == seg.end.y);
     int    pp_h = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.y;
     int    pp_v = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.x;
@@ -218,17 +219,30 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
             if (!h_seg_crosses_vcut(seg.start.x, seg.end.x, c.cut_coord)) continue;
             int b = find_band(/*is_vcut=*/true, pp_h);
             if (b < 0 || b >= (int)c.band_cap.size()) continue;
-            double ov = (c.band_usage[b] + eff_width) - c.band_cap[b];
+            double cap = usable_band_cap(c, b, /*is_vcut=*/true, slide_lo, slide_hi);
+            double ov = (c.band_usage[b] + eff_width) - cap;
             if (ov > peak) peak = ov;
         } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
             if (!v_seg_crosses_hcut(seg.start.y, seg.end.y, c.cut_coord)) continue;
             int b = find_band(/*is_vcut=*/false, pp_v);
             if (b < 0 || b >= (int)c.band_cap.size()) continue;
-            double ov = (c.band_usage[b] + eff_width) - c.band_cap[b];
+            double cap = usable_band_cap(c, b, /*is_vcut=*/false, slide_lo, slide_hi);
+            double ov = (c.band_usage[b] + eff_width) - cap;
             if (ov > peak) peak = ov;
         }
     }
     return std::max(peak, 0.0);
+}
+
+double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
+                                          int slide_lo, int slide_hi) const {
+    double cap = c.band_cap[b];
+    if (slide_lo == INT_MIN) return cap;
+    const auto& grid = is_vcut ? y_grid_ : x_grid_;
+    if (b + 1 >= (int)grid.size()) return cap;
+    double win = std::min(grid[b + 1], slide_hi) -
+                 std::max(grid[b],     slide_lo);
+    return std::min(cap, std::max(win, 0.0));
 }
 
 void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double eff_width,
@@ -260,7 +274,8 @@ void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double e
 // This means Z/U topologies are only preferred over I when I genuinely
 // overflows a cut — not merely because they exploit cut-boundary effects.
 double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
-                                       double eff_width, int perp_pos_override) const {
+                                       double eff_width, int perp_pos_override,
+                                       int slide_lo, int slide_hi) const {
     bool   is_h      = (seg.start.y == seg.end.y);
     int    pp_h = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.y;
     int    pp_v = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.x;
@@ -268,15 +283,17 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
     for (const auto& c : cuts_) {
         if (c.layer_id != layer_id) continue;
         int b = -1;
+        bool is_vcut = false;
         if (is_h && c.dir == LayerDir::VERTICAL) {
             if (!h_seg_crosses_vcut(seg.start.x, seg.end.x, c.cut_coord)) continue;
+            is_vcut = true;
             b = find_band(/*is_vcut=*/true, pp_h);
         } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
             if (!v_seg_crosses_hcut(seg.start.y, seg.end.y, c.cut_coord)) continue;
             b = find_band(/*is_vcut=*/false, pp_v);
         }
         if (b < 0 || b >= (int)c.band_cap.size()) continue;
-        double cap = c.band_cap[b];
+        double cap = usable_band_cap(c, b, is_vcut, slide_lo, slide_hi);
         if (cap <= 0.0) { return kCong_ * 9999.0; }
         double ov = c.band_usage[b] + eff_width - cap;
         if (ov <= 0.0) continue;   // fits — no cost
@@ -302,7 +319,8 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     if ((int)grid.size() < 2) return centre;
 
     int    best_pp   = centre;
-    double best_cost = cong_cost_segment(seg, layer_id, eff_width, centre);
+    double best_cost = cong_cost_segment(seg, layer_id, eff_width, centre,
+                                         slide_lo, slide_hi);
     int    best_dist = 0;
 
     for (int b = 0; b + 1 < (int)grid.size(); ++b) {
@@ -310,7 +328,8 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
         int win_hi = std::min(grid[b + 1], slide_hi);
         if (win_hi - win_lo < eff_width) continue;   // band can't host the bus
         int pp = (win_lo + win_hi) / 2;              // centre of the usable window
-        double cost = cong_cost_segment(seg, layer_id, eff_width, pp);
+        double cost = cong_cost_segment(seg, layer_id, eff_width, pp,
+                                        slide_lo, slide_hi);
         int dist = std::abs(pp - centre);
         if (cost < best_cost - 1e-9 ||
             (std::abs(cost - best_cost) < 1e-9 && dist < best_dist)) {
@@ -402,6 +421,9 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     for (int idx : order) {
         auto& bw = bundles[idx];
         if (bw.candidates.empty()) continue;
+        // Bit count for the honest per-layer width model (eff_bus_width);
+        // 0 (hand-built wrappers without nets) falls back to width x dilution.
+        const int nbits = (int)bw.original_bundle.get_net_names().size();
 
         int    best_topo     = bw.topology_pinned ? bw.selected_topology_index : 0;
         double best_score    = std::numeric_limits<double>::max();
@@ -479,19 +501,19 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 if (si < (int)bw.pinned_seg_layers.size() && bw.pinned_seg_layers[si] != -1) {
                     best_lid = bw.pinned_seg_layers[si];
                     best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
-                    double eff = bw.width * layers_.get_layer_dilution(best_lid);
+                    double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
                     best_pp  = band_perp(best_lid, eff);
-                    best_ov  = score_segment(seg, best_lid, eff, best_pp);
+                    best_ov  = score_segment(seg, best_lid, eff, best_pp, slide_lo, slide_hi);
                 } else {
                     // Iterate highest-ID first so equal-cost layers prefer higher metal.
                     for (int lid : layers_rev) {
-                        double eff  = bw.width * layers_.get_layer_dilution(lid);
+                        double eff  = layers_.eff_bus_width(nbits, bw.width, lid);
                         int    pp   = band_perp(lid, eff);
-                        double cong = cong_cost_segment(seg, lid, eff, pp);
+                        double cong = cong_cost_segment(seg, lid, eff, pp, slide_lo, slide_hi);
                         double span = span_cost_for(seg_span, lid);
                         double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
                         double s    = cong + span + base;
-                        double ov   = score_segment(seg, lid, eff, pp);
+                        double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
                         if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                     }
                 }
@@ -503,7 +525,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 if (si < (int)conn_segs.size()) {
                     const ConnSeg& cs = conn_segs[si];
                     if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel) {
-                        double eff = bw.width * layers_.get_layer_dilution(best_lid);
+                        double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
                         if (static_cast<double>(cs.perp_hi - cs.perp_lo) < eff)
                             topo_infeasible = true;
                     }
@@ -512,7 +534,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
 
                 // Apply chosen layer so later segments in this topology see
                 // the updated congestion state.
-                double eff = bw.width * layers_.get_layer_dilution(best_lid);
+                double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
                 apply_segment(seg, best_lid, eff, perp_pos);
                 seg_layers.push_back(best_lid);
                 seg_perp.push_back(perp_pos);
@@ -557,7 +579,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 int pp = (si < (int)best_seg_perp.size()) ? best_seg_perp[si] : INT_MIN;
                 apply_segment(winner.segments[si],
                               best_seg_layers[si],
-                              bw.width * layers_.get_layer_dilution(best_seg_layers[si]),
+                              layers_.eff_bus_width(nbits, bw.width, best_seg_layers[si]),
                               pp);
             }
         }

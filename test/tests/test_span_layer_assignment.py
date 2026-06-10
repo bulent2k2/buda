@@ -377,3 +377,32 @@ def test_set_planner_param_between_runs():
     # The fresh planner was seeded from the stash (set_planner_param has no
     # getter, so the stash surviving + reseed path is the observable contract).
     assert s._planner_params.get("kCong") == 7.5
+
+
+# ---------------------------------------------------------------------------
+# Scenario: effective bus width — measured bit pitch vs density fallback
+# ---------------------------------------------------------------------------
+
+def test_eff_bus_width_bit_pitch_vs_dilution_fallback():
+    """
+    eff_bus_width(bits, base_width, layer):
+      - bit_pitch set + bits known → exact cost bits × bit_pitch
+        (tracks2top M6: unit_pitch 34 / 8 signals = 4.25/bit; the legacy
+        1.5 × 2.125 = 3.19/bit under-priced every bus by 25%)
+      - bit_pitch unset, or hand-built wrappers without nets (bits=0)
+        → legacy density model base_width × dilution
+    """
+    ls = buda.LayerStack()
+    ls.add_layer(6, "M6", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.set_layer_dilution(6, 2.125)
+
+    # No bit pitch yet → density model.
+    assert ls.eff_bus_width(16, 24.0, 6) == pytest.approx(24.0 * 2.125)
+
+    ls.set_bit_pitch(6, 34.0 / 8.0)
+    # Measured pitch wins when bits are known.
+    assert ls.eff_bus_width(16, 24.0, 6) == pytest.approx(68.0)
+    # bits=0 (hand-built wrapper without nets) keeps the density model.
+    assert ls.eff_bus_width(0, 24.0, 6) == pytest.approx(24.0 * 2.125)
+    # Unknown layer: base width unscaled.
+    assert ls.eff_bus_width(16, 24.0, 9) == pytest.approx(24.0)

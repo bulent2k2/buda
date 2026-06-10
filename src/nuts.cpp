@@ -325,7 +325,8 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                 lid = seg.layer_hint;
 
             ts.layer = lid;
-            ts.width = bw.width * layers_.get_layer_dilution(lid);
+            ts.width = layers_.eff_bus_width(
+                (int)bw.original_bundle.get_net_names().size(), bw.width, lid);
 
             if (ts.horiz) {
                 ts.span_lo = std::min(seg.start.x, seg.end.x);

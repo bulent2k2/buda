@@ -12,6 +12,10 @@ struct Layer {
     LayerDir dir;
     LayerType type;
     double dilution_factor = 1.0;
+    // Channel units consumed per bus bit on this layer
+    // (= track pattern unit_pitch / number of SIGNAL slots).  0 = unset:
+    // fall back to the density model (base width x dilution_factor).
+    double bit_pitch = 0.0;
     // Span preference: span_cost = kSpan * max(0, span_min-span, span-span_max).
     // Defaults give zero span cost for any segment length.
     int    span_min      = 0;
@@ -26,6 +30,12 @@ public:
     void set_layer_dilution(int id, double factor);
     // Convenience: set dilution from overhead percentage (e.g. 20%).
     void set_layer_overhead(int id, double overhead_percent);
+    // Set measured per-bit channel cost (from the layer's track pattern).
+    void set_bit_pitch(int id, double pitch);
+    // Effective channel footprint of a bus on this layer.  bits > 0 with a
+    // measured bit_pitch gives the exact cost (bits x unit_pitch/n_signals);
+    // otherwise the legacy density model (base_width x dilution_factor).
+    double eff_bus_width(int bits, double base_width, int layer_id) const;
     // Set span preference window for an already-added layer.
     void set_layer_span(int id, int span_min, int span_max);
     // Override the global kSpan coefficient for one layer.

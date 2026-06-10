@@ -1514,6 +1514,12 @@ class BudaSession:
 
             self.routing_grid.define_layer(layer_id, pat, is_h)
             self.layers.set_layer_dilution(layer_id, pat.dilution_factor())
+            # Measured per-bit channel cost: one signal track every
+            # unit_pitch/n_signals units.  Supersedes the density model
+            # (base width x dilution) in planner/NUTS effective widths.
+            n_sig = sum(1 for s in slots if s.type == "SIGNAL")
+            if n_sig > 0:
+                self.layers.set_bit_pitch(layer_id, pat.unit_pitch() / n_sig)
 
             # Re-apply any existing keepouts to this new layer grid.
             for koz in self.fp.get_keepout_zones():

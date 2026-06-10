@@ -67,17 +67,28 @@ private:
     // perp_pos_override: if != INT_MIN, replaces seg.start.x/y for the perpendicular band
     // lookup.  Pass the ConnTopology interval centre so grid-boundary stubs land in the
     // correct Hanan cell rather than the adjacent one chosen by find_band's half-open rule.
+    // slide_lo/slide_hi: if set, the segment's slide window clamps each band's
+    // capacity to the window's overlap with that band — demand confined to a
+    // sub-band window (slide bounds are usually not Hanan lines) must not be
+    // priced against the whole band.
     double cong_cost_segment(const Segment& seg, int layer_id, double eff_width,
-                             int perp_pos_override = INT_MIN) const;
+                             int perp_pos_override = INT_MIN,
+                             int slide_lo = INT_MIN, int slide_hi = INT_MIN) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
     double score_segment(const Segment& seg, int layer_id, double eff_width,
-                         int perp_pos_override = INT_MIN) const;
+                         int perp_pos_override = INT_MIN,
+                         int slide_lo = INT_MIN, int slide_hi = INT_MIN) const;
     void   apply_segment(const Segment& seg, int layer_id, double eff_width,
                          int perp_pos_override = INT_MIN);
     // Span-mismatch cost: kSpan(layer) * max(0, span_min-span, span-span_max).
     double span_cost_for(double seg_span, int layer_id) const;
 
     int    find_band(bool is_vcut, int perp_pos) const;
+
+    // Band capacity usable by a segment confined to [slide_lo, slide_hi]:
+    // band_cap clamped by the window's overlap with the band.
+    double usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
+                           int slide_lo, int slide_hi) const;
 
     // Slide-aware band choice: among the Hanan bands that overlap the
     // segment's slide interval [slide_lo, slide_hi] by at least eff_width

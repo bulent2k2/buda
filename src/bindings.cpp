@@ -186,6 +186,9 @@ PYBIND11_MODULE(buda, m) {
         .def("add_layer",               &LayerStack::add_layer)
         .def("set_layer_dilution",      &LayerStack::set_layer_dilution)
         .def("set_layer_overhead",      &LayerStack::set_layer_overhead)
+        .def("set_bit_pitch",           &LayerStack::set_bit_pitch)
+        .def("eff_bus_width",           &LayerStack::eff_bus_width,
+             py::arg("bits"), py::arg("base_width"), py::arg("layer_id"))
         .def("set_layer_span",          &LayerStack::set_layer_span)
         .def("set_layer_kspan",         &LayerStack::set_layer_kspan)
         .def("is_top",                  &LayerStack::is_top)

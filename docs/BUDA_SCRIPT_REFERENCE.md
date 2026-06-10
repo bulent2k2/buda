@@ -666,7 +666,12 @@ Runs the global congestion-aware router. Bundles are processed widest-first
    V layers for V segments).  Segment score = `kCong·u/(1−u) + kSpan·excess + base_cost_non_top`.
    The congestion charge goes to the cheapest Hanan band the segment's slide
    interval can host the bus in (slide-aware lookup), not just the band at the
-   interval centre.
+   interval centre.  Band capacity is clamped to the slide window's overlap
+   with the band: demand confined to a sub-band window (slide bounds are
+   usually not Hanan lines) is not priced against the whole band.
+   The effective bus width per layer uses the measured per-bit channel cost
+   when a track pattern is defined (`bits × unit_pitch/n_signals`, see
+   `def_track_pattern`); otherwise the density model (`width × dilution`).
    Topology score = maximum segment score (weakest-link) `+ kWL·wirelength`.
 3. Selects the topology with the lowest score. Ties broken by candidate index
    (shortest wirelength first, since candidates are sorted).
@@ -915,6 +920,11 @@ Each `<type> <w> <sp>` triple defines one slot in the repeating unit. Slots are 
 - The `origin` should be consistent across layers and with the power-grid intent — mismatched origins produce phase drift across layers.
 - At least one `SIGNAL` slot is required for `run_detailed_nuts` to place any bit-wires.
 - Calling `run_detailed_nuts` without a defined pattern for a bus segment's layer causes that bus to be counted as unplaced.
+- Defining a pattern also syncs the layer's **dilution factor** and **per-bit
+  channel cost** (`unit_pitch / n_signal_slots`) into the layer stack. The
+  per-bit cost supersedes `def_layer`'s overhead% for planner and NUTS
+  effective bus widths: a 16-bit bus on a 34-pitch/8-signal layer is priced
+  at 16 × 4.25 = 68 units, matching what detailed NUTS can actually place.
 
 **Example:**
 ```buda

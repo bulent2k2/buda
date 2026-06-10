@@ -20,6 +20,15 @@ void LayerStack::set_layer_span(int id, int span_min, int span_max) {
 void LayerStack::set_layer_kspan(int id, double kspan) {
     for (auto& l : layers_) if (l.id == id) { l.kspan_override = kspan; return; }
 }
+void LayerStack::set_bit_pitch(int id, double pitch) {
+    for (auto& l : layers_) if (l.id == id) { l.bit_pitch = pitch; return; }
+}
+double LayerStack::eff_bus_width(int bits, double base_width, int layer_id) const {
+    const Layer* l = get_layer(layer_id);
+    if (l && l->bit_pitch > 0.0 && bits > 0)
+        return bits * l->bit_pitch;
+    return base_width * (l ? l->dilution_factor : 1.0);
+}
 const Layer* LayerStack::get_layer(int id) const {
     for (const auto& l : layers_) if (l.id == id) return &l;
     return nullptr;

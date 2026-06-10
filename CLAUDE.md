@@ -181,7 +181,7 @@ Netlist (.buda script)
 - `CongestionPlanner` — congestion-aware global router.
 
 **Algorithm:** Processes widest buses first (greedy heuristic). For each bundle candidate, it evaluates:
-1. Congestion cost across cuts (using band usage/capacity, factoring in layer overhead/dilution).
+1. Congestion cost across cuts (band usage/capacity; band capacity is clamped to the segment's slide-window overlap with the band). Effective bus width per layer = `bits × bit_pitch` when the layer has a track pattern (`LayerStack::eff_bus_width`), else `width × dilution`.
 2. Span-mismatch cost (penalizing segment length outside `[span_min, span_max]`).
 3. Flat penalty for non-`TOP` layers.
 It selects the candidate topology and layer assignments that minimize total cost, updates band usage, and returns the assignments.
@@ -209,7 +209,7 @@ It selects the candidate topology and layer assignments that minimize total cost
 3. Sweep: on START, collect occupied intervals from already-placed active segments; call `first_fit(interval_lo, interval_hi, width, occupied)` to find the lowest valid placement. On END, remove from active set.
 4. `first_fit`: tries placement at `interval_lo` and just after each occupied interval's upper edge (+ `track_pitch`). Returns −1 if infeasible; caller falls back to interval centre (best-effort, counted as violation).
 
-**Power-grid interaction (planned for stage 8):** When a `RoutingGridStack` is provided, `width` is pre-inflated by the layer's `dilution_factor` (= `unit_pitch / signal_width_sum`) so that the abstract bus footprint accounts for power/clock tracks approximately without snapping to them exactly.
+**Power-grid interaction:** When a layer has a track pattern (`def_track_pattern`), the abstract bus footprint uses the measured per-bit channel cost: `bits × unit_pitch / n_signal_slots` (`LayerStack::eff_bus_width`), so abstract widths match what detailed NUTS can actually place. Without a pattern, `width` is inflated by the layer's `dilution_factor` (= `unit_pitch / signal_width_sum`) as an approximation.
 
 **Parallelism:** `solve_layer()` is called independently per layer — the per-layer maps have no cross-layer dependencies.
 
