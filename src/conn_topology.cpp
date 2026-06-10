@@ -313,15 +313,21 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
 void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
                                                const Floorplan& fp)
 {
-    for (auto& cs : segs_) {
-        // Collect blocks already anchored to this segment by a BUSTERM conn.
-        std::set<std::string> anchored;
-        for (const auto& conn : cs.conns)
+    // Blocks with a BUSTERM conn on ANY segment get their connectivity from
+    // that stub.  A segment that merely grazes such a block at its nominal
+    // perp_pos is not the connection to it and must stay free to slide away
+    // (e.g. a U-detour's source stub crossing the dst block's perp extent).
+    // Only blocks connected purely by pass-through (suppressed stubs) need
+    // the tightening below.
+    std::set<std::string> explicitly_connected;
+    for (const auto& s : segs_)
+        for (const auto& conn : s.conns)
             if (conn.kind == SegConn::BUSTERM)
-                anchored.insert(conn.block_name);
+                explicitly_connected.insert(conn.block_name);
 
+    for (auto& cs : segs_) {
         for (const auto& bname : topo.connected_block_names) {
-            if (anchored.count(bname)) continue;
+            if (explicitly_connected.count(bname)) continue;
 
             auto rects = fp.get_block_rects(bname);
             if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
