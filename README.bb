@@ -1,3 +1,5 @@
+CLAUDE_CODE_TMPDIR=/tmp/for_claude
+
 cd ~/src/buda
 export PYTHONPATH=build:src:tools
 python3 tools/def_viz_o3.py chip_designs/ariane136/ariane_buda5.bdb &

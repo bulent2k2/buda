@@ -1,9 +1,8 @@
 # TODO: rotate x<->y
 
-def_layer 4 M4 H TOP 0.0
-def_layer 5 M5 V TOP 0.0
+source tracks2topM4M5.buda
 
-corner_margin dx 15 dy 20
+corner_margin dx 1 dy 2
 
 # top edge: y=600
 add_block u0    200  400  300   600
@@ -46,8 +45,12 @@ add_net n33 u0.tx u33.rx
 add_net n41 u0.tx u41.rx
 add_net n51 u0.tx u51.rx
 
-run_bundler strict
+run_bundler
 generate_topologies
+check_connectivity topo
 run_planner 1
 run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
 visualize

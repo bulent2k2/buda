@@ -140,6 +140,9 @@ add_bus xl_c2l[4]     left.out          right/bot/hi.in
 # leaf→chip, intra-chip (right leaf feeds right chip-level input)
 add_bus xl_l2c[4]     right/top/hi.out  right.in
 
+# b6 uses this detour, but dnuts has a problem finding tracks
+detour_channel S 100
+
 # ── HBundle pipeline ───────────────────────────────────────
 run_hier_bundler depth 2
 

@@ -1,0 +1,24 @@
+# PSI: perpendicular sliding interval (constraint) on each segment
+# perpendicular interval: the range within which a segment can slide. orthogonal to its span
+# from pull2.buda which is 
+# from hbundles/08_cross_level.buda but running flat pipeline
+
+source tracks2top.buda
+
+add_block left          0    0 400 500
+add_block right_bot_hi  550 60 620 190
+add_bus   a[4] left.o right_bot_hi.i
+
+# this is from one.buda B3:
+add_block right         600 450 700 550
+add_bus   b[4] left.o right.i
+
+run_bundler
+generate_topologies
+run_planner
+# b1: b[4] topo 6/8
+select_topology 1 5
+select_topology 2 5
+run_nuts
+run_detailed_nuts
+visualize
