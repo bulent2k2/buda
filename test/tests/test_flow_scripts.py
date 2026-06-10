@@ -195,3 +195,9 @@ def test_08_cross_level_detour_trunk_connectivity():
     assert "disconnected" not in out
     # topo check is not run in this flow; nuts + dnuts must both be clean
     assert out.count("Success: no opens found.") == 2
+
+
+def test_sel_topos_typo():
+    out, rc = run_script("sel_topos_typo.buda")
+    assert rc == 1, f"Expected non-zero exit code 1, got {rc}"
+    assert "Error: block 'rcv2' is used as both driver and receiver in bus 'c'" in out

@@ -1109,11 +1109,13 @@ class BudaSession:
         elif cmd == "add_net":
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')
+            drv_inst = drv_pin.split('.')[0]
+            rcv_insts = [r.split('.')[0] for r in rcv_pins]
+            if drv_inst in rcv_insts:
+                print(f"Error: block '{drv_inst}' is used as both driver and receiver in net '{name}'")
+                sys.exit(1)
             self.netlist.add_net(name, drv_pin, rcv_pins)
-            self._net_endpoints[name] = (
-                drv_pin.split('.')[0],
-                [r.split('.')[0] for r in rcv_pins],
-            )
+            self._net_endpoints[name] = (drv_inst, rcv_insts)
             if self.bdb is not None and self.bdb_net_mode:
                 self.bdb.add_net_pins(name, drv_pin, rcv_pins)
         elif cmd == "add_bus":
@@ -1134,6 +1136,9 @@ class BudaSession:
             rcv_pins = args[2].split(',')
             drv_inst = drv_pin.split('.')[0]
             rcv_insts = [r.split('.')[0] for r in rcv_pins]
+            if drv_inst in rcv_insts:
+                print(f"Error: block '{drv_inst}' is used as both driver and receiver in bus '{prefix}'")
+                sys.exit(1)
             for i in range(lo, hi + 1):
                 net_name = f"{prefix}_{i}"
                 self.netlist.add_net(net_name, drv_pin, rcv_pins)
