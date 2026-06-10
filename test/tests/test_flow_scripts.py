@@ -201,3 +201,30 @@ def test_sel_topos_typo():
     out, rc = run_script("sel_topos_typo.buda")
     assert rc == 1, f"Expected non-zero exit code 1, got {rc}"
     assert "Error: block 'rcv2' is used as both driver and receiver in bus 'c'" in out
+
+
+# ---------------------------------------------------------------------------
+# planner3.buda — bundles 1 and 2 both pick TRUNK_H@y305; their trunks share
+# the 110-unit slide window [250,360] (rcv2 top + min-stub to drv1 bottom −
+# min-stub) and fit only edge-packed (2 × 51 eff width).  Regression: the
+# first trunk took the window CENTRE (preferred for unpulled segs), leaving
+# two 29.5 slivers; the second trunk's preferred_fit failed and the fallback
+# stacked it exactly on the first (both perp_center=305) — 1 M6 overlap.
+# solve_layer's local repack must place both inside the window, no overlap.
+#
+# KNOWN OPEN (not asserted): dnuts still reports a reservation conflict and
+# 16 unplaced bits — the window holds 27 M6 signal tracks but two 16-bit
+# trunks need 32.  The abstract model under-prices a bit (1.5 units × 2.125
+# dilution = 3.19/bit vs the real 34/8 = 4.25/bit on M6), so the planner
+# never sees that overflow.  Needs a width-model fix, tracked separately.
+# ---------------------------------------------------------------------------
+
+def test_planner3_shared_trunk_window_packs_without_overlap():
+    out, rc = run_script("planner3.buda")
+    assert_clean(out, rc, "planner3.buda")
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 9
+    assert viols == 0
+    assert ovlps == 0   # was 1: B1×B2 trunks stacked at the window centre
+    assert "M6: no local overlaps" in out
+    assert "M5: no local overlaps" in out

@@ -1,0 +1,17 @@
+# planner fails to see congestion
+
+source tracks2top.buda
+add_block drv1    50  380  230  620
+add_block rcv1   680  120  880  500
+add_block rcv2   350   50  550  230
+
+add_bus a[16] drv1.o rcv1.i,rcv2.i
+add_bus b[16] rcv1.o drv1.i,rcv2.i
+add_bus c[16] rcv2.o drv1.i,rcv1.i
+
+run_bundler strict
+generate_topologies
+run_planner
+run_nuts
+run_detailed_nuts
+visualize

@@ -425,7 +425,80 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // Incorporate KeepoutZones into 'occupied' list.
     auto kozs = floorplan_.get_keepout_zones();
 
+    // KeepoutZones for this layer that intersect a segment's span.
+    auto add_keepout_occ = [&](const TrackSegment* t,
+                               std::vector<std::pair<double,double>>& occ) {
+        for (const auto& koz : kozs) {
+            if (!koz.layer_ids.count(t->layer)) continue;
+            if (t->horiz) {
+                // Horizontal segment: span in X, pos in Y.
+                if (t->span_lo < koz.bbox.x2 && t->span_hi > koz.bbox.x1)
+                    occ.push_back({static_cast<double>(koz.bbox.y1),
+                                   static_cast<double>(koz.bbox.y2)});
+            } else {
+                // Vertical segment: span in Y, pos in X.
+                if (t->span_lo < koz.bbox.y2 && t->span_hi > koz.bbox.y1)
+                    occ.push_back({static_cast<double>(koz.bbox.x1),
+                                   static_cast<double>(koz.bbox.x2)});
+            }
+        }
+    };
+
     std::vector<int> active;
+
+    // Local repack: when no gap fits ts, earlier centre-seeking placements
+    // may have fragmented a window that has room for everyone (two 51-wide
+    // trunks in a 110-wide shared slide window: the first at the centre
+    // leaves two 29.5 slivers).  Re-place ts together with the active
+    // segments contending for its interval, packing from the low edge,
+    // against everything else already placed.  Commits only on full success.
+    auto try_repack = [&](TrackSegment* ts) -> bool {
+        // All active segments span the current sweep position, so members
+        // pairwise overlap in span; interval overlap = window contention.
+        std::vector<TrackSegment*> members{ts};
+        for (int ai : active) {
+            TrackSegment* o = segs[ai];
+            if (o->placed &&
+                o->interval_lo < ts->interval_hi &&
+                ts->interval_lo < o->interval_hi)
+                members.push_back(o);
+        }
+        if (members.size() < 2) return false;
+        std::set<const TrackSegment*> member_set(members.begin(), members.end());
+
+        // Tightest window first: least slack has the fewest options.
+        std::stable_sort(members.begin(), members.end(),
+            [](const TrackSegment* a, const TrackSegment* b) {
+                return (a->interval_hi - a->interval_lo) - a->width
+                     < (b->interval_hi - b->interval_lo) - b->width;
+            });
+
+        std::vector<std::pair<TrackSegment*,double>> repacked;
+        for (TrackSegment* m : members) {
+            std::vector<std::pair<double,double>> occ;
+            add_keepout_occ(m, occ);
+            // Placed segments outside the repack set (including ones whose
+            // sweep interval already ended) that overlap m's span.
+            for (const TrackSegment* o : segs) {
+                if (!o->placed || member_set.count(o)) continue;
+                if (o->span_lo < m->span_hi && m->span_lo < o->span_hi) {
+                    const double h = o->width / 2.0;
+                    occ.push_back({o->track_position - h, o->track_position + h});
+                }
+            }
+            for (const auto& [pm, ppos] : repacked) {
+                const double h = pm->width / 2.0;
+                occ.push_back({ppos - h, ppos + h});
+            }
+            std::sort(occ.begin(), occ.end());
+            double p = first_fit(m->interval_lo, m->interval_hi, m->width, occ);
+            if (std::isnan(p)) return false;   // window truly full: keep old state
+            repacked.push_back({m, p});
+        }
+        for (const auto& [pm, ppos] : repacked) pm->track_position = ppos;
+        return true;
+    };
+
     for (const auto& ev : events) {
         if (ev.type == 1) {
             active.erase(std::remove(active.begin(), active.end(), ev.idx), active.end());
@@ -433,7 +506,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         }
         TrackSegment* ts = segs[ev.idx];
         std::vector<std::pair<double,double>> occupied;
-        
+
         // 1. Existing placed segments
         for (int ai : active) {
             if (segs[ai]->placed) {
@@ -442,25 +515,9 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                 occupied.push_back({c - h, c + h});
             }
         }
-        
-        // 2. KeepoutZones for this layer that intersect segment span
-        for (const auto& koz : kozs) {
-            if (!koz.layer_ids.count(ts->layer)) continue;
-            
-            bool intersects = false;
-            if (ts->horiz) {
-                // Horizontal segment on M-even: span in X, pos in Y
-                // Blocks Y if span intersects koz.x
-                intersects = (ts->span_lo < koz.bbox.x2 && ts->span_hi > koz.bbox.x1);
-                if (intersects) occupied.push_back({static_cast<double>(koz.bbox.y1),
-                                                    static_cast<double>(koz.bbox.y2)});
-            } else {
-                // Vertical segment on M-odd: span in Y, pos in X
-                intersects = (ts->span_lo < koz.bbox.y2 && ts->span_hi > koz.bbox.y1);
-                if (intersects) occupied.push_back({static_cast<double>(koz.bbox.x1),
-                                                    static_cast<double>(koz.bbox.x2)});
-            }
-        }
+
+        // 2. Keepouts
+        add_keepout_occ(ts, occupied);
 
         std::sort(occupied.begin(), occupied.end());
         double pos;
@@ -475,8 +532,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             pos = preferred_fit(ts->interval_lo, ts->interval_hi,
                                 ts->width, occupied, preferred);
         }
-        if (!std::isnan(pos)) ts->track_position = pos;
-        else                  ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
+        if (!std::isnan(pos))      ts->track_position = pos;
+        else if (!try_repack(ts))  ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
         ts->placed = true;
         active.push_back(ev.idx);
     }
