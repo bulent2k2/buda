@@ -1627,21 +1627,22 @@ class BudaSession:
                 return
             self._rerun_nuts_layer(layer_id)
         elif cmd == "select_topology":
-            # Usage: select_topology <bundle_id> <topo_index>
+            # Usage: select_topology <bundle_id> <topo_id>
             if len(args) < 2:
-                print("Error: select_topology requires bundle_id and topo_index")
+                print("Error: select_topology requires bundle_id and topo_id (1-based)")
                 return
             bid  = int(args[0])
-            tidx = int(args[1])
+            tid  = int(args[1])
+            tidx = tid - 1  # Convert 1-based id to 0-based index
             found = False
             for w in self.bundles:
                 if w.original_bundle.id == bid:
                     if tidx < 0 or tidx >= len(w.candidates):
-                        print(f"Error: invalid topology index {tidx} for bundle {bid}")
+                        print(f"Error: invalid topology id {tid} for bundle {bid}")
                     else:
                         w.selected_topology_index = tidx
                         w.topology_pinned = True
-                        print(f"Selected topology {tidx} for bundle {bid}")
+                        print(f"Pinned bundle {bid} to topology {tid}")
                         # If the planner already ran, its per-segment layer
                         # assignments (seg_layers) describe the PREVIOUS
                         # topology's segment list; re-run layer assignment so
@@ -1649,7 +1650,8 @@ class BudaSession:
                         self._replan_layers()
                     found = True
                     break
-            if not found: print(f"Error: bundle {bid} not found")
+            if not found:
+                print(f"Error: bundle {bid} not found")
 
         elif cmd == "check_connectivity":
             # Usage: check_connectivity [topo|nuts|dnuts] [all]

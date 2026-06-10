@@ -27,7 +27,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** bundle |
 | 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
-| 3b | `select_topology` | Manually pin a specific topology candidate for a bundle |
+| 3b | `select_topology` | Manually pin a specific topology candidate for a bundle by its 1-based ID |
 | 4 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
 | 4c | `run_planner post_nuts` | Reassign stub layers to resolve channel pin conflicts; single NUTS re-run |
@@ -698,10 +698,10 @@ run_planner 5
 ### `select_topology`
 
 ```
-select_topology <bundle_id> <topo_index>
+select_topology <bundle_id> <topo_id>
 ```
 
-Manually pin a specific topology candidate for a given bundle by its numeric ID and topology candidate index. This manually overrides the planner's selection.
+Manually pin a specific topology candidate for a given bundle by its numeric bundle ID and topology candidate ID (1-based index). This manually overrides the planner's selection.
 
 If the planner has already run, layer assignment is automatically re-run with
 the pin in place (logged with a `[pinned]` marker), so per-segment layers
@@ -711,12 +711,12 @@ always describe the pinned topology's segment list. Pins set before
 | Argument | Type | Description |
 |---|---|---|
 | `bundle_id` | int | Numeric ID of the bundle (e.g. `2`). |
-| `topo_index` | int | 0-based index of the topology candidate to pin (e.g. `1`). |
+| `topo_id` | int | 1-based ID of the topology candidate to pin (e.g. `2` for the second topology). |
 
 **Example:**
 ```buda
-# Pin topology candidate 1 for bundle 2
-select_topology 2 1
+# Pin topology candidate 2 for bundle 2
+select_topology 2 2
 ```
 
 ---

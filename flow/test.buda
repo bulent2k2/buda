@@ -19,6 +19,7 @@ run_bundler strict
 # Pass all four destination blocks so the CLI dispatches to
 # generate_multicast_candidates() instead of generate_candidates().
 generate_topologies_for_bundle b1 drv1 rcv1 rcv2
+select_topology 1 2
 run_planner 1
 
 # Step through all 18 topologies in wirelength order.

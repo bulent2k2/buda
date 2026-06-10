@@ -13,7 +13,7 @@ detour_channel S 100
 run_bundler
 generate_topologies
 run_planner
-select_topology 1 2
+select_topology 1 3
 run_nuts
 run_detailed_nuts
 check_connectivity dnuts

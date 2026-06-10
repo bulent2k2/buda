@@ -16,8 +16,8 @@ add_bus   b[4] left.o right.i
 run_bundler
 generate_topologies
 # b1: b[4] topo 6/8
-select_topology 1 5
-select_topology 2 5
+select_topology 1 6
+select_topology 2 6
 run_planner
 run_nuts
 run_detailed_nuts
