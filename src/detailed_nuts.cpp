@@ -258,37 +258,45 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             const auto* bs_ptr = bs_map[{ns.bundle_id, ns.seg_idx}];
             if (!bs_ptr) continue;
 
-            bool has_lo = false, has_hi = false;
-            double min_lo = std::numeric_limits<double>::infinity();
-            double max_hi = -std::numeric_limits<double>::infinity();
-            bool all_lo_endpoints = true, all_hi_endpoints = true;
+            // Endpoint connections snap their end of the wire to the
+            // connected bit's exact position — extending OR retracting:
+            // each bit's stub lands at a different track, so the abstract
+            // span end is wrong in both directions for most bits.
+            // Mid-span connections never gate the ends; they only require
+            // the span to keep covering the connected bit's position.
+            bool   has_ep_lo = false, has_ep_hi = false;
+            double ep_lo =  std::numeric_limits<double>::infinity();
+            double ep_hi = -std::numeric_limits<double>::infinity();
+            double cover_lo =  std::numeric_limits<double>::infinity();
+            double cover_hi = -std::numeric_limits<double>::infinity();
 
             for (const auto& conn : bs_ptr->connections) {
                 auto it = idx_map.find({ns.bundle_id, conn.seg_idx, ns.bit_index});
                 if (it == idx_map.end()) continue;
-                
+
                 const auto& other_ns = result.net_segments[it->second];
                 const double other_pos = other_ns.track_position;
-                
-                if (conn.lo_end) {
-                    has_lo = true;
-                    min_lo = std::min(min_lo, other_pos);
-                    if (!conn.is_endpoint) all_lo_endpoints = false;
+
+                if (conn.is_endpoint) {
+                    if (conn.lo_end) {
+                        has_ep_lo = true;
+                        ep_lo = std::min(ep_lo, other_pos);
+                    } else {
+                        has_ep_hi = true;
+                        ep_hi = std::max(ep_hi, other_pos);
+                    }
                 } else {
-                    has_hi = true;
-                    max_hi = std::max(max_hi, other_pos);
-                    if (!conn.is_endpoint) all_hi_endpoints = false;
+                    cover_lo = std::min(cover_lo, other_pos);
+                    cover_hi = std::max(cover_hi, other_pos);
                 }
             }
 
-            if (has_lo) {
-                if (all_lo_endpoints) ns.span_lo = min_lo;
-                else ns.span_lo = std::min(ns.span_lo, min_lo);
-            }
-            if (has_hi) {
-                if (all_hi_endpoints) ns.span_hi = max_hi;
-                else ns.span_hi = std::max(ns.span_hi, max_hi);
-            }
+            // Ends with no endpoint conn (e.g. a BUSTERM face) keep the
+            // abstract span.
+            if (has_ep_lo) ns.span_lo = ep_lo;
+            if (has_ep_hi) ns.span_hi = ep_hi;
+            if (cover_lo < ns.span_lo) ns.span_lo = cover_lo;
+            if (cover_hi > ns.span_hi) ns.span_hi = cover_hi;
         }
     }
 

@@ -304,3 +304,64 @@ def test_interval_spanning_two_units_yields_eight_signal_tracks():
     # First four from unit 0, next four from unit 1 (centres +14)
     positions = sorted(s.track_position for s in result.net_segments)
     assert positions == pytest.approx([3.5, 5.5, 10.5, 12.5, 17.5, 19.5, 24.5, 26.5])
+
+
+# ---------------------------------------------------------------------------
+# Span-adjustment post-pass: endpoint conns snap (extend OR retract) their end
+# to the connected bit's position; mid-span conns only require coverage.
+# Regression (flow/dnuts_bit_span_reg.buda): a mid-span stub classified into
+# the trunk's lo half made the pass extend-only, so trunk bits whose stub bit
+# sat RIGHT of the abstract span end kept a dangling overhang past their stub.
+# ---------------------------------------------------------------------------
+
+def test_span_adjust_endpoint_retracts_despite_midspan_conn():
+    stack = buda.RoutingGridStack()
+    stack.define_layer(5, make_standard_pattern(origin=0.0), False)  # V stubs
+    stack.define_layer(6, make_standard_pattern(origin=0.0), True)   # H trunk
+
+    # Trunk: abstract span [180, 600], 2 bits.  hi end is a busterm face
+    # (no endpoint conn) and must keep the abstract 600.
+    trunk = make_bus_segment(bundle_id=1, seg_idx=0, layer=6,
+                             span_lo=180.0, span_hi=600.0,
+                             interval_lo=0.0, interval_hi=14.0, bit_width=2)
+    # Stub A: endpoint conn at the trunk's lo end.  Its bits land on layer-5
+    # tracks at x=185.5 and 187.5 — both RIGHT of the abstract lo end 180,
+    # so the trunk bits must RETRACT to them.
+    stub_a = make_bus_segment(bundle_id=1, seg_idx=1, layer=5,
+                              span_lo=0.0, span_hi=100.0,
+                              interval_lo=182.0, interval_hi=196.0, bit_width=2)
+    # Stub B: mid-span conn; bits at x=395.5, 397.5 — already covered.
+    stub_b = make_bus_segment(bundle_id=1, seg_idx=2, layer=5,
+                              span_lo=0.0, span_hi=100.0,
+                              interval_lo=392.0, interval_hi=406.0, bit_width=2)
+
+    conn_a = buda.BusSegmentConn()
+    conn_a.seg_idx = 1; conn_a.at_pos = 180.0
+    conn_a.is_endpoint = True; conn_a.lo_end = True
+    conn_b = buda.BusSegmentConn()
+    conn_b.seg_idx = 2; conn_b.at_pos = 400.0
+    conn_b.is_endpoint = False; conn_b.lo_end = True   # mid-span, lo half
+    trunk.connections.append(conn_a)
+    trunk.connections.append(conn_b)
+
+    engine = buda.DetailedNUTSEngine(stack)
+    result = engine.run([trunk, stub_a, stub_b])
+    assert result.num_unplaced == 0
+
+    stub_a_pos = {s.bit_index: s.track_position
+                  for s in result.net_segments if s.seg_idx == 1}
+    stub_b_pos = {s.bit_index: s.track_position
+                  for s in result.net_segments if s.seg_idx == 2}
+    assert sorted(stub_a_pos.values()) == pytest.approx([185.5, 187.5])
+
+    trunk_bits = [s for s in result.net_segments if s.seg_idx == 0]
+    assert len(trunk_bits) == 2
+    for ns in trunk_bits:
+        # lo end snaps to the bit's own stub position (retraction past 180).
+        assert ns.span_lo == pytest.approx(stub_a_pos[ns.bit_index]), (
+            f"bit {ns.bit_index}: span_lo {ns.span_lo} must snap to its stub "
+            f"at {stub_a_pos[ns.bit_index]}, not dangle at the abstract 180"
+        )
+        # busterm hi end untouched; mid-span stub stays covered.
+        assert ns.span_hi == pytest.approx(600.0)
+        assert ns.span_lo <= stub_b_pos[ns.bit_index] <= ns.span_hi
