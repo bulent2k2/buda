@@ -1,0 +1,16 @@
+# a z-topo with wrong pull for the outer segs
+# from hbundles/08_cross_level.buda but running flat pipeline
+
+source tracks2top.buda
+
+add_block left          0    0 400 500
+add_block right_bot_hi  550 60 620 190
+
+add_bus   a[4] left.o right_bot_hi.i
+
+run_bundler
+generate_topologies
+run_planner
+run_nuts
+run_detailed_nuts
+visualize

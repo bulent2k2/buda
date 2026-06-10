@@ -1,0 +1,168 @@
+"""
+Unit tests for ConnTopology.compute_net_pull().
+
+Covers the two reference flows:
+
+flow/pull1.buda — GOOD behavior to preserve: a floating spine (Z trunk with
+    no busterm of its own) pulls its outer stubs toward the far block when the
+    stub's nominal position lies OUTSIDE the far stub's anchored slide
+    interval.  Sliding to the own-range extreme then lands the stub as close
+    as possible to its target.
+
+flow/pull2.buda — regression: when the far stub's anchored interval CONTAINS
+    the stub's nominal position, any nonzero pull makes NUTS overshoot (it
+    slides the stub to its own range extreme, past the target).  The pull
+    must be 0 so the stub stays at its nominal position.
+"""
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import buda
+
+_ROOT   = Path(__file__).parents[2]
+FLOW    = _ROOT / "flow"
+CLI     = _ROOT / "src" / "buda_cli.py"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _candidate(fp, src, dst, type_str):
+    gen = buda.TopologyGenerator(fp)
+    cands = gen.generate_candidates(src, dst)
+    for c in cands:
+        if c.type == type_str:
+            return c
+    raise AssertionError(
+        f"{type_str} not generated; got: {[c.type for c in cands]}")
+
+
+def _pulls(topo, fp):
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    return [cs.net_pull for cs in ct.segs()]
+
+
+def _pull1_fp():
+    """Geometry of flow/pull1.buda."""
+    fp = buda.Floorplan()
+    fp.add_block("bottom", 200, 0, 300, 100)
+    fp.add_block("topl",   0,   200, 100, 300)
+    fp.add_block("topr",   400, 200, 500, 300)
+    fp.set_global_corner_margin(10, 8)
+    return fp
+
+
+def _pull2_fp():
+    """Geometry of flow/pull2.buda."""
+    fp = buda.Floorplan()
+    fp.add_block("left",         0,   0,  400, 500)
+    fp.add_block("right_bot_hi", 550, 60, 620, 190)
+    return fp
+
+
+# ---------------------------------------------------------------------------
+# pull1 — floating spine pulls stubs toward the far block (preserve)
+# ---------------------------------------------------------------------------
+
+def test_pull1_z_stubs_pull_toward_far_block():
+    """Z topl->bottom: the block faces are disjoint in y (topl [208,292],
+    bottom [8,92]), so each outer stub is pulled toward the far block."""
+    fp = _pull1_fp()
+    z = _candidate(fp, "topl", "bottom", "Z_HVH@x150@y208")
+    seg0, trunk, seg2 = _pulls(z, fp)
+    assert seg0 < 0, "topl stub (y=208) must pull DOWN toward bottom [8,92]"
+    assert trunk == 0, "floating V trunk between the stubs is balanced"
+    assert seg2 > 0, "bottom stub (y=92) must pull UP toward topl [208,292]"
+
+
+def test_pull1_multicast_stubs_pull_toward_anchored_trunk():
+    """TRUNK_V bottom->{topl,topr}: the trunk is anchored at bottom's top
+    face (y=100); both branch stubs (y=208) are pulled down toward it."""
+    fp = _pull1_fp()
+    t = _candidate(fp, "bottom", ["topl", "topr"], "TRUNK_V@x250")
+    trunk, stub_l, stub_r = _pulls(t, fp)
+    assert trunk == 0
+    assert stub_l < 0, "topl stub must pull DOWN toward the bottom anchor"
+    assert stub_r < 0, "topr stub must pull DOWN toward the bottom anchor"
+
+
+# ---------------------------------------------------------------------------
+# pull2 — stub already inside the far stub's anchored interval: no pull
+# ---------------------------------------------------------------------------
+
+def test_pull2_z_outer_stubs_have_no_pull():
+    """Z left->right_bot_hi: the left stub (y=125) lies inside the right
+    stub's anchored interval [60,190], and the right stub (y=190) lies inside
+    the left stub's interval [0,500].  Neither may be pulled — a nonzero pull
+    previously sent the left stub to y~500 and the right stub to y~60,
+    stretching the trunk from 65 to ~430 units."""
+    fp = _pull2_fp()
+    z = _candidate(fp, "left", "right_bot_hi", "Z_HVH@x475@y125")
+    seg0, trunk, seg2 = _pulls(z, fp)
+    assert seg0 == 0, "left stub is inside the far anchored interval: no pull"
+    assert trunk == 0
+    assert seg2 == 0, "right stub is inside the far anchored interval: no pull"
+
+
+def test_pull2_l_stub_outside_far_interval_still_pulls():
+    """Same floorplan, L candidate whose H stub (y=210) is ABOVE the
+    right_bot_hi face [60,190]: the directional pull must remain."""
+    fp = _pull2_fp()
+    l = _candidate(fp, "left", "right_bot_hi", "L_HV@x550@y210")
+    h_pull, _ = _pulls(l, fp)
+    assert h_pull < 0, "stub above the target face must pull DOWN"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: flow scripts place stubs sanely (regression for NUTS overshoot)
+# ---------------------------------------------------------------------------
+
+def _run_flow(name):
+    build_dir = _ROOT / "build"
+    tools_dir = _ROOT / "tools"
+    ppath = os.environ.get("PYTHONPATH", "")
+    env = {**os.environ,
+           "PYTHONPATH": f"{build_dir}:{tools_dir}:{ppath}".rstrip(":")}
+    r = subprocess.run(
+        [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
+        capture_output=True, text=True, env=env)
+    assert r.returncode == 0, f"{name} failed:\n{r.stdout}{r.stderr}"
+    return r.stdout + r.stderr
+
+
+def _layer_interval(out, layer):
+    m = re.search(
+        rf"\[NUTS\] {layer}: total bus width [\d.]+ units, "
+        rf"spanning perpendicular interval \[([-\d.]+), ([-\d.]+)\]", out)
+    assert m, f"no NUTS interval line for {layer}:\n{out}"
+    return float(m.group(1)), float(m.group(2))
+
+
+def test_pull2_flow_stubs_stay_within_target_face():
+    """flow/pull2.buda pins the Z_HVH@x475@y125 topology.  Both outer H
+    stubs (layer M6) must be placed within right_bot_hi's face extent
+    [60,190].  Before the fix they were placed at y~495 and y~63."""
+    out = _run_flow("pull2.buda")
+    lo, hi = _layer_interval(out, "M6")
+    assert lo >= 60.0 - 1e-6, f"H stubs placed below the target face: lo={lo}"
+    assert hi <= 190.0 + 1e-6, f"H stubs placed above the target face: hi={hi}"
+
+
+def test_pull1_flow_placement_clean_and_compact():
+    """flow/pull1.buda: NUTS stays clean and all H segments stay within the
+    block faces they connect ([8,92] and [208,292])."""
+    out = _run_flow("pull1.buda")
+    m = re.search(
+        r"\[NUTS\] (\d+) segments placed.*"
+        r"Interval violations: (\d+), Track overlaps: (\d+)", out)
+    assert m, "NUTS summary line not found"
+    assert int(m.group(2)) == 0, "interval violations"
+    assert int(m.group(3)) == 0, "track overlaps"
+    lo, hi = _layer_interval(out, "M4")
+    assert lo >= 8.0 - 1e-6
+    assert hi <= 292.0 + 1e-6

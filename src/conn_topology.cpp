@@ -441,7 +441,8 @@ std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
 }
 
 void ConnTopology::compute_net_pull() {
-    for (auto& cs : segs_) {
+    for (int ci = 0; ci < (int)segs_.size(); ++ci) {
+        ConnSeg& cs = segs_[ci];
         int pos = 0, neg = 0;
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::SEG) continue;
@@ -459,16 +460,19 @@ void ConnTopology::compute_net_pull() {
             for (const auto& sc : nb.conns)
                 if (sc.kind == SegConn::BUSTERM) { nb_has_bt = true; break; }
             if (nb_has_bt) continue;
-            int lo = INT_MAX, hi = INT_MIN;
+            // nb is a floating spine (no busterm of its own): the pull comes
+            // from the far segments reachable through it.  Compare against each
+            // far segment's anchored slide interval [perp_lo, perp_hi], not its
+            // nominal position — a far stub can slide anywhere within its block
+            // face, so only a perp_pos OUTSIDE that interval produces a pull.
+            // NUTS turns any nonzero pull into "slide to my own range extreme";
+            // emitting a pull while already inside the far interval makes the
+            // segment overshoot past its target (see flow/pull2.buda).
             for (const auto& sc : nb.conns) {
-                if (sc.kind != SegConn::SEG) continue;
-                int p = segs_[sc.seg_idx].perp_pos;
-                lo = std::min(lo, p);
-                hi = std::max(hi, p);
-            }
-            if (lo < hi) {
-                if      (cs.perp_pos == lo) ++pos;
-                else if (cs.perp_pos == hi) ++neg;
+                if (sc.kind != SegConn::SEG || sc.seg_idx == ci) continue;
+                const ConnSeg& far = segs_[sc.seg_idx];
+                if      (cs.perp_pos < far.perp_lo) ++pos;
+                else if (cs.perp_pos > far.perp_hi) ++neg;
             }
         }
         cs.net_pull = pos - neg;
