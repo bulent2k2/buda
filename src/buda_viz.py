@@ -443,11 +443,11 @@ class TopologyExplorer:
 
     def _current_is_selected(self):
         sel  = self._find_selection()
-        if sel is None:
-            return False
-        topo = self.topos[self.idx]
-        return (topo.type == sel['topo_type'] and
-                topo.estimated_wirelength == sel['topo_wl'])
+        if sel is not None:
+            topo = self.topos[self.idx]
+            if topo.type == sel['topo_type'] and topo.estimated_wirelength == sel['topo_wl']:
+                return True
+        return (self.idx == self.wrapper.selected_topology_index and getattr(self.wrapper, 'topology_pinned', False))
 
     def _select_current(self):
         topo = self.topos[self.idx]
@@ -699,7 +699,7 @@ class TopologyExplorer:
         viz_lw  = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
 
         is_sel = self._current_is_selected()
-        has_any_sel = self._find_selection() is not None
+        has_any_sel = self._find_selection() is not None or getattr(self.wrapper, 'topology_pinned', False)
         is_planner_active = (self.idx == self.wrapper.selected_topology_index)
 
         # ── Enable/Disable Tuning Row ──
