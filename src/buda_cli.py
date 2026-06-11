@@ -1222,36 +1222,43 @@ class BudaSession:
             py = float(args[4]) if len(args) > 4 else -1.0
             self.bdb.add_cell_pin(cell_name, pin_name, direction, px, py)
         elif cmd == "add_net":
+            # Syntax A (directed):   add_net <name> <drv_pin> <rcv_pins_csv>
+            # Syntax B (undirected): add_net <name> <pin1> <pin2_csv> unknown
+            unknown_dir = len(args) >= 4 and args[3].lower() == "unknown"
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')
             drv_inst = drv_pin.split('.')[0]
             rcv_insts = [r.split('.')[0] for r in rcv_pins]
-            if drv_inst in rcv_insts:
+            if not unknown_dir and drv_inst in rcv_insts:
                 print(f"Error: block '{drv_inst}' is used as both driver and receiver in net '{name}'")
                 sys.exit(1)
             self.netlist.add_net(name, drv_pin, rcv_pins)
             self._net_endpoints[name] = (drv_inst, rcv_insts)
             if self.bdb is not None and self.bdb_net_mode:
-                self.bdb.add_net_pins(name, drv_pin, rcv_pins)
+                if unknown_dir:
+                    self.bdb.add_net_pins_undirected(name, [drv_pin] + rcv_pins)
+                else:
+                    self.bdb.add_net_pins(name, drv_pin, rcv_pins)
         elif cmd == "add_bus":
-            # Syntax: add_bus <prefix>[<N>] <drv_pin> <rcv_pin>
-            #      or add_bus <prefix>[<lo>:<hi>] <drv_pin> <rcv_pin>
-            # Expands to add_net calls: <prefix>_<lo> … <prefix>_<hi>
+            # Syntax A (directed):   add_bus <prefix>[N] <drv_pin> <rcv_pin>
+            # Syntax B (undirected): add_bus <prefix>[N] <pin1> <pin2> unknown
             import re
-            m = re.match(r'^(.+)\[(\d+)(?::(\d+))?\]$', args[0])
+            unknown_dir = args and args[-1].lower() == "unknown"
+            bus_args = args[:-1] if unknown_dir else args
+            m = re.match(r'^(.+)\[(\d+)(?::(\d+))?\]$', bus_args[0])
             if not m:
-                print(f"Error: bad add_bus syntax '{args[0]}' — expected name[N] or name[lo:hi]")
+                print(f"Error: bad add_bus syntax '{bus_args[0]}' — expected name[N] or name[lo:hi]")
                 return
             prefix = m.group(1)
             lo = int(m.group(2))
             hi = int(m.group(3)) if m.group(3) is not None else lo - 1
             if m.group(3) is None:      # name[N]  → indices 0 … N-1
                 lo, hi = 0, int(m.group(2)) - 1
-            drv_pin  = args[1]
-            rcv_pins = args[2].split(',')
+            drv_pin  = bus_args[1]
+            rcv_pins = bus_args[2].split(',')
             drv_inst = drv_pin.split('.')[0]
             rcv_insts = [r.split('.')[0] for r in rcv_pins]
-            if drv_inst in rcv_insts:
+            if not unknown_dir and drv_inst in rcv_insts:
                 print(f"Error: block '{drv_inst}' is used as both driver and receiver in bus '{prefix}'")
                 sys.exit(1)
             for i in range(lo, hi + 1):
@@ -1259,7 +1266,10 @@ class BudaSession:
                 self.netlist.add_net(net_name, drv_pin, rcv_pins)
                 self._net_endpoints[net_name] = (drv_inst, rcv_insts)
                 if self.bdb is not None and self.bdb_net_mode:
-                    self.bdb.add_net_pins(net_name, drv_pin, rcv_pins)
+                    if unknown_dir:
+                        self.bdb.add_net_pins_undirected(net_name, [drv_pin] + rcv_pins)
+                    else:
+                        self.bdb.add_net_pins(net_name, drv_pin, rcv_pins)
         elif cmd == "def_layer":
             # def_layer <id> <name> <H|V> [TOP|LOW] <overhead%>
             #           [span_min N] [span_max N] [kSpan K]
@@ -1337,6 +1347,18 @@ class BudaSession:
                 counts[b.level] = counts.get(b.level, 0) + 1
             summary = ", ".join(f"D{d}: {n}" for d, n in sorted(counts.items()))
             print(f"HierBundler: {len(raw_bundles)} hbundles ({summary})")
+            # Warn about nets that had pins in BDB but ended up in no bundle.
+            bundled_nets: set[str] = set()
+            for b in raw_bundles:
+                bundled_nets.update(b.get_net_names())
+            all_bdb_nets = {r.name for r in self.bdb.all_nets()}
+            dropped = sorted(all_bdb_nets - bundled_nets)
+            if dropped:
+                shown = dropped[:5]
+                ellipsis_str = f" … and {len(dropped)-5} more" if len(dropped) > 5 else ""
+                print(f"  Warning: {len(dropped)} net(s) not placed in any bundle "
+                      f"(possibly UNKNOWN direction or missing receiver): "
+                      f"{', '.join(shown)}{ellipsis_str}")
         elif cmd == "dump_hbundles":
             # Usage: dump_hbundles [expanded] [depth N]
             # Without 'expanded': prints the pre-expansion HBundle list (from _hier_bundles_orig).

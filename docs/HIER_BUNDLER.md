@@ -78,12 +78,29 @@ pins_by_net  : map<int, vector<PinRow>>         from all_pins()
 for each net N in pins_by_net:
   driver_comp_id = first pin where comp.depth == D AND dir == "OUTPUT"
   recv_comp_ids  = [pin.comp_id where comp.depth == D AND dir == "INPUT"]
+  unknown_ids    = [pin.comp_id where comp.depth == D AND dir == "UNKNOWN"]
+
+  # Positional fallback for nets whose pins have no OUTPUT/INPUT (e.g. from
+  # import_verilog or add_net … unknown):
+  if driver_comp_id not valid AND unknown_ids non-empty:
+    driver_comp_id = unknown_ids[0]        # first UNKNOWN = tentative driver
+    recv_comp_ids += unknown_ids[1:]       # remaining = tentative receivers
+    emit warning to stderr
+
   if driver_comp_id valid AND recv_comp_ids non-empty:
     ep_map[N] = { driver_comp_id, recv_comp_ids }
 ```
 
 Cross-block nets appear in ep_map at D=0 AND D=1.  
 Intra-block nets appear only at D=1 (and deeper).
+
+**UNKNOWN direction:** Pins stored with `dir="UNKNOWN"` (produced by
+`import_verilog`, `import_def_lef` when LEF has no DIRECTION, or `add_net …
+unknown` / `add_net_pins_undirected`) are treated with a positional fallback:
+the first UNKNOWN pin encountered (in BDB insertion order) is promoted to
+driver; all remaining UNKNOWN pins at the same depth become receivers. A
+`[HierBundler]` warning line is printed to stderr for each net that uses this
+fallback. Nets with exactly one UNKNOWN pin are dropped (no receiver).
 
 #### 2b. Group by STRICT signature
 

@@ -546,7 +546,9 @@ PYBIND11_MODULE(buda, m) {
              py::arg("dir") = "INOUT", py::arg("px") = -1.0, py::arg("py") = -1.0)
         .def("all_cell_pins", &BDB::all_cell_pins)
         .def("add_net_pins", &BDB::add_net_pins,
-             py::arg("net_name"), py::arg("drv"), py::arg("rcvs"));
+             py::arg("net_name"), py::arg("drv"), py::arg("rcvs"))
+        .def("add_net_pins_undirected", &BDB::add_net_pins_undirected,
+             py::arg("net_name"), py::arg("pins"));
 
     // ── verify ─────────────────────────────────────────────────────────────
 
