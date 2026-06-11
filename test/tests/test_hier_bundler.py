@@ -308,3 +308,86 @@ def test_multiple_occurrence_two_proc_instances():
     assert replica is not None
     assert replica.parent_id == template.id
     assert replica.id in template.child_ids
+
+
+# ── UNKNOWN direction tests ────────────────────────────────────────────────────
+
+def _build_two_block_bdb():
+    """Minimal BDB: two top-level blocks A and B, no sub-hierarchy."""
+    db = buda.BDB(":memory:")
+    db.add_cell("cell_a", 100, 100)
+    db.add_cell("cell_b", 100, 100)
+    db.add_inst("a_i", "cell_a", "",   0, 0)
+    db.add_inst("b_i", "cell_b", "", 200, 0)
+    return db
+
+
+def test_add_net_pins_undirected_stores_unknown_dir():
+    """add_net_pins_undirected stores all pins with dir=UNKNOWN."""
+    db = _build_two_block_bdb()
+    db.add_net_pins_undirected("clk", ["a_i.clk", "b_i.clk"])
+    pins = db.all_pins()
+    clk_pins = [p for p in pins if p.pin_name == "clk"]
+    assert len(clk_pins) == 2, f"Expected 2 clk pins, got {len(clk_pins)}"
+    for p in clk_pins:
+        assert p.dir == "UNKNOWN", f"Expected UNKNOWN, got {p.dir!r}"
+
+
+def test_hier_bundler_bundles_unknown_direction_net():
+    """HierarchicalBundler creates a bundle for a net with all-UNKNOWN pins."""
+    db = _build_two_block_bdb()
+    db.add_net_pins_undirected("clk", ["a_i.clk", "b_i.clk"])
+    gen = buda.BustermGen(db)
+    gen.derive(0)
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(0)
+    net_names = [n for b in bundles for n in b.net_names]
+    assert "clk" in net_names, (
+        f"Net 'clk' with UNKNOWN direction was not bundled; bundles: "
+        f"{[(b.reason, b.net_names) for b in bundles]}"
+    )
+
+
+def test_hier_bundler_unknown_pins_positional_driver_is_first():
+    """With UNKNOWN pins, the first-encountered pin becomes the driver (positional)."""
+    db = _build_two_block_bdb()
+    # Insert undirected: a_i is listed first → should be treated as driver
+    db.add_net_pins_undirected("sig", ["a_i.out", "b_i.in"])
+    gen = buda.BustermGen(db)
+    gen.derive(0)
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(0)
+    sig_bundle = next((b for b in bundles if "sig" in b.net_names), None)
+    assert sig_bundle is not None, "Net 'sig' was not bundled"
+    # Driver should be a_i (depth-0 comp), receiver b_i
+    assert "DRV:a_i" in sig_bundle.reason, (
+        f"Expected DRV:a_i in reason, got {sig_bundle.reason!r}"
+    )
+
+
+def test_hier_bundler_mixed_directed_and_unknown_nets():
+    """Directed and undirected nets co-exist and both get bundled."""
+    db = _build_two_block_bdb()
+    db.add_net_pins("data", "a_i.out", ["b_i.in"])         # directed
+    db.add_net_pins_undirected("clk", ["a_i.clk", "b_i.clk"])  # undirected
+    gen = buda.BustermGen(db)
+    gen.derive(0)
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(0)
+    all_nets = {n for b in bundles for n in b.net_names}
+    assert "data" in all_nets, "Directed net 'data' was not bundled"
+    assert "clk"  in all_nets, "Undirected net 'clk' was not bundled"
+
+
+def test_add_net_pins_undirected_single_pin_produces_no_bundle():
+    """A net with only one UNKNOWN pin has no receiver — should not be bundled."""
+    db = _build_two_block_bdb()
+    db.add_net_pins_undirected("lonely", ["a_i.out"])
+    gen = buda.BustermGen(db)
+    gen.derive(0)
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(0)
+    net_names = {n for b in bundles for n in b.net_names}
+    assert "lonely" not in net_names, (
+        "A single-pin undirected net should not form a bundle (no receiver)"
+    )

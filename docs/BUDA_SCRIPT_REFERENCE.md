@@ -211,6 +211,7 @@ add_keepout 100 100 250 250 M4 M5
 
 ```
 add_net <name> <driver_pin> <receiver_pins>
+add_net <name> <pin1> <pin2>[,<pin3>…] unknown
 ```
 
 Add a single net to the netlist.
@@ -218,14 +219,26 @@ Add a single net to the netlist.
 | Argument | Type | Description |
 |---|---|---|
 | `name` | str | Net name. Used as a bundle hint key — the first net name in a bundle identifies the bundle in sidecar files and `generate_topologies_for_bundle`. |
-| `driver_pin` | str | Driver pin in `instance.port` form, e.g. `u_cpu.tx` |
-| `receiver_pins` | str | Comma-separated list of receiver pins (no spaces), e.g. `u_mem.rx` or `u_a.rx,u_b.rx` |
+| `driver_pin` | str | Driver pin in `instance.port` form, e.g. `u_cpu.tx`. When `unknown` is appended this is the first (positional) pin. |
+| `receiver_pins` | str | Comma-separated list of receiver pins (no spaces), e.g. `u_mem.rx` or `u_a.rx,u_b.rx`. |
+| `unknown` | keyword | Optional. Marks the net as having no known pin direction. All listed pins are stored in BDB with `dir="UNKNOWN"`. The flat bundler still uses positional order (first = driver, rest = receivers); `run_hier_bundler` applies the same positional fallback from BDB. |
 
-**Example:**
+**Directed form** — use when you know which end drives:
 ```
 add_net data_0  u_cpu.dout  u_mem.din
 add_net req     u_cpu.req   u_arb.req0,u_arb.req1
 ```
+
+**Undirected form** — use for clock, reset, or any bidirectional signal where driver direction is not known at script time:
+```
+add_net clk  u_clkbuf.clk  u_cpu.clk,u_mem.clk  unknown
+```
+
+When `bdb_net_mode` is **off** the `unknown` keyword has no effect on the flat
+bundler — direction is always inferred positionally. When `bdb_net_mode` is
+**on** the keyword causes `add_net_pins_undirected` to be used instead of
+`add_net_pins`, storing `"UNKNOWN"` in the BDB pin table so `run_hier_bundler`
+can handle the net with its positional-fallback logic.
 
 ---
 
@@ -234,6 +247,7 @@ add_net req     u_cpu.req   u_arb.req0,u_arb.req1
 ```
 add_bus <prefix>[<N>]        <driver_pin> <receiver_pins>
 add_bus <prefix>[<lo>:<hi>]  <driver_pin> <receiver_pins>
+add_bus <prefix>[<N>]        <pin1> <pin2> unknown
 ```
 
 Convenience macro that expands to a sequence of `add_net` calls.
@@ -247,10 +261,14 @@ The driver and receiver pins are the same for every expanded net — this
 describes a parallel bus where every bit shares the same source and
 destination blocks.
 
+The trailing `unknown` keyword works identically to `add_net unknown`: all pins
+for every expanded net are stored in BDB with `dir="UNKNOWN"`.
+
 **Example:**
 ```
 add_bus data[8]  u_cpu.dout  u_mem.din       # expands to data_0 … data_7
 add_bus addr[16] u_cpu.addr  u_mem.addr      # expands to addr_0 … addr_15
+add_bus clk[4]   u_clk.out   u_tile.clk  unknown   # undirected clock bus
 ```
 
 ---

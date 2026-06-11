@@ -2,6 +2,7 @@
 #include <sstream>
 #include <algorithm>
 #include <climits>
+#include <iostream>
 namespace buda {
 std::string extract_instance(const std::string& pin) {
     size_t last_dot = pin.find_last_of('.');
@@ -79,6 +80,7 @@ HierarchicalBundler::_endpoints_at_depth(
     std::unordered_map<int, NetEndpoints> result;
     for (const auto& [net_id, pins] : pins_by_net) {
         NetEndpoints ep;
+        std::vector<int> unknown_comp_ids;
         for (const auto& p : pins) {
             auto it = comp_by_id.find(p.comp_id);
             if (it == comp_by_id.end() || it->second.depth != depth) continue;
@@ -86,6 +88,17 @@ HierarchicalBundler::_endpoints_at_depth(
                 ep.driver_comp_id = p.comp_id;
             else if (p.dir == "INPUT")
                 ep.receiver_comp_ids.push_back(p.comp_id);
+            else if (p.dir == "UNKNOWN")
+                unknown_comp_ids.push_back(p.comp_id);
+        }
+        // Fallback: use UNKNOWN pins positionally when OUTPUT/INPUT are absent.
+        if (ep.driver_comp_id < 0 && !unknown_comp_ids.empty()) {
+            ep.driver_comp_id = unknown_comp_ids[0];
+            for (size_t i = 1; i < unknown_comp_ids.size(); ++i)
+                ep.receiver_comp_ids.push_back(unknown_comp_ids[i]);
+            std::cerr << "[HierBundler] net_id=" << net_id
+                      << " at depth " << depth
+                      << ": using UNKNOWN-direction pins as positional driver/receivers\n";
         }
         if (ep.driver_comp_id >= 0 && !ep.receiver_comp_ids.empty())
             result[net_id] = std::move(ep);
@@ -133,6 +146,12 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         std::vector<int>         rcv_spec_comp_ids;
         int                      rcv_spec_depth = -1;
         std::vector<std::string> rcv_spec_paths;
+        // Deepest UNKNOWN-direction pin — used as positional fallback.
+        int unk_spec_depth   = -1;
+        int unk_spec_comp_id = -1;
+        std::string unk_spec_path;
+        std::vector<int>         unk_spec_comp_ids;
+        std::vector<std::string> unk_spec_paths;
         int  bundle_depth   = 0;
         bool is_cross       = false;
         bool is_degenerate  = false;
@@ -180,7 +199,35 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     info.rcv_spec_comp_ids.push_back(p.comp_id);
                     info.rcv_spec_paths.push_back(it->second.name);
                 }
+            } else if (p.dir == "UNKNOWN") {
+                if (d > info.unk_spec_depth) {
+                    info.unk_spec_depth    = d;
+                    info.unk_spec_comp_id  = p.comp_id;
+                    info.unk_spec_path     = it->second.name;
+                    info.unk_spec_comp_ids = {p.comp_id};
+                    info.unk_spec_paths    = {it->second.name};
+                } else if (d == info.unk_spec_depth) {
+                    info.unk_spec_comp_ids.push_back(p.comp_id);
+                    info.unk_spec_paths.push_back(it->second.name);
+                }
             }
+        }
+        // Fallback: promote deepest UNKNOWN pins to driver/receiver roles
+        // when OUTPUT/INPUT pins are absent (e.g. after import_verilog or
+        // add_net … unknown).
+        if (info.drv_spec_depth < 0 && info.unk_spec_depth >= 0) {
+            info.drv_spec_depth   = info.unk_spec_depth;
+            info.drv_spec_comp_id = info.unk_spec_comp_id;
+            info.drv_spec_path    = info.unk_spec_path;
+            // Remaining UNKNOWNs at the same depth become receivers.
+            for (size_t i = 1; i < info.unk_spec_comp_ids.size(); ++i) {
+                info.rcv_spec_comp_ids.push_back(info.unk_spec_comp_ids[i]);
+                info.rcv_spec_paths.push_back(info.unk_spec_paths[i]);
+            }
+            if (info.rcv_spec_depth < 0 && !info.rcv_spec_comp_ids.empty())
+                info.rcv_spec_depth = info.unk_spec_depth;
+            std::cerr << "[HierBundler] net_id=" << net_id
+                      << ": using UNKNOWN-direction pins as positional driver/receivers\n";
         }
         if (info.drv_spec_depth < 0 || info.rcv_spec_depth < 0) continue;
         info.is_cross = (info.drv_spec_depth != info.rcv_spec_depth);

@@ -114,6 +114,13 @@ public:
                      const std::string& drv,
                      const std::vector<std::string>& rcvs);
 
+    // Like add_net_pins but stores every pin with dir="UNKNOWN".
+    // Use when direction is not known at script time (e.g. undirected nets
+    // declared with 'add_net … unknown', or after import_verilog).
+    // HierarchicalBundler will use positional ordering as a fallback.
+    int add_net_pins_undirected(const std::string& net_name,
+                                const std::vector<std::string>& pins);
+
     // ── Mutations ──────────────────────────────────────────────────────────
     // Move a single instance to new origin (x,y); size is preserved.
     void move_comp(const std::string& name, double x, double y);
