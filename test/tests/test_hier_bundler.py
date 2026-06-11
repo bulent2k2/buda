@@ -142,27 +142,14 @@ def check_cell_context_instances(context, ctx, inst):
             )
 
 
-# ── Depth linkage steps ────────────────────────────────────────────────────────
-
-@then(parsers.re(r'the depth-1 bundle for "(?P<net>[^"]+)" has a depth-0 parent'))
-def check_depth1_has_parent(context, net):
-    b = context['by_net'].get(net)
-    assert b is not None, f"No bundle found containing net {net!r}"
-    assert b.level == 1, f"Bundle for {net!r} is at level {b.level}, expected 1"
-    assert b.parent_id != -1, (
-        f"Bundle {b.id} for net {net!r} has no parent (parent_id=-1); "
-        f"reason={b.reason!r}"
-    )
-    parent = next((p for p in context['bundles'] if p.id == b.parent_id), None)
-    assert parent is not None, f"parent_id={b.parent_id} not found in bundles"
-    assert parent.level == 0, f"parent bundle level={parent.level}, expected 0"
-
+# ── Parent linkage steps ───────────────────────────────────────────────────────
+# Cross-depth linkage no longer exists (each net is bundled exactly once);
+# parent_id is reserved for the template/replica multiple-occurrence merge.
 
 @then(parsers.re(r'the depth-1 bundle for "(?P<net>[^"]+)" has no parent bundle'))
-def check_depth1_no_parent(context, net):
+def check_no_parent(context, net):
     b = context['by_net'].get(net)
     assert b is not None, f"No bundle found containing net {net!r}"
-    assert b.level == 1, f"Bundle for {net!r} is at level {b.level}, expected 1"
     assert b.parent_id == -1, (
         f"Bundle {b.id} for net {net!r} unexpectedly has parent_id={b.parent_id}"
     )
@@ -203,14 +190,26 @@ def test_depth0_only_cross_block():
 
 
 def test_depth1_four_bundles():
-    """At depth 1, all four buses produce bundles; two are intra-proc."""
+    """At depth 1, all four buses produce exactly one bundle each.
+
+    Cross-block buses (s2p, p2s) are bundled once at their most specific
+    (leaf) endpoints with level 0 — the routing-context depth of their
+    common ancestor.  Ancestor-level duplicate projections are not emitted.
+    """
     db = _build_pipeline_bdb(); _add_pipeline_nets(db)
     bundles = _run_hier_bundler(db, 1)
-    assert len(bundles) == 6, f"Expected 6, got {len(bundles)}"
+    assert len(bundles) == 4, f"Expected 4, got {len(bundles)}"
     d0 = [b for b in bundles if b.level == 0]
     d1 = [b for b in bundles if b.level == 1]
     assert len(d0) == 2
-    assert len(d1) == 4
+    assert len(d1) == 2
+    # Every net appears in exactly one bundle.
+    seen = {}
+    for b in bundles:
+        for n in b.net_names:
+            assert n not in seen, f"net {n} in bundles {seen[n]} and {b.id}"
+            seen[n] = b.id
+    assert len(seen) == 32
 
 
 def test_intra_proc_cell_context():
@@ -225,18 +224,18 @@ def test_intra_proc_cell_context():
 
 
 def test_cross_block_depth_linkage():
-    """Depth-1 s2p/p2s bundles are linked to their depth-0 parents."""
+    """Cross-block nets are bundled once at leaf precision, with no
+    cross-depth parent (ancestor-level duplicates are not emitted;
+    parent_id is reserved for the template/replica merge)."""
     db = _build_pipeline_bdb(); _add_pipeline_nets(db)
     bundles = _run_hier_bundler(db, 1)
     by_net = {n: b for b in bundles for n in b.net_names}
-    by_id  = {b.id: b for b in bundles}
 
-    for net in ("s2p_0", "p2s_0"):
+    for net, drv in (("s2p_0", "src_i/buf_i"), ("p2s_0", "proc_i/pc_i")):
         b = by_net[net]
-        assert b.parent_id != -1, f"{net}: expected parent, got parent_id=-1"
-        parent = by_id[b.parent_id]
-        assert parent.level == 0, f"{net}: parent level={parent.level}"
-        assert b.id in parent.child_ids
+        assert b.level == 0, f"{net}: level={b.level}"
+        assert f"DRV:{drv}" in b.reason, f"{net}: reason={b.reason!r}"
+        assert b.parent_id == -1, f"{net}: parent_id={b.parent_id}"
 
 
 def test_intra_proc_no_depth_linkage():

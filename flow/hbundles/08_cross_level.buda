@@ -44,19 +44,23 @@
 #     xl_l2c     right/top/hi → right           leaf→chip, intra-right-chip
 #
 # Pipeline result:
-#   18 HBundles (D0:6 D1:5 D2:7), 98 candidates, 21 expanded wrappers
-#   26 segments placed; 0 NUTS overlaps
-#   check_connectivity: Success — no opens found
+#   14 HBundles (D0:7 D1:3 D2:4) — one per bus (each net bundled exactly
+#   once at its most specific endpoints; level = common-ancestor depth).
+#   14 expanded wrappers; 19 segments placed; 0 NUTS overlaps
+#   check_connectivity: Success — no opens found (nuts and dnuts).
 #
-#   Bundler cross-level classification (each cross-level bus in its own bundle):
-#     D0 bundle: xl_b2l_ht  (left/top→right/top/lo)  [D1→D2 cross-chip]
-#     D0 bundle: xl_b2l_hb  (left/bot→right/bot/lo)  [D1→D2 cross-chip]
-#     D0 bundle: xl_l2b_dt  (right/top/hi→left/bot)  [D2→D1 cross-chip diagonal]
-#     D0 bundle: xl_l2b_db  (right/bot/hi→left/top)  [D2→D1 cross-chip anti-diag]
-#     D0 bundle: xl_c2l     (left→right/bot/hi)       [D0→D2 cross-chip]
-#     D0 bundle: x_top+x_bot (left→right, same-level, merged)
-#     D1 bundle: xl_ic_b2l  (left/top→left/bot/lo)   [D1→D2 intra-chip]
-#     D1 bundle: xl_ic_l2b  (left/bot/hi→left/top)   [D2→D1 intra-chip]
+#   Bundle classification:
+#     D0: xl_b2l_ht  (left/top→right/top/lo)     [D1→D2 cross-chip]
+#         xl_b2l_hb  (left/bot→right/bot/lo)     [D1→D2 cross-chip]
+#         xl_l2b_dt  (right/top/hi→left/bot)     [D2→D1 cross-chip diagonal]
+#         xl_l2b_db  (right/bot/hi→left/top)     [D2→D1 cross-chip anti-diag]
+#         xl_c2l     (left→right/bot/hi)          [D0→D2 cross-chip]
+#         x_top      (left/top/hi→right/top/lo)  same-level cross-chip
+#         x_bot      (left/bot/hi→right/bot/lo)  same-level cross-chip
+#     D1: xl_ic_b2l  (left/top→left/bot/lo)      [D1→D2 intra-chip]
+#         xl_ic_l2b  (left/bot/hi→left/top)      [D2→D1 intra-chip]
+#         l_tb       (left/top/lo→left/bot/hi)   same-level intra-chip
+#     D2: b_lohi ×4  (lo→hi)  blk_cell template + 3 replicas → 4 instances
 #     Note: xl_l2c (right/top/hi→right) is degenerate (receiver is ancestor
 #           of driver) and silently dropped; not yet supported.
 #
@@ -69,6 +73,7 @@ set_min_stub_length 2
 
 # ── BDB: cell sizes ────────────────────────────────────────
 open_bdb :memory:
+# open_bdb 08fp.bdb
 
 add_cell chip_cell  400 500
 add_cell blk_cell   180 230

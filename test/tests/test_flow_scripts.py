@@ -185,18 +185,24 @@ def test_nuts_relax_range_reg_pinned_u_detour():
 def test_08_cross_level_detour_trunk_connectivity():
     out, rc = run_script("hbundles/08_cross_level.buda")
     assert_clean(out, rc, "hbundles/08_cross_level.buda")
-    assert re.search(r"\[Planner\] Bundle 6 .*-> topo \d+ of \d+: I_H\b", out), (
-        "Bundle 6 should select the direct I_H topology"
+    # Each net is bundled exactly once at its most specific endpoints:
+    # 15 buses − 1 degenerate (xl_l2c) = 14 HBundles = 14 wrappers (the
+    # b_lohi blk_cell template expands to its 4 instances; replicas are
+    # skipped).  Previously the same-level buses were also bundled at every
+    # ancestor depth and routed once per depth (x_top got 3 parallel copies).
+    assert "HierBundler: 14 hbundles (D0: 7, D1: 3, D2: 4)" in out
+    assert "run_planner hier: 14 wrappers after expansion" in out
+    # x_top / x_bot (leaf-precision level-0 bundles) route direct I_H.
+    assert re.search(r"\[Planner\] Bundle 8 .*-> topo \d+ of \d+: I_H\b", out)
+    assert re.search(r"\[Planner\] Bundle 10 .*-> topo \d+ of \d+: I_H\b", out)
+    assert re.search(r"\[Planner\] Bundle 3 .*Z_HVH@x475@y125 \[pinned\]", out), (
+        "sidecar pin for bundle 3 (xl_c2l, by net name) must be honored by "
+        "the hier planner"
     )
     segs, viols, ovlps = nuts_summary(out)
-    # 28 = bundle 6 on I_H (1 seg, not the 3-seg U detour) + bundle 7 on a
-    # Z detour (3 segs: with measured bit pitch its direct I_V no longer fits
-    # its slide window cleanly) + bundle 3 pinned to Z_HVH@x475@y125 (3 segs)
-    # by the 08_cross_level.json sidecar, honored by run_planner hier.
-    assert segs  == 28
-    assert re.search(r"\[Planner\] Bundle 3 .*Z_HVH@x475@y125 \[pinned\]", out), (
-        "sidecar pin for bundle 3 must be honored by the hier planner"
-    )
+    # 19 = 10 single-seg I_H/I_V + 2 L_HV (2 segs each) + pinned Z_HVH
+    # (3 segs) + 1 L_VH (2 segs) across the 14 wrappers.
+    assert segs  == 19
     assert viols == 0
     assert ovlps == 0
     assert "disconnected" not in out
@@ -389,3 +395,39 @@ def test_ripup2_targets_actual_blocker():
     assert dm, "DetailedNUTS summary not found"
     assert int(dm.group(1)) == 60    # 24 + 16 + 20 bits, one segment each
     assert int(dm.group(2)) == 0
+
+
+# ---------------------------------------------------------------------------
+# hbundles/10_chip_units_blocks_leaf.buda — 4-level hierarchy at scale:
+# 2 chips × 10 units × 2 blks × 2 leaves, 176 buses / 968 bits across all
+# depth pairings.  Guards the single-bundle-per-net semantics (a bus is
+# never routed at more than one hierarchy depth) and the planner's clean
+# strict pass at this size.  Residual NUTS overlaps / unplaced dnuts bits
+# are known stage-4 packing gaps (docs/future/nuts_packing_gaps.md) and
+# are ratcheted, not accepted silently.
+# ---------------------------------------------------------------------------
+
+def test_10_four_level_scale_one_bundle_per_bus():
+    out, rc = run_script("hbundles/10_chip_units_blocks_leaf.buda")
+    assert_clean(out, rc, "hbundles/10_chip_units_blocks_leaf.buda")
+    # 176 buses → exactly one HBundle per bus, at its routing-context level.
+    assert "HierBundler: 176 hbundles (D0: 26, D1: 30, D2: 40, D3: 80)" in out
+    # The two D3 blk_cell templates expand over their 40 instances;
+    # replicas are skipped → one wrapper per physical bus.
+    assert "run_planner hier: 176 wrappers after expansion" in out
+    # Every bundle plans STRICT: no rip-ups, no overflow/best-effort commits.
+    assert re.search(r"D0: 26 bundles\s+strict:26", out)
+    assert re.search(r"D1: 30 bundles\s+strict:30", out)
+    assert re.search(r"D2: 40 bundles\s+strict:40", out)
+    assert re.search(r"D3: 80 bundles\s+strict:80", out)
+    assert "Rip-up" not in out
+    assert "WARNING" not in out
+    assert "Success: no opens found." in out      # nuts connectivity
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs == 196
+    assert viols == 0
+    assert ovlps <= 10                            # ratchet (currently 10)
+    dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) >= 1112               # ratchet (currently 1112)
+    assert int(dm.group(2)) <= 8                  # ratchet (currently 8)

@@ -37,12 +37,11 @@
 #     5-pin template: d1_mp5   s3/l → s3/r, s1/l, s2/l, s4/l
 #     6-pin template: d1_mp6   s4/r → s1/l, s2/l, s3/l, s1/r, s2/r
 #
-# Pipeline result (observed):
-#   79 HBundles (D0:9 D1:35 D2:35), 934 candidates, 99 expanded wrappers
-#   388 segments placed; 271 NUTS overlaps (heavily congested by design)
-#   check_connectivity: 2 stubs of bundle d1_mp3 hit a degenerate
-#     narrow-span edge case (same-row driver/receiver on TRUNK_H) —
-#     worth investigating as a planner/NUTS bug.
+# Pipeline result (observed, after single-bundle-per-net dedup):
+#   35 HBundles (D0:11 D1:24), 463 candidates, 35 expanded wrappers
+#   151 segments placed; 18 NUTS overlaps (congested by design — was 271
+#   before dedup, when every cross-block net was also routed at each
+#   ancestor depth)
 #
 # ============================================================
 

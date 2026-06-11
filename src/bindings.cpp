@@ -99,7 +99,8 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("topo_index", &BundleAssignment::topo_index)
         .def_readwrite("v_layer_id", &BundleAssignment::v_layer_id)
         .def_readwrite("h_layer_id", &BundleAssignment::h_layer_id)
-        .def_readwrite("seg_layers", &BundleAssignment::seg_layers);
+        .def_readwrite("seg_layers", &BundleAssignment::seg_layers)
+        .def_readwrite("seg_perp",   &BundleAssignment::seg_perp);
 
     py::class_<BundleWrapper>(m, "BundleWrapper")
         .def(py::init<>())
@@ -108,6 +109,7 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("selected_topology_index", &BundleWrapper::selected_topology_index)
         .def_readwrite("width",                   &BundleWrapper::width)
         .def_readwrite("seg_layers",              &BundleWrapper::seg_layers)
+        .def_readwrite("seg_perp",                &BundleWrapper::seg_perp)
         .def_readwrite("pinned_seg_layers",       &BundleWrapper::pinned_seg_layers)
         .def_readwrite("assigned_v_layer",        &BundleWrapper::assigned_v_layer)
         .def_readwrite("assigned_h_layer",        &BundleWrapper::assigned_h_layer)

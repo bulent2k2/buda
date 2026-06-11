@@ -371,13 +371,18 @@ class BudaSession:
             return n
 
         else:
-            # Case (b): same-level cross-block — BDB depth-D floorplan
-            cache_key = ('depth', b.level)
+            # Case (b): same-level cross-block — BDB floorplan at the
+            # endpoints' depth.  b.level is the routing-context depth (the
+            # endpoints' common ancestor), which can be shallower than the
+            # endpoint paths themselves; the blocks to route between live at
+            # the endpoint depth (path segments − 1).
+            src, dsts = self._parse_bundle_reason(b.reason)
+            ep_depth = src.count('/') if src else b.level
+            cache_key = ('depth', ep_depth)
             if cache_key not in fp_cache:
-                fp_cache[cache_key] = self._build_bdb_floorplan(b.level)
+                fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
             depth_fp = fp_cache[cache_key]
             tg = self._make_topo_gen(depth_fp, use_center, use_double_detour)
-            src, dsts = self._parse_bundle_reason(b.reason)
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
@@ -445,16 +450,36 @@ class BudaSession:
         Cross-block bundles (not expanded) are not included in the map.
         """
         comps = {c.name: c for c in self.bdb.all_components()}
+        # Replica bookkeeping: the multiple-occurrence merge accumulates all
+        # instance paths on the template but leaves each replica in the list
+        # with its own instance and its own nets.  Expanding both the template
+        # (over all instances) and the replicas would route the same physical
+        # buses twice — so replicas are skipped here, and the template's
+        # per-instance wrappers take their nets from the bundle that
+        # physically lives in that instance (the replica = "donor").
+        cell_bundle_ids = {w.original_bundle.id for w in bundles
+                           if w.original_bundle.cell_context}
+        donor_nets = {}    # (template id, instance path) → replica net list
+        replica_wrapper_of = {}  # replica id → (template id, instance path)
+        for w in bundles:
+            b = w.original_bundle
+            if (b.cell_context and b.parent_id in cell_bundle_ids
+                    and b.instances):
+                donor_nets[(b.parent_id, b.instances[0])] = list(b.net_names)
+                replica_wrapper_of[b.id] = (b.parent_id, b.instances[0])
         # Start synthetic IDs above any real bundle ID in the set.
         max_id = max((w.original_bundle.id for w in bundles), default=-1)
         next_id = max_id + 1
         result = []
         expansion_map = {}  # original bundle id → [expanded wrappers]
+        wrapper_at = {}     # (template id, instance path) → expanded wrapper
         for w in bundles:
             b = w.original_bundle
             if not b.cell_context or not b.instances:
                 result.append(w)
                 continue
+            if b.id in replica_wrapper_of:
+                continue   # replica: covered by its template's expansion
             expansion_map[b.id] = []
             for inst_name in b.instances:
                 parent = comps.get(inst_name)
@@ -463,8 +488,14 @@ class BudaSession:
                 dx = int(round(parent.x1))
                 dy = int(round(parent.y1))
                 new_w = buda.BundleWrapper()
-                new_w.original_bundle = self._clone_hbundle_with_id(b, next_id)
+                clone = self._clone_hbundle_with_id(b, next_id)
                 next_id += 1
+                # Each instance wrapper carries the nets that physically live
+                # in that instance and names only its own instance path.
+                clone.net_names = donor_nets.get((b.id, inst_name),
+                                                 list(b.net_names))
+                clone.instances = [inst_name]
+                new_w.original_bundle = clone
                 new_w.width = w.width
                 new_w.candidates = [self._offset_topology(t, dx, dy)
                                     for t in w.candidates]
@@ -493,7 +524,13 @@ class BudaSession:
                 if w.pinned_seg_layers:
                     new_w.pinned_seg_layers = list(w.pinned_seg_layers)
                 expansion_map[b.id].append(new_w)
+                wrapper_at[(b.id, inst_name)] = new_w
                 result.append(new_w)
+        # Replicas map to the template wrapper at their instance, so a pin on
+        # a replica's bundle ID still reaches the wrapper that routes it.
+        for rid, key in replica_wrapper_of.items():
+            if key in wrapper_at:
+                expansion_map[rid] = [wrapper_at[key]]
         return result, expansion_map
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False):
@@ -968,6 +1005,7 @@ class BudaSession:
                 w.assigned_v_layer = asn.v_layer_id
                 w.assigned_h_layer = asn.h_layer_id
                 w.seg_layers = list(asn.seg_layers)
+                w.seg_perp = list(asn.seg_perp)
 
     def _rerun_all(self):
         """Apply sidecar topology selections, re-run planner layer assignment,
@@ -1582,6 +1620,7 @@ class BudaSession:
                         w.assigned_v_layer = asn.v_layer_id
                         w.assigned_h_layer = asn.h_layer_id
                         w.seg_layers = list(asn.seg_layers)
+                        w.seg_perp = list(asn.seg_perp)
                 self.bundles = expanded
                 print(f"run_planner hier: {len(self.bundles)} wrappers after expansion")
             else:
@@ -1604,6 +1643,7 @@ class BudaSession:
                         w.assigned_v_layer = asn.v_layer_id
                         w.assigned_h_layer = asn.h_layer_id
                         w.seg_layers = list(asn.seg_layers)
+                        w.seg_perp = list(asn.seg_perp)
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0

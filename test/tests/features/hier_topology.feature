@@ -1,9 +1,11 @@
 Feature: generate_hier_topologies — pipeline test vehicle
-  Verify topology candidate generation for the three bundle kinds:
-  depth-0 cross-block, depth-1 cross-block, and depth-1 cell-level.
+  Verify topology candidate generation for both bundle kinds:
+  cross-block (leaf-precision endpoints, level = common-ancestor depth)
+  and cell-level (cell-local coords).
 
   Pipeline: src_i → proc_i (3×pipe_cell) → snk_i
-  4 buses of 8 bits; run_hier_bundler depth 1 produces 6 HBundles.
+  4 buses of 8 bits; run_hier_bundler depth 1 produces 4 HBundles
+  (one per bus — each net is bundled exactly once).
 
   Background:
     Given a BDB with the pipeline hierarchy, nets, and busterms
@@ -15,9 +17,9 @@ Feature: generate_hier_topologies — pipeline test vehicle
     When generate_hier_topologies is called
     Then every bundle has at least 1 candidate
 
-  Scenario: all six bundles get candidates
+  Scenario: all four bundles get candidates
     When generate_hier_topologies is called
-    Then there are 6 bundles with candidates
+    Then there are 4 bundles with candidates
 
   # ── Cell-local topology ───────────────────────────────────────────────────
 

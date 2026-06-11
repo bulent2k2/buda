@@ -127,9 +127,6 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
     std::unordered_map<int, int> id_to_idx;   // bundle id → index in bundles
     int next_id = 0;
 
-    // Depth-0 bundle index for parent linkage: sig → bundle id
-    std::unordered_map<std::string, int> depth0_by_sig;
-
     // ── 1b. Pre-compute per-net leaf (most-specific endpoint) info ────────────
     // Ancestor pin propagation (add_net_pins) inserts pins for every ancestor
     // between the specified endpoint and the common ancestor.  For a cross-level
@@ -295,6 +292,15 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         // Group same-level nets by STRICT signature at this depth.
         std::map<std::string, std::vector<int>> sig_to_nets;
         for (const auto& [net_id, ep] : ep_map) {
+            // Bundle each net exactly once, at its most specific projection
+            // available within max_depth.  Pin propagation makes the net
+            // visible at every ancestor depth it crosses; those ancestor
+            // projections are views of the same physical wires, and bundling
+            // them too would route the net once per depth.
+            auto li = net_leaf.find(net_id);
+            if (li != net_leaf.end() &&
+                depth != std::min(li->second.drv_spec_depth, max_depth))
+                continue;
             auto drv_it = comp_by_id.find(ep.driver_comp_id);
             if (drv_it == comp_by_id.end()) continue;
             std::vector<std::string> rcv_names;
@@ -309,7 +315,21 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         for (const auto& [sig, net_ids] : sig_to_nets) {
             HBundle b;
             b.id    = ++next_id;
+            // Routing-context level: the depth of the endpoints' common
+            // ancestor (same convention as cross-level bundle_depth).  A
+            // cross-chip net is a depth-0 routing problem even when its
+            // endpoints are specified down at leaf pins, and the planner's
+            // top-down ordering keys off this level.
             b.level = depth;
+            {
+                auto li0 = net_leaf.find(net_ids[0]);
+                if (li0 != net_leaf.end() && !li0->second.rcv_spec_paths.empty()) {
+                    int mc = INT_MAX;
+                    for (const auto& rp : li0->second.rcv_spec_paths)
+                        mc = std::min(mc, path_common(li0->second.drv_spec_path, rp));
+                    if (mc != INT_MAX) b.level = mc;
+                }
+            }
             b.reason = sig;
             for (int nid : net_ids) {
                 auto it = net_name.find(nid);
@@ -346,35 +366,11 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 }
             }
 
-            // ── Depth linkage: cross-block depth-D bundles link to depth-(D-1) parents ──
-            if (depth > 0 && b.cell_context.empty()) {
-                auto drv2 = comp_by_id.find(ep0.driver_comp_id);
-                if (drv2 != comp_by_id.end() && drv2->second.parent_id >= 0) {
-                    auto par_drv = comp_by_id.find(drv2->second.parent_id);
-                    if (par_drv != comp_by_id.end()) {
-                        std::vector<std::string> par_rcv_names;
-                        for (int rid : ep0.receiver_comp_ids) {
-                            auto rit = comp_by_id.find(rid);
-                            if (rit != comp_by_id.end() && rit->second.parent_id >= 0) {
-                                auto prv = comp_by_id.find(rit->second.parent_id);
-                                if (prv != comp_by_id.end())
-                                    par_rcv_names.push_back(prv->second.name);
-                            }
-                        }
-                        std::sort(par_rcv_names.begin(), par_rcv_names.end());
-                        std::string d0_sig = _strict_sig(par_drv->second.name, par_rcv_names);
-                        auto it = depth0_by_sig.find(d0_sig);
-                        if (it != depth0_by_sig.end()) {
-                            b.parent_id = it->second;
-                            auto pidx = id_to_idx.find(it->second);
-                            if (pidx != id_to_idx.end())
-                                bundles[pidx->second].child_ids.push_back(b.id);
-                        }
-                    }
-                }
-            }
-
-            if (depth == 0) depth0_by_sig[sig] = b.id;
+            // Note: cross-depth parent linkage was removed along with
+            // ancestor-level duplicate bundles — each net is bundled exactly
+            // once, so there is no depth-(D-1) projection to link to.
+            // parent_id/child_ids are used only by the multiple-occurrence
+            // merge below (template ↔ replicas).
 
             id_to_idx[b.id] = (int)bundles.size();
             bundles.push_back(std::move(b));

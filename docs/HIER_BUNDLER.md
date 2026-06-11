@@ -55,8 +55,10 @@ pins inserted:
   depth 1   proc_i/pb_i   "in"     INPUT    ← leaf only
 ```
 
-**Key consequence**: intra-block nets appear only at depth 1; cross-block nets
-appear at both depth 0 and depth 1.
+**Key consequence**: intra-block nets have pins only at depth 1; cross-block
+nets have pins at both depth 0 and depth 1.  Pins (visibility) are per-depth;
+**bundling is not** — each net is placed in exactly one HBundle, at its most
+specific endpoints (see step 2b).
 
 ---
 
@@ -91,8 +93,10 @@ for each net N in pins_by_net:
     ep_map[N] = { driver_comp_id, recv_comp_ids }
 ```
 
-Cross-block nets appear in ep_map at D=0 AND D=1.  
-Intra-block nets appear only at D=1 (and deeper).
+Cross-block nets appear in ep_map at D=0 AND D=1 (their interface pins make
+them visible at every depth they cross); intra-block nets only at D=1 (and
+deeper).  ep_map is visibility, not assignment — step 2b picks exactly one
+depth per net.
 
 **UNKNOWN direction:** Pins stored with `dir="UNKNOWN"` (produced by
 `import_verilog`, `import_def_lef` when LEF has no DIRECTION, or `add_net …
@@ -102,9 +106,17 @@ driver; all remaining UNKNOWN pins at the same depth become receivers. A
 `[HierBundler]` warning line is printed to stderr for each net that uses this
 fallback. Nets with exactly one UNKNOWN pin are dropped (no receiver).
 
-#### 2b. Group by STRICT signature
+#### 2b. Group by STRICT signature — one bundle per net
+
+A net is bundled **only at its most specific projection**: it is skipped at
+depth D unless `D == min(leaf_endpoint_depth, max_depth)`.  Ancestor-level
+projections of the same net are views of the same physical wires; bundling
+them too would route the net once per depth (multiple parallel copies of
+metal — the pre-fix behavior).
 
 ```
+for each net in ep_map:
+  if D != min(drv_spec_depth, max_depth): skip
 sig = "DRV:" + comp_name[driver] + "|REC:" + sorted(comp_names[recv]), joined by ","
 sig_to_nets: map<sig, [net_id]>
 ```
@@ -116,7 +128,7 @@ Fields set here:
 | Field | Value |
 |---|---|
 | `id` | auto-increment |
-| `level` | current depth D |
+| `level` | depth of the endpoints' **common ancestor** (the routing context — same convention as cross-level `bundle_depth`); a cross-chip net is a level-0 routing problem even when its endpoints are leaf pins. Falls back to D when leaf info is unavailable. |
 | `net_names` | net names in this group |
 | `num_terminals` | 1 + len(recv_comps) for first net |
 | `reason` | the sig string (for debugging) |
@@ -138,17 +150,12 @@ if drv_comp.parent_id >= 0:                          // not a root component
 
 Cross-block bundles (different parents) leave `cell_context` empty.
 
-### Step 4 — Depth linkage for cross-block bundles
+### Step 4 — (removed) Cross-depth linkage
 
-For depth-D (D ≥ 1) cross-block bundles:
-
-```
-par_drv = parent of driver comp → its name is the depth-(D-1) driver
-par_rcvs = [parent of each recv comp]
-d0_sig   = build STRICT sig from par_drv and par_rcvs
-Look up d0_sig in depth0_bundle_by_sig index.
-If found:  b.parent_id = d0_bundle.id;  d0_bundle.child_ids += [b.id]
-```
+Cross-depth parent linkage existed to relate a net's per-depth duplicate
+bundles.  With one bundle per net there is nothing to link; `parent_id` /
+`child_ids` are now used **only** by the multiple-occurrence merge (step 5,
+template ↔ replicas).
 
 ### Step 5 — Multiple-occurrence detection
 
@@ -180,21 +187,19 @@ signatures ("pa_i→pb_i" vs "pb_i→pc_i") so they are NOT merged.
 
 ## 4. Expected Output for the Pipeline Test Vehicle
 
-After `run(max_depth=1)` with 4 buses of 8 bits each:
+After `run(max_depth=1)` with 4 buses of 8 bits each — one bundle per bus:
 
 ```
-depth 0 (2 bundles):
-  hbundle-1   level=0  nets=[s2p_0..7]    reason="DRV:src_i|REC:proc_i,"
-  hbundle-2   level=0  nets=[p2s_0..7]    reason="DRV:proc_i|REC:snk_i,"
-
-depth 1 (4 bundles):
-  hbundle-3   level=1  nets=[s2p_0..7]    cell_context=""        parent=hbundle-1
-  hbundle-4   level=1  nets=[pa_pb_0..7]  cell_context=proc_cell instances=["proc_i"]
-  hbundle-5   level=1  nets=[pb_pc_0..7]  cell_context=proc_cell instances=["proc_i"]
-  hbundle-6   level=1  nets=[p2s_0..7]    cell_context=""        parent=hbundle-2
+hbundle-1  level=0  nets=[s2p_0..7]    reason="DRV:src_i/buf_i|REC:proc_i/pa_i,"
+hbundle-2  level=0  nets=[p2s_0..7]    reason="DRV:proc_i/pc_i|REC:snk_i/rcv_i,"
+hbundle-3  level=1  nets=[pa_pb_0..7]  cell_context=proc_cell instances=["proc_i"]
+hbundle-4  level=1  nets=[pb_pc_0..7]  cell_context=proc_cell instances=["proc_i"]
 ```
 
-Total: 6 HBundles.
+Total: 4 HBundles.  The cross-block buses carry leaf-precision endpoint paths
+but level 0 — the depth of their common ancestor (their routing context).
+Topology generation builds the floorplan for such bundles from the blocks at
+the **endpoint depth** (path segments − 1), not at `level`.
 
 ---
 

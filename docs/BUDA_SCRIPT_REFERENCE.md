@@ -489,6 +489,8 @@ Group nets into hierarchy-aware bundles (HBundles) by querying the component hie
 
 HBundles group signals that cross cell boundaries at different levels of the physical hierarchy, allowing the planner and routing engines to distinguish local intra-cell routing from top-level inter-cell interconnect.
 
+Each net is bundled **exactly once**, at its most specific endpoint projection within `depth N`; the bundle's level is the depth of the endpoints' common ancestor (its routing context). Identical cell-local buses across instances of the same cell merge into one template bundle carrying all instance paths (expanded back per instance by `run_planner hier`).
+
 **Example:**
 ```buda
 run_hier_bundler depth 1
