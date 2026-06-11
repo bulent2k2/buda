@@ -43,6 +43,7 @@ class BdbFloorplanner:
         self._die_h = tk.DoubleVar(value=1200.0)
         self._grid = tk.DoubleVar(value=10.0)
         self._depth = tk.IntVar(value=0)
+        self._last_depth = 0
         self._sel_var = tk.StringVar(value="")
         self._issue_var = tk.StringVar(value="")
 
@@ -74,7 +75,7 @@ class BdbFloorplanner:
         self._spin(setup, "Die W", self._die_w, 0)
         self._spin(setup, "Die H", self._die_h, 1)
         self._spin(setup, "Grid", self._grid, 2)
-        self._spin(setup, "Depth", self._depth, 3)
+        self._spin(setup, "Depth", self._depth, 3, from_=0, increment=1)
         ttk.Button(setup, text="Apply", command=self._apply_canvas).grid(
             row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         self._depth.trace_add("write", lambda *_: self._on_depth_change())
@@ -114,9 +115,10 @@ class BdbFloorplanner:
         self._draw()
 
     @staticmethod
-    def _spin(parent, label, var, row):
+    def _spin(parent, label, var, row, from_=1, increment=10):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=1)
-        ttk.Spinbox(parent, textvariable=var, from_=1, to=1_000_000, increment=10, width=10).grid(
+        ttk.Spinbox(parent, textvariable=var, from_=from_, to=1_000_000,
+                    increment=increment, width=10).grid(
             row=row, column=1, sticky="ew", pady=1)
         parent.columnconfigure(1, weight=1)
 
@@ -231,7 +233,7 @@ class BdbFloorplanner:
                                             filetypes=[("BUDA script", "*.buda"), ("All", "*")])
         if not path:
             return
-        fpc.export_hbundle_script(self.state, path, depth=max(1, int(self._depth.get())))
+        fpc.export_hbundle_script(self.state, path, depth=max(1, self._depth_value()))
         self._status.set(f"Exported HBundle flow script to {path}.")
 
     def _run_flow(self):
@@ -240,7 +242,7 @@ class BdbFloorplanner:
             return
         self._status.set("Running HBundle flow...")
         self.root.update_idletasks()
-        result = fpc.run_hbundle_flow(self.state, depth=max(1, int(self._depth.get())))
+        result = fpc.run_hbundle_flow(self.state, depth=max(1, self._depth_value()))
         tail = (result.stdout or result.stderr).strip().splitlines()[-1:] or [""]
         if result.returncode == 0:
             self._status.set(f"HBundle flow completed. {tail[0]}")
@@ -260,7 +262,7 @@ class BdbFloorplanner:
             self._block_list.insert(tk.END, name)
 
     def _visible_names(self):
-        return self.state.names_at_depth(int(self._depth.get()))
+        return self.state.names_at_depth(self._depth_value())
 
     def _selected_list_names(self):
         return [self._block_list.get(i) for i in self._block_list.curselection()]
@@ -280,9 +282,23 @@ class BdbFloorplanner:
             self._block_list.see(idx)
 
     def _on_depth_change(self):
+        if self._depth_value(allow_invalid=True) is None:
+            return
         self.state.selected = None
         self._refresh_list()
         self._draw()
+
+    def _depth_value(self, allow_invalid=False):
+        try:
+            depth = int(self._depth.get())
+        except (tk.TclError, ValueError):
+            if allow_invalid:
+                return None
+            return self._last_depth
+        if depth < 0:
+            depth = 0
+        self._last_depth = depth
+        return depth
 
     def _draw(self):
         ax = self._ax
@@ -295,7 +311,8 @@ class BdbFloorplanner:
                 (0, 0), dw, dh, facecolor="#f8fafc", edgecolor="#6b7280",
                 linewidth=1.2, zorder=0))
 
-        for block in self.state.blocks_at_depth(int(self._depth.get())):
+        depth = self._depth_value()
+        for block in self.state.blocks_at_depth(depth):
             selected = block.name == self.state.selected
             patch = mpatches.Rectangle(
                 (block.x1, block.y1), block.x2 - block.x1, block.y2 - block.y1,
@@ -316,7 +333,7 @@ class BdbFloorplanner:
         elif self._visible_names():
             xs = []
             ys = []
-            for b in self.state.blocks_at_depth(int(self._depth.get())):
+            for b in self.state.blocks_at_depth(depth):
                 xs += [b.x1, b.x2]
                 ys += [b.y1, b.y2]
             pad = max(max(xs) - min(xs), max(ys) - min(ys), 1.0) * 0.12
