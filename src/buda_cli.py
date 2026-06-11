@@ -90,6 +90,7 @@ class BudaSession:
         self.bdb = None              # BDB (opened by open_bdb command)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
         self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
+        self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -116,26 +117,25 @@ class BudaSession:
 
         for sel in data.get('selections', []):
             hint = sel['bundle_hint']
-            matched_w = None
-            for w in self.bundles:
-                names = w.original_bundle.get_net_names()
-                if names and names[0].startswith(hint):
-                    matched_w = w
-                    break
-            if matched_w is None:
+            matching = [w for w in self.bundles
+                        if w.original_bundle.get_net_names() and
+                           w.original_bundle.get_net_names()[0].startswith(hint)]
+            if not matching:
                 print(f"Warning: no bundle found for hint '{hint}' — skipping")
                 continue
 
             # Prefer stable (type, wl) match; fall back to stored index hint.
+            # Resolution uses the first match; all instances share the same candidate set.
+            first_w = matching[0]
             resolved = None
-            for i, cand in enumerate(matched_w.candidates):
+            for i, cand in enumerate(first_w.candidates):
                 if (cand.type == sel['topo_type'] and
                         cand.estimated_wirelength == sel['topo_wl']):
                     resolved = i
                     break
             if resolved is None:
                 idx_hint = sel.get('topo_index_hint', -1)
-                if 0 <= idx_hint < len(matched_w.candidates):
+                if 0 <= idx_hint < len(first_w.candidates):
                     resolved = idx_hint
                     print(f"Warning: selection for '{hint}' matched by index hint "
                           f"(type/WL changed?) — using topo {resolved}")
@@ -143,19 +143,22 @@ class BudaSession:
                     print(f"Warning: selection for '{hint}' could not be resolved — ignored")
                     continue
 
-            matched_w.selected_topology_index = resolved
-            matched_w.topology_pinned = True
+            # Apply pin to ALL matching wrappers (handles multiple cell instances).
+            pinned_layers = sel.get('seg_layers')
+            for w in matching:
+                w.selected_topology_index = resolved
+                w.topology_pinned = True
+                if pinned_layers is not None:
+                    topo = w.candidates[resolved]
+                    if len(pinned_layers) == len(topo.segments):
+                        w.pinned_seg_layers = list(pinned_layers)
 
-            # Load per-segment layer overrides if present.
-            if 'seg_layers' in sel:
-                pinned = sel['seg_layers']
-                topo = matched_w.candidates[resolved]
-                if len(pinned) == len(topo.segments):
-                    matched_w.pinned_seg_layers = list(pinned)
-                    print(f"  (pinned {len(pinned)} segment layers)")
-
+            n = len(matching)
+            suffix = f" [{n} instances]" if n > 1 else ""
+            if pinned_layers is not None and len(pinned_layers) == len(first_w.candidates[resolved].segments):
+                print(f"  (pinned {len(pinned_layers)} segment layers)")
             print(f"Pinned bundle '{hint}' to topology {resolved} "
-                  f"({sel['topo_type']}, WL={sel['topo_wl']})")
+                  f"({sel['topo_type']}, WL={sel['topo_wl']}){suffix}")
 
     def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):
         """Walk BDB hierarchy and call fp.add_block() for components at `depth`.
@@ -338,17 +341,23 @@ class BudaSession:
         per entry in b.instances, each with candidates offset to that
         instance's absolute position.  Each expanded wrapper gets a unique
         HBundle ID so assignment matching is unambiguous.
+
+        Returns (result_list, expansion_map) where expansion_map maps each
+        original bundle ID to the list of expanded wrappers produced from it.
+        Cross-block bundles (not expanded) are not included in the map.
         """
         comps = {c.name: c for c in self.bdb.all_components()}
         # Start synthetic IDs above any real bundle ID in the set.
         max_id = max((w.original_bundle.id for w in bundles), default=-1)
         next_id = max_id + 1
         result = []
+        expansion_map = {}  # original bundle id → [expanded wrappers]
         for w in bundles:
             b = w.original_bundle
             if not b.cell_context or not b.instances:
                 result.append(w)
                 continue
+            expansion_map[b.id] = []
             for inst_name in b.instances:
                 parent = comps.get(inst_name)
                 if parent is None:
@@ -370,8 +379,16 @@ class BudaSession:
                         inst_name + "/" + n if "/" not in n else n
                         for n in topo.connected_block_names
                     ]
+                # Propagate topology pinning from template to each instance.
+                # Candidate indices are preserved (expansion offsets coordinates
+                # but keeps the same ordering as the template candidate list).
+                new_w.topology_pinned = w.topology_pinned
+                new_w.selected_topology_index = w.selected_topology_index
+                if w.pinned_seg_layers:
+                    new_w.pinned_seg_layers = list(w.pinned_seg_layers)
+                expansion_map[b.id].append(new_w)
                 result.append(new_w)
-        return result
+        return result, expansion_map
 
     def _make_topo_gen(self, fp, use_center=False, use_double_detour=False):
         """Create a TopologyGenerator on fp with the current layer stack."""
@@ -1416,9 +1433,12 @@ class BudaSession:
                 if self.bdb is None:
                     print("Error: run_planner hier requires an open BDB"); return
                 iterations = int(args[1]) if len(args) > 1 else 5
+                # Apply user-pinned selections to template wrappers BEFORE expansion
+                # so topology_pinned + pinned_seg_layers propagate to all instances.
+                self._apply_selections()
                 # Expand cell-level bundles → per-instance absolute-coord wrappers.
                 # Each expanded wrapper gets a unique HBundle ID.
-                expanded = self._expand_hier_bundles(self.bundles)
+                expanded, self._hier_expansion_map = self._expand_hier_bundles(self.bundles)
                 # priority = -(level * 10000 + n_candidates): higher routes first.
                 # Depth-0 before depth-1; fewer candidates (less flexibility) first.
                 for w in expanded:
@@ -1661,6 +1681,20 @@ class BudaSession:
                         self._replan_layers()
                     found = True
                     break
+            if not found:
+                # Hier mode: the original bundle was expanded into synthetic-ID wrappers.
+                # Look up the original ID in the expansion map and apply to all instances.
+                wrappers = self._hier_expansion_map.get(bid, [])
+                if wrappers:
+                    if tidx < 0 or tidx >= len(wrappers[0].candidates):
+                        print(f"Error: invalid topology index {tidx} for bundle {bid}")
+                    else:
+                        for w in wrappers:
+                            w.selected_topology_index = tidx
+                        n = len(wrappers)
+                        print(f"Selected topology {tidx} for bundle {bid} "
+                              f"({n} expanded instance{'s' if n > 1 else ''})")
+                    found = True
             if not found:
                 print(f"Error: bundle {bid} not found")
 
