@@ -700,6 +700,7 @@ class TopologyExplorer:
 
         is_sel = self._current_is_selected()
         has_any_sel = self._find_selection() is not None
+        is_planner_active = (self.idx == self.wrapper.selected_topology_index)
 
         # ── Enable/Disable Tuning Row ──
         for b in self._bax2:
@@ -707,16 +708,30 @@ class TopologyExplorer:
 
         # ── Update selection button states ──
         if is_sel:
-            self._btn_select.label.set_text('★  Selected')
+            self._btn_select.label.set_text('★  Pinned')
             self._btn_select.ax.set_facecolor('#aadd88')
+        elif is_planner_active:
+            self._btn_select.label.set_text('★  Pin Planner Choice')
+            self._btn_select.ax.set_facecolor('#cceeff')
         else:
-            self._btn_select.label.set_text('★  Select Topo')
+            self._btn_select.label.set_text('★  Pin Topo')
             self._btn_select.ax.set_facecolor('#f0f0f0')
         self._btn_deselect.ax.set_facecolor('#ffbbaa' if has_any_sel else '#f0f0f0')
 
-        # ── Axes border: gold when selected, subtle grey otherwise ──
-        border_col = '#FFD700' if is_sel else '#cccccc'
-        border_lw  = 3.5      if is_sel else 0.8
+        # ── Axes border: gold for pinned, blue for planner, subtle grey otherwise ──
+        if is_planner_active and is_sel:
+            border_col = '#BDB76B' # Dark Khaki
+            border_lw  = 3.5
+        elif is_planner_active:
+            border_col = '#4682B4' # Steel Blue
+            border_lw  = 3.5
+        elif is_sel:
+            border_col = '#FFD700' # Gold
+            border_lw  = 3.5
+        else:
+            border_col = '#cccccc'
+            border_lw  = 0.8
+            
         for spine in ax.spines.values():
             spine.set_edgecolor(border_col)
             spine.set_linewidth(border_lw)
@@ -726,8 +741,7 @@ class TopologyExplorer:
                    for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
         bus_label = (f"bus {self.bidx + 1}/{nb} · " if nb > 1 else "")
         
-        is_planner_active = (self.idx == self.wrapper.selected_topology_index)
-        is_current_selection = self._current_is_selected()
+        is_current_selection = is_sel
         
         if is_planner_active and is_current_selection:
             sel_badge = "  ★ PLANNER SELECTED (PINNED)"
