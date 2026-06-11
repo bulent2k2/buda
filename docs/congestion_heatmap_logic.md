@@ -27,12 +27,12 @@ Congestion is measured using a 2D cut-based model on the Hanan grid.
 
 ### Usage Accumulation
 *   When a topology is applied, each of its segments contributes to the usage of the cuts it crosses.
-*   **Effective Width:** The usage added is `bundle_width * layer_dilution_factor`.
+*   **Effective Width:** The usage added is `bits × unit_pitch / n_signal_slots` when the layer has a track pattern (`def_track_pattern`); otherwise `bundle_width * layer_dilution_factor`.
 *   **Dilution Factor:** Calculated from layer overhead as `100 / (100 - overhead_percent)`.
 *   Usage is added to the specific band that contains the segment's coordinate.
 
 ### Congestion Cost and Overflow
-*   **Congestion Cost:** A hyperbolic function `kCong * u / (1 - u)`, where `u = (usage + effective_width) / capacity`. This cost drives the global planner to avoid congested areas.
+*   **Congestion Cost:** `kCong * overflow / capacity`, where `overflow = max(0, usage + effective_width - capacity)` — zero when the segment fits. Overflow is additionally enforced as a **hard constraint** during planning; see [congestion_planner.md](congestion_planner.md) for the cost model and escalation ladder.
 *   **Overflow:** `(usage + effective_width) - capacity`, clamped to 0. This is used for reporting and debugging.
 
 ## 2. Heatmap Visualization (`BudaVisualizer`)

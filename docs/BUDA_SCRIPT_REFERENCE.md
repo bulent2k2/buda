@@ -726,7 +726,7 @@ adjusted between runs to re-plan with different weights.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `kCong` | `1.0` | Congestion cost coefficient. Multiplies the hyperbolic term `u/(1−u)` for each channel band. Larger values make the planner avoid congested channels more aggressively. |
+| `kCong` | `1.0` | Congestion cost coefficient. Multiplies the overflow ratio `max(0, usage+eff_width−cap)/cap` for each channel band (zero when the segment fits). Note: overflow is gated as a hard constraint first (see `run_planner`); `kCong` only arbitrates among candidates when overflow is genuinely unavoidable, or prices residual soft pressure. |
 | `kSpan` | `0.001` | Span-mismatch cost coefficient. Multiplies the excess span outside a layer's `[span_min, span_max]` window. Guides long segments to higher metal and short stubs to lower metal. |
 | `base_cost_non_top` | `0.5` | Flat penalty per segment for using a non-`TOP` layer. Keeps the default preference on top layers without hard-blocking lower ones. |
 | `kWL` | `0.001` | Wirelength cost per layout unit, added to the topology score. Steers equal-congestion choices toward shorter topologies, so a detour wins only when it avoids real congestion. |
@@ -753,7 +753,9 @@ Runs the global congestion-aware router. Bundles are processed widest-first
 1. Builds a Hanan-grid congestion map (one cut per channel per layer).
 2. Scores every topology candidate — for each segment independently selects
    the best layer from the direction-appropriate set (H layers for H segments,
-   V layers for V segments).  Segment score = `kCong·u/(1−u) + kSpan·excess + base_cost_non_top`.
+   V layers for V segments).  Segment score = `kCong·overflow/cap + kSpan·excess
+   + base_cost_non_top`, where `overflow = max(0, usage+eff_width−cap)` (zero
+   when the segment fits).
    The congestion charge goes to the cheapest Hanan band the segment's slide
    interval can host the bus in (slide-aware lookup), not just the band at the
    interval centre.  Band capacity is clamped to the slide window's overlap
@@ -771,12 +773,31 @@ Runs the global congestion-aware router. Bundles are processed widest-first
    (see `visualize_topologies`): for a pinned bundle, only that one topology
    is scored (layer assignment is still computed).
 
+**Overflow is a hard constraint** — an overflowing band cannot physically host
+the bus, so NUTS would emit a real overlap. Each bundle walks an escalation
+ladder (see [congestion_planner.md](congestion_planner.md) for the full design):
+
+1. `STRICT` — only candidates that fit their slide windows **and** are
+   overflow-free compete on the soft costs above.
+2. **Rip-up & replan** — if no candidate is overflow-free, one earlier-committed
+   bundle at a time is ripped up (most recent first) and the pair is replanned;
+   accepted only if both end up overflow-free.
+3. `ALLOW_OVERFLOW` — overflow truly unavoidable: the least-cost candidate is
+   committed with a `WARNING`.
+4. `BEST_EFFORT` — no candidate even fits its slide windows (e.g. stale sidecar
+   pins): committed anyway with a `WARNING` rather than dropping the bundle.
+
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `iterations` | int | 5 | Reserved for future iterative refinement; currently unused beyond the first pass. |
+| `iterations` | int | 5 | Reserved for planned PathFinder-style negotiated-congestion iterations (see [future/planner_ripup_extensions.md](future/planner_ripup_extensions.md)); currently unused beyond the first pass. |
 
-**Output:** Prints per-bundle selection: topology type, assigned H/V layers,
-and overflow estimate.
+**Output:** Prints per-bundle selection: topology type, assigned per-segment
+layers, ` [pinned]`/` [replanned]` tags, and the raw overflow in layout units
+(0 unless a fallback mode committed). Rip-ups print
+`[Planner] Rip-up: replanned bundle <P> to free capacity for bundle <B>:`
+followed by the victim's new selection line; fallback modes print
+`[Planner] WARNING: Bundle <id>: no overflow-free candidate (even after
+rip-up); …` or `…: no candidate fits its slide windows …` respectively.
 
 **Side effects:**
 - Creates a `GlobalRouter` object accessible to `visualize` for congestion
