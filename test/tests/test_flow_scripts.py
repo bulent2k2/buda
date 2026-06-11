@@ -216,11 +216,10 @@ def test_sel_topos_typo():
 # ended with a reservation conflict and 16 unplaced bits (the window has 27
 # signal tracks; two 16-bit trunks need 32).
 #
-# KNOWN OPEN: 1 abstract M6 overlap (B2×B3 rcv1-side stubs) remains — their
-# spans only touch at placement time, then span adjustment extends one to the
-# slid trunk, creating overlap AFTER packing.  The dnuts wires are
-# conflict-free (track reservation separates them; 0 unplaced), so this is
-# the abstract metric only.  Needs span-adjustment-aware repacking.
+# The M6 window contention among B1's trunk and the B2/B3 stubs is resolved
+# by the earliest-deadline-first window repack, and B2's two stubs (same
+# bundle, same trunk) share one M6 band via the sibling alignment preference
+# (positions asserted in-process in test_nuts_alignment.py).
 # ---------------------------------------------------------------------------
 
 def test_planner3_window_capacity_avoids_double_booked_trunk():
@@ -235,7 +234,7 @@ def test_planner3_window_capacity_avoids_double_booked_trunk():
     segs, viols, ovlps = nuts_summary(out)
     assert segs  == 9
     assert viols == 0
-    assert ovlps == 1   # known open: post-span-adjustment artifact, see above
+    assert ovlps == 0   # was 1: EDF repack packs the shared M6 window cleanly
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
     assert int(dm.group(1)) == 144   # 9 segs × 16 bits

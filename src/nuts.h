@@ -52,6 +52,17 @@ struct NUTSResult {
 // A sweep-line / first-fit algorithm assigns track positions so that no two
 // segments on the same layer with overlapping spans also overlap in the
 // perpendicular direction.
+// Records how segment S's span must follow segment T's track position
+// (S connects to T at S's lo or hi end, or mid-span).
+struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
+
+// (bundle_id, seg_idx) → keys of same-bundle segments connected to the same
+// perpendicular segment.  Siblings on the same layer prefer the same track
+// position: per-bit they are the same nets and may share tracks (mirrors the
+// DetailedNUTS same-bundle reservation exemption), collapsing e.g. a
+// multicast trunk's two opposite stubs onto one band.
+using AlignMap = std::map<std::pair<int,int>, std::vector<std::pair<int,int>>>;
+
 class NUTSEngine {
 public:
     explicit NUTSEngine(const Floorplan& fp, const LayerStack& ls);
@@ -91,8 +102,23 @@ private:
     // Solve placement for one layer (modifies TrackSegment::track_position in place).
     // pull_map: (bundle_id, seg_idx) -> preferred perpendicular centre; absent entries
     // fall back to first-fit (lowest valid) behaviour.
+    // align_map: same-bundle sibling preference (see AlignMap).
     void solve_layer(std::vector<TrackSegment*>& segs,
-                     const std::map<std::pair<int,int>, double>& pull_map) const;
+                     const std::map<std::pair<int,int>, double>& pull_map,
+                     const AlignMap& align_map) const;
+
+    // Post-span-adjustment overlap repair: the final cross-layer span
+    // adjustments can extend spans of already-packed layers, materialising
+    // overlaps after packing.  Re-places victims of overlapping pairs within
+    // their intervals against current adjusted spans (bounded iterations;
+    // restores the original state unless the overlap count strictly drops).
+    void repair_overlaps(
+        std::vector<TrackSegment>& segments,
+        const std::map<std::pair<int,int>, double>&                pull_map,
+        const std::map<std::pair<int,int>, int>&                   net_pull_map,
+        const AlignMap&                                            align_map,
+        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
 
     // First-fit: lowest valid placement position within [lo, hi].
     // Returns NaN if the interval is infeasible.

@@ -206,8 +206,9 @@ It selects the candidate topology and layer assignments that minimize total cost
 **Algorithm (per layer):**
 1. Extract segments from selected topologies; derive interval constraints from the Hanan grid cell containing each segment's nominal perpendicular coordinate.
 2. Build a sweep-line event queue: one START and one END event per segment, sorted by `span_lo`.
-3. Sweep: on START, collect occupied intervals from already-placed active segments; call `first_fit(interval_lo, interval_hi, width, occupied)` to find the lowest valid placement. On END, remove from active set.
-4. `first_fit`: tries placement at `interval_lo` and just after each occupied interval's upper edge (+ `track_pitch`). Returns −1 if infeasible; caller falls back to interval centre (best-effort, counted as violation).
+3. Sweep: on START, collect occupied intervals from already-placed active segments (same-bundle segments never conflict — per-bit they are the same nets and may share tracks); place via `preferred_fit` at the alignment sibling's position (a placed same-bundle segment off the same perpendicular connector, if it fits) or the pull/centre preference. On END, remove from active set.
+4. On placement failure, repack the contended window: all placed interval-overlapping segments are re-placed earliest-deadline-first (`interval_hi` ascending) with `first_fit`; commits only on full success, else falls back to interval centre (overlap recorded if conflicting).
+5. After all layers solve and span adjustments follow connected segments' placed positions, a bounded `repair_overlaps` pass re-places victims of any overlap the adjustments materialized (state restored unless the overlap count strictly drops).
 
 **Power-grid interaction:** When a layer has a track pattern (`def_track_pattern`), the abstract bus footprint uses the measured per-bit channel cost: `bits × unit_pitch / n_signal_slots` (`LayerStack::eff_bus_width`), so abstract widths match what detailed NUTS can actually place. Without a pattern, `width` is inflated by the layer's `dilution_factor` (= `unit_pitch / signal_width_sum`) as an approximation.
 
