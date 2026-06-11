@@ -14,11 +14,14 @@ Stage 2 (Topology Generator)
 Stage 3 (Congestion Planner)
     BundleAssignment per bundle:
       selected topology index + per-segment layer IDs
-    (+ per-segment perp-band hints applied to the internal cut state)
+      + per-segment charged-band centres (seg_perp)
           │
           ▼
 Stage 4 (Abstract NUTS)
-    packs each segment into its Hanan-cell interval on the assigned layer
+    packs each segment into its Hanan-cell interval on the assigned layer,
+    preferring the planner's charged band (seg_perp) for segments free of
+    face semantics (no busterm/net_pull bound) — so buses land in the bands
+    whose capacity the books actually reserved
 ```
 
 The planner consults Stage 5 (`LayerStack`) for layer direction/type metadata and the honest per-layer bus width, and the `Floorplan` for blocks, keepouts, and the Hanan grid.
@@ -252,5 +255,11 @@ Demo scripts:
 ---
 
 ## Future Work
+
+Residual planner→NUTS packing gaps observed at scale
+(`flow/hbundles/10_chip_units_blocks_leaf.buda`) are catalogued in
+[future/nuts_packing_gaps.md](future/nuts_packing_gaps.md): pitch-blind band
+accounting, ancestor-block face clamping, and post-placement span stretching.
+
 
 Planned extensions — multi-victim rip-up, PathFinder-style negotiated congestion using the reserved `run_planner <iterations>` argument, and raw-unit overflow pricing in the `ALLOW_OVERFLOW` fallback — are detailed in [future/planner_ripup_extensions.md](future/planner_ripup_extensions.md). (Contended-band victim selection, item 2 there, is implemented.)

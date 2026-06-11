@@ -100,6 +100,20 @@ static void build_nuts_maps(
                     preferred = (cs.perp_lo > -kSentinel) ? static_cast<double>(cs.perp_lo)
                                                           : pull_map[key]; // fallback
                 pull_map[key] = preferred;
+            } else if (n_bt == 0 &&
+                       si < (int)bw.seg_perp.size() &&
+                       bw.seg_perp[si] != INT_MIN) {
+                // Planner band preference: the slide-aware congestion lookup
+                // charged this segment to a specific Hanan band (seg_perp =
+                // centre of that band's usable window).  Prefer it over the
+                // raw nominal so buses land in the bands whose capacity the
+                // planner actually reserved — otherwise several buses pack
+                // into one band by centre preference while the charged bands
+                // sit empty.  Only for segments free of face semantics:
+                // busterm stubs and net_pull-driven segments keep their
+                // nominal/bound pulls (those encode face containment and
+                // min-stub length).
+                pull_map[key] = static_cast<double>(bw.seg_perp[si]);
             }
         }
     }
@@ -371,8 +385,27 @@ void NUTSEngine::repair_overlaps(
         return it == net_pull_map.end() ? 0 : it->second;
     };
 
+    // Per-move snapshot: a move re-adjusts follower spans globally, so a
+    // locally good move can surface overlaps elsewhere.  Each move is
+    // accepted only if the global overlap count strictly drops; otherwise
+    // just that move is rolled back — earlier accepted moves are kept.
+    auto take_snap = [&](std::vector<Snap>& s) {
+        s.clear();
+        s.reserve(segments.size());
+        for (const auto& ts : segments)
+            s.push_back({ts.track_position, ts.span_lo, ts.span_hi});
+    };
+    auto restore_snap = [&](const std::vector<Snap>& s) {
+        for (size_t k = 0; k < segments.size(); ++k) {
+            segments[k].track_position = s[k].pos;
+            segments[k].span_lo        = s[k].lo;
+            segments[k].span_hi        = s[k].hi;
+        }
+    };
+
     int moved = 0;
-    for (int iter = 0; iter < 3; ++iter) {
+    std::vector<Snap> pre_move;
+    for (int iter = 0; iter < 8; ++iter) {
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
         bool progress = false;
@@ -381,17 +414,23 @@ void NUTSEngine::repair_overlaps(
             TrackSegment& b = segments[j];
             if (!segs_overlap(a, b)) continue;   // fixed by an earlier move
 
-            // Victim: prefer moving an unpulled segment (a pull target is
-            // semantic — block face / min-stub bound); tie → larger interval
-            // slack; tie → the later one.
+            // Victim: only an unpulled segment may move — a pull target is
+            // semantic (block face / min-stub bound) and its edge-at-bound
+            // placement is what keeps every bit within the face; relocating
+            // it can push bits past the face even inside its interval.
+            // Both pulled → the pair is not repairable here.
             TrackSegment* victim;
             int pa = std::abs(pull_of(a)), pb = std::abs(pull_of(b));
-            if (pa != pb) {
-                victim = (pa < pb) ? &a : &b;
-            } else {
+            if (pa == 0 && pb == 0) {
                 double sa = (a.interval_hi - a.interval_lo) - a.width;
                 double sb = (b.interval_hi - b.interval_lo) - b.width;
-                victim = (sa > sb) ? &a : &b;
+                victim = (sa > sb) ? &a : &b;   // larger slack moves
+            } else if (pa == 0) {
+                victim = &a;
+            } else if (pb == 0) {
+                victim = &b;
+            } else {
+                continue;
             }
 
             std::vector<std::pair<double,double>> occ;
@@ -433,13 +472,19 @@ void NUTSEngine::repair_overlaps(
                                        victim->width, occ, preferred);
             if (std::isnan(pos) || pos == victim->track_position) continue;
 
+            const size_t before = find_overlaps(segments).size();
+            take_snap(pre_move);
             victim->track_position = pos;
-            ++moved;
-            progress = true;
             // Settle followers of the moved segment (and theirs, cheaply).
             std::vector<TrackSegment*> all_placed;
             for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
             do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+            if (find_overlaps(segments).size() >= before) {
+                restore_snap(pre_move);   // this move made things no better
+                continue;
+            }
+            ++moved;
+            progress = true;
         }
         if (!progress) break;
     }
@@ -447,11 +492,7 @@ void NUTSEngine::repair_overlaps(
     auto remaining = find_overlaps(segments);
     if (remaining.size() >= initial.size()) {
         // No strict improvement: restore the pre-repair state.
-        for (size_t k = 0; k < segments.size(); ++k) {
-            segments[k].track_position = snapshot[k].pos;
-            segments[k].span_lo        = snapshot[k].lo;
-            segments[k].span_hi        = snapshot[k].hi;
-        }
+        restore_snap(snapshot);
         return;
     }
     if (moved > 0)
@@ -662,6 +703,14 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             }
             for (const auto& [pm, ppos] : repacked) {
                 if (pm->bundle_id == m->bundle_id) continue;
+                // Members conflict only where their spans overlap — same
+                // physical criterion as the outside-set obstacles above.
+                // Without this, disjoint-span members sharing one window
+                // (e.g. blk-local buses left and right of a cross-chip
+                // trunk, all at the same Hanan band) are packed as if
+                // simultaneous and wedge a window that has room for all.
+                if (!(pm->span_lo < m->span_hi && m->span_lo < pm->span_hi))
+                    continue;
                 const double h = pm->width / 2.0;
                 occ.push_back({ppos - h, ppos + h});
             }

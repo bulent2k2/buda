@@ -64,3 +64,4 @@ check_connectivity nuts
 
 run_detailed_nuts
 check_connectivity dnuts
+visualize

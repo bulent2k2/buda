@@ -659,6 +659,7 @@ BundleAssignment CongestionPlanner::make_assignment(const BundleWrapper& bw,
     asn.v_layer_id = rep_v;
     asn.h_layer_id = rep_h;
     asn.seg_layers = plan.seg_layers;
+    asn.seg_perp   = plan.seg_perp;
     return asn;
 }
 

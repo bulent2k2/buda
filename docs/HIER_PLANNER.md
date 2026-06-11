@@ -55,9 +55,15 @@ Cell-level HBundles from Phase C carry candidates in **cell-local coordinates**
 (origin at the parent instance's lower-left corner).  The planner operates on
 the global floorplan with absolute coordinates.
 
-Before calling the planner, each cell-level wrapper is expanded into one
-wrapper per `HBundle.instances` entry.  Each replica has candidates
-**transformed to absolute coordinates** by adding the instance's (x1, y1):
+Before calling the planner, each cell-level **template** wrapper is expanded
+into one wrapper per `HBundle.instances` entry.  Bundles that the
+multiple-occurrence merge marked as replicas (`parent_id` → a cell template)
+are **skipped** — their instance is covered by the template's expansion, and
+expanding both would route the same physical buses twice.  Each per-instance
+wrapper carries the **nets that physically live in that instance** (taken
+from the replica that contributed the instance — its "donor"), names only its
+own instance path, and has candidates **transformed to absolute coordinates**
+by adding the instance's (x1, y1):
 
 ```
 For each instance path in b.instances:
@@ -87,9 +93,14 @@ pass_through_count) are copied; `trunk_location` is left as-is (metadata only).
 
 3. Expand: walk self.bundles and produce expanded_wrappers:
    - Cross-block bundle → keep as-is
-   - Cell-level bundle with instances [i0, i1, …]:
+   - Cell-level replica (parent_id → a cell template) → skip (covered by
+     its template's expansion; pins on its ID still propagate via the
+     expansion map)
+   - Cell-level template with instances [i0, i1, …]:
      For each instance ik:
        new_w = clone of w with candidates offset by (ik.x1, ik.y1)
+       new_w.original_bundle.net_names = donor nets of ik (replica's nets)
+       new_w.original_bundle.instances = [ik]
        new_w.priority = -(b.level * 10_000 + len(new_candidates))
      Append new_w to expanded_wrappers.
    Record the mapping in _hier_expansion_map:

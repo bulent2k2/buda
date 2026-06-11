@@ -26,31 +26,39 @@ Feature: HierarchicalBundler — pipeline test vehicle
 
   # ── Depth-1 bundles ───────────────────────────────────────────────────────
 
+  # Each net is bundled exactly once, at its most specific endpoints.
+  # Cross-block buses (s2p, p2s) carry leaf-precision endpoint paths but
+  # keep level 0 — the depth of their common ancestor (routing context).
   Scenario: depth-1 bundling creates four bundles total
     When run_hier_bundler is called with max_depth 1
-    Then there are 6 hbundles
+    Then there are 4 hbundles
     And there are 2 hbundles at level 0
-    And there are 4 hbundles at level 1
+    And there are 2 hbundles at level 1
 
   Scenario: intra-proc bundles have cell_context set to proc_cell
     When run_hier_bundler is called with max_depth 1
     Then there are 2 hbundles with cell_context "proc_cell"
     And  there are 0 hbundles with cell_context "src_cell"
 
-  Scenario: cross-block depth-1 bundles have no cell_context
+  Scenario: cross-block bundles have no cell_context
     When run_hier_bundler is called with max_depth 1
-    Then there are 2 hbundles at level 1 with empty cell_context
+    Then there are 2 hbundles at level 0 with empty cell_context
 
   Scenario: intra-proc bundles list proc_i as their instance
     When run_hier_bundler is called with max_depth 1
     Then every hbundle with cell_context "proc_cell" has instance "proc_i"
 
-  # ── Depth linkage ─────────────────────────────────────────────────────────
+  # ── Single bundle per net ─────────────────────────────────────────────────
+  # Ancestor-level projections of the same net are no longer emitted, so
+  # there is no cross-depth parent linkage; parent_id is used only by the
+  # multiple-occurrence merge (template ↔ replicas).
 
-  Scenario: depth-1 cross-block bundles are children of depth-0 bundles
+  Scenario: cross-block nets are bundled exactly once at leaf precision
     When run_hier_bundler is called with max_depth 1
-    Then the depth-1 bundle for "s2p_0" has a depth-0 parent
-    And  the depth-1 bundle for "p2s_0" has a depth-0 parent
+    Then an hbundle with 8 nets exists at level 0 with reason containing "DRV:src_i/buf_i"
+    And  an hbundle with 8 nets exists at level 0 with reason containing "DRV:proc_i/pc_i"
+    And  the depth-1 bundle for "s2p_0" has no parent bundle
+    And  the depth-1 bundle for "p2s_0" has no parent bundle
 
   Scenario: intra-proc bundles have no cross-depth parent
     When run_hier_bundler is called with max_depth 1

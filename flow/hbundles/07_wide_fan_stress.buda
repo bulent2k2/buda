@@ -39,10 +39,10 @@
 #     8-pin template: d1_mp8  s1/l → s1/r, s2/l, s2/r, s3/l, s3/r, s4/l, s4/r
 #     (8-pin is the maximum intra-blk fan: 1 driver + all 7 other leaves)
 #
-# Pipeline result (observed):
-#   51 HBundles (D0:9 D1:18 D2:24), 855 candidates, 56 expanded wrappers
-#   346 segments placed; 39 NUTS overlaps (congested by design)
-#   check_connectivity: Success — no opens found
+# Pipeline result (observed, after single-bundle-per-net dedup):
+#   24 HBundles (D0:12 D1:12), 444 candidates, 24 expanded wrappers
+#   188 segments placed; 5 NUTS overlaps (congested by design — was 39
+#   before dedup)
 #
 # ============================================================
 

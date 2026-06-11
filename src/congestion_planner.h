@@ -39,6 +39,12 @@ struct BundleWrapper {
     // Per-segment layer assignments set by CongestionPlanner (primary).
     // Index matches topo.segments of the selected topology.
     std::vector<int> seg_layers;
+    // Per-segment perpendicular band preference set by CongestionPlanner:
+    // the centre of the Hanan band the slide-aware lookup charged the
+    // segment to.  INT_MIN = no preference.  NUTS uses it as the preferred
+    // placement so buses land in the bands whose capacity the planner
+    // actually reserved (connectivity pulls still take precedence).
+    std::vector<int> seg_perp;
     // Manual layer overrides per segment.  Values are layer IDs, or -1
     // for no override (let the planner decide).
     std::vector<int> pinned_seg_layers;
@@ -53,6 +59,7 @@ struct BundleAssignment {
     int v_layer_id;              // representative V layer (logging)
     int h_layer_id;              // representative H layer (logging)
     std::vector<int> seg_layers; // per-segment assignments (same order as topo.segments)
+    std::vector<int> seg_perp;   // per-segment charged-band centres (INT_MIN = none)
 };
 
 class CongestionPlanner {

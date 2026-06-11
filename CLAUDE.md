@@ -192,7 +192,7 @@ Netlist (.buda script)
 3. Span-scaled penalty for non-`TOP` layers: `base_cost_non_top · min(1, seg_span/base_span_ref)` — short stubs offload to lower layers cheaply, long trunks stay on TOP.
 It selects the candidate topology and layer assignments that minimize total cost, updates band usage, and returns the assignments.
 
-**Hier mode (`run_planner hier`)**: cell-level HBundles are expanded per instance and planned top-down (`priority = -(level·10000 + n_candidates)`); each cell-local wrapper parks its effective width as a virtual **demand reservation** on TOP-layer bands inside its instance bbox (released at its own turn) so earlier globals leave room; a per-level ladder-stage summary is printed when levels differ.
+**Hier mode (`run_planner hier`)**: each net is bundled exactly once at its most specific endpoints (level = common-ancestor depth — ancestor-level duplicate projections are not emitted); cell-level HBundle templates are expanded per instance (replicas skipped, each instance wrapper carrying its own donor nets) and planned top-down (`priority = -(level·10000 + n_candidates)`); each cell-local wrapper parks its effective width as a virtual **demand reservation** on TOP-layer bands inside its instance bbox (released at its own turn) so earlier globals leave room; a per-level ladder-stage summary is printed when levels differ.
 
 **Overflow is a hard constraint** (an overflowing band cannot physically host the bus — NUTS would emit a real overlap), enforced by an escalation ladder per bundle:
 1. `STRICT` — only candidates that are slide-feasible **and** overflow-free compete on soft costs (congestion/span/wirelength).
@@ -220,7 +220,7 @@ It selects the candidate topology and layer assignments that minimize total cost
 **Algorithm (per layer):**
 1. Extract segments from selected topologies; derive interval constraints from the Hanan grid cell containing each segment's nominal perpendicular coordinate.
 2. Build a sweep-line event queue: one START and one END event per segment, sorted by `span_lo`.
-3. Sweep: on START, collect occupied intervals from already-placed active segments (same-bundle segments never conflict — per-bit they are the same nets and may share tracks); place via `preferred_fit` at the alignment sibling's position (a placed same-bundle segment off the same perpendicular connector, if it fits) or the pull/centre preference. On END, remove from active set.
+3. Sweep: on START, collect occupied intervals from already-placed active segments (same-bundle segments never conflict — per-bit they are the same nets and may share tracks); place via `preferred_fit` at the alignment sibling's position (a placed same-bundle segment off the same perpendicular connector, if it fits), else the planner's charged-band centre (`BundleWrapper::seg_perp`, for segments free of busterm/net_pull face semantics), else the pull/centre preference. On END, remove from active set.
 4. On placement failure, repack the contended window: all placed interval-overlapping segments are re-placed earliest-deadline-first (`interval_hi` ascending) with `first_fit`; commits only on full success, else falls back to interval centre (overlap recorded if conflicting).
 5. After all layers solve and span adjustments follow connected segments' placed positions, a bounded `repair_overlaps` pass re-places victims of any overlap the adjustments materialized (state restored unless the overlap count strictly drops).
 

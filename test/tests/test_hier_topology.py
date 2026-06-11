@@ -119,10 +119,6 @@ def _generate_hier_topologies(db, bundles):
             tg = buda.TopologyGenerator(fp)
             result[b.id] = tg.generate_candidates(src_local, dsts_local)
         else:
-            key = ('depth', b.level)
-            if key not in fp_cache:
-                fp_cache[key] = build_depth_fp(b.level)
-            fp = fp_cache[key]
             # parse reason "DRV:x|REC:a,b,"
             try:
                 drv_part, rec_part = b.reason.split('|REC:')
@@ -130,6 +126,14 @@ def _generate_hier_topologies(db, bundles):
                 dsts = [n for n in rec_part.split(',') if n]
             except ValueError:
                 continue
+            # Floorplan at the endpoints' depth: b.level is the routing-context
+            # depth (common ancestor), which can be shallower than the
+            # endpoint paths themselves.
+            ep_depth = src.count('/')
+            key = ('depth', ep_depth)
+            if key not in fp_cache:
+                fp_cache[key] = build_depth_fp(ep_depth)
+            fp = fp_cache[key]
             tg = buda.TopologyGenerator(fp)
             result[b.id] = tg.generate_candidates(src, dsts)
 
@@ -275,32 +279,32 @@ def test_cell_local_topology_in_bounds():
 
 
 def test_cross_block_topology_absolute_coords():
-    """s2p depth-0 topology has segments spanning src_i to proc_i in absolute coords."""
+    """s2p topology (level 0, leaf-precision endpoints) spans
+    src_i/buf_i to proc_i/pa_i in absolute coords."""
     db = _build_pipeline_bdb()
     _add_pipeline_nets(db)
     buda.BustermGen(db).derive(1)
     _, bundles = _setup_full_context()
     cands = _generate_hier_topologies(db, bundles)
-    by_net = {n: b for b in bundles for n in b.net_names}
-    # depth-0 s2p bundle: src_i (50-250) → proc_i (350-770)
+    # s2p bundle: src_i/buf_i (150-230) → proc_i/pa_i (370-480), level 0
     s2p_d0 = next((b for b in bundles if b.level == 0 and "s2p_0" in b.net_names), None)
     assert s2p_d0 is not None
     topos = cands[s2p_d0.id]
-    assert topos, "s2p depth-0 bundle produced no candidates"
+    assert topos, "s2p bundle produced no candidates"
     all_xs = [coord for t in topos for s in t.segments
               for coord in (s.start.x, s.end.x)]
-    # src_i extends to x=250; proc_i starts at x=350 → any route must span > 250
-    assert max(all_xs) > 300, f"s2p depth-0 max x = {max(all_xs)}, expected > 300"
+    # src_i/buf_i extends to x=230; proc_i/pa_i starts at x=370 → must span > 300
+    assert max(all_xs) > 300, f"s2p max x = {max(all_xs)}, expected > 300"
 
 
 def test_all_bundles_get_candidates():
-    """Every bundle (all 6) receives at least one topology candidate."""
+    """Every bundle (one per bus) receives at least one topology candidate."""
     db = _build_pipeline_bdb()
     _add_pipeline_nets(db)
     buda.BustermGen(db).derive(1)
     _, bundles = _setup_full_context()
     cands = _generate_hier_topologies(db, bundles)
-    assert len(bundles) == 6, f"Expected 6 bundles, got {len(bundles)}"
+    assert len(bundles) == 4, f"Expected 4 bundles, got {len(bundles)}"
     for b in bundles:
         n = len(cands.get(b.id, []))
         assert n >= 1, (
