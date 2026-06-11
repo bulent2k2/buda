@@ -112,7 +112,13 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("assigned_v_layer",        &BundleWrapper::assigned_v_layer)
         .def_readwrite("assigned_h_layer",        &BundleWrapper::assigned_h_layer)
         .def_readwrite("topology_pinned",         &BundleWrapper::topology_pinned)
-        .def_readwrite("priority",                &BundleWrapper::priority);
+        .def_readwrite("priority",                &BundleWrapper::priority)
+        .def_readwrite("level",                   &BundleWrapper::level)
+        .def_readwrite("has_reservation",         &BundleWrapper::has_reservation)
+        .def_readwrite("res_x1",                  &BundleWrapper::res_x1)
+        .def_readwrite("res_y1",                  &BundleWrapper::res_y1)
+        .def_readwrite("res_x2",                  &BundleWrapper::res_x2)
+        .def_readwrite("res_y2",                  &BundleWrapper::res_y2);
 
     py::class_<Netlist>(m, "Netlist")
         .def(py::init<>())

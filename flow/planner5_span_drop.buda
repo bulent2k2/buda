@@ -1,0 +1,39 @@
+# Span-scaled non-TOP penalty: a SHORT bundle whose TOP band is saturated
+# should drop its stub to a lower layer (cheap at short span) instead of
+# detouring on TOP (which eats more TOP capacity).
+#
+#   c (0,300)-(50,500)    a (100,300)-(200,500)  b (300,300)-(400,500)   d (500,300)-(550,500)
+#   d1 (600,0)-(700,200)  d2 (900,0)-(1000,100)      <- grid extenders / detour bands
+#
+# f[40] c->d saturates band y[300,500] on M6 (eff 170 of cap 200) across
+# the a-b channel.  t[8] (eff 34) then cannot use M6 there (STRICT) and
+# chooses between:
+#   - dropping its short I_H to M4 (non-TOP penalty scaled by span), or
+#   - detouring on M6 below the blocks (U shape, longer wirelength).
+#
+# With base_span_ref 2000 the short drop is cheap -> expect t on M4 (I_H).
+# With base_span_ref 1 the penalty is effectively flat (legacy) -> the
+# M6 detour is cheaper -> expect t on a multi-segment detour via M6.
+
+source tracks.buda
+
+add_block c     0 300   50 500
+add_block a   100 300  200 500
+add_block b   300 300  400 500
+add_block d   500 300  550 500
+add_block d1  600   0  700 200
+add_block d2  900   0 1000 100
+
+add_bus f[40] c.o d.i
+add_bus t[8]  a.o b.i
+
+run_bundler strict
+generate_topologies
+
+set_planner_param base_span_ref 2000
+run_planner
+
+set_planner_param base_span_ref 1
+run_planner
+
+run_nuts

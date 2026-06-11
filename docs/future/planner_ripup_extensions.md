@@ -34,23 +34,11 @@ A two-victim variant of `flow/ripup1.buda`: two medium buses split the centre ba
 
 ---
 
-## 2. Smarter Victim Selection
+## 2. Smarter Victim Selection — ✅ IMPLEMENTED
 
-### Problem
-
-Victims are tried in **reverse commit order** (most recent first). That is a proxy for "cheapest to disturb" but ignores *relevance*: the most recently committed bundle may share no bands with the failing bundle, wasting two full replans per irrelevant victim, while the actual blocker sits earlier in the list.
-
-### Proposed enhancement
-
-When STRICT fails, record the **contended bands**: for each candidate, the (cut, band) pairs where the overflow occurred (already computed inside `score_segment` — needs to be surfaced instead of reduced to a scalar). Rank committed bundles by their `band_usage` contribution to those bands, descending, and try victims in that order. Reverse commit order remains the tie-breaker.
+Victims were tried in reverse commit order, wasting two full replans per irrelevant victim while the actual blocker sat earlier in the list. Now implemented in `CongestionPlanner`: a failed STRICT pass returns the contended (cut, band) set (`collect_overflow_bands`), committed bundles are ranked by their demand on those bands (`plan_band_overlap`), zero-overlap victims are skipped, and ties break toward the most recent commit. See [../congestion_planner.md](../congestion_planner.md) and `flow/ripup2.buda` / `test_ripup2_targets_actual_blocker`.
 
 This also gives §1 its candidate pool: only bundles with non-zero contended-band overlap are worth ripping.
-
-### Validation
-
-Construct a flow where the relevant blocker is the *first*-committed bundle among several later irrelevant ones; assert the rip-up log names it directly (and planner runtime/log shows no failed attempts on irrelevant victims).
-
-**Effort:** small-medium — extend `score_segment` (or add a sibling) to return the overflowing (cut, band) set; ranking is bookkeeping.
 
 ---
 
