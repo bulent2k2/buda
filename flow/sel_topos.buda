@@ -1,3 +1,6 @@
+# user can select a topo here or in GUI (json sidecar file)
+# planner auto selects to detour congestion/obstacles
+
 source tracks2top.buda
 add_block drv1    50  380  230  620
 add_block rcv1   680  120  880  500
@@ -9,10 +12,24 @@ add_bus c[16] rcv2.o drv1.i,rcv1.i
 
 run_bundler strict
 generate_topologies
+
+# force bundle 3 to switch to another topo:
+add_keepout 600 250 650 350 M6
+
+#in json:
 #select_topology 1 3
-#select_topology 2 2
+
+select_topology 2 4
+
+#planner selects topo 1 without keepout:
 #select_topology 3 1
+
+#[Planner] Bundle 1 (24 units wide) -> topo 3 of 14: TRUNK_H@y175 [pinned]  [H→M6 V→M5]  overflow=0
+#[Planner] Bundle 2 (24 units wide) -> topo 4 of 14: TRUNK_H@y440 [pinned]  [H→M6 V→M5]  overflow=0
+#[Planner] Bundle 3 (24 units wide) -> topo 2 of 14: TRUNK_V@x450  [V→M5 H→M6 H→M6]  overflow=16
+
 run_planner
+
 run_nuts
 run_detailed_nuts
 visualize
