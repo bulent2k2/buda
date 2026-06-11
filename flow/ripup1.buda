@@ -1,0 +1,22 @@
+# Rip-up & replan regression: bundle a (24 bits, planned first) initially
+# parks its H trunk in the centre band y[40,160] — the ONLY band that
+# bundle b's slide window allows.  Both cannot fit there (102+68 > 120).
+# b is pinned to its straight I_H topology so it cannot detour, so the
+# planner must rip up a and replan it into band y[160,300] to make room.
+
+source tracks2top.buda
+
+add_block asrc    0   0  100 300
+add_block adst  900   0 1000 300
+add_block bsrc  300  40  420 160
+add_block bdst  600  40  720 160
+
+add_bus a[24] asrc.o adst.i
+add_bus b[16] bsrc.o bdst.i
+
+run_bundler strict
+generate_topologies
+select_topology 2 1
+run_planner
+run_nuts
+run_detailed_nuts

@@ -83,6 +83,36 @@ private:
     // Span-mismatch cost: kSpan(layer) * max(0, span_min-span, span-span_max).
     double span_cost_for(double seg_span, int layer_id) const;
 
+    // Planning admissibility modes, in decreasing strictness:
+    //   STRICT         — slide-window AND overflow-free required.  Overflow is
+    //                    a hard constraint: an overflowing band cannot
+    //                    physically host the bus, so NUTS would emit a real
+    //                    overlap no matter how the soft costs balance.
+    //   ALLOW_OVERFLOW — slide-window required; overflow priced softly via
+    //                    cong_cost_segment.  Fallback when no overflow-free
+    //                    plan exists even after rip-up.
+    //   BEST_EFFORT    — no gates (legacy fallback for pinned bundles whose
+    //                    slide windows are narrower than the bus).
+    enum class PlanMode { STRICT, ALLOW_OVERFLOW, BEST_EFFORT };
+
+    // One bundle's scored plan: winning candidate index plus per-segment
+    // layer and perp-band choices.  Produced by plan_bundle (pure scoring —
+    // cut state untouched on return); applied/reverted with commit_plan.
+    struct PlanResult {
+        bool   found     = false;
+        int    best_topo = 0;
+        double score     = 0.0;
+        double overflow  = 0.0;
+        std::vector<int> seg_layers;
+        std::vector<int> seg_perp;
+    };
+
+    PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode);
+    // sign=+1 applies the plan's demand to the cut state; sign=-1 rips it up.
+    void commit_plan(const BundleWrapper& bw, const PlanResult& plan, double sign = 1.0);
+    BundleAssignment make_assignment(const BundleWrapper& bw, const PlanResult& plan) const;
+    void log_choice(const BundleWrapper& bw, const PlanResult& plan, const std::string& tag) const;
+
     int    find_band(bool is_vcut, int perp_pos) const;
 
     // Band capacity usable by a segment confined to [slide_lo, slide_hi]:

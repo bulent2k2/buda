@@ -236,12 +236,12 @@ def test_planner3_window_capacity_avoids_double_booked_trunk():
         f"planner selected {sel}"
     )
     segs, viols, ovlps = nuts_summary(out)
-    assert segs  == 9
+    assert segs  == 8   # was 9: hard overflow gate lets bundle 3 take a 2-seg trunk
     assert viols == 0
     assert ovlps == 0   # was 1: EDF repack packs the shared M6 window cleanly
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) == 144   # 9 segs × 16 bits
+    assert int(dm.group(1)) == 128   # 8 segs × 16 bits
     assert int(dm.group(2)) == 0     # was 16: trunk reservation conflict
     assert "reservation conflict" not in out
 
@@ -267,3 +267,47 @@ def test_channel_stress_pinned_infeasible_does_not_crash():
     # The pipeline must still run to completion (no run_detailed_nuts in
     # this flow; it ends with post_nuts stub reassignment).
     nuts_summary(out)
+
+
+# ---------------------------------------------------------------------------
+# planner4.buda — keepout on M6 blocks bundle 3's preferred trunk band, and
+# bundles 1/2 (pinned) hold the alternative bands.  Overflow is a hard
+# constraint: the planner must detour bundle 3 to an overflow-free trunk
+# instead of committing 16 units of overflow that NUTS cannot place (which
+# previously materialised as a B2×B3 track overlap on M6).
+# ---------------------------------------------------------------------------
+
+def test_planner4_keepout_overflow_forces_detour():
+    out, rc = run_script("planner4.buda")
+    assert_clean(out, rc, "planner4.buda")
+    ovs = re.findall(r"\[Planner\] Bundle \d+ .*overflow=([\d.]+)", out)
+    assert len(ovs) == 3
+    assert all(float(o) == 0.0 for o in ovs), f"expected overflow-free plans, got {ovs}"
+    segs, viols, ovlps = nuts_summary(out)
+    assert viols == 0
+    assert ovlps == 0   # was 1: bundle 3 overflowed into bundle 2's trunk band
+    dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(2)) == 0
+
+
+# ---------------------------------------------------------------------------
+# ripup1.buda — bundle 1 (wider, planned first) parks in the only band that
+# bundle 2's pinned I_H topology can use; both cannot fit (102+68 > 120) and
+# the pin forbids a detour.  The planner must rip up bundle 1 and replan it
+# into the free band above so both end up overflow-free.
+# ---------------------------------------------------------------------------
+
+def test_ripup1_replans_earlier_bundle_to_free_capacity():
+    out, rc = run_script("ripup1.buda")
+    assert_clean(out, rc, "ripup1.buda")
+    assert "[Planner] Rip-up: replanned bundle 1 to free capacity for bundle 2" in out
+    ovs = re.findall(r"\[Planner\] Bundle \d+ .*overflow=([\d.]+)", out)
+    assert all(float(o) == 0.0 for o in ovs), f"expected overflow-free plans, got {ovs}"
+    segs, viols, ovlps = nuts_summary(out)
+    assert viols == 0
+    assert ovlps == 0
+    dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) == 40    # 2 segs × 20 bits avg (24+16 bits)
+    assert int(dm.group(2)) == 0
