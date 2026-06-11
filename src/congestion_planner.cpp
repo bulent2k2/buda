@@ -353,6 +353,244 @@ double CongestionPlanner::span_cost_for(double seg_span, int layer_id) const {
 }
 
 // ---------------------------------------------------------------------------
+// Per-bundle candidate scoring
+// ---------------------------------------------------------------------------
+
+// Score every candidate topology of one bundle against the CURRENT cut state
+// and return the cheapest admissible one for the given mode.  Pure scoring:
+// the cut state is restored before returning; the caller commits the winner
+// with commit_plan().
+CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
+        const BundleWrapper& bw, PlanMode mode) {
+    PlanResult res;
+    if (bw.candidates.empty()) return res;
+
+    const bool enforce_window   = (mode != PlanMode::BEST_EFFORT);
+    const bool enforce_overflow = (mode == PlanMode::STRICT);
+    constexpr double kOvEps = 1e-6;   // float noise only — any real overflow is hard
+
+    // Bit count for the honest per-layer width model (eff_bus_width);
+    // 0 (hand-built wrappers without nets) falls back to width x dilution.
+    const int nbits = (int)bw.original_bundle.get_net_names().size();
+
+    auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
+    auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
+    if (h_layers.empty()) h_layers.push_back(4);
+    if (v_layers.empty()) v_layers.push_back(5);
+    // Reversed copies: highest layer ID first so ties break toward higher metal.
+    auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
+    auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
+
+    res.best_topo     = bw.topology_pinned ? bw.selected_topology_index : 0;
+    double best_score = std::numeric_limits<double>::max();
+
+    // Snapshot cut state so each topology candidate is scored from the same base.
+    auto cuts_snapshot = cuts_;
+
+    int ci_lo = bw.topology_pinned ? bw.selected_topology_index     : 0;
+    int ci_hi = bw.topology_pinned ? bw.selected_topology_index + 1 : (int)bw.candidates.size();
+
+    for (int ci = ci_lo; ci < ci_hi; ++ci) {
+        const Topology& topo = bw.candidates[ci];
+
+        // Greedy per-segment layer assignment within this topology.
+        // Each segment independently gets the layer that minimises its
+        // marginal overflow + affinity cost.  We apply each choice to the
+        // running cut state so within-topology interactions are captured
+        // (same-bundle segments rarely share a cut+band, but this is exact
+        // for multicast trees whose H-spine and V-stubs can share bands).
+        std::vector<int> seg_layers;
+        std::vector<int> seg_perp;   // perp-centre overrides for band lookup
+        double topo_overflow = 0.0;
+        double topo_score    = 0.0;
+        bool   topo_infeasible = false;
+
+        // Build ConnTopology for this candidate to obtain authoritative
+        // perp_lo/perp_hi ranges (including spines/trunks via Pass 2).
+        // The interval centre is also used as the perp-band lookup key so
+        // that stubs whose nominal x/y lands on a Hanan grid boundary are
+        // credited to the correct cell (the one NUTS's interval places them in)
+        // rather than the adjacent cell chosen by find_band's half-open rule.
+        ConnTopology ct;
+        ct.build(topo, floorplan_);
+        const auto& conn_segs = ct.segs();
+        constexpr int kSentinel = INT_MAX / 2;
+
+        for (int si = 0; si < (int)topo.segments.size(); ++si) {
+            const Segment& seg = topo.segments[si];
+            bool  is_h         = (seg.start.y == seg.end.y);
+            const auto& layers_rev = is_h ? h_layers_rev : v_layers_rev;
+            double seg_span = is_h
+                ? (double)std::abs(seg.end.x - seg.start.x)
+                : (double)std::abs(seg.end.y - seg.start.y);
+
+            // Derive the perpendicular-band lookup window from the ConnTopology
+            // slide range.  The segment can slide anywhere within it, so the
+            // congestion charge goes to the cheapest band that can host the bus
+            // (best_band_perp) rather than a point estimate at the centre —
+            // which can land in an arbitrarily narrow band the bus would never
+            // use.  Sentinel (unbounded) sides are clamped to the grid extent.
+            int slide_lo = INT_MIN, slide_hi = INT_MIN;
+            if (si < (int)conn_segs.size()) {
+                const ConnSeg& cs = conn_segs[si];
+                const auto& pgrid = is_h ? y_grid_ : x_grid_;
+                if (!pgrid.empty()) {
+                    slide_lo = std::max(cs.perp_lo, pgrid.front());
+                    slide_hi = std::min(cs.perp_hi, pgrid.back());
+                    if (slide_lo > slide_hi) { slide_lo = INT_MIN; slide_hi = INT_MIN; }
+                }
+            }
+            auto band_perp = [&](int lid, double eff) {
+                if (slide_lo == INT_MIN) return INT_MIN;   // no window: nominal lookup
+                return best_band_perp(seg, lid, eff, slide_lo, slide_hi);
+            };
+
+            int    best_lid = layers_rev[0];
+            double best_s   = std::numeric_limits<double>::max();
+            double best_ov  = 0.0;
+            int    best_pp  = INT_MIN;
+
+            // Respect manual layer overrides if present for this segment.
+            if (si < (int)bw.pinned_seg_layers.size() && bw.pinned_seg_layers[si] != -1) {
+                best_lid = bw.pinned_seg_layers[si];
+                best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
+                double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
+                best_pp  = band_perp(best_lid, eff);
+                best_ov  = score_segment(seg, best_lid, eff, best_pp, slide_lo, slide_hi);
+                if (enforce_overflow && best_ov > kOvEps) topo_infeasible = true;
+            } else {
+                // Iterate highest-ID first so equal-cost layers prefer higher metal.
+                for (int lid : layers_rev) {
+                    double eff  = layers_.eff_bus_width(nbits, bw.width, lid);
+                    int    pp   = band_perp(lid, eff);
+                    double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
+                    // STRICT: overflow is a hard constraint.  An overflowing
+                    // band physically cannot host the bus — NUTS would emit a
+                    // real overlap — so the layer is not a choice, however
+                    // cheap its soft cost.
+                    if (enforce_overflow && ov > kOvEps) continue;
+                    double cong = cong_cost_segment(seg, lid, eff, pp, slide_lo, slide_hi);
+                    double span = span_cost_for(seg_span, lid);
+                    double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
+                    double s    = cong + span + base;
+                    if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
+                }
+                if (best_s == std::numeric_limits<double>::max())
+                    topo_infeasible = true;   // STRICT: every layer overflows
+            }
+            if (topo_infeasible) break;
+            int perp_pos = best_pp;
+
+            // Feasibility: the bus (eff_width in the perpendicular direction)
+            // must fit within the sliding range ConnTopology computed for this
+            // segment — covers busterms (Pass 1) and spines/trunks (Pass 2).
+            if (enforce_window && si < (int)conn_segs.size()) {
+                const ConnSeg& cs = conn_segs[si];
+                if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel) {
+                    double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
+                    if (static_cast<double>(cs.perp_hi - cs.perp_lo) < eff)
+                        topo_infeasible = true;
+                }
+            }
+            if (topo_infeasible) break;
+
+            // Apply chosen layer so later segments in this topology see
+            // the updated congestion state.
+            double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
+            apply_segment(seg, best_lid, eff, perp_pos);
+            seg_layers.push_back(best_lid);
+            seg_perp.push_back(perp_pos);
+            topo_overflow = std::max(topo_overflow, best_ov);
+            topo_score    = std::max(topo_score,    best_s);
+        }
+
+        // Wirelength term: with congestion/span/layer costs equal, shorter
+        // topologies win — a detour must buy real congestion relief to be
+        // worth its extra length.
+        topo_score += kWL_ * topo.estimated_wirelength;
+
+        if (topo_infeasible) {
+            cuts_ = cuts_snapshot;
+            continue;
+        }
+
+        bool is_better = false;
+        if (topo_score < best_score - 1e-6) {
+            is_better = true;
+        } else if (std::abs(topo_score - best_score) < 1e-6) {
+            // Tie-breaker: stable selection by index.
+            if (ci < res.best_topo) is_better = true;
+        }
+
+        if (is_better) {
+            best_score     = topo_score;
+            res.score      = topo_score;
+            res.overflow   = topo_overflow;
+            res.best_topo  = ci;
+            res.seg_layers = seg_layers;
+            res.seg_perp   = seg_perp;
+            res.found      = true;
+        }
+
+        // Roll back to snapshot before scoring the next candidate.
+        cuts_ = cuts_snapshot;
+    }
+    return res;
+}
+
+// Commit (sign=+1) or rip up (sign=-1) a planned bundle's per-segment demand
+// in the cut state.
+void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& plan,
+                                    double sign) {
+    const int nbits = (int)bw.original_bundle.get_net_names().size();
+    const Topology& t = bw.candidates[plan.best_topo];
+    for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
+        int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
+        int lid = plan.seg_layers[si];
+        apply_segment(t.segments[si], lid,
+                      sign * layers_.eff_bus_width(nbits, bw.width, lid), pp);
+    }
+}
+
+BundleAssignment CongestionPlanner::make_assignment(const BundleWrapper& bw,
+                                                    const PlanResult& plan) const {
+    // Derive representative V/H layers for logging (last V/H seg wins).
+    int rep_v = layers_.get_top_layer(LayerDir::VERTICAL);
+    int rep_h = layers_.get_top_layer(LayerDir::HORIZONTAL);
+    const Topology& winner = bw.candidates[plan.best_topo];
+    for (int si = 0; si < (int)winner.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
+        bool is_h = (winner.segments[si].start.y == winner.segments[si].end.y);
+        if (is_h) rep_h = plan.seg_layers[si];
+        else      rep_v = plan.seg_layers[si];
+    }
+    BundleAssignment asn;
+    asn.bundle_id  = bw.original_bundle.id;
+    asn.topo_index = plan.best_topo;
+    asn.v_layer_id = rep_v;
+    asn.h_layer_id = rep_h;
+    asn.seg_layers = plan.seg_layers;
+    return asn;
+}
+
+void CongestionPlanner::log_choice(const BundleWrapper& bw, const PlanResult& plan,
+                                   const std::string& tag) const {
+    const Topology& winner = bw.candidates[plan.best_topo];
+    std::string seg_str;
+    for (int si = 0; si < (int)winner.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
+        bool is_h = (winner.segments[si].start.y == winner.segments[si].end.y);
+        if (si > 0) seg_str += ' ';
+        seg_str += (is_h ? "H" : "V");
+        seg_str += "→M" + std::to_string(plan.seg_layers[si]);
+    }
+    std::cout << "[Planner] Bundle " << bw.original_bundle.id
+              << " (" << bw.width << " units wide)"
+              << " -> topo " << (plan.best_topo + 1) << " of " << bw.candidates.size()
+              << ": " << winner.type << tag
+              << "  [" << seg_str << "]"
+              << "  overflow=" << plan.overflow << "\n";
+}
+
+// ---------------------------------------------------------------------------
 // Main optimiser — greedy fattest-bus-first, per-segment layer assignment
 // ---------------------------------------------------------------------------
 
@@ -393,18 +631,6 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         }
     }
 
-    int top_h = layers_.get_top_layer(LayerDir::HORIZONTAL);
-    int top_v = layers_.get_top_layer(LayerDir::VERTICAL);
-
-    auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
-    auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
-    if (h_layers.empty()) { h_layers.push_back(4); top_h = 4; }
-    if (v_layers.empty()) { v_layers.push_back(5); top_v = 5; }
-
-    // Reversed copies: highest layer ID first so ties break toward higher metal.
-    auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
-    auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
-
     // Sort: higher priority first (depth-0 before depth-1, constrained first);
     // within the same priority, process widest buses first.
     std::vector<int> order(bundles.size());
@@ -418,230 +644,93 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     std::vector<BundleAssignment> assignments;
     assignments.reserve(bundles.size());
 
+    // Bundles committed so far, in commit order, with the exact plan applied
+    // to the cut state (so it can be ripped up) and where its assignment
+    // lives (so a replan can overwrite it).
+    struct Committed { int bundle_idx; int asn_idx; PlanResult plan; };
+    std::vector<Committed> committed;
+
     for (int idx : order) {
         auto& bw = bundles[idx];
         if (bw.candidates.empty()) continue;
-        // Bit count for the honest per-layer width model (eff_bus_width);
-        // 0 (hand-built wrappers without nets) falls back to width x dilution.
-        const int nbits = (int)bw.original_bundle.get_net_names().size();
 
-        int    best_topo     = bw.topology_pinned ? bw.selected_topology_index : 0;
-        double best_score    = std::numeric_limits<double>::max();
-        double best_overflow = 0.0;
-        bool   have_winner   = false;
-        bool   best_effort   = false;
-        std::vector<int> best_seg_layers;
-        std::vector<int> best_seg_perp;  // ConnTopology perp-centre per segment, for winner commit
+        // (1) Overflow is a hard constraint: first look for a candidate that
+        //     is both slide-feasible and overflow-free.  A detour only loses
+        //     to soft costs (wirelength/span) against other overflow-free
+        //     candidates — never against one that NUTS cannot place.
+        PlanResult plan = plan_bundle(bw, PlanMode::STRICT);
+        bool already_committed = false;
 
-        // Snapshot cut state so each topology candidate is scored from the same base.
-        auto cuts_snapshot = cuts_;
-
-        int ci_lo = bw.topology_pinned ? bw.selected_topology_index     : 0;
-        int ci_hi = bw.topology_pinned ? bw.selected_topology_index + 1 : (int)bw.candidates.size();
-
-        // Pass 0 enforces slide-window feasibility.  If every candidate is
-        // infeasible (a pinned bundle scores exactly one), pass 1 re-scores
-        // with the feasibility gate off so the bundle still gets a layer
-        // assignment instead of committing an EMPTY best_seg_layers — which
-        // indexed out of bounds and crashed (flow/channel_stress.buda:
-        // sidecar pins saved under the old width model).
-        for (int pass = 0; pass < 2 && !have_winner; ++pass) {
-        const bool enforce_feasibility = (pass == 0);
-        best_effort = !enforce_feasibility;
-        for (int ci = ci_lo; ci < ci_hi; ++ci) {
-            const Topology& topo = bw.candidates[ci];
-
-            // Greedy per-segment layer assignment within this topology.
-            // Each segment independently gets the layer that minimises its
-            // marginal overflow + affinity cost.  We apply each choice to the
-            // running cut state so within-topology interactions are captured
-            // (same-bundle segments rarely share a cut+band, but this is exact
-            // for multicast trees whose H-spine and V-stubs can share bands).
-            std::vector<int> seg_layers;
-            std::vector<int> seg_perp;   // perp-centre overrides for band lookup
-            double topo_overflow = 0.0;
-            double topo_score    = 0.0;
-            bool   topo_infeasible = false;
-
-            // Build ConnTopology for this candidate to obtain authoritative
-            // perp_lo/perp_hi ranges (including spines/trunks via Pass 2).
-            // The interval centre is also used as the perp-band lookup key so
-            // that stubs whose nominal x/y lands on a Hanan grid boundary are
-            // credited to the correct cell (the one NUTS's interval places them in)
-            // rather than the adjacent cell chosen by find_band's half-open rule.
-            ConnTopology ct;
-            ct.build(topo, floorplan_);
-            const auto& conn_segs = ct.segs();
-            constexpr int kSentinel = INT_MAX / 2;
-
-            for (int si = 0; si < (int)topo.segments.size(); ++si) {
-                const Segment& seg = topo.segments[si];
-                bool  is_h         = (seg.start.y == seg.end.y);
-                const auto& layers_rev = is_h ? h_layers_rev : v_layers_rev;
-                double seg_span = is_h
-                    ? (double)std::abs(seg.end.x - seg.start.x)
-                    : (double)std::abs(seg.end.y - seg.start.y);
-
-                // Derive the perpendicular-band lookup window from the ConnTopology
-                // slide range.  The segment can slide anywhere within it, so the
-                // congestion charge goes to the cheapest band that can host the bus
-                // (best_band_perp) rather than a point estimate at the centre —
-                // which can land in an arbitrarily narrow band the bus would never
-                // use.  Sentinel (unbounded) sides are clamped to the grid extent.
-                int slide_lo = INT_MIN, slide_hi = INT_MIN;
-                if (si < (int)conn_segs.size()) {
-                    const ConnSeg& cs = conn_segs[si];
-                    const auto& pgrid = is_h ? y_grid_ : x_grid_;
-                    if (!pgrid.empty()) {
-                        slide_lo = std::max(cs.perp_lo, pgrid.front());
-                        slide_hi = std::min(cs.perp_hi, pgrid.back());
-                        if (slide_lo > slide_hi) { slide_lo = INT_MIN; slide_hi = INT_MIN; }
+        // (2) Rip-up & replan: no candidate is overflow-free against the
+        //     current usage.  Try freeing capacity by replanning one earlier
+        //     bundle (most recently committed first — lowest priority /
+        //     narrowest).  Accept only if BOTH bundles end up overflow-free;
+        //     otherwise restore the victim exactly and try the next one.
+        if (!plan.found) {
+            for (int k = (int)committed.size() - 1; k >= 0; --k) {
+                auto& cp = committed[k];
+                auto& pw = bundles[cp.bundle_idx];
+                commit_plan(pw, cp.plan, -1.0);             // rip up victim
+                PlanResult mine = plan_bundle(bw, PlanMode::STRICT);
+                if (mine.found) {
+                    commit_plan(bw, mine);
+                    PlanResult theirs = plan_bundle(pw, PlanMode::STRICT);
+                    if (theirs.found) {
+                        commit_plan(pw, theirs);
+                        cp.plan = theirs;
+                        assignments[cp.asn_idx] = make_assignment(pw, theirs);
+                        std::cout << "[Planner] Rip-up: replanned bundle "
+                                  << pw.original_bundle.id
+                                  << " to free capacity for bundle "
+                                  << bw.original_bundle.id << ":\n";
+                        log_choice(pw, theirs,
+                                   std::string(pw.topology_pinned ? " [pinned]" : "")
+                                   + " [replanned]");
+                        plan = mine;
+                        already_committed = true;
+                        break;
                     }
+                    commit_plan(bw, mine, -1.0);            // victim can't recover: undo us
                 }
-                auto band_perp = [&](int lid, double eff) {
-                    if (slide_lo == INT_MIN) return INT_MIN;   // no window: nominal lookup
-                    return best_band_perp(seg, lid, eff, slide_lo, slide_hi);
-                };
-
-                int    best_lid = layers_rev[0];
-                double best_s   = std::numeric_limits<double>::max();
-                double best_ov  = 0.0;
-                int    best_pp  = INT_MIN;
-
-                // Respect manual layer overrides if present for this segment.
-                if (si < (int)bw.pinned_seg_layers.size() && bw.pinned_seg_layers[si] != -1) {
-                    best_lid = bw.pinned_seg_layers[si];
-                    best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
-                    double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
-                    best_pp  = band_perp(best_lid, eff);
-                    best_ov  = score_segment(seg, best_lid, eff, best_pp, slide_lo, slide_hi);
-                } else {
-                    // Iterate highest-ID first so equal-cost layers prefer higher metal.
-                    for (int lid : layers_rev) {
-                        double eff  = layers_.eff_bus_width(nbits, bw.width, lid);
-                        int    pp   = band_perp(lid, eff);
-                        double cong = cong_cost_segment(seg, lid, eff, pp, slide_lo, slide_hi);
-                        double span = span_cost_for(seg_span, lid);
-                        double base = layers_.is_top(lid) ? 0.0 : base_cost_non_top_;
-                        double s    = cong + span + base;
-                        double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
-                        if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
-                    }
-                }
-                int perp_pos = best_pp;
-
-                // Feasibility: the bus (eff_width in the perpendicular direction)
-                // must fit within the sliding range ConnTopology computed for this
-                // segment — covers busterms (Pass 1) and spines/trunks (Pass 2).
-                if (enforce_feasibility && si < (int)conn_segs.size()) {
-                    const ConnSeg& cs = conn_segs[si];
-                    if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel) {
-                        double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
-                        if (static_cast<double>(cs.perp_hi - cs.perp_lo) < eff)
-                            topo_infeasible = true;
-                    }
-                }
-                if (topo_infeasible) break;
-
-                // Apply chosen layer so later segments in this topology see
-                // the updated congestion state.
-                double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
-                apply_segment(seg, best_lid, eff, perp_pos);
-                seg_layers.push_back(best_lid);
-                seg_perp.push_back(perp_pos);
-                topo_overflow = std::max(topo_overflow, best_ov);
-                topo_score    = std::max(topo_score,    best_s);
-            }
-
-            // Wirelength term: with congestion/span/layer costs equal, shorter
-            // topologies win — a detour must buy real congestion relief to be
-            // worth its extra length.
-            topo_score += kWL_ * topo.estimated_wirelength;
-
-            if (topo_infeasible) {
-                cuts_ = cuts_snapshot;
-                continue;
-            }
-
-            bool is_better = false;
-            if (topo_score < best_score - 1e-6) {
-                is_better = true;
-            } else if (std::abs(topo_score - best_score) < 1e-6) {
-                // Tie-breaker: stable selection by index.
-                if (ci < best_topo) is_better = true;
-            }
-
-            if (is_better) {
-                best_score      = topo_score;
-                best_overflow   = topo_overflow;
-                best_topo       = ci;
-                best_seg_layers = seg_layers;
-                best_seg_perp   = seg_perp;
-                have_winner     = true;
-            }
-
-            // Roll back to snapshot before scoring the next candidate.
-            cuts_ = cuts_snapshot;
-        }
-        }  // feasibility passes
-
-        if (!have_winner) continue;   // no candidates scored (empty range)
-        if (best_effort)
-            std::cout << "[Planner] WARNING: Bundle " << bw.original_bundle.id
-                      << ": no candidate fits its slide windows (bus width "
-                      << "exceeds them); committing best-effort "
-                      << bw.candidates[best_topo].type
-                      << (bw.topology_pinned ? " [pinned]" : "") << ".\n";
-
-        // Commit the winning topology's per-segment choices to the cut state.
-        {
-            const Topology& winner = bw.candidates[best_topo];
-            for (int si = 0; si < (int)winner.segments.size(); ++si) {
-                int pp = (si < (int)best_seg_perp.size()) ? best_seg_perp[si] : INT_MIN;
-                apply_segment(winner.segments[si],
-                              best_seg_layers[si],
-                              layers_.eff_bus_width(nbits, bw.width, best_seg_layers[si]),
-                              pp);
+                commit_plan(pw, cp.plan);                   // restore victim
             }
         }
 
-        // Derive representative V/H layers for logging (last V/H seg wins).
-        int rep_v = top_v, rep_h = top_h;
-        {
-            const Topology& winner = bw.candidates[best_topo];
-            for (int si = 0; si < (int)winner.segments.size(); ++si) {
-                bool is_h = (winner.segments[si].start.y == winner.segments[si].end.y);
-                if (is_h) rep_h = best_seg_layers[si];
-                else      rep_v = best_seg_layers[si];
-            }
+        // (3) Overflow is unavoidable even after rip-up: fall back to soft
+        //     pricing so the least-cost overflowing candidate is committed.
+        if (!plan.found) {
+            plan = plan_bundle(bw, PlanMode::ALLOW_OVERFLOW);
+            if (plan.found)
+                std::cout << "[Planner] WARNING: Bundle " << bw.original_bundle.id
+                          << ": no overflow-free candidate (even after rip-up); "
+                          << "committing least-cost with overflow="
+                          << plan.overflow << ".\n";
         }
 
-        BundleAssignment asn;
-        asn.bundle_id  = bw.original_bundle.id;
-        asn.topo_index = best_topo;
-        asn.v_layer_id = rep_v;
-        asn.h_layer_id = rep_h;
-        asn.seg_layers = best_seg_layers;
-        assignments.push_back(asn);
-
-        // Per-segment summary for console.
-        std::string seg_str;
-        {
-            const Topology& winner = bw.candidates[best_topo];
-            for (int si = 0; si < (int)winner.segments.size(); ++si) {
-                bool is_h = (winner.segments[si].start.y == winner.segments[si].end.y);
-                if (si > 0) seg_str += ' ';
-                seg_str += (is_h ? "H" : "V");
-                seg_str += "→M" + std::to_string(best_seg_layers[si]);
-            }
+        // (4) Every candidate violates its slide windows (bus wider than the
+        //     windows; e.g. sidecar pins saved under the old width model) —
+        //     commit best-effort so the bundle still gets a layer assignment
+        //     instead of an EMPTY seg_layers, which indexed out of bounds and
+        //     crashed (flow/channel_stress.buda).
+        if (!plan.found) {
+            plan = plan_bundle(bw, PlanMode::BEST_EFFORT);
+            if (plan.found)
+                std::cout << "[Planner] WARNING: Bundle " << bw.original_bundle.id
+                          << ": no candidate fits its slide windows (bus width "
+                          << "exceeds them); committing best-effort "
+                          << bw.candidates[plan.best_topo].type
+                          << (bw.topology_pinned ? " [pinned]" : "") << ".\n";
         }
-        std::cout << "[Planner] Bundle " << bw.original_bundle.id
-                  << " (" << bw.width << " units wide)"
-                  << " -> topo " << (best_topo + 1) << " of " << bw.candidates.size()
-                  << ": " << bw.candidates[best_topo].type
-                  << (bw.topology_pinned ? " [pinned]" : "")
-                  << "  [" << seg_str << "]"
-                  << "  overflow=" << best_overflow << "\n";
+
+        if (!plan.found) continue;   // no candidates scored (empty range)
+
+        // Commit the winning topology's per-segment choices to the cut state
+        // (the rip-up path already did).
+        if (!already_committed) commit_plan(bw, plan);
+
+        committed.push_back({idx, (int)assignments.size(), plan});
+        assignments.push_back(make_assignment(bw, plan));
+        log_choice(bw, plan, bw.topology_pinned ? " [pinned]" : "");
     }
 
     return assignments;
