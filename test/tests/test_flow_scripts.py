@@ -189,10 +189,14 @@ def test_08_cross_level_detour_trunk_connectivity():
         "Bundle 6 should select the direct I_H topology"
     )
     segs, viols, ovlps = nuts_summary(out)
-    # 26 = bundle 6 on I_H (1 seg, not the 3-seg U detour) + bundle 7 on a
-    # Z detour (3 segs): with measured bit pitch (4.0/bit on M5 vs the old
-    # 3.0) bundle 7's direct I_V no longer fits its slide window cleanly.
-    assert segs  == 26
+    # 28 = bundle 6 on I_H (1 seg, not the 3-seg U detour) + bundle 7 on a
+    # Z detour (3 segs: with measured bit pitch its direct I_V no longer fits
+    # its slide window cleanly) + bundle 3 pinned to Z_HVH@x475@y125 (3 segs)
+    # by the 08_cross_level.json sidecar, honored by run_planner hier.
+    assert segs  == 28
+    assert re.search(r"\[Planner\] Bundle 3 .*Z_HVH@x475@y125 \[pinned\]", out), (
+        "sidecar pin for bundle 3 must be honored by the hier planner"
+    )
     assert viols == 0
     assert ovlps == 0
     assert "disconnected" not in out
