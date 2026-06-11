@@ -28,6 +28,7 @@ set(SOURCE_FILES
     src/nuts.cpp
     src/routing_grid.cpp
     src/detailed_nuts.cpp
+    src/floorplanner.cpp
     # ── v3 new / evolved ─────────────────────────────────────────
     src/bdb.cpp
     src/sqlite3.c

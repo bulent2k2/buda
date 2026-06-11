@@ -107,6 +107,8 @@ HierarchicalBundler::_endpoints_at_depth(
 }
 
 std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
+    _db.infer_pin_dirs_from_cell_pins();
+
     // ── 1. Index BDB ──────────────────────────────────────────────────────────
     auto all_comps = _db.all_components();
     auto all_nets  = _db.all_nets();

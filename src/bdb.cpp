@@ -189,6 +189,32 @@ std::vector<CellPinRow> BDB::all_cell_pins() const {
     return out;
 }
 
+int BDB::infer_pin_dirs_from_cell_pins() {
+    Stmt u(_db, R"(
+        UPDATE pin
+        SET dir = (
+            SELECT cp.dir
+            FROM component c
+            JOIN cell_pin cp
+              ON cp.cell = c.cell AND cp.pin_name = pin.pin_name
+            WHERE c.id = pin.comp_id
+              AND cp.dir IN ('INPUT','OUTPUT','INOUT')
+        )
+        WHERE dir = 'UNKNOWN'
+          AND EXISTS (
+            SELECT 1
+            FROM component c
+            JOIN cell_pin cp
+              ON cp.cell = c.cell AND cp.pin_name = pin.pin_name
+            WHERE c.id = pin.comp_id
+              AND cp.dir IN ('INPUT','OUTPUT','INOUT')
+          )
+    )");
+    if (sqlite3_step(u) != SQLITE_DONE)
+        throw std::runtime_error("infer_pin_dirs_from_cell_pins: update failed");
+    return sqlite3_changes(_db);
+}
+
 // Insert a pin for net_id at the component named inst_path, with pin_name and dir.
 // Absolute pin position is derived from cell_pin relative coords when available,
 // otherwise defaults to the component's centroid.
@@ -945,7 +971,10 @@ void BDB::import_verilog(const std::string& v_path) {
         std::string cell, name;   // cell type, instance name (both unescaped)
         std::vector<std::pair<std::string,std::string>> portmap;
     };
-    struct VMod { std::vector<VInst> insts; };
+    struct VMod {
+        std::vector<VInst> insts;
+        std::unordered_map<std::string, std::string> port_dirs;
+    };
     std::unordered_map<std::string, VMod> mod_lib;
 
     static const std::unordered_set<std::string> kws = {
@@ -965,6 +994,41 @@ void BDB::import_verilog(const std::string& v_path) {
         auto rtrim = [](std::string s) {
             while (!s.empty() && std::isspace((unsigned char)s.back())) s.pop_back();
             return s;
+        };
+
+        auto clean_port_name = [](std::string s) {
+            s = std::regex_replace(s, std::regex(R"(\[[^\]]+\])"), " ");
+            s = std::regex_replace(s, std::regex(R"([,;()])"), " ");
+            auto tok = split_ws(s);
+            if (tok.empty()) return std::string();
+            std::string name = tok.back();
+            if (name == "wire" || name == "reg" || name == "logic" ||
+                name == "signed" || name == "unsigned")
+                return std::string();
+            if (!name.empty() && name[0] == '\\') name.erase(name.begin());
+            return name;
+        };
+
+        auto parse_port_dirs = [&](const std::string& text) {
+            if (cur_mod.empty()) return;
+            static const std::regex decl_re(R"(\b(input|output|inout)\b([^;)]*))");
+            auto begin = std::sregex_iterator(text.begin(), text.end(), decl_re);
+            auto end = std::sregex_iterator();
+            for (auto it = begin; it != end; ++it) {
+                std::string dir = (*it)[1].str();
+                std::transform(dir.begin(), dir.end(), dir.begin(),
+                               [](unsigned char c){ return std::toupper(c); });
+                std::string rest = (*it)[2].str();
+                rest = std::regex_replace(rest, std::regex(R"(\[[^\]]+\])"), " ");
+                rest = std::regex_replace(rest, std::regex(R"(\b(wire|reg|logic|signed|unsigned)\b)"), " ");
+                std::stringstream ss(rest);
+                std::string item;
+                while (std::getline(ss, item, ',')) {
+                    std::string name = clean_port_name(item);
+                    if (!name.empty())
+                        mod_lib[cur_mod].port_dirs[name] = dir;
+                }
+            }
         };
 
         // Process a complete accumulated instance text
@@ -1028,12 +1092,14 @@ void BDB::import_verilog(const std::string& v_path) {
                     auto p = nm.find('('); if (p != std::string::npos) nm.resize(p);
                     cur_mod = nm;
                     mod_lib.emplace(cur_mod, VMod{});
+                    parse_port_dirs(line);
                     if (line.find(';') != std::string::npos) in_body = true;
                     else in_header = true;
                 }
                 continue;
             }
             if (in_header) {
+                parse_port_dirs(line);
                 if (line.find(';') != std::string::npos) { in_header = false; in_body = true; }
                 continue;
             }
@@ -1056,7 +1122,12 @@ void BDB::import_verilog(const std::string& v_path) {
             }
             // Check if line could start an instance declaration
             auto tok = split_ws(line);
-            if (tok.empty() || kws.count(tok[0])) continue;
+            if (tok.empty()) continue;
+            if (tok[0] == "input" || tok[0] == "output" || tok[0] == "inout") {
+                parse_port_dirs(line);
+                continue;
+            }
+            if (kws.count(tok[0])) continue;
             accum = line;
             auto trimmed = rtrim(line);
             if (!trimmed.empty() && trimmed.back() == ';') {
@@ -1104,8 +1175,26 @@ void BDB::import_verilog(const std::string& v_path) {
         " VALUES(?,?,?,?,?,?)");
     Stmt s_np  (_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
     Stmt s_find_by_name(_db, "SELECT id FROM component WHERE name=?");
+    Stmt s_cell(_db,
+        "INSERT OR IGNORE INTO cell(name,width,height) VALUES(?,0,0)");
+    Stmt s_cell_pin(_db, R"(
+        INSERT INTO cell_pin(cell,pin_name,dir,px,py)
+        VALUES(?,?,?,-1,-1)
+        ON CONFLICT(cell,pin_name) DO UPDATE SET dir=excluded.dir
+    )");
 
     _exec("BEGIN");
+
+    for (const auto& [cell_name, mod] : mod_lib) {
+        sqlite3_bind_text(s_cell, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(s_cell); sqlite3_reset(s_cell);
+        for (const auto& [pin_name, dir] : mod.port_dirs) {
+            sqlite3_bind_text(s_cell_pin, 1, cell_name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(s_cell_pin, 2, pin_name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(s_cell_pin, 3, dir.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(s_cell_pin); sqlite3_reset(s_cell_pin);
+        }
+    }
 
     std::unordered_map<std::string,int> comp_ids, net_ids;
 
@@ -1206,6 +1295,22 @@ void BDB::move_comp(const std::string& name, double x, double y) {
     sqlite3_bind_double(u, 2, y);
     sqlite3_bind_double(u, 3, x + w);
     sqlite3_bind_double(u, 4, y + h);
+    sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(u);
+    compute_hpwl();
+}
+
+void BDB::set_comp_bbox(const std::string& name,
+                        double x1, double y1, double x2, double y2) {
+    Stmt q(_db, "SELECT id FROM component WHERE name=?");
+    sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) != SQLITE_ROW)
+        throw std::runtime_error("set_comp_bbox: not found: " + name);
+    Stmt u(_db, "UPDATE component SET x1=?, y1=?, x2=?, y2=? WHERE name=?");
+    sqlite3_bind_double(u, 1, x1);
+    sqlite3_bind_double(u, 2, y1);
+    sqlite3_bind_double(u, 3, x2);
+    sqlite3_bind_double(u, 4, y2);
     sqlite3_bind_text  (u, 5, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(u);
     compute_hpwl();
