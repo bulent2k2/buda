@@ -23,8 +23,10 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | Setup | `detour_channel` | Set outer-band width for U-shape / UU-shape detour trunks per compass direction |
 | 1 | `run_bundler`, `run_hier_bundler` | Group nets into flat or hierarchy-aware buses |
+| 1b | `dump_hbundles` | Print a summary of all HBundles (after `run_hier_bundler`) |
 | 2 | `generate_topologies`, `generate_hier_topologies` | Enumerate topology candidates for flat or hierarchical bundles |
-| 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** bundle |
+| 2 | `generate_topologies_for_bundle` | Enumerate topology candidates for a **specific** flat bundle |
+| 2 | `generate_topologies_for_hbundle` | Re-run topology generation for a **specific** HBundle by its integer ID |
 | 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
 | 3b | `select_topology` | Manually pin a specific topology candidate for a bundle by its 1-based ID |
@@ -476,6 +478,57 @@ run_hier_bundler depth 1
 
 ---
 
+### `dump_hbundles`
+
+```
+dump_hbundles [expanded] [depth N]
+```
+
+Print a one-line summary for every HBundle. Must be called after `run_hier_bundler`.
+
+| Argument | Type | Description |
+|---|---|---|
+| `expanded` | keyword | Show the post-expansion per-instance wrappers in `self.bundles` (state after `run_planner hier`). Without this flag the pre-expansion snapshot captured at `run_hier_bundler` time is shown. |
+| `depth N` | keyword+int | Filter output to bundles at hierarchy level N. |
+
+**Output format per line:**
+
+```
+hb-{id}  D{level}  {kind}  "{short_reason}"  nets={n}  cands={c}  [{instances}]
+```
+
+| Field | Description |
+|---|---|
+| `hb-{id}` | Bundle integer ID |
+| `D{level}` | Hierarchy depth of this bundle |
+| `{kind}` | `cell:{cell_context}` if cell_context is set; `cross-level` if drv_spec_depth ≥ 0; else `cross-block` |
+| `{short_reason}` | Abbreviated reason string (driver/receiver signature) |
+| `nets={n}` | Number of nets in the bundle |
+| `cands={c}` | Number of topology candidates (0 = topology not yet generated) |
+| `[{instances}]` | Instance list — shown only for cell-level bundles |
+
+By default, output reflects the **pre-expansion snapshot** (`_hier_bundles_orig`) captured at `run_hier_bundler` time — the canonical bundle IDs as the user sees them. After `run_planner hier`, adding `expanded` shows the runtime per-instance wrappers instead.
+
+**Example output (pipeline test vehicle):**
+```
+hb-1  D0  cross-block  "DRV:src_i|REC:proc_i,"  nets=8  cands=7
+hb-2  D0  cross-block  "DRV:proc_i|REC:snk_i,"  nets=8  cands=7
+hb-3  D1  cross-block  "DRV:src_i/buf_i|REC:proc_i/pa_i,"  nets=8  cands=5
+hb-4  D1  cell:proc_cell  "DRV:pa_i|REC:pb_i,"  nets=8  cands=4  [proc_i]
+hb-5  D1  cell:proc_cell  "DRV:pb_i|REC:pc_i,"  nets=8  cands=4  [proc_i]
+hb-6  D1  cross-block  "DRV:proc_i/pc_i|REC:snk_i,"  nets=8  cands=5
+```
+
+**Example:**
+```buda
+run_hier_bundler depth 1
+dump_hbundles                 # show all 6 bundles
+dump_hbundles depth 1         # show only depth-1 bundles
+dump_hbundles expanded        # show expanded per-instance view (after run_planner hier)
+```
+
+---
+
 ## Stage 2 — Topology generator
 
 ### `generate_topologies_for_bundle`
@@ -613,11 +666,48 @@ The topology generator automatically determines the routing context for each HBu
 | `center_mode` | Use block centres as connection points instead of the nearest busterm face. |
 | `double_detour` | Also generate `UU_VHV` / `UU_HVH` high-detour candidates for very congested situations. |
 
+**Zero-candidate warning:** If any HBundle ends up with 0 topology candidates, the CLI prints:
+```
+  WARNING: HierTopo D{level}: bundle {id} ({label}) 0 candidates — bundle will be unrouted!
+```
+Downstream stages (`run_planner`, `run_nuts`) silently skip bundles with no candidates, so this warning is the only indication that a bundle will not be routed. Common causes: source or destination block not present in the floorplan, or extreme span/layer constraints ruling out all shapes.
+
 **Example:**
 ```buda
 run_hier_bundler depth 1
 generate_hier_topologies
 run_planner hier 5
+```
+
+---
+
+### `generate_topologies_for_hbundle`
+
+```
+generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour]
+```
+
+Re-run topology generation for a single HBundle identified by its integer ID. Uses the same 3-case dispatch as `generate_hier_topologies` (cell-local / cross-level / cross-block). Useful for debugging when a specific bundle has zero candidates or when experimenting with flags without re-running all bundles.
+
+| Argument | Type | Description |
+|---|---|---|
+| `bundle_id` | int | Integer bundle ID (as shown by `dump_hbundles`). |
+| `center_mode` | keyword | Use block centres as connection points instead of the nearest busterm face. |
+| `double_detour` | keyword | Also generate `UU_VHV` / `UU_HVH` high-detour candidates. |
+
+**Requirements:** open BDB, `run_hier_bundler` already called.
+
+**Zero-candidate warning:** Same WARNING line as `generate_hier_topologies` if the bundle ends up with 0 candidates.
+
+**Post-expansion advisory:** If `run_planner hier` has already been called and the specified bundle ID no longer appears in `self.bundles` (because it was expanded into per-instance wrappers), the CLI prints:
+```
+Note: bundle {id} was expanded by run_planner hier — re-run generate_hier_topologies before planning.
+```
+
+**Example:**
+```buda
+generate_topologies_for_hbundle 4              # re-generate candidates for hb-4
+generate_topologies_for_hbundle 4 center_mode  # with centre-mode flag
 ```
 
 ---
@@ -1066,6 +1156,13 @@ reported as unbuildable.
 | `stage` | str | `dnuts` | Routing stage to verify: `topo` (topology candidates), `nuts` (abstract track sharing), or `dnuts` (detailed bit placement). |
 | `all` | keyword | — | Checks all candidate topologies instead of just the selected one. Only applicable for the `topo` stage. Automatically enabled if no topology is selected yet. |
 
+**Hierarchical design — missing-block warning:** When `check_connectivity` is called after `run_planner hier`, it additionally checks that every `connected_block_name` referenced in the selected topologies exists in the current floorplan. If any are missing:
+```
+  Warning: N block(s) referenced in topologies but not in floorplan: name1, name2, ...
+  Hint: call 'add_blocks_from_bdb N skip' for all required depths.
+```
+This catches the common error of calling only `add_blocks_from_bdb 0` when depth-1 cell-level bundles also need `add_blocks_from_bdb 1 skip` (because they reference absolute paths like `proc_i/pa_i`). The check is only active when `run_planner hier` has been used (detected by `_hier_expansion_map` being non-empty).
+
 **Example:**
 ```buda
 # Check detailed NUTS placement for opens (typically at the end of script)
@@ -1148,6 +1245,8 @@ overriding the congestion-based choice for pinned bundles.
 
 **Window title:** `<first_net_name> (Bundle N)` — identifies which bundle is
 being explored.
+
+**Hierarchical flow deduplication:** After `run_planner hier`, `self.bundles` holds one wrapper per cell instance. Without deduplication, `visualize_topologies -all` would open the same cell-level bundle template once per instance (e.g. two windows for `pa→pb` if there are two proc instances). Instead, cell-level bundles are deduplicated by `(cell_context, reason)`. The first instance is shown with a title annotation: `(N instances — showing first)`. This avoids redundant exploration windows while still accurately representing the template topology.
 
 **Example:**
 ```
