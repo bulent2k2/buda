@@ -267,3 +267,55 @@ def test_dilution_factor_increases_cut_usage():
         assert used[0] == pytest.approx(expected_eff_width, rel=1e-3), (
             f"Expected diluted usage {expected_eff_width:.3f}, got {used[0]:.3f}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Scenario: pinned bundle whose only candidate is infeasible must not crash
+# ---------------------------------------------------------------------------
+
+def test_pinned_infeasible_candidate_gets_best_effort_assignment():
+    """
+    Regression (flow/channel_stress.buda segfault): when every scored
+    candidate is infeasible (slide window < effective bus width) — which is
+    always "all" for a pinned bundle — the planner committed an EMPTY
+    best_seg_layers and indexed it out of bounds.  A second scoring pass with
+    the feasibility gate off must produce a best-effort assignment instead.
+    """
+    fp = buda.Floorplan()
+    # Tiny 4-unit faces: the H segment's slide window is [0,4].
+    fp.add_block("src", 0,   0, 100, 4)
+    fp.add_block("dst", 400, 0, 500, 4)
+
+    ls = buda.LayerStack()
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+
+    router = buda.CongestionPlanner(fp, ls)
+    router.build_congestion_map()
+
+    seg = buda.Segment()
+    seg.start = buda.Point(100, 2)
+    seg.end   = buda.Point(400, 2)
+    seg.layer_hint = 4
+    topo = buda.Topology()
+    topo.type = "TEST_H"
+    topo.segments = [seg]
+    bundle = buda.HBundle()
+    bundle.id = 1
+    w = buda.BundleWrapper()
+    w.original_bundle = bundle
+    w.width = 50.0                      # 50 >> 4-unit slide window: infeasible
+    w.candidates = [topo]
+    w.selected_topology_index = 0
+    w.topology_pinned = True            # exactly one candidate is scored
+
+    assignments = router.optimize_topologies([w], 1)
+
+    assert len(assignments) == 1
+    asn = assignments[0]
+    assert asn.topo_index == 0
+    assert len(asn.seg_layers) == 1, (
+        "best-effort pass must assign a layer per segment, not crash on an "
+        "empty assignment"
+    )
+    assert asn.seg_layers[0] == 4

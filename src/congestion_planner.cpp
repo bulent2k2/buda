@@ -428,6 +428,8 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         int    best_topo     = bw.topology_pinned ? bw.selected_topology_index : 0;
         double best_score    = std::numeric_limits<double>::max();
         double best_overflow = 0.0;
+        bool   have_winner   = false;
+        bool   best_effort   = false;
         std::vector<int> best_seg_layers;
         std::vector<int> best_seg_perp;  // ConnTopology perp-centre per segment, for winner commit
 
@@ -437,6 +439,15 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         int ci_lo = bw.topology_pinned ? bw.selected_topology_index     : 0;
         int ci_hi = bw.topology_pinned ? bw.selected_topology_index + 1 : (int)bw.candidates.size();
 
+        // Pass 0 enforces slide-window feasibility.  If every candidate is
+        // infeasible (a pinned bundle scores exactly one), pass 1 re-scores
+        // with the feasibility gate off so the bundle still gets a layer
+        // assignment instead of committing an EMPTY best_seg_layers — which
+        // indexed out of bounds and crashed (flow/channel_stress.buda:
+        // sidecar pins saved under the old width model).
+        for (int pass = 0; pass < 2 && !have_winner; ++pass) {
+        const bool enforce_feasibility = (pass == 0);
+        best_effort = !enforce_feasibility;
         for (int ci = ci_lo; ci < ci_hi; ++ci) {
             const Topology& topo = bw.candidates[ci];
 
@@ -522,7 +533,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 // Feasibility: the bus (eff_width in the perpendicular direction)
                 // must fit within the sliding range ConnTopology computed for this
                 // segment — covers busterms (Pass 1) and spines/trunks (Pass 2).
-                if (si < (int)conn_segs.size()) {
+                if (enforce_feasibility && si < (int)conn_segs.size()) {
                     const ConnSeg& cs = conn_segs[si];
                     if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel) {
                         double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
@@ -566,11 +577,21 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 best_topo       = ci;
                 best_seg_layers = seg_layers;
                 best_seg_perp   = seg_perp;
+                have_winner     = true;
             }
 
             // Roll back to snapshot before scoring the next candidate.
             cuts_ = cuts_snapshot;
         }
+        }  // feasibility passes
+
+        if (!have_winner) continue;   // no candidates scored (empty range)
+        if (best_effort)
+            std::cout << "[Planner] WARNING: Bundle " << bw.original_bundle.id
+                      << ": no candidate fits its slide windows (bus width "
+                      << "exceeds them); committing best-effort "
+                      << bw.candidates[best_topo].type
+                      << (bw.topology_pinned ? " [pinned]" : "") << ".\n";
 
         // Commit the winning topology's per-segment choices to the cut state.
         {
