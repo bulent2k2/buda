@@ -294,6 +294,103 @@ class BudaSession:
         except (ValueError, IndexError):
             return None, []
 
+    def _generate_hier_topo_one(self, w, use_center, use_double_detour,
+                                fp_cache, comps_by_name):
+        """Generate topology candidates for a single HBundle wrapper.
+
+        Updates w.candidates in place. Returns candidate count.
+        fp_cache is a dict shared across calls; pass {} for a fresh cache.
+        comps_by_name is {name: ComponentRow} from bdb.all_components().
+        """
+        b = w.original_bundle
+        if b.cell_context and b.entry_busterm_ids:
+            # Case (a): cell-local floorplan
+            parent_name = b.instances[0] if b.instances else None
+            if parent_name is None:
+                print(f"  Warning: bundle {b.id} has cell_context but no instances — skipping")
+                return 0
+            cache_key = ('cell', parent_name)
+            if cache_key not in fp_cache:
+                fp_cache[cache_key] = self._build_cell_local_floorplan(parent_name)
+            cell_fp = fp_cache[cache_key]
+            if cell_fp is None:
+                print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
+                return 0
+            tg = self._make_topo_gen(cell_fp, use_center, use_double_detour)
+            src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
+            dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
+            w.candidates = tg.generate_candidates(src_local, dsts_local)
+            label = f"{src_local}→{dsts_local[0]}"
+            n = len(w.candidates)
+            if n == 0:
+                print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
+                      f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}]")
+            else:
+                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                      f"{n} candidates  [cell:{b.cell_context}]")
+            return n
+
+        elif b.drv_spec_depth >= 0:
+            # Case (c): cross-level — custom floorplan from actual endpoint blocks
+            drv_comp = comps_by_name.get(b.drv_spec_path)
+            if drv_comp is None:
+                print(f"  Warning: driver comp {b.drv_spec_path!r} not found — "
+                      f"skipping bundle {b.id}")
+                return 0
+            fp = buda.Floorplan()
+            dx, dy = self._corner_margin
+            if dx or dy:
+                fp.set_global_corner_margin(dx, dy)
+            fp.add_block(b.drv_spec_path,
+                         int(round(drv_comp.x1)), int(round(drv_comp.y1)),
+                         int(round(drv_comp.x2)), int(round(drv_comp.y2)))
+            ok = True
+            for rpath in b.rcv_spec_paths:
+                rc = comps_by_name.get(rpath)
+                if rc is None:
+                    print(f"  Warning: receiver comp {rpath!r} not found — "
+                          f"skipping bundle {b.id}")
+                    ok = False; break
+                fp.add_block(rpath,
+                             int(round(rc.x1)), int(round(rc.y1)),
+                             int(round(rc.x2)), int(round(rc.y2)))
+            if not ok:
+                return 0
+            tg = self._make_topo_gen(fp, use_center, use_double_detour)
+            w.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
+            label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
+                     if len(b.rcv_spec_paths) == 1
+                     else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
+            n = len(w.candidates)
+            tag = f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]"
+            if n == 0:
+                print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
+                      f"0 candidates — bundle will be unrouted!  {tag}")
+            else:
+                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates  {tag}")
+            return n
+
+        else:
+            # Case (b): same-level cross-block — BDB depth-D floorplan
+            cache_key = ('depth', b.level)
+            if cache_key not in fp_cache:
+                fp_cache[cache_key] = self._build_bdb_floorplan(b.level)
+            depth_fp = fp_cache[cache_key]
+            tg = self._make_topo_gen(depth_fp, use_center, use_double_detour)
+            src, dsts = self._parse_bundle_reason(b.reason)
+            if src is None:
+                print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
+                return 0
+            w.candidates = tg.generate_candidates(src, dsts)
+            label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
+            n = len(w.candidates)
+            if n == 0:
+                print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
+                      f"0 candidates — bundle will be unrouted!")
+            else:
+                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates")
+            return n
+
     @staticmethod
     def _offset_topology(topo, dx, dy):
         """Return a new Topology with every segment shifted by (dx, dy)."""
@@ -1350,98 +1447,39 @@ class BudaSession:
             comps_by_name = {c.name: c for c in self.bdb.all_components()}
 
             for w in self.bundles:
-                b = w.original_bundle
-
-                if b.cell_context and b.entry_busterm_ids:
-                    # ── Case (a): intra-cell bundle — cell-local floorplan ──
-                    parent_name = b.instances[0] if b.instances else None
-                    if parent_name is None:
-                        print(f"  Warning: bundle {b.id} has cell_context but no instances — skipping")
-                        continue
-                    cache_key = ('cell', parent_name)
-                    if cache_key not in fp_cache:
-                        fp_cache[cache_key] = self._build_cell_local_floorplan(parent_name)
-                    cell_fp = fp_cache[cache_key]
-                    if cell_fp is None:
-                        print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
-                        continue
-                    tg = self._make_topo_gen(cell_fp, use_center, use_double_detour)
-                    src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
-                    dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1]
-                                  for e in b.exit_busterm_ids]
-                    w.candidates = tg.generate_candidates(src_local, dsts_local)
-                    label = f"{src_local}→{dsts_local[0]}"
-                    n_cands = len(w.candidates)
-                    if n_cands == 0:
-                        print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                              f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}]")
-                    else:
-                        print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                              f"{n_cands} candidates  [cell:{b.cell_context}]")
-
-                elif b.drv_spec_depth >= 0:
-                    # ── Case (c): cross-level bundle — custom floorplan from actual endpoint blocks ──
-                    # The driver and receiver are at different hierarchy depths, so neither the
-                    # single-depth BDB floorplan nor a cell-local floorplan is correct.
-                    # Build a custom floorplan containing exactly the specified endpoint blocks.
-                    drv_comp = comps_by_name.get(b.drv_spec_path)
-                    if drv_comp is None:
-                        print(f"  Warning: driver comp {b.drv_spec_path!r} not found — skipping bundle {b.id}")
-                        continue
-                    fp = buda.Floorplan()
-                    dx, dy = self._corner_margin
-                    if dx or dy:
-                        fp.set_global_corner_margin(dx, dy)
-                    fp.add_block(b.drv_spec_path,
-                                 int(round(drv_comp.x1)), int(round(drv_comp.y1)),
-                                 int(round(drv_comp.x2)), int(round(drv_comp.y2)))
-                    ok = True
-                    for rpath in b.rcv_spec_paths:
-                        rc = comps_by_name.get(rpath)
-                        if rc is None:
-                            print(f"  Warning: receiver comp {rpath!r} not found — skipping bundle {b.id}")
-                            ok = False; break
-                        fp.add_block(rpath,
-                                     int(round(rc.x1)), int(round(rc.y1)),
-                                     int(round(rc.x2)), int(round(rc.y2)))
-                    if not ok:
-                        continue
-                    tg = self._make_topo_gen(fp, use_center, use_double_detour)
-                    w.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
-                    label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
-                             if len(b.rcv_spec_paths) == 1
-                             else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
-                    n_cands = len(w.candidates)
-                    tag = f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]"
-                    if n_cands == 0:
-                        print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                              f"0 candidates — bundle will be unrouted!  {tag}")
-                    else:
-                        print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                              f"{n_cands} candidates  {tag}")
-
-                else:
-                    # ── Case (b): same-level cross-block bundle — BDB depth-D floorplan ──
-                    cache_key = ('depth', b.level)
-                    if cache_key not in fp_cache:
-                        fp_cache[cache_key] = self._build_bdb_floorplan(b.level)
-                    depth_fp = fp_cache[cache_key]
-                    tg = self._make_topo_gen(depth_fp, use_center, use_double_detour)
-                    src, dsts = self._parse_bundle_reason(b.reason)
-                    if src is None:
-                        print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
-                        continue
-                    w.candidates = tg.generate_candidates(src, dsts)
-                    label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
-                    n_cands = len(w.candidates)
-                    if n_cands == 0:
-                        print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                              f"0 candidates — bundle will be unrouted!")
-                    else:
-                        print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n_cands} candidates")
-                total_candidates += len(w.candidates)
+                n = self._generate_hier_topo_one(w, use_center, use_double_detour,
+                                                  fp_cache, comps_by_name)
+                total_candidates += n
             print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
                   f"{total_candidates} total candidates")
+
+        elif cmd == "generate_topologies_for_hbundle":
+            # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour]
+            if not args:
+                print("Error: generate_topologies_for_hbundle requires a bundle_id"); return
+            if self.bdb is None:
+                print("Error: generate_topologies_for_hbundle requires an open BDB"); return
+            try:
+                bid = int(args[0])
+            except ValueError:
+                print(f"Error: invalid bundle_id {args[0]!r}"); return
+            use_center        = "center_mode"   in args[1:]
+            use_double_detour = "double_detour" in args[1:]
+            target_w = next((w for w in self.bundles if w.original_bundle.id == bid), None)
+            if target_w is None:
+                orig_w = next((w for w in self._hier_bundles_orig
+                               if w.original_bundle.id == bid), None)
+                if orig_w is not None:
+                    print(f"Note: bundle {bid} was expanded by run_planner hier — "
+                          f"re-run generate_hier_topologies before planning.")
+                else:
+                    print(f"Error: bundle {bid} not found")
+                return
+            fp_cache = {}
+            comps_by_name = {c.name: c for c in self.bdb.all_components()}
+            n = self._generate_hier_topo_one(target_w, use_center, use_double_detour,
+                                              fp_cache, comps_by_name)
+            print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
 
         elif cmd == "run_planner":
             if args and args[0] == "post_nuts":
@@ -1773,11 +1811,23 @@ class BudaSession:
             hints    = args[1:] if all_mode else args[:1]
 
             seen, wrappers = set(), []
+            # For cell-level bundles expanded by run_planner hier, deduplicate by
+            # (cell_context, reason) so the same cell-level template isn't listed once
+            # per instance.  We keep the first instance and annotate it.
+            cell_seen: dict[tuple, tuple[object, int]] = {}  # key → (wrapper, count)
             for w in self.bundles:
                 if not w.candidates: continue
                 bid  = w.original_bundle.id
+                b    = w.original_bundle
                 if bid in seen: continue
-                net0 = w.original_bundle.get_net_names()[0]
+                cell_key = (b.cell_context, b.reason) if b.cell_context else None
+                if cell_key is not None:
+                    if cell_key in cell_seen:
+                        first_w, cnt = cell_seen[cell_key]
+                        cell_seen[cell_key] = (first_w, cnt + 1)
+                        continue
+                    cell_seen[cell_key] = (w, 1)
+                net0 = b.get_net_names()[0] if b.get_net_names() else ""
                 if not hints or any(net0.startswith(h) for h in hints):
                     wrappers.append(w)
                     seen.add(bid)
@@ -1788,8 +1838,14 @@ class BudaSession:
                 print(f"Warning: no bundle with candidates matching {hints or '(any)'}")
             else:
                 for w in wrappers:
-                    print(f"  bundle {w.original_bundle.id}: "
-                          f"{len(w.candidates)} topologies")
+                    b = w.original_bundle
+                    cell_key = (b.cell_context, b.reason) if b.cell_context else None
+                    inst_note = ""
+                    if cell_key is not None and cell_key in cell_seen:
+                        cnt = cell_seen[cell_key][1]
+                        if cnt > 1:
+                            inst_note = f" ({cnt} instances — showing first)"
+                    print(f"  bundle {b.id}: {len(w.candidates)} topologies{inst_note}")
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path(),
                                  layer_stack=self.layers).show()
@@ -2006,6 +2062,22 @@ class BudaSession:
         labels = {"topo": "topology", "nuts": "NUTS", "dnuts": "Detailed NUTS"}
         suffix = " (all candidates)" if (all_candidates and stage == "topo") else ""
         print(f"[Check] Verifying {labels[stage]}-level connectivity{suffix}...")
+
+        if self._hier_expansion_map:
+            fp_block_names = {name for name, _ in self.fp.get_all_blocks()}
+            missing = set()
+            for w in self.bundles:
+                if w.candidates and w.selected_topology_index >= 0:
+                    topo = w.candidates[w.selected_topology_index]
+                    for bname in topo.connected_block_names:
+                        if bname not in fp_block_names:
+                            missing.add(bname)
+            if missing:
+                shown = sorted(missing)[:5]
+                ellipsis_str = "..." if len(missing) > 5 else ""
+                print(f"  Warning: {len(missing)} block(s) referenced in topologies "
+                      f"but not in floorplan: {', '.join(shown)}{ellipsis_str}")
+                print(f"  Hint: call 'add_blocks_from_bdb N skip' for all required depths.")
 
         total = 0
         for w in self.bundles:
