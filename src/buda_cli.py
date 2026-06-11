@@ -468,6 +468,14 @@ class BudaSession:
                 new_w.width = w.width
                 new_w.candidates = [self._offset_topology(t, dx, dy)
                                     for t in w.candidates]
+                # Reserve the instance footprint: until this local bundle is
+                # planned, its demand is parked as virtual usage so earlier
+                # (global) bundles leave room over the cell interior.
+                new_w.has_reservation = True
+                new_w.res_x1 = dx
+                new_w.res_y1 = dy
+                new_w.res_x2 = int(round(parent.x2))
+                new_w.res_y2 = int(round(parent.y2))
                 # Rewrite cell-local block names to absolute paths so that
                 # ConnTopology can look them up in the global floorplan.
                 # Cell-local names have no "/" (e.g. "pa_i"); absolute names
@@ -1556,6 +1564,7 @@ class BudaSession:
                 for w in expanded:
                     b = w.original_bundle
                     w.priority = -(b.level * 10_000 + len(w.candidates))
+                    w.level    = b.level   # for the per-level planning summary
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)

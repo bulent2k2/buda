@@ -189,12 +189,14 @@ Netlist (.buda script)
 **Algorithm:** Processes widest buses first (greedy heuristic). For each bundle candidate, it evaluates:
 1. Congestion cost across cuts (band usage/capacity; band capacity is clamped to the segment's slide-window overlap with the band). Effective bus width per layer = `bits × bit_pitch` when the layer has a track pattern (`LayerStack::eff_bus_width`), else `width × dilution`.
 2. Span-mismatch cost (penalizing segment length outside `[span_min, span_max]`).
-3. Flat penalty for non-`TOP` layers.
+3. Span-scaled penalty for non-`TOP` layers: `base_cost_non_top · min(1, seg_span/base_span_ref)` — short stubs offload to lower layers cheaply, long trunks stay on TOP.
 It selects the candidate topology and layer assignments that minimize total cost, updates band usage, and returns the assignments.
+
+**Hier mode (`run_planner hier`)**: cell-level HBundles are expanded per instance and planned top-down (`priority = -(level·10000 + n_candidates)`); each cell-local wrapper parks its effective width as a virtual **demand reservation** on TOP-layer bands inside its instance bbox (released at its own turn) so earlier globals leave room; a per-level ladder-stage summary is printed when levels differ.
 
 **Overflow is a hard constraint** (an overflowing band cannot physically host the bus — NUTS would emit a real overlap), enforced by an escalation ladder per bundle:
 1. `STRICT` — only candidates that are slide-feasible **and** overflow-free compete on soft costs (congestion/span/wirelength).
-2. **Rip-up & replan** — if no candidate is overflow-free, rip up one earlier-committed bundle at a time (most recent first) and replan the pair; accepted only if both end up overflow-free.
+2. **Rip-up & replan** — if no candidate is overflow-free, rip up earlier-committed bundles one at a time — ranked by their demand on the failing bundle's contended bands (actual blocker first, zero-overlap victims skipped) — and replan the pair; accepted only if both end up overflow-free.
 3. `ALLOW_OVERFLOW` — overflow truly unavoidable: commit the least-cost candidate with a `WARNING`.
 4. `BEST_EFFORT` — no candidate even fits its slide windows (e.g. stale sidecar pins): commit anyway with a `WARNING` rather than dropping the bundle.
 

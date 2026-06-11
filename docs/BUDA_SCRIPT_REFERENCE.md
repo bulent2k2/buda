@@ -746,7 +746,8 @@ adjusted between runs to re-plan with different weights.
 |---|---|---|
 | `kCong` | `1.0` | Congestion cost coefficient. Multiplies the overflow ratio `max(0, usage+eff_width−cap)/cap` for each channel band (zero when the segment fits). Note: overflow is gated as a hard constraint first (see `run_planner`); `kCong` only arbitrates among candidates when overflow is genuinely unavoidable, or prices residual soft pressure. |
 | `kSpan` | `0.001` | Span-mismatch cost coefficient. Multiplies the excess span outside a layer's `[span_min, span_max]` window. Guides long segments to higher metal and short stubs to lower metal. |
-| `base_cost_non_top` | `0.5` | Flat penalty per segment for using a non-`TOP` layer. Keeps the default preference on top layers without hard-blocking lower ones. |
+| `base_cost_non_top` | `0.5` | Penalty per segment for using a non-`TOP` layer, scaled by segment span (see `base_span_ref`). Keeps the default preference on top layers without hard-blocking lower ones. |
+| `base_span_ref` | 25% of the larger Hanan grid extent | Span at which a segment pays the full `base_cost_non_top`; shorter segments pay proportionally less (`× span/base_span_ref`). Short stubs therefore drop to lower layers when TOP bands saturate instead of detouring on TOP — preserving TOP capacity for long trunks. |
 | `kWL` | `0.001` | Wirelength cost per layout unit, added to the topology score. Steers equal-congestion choices toward shorter topologies, so a detour wins only when it avoids real congestion. |
 
 **Example:**
@@ -772,8 +773,11 @@ Runs the global congestion-aware router. Bundles are processed widest-first
 2. Scores every topology candidate — for each segment independently selects
    the best layer from the direction-appropriate set (H layers for H segments,
    V layers for V segments).  Segment score = `kCong·overflow/cap + kSpan·excess
-   + base_cost_non_top`, where `overflow = max(0, usage+eff_width−cap)` (zero
-   when the segment fits).
+   + base_cost_non_top·min(1, seg_span/base_span_ref)`, where
+   `overflow = max(0, usage+eff_width−cap)` (zero when the segment fits) and the
+   non-TOP penalty scales with segment span so short stubs offload to lower
+   layers cheaply while long trunks stay on TOP (see `set_planner_param
+   base_span_ref`).
    The congestion charge goes to the cheapest Hanan band the segment's slide
    interval can host the bus in (slide-aware lookup), not just the band at the
    interval centre.  Band capacity is clamped to the slide window's overlap
@@ -797,9 +801,11 @@ ladder (see [congestion_planner.md](congestion_planner.md) for the full design):
 
 1. `STRICT` — only candidates that fit their slide windows **and** are
    overflow-free compete on the soft costs above.
-2. **Rip-up & replan** — if no candidate is overflow-free, one earlier-committed
-   bundle at a time is ripped up (most recent first) and the pair is replanned;
-   accepted only if both end up overflow-free.
+2. **Rip-up & replan** — if no candidate is overflow-free, earlier-committed
+   bundles are ripped up one at a time, ranked by the demand they hold on the
+   failing bundle's contended bands (the actual blocker first; zero-overlap
+   victims skipped), and the pair is replanned; accepted only if both end up
+   overflow-free.
 3. `ALLOW_OVERFLOW` — overflow truly unavoidable: the least-cost candidate is
    committed with a `WARNING`.
 4. `BEST_EFFORT` — no candidate even fits its slide windows (e.g. stale sidecar
@@ -826,6 +832,64 @@ rip-up); …` or `…: no candidate fits its slide windows …` respectively.
 ```
 run_planner 5
 ```
+
+---
+
+### `run_planner hier`
+
+```
+run_planner hier [<iterations>]
+```
+
+Hierarchy-aware variant of `run_planner` for the HBundle pipeline. Requires an
+open BDB, `run_hier_bundler`, and `generate_hier_topologies`. Steps:
+
+1. Applies architect-pinned sidecar selections to the pre-expansion bundles.
+2. **Expands** each cell-level HBundle into one wrapper per cell instance, with
+   candidates offset to absolute coordinates by the instance origin.
+3. Assigns each wrapper `priority = -(level·10000 + n_candidates)` and runs the
+   congestion planner sorted by `(priority DESC, width DESC)` — depth-0 globals
+   first, then within each level the least-flexible bundles first.
+
+Two mechanisms manage the local-vs-global competition this ordering creates
+(see [HIER_PLANNER.md](HIER_PLANNER.md) §7 and
+[congestion_planner.md](congestion_planner.md)):
+
+- **Cell-interior demand reservation.** Each expanded cell-local wrapper parks
+  its effective bus width as virtual usage on the TOP-layer bands inside its
+  instance bbox before planning starts; the reservation is released right
+  before the bundle's own turn. Earlier globals avoid a cell-interior band
+  only when it cannot hold both bundles — a "leave room" constraint, not a
+  keep-out.
+- **Per-level summary.** When bundles span multiple depth levels, the planner
+  prints a per-level report after planning:
+
+  ```
+  [Planner] Level summary:
+    D0: 1 bundles  strict:1  layers{M6:1}
+    D1: 1 bundles  strict:1  layers{M5:1 M6:1}
+  ```
+
+  Stage counts other than `strict:` (`ripup:` / `overflow:` / `best_effort:`)
+  flag levels losing the competition or under-capacity regions.
+
+The span-scaled non-TOP penalty (`base_span_ref`) complements both: short
+cell-local stubs drop to lower layers when TOP saturates instead of detouring
+on TOP, preserving TOP capacity for long global trunks.
+
+**Side effects:** Replaces the session bundle list with the expanded
+per-instance wrappers (see `dump_hbundles expanded`); subsequent `run_nuts` /
+`check_connectivity` / `visualize` operate on the expanded set.
+
+**Example:**
+```
+run_hier_bundler depth 1
+generate_hier_topologies
+run_planner hier 5
+```
+
+Demonstrated end-to-end by `flow/hbundles/08_cross_level.buda` and
+`flow/hbundles/09_local_global_compete.buda`.
 
 ---
 

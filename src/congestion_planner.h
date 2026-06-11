@@ -1,5 +1,8 @@
 #pragma once
 #include <climits>
+#include <functional>
+#include <set>
+#include <utility>
 #include "bundler.h"
 #include "topology.h"
 #include "layering.h"
@@ -24,6 +27,15 @@ struct BundleWrapper {
     bool topology_pinned = false;
     double width = 1.0;
     double priority = 0.0;  // Higher = route first. Set by run_planner hier.
+    int level = 0;          // Hierarchy depth (0 = top). Set by run_planner hier;
+                            // used for the per-level planning summary.
+    // Demand reservation: while this bundle is still unplanned, its effective
+    // bus width is parked as virtual usage on the TOP-layer bands inside this
+    // region (the parent cell instance bbox, set by run_planner hier for
+    // cell-local bundles).  Earlier-planned bundles then avoid bands that
+    // cannot hold both them and this bundle.
+    bool has_reservation = false;
+    int  res_x1 = 0, res_y1 = 0, res_x2 = 0, res_y2 = 0;
     // Per-segment layer assignments set by CongestionPlanner (primary).
     // Index matches topo.segments of the selected topology.
     std::vector<int> seg_layers;
@@ -53,6 +65,9 @@ public:
     //   "kWL"              — wirelength cost per layout-unit (default 0.001);
     //                        steers ties toward shorter topologies so detours
     //                        only win when they avoid real congestion
+    //   "base_span_ref"    — span at which a segment pays the full non-TOP
+    //                        penalty; shorter segments pay proportionally
+    //                        less (default: 25% of the larger grid extent)
     void set_planner_param(const std::string& name, double value);
     void build_congestion_map();
     std::vector<BundleAssignment> optimize_topologies(
@@ -107,11 +122,32 @@ private:
         std::vector<int> seg_perp;
     };
 
-    PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode);
+    // contended (optional, STRICT only): receives the (cut_index, band) pairs
+    // whose overflow disqualified a layer choice — i.e. the bands rip-up must
+    // relieve for this bundle to become plannable.
+    PlanResult plan_bundle(const BundleWrapper& bw, PlanMode mode,
+                           std::set<std::pair<int,int>>* contended = nullptr);
     // sign=+1 applies the plan's demand to the cut state; sign=-1 rips it up.
     void commit_plan(const BundleWrapper& bw, const PlanResult& plan, double sign = 1.0);
     BundleAssignment make_assignment(const BundleWrapper& bw, const PlanResult& plan) const;
     void log_choice(const BundleWrapper& bw, const PlanResult& plan, const std::string& tag) const;
+
+    // Invoke fn(cut_index, band) for every cut/band this segment loads —
+    // the same matching rule as apply_segment, factored for reuse.
+    void for_each_band(const Segment& seg, int layer_id, int perp_pos_override,
+                       const std::function<void(int, int)>& fn) const;
+    // Insert into `out` the (cut_index, band) pairs where placing the segment
+    // would overflow (the band-set sibling of score_segment).
+    void collect_overflow_bands(const Segment& seg, int layer_id, double eff_width,
+                                int perp_pos_override, int slide_lo, int slide_hi,
+                                std::set<std::pair<int,int>>& out) const;
+    // Total effective width a committed plan contributes to the given bands.
+    // Used to rank rip-up victims by how much relief ripping them offers.
+    double plan_band_overlap(const BundleWrapper& bw, const PlanResult& plan,
+                             const std::set<std::pair<int,int>>& contended) const;
+    // Park (sign=+1) or release (sign=-1) the bundle's reserved demand as
+    // virtual usage on TOP-layer bands inside its reservation region.
+    void apply_reservation(const BundleWrapper& bw, double sign);
 
     int    find_band(bool is_vcut, int perp_pos) const;
 
@@ -133,12 +169,23 @@ private:
     const LayerStack& layers_;
     std::vector<GlobalCut> cuts_;
     std::vector<int> x_grid_, y_grid_;
+    // Block footprints, cached at cut-rebuild time; used by for_each_band to
+    // clamp block-attached segments to their endpoint-block faces on non-TOP
+    // layers.
+    std::vector<std::pair<std::string, Rect>> blocks_cache_;
 
     // Tunable cost coefficients.
     double kCong_             = 1.0;
     double kSpan_             = 0.001;
     double base_cost_non_top_ = 0.5;
     double kWL_               = 0.001;
+    // Span reference for scaling the non-TOP penalty: a segment of length
+    // base_span_ref_ (or longer) pays the full base_cost_non_top_; shorter
+    // segments pay proportionally less, so short local stubs offload to
+    // lower layers instead of detouring on TOP.  <= 0 = unset: derived per
+    // optimize_topologies run as 25% of the larger Hanan grid extent.
+    double base_span_ref_     = -1.0;
+    double span_ref_eff_      = 0.0;   // resolved value for the current run
 };
 
 } // namespace buda

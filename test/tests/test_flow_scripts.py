@@ -311,3 +311,81 @@ def test_ripup1_replans_earlier_bundle_to_free_capacity():
     assert dm, "DetailedNUTS summary not found"
     assert int(dm.group(1)) == 40    # 2 segs × 20 bits avg (24+16 bits)
     assert int(dm.group(2)) == 0
+
+
+# ---------------------------------------------------------------------------
+# hbundles/09_local_global_compete.buda — local/global band competition.
+# A wide cell-local bus (D1, eff 136) fits only the band over its cell
+# interior (cap 170); the global D0 bus (eff 102) is planned first and its
+# window centre lands in that same band.  The demand reservation parked by
+# run_planner hier must steer the global to a free band on the FIRST pass:
+# no rip-up, every bundle overflow-free, both levels strict in the summary.
+# ---------------------------------------------------------------------------
+
+def test_09_local_global_compete_reservation_avoids_ripup():
+    out, rc = run_script("hbundles/09_local_global_compete.buda")
+    assert_clean(out, rc, "hbundles/09_local_global_compete.buda")
+    assert "Rip-up" not in out, "reservation should pre-empt the conflict, not repair it"
+    ovs = re.findall(r"\[Planner\] Bundle \d+ .*overflow=([\d.]+)", out)
+    assert len(ovs) == 2
+    assert all(float(o) == 0.0 for o in ovs), f"expected overflow-free plans, got {ovs}"
+    assert re.search(r"D0: 1 bundles\s+strict:1", out)
+    assert re.search(r"D1: 1 bundles\s+strict:1", out)
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 2
+    assert viols == 0
+    assert ovlps == 0
+    assert out.count("Success: no opens found.") == 2
+    dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) == 56    # 24 + 32 bits, one segment each
+    assert int(dm.group(2)) == 0
+
+
+# ---------------------------------------------------------------------------
+# planner5_span_drop.buda — span-scaled non-TOP penalty.  With the TOP band
+# saturated by the filler, the short bundle chooses between dropping its
+# I_H to M4 (penalty scaled by span) and detouring on M6 (extra wirelength).
+# Run 1 (base_span_ref 2000): the drop is cheap → I_H on M4.
+# Run 2 (base_span_ref 1: effectively the legacy flat penalty): the TOP
+# detour is cheaper → multi-segment U via M6.
+# ---------------------------------------------------------------------------
+
+def test_planner5_span_scaled_penalty_drops_short_stub():
+    out, rc = run_script("planner5_span_drop.buda")
+    assert_clean(out, rc, "planner5_span_drop.buda")
+    picks = re.findall(r"\[Planner\] Bundle 1 .*?:\s+(\S+)\s+\[([^\]]+)\]", out)
+    assert len(picks) == 2, f"expected two planner runs for bundle 1, got {picks}"
+    assert picks[0][0] == "I_H" and picks[0][1] == "H→M4", (
+        f"scaled penalty must drop the short stub to M4, got {picks[0]}"
+    )
+    assert picks[1][1] != "H→M4" and "M6" in picks[1][1], (
+        f"flat penalty must prefer the TOP-layer detour, got {picks[1]}"
+    )
+    segs, viols, ovlps = nuts_summary(out)
+    assert viols == 0
+    assert ovlps == 0
+
+
+# ---------------------------------------------------------------------------
+# ripup2.buda — rip-up victim TARGETING.  Same a/b conflict as ripup1 plus
+# an unrelated bus i (disjoint channel) committed between them.  Victims are
+# ranked by contended-band overlap: bundle 1 (the blocker) is ripped
+# directly; bundle 3 (zero overlap) must never be replanned.
+# ---------------------------------------------------------------------------
+
+def test_ripup2_targets_actual_blocker():
+    out, rc = run_script("ripup2.buda")
+    assert_clean(out, rc, "ripup2.buda")
+    assert "[Planner] Rip-up: replanned bundle 1 to free capacity for bundle 2" in out
+    assert "replanned bundle 3" not in out, "zero-overlap victim must be skipped"
+    ovs = re.findall(r"\[Planner\] Bundle \d+ .*overflow=([\d.]+)", out)
+    assert all(float(o) == 0.0 for o in ovs), f"expected overflow-free plans, got {ovs}"
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 3
+    assert viols == 0
+    assert ovlps == 0
+    dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) == 60    # 24 + 16 + 20 bits, one segment each
+    assert int(dm.group(2)) == 0

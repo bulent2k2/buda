@@ -144,14 +144,35 @@ at depth 0.
 
 ---
 
-## 7. Constraint Propagation (Phase E.2 — Future)
+## 7. Local/Global Competition — Demand Reservation and Reporting
 
-Phase E.1 (this implementation) relies solely on the shared congestion map to
-propagate constraints top-down: depth-0 routes are applied first, increasing
-band usage, and depth-1 candidates that overlap see higher cost.  This is
-approximate — it doesn't enforce that depth-1 faces match depth-0 entry/exit
-faces exactly.
+Top-down ordering alone lets depth-0 globals consume the TOP-layer bands over
+cell interiors before the cell-local bundles (planned later, with tiny slide
+windows) get a turn.  Two mechanisms address this (see
+[congestion_planner.md](congestion_planner.md) for full detail):
 
+1. **Cell-interior demand reservation.**  Each expanded cell-local wrapper
+   carries `has_reservation` + the instance bbox (`res_x1..res_y2`), set during
+   expansion.  Before planning, its effective bus width is parked as virtual
+   usage on the TOP-layer bands inside the region and released right before
+   the bundle's own turn.  Earlier globals therefore avoid a region band only
+   when it cannot hold both of them — "leave room", not keep-out.
+   Demonstrated by `flow/hbundles/09_local_global_compete.buda`.
+
+2. **Per-level summary.**  After planning, the planner reports per depth level
+   how many bundles ended at each ladder stage (strict / ripup / overflow /
+   best_effort) and their layer mix — anything other than `strict` flags
+   competition or under-capacity.  Enabled by `BundleWrapper.level`, set
+   during expansion.
+
+The span-scaled non-TOP penalty (`base_span_ref`) complements both: short
+local stubs offload to lower layers when TOP saturates instead of detouring
+on TOP, preserving TOP capacity for long global trunks.
+
+## 7b. Constraint Propagation (Phase E.2 — Future)
+
+The shared congestion map propagates constraints top-down approximately — it
+doesn't enforce that depth-1 faces match depth-0 entry/exit faces exactly.
 Phase E.2 will add explicit face-matching: after depth-0 topology selection,
 extract the entry/exit face of each depth-0 endpoint block and filter depth-1
 cross-block candidates to only those that terminate within the chosen face.

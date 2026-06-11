@@ -76,7 +76,7 @@ Per segment, for each direction-appropriate layer:
 ```
 cong = kCong · max(0, usage + eff_width − cap) / cap      (0 when the segment fits)
 span = kSpan(layer) · excess outside [span_min, span_max]
-base = 0 if TOP layer else base_cost_non_top
+base = 0 if TOP layer else base_cost_non_top · min(1, seg_span / base_span_ref)
 segment score = cong + span + base
 ```
 
@@ -88,6 +88,11 @@ topology score = max over segments (weakest link) + kWL · estimated_wirelength
 - **Slide-aware band lookup** (`best_band_perp`): the congestion charge goes to the cheapest Hanan band within the segment's ConnTopology slide window that can host the bus — not a point estimate at the window centre, which can land in an arbitrarily narrow band the bus would never use. Ties break toward the window centre.
 - **Window-clamped capacity** (`usable_band_cap`): a segment confined to a sub-band window is priced against the window's overlap with the band, not the whole band.
 - **Keepout rejection**: `cap ≤ 0` (band fully blocked) scores `kCong × 9999`, eliminating the band outright.
+- **Endpoint-block face clamping** (`for_each_band`): segments run centre-to-centre, but on block-obstructed (non-`TOP`) layers the portion inside an *endpoint* block is not routed there — the connection lands on the block face. Cut crossings are therefore clamped to the endpoint-block faces on non-TOP layers; without this, every block-attached segment scored `cap=0` on every lower layer and the whole non-TOP stack was unusable for stubs. Blocks merely crossed mid-span still block normally.
+
+### Span-scaled non-TOP penalty
+
+`base_cost_non_top` is scaled by `min(1, seg_span / base_span_ref)`: a segment of `base_span_ref` or longer pays the full penalty, shorter ones proportionally less. Because the congestion term is overflow-based (zero until a band is full), the penalty's real effect is the **drop-to-lower-layer vs detour-on-TOP** tradeoff once TOP bands saturate: a short local stub now offloads to a lower layer (cheap at short span) instead of detouring on TOP — preserving TOP capacity for the long-haul trunks that pay the penalty in full. This is the main mechanism separating local/short bundles from global/long ones on a shared layer stack without per-design `span_min`/`span_max` tuning. Demonstrated by `flow/planner5_span_drop.buda`.
 
 ### Tuning knobs (`set_planner_param`)
 
@@ -95,7 +100,8 @@ topology score = max over segments (weakest link) + kWL · estimated_wirelength
 |---|---|---|
 | `kCong` | 1.0 | Arbitrates among *unavoidable* overflows (`ALLOW_OVERFLOW` fallback) and prices residual soft pressure. It no longer decides overflow-vs-detour — that is a hard gate. |
 | `kSpan` | 0.001 | Span-mismatch pressure; per-layer `kSpan K` override on `def_layer`. |
-| `base_cost_non_top` | 0.5 | Flat preference for `TOP` layers. |
+| `base_cost_non_top` | 0.5 | Preference for `TOP` layers, scaled by segment span (see above). |
+| `base_span_ref` | 25% of the larger Hanan grid extent | Span at which a segment pays the full non-TOP penalty; shorter segments pay proportionally less. |
 | `kWL` | 0.001 | Tie-breaker among overflow-free candidates: a detour must buy real relief to be worth its length. |
 
 ---
@@ -123,10 +129,11 @@ Only candidates that are **slide-feasible** (the bus fits each segment's ConnTop
 
 ### 2. Rip-up & replan — make room by moving an earlier bundle
 
-When no candidate is overflow-free against the current usage, earlier-committed bundles are tried as victims, **most recently committed first** (lowest priority / narrowest — cheapest to disturb):
+When no candidate is overflow-free, the failed STRICT pass also returns the **contended bands** — the (cut, band) pairs whose overflow disqualified candidates. Committed bundles are ranked as victims by the demand they hold on those bands (`plan_band_overlap`), most relief first; **zero-overlap victims are skipped** (ripping them cannot help), and ties break toward the most recently committed. This finds the actual blocker directly — e.g. the one global trunk crossing a cell whose local bundle just failed — instead of walking back through unrelated bundles:
 
 ```
-for each victim P (reverse commit order):
+contended = bands whose overflow disqualified B's candidates
+for each victim P (by overlap with contended, descending; overlap 0 skipped):
     commit_plan(P, plan_P, −1)                 # rip up
     mine = plan_bundle(B, STRICT)
     if mine.found:
@@ -152,6 +159,33 @@ The slide-window gate stays on, but overflow reverts to soft pricing and the lea
 ### 4. `BEST_EFFORT` — slide windows themselves are too narrow
 
 No candidate fits its slide windows at all (e.g. sidecar pins saved under an older width model). The bundle is committed without gates rather than dropped — committing an empty `seg_layers` used to index out of bounds and crash (`flow/channel_stress.buda` regression).
+
+---
+
+## Hierarchical Planning (run_planner hier)
+
+`run_planner hier` expands cell-level HBundles to per-instance wrappers and feeds them to the same optimizer with `priority = -(level·10000 + n_candidates)` — depth-0 globals route first, constrained bundles first within a level (see [HIER_PLANNER.md](HIER_PLANNER.md)). Two mechanisms manage the resulting local/global competition:
+
+### Cell-interior demand reservation
+
+Globals are planned first by design, but TOP layers ignore block footprints, so global trunks fly over cell interiors — the only place the later-planned, tightly-windowed locals can route. To stop early globals from eating that capacity, each expanded cell-local wrapper carries a **reservation** (`has_reservation` + the instance bbox): before planning starts, its effective bus width is parked as *virtual usage* on every TOP-layer band inside the region (`apply_reservation`), and released right before the bundle's own turn.
+
+Because congestion cost is overflow-based, the virtual usage repels a global from a region band **only when the band cannot hold both** of them — it is a "leave room" constraint, not a keep-out. A global that fits alongside the local still routes straight over the cell. When contention is real, the global detours on its first pass and no rip-up is needed (`flow/hbundles/09_local_global_compete.buda`).
+
+Limitation: a reservation is not a committed plan, so a bundle blocked *only* by reservations cannot rip them up — it falls through the ladder and the conflict resolves when the reserved bundle itself plans (possibly via rip-up then).
+
+### Per-level summary
+
+When the bundle set spans hierarchy levels, the planner prints which ladder stage each level's bundles ended at and their layer mix:
+
+```
+[Planner] Level summary:
+  D0: 6 bundles  strict:6  layers{M5:2 M6:6}
+  D1: 5 bundles  strict:5  layers{M5:4 M6:3}
+  D2: 10 bundles  strict:10  layers{M5:1 M6:10}
+```
+
+Stages: `strict` / `ripup` / `overflow` (ALLOW_OVERFLOW) / `best_effort`; `max_overflow` is appended when non-zero. Anything other than `strict` on a level is the signal that local/global competition (or genuine under-capacity) needs attention.
 
 ---
 
@@ -189,6 +223,9 @@ Flow-level regressions in `test/tests/test_flow_scripts.py`:
 | `test_ripup1_replans_earlier_bundle_to_free_capacity` | Pinned bundle forces rip-up: bundle 1 is replanned out of the only band bundle 2 can use; both end overflow-free |
 | `test_planner3_window_capacity_avoids_double_booked_trunk` | Two bundles must not double-book one trunk window; the hard gate also lets bundle 3 take the shortest clean trunk |
 | `test_channel_stress_pinned_infeasible_does_not_crash` | `BEST_EFFORT` fallback: infeasible pinned candidates warn instead of crashing |
+| `test_ripup2_targets_actual_blocker` | Victim ranking rips the actual blocker directly; zero-overlap victims are never replanned |
+| `test_planner5_span_scaled_penalty_drops_short_stub` | Span-scaled penalty: short stub drops to M4 when TOP saturates; flat penalty would detour on TOP |
+| `test_09_local_global_compete_reservation_avoids_ripup` | Reservation steers the global off the cell-interior band on the first pass — no rip-up |
 
 Demo scripts:
 
@@ -197,6 +234,9 @@ Demo scripts:
 | `flow/planner3.buda` | Three crossing 16-bit buses; all bands clean without detours |
 | `flow/planner4.buda` | Same floorplan + `add_keepout … M6`: the keepout squeezes bundle 3 and the planner detours (`STRICT` gate) |
 | `flow/ripup1.buda` | Wide bus parks in the only band a pinned narrow bus can use; rip-up & replan resolves it |
+| `flow/ripup2.buda` | ripup1 plus an unrelated committed bundle: contended-band ranking targets the real blocker |
+| `flow/planner5_span_drop.buda` | Span-scaled vs flat non-TOP penalty (two `run_planner` runs with different `base_span_ref`) |
+| `flow/hbundles/09_local_global_compete.buda` | Cell-local demand reservation vs a global trunk crossing the cell |
 
 ---
 
@@ -213,4 +253,4 @@ Demo scripts:
 
 ## Future Work
 
-Planned extensions — multi-victim rip-up, smarter victim selection, PathFinder-style negotiated congestion using the reserved `run_planner <iterations>` argument, and raw-unit overflow pricing in the `ALLOW_OVERFLOW` fallback — are detailed in [future/planner_ripup_extensions.md](future/planner_ripup_extensions.md).
+Planned extensions — multi-victim rip-up, PathFinder-style negotiated congestion using the reserved `run_planner <iterations>` argument, and raw-unit overflow pricing in the `ALLOW_OVERFLOW` fallback — are detailed in [future/planner_ripup_extensions.md](future/planner_ripup_extensions.md). (Contended-band victim selection, item 2 there, is implemented.)
