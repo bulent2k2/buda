@@ -91,6 +91,7 @@ class BudaSession:
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
         self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
+        self._hier_bundles_orig = []   # pre-expansion snapshot set by run_hier_bundler
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -1233,11 +1234,48 @@ class BudaSession:
                 w.original_bundle = b
                 w.width = len(b.get_net_names()) * 1.5
                 self.bundles.append(w)
+            self._hier_bundles_orig = list(self.bundles)  # snapshot for dump_hbundles
             counts = {}
             for b in raw_bundles:
                 counts[b.level] = counts.get(b.level, 0) + 1
             summary = ", ".join(f"D{d}: {n}" for d, n in sorted(counts.items()))
             print(f"HierBundler: {len(raw_bundles)} hbundles ({summary})")
+        elif cmd == "dump_hbundles":
+            # Usage: dump_hbundles [expanded] [depth N]
+            # Without 'expanded': prints the pre-expansion HBundle list (from _hier_bundles_orig).
+            # With 'expanded':    prints the current self.bundles (post-expansion after run_planner hier).
+            # With 'depth N':     filters to bundles at level N only.
+            use_expanded = "expanded" in args
+            filter_depth = None
+            if "depth" in args:
+                idx = list(args).index("depth")
+                if idx + 1 < len(args):
+                    filter_depth = int(args[idx + 1])
+            source = self.bundles if use_expanded else self._hier_bundles_orig
+            if not source:
+                label = "expanded bundles" if use_expanded else "original HBundles"
+                print(f"  (no {label} — run run_hier_bundler first)")
+            else:
+                for w in source:
+                    b = w.original_bundle
+                    if filter_depth is not None and b.level != filter_depth:
+                        continue
+                    if b.drv_spec_depth >= 0:
+                        kind = "cross-level"
+                    elif b.cell_context:
+                        kind = f"cell:{b.cell_context}"
+                    else:
+                        kind = "cross-block"
+                    short_reason = b.reason[:50].rstrip(',')
+                    cands = len(w.candidates)
+                    inst_str = ""
+                    if b.instances:
+                        insts = list(b.instances)
+                        shown = insts[:3]
+                        ellipsis = "…" if len(insts) > 3 else ""
+                        inst_str = f"  [{', '.join(shown)}{ellipsis}]"
+                    print(f"hb-{b.id:<3}  D{b.level}  {kind:<24}  \"{short_reason}\"  "
+                          f"nets={len(b.get_net_names())}  cands={cands}{inst_str}")
         elif cmd == "generate_topologies_for_bundle":
             # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...] [center_mode] [double_detour]
             # Single dst  → 2-pin L/Z/U candidates
@@ -1333,8 +1371,13 @@ class BudaSession:
                                   for e in b.exit_busterm_ids]
                     w.candidates = tg.generate_candidates(src_local, dsts_local)
                     label = f"{src_local}→{dsts_local[0]}"
-                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                          f"{len(w.candidates)} candidates  [cell:{b.cell_context}]")
+                    n_cands = len(w.candidates)
+                    if n_cands == 0:
+                        print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
+                              f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}]")
+                    else:
+                        print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                              f"{n_cands} candidates  [cell:{b.cell_context}]")
 
                 elif b.drv_spec_depth >= 0:
                     # ── Case (c): cross-level bundle — custom floorplan from actual endpoint blocks ──
@@ -1368,9 +1411,14 @@ class BudaSession:
                     label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
                              if len(b.rcv_spec_paths) == 1
                              else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
-                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                          f"{len(w.candidates)} candidates  "
-                          f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]")
+                    n_cands = len(w.candidates)
+                    tag = f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]"
+                    if n_cands == 0:
+                        print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
+                              f"0 candidates — bundle will be unrouted!  {tag}")
+                    else:
+                        print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
+                              f"{n_cands} candidates  {tag}")
 
                 else:
                     # ── Case (b): same-level cross-block bundle — BDB depth-D floorplan ──
@@ -1385,8 +1433,12 @@ class BudaSession:
                         continue
                     w.candidates = tg.generate_candidates(src, dsts)
                     label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
-                    print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                          f"{len(w.candidates)} candidates")
+                    n_cands = len(w.candidates)
+                    if n_cands == 0:
+                        print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
+                              f"0 candidates — bundle will be unrouted!")
+                    else:
+                        print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n_cands} candidates")
                 total_candidates += len(w.candidates)
             print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
                   f"{total_candidates} total candidates")
