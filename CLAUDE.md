@@ -12,6 +12,7 @@ The core engine is **C++20** exposed to Python via **pybind11**, with a Python C
 - [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
 - [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation.
 - [BDB Reference](docs/BDB_REFERENCE.md) — Physical design database: schema, `.buda` commands, Python API.
+- [Congestion Planner](docs/congestion_planner.md) — Internal design of the bundle planner: cost model, hard overflow constraint, rip-up & replan.
 - [Detailed NUTS](docs/detailed_nuts.md) — Internal design of bit-level track assignment.
 
 ## Build
@@ -190,6 +191,12 @@ Netlist (.buda script)
 2. Span-mismatch cost (penalizing segment length outside `[span_min, span_max]`).
 3. Flat penalty for non-`TOP` layers.
 It selects the candidate topology and layer assignments that minimize total cost, updates band usage, and returns the assignments.
+
+**Overflow is a hard constraint** (an overflowing band cannot physically host the bus — NUTS would emit a real overlap), enforced by an escalation ladder per bundle:
+1. `STRICT` — only candidates that are slide-feasible **and** overflow-free compete on soft costs (congestion/span/wirelength).
+2. **Rip-up & replan** — if no candidate is overflow-free, rip up one earlier-committed bundle at a time (most recent first) and replan the pair; accepted only if both end up overflow-free.
+3. `ALLOW_OVERFLOW` — overflow truly unavoidable: commit the least-cost candidate with a `WARNING`.
+4. `BEST_EFFORT` — no candidate even fits its slide windows (e.g. stale sidecar pins): commit anyway with a `WARNING` rather than dropping the bundle.
 
 **After this stage**, each `BundleWrapper::candidates[selected_topology_index]` contains segments where:
 - `layer_hint` is the assigned metal layer
