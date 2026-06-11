@@ -57,10 +57,15 @@ python3 buda_cli.py ../flow/comprehensive_demo.buda
 | `add_bus <prefix>[<N>] <drv_pin> <rcv_pin_csv>` | setup | Expand a bus into N nets: `prefix[N]` → `prefix_0`…`prefix_{N-1}`; `prefix[lo:hi]` → explicit range |
 | `def_layer <id> <name> <H\|V> [TOP\|LOW] <overhead%> [span_min N] [span_max N] [kSpan K]` | setup | Register a metal layer; `TOP` marks it for trunk preference; optional span limits and per-layer congestion weight override |
 | `run_bundler <STRICT\|CONVERGENT>` | 1 | Group nets into buses |
+| `run_hier_bundler [depth <N>]` | 1 | Group nets into hierarchy-aware HBundles using open BDB |
+| `dump_hbundles [expanded] [depth N]` | 1 | Print HBundle list (pre-expansion by default; `expanded` = post-`run_planner hier` view; `depth N` = filter by level) |
 | `generate_topologies [center_mode] [double_detour]` | 2 | Generate candidates for all bundles (src/dst auto-derived from netlist) |
 | `generate_topologies_for_bundle <hint> <src> <dst...> [center_mode] [double_detour]` | 2 | Generate candidates for a specific bundle; multiple dst → multicast trunk+branch shapes |
+| `generate_hier_topologies [center_mode] [double_detour]` | 2 | Generate candidates for all HBundles (3-case: cell-local / cross-level / cross-block) |
+| `generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour]` | 2 | Re-generate candidates for a single HBundle by ID; useful for debugging zero-candidate bundles |
 | `set_planner_param <name> <value>` | 3 | Set a planner tuning knob; takes effect at the next `run_planner` (knobs may be changed between runs to re-plan). Known params: `kCong` (congestion weight), `kSpan` (span-length weight), `base_cost_non_top` (penalty for non-TOP layers), `kWL` (wirelength weight) |
 | `run_planner <iterations>` | 3 | Layer assign + topology select |
+| `run_planner hier [<iterations>]` | 3 | Hier-aware planner: pins sidecar selections, expands cell-level bundles to per-instance wrappers, then runs congestion planner top-down |
 | `run_planner post_nuts [V [short long]] [H [short long]]` | 3 | Post-NUTS stub layer reassignment: short/long stubs on V or H layers are moved to cheaper layers |
 | `run_nuts [pitch]` | 4 | Abstract track placement |
 | `run_nuts_on_layer <layer-name>` | 4 | Re-solve one layer with NUTS without disturbing other layers |

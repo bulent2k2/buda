@@ -90,7 +90,9 @@ same cell-local candidates serve all instances.  No per-instance regeneration.
 
 ---
 
-## 5. CLI Command
+## 5. CLI Commands
+
+### `generate_hier_topologies`
 
 ```
 generate_hier_topologies [center_mode] [double_detour]
@@ -109,6 +111,50 @@ HierTopo D1: bundle 3 (src_i/buf_i→proc_i/pa_i) 7 candidates   [cross-block]
 HierTopo D1: bundle 4 (pa_i→pb_i) 5 candidates                 [cell:proc_cell]
 HierTopo D1: bundle 5 (pb_i→pc_i) 5 candidates                 [cell:proc_cell]
 HierTopo D1: bundle 6 (proc_i/pc_i→snk_i/rcv_i) 7 candidates  [cross-block]
+```
+
+**Zero-candidate warning:** If any HBundle ends up with 0 topology candidates, the CLI prints:
+```
+  WARNING: HierTopo D{level}: bundle {id} ({label}) 0 candidates — bundle will be unrouted!
+```
+Downstream stages (`run_planner`, `run_nuts`) silently skip bundles with no candidates, so this warning is the only indication that a bundle will not be routed. Common causes: source or destination block not present in the floorplan (check `add_blocks_from_bdb` depth), or extreme span/layer constraints ruling out all candidate shapes.
+
+---
+
+### `generate_topologies_for_hbundle`
+
+```
+generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour]
+```
+
+Re-run topology generation for a **single** HBundle identified by its integer ID, without regenerating all other bundles. Useful for debugging when one bundle has zero candidates or when experimenting with flags on a specific bundle.
+
+| Argument | Type | Description |
+|---|---|---|
+| `bundle_id` | int | Integer bundle ID (as shown by `dump_hbundles`). |
+| `center_mode` | keyword | Use block centres as connection points instead of the nearest busterm face. |
+| `double_detour` | keyword | Also generate `UU_VHV` / `UU_HVH` high-detour candidates. |
+
+**3-case dispatch:** Uses the same routing-context logic as `generate_hier_topologies`:
+
+| Bundle type | Floorplan used | Src/dst derivation |
+|---|---|---|
+| Cell-local (`cell_context` set) | Cell-local floorplan (origin at parent (x1,y1)) | Local component names from `entry/exit_busterm_ids` |
+| Cross-level (`drv_spec_depth` ≥ 0) | BDB depth-D floorplan | Depth-D absolute component paths |
+| Cross-block | BDB depth-D floorplan | Parsed from `reason` string |
+
+**Zero-candidate warning:** Same WARNING line as `generate_hier_topologies` if the bundle ends up with 0 candidates after the call.
+
+**Post-expansion advisory:** If `run_planner hier` has already been called and the specified bundle ID no longer appears in `self.bundles` (because it was expanded into per-instance wrappers), the CLI prints:
+```
+Note: bundle {id} was expanded by run_planner hier — re-run generate_hier_topologies before planning.
+```
+
+**Example:**
+```buda
+generate_topologies_for_hbundle 4              # re-generate for hb-4
+generate_topologies_for_hbundle 4 center_mode  # with centre-mode flag
+dump_hbundles depth 1                          # verify cands updated
 ```
 
 ---

@@ -79,27 +79,38 @@ pass_through_count) are copied; `trunk_location` is left as-is (metadata only).
 ```
 1. Guard: require open BDB and non-empty self.bundles.
 
-2. Expand: walk self.bundles and produce expanded_wrappers:
+2. Apply sidecar selections (_apply_selections): load the .json sidecar and
+   pin any architect-overridden topology indices on the *original* bundles in
+   self.bundles (pre-expansion). This ensures sidecar pins refer to the
+   canonical pre-expansion bundle IDs that the user sees in dump_hbundles and
+   visualize_topologies.
+
+3. Expand: walk self.bundles and produce expanded_wrappers:
    - Cross-block bundle → keep as-is
    - Cell-level bundle with instances [i0, i1, …]:
      For each instance ik:
        new_w = clone of w with candidates offset by (ik.x1, ik.y1)
        new_w.priority = -(b.level * 10_000 + len(new_candidates))
      Append new_w to expanded_wrappers.
+   Record the mapping in _hier_expansion_map:
+     { original_bundle_id → [expanded_wrapper, …] }
+   This map is used by select_topology to propagate manual pins after expansion.
 
-3. For all other wrappers (cross-block):
+4. For all other wrappers (cross-block):
    w.priority = -(b.level * 10_000 + len(w.candidates))
 
-4. Build CongestionPlanner on self.fp (the global/depth-D floorplan that
+5. Build CongestionPlanner on self.fp (the global/depth-D floorplan that
    was populated with absolute-coord blocks via add_blocks_from_bdb).
    Apply _planner_params.
 
-5. Call optimize_topologies(expanded_wrappers, N).
+6. Call optimize_topologies(expanded_wrappers, N).
    The planner sorts by (priority DESC, width DESC) internally.
 
-6. Replace self.bundles with expanded_wrappers.
+7. Replace self.bundles with expanded_wrappers.
    Subsequent run_nuts / visualize / check_connectivity use expanded_wrappers.
 ```
+
+**`_hier_expansion_map`:** The map `{ original_bundle_id → [expanded_wrappers] }` is stored on the session after expansion. `select_topology` uses it to apply a pin to all per-instance wrappers that originated from the same template bundle. It also signals to `check_connectivity` and `dump_hbundles` that `run_planner hier` has been called.
 
 ---
 
@@ -109,6 +120,27 @@ pass_through_count) are copied; `trunk_location` is left as-is (metadata only).
 hier`, `self.bundles` contains the expanded wrappers with absolute-coord
 candidates and the planner-selected topology index.  NUTS processes them
 identically to the flat-flow wrappers — no NUTS changes needed.
+
+---
+
+## 6b. `check_connectivity` — Post-Expansion Block Verification
+
+After `run_planner hier`, `check_connectivity` performs an additional check
+specific to hierarchical flows: it verifies that every `connected_block_name`
+referenced in the selected topologies exists in the current floorplan
+(`self.fp`). If any are missing, it prints:
+
+```
+  Warning: N block(s) referenced in topologies but not in floorplan: name1, name2, ...
+  Hint: call 'add_blocks_from_bdb N skip' for all required depths.
+```
+
+This check is only active when `_hier_expansion_map` is non-empty (i.e. when
+`run_planner hier` has been used). It catches the common error of importing
+only depth-0 blocks with `add_blocks_from_bdb 0` when depth-1 cell-level
+bundles also need `add_blocks_from_bdb 1 skip` — because their selected
+topologies reference absolute paths such as `proc_i/pa_i` that do not exist
+at depth 0.
 
 ---
 

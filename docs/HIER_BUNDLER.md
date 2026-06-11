@@ -197,6 +197,62 @@ HierBundler: N hbundles (D0: a, D1: b, …)
 
 ---
 
+## 5a. CLI Inspection: `dump_hbundles`
+
+After `run_hier_bundler`, the full HBundle set can be inspected with:
+
+```
+dump_hbundles [expanded] [depth N]
+```
+
+### Pre-expansion snapshot
+
+At `run_hier_bundler` time, the CLI captures a snapshot of the bundle list in
+`_hier_bundles_orig`. By default `dump_hbundles` reads from this snapshot,
+so the canonical bundle IDs (as the user sees them) are always available even
+after `run_planner hier` has replaced `self.bundles` with expanded per-instance
+wrappers.
+
+### Output format
+
+```
+hb-{id}  D{level}  {kind}  "{short_reason}"  nets={n}  cands={c}  [{instances}]
+```
+
+| Field | Description |
+|---|---|
+| `hb-{id}` | Bundle integer ID |
+| `D{level}` | Hierarchy depth |
+| `{kind}` | `cell:{cell_context}` if cell_context set; `cross-level` if drv_spec_depth ≥ 0; else `cross-block` |
+| `{short_reason}` | Abbreviated driver/receiver signature |
+| `nets={n}` | Number of nets in the bundle |
+| `cands={c}` | Number of topology candidates (0 = topology not yet generated) |
+| `[{instances}]` | Instance path list — shown only for cell-level bundles |
+
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `expanded` | Show the current `self.bundles` (post-expansion per-instance wrappers) instead of the pre-expansion snapshot. Useful for verifying that `run_planner hier` expanded cell-level bundles correctly. |
+| `depth N` | Filter output to bundles at hierarchy level N only. |
+
+### Example output — pipeline test vehicle
+
+```
+hb-1  D0  cross-block  "DRV:src_i|REC:proc_i,"  nets=8  cands=7
+hb-2  D0  cross-block  "DRV:proc_i|REC:snk_i,"  nets=8  cands=7
+hb-3  D1  cross-block  "DRV:src_i/buf_i|REC:proc_i/pa_i,"  nets=8  cands=5
+hb-4  D1  cell:proc_cell  "DRV:pa_i|REC:pb_i,"  nets=8  cands=4  [proc_i]
+hb-5  D1  cell:proc_cell  "DRV:pb_i|REC:pc_i,"  nets=8  cands=4  [proc_i]
+hb-6  D1  cross-block  "DRV:proc_i/pc_i|REC:snk_i,"  nets=8  cands=5
+```
+
+The `cands` field is 0 before `generate_hier_topologies` is called and
+updates in-place — re-running `dump_hbundles` after topology generation shows
+the filled-in counts.
+
+---
+
 ## 6. Differences from Flat Bundler
 
 | Aspect | Flat `Bundler` | `HierarchicalBundler` |
