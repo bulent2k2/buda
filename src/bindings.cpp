@@ -12,6 +12,7 @@
 #include "nuts.h"
 #include "routing_grid.h"
 #include "detailed_nuts.h"
+#include "floorplanner.h"
 #include "verify.h"
 
 namespace py = pybind11;
@@ -121,6 +122,48 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("res_y1",                  &BundleWrapper::res_y1)
         .def_readwrite("res_x2",                  &BundleWrapper::res_x2)
         .def_readwrite("res_y2",                  &BundleWrapper::res_y2);
+
+    py::class_<FloorplanBlockRow>(m, "FloorplanBlockRow")
+        .def_readwrite("name", &FloorplanBlockRow::name)
+        .def_readwrite("x1",   &FloorplanBlockRow::x1)
+        .def_readwrite("y1",   &FloorplanBlockRow::y1)
+        .def_readwrite("x2",   &FloorplanBlockRow::x2)
+        .def_readwrite("y2",   &FloorplanBlockRow::y2);
+
+    py::class_<FloorplanIssue>(m, "FloorplanIssue")
+        .def_readwrite("kind",    &FloorplanIssue::kind)
+        .def_readwrite("block_a", &FloorplanIssue::block_a)
+        .def_readwrite("block_b", &FloorplanIssue::block_b)
+        .def_readwrite("message", &FloorplanIssue::message);
+
+    py::class_<FloorplannerEngine>(m, "FloorplannerEngine")
+        .def(py::init<>())
+        .def("set_die",       &FloorplannerEngine::set_die,
+             py::arg("w"), py::arg("h"))
+        .def("set_grid",      &FloorplannerEngine::set_grid,
+             py::arg("grid"))
+        .def("die_w",         &FloorplannerEngine::die_w)
+        .def("die_h",         &FloorplannerEngine::die_h)
+        .def("grid",          &FloorplannerEngine::grid)
+        .def("add_block",     &FloorplannerEngine::add_block,
+             py::arg("name"), py::arg("x1"), py::arg("y1"),
+             py::arg("x2"), py::arg("y2"))
+        .def("add_child_block", &FloorplannerEngine::add_child_block,
+             py::arg("name"), py::arg("local_x"), py::arg("local_y"),
+             py::arg("w"), py::arg("h"))
+        .def("move_block_raw", &FloorplannerEngine::move_block_raw,
+             py::arg("name"), py::arg("x"), py::arg("y"))
+        .def("move_child_local", &FloorplannerEngine::move_child_local,
+             py::arg("name"), py::arg("local_x"), py::arg("local_y"))
+        .def("align_bottom",  &FloorplannerEngine::align_bottom,
+             py::arg("names"))
+        .def("get_block",     &FloorplannerEngine::get_block,
+             py::arg("name"))
+        .def("get_child_local_origin", &FloorplannerEngine::get_child_local_origin,
+             py::arg("name"))
+        .def("validate",      &FloorplannerEngine::validate)
+        .def("write_bdb",     &FloorplannerEngine::write_bdb,
+             py::arg("db"));
 
     py::class_<Netlist>(m, "Netlist")
         .def(py::init<>())
@@ -530,6 +573,9 @@ PYBIND11_MODULE(buda, m) {
         .def_static("db_path",  &BDB::db_path, py::arg("def_path"))
         .def("move_comp",   &BDB::move_comp,
              py::arg("name"), py::arg("x"), py::arg("y"))
+        .def("set_comp_bbox", &BDB::set_comp_bbox,
+             py::arg("name"), py::arg("x1"), py::arg("y1"),
+             py::arg("x2"), py::arg("y2"))
         .def("resize_cell", &BDB::resize_cell,
              py::arg("cell"), py::arg("w"), py::arg("h"))
         .def("add_comp",    &BDB::add_comp,
@@ -553,6 +599,7 @@ PYBIND11_MODULE(buda, m) {
              py::arg("cell"), py::arg("pin_name"),
              py::arg("dir") = "INOUT", py::arg("px") = -1.0, py::arg("py") = -1.0)
         .def("all_cell_pins", &BDB::all_cell_pins)
+        .def("infer_pin_dirs_from_cell_pins", &BDB::infer_pin_dirs_from_cell_pins)
         .def("add_net_pins", &BDB::add_net_pins,
              py::arg("net_name"), py::arg("drv"), py::arg("rcvs"))
         .def("add_net_pins_undirected", &BDB::add_net_pins_undirected,

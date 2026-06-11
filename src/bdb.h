@@ -105,6 +105,9 @@ public:
                       const std::string& dir = "INOUT",
                       double px = -1.0, double py = -1.0);
     std::vector<CellPinRow> all_cell_pins() const;
+    // Resolve UNKNOWN instance pin directions from cell_pin declarations.
+    // Returns the number of pin rows updated.
+    int infer_pin_dirs_from_cell_pins();
 
     // Add a net and derive instance-level pins from "inst/path.pin_name"
     // endpoint notation.  Also inserts interface pins at each ancestor
@@ -124,6 +127,9 @@ public:
     // ── Mutations ──────────────────────────────────────────────────────────
     // Move a single instance to new origin (x,y); size is preserved.
     void move_comp(const std::string& name, double x, double y);
+    // Set a single instance bounding box exactly.
+    void set_comp_bbox(const std::string& name,
+                       double x1, double y1, double x2, double y2);
     // Update the cell definition and every instance's x2/y2 to x1+w, y1+h.
     void resize_cell(const std::string& cell, double w, double h);
     // Insert a new component row using explicit absolute coordinates.

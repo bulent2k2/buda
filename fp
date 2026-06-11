@@ -1,0 +1,13 @@
+#!/bin/bash
+# BUDA floorplanner environment wrapper
+# Sets up PYTHONPATH to include the build directory before running the floorplanner.
+
+# Get the absolute path of the project root (where this script resides)
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+BUILD_DIR="$PROJECT_ROOT/build"
+
+# Add build and tools directories to PYTHONPATH
+export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"
+
+# Run the floorplanner prototype, passing all arguments
+python3 "$PROJECT_ROOT/tools/bdb_floorplanner.py" "$@"
