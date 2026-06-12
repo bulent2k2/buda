@@ -295,6 +295,8 @@ run_hier_bundler depth 3
 
 generate_hier_topologies
 
+check_connectivity topo
+
 run_planner hier 5
 
 run_nuts
