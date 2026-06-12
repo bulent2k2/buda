@@ -1157,6 +1157,41 @@ class BudaSession:
               f"{n_unplaced} bits unplaced.")
         return self.detailed_result
 
+    def _select_single_topology_internal(self, bid, tid):
+        """Helper for select_topology/select_topologies: set a pin without re-planning layers.
+        Returns True if the bundle (or its hierarchical expansion) was found.
+        """
+        tidx = tid - 1  # Convert 1-based id to 0-based index
+        found = False
+        for w in self.bundles:
+            if w.original_bundle.id == bid:
+                if tidx < 0 or tidx >= len(w.candidates):
+                    print(f"Error: invalid topology id {tid} for bundle {bid}")
+                else:
+                    w.selected_topology_index = tidx
+                    w.topology_pinned = True
+                    print(f"Pinned bundle {bid} to topology {tid}")
+                found = True
+                break
+        if not found:
+            # Hier mode: the original bundle was expanded into synthetic-ID wrappers.
+            # Look up the original ID in the expansion map and apply to all instances.
+            wrappers = self._hier_expansion_map.get(bid, [])
+            if wrappers:
+                if tidx < 0 or tidx >= len(wrappers[0].candidates):
+                    print(f"Error: invalid topology id {tid} for bundle {bid}")
+                else:
+                    for w in wrappers:
+                        w.selected_topology_index = tidx
+                        w.topology_pinned = True
+                    n = len(wrappers)
+                    print(f"Pinned bundle {bid} to topology {tid} "
+                          f"({n} expanded instance{'s' if n > 1 else ''})")
+                found = True
+        if not found:
+            print(f"Error: bundle {bid} not found")
+        return found
+
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
         if not parts or parts[0].startswith('#'): return
@@ -1881,41 +1916,32 @@ class BudaSession:
             if len(args) < 2:
                 print("Error: select_topology requires bundle_id and topo_id (1-based)")
                 return
-            bid  = int(args[0])
-            tid  = int(args[1])
-            tidx = tid - 1  # Convert 1-based id to 0-based index
-            found = False
-            for w in self.bundles:
-                if w.original_bundle.id == bid:
-                    if tidx < 0 or tidx >= len(w.candidates):
-                        print(f"Error: invalid topology id {tid} for bundle {bid}")
-                    else:
-                        w.selected_topology_index = tidx
-                        w.topology_pinned = True
-                        print(f"Pinned bundle {bid} to topology {tid}")
-                        # If the planner already ran, its per-segment layer
-                        # assignments (seg_layers) describe the PREVIOUS
-                        # topology's segment list; re-run layer assignment so
-                        # NUTS doesn't route the new topology with stale layers.
-                        self._replan_layers()
-                    found = True
-                    break
-            if not found:
-                # Hier mode: the original bundle was expanded into synthetic-ID wrappers.
-                # Look up the original ID in the expansion map and apply to all instances.
-                wrappers = self._hier_expansion_map.get(bid, [])
-                if wrappers:
-                    if tidx < 0 or tidx >= len(wrappers[0].candidates):
-                        print(f"Error: invalid topology id {tid} for bundle {bid}")
-                    else:
-                        for w in wrappers:
-                            w.selected_topology_index = tidx
-                        n = len(wrappers)
-                        print(f"Pinned bundle {bid} to topology {tid} "
-                              f"({n} expanded instance{'s' if n > 1 else ''})")
-                    found = True
-            if not found:
-                print(f"Error: bundle {bid} not found")
+            bid = int(args[0])
+            tid = int(args[1])
+            if self._select_single_topology_internal(bid, tid):
+                self._replan_layers()
+
+        elif cmd == "select_topologies":
+            # Usage: select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
+            # bundle_ids can be comma-separated, e.g. "1,4,5"
+            if len(args) < 2 or len(args) % 2 != 0:
+                print("Error: select_topologies requires (bundle_ids, topo_id) pairs")
+                return
+            any_found = False
+            for i in range(0, len(args), 2):
+                bid_str = args[i]
+                tid = int(args[i+1])
+                # Parse comma-separated IDs
+                try:
+                    bids = [int(x) for x in bid_str.split(',') if x.strip()]
+                except ValueError:
+                    print(f"Error: invalid bundle ID list '{bid_str}'")
+                    continue
+                for bid in bids:
+                    if self._select_single_topology_internal(bid, tid):
+                        any_found = True
+            if any_found:
+                self._replan_layers()
 
         elif cmd == "check_connectivity":
             # Usage: check_connectivity [topo|nuts|dnuts] [all]

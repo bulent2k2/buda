@@ -30,7 +30,8 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 3 | `set_planner_param` | Tune planner cost coefficients (applied at the next `run_planner`) |
 | 3 | `run_planner` | Select topology + assign layers per segment |
 | 3b | `select_topology` | Manually pin a specific topology candidate for a bundle by its 1-based ID |
-| 4 | `run_nuts` | Abstract 1.5-D track placement |
+| 3b | `select_topologies` | Batch pin multiple bundles to specific topologies |
+| 3 | `run_nuts` | Abstract 1.5-D track placement |
 | 4b | `run_nuts_on_layer` | Re-solve one layer after inspection |
 | 4c | `run_planner post_nuts` | Reassign stub layers to resolve channel pin conflicts; single NUTS re-run |
 | 8 | `def_track_pattern` | Define the repeating POWER/SIGNAL/GROUND track pattern for a layer |
@@ -917,6 +918,27 @@ always describe the pinned topology's segment list. Pins set before
 ```buda
 # Pin topology candidate 2 for bundle 2
 select_topology 2 2
+```
+
+---
+
+### `select_topologies`
+
+```
+select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
+```
+
+Batch pin multiple bundles to specific topology candidates. Bundle IDs within a group can be comma-separated.
+
+| Argument | Type | Description |
+|---|---|---|
+| `bundle_ids` | string | Comma-separated list of numeric bundle IDs (e.g. `1,4,5`). |
+| `topo_id` | int | 1-based ID of the topology candidate to pin for the preceding group. |
+
+**Example:**
+```buda
+# Pin bundles 1, 4, and 5 to topology 3; pin bundles 2, 3, and 6 to topology 1
+select_topologies 1,4,5 3 2,3,6 1
 ```
 
 ---
