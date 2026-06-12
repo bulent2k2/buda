@@ -136,12 +136,13 @@ class BudaSession:
                     break
             if resolved is None:
                 idx_hint = sel.get('topo_index_hint', -1)
+                bid = first_w.original_bundle.id
                 if 0 <= idx_hint < len(first_w.candidates):
                     resolved = idx_hint
-                    print(f"Warning: selection for '{hint}' matched by index hint "
-                          f"(type/WL changed?) — using topo {resolved}")
+                    print(f"Warning: selection for bundle {bid} matched by index hint "
+                          f"(type/WL changed?) — using topo {resolved + 1}")
                 else:
-                    print(f"Warning: selection for '{hint}' could not be resolved — ignored")
+                    print(f"Warning: selection for bundle {bid} could not be resolved — ignored")
                     continue
 
             # Apply pin to ALL matching wrappers (handles multiple cell instances).
@@ -155,10 +156,11 @@ class BudaSession:
                         w.pinned_seg_layers = list(pinned_layers)
 
             n = len(matching)
+            bid = first_w.original_bundle.id
             suffix = f" [{n} instances]" if n > 1 else ""
             if pinned_layers is not None and len(pinned_layers) == len(first_w.candidates[resolved].segments):
                 print(f"  (pinned {len(pinned_layers)} segment layers)")
-            print(f"Pinned bundle '{hint}' to topology {resolved} "
+            print(f"Pinned bundle {bid} to topology {resolved + 1} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']}){suffix}")
 
     def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):
@@ -1904,12 +1906,12 @@ class BudaSession:
                 wrappers = self._hier_expansion_map.get(bid, [])
                 if wrappers:
                     if tidx < 0 or tidx >= len(wrappers[0].candidates):
-                        print(f"Error: invalid topology index {tidx} for bundle {bid}")
+                        print(f"Error: invalid topology id {tid} for bundle {bid}")
                     else:
                         for w in wrappers:
                             w.selected_topology_index = tidx
                         n = len(wrappers)
-                        print(f"Selected topology {tidx} for bundle {bid} "
+                        print(f"Pinned bundle {bid} to topology {tid} "
                               f"({n} expanded instance{'s' if n > 1 else ''})")
                     found = True
             if not found:
@@ -2255,7 +2257,7 @@ class BudaSession:
 
                 for v in res.violations:
                     if all_candidates and stage == "topo":
-                        print(f"  Bundle {bid} topo[{topo_idx}] ({topo.type}): {v.message}")
+                        print(f"  Bundle {bid} topo {topo_idx + 1} ({topo.type}): {v.message}")
                     else:
                         print(f"  Bundle {bid}: {v.message}")
                     total += 1
