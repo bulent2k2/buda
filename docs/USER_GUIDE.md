@@ -115,6 +115,128 @@ You can prohibit routing in specific rectangular regions for one or more layers:
 
 ---
 
-## 6. Getting Help
+## 6. Advanced: Hierarchical BDB / HBundle Flow
+
+The base flow is flat: you describe blocks directly with `add_block`, connect
+them with `add_net` or `add_bus`, then run:
+
+```python
+run_bundler strict
+generate_topologies
+run_planner 5
+run_nuts
+run_detailed_nuts
+```
+
+This is the right starting point when every routing endpoint is already a
+top-level floorplan block. It is simple, direct, and easy to debug.
+
+The HBundle flow is hierarchical: you first populate BDB with cells, instances,
+and nets, then let BUDA derive routing blocks from hierarchy depth. This lets
+the same flow distinguish top-level inter-block routes from repeated local
+routes inside cell templates.
+
+### Flat Flow vs. HBundle Flow
+
+| Topic | Base / Flat Flow | BDB / HBundle Flow |
+|---|---|---|
+| Floorplan source | `add_block` commands | BDB cells and instances, then `add_blocks_from_bdb` |
+| Net source | `add_net` / `add_bus` in the flat session | `add_net` / `add_bus` with `bdb_net_mode on`, or imported netlist data |
+| Bundling command | `run_bundler strict` | `run_hier_bundler depth N` |
+| Topology command | `generate_topologies` | `generate_hier_topologies` |
+| Planner command | `run_planner 5` | `run_planner hier 5` |
+| Best for | Small flat studies and quick experiments | Designs with hierarchy, repeated cells, or local-vs-global routing tradeoffs |
+| Main limitation | Loses hierarchy context | Requires BDB setup before planning |
+
+### Complete HBundle Example
+
+Save this as `hb_quickstart.buda` and run it from the repository root:
+
+```sh
+python3 src/buda_cli.py hb_quickstart.buda
+```
+
+```python
+# -- Technology --------------------------------------------------------------
+# Layer ID, Name, Direction (H/V), Type (TOP/LOW), Capacity per unit
+def_layer 4 M4 H TOP 1.0
+def_layer 5 M5 V TOP 1.0
+
+# Track patterns are required by run_detailed_nuts.
+def_track_pattern 4 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0
+def_track_pattern 5 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0
+
+corner_margin dx 5 dy 5
+set_min_stub_length 2
+
+# -- BDB: cell templates -----------------------------------------------------
+open_bdb :memory:
+
+add_cell src_cell   160 160
+add_cell proc_cell  360 160
+add_cell snk_cell   160 160
+add_cell leaf_cell   80  80
+
+# proc_cell contains two repeated leaf-level routing endpoints.
+add_inst_to_cell proc_cell p0 leaf_cell  40 40
+add_inst_to_cell proc_cell p1 leaf_cell 200 40
+
+# Top-level placement.
+add_inst src_i  src_cell  -   50 50
+add_inst proc_i proc_cell -  280 50
+add_inst snk_i  snk_cell  -  760 50
+
+# Create busterms for depth 0 and depth 1 so hierarchy endpoints can route.
+derive_busterms 1
+
+# Import BDB instances into the BUDA floorplan.
+# Depth 0 gives top-level blocks: src_i, proc_i, snk_i.
+# Depth 1 gives child blocks such as proc_i/p0 and proc_i/p1.
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+
+# -- BDB netlist -------------------------------------------------------------
+# With bdb_net_mode on, buses are written into BDB for run_hier_bundler.
+bdb_net_mode on
+
+# Cross-block top-level traffic.
+add_bus s2p[8] src_i.out     proc_i/p0.in
+add_bus p2s[8] proc_i/p1.out snk_i.in
+
+# Local traffic inside proc_cell. The HBundle flow keeps this as a depth-1
+# routing problem instead of flattening it into only top-level traffic.
+add_bus p0_p1[8] proc_i/p0.out proc_i/p1.in
+
+# -- HBundle planning pipeline ----------------------------------------------
+run_hier_bundler depth 1
+dump_hbundles
+
+generate_hier_topologies
+run_planner hier 5
+
+run_nuts
+check_connectivity nuts
+
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize
+```
+
+In this example, `s2p` and `p2s` behave like top-level global routes, while
+`p0_p1` is recognized as local traffic inside `proc_cell`. The hierarchy-aware
+planner can therefore generate and plan candidates in the correct routing
+context instead of treating every endpoint as only a flat top-level block.
+
+For larger designs, the usual top-down workflow is:
+
+1. Import or create the hierarchy in BDB.
+2. Place or resize major cells enough to define a rough floorplan.
+3. Use `derive_busterms` and `add_blocks_from_bdb` for the hierarchy depths you
+   want to study.
+4. Run `run_hier_bundler`, `generate_hier_topologies`, and `run_planner hier`.
+5. Inspect congestion and topology choices, refine the floorplan, and rerun.
+
+## 7. Getting Help
 *   Check `docs/BUDA_SCRIPT_REFERENCE.md` for a full list of commands.
 *   Use `visualize` at different stages of your script to see what BUDA is doing!
