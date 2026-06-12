@@ -1923,20 +1923,42 @@ class BudaSession:
 
         elif cmd == "select_topologies":
             # Usage: select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
-            # bundle_ids can be comma-separated, e.g. "1,4,5"
+            # bundle_ids can be comma-separated or ranges, e.g. "1,5-9,11"
             if len(args) < 2 or len(args) % 2 != 0:
                 print("Error: select_topologies requires (bundle_ids, topo_id) pairs")
                 return
             any_found = False
             for i in range(0, len(args), 2):
                 bid_str = args[i]
-                tid = int(args[i+1])
-                # Parse comma-separated IDs
                 try:
-                    bids = [int(x) for x in bid_str.split(',') if x.strip()]
+                    tid = int(args[i+1])
                 except ValueError:
-                    print(f"Error: invalid bundle ID list '{bid_str}'")
+                    print(f"Error: invalid topology ID '{args[i+1]}'")
                     continue
+
+                # Parse comma-separated IDs and ranges (e.g. "1,5-9,11")
+                bids = []
+                for chunk in bid_str.split(','):
+                    chunk = chunk.strip()
+                    if not chunk: continue
+                    if '-' in chunk:
+                        try:
+                            s_start, s_end = chunk.split('-', 1)
+                            b_start, b_end = int(s_start), int(s_end)
+                            if b_start <= b_end:
+                                bids.extend(range(b_start, b_end + 1))
+                            else:
+                                bids.extend(range(b_start, b_end - 1, -1))
+                        except ValueError:
+                            print(f"Error: invalid range '{chunk}' in bundle ID list")
+                            continue
+                    else:
+                        try:
+                            bids.append(int(chunk))
+                        except ValueError:
+                            print(f"Error: invalid bundle ID '{chunk}' in list")
+                            continue
+                
                 for bid in bids:
                     if self._select_single_topology_internal(bid, tid):
                         any_found = True
