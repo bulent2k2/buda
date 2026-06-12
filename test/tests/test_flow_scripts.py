@@ -410,6 +410,14 @@ def test_ripup2_targets_actual_blocker():
 def test_10_four_level_scale_one_bundle_per_bus():
     out, rc = run_script("hbundles/10_chip_units_blocks_leaf.buda")
     assert_clean(out, rc, "hbundles/10_chip_units_blocks_leaf.buda")
+    # Regression: check_connectivity over hbundles verifies every candidate —
+    # cell-level templates carry cell-local block names (e.g. lo/hi) absent from
+    # the chip floorplan.  The check must resolve each hbundle's own generation
+    # floorplan instead of crashing with `map::at: key not found`.
+    assert "Verifying topology-level connectivity (all candidates)..." in out
+    assert "map::at" not in out
+    assert "Traceback" not in out
+    assert out.count("Success: no opens found.") >= 2   # topo + nuts both clean
     # 176 buses → exactly one HBundle per bus, at its routing-context level.
     assert "HierBundler: 176 hbundles (D0: 26, D1: 30, D2: 40, D3: 80)" in out
     # The two D3 blk_cell templates expand over their 40 instances;

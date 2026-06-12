@@ -396,6 +396,62 @@ class BudaSession:
                 print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates")
             return n
 
+    def _floorplan_for_hbundle(self, b, fp_cache, comps_by_name):
+        """Return the Floorplan an HBundle's candidates were generated in.
+
+        Mirrors the 3-case floorplan selection in _generate_hier_topo_one so a
+        connectivity check evaluates each topology in the same coordinate /
+        block-name space its candidates were built in.  Returns None when the
+        floorplan can't be reconstructed (caller falls back to self.fp).
+
+        This resolves the PRE-expansion floorplan for a cell-level template
+        (cell-local coords, cell-local block names).  Per-instance wrappers
+        produced by _expand_hier_bundles carry absolute coords with dropped
+        seg_busterms and must be checked against self.fp — callers exclude them.
+        """
+        if b.cell_context and b.entry_busterm_ids:
+            # Case (a): cell-local floorplan.
+            parent_name = b.instances[0] if b.instances else None
+            if parent_name is None:
+                return None
+            cache_key = ('cell', parent_name)
+            if cache_key not in fp_cache:
+                fp_cache[cache_key] = self._build_cell_local_floorplan(parent_name)
+            return fp_cache[cache_key]
+
+        if b.drv_spec_depth >= 0:
+            # Case (c): cross-level custom floorplan from the endpoint blocks.
+            cache_key = ('xlevel', b.id)
+            if cache_key not in fp_cache:
+                fp = None
+                drv_comp = comps_by_name.get(b.drv_spec_path)
+                if drv_comp is not None:
+                    fp = buda.Floorplan()
+                    dx, dy = self._corner_margin
+                    if dx or dy:
+                        fp.set_global_corner_margin(dx, dy)
+                    fp.add_block(b.drv_spec_path,
+                                 int(round(drv_comp.x1)), int(round(drv_comp.y1)),
+                                 int(round(drv_comp.x2)), int(round(drv_comp.y2)))
+                    for rpath in b.rcv_spec_paths:
+                        rc = comps_by_name.get(rpath)
+                        if rc is None:
+                            fp = None
+                            break
+                        fp.add_block(rpath,
+                                     int(round(rc.x1)), int(round(rc.y1)),
+                                     int(round(rc.x2)), int(round(rc.y2)))
+                fp_cache[cache_key] = fp
+            return fp_cache[cache_key]
+
+        # Case (b): same-level cross-block — BDB floorplan at the endpoint depth.
+        src, _ = self._parse_bundle_reason(b.reason)
+        ep_depth = src.count('/') if src else b.level
+        cache_key = ('depth', ep_depth)
+        if cache_key not in fp_cache:
+            fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
+        return fp_cache[cache_key]
+
     @staticmethod
     def _offset_topology(topo, dx, dy):
         """Return a new Topology with every segment shifted by (dx, dy)."""
@@ -2150,11 +2206,31 @@ class BudaSession:
                       f"but not in floorplan: {', '.join(shown)}{ellipsis_str}")
                 print(f"  Hint: call 'add_blocks_from_bdb N skip' for all required depths.")
 
+        # Hier bundles' candidates may live in a cell-local / depth / custom
+        # floorplan rather than self.fp; resolve the right one per bundle so the
+        # check uses the same coordinate and block-name space the candidates
+        # were generated in.  Per-instance wrappers from _expand_hier_bundles
+        # (absolute coords, dropped seg_busterms) are excluded and use self.fp.
+        hier_fp_cache = {}
+        comps_by_name = ({c.name: c for c in self.bdb.all_components()}
+                         if self.bdb is not None else {})
+        expanded_ids = {id(w)
+                        for ws in (self._hier_expansion_map or {}).values()
+                        for w in ws}
+
         total = 0
         for w in self.bundles:
             if not w.candidates:
                 continue
             bid = w.original_bundle.id
+
+            b = w.original_bundle
+            check_fp = self.fp
+            if (self.bdb is not None and isinstance(b, buda.HBundle)
+                    and id(w) not in expanded_ids):
+                resolved = self._floorplan_for_hbundle(b, hier_fp_cache, comps_by_name)
+                if resolved is not None:
+                    check_fp = resolved
 
             if all_candidates and stage == "topo":
                 to_check = list(enumerate(w.candidates))
@@ -2166,15 +2242,15 @@ class BudaSession:
 
             for topo_idx, topo in to_check:
                 ct = buda.ConnTopology()
-                ct.build(topo, self.fp)
+                ct.build(topo, check_fp)
 
                 if stage == "topo":
-                    res = buda.check_topo(ct, topo, self.fp, bid)
+                    res = buda.check_topo(ct, topo, check_fp, bid)
                 elif stage == "nuts":
-                    res = buda.check_nuts(ct, self.nuts_result, topo, self.fp, self.layers, bid)
+                    res = buda.check_nuts(ct, self.nuts_result, topo, check_fp, self.layers, bid)
                 else:
                     num_bits = len(w.original_bundle.get_net_names())
-                    res = buda.check_dnuts(ct, self.detailed_result, topo, self.fp,
+                    res = buda.check_dnuts(ct, self.detailed_result, topo, check_fp,
                                            self.layers, bid, num_bits)
 
                 for v in res.violations:

@@ -195,7 +195,13 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
         for (const auto& conn : cs.conns) {
             if (conn.kind != SegConn::BUSTERM) continue;
 
-            Rect face_rect = bmap.at(conn.block_name);
+            // Block may not exist in this floorplan (e.g. a cell-local busterm
+            // name checked against a different floorplan); skip its constraint
+            // rather than throwing — mirrors the graceful misses in the other
+            // Floorplan accessors (get_block_rects/bounds/corner_margin).
+            auto bm_it = bmap.find(conn.block_name);
+            if (bm_it == bmap.end()) continue;
+            Rect face_rect = bm_it->second;
             {
                 const auto rects = fp.get_block_rects(conn.block_name);
                 if (!rects.empty()) {
