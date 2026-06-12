@@ -2759,6 +2759,21 @@ class BudaVisualizer:
         ax.set_ylim(new_ylim)
         self.fig.canvas.draw_idle()
 
+    def _on_close(self, event):
+        """Cleanup when the main window is closed."""
+        if hasattr(self, '_ipc_timer') and self._ipc_timer is not None:
+            try:
+                self._ipc_timer.stop()
+            except Exception:
+                pass
+            self._ipc_timer = None
+        if hasattr(self, '_ipc') and self._ipc is not None:
+            try:
+                self._ipc.close()
+            except Exception:
+                pass
+            self._ipc = None
+
     def show(self):
         self._bid_list = sorted(self._bundle_artists.keys())
         self._bundle_visible = {bid: True for bid in self._bid_list}
@@ -2938,6 +2953,7 @@ class BudaVisualizer:
         btn_oscroll_dn.on_clicked(lambda _: self._scroll_overlaps(+5))
 
         self.fig.canvas.mpl_connect('scroll_event', self._on_scroll_event)
+        self.fig.canvas.mpl_connect('close_event',  self._on_close)
 
         # ── Bottom navigation buttons ─────────────────────────────────────
         # All buttons sit in x=[0.02, 0.79] (same footprint as main plot),
