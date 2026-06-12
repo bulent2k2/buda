@@ -157,6 +157,7 @@ routes inside cell templates.
 > complete direction model, including how `run_hier_bundler` applies the
 > positional fallback for `UNKNOWN`-direction pins.
 
+
 ### Complete HBundle Example
 
 Save this as `hb_quickstart.buda` and run it from the repository root:
