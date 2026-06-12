@@ -928,17 +928,18 @@ select_topology 2 2
 select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
 ```
 
-Batch pin multiple bundles to specific topology candidates. Bundle IDs within a group can be comma-separated.
+Batch pin multiple bundles to specific topology candidates. Bundle IDs within a group can be comma-separated or specify ranges (e.g. `5-9`).
 
 | Argument | Type | Description |
 |---|---|---|
-| `bundle_ids` | string | Comma-separated list of numeric bundle IDs (e.g. `1,4,5`). |
+| `bundle_ids` | string | Comma-separated list and/or ranges of numeric bundle IDs (e.g. `1,5-9,11`). |
 | `topo_id` | int | 1-based ID of the topology candidate to pin for the preceding group. |
 
 **Example:**
 ```buda
-# Pin bundles 1, 4, and 5 to topology 3; pin bundles 2, 3, and 6 to topology 1
-select_topologies 1,4,5 3 2,3,6 1
+# Pin bundles 1, 5 through 9, 11, and 15 through 19, and 22 to topology 3
+# Pin bundles 2 through 4, 10, 12 through 14, 20, 21, and 23 through 30 to topology 1
+select_topologies 1,5-9,11,15-19,22 3 2-4,10,12-14,20,21,23-30 1
 ```
 
 ---
