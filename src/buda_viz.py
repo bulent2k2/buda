@@ -2210,11 +2210,13 @@ class BudaVisualizer:
                     self.ax.add_patch(rect)
                     self._heatmap_artists.append(rect)
                     if ratio > 1.0:
-                        label = "BLOCK" if cap <= 0 else f"OVF\n{ratio:.0%}"
+                        layer_name = _LAYER_LABEL.get(cut.layer_id, f"M{cut.layer_id}").split()[0]
+                        label = f"{layer_name}\nBLOCK" if cap <= 0 else f"{layer_name}\n{ratio:.0%}"
                         txt = self.ax.text((x_lo + x_hi) / 2, (p_lo + p_hi) / 2,
-                                           label, fontsize=6, color='darkred',
-                                           ha='center', va='center', zorder=4,
+                                           label, fontsize=7, color='white',
+                                           ha='center', va='center', zorder=5,
                                            fontweight='bold', clip_on=True)
+                        txt.set_bbox(dict(facecolor='darkred', alpha=0.8, edgecolor='none', pad=1))
                         self._heatmap_artists.append(txt)
                 else:
                     rect = patches.Rectangle(
@@ -2223,11 +2225,13 @@ class BudaVisualizer:
                     self.ax.add_patch(rect)
                     self._heatmap_artists.append(rect)
                     if ratio > 1.0:
-                        label = "BLOCK" if cap <= 0 else f"OVF\n{ratio:.0%}"
+                        layer_name = _LAYER_LABEL.get(cut.layer_id, f"M{cut.layer_id}").split()[0]
+                        label = f"{layer_name}\nBLOCK" if cap <= 0 else f"{layer_name}\n{ratio:.0%}"
                         txt = self.ax.text((p_lo + p_hi) / 2, (y_lo + y_hi) / 2,
-                                           label, fontsize=6, color='darkred',
-                                           ha='center', va='center', zorder=4,
+                                           label, fontsize=7, color='white',
+                                           ha='center', va='center', zorder=5,
                                            fontweight='bold', clip_on=True)
+                        txt.set_bbox(dict(facecolor='darkred', alpha=0.8, edgecolor='none', pad=1))
                         self._heatmap_artists.append(txt)
 
         # Apply current visibility state.
