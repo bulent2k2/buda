@@ -37,10 +37,10 @@ def make_bundle_wrapper(bid, width, seg):
     bundle.id = bid
 
     w = buda.BundleWrapper()
-    w.original_bundle = bundle
-    w.width = width
-    w.candidates = [topo]
-    w.selected_topology_index = 0
+    w.input.original_bundle = bundle
+    w.input.width = width
+    w.input.candidates = [topo]
+    w.plan.selected_topology_index = 0
     return w
 
 
@@ -303,11 +303,11 @@ def test_pinned_infeasible_candidate_gets_best_effort_assignment():
     bundle = buda.HBundle()
     bundle.id = 1
     w = buda.BundleWrapper()
-    w.original_bundle = bundle
-    w.width = 50.0                      # 50 >> 4-unit slide window: infeasible
-    w.candidates = [topo]
-    w.selected_topology_index = 0
-    w.topology_pinned = True            # exactly one candidate is scored
+    w.input.original_bundle = bundle
+    w.input.width = 50.0                      # 50 >> 4-unit slide window: infeasible
+    w.input.candidates = [topo]
+    w.plan.selected_topology_index = 0
+    w.input.topology_pinned = True            # exactly one candidate is scored
 
     assignments = router.optimize_topologies([w], 1)
 

@@ -80,8 +80,8 @@ def _setup_full_context(n_proc=1):
     wrappers = []
     for b in bundles:
         w = buda.BundleWrapper()
-        w.original_bundle = b
-        w.width = float(len(b.net_names))
+        w.input.original_bundle = b
+        w.input.width = float(len(b.net_names))
 
         if b.cell_context and b.instances:
             # Cell-level bundle: generate candidates in cell-local coords
@@ -107,7 +107,7 @@ def _setup_full_context(n_proc=1):
                     candidates = tg.generate(src_local, dsts_local)
                 except Exception:
                     candidates = []
-                w.candidates = candidates
+                w.input.candidates = candidates
         else:
             # Cross-block or top-level bundle
             if b.entry_busterm_ids and b.exit_busterm_ids:
@@ -119,7 +119,7 @@ def _setup_full_context(n_proc=1):
                     candidates = tg.generate(src_blk, dsts_blk)
                 except Exception:
                     candidates = []
-                w.candidates = candidates
+                w.input.candidates = candidates
 
         wrappers.append(w)
 
@@ -145,11 +145,11 @@ def _clone_hbundle_with_id(b, new_id):
 def _expand_hier_bundles(wrappers, db):
     """Replicate BudaSession._expand_hier_bundles."""
     comps = {c.name: c for c in db.all_components()}
-    max_id = max((w.original_bundle.id for w in wrappers), default=-1)
+    max_id = max((w.input.original_bundle.id for w in wrappers), default=-1)
     next_id = max_id + 1
     result = []
     for w in wrappers:
-        b = w.original_bundle
+        b = w.input.original_bundle
         if not b.cell_context or not b.instances:
             result.append(w)
             continue
@@ -160,12 +160,12 @@ def _expand_hier_bundles(wrappers, db):
             dx = int(round(parent.x1))
             dy = int(round(parent.y1))
             new_w = buda.BundleWrapper()
-            new_w.original_bundle = _clone_hbundle_with_id(b, next_id)
+            new_w.input.original_bundle = _clone_hbundle_with_id(b, next_id)
             next_id += 1
-            new_w.width = w.width
+            new_w.input.width = w.input.width
             # offset candidates
             new_segs_list = []
-            for topo in w.candidates:
+            for topo in w.input.candidates:
                 new_t = buda.Topology()
                 new_t.type                  = topo.type
                 new_t.estimated_wirelength  = topo.estimated_wirelength
@@ -181,7 +181,7 @@ def _expand_hier_bundles(wrappers, db):
                     new_segs.append(ns)
                 new_t.segments = new_segs
                 new_segs_list.append(new_t)
-            new_w.candidates = new_segs_list
+            new_w.input.candidates = new_segs_list
             result.append(new_w)
     return result
 
@@ -215,20 +215,20 @@ def run_planner_hier(context):
     layers   = context["layers"]
     expanded = _expand_hier_bundles(wrappers, db)
     for w in expanded:
-        b = w.original_bundle
-        w.priority = -(b.level * 10_000 + len(w.candidates))
+        b = w.input.original_bundle
+        w.hier.priority = -(b.level * 10_000 + len(w.input.candidates))
     planner = buda.CongestionPlanner(fp, layers)
     planner.build_congestion_map()
     with buda.ostream_redirect():
         assignments = planner.optimize_topologies(expanded, 5)
-    bid_to_w = {w.original_bundle.id: w for w in expanded}
+    bid_to_w = {w.input.original_bundle.id: w for w in expanded}
     for asn in assignments:
         w = bid_to_w.get(asn.bundle_id)
         if w is not None:
-            w.selected_topology_index = asn.topo_index
-            w.assigned_v_layer = asn.v_layer_id
-            w.assigned_h_layer = asn.h_layer_id
-            w.seg_layers = list(asn.seg_layers)
+            w.plan.selected_topology_index = asn.topo_index
+            w.input.assigned_v_layer = asn.v_layer_id
+            w.input.assigned_h_layer = asn.h_layer_id
+            w.plan.seg_layers = list(asn.seg_layers)
     context["expanded"] = expanded
 
 
@@ -238,8 +238,8 @@ def assign_priorities(context):
     db       = context["db"]
     expanded = _expand_hier_bundles(wrappers, db)
     for w in expanded:
-        b = w.original_bundle
-        w.priority = -(b.level * 10_000 + len(w.candidates))
+        b = w.input.original_bundle
+        w.hier.priority = -(b.level * 10_000 + len(w.input.candidates))
     context["expanded"] = expanded
 
 
@@ -259,37 +259,37 @@ def check_expansion_count(context):
 @then("every wrapper in self.bundles has selected_topology_index >= 0")
 def check_all_assigned(context):
     for w in context["expanded"]:
-        if not w.candidates:
+        if not w.input.candidates:
             continue   # skip empty-candidate wrappers
-        assert w.selected_topology_index >= 0, \
-            f"bundle id={w.original_bundle.id} unassigned"
+        assert w.plan.selected_topology_index >= 0, \
+            f"bundle id={w.input.original_bundle.id} unassigned"
 
 
 @then("every depth-0 wrapper has priority greater than every depth-1 wrapper")
 def check_depth_priority(context):
-    d0 = [w for w in context["expanded"] if w.original_bundle.level == 0]
-    d1 = [w for w in context["expanded"] if w.original_bundle.level == 1]
+    d0 = [w for w in context["expanded"] if w.input.original_bundle.level == 0]
+    d1 = [w for w in context["expanded"] if w.input.original_bundle.level == 1]
     if not d0 or not d1:
         return  # nothing to compare
-    min_d0 = min(w.priority for w in d0)
-    max_d1 = max(w.priority for w in d1)
+    min_d0 = min(w.hier.priority for w in d0)
+    max_d1 = max(w.hier.priority for w in d1)
     assert min_d0 > max_d1, \
         f"depth-0 min priority {min_d0} not > depth-1 max {max_d1}"
 
 
 @then("within depth-0, a wrapper with fewer candidates has priority >= wrapper with more candidates")
 def check_constraint_first(context):
-    d0 = [w for w in context["expanded"] if w.original_bundle.level == 0]
+    d0 = [w for w in context["expanded"] if w.input.original_bundle.level == 0]
     for i, a in enumerate(d0):
         for b in d0[i+1:]:
-            if len(a.candidates) < len(b.candidates):
-                assert a.priority >= b.priority, \
-                    f"fewer-candidate wrapper priority {a.priority} < {b.priority}"
+            if len(a.input.candidates) < len(b.input.candidates):
+                assert a.hier.priority >= b.hier.priority, \
+                    f"fewer-candidate wrapper priority {a.hier.priority} < {b.hier.priority}"
 
 
 @then("the expanded wrappers have unique original_bundle ids")
 def check_unique_ids(context):
-    ids = [w.original_bundle.id for w in context["expanded"]]
+    ids = [w.input.original_bundle.id for w in context["expanded"]]
     assert len(ids) == len(set(ids)), \
         f"duplicate bundle IDs after expansion: {ids}"
 
@@ -306,14 +306,14 @@ def test_expansion_count_single_proc():
 def test_unique_ids_single_proc():
     db, bundles, wrappers, fp, layers = _setup_full_context(1)
     expanded = _expand_hier_bundles(wrappers, db)
-    ids = [w.original_bundle.id for w in expanded]
+    ids = [w.input.original_bundle.id for w in expanded]
     assert len(ids) == len(set(ids)), "duplicate IDs in single-proc expansion"
 
 
 def test_unique_ids_two_proc():
     db, bundles, wrappers, fp, layers = _setup_full_context(2)
     expanded = _expand_hier_bundles(wrappers, db)
-    ids = [w.original_bundle.id for w in expanded]
+    ids = [w.input.original_bundle.id for w in expanded]
     assert len(ids) == len(set(ids)), f"duplicate IDs in two-proc expansion: {ids}"
 
 
@@ -321,32 +321,32 @@ def test_priority_encoding():
     db, bundles, wrappers, fp, layers = _setup_full_context(1)
     expanded = _expand_hier_bundles(wrappers, db)
     for w in expanded:
-        b = w.original_bundle
-        w.priority = -(b.level * 10_000 + len(w.candidates))
-    d0 = [w for w in expanded if w.original_bundle.level == 0]
-    d1 = [w for w in expanded if w.original_bundle.level == 1]
+        b = w.input.original_bundle
+        w.hier.priority = -(b.level * 10_000 + len(w.input.candidates))
+    d0 = [w for w in expanded if w.input.original_bundle.level == 0]
+    d1 = [w for w in expanded if w.input.original_bundle.level == 1]
     if d0 and d1:
-        assert min(w.priority for w in d0) > max(w.priority for w in d1)
+        assert min(w.hier.priority for w in d0) > max(w.hier.priority for w in d1)
 
 
 def test_run_planner_hier_assigns_all():
     db, bundles, wrappers, fp, layers = _setup_full_context(1)
     expanded = _expand_hier_bundles(wrappers, db)
     for w in expanded:
-        b = w.original_bundle
-        w.priority = -(b.level * 10_000 + len(w.candidates))
+        b = w.input.original_bundle
+        w.hier.priority = -(b.level * 10_000 + len(w.input.candidates))
     planner = buda.CongestionPlanner(fp, layers)
     planner.build_congestion_map()
     with buda.ostream_redirect():
         assignments = planner.optimize_topologies(expanded, 5)
-    bid_to_w = {w.original_bundle.id: w for w in expanded}
+    bid_to_w = {w.input.original_bundle.id: w for w in expanded}
     for asn in assignments:
         w = bid_to_w.get(asn.bundle_id)
         if w is not None:
-            w.selected_topology_index = asn.topo_index
-            w.seg_layers = list(asn.seg_layers)
+            w.plan.selected_topology_index = asn.topo_index
+            w.plan.seg_layers = list(asn.seg_layers)
     unassigned = [w for w in expanded
-                  if w.candidates and w.selected_topology_index < 0]
+                  if w.input.candidates and w.plan.selected_topology_index < 0]
     assert not unassigned, f"{len(unassigned)} wrappers left unassigned"
 
 

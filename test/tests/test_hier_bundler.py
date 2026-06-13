@@ -511,3 +511,93 @@ def test_add_net_pins_inout_single_pin_produces_no_bundle():
     assert "lone_io" not in net_names, (
         "A single-pin INOUT net should not form a bundle (no receiver)"
     )
+
+
+# ── Phase B4: cross-block busterm IDs ─────────────────────────────────────────
+
+def test_cross_block_bundle_has_busterm_ids_when_derive_called_first():
+    """Cross-block bundles get entry/exit busterm IDs when derive_busterms precedes run."""
+    db = _build_pipeline_bdb()
+    _add_pipeline_nets(db)
+    # derive_busterms first so the bt_by_comp_name map is populated
+    gen = buda.BustermGen(db)
+    gen.derive(0)
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(0)
+    by_net = {n: b for b in bundles for n in b.net_names}
+
+    s2p = by_net["s2p_0"]
+    assert s2p.level == 0, f"s2p should be cross-block at level 0, got {s2p.level}"
+    assert len(s2p.entry_busterm_ids) > 0, (
+        f"s2p_0 cross-block bundle should have entry_busterm_ids, got {s2p.entry_busterm_ids}"
+    )
+    assert len(s2p.exit_busterm_ids) > 0, (
+        f"s2p_0 cross-block bundle should have exit_busterm_ids, got {s2p.exit_busterm_ids}"
+    )
+    # Driver is src_i/buf_i → entry busterm should be bt:src_i
+    assert "bt:src_i" in s2p.entry_busterm_ids, (
+        f"Expected bt:src_i in entry_busterm_ids, got {s2p.entry_busterm_ids}"
+    )
+    # Receiver is proc_i/pa_i → exit busterm should be bt:proc_i
+    assert "bt:proc_i" in s2p.exit_busterm_ids, (
+        f"Expected bt:proc_i in exit_busterm_ids, got {s2p.exit_busterm_ids}"
+    )
+
+
+def test_cross_block_busterm_ids_empty_without_derive():
+    """Without derive_busterms, cross-block bundles have empty busterm IDs (graceful no-op)."""
+    db = _build_pipeline_bdb()
+    _add_pipeline_nets(db)
+    # No derive_busterms call — bt_by_comp_name will be empty
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(0)
+    by_net = {n: b for b in bundles for n in b.net_names}
+
+    s2p = by_net["s2p_0"]
+    assert s2p.entry_busterm_ids == [], (
+        f"Without derive, entry_busterm_ids should be empty, got {s2p.entry_busterm_ids}"
+    )
+    assert s2p.exit_busterm_ids == [], (
+        f"Without derive, exit_busterm_ids should be empty, got {s2p.exit_busterm_ids}"
+    )
+
+
+def test_intra_cell_busterm_ids_set_with_or_without_cross_block_derive():
+    """Intra-cell busterm IDs are set regardless of whether derive_busterms is called,
+    since they are populated during the same-parent path in HierarchicalBundler."""
+    db = _build_pipeline_bdb()
+    _add_pipeline_nets(db)
+    gen = buda.BustermGen(db)
+    gen.derive(1)
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(1)
+    by_net = {n: b for b in bundles for n in b.net_names}
+
+    pa_pb = by_net["pa_pb_0"]
+    assert "bt:proc_i/pa_i" in pa_pb.entry_busterm_ids, (
+        f"pa_pb intra-cell bundle missing entry bt:proc_i/pa_i; "
+        f"got {pa_pb.entry_busterm_ids}"
+    )
+    assert "bt:proc_i/pb_i" in pa_pb.exit_busterm_ids, (
+        f"pa_pb intra-cell bundle missing exit bt:proc_i/pb_i; "
+        f"got {pa_pb.exit_busterm_ids}"
+    )
+
+
+def test_cross_block_busterm_ids_p2s_bundle():
+    """p2s_0 cross-block bundle has proc_i driver busterm and snk_i receiver busterm."""
+    db = _build_pipeline_bdb()
+    _add_pipeline_nets(db)
+    gen = buda.BustermGen(db)
+    gen.derive(0)
+    hb = buda.HierarchicalBundler(db)
+    bundles = hb.run(0)
+    by_net = {n: b for b in bundles for n in b.net_names}
+
+    p2s = by_net["p2s_0"]
+    assert "bt:proc_i" in p2s.entry_busterm_ids, (
+        f"p2s_0 entry should include bt:proc_i, got {p2s.entry_busterm_ids}"
+    )
+    assert "bt:snk_i" in p2s.exit_busterm_ids, (
+        f"p2s_0 exit should include bt:snk_i, got {p2s.exit_busterm_ids}"
+    )

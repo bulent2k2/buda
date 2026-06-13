@@ -270,13 +270,13 @@ void CongestionPlanner::collect_overflow_bands(const Segment& seg, int layer_id,
 double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
                                             const PlanResult& plan,
                                             const std::set<std::pair<int,int>>& contended) const {
-    const int nbits = (int)bw.original_bundle.get_net_names().size();
-    const Topology& t = bw.candidates[plan.best_topo];
+    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
+    const Topology& t = bw.input.candidates[plan.best_topo];
     double overlap = 0.0;
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
-        double eff = layers_.eff_bus_width(nbits, bw.width, lid);
+        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid);
         for_each_band(t.segments[si], lid, pp, [&](int ci, int b) {
             if (contended.count({ci, b})) overlap += eff;
         });
@@ -308,8 +308,8 @@ void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double e
 // earlier-planned bundle from a region band ONLY when the band cannot hold
 // both of them — it is a "leave room" constraint, not a keep-out.
 void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) {
-    if (!bw.has_reservation) return;
-    const int nbits = (int)bw.original_bundle.get_net_names().size();
+    if (!bw.hier.has_reservation) return;
+    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
     int top_h = layers_.get_top_layer(LayerDir::HORIZONTAL);
     int top_v = layers_.get_top_layer(LayerDir::VERTICAL);
     for (auto& c : cuts_) {
@@ -319,15 +319,15 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
         int  lid     = is_vcut ? top_h : top_v;
         if (lid < 0 || c.layer_id != lid) continue;
         // Cut must lie inside the region along the cut axis.
-        int clo = is_vcut ? bw.res_x1 : bw.res_y1;
-        int chi = is_vcut ? bw.res_x2 : bw.res_y2;
+        int clo = is_vcut ? bw.hier.res_x1 : bw.hier.res_y1;
+        int chi = is_vcut ? bw.hier.res_x2 : bw.hier.res_y2;
         if (c.cut_coord < clo || c.cut_coord > chi) continue;
-        double eff = layers_.eff_bus_width(nbits, bw.width, lid);
+        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid);
         // Every band overlapping the region's perpendicular range could be
         // the bundle's eventual home, so each carries the reservation.
         const auto& grid = is_vcut ? y_grid_ : x_grid_;
-        int plo = is_vcut ? bw.res_y1 : bw.res_x1;
-        int phi = is_vcut ? bw.res_y2 : bw.res_x2;
+        int plo = is_vcut ? bw.hier.res_y1 : bw.hier.res_x1;
+        int phi = is_vcut ? bw.hier.res_y2 : bw.hier.res_x2;
         for (int b = 0; b + 1 < (int)grid.size() && b < c.num_bands(); ++b) {
             if (grid[b + 1] <= plo || grid[b] >= phi) continue;
             c.add_usage(b, sign * eff);
@@ -423,7 +423,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
         const BundleWrapper& bw, PlanMode mode,
         std::set<std::pair<int,int>>* contended) {
     PlanResult res;
-    if (bw.candidates.empty()) return res;
+    if (bw.input.candidates.empty()) return res;
 
     const bool enforce_window   = (mode != PlanMode::BEST_EFFORT);
     const bool enforce_overflow = (mode == PlanMode::STRICT);
@@ -431,7 +431,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
 
     // Bit count for the honest per-layer width model (eff_bus_width);
     // 0 (hand-built wrappers without nets) falls back to width x dilution.
-    const int nbits = (int)bw.original_bundle.get_net_names().size();
+    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
 
     auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
     auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
@@ -441,17 +441,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     auto h_layers_rev = h_layers; std::reverse(h_layers_rev.begin(), h_layers_rev.end());
     auto v_layers_rev = v_layers; std::reverse(v_layers_rev.begin(), v_layers_rev.end());
 
-    res.best_topo     = bw.topology_pinned ? bw.selected_topology_index : 0;
+    res.best_topo     = bw.input.topology_pinned ? bw.plan.selected_topology_index : 0;
     double best_score = std::numeric_limits<double>::max();
 
     // Snapshot cut state so each topology candidate is scored from the same base.
     auto cuts_snapshot = cuts_;
 
-    int ci_lo = bw.topology_pinned ? bw.selected_topology_index     : 0;
-    int ci_hi = bw.topology_pinned ? bw.selected_topology_index + 1 : (int)bw.candidates.size();
+    int ci_lo = bw.input.topology_pinned ? bw.plan.selected_topology_index     : 0;
+    int ci_hi = bw.input.topology_pinned ? bw.plan.selected_topology_index + 1 : (int)bw.input.candidates.size();
 
     for (int ci = ci_lo; ci < ci_hi; ++ci) {
-        const Topology& topo = bw.candidates[ci];
+        const Topology& topo = bw.input.candidates[ci];
 
         // Greedy per-segment layer assignment within this topology.
         // Each segment independently gets the layer that minimises its
@@ -511,10 +511,10 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             int    best_pp  = INT_MIN;
 
             // Respect manual layer overrides if present for this segment.
-            if (si < (int)bw.pinned_seg_layers.size() && bw.pinned_seg_layers[si] != -1) {
-                best_lid = bw.pinned_seg_layers[si];
+            if (si < (int)bw.input.pinned_seg_layers.size() && bw.input.pinned_seg_layers[si] != -1) {
+                best_lid = bw.input.pinned_seg_layers[si];
                 best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
-                double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
+                double eff = layers_.eff_bus_width(nbits, bw.input.width, best_lid);
                 best_pp  = band_perp(best_lid, eff);
                 best_ov  = score_segment(seg, best_lid, eff, best_pp, slide_lo, slide_hi);
                 if (enforce_overflow && best_ov > kOvEps) {
@@ -526,7 +526,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             } else {
                 // Iterate highest-ID first so equal-cost layers prefer higher metal.
                 for (int lid : layers_rev) {
-                    double eff  = layers_.eff_bus_width(nbits, bw.width, lid);
+                    double eff  = layers_.eff_bus_width(nbits, bw.input.width, lid);
                     int    pp   = band_perp(lid, eff);
                     double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
                     // STRICT: overflow is a hard constraint.  An overflowing
@@ -565,7 +565,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             if (enforce_window && si < (int)conn_segs.size()) {
                 const ConnSeg& cs = conn_segs[si];
                 if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel) {
-                    double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
+                    double eff = layers_.eff_bus_width(nbits, bw.input.width, best_lid);
                     if (static_cast<double>(cs.perp_hi - cs.perp_lo) < eff)
                         topo_infeasible = true;
                 }
@@ -574,7 +574,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
 
             // Apply chosen layer so later segments in this topology see
             // the updated congestion state.
-            double eff = layers_.eff_bus_width(nbits, bw.width, best_lid);
+            double eff = layers_.eff_bus_width(nbits, bw.input.width, best_lid);
             apply_segment(seg, best_lid, eff, perp_pos);
             seg_layers.push_back(best_lid);
             seg_perp.push_back(perp_pos);
@@ -620,13 +620,13 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
 // in the cut state.
 void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& plan,
                                     double sign) {
-    const int nbits = (int)bw.original_bundle.get_net_names().size();
-    const Topology& t = bw.candidates[plan.best_topo];
+    const int nbits = (int)bw.input.original_bundle.get_net_names().size();
+    const Topology& t = bw.input.candidates[plan.best_topo];
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
         apply_segment(t.segments[si], lid,
-                      sign * layers_.eff_bus_width(nbits, bw.width, lid), pp);
+                      sign * layers_.eff_bus_width(nbits, bw.input.width, lid), pp);
     }
 }
 
@@ -635,14 +635,14 @@ BundleAssignment CongestionPlanner::make_assignment(const BundleWrapper& bw,
     // Derive representative V/H layers for logging (last V/H seg wins).
     int rep_v = layers_.get_top_layer(LayerDir::VERTICAL);
     int rep_h = layers_.get_top_layer(LayerDir::HORIZONTAL);
-    const Topology& winner = bw.candidates[plan.best_topo];
+    const Topology& winner = bw.input.candidates[plan.best_topo];
     for (int si = 0; si < (int)winner.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         bool is_h = (winner.segments[si].start.y == winner.segments[si].end.y);
         if (is_h) rep_h = plan.seg_layers[si];
         else      rep_v = plan.seg_layers[si];
     }
     BundleAssignment asn;
-    asn.bundle_id  = bw.original_bundle.id;
+    asn.bundle_id  = bw.input.original_bundle.id;
     asn.topo_index = plan.best_topo;
     asn.v_layer_id = rep_v;
     asn.h_layer_id = rep_h;
@@ -653,7 +653,7 @@ BundleAssignment CongestionPlanner::make_assignment(const BundleWrapper& bw,
 
 void CongestionPlanner::log_choice(const BundleWrapper& bw, const PlanResult& plan,
                                    const std::string& tag) const {
-    const Topology& winner = bw.candidates[plan.best_topo];
+    const Topology& winner = bw.input.candidates[plan.best_topo];
     std::string seg_str;
     for (int si = 0; si < (int)winner.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         bool is_h = (winner.segments[si].start.y == winner.segments[si].end.y);
@@ -661,9 +661,9 @@ void CongestionPlanner::log_choice(const BundleWrapper& bw, const PlanResult& pl
         seg_str += (is_h ? "H" : "V");
         seg_str += "→M" + std::to_string(plan.seg_layers[si]);
     }
-    std::cout << "[Planner] Bundle " << bw.original_bundle.id
-              << " (" << bw.width << " units wide)"
-              << " -> topo " << (plan.best_topo + 1) << " of " << bw.candidates.size()
+    std::cout << "[Planner] Bundle " << bw.input.original_bundle.id
+              << " (" << bw.input.width << " units wide)"
+              << " -> topo " << (plan.best_topo + 1) << " of " << bw.input.candidates.size()
               << ": " << winner.type << tag
               << "  [" << seg_str << "]"
               << "  overflow=" << plan.overflow << "\n";
@@ -693,7 +693,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
             if (it == grid.end() || *it != val) grid.insert(it, val);
         };
         for (const auto& bw : bundles) {
-            for (const auto& cand : bw.candidates) {
+            for (const auto& cand : bw.input.candidates) {
                 for (const auto& seg : cand.segments) {
                     extend_oob(x_grid_, seg.start.x);
                     extend_oob(x_grid_, seg.end.x);
@@ -725,9 +725,9 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     std::vector<int> order(bundles.size());
     std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(), [&](int a, int b) {
-        if (bundles[a].priority != bundles[b].priority)
-            return bundles[a].priority > bundles[b].priority;
-        return bundles[a].width > bundles[b].width;
+        if (bundles[a].hier.priority != bundles[b].hier.priority)
+            return bundles[a].hier.priority > bundles[b].hier.priority;
+        return bundles[a].input.width > bundles[b].input.width;
     });
 
     // Park every bundle's reserved demand as virtual usage up front, so
@@ -760,7 +760,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         // Release this bundle's own reservation: its demand is now planned
         // for real (or dropped, if it has no candidates).
         apply_reservation(bw, -1.0);
-        if (bw.candidates.empty()) continue;
+        if (bw.input.candidates.empty()) continue;
 
         // (1) Overflow is a hard constraint: first look for a candidate that
         //     is both slide-feasible and overflow-free.  A detour only loses
@@ -807,11 +807,11 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                         cp.plan = theirs;
                         assignments[cp.asn_idx] = make_assignment(pw, theirs);
                         std::cout << "[Planner] Rip-up: replanned bundle "
-                                  << pw.original_bundle.id
+                                  << pw.input.original_bundle.id
                                   << " to free capacity for bundle "
-                                  << bw.original_bundle.id << ":\n";
+                                  << bw.input.original_bundle.id << ":\n";
                         log_choice(pw, theirs,
-                                   std::string(pw.topology_pinned ? " [pinned]" : "")
+                                   std::string(pw.input.topology_pinned ? " [pinned]" : "")
                                    + " [replanned]");
                         plan = mine;
                         already_committed = true;
@@ -830,7 +830,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
             plan = plan_bundle(bw, PlanMode::ALLOW_OVERFLOW);
             if (plan.found) {
                 stage = 2;   // soft overflow
-                std::cout << "[Planner] WARNING: Bundle " << bw.original_bundle.id
+                std::cout << "[Planner] WARNING: Bundle " << bw.input.original_bundle.id
                           << ": no overflow-free candidate (even after rip-up); "
                           << "committing least-cost with overflow="
                           << plan.overflow << ".\n";
@@ -846,11 +846,11 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
             plan = plan_bundle(bw, PlanMode::BEST_EFFORT);
             if (plan.found) {
                 stage = 3;   // best-effort
-                std::cout << "[Planner] WARNING: Bundle " << bw.original_bundle.id
+                std::cout << "[Planner] WARNING: Bundle " << bw.input.original_bundle.id
                           << ": no candidate fits its slide windows (bus width "
                           << "exceeds them); committing best-effort "
-                          << bw.candidates[plan.best_topo].type
-                          << (bw.topology_pinned ? " [pinned]" : "") << ".\n";
+                          << bw.input.candidates[plan.best_topo].type
+                          << (bw.input.topology_pinned ? " [pinned]" : "") << ".\n";
             }
         }
 
@@ -862,9 +862,9 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
 
         committed.push_back({idx, (int)assignments.size(), plan});
         assignments.push_back(make_assignment(bw, plan));
-        log_choice(bw, plan, bw.topology_pinned ? " [pinned]" : "");
+        log_choice(bw, plan, bw.input.topology_pinned ? " [pinned]" : "");
 
-        LevelStats& ls = level_stats[bw.level];
+        LevelStats& ls = level_stats[bw.hier.level];
         ls.n += 1;
         ls.by_stage[stage] += 1;
         ls.max_overflow = std::max(ls.max_overflow, plan.overflow);

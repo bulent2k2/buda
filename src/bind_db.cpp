@@ -27,7 +27,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("x2",         &HierBusterm::x2)
         .def_readwrite("y2",         &HierBusterm::y2)
         .def_readwrite("resolution", &HierBusterm::resolution)
-        .def_readwrite("parent_id",  &HierBusterm::parent_id);
+        .def_readwrite("parent_id",  &HierBusterm::parent_id)
+        .def_readwrite("rects",      &HierBusterm::rects);
 
     // ── BustermGen ────────────────────────────────────────────────────────
     py::class_<BustermGen>(m, "BustermGen")
@@ -91,7 +92,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("x2",         &BustermRow::x2)
         .def_readwrite("y2",         &BustermRow::y2)
         .def_readwrite("resolution", &BustermRow::resolution)
-        .def_readwrite("parent_id",  &BustermRow::parent_id);
+        .def_readwrite("parent_id",  &BustermRow::parent_id)
+        .def_readwrite("rects",      &BustermRow::rects);
 
     // ── BDB ───────────────────────────────────────────────────────────────
     py::class_<BDB>(m, "BDB")

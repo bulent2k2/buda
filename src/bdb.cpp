@@ -93,7 +93,8 @@ void BDB::_create_schema() {
             depth      INTEGER,
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             resolution TEXT DEFAULT 'BLOCK',
-            parent_id  TEXT REFERENCES busterm(id)
+            parent_id  TEXT REFERENCES busterm(id),
+            rects      TEXT DEFAULT NULL
         );
         CREATE TABLE IF NOT EXISTS bundle (
             id           TEXT PRIMARY KEY,
@@ -150,6 +151,10 @@ void BDB::_create_schema() {
             value TEXT
         );
     )");
+    // Schema migration: add rects column to busterm if it was created by an older version.
+    sqlite3_exec(_db,
+        "ALTER TABLE busterm ADD COLUMN rects TEXT DEFAULT NULL",
+        nullptr, nullptr, nullptr);  // Ignored if column already exists.
     Stmt mq(_db, "SELECT key,value FROM meta");
     while (sqlite3_step(mq) == SQLITE_ROW) {
         std::string k = (const char*)sqlite3_column_text(mq, 0);
@@ -1734,8 +1739,8 @@ void BDB::rotate_comp(const std::string& name, int degrees) {
 
 void BDB::add_busterm(const BustermRow& bt) {
     Stmt s(_db,
-        "INSERT OR REPLACE INTO busterm(id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,parent_id)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?)");
+        "INSERT OR REPLACE INTO busterm(id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,parent_id,rects)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?)");
     sqlite3_bind_text  (s, 1, bt.id.c_str(),         -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, bt.comp_id);
     sqlite3_bind_text  (s, 3, bt.hier_path.c_str(),  -1, SQLITE_TRANSIENT);
@@ -1749,6 +1754,10 @@ void BDB::add_busterm(const BustermRow& bt) {
         sqlite3_bind_null(s, 10);
     else
         sqlite3_bind_text(s, 10, bt.parent_id.c_str(), -1, SQLITE_TRANSIENT);
+    if (bt.rects.empty())
+        sqlite3_bind_null(s, 11);
+    else
+        sqlite3_bind_text(s, 11, bt.rects.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(s);
 }
 
@@ -1809,7 +1818,8 @@ std::vector<PinRow> BDB::pins_by_comp(int comp_id) const {
 std::vector<BustermRow> BDB::all_busterms() const {
     if (!_q_all_busterms)
         sqlite3_prepare_v2(_db,
-            "SELECT id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,COALESCE(parent_id,'')"
+            "SELECT id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,"
+            "COALESCE(parent_id,''),COALESCE(rects,'')"
             " FROM busterm ORDER BY depth,id",
             -1, &_q_all_busterms, nullptr);
     sqlite3_reset(_q_all_busterms);
@@ -1827,6 +1837,7 @@ std::vector<BustermRow> BDB::all_busterms() const {
         r.y2         = sqlite3_column_double(q, 7);
         r.resolution = (const char*)sqlite3_column_text(q, 8);
         r.parent_id  = (const char*)sqlite3_column_text(q, 9);
+        r.rects      = (const char*)sqlite3_column_text(q, 10);
         rows.push_back(r);
     }
     return rows;

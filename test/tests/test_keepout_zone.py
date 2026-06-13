@@ -73,9 +73,9 @@ def when_run_global_planner(ctx):
     bundle.id = 1
 
     w = buda.BundleWrapper()
-    w.original_bundle = bundle
-    w.width = 10.0
-    w.candidates = ctx['candidates']
+    w.input.original_bundle = bundle
+    w.input.width = 10.0
+    w.input.candidates = ctx['candidates']
     
     assignments = router.optimize_topologies([w], 1)
     ctx['assignment'] = assignments[0] if assignments else None

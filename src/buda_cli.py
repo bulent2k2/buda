@@ -120,8 +120,8 @@ class BudaSession:
         for sel in data.get('selections', []):
             hint = sel['bundle_hint']
             matching = [w for w in self.bundles
-                        if w.original_bundle.get_net_names() and
-                           w.original_bundle.get_net_names()[0].startswith(hint)]
+                        if w.input.original_bundle.get_net_names() and
+                           w.input.original_bundle.get_net_names()[0].startswith(hint)]
             if not matching:
                 print(f"Warning: no bundle found for hint '{hint}' — skipping")
                 continue
@@ -130,15 +130,15 @@ class BudaSession:
             # Resolution uses the first match; all instances share the same candidate set.
             first_w = matching[0]
             resolved = None
-            for i, cand in enumerate(first_w.candidates):
+            for i, cand in enumerate(first_w.input.candidates):
                 if (cand.type == sel['topo_type'] and
                         cand.estimated_wirelength == sel['topo_wl']):
                     resolved = i
                     break
             if resolved is None:
                 idx_hint = sel.get('topo_index_hint', -1)
-                bid = first_w.original_bundle.id
-                if 0 <= idx_hint < len(first_w.candidates):
+                bid = first_w.input.original_bundle.id
+                if 0 <= idx_hint < len(first_w.input.candidates):
                     resolved = idx_hint
                     print(f"Warning: selection for bundle {bid} matched by index hint "
                           f"(type/WL changed?) — using topo {resolved + 1}")
@@ -149,17 +149,17 @@ class BudaSession:
             # Apply pin to ALL matching wrappers (handles multiple cell instances).
             pinned_layers = sel.get('seg_layers')
             for w in matching:
-                w.selected_topology_index = resolved
-                w.topology_pinned = True
+                w.plan.selected_topology_index = resolved
+                w.input.topology_pinned = True
                 if pinned_layers is not None:
-                    topo = w.candidates[resolved]
+                    topo = w.input.candidates[resolved]
                     if len(pinned_layers) == len(topo.segments):
-                        w.pinned_seg_layers = list(pinned_layers)
+                        w.input.pinned_seg_layers = list(pinned_layers)
 
             n = len(matching)
-            bid = first_w.original_bundle.id
+            bid = first_w.input.original_bundle.id
             suffix = f" [{n} instances]" if n > 1 else ""
-            if pinned_layers is not None and len(pinned_layers) == len(first_w.candidates[resolved].segments):
+            if pinned_layers is not None and len(pinned_layers) == len(first_w.input.candidates[resolved].segments):
                 print(f"  (pinned {len(pinned_layers)} segment layers)")
             print(f"Pinned bundle {bid} to topology {resolved + 1} "
                   f"({sel['topo_type']}, WL={sel['topo_wl']}){suffix}")
@@ -301,11 +301,11 @@ class BudaSession:
                                 fp_cache, comps_by_name):
         """Generate topology candidates for a single HBundle wrapper.
 
-        Updates w.candidates in place. Returns candidate count.
+        Updates w.input.candidates in place. Returns candidate count.
         fp_cache is a dict shared across calls; pass {} for a fresh cache.
         comps_by_name is {name: ComponentRow} from bdb.all_components().
         """
-        b = w.original_bundle
+        b = w.input.original_bundle
         if b.cell_context and b.entry_busterm_ids:
             # Case (a): cell-local floorplan
             parent_name = b.instances[0] if b.instances else None
@@ -322,9 +322,9 @@ class BudaSession:
             tg = self._make_topo_gen(cell_fp, use_center, use_double_detour)
             src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
             dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
-            w.candidates = tg.generate_candidates(src_local, dsts_local)
+            w.input.candidates = tg.generate_candidates(src_local, dsts_local)
             label = f"{src_local}→{dsts_local[0]}"
-            n = len(w.candidates)
+            n = len(w.input.candidates)
             if n == 0:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}]")
@@ -360,11 +360,11 @@ class BudaSession:
             if not ok:
                 return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour)
-            w.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
+            w.input.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
             label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
                      if len(b.rcv_spec_paths) == 1
                      else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
-            n = len(w.candidates)
+            n = len(w.input.candidates)
             tag = f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]"
             if n == 0:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
@@ -389,9 +389,9 @@ class BudaSession:
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
-            w.candidates = tg.generate_candidates(src, dsts)
+            w.input.candidates = tg.generate_candidates(src, dsts)
             label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
-            n = len(w.candidates)
+            n = len(w.input.candidates)
             if n == 0:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted!")
@@ -516,24 +516,24 @@ class BudaSession:
         # buses twice — so replicas are skipped here, and the template's
         # per-instance wrappers take their nets from the bundle that
         # physically lives in that instance (the replica = "donor").
-        cell_bundle_ids = {w.original_bundle.id for w in bundles
-                           if w.original_bundle.cell_context}
+        cell_bundle_ids = {w.input.original_bundle.id for w in bundles
+                           if w.input.original_bundle.cell_context}
         donor_nets = {}    # (template id, instance path) → replica net list
         replica_wrapper_of = {}  # replica id → (template id, instance path)
         for w in bundles:
-            b = w.original_bundle
+            b = w.input.original_bundle
             if (b.cell_context and b.parent_id in cell_bundle_ids
                     and b.instances):
                 donor_nets[(b.parent_id, b.instances[0])] = list(b.net_names)
                 replica_wrapper_of[b.id] = (b.parent_id, b.instances[0])
         # Start synthetic IDs above any real bundle ID in the set.
-        max_id = max((w.original_bundle.id for w in bundles), default=-1)
+        max_id = max((w.input.original_bundle.id for w in bundles), default=-1)
         next_id = max_id + 1
         result = []
         expansion_map = {}  # original bundle id → [expanded wrappers]
         wrapper_at = {}     # (template id, instance path) → expanded wrapper
         for w in bundles:
-            b = w.original_bundle
+            b = w.input.original_bundle
             if not b.cell_context or not b.instances:
                 result.append(w)
                 continue
@@ -554,23 +554,23 @@ class BudaSession:
                 clone.net_names = donor_nets.get((b.id, inst_name),
                                                  list(b.net_names))
                 clone.instances = [inst_name]
-                new_w.original_bundle = clone
-                new_w.width = w.width
-                new_w.candidates = [self._offset_topology(t, dx, dy)
-                                    for t in w.candidates]
+                new_w.input.original_bundle = clone
+                new_w.input.width = w.input.width
+                new_w.input.candidates = [self._offset_topology(t, dx, dy)
+                                    for t in w.input.candidates]
                 # Reserve the instance footprint: until this local bundle is
                 # planned, its demand is parked as virtual usage so earlier
                 # (global) bundles leave room over the cell interior.
-                new_w.has_reservation = True
-                new_w.res_x1 = dx
-                new_w.res_y1 = dy
-                new_w.res_x2 = int(round(parent.x2))
-                new_w.res_y2 = int(round(parent.y2))
+                new_w.hier.has_reservation = True
+                new_w.hier.res_x1 = dx
+                new_w.hier.res_y1 = dy
+                new_w.hier.res_x2 = int(round(parent.x2))
+                new_w.hier.res_y2 = int(round(parent.y2))
                 # Rewrite cell-local block names to absolute paths so that
                 # ConnTopology can look them up in the global floorplan.
                 # Cell-local names have no "/" (e.g. "pa_i"); absolute names
                 # already contain the hierarchy separator.
-                for topo in new_w.candidates:
+                for topo in new_w.input.candidates:
                     topo.connected_block_names = [
                         inst_name + "/" + n if "/" not in n else n
                         for n in topo.connected_block_names
@@ -578,10 +578,10 @@ class BudaSession:
                 # Propagate topology pinning from template to each instance.
                 # Candidate indices are preserved (expansion offsets coordinates
                 # but keeps the same ordering as the template candidate list).
-                new_w.topology_pinned = w.topology_pinned
-                new_w.selected_topology_index = w.selected_topology_index
-                if w.pinned_seg_layers:
-                    new_w.pinned_seg_layers = list(w.pinned_seg_layers)
+                new_w.input.topology_pinned = w.input.topology_pinned
+                new_w.plan.selected_topology_index = w.plan.selected_topology_index
+                if w.input.pinned_seg_layers:
+                    new_w.input.pinned_seg_layers = list(w.input.pinned_seg_layers)
                 expansion_map[b.id].append(new_w)
                 wrapper_at[(b.id, inst_name)] = new_w
                 result.append(new_w)
@@ -638,12 +638,12 @@ class BudaSession:
         # Build a segment label map: (bundle_id, seg_idx) -> display name
         seg_label = {}
         for w in self.bundles:
-            bid   = w.original_bundle.id
-            nets  = w.original_bundle.get_net_names()
+            bid   = w.input.original_bundle.id
+            nets  = w.input.original_bundle.get_net_names()
             hint  = nets[0] if nets else f"B{bid}"
-            if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
+            if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
                 continue  # bundle has no topology (e.g. src==dst or no candidates generated)
-            topo  = w.candidates[w.selected_topology_index]
+            topo  = w.input.candidates[w.plan.selected_topology_index]
             for si, seg in enumerate(topo.segments):
                 lname = layer_names.get(seg.layer_hint, f"L{seg.layer_hint}")
                 seg_label[(bid, si)] = f"B{bid}.{lname}[{si}]"
@@ -793,7 +793,7 @@ class BudaSession:
 
             short_count = medium_count = long_count = 0
             for w in self.bundles:
-                bid = w.original_bundle.id
+                bid = w.input.original_bundle.id
                 if bid not in bid_max_span:
                     continue
                 max_span = bid_max_span[bid]
@@ -810,22 +810,22 @@ class BudaSession:
                 # Update per-segment layers for segments of this direction.
                 # If seg_layers is populated (from run_planner), update it directly;
                 # otherwise fall back to the legacy assigned_v/h_layer attribute.
-                if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
+                if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
                     continue
-                topo = w.candidates[w.selected_topology_index]
-                if w.seg_layers:
-                    sl = list(w.seg_layers)
+                topo = w.input.candidates[w.plan.selected_topology_index]
+                if w.plan.seg_layers:
+                    sl = list(w.plan.seg_layers)
                     for si, seg in enumerate(topo.segments):
                         seg_is_v = (seg.start.y != seg.end.y)
                         if (is_v and seg_is_v) or (not is_v and not seg_is_v):
                             if si < len(sl):
                                 sl[si] = new_layer
-                    w.seg_layers = sl
+                    w.plan.seg_layers = sl
                 else:
                     if is_v:
-                        w.assigned_v_layer = new_layer
+                        w.input.assigned_v_layer = new_layer
                     else:
-                        w.assigned_h_layer = new_layer
+                        w.input.assigned_h_layer = new_layer
 
             lo_name = layer_names.get(lo_layer, f"L{lo_layer}")
             hi_name = layer_names.get(hi_layer, f"L{hi_layer}")
@@ -858,20 +858,20 @@ class BudaSession:
         """
         states: dict[tuple, dict] = {}
         for bw in self.bundles:
-            if not bw.candidates or bw.selected_topology_index < 0 or bw.selected_topology_index >= len(bw.candidates):
+            if not bw.input.candidates or bw.plan.selected_topology_index < 0 or bw.plan.selected_topology_index >= len(bw.input.candidates):
                 continue
-            topo = bw.candidates[bw.selected_topology_index]
-            bid  = bw.original_bundle.id
+            topo = bw.input.candidates[bw.plan.selected_topology_index]
+            bid  = bw.input.original_bundle.id
             for si, seg in enumerate(topo.segments):
                 is_h = (seg.start.y == seg.end.y)
                 if is_h:
                     span_lo = float(min(seg.start.x, seg.end.x))
                     span_hi = float(max(seg.start.x, seg.end.x))
-                    layer   = bw.assigned_h_layer if bw.assigned_h_layer >= 0 else seg.layer_hint
+                    layer   = bw.input.assigned_h_layer if bw.input.assigned_h_layer >= 0 else seg.layer_hint
                 else:
                     span_lo = float(min(seg.start.y, seg.end.y))
                     span_hi = float(max(seg.start.y, seg.end.y))
-                    layer   = bw.assigned_v_layer if bw.assigned_v_layer >= 0 else seg.layer_hint
+                    layer   = bw.input.assigned_v_layer if bw.input.assigned_v_layer >= 0 else seg.layer_hint
                 states[(bid, si)] = {
                     'layer':          layer,
                     'track_position': float('nan'),   # unplaced sentinel
@@ -1056,15 +1056,15 @@ class BudaSession:
         with buda.ostream_redirect():
             assignments = self.planner.optimize_topologies(
                 self.bundles, self._planner_iterations)
-        bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
+        bid_to_wrapper = {w.input.original_bundle.id: w for w in self.bundles}
         for asn in assignments:
             w = bid_to_wrapper.get(asn.bundle_id)
             if w is not None:
-                w.selected_topology_index = asn.topo_index
-                w.assigned_v_layer = asn.v_layer_id
-                w.assigned_h_layer = asn.h_layer_id
-                w.seg_layers = list(asn.seg_layers)
-                w.seg_perp = list(asn.seg_perp)
+                w.plan.selected_topology_index = asn.topo_index
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.plan.seg_perp = list(asn.seg_perp)
 
     def _rerun_all(self):
         """Apply sidecar topology selections, re-run planner layer assignment,
@@ -1106,17 +1106,17 @@ class BudaSession:
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
-        bid_to_nbits = {w.original_bundle.id: len(w.original_bundle.get_net_names())
+        bid_to_nbits = {w.input.original_bundle.id: len(w.input.original_bundle.get_net_names())
                         for w in self.bundles}
         # Build ConnTopology per bundle for endpoint adj info.
         bid_to_cs = {}
         for w in self.bundles:
-            if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
-                bid_to_cs[w.original_bundle.id] = []
+            if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
+                bid_to_cs[w.input.original_bundle.id] = []
                 continue
             ct = buda.ConnTopology()
-            ct.build(w.candidates[w.selected_topology_index], self.fp)
-            bid_to_cs[w.original_bundle.id] = list(ct.segs())
+            ct.build(w.input.candidates[w.plan.selected_topology_index], self.fp)
+            bid_to_cs[w.input.original_bundle.id] = list(ct.segs())
 
         bus_segs = []
         for ts in self.nuts_result.segments:
@@ -1165,12 +1165,12 @@ class BudaSession:
         tidx = tid - 1  # Convert 1-based id to 0-based index
         found = False
         for w in self.bundles:
-            if w.original_bundle.id == bid:
-                if tidx < 0 or tidx >= len(w.candidates):
+            if w.input.original_bundle.id == bid:
+                if tidx < 0 or tidx >= len(w.input.candidates):
                     print(f"Error: invalid topology id {tid} for bundle {bid}")
                 else:
-                    w.selected_topology_index = tidx
-                    w.topology_pinned = True
+                    w.plan.selected_topology_index = tidx
+                    w.input.topology_pinned = True
                     print(f"Pinned bundle {bid} to topology {tid}")
                 found = True
                 break
@@ -1183,8 +1183,8 @@ class BudaSession:
                     print(f"Error: invalid topology id {tid} for bundle {bid}")
                 else:
                     for w in wrappers:
-                        w.selected_topology_index = tidx
-                        w.topology_pinned = True
+                        w.plan.selected_topology_index = tidx
+                        w.input.topology_pinned = True
                     n = len(wrappers)
                     print(f"Pinned bundle {bid} to topology {tid} "
                           f"({n} expanded instance{'s' if n > 1 else ''})")
@@ -1470,8 +1470,8 @@ class BudaSession:
             self.bundles = []
             for b in raw_bundles:
                 w = buda.BundleWrapper()
-                w.original_bundle = b
-                w.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
+                w.input.original_bundle = b
+                w.input.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} hbundles.")
         elif cmd == "run_hier_bundler":
@@ -1488,8 +1488,8 @@ class BudaSession:
             self.bundles = []
             for b in raw_bundles:
                 w = buda.BundleWrapper()
-                w.original_bundle = b
-                w.width = len(b.get_net_names()) * 1.5
+                w.input.original_bundle = b
+                w.input.width = len(b.get_net_names()) * 1.5
                 self.bundles.append(w)
             self._hier_bundles_orig = list(self.bundles)  # snapshot for dump_hbundles
             counts = {}
@@ -1526,7 +1526,7 @@ class BudaSession:
                 print(f"  (no {label} — run run_hier_bundler first)")
             else:
                 for w in source:
-                    b = w.original_bundle
+                    b = w.input.original_bundle
                     if filter_depth is not None and b.level != filter_depth:
                         continue
                     if b.drv_spec_depth >= 0:
@@ -1536,7 +1536,7 @@ class BudaSession:
                     else:
                         kind = "cross-block"
                     short_reason = b.reason[:50].rstrip(',')
-                    cands = len(w.candidates)
+                    cands = len(w.input.candidates)
                     inst_str = ""
                     if b.instances:
                         insts = list(b.instances)
@@ -1566,11 +1566,11 @@ class BudaSession:
                 topo_gen.set_double_detour(True)
             found = False
             for w in self.bundles:
-                if w.original_bundle.get_net_names()[0].startswith(hint):
-                    w.candidates = topo_gen.generate_candidates(src, dsts)
+                if w.input.original_bundle.get_net_names()[0].startswith(hint):
+                    w.input.candidates = topo_gen.generate_candidates(src, dsts)
                     label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
-                    print(f"Generated {len(w.candidates)} topologies for bundle "
-                          f"{w.original_bundle.id} ({label})")
+                    print(f"Generated {len(w.input.candidates)} topologies for bundle "
+                          f"{w.input.original_bundle.id} ({label})")
                     found = True
             if not found: print(f"Warning: Could not find bundle matching hint {hint}")
 
@@ -1590,16 +1590,16 @@ class BudaSession:
             if use_double_detour:
                 topo_gen.set_double_detour(True)
             for w in self.bundles:
-                net_name = w.original_bundle.get_net_names()[0]
+                net_name = w.input.original_bundle.get_net_names()[0]
                 ep = self._net_endpoints.get(net_name)
                 if ep is None:
-                    print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.original_bundle.id}")
+                    print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
                     continue
                 src, dsts = ep
-                w.candidates = topo_gen.generate_candidates(src, dsts)
+                w.input.candidates = topo_gen.generate_candidates(src, dsts)
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
-                print(f"Generated {len(w.candidates)} topologies for bundle "
-                      f"{w.original_bundle.id} ({label})")
+                print(f"Generated {len(w.input.candidates)} topologies for bundle "
+                      f"{w.input.original_bundle.id} ({label})")
 
         elif cmd == "generate_hier_topologies":
             # generate_hier_topologies [center_mode] [double_detour]
@@ -1637,10 +1637,10 @@ class BudaSession:
                 print(f"Error: invalid bundle_id {args[0]!r}"); return
             use_center        = "center_mode"   in args[1:]
             use_double_detour = "double_detour" in args[1:]
-            target_w = next((w for w in self.bundles if w.original_bundle.id == bid), None)
+            target_w = next((w for w in self.bundles if w.input.original_bundle.id == bid), None)
             if target_w is None:
                 orig_w = next((w for w in self._hier_bundles_orig
-                               if w.original_bundle.id == bid), None)
+                               if w.input.original_bundle.id == bid), None)
                 if orig_w is not None:
                     print(f"Note: bundle {bid} was expanded by run_planner hier — "
                           f"re-run generate_hier_topologies before planning.")
@@ -1704,9 +1704,9 @@ class BudaSession:
                 # priority = -(level * 10000 + n_candidates): higher routes first.
                 # Depth-0 before depth-1; fewer candidates (less flexibility) first.
                 for w in expanded:
-                    b = w.original_bundle
-                    w.priority = -(b.level * 10_000 + len(w.candidates))
-                    w.level    = b.level   # for the per-level planning summary
+                    b = w.input.original_bundle
+                    w.hier.priority = -(b.level * 10_000 + len(w.input.candidates))
+                    w.hier.level    = b.level   # for the per-level planning summary
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
@@ -1716,15 +1716,15 @@ class BudaSession:
                     assignments = self.planner.optimize_topologies(expanded, iterations)
                 # Apply assignments.  Each expanded wrapper has a unique HBundle ID so
                 # this lookup is unambiguous even for multiple cell instances.
-                bid_to_wrapper = {w.original_bundle.id: w for w in expanded}
+                bid_to_wrapper = {w.input.original_bundle.id: w for w in expanded}
                 for asn in assignments:
                     w = bid_to_wrapper.get(asn.bundle_id)
                     if w is not None:
-                        w.selected_topology_index = asn.topo_index
-                        w.assigned_v_layer = asn.v_layer_id
-                        w.assigned_h_layer = asn.h_layer_id
-                        w.seg_layers = list(asn.seg_layers)
-                        w.seg_perp = list(asn.seg_perp)
+                        w.plan.selected_topology_index = asn.topo_index
+                        w.input.assigned_v_layer = asn.v_layer_id
+                        w.input.assigned_h_layer = asn.h_layer_id
+                        w.plan.seg_layers = list(asn.seg_layers)
+                        w.plan.seg_perp = list(asn.seg_perp)
                 self.bundles = expanded
                 print(f"run_planner hier: {len(self.bundles)} wrappers after expansion")
             else:
@@ -1739,15 +1739,15 @@ class BudaSession:
                 with buda.ostream_redirect():
                     assignments = self.planner.optimize_topologies(self.bundles, self._planner_iterations)
                 # Apply planner layer decisions (vector copy in C++ means we must apply here).
-                bid_to_wrapper = {w.original_bundle.id: w for w in self.bundles}
+                bid_to_wrapper = {w.input.original_bundle.id: w for w in self.bundles}
                 for asn in assignments:
                     w = bid_to_wrapper.get(asn.bundle_id)
                     if w is not None:
-                        w.selected_topology_index = asn.topo_index
-                        w.assigned_v_layer = asn.v_layer_id
-                        w.assigned_h_layer = asn.h_layer_id
-                        w.seg_layers = list(asn.seg_layers)
-                        w.seg_perp = list(asn.seg_perp)
+                        w.plan.selected_topology_index = asn.topo_index
+                        w.input.assigned_v_layer = asn.v_layer_id
+                        w.input.assigned_h_layer = asn.h_layer_id
+                        w.plan.seg_layers = list(asn.seg_layers)
+                        w.plan.seg_perp = list(asn.seg_perp)
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             pitch = float(args[0]) if args else 1.0
@@ -2004,9 +2004,9 @@ class BudaSession:
             # per instance.  We keep the first instance and annotate it.
             cell_seen: dict[tuple, tuple[object, int]] = {}  # key → (wrapper, count)
             for w in self.bundles:
-                if not w.candidates: continue
-                bid  = w.original_bundle.id
-                b    = w.original_bundle
+                if not w.input.candidates: continue
+                bid  = w.input.original_bundle.id
+                b    = w.input.original_bundle
                 if bid in seen: continue
                 cell_key = (b.cell_context, b.reason) if b.cell_context else None
                 if cell_key is not None:
@@ -2026,14 +2026,14 @@ class BudaSession:
                 print(f"Warning: no bundle with candidates matching {hints or '(any)'}")
             else:
                 for w in wrappers:
-                    b = w.original_bundle
+                    b = w.input.original_bundle
                     cell_key = (b.cell_context, b.reason) if b.cell_context else None
                     inst_note = ""
                     if cell_key is not None and cell_key in cell_seen:
                         cnt = cell_seen[cell_key][1]
                         if cnt > 1:
                             inst_note = f" ({cnt} instances — showing first)"
-                    print(f"  bundle {b.id}: {len(w.candidates)} topologies{inst_note}")
+                    print(f"  bundle {b.id}: {len(w.input.candidates)} topologies{inst_note}")
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path(),
                                  layer_stack=self.layers).show()
@@ -2249,7 +2249,7 @@ class BudaSession:
         # topology has been selected yet (before run_planner).
         if stage == "topo" and not all_candidates:
             no_selection = all(
-                not w.candidates or w.selected_topology_index < 0
+                not w.input.candidates or w.plan.selected_topology_index < 0
                 for w in self.bundles
             )
             if no_selection:
@@ -2263,8 +2263,8 @@ class BudaSession:
             fp_block_names = {name for name, _ in self.fp.get_all_blocks()}
             missing = set()
             for w in self.bundles:
-                if w.candidates and w.selected_topology_index >= 0:
-                    topo = w.candidates[w.selected_topology_index]
+                if w.input.candidates and w.plan.selected_topology_index >= 0:
+                    topo = w.input.candidates[w.plan.selected_topology_index]
                     for bname in topo.connected_block_names:
                         if bname not in fp_block_names:
                             missing.add(bname)
@@ -2289,11 +2289,11 @@ class BudaSession:
 
         total = 0
         for w in self.bundles:
-            if not w.candidates:
+            if not w.input.candidates:
                 continue
-            bid = w.original_bundle.id
+            bid = w.input.original_bundle.id
 
-            b = w.original_bundle
+            b = w.input.original_bundle
             check_fp = self.fp
             if (self.bdb is not None and isinstance(b, buda.HBundle)
                     and id(w) not in expanded_ids):
@@ -2302,10 +2302,10 @@ class BudaSession:
                     check_fp = resolved
 
             if all_candidates and stage == "topo":
-                to_check = list(enumerate(w.candidates))
-            elif w.selected_topology_index >= 0:
-                idx = w.selected_topology_index
-                to_check = [(idx, w.candidates[idx])]
+                to_check = list(enumerate(w.input.candidates))
+            elif w.plan.selected_topology_index >= 0:
+                idx = w.plan.selected_topology_index
+                to_check = [(idx, w.input.candidates[idx])]
             else:
                 continue
 
@@ -2318,7 +2318,7 @@ class BudaSession:
                 elif stage == "nuts":
                     res = buda.check_nuts(ct, self.nuts_result, topo, check_fp, self.layers, bid)
                 else:
-                    num_bits = len(w.original_bundle.get_net_names())
+                    num_bits = len(w.input.original_bundle.get_net_names())
                     res = buda.check_dnuts(ct, self.detailed_result, topo, check_fp,
                                            self.layers, bid, num_bits)
 
