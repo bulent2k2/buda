@@ -20,6 +20,10 @@ find_package(pybind11 REQUIRED)
 
 set(SOURCE_FILES
     src/bindings.cpp
+    src/bind_db.cpp
+    src/bind_bundler.cpp
+    src/bind_routing.cpp
+    src/bind_nuts.cpp
     # ── as-is from v2 ─────────────────────────────────────────────
     src/topology.cpp
     src/conn_topology.cpp
