@@ -141,9 +141,11 @@ void bind_routing(py::module_& m) {
     // ── TopologyGenerator ─────────────────────────────────────────────────
     py::class_<TopologyGenerator>(m, "TopologyGenerator")
         .def(py::init<const Floorplan&>())
-        .def("set_busterm_mode",  &TopologyGenerator::set_busterm_mode)
-        .def("set_double_detour", &TopologyGenerator::set_double_detour)
-        .def("set_layer_ids",     &TopologyGenerator::set_layer_ids)
+        .def("set_busterm_mode",   &TopologyGenerator::set_busterm_mode)
+        .def("set_double_detour",  &TopologyGenerator::set_double_detour)
+        .def("set_layer_ids",      &TopologyGenerator::set_layer_ids)
+        .def("set_all_h_layers",   &TopologyGenerator::set_all_h_layers)
+        .def("set_all_v_layers",   &TopologyGenerator::set_all_v_layers)
         .def("generate_candidates", [](TopologyGenerator& self,
                                        const std::string& src,
                                        py::object dsts) {

@@ -107,6 +107,47 @@ Segment make_seg(int x1, int y1, int x2, int y2, int layer) {
     Segment s; s.start={x1,y1}; s.end={x2,y2}; s.layer_hint=layer; return s;
 }
 
+// ── Keepout helpers ─────────────────────────────────────────────────────────
+
+// Returns true if a horizontal segment at y crossing [x1,x2] overlaps keepout.
+static bool h_seg_overlaps_keepout(int x1, int x2, int y, const KeepoutZone& koz) {
+    return y  >= koz.bbox.y1 && y  <= koz.bbox.y2 &&
+           x1 <= koz.bbox.x2 && x2 >= koz.bbox.x1;
+}
+
+// Returns true if a vertical segment at x crossing [y1,y2] overlaps keepout.
+static bool v_seg_overlaps_keepout(int x, int y1, int y2, const KeepoutZone& koz) {
+    return x  >= koz.bbox.x1 && x  <= koz.bbox.x2 &&
+           y1 <= koz.bbox.y2 && y2 >= koz.bbox.y1;
+}
+
+// Returns true if the segment is blocked on ALL layers in candidate_layers by
+// the given keepout list.  A keepout with empty layer_ids blocks all layers.
+static bool all_layers_blocked_by_keepouts(
+    const Segment& seg,
+    const std::vector<int>& candidate_layers,
+    const std::vector<KeepoutZone>& keepouts)
+{
+    if (candidate_layers.empty() || keepouts.empty()) return false;
+    bool is_h = (seg.start.y == seg.end.y);
+    int x1 = std::min(seg.start.x, seg.end.x);
+    int x2 = std::max(seg.start.x, seg.end.x);
+    int y1 = std::min(seg.start.y, seg.end.y);
+    int y2 = std::max(seg.start.y, seg.end.y);
+    for (int layer : candidate_layers) {
+        bool blocked = false;
+        for (const auto& koz : keepouts) {
+            bool koz_covers = koz.layer_ids.empty() || koz.layer_ids.count(layer);
+            if (!koz_covers) continue;
+            bool crosses = is_h ? h_seg_overlaps_keepout(x1, x2, y1, koz)
+                                : v_seg_overlaps_keepout(x1, y1, y2, koz);
+            if (crosses) { blocked = true; break; }
+        }
+        if (!blocked) return false;  // found a free layer — not all blocked
+    }
+    return true;
+}
+
 static int clamp(int value, int lo, int hi) {
     return std::max(lo, std::min(hi, value));
 }
@@ -1029,6 +1070,12 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
 
+bool TopologyGenerator::segment_blocked_on_all_layers(const Segment& seg) const {
+    bool is_h = (seg.start.y == seg.end.y);
+    const std::vector<int>& layers = is_h ? all_h_layers_ : all_v_layers_;
+    return all_layers_blocked_by_keepouts(seg, layers, floorplan_.get_keepout_zones());
+}
+
 // ---------------------------------------------------------------------------
 // Multi-pin topology generation
 // ---------------------------------------------------------------------------
@@ -1087,6 +1134,21 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     std::vector<int> hanan_x, hanan_y;
     bundle_hanan_grid(all_rects_for_hanan, hanan_x, hanan_y);
 
+    // Include keepout edges in the local Hanan grid so trunk midpoints naturally
+    // fall above/below keepout bands rather than inside them.
+    const auto& keepouts = floorplan_.get_keepout_zones();
+    if (!keepouts.empty()) {
+        for (const auto& koz : keepouts) {
+            hanan_x.push_back(koz.bbox.x1); hanan_x.push_back(koz.bbox.x2);
+            hanan_y.push_back(koz.bbox.y1); hanan_y.push_back(koz.bbox.y2);
+        }
+        auto su = [](std::vector<int>& v) {
+            std::sort(v.begin(), v.end());
+            v.erase(std::unique(v.begin(), v.end()), v.end());
+        };
+        su(hanan_x); su(hanan_y);
+    }
+
     std::set<int> y_set, x_set;
     for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {
         int mid = (hanan_y[i] + hanan_y[i+1]) / 2;
@@ -1097,8 +1159,26 @@ std::vector<Topology> TopologyGenerator::generate_npin(
         if (mid > x_lo && mid < x_hi) x_set.insert(mid);
     }
 
-    for (int y_t : y_set) add_trunk_h(pins, blocks, y_t, false, results);
-    for (int x_t : x_set) add_trunk_v(pins, blocks, x_t, false, results);
+    // Keepout-aware trunk filtering: skip trunk positions where ALL candidate
+    // layers for that direction are blocked by keepouts spanning the full x/y
+    // extent of the block set.  Partial blocking (some layers free) is left
+    // to the planner/NUTS to resolve via layer reassignment.
+    for (int y_t : y_set) {
+        if (!keepouts.empty()) {
+            Segment trunk_probe = make_seg(x_lo, y_t, x_hi, y_t, h_layer_);
+            if (all_layers_blocked_by_keepouts(trunk_probe, all_h_layers_, keepouts))
+                continue;
+        }
+        add_trunk_h(pins, blocks, y_t, false, results);
+    }
+    for (int x_t : x_set) {
+        if (!keepouts.empty()) {
+            Segment trunk_probe = make_seg(x_t, y_lo, x_t, y_hi, v_layer_);
+            if (all_layers_blocked_by_keepouts(trunk_probe, all_v_layers_, keepouts))
+                continue;
+        }
+        add_trunk_v(pins, blocks, x_t, false, results);
+    }
 
     {
         int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/,   v_layer_);
@@ -1107,25 +1187,56 @@ std::vector<Topology> TopologyGenerator::generate_npin(
             int margin_y = std::max({m_v, 1, (int)(0.1 * (hanan_y.back() - hanan_y[0]))});
             for (int i = 0; i + 1 < (int)hanan_y.size(); ++i) {
                 int mid = (hanan_y[i] + hanan_y[i+1]) / 2;
-                if (mid < y_lo || mid > y_hi)
+                if (mid < y_lo || mid > y_hi) {
+                    if (!keepouts.empty()) {
+                        Segment tp = make_seg(x_lo, mid, x_hi, mid, h_layer_);
+                        if (all_layers_blocked_by_keepouts(tp, all_h_layers_, keepouts)) continue;
+                    }
                     add_trunk_h(pins, blocks, mid, true, results);
+                }
             }
-            add_trunk_h(pins, blocks, hanan_y[0]      - margin_y, true, results);
-            add_trunk_h(pins, blocks, hanan_y.back()  + margin_y, true, results);
+            {
+                int y_bot = hanan_y[0] - margin_y;
+                if (keepouts.empty() || !all_layers_blocked_by_keepouts(
+                        make_seg(x_lo, y_bot, x_hi, y_bot, h_layer_), all_h_layers_, keepouts))
+                    add_trunk_h(pins, blocks, y_bot, true, results);
+            }
+            {
+                int y_top = hanan_y.back() + margin_y;
+                if (keepouts.empty() || !all_layers_blocked_by_keepouts(
+                        make_seg(x_lo, y_top, x_hi, y_top, h_layer_), all_h_layers_, keepouts))
+                    add_trunk_h(pins, blocks, y_top, true, results);
+            }
         }
         if ((int)hanan_x.size() >= 2) {
             int margin_x = std::max({m_h, 1, (int)(0.1 * (hanan_x.back() - hanan_x[0]))});
             for (int i = 0; i + 1 < (int)hanan_x.size(); ++i) {
                 int mid = (hanan_x[i] + hanan_x[i+1]) / 2;
-                if (mid < x_lo || mid > x_hi)
+                if (mid < x_lo || mid > x_hi) {
+                    if (!keepouts.empty()) {
+                        Segment tp = make_seg(mid, y_lo, mid, y_hi, v_layer_);
+                        if (all_layers_blocked_by_keepouts(tp, all_v_layers_, keepouts)) continue;
+                    }
                     add_trunk_v(pins, blocks, mid, true, results);
+                }
             }
-            add_trunk_v(pins, blocks, hanan_x[0]      - margin_x, true, results);
-            add_trunk_v(pins, blocks, hanan_x.back()  + margin_x, true, results);
+            {
+                int x_lft = hanan_x[0] - margin_x;
+                if (keepouts.empty() || !all_layers_blocked_by_keepouts(
+                        make_seg(x_lft, y_lo, x_lft, y_hi, v_layer_), all_v_layers_, keepouts))
+                    add_trunk_v(pins, blocks, x_lft, true, results);
+            }
+            {
+                int x_rgt = hanan_x.back() + margin_x;
+                if (keepouts.empty() || !all_layers_blocked_by_keepouts(
+                        make_seg(x_rgt, y_lo, x_rgt, y_hi, v_layer_), all_v_layers_, keepouts))
+                    add_trunk_v(pins, blocks, x_rgt, true, results);
+            }
         }
     }
 
     for (auto& t : results) annotate_endpoints(t, blocks);
+    add_trunk_mst_candidates(blocks, results);
     add_mst_candidates(blocks, results);
     add_multi_trunk_candidates(pins, blocks, results);
     annotate_and_sort(results);
@@ -1140,12 +1251,11 @@ std::vector<Topology> TopologyGenerator::generate_npin(
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                                            std::vector<Topology>& results) {
     // MST topologies model daisy-chain connections (each block connects to its
-    // nearest neighbour rather than to a shared trunk spine).  For ≤3 blocks the
-    // MST tree has only 1–2 edges: with 2 blocks it degenerates to an L-shape
-    // already covered by TRUNK candidates; with 3 blocks it is genuinely unique
-    // only in "chain" geometries (one dst geometrically between src and the
-    // other), which are rare in practice.  Starting at 4 blocks the tree
-    // structure is always richer than any single-spine TRUNK.
+    // nearest neighbour rather than to a shared trunk spine).  For 2 blocks this
+    // degenerates to an L-shape already covered by TRUNK candidates.  For 3 blocks
+    // the TRUNK+MST hybrid (add_trunk_mst_candidates) already provides MST-like
+    // inter-block connectivity on top of the trunk spine.  Standalone MST starts
+    // at 4 blocks where the pure tree structure offers something distinct.
     if (blocks.size() < 4) return;
 
     // Use individual rects for multi-rect blocks so that closest_points finds
@@ -1236,6 +1346,112 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         if (valid) {
             annotate_endpoints(mst, blocks);
             results.push_back(std::move(mst));
+        }
+    }
+}
+
+void TopologyGenerator::add_trunk_mst_candidates(
+    const std::vector<Busterm>& blocks,
+    std::vector<Topology>& results)
+{
+    // For each TRUNK_H/V topology, identify BRANCH blocks (those with explicit
+    // stubs, i.e. not pass-through).  Compute an MST among the branch blocks
+    // and add inter-branch edges as extra segments, creating TRUNK+MST hybrids
+    // that provide direct block-to-block shortcuts alongside the trunk spine.
+    int orig_count = (int)results.size();
+    int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+    int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/,   v_layer_);
+
+    for (int ti = 0; ti < orig_count; ++ti) {
+        const Topology& trunk_topo = results[ti];
+        bool is_h = (trunk_topo.type.find("TRUNK_H") != std::string::npos);
+        bool is_v = (trunk_topo.type.find("TRUNK_V") != std::string::npos);
+        if (!is_h && !is_v) continue;
+        // Don't cascade: skip topologies that are already TRUNK+MST.
+        if (trunk_topo.type.find("+MST") != std::string::npos) continue;
+
+        int trunk_pos = trunk_topo.trunk_location;
+
+        // BRANCH blocks: blocks whose orig_bbox does NOT contain trunk_pos.
+        // Pass-through (spine) blocks straddle the trunk; they need no stub
+        // and are already connected via the trunk passing through their bbox.
+        std::vector<int> branch_idx;
+        for (int i = 0; i < (int)blocks.size(); ++i) {
+            bool is_spine = is_h
+                ? (blocks[i].orig_bbox.y1 <= trunk_pos && trunk_pos <= blocks[i].orig_bbox.y2)
+                : (blocks[i].orig_bbox.x1 <= trunk_pos && trunk_pos <= blocks[i].orig_bbox.x2);
+            if (!is_spine) branch_idx.push_back(i);
+        }
+        // Need ≥2 branch blocks to compute an inter-branch MST.
+        if (branch_idx.size() < 2) continue;
+
+        // Build MST among branch blocks.  Use the block rect nearest to the
+        // trunk as the representative rect for each block.
+        std::vector<std::pair<std::string, Rect>> nodes;
+        for (int idx : branch_idx) {
+            const Busterm& bt = blocks[idx];
+            auto rects = bt.rects.empty() ? std::vector<Rect>{bt.orig_bbox} : bt.rects;
+            Rect best = rects[0];
+            int  best_d = INT_MAX;
+            for (const auto& r : rects) {
+                Rect tp = is_h ? Rect{r.x1, trunk_pos, r.x2, trunk_pos}
+                               : Rect{trunk_pos, r.y1, trunk_pos, r.y2};
+                int d = manhattan_nearest(tp, r);
+                if (d < best_d) { best_d = d; best = r; }
+            }
+            nodes.emplace_back(bt.block_name, best);
+        }
+
+        auto mst_edges = compute_mst(nodes);
+        if (mst_edges.empty()) continue;
+
+        // Build new topology: copy trunk + append MST inter-branch edge segments.
+        // Place "+MST" before the "@..." positional tag so substring checks work.
+        Topology new_t = trunk_topo;
+        {
+            auto at = trunk_topo.type.find('@');
+            new_t.type = (at != std::string::npos)
+                ? trunk_topo.type.substr(0, at) + "+MST" + trunk_topo.type.substr(at)
+                : trunk_topo.type + "+MST";
+        }
+
+        bool valid = true;
+        for (const auto& edge : mst_edges) {
+            const Rect& r_u = nodes[edge.u].second;
+            const Rect& r_v = nodes[edge.v].second;
+            Point p1, p2;
+            closest_points(r_u, r_v, p1, p2);
+            if (p1.x == p2.x && p1.y == p2.y) continue;
+
+            if (p1.x == p2.x) {
+                if (std::abs(p2.y - p1.y) < m_v) { valid = false; break; }
+                new_t.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+            } else if (p1.y == p2.y) {
+                if (std::abs(p2.x - p1.x) < m_h) { valid = false; break; }
+                new_t.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+            } else {
+                // Diagonal L-shape: both legs must meet their minimum length,
+                // otherwise the edge would stop short of the branch block and
+                // leave a dangling shortcut.  Reject the whole candidate (same
+                // as standalone MST) rather than emit an incomplete edge.
+                if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v) {
+                    valid = false; break;
+                }
+                if (is_h) {
+                    // first perpendicular to trunk direction, then along it
+                    new_t.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+                    new_t.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
+                } else {
+                    new_t.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+                    new_t.segments.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+                }
+            }
+        }
+
+        // Only emit if extra segments were actually added (safety: no duplicate trunks).
+        if (valid && new_t.segments.size() > trunk_topo.segments.size()) {
+            annotate_endpoints(new_t, blocks);
+            results.push_back(std::move(new_t));
         }
     }
 }
@@ -1383,6 +1599,29 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
         add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
     annotate_and_sort(candidates);
+
+    // Keepout filtering for 2-pin: remove topologies whose trunk segment is
+    // blocked on all available layers.  OOB/U-shape segments outside the
+    // keepout are not affected; only fully-blocked in-bbox segments are culled.
+    {
+        const auto& kos = floorplan_.get_keepout_zones();
+        if (!kos.empty()) {
+            candidates.erase(
+                std::remove_if(candidates.begin(), candidates.end(),
+                    [&](const Topology& t) {
+                        for (const auto& seg : t.segments) {
+                            bool is_h = (seg.start.y == seg.end.y);
+                            const std::vector<int>& layers =
+                                is_h ? all_h_layers_ : all_v_layers_;
+                            if (all_layers_blocked_by_keepouts(seg, layers, kos))
+                                return true;
+                        }
+                        return false;
+                    }),
+                candidates.end());
+        }
+    }
+
     filter_pinched(candidates);
     for (auto& t : candidates)
         if (t.connected_block_names.empty())

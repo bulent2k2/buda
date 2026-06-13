@@ -599,6 +599,17 @@ class BudaSession:
         v = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
         if h != -1 and v != -1:
             tg.set_layer_ids(h, v)
+            # Inform the generator of ALL same-direction layers so keepout
+            # avoidance only suppresses a trunk position when every routable
+            # layer for that direction is blocked.  Without this, a keepout on
+            # the preferred (TOP) layer alone would wrongly cull candidates the
+            # planner could legally reassign to a free same-direction layer.
+            h_all = self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL)
+            v_all = self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL)
+            if h_all:
+                tg.set_all_h_layers(h_all)
+            if v_all:
+                tg.set_all_v_layers(v_all)
         if use_center:
             tg.set_busterm_mode(False)
         if use_double_detour:
@@ -1558,15 +1569,7 @@ class BudaSession:
                 print("Error: generate_topologies_for_bundle requires a hint")
                 return
             hint = pos_args[0]
-            topo_gen = buda.TopologyGenerator(self.fp)
-            h_layer = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
-            v_layer = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
-            if h_layer != -1 and v_layer != -1:
-                topo_gen.set_layer_ids(h_layer, v_layer)
-            if use_center:
-                topo_gen.set_busterm_mode(False)
-            if use_double_detour:
-                topo_gen.set_double_detour(True)
+            topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour)
             found = False
             for w in self.bundles:
                 net_name = w.input.original_bundle.get_net_names()[0]
@@ -1589,15 +1592,7 @@ class BudaSession:
             # deriving src/dst block names from the netlist automatically.
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
-            topo_gen = buda.TopologyGenerator(self.fp)
-            h_layer = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
-            v_layer = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
-            if h_layer != -1 and v_layer != -1:
-                topo_gen.set_layer_ids(h_layer, v_layer)
-            if use_center:
-                topo_gen.set_busterm_mode(False)
-            if use_double_detour:
-                topo_gen.set_double_detour(True)
+            topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour)
             for w in self.bundles:
                 net_name = w.input.original_bundle.get_net_names()[0]
                 ep = self._net_endpoints.get(net_name)
