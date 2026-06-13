@@ -226,6 +226,16 @@ private:
     int    _units = 1000;
     double _die_w = 0.0, _die_h = 0.0;
 
+    // Cached prepared statements for hot read paths.
+    // Lazily prepared on first use; reset (not finalized) between calls.
+    // Finalized in the destructor.
+    mutable sqlite3_stmt* _q_all_components     = nullptr;
+    mutable sqlite3_stmt* _q_components_at_depth= nullptr;
+    mutable sqlite3_stmt* _q_all_nets           = nullptr;
+    mutable sqlite3_stmt* _q_all_pins           = nullptr;
+    mutable sqlite3_stmt* _q_pins_by_comp       = nullptr;
+    mutable sqlite3_stmt* _q_all_busterms       = nullptr;
+
     void _exec(const char* sql);
     void _create_schema();
     // Insert a pin for net_id at the component named inst_path, auto-register

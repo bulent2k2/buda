@@ -33,7 +33,14 @@ BDB::BDB(const std::string& db_path) {
 }
 
 BDB::~BDB() {
-    if (_db) sqlite3_close(_db);
+    if (!_db) return;
+    sqlite3_finalize(_q_all_components);
+    sqlite3_finalize(_q_components_at_depth);
+    sqlite3_finalize(_q_all_nets);
+    sqlite3_finalize(_q_all_pins);
+    sqlite3_finalize(_q_pins_by_comp);
+    sqlite3_finalize(_q_all_busterms);
+    sqlite3_close(_db);
 }
 
 void BDB::_exec(const char* sql) {
@@ -828,11 +835,15 @@ void BDB::compute_all() { compute_hpwl(); compute_fanout(); }
 // ── Bulk queries ─────────────────────────────────────────────────────────────
 
 std::vector<ComponentRow> BDB::all_components() const {
+    if (!_q_all_components)
+        sqlite3_prepare_v2(_db,
+            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
+            " FROM component ORDER BY id",
+            -1, &_q_all_components, nullptr);
+    sqlite3_reset(_q_all_components);
     std::vector<ComponentRow> rows;
-    Stmt q(_db,
-        "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
-        " FROM component ORDER BY id");
-    while (sqlite3_step(q)==SQLITE_ROW) {
+    while (sqlite3_step(_q_all_components) == SQLITE_ROW) {
+        auto q = _q_all_components;
         ComponentRow r;
         r.id           = sqlite3_column_int(q,0);
         r.name         = (const char*)sqlite3_column_text(q,1);
@@ -851,19 +862,26 @@ std::vector<ComponentRow> BDB::all_components() const {
 }
 
 std::vector<NetRow> BDB::all_nets() const {
+    if (!_q_all_nets)
+        sqlite3_prepare_v2(_db, "SELECT id,name FROM net ORDER BY name",
+                           -1, &_q_all_nets, nullptr);
+    sqlite3_reset(_q_all_nets);
     std::vector<NetRow> rows;
-    Stmt q(_db, "SELECT id,name FROM net ORDER BY name");
-    while (sqlite3_step(q)==SQLITE_ROW)
-        rows.push_back({sqlite3_column_int(q,0),
-                        (const char*)sqlite3_column_text(q,1)});
+    while (sqlite3_step(_q_all_nets) == SQLITE_ROW)
+        rows.push_back({sqlite3_column_int(_q_all_nets, 0),
+                        (const char*)sqlite3_column_text(_q_all_nets, 1)});
     return rows;
 }
 
 std::vector<PinRow> BDB::all_pins() const {
+    if (!_q_all_pins)
+        sqlite3_prepare_v2(_db,
+            "SELECT p.net_id, p.comp_id, p.pin_name, p.dir, p.px, p.py FROM pin p",
+            -1, &_q_all_pins, nullptr);
+    sqlite3_reset(_q_all_pins);
     std::vector<PinRow> rows;
-    Stmt q(_db,
-        "SELECT p.net_id, p.comp_id, p.pin_name, p.dir, p.px, p.py FROM pin p");
-    while (sqlite3_step(q)==SQLITE_ROW) {
+    while (sqlite3_step(_q_all_pins) == SQLITE_ROW) {
+        auto q = _q_all_pins;
         PinRow r;
         r.net_id   = sqlite3_column_int(q,0);
         r.comp_id  = sqlite3_column_int(q,1);
@@ -1739,12 +1757,16 @@ void BDB::clear_busterms() {
 }
 
 std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
+    if (!_q_components_at_depth)
+        sqlite3_prepare_v2(_db,
+            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
+            " FROM component WHERE depth=? ORDER BY id",
+            -1, &_q_components_at_depth, nullptr);
+    sqlite3_reset(_q_components_at_depth);
+    sqlite3_bind_int(_q_components_at_depth, 1, depth);
     std::vector<ComponentRow> rows;
-    Stmt q(_db,
-        "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
-        " FROM component WHERE depth=? ORDER BY id");
-    sqlite3_bind_int(q, 1, depth);
-    while (sqlite3_step(q) == SQLITE_ROW) {
+    while (sqlite3_step(_q_components_at_depth) == SQLITE_ROW) {
+        auto q = _q_components_at_depth;
         ComponentRow r;
         r.id           = sqlite3_column_int(q, 0);
         r.name         = (const char*)sqlite3_column_text(q, 1);
@@ -1763,11 +1785,15 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
 }
 
 std::vector<PinRow> BDB::pins_by_comp(int comp_id) const {
+    if (!_q_pins_by_comp)
+        sqlite3_prepare_v2(_db,
+            "SELECT net_id,comp_id,pin_name,dir,px,py FROM pin WHERE comp_id=?",
+            -1, &_q_pins_by_comp, nullptr);
+    sqlite3_reset(_q_pins_by_comp);
+    sqlite3_bind_int(_q_pins_by_comp, 1, comp_id);
     std::vector<PinRow> rows;
-    Stmt q(_db,
-        "SELECT net_id,comp_id,pin_name,dir,px,py FROM pin WHERE comp_id=?");
-    sqlite3_bind_int(q, 1, comp_id);
-    while (sqlite3_step(q) == SQLITE_ROW) {
+    while (sqlite3_step(_q_pins_by_comp) == SQLITE_ROW) {
+        auto q = _q_pins_by_comp;
         PinRow r;
         r.net_id   = sqlite3_column_int(q, 0);
         r.comp_id  = sqlite3_column_int(q, 1);
@@ -1781,11 +1807,15 @@ std::vector<PinRow> BDB::pins_by_comp(int comp_id) const {
 }
 
 std::vector<BustermRow> BDB::all_busterms() const {
+    if (!_q_all_busterms)
+        sqlite3_prepare_v2(_db,
+            "SELECT id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,COALESCE(parent_id,'')"
+            " FROM busterm ORDER BY depth,id",
+            -1, &_q_all_busterms, nullptr);
+    sqlite3_reset(_q_all_busterms);
     std::vector<BustermRow> rows;
-    Stmt q(_db,
-        "SELECT id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,COALESCE(parent_id,'')"
-        " FROM busterm ORDER BY depth,id");
-    while (sqlite3_step(q) == SQLITE_ROW) {
+    while (sqlite3_step(_q_all_busterms) == SQLITE_ROW) {
+        auto q = _q_all_busterms;
         BustermRow r;
         r.id         = (const char*)sqlite3_column_text(q, 0);
         r.comp_id    = sqlite3_column_int(q, 1);
