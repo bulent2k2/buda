@@ -1430,17 +1430,20 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 if (std::abs(p2.x - p1.x) < m_h) { valid = false; break; }
                 new_t.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
             } else {
-                // L-shape: first perpendicular to trunk direction, then along it.
+                // Diagonal L-shape: both legs must meet their minimum length,
+                // otherwise the edge would stop short of the branch block and
+                // leave a dangling shortcut.  Reject the whole candidate (same
+                // as standalone MST) rather than emit an incomplete edge.
+                if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v) {
+                    valid = false; break;
+                }
                 if (is_h) {
-                    if (std::abs(p2.y - p1.y) < m_v) { valid = false; break; }
+                    // first perpendicular to trunk direction, then along it
                     new_t.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-                    if (std::abs(p2.x - p1.x) >= m_h)
-                        new_t.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
+                    new_t.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
                 } else {
-                    if (std::abs(p2.x - p1.x) < m_h) { valid = false; break; }
                     new_t.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-                    if (std::abs(p2.y - p1.y) >= m_v)
-                        new_t.segments.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+                    new_t.segments.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
                 }
             }
         }

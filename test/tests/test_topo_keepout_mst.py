@@ -317,6 +317,44 @@ def test_trunk_mst_wirelength_geq_trunk():
     pytest.skip("No overlapping trunk pair found")
 
 
+def test_trunk_mst_no_legs_shorter_than_min_stub():
+    """TRUNK+MST edges never emit a leg shorter than the minimum stub length.
+
+    Regression for the incomplete-L-leg bug: a diagonal branch-pair whose
+    second leg fell below the minimum was previously truncated, leaving a
+    dangling shortcut.  Now such an edge invalidates the whole candidate, so
+    every emitted TRUNK+MST segment must satisfy the per-direction minimum.
+    """
+    fp = buda.Floorplan()
+    # Two branch blocks with a small (10-unit) horizontal gap and a larger
+    # vertical separation — the diagonal MST edge would have a sub-minimum
+    # H leg under the default min stub length.
+    fp.add_block("A", 0,   0,   100, 100)   # spine block
+    fp.add_block("B", 300, 400, 400, 500)   # branch
+    fp.add_block("C", 410, 800, 510, 900)   # branch, 10-unit x gap from B's right
+    fp.set_min_stub_length(20)
+
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C"])
+
+    m_h = fp.get_min_stub_length(buda.LayerDir.HORIZONTAL, 4)
+    m_v = fp.get_min_stub_length(buda.LayerDir.VERTICAL, 5)
+    for c in cands:
+        if "+MST" not in c.type:
+            continue
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        for cs in ct.segs():
+            is_stub = any(co.kind == buda.SegConnKind.BUSTERM for co in cs.conns)
+            if not is_stub:
+                continue
+            length = abs(cs.along_hi - cs.along_lo)
+            m = m_h if cs.horiz else m_v
+            assert length >= m, (
+                f"TRUNK+MST {c.type} has sub-minimum stub: {length} < {m}"
+            )
+
+
 def test_mst_any_for_3_blocks():
     """Any MST-type candidate (TRUNK+MST hybrid) is present for 3 blocks.
 
