@@ -54,6 +54,9 @@ fi
 echo "Building target (buda)..."
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
+echo "Installing to src/..."
+cmake --install . --prefix "$REPO_DIR" 2>&1 | grep -v "^--"
+
 BUILD_END=$(date +%s)
 BUILD_DURATION=$((BUILD_END - BUILD_START))
 
