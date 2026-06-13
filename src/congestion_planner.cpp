@@ -97,10 +97,10 @@ static double band_available_length(
 
 void CongestionPlanner::build_congestion_map() {
     floorplan_.get_hanan_grid(x_grid_, y_grid_);
-    _rebuild_cuts();
+    rebuild_cuts_();
 }
 
-void CongestionPlanner::_rebuild_cuts() {
+void CongestionPlanner::rebuild_cuts_() {
     cuts_.clear();
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
@@ -127,17 +127,11 @@ void CongestionPlanner::_rebuild_cuts() {
             c.cut_coord = x_mid;
             c.dir       = LayerDir::VERTICAL;
             c.layer_id  = lid;
-            c.band_cap.resize(n_ybands);
-            c.band_usage.assign(n_ybands, 0.0);
-            for (int b = 0; b < n_ybands; ++b) {
-                if (is_top) {
-                    c.band_cap[b] = band_available_length(
-                            x_mid, true, {}, keepouts, lid, y_grid_[b], y_grid_[b+1]);
-                } else {
-                    c.band_cap[b] = band_available_length(
-                            x_mid, true, blocks, keepouts, lid, y_grid_[b], y_grid_[b+1]);
-                }
-            }
+            c.init_bands(n_ybands, [&](int b) {
+                return is_top
+                    ? band_available_length(x_mid, true, {}, keepouts, lid, y_grid_[b], y_grid_[b+1])
+                    : band_available_length(x_mid, true, blocks, keepouts, lid, y_grid_[b], y_grid_[b+1]);
+            });
             cuts_.push_back(std::move(c));
         }
     }
@@ -154,17 +148,11 @@ void CongestionPlanner::_rebuild_cuts() {
             c.cut_coord = y_mid;
             c.dir       = LayerDir::HORIZONTAL;
             c.layer_id  = lid;
-            c.band_cap.resize(n_xbands);
-            c.band_usage.assign(n_xbands, 0.0);
-            for (int b = 0; b < n_xbands; ++b) {
-                if (is_top) {
-                    c.band_cap[b] = band_available_length(
-                            y_mid, false, {}, keepouts, lid, x_grid_[b], x_grid_[b+1]);
-                } else {
-                    c.band_cap[b] = band_available_length(
-                            y_mid, false, blocks, keepouts, lid, x_grid_[b], x_grid_[b+1]);
-                }
-            }
+            c.init_bands(n_xbands, [&](int b) {
+                return is_top
+                    ? band_available_length(y_mid, false, {}, keepouts, lid, x_grid_[b], x_grid_[b+1])
+                    : band_available_length(y_mid, false, blocks, keepouts, lid, x_grid_[b], x_grid_[b+1]);
+            });
             cuts_.push_back(std::move(c));
         }
     }
@@ -175,7 +163,7 @@ void CongestionPlanner::_rebuild_cuts() {
         double min_cap = std::numeric_limits<double>::max();
         for (const auto& c : cuts_)
             if (c.layer_id == vid && c.dir == LayerDir::HORIZONTAL)
-                for (double bc : c.band_cap) min_cap = std::min(min_cap, bc);
+                for (int b = 0; b < c.num_bands(); ++b) min_cap = std::min(min_cap, c.cap(b));
         if (min_cap < std::numeric_limits<double>::max())
             std::cout << "  M" << vid << " (V)  min_band_cap=" << min_cap << "\n";
     }
@@ -183,7 +171,7 @@ void CongestionPlanner::_rebuild_cuts() {
         double min_cap = std::numeric_limits<double>::max();
         for (const auto& c : cuts_)
             if (c.layer_id == hid && c.dir == LayerDir::VERTICAL)
-                for (double bc : c.band_cap) min_cap = std::min(min_cap, bc);
+                for (int b = 0; b < c.num_bands(); ++b) min_cap = std::min(min_cap, c.cap(b));
         if (min_cap < std::numeric_limits<double>::max())
             std::cout << "  M" << hid << " (H)  min_band_cap=" << min_cap << "\n";
     }
@@ -235,11 +223,11 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
         if (is_h && c.dir == LayerDir::VERTICAL) {
             if (!(c.cut_coord >= lo && c.cut_coord < hi)) continue;
             int b = find_band(/*is_vcut=*/true, pp_h);
-            if (b >= 0 && b < (int)c.band_cap.size()) fn(ci, b);
+            if (b >= 0 && b < c.num_bands()) fn(ci, b);
         } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
             if (!(c.cut_coord >= lo && c.cut_coord < hi)) continue;
             int b = find_band(/*is_vcut=*/false, pp_v);
-            if (b >= 0 && b < (int)c.band_cap.size()) fn(ci, b);
+            if (b >= 0 && b < c.num_bands()) fn(ci, b);
         }
     }
 }
@@ -253,7 +241,7 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        double ov  = (c.band_usage[b] + eff_width) - cap;
+        double ov  = (c.usage(b) + eff_width) - cap;
         if (ov > peak) peak = ov;
     });
     return std::max(peak, 0.0);
@@ -272,7 +260,7 @@ void CongestionPlanner::collect_overflow_bands(const Segment& seg, int layer_id,
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        if ((c.band_usage[b] + eff_width) - cap > 0.0) out.insert({ci, b});
+        if ((c.usage(b) + eff_width) - cap > 0.0) out.insert({ci, b});
     });
 }
 
@@ -298,7 +286,7 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
 
 double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
                                           int slide_lo, int slide_hi) const {
-    double cap = c.band_cap[b];
+    double cap = c.cap(b);
     if (slide_lo == INT_MIN) return cap;
     const auto& grid = is_vcut ? y_grid_ : x_grid_;
     if (b + 1 >= (int)grid.size()) return cap;
@@ -310,7 +298,7 @@ double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcu
 void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double eff_width,
                                       int perp_pos_override) {
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
-        cuts_[ci].band_usage[b] += eff_width;
+        cuts_[ci].add_usage(b, eff_width);
     });
 }
 
@@ -340,9 +328,9 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
         const auto& grid = is_vcut ? y_grid_ : x_grid_;
         int plo = is_vcut ? bw.res_y1 : bw.res_x1;
         int phi = is_vcut ? bw.res_y2 : bw.res_x2;
-        for (int b = 0; b + 1 < (int)grid.size() && b < (int)c.band_usage.size(); ++b) {
+        for (int b = 0; b + 1 < (int)grid.size() && b < c.num_bands(); ++b) {
             if (grid[b + 1] <= plo || grid[b] >= phi) continue;
-            c.band_usage[b] += sign * eff;
+            c.add_usage(b, sign * eff);
         }
     }
 }
@@ -366,7 +354,7 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
         if (cap <= 0.0) { blocked = true; return; }
-        double ov = c.band_usage[b] + eff_width - cap;
+        double ov = c.usage(b) + eff_width - cap;
         if (ov <= 0.0) return;     // fits — no cost
         peak_cost = std::max(peak_cost, kCong_ * ov / cap);
     });
@@ -718,7 +706,7 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
             std::cout << "[Planner] Grid extended: "
                       << (x_grid_.size() - nx0) << " X, "
                       << (y_grid_.size() - ny0) << " Y points from topology candidates.\n";
-            _rebuild_cuts();
+            rebuild_cuts_();
         }
     }
 
