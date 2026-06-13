@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.15)
 project(buda VERSION 3.0.0 LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
+if(APPLE)
+    set(PLATFORM_RPATH "@loader_path")
+else()
+    set(PLATFORM_RPATH "$ORIGIN")
+endif()
+
 if(MSVC)
     add_compile_options(/O2)
 else()
@@ -37,7 +44,7 @@ add_library(buda_core SHARED
 )
 target_include_directories(buda_core PUBLIC src)
 set_target_properties(buda_core PROPERTIES
-    INSTALL_RPATH "$ORIGIN"
+    INSTALL_RPATH "${PLATFORM_RPATH}"
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
@@ -52,7 +59,7 @@ pybind11_add_module(buda_db ${BUDA_DB_FILES})
 target_include_directories(buda_db PRIVATE src)
 target_link_libraries(buda_db PRIVATE buda_core)
 set_target_properties(buda_db PROPERTIES
-    INSTALL_RPATH "$ORIGIN"
+    INSTALL_RPATH "${PLATFORM_RPATH}"
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
@@ -84,8 +91,8 @@ pybind11_add_module(buda ${SOURCE_FILES})
 target_include_directories(buda PRIVATE src)
 target_link_libraries(buda PRIVATE buda_core)
 set_target_properties(buda PROPERTIES
-    INSTALL_RPATH "$ORIGIN"
+    INSTALL_RPATH "${PLATFORM_RPATH}"
     BUILD_RPATH   "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
-install(TARGETS buda buda_db buda_core DESTINATION src)
+install(TARGETS buda buda_db buda_core DESTINATION build)
