@@ -124,7 +124,7 @@ def when_pass1(ctx, net, depth):
     engine = buda.NUTSEngine()
     from buda import BundleWrapper
     w = BundleWrapper()
-    w.candidates = cands
+    w.input.candidates = cands
     result = engine.solve([w])
     ctx['pass1_result'] = result
     ctx['pass1_net'] = net
@@ -174,9 +174,9 @@ def when_run_planner(ctx, net):
     b = Bundle()
     b.id = 1
     w = BundleWrapper()
-    w.original_bundle = b
-    w.width = 8.0
-    w.candidates = ctx['pass2_candidates']
+    w.input.original_bundle = b
+    w.input.width = 8.0
+    w.input.candidates = ctx['pass2_candidates']
     assignments = router.optimize_topologies([w], 1)
     ctx['pass2_assignment'] = assignments[0] if assignments else None
 

@@ -54,6 +54,9 @@ struct BustermRow {
     double      x1, y1, x2, y2;
     std::string resolution;   // BLOCK | SPATIAL_CLUSTER | PORT
     std::string parent_id;
+    // Optional multi-rect geometry (e.g. TEG blocks).
+    // JSON-encoded: [[x1,y1,x2,y2],...].  Empty string = single-rect (x1..y2 only).
+    std::string rects;
 };
 
 struct BundleRow {

@@ -1,7 +1,46 @@
 #include "busterm.h"
+#include <cstdio>
 #include <unordered_map>
 
 namespace buda {
+
+// ── JSON helpers (minimal: no external deps) ──────────────────────────────
+
+// Encode a vector of (x1,y1,x2,y2) tuples as [[x1,y1,x2,y2],...].
+static std::string encode_rects(
+    const std::vector<std::tuple<double,double,double,double>>& rects) {
+    if (rects.empty()) return "";
+    std::string out = "[";
+    for (const auto& [x1,y1,x2,y2] : rects) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "[%g,%g,%g,%g],", x1, y1, x2, y2);
+        out += buf;
+    }
+    out.back() = ']';  // replace trailing comma
+    return out;
+}
+
+// Decode "[[x1,y1,x2,y2],...]" into a vector.  Returns empty on parse failure.
+static std::vector<std::tuple<double,double,double,double>>
+decode_rects(const std::string& s) {
+    std::vector<std::tuple<double,double,double,double>> result;
+    if (s.empty() || s[0] != '[') return result;
+    const char* p = s.c_str() + 1;
+    while (*p == '[') {
+        double x1, y1, x2, y2;
+        int consumed = 0;
+        if (std::sscanf(p, "[%lf,%lf,%lf,%lf]%n", &x1, &y1, &x2, &y2, &consumed) == 4) {
+            result.emplace_back(x1, y1, x2, y2);
+            p += consumed;
+            if (*p == ',') ++p;
+        } else {
+            break;
+        }
+    }
+    return result;
+}
+
+// ── BustermGen ─────────────────────────────────────────────────────────────
 
 BustermGen::BustermGen(BDB& db) : _db(db) {}
 
@@ -60,9 +99,13 @@ void BustermGen::derive(int max_depth) {
         row.y1         = hbt.y1;
         row.x2         = hbt.x2;
         row.y2         = hbt.y2;
-        row.resolution = (hbt.resolution == BustermResolution::BLOCK)
-                         ? "BLOCK" : "SPATIAL_CLUSTER";
+        row.resolution = (hbt.resolution == BustermResolution::PORT)
+                         ? "PORT"
+                         : (hbt.resolution == BustermResolution::SPATIAL_CLUSTER)
+                           ? "SPATIAL_CLUSTER"
+                           : "BLOCK";
         row.parent_id  = hbt.parent_id;
+        row.rects      = encode_rects(hbt.rects);  // empty unless caller populated rects
         _db.add_busterm(row);
     }
 }
@@ -87,6 +130,7 @@ std::vector<HierBusterm> BustermGen::all() const {
         else
             hbt.resolution = BustermResolution::BLOCK;
         hbt.parent_id = row.parent_id;
+        hbt.rects     = decode_rects(row.rects);
         result.push_back(hbt);
     }
     return result;

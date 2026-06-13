@@ -163,25 +163,37 @@ void bind_routing(py::module_& m) {
         .def_readwrite("seg_layers", &BundleAssignment::seg_layers)
         .def_readwrite("seg_perp",   &BundleAssignment::seg_perp);
 
+    py::class_<BundleInput>(m, "BundleInput")
+        .def(py::init<>())
+        .def_readwrite("original_bundle",   &BundleInput::original_bundle)
+        .def_readwrite("candidates",        &BundleInput::candidates)
+        .def_readwrite("width",             &BundleInput::width)
+        .def_readwrite("pinned_seg_layers", &BundleInput::pinned_seg_layers)
+        .def_readwrite("assigned_v_layer",  &BundleInput::assigned_v_layer)
+        .def_readwrite("assigned_h_layer",  &BundleInput::assigned_h_layer)
+        .def_readwrite("topology_pinned",   &BundleInput::topology_pinned);
+
+    py::class_<BundlePlan>(m, "BundlePlan")
+        .def(py::init<>())
+        .def_readwrite("selected_topology_index", &BundlePlan::selected_topology_index)
+        .def_readwrite("seg_layers",              &BundlePlan::seg_layers)
+        .def_readwrite("seg_perp",                &BundlePlan::seg_perp);
+
+    py::class_<BundleHierMeta>(m, "BundleHierMeta")
+        .def(py::init<>())
+        .def_readwrite("level",           &BundleHierMeta::level)
+        .def_readwrite("priority",        &BundleHierMeta::priority)
+        .def_readwrite("has_reservation", &BundleHierMeta::has_reservation)
+        .def_readwrite("res_x1",          &BundleHierMeta::res_x1)
+        .def_readwrite("res_y1",          &BundleHierMeta::res_y1)
+        .def_readwrite("res_x2",          &BundleHierMeta::res_x2)
+        .def_readwrite("res_y2",          &BundleHierMeta::res_y2);
+
     py::class_<BundleWrapper>(m, "BundleWrapper")
         .def(py::init<>())
-        .def_readwrite("original_bundle",         &BundleWrapper::original_bundle)
-        .def_readwrite("candidates",              &BundleWrapper::candidates)
-        .def_readwrite("selected_topology_index", &BundleWrapper::selected_topology_index)
-        .def_readwrite("width",                   &BundleWrapper::width)
-        .def_readwrite("seg_layers",              &BundleWrapper::seg_layers)
-        .def_readwrite("seg_perp",                &BundleWrapper::seg_perp)
-        .def_readwrite("pinned_seg_layers",       &BundleWrapper::pinned_seg_layers)
-        .def_readwrite("assigned_v_layer",        &BundleWrapper::assigned_v_layer)
-        .def_readwrite("assigned_h_layer",        &BundleWrapper::assigned_h_layer)
-        .def_readwrite("topology_pinned",         &BundleWrapper::topology_pinned)
-        .def_readwrite("priority",                &BundleWrapper::priority)
-        .def_readwrite("level",                   &BundleWrapper::level)
-        .def_readwrite("has_reservation",         &BundleWrapper::has_reservation)
-        .def_readwrite("res_x1",                  &BundleWrapper::res_x1)
-        .def_readwrite("res_y1",                  &BundleWrapper::res_y1)
-        .def_readwrite("res_x2",                  &BundleWrapper::res_x2)
-        .def_readwrite("res_y2",                  &BundleWrapper::res_y2);
+        .def_readwrite("input", &BundleWrapper::input)
+        .def_readwrite("plan",  &BundleWrapper::plan)
+        .def_readwrite("hier",  &BundleWrapper::hier);
 
     // ── CongestionPlanner ─────────────────────────────────────────────────
     py::class_<GlobalCut>(m, "GlobalCut")

@@ -41,9 +41,9 @@ static void build_nuts_maps(
 {
     // Pass 1 — nominal perpendicular position from the topology.
     for (const auto& bw : bundles) {
-        if (bw.candidates.empty() || bw.selected_topology_index < 0) continue;
-        const Topology& topo = bw.candidates[bw.selected_topology_index];
-        int bid = bw.original_bundle.id;
+        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        int bid = bw.input.original_bundle.id;
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
             bool is_h  = (seg.start.y == seg.end.y);
@@ -55,9 +55,9 @@ static void build_nuts_maps(
 
     // Pass 2 — connectivity-based override.
     for (const auto& bw : bundles) {
-        if (bw.candidates.empty() || bw.selected_topology_index < 0) continue;
-        const Topology& topo = bw.candidates[bw.selected_topology_index];
-        int bid = bw.original_bundle.id;
+        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
+        int bid = bw.input.original_bundle.id;
 
         ConnTopology ct;
         ct.build(topo, floorplan);
@@ -101,8 +101,8 @@ static void build_nuts_maps(
                                                           : pull_map[key]; // fallback
                 pull_map[key] = preferred;
             } else if (n_bt == 0 &&
-                       si < (int)bw.seg_perp.size() &&
-                       bw.seg_perp[si] != INT_MIN) {
+                       si < (int)bw.plan.seg_perp.size() &&
+                       bw.plan.seg_perp[si] != INT_MIN) {
                 // Planner band preference: the slide-aware congestion lookup
                 // charged this segment to a specific Hanan band (seg_perp =
                 // centre of that band's usable window).  Prefer it over the
@@ -113,7 +113,7 @@ static void build_nuts_maps(
                 // busterm stubs and net_pull-driven segments keep their
                 // nominal/bound pulls (those encode face containment and
                 // min-stub length).
-                pull_map[key] = static_cast<double>(bw.seg_perp[si]);
+                pull_map[key] = static_cast<double>(bw.plan.seg_perp[si]);
             }
         }
     }
@@ -516,29 +516,29 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
 {
     std::vector<TrackSegment> result;
     for (const auto& bw : bundles) {
-        if (bw.candidates.empty() || bw.selected_topology_index < 0) continue;
-        const Topology& topo = bw.candidates[bw.selected_topology_index];
+        if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
             const bool is_horizontal = (seg.start.y == seg.end.y);
             TrackSegment ts;
-            ts.bundle_id = bw.original_bundle.id;
+            ts.bundle_id = bw.input.original_bundle.id;
             ts.seg_idx   = si;
             ts.horiz     = is_horizontal;
 
             int lid = 0;
-            if (si < (int)bw.seg_layers.size() && bw.seg_layers[si] >= 0)
-                lid = bw.seg_layers[si];
-            else if (!is_horizontal && bw.assigned_v_layer >= 0)
-                lid = bw.assigned_v_layer;
-            else if (is_horizontal && bw.assigned_h_layer >= 0)
-                lid = bw.assigned_h_layer;
+            if (si < (int)bw.plan.seg_layers.size() && bw.plan.seg_layers[si] >= 0)
+                lid = bw.plan.seg_layers[si];
+            else if (!is_horizontal && bw.input.assigned_v_layer >= 0)
+                lid = bw.input.assigned_v_layer;
+            else if (is_horizontal && bw.input.assigned_h_layer >= 0)
+                lid = bw.input.assigned_h_layer;
             else
                 lid = seg.layer_hint;
 
             ts.layer = lid;
             ts.width = layers_.eff_bus_width(
-                (int)bw.original_bundle.get_net_names().size(), bw.width, lid);
+                (int)bw.input.original_bundle.get_net_names().size(), bw.input.width, lid);
 
             if (ts.horiz) {
                 ts.span_lo = std::min(seg.start.x, seg.end.x);

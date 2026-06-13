@@ -39,10 +39,10 @@ def make_bundle_wrapper(bid, width, seg):
     bundle = buda.HBundle()
     bundle.id = bid
     w = buda.BundleWrapper()
-    w.original_bundle = bundle
-    w.width = width
-    w.candidates = [topo]
-    w.selected_topology_index = 0
+    w.input.original_bundle = bundle
+    w.input.width = width
+    w.input.candidates = [topo]
+    w.plan.selected_topology_index = 0
     return w
 
 

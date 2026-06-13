@@ -24,6 +24,8 @@ struct HierBusterm {
     double           x1, y1, x2, y2;
     BustermResolution resolution = BustermResolution::BLOCK;
     std::string      parent_id;  // coarser busterm; empty at depth 0
+    // Optional multi-rect geometry (e.g. TEG blocks).  Empty = single-rect.
+    std::vector<std::tuple<double,double,double,double>> rects;
 };
 
 class BustermGen {

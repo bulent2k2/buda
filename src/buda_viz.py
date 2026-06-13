@@ -171,7 +171,7 @@ class TopologyExplorer:
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         self.bidx     = 0   # current bundle index
-        w0_selected   = self.wrappers[0].selected_topology_index
+        w0_selected   = self.wrappers[0].plan.selected_topology_index
         self.idx      = w0_selected if w0_selected >= 0 else 0
         self.sidx     = -1  # current selected segment index within current topology
 
@@ -185,7 +185,7 @@ class TopologyExplorer:
             saved_sel = self._find_selection(self.wrappers[0])
             if saved_sel is not None:
                 saved = saved_sel.get('topo_index_hint', 0)
-                n_cands = len(self.wrappers[0].candidates)
+                n_cands = len(self.wrappers[0].input.candidates)
                 if 0 <= saved < n_cands:
                     self.idx = saved
 
@@ -295,7 +295,7 @@ class TopologyExplorer:
 
     @property
     def topos(self):
-        return self.wrapper.candidates
+        return self.wrapper.input.candidates
 
     # ------------------------------------------------------------------
 
@@ -423,8 +423,8 @@ class TopologyExplorer:
 
     def _bundle_hint(self, wrapper=None):
         w = wrapper or self.wrapper
-        names = w.original_bundle.get_net_names()
-        return names[0] if names else f"bundle_{w.original_bundle.id}"
+        names = w.input.original_bundle.get_net_names()
+        return names[0] if names else f"bundle_{w.input.original_bundle.id}"
 
     def _find_selection(self, wrapper=None):
         """Return the saved selection dict for the given wrapper, or None.
@@ -436,7 +436,7 @@ class TopologyExplorer:
         w   = wrapper or self.wrapper
         sel = self._selections.get(self._bundle_hint(w))
         if sel is None:
-            bid = w.original_bundle.id
+            bid = w.input.original_bundle.id
             sel = next((s for s in self._selections.values()
                         if s.get('bundle_id') == bid), None)
         return sel
@@ -447,7 +447,7 @@ class TopologyExplorer:
             topo = self.topos[self.idx]
             if topo.type == sel['topo_type'] and topo.estimated_wirelength == sel['topo_wl']:
                 return True
-        return (self.idx == self.wrapper.selected_topology_index and getattr(self.wrapper, 'topology_pinned', False))
+        return (self.idx == self.wrapper.plan.selected_topology_index and getattr(self.wrapper.input, 'topology_pinned', False))
 
     def _select_current(self):
         topo = self.topos[self.idx]
@@ -462,7 +462,7 @@ class TopologyExplorer:
         
         wrapper = self.wrappers[self.bidx]
         sel = {
-            'bundle_id':       wrapper.original_bundle.id,
+            'bundle_id':       wrapper.input.original_bundle.id,
             'topo_type':       topo.type,
             'topo_wl':         topo.estimated_wirelength,
             'topo_index_hint': self.idx,
@@ -470,17 +470,17 @@ class TopologyExplorer:
             'selected_at':     datetime.now().isoformat(timespec='seconds'),
         }
         
-        pinned = list(wrapper.pinned_seg_layers)
+        pinned = list(wrapper.input.pinned_seg_layers)
         if len(pinned) == len(topo.segments):
             if any(lid != -1 for lid in pinned):
                 sel['seg_layers'] = pinned
         
         # Update live object
-        if wrapper.selected_topology_index != self.idx:
-            wrapper.seg_layers = [] # Clear stale results for different topology
+        if wrapper.plan.selected_topology_index != self.idx:
+            wrapper.plan.seg_layers = [] # Clear stale results for different topology
         
-        wrapper.selected_topology_index = self.idx
-        wrapper.topology_pinned = True
+        wrapper.plan.selected_topology_index = self.idx
+        wrapper.input.topology_pinned = True
         
         self._selections[hint] = sel
         self._save_sidecar()
@@ -497,8 +497,8 @@ class TopologyExplorer:
             
             # Update live object
             wrapper = self.wrappers[self.bidx]
-            wrapper.topology_pinned = False
-            wrapper.pinned_seg_layers = []
+            wrapper.input.topology_pinned = False
+            wrapper.input.pinned_seg_layers = []
 
         self._draw()
 
@@ -550,7 +550,7 @@ class TopologyExplorer:
 
     def _step_bundle(self, delta):
         self.bidx = (self.bidx + delta) % len(self.wrappers)
-        w_selected = self.wrappers[self.bidx].selected_topology_index
+        w_selected = self.wrappers[self.bidx].plan.selected_topology_index
         self.idx  = w_selected if w_selected >= 0 else 0
         self.sidx = -1
         self._reset_rerun_btn()
@@ -598,7 +598,7 @@ class TopologyExplorer:
         if self.sidx == -1 or self.layer_stack is None:
             return
         wrapper = self.wrappers[self.bidx]
-        topo = wrapper.candidates[self.idx]
+        topo = wrapper.input.candidates[self.idx]
         seg = topo.segments[self.sidx]
         is_h = (seg.start.y == seg.end.y)
 
@@ -610,7 +610,7 @@ class TopologyExplorer:
         # Resolve current layer ID using same precedence as _draw.
         sel = self._find_selection()
         is_current_selection = self._current_is_selected()
-        is_planner_active = (self.idx == wrapper.selected_topology_index)
+        is_planner_active = (self.idx == wrapper.plan.selected_topology_index)
         
         curr = -1
         if is_current_selection and sel and 'seg_layers' in sel:
@@ -619,8 +619,8 @@ class TopologyExplorer:
                 curr = pinned[self.sidx]
         
         if curr == -1 and is_planner_active:
-            if len(wrapper.seg_layers) == len(topo.segments):
-                curr = wrapper.seg_layers[self.sidx]
+            if len(wrapper.plan.seg_layers) == len(topo.segments):
+                curr = wrapper.plan.seg_layers[self.sidx]
         
         if curr == -1:
             curr = seg.layer_hint
@@ -637,20 +637,20 @@ class TopologyExplorer:
         new_lid = lids[new_lidx]
 
         # Update pinned_seg_layers scratchpad.
-        pinned_list = list(wrapper.pinned_seg_layers)
+        pinned_list = list(wrapper.input.pinned_seg_layers)
         if len(pinned_list) != len(topo.segments):
             # Start from current actual layers.
             pinned_list = []
             for i, s in enumerate(topo.segments):
                 l = -1
-                if is_planner_active and len(wrapper.seg_layers) == len(topo.segments):
-                    l = wrapper.seg_layers[i]
+                if is_planner_active and len(wrapper.plan.seg_layers) == len(topo.segments):
+                    l = wrapper.plan.seg_layers[i]
                 else:
                     l = s.layer_hint
                 pinned_list.append(l)
 
         pinned_list[self.sidx] = new_lid
-        wrapper.pinned_seg_layers = pinned_list
+        wrapper.input.pinned_seg_layers = pinned_list
 
         # Selection logic now automatically persists this to sidecar.
         self._select_current()
@@ -692,15 +692,15 @@ class TopologyExplorer:
 
         topo  = self.topos[self.idx]
         n     = len(self.topos)
-        bid   = self.wrapper.original_bundle.id
+        bid   = self.wrapper.input.original_bundle.id
         wl    = topo.estimated_wirelength
         ct      = self._build_conn_topo(topo)
         cs_list = list(ct.segs())
-        viz_lw  = min(3.0 + math.log2(1 + self.wrapper.width) * 1.5, 14.0)
+        viz_lw  = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 14.0)
 
         is_sel = self._current_is_selected()
-        has_any_sel = self._find_selection() is not None or getattr(self.wrapper, 'topology_pinned', False)
-        is_planner_active = (self.idx == self.wrapper.selected_topology_index)
+        has_any_sel = self._find_selection() is not None or getattr(self.wrapper.input, 'topology_pinned', False)
+        is_planner_active = (self.idx == self.wrapper.plan.selected_topology_index)
 
         # ── Enable/Disable Tuning Row ──
         for b in self._bax2:
@@ -814,8 +814,8 @@ class TopologyExplorer:
 
             # 2. Planned layers (from CongestionPlanner result)
             if lid == -1 and is_planner_active:
-                if len(self.wrapper.seg_layers) == len(topo.segments):
-                    lid = self.wrapper.seg_layers[i]
+                if len(self.wrapper.plan.seg_layers) == len(topo.segments):
+                    lid = self.wrapper.plan.seg_layers[i]
 
             # 3. Default from topology generator
             if lid == -1:
@@ -885,7 +885,7 @@ class TopologyExplorer:
                 layer_summary_parts.append(lbl)
         layer_summary = " ".join(layer_summary_parts)
         
-        nterms = self.wrapper.original_bundle.num_terminals
+        nterms = self.wrapper.input.original_bundle.num_terminals
         title_main = (
             f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
             f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
@@ -902,8 +902,8 @@ class TopologyExplorer:
         ax.set_title(title_main, fontsize=12, pad=10, color=title_color)
 
         if self.fig.canvas.manager:
-            bid_  = self.wrapper.original_bundle.id
-            names_ = self.wrapper.original_bundle.get_net_names()
+            bid_  = self.wrapper.input.original_bundle.id
+            names_ = self.wrapper.input.original_bundle.get_net_names()
             net0  = names_[0] if names_ else f"B{bid_}"
             self.fig.canvas.manager.set_window_title(f"{net0} (Bundle {bid_})")
 
@@ -1062,9 +1062,9 @@ class BudaVisualizer:
         self._bundle_insts: dict = {}
         if net_endpoints:
             for w in bundles:
-                bid   = w.original_bundle.id
+                bid   = w.input.original_bundle.id
                 insts = set()
-                for net_name in w.original_bundle.get_net_names():
+                for net_name in w.input.original_bundle.get_net_names():
                     ep = net_endpoints.get(net_name)
                     if ep:
                         drv, rcvs = ep
@@ -1130,17 +1130,17 @@ class BudaVisualizer:
 
     def _bundle_name(self, bid):
         """Return the first net name for bid, or 'B{bid}' as fallback."""
-        w = next((w for w in self.bundles if w.original_bundle.id == bid), None)
+        w = next((w for w in self.bundles if w.input.original_bundle.id == bid), None)
         if w:
-            names = w.original_bundle.get_net_names()
+            names = w.input.original_bundle.get_net_names()
             return names[0] if names else f"B{bid}"
         return f"B{bid}"
 
     def _bundle_bits(self, bid):
         """Return the number of nets (bit-width) for bid, or 0 if unknown."""
-        w = next((w for w in self.bundles if w.original_bundle.id == bid), None)
+        w = next((w for w in self.bundles if w.input.original_bundle.id == bid), None)
         if w:
-            return len(w.original_bundle.get_net_names())
+            return len(w.input.original_bundle.get_net_names())
         return 0
 
     def _set_highlight(self, bundle_id):
@@ -1159,8 +1159,8 @@ class BudaVisualizer:
         if bundle_id is None:
             self._ipc.send({'type': 'clear'})
             return
-        w = next((w for w in self.bundles if w.original_bundle.id == bundle_id), None)
-        net_names  = list(w.original_bundle.get_net_names()) if w else []
+        w = next((w for w in self.bundles if w.input.original_bundle.id == bundle_id), None)
+        net_names  = list(w.input.original_bundle.get_net_names()) if w else []
         inst_names = sorted(self._bundle_insts.get(bundle_id, set()))
         msg = {
             'type': 'select_bundle',
@@ -1313,17 +1313,17 @@ class BudaVisualizer:
             bname = self._bundle_name(bundle_id)
             nbits = self._bundle_bits(bundle_id)
 
-            wrapper = next((w for w in self.bundles if w.original_bundle.id == bundle_id), None)
+            wrapper = next((w for w in self.bundles if w.input.original_bundle.id == bundle_id), None)
 
             # for ref only. Old code:
             # Get busterm count from the active topology.
             # nterms = 0
-            # if wrapper and wrapper.candidates and wrapper.selected_topology_index >= 0:
-            #    topo = wrapper.candidates[wrapper.selected_topology_index]
+            # if wrapper and wrapper.input.candidates and wrapper.plan.selected_topology_index >= 0:
+            #    topo = wrapper.input.candidates[wrapper.plan.selected_topology_index]
             #    nterms = _get_nterms(topo)
 
             # Get busterm count from the bundle metadata.
-            nterms = wrapper.original_bundle.num_terminals
+            nterms = wrapper.input.original_bundle.num_terminals
 
             bits_str = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
             # For ref, old title had: f"(click again or click background to deselect)"
@@ -1769,8 +1769,8 @@ class BudaVisualizer:
             all_on = all(self._bundle_visible.values())
             all_lbl = '☑ All Bundles' if all_on else '☐ All Bundles'
             if self._detailed_result:
-                n_total = sum(len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
-                              for w in self.bundles if w.candidates and 0 <= w.selected_topology_index < len(w.candidates))
+                n_total = sum(len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[w.plan.selected_topology_index].segments)
+                              for w in self.bundles if w.input.candidates and 0 <= w.plan.selected_topology_index < len(w.input.candidates))
                 all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
             self._btn_all_bundles.label.set_text(all_lbl)
 
@@ -1793,8 +1793,8 @@ class BudaVisualizer:
             nbits = self._bundle_bits(bid)
 
             # Get busterm count from metadata
-            w = next(w for w in self.bundles if w.original_bundle.id == bid)
-            nterms = w.original_bundle.num_terminals
+            w = next(w for w in self.bundles if w.input.original_bundle.id == bid)
+            nterms = w.input.original_bundle.num_terminals
 
             #bits_suffix = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
             bits_suffix = f" ({nbits} bits)" if nbits > 0 else ""
@@ -1820,11 +1820,11 @@ class BudaVisualizer:
             if self._detailed_result:
                 # DetailedNUTSResult doesn't easily provide per-bundle unplaced count.
                 # Let's count how many net_segments we have vs how many we expect.
-                w = next(w for w in self.bundles if w.original_bundle.id == bid)
-                if not w.candidates or w.selected_topology_index < 0 or w.selected_topology_index >= len(w.candidates):
+                w = next(w for w in self.bundles if w.input.original_bundle.id == bid)
+                if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
                     stats_part = ' [no topo]'; stats_color = '#888888'
                     continue
-                n_expected = len(w.original_bundle.get_net_names()) * len(w.candidates[w.selected_topology_index].segments)
+                n_expected = len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[w.plan.selected_topology_index].segments)
                 n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
                 n_unp = n_expected - n_placed
                 stats_part = f" [{n_unp}/{n_expected}]"
@@ -2008,22 +2008,22 @@ class BudaVisualizer:
         if self._highlighted is None:
             # Automatically select the first bundle that has candidates.
             for w in self.bundles:
-                if w.candidates:
-                    self._highlighted = w.original_bundle.id
+                if w.input.candidates:
+                    self._highlighted = w.input.original_bundle.id
                     self._refresh_highlight()
                     break
 
         if self._highlighted is None:
             return
         wrapper = next((w for w in self.bundles
-                        if w.original_bundle.id == self._highlighted), None)
-        if wrapper is None or not wrapper.candidates:
+                        if w.input.original_bundle.id == self._highlighted), None)
+        if wrapper is None or not wrapper.input.candidates:
             return
 
         # Singleton Pattern: check if a TopologyExplorer window is already open.
         if self._topo_explorer is not None and plt.fignum_exists(self._topo_explorer.fig.number):
             # If it's for the SAME bundle, just raise it.
-            if self._topo_explorer.wrappers[0].original_bundle.id == self._highlighted:
+            if self._topo_explorer.wrappers[0].input.original_bundle.id == self._highlighted:
                 _raise_window(self._topo_explorer.fig)
                 return
             else:
@@ -2094,10 +2094,10 @@ class BudaVisualizer:
         highlight_blocks = set()
         if highlight_bid is not None:
             wrapper = next((w for w in self.bundles
-                            if w.original_bundle.id == highlight_bid), None)
-            if (wrapper and wrapper.candidates and
-                    0 <= wrapper.selected_topology_index < len(wrapper.candidates)):
-                topo = wrapper.candidates[wrapper.selected_topology_index]
+                            if w.input.original_bundle.id == highlight_bid), None)
+            if (wrapper and wrapper.input.candidates and
+                    0 <= wrapper.plan.selected_topology_index < len(wrapper.input.candidates)):
+                topo = wrapper.input.candidates[wrapper.plan.selected_topology_index]
                 highlight_blocks = set(topo.connected_block_names)
 
         for name, rect in self.fp.get_all_blocks():
@@ -2398,11 +2398,11 @@ class BudaVisualizer:
         self._vias_conns_artists = []
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
         for i, wrapper in enumerate(self.bundles):
-            bid      = wrapper.original_bundle.id
-            if not wrapper.candidates or wrapper.selected_topology_index < 0 or wrapper.selected_topology_index >= len(wrapper.candidates):
+            bid      = wrapper.input.original_bundle.id
+            if not wrapper.input.candidates or wrapper.plan.selected_topology_index < 0 or wrapper.plan.selected_topology_index >= len(wrapper.input.candidates):
                 continue
-            topo     = wrapper.candidates[wrapper.selected_topology_index]
-            viz_lw   = 3.0 + math.log2(1 + wrapper.width) * 2.0
+            topo     = wrapper.input.candidates[wrapper.plan.selected_topology_index]
+            viz_lw   = 3.0 + math.log2(1 + wrapper.input.width) * 2.0
             offset   = (i % 3 - 1) * 2.0
             alpha    = 0.8
 
@@ -2440,11 +2440,11 @@ class BudaVisualizer:
         seg_alpha  = 0.90
 
         for i, wrapper in enumerate(self.bundles):
-            bid    = wrapper.original_bundle.id
-            if not wrapper.candidates or wrapper.selected_topology_index < 0 or wrapper.selected_topology_index >= len(wrapper.candidates):
+            bid    = wrapper.input.original_bundle.id
+            if not wrapper.input.candidates or wrapper.plan.selected_topology_index < 0 or wrapper.plan.selected_topology_index >= len(wrapper.input.candidates):
                 continue
-            topo   = wrapper.candidates[wrapper.selected_topology_index]
-            viz_lw = 3.0 + math.log2(1 + wrapper.width) * 2.0
+            topo   = wrapper.input.candidates[wrapper.plan.selected_topology_index]
+            viz_lw = 3.0 + math.log2(1 + wrapper.input.width) * 2.0
             msz     = max(4, viz_lw)
             ct      = ic.ConnTopology(); ct.build(topo, self.fp)
             cs_list = list(ct.segs())

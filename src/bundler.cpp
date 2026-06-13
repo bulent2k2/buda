@@ -141,6 +141,12 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
     std::unordered_map<int, std::vector<PinRow>> pins_by_net;
     for (const auto& p : all_pins) pins_by_net[p.net_id].push_back(p);
 
+    // Build comp-name → busterm-id map.  Populated only when derive_busterms
+    // has been called before run_hier_bundler; empty map = graceful no-op.
+    std::unordered_map<std::string, std::string> bt_by_comp_name;
+    for (const auto& bt : _db.all_busterms())
+        bt_by_comp_name[bt.hier_path] = bt.id;
+
     std::vector<HBundle> bundles;
     std::unordered_map<int, int> id_to_idx;   // bundle id → index in bundles
     int next_id = 0;
@@ -419,6 +425,18 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                             if (rit != comp_by_id.end())
                                 b.exit_busterm_ids.push_back("bt:" + rit->second.name);
                         }
+                    }
+                } else {
+                    // Cross-block bundle: look up busterm IDs from BDB if available.
+                    auto drv_bt = bt_by_comp_name.find(drv_it->second.name);
+                    if (drv_bt != bt_by_comp_name.end())
+                        b.entry_busterm_ids = {drv_bt->second};
+                    for (int rid : ep0.receiver_comp_ids) {
+                        auto rit = comp_by_id.find(rid);
+                        if (rit == comp_by_id.end()) continue;
+                        auto rcv_bt = bt_by_comp_name.find(rit->second.name);
+                        if (rcv_bt != bt_by_comp_name.end())
+                            b.exit_busterm_ids.push_back(rcv_bt->second);
                     }
                 }
             }

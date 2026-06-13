@@ -134,20 +134,20 @@ def test_select_topology_after_run_planner_replans_layers():
 
     w = s.bundles[0]
     # Pick any candidate with more segments than the planner's choice.
-    planner_idx = w.selected_topology_index
-    new_idx = next(i for i, c in enumerate(w.candidates)
+    planner_idx = w.plan.selected_topology_index
+    new_idx = next(i for i, c in enumerate(w.input.candidates)
                    if i != planner_idx and len(c.segments) > 1)
     # select_topology takes a 1-based topology id.
     s.do_command(f"select_topology 1 {new_idx + 1}")
 
-    assert w.topology_pinned, "select_topology must pin the choice"
-    assert w.selected_topology_index == new_idx, "pinned index must survive the re-plan"
-    topo = w.candidates[new_idx]
-    assert len(w.seg_layers) == len(topo.segments), (
+    assert w.input.topology_pinned, "select_topology must pin the choice"
+    assert w.plan.selected_topology_index == new_idx, "pinned index must survive the re-plan"
+    topo = w.input.candidates[new_idx]
+    assert len(w.plan.seg_layers) == len(topo.segments), (
         f"seg_layers must match the new topology's segment list; "
-        f"got {list(w.seg_layers)} for {len(topo.segments)} segments"
+        f"got {list(w.plan.seg_layers)} for {len(topo.segments)} segments"
     )
-    for seg, lid in zip(topo.segments, w.seg_layers):
+    for seg, lid in zip(topo.segments, w.plan.seg_layers):
         seg_horiz = seg.start.y == seg.end.y
         lay_horiz = s.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL
         assert seg_horiz == lay_horiz, (

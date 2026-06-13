@@ -34,10 +34,10 @@ def make_bundle(bundle_id, nets, width, segments):
     topo.segments = seg_list
 
     wrapper = buda.BundleWrapper()
-    wrapper.original_bundle = bundle
-    wrapper.width = width
-    wrapper.candidates = [topo]
-    wrapper.selected_topology_index = 0
+    wrapper.input.original_bundle = bundle
+    wrapper.input.width = width
+    wrapper.input.candidates = [topo]
+    wrapper.plan.selected_topology_index = 0
     return wrapper
 
 

@@ -37,22 +37,21 @@ private:
     std::vector<double> band_usage_;  // accumulated demand per band
 };
 
-struct BundleWrapper {
+struct BundleInput {
     HBundle original_bundle;
     std::vector<Topology> candidates;
-    int selected_topology_index = -1;
-    bool topology_pinned = false;
     double width = 1.0;
-    double priority = 0.0;  // Higher = route first. Set by run_planner hier.
-    int level = 0;          // Hierarchy depth (0 = top). Set by run_planner hier;
-                            // used for the per-level planning summary.
-    // Demand reservation: while this bundle is still unplanned, its effective
-    // bus width is parked as virtual usage on the TOP-layer bands inside this
-    // region (the parent cell instance bbox, set by run_planner hier for
-    // cell-local bundles).  Earlier-planned bundles then avoid bands that
-    // cannot hold both them and this bundle.
-    bool has_reservation = false;
-    int  res_x1 = 0, res_y1 = 0, res_x2 = 0, res_y2 = 0;
+    // Manual layer overrides per segment.  Values are layer IDs, or -1
+    // for no override (let the planner decide).
+    std::vector<int> pinned_seg_layers;
+    // Legacy per-direction overrides (set by post_nuts; secondary to seg_layers).
+    int assigned_v_layer = -1;
+    int assigned_h_layer = -1;
+    bool topology_pinned = false;
+};
+
+struct BundlePlan {
+    int selected_topology_index = -1;
     // Per-segment layer assignments set by CongestionPlanner (primary).
     // Index matches topo.segments of the selected topology.
     std::vector<int> seg_layers;
@@ -62,12 +61,24 @@ struct BundleWrapper {
     // placement so buses land in the bands whose capacity the planner
     // actually reserved (connectivity pulls still take precedence).
     std::vector<int> seg_perp;
-    // Manual layer overrides per segment.  Values are layer IDs, or -1
-    // for no override (let the planner decide).
-    std::vector<int> pinned_seg_layers;
-    // Legacy per-direction overrides (set by post_nuts; secondary to seg_layers).
-    int assigned_v_layer = -1;
-    int assigned_h_layer = -1;
+};
+
+struct BundleHierMeta {
+    int    level    = 0;
+    double priority = 0.0;  // Higher = route first. Set by run_planner hier.
+    // Demand reservation: while this bundle is still unplanned, its effective
+    // bus width is parked as virtual usage on the TOP-layer bands inside this
+    // region (the parent cell instance bbox, set by run_planner hier for
+    // cell-local bundles).  Earlier-planned bundles then avoid bands that
+    // cannot hold both them and this bundle.
+    bool has_reservation = false;
+    int  res_x1 = 0, res_y1 = 0, res_x2 = 0, res_y2 = 0;
+};
+
+struct BundleWrapper {
+    BundleInput    input;
+    BundlePlan     plan;
+    BundleHierMeta hier;
 };
 
 struct BundleAssignment {

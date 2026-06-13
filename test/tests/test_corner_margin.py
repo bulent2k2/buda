@@ -353,11 +353,11 @@ def test_nuts_respects_margin_adjusted_range():
     bundle = buda.HBundle()
     bundle.id = 1
     bw = buda.BundleWrapper()
-    bw.original_bundle = bundle
-    bw.width = 10.0
-    bw.selected_topology_index = 0
-    bw.candidates = [topo]
-    bw.seg_layers = [seg_h.layer_hint]
+    bw.input.original_bundle = bundle
+    bw.input.width = 10.0
+    bw.plan.selected_topology_index = 0
+    bw.input.candidates = [topo]
+    bw.plan.seg_layers = [seg_h.layer_hint]
 
     result = nuts.run([bw])
     placed_segs = [s for s in result.segments if s.bundle_id == 1]
