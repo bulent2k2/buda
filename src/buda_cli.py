@@ -1361,14 +1361,17 @@ class BudaSession:
             py = float(args[4]) if len(args) > 4 else -1.0
             self.bdb.add_cell_pin(cell_name, pin_name, direction, px, py)
         elif cmd == "add_net":
-            # Syntax A (directed):   add_net <name> <drv_pin> <rcv_pins_csv>
-            # Syntax B (undirected): add_net <name> <pin1> <pin2_csv> unknown
-            unknown_dir = len(args) >= 4 and args[3].lower() == "unknown"
+            # Syntax A (directed):       add_net <name> <drv_pin> <rcv_pins_csv>
+            # Syntax B (undirected):     add_net <name> <pin1> <pin2_csv> unknown
+            # Syntax C (bidirectional):  add_net <name> <pin1> <pin2_csv> inout
+            last_kw = args[3].lower() if len(args) >= 4 else ""
+            unknown_dir = (last_kw == "unknown")
+            inout_dir   = (last_kw == "inout")
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')
             drv_inst = drv_pin.split('.')[0]
             rcv_insts = [r.split('.')[0] for r in rcv_pins]
-            if not unknown_dir and drv_inst in rcv_insts:
+            if not (unknown_dir or inout_dir) and drv_inst in rcv_insts:
                 print(f"Error: block '{drv_inst}' is used as both driver and receiver in net '{name}'")
                 sys.exit(1)
             self.netlist.add_net(name, drv_pin, rcv_pins)
@@ -1376,14 +1379,19 @@ class BudaSession:
             if self.bdb is not None and self.bdb_net_mode:
                 if unknown_dir:
                     self.bdb.add_net_pins_undirected(name, [drv_pin] + rcv_pins)
+                elif inout_dir:
+                    self.bdb.add_net_pins_inout(name, [drv_pin] + rcv_pins)
                 else:
                     self.bdb.add_net_pins(name, drv_pin, rcv_pins)
         elif cmd == "add_bus":
-            # Syntax A (directed):   add_bus <prefix>[N] <drv_pin> <rcv_pin>
-            # Syntax B (undirected): add_bus <prefix>[N] <pin1> <pin2> unknown
+            # Syntax A (directed):       add_bus <prefix>[N] <drv_pin> <rcv_pin>
+            # Syntax B (undirected):     add_bus <prefix>[N] <pin1> <pin2> unknown
+            # Syntax C (bidirectional):  add_bus <prefix>[N] <pin1> <pin2> inout
             import re
-            unknown_dir = args and args[-1].lower() == "unknown"
-            bus_args = args[:-1] if unknown_dir else args
+            last_kw = args[-1].lower() if args else ""
+            unknown_dir = (last_kw == "unknown")
+            inout_dir   = (last_kw == "inout")
+            bus_args = args[:-1] if (unknown_dir or inout_dir) else args
             m = re.match(r'^(.+)\[(\d+)(?::(\d+))?\]$', bus_args[0])
             if not m:
                 print(f"Error: bad add_bus syntax '{bus_args[0]}' — expected name[N] or name[lo:hi]")
@@ -1397,7 +1405,7 @@ class BudaSession:
             rcv_pins = bus_args[2].split(',')
             drv_inst = drv_pin.split('.')[0]
             rcv_insts = [r.split('.')[0] for r in rcv_pins]
-            if not unknown_dir and drv_inst in rcv_insts:
+            if not (unknown_dir or inout_dir) and drv_inst in rcv_insts:
                 print(f"Error: block '{drv_inst}' is used as both driver and receiver in bus '{prefix}'")
                 sys.exit(1)
             for i in range(lo, hi + 1):
@@ -1407,6 +1415,8 @@ class BudaSession:
                 if self.bdb is not None and self.bdb_net_mode:
                     if unknown_dir:
                         self.bdb.add_net_pins_undirected(net_name, [drv_pin] + rcv_pins)
+                    elif inout_dir:
+                        self.bdb.add_net_pins_inout(net_name, [drv_pin] + rcv_pins)
                     else:
                         self.bdb.add_net_pins(net_name, drv_pin, rcv_pins)
         elif cmd == "def_layer":
