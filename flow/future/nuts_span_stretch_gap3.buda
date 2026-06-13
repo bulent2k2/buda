@@ -1,0 +1,42 @@
+# ============================================================================
+# Gap 3 demonstrator — span adjustments stretch a follower into uncharged bands
+# ============================================================================
+# See docs/future/nuts_packing_gaps.md §3.
+#
+# Bus `a` (L→R) cannot take the direct path: the keepout over [300,600]×[100,450]
+# blocks M4/M5 there, so it detours UP as a U_VHV — a vertical stub out of L, a
+# horizontal trunk on M4 above the keepout, and a vertical stub down into R.
+#
+# Bus `b` (T→R) is a straight vertical trunk on M5 that shares block R with `a`.
+#
+# The planner scores `a` at its planned trunk Y.  NUTS then PLACES the M4 trunk;
+# if that placed Y differs from plan (here only mildly, since M4 is uncontended),
+# do_span_adjustments STRETCHES a's right M5 stub in Y to reach the trunk — and
+# that stretched stub can cross M5 bands the planner never charged, colliding
+# with `b` if it lands at the same X.  Run with `visualize` and watch the
+# "[NUTS] Span adjustments: M5:n" line: those are the stretches at issue.
+#
+# At this 2-bus scale repair_overlaps still rescues the result (0 overlaps).
+# The unrepairable form — a face window genuinely over-filled after the stretch —
+# shows up at scale in flow/hbundles/10_chip_units_blocks_leaf.buda (4 residual
+# abstract-NUTS overlaps + bundle-47 reservation conflict).  This file is the
+# minimal scaffold for developing/validating the "re-charge & verify" fix.
+# ============================================================================
+
+def_layer 4 M4 H TOP 0
+def_layer 5 M5 V TOP 0
+
+add_block L   100 200  200 300
+add_block R   700 200  800 300
+add_block T   650 600  850 700
+
+add_keepout 300 100 600 450 M4 M5
+
+add_bus a[20] L.tx R.rx
+add_bus b[20] T.tx R.rx
+
+run_bundler strict
+generate_topologies double_detour
+run_planner 1
+run_nuts
+visualize

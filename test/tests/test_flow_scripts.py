@@ -432,10 +432,13 @@ def test_10_four_level_scale_one_bundle_per_bus():
     assert "WARNING" not in out
     assert "Success: no opens found." in out      # nuts connectivity
     segs, viols, ovlps = nuts_summary(out)
-    assert segs == 196
+    # Segment count rose 196→212: the corrected LOW-layer congestion model
+    # (Gap 2 — leaf cells block LOW, containers stay transparent) and inter-bus
+    # pitch reservation (Gap 1) steer the planner to different topologies.
+    assert segs == 212
     assert viols == 0
-    assert ovlps <= 10                            # ratchet (currently 10)
+    assert ovlps <= 4                             # ratchet (was 10; Gap 1+2 dropped it to 4)
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) >= 1112               # ratchet (currently 1112)
-    assert int(dm.group(2)) <= 8                  # ratchet (currently 8)
+    assert int(dm.group(1)) >= 1224               # ratchet (was 1112; now 1224)
+    assert int(dm.group(2)) <= 8                  # ratchet (currently 8; Gap 3 still open)

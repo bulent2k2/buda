@@ -194,6 +194,7 @@ def test_v_layer_slide_within_m5():
     ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
 
     router = buda.CongestionPlanner(fp, ls)
+    router.set_track_pitch(0.0)   # isolate slide behavior from inter-bus pitch (Gap 1)
     router.build_congestion_map()
 
     w1 = make_bundle_wrapper(bid=1, width=3.0, seg=make_v_segment(x=10, y_lo=0, y_hi=100, layer=5))
@@ -245,6 +246,7 @@ def test_dilution_factor_increases_cut_usage():
     ls.set_layer_overhead(5, 25.0)   # M5 V: 25% overhead
 
     router = buda.CongestionPlanner(fp, ls)
+    router.set_track_pitch(0.0)   # isolate dilution accounting from inter-bus pitch (Gap 1)
     router.build_congestion_map()
 
     seg = make_v_segment(x=150, y_lo=0, y_hi=200, layer=5)

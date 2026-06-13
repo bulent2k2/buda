@@ -50,7 +50,7 @@ python3 buda_cli.py ../flow/comprehensive_demo.buda
 
 | Command | Stage | Description |
 |---|---|---|
-| `add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]` | setup | Place a single-rect floorplan block; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
+| `add_block <name> <x1> <y1> <x2> <y2> [container] [corner_margin ...]` | setup | Place a single-rect floorplan block; `container` marks a hierarchy envelope (transparent to LOW layers; leaf cells block LOW layers as keepouts) rather than a solid leaf cell; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
 | `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru\|over] [corner_margin ...]` | setup | Multi-rect block: topology generator picks the best-fit rect per trunk position; `teg_mode over` generates an explicit bridge segment over the block's notch when the trunk falls in a gap between rects |
 | `add_keepout <x1> <y1> <x2> <y2> <layer_list>` | setup | Define a rectangular keep-out zone for specific routing layers |
 | `corner_margin dx <n> [dy <n>]` | setup | Set global corner margin for all blocks with no per-block override. Only `dx`/`dy` (absolute); `pct_h`/`pct_v` not valid globally. Single-axis value mirrors to the other axis. |

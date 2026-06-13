@@ -81,6 +81,34 @@ void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2, const std::vect
     for (int lid : layer_ids) koz.layer_ids.insert(lid);
     keepouts_.push_back(std::move(koz));
 }
+void Floorplan::set_container(const std::string& name, bool is_container) {
+    if (is_container) containers_.insert(name);
+    else              containers_.erase(name);
+}
+bool Floorplan::is_container(const std::string& name) const {
+    return containers_.count(name) > 0;
+}
+std::vector<KeepoutZone> Floorplan::low_layer_keepouts(const std::vector<int>& low_layer_ids) const {
+    std::vector<KeepoutZone> result = keepouts_;   // user-defined zones first
+    if (low_layer_ids.empty()) return result;
+    std::set<int> low_set(low_layer_ids.begin(), low_layer_ids.end());
+    for (const auto& [name, r] : blocks_) {
+        if (containers_.count(name)) continue;     // containers are transparent to LOW layers
+        // Multi-rect leaf cells block each rect individually (the notch between
+        // rects is routable), matching the per-rect Hanan grid.
+        auto it = block_rects_.find(name);
+        if (it != block_rects_.end()) {
+            for (const Rect& ri : it->second) {
+                KeepoutZone koz; koz.bbox = ri; koz.layer_ids = low_set;
+                result.push_back(std::move(koz));
+            }
+        } else {
+            KeepoutZone koz; koz.bbox = r; koz.layer_ids = low_set;
+            result.push_back(std::move(koz));
+        }
+    }
+    return result;
+}
 void Floorplan::get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_coords) const {
     for (const auto& [name, r] : blocks_) {
         auto it = block_rects_.find(name);

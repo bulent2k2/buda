@@ -230,6 +230,12 @@ class BudaSession:
             self.fp.add_block(r.name,
                               int(round(r.x1)), int(round(r.y1)),
                               int(round(r.x2)), int(round(r.y2)))
+            # A BDB node with children is a hierarchy envelope, not a solid leaf
+            # cell: mark it a container so LOW layers route through its internal
+            # channels (charged via the child blocks' cuts) rather than treating
+            # the whole region as solid or as zero-congestion (Gap 2).
+            if children_of.get(r.id):
+                self.fp.set_container(r.name)
             added_rows.append((r, is_fallback))
             if is_fallback:
                 fallback_count += 1
@@ -1225,6 +1231,11 @@ class BudaSession:
                 x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
                 self.fp.add_block(name, x1, y1, x2, y2)
                 rest = list(args[5:])
+            # Optional 'container' flag: marks a hierarchy envelope (transparent
+            # to LOW layers) rather than a solid leaf cell.  See Gap 2.
+            if any(t.lower() == "container" for t in rest):
+                self.fp.set_container(name)
+                rest = [t for t in rest if t.lower() != "container"]
             if rest and rest[0].lower() == "corner_margin":
                 rest = rest[1:]
                 kws = {}
@@ -1710,6 +1721,9 @@ class BudaSession:
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
+                # Mirror NUTS inter-bus pitch so the band books reserve the
+                # spacing NUTS enforces (Gap 1).
+                self.planner.set_track_pitch(self._nuts_pitch)
                 self.planner.build_congestion_map()
                 self._planner_iterations = iterations
                 with buda.ostream_redirect():
@@ -1731,6 +1745,9 @@ class BudaSession:
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
+                # Mirror NUTS inter-bus pitch so the band books reserve the
+                # spacing NUTS enforces (Gap 1).
+                self.planner.set_track_pitch(self._nuts_pitch)
                 self.planner.build_congestion_map()
                 # Apply architect-pinned selections BEFORE optimizing so the
                 # planner scores the correct topology and assigns layers for it.
