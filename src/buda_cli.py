@@ -1546,7 +1546,7 @@ class BudaSession:
                     print(f"hb-{b.id:<3}  D{b.level}  {kind:<24}  \"{short_reason}\"  "
                           f"nets={len(b.get_net_names())}  cands={cands}{inst_str}")
         elif cmd == "generate_topologies_for_bundle":
-            # Usage: generate_topologies_for_bundle <hint> <src> <dst> [<dst2> ...] [center_mode] [double_detour]
+            # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour]
             # Single dst  → 2-pin L/Z/U candidates
             # Multiple dst → multicast trunk+branch candidates
             # Append "center_mode"    to use block centres instead of busterm faces.
@@ -1554,7 +1554,10 @@ class BudaSession:
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
             pos_args = [a for a in args if a not in ("center_mode", "double_detour")]
-            hint = pos_args[0]; src = pos_args[1]; dsts = pos_args[2:]
+            if not pos_args:
+                print("Error: generate_topologies_for_bundle requires a hint")
+                return
+            hint = pos_args[0]
             topo_gen = buda.TopologyGenerator(self.fp)
             h_layer = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
             v_layer = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
@@ -1566,7 +1569,13 @@ class BudaSession:
                 topo_gen.set_double_detour(True)
             found = False
             for w in self.bundles:
-                if w.input.original_bundle.get_net_names()[0].startswith(hint):
+                net_name = w.input.original_bundle.get_net_names()[0]
+                if net_name.startswith(hint):
+                    ep = self._net_endpoints.get(net_name)
+                    if ep is None:
+                        print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
+                        continue
+                    src, dsts = ep
                     w.input.candidates = topo_gen.generate_candidates(src, dsts)
                     label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                     print(f"Generated {len(w.input.candidates)} topologies for bundle "

@@ -565,22 +565,20 @@ dump_hbundles expanded        # show expanded per-instance view (after run_plann
 ### `generate_topologies_for_bundle`
 
 ```
-generate_topologies_for_bundle <hint> <src> <dst> [flags]
-generate_topologies_for_bundle <hint> <src> <dst1> <dst2> … [flags]
+generate_topologies_for_bundle <hint> [flags]
 ```
 
 Generate routing topology candidates for the bundle whose first net name
-starts with `<hint>`.
+starts with `<hint>`. Source and destination block names are derived
+automatically from the netlist.
 
 **Positional arguments:**
 
 | Argument | Description |
 |---|---|
 | `hint` | Prefix of the first net name in the target bundle, e.g. `t0_b3`. |
-| `src` | Source block name (must match an `add_block` name). |
-| `dst` / `dst1 …` | One or more destination block names. Single destination → 2-pin L/Z/U candidates. Multiple destinations → multicast trunk-and-branch candidates. |
 
-**Optional flags** (append anywhere after the block names):
+**Optional flags** (append anywhere after the hint):
 
 | Flag | Effect |
 |---|---|
@@ -632,9 +630,9 @@ ranked after `thru` candidates when all else is equal.
 
 **Example:**
 ```
-generate_topologies_for_bundle t0_b3  u_t0  u_b3
-generate_topologies_for_bundle t0_b3  u_t0  u_b3  center_mode
-generate_topologies_for_bundle bus_rsp  u_resp  u_a  u_b  u_c   # multicast
+generate_topologies_for_bundle t0_b3
+generate_topologies_for_bundle t0_b3  center_mode
+generate_topologies_for_bundle bus_rsp  # multicast
 ```
 
 ---
