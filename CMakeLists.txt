@@ -20,6 +20,10 @@ find_package(pybind11 REQUIRED)
 
 set(SOURCE_FILES
     src/bindings.cpp
+    src/bind_db.cpp
+    src/bind_bundler.cpp
+    src/bind_routing.cpp
+    src/bind_nuts.cpp
     # ── as-is from v2 ─────────────────────────────────────────────
     src/topology.cpp
     src/conn_topology.cpp
@@ -41,7 +45,23 @@ set(SOURCE_FILES
 # SQLite amalgamation is C, not C++
 set_source_files_properties(src/sqlite3.c PROPERTIES LANGUAGE C)
 
+# ── buda_db: standalone database-layer module ─────────────────────────────
+# Contains BDB, row types, BustermGen, HierBusterm.  Can be imported without
+# the routing pipeline.  buda_cli.py imports both buda_db and buda.
+set(BUDA_DB_FILES
+    src/bindings_db.cpp
+    src/bind_db.cpp
+    src/bdb.cpp
+    src/sqlite3.c
+    src/busterm.cpp
+)
+pybind11_add_module(buda_db ${BUDA_DB_FILES})
+target_include_directories(buda_db PRIVATE src)
+
+# ── buda: full routing-pipeline module ───────────────────────────────────
+# Includes everything; bind_db.cpp is re-compiled here so the buda module
+# is self-contained and can also be used without buda_db being imported.
 pybind11_add_module(buda ${SOURCE_FILES})
 target_include_directories(buda PRIVATE src)
 
-install(TARGETS buda DESTINATION src)
+install(TARGETS buda buda_db DESTINATION src)
