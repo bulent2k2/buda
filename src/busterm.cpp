@@ -18,6 +18,7 @@ HierBusterm BustermGen::_from_component(const ComponentRow& comp) const {
 }
 
 void BustermGen::derive(int max_depth) {
+    _max_depth = max_depth;
     _db.clear_busterms();
 
     // Build comp_id → ComponentRow map for parent lookup.
@@ -57,11 +58,7 @@ void BustermGen::derive(int max_depth) {
 }
 
 void BustermGen::refine() {
-    // Incremental re-derive: clear and redo from scratch for now.
-    // A smarter implementation would only re-derive components whose
-    // placement changed; that optimisation is deferred until placement
-    // mutations become a bottleneck.
-    derive(/* max_depth from last call — stored in _db or re-derived */);
+    derive(_max_depth);
 }
 
 std::vector<HierBusterm> BustermGen::all() const {
