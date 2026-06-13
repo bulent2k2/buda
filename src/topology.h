@@ -163,7 +163,17 @@ public:
     // Override the default H and V layer IDs used for segment layer_hint.
     // Defaults: h=4 (M4), v=5 (M5).  Call this after determining which layers
     // are actually defined in the layer stack so no undefined layer is emitted.
-    void set_layer_ids(int h, int v) { h_layer_ = h; v_layer_ = v; }
+    void set_layer_ids(int h, int v) {
+        h_layer_ = h; v_layer_ = v;
+        all_h_layers_ = {h}; all_v_layers_ = {v};
+    }
+
+    // Inform the generator of ALL available H and V layer IDs so keepout
+    // avoidance can distinguish "keepout on one H layer" (planner re-assigns)
+    // from "keepout on ALL H layers" (trunk position must be skipped).
+    // Must be called after set_layer_ids if multiple H or V layers exist.
+    void set_all_h_layers(const std::vector<int>& layers) { all_h_layers_ = layers; }
+    void set_all_v_layers(const std::vector<int>& layers) { all_v_layers_ = layers; }
 
     // Double-detour mode (default false): add UU_VHV / UU_HVH topologies where
     // the src stub is an L-shape that exits a SIDE face of the src block rather
@@ -190,6 +200,8 @@ private:
     bool allow_double_detour_ = false;
     int  h_layer_             = 4;
     int  v_layer_             = 5;
+    std::vector<int> all_h_layers_ = {4};
+    std::vector<int> all_v_layers_ = {5};
 
     void add_l_shapes(const Busterm& src, const Busterm& dst, std::vector<Topology>& results);
     void add_z_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
@@ -200,6 +212,9 @@ private:
     void add_trunk_v(const std::vector<Point>& pins, const std::vector<Busterm>& blocks,
                      int x_trunk, bool out_of_bbox, std::vector<Topology>& results);
     void add_mst_candidates(const std::vector<Busterm>& blocks, std::vector<Topology>& results);
+    void add_trunk_mst_candidates(const std::vector<Busterm>& blocks, std::vector<Topology>& results);
     void add_multi_trunk_candidates(const std::vector<Point>& pins, const std::vector<Busterm>& blocks, std::vector<Topology>& results);
+    // Keepout helpers (used by generate_2pin and generate_npin)
+    bool segment_blocked_on_all_layers(const Segment& seg) const;
 };
 }
