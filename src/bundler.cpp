@@ -403,18 +403,23 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             const auto& ep0 = ep_map.at(net_ids[0]);
             b.num_terminals = 1 + (int)ep0.receiver_comp_ids.size();
 
-            // ── Cell context: set when all endpoints share the same parent ──
+            // ── Cell context + busterm IDs ─────────────────────────────────
             auto drv_it = comp_by_id.find(ep0.driver_comp_id);
-            if (drv_it != comp_by_id.end() && drv_it->second.parent_id >= 0) {
+            if (drv_it != comp_by_id.end()) {
                 int par_id = drv_it->second.parent_id;
-                bool same_par = true;
-                for (int rid : ep0.receiver_comp_ids) {
-                    auto rit = comp_by_id.find(rid);
-                    if (rit == comp_by_id.end() || rit->second.parent_id != par_id) {
-                        same_par = false; break;
+                bool has_parent = (par_id >= 0);
+                bool same_par = false;
+                if (has_parent) {
+                    same_par = true;
+                    for (int rid : ep0.receiver_comp_ids) {
+                        auto rit = comp_by_id.find(rid);
+                        if (rit == comp_by_id.end() || rit->second.parent_id != par_id) {
+                            same_par = false; break;
+                        }
                     }
                 }
                 if (same_par) {
+                    // Intra-cell: all endpoints share the same parent component.
                     auto par_it = comp_by_id.find(par_id);
                     if (par_it != comp_by_id.end()) {
                         b.cell_context = par_it->second.cell;
@@ -427,7 +432,8 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                         }
                     }
                 } else {
-                    // Cross-block bundle: look up busterm IDs from BDB if available.
+                    // Cross-block bundle (or root-level endpoints): look up
+                    // busterm IDs from BDB if derive_busterms was called.
                     auto drv_bt = bt_by_comp_name.find(drv_it->second.name);
                     if (drv_bt != bt_by_comp_name.end())
                         b.entry_busterm_ids = {drv_bt->second};
