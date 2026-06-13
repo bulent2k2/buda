@@ -52,12 +52,18 @@ struct PatternOverride {
 // ---------------------------------------------------------------------------
 class RoutingGrid {
 public:
-    TrackPattern                global_pattern;
-    std::vector<PatternOverride> overrides;
-    std::vector<Rect>           keepouts;
-    bool                        is_horizontal = true;
+    void add_keepout(const Rect& bbox) { keepouts_.push_back(bbox); }
 
-    void add_keepout(const Rect& bbox) { keepouts.push_back(bbox); }
+    // Initialise the global pattern and routing direction (called by RoutingGridStack).
+    void init(const TrackPattern& p, bool is_horiz) {
+        global_pattern_ = p;
+        is_horizontal_  = is_horiz;
+    }
+
+    // Append a region override (called by RoutingGridStack).
+    void add_pattern_override(PatternOverride ov) {
+        overrides_.push_back(std::move(ov));
+    }
 
     // Returns the first matching override pattern for point (x,y), else global.
     const TrackPattern& effective_pattern_at(double x, double y) const;
@@ -65,6 +71,12 @@ public:
     // SIGNAL-only tracks whose centre falls in [lo, hi] at perpendicular coord x.
     std::vector<std::pair<double, TrackSlot>>
     signal_tracks_in(double x, double lo, double hi) const;
+
+private:
+    TrackPattern                 global_pattern_;
+    std::vector<PatternOverride> overrides_;
+    std::vector<Rect>            keepouts_;
+    bool                         is_horizontal_ = true;
 };
 
 // ---------------------------------------------------------------------------

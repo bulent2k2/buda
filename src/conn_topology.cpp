@@ -1,5 +1,6 @@
 #include "conn_topology.h"
 #include <algorithm>
+#include <cassert>
 #include <functional>
 #include <map>
 #include <numeric>
@@ -40,6 +41,11 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
     compute_slide_ranges(fp);
     tighten_passthrough_ranges(topo, fp);
     compute_net_pull();
+
+    for (const auto& cs : segs_) {
+        assert(cs.along_lo <= cs.along_hi);
+        assert(cs.perp_lo  <= cs.perp_hi);
+    }
 }
 
 // ── ConnTopology::infer_connections ───────────────────────────────────────────

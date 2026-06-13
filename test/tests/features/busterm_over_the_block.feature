@@ -159,7 +159,7 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     Then in the TRUNK_H@y50 candidate "B" has no bridge segment
     And "B" has a Direct connection in the TRUNK_H@y50 candidate
 
-  Scenario: Over-the-block — L-shaped block with H trunk above notch
+  Scenario: Over-the-block — L-shaped block with V trunk beside notch
     # L-block: tall arm (0,0)-(100,400) + wide base (0,0)-(400,100).
     # Notch: x=100–400, y=100–400.
     # src at (500,150)-(600,250).
@@ -171,15 +171,17 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     # V trunk at x=250 falls inside the wide base's x-range [0,400] but NOT
     # inside the tall arm's x-range [0,100].
     # → wide base: Direct (no H stub); trunk connects at y=100 (wide-base top face).
-    # → tall arm: x=250 is outside [0,100] → arm is NOT reachable by a direct stub.
-    # Over-the-block mode: emit a bridge H segment at y=400 (union bbox top) to
-    # signal that the tall arm must be connected externally over the block.
+    # → tall arm: x=250 is outside [0,100] → arm NOT fully spanned.
+    # Over-the-block mode (rectilinear): emit a bridge V segment at x=400 (union bbox
+    # right face) to signal that the tall arm must be connected externally.
+    # Spec: "right for V-trunk gap" — bridge is VERTICAL at x = union_bbox.x2.
     #
-    #   y=400 ─ +──────────────────────+ ← bridge H at y=400 (union bbox top)
-    #           | tall arm |            :
-    #   y=100 ─ +──────────────────────x ← wide-base top; V trunk direct connection
-    #   y=  0 ─ +──────────────────────+
-    #           x=0          x=250  x=400
+    #   y=400 ─ +──────────+   ║ ← bridge V at x=400 (union bbox right face)
+    #           | tall arm |   ║
+    #   y=100 ─ +──────────+───╫──+ ← wide-base top; V trunk direct connection
+    #   y=  0 ─ +──────────────+──║
+    #           x=0  x=100  x=400 ║
+    #                             ║ x=400 (right face of union bbox)
     #
     Given a block "src" at (500,150)-(600,250)
     And a block "L" with rects (0,0)-(100,400) and (0,0)-(400,100) and teg_mode "over"
@@ -187,7 +189,38 @@ Feature: Over-the-Block vs Thru-the-Block TEG Routing Modes
     And layer M5 is VERTICAL with id 5
     When I generate multicast candidates from "src" to ["L"] using layers M4,M5
     Then the TRUNK_V@x250 candidate has a bridge segment for "L"
-    And the bridge segment runs along the top face of "L"'s union bounding box
+    And the bridge segment runs along the right face of "L"'s union bounding box
+
+  Scenario: Over-the-block — V trunk with horizontal gap (pure TEG, right-face bridge)
+    # Pure TEG block B: two disjoint rects side-by-side (horizontal gap).
+    # Right rect listed first so the topology generator picks it as the primary
+    # connection point (right of trunk), keeping A (left of trunk) on the opposite
+    # side — this prevents stub suppression and lets the TEG bridge code activate.
+    # Rleft  (left):  (100,0)-(200,400)
+    # Rright (right): (300,0)-(500,400)
+    # Horizontal gap: x=200 to x=300.
+    # Source A at (0,150)-(50,250).
+    # Union bbox of B: (100,0)-(500,400).
+    #
+    # V trunk at x=250 (midpoint of gap) falls between Rleft.x2=200 and Rright.x1=300.
+    # → teg_mode=over: two H stubs + bridge V segment at x=500 (union_bbox.x2).
+    # Spec: "right for V-trunk gap" — bridge is VERTICAL at x = union_bbox.x2.
+    #
+    #   y=400 +──────+     +──────────║
+    #         |Rleft |     |  Rright  ║ ← bridge V at x=500 (right outer face)
+    #   y=200 x──────x─x─x─x─────────║
+    #                  ↑
+    #               x=250 (trunk)
+    #   y=  0 +──────+     +──────────║
+    #       x=100 x=200 x=250 x=300  x=500
+    #
+    Given a block "A" at (0,150)-(50,250)
+    And a block "B" with rects (300,0)-(500,400) and (100,0)-(200,400) and teg_mode "over"
+    And layer M4 is HORIZONTAL with id 4
+    And layer M5 is VERTICAL with id 5
+    When I generate multicast candidates from "A" to ["B"] using layers M4,M5
+    Then the TRUNK_V@x250 candidate has a bridge segment for "B"
+    And the V-trunk bridge for "B" is vertical at x=500
 
   Scenario: Over-the-block — bridge is omitted when rects are adjacent (no gap)
     # When two rects share an edge (no gap between them), thru-the-block and

@@ -88,6 +88,7 @@ class BudaSession:
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self.no_viz = False          # set by --no-viz CLI flag
         self.bdb = None              # BDB (opened by open_bdb command)
+        self._busterm_gen = None     # BustermGen instance (created by derive_busterms)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
         self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
@@ -2192,10 +2193,18 @@ class BudaSession:
             if self.bdb is None:
                 print("Error: open_bdb first"); return
             max_depth = int(args[0]) if args else 1
-            gen = buda.BustermGen(self.bdb)
-            gen.derive(max_depth)
+            self._busterm_gen = buda.BustermGen(self.bdb)
+            self._busterm_gen.derive(max_depth)
             bts = self.bdb.all_busterms()
             print(f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth}).")
+        elif cmd == "refine_busterms":
+            # refine_busterms — re-derive busterms using the same max_depth as
+            # the last derive_busterms call (clears and rewrites the busterm table).
+            if self._busterm_gen is None:
+                print("Error: run derive_busterms first"); return
+            self._busterm_gen.refine()
+            bts = self.bdb.all_busterms()
+            print(f"refine_busterms: {len(bts)} busterms written.")
         elif cmd == "source":
             if not args:
                 print("Error: source command requires a file path")

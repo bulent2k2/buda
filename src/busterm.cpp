@@ -5,20 +5,31 @@ namespace buda {
 
 BustermGen::BustermGen(BDB& db) : _db(db) {}
 
-HierBusterm BustermGen::_from_component(const ComponentRow& comp) const {
+HierBusterm BustermGen::_from_component(const ComponentRow& comp,
+    const std::unordered_set<std::string>& cells_with_pins) const {
     HierBusterm bt;
     bt.id         = "bt:" + comp.name;
     bt.hier_path  = comp.name;
     bt.depth      = comp.depth;
     bt.x1 = comp.x1; bt.y1 = comp.y1;
     bt.x2 = comp.x2; bt.y2 = comp.y2;
-    bt.resolution = comp.is_leaf ? BustermResolution::SPATIAL_CLUSTER
-                                 : BustermResolution::BLOCK;
+    if (comp.is_leaf && cells_with_pins.count(comp.cell))
+        bt.resolution = BustermResolution::PORT;
+    else if (comp.is_leaf)
+        bt.resolution = BustermResolution::SPATIAL_CLUSTER;
+    else
+        bt.resolution = BustermResolution::BLOCK;
     return bt;
 }
 
 void BustermGen::derive(int max_depth) {
+    _max_depth = max_depth;
     _db.clear_busterms();
+
+    // Build set of cell names that have declared cell_pins (PORT resolution).
+    std::unordered_set<std::string> cells_with_pins;
+    for (const auto& cp : _db.all_cell_pins())
+        cells_with_pins.insert(cp.cell);
 
     // Build comp_id → ComponentRow map for parent lookup.
     auto all_comps = _db.all_components();
@@ -31,7 +42,7 @@ void BustermGen::derive(int max_depth) {
         if (comp.depth > max_depth) continue;
         if (comp.x1 < 0) continue;  // unplaced; skip
 
-        HierBusterm hbt = _from_component(comp);
+        HierBusterm hbt = _from_component(comp, cells_with_pins);
 
         // Resolve parent busterm id via parent component.
         if (comp.parent_id >= 0) {
@@ -57,11 +68,7 @@ void BustermGen::derive(int max_depth) {
 }
 
 void BustermGen::refine() {
-    // Incremental re-derive: clear and redo from scratch for now.
-    // A smarter implementation would only re-derive components whose
-    // placement changed; that optimisation is deferred until placement
-    // mutations become a bottleneck.
-    derive(/* max_depth from last call — stored in _db or re-derived */);
+    derive(_max_depth);
 }
 
 std::vector<HierBusterm> BustermGen::all() const {

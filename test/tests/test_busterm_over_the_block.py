@@ -41,8 +41,14 @@ def test_overtheblock__trunk_inside_one_rect__no_bridge_needed():
 
 
 @scenario('features/busterm_over_the_block.feature',
-          'Over-the-block — L-shaped block with H trunk above notch')
-def test_overtheblock__lshaped_block_with_h_trunk_above_notch():
+          'Over-the-block — L-shaped block with V trunk beside notch')
+def test_overtheblock__lshaped_block_with_v_trunk_beside_notch():
+    pass
+
+
+@scenario('features/busterm_over_the_block.feature',
+          'Over-the-block — V trunk with horizontal gap (pure TEG, right-face bridge)')
+def test_overtheblock__v_trunk_horizontal_gap_right_face_bridge():
     pass
 
 
@@ -309,17 +315,21 @@ def then_has_bridge(ctx, trunk_key, block):
 
 
 @then(parsers.re(
-    r'the bridge segment runs along the top face of "(?P<block>[^"]+)"\'s union bounding box'
+    r'the bridge segment runs along the right face of "(?P<block>[^"]+)"\'s union bounding box'
 ))
-def then_bridge_along_top(ctx, block):
+def then_bridge_along_right(ctx, block):
     c = _find_by_trunk(ctx['candidates'], 'TRUNK_V@x250')
-    assert c is not None, 'TRUNK_V@x300 not found'
+    assert c is not None, 'TRUNK_V@x250 not found'
     bridge = _bridge_for_block(c, block)
     assert bridge is not None, f'No bridge for {block!r}'
     rects = ctx['fp'].get_block_rects(block)
-    union_y2 = max(r[3] for r in rects)
-    assert bridge.start.y == union_y2, \
-        f'Bridge y: expected top of union bbox ({union_y2}), got {bridge.start.y}'
+    union_x2 = max(r[2] for r in rects)
+    assert bridge.start.x == union_x2, \
+        f'Bridge x: expected right face of union bbox ({union_x2}), got {bridge.start.x}'
+    assert bridge.start.y != bridge.end.y or bridge.start.x != bridge.end.x, \
+        f'Bridge is degenerate (zero length)'
+    assert bridge.start.x == bridge.end.x, \
+        f'V-trunk bridge should be vertical (same x); got start.x={bridge.start.x}, end.x={bridge.end.x}'
 
 
 @then(parsers.re(
@@ -346,6 +356,23 @@ def then_direct_connection(ctx, block, trunk_key):
         if any(bt is not None and bt.block_name == block for bt in bt_pair):
             return
     pytest.fail(f'{block!r} has no Direct connection on a horizontal segment in {trunk_key!r}')
+
+
+@then(parsers.re(
+    r'the V-trunk bridge for "(?P<block>[^"]+)" is vertical at x=(?P<x>\d+)'
+))
+def then_v_trunk_bridge_vertical_at_x(ctx, block, x):
+    c = _find_by_trunk(ctx['candidates'], 'TRUNK_V@x250')
+    assert c is not None, 'TRUNK_V@x250 candidate not found'
+    bridge = _bridge_for_block(c, block)
+    assert bridge is not None, f'No bridge segment for {block!r} in TRUNK_V@x250'
+    expected_x = int(x)
+    assert bridge.start.x == expected_x, \
+        f'Bridge start.x: expected {expected_x}, got {bridge.start.x}'
+    assert bridge.end.x == expected_x, \
+        f'Bridge end.x: expected {expected_x}, got {bridge.end.x}'
+    assert bridge.start.y != bridge.end.y, \
+        f'V-trunk bridge should be vertical (start.y != end.y)'
 
 
 @then(parsers.re(

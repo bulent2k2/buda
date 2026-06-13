@@ -16,8 +16,25 @@ struct GlobalCut {
     int      cut_coord = 0;    // x_mid (V-cut) or y_mid (H-cut)
     LayerDir dir;
     int      layer_id = 0;
-    std::vector<double> band_cap;    // capacity per perpendicular Hanan band
-    std::vector<double> band_usage;  // accumulated demand per band
+
+    int    num_bands() const { return static_cast<int>(band_cap_.size()); }
+    double cap(int b)  const { return band_cap_[b]; }
+    double usage(int b) const { return band_usage_[b]; }
+    // Read-only views for Python (returns by value, safe copy).
+    std::vector<double> caps()   const { return band_cap_; }
+    std::vector<double> usages() const { return band_usage_; }
+
+    void init_bands(int n, const std::function<double(int)>& cap_fn) {
+        band_cap_.resize(n);
+        band_usage_.assign(n, 0.0);
+        for (int b = 0; b < n; ++b) band_cap_[b] = cap_fn(b);
+    }
+    void reset_usage() { std::fill(band_usage_.begin(), band_usage_.end(), 0.0); }
+    void add_usage(int b, double delta) { band_usage_[b] += delta; }
+
+private:
+    std::vector<double> band_cap_;    // capacity per perpendicular Hanan band
+    std::vector<double> band_usage_;  // accumulated demand per band
 };
 
 struct BundleWrapper {
@@ -84,7 +101,7 @@ public:
     const std::vector<int>& get_y_grid() const { return y_grid_; }
 
 private:
-    void _rebuild_cuts();
+    void rebuild_cuts_();
     // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.
     // perp_pos_override: if != INT_MIN, replaces seg.start.x/y for the perpendicular band
     // lookup.  Pass the ConnTopology interval centre so grid-boundary stubs land in the

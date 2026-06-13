@@ -60,14 +60,14 @@ TrackPattern::tracks_in_range(double lo, double hi) const {
 // ---------------------------------------------------------------------------
 
 const TrackPattern& RoutingGrid::effective_pattern_at(double x, double y) const {
-    for (const auto& ov : overrides) {
+    for (const auto& ov : overrides_) {
         if (x >= static_cast<double>(ov.region.x1) &&
             x <= static_cast<double>(ov.region.x2) &&
             y >= static_cast<double>(ov.region.y1) &&
             y <= static_cast<double>(ov.region.y2))
             return ov.pattern;
     }
-    return global_pattern;
+    return global_pattern_;
 }
 
 std::vector<std::pair<double, TrackSlot>>
@@ -79,11 +79,11 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
     for (auto& p : all) {
         if (p.second.type == "SIGNAL") {
             bool blocked = false;
-            for (const auto& koz : keepouts) {
+            for (const auto& koz : keepouts_) {
                 // p.first is the fixed coordinate of the track (Y if horizontal, X if vertical).
                 // x is the coordinate along the track span (X if horizontal, Y if vertical).
-                double px = is_horizontal ? x : p.first;
-                double py = is_horizontal ? p.first : x;
+                double px = is_horizontal_ ? x : p.first;
+                double py = is_horizontal_ ? p.first : x;
                 if (px >= koz.x1 && px <= koz.x2 &&
                     py >= koz.y1 && py <= koz.y2) {
                     blocked = true;
@@ -101,9 +101,7 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
 // ---------------------------------------------------------------------------
 
 void RoutingGridStack::define_layer(int layer_id, const TrackPattern& pattern, bool is_horizontal) {
-    auto& g = layers_[layer_id];
-    g.global_pattern = pattern;
-    g.is_horizontal  = is_horizontal;
+    layers_[layer_id].init(pattern, is_horizontal);
 }
 
 void RoutingGridStack::add_override(int layer_id,
@@ -113,7 +111,7 @@ void RoutingGridStack::add_override(int layer_id,
     ov.region   = Rect{x1, y1, x2, y2};
     ov.layer_id = layer_id;
     ov.pattern  = pattern;
-    layers_[layer_id].overrides.push_back(std::move(ov));
+    layers_[layer_id].add_pattern_override(std::move(ov));
 }
 
 RoutingGrid& RoutingGridStack::get_layer_grid(int layer_id) {
