@@ -61,13 +61,16 @@ channels too.
 ### Fix (implemented)
 
 Blocks now carry an explicit `is_container` flag (`Floorplan::set_container`; the
-CLI marks BDB ancestors — any component with children — and accepts an
-`add_block … container` keyword). A **solid leaf cell** (non-container) is a
-keepout for every LOW (non-TOP) layer: `Floorplan::low_layer_keepouts(low_ids)`
-emits an implicit `KeepoutZone` per leaf cell, consumed by the planner's band
-capacity (`rebuild_cuts_`), abstract NUTS (`solve_layer`/`repair_overlaps`), and
-detailed NUTS through one shared path. A LOW segment therefore cannot route over
-a cell, while TOP layers (absent from `low_ids`) cross cells freely.
+CLI marks a BDB ancestor only when one of its descendants is actually loaded into
+the floorplan, and accepts an `add_block … container` keyword). A **solid leaf
+cell** (non-container) is a keepout for every LOW (non-TOP) layer:
+`Floorplan::low_layer_keepouts(low_ids)` emits an implicit `KeepoutZone` per leaf
+cell. The planner's band capacity (`rebuild_cuts_`) and abstract NUTS
+(`solve_layer`/`repair_overlaps`) consume it directly; the CLI installs the same
+leaf zones into the `RoutingGridStack` non-TOP layers before `run_detailed_nuts`,
+so detailed routing avoids signal tracks over cells too. A LOW segment therefore
+cannot route over a cell, while TOP layers (absent from `low_ids`) cross cells
+freely.
 
 A **container** is transparent: it is excluded from the `for_each_band` endpoint
 clamp, so a segment inside it keeps its full extent and is charged across the

@@ -89,6 +89,8 @@ void bind_routing(py::module_& m) {
         .def("set_container",           &Floorplan::set_container,
              py::arg("name"), py::arg("is_container") = true)
         .def("is_container",            &Floorplan::is_container)
+        .def("low_layer_keepouts",      &Floorplan::low_layer_keepouts,
+             py::arg("low_layer_ids"))
         .def("add_keepout_zone",        &Floorplan::add_keepout_zone)
         .def("get_keepout_zones",       &Floorplan::get_keepout_zones)
         .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {

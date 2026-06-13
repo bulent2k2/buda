@@ -1145,6 +1145,23 @@ class BudaSession:
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
+        # Install implicit solid-leaf-cell keepouts on every non-TOP layer grid
+        # so detailed routing avoids signal tracks over cells, matching the
+        # planner and abstract NUTS (Gap 2).  Done here — just before the solve —
+        # so it is independent of the order in which blocks, containers, and
+        # track patterns were declared.  Guarded per grid object so repeated
+        # detailed runs (e.g. after run_nuts_on_layer) don't re-add duplicates.
+        if getattr(self, '_leaf_keepouts_grid', None) is not self.routing_grid:
+            for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
+                for lid in self.layers.get_layer_ids_by_dir(d):
+                    if self.layers.is_top(lid) or not self.routing_grid.has_layer(lid):
+                        continue
+                    for koz in self.fp.low_layer_keepouts([lid]):
+                        if lid in koz.layer_ids:
+                            self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
+                                                          koz.bbox.x2, koz.bbox.y2)
+            self._leaf_keepouts_grid = self.routing_grid
+
         bid_to_nbits = {w.input.original_bundle.id: len(w.input.original_bundle.get_net_names())
                         for w in self.bundles}
         # Build ConnTopology per bundle for endpoint adj info.
