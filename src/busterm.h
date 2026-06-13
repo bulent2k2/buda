@@ -7,6 +7,7 @@
 // routing-level "Busterm" in topology.h (which carries block_name + Rect).
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include "bdb.h"
 
@@ -44,7 +45,8 @@ public:
 private:
     BDB& _db;
     int  _max_depth = 0;
-    HierBusterm _from_component(const ComponentRow& comp) const;
+    HierBusterm _from_component(const ComponentRow& comp,
+                                const std::unordered_set<std::string>& cells_with_pins) const;
 };
 
 }  // namespace buda
