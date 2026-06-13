@@ -80,6 +80,7 @@ HierarchicalBundler::_endpoints_at_depth(
     std::unordered_map<int, NetEndpoints> result;
     for (const auto& [net_id, pins] : pins_by_net) {
         NetEndpoints ep;
+        std::vector<int> inout_comp_ids;
         std::vector<int> unknown_comp_ids;
         for (const auto& p : pins) {
             auto it = comp_by_id.find(p.comp_id);
@@ -88,8 +89,23 @@ HierarchicalBundler::_endpoints_at_depth(
                 ep.driver_comp_id = p.comp_id;
             else if (p.dir == "INPUT")
                 ep.receiver_comp_ids.push_back(p.comp_id);
+            else if (p.dir == "INOUT")
+                inout_comp_ids.push_back(p.comp_id);
             else if (p.dir == "UNKNOWN")
                 unknown_comp_ids.push_back(p.comp_id);
+        }
+        // INOUT fallback: secondary driver when no OUTPUT exists;
+        // otherwise INOUT pins are additional receivers.
+        if (ep.driver_comp_id < 0 && !inout_comp_ids.empty()) {
+            ep.driver_comp_id = inout_comp_ids[0];
+            for (size_t i = 1; i < inout_comp_ids.size(); ++i)
+                ep.receiver_comp_ids.push_back(inout_comp_ids[i]);
+            std::cerr << "[HierBundler] net_id=" << net_id
+                      << " at depth " << depth
+                      << ": using INOUT pin as driver\n";
+        } else {
+            for (int id : inout_comp_ids)
+                ep.receiver_comp_ids.push_back(id);
         }
         // Fallback: use UNKNOWN pins positionally when OUTPUT/INPUT are absent.
         if (ep.driver_comp_id < 0 && !unknown_comp_ids.empty()) {
@@ -145,6 +161,12 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         std::vector<int>         rcv_spec_comp_ids;
         int                      rcv_spec_depth = -1;
         std::vector<std::string> rcv_spec_paths;
+        // Deepest INOUT-direction pin (priority: OUTPUT > INOUT > UNKNOWN).
+        int inout_spec_depth   = -1;
+        int inout_spec_comp_id = -1;
+        std::string inout_spec_path;
+        std::vector<int>         inout_spec_comp_ids;
+        std::vector<std::string> inout_spec_paths;
         // Deepest UNKNOWN-direction pin — used as positional fallback.
         int unk_spec_depth   = -1;
         int unk_spec_comp_id = -1;
@@ -198,6 +220,17 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                     info.rcv_spec_comp_ids.push_back(p.comp_id);
                     info.rcv_spec_paths.push_back(it->second.name);
                 }
+            } else if (p.dir == "INOUT") {
+                if (d > info.inout_spec_depth) {
+                    info.inout_spec_depth    = d;
+                    info.inout_spec_comp_id  = p.comp_id;
+                    info.inout_spec_path     = it->second.name;
+                    info.inout_spec_comp_ids = {p.comp_id};
+                    info.inout_spec_paths    = {it->second.name};
+                } else if (d == info.inout_spec_depth) {
+                    info.inout_spec_comp_ids.push_back(p.comp_id);
+                    info.inout_spec_paths.push_back(it->second.name);
+                }
             } else if (p.dir == "UNKNOWN") {
                 if (d > info.unk_spec_depth) {
                     info.unk_spec_depth    = d;
@@ -211,8 +244,30 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 }
             }
         }
+        // INOUT fallback: secondary driver when no OUTPUT exists;
+        // otherwise INOUT pins at deepest depth are added as receivers.
+        if (info.drv_spec_depth < 0 && info.inout_spec_depth >= 0) {
+            info.drv_spec_depth   = info.inout_spec_depth;
+            info.drv_spec_comp_id = info.inout_spec_comp_id;
+            info.drv_spec_path    = info.inout_spec_path;
+            for (size_t i = 1; i < info.inout_spec_comp_ids.size(); ++i) {
+                info.rcv_spec_comp_ids.push_back(info.inout_spec_comp_ids[i]);
+                info.rcv_spec_paths.push_back(info.inout_spec_paths[i]);
+            }
+            if (info.rcv_spec_depth < 0 && !info.rcv_spec_comp_ids.empty())
+                info.rcv_spec_depth = info.inout_spec_depth;
+            std::cerr << "[HierBundler] net_id=" << net_id
+                      << ": using INOUT pin as driver\n";
+        } else if (info.inout_spec_depth >= 0) {
+            for (size_t i = 0; i < info.inout_spec_comp_ids.size(); ++i) {
+                info.rcv_spec_comp_ids.push_back(info.inout_spec_comp_ids[i]);
+                info.rcv_spec_paths.push_back(info.inout_spec_paths[i]);
+            }
+            if (info.rcv_spec_depth < 0 && !info.rcv_spec_comp_ids.empty())
+                info.rcv_spec_depth = info.inout_spec_depth;
+        }
         // Fallback: promote deepest UNKNOWN pins to driver/receiver roles
-        // when OUTPUT/INPUT pins are absent (e.g. after import_verilog or
+        // when OUTPUT/INPUT/INOUT pins are absent (e.g. after import_verilog or
         // add_net … unknown).
         if (info.drv_spec_depth < 0 && info.unk_spec_depth >= 0) {
             info.drv_spec_depth   = info.unk_spec_depth;

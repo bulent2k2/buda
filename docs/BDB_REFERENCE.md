@@ -101,27 +101,37 @@ created by `add_net`, `add_net_pins`, etc.) uses all four values.
 |--------|-----------------|
 | `add_net <n> <drv> <rcv>` with `bdb_net_mode on` | driver → `OUTPUT`; receivers → `INPUT` |
 | `add_net <n> <p1> <p2> unknown` with `bdb_net_mode on` | all pins → `UNKNOWN` |
+| `add_net <n> <p1> <p2> inout` with `bdb_net_mode on` | all pins → `INOUT` |
 | `add_bus … unknown` with `bdb_net_mode on` | all pins for every expanded net → `UNKNOWN` |
+| `add_bus … inout` with `bdb_net_mode on` | all pins for every expanded net → `INOUT` |
 | `import_verilog` | all instance-level pins → `UNKNOWN`; then overridden per-pin if a matching `cell_pin` row with a direction exists |
 | `import_def_lef` — LEF pin with `DIRECTION OUTPUT/INPUT/INOUT` | stored as-is |
 | `import_def_lef` — LEF pin with no `DIRECTION` keyword | → `UNKNOWN` |
 | `add_cell_pin` | stored as specified (`INOUT` if omitted) |
 | `bdb.add_net_pins(net, drv, rcvs)` | driver → `OUTPUT`; receivers → `INPUT` |
 | `bdb.add_net_pins_undirected(net, pins)` | all pins → `UNKNOWN` |
+| `bdb.add_net_pins_inout(net, pins)` | all pins → `INOUT` |
 
 #### Hierarchy propagation
 
-When `bdb_net_mode on` is active (or when calling `add_net_pins` / `add_net_pins_undirected` directly), *interface pins* are automatically created at every ancestor component between the leaf pin and the common ancestor of all endpoints. Interface pins inherit the direction of their corresponding leaf pin. For `UNKNOWN`-direction nets, the interface pins are also stored as `UNKNOWN`.
+When `bdb_net_mode on` is active (or when calling `add_net_pins` / `add_net_pins_undirected` / `add_net_pins_inout` directly), *interface pins* are automatically created at every ancestor component between the leaf pin and the common ancestor of all endpoints. Interface pins inherit the direction of their corresponding leaf pin.
 
-#### UNKNOWN direction in `run_hier_bundler`
+#### Driver priority in `run_hier_bundler`
 
-`run_hier_bundler` handles `UNKNOWN`-direction pins with a **positional fallback**:
+`run_hier_bundler` selects drivers with the following priority:
 
-1. Pins with `dir="OUTPUT"` are always the preferred driver.
-2. If no `OUTPUT` pin exists at a given hierarchy depth, the **first** `UNKNOWN` pin (in BDB insertion order, which matches the listing order in `add_net`) becomes the tentative driver; all remaining `UNKNOWN` pins at that depth become receivers.
-3. A net with exactly one `UNKNOWN` pin and no other receivers is dropped. A warning is printed to `stderr` (`[HierBundler] net_id=…: using UNKNOWN-direction pins as positional driver/receivers`) and `run_hier_bundler` reports the dropped net on `stdout` after bundling completes.
+| Priority | Direction | Role |
+|----------|-----------|------|
+| 1 | `OUTPUT` | Preferred driver |
+| 2 | `INOUT` | Secondary driver (if no OUTPUT pin exists); otherwise treated as receiver |
+| 3 | `INPUT` | Receiver only |
+| 4 | `UNKNOWN` | Positional fallback (if neither OUTPUT nor INOUT exist) |
 
-> **Pin ordering matters for UNKNOWN nets.** In `add_net <name> <p1> <p2>[,<p3>…] unknown`, the first pin (`p1`) is treated as the driver. List the driving component's pin first.
+**`INOUT` behaviour:** If no `OUTPUT` pin exists, the first `INOUT` pin (BDB insertion order) becomes the driver; remaining `INOUT` pins become receivers. If an `OUTPUT` pin already drives the net, all `INOUT` pins are receivers. A `[HierBundler]` line is written to `stderr` when INOUT fallback fires.
+
+**`UNKNOWN` behaviour:** Identical fallback rule as INOUT, but only applies when neither `OUTPUT` nor `INOUT` pins are present. A `[HierBundler]` line is written to `stderr` when UNKNOWN fallback fires; `run_hier_bundler` also reports dropped nets on `stdout` after bundling.
+
+> **Pin ordering matters for INOUT and UNKNOWN nets.** The first pin listed in `add_net`/`add_bus` is treated as the driver when the fallback fires. List the driving component's pin first.
 
 ---
 
@@ -684,6 +694,14 @@ for nets declared with `add_net … unknown`, or for programmatic use after
 `import_verilog`.  `pins` is a `list[str]` of `"inst/path.pin_name"` strings;
 the first entry becomes the positional driver when `run_hier_bundler` applies
 its UNKNOWN fallback rule.
+
+```python
+net_id: int = db.add_net_pins_inout(net_name, pins)
+```
+Like `add_net_pins_undirected` but stores every pin with `dir="INOUT"`.
+Use for explicitly bidirectional nets (`add_net … inout`).  `run_hier_bundler`
+treats INOUT as a secondary driver: the first entry drives when no `OUTPUT` pin
+exists, otherwise all INOUT pins are receivers.
 
 ---
 

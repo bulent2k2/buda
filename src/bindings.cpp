@@ -603,6 +603,8 @@ PYBIND11_MODULE(buda, m) {
         .def("add_net_pins", &BDB::add_net_pins,
              py::arg("net_name"), py::arg("drv"), py::arg("rcvs"))
         .def("add_net_pins_undirected", &BDB::add_net_pins_undirected,
+             py::arg("net_name"), py::arg("pins"))
+        .def("add_net_pins_inout", &BDB::add_net_pins_inout,
              py::arg("net_name"), py::arg("pins"));
 
     // ── verify ─────────────────────────────────────────────────────────────

@@ -402,6 +402,68 @@ int BDB::add_net_pins_undirected(const std::string& net_name,
     return net_id;
 }
 
+int BDB::add_net_pins_inout(const std::string& net_name,
+                             const std::vector<std::string>& pins) {
+    Stmt ins_net(_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
+    sqlite3_bind_text(ins_net, 1, net_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(ins_net);
+
+    Stmt q_net(_db, "SELECT id FROM net WHERE name=?");
+    sqlite3_bind_text(q_net, 1, net_name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q_net) != SQLITE_ROW)
+        throw std::runtime_error("add_net_pins_inout: failed to insert net " + net_name);
+    int net_id = sqlite3_column_int(q_net, 0);
+
+    auto split = [](const std::string& p) {
+        std::vector<std::string> v;
+        std::string seg;
+        for (char c : p) {
+            if (c == '/') { if (!seg.empty()) { v.push_back(seg); seg.clear(); } }
+            else seg += c;
+        }
+        if (!seg.empty()) v.push_back(seg);
+        return v;
+    };
+
+    struct Ep { std::string path, pin; };
+    auto parse = [](const std::string& s) -> Ep {
+        auto dot = s.rfind('.');
+        if (dot == std::string::npos) return {s, s};
+        return {s.substr(0, dot), s.substr(dot + 1)};
+    };
+
+    std::vector<Ep> eps;
+    std::vector<std::vector<std::string>> all_segs;
+    for (const auto& p : pins) {
+        eps.push_back(parse(p));
+        all_segs.push_back(split(eps.back().path));
+    }
+
+    size_t common = all_segs.empty() ? 0 : all_segs[0].size();
+    for (size_t i = 1; i < all_segs.size(); ++i) {
+        size_t k = 0;
+        while (k < common && k < all_segs[i].size() &&
+               all_segs[0][k] == all_segs[i][k]) ++k;
+        common = k;
+    }
+
+    for (size_t i = 0; i < eps.size(); ++i) {
+        const auto& ep  = eps[i];
+        const auto& seg = all_segs[i];
+        _add_pin_by_path(net_id, ep.path, ep.pin, "INOUT");
+        for (size_t d = seg.size() - 1; d > common; --d) {
+            std::string anc;
+            for (size_t k = 0; k < d; ++k) {
+                if (k > 0) anc += '/';
+                anc += seg[k];
+            }
+            _add_pin_by_path(net_id, anc, net_name, "INOUT");
+        }
+    }
+
+    return net_id;
+}
+
 int BDB::units() const { return _units; }
 
 void BDB::set_die(double w, double h) {
@@ -500,7 +562,6 @@ BDB::LefPins BDB::_parse_lef_pins(const std::string& lef_path) {
             for (auto x:xs) ox+=x; for (auto y:ys) oy+=y;
             ox/=xs.size(); oy/=ys.size();
             std::string dir = cur_dir.empty() ? "UNKNOWN" : cur_dir;
-            if (dir == "INOUT") dir = "OUTPUT";
             result[cur_cell][cur_pin] = {ox, oy, dir};
         }
         xs.clear(); ys.clear(); cur_pin.clear(); cur_dir.clear(); cur_use.clear();
@@ -757,7 +818,7 @@ void BDB::compute_fanout() {
         UPDATE net_props SET fanout = (
             SELECT COUNT(*) FROM pin
             WHERE  pin.net_id = net_props.net_id
-              AND  pin.dir = 'INPUT'
+              AND  pin.dir IN ('INPUT', 'INOUT')
         )
     )");
 }

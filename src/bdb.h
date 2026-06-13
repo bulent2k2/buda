@@ -32,7 +32,7 @@ struct PinRow {
     int         net_id;
     int         comp_id;
     std::string pin_name;
-    std::string dir;          // INPUT OUTPUT INOUT
+    std::string dir;          // INPUT | OUTPUT | INOUT | UNKNOWN
     double      px, py;       // absolute pin position in µm (-1 if unknown)
 };
 
@@ -123,6 +123,14 @@ public:
     // HierarchicalBundler will use positional ordering as a fallback.
     int add_net_pins_undirected(const std::string& net_name,
                                 const std::vector<std::string>& pins);
+
+    // Like add_net_pins but stores every pin with dir="INOUT".
+    // Use for explicitly bidirectional nets declared with 'add_net … inout'.
+    // HierarchicalBundler treats INOUT as a secondary driver (priority below
+    // OUTPUT); the first INOUT pin becomes the driver when no OUTPUT exists,
+    // and remaining INOUT pins become receivers.
+    int add_net_pins_inout(const std::string& net_name,
+                           const std::vector<std::string>& pins);
 
     // ── Mutations ──────────────────────────────────────────────────────────
     // Move a single instance to new origin (x,y); size is preserved.
