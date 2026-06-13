@@ -311,8 +311,13 @@ PYBIND11_MODULE(buda, m) {
         .def_readwrite("cut_coord",  &GlobalCut::cut_coord)
         .def_readwrite("dir",        &GlobalCut::dir)
         .def_readwrite("layer_id",   &GlobalCut::layer_id)
-        .def_readwrite("band_cap",   &GlobalCut::band_cap)
-        .def_readwrite("band_usage", &GlobalCut::band_usage);
+        .def_property_readonly("band_cap",
+            [](const GlobalCut& c) { return c.caps(); })
+        .def_property_readonly("band_usage",
+            [](const GlobalCut& c) { return c.usages(); })
+        .def("num_bands",  &GlobalCut::num_bands)
+        .def("cap",        &GlobalCut::cap,   py::arg("band"))
+        .def("usage",      &GlobalCut::usage, py::arg("band"));
 
     py::class_<CongestionPlanner>(m, "CongestionPlanner")
         .def(py::init<const Floorplan&, const LayerStack&>())
@@ -406,7 +411,7 @@ PYBIND11_MODULE(buda, m) {
              py::arg("pattern"))
         .def("add_keepout",   &RoutingGridStack::add_keepout,
              py::arg("layer_id"), py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"))
-        .def("get_layer_grid", [](RoutingGridStack& s, int id) -> RoutingGrid& {
+        .def("get_layer_grid", [](const RoutingGridStack& s, int id) -> const RoutingGrid& {
             return s.get_layer_grid(id);
         }, py::arg("layer_id"), py::return_value_policy::reference_internal)
         .def("has_layer",      &RoutingGridStack::has_layer, py::arg("layer_id"));

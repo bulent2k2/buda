@@ -974,7 +974,7 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                 if (!all_span) {
                     const Rect& ub = blocks[i].orig_bbox;
                     t.bridge_segments[blocks[i].block_name] =
-                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
+                        make_seg(ub.x2, ub.y1, ub.x2, ub.y2, v_layer_);
                 }
             }
             continue;
@@ -1011,10 +1011,10 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                     t.segments.push_back(make_seg(x_trunk, cy_right, best_right.x1, cy_right, h_layer_));
                     t.seg_busterms[idx].first = blocks[i];
 
-                    // Bridge H segment at union_bbox.y2 (over the block top)
+                    // Bridge V segment at union_bbox.x2 (right outer face)
                     const Rect& ub = blocks[i].orig_bbox;
                     t.bridge_segments[blocks[i].block_name] =
-                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
+                        make_seg(ub.x2, ub.y1, ub.x2, ub.y2, v_layer_);
                     continue;
                 }
             }

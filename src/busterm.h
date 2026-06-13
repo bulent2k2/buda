@@ -7,6 +7,7 @@
 // routing-level "Busterm" in topology.h (which carries block_name + Rect).
 
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include "bdb.h"
 
@@ -33,8 +34,9 @@ public:
     // Clears the existing busterm table and rewrites from BDB components.
     void derive(int max_depth = 0);
 
-    // Re-derive only the busterms affected by newly placed components
-    // (incremental update called after design evolves).
+    // Re-derive using the same max_depth as the last derive() call.
+    // Clears the busterm table and re-runs from scratch; a smarter
+    // incremental implementation is deferred until needed.
     void refine();
 
     // Return all busterms currently in BDB.
@@ -42,7 +44,9 @@ public:
 
 private:
     BDB& _db;
-    HierBusterm _from_component(const ComponentRow& comp) const;
+    int  _max_depth = 0;
+    HierBusterm _from_component(const ComponentRow& comp,
+                                const std::unordered_set<std::string>& cells_with_pins) const;
 };
 
 }  // namespace buda
