@@ -148,6 +148,15 @@ routes inside cell templates.
 | Best for | Small flat studies and quick experiments | Designs with hierarchy, repeated cells, or local-vs-global routing tradeoffs |
 | Main limitation | Loses hierarchy context | Requires BDB setup before planning |
 
+> **Pin directions:** When `bdb_net_mode on` is active, `add_net`/`add_bus`
+> automatically tag the first pin as `OUTPUT` (driver) and the remaining pins as
+> `INPUT` (receivers).  When direction is not known — for example after
+> `import_verilog`, or for clock nets where there is no designated driver — use
+> the trailing `unknown` keyword: `add_net clk u_src.clk u_dst.clk unknown`.
+> See [BDB Reference → Pin Directions](BDB_REFERENCE.md#pin-directions) for the
+> complete direction model, including how `run_hier_bundler` applies the
+> positional fallback for `UNKNOWN`-direction pins.
+
 ### Complete HBundle Example
 
 Save this as `hb_quickstart.buda` and run it from the repository root:

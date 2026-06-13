@@ -13,6 +13,7 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 ## Contents
 
 1. [Schema overview](#1-schema-overview)
+   - [Pin Directions](#pin-directions)
 2. [`.buda` script commands](#2-buda-script-commands)
 3. [Python API](#3-python-api)
    - [Row types](#row-types)
@@ -76,6 +77,51 @@ positions.  `component` stores the *physical* occurrences (one row per placed
 instance).  When `add_inst` places a cell that has `cell_children` rows, the
 engine recursively creates all descendant `component` rows automatically
 (eager expansion).
+
+---
+
+### Pin Directions
+
+The `dir` column in `pin` and `cell_pin` uses the following string values:
+
+| Direction | Valid in | Meaning |
+|-----------|----------|---------|
+| `OUTPUT` | `pin`, `cell_pin` | The pin drives the net — signal flows out of this component. |
+| `INPUT` | `pin`, `cell_pin` | The pin receives the net — signal flows into this component. |
+| `INOUT` | `pin`, `cell_pin` | Bidirectional port; can both drive and receive. Default for `add_cell_pin`. |
+| `UNKNOWN` | `pin` only | Direction not known at definition time. Used by `import_verilog`, incomplete LEF, and `add_net … unknown`. |
+
+`cell_pin.dir` (cell-type ports) does not use `UNKNOWN` — it represents the
+canonical port definition for a cell type.  `pin.dir` (instance-level pins
+created by `add_net`, `add_net_pins`, etc.) uses all four values.
+
+#### How each direction is set
+
+| Source | Direction stored |
+|--------|-----------------|
+| `add_net <n> <drv> <rcv>` with `bdb_net_mode on` | driver → `OUTPUT`; receivers → `INPUT` |
+| `add_net <n> <p1> <p2> unknown` with `bdb_net_mode on` | all pins → `UNKNOWN` |
+| `add_bus … unknown` with `bdb_net_mode on` | all pins for every expanded net → `UNKNOWN` |
+| `import_verilog` | all instance-level pins → `UNKNOWN`; then overridden per-pin if a matching `cell_pin` row with a direction exists |
+| `import_def_lef` — LEF pin with `DIRECTION OUTPUT/INPUT/INOUT` | stored as-is |
+| `import_def_lef` — LEF pin with no `DIRECTION` keyword | → `UNKNOWN` |
+| `add_cell_pin` | stored as specified (`INOUT` if omitted) |
+| `bdb.add_net_pins(net, drv, rcvs)` | driver → `OUTPUT`; receivers → `INPUT` |
+| `bdb.add_net_pins_undirected(net, pins)` | all pins → `UNKNOWN` |
+
+#### Hierarchy propagation
+
+When `bdb_net_mode on` is active (or when calling `add_net_pins` / `add_net_pins_undirected` directly), *interface pins* are automatically created at every ancestor component between the leaf pin and the common ancestor of all endpoints. Interface pins inherit the direction of their corresponding leaf pin. For `UNKNOWN`-direction nets, the interface pins are also stored as `UNKNOWN`.
+
+#### UNKNOWN direction in `run_hier_bundler`
+
+`run_hier_bundler` handles `UNKNOWN`-direction pins with a **positional fallback**:
+
+1. Pins with `dir="OUTPUT"` are always the preferred driver.
+2. If no `OUTPUT` pin exists at a given hierarchy depth, the **first** `UNKNOWN` pin (in BDB insertion order, which matches the listing order in `add_net`) becomes the tentative driver; all remaining `UNKNOWN` pins at that depth become receivers.
+3. A net with exactly one `UNKNOWN` pin and no other receivers is dropped. A warning is printed to `stderr` (`[HierBundler] net_id=…: using UNKNOWN-direction pins as positional driver/receivers`) and `run_hier_bundler` reports the dropped net on `stdout` after bundling completes.
+
+> **Pin ordering matters for UNKNOWN nets.** In `add_net <name> <p1> <p2>[,<p3>…] unknown`, the first pin (`p1`) is treated as the driver. List the driving component's pin first.
 
 ---
 
@@ -626,7 +672,18 @@ net_id: int = db.add_net_pins(net_name, drv, rcvs)
 Add a net and derive instance-level pins from `"inst/path.pin_name"` endpoint
 strings.  Propagates interface pins up the hierarchy to each ancestor strictly
 between the leaf and the common ancestor of all endpoints.  `rcvs` is a
-`list[str]`.  Idempotent for existing net names.
+`list[str]`.  Idempotent for existing net names.  Driver pin is stored as
+`OUTPUT`; receiver pins are stored as `INPUT`.
+
+```python
+net_id: int = db.add_net_pins_undirected(net_name, pins)
+```
+Like `add_net_pins` but stores every pin (leaf and ancestor interface) with
+`dir="UNKNOWN"`.  Use when direction is not known at script time — for example
+for nets declared with `add_net … unknown`, or for programmatic use after
+`import_verilog`.  `pins` is a `list[str]` of `"inst/path.pin_name"` strings;
+the first entry becomes the positional driver when `run_hier_bundler` applies
+its UNKNOWN fallback rule.
 
 ---
 
