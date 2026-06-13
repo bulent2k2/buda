@@ -379,7 +379,7 @@ void NUTSEngine::repair_overlaps(
     for (const auto& ts : segments)
         snapshot.push_back({ts.track_position, ts.span_lo, ts.span_hi});
 
-    const auto kozs = floorplan_.get_keepout_zones();
+    const auto kozs = low_keepouts();
     auto pull_of = [&](const TrackSegment& ts) {
         auto it = net_pull_map.find({ts.bundle_id, ts.seg_idx});
         return it == net_pull_map.end() ? 0 : it->second;
@@ -508,6 +508,15 @@ void NUTSEngine::set_track_pitch(double pitch) {
     track_pitch_ = pitch;
 }
 
+std::vector<KeepoutZone> NUTSEngine::low_keepouts() const {
+    std::vector<int> low_ids;
+    for (int lid : layers_.get_layer_ids_by_dir(LayerDir::VERTICAL))
+        if (!layers_.is_top(lid)) low_ids.push_back(lid);
+    for (int lid : layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL))
+        if (!layers_.is_top(lid)) low_ids.push_back(lid);
+    return floorplan_.low_layer_keepouts(low_ids);
+}
+
 
 std::vector<TrackSegment> NUTSEngine::extract_segments(
     const std::vector<BundleWrapper>& bundles,
@@ -622,33 +631,33 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     std::map<std::pair<int,int>, const TrackSegment*> layer_map;
     for (const TrackSegment* ts : segs)
         layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
-    struct Event {
-        double pos; int type; int idx; int net_pull_abs = 0;
-        bool operator<(const Event& o) const {
-            if (pos != o.pos) return pos < o.pos;
-            if (type != o.type) return type > o.type;  // END before START at same pos
-            // For START events at same position: stronger pull gets placed first.
-            return net_pull_abs > o.net_pull_abs;
-        }
-    };
-    std::vector<Event> events;
-    events.reserve(segs.size() * 2);
-    for (int i = 0; i < (int)segs.size(); ++i) {
-        int npa = std::abs(segs[i]->net_pull);
-        events.push_back({segs[i]->span_lo, 0, i, npa});
-        events.push_back({segs[i]->span_hi, 1, i, 0});
-    }
-    std::sort(events.begin(), events.end());
-    
-    // Incorporate KeepoutZones into 'occupied' list.
-    auto kozs = floorplan_.get_keepout_zones();
+    // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
+    // zones on LOW layers; TOP segments are filtered out by layer_ids).
+    auto kozs = low_keepouts();
 
     auto add_keepout_occ = [&](const TrackSegment* t,
                                std::vector<std::pair<double,double>>& occ) {
         keepout_occupied(kozs, t, occ);
     };
 
-    std::vector<int> active;
+    // Occupancy a candidate placement must avoid: every already-placed segment
+    // of another bundle whose span overlaps ts (same-bundle bits may share
+    // tracks), plus keepouts.  Span-overlap rather than a sweep active set, so
+    // pull anchors pre-placed in phase 1 are seen when packing phase 2 — and
+    // for a single pull-free pass this is equivalent to the old active-set
+    // sweep, since in span order an overlapping earlier segment is exactly one
+    // that has started and not yet ended.
+    auto build_occupied = [&](const TrackSegment* ts,
+                              std::vector<std::pair<double,double>>& occ) {
+        for (const TrackSegment* o : segs) {
+            if (o == ts || !o->placed || o->bundle_id == ts->bundle_id) continue;
+            if (o->span_lo < ts->span_hi && ts->span_lo < o->span_hi) {
+                const double h = o->width / 2.0;
+                occ.push_back({o->track_position - h, o->track_position + h});
+            }
+        }
+        add_keepout_occ(ts, occ);
+    };
 
     // Local repack: when no gap fits ts, earlier centre-seeking placements
     // may have fragmented a window that has room for everyone (two 51-wide
@@ -723,62 +732,68 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         return true;
     };
 
-    for (const auto& ev : events) {
-        if (ev.type == 1) {
-            active.erase(std::remove(active.begin(), active.end(), ev.idx), active.end());
-            continue;
-        }
-        TrackSegment* ts = segs[ev.idx];
+    // Place one segment at its preferred track, avoiding current occupancy.
+    auto place_seg = [&](TrackSegment* ts) {
         std::vector<std::pair<double,double>> occupied;
-
-        // 1. Existing placed segments.  Same-bundle segments never conflict:
-        //    per-bit they are the same nets and may share tracks.
-        for (int ai : active) {
-            if (segs[ai]->placed && segs[ai]->bundle_id != ts->bundle_id) {
-                const double c = segs[ai]->track_position;
-                const double h = segs[ai]->width / 2.0;
-                occupied.push_back({c - h, c + h});
-            }
-        }
-
-        // 2. Keepouts
-        add_keepout_occ(ts, occupied);
-
+        build_occupied(ts, occupied);
         std::sort(occupied.begin(), occupied.end());
-        double pos;
-        {
-            const double c_lo = ts->interval_lo + ts->width / 2.0;
-            const double c_hi = ts->interval_hi - ts->width / 2.0;
-            auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
 
-            // Alignment: a placed same-layer sibling (same bundle, connected
-            // to the same perpendicular segment) whose position fits this
-            // segment's interval — sharing its band saves a whole track.
-            double preferred = std::numeric_limits<double>::quiet_NaN();
-            auto ait = align_map.find(key);
-            if (ait != align_map.end()) {
-                for (const auto& sk : ait->second) {
-                    auto lit = layer_map.find(sk);
-                    if (lit == layer_map.end() || !lit->second->placed) continue;
-                    double p = lit->second->track_position;
-                    if (p >= c_lo && p <= c_hi) { preferred = p; break; }
-                }
+        const double c_lo = ts->interval_lo + ts->width / 2.0;
+        const double c_hi = ts->interval_hi - ts->width / 2.0;
+        auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
+
+        // Alignment: a placed same-layer sibling (same bundle, connected to the
+        // same perpendicular segment) whose position fits this segment's
+        // interval — sharing its band saves a whole track.
+        double preferred = std::numeric_limits<double>::quiet_NaN();
+        auto ait = align_map.find(key);
+        if (ait != align_map.end()) {
+            for (const auto& sk : ait->second) {
+                auto lit = layer_map.find(sk);
+                if (lit == layer_map.end() || !lit->second->placed) continue;
+                double p = lit->second->track_position;
+                if (p >= c_lo && p <= c_hi) { preferred = p; break; }
             }
-            if (std::isnan(preferred)) {
-                auto it = pull_map.find(key);
-                preferred = (it != pull_map.end())
-                            ? it->second
-                            : (ts->interval_lo + ts->interval_hi) / 2.0;
-            }
-            preferred = std::clamp(preferred, c_lo, c_hi);
-            pos = preferred_fit(ts->interval_lo, ts->interval_hi,
-                                ts->width, occupied, preferred);
         }
+        if (std::isnan(preferred)) {
+            auto it = pull_map.find(key);
+            preferred = (it != pull_map.end())
+                        ? it->second
+                        : (ts->interval_lo + ts->interval_hi) / 2.0;
+        }
+        preferred = std::clamp(preferred, c_lo, c_hi);
+        double pos = preferred_fit(ts->interval_lo, ts->interval_hi,
+                                   ts->width, occupied, preferred);
         if (!std::isnan(pos))      ts->track_position = pos;
         else if (!try_repack(ts))  ts->track_position = (ts->interval_lo + ts->interval_hi) / 2.0;
         ts->placed = true;
-        active.push_back(ev.idx);
-    }
+    };
+
+    // Phase 1 — anchor pulled segments first at their preferred (pull-extreme)
+    // positions, strongest pull then tightest interval first, so the pull-free
+    // segments fill the residual gaps in phase 2.  A pull-free trunk then slides
+    // off any track a pulled bus needs, instead of grabbing it by sweep order
+    // and forcing the pulled bus to detour (item A: planner6 Bundle 3/4).
+    std::vector<TrackSegment*> pulled, free_segs;
+    for (TrackSegment* ts : segs)
+        (ts->net_pull != 0 ? pulled : free_segs).push_back(ts);
+    std::stable_sort(pulled.begin(), pulled.end(),
+        [](const TrackSegment* a, const TrackSegment* b) {
+            int pa = std::abs(a->net_pull), pb = std::abs(b->net_pull);
+            if (pa != pb) return pa > pb;                       // strongest pull first
+            return (a->interval_hi - a->interval_lo)
+                 < (b->interval_hi - b->interval_lo);           // tightest window first
+        });
+    for (TrackSegment* ts : pulled) place_seg(ts);
+
+    // Phase 2 — sweep the pull-free segments in span order; each sees the
+    // anchors and earlier free segments via build_occupied and slides to the
+    // nearest free track.
+    std::stable_sort(free_segs.begin(), free_segs.end(),
+        [](const TrackSegment* a, const TrackSegment* b) {
+            return a->span_lo < b->span_lo;
+        });
+    for (TrackSegment* ts : free_segs) place_seg(ts);
 }
 
 void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys) {

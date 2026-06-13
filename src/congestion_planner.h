@@ -104,6 +104,10 @@ public:
     //                        penalty; shorter segments pay proportionally
     //                        less (default: 25% of the larger grid extent)
     void set_planner_param(const std::string& name, double value);
+    // Minimum inter-bus spacing, mirroring NUTSEngine::set_track_pitch.  The
+    // band books reserve one pitch of margin per additional bus in a band so a
+    // band the planner books full is actually packable by NUTS (Gap 1).
+    void set_track_pitch(double pitch) { track_pitch_ = pitch; }
     void build_congestion_map();
     std::vector<BundleAssignment> optimize_topologies(
             std::vector<BundleWrapper>& bundles, int max_iterations);
@@ -221,6 +225,10 @@ private:
     // optimize_topologies run as 25% of the larger Hanan grid extent.
     double base_span_ref_     = -1.0;
     double span_ref_eff_      = 0.0;   // resolved value for the current run
+    // Inter-bus spacing (mirrors NUTSEngine::track_pitch_).  Each segment is
+    // charged eff_width + track_pitch_ and each band granted cap + track_pitch_,
+    // so k buses in a band reserve the (k-1)*pitch of separation NUTS enforces.
+    double track_pitch_       = 1.0;
 };
 
 } // namespace buda

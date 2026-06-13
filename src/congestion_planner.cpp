@@ -50,27 +50,17 @@ int CongestionPlanner::find_band(bool is_vcut, int perp_pos) const {
 // ---------------------------------------------------------------------------
 
 // Available perpendicular length within a single Hanan band at a cut.
+// Blockages are supplied as keepout zones: user-defined zones plus the implicit
+// solid-leaf-cell zones on LOW layers (Floorplan::low_layer_keepouts).  TOP
+// layers see only the user zones, so they tile cells freely; containers are
+// absent from the zone list and keep their full channel capacity (Gap 2).
 static double band_available_length(
         int cut_coord, bool is_vcut,
-        const std::vector<std::pair<std::string,Rect>>& blocks,
         const std::vector<KeepoutZone>& keepouts,
         int layer_id,
         int band_lo, int band_hi)
 {
     std::vector<std::pair<int,int>> blocked;
-    // 1. Block footprints
-    for (const auto& [name, r] : blocks) {
-        bool covers = is_vcut
-            ? (cut_coord >= r.x1 && cut_coord <= r.x2)
-            : (cut_coord >= r.y1 && cut_coord <= r.y2);
-        if (!covers) continue;
-        int lo = is_vcut ? r.y1 : r.x1;
-        int hi = is_vcut ? r.y2 : r.x2;
-        int clo = std::max(lo, band_lo);
-        int chi = std::min(hi, band_hi);
-        if (clo < chi) blocked.push_back({clo, chi});
-    }
-    // 2. Keepout zones for this layer
     for (const auto& koz : keepouts) {
         if (!koz.layer_ids.count(layer_id)) continue;
         const Rect& r = koz.bbox;
@@ -105,7 +95,6 @@ void CongestionPlanner::rebuild_cuts_() {
     if (x_grid_.size() < 2 || y_grid_.size() < 2) return;
 
     auto blocks   = floorplan_.get_all_blocks();
-    auto keepouts = floorplan_.get_keepout_zones();
     blocks_cache_ = blocks;
     int n_ybands = (int)y_grid_.size() - 1;
     int n_xbands = (int)x_grid_.size() - 1;
@@ -115,22 +104,32 @@ void CongestionPlanner::rebuild_cuts_() {
     if (v_layers.empty()) v_layers.push_back(5);
     if (h_layers.empty()) h_layers.push_back(4);
 
+    // Keepouts seen by LOW (non-TOP) layers carry an implicit zone for every
+    // solid leaf cell (Gap 2): a LOW segment cannot route over a cell, so the
+    // band sitting on it has zero capacity.  Hierarchy containers stay
+    // transparent — their internal channels keep capacity and accrue congestion
+    // as LOW segments cross the child-edge cuts.  TOP layers (absent from
+    // low_ids) cross cells freely, so the leaf zones never apply to them.
+    std::vector<int> low_ids;
+    for (int lid : v_layers) if (!layers_.is_top(lid)) low_ids.push_back(lid);
+    for (int lid : h_layers) if (!layers_.is_top(lid)) low_ids.push_back(lid);
+    auto keepouts = floorplan_.low_layer_keepouts(low_ids);
+
     // V-cuts: one per (X-channel midpoint, H-layer).
     // Perpendicular direction = Y → bands indexed by y_grid_.
     for (int i = 0; i + 1 < (int)x_grid_.size(); ++i) {
         int x_mid = (x_grid_[i] + x_grid_[i+1]) / 2;
         for (int lid : h_layers) {
-            bool is_top = layers_.get_layer_type(lid) == LayerType::TOP;
             GlobalCut c;
             c.p1        = {x_mid, y_grid_.front()};
             c.p2        = {x_mid, y_grid_.back()};
             c.cut_coord = x_mid;
             c.dir       = LayerDir::VERTICAL;
             c.layer_id  = lid;
+            // Leaf cells reach LOW layers via `keepouts` (low_layer_keepouts),
+            // so blocks no longer carve capacity directly.
             c.init_bands(n_ybands, [&](int b) {
-                return is_top
-                    ? band_available_length(x_mid, true, {}, keepouts, lid, y_grid_[b], y_grid_[b+1])
-                    : band_available_length(x_mid, true, blocks, keepouts, lid, y_grid_[b], y_grid_[b+1]);
+                return band_available_length(x_mid, true, keepouts, lid, y_grid_[b], y_grid_[b+1]);
             });
             cuts_.push_back(std::move(c));
         }
@@ -141,7 +140,6 @@ void CongestionPlanner::rebuild_cuts_() {
     for (int i = 0; i + 1 < (int)y_grid_.size(); ++i) {
         int y_mid = (y_grid_[i] + y_grid_[i+1]) / 2;
         for (int lid : v_layers) {
-            bool is_top = layers_.get_layer_type(lid) == LayerType::TOP;
             GlobalCut c;
             c.p1        = {x_grid_.front(), y_mid};
             c.p2        = {x_grid_.back(),  y_mid};
@@ -149,9 +147,7 @@ void CongestionPlanner::rebuild_cuts_() {
             c.dir       = LayerDir::HORIZONTAL;
             c.layer_id  = lid;
             c.init_bands(n_xbands, [&](int b) {
-                return is_top
-                    ? band_available_length(y_mid, false, {}, keepouts, lid, x_grid_[b], x_grid_[b+1])
-                    : band_available_length(y_mid, false, blocks, keepouts, lid, x_grid_[b], x_grid_[b+1]);
+                return band_available_length(y_mid, false, keepouts, lid, x_grid_[b], x_grid_[b+1]);
             });
             cuts_.push_back(std::move(c));
         }
@@ -206,6 +202,11 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
     if (!layers_.is_top(layer_id)) {
         int perp = is_h ? seg.start.y : seg.start.x;
         for (const auto& [name, r] : blocks_cache_) {
+            // Only true leaf cells clamp a non-TOP segment to their face (the
+            // in-cell portion is internal pin access).  Hierarchy containers are
+            // transparent (Gap 2): a segment inside one keeps its full extent and
+            // is charged across the child-edge cuts it crosses.
+            if (floorplan_.is_container(name)) continue;
             int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
             int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
             if (perp < plo || perp > phi) continue;
@@ -241,7 +242,7 @@ double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        double ov  = (c.usage(b) + eff_width) - cap;
+        double ov  = (c.usage(b) + eff_width + track_pitch_) - cap;  // +pitch: Gap 1
         if (ov > peak) peak = ov;
     });
     return std::max(peak, 0.0);
@@ -260,7 +261,7 @@ void CongestionPlanner::collect_overflow_bands(const Segment& seg, int layer_id,
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
-        if ((c.usage(b) + eff_width) - cap > 0.0) out.insert({ci, b});
+        if ((c.usage(b) + eff_width + track_pitch_) - cap > 0.0) out.insert({ci, b});  // +pitch: Gap 1
     });
 }
 
@@ -276,7 +277,7 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
-        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid);
+        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid) + track_pitch_;  // +pitch: Gap 1
         for_each_band(t.segments[si], lid, pp, [&](int ci, int b) {
             if (contended.count({ci, b})) overlap += eff;
         });
@@ -287,12 +288,21 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
 double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
                                           int slide_lo, int slide_hi) const {
     double cap = c.cap(b);
-    if (slide_lo == INT_MIN) return cap;
-    const auto& grid = is_vcut ? y_grid_ : x_grid_;
-    if (b + 1 >= (int)grid.size()) return cap;
-    double win = std::min(grid[b + 1], slide_hi) -
-                 std::max(grid[b],     slide_lo);
-    return std::min(cap, std::max(win, 0.0));
+    if (slide_lo != INT_MIN) {
+        const auto& grid = is_vcut ? y_grid_ : x_grid_;
+        if (b + 1 < (int)grid.size()) {
+            double win = std::min(grid[b + 1], slide_hi) -
+                         std::max(grid[b],     slide_lo);
+            cap = std::min(cap, std::max(win, 0.0));
+        }
+    }
+    // Inter-bus pitch margin (Gap 1): a band hosting k buses needs (k-1)*pitch
+    // beyond the summed eff widths.  Each segment is charged eff + pitch (see
+    // score/cong/collect/apply), so granting one free pitch here leaves single-
+    // bus bands unaffected while reserving spacing for the rest.  A physically
+    // blocked band (cap 0 — e.g. a leaf-cell keepout) stays a hard block.
+    if (cap <= 0.0) return 0.0;
+    return cap + track_pitch_;
 }
 
 void CongestionPlanner::apply_segment(const Segment& seg, int layer_id, double eff_width,
@@ -322,7 +332,7 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
         int clo = is_vcut ? bw.hier.res_x1 : bw.hier.res_y1;
         int chi = is_vcut ? bw.hier.res_x2 : bw.hier.res_y2;
         if (c.cut_coord < clo || c.cut_coord > chi) continue;
-        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid);
+        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid) + track_pitch_;  // +pitch: Gap 1
         // Every band overlapping the region's perpendicular range could be
         // the bundle's eventual home, so each carries the reservation.
         const auto& grid = is_vcut ? y_grid_ : x_grid_;
@@ -354,7 +364,7 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
         const GlobalCut& c = cuts_[ci];
         double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
         if (cap <= 0.0) { blocked = true; return; }
-        double ov = c.usage(b) + eff_width - cap;
+        double ov = c.usage(b) + eff_width + track_pitch_ - cap;  // +pitch: Gap 1
         if (ov <= 0.0) return;     // fits — no cost
         peak_cost = std::max(peak_cost, kCong_ * ov / cap);
     });
@@ -573,9 +583,10 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             if (topo_infeasible) break;
 
             // Apply chosen layer so later segments in this topology see
-            // the updated congestion state.
+            // the updated congestion state.  Charge eff + pitch so the band
+            // books mirror NUTS inter-bus spacing (Gap 1).
             double eff = layers_.eff_bus_width(nbits, bw.input.width, best_lid);
-            apply_segment(seg, best_lid, eff, perp_pos);
+            apply_segment(seg, best_lid, eff + track_pitch_, perp_pos);
             seg_layers.push_back(best_lid);
             seg_perp.push_back(perp_pos);
             topo_overflow = std::max(topo_overflow, best_ov);
@@ -625,8 +636,9 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
+        // Charge eff + pitch (Gap 1); sign rips up symmetrically.
         apply_segment(t.segments[si], lid,
-                      sign * layers_.eff_bus_width(nbits, bw.input.width, lid), pp);
+                      sign * (layers_.eff_bus_width(nbits, bw.input.width, lid) + track_pitch_), pp);
     }
 }
 

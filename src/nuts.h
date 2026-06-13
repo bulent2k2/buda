@@ -93,6 +93,12 @@ private:
     double track_pitch_ = 1.0;
     std::vector<int> extra_x_, extra_y_;   // additional grid points from CongestionPlanner
 
+    // User keepouts plus implicit solid-leaf-cell keepouts on every non-TOP
+    // layer (Gap 2): a LOW segment may not route over a leaf cell, so the cell
+    // behaves as a keepout for the whole lower stack.  TOP segments are filtered
+    // out by KeepoutZone::layer_ids.  Mirrors the planner's band-capacity model.
+    std::vector<KeepoutZone> low_keepouts() const;
+
     // Build a flat list of TrackSegments from all selected topologies.
     std::vector<TrackSegment> extract_segments(
         const std::vector<BundleWrapper>& bundles,

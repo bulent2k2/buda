@@ -79,6 +79,7 @@ class BudaSession:
         self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
         self._nuts_pitch = 1.0
+        self._planner_pitch = None   # pitch the last run_planner reserved bands for
         self._detailed_bit_order = "LO_HI"
        # last track pitch used by run_nuts
         self._planner_iterations = 5 # last iteration count used by run_planner
@@ -88,6 +89,7 @@ class BudaSession:
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self.no_viz = False          # set by --no-viz CLI flag
         self.bdb = None              # BDB (opened by open_bdb command)
+        self._bdb_added_ids = set()  # component ids loaded into fp via add_blocks_from_bdb
         self._busterm_gen = None     # BustermGen instance (created by derive_busterms)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
         self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
@@ -230,9 +232,20 @@ class BudaSession:
             self.fp.add_block(r.name,
                               int(round(r.x1)), int(round(r.y1)),
                               int(round(r.x2)), int(round(r.y2)))
+            self._bdb_added_ids.add(r.id)
             added_rows.append((r, is_fallback))
             if is_fallback:
                 fallback_count += 1
+
+        # Container marking (Gap 2): a block is a hierarchy envelope only when at
+        # least one of its BDB descendants was ALSO loaded into the floorplan —
+        # those finer blocks supply the internal cuts that charge intra-block
+        # congestion.  A node whose descendants were NOT imported (e.g.
+        # `add_blocks_from_bdb 1 skip` on non-leaf depth-1 blocks) stays a solid
+        # leaf cell and keeps blocking LOW layers.  Recomputed over every block
+        # imported so far so a shallow block flips to container once a later
+        # call loads its descendants.
+        self._mark_bdb_containers(by_id, children_of)
 
         added = len(added_rows)
         parts = [f"[BDB] Added {added} blocks at depth {depth} (mode={mode})"]
@@ -254,6 +267,32 @@ class BudaSession:
             print(f"[BDB] Block list written to {log_path}")
         except OSError as e:
             print(f"[BDB] Warning: could not write block log {log_path}: {e}")
+
+    def _mark_bdb_containers(self, by_id, children_of):
+        """Mark imported blocks container/leaf by whether a loaded descendant exists.
+
+        A block is a container (transparent to LOW layers; intra-block congestion
+        charged via descendant cuts) only if at least one of its BDB descendants
+        was itself loaded into the floorplan.  Otherwise it stays a solid leaf
+        cell that blocks LOW layers.  Recomputed over self._bdb_added_ids so the
+        decision stays correct as deeper levels are imported in later calls.
+        """
+        added = self._bdb_added_ids
+        memo: dict[int, bool] = {}
+
+        def has_loaded_descendant(nid):
+            if nid in memo:
+                return memo[nid]
+            memo[nid] = False   # guard against cycles
+            res = any(ch.id in added or has_loaded_descendant(ch.id)
+                      for ch in children_of.get(nid, []))
+            memo[nid] = res
+            return res
+
+        for nid in added:
+            row = by_id.get(nid)
+            if row is not None:
+                self.fp.set_container(row.name, has_loaded_descendant(nid))
 
     # ── Hierarchical topology helpers ─────────────────────────────────────────
 
@@ -1117,6 +1156,23 @@ class BudaSession:
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
+        # Install implicit solid-leaf-cell keepouts on every non-TOP layer grid
+        # so detailed routing avoids signal tracks over cells, matching the
+        # planner and abstract NUTS (Gap 2).  Done here — just before the solve —
+        # so it is independent of the order in which blocks, containers, and
+        # track patterns were declared.  Guarded per grid object so repeated
+        # detailed runs (e.g. after run_nuts_on_layer) don't re-add duplicates.
+        if getattr(self, '_leaf_keepouts_grid', None) is not self.routing_grid:
+            for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
+                for lid in self.layers.get_layer_ids_by_dir(d):
+                    if self.layers.is_top(lid) or not self.routing_grid.has_layer(lid):
+                        continue
+                    for koz in self.fp.low_layer_keepouts([lid]):
+                        if lid in koz.layer_ids:
+                            self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
+                                                          koz.bbox.x2, koz.bbox.y2)
+            self._leaf_keepouts_grid = self.routing_grid
+
         bid_to_nbits = {w.input.original_bundle.id: len(w.input.original_bundle.get_net_names())
                         for w in self.bundles}
         # Build ConnTopology per bundle for endpoint adj info.
@@ -1236,6 +1292,11 @@ class BudaSession:
                 x1, y1, x2, y2 = int(args[1]), int(args[2]), int(args[3]), int(args[4])
                 self.fp.add_block(name, x1, y1, x2, y2)
                 rest = list(args[5:])
+            # Optional 'container' flag: marks a hierarchy envelope (transparent
+            # to LOW layers) rather than a solid leaf cell.  See Gap 2.
+            if any(t.lower() == "container" for t in rest):
+                self.fp.set_container(name)
+                rest = [t for t in rest if t.lower() != "container"]
             if rest and rest[0].lower() == "corner_margin":
                 rest = rest[1:]
                 kws = {}
@@ -1475,6 +1536,14 @@ class BudaSession:
             self._planner_params[name_p] = value_p
             if self.planner is not None:
                 self.planner.set_planner_param(name_p, value_p)
+        elif cmd == "set_track_pitch":
+            # Usage: set_track_pitch <pitch>
+            # Declare the inter-bus pitch BEFORE run_planner so its band
+            # reservations (Gap 1) match the run_nuts that packs the tracks.
+            # run_nuts with no argument reuses this value.
+            if not args:
+                print("Error: set_track_pitch requires a pitch value"); return
+            self._nuts_pitch = float(args[0])
         elif cmd == "run_bundler":
             self.bundler.set_strategy(buda.Strategy.STRICT)
             raw_bundles = self.bundler.run(self.netlist)
@@ -1714,6 +1783,12 @@ class BudaSession:
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
+                # Mirror NUTS inter-bus pitch so the band books reserve the
+                # spacing NUTS enforces (Gap 1).  Use set_track_pitch before
+                # run_planner to plan a non-default pitch; run_nuts warns if its
+                # pitch ends up differing from the one planned here.
+                self.planner.set_track_pitch(self._nuts_pitch)
+                self._planner_pitch = self._nuts_pitch
                 self.planner.build_congestion_map()
                 self._planner_iterations = iterations
                 with buda.ostream_redirect():
@@ -1735,6 +1810,12 @@ class BudaSession:
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
+                # Mirror NUTS inter-bus pitch so the band books reserve the
+                # spacing NUTS enforces (Gap 1).  Use set_track_pitch before
+                # run_planner to plan a non-default pitch; run_nuts warns if its
+                # pitch ends up differing from the one planned here.
+                self.planner.set_track_pitch(self._nuts_pitch)
+                self._planner_pitch = self._nuts_pitch
                 self.planner.build_congestion_map()
                 # Apply architect-pinned selections BEFORE optimizing so the
                 # planner scores the correct topology and assigns layers for it.
@@ -1754,8 +1835,18 @@ class BudaSession:
                         w.plan.seg_perp = list(asn.seg_perp)
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
-            pitch = float(args[0]) if args else 1.0
+            # Default to the stored pitch (possibly set via set_track_pitch
+            # before run_planner) rather than resetting to 1.0, so a planner
+            # that reserved bands for a non-default pitch stays consistent.
+            pitch = float(args[0]) if args else self._nuts_pitch
             self._nuts_pitch = pitch
+            if (self._planner_pitch is not None and
+                    abs(pitch - self._planner_pitch) > 1e-9):
+                print(f"Warning: run_nuts pitch {pitch} differs from the pitch "
+                      f"{self._planner_pitch} run_planner reserved bands for. "
+                      f"Set the pitch with 'set_track_pitch <p>' before "
+                      f"run_planner (or re-run run_planner) so the planner's "
+                      f"pitch-aware band reservations match this NUTS run.")
             nuts = buda.NUTSEngine(self.fp, self.layers)
             nuts.set_track_pitch(pitch)
 

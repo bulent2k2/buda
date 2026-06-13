@@ -86,6 +86,11 @@ void bind_routing(py::module_& m) {
         }, py::arg("name"), py::arg("rects"), py::arg("teg_mode") = TegMode::THRU)
         .def("set_block_teg_mode",      &Floorplan::set_block_teg_mode)
         .def("get_block_teg_mode",      &Floorplan::get_block_teg_mode)
+        .def("set_container",           &Floorplan::set_container,
+             py::arg("name"), py::arg("is_container") = true)
+        .def("is_container",            &Floorplan::is_container)
+        .def("low_layer_keepouts",      &Floorplan::low_layer_keepouts,
+             py::arg("low_layer_ids"))
         .def("add_keepout_zone",        &Floorplan::add_keepout_zone)
         .def("get_keepout_zones",       &Floorplan::get_keepout_zones)
         .def("get_block_rects", [](const Floorplan& fp, const std::string& name) {
@@ -216,6 +221,7 @@ void bind_routing(py::module_& m) {
     py::class_<CongestionPlanner>(m, "CongestionPlanner")
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_planner_param",    &CongestionPlanner::set_planner_param)
+        .def("set_track_pitch",      &CongestionPlanner::set_track_pitch)
         .def("build_congestion_map", &CongestionPlanner::build_congestion_map)
         .def("optimize_topologies",  &CongestionPlanner::optimize_topologies)
         .def("get_cuts",             &CongestionPlanner::get_cuts)

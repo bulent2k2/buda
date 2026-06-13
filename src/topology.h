@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <map>
+#include <set>
 #include <optional>
 #include "bundler.h"
 namespace buda {
@@ -101,6 +102,19 @@ public:
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
     void add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids);
     const std::vector<KeepoutZone>& get_keepout_zones() const { return keepouts_; }
+    // Mark a block as a hierarchy container (an envelope enclosing finer blocks)
+    // rather than a solid leaf cell.  Containers are transparent to LOW layers:
+    // their internal channels carry routing congestion (charged via the child
+    // blocks' Hanan cuts), whereas leaf cells block LOW layers entirely.
+    void set_container(const std::string& name, bool is_container = true);
+    bool is_container(const std::string& name) const;
+    // Keepouts seen by LOW (non-TOP) layers: the user-defined zones plus an
+    // implicit zone for every solid leaf cell (each cell rect), tagged with the
+    // given non-TOP layer ids.  A LOW segment cannot route over a leaf cell —
+    // the cell behaves as a keepout for the whole lower stack — while TOP layers
+    // (absent from low_layer_ids) cross cells freely.  Shared by the planner's
+    // band-capacity model and abstract/detailed NUTS so all three agree.
+    std::vector<KeepoutZone> low_layer_keepouts(const std::vector<int>& low_layer_ids) const;
     // Multi-rect block: stores each rect individually; add_block is called
     // internally with the union bounding box for backward compatibility.
     void add_block_rects(const std::string& name, const std::vector<Rect>& rects,
@@ -144,6 +158,7 @@ public:
 private:
     std::map<std::string, Rect>          blocks_;
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
+    std::set<std::string>                containers_;       // hierarchy envelopes (not leaf cells)
     std::map<std::string, TegMode>       teg_modes_;
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};

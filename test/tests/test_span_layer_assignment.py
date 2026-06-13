@@ -247,6 +247,10 @@ def test_overflow_threshold_congestion():
     ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
 
     router = buda.CongestionPlanner(fp, ls)
+    # Isolate the overflow-threshold cost model from inter-bus pitch (Gap 1),
+    # so the "2+2=4=cap, edge-to-edge" threshold this test documents holds.
+    # The pitch-aware threshold is covered by test_inter_bus_pitch_reserved.
+    router.set_track_pitch(0.0)
     router.build_congestion_map()
 
     seg1 = make_h_segment(100, 500, y=98)
@@ -265,6 +269,36 @@ def test_overflow_threshold_congestion():
     assert layers[2] == 6, f"Bundle 2 should stay on M6 (2+2=4, no overflow); got M{layers[2]}"
     # Bundle 3: M6 overflow (4+2=6 > 4) → positive cost → spills to M4.
     assert layers[3] == 4, f"Bundle 3 should spill to M4 (M6 overflow); got M{layers[3]}"
+
+
+def test_inter_bus_pitch_reserved():
+    """
+    Scenario: inter-bus pitch reservation (Gap 1)
+
+    Two width-2 bundles sum to 4 = channel cap, so they fit edge-to-edge with
+    pitch=0.  But NUTS separates distinct buses by track_pitch, so a real
+    channel needs 2 + 2 + 1*pitch = 5 > 4.  With the default pitch the planner
+    must reserve that gap, so the second bundle spills to M4 — whereas with
+    pitch disabled it stays on M6 (control).
+    """
+    def assign(pitch):
+        fp = bottleneck_fp()   # V-cut at x=300, open band capacity=4
+        ls = buda.LayerStack()
+        ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+        ls.add_layer(6, "M6", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+        ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
+        router = buda.CongestionPlanner(fp, ls)
+        router.set_track_pitch(pitch)
+        router.build_congestion_map()
+        w1 = make_bundle_wrapper(bid=1, width=2.0, seg=make_h_segment(100, 500, y=98))
+        w2 = make_bundle_wrapper(bid=2, width=2.0, seg=make_h_segment(100, 500, y=98))
+        a = router.optimize_topologies([w1, w2], 1)
+        return {x.bundle_id: x.seg_layers[0] for x in a}
+
+    # pitch=0: edge-to-edge fits (2+2=4=cap) → both on M6.
+    assert assign(0.0)[2] == 6, "with no pitch the second bundle should fit on M6"
+    # pitch=1: needs 2+2+1=5 > 4 → second bundle spills to M4.
+    assert assign(1.0)[2] == 4, "inter-bus pitch should push the second bundle to M4"
 
 
 # ---------------------------------------------------------------------------

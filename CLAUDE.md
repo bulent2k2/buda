@@ -50,7 +50,7 @@ python3 buda_cli.py ../flow/comprehensive_demo.buda
 
 | Command | Stage | Description |
 |---|---|---|
-| `add_block <name> <x1> <y1> <x2> <y2> [corner_margin ...]` | setup | Place a single-rect floorplan block; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
+| `add_block <name> <x1> <y1> <x2> <y2> [container] [corner_margin ...]` | setup | Place a single-rect floorplan block; `container` marks a hierarchy envelope (transparent to LOW layers; leaf cells block LOW layers as keepouts) rather than a solid leaf cell; optional per-block corner margin (absolute or `pct_h`/`pct_v`) |
 | `add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru\|over] [corner_margin ...]` | setup | Multi-rect block: topology generator picks the best-fit rect per trunk position; `teg_mode over` generates an explicit bridge segment over the block's notch when the trunk falls in a gap between rects |
 | `add_keepout <x1> <y1> <x2> <y2> <layer_list>` | setup | Define a rectangular keep-out zone for specific routing layers |
 | `corner_margin dx <n> [dy <n>]` | setup | Set global corner margin for all blocks with no per-block override. Only `dx`/`dy` (absolute); `pct_h`/`pct_v` not valid globally. Single-axis value mirrors to the other axis. |
@@ -68,7 +68,8 @@ python3 buda_cli.py ../flow/comprehensive_demo.buda
 | `run_planner <iterations>` | 3 | Layer assign + topology select |
 | `run_planner hier [<iterations>]` | 3 | Hier-aware planner: pins sidecar selections, expands cell-level bundles to per-instance wrappers, then runs congestion planner top-down |
 | `run_planner post_nuts [V [short long]] [H [short long]]` | 3 | Post-NUTS stub layer reassignment: short/long stubs on V or H layers are moved to cheaper layers |
-| `run_nuts [pitch]` | 4 | Abstract track placement |
+| `set_track_pitch <pitch>` | 3 setup | Declare inter-bus track pitch before `run_planner` so its pitch-aware band reservations match the `run_nuts` that packs tracks; `run_nuts` with no arg reuses it |
+| `run_nuts [pitch]` | 4 | Abstract track placement (defaults to the last `set_track_pitch`/`run_nuts` value; warns if it differs from the pitch `run_planner` reserved for) |
 | `run_nuts_on_layer <layer-name>` | 4 | Re-solve one layer with NUTS without disturbing other layers |
 | `visualize_topologies [<hint>]` | — | Open topology explorer for the matching bundle (`-all [hints…]` for multiple) |
 | `visualize` | — | Open interactive matplotlib window |
