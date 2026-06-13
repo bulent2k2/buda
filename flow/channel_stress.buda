@@ -3,12 +3,7 @@
 # 200 nets randomly paired (fixed seed=42) — stress-tests NUTS channel packing.
 # Results in 62 bundles.
 
-def_layer 3 M3 V LOW 10.0
-# high power % is to force planner to resort to M6
-def_layer 4 M4 H TOP 88.0
-def_layer 5 M5 V TOP 20.0
-def_layer 6 M6 H LOW 20.0
-def_layer 7 M7 V LOW 40.0
+source tracks_for_channel_stress.buda
 
 add_block u_b0    20   20   80   80
 add_block u_b1   100   20  160   80
@@ -35,8 +30,14 @@ run_bundler strict
 # source test4_gen_topo.buda
 generate_topologies
 
+select_topologies 2,8,10,17,18,25,27,34,36,43,45,52,54,61 3
+select_topologies 1,9,26,35,44,53,62 1 3-7,11-16,19-24,28-32,37-42,46,47,49-51,55,57-60 4
+# ripup and reroute with a detour:
+# select_topology 33 5
+# bundles 48 and 56 are free
 run_planner 5
-run_nuts 2.0
+#run_nuts 2.0
+run_nuts
 # OverlapCnt: 61 = 1 m4 + 60 m5
 
 # Default values: [Planner] post_nuts: short<80→M3 (0b), medium (35b), long>200→M7 (27b)
@@ -44,7 +45,8 @@ run_nuts 2.0
 # vertical channel is 400 tall
 run_planner post_nuts V 200 300
 
-run_nuts 2.0
+#run_nuts 2.0
+run_nuts
 # Overlaps  : 22  (M3=16  M5=6)
 
 # These can be done after `visualize`, too!
@@ -57,5 +59,9 @@ run_nuts_on_layer M5
 
 # has no effect:
 run_nuts_on_layer M3
+check_connectivity nuts
+
+run_detailed_nuts
+check_connectivity dnuts
 
 visualize
