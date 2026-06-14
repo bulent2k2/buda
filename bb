@@ -54,8 +54,8 @@ fi
 echo "Building target (buda)..."
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-echo "Installing to build/..."
-cmake --install . --prefix "$REPO_DIR" 2>&1 | grep -v "^--" || true
+echo "Installing to src/..."
+cp buda.cpython-*.so "$REPO_DIR/src/"
 
 BUILD_END=$(date +%s)
 BUILD_DURATION=$((BUILD_END - BUILD_START))

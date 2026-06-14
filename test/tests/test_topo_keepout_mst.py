@@ -464,3 +464,32 @@ def test_keepout_does_not_eliminate_all_candidates():
     cands = gen.generate_candidates("A", ["B", "C"])
 
     assert len(cands) > 0, "Should always have some candidates (OOB trunks etc.)"
+
+
+def test_2pin_u_shape_clears_keepout_when_blocks_at_same_y_level():
+    """U_VHV detour is generated when a keepout's Y range exceeds the block Y span.
+
+    Regression for the gap3 demonstrator: L and R are at the same Y level
+    [200,300], and the keepout [300,100]–[600,450] on M4+M5 covers the block Y
+    range entirely.  Without keepout edges in the 2-pin Hanan grid the auto-
+    margin (10% of block Y span = 20) gives OOB trunk positions y=180 and y=320,
+    both inside the keepout.  With the fix, keepout edges expand hanan_y to
+    [100,200,300,450], margin grows to 35, and y=65/y=485 clear the keepout.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("L", 100, 200, 200, 300)
+    fp.add_block("R", 700, 200, 800, 300)
+    fp.add_keepout_zone(300, 100, 600, 450, [4, 5])  # blocks M4 and M5
+
+    gen = buda.TopologyGenerator(fp)
+    gen.set_layer_ids(4, 5)
+    gen.set_all_h_layers([4])
+    gen.set_all_v_layers([5])
+    gen.set_double_detour(True)
+
+    cands = gen.generate_candidates("L", ["R"])
+    u_vhv = [c for c in cands if "U_VHV" in c.type]
+    assert len(u_vhv) > 0, (
+        f"Expected at least one U_VHV candidate detour above/below keepout, "
+        f"got types: {[c.type for c in cands]}"
+    )

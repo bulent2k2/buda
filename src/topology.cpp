@@ -1594,6 +1594,22 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
         for (const Rect& r : bt_all_rects(dst_bt)) hr.push_back(r);
         bundle_hanan_grid(hr, hanan_x, hanan_y);
     }
+    // Mirror generate_npin: add keepout bbox edges so OOB trunk margins
+    // extend beyond keepout boundaries rather than landing inside them.
+    {
+        const auto& kos_2pin = floorplan_.get_keepout_zones();
+        if (!kos_2pin.empty()) {
+            for (const auto& koz : kos_2pin) {
+                hanan_x.push_back(koz.bbox.x1); hanan_x.push_back(koz.bbox.x2);
+                hanan_y.push_back(koz.bbox.y1); hanan_y.push_back(koz.bbox.y2);
+            }
+            auto su = [](std::vector<int>& v) {
+                std::sort(v.begin(), v.end());
+                v.erase(std::unique(v.begin(), v.end()), v.end());
+            };
+            su(hanan_x); su(hanan_y);
+        }
+    }
 
     std::vector<int> chan_x, chan_y;
     for (int i = 0; i + 1 < (int)hanan_x.size(); ++i)
