@@ -995,8 +995,14 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             if (c_lo <= c_hi) preferred = std::clamp(preferred, c_lo, c_hi);
             pos = preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
         }
-        if (!std::isnan(pos))            ts->track_position = pos;
-        else if (!pack_low && try_repack(ts)) { /* repacked */ }
+        // try_repack re-places members with first_fit over their FULL intervals,
+        // ignoring lb/ub — so it must not run for a phase-0 constrained placement
+        // (pack_low or any finite bound/target), or it could relocate a bounded
+        // trunk to the wrong side of its split.  Only unconstrained phase-1/2
+        // placements may repack.
+        const bool phase0 = pack_low || lb > -kInf || ub < kInf || !std::isnan(target);
+        if (!std::isnan(pos))           ts->track_position = pos;
+        else if (!phase0 && try_repack(ts)) { /* repacked */ }
         else {
             // No feasible track (e.g. an ordering lower bound pushed eff_lo past
             // the interval).  Fall back to the midpoint but clamp it into the
