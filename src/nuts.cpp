@@ -1118,12 +1118,12 @@ NUTSResult NUTSEngine::rerun_layer(
     // Final pass for all layers to catch cross-layer adjustments from the re-solved layer.
     std::vector<TrackSegment*> all_placed;
     for (auto& ts : result.segments) if (ts.placed) all_placed.push_back(&ts);
-    std::set<std::pair<int,int>> stretched;
-    do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map, false, &stretched);
+    do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
     repair_overlaps(result.segments, pull_map, net_pull_map, align_map,
                     rev_conn_map, ts_ptr_map);
-    resolve_corner_overlaps(result.segments, pull_map, net_pull_map, align_map,
-                            rev_conn_map, ts_ptr_map, stretched);
+    // Note: resolve_corner_overlaps is NOT run here.  It re-solves whole trunk
+    // layers, which may differ from layer_id — that would violate rerun_layer's
+    // single-layer contract.  Corner overlaps are resolved by the full run().
     compute_metrics(result);
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "
