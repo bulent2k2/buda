@@ -321,6 +321,8 @@ block dimensions — use `dx` / `dy` instead.
 | `dx N` | keyword+int | Shrink top/bottom (X-direction) faces by `N` layout units. If `dy` is omitted, same value applies to Y. |
 | `dy N` | keyword+int | Shrink left/right (Y-direction) faces by `N` layout units. |
 
+**Default:** `dx 0 dy 0` (no corner margin is applied by default).
+
 The margin constrains where segment endpoints can land on a block face.
 `dy` limits the Y range on left/right (vertical) faces; `dx` limits the X
 range on top/bottom (horizontal) faces. A guard prevents the margin from
@@ -348,6 +350,8 @@ specified compass direction(s). Must be called before `generate_topologies` or
 |---|---|---|
 | `dir` | str | Direction shorthand — see table below |
 | `size` | int | Outer band width in layout units. Negative value resets the direction to auto. |
+
+**Default:** `auto` (represented by size `-1`) for all directions.
 
 **Direction shorthands:**
 
@@ -427,7 +431,7 @@ Set the global minimum stub length for routing to and from block boundary pins.
 
 | Argument | Type | Description |
 |---|---|---|
-| `len` | int | Minimum length in layout units. |
+| `len` | int | Minimum length in layout units. Default `20`. |
 
 **Example:**
 ```buda
@@ -447,7 +451,7 @@ Set the minimum stub length for a specific direction: horizontal (`H` or `HORIZO
 | Argument | Type | Description |
 |---|---|---|
 | `dir` | str | Direction: `H` (or `HORIZONTAL`), or `V` (or `VERTICAL`). |
-| `len` | int | Minimum length in layout units. |
+| `len` | int | Minimum length in layout units. Default: unset (falls back to global value). |
 
 **Example:**
 ```buda
@@ -467,7 +471,7 @@ Set the minimum stub length for a specific metal layer.
 | Argument | Type | Description |
 |---|---|---|
 | `layer_name` | str | Metal layer name (e.g. `M3`). |
-| `len` | int | Minimum length in layout units. |
+| `len` | int | Minimum length in layout units. Default: unset (falls back to direction-specific value, then to global value). |
 
 **Example:**
 ```buda
