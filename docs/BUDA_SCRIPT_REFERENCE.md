@@ -20,6 +20,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin) |
 | Setup | `corner_margin` | Set global corner margin for all blocks without a per-block override |
 | Setup | `set_min_stub_length`, `_dir`, `_layer` | Set minimum stub length globally, per direction, or per layer |
+| Setup | `set_track_pitch` | Declare inter-bus pitch so `run_planner` band reservations match the NUTS solve |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | Setup | `detour_channel` | Set outer-band width for U-shape / UU-shape detour trunks per compass direction |
 | 1 | `run_bundler`, `run_hier_bundler` | Group nets into flat or hierarchy-aware buses |
@@ -118,6 +119,7 @@ margin calculations.
 | `corner_margin dy N` | keyword | Optional. Shrink the routing face by `N` units in Y (left/right faces). |
 | `corner_margin pct_h P` | keyword | Shrink X faces by `P`% of block width. If `pct_v` is omitted, same percentage applies to height. |
 | `corner_margin pct_v P` | keyword | Shrink Y faces by `P`% of block height. |
+| `container` | keyword | Optional. Mark this block as a **hierarchy envelope** — transparent to LOW layers. A container block's interior is not blocked for low-metal routing; congestion inside the envelope is charged via finer descendant block cuts. Used for hierarchical blocks whose children are separately imported as blocks. |
 
 A per-block `corner_margin` overrides the global `corner_margin` command for
 that block. The margin is baked into the block's `Busterm.bbox` at construction;
@@ -171,6 +173,10 @@ add_block u_notch  rect  200  0  280  100  rect  220  300  300  400  teg_mode ov
 
 # Same notched block, relying on internal routing to join the two sides (default)
 add_block u_notch  rect  200  0  280  100  rect  220  300  300  400
+
+# Hierarchy envelope: a top-level block whose children are imported as sub-blocks.
+# LOW layers can route through the envelope; congestion is charged via child cuts.
+add_block u_proc  0  0  400  400  container
 ```
 
 ---
@@ -191,10 +197,25 @@ global planner and the detailed router respect these zones.
 | `layerN` | int or str | Layer ID or name (e.g. `4` or `M4`) to block in this zone. |
 
 **Effect:**
+- **Topology generation**: `generate_topologies` / `generate_topologies_for_bundle`
+  incorporate keepout zones at two levels:
+  - *Hanan grid*: keepout bounding-box edges are added to the local Hanan grid so
+    Z/TRUNK midpoints snap to positions outside keepout bands rather than landing
+    in the middle of a blocked region.
+  - *Trunk filtering*: a TRUNK_H or TRUNK_V position is suppressed only when
+    **all** routable layers in that direction are blocked at that position. If at
+    least one same-direction layer is free the position is kept (the planner
+    reassigns to the free layer).
+  - *2-pin filtering*: L-shape, Z-shape, and U-shape candidates whose horizontal
+    or vertical segment is fully blocked on **all** layers in the segment's
+    direction are suppressed.
 - **Planning**: `run_planner` subtracts the prohibited area from its congestion
   model, forcing it to choose topologies that detour around the zone.
 - **Detailed Routing**: `run_detailed_nuts` automatically skips any signal
   tracks that pass through a keep-out zone for the segment's assigned layer.
+  Additionally, solid (non-container) leaf-cell blocks automatically generate
+  keepouts on all LOW-layer routing grids so signal tracks cannot route over
+  cell interiors on non-TOP layers.
 - **Visualization**: Keep-out zones appear as red hatched rectangles.
 
 **Example:**
@@ -455,6 +476,41 @@ set_min_stub_length_layer M3 10
 
 ---
 
+### `set_track_pitch`
+
+```
+set_track_pitch <pitch>
+```
+
+Declare the inter-bus gap that `run_planner` should reserve in its band
+congestion books, and that `run_nuts` will enforce between adjacent bus
+segments. Calling this **before** `run_planner` keeps the two stages
+consistent (Gap 1): the planner's band-capacity check adds `pitch` to the
+effective bus width so it never books a band so full that NUTS cannot fit the
+required inter-bus gap beside the bus.
+
+| Argument | Type | Description |
+|---|---|---|
+| `pitch` | float | Minimum perpendicular gap between the upper edge of one bus and the lower edge of the next, in layout units. Default `1.0`. |
+
+**Behaviour:**
+- After this command, subsequent `run_planner` calls reserve an extra `pitch`
+  units of capacity per bus in every band they charge.
+- `run_nuts` with no explicit argument reuses the stored pitch rather than
+  resetting to `1.0`.
+- If `run_nuts` is called with an explicit pitch that differs from the stored
+  value, a warning is printed advising you to re-run `run_planner` (or call
+  `set_track_pitch` before planning) so both stages agree.
+
+**Example:**
+```buda
+set_track_pitch 2.0    # 2-unit gap between buses
+run_planner 5          # plans with 2-unit pitch baked in
+run_nuts               # reuses 2.0 automatically — no need to pass it again
+```
+
+---
+
 ## Stage 1 — Bundler
 
 ### `run_bundler`
@@ -605,9 +661,11 @@ automatically from the netlist.
 |---|---|
 | `TRUNK_H@y{trunk}` | H spine + V stubs to each receiver. Optimised with pass-through snapping and extreme-stub slide. For receivers with `teg_mode over`, may carry a `bridge_segments` entry (see below). |
 | `TRUNK_V@x{trunk}` | V spine + H stubs. Symmetric. Same bridge logic applies. |
+| `TRUNK_H+MST@y{trunk}` | TRUNK_H hybrid: adds MST inter-branch edges between the branch blocks (those with explicit stubs) on top of the spine, shortening inter-block paths. Generated for 3+ blocks. Type string is `TRUNK_H+MST@y{trunk}`. |
+| `TRUNK_V+MST@x{trunk}` | TRUNK_V hybrid with MST inter-branch edges. Symmetric. |
 | `TRUNK_H_OOB@y{trunk}` | H spine outside the pin bounding box + V stubs (detour equivalent of U-shape). |
 | `TRUNK_V_OOB@x{trunk}` | V spine outside the pin bounding box + H stubs. |
-| `MST_HV` | Prim MST on block bboxes, L-bends H-first. Lower total wirelength for scattered pins. |
+| `MST_HV` | Prim MST on block bboxes, L-bends H-first. Lower total wirelength for scattered pins. Generated for 4+ blocks. |
 | `MST_VH` | Prim MST, L-bends V-first. |
 | `BITRUNK_H` | Two parallel H spines at 25th/75th percentile Y + vertical backbone. Generated for 4+ receivers. |
 
@@ -1067,10 +1125,15 @@ a first-fit strategy. Each layer is solved independently and in parallel.
 
 | Argument | Type | Default | Description |
 |---|---|---|---|
-| `track_pitch` | float | 1.0 | Minimum gap between the upper edge of one segment and the lower edge of the next, in layout units. |
+| `track_pitch` | float | stored pitch | Minimum gap between the upper edge of one segment and the lower edge of the next, in layout units. When omitted, reuses the pitch previously set by `set_track_pitch` (or `1.0` if never set). |
 
 **Output:** Prints segment count, interval violations, and track overlap counts
 per layer. Writes a detailed overlap report to `<script>_nuts.log`.
+
+**Pitch consistency warning:** If an explicit `track_pitch` argument is given
+that differs from the pitch `run_planner` was called with, a warning is printed
+reminding you to call `set_track_pitch` before `run_planner` (or re-run
+`run_planner`) so the planner's band reservations and NUTS's packing gap agree.
 
 **Notes:**
 - Must be called after `run_planner` (or after `generate_topologies_for_bundle`
@@ -1257,6 +1320,14 @@ For each bus segment in the NUTS result, calls `signal_tracks_in()` on its layer
 5. If fewer signal tracks are available than `bit_width`, or no valid contiguous window exists, the entire bus is **unplaced** (all-or-nothing; no partial placement).
 
 **Output:** Prints the total number of net segments placed and the number of bits unplaced.
+
+**Leaf-cell keepouts (Gap 2):** Before solving, `run_detailed_nuts` automatically
+installs keepout zones on every non-TOP layer's routing grid for each solid
+(non-container) leaf-cell block. This prevents signal tracks from routing over
+cell interiors on LOW layers — matching the constraint the planner and abstract
+NUTS already enforce. Blocks marked `container` (hierarchy envelopes) are
+excluded from this automatic keepout. The keepouts are installed once per routing
+grid object and are transparent to repeated `run_detailed_nuts` calls.
 
 **Requires:** `run_nuts` must have been called first. At least one `def_track_pattern` must cover the layers used by the NUTS result.
 
@@ -1472,14 +1543,17 @@ add_bus  data[8] u_a.dout  u_b.din
 run_bundler strict
 
 # ── Stage 2: topologies ─────────────────────────────────────
-generate_topologies_for_bundle sig0  u_a  u_b
-generate_topologies_for_bundle data  u_a  u_b
+generate_topologies_for_bundle sig0
+generate_topologies_for_bundle data
 
 # ── Stage 3: global route ────────────────────────────────────
+# set_track_pitch ensures the planner reserves the same inter-bus gap
+# that run_nuts enforces.  Omit only if the default 1.0 is sufficient.
+set_track_pitch 2.0
 run_planner 5
 
 # ── Stage 4: abstract track placement ────────────────────────
-run_nuts 2.0
+run_nuts   # reuses set_track_pitch value (2.0) automatically
 
 # ── Stage 4c (optional): redistribute stubs across V and/or H layers ──
 # Use when many blocks line up along a channel and stubs overlap.
@@ -1522,7 +1596,7 @@ Full reference: **[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**
 | `import_def_lef <def> <lef>` | Import placements from DEF + cell sizes from LEF. Clears all tables. |
 | `import_verilog <v>` | Elaborate hierarchy from Verilog; preserves coordinates from a prior `import_def_lef`. |
 | `bdb_net_mode on\|off` | Toggle whether nets/buses are written directly to BDB database. |
-| `add_blocks_from_bdb <depth> [deepest\|skip\|error]` | Populate the BUDA floorplan from BDB instances at hierarchy depth `N`. |
+| `add_blocks_from_bdb <depth> [deepest\|skip\|error]` | Populate the BUDA floorplan from BDB instances at hierarchy depth `N`. Blocks that have at least one loaded BDB descendant are automatically marked as containers (hierarchy envelopes, transparent to LOW layers). |
 | `set_die <w> <h>` | Set die size (bounding box) dimensions in the database. |
 | `add_cell <name> <width> <height>` | Define a cell template and its size in BDB. |
 | `add_inst <inst> <cell> <parent\|-> <x> <y>` | Place a new instance at coordinates relative to parent or root (`-`). |
