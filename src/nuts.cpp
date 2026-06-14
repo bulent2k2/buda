@@ -10,6 +10,11 @@
 
 namespace buda {
 
+// File-scope so it can appear in lambda default arguments (a local variable
+// may not — odr-using one in a default argument is ill-formed on conforming
+// compilers).
+static constexpr double kInf = std::numeric_limits<double>::infinity();
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -563,7 +568,6 @@ void NUTSEngine::resolve_corner_overlaps(
         return lo_end ? s.span_hi : s.span_lo;
     };
 
-    constexpr double kInf = std::numeric_limits<double>::infinity();
     std::map<int, LayerConstraints> by_layer_cons;  // trunk layer → phase-0 constraints
     // Same-trunk-layer: hi must sit above lo (relative ordering edge).
     auto add_edge = [&](const Key& lo, const Key& hi) -> bool {
@@ -944,7 +948,6 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // of a cross-layer split (ub).  pack_low packs to the lowest feasible track
     // (same-layer ordering); otherwise placement seeks `target` if finite
     // (cross-layer: nudge toward the split bound), else the align/pull preference.
-    constexpr double kInf = std::numeric_limits<double>::infinity();
     auto place_seg = [&](TrackSegment* ts,
                          double lb = -kInf, double ub = kInf,
                          bool pack_low = false,
