@@ -114,38 +114,50 @@ Worked example: `flow/nuts_corner_overlap.buda` — two buses pinned to Z-topos
 whose first V-stubs share the x≈90 column; the lower-anchored stub's trunk must
 take the lower track or the stubs cross.
 
-### Implemented: lazy vertical-constraint resolution (`resolve_corner_overlaps`)
+### `find_overlaps`: parallel vs end-to-end touch
 
-After `repair_overlaps`, a bounded pass runs only when spans were stretched:
-1. Detect corner overlaps — `find_overlaps` pairs (now an O(n log n) per-layer
-   sweep) with ≥1 member in the **stretched** set that `do_span_adjustments`
-   reports.
-2. Derive an ordering edge from each pair's **anchored (non-stretched) ends**: the
-   segment anchored lower ⇒ its trunk must take the lower track.
-3. Re-solve the trunk layer under the accumulated edges — `solve_layer` phase 0
-   places constrained trunks in topological order, **bottom-edge packed**
-   (`first_fit` from just above each predecessor) so successors have room.
-4. **Stop & reverse**: keep the re-solve only while the total overlap count
-   strictly drops; otherwise restore and stop. Bounded iterations; short-circuits
-   when nothing stretched.
+Abstract segments are bit-bundles, not single wires, so the two ways two
+distinct-net segments can touch differ (`segs_overlap`):
+- **End-to-end** (collinear, same track, spans meet) — the bit ends butt up → a
+  DRC. The span axis test is **closed** (touch counts).
+- **Parallel** (side-by-side, track edges meet, spans overlap) — the bundles just
+  sit edge to edge; intra-bundle spacing covers it → not a DRC. The perp axis test
+  stays **strict**.
 
-This clears the `nuts_corner_overlap.buda` overlap (and its 4 detailed-NUTS
-unplaced bits → 0). The heuristic edge derivation is safe because the monotone
-guard reverts any edge that doesn't help.
+So `find_overlaps` flags spans-overlap-or-touch AND tracks-strictly-overlap. This
+surfaces end-to-end touches the old strict test hid — including those from
+**aligned trunks** on two layers (both trunks land at the same coordinate, so the
+stubs meet end-to-end with no span stretching at all).
+
+### Implemented: corner-overlap resolution (`resolve_corner_overlaps`)
+
+After `repair_overlaps`, a bounded pass runs while overlaps exist:
+1. Detect — `find_overlaps` pairs (O(n log n) per-layer sweep) where both
+   segments are stubs hanging from **distinct trunks** (geometric criterion; no
+   longer gated on a "stretched" set, since aligned trunks cause touches with no
+   stretching).
+2. Anchored-end rule picks the low/high trunk (stub anchored lower → lower trunk).
+3. Constrain and re-solve the affected trunk layer(s):
+   - **Same trunk layer** → relative ordering edge; phase 0 bottom-edge packs the
+     trunks in topological order.
+   - **Different trunk layers** → the trunks can't be track-ordered against each
+     other, so each is nudged within its own layer to opposite sides of a split
+     `S` (abstract gap `g = 1`): `lo_trunk ≤ S−g/2`, `hi_trunk ≥ S+g/2`, placed by
+     `preferred_fit` toward `S`. `S = clamp(midpoint of current trunk positions,
+     feasible window)`; an empty window (intervals can't separate them) is skipped.
+4. **Stop & reverse**: keep a re-solve only while the total overlap count strictly
+   drops AND no new interval violation appears; else restore and stop.
+
+Clears `nuts_corner_overlap.buda` (same-layer), `nuts_corner_overlap_3layer.buda`
+(3-layer, same trunk layer), and `nuts_corner_touch.buda` (cross trunk layer).
+Flow 10 improved 4 → 1 abstract overlaps and 8 → 0 unplaced detailed bits.
 
 ### Still open
 
-The guard means genuinely **cyclic** vertical constraints (net A above B at one
-column, B above A at another — NP-hard, needing a *dogleg* that splits a trunk
-across tracks) are left as-is. Flow 10's ~4 residual abstract overlaps and the
-bundle-47 reservation conflict are not resolved by this pass; a future dogleg /
-joint-placement extension would be needed. **Effort:** medium→large.
-
-Multi-layer (≥3 TOP) note: the pass orders the trunks the colliding segments hang
-from, so it requires both trunks to be on the **same** layer. A corner overlap
-whose two stubs hang from trunks on *different* layers (possible with three TOP
-layers, e.g. one trunk on M4 and the other on M6) is skipped — it has no single-
-layer track ordering. The common same-trunk-layer case generalizes cleanly across
-layers and is covered by `flow/nuts_corner_overlap_3layer.buda` (trunks forced
-onto M4, the first-solved layer). Handling different-layer trunks (e.g. moving one
-trunk within its own layer) is future work.
+- **Detailed-NUTS spacing** for the cross-layer case: abstract uses `g = 1` only
+  to set the side; the real separation should come from snapping each trunk to the
+  nearest signal track on its own layer (per-layer track patterns). Follow-up.
+- Genuinely **cyclic** vertical constraints (A above B at one column, B above A at
+  another — NP-hard, needs a *dogleg* splitting a trunk across tracks) are left as
+  is by the guard; flow 10's last residual overlap is this class. **Effort:**
+  medium→large.

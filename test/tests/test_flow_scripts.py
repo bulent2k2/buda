@@ -429,11 +429,11 @@ def test_10_four_level_scale_one_bundle_per_bus():
     # pitch reservation (Gap 1) steer the planner to different topologies.
     assert segs == 212
     assert viols == 0
-    assert ovlps <= 4                             # ratchet (was 10; Gap 1+2 dropped it to 4)
+    assert ovlps <= 1                             # ratchet (10→4→1; corner-overlap pass)
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) >= 1224               # ratchet (was 1112; now 1224)
-    assert int(dm.group(2)) <= 8                  # ratchet (currently 8; Gap 3 still open)
+    assert int(dm.group(1)) >= 1232               # ratchet (1112→1224→1232)
+    assert int(dm.group(2)) == 0                  # all bits now place (was 8 unplaced)
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +472,32 @@ def test_nuts_corner_overlap_3layer():
     assert_clean(out, rc, "nuts_corner_overlap_3layer.buda")
     # Trunks forced onto M4 (the first-solved layer) by the M6 keepout.
     assert re.search(r"Bundle 1 .*\[V→M5 H→M4 V→M5\]", out)
+    assert "[NUTS] corner-overlap pass: overlaps 1 -> 0." in out
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 6
+    assert viols == 0
+    assert ovlps == 0
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(2)) == 0
+
+
+# ---------------------------------------------------------------------------
+# nuts_corner_touch.buda — a CROSS-trunk-layer corner overlap.  Bundle 1's trunk
+# is pinned to M4 (sidecar seg_layers [5,4,5]) and bundle 2's to M6; both land at
+# y=125, so the two M5 stubs meet end-to-end (a touch, not a strict overlap).
+# find_overlaps flags the end-to-end touch; the corner pass can't track-order an
+# M4 trunk against an M6 trunk, so it nudges each within its own layer to opposite
+# sides of a split coordinate.  Resolves the overlap (and the bits it blocked).
+# ---------------------------------------------------------------------------
+
+def test_nuts_corner_touch_xlayer():
+    out, rc = run_script("nuts_corner_touch.buda")
+    assert_clean(out, rc, "nuts_corner_touch.buda")
+    # Trunks split across two layers (M4 and M6).
+    assert re.search(r"Bundle 1 .*\[V→M5 H→M4 V→M5\]", out)
+    assert re.search(r"Bundle 2 .*\[V→M5 H→M6 V→M5\]", out)
     assert "[NUTS] corner-overlap pass: overlaps 1 -> 0." in out
     segs, viols, ovlps = nuts_summary(out)
     assert segs  == 6

@@ -1,0 +1,18 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "x_0",
+      "bundle_id": 1,
+      "topo_type": "Z_VHV@y125@x98",
+      "topo_wl": 129,
+      "topo_index_hint": 3,
+      "note": "",
+      "selected_at": "2026-06-14T22:57:40",
+      "seg_layers": [
+        5,
+        4,
+        5
+      ]
+    }
+  ]
+}
