@@ -76,6 +76,34 @@ endmodule
         10, 10, 250, 210)
 
 
+def test_resize_block(tmp_path):
+    bdb_path = tmp_path / "resize.bdb"
+    state = fpc.create_bdb(str(bdb_path), 1000, 800, grid=10)
+    fpc.add_block(state, "u_cpu", 100, 100, 200, 150)   # placed at (100,100)-(300,250)
+
+    # Basic resize: new bottom-right corner
+    fpc.resize_block(state, "u_cpu", 100, 100, 300, 200)
+    b = state.block("u_cpu")
+    assert (b.x1, b.y1, b.x2, b.y2) == (100, 100, 300, 200)
+
+    # Grid snap: off-grid request rounds to nearest grid (10)
+    fpc.resize_block(state, "u_cpu", 100, 100, 305, 205)
+    b = state.block("u_cpu")
+    assert (b.x1, b.y1, b.x2, b.y2) == (100, 100, 310, 210)
+
+    # Corner resize: top-left corner (x1,y1 change, x2,y2 stay)
+    fpc.resize_block(state, "u_cpu", 50, 60, 310, 210)
+    b = state.block("u_cpu")
+    assert (b.x1, b.y1) == (50, 60)
+    assert (b.x2, b.y2) == (310, 210)
+
+    # Minimum size enforced: x2 <= x1 request → clamped to x1 + grid
+    fpc.resize_block(state, "u_cpu", 100, 100, 100, 100)
+    b = state.block("u_cpu")
+    assert b.x2 > b.x1
+    assert b.y2 > b.y1
+
+
 def test_floorplanner_commands_run_hbundle_flow_from_verilog(tmp_path):
     v_path = tmp_path / "flow.v"
     bdb_path = tmp_path / "flow.bdb"

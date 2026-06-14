@@ -39,6 +39,8 @@ public:
                          double w, double h);
 
     void move_block_raw(const std::string& name, double x, double y);
+    void resize_block_raw(const std::string& name,
+                          double x1, double y1, double x2, double y2);
     void move_child_local(const std::string& name, double local_x, double local_y);
     void align_bottom(const std::vector<std::string>& names);
 

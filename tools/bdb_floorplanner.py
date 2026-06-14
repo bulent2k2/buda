@@ -34,16 +34,16 @@ class BdbFloorplanner:
         self.root.geometry("1360x820")
 
         self.state = fpc.new_state()
-        self._patch_to_name = {}
+        self._patch_to_name: dict = {}
+        self._handle_patches: list[tuple] = []   # (patch, name, corner_str)
         self._drag = None
+        self._path: list[str] = []               # drill-down stack
         self._status = tk.StringVar(value="Open or create a BDB to begin.")
 
         self._bdb_var = tk.StringVar()
         self._die_w = tk.DoubleVar(value=2000.0)
         self._die_h = tk.DoubleVar(value=1200.0)
         self._grid = tk.DoubleVar(value=10.0)
-        self._depth = tk.IntVar(value=0)
-        self._last_depth = 0
         self._sel_var = tk.StringVar(value="")
         self._issue_var = tk.StringVar(value="")
 
@@ -63,6 +63,11 @@ class BdbFloorplanner:
         ttk.Button(top, text="Run Flow", command=self._run_flow).grid(row=0, column=7, padx=2)
         top.columnconfigure(1, weight=1)
 
+        # Breadcrumb bar
+        self._crumb_frame = ttk.Frame(self.root, padding=(4, 2))
+        self._crumb_frame.pack(side=tk.TOP, fill=tk.X)
+        self._refresh_breadcrumbs()
+
         main = ttk.Frame(self.root)
         main.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=2)
 
@@ -75,10 +80,8 @@ class BdbFloorplanner:
         self._spin(setup, "Die W", self._die_w, 0)
         self._spin(setup, "Die H", self._die_h, 1)
         self._spin(setup, "Grid", self._grid, 2)
-        self._spin(setup, "Depth", self._depth, 3, from_=0, increment=1)
         ttk.Button(setup, text="Apply", command=self._apply_canvas).grid(
-            row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        self._depth.trace_add("write", lambda *_: self._on_depth_change())
+            row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         blocks = ttk.LabelFrame(left, text="Blocks", padding=6)
         blocks.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
@@ -122,16 +125,72 @@ class BdbFloorplanner:
             row=row, column=1, sticky="ew", pady=1)
         parent.columnconfigure(1, weight=1)
 
+    # ------------------------------------------------------------------
+    # Breadcrumb helpers
+    # ------------------------------------------------------------------
+
+    def _refresh_breadcrumbs(self):
+        for w in self._crumb_frame.winfo_children():
+            w.destroy()
+        ttk.Button(self._crumb_frame, text="[top]",
+                   command=self._go_top).pack(side=tk.LEFT)
+        for i, name in enumerate(self._path):
+            ttk.Label(self._crumb_frame, text=" > ").pack(side=tk.LEFT)
+            idx = i  # capture
+            leaf = name.split("/")[-1]
+            ttk.Button(self._crumb_frame, text=leaf,
+                       command=lambda i=idx: self._go_depth(i + 1)).pack(side=tk.LEFT)
+
+    def _go_top(self):
+        self._path = []
+        self.state.selected = None
+        self._refresh_breadcrumbs()
+        self._refresh_list()
+        self._draw()
+
+    def _go_depth(self, depth: int):
+        self._path = self._path[:depth]
+        self.state.selected = None
+        self._refresh_breadcrumbs()
+        self._refresh_list()
+        self._draw()
+
+    def _drill_into(self, name: str):
+        children = self._children_of(name)
+        if not children:
+            self._status.set(f"{name} has no children to drill into.")
+            return
+        self._path.append(name)
+        self.state.selected = None
+        self._refresh_breadcrumbs()
+        self._refresh_list()
+        self._draw()
+
+    def _children_of(self, name: str) -> list[str]:
+        prefix = name + "/"
+        depth = name.count("/") + 1
+        return [n for n in self.state.block_names
+                if n.startswith(prefix) and n.count("/") == depth]
+
+    # ------------------------------------------------------------------
+    # BDB commands
+    # ------------------------------------------------------------------
+
     def _open_bdb(self):
         path = filedialog.askopenfilename(filetypes=[("BDB", "*.bdb"), ("All", "*")])
         if not path:
             return
         self.state = fpc.load_bdb(path)
+        self._path = []
         self._bdb_var.set(path)
         self._sync_canvas_vars()
+        self._refresh_breadcrumbs()
         self._refresh_list()
         self._draw()
-        self._status.set(f"Loaded {len(self.state.block_names)} placed block(s).")
+        max_depth = max((n.count("/") for n in self.state.block_names), default=0)
+        self._status.set(
+            f"Loaded {len(self.state.block_names)} block(s), "
+            f"{max_depth + 1} level(s).")
 
     def _new_bdb(self):
         path = filedialog.asksaveasfilename(defaultextension=".bdb",
@@ -139,7 +198,9 @@ class BdbFloorplanner:
         if not path:
             return
         self.state = fpc.create_bdb(path, self._die_w.get(), self._die_h.get(), self._grid.get())
+        self._path = []
         self._bdb_var.set(path)
+        self._refresh_breadcrumbs()
         self._refresh_list()
         self._draw()
         self._status.set("Created new floorplan BDB.")
@@ -159,15 +220,20 @@ class BdbFloorplanner:
             return
         self.state = fpc.import_verilog(
             v_path, bdb_path, self._die_w.get(), self._die_h.get(), self._grid.get())
+        self._path = []
         self._bdb_var.set(bdb_path)
         self._sync_canvas_vars()
+        self._refresh_breadcrumbs()
         self._refresh_list()
         self._draw()
+        max_depth = max((n.count("/") for n in self.state.block_names), default=0)
         suffix = ""
         if self.state.unplaced_names:
             suffix = f" Seeded {len(self.state.unplaced_names)} placeholder block(s)."
         self._status.set(
-            f"Imported Verilog hierarchy from {os.path.basename(v_path)}.{suffix}")
+            f"Imported Verilog from {os.path.basename(v_path)} — "
+            f"{len(self.state.block_names)} block(s), "
+            f"{max_depth + 1} level(s).{suffix}")
 
     def _apply_canvas(self):
         fpc.set_die(self.state, self._die_w.get(), self._die_h.get())
@@ -233,7 +299,8 @@ class BdbFloorplanner:
                                             filetypes=[("BUDA script", "*.buda"), ("All", "*")])
         if not path:
             return
-        fpc.export_hbundle_script(self.state, path, depth=max(1, self._depth_value()))
+        depth = max(1, len(self._path) if self._path else 1)
+        fpc.export_hbundle_script(self.state, path, depth=depth)
         self._status.set(f"Exported HBundle flow script to {path}.")
 
     def _run_flow(self):
@@ -242,12 +309,17 @@ class BdbFloorplanner:
             return
         self._status.set("Running HBundle flow...")
         self.root.update_idletasks()
-        result = fpc.run_hbundle_flow(self.state, depth=max(1, self._depth_value()))
+        depth = max(1, len(self._path) if self._path else 1)
+        result = fpc.run_hbundle_flow(self.state, depth=depth)
         tail = (result.stdout or result.stderr).strip().splitlines()[-1:] or [""]
         if result.returncode == 0:
             self._status.set(f"HBundle flow completed. {tail[0]}")
         else:
             self._status.set(f"HBundle flow failed ({result.returncode}). {tail[0]}")
+
+    # ------------------------------------------------------------------
+    # List / selection helpers
+    # ------------------------------------------------------------------
 
     def _sync_canvas_vars(self):
         if self.state.engine.die_w() > 0:
@@ -259,20 +331,28 @@ class BdbFloorplanner:
     def _refresh_list(self):
         self._block_list.delete(0, tk.END)
         for name in self._visible_names():
-            self._block_list.insert(tk.END, name)
+            leaf = name.split("/")[-1]
+            self._block_list.insert(tk.END, leaf)
 
-    def _visible_names(self):
-        return self.state.names_at_depth(self._depth_value())
+    def _visible_names(self) -> list[str]:
+        if not self._path:
+            return self.state.names_at_depth(0)
+        prefix = self._path[-1] + "/"
+        depth = len(self._path)
+        return [n for n in self.state.block_names
+                if n.startswith(prefix) and n.count("/") == depth]
 
-    def _selected_list_names(self):
-        return [self._block_list.get(i) for i in self._block_list.curselection()]
+    def _selected_list_names(self) -> list[str]:
+        visible = self._visible_names()
+        return [visible[i] for i in self._block_list.curselection()
+                if i < len(visible)]
 
     def _on_list_select(self):
         names = self._selected_list_names()
         self.state.selected = names[-1] if names else None
         self._draw()
 
-    def _select_name(self, name):
+    def _select_name(self, name: str):
         self.state.selected = name
         self._block_list.selection_clear(0, tk.END)
         visible = self._visible_names()
@@ -281,38 +361,51 @@ class BdbFloorplanner:
             self._block_list.selection_set(idx)
             self._block_list.see(idx)
 
-    def _on_depth_change(self):
-        if self._depth_value(allow_invalid=True) is None:
-            return
-        self.state.selected = None
-        self._refresh_list()
-        self._draw()
-
-    def _depth_value(self, allow_invalid=False):
-        try:
-            depth = int(self._depth.get())
-        except (tk.TclError, ValueError):
-            if allow_invalid:
-                return None
-            return self._last_depth
-        if depth < 0:
-            depth = 0
-        self._last_depth = depth
-        return depth
+    # ------------------------------------------------------------------
+    # Drawing
+    # ------------------------------------------------------------------
 
     def _draw(self):
         ax = self._ax
         ax.clear()
         self._patch_to_name.clear()
+        self._handle_patches.clear()
 
         dw, dh = self.state.engine.die_w(), self.state.engine.die_h()
+
+        # Auto-zoom: if drilling down, fit to parent block; else fit to die
+        zoom_set = False
+        if self._path:
+            try:
+                pb = self.state.block(self._path[-1])
+                pw, ph = pb.x2 - pb.x1, pb.y2 - pb.y1
+                margin = max(pw, ph) * 0.05
+                ax.set_xlim(pb.x1 - margin, pb.x2 + margin)
+                ax.set_ylim(pb.y1 - margin, pb.y2 + margin)
+                zoom_set = True
+                # Draw parent as faint background
+                ax.add_patch(mpatches.Rectangle(
+                    (pb.x1, pb.y1), pw, ph,
+                    facecolor="#e5e7eb", edgecolor="#9ca3af",
+                    linewidth=1.0, linestyle="--", zorder=1))
+            except Exception:
+                pass
+
         if dw > 0 and dh > 0:
             ax.add_patch(mpatches.Rectangle(
                 (0, 0), dw, dh, facecolor="#f8fafc", edgecolor="#6b7280",
                 linewidth=1.2, zorder=0))
+            if not zoom_set:
+                margin = max(dw, dh) * 0.04
+                ax.set_xlim(-margin, dw + margin)
+                ax.set_ylim(-margin, dh + margin)
 
-        depth = self._depth_value()
-        for block in self.state.blocks_at_depth(depth):
+        visible = self._visible_names()
+        for name in visible:
+            try:
+                block = self.state.block(name)
+            except Exception:
+                continue
             selected = block.name == self.state.selected
             patch = mpatches.Rectangle(
                 (block.x1, block.y1), block.x2 - block.x1, block.y2 - block.y1,
@@ -321,27 +414,52 @@ class BdbFloorplanner:
                 linewidth=2.0 if selected else 0.9,
                 alpha=0.92, picker=True, zorder=2)
             ax.add_patch(patch)
-            self._patch_to_name[patch] = block.name
-            ax.text(block.x1 + 4, block.y1 + 4, block.name,
+            self._patch_to_name[patch] = name
+            label = name.split("/")[-1]
+            ax.text(block.x1 + 4, block.y1 + 4, label,
                     fontsize=7.5, color="#0f172a", va="bottom", clip_on=True, zorder=3)
 
+            # Corner handles for selected block
+            if selected:
+                ref = max(dw if dw > 0 else (block.x2 - block.x1),
+                          dh if dh > 0 else (block.y2 - block.y1))
+                HS = max(ref * 0.008, 2.0)
+                for corner, (cx, cy) in [
+                        ("tl", (block.x1, block.y1)),
+                        ("tr", (block.x2, block.y1)),
+                        ("bl", (block.x1, block.y2)),
+                        ("br", (block.x2, block.y2))]:
+                    hp = mpatches.Rectangle(
+                        (cx - HS, cy - HS), 2 * HS, 2 * HS,
+                        facecolor="white", edgecolor="#0f172a",
+                        linewidth=1.0, zorder=5, picker=True)
+                    ax.add_patch(hp)
+                    self._handle_patches.append((hp, name, corner))
+
         self._update_selection_label()
-        if dw > 0 and dh > 0:
-            margin = max(dw, dh) * 0.04
-            ax.set_xlim(-margin, dw + margin)
-            ax.set_ylim(-margin, dh + margin)
-        elif self._visible_names():
-            xs = []
-            ys = []
-            for b in self.state.blocks_at_depth(depth):
-                xs += [b.x1, b.x2]
-                ys += [b.y1, b.y2]
-            pad = max(max(xs) - min(xs), max(ys) - min(ys), 1.0) * 0.12
-            ax.set_xlim(min(xs) - pad, max(xs) + pad)
-            ax.set_ylim(min(ys) - pad, max(ys) + pad)
+        if not zoom_set:
+            if dw > 0 and dh > 0:
+                pass  # already set above
+            elif visible:
+                xs, ys = [], []
+                for name in visible:
+                    try:
+                        b = self.state.block(name)
+                        xs += [b.x1, b.x2]
+                        ys += [b.y1, b.y2]
+                    except Exception:
+                        pass
+                if xs:
+                    pad = max(max(xs) - min(xs), max(ys) - min(ys), 1.0) * 0.12
+                    ax.set_xlim(min(xs) - pad, max(xs) + pad)
+                    ax.set_ylim(min(ys) - pad, max(ys) + pad)
+
         ax.set_aspect("equal")
         ax.grid(True, color="#e5e7eb", linewidth=0.5)
-        ax.set_title("BUDA Floorplanner Prototype", fontsize=11)
+        title = "BUDA Floorplanner"
+        if self._path:
+            title += " — " + " / ".join(n.split("/")[-1] for n in self._path)
+        ax.set_title(title, fontsize=11)
         self._canvas.draw_idle()
 
     def _update_selection_label(self):
@@ -354,11 +472,17 @@ class BdbFloorplanner:
         except Exception:
             self._sel_var.set(name)
             return
+        n_children = len(self._children_of(name))
+        child_hint = f"  [{n_children} children]" if n_children else ""
         self._sel_var.set(
-            f"{name}\n"
+            f"{name}{child_hint}\n"
             f"({b.x1:.1f}, {b.y1:.1f}) - ({b.x2:.1f}, {b.y2:.1f})\n"
             f"{b.x2 - b.x1:.1f} x {b.y2 - b.y1:.1f}"
         )
+
+    # ------------------------------------------------------------------
+    # Mouse events
+    # ------------------------------------------------------------------
 
     def _on_press(self, event):
         if event.inaxes != self._ax or event.button != 1:
@@ -366,11 +490,24 @@ class BdbFloorplanner:
         tb = getattr(self._canvas, "toolbar", None)
         if tb and getattr(tb, "mode", ""):
             return
+
+        # 1. Check corner handles first
+        for hp, name, corner in self._handle_patches:
+            if hp.contains(event)[0]:
+                self._drag = {"mode": "resize", "name": name, "corner": corner}
+                return
+
+        # 2. Check block body
         for patch, name in self._patch_to_name.items():
             if patch.contains(event)[0]:
                 b = self.state.block(name)
                 self._select_name(name)
+                if event.dblclick:
+                    self._draw()
+                    self._drill_into(name)
+                    return
                 self._drag = {
+                    "mode": "move",
                     "name": name,
                     "dx": event.xdata - b.x1,
                     "dy": event.ydata - b.y1,
@@ -381,16 +518,38 @@ class BdbFloorplanner:
     def _on_motion(self, event):
         if not self._drag or event.inaxes != self._ax:
             return
+        if event.xdata is None or event.ydata is None:
+            return
+
+        mode = self._drag.get("mode")
         name = self._drag["name"]
-        raw_x = event.xdata - self._drag["dx"]
-        raw_y = event.ydata - self._drag["dy"]
-        fpc.move_block(self.state, name, raw_x, raw_y)
-        self._draw()
+
+        if mode == "resize":
+            corner = self._drag["corner"]
+            b = self.state.block(name)
+            x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
+            if "l" in corner:
+                x1 = event.xdata
+            if "r" in corner:
+                x2 = event.xdata
+            if "t" in corner:
+                y1 = event.ydata
+            if "b" in corner:
+                y2 = event.ydata
+            fpc.resize_block(self.state, name, x1, y1, x2, y2)
+            self._draw()
+
+        elif mode == "move":
+            raw_x = event.xdata - self._drag["dx"]
+            raw_y = event.ydata - self._drag["dy"]
+            fpc.move_block(self.state, name, raw_x, raw_y)
+            self._draw()
 
     def _on_release(self, event):
         if self._drag:
+            mode = self._drag.get("mode", "move")
             self._drag = None
-            self._status.set("Block moved.")
+            self._status.set("Block resized." if mode == "resize" else "Block moved.")
 
 
 def main():
@@ -400,8 +559,10 @@ def main():
         path = sys.argv[1]
         if os.path.exists(path):
             app.state = fpc.load_bdb(path)
+            app._path = []
             app._bdb_var.set(path)
             app._sync_canvas_vars()
+            app._refresh_breadcrumbs()
             app._refresh_list()
             app._draw()
     root.mainloop()

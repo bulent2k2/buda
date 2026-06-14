@@ -81,6 +81,25 @@ void FloorplannerEngine::move_block_raw(const std::string& name, double x, doubl
     }
 }
 
+void FloorplannerEngine::resize_block_raw(const std::string& name,
+                                          double x1, double y1,
+                                          double x2, double y2) {
+    Block& b = _block_or_throw(name);
+    double sx1 = _snap(x1), sy1 = _snap(y1);
+    double sx2 = _snap(x2), sy2 = _snap(y2);
+    if (sx2 <= sx1) sx2 = sx1 + _grid;
+    if (sy2 <= sy1) sy2 = sy1 + _grid;
+    b.x1 = sx1; b.y1 = sy1; b.x2 = sx2; b.y2 = sy2;
+    if (b.has_local) {
+        std::string parent = _parent_path(name);
+        if (!parent.empty()) {
+            const Block& p = _block_or_throw(parent);
+            b.local_x = b.x1 - p.x1;
+            b.local_y = b.y1 - p.y1;
+        }
+    }
+}
+
 void FloorplannerEngine::move_child_local(const std::string& name,
                                           double local_x, double local_y) {
     Block& b = _block_or_throw(name);

@@ -209,6 +209,11 @@ def move_block(state: FloorplannerAppState, name: str, raw_x: float, raw_y: floa
     state.engine.move_block_raw(name, float(raw_x), float(raw_y))
 
 
+def resize_block(state: FloorplannerAppState, name: str,
+                 x1: float, y1: float, x2: float, y2: float):
+    state.engine.resize_block_raw(name, float(x1), float(y1), float(x2), float(y2))
+
+
 def align_bottom(state: FloorplannerAppState, names: Iterable[str]):
     names = list(names)
     if names:
