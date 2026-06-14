@@ -89,9 +89,15 @@ class BdbFloorplanner:
         filter_f.pack(fill=tk.X)
         ttk.Button(filter_f, text="Add", command=self._add_block).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(filter_f, text="Align Bottom", command=self._align_bottom).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
-        self._block_list = tk.Listbox(blocks, selectmode=tk.EXTENDED, exportselection=False)
-        self._block_list.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-        self._block_list.bind("<<ListboxSelect>>", lambda _: self._on_list_select())
+        tv_frame = ttk.Frame(blocks)
+        tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        self._tree = ttk.Treeview(tv_frame, show="tree", selectmode="browse")
+        tv_sb = ttk.Scrollbar(tv_frame, orient="vertical", command=self._tree.yview)
+        self._tree.configure(yscrollcommand=tv_sb.set)
+        self._tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tv_sb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self._tree.bind("<Double-Button-1>", self._on_tree_dblclick)
 
         props = ttk.LabelFrame(left, text="Selection", padding=6)
         props.pack(fill=tk.X, pady=(0, 4))
@@ -145,14 +151,14 @@ class BdbFloorplanner:
         self._path = []
         self.state.selected = None
         self._refresh_breadcrumbs()
-        self._refresh_list()
+        self._refresh_tree()
         self._draw()
 
     def _go_depth(self, depth: int):
         self._path = self._path[:depth]
         self.state.selected = None
         self._refresh_breadcrumbs()
-        self._refresh_list()
+        self._refresh_tree()
         self._draw()
 
     def _drill_into(self, name: str):
@@ -163,7 +169,7 @@ class BdbFloorplanner:
         self._path.append(name)
         self.state.selected = None
         self._refresh_breadcrumbs()
-        self._refresh_list()
+        self._refresh_tree()
         self._draw()
 
     def _children_of(self, name: str) -> list[str]:
@@ -185,7 +191,7 @@ class BdbFloorplanner:
         self._bdb_var.set(path)
         self._sync_canvas_vars()
         self._refresh_breadcrumbs()
-        self._refresh_list()
+        self._refresh_tree()
         self._draw()
         max_depth = max((n.count("/") for n in self.state.block_names), default=0)
         self._status.set(
@@ -201,7 +207,7 @@ class BdbFloorplanner:
         self._path = []
         self._bdb_var.set(path)
         self._refresh_breadcrumbs()
-        self._refresh_list()
+        self._refresh_tree()
         self._draw()
         self._status.set("Created new floorplan BDB.")
 
@@ -224,7 +230,7 @@ class BdbFloorplanner:
         self._bdb_var.set(bdb_path)
         self._sync_canvas_vars()
         self._refresh_breadcrumbs()
-        self._refresh_list()
+        self._refresh_tree()
         self._draw()
         max_depth = max((n.count("/") for n in self.state.block_names), default=0)
         suffix = ""
@@ -252,12 +258,12 @@ class BdbFloorplanner:
         if None in (x, y, w, h):
             return
         fpc.add_block(self.state, name, x, y, w, h)
-        self._refresh_list()
+        self._refresh_tree()
         self._select_name(name)
         self._draw()
 
     def _align_bottom(self):
-        names = self._selected_list_names()
+        names = self._selected_tree_names()
         if len(names) < 2:
             self._status.set("Select at least two blocks to align.")
             return
@@ -328,11 +334,26 @@ class BdbFloorplanner:
             self._die_h.set(self.state.engine.die_h())
         self._grid.set(self.state.engine.grid())
 
-    def _refresh_list(self):
-        self._block_list.delete(0, tk.END)
-        for name in self._visible_names():
-            leaf = name.split("/")[-1]
-            self._block_list.insert(tk.END, leaf)
+    def _refresh_tree(self):
+        self._tree.delete(*self._tree.get_children())
+        roots = fpc.build_hierarchy_tree(self.state)
+
+        def _insert(node: fpc.BlockNode, parent_iid: str = ""):
+            iid = self._tree.insert(
+                parent_iid, "end", iid=node.name,
+                text=node.label, open=(node.depth < 2))
+            for child in node.children:
+                _insert(child, iid)
+
+        for root in roots:
+            _insert(root)
+
+        if self.state.selected:
+            try:
+                self._tree.selection_set(self.state.selected)
+                self._tree.see(self.state.selected)
+            except Exception:
+                pass
 
     def _visible_names(self) -> list[str]:
         if not self._path:
@@ -342,24 +363,27 @@ class BdbFloorplanner:
         return [n for n in self.state.block_names
                 if n.startswith(prefix) and n.count("/") == depth]
 
-    def _selected_list_names(self) -> list[str]:
-        visible = self._visible_names()
-        return [visible[i] for i in self._block_list.curselection()
-                if i < len(visible)]
+    def _selected_tree_names(self) -> list[str]:
+        return list(self._tree.selection())
 
-    def _on_list_select(self):
-        names = self._selected_list_names()
-        self.state.selected = names[-1] if names else None
-        self._draw()
+    def _on_tree_select(self, _event=None):
+        sel = self._tree.selection()
+        if sel:
+            self.state.selected = sel[0]
+            self._draw()
+
+    def _on_tree_dblclick(self, _event=None):
+        sel = self._tree.selection()
+        if sel:
+            self._drill_into(sel[0])
 
     def _select_name(self, name: str):
         self.state.selected = name
-        self._block_list.selection_clear(0, tk.END)
-        visible = self._visible_names()
-        if name in visible:
-            idx = visible.index(name)
-            self._block_list.selection_set(idx)
-            self._block_list.see(idx)
+        try:
+            self._tree.selection_set(name)
+            self._tree.see(name)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Drawing

@@ -22,6 +22,27 @@ import buda
 
 
 @dataclass
+class BlockNode:
+    """One node in the component hierarchy tree."""
+    name:     str
+    cell:     str
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    depth:    int
+    children: list["BlockNode"] = field(default_factory=list)
+
+    @property
+    def leaf_name(self) -> str:
+        return self.name.split("/")[-1]
+
+    @property
+    def label(self) -> str:
+        return f"{self.leaf_name}  [{self.cell}]"
+
+
+@dataclass
 class FloorplannerAppState:
     engine: object = field(default_factory=buda.FloorplannerEngine)
     bdb: object | None = None
@@ -274,3 +295,45 @@ def run_hbundle_flow(state: FloorplannerAppState, script_path: str | None = None
     ])
     cmd = [sys.executable, os.path.join(_ROOT, "src", "buda_cli.py"), script_path, "--no-viz"]
     return subprocess.run(cmd, cwd=_ROOT, env=env, capture_output=True, text=True)
+
+
+def build_hierarchy_tree(state: FloorplannerAppState) -> list[BlockNode]:
+    """Build a BlockNode tree for the full component hierarchy.
+
+    Uses bdb.all_components() when available (gives cell names and parent_id
+    links).  Falls back to string-path parsing of state.block_names.
+    Returns the list of root nodes (depth 0).
+    """
+    if state.bdb is not None:
+        comps = state.bdb.all_components()
+        if comps:
+            by_id: dict[int, "ComponentRow"] = {c.id: c for c in comps}
+            nodes: dict[int, BlockNode] = {}
+            for c in comps:
+                try:
+                    b = state.engine.get_block(c.name)
+                    x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
+                except Exception:
+                    x1, y1, x2, y2 = c.x1, c.y1, c.x2, c.y2
+                nodes[c.id] = BlockNode(c.name, c.cell, x1, y1, x2, y2, c.depth)
+            for c in comps:
+                if c.parent_id != -1 and c.parent_id in nodes:
+                    nodes[c.parent_id].children.append(nodes[c.id])
+            return [nodes[c.id] for c in comps if c.parent_id == -1]
+
+    # Fallback: derive tree from path strings in block_names
+    all_names = state.block_names
+    node_map: dict[str, BlockNode] = {}
+    for name in sorted(all_names, key=lambda n: n.count("/")):
+        try:
+            b = state.engine.get_block(name)
+            x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
+        except Exception:
+            x1 = y1 = x2 = y2 = 0.0
+        depth = name.count("/")
+        node_map[name] = BlockNode(name, "", x1, y1, x2, y2, depth)
+    for name, node in node_map.items():
+        parent_name = "/".join(name.split("/")[:-1])
+        if parent_name and parent_name in node_map:
+            node_map[parent_name].children.append(node)
+    return [n for name, n in node_map.items() if "/" not in name]
