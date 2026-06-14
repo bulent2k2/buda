@@ -140,3 +140,12 @@ column, B above A at another — NP-hard, needing a *dogleg* that splits a trunk
 across tracks) are left as-is. Flow 10's ~4 residual abstract overlaps and the
 bundle-47 reservation conflict are not resolved by this pass; a future dogleg /
 joint-placement extension would be needed. **Effort:** medium→large.
+
+Multi-layer (≥3 TOP) note: the pass orders the trunks the colliding segments hang
+from, so it requires both trunks to be on the **same** layer. A corner overlap
+whose two stubs hang from trunks on *different* layers (possible with three TOP
+layers, e.g. one trunk on M4 and the other on M6) is skipped — it has no single-
+layer track ordering. The common same-trunk-layer case generalizes cleanly across
+layers and is covered by `flow/nuts_corner_overlap_3layer.buda` (trunks forced
+onto M4, the first-solved layer). Handling different-layer trunks (e.g. moving one
+trunk within its own layer) is future work.

@@ -772,6 +772,18 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     std::map<std::pair<int,int>, TrackSegment*> layer_map;
     for (TrackSegment* ts : segs)
         layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
+
+    // Segments placed by phase 0 to satisfy corner-ordering edges.  Built up
+    // front (before the lambdas) so try_repack can treat them as fixed: a later
+    // non-constrained repack must not relocate a constrained trunk and undo the
+    // vertical constraint it was placed to enforce.
+    std::set<std::pair<int,int>> constrained;
+    for (const auto& [k, preds] : order_preds) {
+        if (layer_map.count(k)) constrained.insert(k);
+        for (const auto& p : preds)
+            if (layer_map.count(p)) constrained.insert(p);
+    }
+
     // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
     // zones on LOW layers; TOP segments are filtered out by layer_ids).
     auto kozs = low_keepouts();
@@ -817,6 +829,9 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         std::vector<TrackSegment*> members{ts};
         for (TrackSegment* o : segs) {
             if (o == ts || !o->placed) continue;
+            // Phase-0 constrained trunks stay fixed (they carry corner-ordering
+            // edges); they remain obstacles via the non-member span-overlap loop.
+            if (constrained.count({o->bundle_id, o->seg_idx})) continue;
             if (o->interval_lo < ts->interval_hi &&
                 ts->interval_lo < o->interval_hi)
                 members.push_back(o);
@@ -940,13 +955,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // Phase 0 — ordering-constrained segments (corner-overlap resolution): place
     // each in dependency order (after every segment that must sit below it),
     // clamped just above its placed predecessors.  They become placed anchors
-    // the normal anchor/sweep phases then avoid.
-    std::set<std::pair<int,int>> constrained;
-    for (const auto& [k, preds] : order_preds) {
-        if (layer_map.count(k)) constrained.insert(k);
-        for (const auto& p : preds)
-            if (layer_map.count(p)) constrained.insert(p);
-    }
+    // the normal anchor/sweep phases then avoid.  (`constrained` built above.)
     if (!constrained.empty()) {
         std::set<std::pair<int,int>> done;
         auto lb_of = [&](const std::pair<int,int>& k, const TrackSegment* ts) {
