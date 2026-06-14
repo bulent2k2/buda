@@ -8,11 +8,14 @@ import re
 import sys
 import os
 
-# Insert src/ at the front of sys.path BEFORE importing buda, so the freshly
-# built library in src/ is always found first — never a stale copy elsewhere.
-_src = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-if _src not in sys.path:
-    sys.path.insert(0, _src)
+# Insert build/ then src/ at the front of sys.path so the fresh .so in build/
+# always wins over any stale copy elsewhere.
+_repo = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..'))
+_build = os.path.join(_repo, 'build')
+_src   = os.path.join(_repo, 'src')
+for _p in (_src, _build):   # insert src then build; each insert(0) pushes prior down,
+    if _p not in sys.path:  # so build ends up at index 0 and wins over src
+        sys.path.insert(0, _p)
 
 import pytest
 import buda

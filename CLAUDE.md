@@ -34,17 +34,19 @@ Manual build:
 ```bash
 mkdir -p build && cd build
 cmake .. && make -j4
-cp build/buda.cpython-*.so src/
 ```
+
+All build artifacts remain in `build/`. No copy step needed.
 
 CMake builds a single shared library module (`buda`) with `-O3 -march=native -Wall -Wextra`.
 
 ## Run
 
 ```bash
-cd src/
-python3 buda_cli.py ../flow/comprehensive_demo.buda
+PYTHONPATH=build python3 src/buda_cli.py flow/comprehensive_demo.buda
 ```
+
+Or set `export PYTHONPATH=build` once per shell session.
 
 `.buda` script command reference:
 

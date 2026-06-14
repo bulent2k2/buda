@@ -54,8 +54,9 @@ fi
 echo "Building target (buda)..."
 make -j$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-echo "Installing to src/..."
-cp buda.cpython-*.so "$REPO_DIR/src/"
+# Remove any stale .so copies from src/ so they cannot shadow the fresh build.
+rm -f "$REPO_DIR"/src/buda*.so "$REPO_DIR"/src/libbuda_core*.so
+echo "Build artifacts in build/. Use 'PYTHONPATH=build' to run scripts directly."
 
 BUILD_END=$(date +%s)
 BUILD_DURATION=$((BUILD_END - BUILD_START))
