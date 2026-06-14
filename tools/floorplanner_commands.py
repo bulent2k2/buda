@@ -297,6 +297,64 @@ def run_hbundle_flow(state: FloorplannerAppState, script_path: str | None = None
     return subprocess.run(cmd, cwd=_ROOT, env=env, capture_output=True, text=True)
 
 
+def get_block_cell(state: FloorplannerAppState, name: str) -> str | None:
+    """Return the BDB cell type for a component path, or None."""
+    if state.bdb is None:
+        return None
+    for c in state.bdb.all_components():
+        if c.name == name:
+            return c.cell
+    return None
+
+
+def count_cell_instances(state: FloorplannerAppState, cell: str) -> int:
+    """Count how many components share this cell type."""
+    if state.bdb is None:
+        return 0
+    return sum(1 for c in state.bdb.all_components() if c.cell == cell)
+
+
+def sync_cell_to_instances(state: FloorplannerAppState, name: str,
+                            x1: float, y1: float,
+                            x2: float, y2: float) -> tuple[str, int]:
+    """Resize the cell template and reload every instance's engine block.
+
+    Returns (cell_name, instance_count).  count=0 means no BDB or unique cell.
+    """
+    cell = get_block_cell(state, name)
+    if cell is None:
+        return ("", 0)
+    w, h = x2 - x1, y2 - y1
+    state.bdb.resize_cell(cell, w, h)
+    count = 0
+    for c in state.bdb.all_components():
+        if c.cell == cell and c.name in state.block_names:
+            try:
+                state.engine.resize_block_raw(c.name, c.x1, c.y1, c.x2, c.y2)
+                count += 1
+            except Exception:
+                pass
+    return (cell, count)
+
+
+def make_block_unique(state: FloorplannerAppState, name: str) -> str | None:
+    """Create a private cell definition for this component.
+
+    Subsequent resize operations via sync_cell_to_instances will not affect it.
+    Returns the new cell name, or None if already unique or no BDB.
+    """
+    cell = get_block_cell(state, name)
+    if cell is None or count_cell_instances(state, cell) <= 1:
+        return None
+    b = state.engine.get_block(name)
+    leaf = name.replace("/", "_")
+    new_cell = f"{cell}_{leaf}"
+    w, h = b.x2 - b.x1, b.y2 - b.y1
+    state.bdb.add_cell(new_cell, w, h)
+    state.bdb.set_comp_cell(name, new_cell)
+    return new_cell
+
+
 def build_hierarchy_tree(state: FloorplannerAppState) -> list[BlockNode]:
     """Build a BlockNode tree for the full component hierarchy.
 

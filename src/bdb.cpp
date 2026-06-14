@@ -1416,6 +1416,14 @@ void BDB::resize_cell(const std::string& cell, double w, double h) {
     compute_hpwl();
 }
 
+void BDB::set_comp_cell(const std::string& comp_name, const std::string& new_cell) {
+    Stmt u(_db, "UPDATE component SET cell=? WHERE name=?");
+    sqlite3_bind_text(u, 1, new_cell.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(u, 2, comp_name.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(u) != SQLITE_DONE)
+        throw std::runtime_error("set_comp_cell: update failed: " + comp_name);
+}
+
 int BDB::add_comp(const std::string& name, const std::string& cell,
                   const std::string& parent_name,
                   double x1, double y1, double x2, double y2, bool is_leaf) {

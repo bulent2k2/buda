@@ -143,6 +143,7 @@ public:
                        double x1, double y1, double x2, double y2);
     // Update the cell definition and every instance's x2/y2 to x1+w, y1+h.
     void resize_cell(const std::string& cell, double w, double h);
+    void set_comp_cell(const std::string& comp_name, const std::string& new_cell);
     // Insert a new component row using explicit absolute coordinates.
     // parent_name="" for a root instance.  Throws if name already exists.
     int  add_comp(const std::string& name, const std::string& cell,

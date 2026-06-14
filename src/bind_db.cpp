@@ -139,6 +139,8 @@ void bind_db(py::module_& m) {
              py::arg("x2"), py::arg("y2"))
         .def("resize_cell",     &BDB::resize_cell,
              py::arg("cell"), py::arg("w"), py::arg("h"))
+        .def("set_comp_cell",   &BDB::set_comp_cell,
+             py::arg("comp_name"), py::arg("new_cell"))
         .def("add_comp",        &BDB::add_comp,
              py::arg("name"), py::arg("cell"), py::arg("parent_name"),
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),

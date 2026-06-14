@@ -46,6 +46,7 @@ class BdbFloorplanner:
         self._grid = tk.DoubleVar(value=10.0)
         self._sel_var = tk.StringVar(value="")
         self._issue_var = tk.StringVar(value="")
+        self._overlay_depth = tk.IntVar(value=0)   # extra depth levels to overlay
 
         self._build_ui()
 
@@ -82,6 +83,17 @@ class BdbFloorplanner:
         self._spin(setup, "Grid", self._grid, 2)
         ttk.Button(setup, text="Apply", command=self._apply_canvas).grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        # Depth overlay control
+        ov_f = ttk.Frame(setup)
+        ov_f.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ttk.Label(ov_f, text="Overlay:").pack(side=tk.LEFT)
+        ttk.Button(ov_f, text="−", width=2,
+                   command=self._overlay_dec).pack(side=tk.LEFT, padx=2)
+        self._overlay_lbl = ttk.Label(ov_f, text="0", width=2, anchor="center")
+        self._overlay_lbl.pack(side=tk.LEFT)
+        ttk.Button(ov_f, text="+", width=2,
+                   command=self._overlay_inc).pack(side=tk.LEFT, padx=2)
+        ttk.Label(ov_f, text="extra level(s)").pack(side=tk.LEFT, padx=(4, 0))
 
         blocks = ttk.LabelFrame(left, text="Blocks", padding=6)
         blocks.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
@@ -102,6 +114,9 @@ class BdbFloorplanner:
         props = ttk.LabelFrame(left, text="Selection", padding=6)
         props.pack(fill=tk.X, pady=(0, 4))
         ttk.Label(props, textvariable=self._sel_var, anchor="w").pack(fill=tk.X)
+        self._make_unique_btn = ttk.Button(props, text="Make Unique",
+                                           command=self._on_make_unique)
+        # Shown only when a replicated block is selected (packed in _update_selection_label)
 
         checks = ttk.LabelFrame(left, text="Validation", padding=6)
         checks.pack(fill=tk.X)
@@ -132,6 +147,22 @@ class BdbFloorplanner:
         parent.columnconfigure(1, weight=1)
 
     # ------------------------------------------------------------------
+    # Overlay depth control
+    # ------------------------------------------------------------------
+
+    def _overlay_dec(self):
+        v = max(0, self._overlay_depth.get() - 1)
+        self._overlay_depth.set(v)
+        self._overlay_lbl.configure(text=str(v))
+        self._draw()
+
+    def _overlay_inc(self):
+        v = min(4, self._overlay_depth.get() + 1)
+        self._overlay_depth.set(v)
+        self._overlay_lbl.configure(text=str(v))
+        self._draw()
+
+    # ------------------------------------------------------------------
     # Breadcrumb helpers
     # ------------------------------------------------------------------
 
@@ -142,9 +173,12 @@ class BdbFloorplanner:
                    command=self._go_top).pack(side=tk.LEFT)
         for i, name in enumerate(self._path):
             ttk.Label(self._crumb_frame, text=" > ").pack(side=tk.LEFT)
-            idx = i  # capture
+            idx = i
             leaf = name.split("/")[-1]
-            ttk.Button(self._crumb_frame, text=leaf,
+            cell = fpc.get_block_cell(self.state, name)
+            n = fpc.count_cell_instances(self.state, cell) if cell else 0
+            label = leaf if n <= 1 else f"{leaf} (shared ×{n})"
+            ttk.Button(self._crumb_frame, text=label,
                        command=lambda i=idx: self._go_depth(i + 1)).pack(side=tk.LEFT)
 
     def _go_top(self):
@@ -399,10 +433,12 @@ class BdbFloorplanner:
 
         # Auto-zoom: if drilling down, fit to parent block; else fit to die
         zoom_set = False
+        vis_ref = max(dw, dh) if dw > 0 else 200.0   # handle-size reference
         if self._path:
             try:
                 pb = self.state.block(self._path[-1])
                 pw, ph = pb.x2 - pb.x1, pb.y2 - pb.y1
+                vis_ref = max(pw, ph)
                 margin = max(pw, ph) * 0.05
                 ax.set_xlim(pb.x1 - margin, pb.x2 + margin)
                 ax.set_ylim(pb.y1 - margin, pb.y2 + margin)
@@ -445,9 +481,7 @@ class BdbFloorplanner:
 
             # Corner handles for selected block
             if selected:
-                ref = max(dw if dw > 0 else (block.x2 - block.x1),
-                          dh if dh > 0 else (block.y2 - block.y1))
-                HS = max(ref * 0.008, 2.0)
+                HS = max(vis_ref * 0.012, 1.0)
                 for corner, (cx, cy) in [
                         ("tl", (block.x1, block.y1)),
                         ("tr", (block.x2, block.y1)),
@@ -459,6 +493,27 @@ class BdbFloorplanner:
                         linewidth=1.0, zorder=5, picker=True)
                     ax.add_patch(hp)
                     self._handle_patches.append((hp, name, corner))
+
+        # Depth overlay: draw child blocks at reduced opacity without interaction
+        extra_levels = self._overlay_depth.get()
+        if extra_levels > 0:
+            def _draw_overlay(parent_name: str, remaining: int, alpha: float):
+                for child in self._children_of(parent_name):
+                    try:
+                        cb = self.state.block(child)
+                    except Exception:
+                        continue
+                    ax.add_patch(mpatches.Rectangle(
+                        (cb.x1, cb.y1), cb.x2 - cb.x1, cb.y2 - cb.y1,
+                        facecolor="#fde68a", edgecolor="#92400e",
+                        linewidth=0.6, alpha=alpha, picker=False, zorder=1.5))
+                    ax.text(cb.x1 + 2, cb.y1 + 2, child.split("/")[-1],
+                            fontsize=6, color="#78350f", alpha=alpha,
+                            clip_on=True, zorder=1.6)
+                    if remaining > 1:
+                        _draw_overlay(child, remaining - 1, alpha * 0.65)
+            for name in visible:
+                _draw_overlay(name, extra_levels, 0.5)
 
         self._update_selection_label()
         if not zoom_set:
@@ -490,19 +545,41 @@ class BdbFloorplanner:
         name = self.state.selected
         if not name:
             self._sel_var.set("No block selected.")
+            self._make_unique_btn.pack_forget()
             return
         try:
             b = self.state.block(name)
         except Exception:
             self._sel_var.set(name)
+            self._make_unique_btn.pack_forget()
             return
         n_children = len(self._children_of(name))
         child_hint = f"  [{n_children} children]" if n_children else ""
+        cell = fpc.get_block_cell(self.state, name)
+        n_inst = fpc.count_cell_instances(self.state, cell) if cell else 0
+        if n_inst > 1:
+            cell_hint = f"\n⚠ Shared: {cell} (×{n_inst})"
+            self._make_unique_btn.pack(fill=tk.X, pady=(4, 0))
+        else:
+            cell_hint = f"\nCell: {cell}" if cell else ""
+            self._make_unique_btn.pack_forget()
         self._sel_var.set(
-            f"{name}{child_hint}\n"
+            f"{name}{child_hint}{cell_hint}\n"
             f"({b.x1:.1f}, {b.y1:.1f}) - ({b.x2:.1f}, {b.y2:.1f})\n"
             f"{b.x2 - b.x1:.1f} x {b.y2 - b.y1:.1f}"
         )
+
+    def _on_make_unique(self):
+        name = self.state.selected
+        if not name:
+            return
+        new_cell = fpc.make_block_unique(self.state, name)
+        if new_cell:
+            self._status.set(
+                f"{name.split('/')[-1]} is now unique — cell: {new_cell}.")
+        else:
+            self._status.set(f"{name.split('/')[-1]} is already unique.")
+        self._draw()
 
     # ------------------------------------------------------------------
     # Mouse events
@@ -570,10 +647,25 @@ class BdbFloorplanner:
             self._draw()
 
     def _on_release(self, event):
-        if self._drag:
-            mode = self._drag.get("mode", "move")
-            self._drag = None
-            self._status.set("Block resized." if mode == "resize" else "Block moved.")
+        if not self._drag:
+            return
+        mode = self._drag.get("mode", "move")
+        name = self._drag.get("name")
+        self._drag = None
+        if mode == "resize" and name:
+            b = self.state.block(name)
+            cell, n = fpc.sync_cell_to_instances(
+                self.state, name, b.x1, b.y1, b.x2, b.y2)
+            if n > 1:
+                self._status.set(
+                    f"Resized {name.split('/')[-1]}; "
+                    f"synced [{cell}] to {n} instances.")
+            else:
+                self._status.set("Block resized.")
+            self._refresh_tree()
+            self._draw()
+        else:
+            self._status.set("Block moved.")
 
 
 def main():
