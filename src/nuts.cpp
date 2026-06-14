@@ -350,19 +350,25 @@ static std::vector<std::pair<int,int>> find_overlaps(
     return pairs;
 }
 
-static void compute_metrics(NUTSResult& result)
+// Placed segments whose track (± half width) falls outside their hard interval.
+static int count_violations(const std::vector<TrackSegment>& segments)
 {
-    result.num_violations = 0;
-    result.num_overlaps   = 0;
-    result.overlaps_per_layer.clear();
-    result.overlap_details.clear();
-
-    for (const auto& ts : result.segments) {
+    int v = 0;
+    for (const auto& ts : segments) {
         if (!ts.placed) continue;
         if (ts.track_position - ts.width / 2.0 < ts.interval_lo ||
             ts.track_position + ts.width / 2.0 > ts.interval_hi)
-            ++result.num_violations;
+            ++v;
     }
+    return v;
+}
+
+static void compute_metrics(NUTSResult& result)
+{
+    result.num_violations = count_violations(result.segments);
+    result.num_overlaps   = 0;
+    result.overlaps_per_layer.clear();
+    result.overlap_details.clear();
 
     for (auto [i, j] : find_overlaps(result.segments)) {
         const auto& a = result.segments[i];
@@ -596,7 +602,8 @@ void NUTSEngine::resolve_corner_overlaps(
         std::vector<Snap> snap; snap.reserve(segments.size());
         for (const auto& ts : segments)
             snap.push_back({ts.track_position, ts.span_lo, ts.span_hi, ts.placed});
-        const size_t before = pairs.size();
+        const size_t before      = pairs.size();
+        const int    before_viol = count_violations(segments);
 
         // Re-solve each affected trunk layer under the accumulated constraints.
         for (int layer : dirty_layers) {
@@ -616,8 +623,12 @@ void NUTSEngine::resolve_corner_overlaps(
         do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map, false, &stretched_now);
         repair_overlaps(segments, pull_map, net_pull_map, align_map, rev_conn_map, ts_ptr_map);
 
-        if (find_overlaps(segments).size() >= before) {
-            for (size_t k = 0; k < segments.size(); ++k) {   // stop & reverse
+        const size_t after = find_overlaps(segments).size();
+        // Accept only a strict overlap improvement that does not introduce a new
+        // interval violation (an infeasible ordering must not trade a legal
+        // overlap for a violation) — otherwise stop & reverse.
+        if (after >= before || count_violations(segments) > before_viol) {
+            for (size_t k = 0; k < segments.size(); ++k) {
                 segments[k].track_position = snap[k].pos;
                 segments[k].span_lo        = snap[k].lo;
                 segments[k].span_hi        = snap[k].hi;
@@ -626,7 +637,7 @@ void NUTSEngine::resolve_corner_overlaps(
             break;
         }
         std::cout << "[NUTS] corner-overlap pass: overlaps " << before
-                  << " -> " << find_overlaps(segments).size() << ".\n";
+                  << " -> " << after << ".\n";
     }
 }
 
@@ -909,7 +920,20 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             : preferred_fit(eff_lo, ts->interval_hi, ts->width, occupied, preferred);
         if (!std::isnan(pos))            ts->track_position = pos;
         else if (!pack_low && try_repack(ts)) { /* repacked */ }
-        else                             ts->track_position = (eff_lo + ts->interval_hi) / 2.0;
+        else {
+            // No feasible track (e.g. an ordering lower bound pushed eff_lo past
+            // the interval).  Fall back to the midpoint but clamp it into the
+            // valid centre range so an infeasible ordering can never create an
+            // interval violation — the unsatisfied ordering just leaves the
+            // overlap for resolve_corner_overlaps' guard to reject.  Only the
+            // pathological bus-wider-than-interval case (empty range) keeps the
+            // raw midpoint, preserving prior behavior.
+            double fb = (eff_lo + ts->interval_hi) / 2.0;
+            const double v_lo = ts->interval_lo + ts->width / 2.0;
+            const double v_hi = ts->interval_hi - ts->width / 2.0;
+            if (v_lo <= v_hi) fb = std::clamp(fb, v_lo, v_hi);
+            ts->track_position = fb;
+        }
         ts->placed = true;
     };
 
