@@ -13,8 +13,8 @@ import os
 _repo = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..'))
 _build = os.path.join(_repo, 'build')
 _src   = os.path.join(_repo, 'src')
-for _p in (_build, _src):   # build first → fresh .so wins
-    if _p not in sys.path:
+for _p in (_src, _build):   # insert src then build; each insert(0) pushes prior down,
+    if _p not in sys.path:  # so build ends up at index 0 and wins over src
         sys.path.insert(0, _p)
 
 import pytest
