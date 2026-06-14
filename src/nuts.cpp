@@ -470,7 +470,7 @@ void NUTSEngine::repair_overlaps(
                 if (&o == victim || !o.placed) continue;
                 if (o.layer != victim->layer) continue;
                 if (o.bundle_id == victim->bundle_id) continue;
-                if (o.span_lo < victim->span_hi && victim->span_lo < o.span_hi) {
+                if (o.span_lo <= victim->span_hi && victim->span_lo <= o.span_hi) {  // closed: touch = occupied
                     const double h = o.width / 2.0;
                     occ.push_back({o.track_position - h, o.track_position + h});
                 }
@@ -850,7 +850,11 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                               std::vector<std::pair<double,double>>& occ) {
         for (const TrackSegment* o : segs) {
             if (o == ts || !o->placed || o->bundle_id == ts->bundle_id) continue;
-            if (o->span_lo < ts->span_hi && ts->span_lo < o->span_hi) {
+            // Closed-span (<=) to match segs_overlap: a span that merely TOUCHES
+            // ts is occupancy too, so ts is kept off o's track and the two don't
+            // end up collinear (an end-to-end DRC).  Spans that are truly
+            // disjoint (gap > 0) still don't block.
+            if (o->span_lo <= ts->span_hi && ts->span_lo <= o->span_hi) {
                 const double h = o->width / 2.0;
                 occ.push_back({o->track_position - h, o->track_position + h});
             }
@@ -907,7 +911,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             for (const TrackSegment* o : segs) {
                 if (!o->placed || member_set.count(o)) continue;
                 if (o->bundle_id == m->bundle_id) continue;
-                if (o->span_lo < m->span_hi && m->span_lo < o->span_hi) {
+                if (o->span_lo <= m->span_hi && m->span_lo <= o->span_hi) {  // closed: touch = occupied
                     const double h = o->width / 2.0;
                     occ.push_back({o->track_position - h, o->track_position + h});
                 }
@@ -920,7 +924,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                 // (e.g. blk-local buses left and right of a cross-chip
                 // trunk, all at the same Hanan band) are packed as if
                 // simultaneous and wedge a window that has room for all.
-                if (!(pm->span_lo < m->span_hi && m->span_lo < pm->span_hi))
+                if (!(pm->span_lo <= m->span_hi && m->span_lo <= pm->span_hi))  // closed: touch = occupied
                     continue;
                 const double h = pm->width / 2.0;
                 occ.push_back({ppos - h, ppos + h});
