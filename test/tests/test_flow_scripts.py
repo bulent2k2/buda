@@ -434,3 +434,50 @@ def test_10_four_level_scale_one_bundle_per_bus():
     assert dm, "DetailedNUTS summary not found"
     assert int(dm.group(1)) >= 1224               # ratchet (was 1112; now 1224)
     assert int(dm.group(2)) <= 8                  # ratchet (currently 8; Gap 3 still open)
+
+
+# ---------------------------------------------------------------------------
+# nuts_corner_overlap.buda — two buses pinned to Z-topos whose V-stubs share a
+# column.  After the H trunks are placed and the V-stub spans are stretched to
+# reach them, the stubs collide (a "corner overlap") — fixable only by ordering
+# the trunks (H1 below H2).  The corner-overlap pass derives that vertical
+# constraint from the stubs' anchored ends and re-solves the H layer; the
+# overlap (and the 4 detailed-NUTS unplaced bits it caused) disappears.
+# ---------------------------------------------------------------------------
+
+def test_nuts_corner_overlap_vertical_constraint():
+    out, rc = run_script("nuts_corner_overlap.buda")
+    assert_clean(out, rc, "nuts_corner_overlap.buda")
+    assert "[NUTS] corner-overlap pass: overlaps 1 -> 0." in out
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 6
+    assert viols == 0
+    assert ovlps == 0          # corner overlap resolved by trunk reordering
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(2)) == 0   # all bits place once the overlap is gone
+
+
+# ---------------------------------------------------------------------------
+# nuts_corner_overlap_3layer.buda — the corner-overlap pass in a 3-TOP-layer
+# stack (M4/M5/M6).  An M6 keepout forces both Z-topo H-trunks onto M4, the
+# FIRST layer NUTS solves, so the pass must derive its vertical constraint on
+# the first-solved layer (the 2-layer test exercises the last-solved M6).
+# Confirms the pass generalizes across three layers solved in sequence.
+# ---------------------------------------------------------------------------
+
+def test_nuts_corner_overlap_3layer():
+    out, rc = run_script("nuts_corner_overlap_3layer.buda")
+    assert_clean(out, rc, "nuts_corner_overlap_3layer.buda")
+    # Trunks forced onto M4 (the first-solved layer) by the M6 keepout.
+    assert re.search(r"Bundle 1 .*\[V→M5 H→M4 V→M5\]", out)
+    assert "[NUTS] corner-overlap pass: overlaps 1 -> 0." in out
+    segs, viols, ovlps = nuts_summary(out)
+    assert segs  == 6
+    assert viols == 0
+    assert ovlps == 0
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(2)) == 0

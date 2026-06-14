@@ -79,61 +79,73 @@ monotonically with the number of LOW segments packed through it.
 
 ---
 
-## 3. Span adjustments stretch segments into uncharged bands — OPEN
+## 3. "Corner overlaps" from span stretching — PARTLY RESOLVED
 
 ### Problem
 
-The planner scores a topology at its planned coordinates. NUTS places segments,
-then stretches connected spans to meet placed positions (`do_span_adjustments`).
-A detour stub planned as `y∈[230,270]` can end as `y∈[220,356]` after its trunk
-slides — now crossing cuts/bands the planner never charged, and colliding with
-buses that were disjoint at planning time. `repair_overlaps` fixes what it can
-(per-move monotone guard), but a face window genuinely over-filled post-stretch
-has no repair.
+The planner scores a topology at its planned coordinates. NUTS places one layer,
+then stretches the connected segments on the other layer to meet their placed
+trunks (`do_span_adjustments`). Two stretched segments that were disjoint at plan
+time can then collide — a **corner overlap**. When the colliding segments are
+perp-locked (e.g. pinned to a block face), `repair_overlaps` cannot help: moving a
+victim sideways is infeasible. The only cure is to reorder the *trunks* they hang
+from — the **vertical constraint** of two-sided channel routing.
 
 ```
-  Planned (planner books these bands):        After NUTS places + stretches:
+A single VERTICAL M5 track column (one x, shared by stubs a and b).
+y runs upward; the horizontal H6 trunk a hangs from is shown by its y-level (┄┄).
 
-  M4 trunk planned @ y=270 ───────┐           M4 trunk PLACED @ y=356 ──────────┐  (slid up:
-                                  │                                             │   M4 congestion)
-                                  │                                             │
-  stub a  ▓▓ y∈[230,270]          │           stub a  ▓▓ y∈[230,356] ◄─ stretched to
-          ▓▓                      │                   ▓▓                follow the trunk
-          ▓▓                      │                   ▓▓
-   bus b  ░░ y∈[300,340]  (disjoint           bus b  ░░ y∈[300,340]   ◄─ now OVERLAPS a
-          ░░  from a at plan time)                   ░░                  in the y∈[300,340]
-                                                                         band the planner
-                                                                         never charged a for
+        PLANNED  (planner's books)            AFTER NUTS  (trunk placed higher)
+  y                                       y
+ 356                                     356  ┄┄┄  H trunk PLACED @356
+      ┄┄┄  trunk planned @270                 █       (H congestion slid it up)
+ 340  ▒▒▒  b (anchored y340, grows down) 340   █▒▒ ◄ a now runs through 300–340
+ 320  ▒▒▒                                320   █▒▒   → CORNER OVERLAP with b
+ 300  ▒▒▒                                300   █▒▒     (same track, overlapping y)
+      ···  free gap: a charged only            █
+ 280  ···  up to y=270                   280   █   ◄ a stretched to follow its trunk
+ 270  ┄┄┄  trunk planned @270            270   █      into bands b already occupies
+ 260  ███  a (anchored y230, grows up)   260   █
+ 240  ███   ends safely below b          240   █   a.span_hi: 270 → 356
+ 230  ███                                230   █
 ```
 
-The flow `flow/future/nuts_span_stretch_gap3.buda` sets up the detour + crossing
-geometry and exercises the span-adjustment path; at 2-bus scale `repair_overlaps`
-still rescues it. The unrepairable form appears at scale in
-`10_chip_units_blocks_leaf.buda` (the 4 residual abstract overlaps and the
-bundle-47 reservation conflict).
+Worked example: `flow/nuts_corner_overlap.buda` — two buses pinned to Z-topos
+whose first V-stubs share the x≈90 column; the lower-anchored stub's trunk must
+take the lower track or the stubs cross.
 
-### Chosen approach: re-charge & verify
+### Implemented: lazy vertical-constraint resolution (`resolve_corner_overlaps`)
 
-After `do_span_adjustments`, re-run the band books on the **final** geometry; any
-band now over capacity triggers a targeted NUTS re-placement of the newest
-contributor. The planner itself stays untouched.
+After `repair_overlaps`, a bounded pass runs only when spans were stretched:
+1. Detect corner overlaps — `find_overlaps` pairs (now an O(n log n) per-layer
+   sweep) with ≥1 member in the **stretched** set that `do_span_adjustments`
+   reports.
+2. Derive an ordering edge from each pair's **anchored (non-stretched) ends**: the
+   segment anchored lower ⇒ its trunk must take the lower track.
+3. Re-solve the trunk layer under the accumulated edges — `solve_layer` phase 0
+   places constrained trunks in topological order, **bottom-edge packed**
+   (`first_fit` from just above each predecessor) so successors have room.
+4. **Stop & reverse**: keep the re-solve only while the total overlap count
+   strictly drops; otherwise restore and stop. Bounded iterations; short-circuits
+   when nothing stretched.
 
-**Efficiency constraint (required):** this must not slow NUTS in the common case.
-Re-charge only the segments whose span actually changed during
-`do_span_adjustments` (track the dirty set there) and the bands those segments
-now touch — never the whole design — and short-circuit entirely when no span was
-adjusted. The verify pass is then proportional to the (usually small) number of
-stretched segments, not to the segment count.
+This clears the `nuts_corner_overlap.buda` overlap (and its 4 detailed-NUTS
+unplaced bits → 0). The heuristic edge derivation is safe because the monotone
+guard reverts any edge that doesn't help.
 
-**Alternatives considered:**
-- *Bounded slide* — cap a follower's stretch to the Hanan band(s) its planner
-  charge covered and let the trunk absorb the gap. Cheaper, but loses legitimate
-  long stretches.
-- *Joint placement* — place connected segments (trunk + stubs) as a group so
-  spans never change post-placement. The principled fix, and the largest rewrite
-  of `solve_layer`.
+### Still open
 
-Validate: flow 10 M5 stub overlaps (`B43×B47`-class) disappear and the residual
-overlap ratchet drops below 4; planner3/4/5, ripup1/2, 05–09 stay green.
+The guard means genuinely **cyclic** vertical constraints (net A above B at one
+column, B above A at another — NP-hard, needing a *dogleg* that splits a trunk
+across tracks) are left as-is. Flow 10's ~4 residual abstract overlaps and the
+bundle-47 reservation conflict are not resolved by this pass; a future dogleg /
+joint-placement extension would be needed. **Effort:** medium→large.
 
-**Effort:** medium.
+Multi-layer (≥3 TOP) note: the pass orders the trunks the colliding segments hang
+from, so it requires both trunks to be on the **same** layer. A corner overlap
+whose two stubs hang from trunks on *different* layers (possible with three TOP
+layers, e.g. one trunk on M4 and the other on M6) is skipped — it has no single-
+layer track ordering. The common same-trunk-layer case generalizes cleanly across
+layers and is covered by `flow/nuts_corner_overlap_3layer.buda` (trunks forced
+onto M4, the first-solved layer). Handling different-layer trunks (e.g. moving one
+trunk within its own layer) is future work.
