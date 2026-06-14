@@ -905,34 +905,42 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             eff_lo = std::max(eff_lo, lb - ts->width / 2.0);
         const double c_lo = eff_lo + ts->width / 2.0;
         const double c_hi = ts->interval_hi - ts->width / 2.0;
-        auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
-
-        // Alignment: a placed same-layer sibling (same bundle, connected to the
-        // same perpendicular segment) whose position fits this segment's
-        // interval — sharing its band saves a whole track.
-        double preferred = std::numeric_limits<double>::quiet_NaN();
-        auto ait = align_map.find(key);
-        if (ait != align_map.end()) {
-            for (const auto& sk : ait->second) {
-                auto lit = layer_map.find(sk);
-                if (lit == layer_map.end() || !lit->second->placed) continue;
-                double p = lit->second->track_position;
-                if (p >= c_lo && p <= c_hi) { preferred = p; break; }
-            }
-        }
-        if (std::isnan(preferred)) {
-            auto it = pull_map.find(key);
-            preferred = (it != pull_map.end())
-                        ? it->second
-                        : (ts->interval_lo + ts->interval_hi) / 2.0;
-        }
-        preferred = std::clamp(preferred, c_lo, c_hi);
         // Ordering-constrained segments pack to their lowest feasible track
-        // (bottom-edge assignment) so segments that must sit above them still
-        // fit; others seek their preferred track.
-        double pos = pack_low
-            ? first_fit(eff_lo, ts->interval_hi, ts->width, occupied)
-            : preferred_fit(eff_lo, ts->interval_hi, ts->width, occupied, preferred);
+        // (bottom-edge / first_fit) so segments that must sit above them still
+        // fit; others seek their preferred track via preferred_fit.  The
+        // preferred computation (and its clamp) only matters for the latter —
+        // skip it entirely for pack_low, where an ordering lower bound can make
+        // c_lo > c_hi and std::clamp(preferred, c_lo, c_hi) would be undefined.
+        double pos;
+        if (pack_low) {
+            pos = first_fit(eff_lo, ts->interval_hi, ts->width, occupied);
+        } else {
+            auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
+            // Alignment: a placed same-layer sibling (same bundle, connected to
+            // the same perpendicular segment) whose position fits this segment's
+            // interval — sharing its band saves a whole track.
+            double preferred = std::numeric_limits<double>::quiet_NaN();
+            auto ait = align_map.find(key);
+            if (ait != align_map.end()) {
+                for (const auto& sk : ait->second) {
+                    auto lit = layer_map.find(sk);
+                    if (lit == layer_map.end() || !lit->second->placed) continue;
+                    double p = lit->second->track_position;
+                    if (p >= c_lo && p <= c_hi) { preferred = p; break; }
+                }
+            }
+            if (std::isnan(preferred)) {
+                auto it = pull_map.find(key);
+                preferred = (it != pull_map.end())
+                            ? it->second
+                            : (ts->interval_lo + ts->interval_hi) / 2.0;
+            }
+            // Guard against an inverted range (bus wider than its interval):
+            // std::clamp requires lo <= hi.  preferred_fit returns NaN there
+            // anyway, so the value is irrelevant — just avoid the UB.
+            if (c_lo <= c_hi) preferred = std::clamp(preferred, c_lo, c_hi);
+            pos = preferred_fit(eff_lo, ts->interval_hi, ts->width, occupied, preferred);
+        }
         if (!std::isnan(pos))            ts->track_position = pos;
         else if (!pack_low && try_repack(ts)) { /* repacked */ }
         else {
