@@ -32,16 +32,20 @@ stat_title = "Bundle-based Design Assistant (BUDA) with Non-Uniform Track Sharin
 
 
 def _draw_hanan_grid(ax, fp, ui_state: ViewState):
-    """Draw the Hanan grid if enabled. Prominent if ON, hidden if OFF."""
-    if not ui_state.hanan_grid:
-        return
+    """Draw the Hanan grid and return the line artists. Visibility is set by ui_state."""
+    artists = []
     xs, ys = fp.get_hanan_grid()
     # Style: prominent dashed line for debugging
     color = '#94a3b8'  # slate-400
     for x in xs:
-        ax.axvline(x=x, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
+        l = ax.axvline(x=x, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
+        l.set_visible(ui_state.hanan_grid)
+        artists.append(l)
     for y in ys:
-        ax.axhline(y=y, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
+        l = ax.axhline(y=y, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
+        l.set_visible(ui_state.hanan_grid)
+        artists.append(l)
+    return artists
 
 
 def _draw_blocks(ax, fp, ui_state: ViewState, highlight_names=None):
@@ -413,8 +417,13 @@ class TopologyExplorer:
         self._btn_demote.on_clicked(lambda _: self._cycle_layer(-1))
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+        self.fig.canvas.mpl_connect('close_event', self._on_close)
 
         self._draw()
+
+    def _on_close(self, event):
+        if hasattr(self, 'ui_state'):
+            self.ui_state.remove_listener(self.fig_redraw)
 
     # ------------------------------------------------------------------
 
@@ -724,13 +733,9 @@ class TopologyExplorer:
         self._reset_rerun_btn()
         self._draw()
 
-    def _toggle_blocks(self):
-        self._blocks_visible = not self._blocks_visible
-        for p in self._block_patch_artists:
-            p.set_visible(self._blocks_visible)
-        for t in self._block_name_artists:
-            t.set_visible(self._blocks_visible)
-        self.fig.canvas.draw_idle()
+    def _redraw_topo(self):
+        # We trigger a fig_redraw so the UI state updates correctly.
+        self.fig_redraw()
 
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
@@ -1338,6 +1343,7 @@ class BudaVisualizer:
         self._pick_happened  = False
         self._cbar_ax        = None   # colorbar axes for congestion heatmap
         self._heatmap_artists = []    # patches + texts created by draw_congestion_map
+        self._hanan_artists  = []     # lines created by draw_hanan_grid
         self._block_patch_artists = [] # block rectangle patches
         self._block_name_artists = [] # text artists created by draw_blocks
         self._home_xlim          = None
@@ -1562,6 +1568,15 @@ class BudaVisualizer:
             
         for a in self._vias_conns_artists:
             a.set_visible(self.ui_state.vias_conns)
+            
+        for a in self._hanan_artists:
+            a.set_visible(self.ui_state.hanan_grid)
+            
+        for a in self._block_patch_artists:
+            a.set_visible(self.ui_state.blocks)
+            
+        for a in self._block_name_artists:
+            a.set_visible(self.ui_state.block_names and self.ui_state.blocks)
 
         # 3. Complex redraws (blocks, highlights)
         self._refresh_highlight()
@@ -1726,11 +1741,6 @@ class BudaVisualizer:
 
         # Redraw all via notification
         self.ui_state.notify()
-        self._keepouts_visible    = True
-        self._blocks_visible      = True
-        self._block_names_visible = True
-        self._bustermss_visible   = True
-        self._vias_conns_visible  = True
         self._tracks_visible      = True
 
         # Toggle All logic (forced to True)
@@ -2306,7 +2316,8 @@ class BudaVisualizer:
             main_fig=self.fig,
             rerun_fn=self._rerun_fn,
             refresh_fn=refresh_fn,
-            layer_stack=self.layer_stack)
+            layer_stack=self.layer_stack,
+            ui_state=self.ui_state)
         self._topo_explorer.fig.show()
 
     def _zoom_home(self):
@@ -2384,9 +2395,9 @@ class BudaVisualizer:
                 self._block_name_artists.append(txt)
 
         for p in self._block_patch_artists:
-            p.set_visible(self._blocks_visible)
+            p.set_visible(self.ui_state.blocks)
         for txt in self._block_name_artists:
-            txt.set_visible(self._blocks_visible and self._block_names_visible)
+            txt.set_visible(self.ui_state.blocks and self.ui_state.block_names)
 
     def draw_blocks(self):
         self._redraw_blocks()
@@ -2395,7 +2406,7 @@ class BudaVisualizer:
     def draw_keepouts(self):
         """Draw KeepoutZones as hatched rectangles with layer labels."""
         self._keepout_artists = []
-        vis = self._keepouts_visible
+        vis = self.ui_state.keepouts
         for koz in self.fp.get_keepout_zones():
             r = koz.bbox
             w = r.x2 - r.x1
@@ -2504,7 +2515,7 @@ class BudaVisualizer:
                         self._heatmap_artists.append(txt)
 
         # Apply current visibility state.
-        vis = self._heatmap_visible
+        vis = self.ui_state.heatmap
         for a in self._heatmap_artists:
             a.set_visible(vis)
 
@@ -2562,15 +2573,14 @@ class BudaVisualizer:
         cbar.set_label('Congestion', fontsize=8, labelpad=4)
         cbar.ax.yaxis.set_label_position('left')
         cbar.ax.yaxis.set_ticks_position('left')
-        self._cbar_ax.set_visible(self._heatmap_visible)
+        self._cbar_ax.set_visible(self.ui_state.heatmap)
 
     def draw_hanan_grid(self):
-        # Hanan grid
-        xs, ys = self.fp.get_hanan_grid()
-        for x in xs:
-            self.ax.axvline(x=x, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
-        for y in ys:
-            self.ax.axhline(y=y, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
+        # Remove any existing
+        for a in self._hanan_artists:
+            try: a.remove()
+            except Exception: pass
+        self._hanan_artists = _draw_hanan_grid(self.ax, self.fp, self.ui_state)
 
     @staticmethod
     def _busterm_positions(topo, ct, ts_map=None, bid=None, offset=0.0):
@@ -2609,7 +2619,7 @@ class BudaVisualizer:
                            alpha=alpha, zorder=zorder + 1, clip_on=True)
         self._register(bid, xm, alpha=alpha, lw=msz * 0.65, layer=layer)
         self._vias_conns_artists.append(xm)
-        if not self._vias_conns_visible:
+        if not self.ui_state.vias_conns:
             sq.set_visible(False)
             xm.set_visible(False)
 
@@ -2620,7 +2630,7 @@ class BudaVisualizer:
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
         self._register(bid, sq, alpha=alpha, lw=msz, layer=layer)
         self._vias_conns_artists.append(sq)
-        if not self._vias_conns_visible:
+        if not self.ui_state.vias_conns:
             sq.set_visible(False)
 
     def _draw_seg_connectors(self, bid, seg_idx, cs, sx, sy, col, msz, alpha,
@@ -2983,7 +2993,7 @@ class BudaVisualizer:
 
         self._busterm_artists.extend(new_artists)
         # Apply current visibility state to newly created artists
-        if not self._bustermss_visible:
+        if not self.ui_state.busterms:
             for a in new_artists:
                 a.set_visible(False)
 
@@ -3109,6 +3119,11 @@ class BudaVisualizer:
         self._btn_blknames.label.set_fontsize(7.5)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
 
+        ax_hanan = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_hanan = Button(ax_hanan, '☐ Hanan', color='#e8f4e8')
+        self._btn_hanan.label.set_fontsize(7.5)
+        self._btn_hanan.on_clicked(lambda _: self._toggle_hanan())
+
         ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_bustermss = Button(ax_bustermss, '☑ Busterms', color='#e8f4e8')
         self._btn_bustermss.label.set_fontsize(7.5)
@@ -3142,11 +3157,6 @@ class BudaVisualizer:
         # Hidden until draw_detailed_tracks() has been called.
         if not self._detailed_bundle_artists:
             self._btn_detailed.ax.set_visible(False)
-
-        ax_hanan = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_hanan = Button(ax_hanan, '☐ Hanan', color='#e8f4e8')
-        self._btn_hanan.label.set_fontsize(7.5)
-        self._btn_hanan.on_clicked(lambda _: self._toggle_hanan())
 
         ax_tracks = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_tracks = Button(ax_tracks, '☑ Tracks', color='#ffe8cc')

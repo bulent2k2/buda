@@ -177,10 +177,6 @@ class BdbFloorplanner:
         # View settings panel
         view_f = ttk.LabelFrame(left, text="View", padding=6)
         view_f.pack(fill=tk.X, pady=(0, 4))
-        
-        self._var_hanan = tk.BooleanVar(value=self.ui_state.hanan_grid)
-        self._var_hanan.trace_add("write", lambda *args: self._on_view_toggle('hanan_grid', self._var_hanan))
-        ttk.Checkbutton(view_f, text="Hanan Grid", variable=self._var_hanan).pack(side=tk.LEFT, padx=2)
 
         self._var_names = tk.BooleanVar(value=self.ui_state.block_names)
         self._var_names.trace_add("write", lambda *args: self._on_view_toggle('block_names', self._var_names))
@@ -604,8 +600,6 @@ class BdbFloorplanner:
         visible = self._visible_names()
         extra_levels = self._overlay_depth.get()
         
-        hanan_x, hanan_y = set(), set()
-        
         for name in visible:
             try:
                 block = self.state.block(name)
@@ -628,9 +622,6 @@ class BdbFloorplanner:
                 ax.text(block.x1 + 4, block.y1 + 4, label,
                         fontsize=7.5, color="#0f172a", va="bottom", clip_on=True, zorder=3)
             
-            hanan_x.update([block.x1, block.x2])
-            hanan_y.update([block.y1, block.y2])
-
             # Corner handles for selected block
             if selected:
                 HS = max(vis_ref * 0.005, 1.0)
@@ -666,14 +657,6 @@ class BdbFloorplanner:
                         _draw_overlay(child, remaining - 1, alpha * 0.72)
             for name in visible:
                 _draw_overlay(name, extra_levels, 0.85)
-                
-        # Draw Hanan grid
-        if self.ui_state.hanan_grid:
-            color = '#94a3b8'  # slate-400
-            for x in sorted(hanan_x):
-                ax.axvline(x=x, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0.5)
-            for y in sorted(hanan_y):
-                ax.axhline(y=y, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0.5)
 
         self._draw_flylines(ax)
         self._update_selection_label()
