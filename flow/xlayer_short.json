@@ -1,0 +1,17 @@
+{
+  "selections": [
+    {
+      "bundle_hint": "x_0",
+      "bundle_id": 1,
+      "topo_type": "Z_VHV@y125@x98",
+      "topo_wl": 129,
+      "topo_index_hint": 3,
+      "note": "pin bus x's H-trunk to M4 so the two trunks are cross-layer (M4 vs M6)",
+      "seg_layers": [
+        5,
+        4,
+        5
+      ]
+    }
+  ]
+}

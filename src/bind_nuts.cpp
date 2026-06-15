@@ -91,7 +91,9 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("width",          &TrackSegment::width)
         .def_readwrite("track_position", &TrackSegment::track_position)
         .def_readwrite("placed",         &TrackSegment::placed)
-        .def_readwrite("net_pull",       &TrackSegment::net_pull);
+        .def_readwrite("net_pull",       &TrackSegment::net_pull)
+        .def_readwrite("track_lo_bound", &TrackSegment::track_lo_bound)
+        .def_readwrite("track_hi_bound", &TrackSegment::track_hi_bound);
 
     py::class_<OverlapDetail>(m, "OverlapDetail")
         .def_readwrite("layer",   &OverlapDetail::layer)
@@ -187,7 +189,9 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("bit_order",       &BusSegment::bit_order)
         .def_readwrite("timing_critical", &BusSegment::timing_critical)
         .def_readwrite("connections",     &BusSegment::connections)
-        .def_readwrite("abstract_pos",    &BusSegment::abstract_pos);
+        .def_readwrite("abstract_pos",    &BusSegment::abstract_pos)
+        .def_readwrite("track_lo_bound",  &BusSegment::track_lo_bound)
+        .def_readwrite("track_hi_bound",  &BusSegment::track_hi_bound);
 
     py::class_<NetSegment>(m, "NetSegment")
         .def(py::init<>())

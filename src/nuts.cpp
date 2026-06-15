@@ -610,6 +610,9 @@ void NUTSEngine::resolve_corner_overlaps(
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
 
+        // Snapshot the constraint set so a reverted iteration's new edges/bounds
+        // are dropped (only committed constraints persist to detailed NUTS).
+        auto cons_before = by_layer_cons;
         bool new_edge = false;
         std::set<int> dirty_layers;
         for (auto [i, j] : pairs) {
@@ -696,10 +699,26 @@ void NUTSEngine::resolve_corner_overlaps(
                 segments[k].span_hi        = snap[k].hi;
                 segments[k].placed         = snap[k].placed;
             }
+            by_layer_cons = cons_before;   // this iteration's edges/bounds are reverted
             break;
         }
         std::cout << "[NUTS] corner-overlap pass: overlaps " << before
                   << " -> " << after << ".\n";
+    }
+
+    // Persist committed cross-layer split bounds onto the trunk TrackSegments,
+    // so detailed NUTS snaps each trunk to its bounded side on real signal
+    // tracks (the abstract g=1 only set the side).  Same-layer ordering edges
+    // need no carry — detailed NUTS already separates same-layer trunks via
+    // track reservation.
+    for (const auto& [layer, cons] : by_layer_cons) {
+        (void)layer;
+        for (const auto& [k, b] : cons.bounds) {
+            auto it = idx_of.find(k);
+            if (it == idx_of.end()) continue;
+            segments[it->second].track_lo_bound = b.first;
+            segments[it->second].track_hi_bound = b.second;
+        }
     }
 }
 
@@ -1199,6 +1218,12 @@ NUTSResult NUTSEngine::rerun_layer(
         if (ts.layer != layer_id) continue;
         ts.track_position = std::numeric_limits<double>::quiet_NaN();
         ts.placed         = false;
+        // This layer is about to be re-solved unconstrained (resolve_corner_
+        // overlaps is intentionally not run here), so any cross-layer split
+        // bound from the previous full solve is now stale — clear it, or
+        // detailed NUTS would filter these trunks to an obsolete side.
+        ts.track_lo_bound = -kInf;
+        ts.track_hi_bound =  kInf;
     }
     std::map<std::pair<int,int>, double>                         pull_map;
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;

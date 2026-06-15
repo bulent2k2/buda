@@ -152,11 +152,25 @@ Clears `nuts_corner_overlap.buda` (same-layer), `nuts_corner_overlap_3layer.buda
 (3-layer, same trunk layer), and `nuts_corner_touch.buda` (cross trunk layer).
 Flow 10 improved 4 → 1 abstract overlaps and 8 → 0 unplaced detailed bits.
 
+### Detailed-NUTS spacing for the cross-layer case — RESOLVED
+
+Abstract NUTS uses only `g = 1` to set each trunk's side of the split; the real
+separation comes from the per-layer signal-track grids.  When two trunk layers
+have an *aligned* signal track, detailed NUTS used to snap both trunks to the same
+coordinate, so the two M5 stubs met end-to-end — a bit-level short detailed NUTS
+didn't report (it only counts unplaced bits).
+
+Fix: `resolve_corner_overlaps` records the committed cross-layer split bound on the
+trunk `TrackSegment`s (`track_lo_bound`/`track_hi_bound`); the CLI carries them onto
+the `BusSegment`s; detailed NUTS filters each trunk's `signal_tracks` to its bounded
+side before snapping.  The trunks land on disjoint real tracks → the stubs no longer
+meet.  If a side genuinely lacks `bit_width` tracks the bits are reported **unplaced**
+(an honest spacing failure) rather than silently shorted.  Verified by
+`test_detailed_nuts_xlayer.py` (no same-track/overlapping-span stub pair on
+`nuts_corner_touch`, 0 unplaced).
+
 ### Still open
 
-- **Detailed-NUTS spacing** for the cross-layer case: abstract uses `g = 1` only
-  to set the side; the real separation should come from snapping each trunk to the
-  nearest signal track on its own layer (per-layer track patterns). Follow-up.
 - Genuinely **cyclic** vertical constraints (A above B at one column, B above A at
   another — NP-hard, needs a *dogleg* splitting a trunk across tracks) are left as
   is by the guard; flow 10's last residual overlap is this class. **Effort:**
