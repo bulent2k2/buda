@@ -1622,6 +1622,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // perturbs a flow that otherwise converges to zero.
     const int kMaxDoglegs  = 8;
     const int kMaxResidual = 4;
+    std::set<int> doglegged_bids;   // bundles whose topology the dogleg mutated
     for (int dl = 0; dl < kMaxDoglegs && !out.plans.empty()
                      && out.result.num_overlaps <= kMaxResidual; ++dl) {
         const std::vector<DoglegPlan> plans = out.plans;
@@ -1633,16 +1634,26 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         bool applied = false;
         std::vector<BundleWrapper> best_bundles;
         SolveOut                   best_out;
-        double                     best_jog = std::numeric_limits<double>::max();
+        double                     best_jog  = std::numeric_limits<double>::max();
+        double                     best_span = -1.0;
+        int                        best_bid  = -1;
         for (const DoglegPlan& p : plans) {
             int bw_idx = find_bw(p.split_trunk.first);
             if (bw_idx < 0) continue;
+            // Trunk geometry: its slide window (interval) must hold two sub-trunks,
+            // and a longer span gives the jog more room to slide — so among the
+            // cycle's trunks we prefer the one with the longest span (tie-broken on
+            // a shorter jog), skipping any whose slide window is too narrow.
+            double trunk_w = 1.0, trunk_span = 0.0, trunk_slide = 0.0;
+            for (const auto& ts : out.result.segments)
+                if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == p.split_trunk.second) {
+                    trunk_w     = ts.width;
+                    trunk_span  = ts.span_hi - ts.span_lo;
+                    trunk_slide = ts.interval_hi - ts.interval_lo;
+                }
+            if (trunk_slide < 2.0 * trunk_w + 2.0 * track_pitch_) continue;  // can't host two pieces
             // Seed the jog tall enough that the pieces clear the neighbour trunks
             // between them: separation ≳ bus width + pitch each side.
-            double trunk_w = 1.0;
-            for (const auto& ts : out.result.segments)
-                if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == p.split_trunk.second)
-                    trunk_w = ts.width;
             const int delta = (int)std::ceil(trunk_w + track_pitch_ + 2.0);
             std::vector<BundleWrapper> trial = bundles;
             DoglegResult dr = apply_dogleg(trial[bw_idx], p.split_trunk.second,
@@ -1673,15 +1684,22 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
             for (const auto& ts : t.result.segments)
                 if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == dr.jog_si)
                     jog_len = ts.span_hi - ts.span_lo;
+            // Prefer: fewer overlaps, then the LONGER trunk (more jog room), then
+            // the shorter jog.
+            const size_t ov = t.result.num_overlaps;
             const bool better =
                 !applied ||
-                t.result.num_overlaps <  best_out.result.num_overlaps ||
-                (t.result.num_overlaps == best_out.result.num_overlaps && jog_len < best_jog);
+                ov <  best_out.result.num_overlaps ||
+                (ov == best_out.result.num_overlaps && trunk_span > best_span + 1e-6) ||
+                (ov == best_out.result.num_overlaps && std::abs(trunk_span - best_span) <= 1e-6
+                                                    && jog_len < best_jog);
             if (better) {
                 applied      = true;
                 best_bundles = std::move(trial);
                 best_out     = std::move(t);
                 best_jog     = jog_len;
+                best_span    = trunk_span;
+                best_bid     = p.split_trunk.first;
             }
         }
         if (applied && best_out.result.num_overlaps < out.result.num_overlaps) {
@@ -1691,10 +1709,24 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                       << " -> " << best_out.result.num_overlaps << ").\n";
             bundles = std::move(best_bundles);
             out     = std::move(best_out);
+            if (best_bid >= 0) doglegged_bids.insert(best_bid);
         } else {
             break;   // no dogleg helped — leave the residual to BEST_EFFORT
         }
     }
+
+    // Export the dogleg-mutated topologies so the CLI can adopt them before it
+    // rebuilds ConnTopology for detailed NUTS — otherwise the split bundle's
+    // stubs keep their stale (pre-split) connectivity and detailed NUTS routes
+    // them with corrupted spans.
+    for (int bid : doglegged_bids)
+        for (const auto& bw : bundles)
+            if (bw.input.original_bundle.id == bid &&
+                bw.plan.selected_topology_index >= 0) {
+                out.result.dogleg_topologies[bid] =
+                    bw.input.candidates[bw.plan.selected_topology_index];
+                out.result.dogleg_seg_layers[bid] = bw.plan.seg_layers;
+            }
 
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "
               << "Interval violations: " << out.result.num_violations << ", "

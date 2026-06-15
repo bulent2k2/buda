@@ -61,6 +61,12 @@ struct NUTSResult {
     int num_violations = 0;   // segments placed outside their interval
     int num_overlaps   = 0;   // pairs of segments that physically overlap after placement
     std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
+    // Topologies the dogleg pass mutated (bundle_id -> new selected Topology and
+    // its seg_layers).  The CLI adopts these into its bundles before rebuilding
+    // ConnTopology for detailed NUTS, so the split bundle's stubs get the correct
+    // (post-split) connectivity instead of routing with stale, corrupted spans.
+    std::map<int, Topology>          dogleg_topologies;
+    std::map<int, std::vector<int>>  dogleg_seg_layers;
 };
 
 // Non-Uniform Track Sharing engine.

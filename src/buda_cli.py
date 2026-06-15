@@ -908,6 +908,7 @@ class BudaSession:
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
         self.nuts_result = nuts.run(self.bundles)
+        self._adopt_doglegs()
 
         layer_names = self._make_layer_names()
         self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
@@ -1155,6 +1156,7 @@ class BudaSession:
                 list(self.planner.get_y_grid()))
         before = self._segment_states_from_topology()
         self.nuts_result = nuts.run(self.bundles)
+        self._adopt_doglegs()
         diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
         self._write_nuts_log(layer_names, append=True,
                              rerun_layer_name="topo-rerun", extra_lines=diag)
@@ -1164,6 +1166,25 @@ class BudaSession:
             return self.nuts_result, self.detailed_result
 
         return self.nuts_result
+
+    def _adopt_doglegs(self):
+        """Adopt any dogleg-mutated topologies from the NUTS result into the live
+        bundles, so a later run_detailed_nuts rebuilds ConnTopology from the
+        post-split geometry (otherwise the split bundle's stubs keep their stale
+        pre-split connectivity and detailed NUTS routes them with bad spans)."""
+        dl = getattr(self.nuts_result, "dogleg_topologies", None)
+        if not dl:
+            return
+        seg_layers = self.nuts_result.dogleg_seg_layers
+        for w in self.bundles:
+            bid = w.input.original_bundle.id
+            if bid not in dl:
+                continue
+            sel = w.plan.selected_topology_index
+            cands = w.input.candidates        # pybind copy
+            cands[sel] = dl[bid]
+            w.input.candidates = cands        # reassign the whole vector back
+            w.plan.seg_layers = list(seg_layers[bid])
 
     def _run_detailed_nuts(self, bit_order="LO_HI"):
         """Execute bit-level track assignment using DetailedNUTSEngine."""
@@ -1877,6 +1898,7 @@ class BudaSession:
             # C++ prints its own [NUTS] N segments placed across K layer(s) line.
             with buda.ostream_redirect():
                 self.nuts_result = nuts.run(self.bundles)
+            self._adopt_doglegs()
             layer_names = self._make_layer_names()
             diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
             self._write_nuts_log(layer_names, extra_lines=diag)
