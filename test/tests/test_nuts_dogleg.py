@@ -108,10 +108,12 @@ def test_dogleg1_net_pull():
 def test_dogleg2_net_pull():
     # Bus z (B3) is multicast (bot3 -> top1, top4), so its trunk has net_pull +1
     # (up).  Original topology: s0 trunk (+1), s1 stub->bot3 (0), s2 stub->top1
-    # (+2), s3 stub->top4 (-2).  After the split: s0 left piece, s4 right piece,
-    # s5 jog.  Both sub-trunks inherit the trunk's +1; the three stubs preserve
-    # 0 / +2 / -2; the jog is 0.
+    # (+1, the left endpoint of the spine), s3 stub->top4 (-1, the right
+    # endpoint).  After the split: s0 left piece, s4 right piece, s5 jog.  Both
+    # sub-trunks inherit the trunk's +1; the three stubs preserve 0 / +1 / -1;
+    # the jog is 0.  (The endpoint stubs are ±1, not ±2: a multi-fanout spine
+    # contributes one unit of pull per endpoint, not one per far segment.)
     sess = _run("dogleg2.buda")
     assert sess.nuts_result.dogleg_topologies, "expected a dogleg"
     np = _net_pull_by_seg(sess, 3)
-    assert np == {0: 1, 1: 0, 2: 2, 3: -2, 4: 1, 5: 0}, np
+    assert np == {0: 1, 1: 0, 2: 1, 3: -1, 4: 1, 5: 0}, np
