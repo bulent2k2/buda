@@ -1411,7 +1411,7 @@ class BudaVisualizer:
     def _on_pick(self, event):
         self._pick_happened = True
         active_reg = (self._detailed_bundle_artists
-                      if self._detailed_mode else self._bundle_artists)
+                      if self.ui_state.detailed_mode else self._bundle_artists)
         for bid, entries in active_reg.items():
             for e in entries:
                 if event.artist is e['artist']:
@@ -1742,7 +1742,7 @@ class BudaVisualizer:
 
         # Redraw all via notification
         self.ui_state.notify()
-        self._tracks_visible      = True
+        self.ui_state.tracks = True
 
         # Toggle All logic (forced to True)
         if self._btn_all is not None:
@@ -1767,7 +1767,7 @@ class BudaVisualizer:
         for a in self._busterm_artists: a.set_visible(True)
         for a in self._vias_conns_artists: a.set_visible(True)
         for e in self._grid_rail_artists:
-             e['artist'].set_visible(self._detailed_mode)
+             e['artist'].set_visible(self.ui_state.detailed_mode)
 
         # Update button labels
         if self._btn_heatmap is not None: self._btn_heatmap.label.set_text('☑ Heatmap')
@@ -2340,7 +2340,7 @@ class BudaVisualizer:
         if event.key == 'Z': self._interactive_zoom(event, zoom_in=False); return
         if event.key in ('h', 'H', 'cmd+a', 'ctrl+a'): self._zoom_home(); return
         if event.key == 'a':
-            if self._detailed_mode: self._set_highlight(None)
+            if self.ui_state.detailed_mode: self._set_highlight(None)
             else:                   self._reset_view()
             return
         if event.key in ('n', 'cmd+n', 'ctrl+n'): self._step_bundle(+1)
@@ -2910,7 +2910,7 @@ class BudaVisualizer:
         if self._btn_detailed is not None:
             self._btn_detailed.ax.set_visible(True)
         if self._btn_tracks is not None and self._grid_rail_artists:
-            self._btn_tracks.ax.set_visible(self._detailed_mode)
+            self._btn_tracks.ax.set_visible(self.ui_state.detailed_mode)
 
         # Update bundle list to show bit placement stats.
         self._redraw_bundle_list()
@@ -3164,7 +3164,7 @@ class BudaVisualizer:
         self._btn_tracks.label.set_fontsize(7.5)
         self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
         # Only visible when detailed mode is active and there are rail artists.
-        if not self._detailed_mode or not self._grid_rail_artists:
+        if not self.ui_state.detailed_mode or not self._grid_rail_artists:
             self._btn_tracks.ax.set_visible(False)
 
         # Store the current packing position for the colorbar.
