@@ -1369,6 +1369,7 @@ class BudaVisualizer:
         self._ly_post_buttons = 0.60 
 
         # Detailed NUTS (Stage 9) visualisation state.
+        self._detailed_bundle_artists = {}   # bid -> [{artist,alpha,lw,is_band,layer}]
         self._grid_rail_artists      = []    # POWER/GND/CLK stripe patches (not per-bundle)
         self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
 
