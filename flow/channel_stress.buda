@@ -38,27 +38,29 @@ select_topologies 1,9,26,35,44,53,62 1 3-7,11-16,19-24,28-32,37-42,46,47,49-51,5
 run_planner 5
 #run_nuts 2.0
 run_nuts
-# OverlapCnt: 61 = 1 m4 + 60 m5
+# Overlaps: 54  (M4=1, M5=53).  All 62 bundles are crammed onto the two initial
+# layers (M4/M5), so the channel is genuinely over-subscribed — these are
+# congestion overlaps, not corner touches, so repair/corner passes can't clear
+# them here.  The fix below is to redistribute onto more layers.
 
-# Default values: [Planner] post_nuts: short<80→M3 (0b), medium (35b), long>200→M7 (27b)
-# 2nd try:        [Planner] post_nuts: short<250→M3 (55b), medium (7b), long>350→M7 (0b)
-# vertical channel is 400 tall
+# post_nuts reassigns segment layers by stub length, spreading the channel onto
+# M3 (short) and M7 (long) so it actually fits.  With these knobs (short<200,
+# long>300) the split is roughly: short→M3 (~23b), medium→M5 (~29b), long→M7 (~10b).
+# (The vertical channel is 400 tall; tune the two thresholds to shift the split.)
 run_planner post_nuts V 200 300
 
 #run_nuts 2.0
 run_nuts
-# Overlaps  : 22  (M3=16  M5=6)
+# Overlaps: 0.  Once the load is spread across M3/M5/M7 the channel is packable,
+# and the corner-overlap pass clears the residual end-to-end touches → clean.
 
-# These can be done after `visualize`, too!
-# major impact to reduce overlaps!
-run_nuts_on_layer M3
-# Overlaps  : 10  (M3=4  M5=6)
-
-run_nuts_on_layer M5
-# Overlaps  : 4  (M3=4)
-
-# has no effect:
-run_nuts_on_layer M3
+# NOTE: previously this flow needed per-layer reruns to grind the overlaps down
+# (run_nuts above used to leave 22, then M3→10, M5→4).  The generalized NUTS
+# (corner-overlap resolution + parallel/end-to-end touch handling) now packs to 0
+# in the run_nuts above, so the reruns are no-ops and are left commented out:
+#run_nuts_on_layer M3   # was: 22 → 10
+#run_nuts_on_layer M5   # was: 10 → 4
+#run_nuts_on_layer M3   # was: no effect
 check_connectivity nuts
 
 run_detailed_nuts
