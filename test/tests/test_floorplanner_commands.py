@@ -27,6 +27,23 @@ def test_floorplanner_commands_create_move_validate_and_write(tmp_path):
     assert (comps["u_cpu"].x1, comps["u_cpu"].y1) == (120, 150)
 
 
+def test_validate_parent_child_not_flagged(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "v.bdb"), 1000, 800, grid=10)
+    # Parent fully contains child — must NOT be an overlap
+    fpc.add_block(state, "left", 0, 0, 500, 400)
+    fpc.add_block(state, "left/u0", 10, 10, 200, 150)
+    issues = fpc.validate(state)
+    assert not any(i.kind == "OVERLAP" for i in issues), \
+        f"parent-child pair wrongly flagged: {[i.message for i in issues]}"
+
+    # Same-level siblings that overlap — MUST be flagged
+    fpc.add_block(state, "left/u1", 150, 10, 200, 150)  # overlaps u0
+    issues = fpc.validate(state)
+    assert any(i.kind == "OVERLAP" and
+               {i.block_a, i.block_b} == {"left/u0", "left/u1"}
+               for i in issues), "sibling overlap not detected"
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"

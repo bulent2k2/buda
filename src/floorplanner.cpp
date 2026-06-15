@@ -175,6 +175,15 @@ std::vector<FloorplanIssue> FloorplannerEngine::validate() const {
         for (; it2 != _blocks.end(); ++it2) {
             const Block& a = it1->second;
             const Block& b = it2->second;
+            // Skip ancestor/descendant pairs — child blocks are expected
+            // to be contained within their parent's bounding box.
+            auto is_prefix = [](const std::string& anc, const std::string& desc) {
+                return desc.size() > anc.size() + 1 &&
+                       desc[anc.size()] == '/' &&
+                       desc.rfind(anc, 0) == 0;
+            };
+            if (is_prefix(a.name, b.name) || is_prefix(b.name, a.name))
+                continue;
             if (a.x1 < b.x2 && a.x2 > b.x1 &&
                 a.y1 < b.y2 && a.y2 > b.y1) {
                 issues.push_back({
