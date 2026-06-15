@@ -769,6 +769,7 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
             ts.bundle_id = bw.input.original_bundle.id;
             ts.seg_idx   = si;
             ts.horiz     = is_horizontal;
+            ts.is_jog    = seg.is_jog;
 
             int lid = 0;
             if (si < (int)bw.plan.seg_layers.size() && bw.plan.seg_layers[si] >= 0)
@@ -1615,6 +1616,30 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
         apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
         relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
+        // Prune a dogleg jog's slide window to the trunk's stub extent: the jog
+        // should not slide beyond any stub/busterm the original trunk connected
+        // to, on either side — i.e. within the span of the trunk's two pieces
+        // (which run from the leftmost to the rightmost of those connections).
+        // Keep the clamp only if it leaves a feasible window (the jog must still
+        // fit); a too-tight footprint is left unpruned.
+        {
+            std::map<int, std::pair<double,double>> trunk_span;  // bundle → [lo, hi] of its H pieces
+            for (const auto& ts : result.segments)
+                if (ts.horiz) {
+                    auto& e = trunk_span.emplace(ts.bundle_id,
+                                  std::make_pair(kInf, -kInf)).first->second;
+                    e.first  = std::min(e.first,  ts.span_lo);
+                    e.second = std::max(e.second, ts.span_hi);
+                }
+            for (auto& ts : result.segments) {
+                if (!ts.is_jog) continue;
+                auto it = trunk_span.find(ts.bundle_id);
+                if (it == trunk_span.end()) continue;
+                const double lo = std::max(ts.interval_lo, it->second.first);
+                const double hi = std::min(ts.interval_hi, it->second.second);
+                if (hi - lo >= ts.width) { ts.interval_lo = lo; ts.interval_hi = hi; }
+            }
+        }
         std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
         for (auto& ts : result.segments)
             ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;

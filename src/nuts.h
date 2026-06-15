@@ -39,6 +39,7 @@ struct TrackSegment {
     double track_position = std::numeric_limits<double>::quiet_NaN(); // assigned output; NaN = unplaced
     bool   placed   = false;
     int    net_pull = 0;                  // from ConnSeg: >0 prefer hi, <0 prefer lo
+    bool   is_jog   = false;              // dogleg jog (slide window pruned to the trunk's stub extent)
     // Cross-trunk-layer corner resolution: the committed fixed track bound for
     // this trunk (one side of a split).  Carried into detailed NUTS so its bits
     // snap to the bounded side on real signal tracks.  Default = unbounded.

@@ -16,25 +16,16 @@
 # column, low for the other) joined by a short M5 jog.  See
 # docs/future/nuts_packing_gaps.md §3.
 #
-# An M6 keepout across the corridor forces both H-trunks onto M4 (the first layer
-# solved), so the two trunks are on the SAME layer — a true ordering cycle rather
-# than the cross-layer split case (which nuts_corner_touch.buda already covers).
 
 def_layer 4 M4 H TOP 52.94
 def_layer 5 M5 V TOP 50.00
-def_layer 6 M6 H TOP 52.94
-def_track_pattern 4 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 4 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
 def_track_pattern 5    0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
-def_track_pattern 6 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
 
-# Column X ≈ 90 (left), Column Y ≈ 200 (right); channel ≈ y[110,140].
 add_block A_top  80 150 100 200
-add_block B_bot  80  50 100 100
-add_block A_bot 190  50 210 100
+add_block B_bot  80   0 100  50
+add_block A_bot 190   0 210  50
 add_block B_top 190 150 210 200
-
-# Block the M6 trunk corridor so both H trunks must use M4 (solved first).
-add_keepout 60 105 240 145 M6
 
 add_bus x[4]  A_top.o A_bot.i
 add_bus y[4]  B_bot.o B_top.i

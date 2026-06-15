@@ -92,6 +92,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("track_position", &TrackSegment::track_position)
         .def_readwrite("placed",         &TrackSegment::placed)
         .def_readwrite("net_pull",       &TrackSegment::net_pull)
+        .def_readwrite("is_jog",         &TrackSegment::is_jog)
         .def_readwrite("track_lo_bound", &TrackSegment::track_lo_bound)
         .def_readwrite("track_hi_bound", &TrackSegment::track_hi_bound);
 

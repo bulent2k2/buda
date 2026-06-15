@@ -117,3 +117,29 @@ def test_dogleg2_net_pull():
     assert sess.nuts_result.dogleg_topologies, "expected a dogleg"
     np = _net_pull_by_seg(sess, 3)
     assert np == {0: 1, 1: 0, 2: 1, 3: -1, 4: 1, 5: 0}, np
+
+
+def _check_jog_window_pruned(flow):
+    # The dogleg jog's slide window must not stretch beyond the outer
+    # stubs/busterms of the original trunk — i.e. it stays within the span of
+    # the trunk's two pieces (the bundle's H segments).
+    sess = _run(flow)
+    assert sess.nuts_result.dogleg_topologies, f"{flow}: expected a dogleg"
+    for bid in sess.nuts_result.dogleg_topologies:
+        hs = [(t.span_lo, t.span_hi) for t in sess.nuts_result.segments
+              if t.bundle_id == bid and t.horiz]
+        foot_lo, foot_hi = min(a for a, _ in hs), max(b for _, b in hs)
+        jogs = [t for t in sess.nuts_result.segments if t.bundle_id == bid and t.is_jog]
+        assert jogs, f"{flow}: no jog on B{bid}"
+        for j in jogs:
+            assert j.interval_lo >= foot_lo - 1e-6 and j.interval_hi <= foot_hi + 1e-6, \
+                (f"{flow}: jog window [{j.interval_lo},{j.interval_hi}] exceeds trunk "
+                 f"footprint [{foot_lo},{foot_hi}]")
+
+
+def test_dogleg_jog_window_pruned_2cycle():
+    _check_jog_window_pruned("nuts_dogleg_cycle.buda")
+
+
+def test_dogleg_jog_window_pruned_multicast():
+    _check_jog_window_pruned("dogleg2.buda")
