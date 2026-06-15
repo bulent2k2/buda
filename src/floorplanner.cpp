@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 
 namespace buda {
@@ -217,6 +218,13 @@ void FloorplannerEngine::write_bdb(BDB& db) const {
     if (_die_w > 0.0 && _die_h > 0.0)
         db.set_die(_die_w, _die_h);
 
+    // Identify blocks that have at least one child (they are containers, not leaves).
+    std::set<std::string> has_children;
+    for (const auto& [name, _] : _blocks) {
+        std::string parent = _parent_path(name);
+        if (!parent.empty()) has_children.insert(parent);
+    }
+
     std::vector<const Block*> ordered;
     ordered.reserve(_blocks.size());
     for (const auto& [_, b] : _blocks)
@@ -234,13 +242,16 @@ void FloorplannerEngine::write_bdb(BDB& db) const {
     for (const Block* b : ordered) {
         double w = b->x2 - b->x1;
         double h = b->y2 - b->y1;
-        std::string cell = _leaf_name(b->name) + "_cell";
+        std::string cell   = _leaf_name(b->name) + "_cell";
         std::string parent = _parent_path(b->name);
+        bool is_leaf = (has_children.count(b->name) == 0);
         db.add_cell(cell, w, h);
         if (exists[b->name]) {
             db.set_comp_bbox(b->name, b->x1, b->y1, b->x2, b->y2);
+            if (!is_leaf)
+                db.set_comp_is_leaf(b->name, false);
         } else {
-            db.add_comp(b->name, cell, parent, b->x1, b->y1, b->x2, b->y2, true);
+            db.add_comp(b->name, cell, parent, b->x1, b->y1, b->x2, b->y2, is_leaf);
         }
     }
 }

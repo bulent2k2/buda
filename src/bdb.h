@@ -155,6 +155,7 @@ public:
     // Move a single instance to new origin (x,y); size is preserved.
     void move_comp(const std::string& name, double x, double y);
     // Set a single instance bounding box exactly.
+    void set_comp_is_leaf(const std::string& name, bool is_leaf);
     void set_comp_bbox(const std::string& name,
                        double x1, double y1, double x2, double y2);
     // Update the cell definition and every instance's x2/y2 to x1+w, y1+h.

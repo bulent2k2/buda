@@ -240,6 +240,15 @@ def add_block(state: FloorplannerAppState, name: str, x: float, y: float, w: flo
     state.selected = name
 
 
+def add_child_block(state: FloorplannerAppState, name: str,
+                    local_x: float, local_y: float, w: float, h: float):
+    """Add a block as a child of its path-parent using local coordinates."""
+    state.engine.add_child_block(name, float(local_x), float(local_y),
+                                 float(w), float(h))
+    state.add_name(name)
+    state.selected = name
+
+
 def move_block(state: FloorplannerAppState, name: str, raw_x: float, raw_y: float):
     state.engine.move_block_raw(name, float(raw_x), float(raw_y))
 
@@ -448,38 +457,27 @@ def make_block_unique(state: FloorplannerAppState, name: str) -> str | None:
 def build_hierarchy_tree(state: FloorplannerAppState) -> list[BlockNode]:
     """Build a BlockNode tree for the full component hierarchy.
 
-    Uses bdb.all_components() when available (gives cell names and parent_id
-    links).  Falls back to string-path parsing of state.block_names.
+    Always uses state.block_names as the canonical list (the in-memory engine
+    is the live state; the BDB may lag behind unsaved adds).  BDB is consulted
+    only for cell-name metadata enrichment.
     Returns the list of root nodes (depth 0).
     """
+    # Collect cell metadata from BDB for enrichment (names that are already
+    # persisted carry their cell label; newly added blocks get an empty string).
+    bdb_meta: dict[str, str] = {}
     if state.bdb is not None:
-        comps = state.bdb.all_components()
-        if comps:
-            by_id: dict[int, "ComponentRow"] = {c.id: c for c in comps}
-            nodes: dict[int, BlockNode] = {}
-            for c in comps:
-                try:
-                    b = state.engine.get_block(c.name)
-                    x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
-                except Exception:
-                    x1, y1, x2, y2 = c.x1, c.y1, c.x2, c.y2
-                nodes[c.id] = BlockNode(c.name, c.cell, x1, y1, x2, y2, c.depth)
-            for c in comps:
-                if c.parent_id != -1 and c.parent_id in nodes:
-                    nodes[c.parent_id].children.append(nodes[c.id])
-            return [nodes[c.id] for c in comps if c.parent_id == -1]
+        for c in state.bdb.all_components():
+            bdb_meta[c.name] = c.cell
 
-    # Fallback: derive tree from path strings in block_names
-    all_names = state.block_names
     node_map: dict[str, BlockNode] = {}
-    for name in sorted(all_names, key=lambda n: n.count("/")):
+    for name in sorted(state.block_names, key=lambda n: n.count("/")):
         try:
             b = state.engine.get_block(name)
             x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
         except Exception:
             x1 = y1 = x2 = y2 = 0.0
-        depth = name.count("/")
-        node_map[name] = BlockNode(name, "", x1, y1, x2, y2, depth)
+        node_map[name] = BlockNode(
+            name, bdb_meta.get(name, ""), x1, y1, x2, y2, name.count("/"))
     for name, node in node_map.items():
         parent_name = "/".join(name.split("/")[:-1])
         if parent_name and parent_name in node_map:

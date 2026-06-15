@@ -150,6 +150,8 @@ void bind_db(py::module_& m) {
         .def_static("db_path",  &BDB::db_path, py::arg("def_path"))
         .def("move_comp",       &BDB::move_comp,
              py::arg("name"), py::arg("x"), py::arg("y"))
+        .def("set_comp_is_leaf", &BDB::set_comp_is_leaf,
+             py::arg("name"), py::arg("is_leaf"))
         .def("set_comp_bbox",   &BDB::set_comp_bbox,
              py::arg("name"), py::arg("x1"), py::arg("y1"),
              py::arg("x2"), py::arg("y2"))

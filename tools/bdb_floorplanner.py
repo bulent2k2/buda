@@ -125,7 +125,7 @@ class BdbFloorplanner:
         filter_f = ttk.Frame(blocks)
         filter_f.pack(fill=tk.X)
         ttk.Button(filter_f, text="Add", command=self._add_block).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(filter_f, text="Align Bottom", command=self._align_bottom).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        ttk.Button(filter_f, text="Align↓", command=self._align_bottom).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         ttk.Button(filter_f, text="Optimize…", command=self._open_optimize_dialog).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         tv_frame = ttk.Frame(blocks)
         tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
@@ -222,15 +222,16 @@ class BdbFloorplanner:
         self._draw()
 
     def _drill_into(self, name: str):
-        children = self._children_of(name)
-        if not children:
-            self._status.set(f"{name} has no children to drill into.")
-            return
         self._path.append(name)
         self.state.selected = None
         self._refresh_breadcrumbs()
         self._refresh_tree()
         self._draw()
+        leaf = name.split("/")[-1]
+        if not self._children_of(name):
+            self._status.set(f"'{leaf}' has no sub-blocks — use Add to create them.")
+        else:
+            self._status.set(f"Viewing inside '{leaf}'.")
 
     def _children_of(self, name: str) -> list[str]:
         prefix = name + "/"
@@ -308,19 +309,53 @@ class BdbFloorplanner:
         self._status.set("Canvas settings applied.")
 
     def _add_block(self):
-        name = simpledialog.askstring("Add Block", "Instance path:", parent=self.root)
-        if not name:
-            return
-        x = simpledialog.askfloat("Add Block", "X origin:", initialvalue=100.0, parent=self.root)
-        y = simpledialog.askfloat("Add Block", "Y origin:", initialvalue=100.0, parent=self.root)
-        w = simpledialog.askfloat("Add Block", "Width:", initialvalue=200.0, parent=self.root)
-        h = simpledialog.askfloat("Add Block", "Height:", initialvalue=160.0, parent=self.root)
-        if None in (x, y, w, h):
-            return
-        fpc.add_block(self.state, name, x, y, w, h)
-        self._refresh_tree()
-        self._select_name(name)
-        self._draw()
+        if self._path:
+            # Drilled into a parent — add a child block using local coords.
+            parent_name = self._path[-1]
+            leaf_label  = parent_name.split("/")[-1]
+            raw = simpledialog.askstring(
+                "Add Sub-block", f"Name (inside '{leaf_label}'):", parent=self.root)
+            if not raw:
+                return
+            full_name = parent_name + "/" + raw
+            try:
+                pb = self.state.engine.get_block(parent_name)
+            except Exception:
+                self._status.set(f"Cannot locate parent block '{parent_name}'.")
+                return
+            x = simpledialog.askfloat("Add Sub-block", "X (absolute):",
+                                      initialvalue=pb.x1 + 20.0, parent=self.root)
+            y = simpledialog.askfloat("Add Sub-block", "Y (absolute):",
+                                      initialvalue=pb.y1 + 20.0, parent=self.root)
+            w = simpledialog.askfloat("Add Sub-block", "Width:",
+                                      initialvalue=100.0, parent=self.root)
+            h = simpledialog.askfloat("Add Sub-block", "Height:",
+                                      initialvalue=80.0, parent=self.root)
+            if None in (x, y, w, h):
+                return
+            fpc.add_child_block(self.state, full_name,
+                                x - pb.x1, y - pb.y1, w, h)
+            self._refresh_tree()
+            self._select_name(full_name)
+            self._draw()
+        else:
+            name = simpledialog.askstring("Add Block", "Instance path:", parent=self.root)
+            if not name:
+                return
+            x = simpledialog.askfloat("Add Block", "X origin:",
+                                      initialvalue=100.0, parent=self.root)
+            y = simpledialog.askfloat("Add Block", "Y origin:",
+                                      initialvalue=100.0, parent=self.root)
+            w = simpledialog.askfloat("Add Block", "Width:",
+                                      initialvalue=200.0, parent=self.root)
+            h = simpledialog.askfloat("Add Block", "Height:",
+                                      initialvalue=160.0, parent=self.root)
+            if None in (x, y, w, h):
+                return
+            fpc.add_block(self.state, name, x, y, w, h)
+            self._refresh_tree()
+            self._select_name(name)
+            self._draw()
 
     def _align_bottom(self):
         names = self._selected_tree_names()

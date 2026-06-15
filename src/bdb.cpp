@@ -1400,6 +1400,13 @@ void BDB::move_comp(const std::string& name, double x, double y) {
     compute_hpwl();
 }
 
+void BDB::set_comp_is_leaf(const std::string& name, bool is_leaf) {
+    Stmt u(_db, "UPDATE component SET is_leaf=? WHERE name=?");
+    sqlite3_bind_int (u, 1, is_leaf ? 1 : 0);
+    sqlite3_bind_text(u, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(u);
+}
+
 void BDB::set_comp_bbox(const std::string& name,
                         double x1, double y1, double x2, double y2) {
     Stmt q(_db, "SELECT id FROM component WHERE name=?");
