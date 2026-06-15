@@ -886,7 +886,7 @@ def main():
         def _tick(): ipc.poll(); root.after(POLL_MS, _tick)
         root.after(POLL_MS, _tick)
 
-    root.lift(); root.focus_force()
+    buda_viz.raise_window(root)
     root.mainloop()
 
 if __name__ == '__main__':

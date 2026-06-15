@@ -1188,6 +1188,7 @@ def main():
             app._refresh_breadcrumbs()
             app._refresh_tree()
             app._draw()
+    buda_viz.raise_window(root)
     root.mainloop()
 
 

@@ -162,18 +162,24 @@ def _toggle_fullscreen(fig):
 
 def raise_window(win_or_fig):
     """Bring a window or figure to the front (best-effort; backend-dependent)."""
-    # If it's a matplotlib figure, get the window manager
+    win = None
     if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
         mgr = win_or_fig.canvas.manager
-        if mgr is None:
-            return
-        win = getattr(mgr, "window", None)
-        # MacOSX backend exposes show() which calls makeKeyAndOrderFront: internally.
-        if callable(getattr(mgr, "show", None)):
-            try:
-                mgr.show()
-            except Exception:
-                pass
+        if mgr is not None:
+            win = getattr(mgr, "window", None)
+            if win is None and hasattr(mgr, "canvas"):
+                try:
+                    # Fallback for some matplotlib backends (like TkAgg)
+                    win = mgr.canvas.get_tk_widget().winfo_toplevel()
+                except Exception:
+                    pass
+
+            # MacOSX backend exposes show() which calls makeKeyAndOrderFront: internally.
+            if win is None and callable(getattr(mgr, "show", None)):
+                try:
+                    mgr.show()
+                except Exception:
+                    pass
     else:
         # Assume it's a direct window object (like tk.Tk)
         win = win_or_fig
@@ -184,8 +190,8 @@ def raise_window(win_or_fig):
         if sys.platform == "darwin":
             try:
                 import subprocess
-
                 pid = os.getpid()
+                # Use both unix id AND process name "Python" as backup
                 as_cmd = f'tell application "System Events" to set frontmost of every process whose unix id is {pid} to true'
                 subprocess.run(["osascript", "-e", as_cmd], capture_output=True)
             except Exception:
@@ -195,9 +201,11 @@ def raise_window(win_or_fig):
         if hasattr(win, "lift"):
             try:
                 win.lift()
-                # Also try focus_force to pull keyboard focus
+                # Try focus_force immediately AND with a slight delay to ensure it catches after mapping
                 if hasattr(win, "focus_force"):
                     win.focus_force()
+                    if hasattr(win, "after"):
+                        win.after(100, win.focus_force)
 
                 if hasattr(win, "attributes"):
                     win.attributes("-topmost", True)
@@ -1314,6 +1322,7 @@ class TopologyExplorer:
         self.fig.canvas.draw_idle()
 
     def show(self):
+        raise_window(self.fig)
         plt.show()
 
 
@@ -3313,6 +3322,7 @@ class BudaVisualizer:
             self._ipc_timer.start()
             print(f'[buda_viz] IPC timer started (backend={self.fig.canvas.__class__.__name__})')
 
+        raise_window(self.fig)
         plt.show()
 
 # Just for ref. No longer used.
