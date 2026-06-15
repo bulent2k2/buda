@@ -107,6 +107,43 @@ def test_build_hierarchy_tree_nested(tmp_path):
     assert children_total >= 0   # no crash; nested structure may or may not appear
 
 
+def test_sync_move_to_instances(tmp_path):
+    import buda as _buda
+    state = fpc.new_state()
+    state.bdb = _buda.BDB(str(tmp_path / "sync_move.bdb"))
+    state.engine.set_die(500, 400)
+    state.engine.set_grid(10)
+
+    state.bdb.add_cell("leaf_cell", 80, 60)
+    state.bdb.add_cell("blk_cell", 200, 150)
+    state.bdb.add_inst_to_cell("blk_cell", "lo", "leaf_cell", 10, 10)
+    state.bdb.add_inst_to_cell("blk_cell", "hi", "leaf_cell", 100, 10)
+    state.bdb.add_inst("bb", "blk_cell", "", 10, 10)
+    state.bdb.add_inst("bt", "blk_cell", "", 10, 180)
+    for c in state.bdb.all_components():
+        state.engine.add_block(c.name, c.x1, c.y1, c.x2, c.y2)
+        state.add_name(c.name)
+
+    # Simulate drag: move bb/lo in the engine
+    state.engine.move_block_raw("bb/lo", 30, 30)
+
+    parent_cell, n = fpc.sync_move_to_instances(state, "bb/lo", 30, 30)
+    assert parent_cell == "blk_cell"
+    assert n >= 2  # bb/lo and bt/lo both synced
+
+    bb    = state.engine.get_block("bb")
+    bt    = state.engine.get_block("bt")
+    bb_lo = state.engine.get_block("bb/lo")
+    bt_lo = state.engine.get_block("bt/lo")
+    # Both lo blocks must share the same local offset within their parent
+    assert abs((bb_lo.x1 - bb.x1) - (bt_lo.x1 - bt.x1)) < 1e-6
+    assert abs((bb_lo.y1 - bb.y1) - (bt_lo.y1 - bt.y1)) < 1e-6
+
+    # hi blocks must be unaffected
+    bt_hi = state.engine.get_block("bt/hi")
+    assert abs((bt_hi.x1 - bt.x1) - 100) < 1e-6
+
+
 def test_resize_block(tmp_path):
     bdb_path = tmp_path / "resize.bdb"
     state = fpc.create_bdb(str(bdb_path), 1000, 800, grid=10)

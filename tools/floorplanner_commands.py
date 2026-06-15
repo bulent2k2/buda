@@ -337,6 +337,82 @@ def sync_cell_to_instances(state: FloorplannerAppState, name: str,
     return (cell, count)
 
 
+def sync_move_to_instances(state: FloorplannerAppState,
+                           name: str,
+                           new_x: float, new_y: float) -> tuple[str, int]:
+    """Sync a child block's new position to all instances of its parent cell.
+
+    After the engine has moved `name` to (new_x, new_y):
+    1. Computes the new LOCAL offset within the parent cell template.
+    2. Updates cell_children via add_inst_to_cell (INSERT OR REPLACE).
+    3. Calls bdb.move_comp + engine.move_block_raw for every sibling instance.
+
+    Returns (parent_cell, instance_count); count=0 if no BDB, root block,
+    or the parent cell is unique.
+    """
+    if state.bdb is None:
+        return ("", 0)
+
+    parts = name.split("/")
+    if len(parts) < 2:
+        # Root-level block: just persist the move to BDB, no template sync.
+        try:
+            state.bdb.move_comp(name, float(new_x), float(new_y))
+        except Exception:
+            pass
+        return ("", 0)
+
+    inst_local_name = parts[-1]
+    parent_path = "/".join(parts[:-1])
+
+    parent_cell = get_block_cell(state, parent_path)
+    child_cell  = get_block_cell(state, name)
+    if parent_cell is None or count_cell_instances(state, parent_cell) <= 1:
+        # Unique parent — persist to BDB but no sibling sync.
+        try:
+            state.bdb.move_comp(name, float(new_x), float(new_y))
+        except Exception:
+            pass
+        return (parent_cell or "", 0)
+
+    # Compute local offset from the parent's current engine position.
+    try:
+        parent_block = state.engine.get_block(parent_path)
+        local_x = float(new_x) - parent_block.x1
+        local_y = float(new_y) - parent_block.y1
+    except Exception:
+        return (parent_cell, 0)
+
+    # Update the cell template (INSERT OR REPLACE in cell_children).
+    if child_cell:
+        try:
+            state.bdb.add_inst_to_cell(
+                parent_cell, inst_local_name, child_cell, local_x, local_y)
+        except Exception:
+            pass
+
+    # Propagate to every instance of parent_cell.
+    count = 0
+    for c in state.bdb.all_components():
+        if c.cell != parent_cell:
+            continue
+        child_name = c.name + "/" + inst_local_name
+        abs_x = c.x1 + local_x
+        abs_y = c.y1 + local_y
+        try:
+            state.bdb.move_comp(child_name, abs_x, abs_y)
+        except Exception:
+            pass
+        if child_name in state.block_names:
+            try:
+                state.engine.move_block_raw(child_name, abs_x, abs_y)
+                count += 1
+            except Exception:
+                pass
+
+    return (parent_cell, count)
+
+
 def make_block_unique(state: FloorplannerAppState, name: str) -> str | None:
     """Create a private cell definition for this component.
 

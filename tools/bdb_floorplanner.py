@@ -664,8 +664,18 @@ class BdbFloorplanner:
                 self._status.set("Block resized.")
             self._refresh_tree()
             self._draw()
-        else:
-            self._status.set("Block moved.")
+        elif mode == "move" and name:
+            b = self.state.block(name)
+            parent_cell, n = fpc.sync_move_to_instances(
+                self.state, name, b.x1, b.y1)
+            if n > 1:
+                self._status.set(
+                    f"Moved {name.split('/')[-1]}; "
+                    f"synced [{parent_cell}] → {n} parent instances.")
+            else:
+                self._status.set("Block moved.")
+            self._refresh_tree()
+            self._draw()
 
 
 def main():
