@@ -264,6 +264,24 @@ def align_bottom(state: FloorplannerAppState, names: Iterable[str]):
         state.engine.align_bottom(names)
 
 
+def align_top(state: FloorplannerAppState, names: Iterable[str]):
+    names = list(names)
+    if names:
+        state.engine.align_top(names)
+
+
+def align_left(state: FloorplannerAppState, names: Iterable[str]):
+    names = list(names)
+    if names:
+        state.engine.align_left(names)
+
+
+def align_right(state: FloorplannerAppState, names: Iterable[str]):
+    names = list(names)
+    if names:
+        state.engine.align_right(names)
+
+
 def validate(state: FloorplannerAppState):
     return list(state.engine.validate())
 

@@ -59,6 +59,9 @@ public:
                           double x1, double y1, double x2, double y2);
     void move_child_local(const std::string& name, double local_x, double local_y);
     void align_bottom(const std::vector<std::string>& names);
+    void align_top(const std::vector<std::string>& names);
+    void align_left(const std::vector<std::string>& names);
+    void align_right(const std::vector<std::string>& names);
 
     FloorplanBlockRow get_block(const std::string& name) const;
     std::pair<double, double> get_child_local_origin(const std::string& name) const;

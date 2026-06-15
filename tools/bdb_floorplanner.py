@@ -125,7 +125,14 @@ class BdbFloorplanner:
         filter_f = ttk.Frame(blocks)
         filter_f.pack(fill=tk.X)
         ttk.Button(filter_f, text="Add", command=self._add_block).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(filter_f, text="Align↓", command=self._align_bottom).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        self._align_mb = tk.Menubutton(filter_f, text="Align ▾", relief="raised")
+        self._align_mb.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        align_menu = tk.Menu(self._align_mb, tearoff=False)
+        self._align_mb["menu"] = align_menu
+        align_menu.add_command(label="Top  ↑",    command=self._align_top)
+        align_menu.add_command(label="Bottom ↓",  command=self._align_bottom)
+        align_menu.add_command(label="Left  ←",   command=self._align_left)
+        align_menu.add_command(label="Right →",   command=self._align_right)
         ttk.Button(filter_f, text="Optimize…", command=self._open_optimize_dialog).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         tv_frame = ttk.Frame(blocks)
         tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
@@ -357,14 +364,19 @@ class BdbFloorplanner:
             self._select_name(name)
             self._draw()
 
-    def _align_bottom(self):
+    def _do_align(self, fn, edge: str):
         names = self._selected_tree_names()
         if len(names) < 2:
             self._status.set("Select at least two blocks to align.")
             return
-        fpc.align_bottom(self.state, names)
+        fn(self.state, names)
         self._draw()
-        self._status.set(f"Aligned {len(names)} block(s) to bottom edge.")
+        self._status.set(f"Aligned {len(names)} block(s) to {edge} edge.")
+
+    def _align_bottom(self): self._do_align(fpc.align_bottom, "bottom")
+    def _align_top(self):    self._do_align(fpc.align_top,    "top")
+    def _align_left(self):   self._do_align(fpc.align_left,   "left")
+    def _align_right(self):  self._do_align(fpc.align_right,  "right")
 
     def _open_optimize_dialog(self):
         if self.state is None:

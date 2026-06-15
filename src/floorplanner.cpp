@@ -137,21 +137,64 @@ void FloorplannerEngine::move_child_local(const std::string& name,
 
 void FloorplannerEngine::align_bottom(const std::vector<std::string>& names) {
     if (names.empty()) return;
-    double bottom = _block_or_throw(names.front()).y1;
+    double edge = _block_or_throw(names.front()).y1;
     for (const auto& n : names)
-        bottom = std::min(bottom, _block_or_throw(n).y1);
-
+        edge = std::min(edge, _block_or_throw(n).y1);
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double h = b.y2 - b.y1;
-        b.y1 = bottom;
-        b.y2 = bottom + h;
+        b.y1 = edge; b.y2 = edge + h;
         if (b.has_local) {
-            std::string parent = _parent_path(n);
-            if (!parent.empty()) {
-                const Block& p = _block_or_throw(parent);
-                b.local_y = b.y1 - p.y1;
-            }
+            auto p = _parent_path(n);
+            if (!p.empty()) b.local_y = b.y1 - _block_or_throw(p).y1;
+        }
+    }
+}
+
+void FloorplannerEngine::align_top(const std::vector<std::string>& names) {
+    if (names.empty()) return;
+    double edge = _block_or_throw(names.front()).y2;
+    for (const auto& n : names)
+        edge = std::max(edge, _block_or_throw(n).y2);
+    for (const auto& n : names) {
+        Block& b = _block_or_throw(n);
+        double h = b.y2 - b.y1;
+        b.y2 = edge; b.y1 = edge - h;
+        if (b.has_local) {
+            auto p = _parent_path(n);
+            if (!p.empty()) b.local_y = b.y1 - _block_or_throw(p).y1;
+        }
+    }
+}
+
+void FloorplannerEngine::align_left(const std::vector<std::string>& names) {
+    if (names.empty()) return;
+    double edge = _block_or_throw(names.front()).x1;
+    for (const auto& n : names)
+        edge = std::min(edge, _block_or_throw(n).x1);
+    for (const auto& n : names) {
+        Block& b = _block_or_throw(n);
+        double w = b.x2 - b.x1;
+        b.x1 = edge; b.x2 = edge + w;
+        if (b.has_local) {
+            auto p = _parent_path(n);
+            if (!p.empty()) b.local_x = b.x1 - _block_or_throw(p).x1;
+        }
+    }
+}
+
+void FloorplannerEngine::align_right(const std::vector<std::string>& names) {
+    if (names.empty()) return;
+    double edge = _block_or_throw(names.front()).x2;
+    for (const auto& n : names)
+        edge = std::max(edge, _block_or_throw(n).x2);
+    for (const auto& n : names) {
+        Block& b = _block_or_throw(n);
+        double w = b.x2 - b.x1;
+        b.x2 = edge; b.x1 = edge - w;
+        if (b.has_local) {
+            auto p = _parent_path(n);
+            if (!p.empty()) b.local_x = b.x1 - _block_or_throw(p).x1;
         }
     }
 }

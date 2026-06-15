@@ -281,8 +281,10 @@ void bind_routing(py::module_& m) {
              py::arg("x2"), py::arg("y2"))
         .def("move_child_local",     &FloorplannerEngine::move_child_local,
              py::arg("name"), py::arg("local_x"), py::arg("local_y"))
-        .def("align_bottom",         &FloorplannerEngine::align_bottom,
-             py::arg("names"))
+        .def("align_bottom",         &FloorplannerEngine::align_bottom, py::arg("names"))
+        .def("align_top",            &FloorplannerEngine::align_top,    py::arg("names"))
+        .def("align_left",           &FloorplannerEngine::align_left,   py::arg("names"))
+        .def("align_right",          &FloorplannerEngine::align_right,  py::arg("names"))
         .def("get_block",            &FloorplannerEngine::get_block,
              py::arg("name"))
         .def("get_child_local_origin", &FloorplannerEngine::get_child_local_origin,
