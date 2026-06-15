@@ -1,0 +1,58 @@
+# Genuinely CYCLIC vertical constraint — the case a dogleg resolves.
+#
+# Two buses cross the same horizontal M4 channel, each connecting a block ABOVE
+# the channel at one column and a block BELOW it at the other column, with the
+# above/below assignment SWAPPED between the two columns:
+#
+#   bus x: A_top (col X≈90, above)  ->  A_bot (col Y≈200, below)
+#   bus y: B_bot (col X≈90, below)  ->  B_top (col Y≈200, above)
+#
+# On the shared M5 columns this forces contradictory trunk orderings:
+#   column X: x-stub grows down, y-stub grows up  -> x-trunk must sit ABOVE y-trunk
+#   column Y: x-stub grows down, y-stub grows up  -> x-trunk must sit BELOW y-trunk
+# A 2-cycle in the vertical-constraint graph that no single track ordering of the
+# two M4 trunks can satisfy.  resolve_corner_overlaps gives up (its !new_edge
+# guard); the cure is a DOGLEG splitting one trunk across two tracks (high for one
+# column, low for the other) joined by a short M5 jog.  See
+# docs/future/nuts_packing_gaps.md §3.
+#
+# An M6 keepout across the corridor forces both H-trunks onto M4 (the first layer
+# solved), so the two trunks are on the SAME layer — a true ordering cycle rather
+# than the cross-layer split case (which nuts_corner_touch.buda already covers).
+
+def_layer 4 M4 H TOP 52.94
+def_layer 5 M5 V TOP 50.00
+def_layer 6 M6 H TOP 52.94
+def_track_pattern 4 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 5    0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 6 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+
+# Column X ≈ 90 (left), Column Y ≈ 200 (right); channel ≈ y[110,140].
+add_block A_top  80 150 100 200
+add_block B_bot  80  50 100 100
+add_block A_bot 190  50 210 100
+add_block B_top 190 150 210 200
+
+# Block the M6 trunk corridor so both H trunks must use M4 (solved first).
+add_keepout 60 105 240 145 M6
+
+add_bus x[4]  A_top.o A_bot.i
+add_bus y[4]  B_bot.o B_top.i
+
+run_bundler strict
+
+corner_margin dy 2 dx 2
+set_min_stub_length 2
+generate_topologies
+check_connectivity topo
+
+# force the cyclic corner overlap (Z_VHV through the channel for both buses)
+select_topologies 1,2 4
+run_planner 1
+
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize

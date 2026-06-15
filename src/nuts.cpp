@@ -1309,6 +1309,88 @@ void NUTSEngine::orientation_fixpoint(
     restore(best_snap);
 }
 
+// A same-layer vertical-constraint 2-cycle: two trunks on one layer whose stubs
+// require contradictory track orderings at two different columns (A-below-B at
+// one, B-below-A at the other).  No single ordering satisfies both, so
+// resolve_corner_overlaps gives up at its !new_edge guard.  The cure is a dogleg
+// splitting one trunk across two tracks.  (We handle 2-cycles; longer directed
+// cycles are reported but not yet doglegged.)
+struct CycleCandidate {
+    std::pair<int,int> trunk_a, trunk_b;   // the two cyclically-constrained trunks
+    int layer;
+};
+
+static std::vector<CycleCandidate> detect_vcg_cycles(
+    const std::vector<TrackSegment>& segments,
+    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+    const std::map<std::pair<int,int>, double>& pull_map)
+{
+    using Key = std::pair<int,int>;
+    // Follower → (trunk it follows, lo_end) — same construction as
+    // resolve_corner_overlaps so we classify identically.
+    std::map<Key, std::pair<Key,bool>> trunk_of;
+    for (const auto& [tkey, conns] : rev_conn_map)
+        for (const auto& sc : conns)
+            trunk_of[{sc.src_bid, sc.src_si}] = {tkey, sc.lo_end};
+    std::map<Key,int> idx_of;
+    for (int i = 0; i < (int)segments.size(); ++i)
+        idx_of[{segments[i].bundle_id, segments[i].seg_idx}] = i;
+    // The far (block-side) end of a stub, opposite the trunk it connects to.
+    // It is fixed by the floorplan, so it does not move with placement — the
+    // trunk whose stub reaches LOWER must take the lower track.
+    auto anchored_coord = [](const TrackSegment& s, bool lo_end) {
+        return lo_end ? s.span_hi : s.span_lo;
+    };
+
+    // Collect the follower stubs with their nominal column (perpendicular
+    // coordinate) and far end.  A corner overlap can only occur between two
+    // stubs in the SAME column, so we build the vertical-constraint graph from
+    // co-located stub pairs directly — independent of the current placement,
+    // which (for a true cycle) can only ever expose one contradictory column at
+    // a time.
+    struct Stub { Key key, trunk; double col, anchored; int trunk_layer; };
+    std::vector<Stub> stubs;
+    for (const auto& [k, tinfo] : trunk_of) {
+        auto sit = idx_of.find(k);
+        auto tit = idx_of.find(tinfo.first);
+        if (sit == idx_of.end() || tit == idx_of.end()) continue;
+        const TrackSegment& s = segments[sit->second];
+        auto pit = pull_map.find(k);
+        double col = (pit != pull_map.end()) ? pit->second : s.track_position;
+        stubs.push_back({k, tinfo.first, col,
+                         anchored_coord(s, tinfo.second), segments[tit->second].layer});
+    }
+
+    // Directed ordering edges lo_trunk → hi_trunk from every co-located,
+    // distinct-bundle stub pair whose trunks share a layer (so they can be
+    // track-ordered at all; the cross-layer case is the split, not a cycle).
+    constexpr double kColTol = 2.0;   // same Hanan column ⇒ near-identical nominal
+    std::set<std::pair<Key,Key>> edges;
+    for (size_t a = 0; a < stubs.size(); ++a)
+        for (size_t b = a + 1; b < stubs.size(); ++b) {
+            if (stubs[a].key.first == stubs[b].key.first) continue;   // same bundle
+            if (stubs[a].trunk == stubs[b].trunk) continue;
+            if (stubs[a].trunk_layer != stubs[b].trunk_layer) continue;
+            if (std::abs(stubs[a].col - stubs[b].col) > kColTol) continue;  // not co-located
+            const bool a_lower = stubs[a].anchored < stubs[b].anchored;
+            Key lo_trunk = a_lower ? stubs[a].trunk : stubs[b].trunk;
+            Key hi_trunk = a_lower ? stubs[b].trunk : stubs[a].trunk;
+            edges.insert({lo_trunk, hi_trunk});
+        }
+
+    // A 2-cycle is a mutual pair of edges A→B and B→A: the two trunks are
+    // required both ways at two different columns.
+    std::vector<CycleCandidate> cycles;
+    std::set<std::pair<Key,Key>> seen;
+    for (const auto& [a, b] : edges) {
+        if (!edges.count({b, a})) continue;
+        auto canon = std::minmax(a, b);
+        if (!seen.insert({canon.first, canon.second}).second) continue;
+        cycles.push_back({canon.first, canon.second, segments[idx_of[canon.first]].layer});
+    }
+    return cycles;
+}
+
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
@@ -1338,6 +1420,19 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     // instead of stale ones.  Replaces the naive per-layer loop.
     orientation_fixpoint(result.segments, by_layer, pull_map, align_map,
                          rev_conn_map, ts_ptr_map);
+    // Classify any genuinely cyclic vertical constraint NOW, on the raw
+    // post-fixpoint overlaps: a 2-cycle shows both contradictory column
+    // overlaps at once (A-below-B at one column, B-below-A at the other).  The
+    // corner pass below would half-resolve it — fixing one column and leaving a
+    // single residual — which hides the mutual-edge structure.  A later pass
+    // doglegs these; the 2-cycle filter guarantees the safety-net passes could
+    // not have fixed them anyway.
+    const std::vector<CycleCandidate> cycles =
+        detect_vcg_cycles(result.segments, rev_conn_map, pull_map);
+    for (const auto& c : cycles)
+        std::cout << "[NUTS] dogleg: cyclic vertical constraint on layer " << c.layer
+                  << " between trunks B" << c.trunk_a.first << ".s" << c.trunk_a.second
+                  << " and B" << c.trunk_b.first << ".s" << c.trunk_b.second << ".\n";
     // The final adjustments can extend spans of layers packed earlier,
     // materialising overlaps after their solve — repair them in place.
     repair_overlaps(result.segments, pull_map, net_pull_map, align_map,
