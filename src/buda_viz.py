@@ -220,32 +220,63 @@ def raise_window(win_or_fig):
 
 def set_icon(win_or_fig, icon_name="buda_icon.png"):
     """Set the application icon for the window or figure."""
+    # 1. Resolve absolute path to the icon file
+    try:
+        _HERE = os.path.dirname(os.path.abspath(__file__))
+        # Icon is in project root, one level up from src/
+        icon_path = os.path.join(_HERE, "..", icon_name)
+        if not os.path.exists(icon_path):
+            # Fallback: maybe we are in a flattened structure or frozen?
+            icon_path = os.path.join(_HERE, icon_name)
+        
+        if not os.path.exists(icon_path):
+            return
+    except Exception:
+        return
+
+    # 2. Extract the window object
+    win = None
+    target = win_or_fig
     if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
         mgr = win_or_fig.canvas.manager
-        if mgr is None:
-            return
-        win = getattr(mgr, "window", None)
-        target = win_or_fig # to store the reference
+        if mgr is not None:
+            win = getattr(mgr, "window", None)
+            if win is None and hasattr(mgr, "canvas"):
+                # Fallback for some matplotlib backends
+                try:
+                    win = mgr.canvas.get_tk_widget().winfo_toplevel()
+                except Exception:
+                    pass
     else:
         win = win_or_fig
-        target = win_or_fig
 
     if win is None:
         return
 
+    # 3. Apply the icon using Tkinter
     try:
         import tkinter as tk
-
-        # Look in project root (one level up from src/)
-        _HERE = os.path.dirname(__file__)
-        icon_path = os.path.join(_HERE, "..", icon_name)
         
-        if os.path.exists(icon_path) and hasattr(win, "iconphoto"):
-            # Keep a reference to prevent garbage collection
+        # We need a reference to the root to call iconphoto properly
+        root = win
+        if hasattr(win, "winfo_toplevel"):
+            root = win.winfo_toplevel()
+
+        if hasattr(root, "iconphoto"):
+            # Load the image. tk.PhotoImage supports PNG in Tk 8.6+
+            # We store it on the target to prevent garbage collection.
             if not hasattr(target, "_icon_ref"):
-                target._icon_ref = tk.PhotoImage(file=icon_path)
-            # True means apply to all future windows as well
-            win.iconphoto(True, target._icon_ref)
+                target._icon_ref = tk.PhotoImage(file=icon_path, master=root)
+            
+            # Set as default for all windows (important for macOS dock/switcher)
+            root.iconphoto(True, target._icon_ref)
+            
+            # macOS specific: sometimes default=True isn't enough for the dock icon
+            if sys.platform == "darwin":
+                try:
+                    root.tk.call('wm', 'iconphoto', root._w, "-default", target._icon_ref)
+                except Exception:
+                    pass
     except Exception:
         pass
 
