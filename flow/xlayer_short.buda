@@ -1,0 +1,66 @@
+# ============================================================================
+# xlayer_short.buda — cross-trunk-layer corner-overlap → detailed-NUTS stub short
+# ============================================================================
+# Standalone repro for the detailed-NUTS cross-layer spacing fix
+# (see docs/future/nuts_packing_gaps.md §3, PR #12).
+#
+# Setup: three TOP layers, with M4 and M6 sharing the SAME origin (-400) and
+# pattern, so their signal tracks are ALIGNED.  Two buses are pinned to Z-topos
+# whose first V-stubs share the x≈90 column (u1 and u3).  The sidecar
+# xlayer_short.json pins bus x's H-trunk to M4; bus y's trunk defaults to M6 —
+# so the two trunks are on DIFFERENT layers (the cross-trunk-layer case), both
+# wanting y≈125.
+#
+# WHAT TO OBSERVE
+#   Old build (before the carry-bound fix): abstract NUTS separates the trunks
+#   only by g=1, then detailed NUTS snaps each to its own layer's nearest signal
+#   track INDEPENDENTLY.  Because M4/M6 are aligned, both land on the same
+#   coordinate, so the two M5 stubs (x's V1a and y's V2a) end up on the SAME M5
+#   tracks with OVERLAPPING y-spans — a bit-level short that DetailedNUTS does
+#   not report ("0 bits unplaced").  Inspect with tools/show_detailed_shorts.py.
+#
+#   Fixed build: the abstract per-trunk split bound is carried into detailed
+#   NUTS, which filters each trunk's signal tracks to its bounded side.  The
+#   trunks land on DISJOINT real tracks (M4 below, M6 above), the stub y-spans
+#   become disjoint, and the short is gone (0 shorts, 0 unplaced).
+#
+# Run:
+#   cd src && python3 buda_cli.py ../flow/xlayer_short.buda --no-viz
+#   python3 tools/show_detailed_shorts.py flow/xlayer_short.buda   # from repo root
+#
+# NOTE: requires the co-located sidecar xlayer_short.json (it pins bus x's trunk
+# to M4 — there is no .buda command to pin a segment's layer inline).
+# ============================================================================
+
+def_layer 4 M4 H TOP 52.94
+def_layer 5 M5 V TOP 50.00
+def_layer 6 M6 H TOP 52.94
+def_track_pattern 4 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 5    0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 6 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+
+add_block u1    80   50   100 100
+add_block u2    150  50   200 100
+add_block u3    80  150   100 200
+add_block u4    175 150   225 200
+
+add_bus x[4]  u1.o u4.i
+add_bus y[4]  u3.o u2.i
+
+run_bundler strict
+
+corner_margin dy 2 dx 2
+set_min_stub_length 2
+generate_topologies
+check_connectivity topo
+
+# Pin both Z-topos; the sidecar (xlayer_short.json) puts bus x's trunk on M4.
+select_topologies 1,2 4
+run_planner 1
+
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize
