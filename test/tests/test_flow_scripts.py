@@ -264,15 +264,24 @@ def test_channel_stress_packs_clean():
     out, rc = run_script("channel_stress.buda")
     assert rc == 0, f"channel_stress.buda crashed (exit {rc})\n{out[-2000:]}"
     assert "Fatal Python error" not in out
-    # Pin the end state: the last full NUTS summary is overlap/violation-free,
-    # and detailed NUTS places every bit.
-    finals = re.findall(
-        r"\[NUTS\] \d+ segments placed.*?"
-        r"Interval violations: (\d+), Track overlaps: (\d+)", out)
-    assert finals, "no NUTS summary found"
-    last_viol, last_ovlp = finals[-1]
+    # Pin the end state.  Three run_nuts_on_layer commands run AFTER the last
+    # full run_nuts and update the final NUTS state, reporting as
+    # "rerun_layer(...): ... Overlaps: N" — a different line from the full
+    # "Track overlaps: N" summary — so check BOTH the last full summary and the
+    # last per-layer rerun, and that detailed NUTS places every bit.
+    full = re.findall(
+        r"\[NUTS\] \d+ segments placed[^\n]*Interval violations: (\d+), "
+        r"Track overlaps: (\d+)", out)
+    assert full, "no full NUTS summary found"
+    last_viol, last_ovlp = full[-1]
     assert int(last_ovlp) == 0, f"channel_stress final overlaps {last_ovlp} (expected 0)"
     assert int(last_viol) == 0
+
+    reruns = re.findall(r"rerun_layer\([^)]*\):[^\n]*Overlaps: (\d+)", out)
+    if reruns:   # the last per-layer rerun is the final action on the NUTS state
+        assert int(reruns[-1]) == 0, \
+            f"channel_stress final rerun overlaps {reruns[-1]} (expected 0)"
+
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
