@@ -131,10 +131,26 @@ def raise_window(win_or_fig):
         win = win_or_fig
 
     if win is not None:
-        # Tkinter specific: force to front on macOS
+        # macOS specific: force process to front using AppleScript.
+        # This is the most reliable way to steal focus from the terminal.
+        if sys.platform == "darwin":
+            try:
+                import subprocess
+
+                pid = os.getpid()
+                as_cmd = f'tell application "System Events" to set frontmost of every process whose unix id is {pid} to true'
+                subprocess.run(["osascript", "-e", as_cmd], capture_output=True)
+            except Exception:
+                pass
+
+        # Tkinter specific: force to front
         if hasattr(win, "lift"):
             try:
                 win.lift()
+                # Also try focus_force to pull keyboard focus
+                if hasattr(win, "focus_force"):
+                    win.focus_force()
+
                 if hasattr(win, "attributes"):
                     win.attributes("-topmost", True)
                     # after_idle might not be available if not Tk
