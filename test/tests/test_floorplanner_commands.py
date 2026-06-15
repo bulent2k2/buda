@@ -14,6 +14,7 @@
 
 import os
 import sys
+import pytest
 
 _ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _ROOT not in sys.path:
@@ -284,6 +285,7 @@ def test_optimize_placement_ga(tmp_path):
         assert b.x2 <= 1000 and b.y2 <= 800
 
 
+@pytest.mark.slow
 def test_optimize_demo_tc1_overlap_storm(tmp_path):
     """40 blocks all stacked at origin; 80 buses × 64 bits; SA must yield a legal placement."""
     import buda
@@ -326,6 +328,7 @@ def test_optimize_demo_tc1_overlap_storm(tmp_path):
         assert b.x2 <= die_w and b.y2 <= die_h
 
 
+@pytest.mark.slow
 def test_optimize_demo_tc2_fixed_io(tmp_path):
     """io_pad pinned at origin; 39 free blocks; 80 buses × 64 bits; SA leaves io_pad unmoved."""
     import buda

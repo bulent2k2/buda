@@ -20,6 +20,7 @@ cd "$REPO_DIR"
 # Parse arguments
 CLEAN=false
 RUN_TESTS=false
+SLOW_TESTS=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -28,6 +29,9 @@ for arg in "$@"; do
             ;;
         --test|-t|test)
             RUN_TESTS=true
+            ;;
+        --slow|-s|slow)
+            SLOW_TESTS=true
             ;;
     esac
 done
@@ -71,15 +75,19 @@ if [ "$RUN_TESTS" = true ]; then
     cd ..
     mkdir -p log
     TEST_LOG="log/pytest_$(date +%Y%m%d_%H%M%S).log"
-    echo "Running pytest... (output redirected to $TEST_LOG)"
-    
-    # Run pytest, capturing output to the log file.
-    # Use tee to also show the short test summary info and failures on console,
-    # but filter out the noisy [Planner] and [NUTS] C++ printouts.
-    set +e
-    pytest -v > >(tee "$TEST_LOG" | awk '/===|---|FAILURES|test_.*FAILED/ {print}' | uniq) 2>&1
-    PYTEST_RC=$?
-    set -e
+    if [ "$SLOW_TESTS" = true ]; then
+        echo "Running pytest (including slow tests)... (output redirected to $TEST_LOG)"
+        set +e
+        pytest -v -o addopts="" > >(tee "$TEST_LOG" | awk '/===|---|FAILURES|test_.*FAILED/ {print}' | uniq) 2>&1
+        PYTEST_RC=$?
+        set -e
+    else
+        echo "Running pytest (excluding slow tests)... (output redirected to $TEST_LOG)"
+        set +e
+        pytest -v > >(tee "$TEST_LOG" | awk '/===|---|FAILURES|test_.*FAILED/ {print}' | uniq) 2>&1
+        PYTEST_RC=$?
+        set -e
+    fi
 
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))
