@@ -485,3 +485,73 @@ def build_hierarchy_tree(state: FloorplannerAppState) -> list[BlockNode]:
         if parent_name and parent_name in node_map:
             node_map[parent_name].children.append(node)
     return [n for name, n in node_map.items() if "/" not in name]
+
+
+def optimize_placement(
+    state: FloorplannerAppState,
+    method: str = "sa",
+    fixed=None,
+    reshapeable=None,
+    min_sizes=None,
+    **kwargs,
+):
+    """Run global placement optimization on root-level blocks.
+
+    fixed:       names of blocks whose position must not change.
+    reshapeable: names of blocks whose aspect ratio may change (area kept constant).
+    min_sizes:   {name: (min_w, min_h)} minimum dimension constraints.
+    **kwargs:    forwarded to run_sa() or run_ga() (e.g. max_iter, seed).
+
+    Returns an OptimizerResult; also applies the result to state.engine.
+    """
+    import buda as _buda
+
+    die_w = state.engine.die_w()
+    die_h = state.engine.die_h()
+    grid  = state.engine.grid()
+    opt   = _buda.PlacementOptimizer(die_w, die_h, grid)
+
+    fixed_set   = set(fixed or [])
+    reshape_set = set(reshapeable or [])
+    min_dict    = dict(min_sizes or {})
+
+    for name in state.block_names:
+        if "/" in name:
+            continue
+        b = state.engine.get_block(name)
+        w, h   = b.x2 - b.x1, b.y2 - b.y1
+        mw, mh = min_dict.get(name, (0.0, 0.0))
+        opt.add_block_ex(
+            name, w, h, b.x1, b.y1, mw, mh,
+            fixed=(name in fixed_set),
+            reshapeable=(name in reshape_set),
+        )
+
+    if state.bdb is not None:
+        comp_by_id = {c.id: c for c in state.bdb.all_components()}
+        nets_pins: dict = {}
+        for p in state.bdb.all_pins():
+            c = comp_by_id.get(p.comp_id)
+            if c is None or "/" in c.name:
+                continue
+            w, h = c.x2 - c.x1, c.y2 - c.y1
+            lx = p.px - c.x1 if p.px >= 0 else w / 2.0
+            ly = p.py - c.y1 if p.py >= 0 else h / 2.0
+            nets_pins.setdefault(p.net_id, []).append((c.name, (lx, ly)))
+        for pins in nets_pins.values():
+            if len(pins) >= 2:
+                opt.add_net(pins)
+
+    if method == "sa":
+        result = opt.run_sa(**kwargs)
+    else:
+        result = opt.run_ga(**kwargs)
+
+    for pb in result.placements:
+        try:
+            state.engine.resize_block_raw(
+                pb.name, pb.x, pb.y, pb.x + pb.w, pb.y + pb.h
+            )
+        except Exception:
+            pass
+    return result

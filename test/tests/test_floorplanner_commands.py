@@ -230,3 +230,55 @@ endmodule
     assert result.returncode == 0, result.stdout + result.stderr
     assert "HierBundler:" in result.stdout
     assert "generate_hier_topologies:" in result.stdout
+
+
+def test_optimize_placement_sa(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "opt.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a",   0,  0, 100, 80)
+    fpc.add_block(state, "b",  50, 50, 100, 80)  # overlapping
+    fpc.add_block(state, "c", 400, 400, 80, 60)
+    result = fpc.optimize_placement(state, method="sa", max_iter=5000, seed=1)
+    assert result.overlap < 1.0
+    for name in ["a", "b", "c"]:
+        b = state.block(name)
+        assert b.x1 >= 0 and b.y1 >= 0
+        assert b.x2 <= 1000 and b.y2 <= 800
+
+
+def test_optimize_placement_fixed(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "fixed.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "anchor",   0,  0, 100, 80)
+    fpc.add_block(state, "free",   200, 200, 100, 80)
+    fpc.optimize_placement(state, method="sa", fixed=["anchor"], max_iter=3000, seed=3)
+    anchor = state.block("anchor")
+    assert anchor.x1 == 0 and anchor.y1 == 0   # position must be unchanged
+
+
+def test_optimize_placement_reshape(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "reshape.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "r", 0, 0, 100, 100)   # 100×100 = area 10 000
+    result = fpc.optimize_placement(
+        state, method="sa",
+        reshapeable=["r"],
+        min_sizes={"r": (30, 30)},
+        max_iter=3000, seed=5,
+    )
+    pb = next(p for p in result.placements if p.name == "r")
+    grid = 10
+    # Area may deviate by up to max(w,h)*grid because both dimensions are snapped.
+    tol = max(pb.w, pb.h) * grid
+    assert abs(pb.w * pb.h - 10_000) <= tol  # area ≈ constant (grid-snap tolerance)
+    assert pb.w >= 30 and pb.h >= 30          # min-size respected
+    assert pb.w <= 1000 and pb.h <= 800       # within die
+
+
+def test_optimize_placement_ga(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "opt_ga.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a",  0,  0, 100, 80)
+    fpc.add_block(state, "b", 50, 50, 100, 80)
+    result = fpc.optimize_placement(state, method="ga", generations=50, seed=7)
+    assert result.iterations == 50
+    for name in ["a", "b"]:
+        b = state.block(name)
+        assert b.x1 >= 0 and b.y1 >= 0
+        assert b.x2 <= 1000 and b.y2 <= 800

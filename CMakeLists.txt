@@ -82,8 +82,10 @@ set(SOURCE_FILES
     src/routing_grid.cpp
     src/detailed_nuts.cpp
     src/floorplanner.cpp
+    src/placement_optimizer.cpp
     # ── v3 ───────────────────────────────────────────────────────
     src/verify.cpp
+    src/bind_optimizer.cpp
     # bundler.cpp, bundle_refiner.cpp, bdb.cpp, busterm.cpp, sqlite3.c:
     # provided by buda_core via linker
 )

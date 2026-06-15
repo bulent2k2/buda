@@ -27,6 +27,7 @@ namespace py = pybind11;
 void bind_bundler(py::module_& m);
 void bind_routing(py::module_& m);
 void bind_nuts(py::module_& m);
+void bind_optimizer(py::module_& m);
 
 PYBIND11_MODULE(buda, m) {
     py::add_ostream_redirect(m, "ostream_redirect");
@@ -42,7 +43,8 @@ PYBIND11_MODULE(buda, m) {
     }
 
     // Registration order matters: bundler before routing (BundleWrapper uses HBundle).
-    bind_bundler(m);  // Strategy, HBundle, BundleWrapper, Bundler, HierarchicalBundler
-    bind_routing(m);  // geometry, Floorplan, LayerStack, TopologyGenerator, CongestionPlanner
-    bind_nuts(m);     // NUTS, DetailedNUTS, RoutingGrid, ConnTopology, verify
+    bind_bundler(m);    // Strategy, HBundle, BundleWrapper, Bundler, HierarchicalBundler
+    bind_routing(m);    // geometry, Floorplan, LayerStack, TopologyGenerator, CongestionPlanner
+    bind_nuts(m);       // NUTS, DetailedNUTS, RoutingGrid, ConnTopology, verify
+    bind_optimizer(m);  // PlacementOptimizer (SA + GA), PlacedBlock, OptimizerResult
 }
