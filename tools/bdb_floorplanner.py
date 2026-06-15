@@ -126,6 +126,7 @@ class BdbFloorplanner:
         filter_f.pack(fill=tk.X)
         ttk.Button(filter_f, text="Add", command=self._add_block).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(filter_f, text="Align Bottom", command=self._align_bottom).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        ttk.Button(filter_f, text="Optimize…", command=self._open_optimize_dialog).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         tv_frame = ttk.Frame(blocks)
         tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
         self._tree = ttk.Treeview(tv_frame, show="tree", selectmode="browse")
@@ -329,6 +330,24 @@ class BdbFloorplanner:
         fpc.align_bottom(self.state, names)
         self._draw()
         self._status.set(f"Aligned {len(names)} block(s) to bottom edge.")
+
+    def _open_optimize_dialog(self):
+        if self.state is None:
+            self._status.set("Open or create a BDB first.")
+            return
+        root_blocks = [n for n in self.state.block_names if "/" not in n]
+        if not root_blocks:
+            self._status.set("No root-level blocks to optimize.")
+            return
+        dlg = _OptimizeDialog(self.root, self.state, root_blocks)
+        self.root.wait_window(dlg.top)
+        if dlg.result is not None:
+            self._draw()
+            r = dlg.result
+            self._status.set(
+                f"Optimize: HPWL={r.hpwl:.1f}  overlap={r.overlap:.1f}  "
+                f"({r.iterations} iter)"
+            )
 
     def _validate(self):
         issues = fpc.validate(self.state)
@@ -701,6 +720,162 @@ class BdbFloorplanner:
                 self._status.set("Block moved.")
             self._refresh_tree()
             self._draw()
+
+
+class _OptimizeDialog:
+    """Modal dialog for configuring and launching the placement optimizer."""
+
+    def __init__(self, parent, state, root_blocks: list[str]):
+        self.state  = state
+        self.result = None
+
+        self.top = tk.Toplevel(parent)
+        self.top.title("Optimize Placement")
+        self.top.resizable(False, False)
+        self.top.grab_set()  # modal
+
+        pad = dict(padx=6, pady=3)
+
+        # ── Algorithm ────────────────────────────────────────────────────────
+        alg_f = ttk.LabelFrame(self.top, text="Algorithm", padding=6)
+        alg_f.pack(fill=tk.X, padx=8, pady=(8, 0))
+        self._alg = tk.StringVar(value="sa")
+        ttk.Radiobutton(alg_f, text="SA  (Simulated Annealing)",
+                        variable=self._alg, value="sa",
+                        command=self._on_alg_change).pack(anchor="w")
+        ttk.Radiobutton(alg_f, text="GA  (Genetic Algorithm)",
+                        variable=self._alg, value="ga",
+                        command=self._on_alg_change).pack(anchor="w")
+
+        iter_f = ttk.Frame(alg_f)
+        iter_f.pack(fill=tk.X, pady=(4, 0))
+        self._iter_lbl = ttk.Label(iter_f, text="Iterations:")
+        self._iter_lbl.pack(side=tk.LEFT)
+        self._iter_var = tk.IntVar(value=20000)
+        ttk.Spinbox(iter_f, textvariable=self._iter_var,
+                    from_=100, to=500000, increment=1000, width=9).pack(side=tk.LEFT, padx=(4, 0))
+
+        # ── Weights ───────────────────────────────────────────────────────────
+        wt_f = ttk.LabelFrame(self.top, text="Weights", padding=6)
+        wt_f.pack(fill=tk.X, padx=8, pady=(6, 0))
+        self._w_wl   = tk.DoubleVar(value=1.0)
+        self._w_area = tk.DoubleVar(value=0.1)
+        self._w_ovlp = tk.DoubleVar(value=10.0)
+        for col, (lbl, var) in enumerate([
+                ("Wire-length", self._w_wl),
+                ("Area", self._w_area),
+                ("Overlap", self._w_ovlp)]):
+            ttk.Label(wt_f, text=lbl + ":").grid(row=0, column=col * 2, sticky="w", **pad)
+            ttk.Spinbox(wt_f, textvariable=var,
+                        from_=0.0, to=100.0, increment=0.1,
+                        format="%.2f", width=6).grid(row=0, column=col * 2 + 1, **pad)
+
+        # ── Block constraints ─────────────────────────────────────────────────
+        bc_f = ttk.LabelFrame(self.top, text="Block Constraints", padding=6)
+        bc_f.pack(fill=tk.BOTH, expand=True, padx=8, pady=(6, 0))
+
+        hdr_f = ttk.Frame(bc_f)
+        hdr_f.pack(fill=tk.X)
+        ttk.Label(hdr_f, text="Block", width=20, anchor="w").pack(side=tk.LEFT)
+        ttk.Label(hdr_f, text="Fixed",      width=7,  anchor="center").pack(side=tk.LEFT)
+        ttk.Label(hdr_f, text="Reshapeable", width=12, anchor="center").pack(side=tk.LEFT)
+        ttk.Label(hdr_f, text="Min W × H",  width=14, anchor="center").pack(side=tk.LEFT)
+
+        scroll_canvas = tk.Canvas(bc_f, height=min(len(root_blocks) * 28 + 4, 200),
+                                  bd=0, highlightthickness=0)
+        vsb = ttk.Scrollbar(bc_f, orient="vertical", command=scroll_canvas.yview)
+        scroll_canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        rows_f = ttk.Frame(scroll_canvas)
+        scroll_canvas.create_window((0, 0), window=rows_f, anchor="nw")
+        rows_f.bind("<Configure>",
+                    lambda e: scroll_canvas.configure(
+                        scrollregion=scroll_canvas.bbox("all")))
+
+        self._fixed_vars:    dict[str, tk.BooleanVar] = {}
+        self._reshape_vars:  dict[str, tk.BooleanVar] = {}
+        self._min_w_vars:    dict[str, tk.DoubleVar]  = {}
+        self._min_h_vars:    dict[str, tk.DoubleVar]  = {}
+        self._min_w_spins:   dict[str, ttk.Spinbox]  = {}
+        self._min_h_spins:   dict[str, ttk.Spinbox]  = {}
+
+        for name in root_blocks:
+            row = ttk.Frame(rows_f)
+            row.pack(fill=tk.X, pady=1)
+
+            ttk.Label(row, text=name, width=20, anchor="w").pack(side=tk.LEFT)
+
+            fv = tk.BooleanVar(value=False)
+            self._fixed_vars[name] = fv
+            ttk.Checkbutton(row, variable=fv).pack(side=tk.LEFT, padx=(10, 0))
+
+            rv = tk.BooleanVar(value=False)
+            self._reshape_vars[name] = rv
+            ttk.Checkbutton(row, variable=rv,
+                            command=lambda n=name: self._on_reshape_toggle(n)).pack(
+                side=tk.LEFT, padx=(20, 0))
+
+            mw = tk.DoubleVar(value=0.0)
+            mh = tk.DoubleVar(value=0.0)
+            self._min_w_vars[name] = mw
+            self._min_h_vars[name] = mh
+
+            sp_w = ttk.Spinbox(row, textvariable=mw, from_=0, to=99999,
+                               increment=10, width=6, state="disabled")
+            sp_w.pack(side=tk.LEFT, padx=(12, 0))
+            self._min_w_spins[name] = sp_w
+
+            ttk.Label(row, text="×").pack(side=tk.LEFT, padx=2)
+
+            sp_h = ttk.Spinbox(row, textvariable=mh, from_=0, to=99999,
+                               increment=10, width=6, state="disabled")
+            sp_h.pack(side=tk.LEFT)
+            self._min_h_spins[name] = sp_h
+
+        # ── Buttons ───────────────────────────────────────────────────────────
+        btn_f = ttk.Frame(self.top)
+        btn_f.pack(fill=tk.X, padx=8, pady=8)
+        ttk.Button(btn_f, text="Run",    command=self._run).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_f, text="Cancel", command=self.top.destroy).pack(side=tk.RIGHT)
+
+    def _on_alg_change(self):
+        self._iter_lbl.config(
+            text="Iterations:" if self._alg.get() == "sa" else "Generations:")
+        self._iter_var.set(20000 if self._alg.get() == "sa" else 200)
+
+    def _on_reshape_toggle(self, name: str):
+        enabled = self._reshape_vars[name].get()
+        state = "normal" if enabled else "disabled"
+        self._min_w_spins[name].config(state=state)
+        self._min_h_spins[name].config(state=state)
+
+    def _run(self):
+        fixed      = [n for n, v in self._fixed_vars.items()   if v.get()]
+        reshapeable = [n for n, v in self._reshape_vars.items() if v.get()]
+        min_sizes  = {
+            n: (self._min_w_vars[n].get(), self._min_h_vars[n].get())
+            for n in reshapeable
+            if self._min_w_vars[n].get() > 0 or self._min_h_vars[n].get() > 0
+        }
+        method = self._alg.get()
+        kwargs: dict = dict(seed=42)
+        if method == "sa":
+            kwargs["max_iter"] = self._iter_var.get()
+        else:
+            kwargs["generations"] = self._iter_var.get()
+        kwargs["w_wl"]   = self._w_wl.get()
+        kwargs["w_area"] = self._w_area.get()
+        kwargs["w_ovlp"] = self._w_ovlp.get()
+
+        self.result = fpc.optimize_placement(
+            self.state, method=method,
+            fixed=fixed, reshapeable=reshapeable,
+            min_sizes=min_sizes or None,
+            **kwargs,
+        )
+        self.top.destroy()
 
 
 def main():
