@@ -1312,11 +1312,17 @@ void NUTSEngine::orientation_fixpoint(
 // neighbor2).  high1 != high2 — that contradiction is why no single track for the
 // trunk works.  For a 2-cycle neighbor1 == neighbor2; for a longer cycle they
 // differ (each piece orders against a different trunk on the cycle).
+struct CycleEdge { std::pair<int,int> from, to; double col; };   // "from below to" at col
 struct DoglegPlan {
     std::pair<int,int> split_trunk;
     int    layer;
     double col1; bool high1; std::pair<int,int> neighbor1;
     double col2; bool high2; std::pair<int,int> neighbor2;
+    // The full cycle's ordering edges.  Seeding ALL of them (with the split
+    // trunk redirected to its covering piece) imposes the complete vertical
+    // order — not just the split trunk's two constraints — so the trunks the
+    // split does not touch (their mutual edge) are ordered too.
+    std::vector<CycleEdge> cycle_edges;
 };
 
 // Build the same-layer vertical-constraint graph from co-located stub pairs and
@@ -1327,7 +1333,6 @@ struct DoglegPlan {
 static std::vector<DoglegPlan> detect_dogleg_plans(
     const std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    const std::map<std::pair<int,int>, double>& pull_map,
     const std::set<std::pair<int,int>>& trunk_set)
 {
     using Key = std::pair<int,int>;
@@ -1351,33 +1356,39 @@ static std::vector<DoglegPlan> detect_dogleg_plans(
         return lo_end ? s.span_hi : s.span_lo;
     };
 
-    struct Stub { Key key, trunk; double col, anchored; int trunk_layer; };
+    // Co-locate stubs by their Hanan INTERVAL (the column they are constrained
+    // to), not by nominal or placed position: the interval is placement-
+    // independent, so it catches two wide (multi-bit) stubs that share a narrow
+    // column even when NUTS shifted them to different tracks (and it doesn't
+    // vanish once NUTS separates a conflicting pair).  The vertical constraint
+    // then follows from which stub reaches farther (anchored end).
+    struct Stub { Key key, trunk; double ilo, ihi, center, anchored; int trunk_layer; };
     std::vector<Stub> stubs;
     for (const auto& [k, tinfo] : trunk_of) {
         auto sit = idx_of.find(k);
         auto tit = idx_of.find(tinfo.first);
         if (sit == idx_of.end() || tit == idx_of.end()) continue;
         const TrackSegment& s = segments[sit->second];
-        auto pit = pull_map.find(k);
-        double col = (pit != pull_map.end()) ? pit->second : s.track_position;
-        stubs.push_back({k, tinfo.first, col,
+        stubs.push_back({k, tinfo.first, s.interval_lo, s.interval_hi,
+                         0.5 * (s.interval_lo + s.interval_hi),
                          anchored_coord(s, tinfo.second), segments[tit->second].layer});
     }
 
     // Directed edge lo_trunk → hi_trunk ("lo below hi") at a column, from every
     // co-located, distinct-bundle stub pair whose trunks share a layer.
-    constexpr double kColTol = 2.0;   // same Hanan column ⇒ near-identical nominal
+    constexpr double kColTol = 2.0;
     std::map<Key, std::map<Key,double>> adj;   // from → {to → column}
     for (size_t a = 0; a < stubs.size(); ++a)
         for (size_t b = a + 1; b < stubs.size(); ++b) {
             if (stubs[a].key.first == stubs[b].key.first) continue;   // same bundle
             if (stubs[a].trunk == stubs[b].trunk) continue;
             if (stubs[a].trunk_layer != stubs[b].trunk_layer) continue;
-            if (std::abs(stubs[a].col - stubs[b].col) > kColTol) continue;  // not co-located
+            // Co-located: their Hanan intervals overlap (same column).
+            if (stubs[a].ihi <= stubs[b].ilo || stubs[b].ihi <= stubs[a].ilo) continue;
             const bool a_lower = stubs[a].anchored < stubs[b].anchored;
             Key lo = a_lower ? stubs[a].trunk : stubs[b].trunk;
             Key hi = a_lower ? stubs[b].trunk : stubs[a].trunk;
-            adj[lo].emplace(hi, 0.5 * (stubs[a].col + stubs[b].col));  // keep first column
+            adj[lo].emplace(hi, 0.5 * (stubs[a].center + stubs[b].center));  // keep first column
         }
 
     // DFS for one directed cycle; record it as the node sequence v→…→u (with the
@@ -1406,12 +1417,17 @@ static std::vector<DoglegPlan> detect_dogleg_plans(
         if (color[n] == 0 && dfs(n)) break;
     }
     if (cyc.size() < 2) return {};
+    const int n = (int)cyc.size();
+
+    // The cycle's directed ordering edges (nodes[i] below nodes[i+1] at its col).
+    std::vector<CycleEdge> cycle_edges;
+    for (int i = 0; i < n; ++i)
+        cycle_edges.push_back({cyc[i], cyc[(i + 1) % n], adj[cyc[i]][cyc[(i + 1) % n]]});
 
     // One plan per trunk on the cycle: its incoming edge (prev below it → it must
     // be HIGH there) and outgoing edge (it below next → LOW there) give the two
     // contradictory columns and the two neighbour trunks.
     std::vector<DoglegPlan> plans;
-    const int n = (int)cyc.size();
     for (int i = 0; i < n; ++i) {
         const Key& ti   = cyc[i];
         const Key& prev = cyc[(i - 1 + n) % n];
@@ -1424,6 +1440,7 @@ static std::vector<DoglegPlan> detect_dogleg_plans(
         p.layer = segments[idx_of[ti]].layer;
         p.col1 = col_in;  p.high1 = true;  p.neighbor1 = prev;  // ti above prev at col_in
         p.col2 = col_out; p.high2 = false; p.neighbor2 = next;  // ti below next at col_out
+        p.cycle_edges = cycle_edges;
         plans.push_back(p);
     }
     return plans;
@@ -1443,8 +1460,9 @@ static std::vector<DoglegPlan> detect_dogleg_plans(
 struct DoglegResult {
     bool ok = false;
     int  jog_si = -1;
-    int  piece_l_si = -1;     // rewritten trunk segment, covers the left column
-    int  piece_r_si = -1;     // appended segment, covers the right column
+    int  piece_l_si = -1;     // rewritten trunk segment, covers x <= jog_x
+    int  piece_r_si = -1;     // appended segment, covers x >  jog_x
+    int  jog_x = 0;           // split column: stubs left of it hang from piece_l, right from piece_r
     bool piece_l_high = false;
 };
 static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
@@ -1510,20 +1528,21 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     if (trunk_si < (int)bw.plan.seg_perp.size())
         bw.plan.seg_perp[trunk_si] = std::numeric_limits<int>::min();
 
-    // Extend each stub's trunk-side endpoint (currently at y_t) up/down to meet
-    // its piece, so the nominal topology stays connected (ConnTopology infers
-    // the junctions geometrically).
-    auto extend_stub = [&](double col, int new_y) {
-        for (auto& s : topo.segments) {
-            if (s.start.x != s.end.x) continue;                 // only vertical stubs
-            if (std::abs((double)s.start.x - col) > 2.0) continue;
-            if (s.start.y == y_t)      s.start.y = new_y;
-            else if (s.end.y == y_t)   s.end.y   = new_y;
-        }
-    };
-    extend_stub(colL, yL);
-    extend_stub(colR, yR);
-    return DoglegResult{ true, jog_idx, trunk_si, piece_r_idx, highL };
+    // Extend each of the trunk's stubs (a vertical segment with an endpoint at
+    // the old trunk y) up/down to meet whichever piece now covers its column —
+    // left piece (yL) if it sits left of the jog, right piece (yR) otherwise —
+    // so the nominal topology stays connected (ConnTopology infers the junctions
+    // geometrically).  (void)colL/colR: ordering is by jog_x, not exact column.
+    (void)colL; (void)colR;
+    for (auto& s : topo.segments) {
+        if (s.start.x != s.end.x) continue;                 // only vertical stubs
+        const int sx = s.start.x;
+        if (sx == jog_x) continue;                          // the jog itself
+        const int new_y = (sx <= jog_x) ? yL : yR;
+        if (s.start.y == y_t)      s.start.y = new_y;
+        else if (s.end.y == y_t)   s.end.y   = new_y;
+    }
+    return DoglegResult{ true, jog_idx, trunk_si, piece_r_idx, jog_x, highL };
 }
 
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
@@ -1569,7 +1588,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // mutual-edge structure.  The 2-cycle filter guarantees the safety-net
         // passes could not have fixed these anyway.
         SolveOut out;
-        out.plans = detect_dogleg_plans(result.segments, rev_conn_map, pull_map, trunk_set);
+        out.plans = detect_dogleg_plans(result.segments, rev_conn_map, trunk_set);
         // The final adjustments can extend spans of layers packed earlier,
         // materialising overlaps after their solve — repair them in place.
         repair_overlaps(result.segments, pull_map, net_pull_map, align_map,
@@ -1630,21 +1649,23 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                                            p.col1, p.high1, p.col2, p.high2, delta);
             if (!dr.ok) continue;
 
-            // Order each piece against its neighbour (preds[X] = segments below X).
-            // apply_dogleg's left piece covers min(col1,col2); pick accordingly.
+            // Seed the FULL cycle ordering (preds[X] = segments below X), with
+            // the split trunk redirected to whichever piece covers each edge's
+            // column (left of the jog → piece_l, right → piece_r).  This imposes
+            // the complete vertical order, including the edge between the two
+            // trunks the split does not touch, which the corner pass can't.
             const std::pair<int,int> piece_l{p.split_trunk.first, dr.piece_l_si};
             const std::pair<int,int> piece_r{p.split_trunk.first, dr.piece_r_si};
-            const bool col1_left = (p.col1 <= p.col2);
-            const std::pair<int,int> piece_at_col1 = col1_left ? piece_l : piece_r;
-            const std::pair<int,int> piece_at_col2 = col1_left ? piece_r : piece_l;
-            std::map<int, LayerConstraints> seed;
-            auto order = [&](const std::pair<int,int>& piece, bool piece_high,
-                             const std::pair<int,int>& nb) {
-                if (piece_high) seed[p.layer].preds[piece].insert(nb);   // piece above nb
-                else            seed[p.layer].preds[nb].insert(piece);   // piece below nb
+            auto redirect = [&](const std::pair<int,int>& node, double col) {
+                if (node != p.split_trunk) return node;
+                return (col <= dr.jog_x) ? piece_l : piece_r;
             };
-            order(piece_at_col1, p.high1, p.neighbor1);
-            order(piece_at_col2, p.high2, p.neighbor2);
+            std::map<int, LayerConstraints> seed;
+            for (const CycleEdge& e : p.cycle_edges) {
+                const auto a = redirect(e.from, e.col);   // a below b
+                const auto b = redirect(e.to,   e.col);
+                if (a != b) seed[p.layer].preds[b].insert(a);
+            }
             SolveOut t = solve(trial, seed);
 
             // Jog length of the placed jog segment (tie-break; shorter is cheaper).
