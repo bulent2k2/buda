@@ -1185,6 +1185,9 @@ class BudaSession:
             cands[sel] = dl[bid]
             w.input.candidates = cands        # reassign the whole vector back
             w.plan.seg_layers = list(seg_layers[bid])
+            np = getattr(self.nuts_result, "dogleg_seg_net_pull", None)
+            if np and bid in np:
+                w.plan.seg_net_pull = list(np[bid])
 
     def _run_detailed_nuts(self, bit_order="LO_HI"):
         """Execute bit-level track assignment using DetailedNUTSEngine."""

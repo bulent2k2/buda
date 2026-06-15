@@ -112,11 +112,13 @@ static void build_nuts_maps(
 
             // Use cs.net_pull (computed by ConnTopology) to set the preferred
             // placement coordinate.  net_pull > 0 → slide toward perp_hi,
-            // net_pull < 0 → slide toward perp_lo.  A dogleg trunk piece is
-            // forced net-zero: pulling it to a face only stretches the jog by as
-            // much as it shortens the stub, so its track is left to the dogleg's
-            // ordering constraints instead.
-            const int eff_net_pull = topo.segments[si].is_dogleg_trunk ? 0 : cs.net_pull;
+            // net_pull < 0 → slide toward perp_lo.  A per-segment override
+            // (bw.plan.seg_net_pull, set by the dogleg pass) pins the value when
+            // ConnTopology would recompute it wrongly on the split topology.
+            int eff_net_pull = cs.net_pull;
+            if (si < (int)bw.plan.seg_net_pull.size() &&
+                bw.plan.seg_net_pull[si] != INT_MIN)
+                eff_net_pull = bw.plan.seg_net_pull[si];
             net_pull_map[key] = eff_net_pull;
             if (eff_net_pull != 0) {
                 constexpr double kSentinel = 5e8;
@@ -1471,7 +1473,7 @@ struct DoglegResult {
 };
 static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
                                  double col1, bool high1, double col2, bool high2,
-                                 int delta)
+                                 int delta, const std::vector<int>& orig_net_pull)
 {
     if (bw.plan.selected_topology_index < 0) return {};
     Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
@@ -1510,15 +1512,10 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     if (v_layer < 0) return {};
 
     // Rewrite the trunk as the left piece; append the right piece and the jog.
-    // The pieces are marked dogleg trunks (net-zero pull); the jog is marked so
-    // it is exempt from sibling alignment.
-    Segment piece_l{ Point{x_lo, yL}, Point{jog_x, yL}, h_layer };
-    piece_l.is_dogleg_trunk = true;
-    topo.segments[trunk_si] = piece_l;
+    // The jog is marked so it is exempt from sibling alignment.
+    topo.segments[trunk_si] = Segment{ Point{x_lo, yL}, Point{jog_x, yL}, h_layer };
     const int piece_r_idx = (int)topo.segments.size();
-    Segment piece_r{ Point{jog_x, yR}, Point{x_hi, yR}, h_layer };
-    piece_r.is_dogleg_trunk = true;
-    topo.segments.push_back(piece_r);
+    topo.segments.push_back(Segment{ Point{jog_x, yR}, Point{x_hi, yR}, h_layer });
     const int jog_idx = (int)topo.segments.size();
     Segment jog{ Point{jog_x, yL}, Point{jog_x, yR}, v_layer };
     jog.is_jog = true;
@@ -1531,6 +1528,21 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     set_layer(trunk_si, h_layer);
     set_layer(piece_r_idx, h_layer);
     set_layer(jog_idx, v_layer);
+
+    // Pin net_pull (ConnTopology would recompute the split bundle's pulls wrongly):
+    // stubs keep their pre-split value, both sub-trunks inherit the trunk's, the
+    // jog is net-zero.  Sliding a sub-trunk toward a face only stretches the jog
+    // as much as it shortens the stub (net-zero wirelength), so the trunk pull is
+    // the right thing for both pieces.
+    const int INT_MIN_ = std::numeric_limits<int>::min();
+    const int trunk_pull = (trunk_si < (int)orig_net_pull.size()) ? orig_net_pull[trunk_si] : 0;
+    auto& snp = bw.plan.seg_net_pull;
+    snp.assign(topo.segments.size(), INT_MIN_);
+    for (int i = 0; i < (int)orig_net_pull.size() && i < (int)snp.size(); ++i)
+        if (i != trunk_si) snp[i] = orig_net_pull[i];   // stubs preserve their pull
+    snp[trunk_si]    = trunk_pull;                       // left piece inherits trunk
+    snp[piece_r_idx] = trunk_pull;                       // right piece inherits trunk
+    snp[jog_idx]     = 0;                                // jog is net-zero
 
     // Clear the rewritten piece's stale planner band: seg_perp[trunk_si] still
     // names the ORIGINAL trunk's charged band (≈ the old single track), which
@@ -1664,12 +1676,22 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                     trunk_slide = ts.interval_hi - ts.interval_lo;
                 }
             if (trunk_slide < 2.0 * trunk_w + 2.0 * track_pitch_) continue;  // can't host two pieces
+            // Capture this bundle's pre-split net_pull per seg_idx, so apply_dogleg
+            // can pin stubs (preserve) and sub-trunks (inherit the trunk).
+            std::vector<int> orig_net_pull;
+            for (const auto& ts : out.result.segments)
+                if (ts.bundle_id == p.split_trunk.first) {
+                    if (ts.seg_idx >= (int)orig_net_pull.size())
+                        orig_net_pull.resize(ts.seg_idx + 1, 0);
+                    orig_net_pull[ts.seg_idx] = ts.net_pull;
+                }
             // Seed the jog tall enough that the pieces clear the neighbour trunks
             // between them: separation ≳ bus width + pitch each side.
             const int delta = (int)std::ceil(trunk_w + track_pitch_ + 2.0);
             std::vector<BundleWrapper> trial = bundles;
             DoglegResult dr = apply_dogleg(trial[bw_idx], p.split_trunk.second,
-                                           p.col1, p.high1, p.col2, p.high2, delta);
+                                           p.col1, p.high1, p.col2, p.high2, delta,
+                                           orig_net_pull);
             if (!dr.ok) continue;
 
             // Seed the FULL cycle ordering (preds[X] = segments below X), with
@@ -1737,7 +1759,8 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                 bw.plan.selected_topology_index >= 0) {
                 out.result.dogleg_topologies[bid] =
                     bw.input.candidates[bw.plan.selected_topology_index];
-                out.result.dogleg_seg_layers[bid] = bw.plan.seg_layers;
+                out.result.dogleg_seg_layers[bid]   = bw.plan.seg_layers;
+                out.result.dogleg_seg_net_pull[bid]  = bw.plan.seg_net_pull;
             }
 
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "

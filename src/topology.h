@@ -55,12 +55,6 @@ struct Segment {
     // nuts_maps excludes it from same-bundle alignment (it must stay on its own
     // column, not snap onto a sibling stub's track).
     bool is_jog = false;
-    // True for a dogleg TRUNK PIECE (one of the two collinear halves of a split
-    // trunk).  Marked so build_nuts_maps gives it net-zero pull: sliding a piece
-    // toward a face shortens its stub but lengthens the jog by the same amount
-    // (net-zero wirelength), so it must not be pulled to an interval extreme —
-    // its track is set by the dogleg's ordering constraints instead.
-    bool is_dogleg_trunk = false;
 };
 // A busterm is a connection point on a block face.  Currently represented by
 // the block name and its bounding box; can be refined to a pin location later.

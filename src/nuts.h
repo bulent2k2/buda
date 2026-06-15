@@ -67,6 +67,7 @@ struct NUTSResult {
     // (post-split) connectivity instead of routing with stale, corrupted spans.
     std::map<int, Topology>          dogleg_topologies;
     std::map<int, std::vector<int>>  dogleg_seg_layers;
+    std::map<int, std::vector<int>>  dogleg_seg_net_pull;
 };
 
 // Non-Uniform Track Sharing engine.

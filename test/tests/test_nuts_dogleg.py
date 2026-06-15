@@ -83,3 +83,35 @@ def test_dogleg_two_cycle_resolved():
 
 def test_dogleg_three_cycle_resolved():
     _check_resolved("dogleg1.buda")
+
+
+def _net_pull_by_seg(sess, bid):
+    return {ts.seg_idx: ts.net_pull
+            for ts in sess.nuts_result.segments if ts.bundle_id == bid}
+
+
+# Net-pull rules for a dogleg (a split rewrites the topology, so ConnTopology
+# would recompute the bundle's pulls wrongly — the pass pins them instead):
+#   1. each original stub PRESERVES its pre-split pull;
+#   2. both sub-trunks INHERIT the original trunk's pull;
+#   3. the jog is net-zero.
+def test_dogleg1_net_pull():
+    # Bus z (B3) is split.  Original topology: s0 stub→bot3 (-1), s1 trunk (0),
+    # s2 stub→top1 (+1).  After the split: s1 becomes the left piece, s3 the
+    # right piece, s4 the jog.  The trunk had net_pull 0, so both pieces are 0.
+    sess = _run("dogleg1.buda")
+    assert sess.nuts_result.dogleg_topologies, "expected a dogleg"
+    np = _net_pull_by_seg(sess, 3)
+    assert np == {0: -1, 1: 0, 2: 1, 3: 0, 4: 0}, np
+
+
+def test_dogleg2_net_pull():
+    # Bus z (B3) is multicast (bot3 -> top1, top4), so its trunk has net_pull +1
+    # (up).  Original topology: s0 trunk (+1), s1 stub->bot3 (0), s2 stub->top1
+    # (+2), s3 stub->top4 (-2).  After the split: s0 left piece, s4 right piece,
+    # s5 jog.  Both sub-trunks inherit the trunk's +1; the three stubs preserve
+    # 0 / +2 / -2; the jog is 0.
+    sess = _run("dogleg2.buda")
+    assert sess.nuts_result.dogleg_topologies, "expected a dogleg"
+    np = _net_pull_by_seg(sess, 3)
+    assert np == {0: 1, 1: 0, 2: 2, 3: -2, 4: 1, 5: 0}, np
