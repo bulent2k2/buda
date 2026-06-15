@@ -875,10 +875,11 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // non-constrained repack must not relocate a constrained trunk and undo the
     // vertical constraint it was placed to enforce.
     std::set<std::pair<int,int>> constrained;
+    std::set<std::pair<int,int>> has_successor;   // something ordered above it
     for (const auto& [k, preds] : order_preds) {
         if (layer_map.count(k)) constrained.insert(k);
         for (const auto& p : preds)
-            if (layer_map.count(p)) constrained.insert(p);
+            if (layer_map.count(p)) { constrained.insert(p); has_successor.insert(p); }
     }
     for (const auto& [k, b] : order_bounds)
         if (layer_map.count(k)) constrained.insert(k);
@@ -1130,6 +1131,27 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         for (const auto& k : todo) {
             place_phase0(k, layer_map[k]);
             done.insert(k);
+        }
+
+        // Cluster pull.  Bottom-edge packing honors a downward/zero net_pull but
+        // not an upward one.  If the ordered cluster pulls net upward (e.g. a
+        // dogleg whose two trunk pieces both inherit an up-pull), translate the
+        // WHOLE cluster up rigidly — preserving every ordering and gap (so a
+        // dogleg's jog length is unchanged) while shortening the up-pulled
+        // stubs.  The shift is bounded by each member's own interval; the
+        // members move together so they don't bound each other, and phase-0
+        // anchors are avoided by the later phases.
+        int pull_sum = 0;
+        for (const auto& k : done) pull_sum += layer_map[k]->net_pull;
+        if (pull_sum > 0) {
+            double headroom = kInf;
+            for (const auto& k : done) {
+                const TrackSegment* ts = layer_map[k];
+                headroom = std::min(headroom,
+                                    (ts->interval_hi - ts->width / 2.0) - ts->track_position);
+            }
+            if (headroom > 0)
+                for (const auto& k : done) layer_map[k]->track_position += headroom;
         }
     }
 
