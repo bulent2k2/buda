@@ -39,7 +39,13 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+# Add src/ to path so we can import buda_viz
+_SRC = os.path.join(_HERE, "..", "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
 import floorplanner_commands as fpc
+import buda_viz
 
 
 class BdbFloorplanner:
@@ -47,6 +53,10 @@ class BdbFloorplanner:
         self.root = root
         self.root.title("BUDA Floorplanner Prototype")
         self.root.geometry("1360x820")
+
+        # Bring window to front and set icon using centralized helpers
+        buda_viz.set_icon(self.root, "buda_fp_icon.png")
+        buda_viz.raise_window(self.root)
 
         self.state = fpc.new_state()
         self._patch_to_name: dict = {}
@@ -704,7 +714,7 @@ def main():
             app._bdb_var.set(path)
             app._sync_canvas_vars()
             app._refresh_breadcrumbs()
-            app._refresh_list()
+            app._refresh_tree()
             app._draw()
     root.mainloop()
 

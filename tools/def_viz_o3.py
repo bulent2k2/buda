@@ -37,10 +37,17 @@ import matplotlib.patches as mpatches
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
+
+# Add src/ to path so we can import buda_viz
+_SRC = os.path.join(_HERE, "..", "src")
+if _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
+
 from def_viz_shared import (DefVizData, bdb_is_fresh,
                              draw_die, draw_bg_instances,
                              draw_selected_instances, draw_group_boxes, fit_view)
 from group_tree import GroupTree, lighten_color
+import buda_viz
 
 
 class DefVizV3:
@@ -48,6 +55,10 @@ class DefVizV3:
         self.root  = root
         root.title('DEF Viz — V3: Canvas-first Groups')
         root.geometry('1480x860')
+
+        # Bring window to front and set icon using centralized helpers
+        buda_viz.set_icon(root)
+        buda_viz.raise_window(root)
 
         self.data          = DefVizData()
         self.selected_nets = set()

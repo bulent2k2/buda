@@ -112,28 +112,78 @@ def _toggle_fullscreen(fig):
     if mgr:
         mgr.full_screen_toggle()
 
-def _raise_window(fig):
-    """Bring fig's window to the front (best-effort; backend-dependent)."""
-    mgr = fig.canvas.manager
-    if mgr is None:
-        return
-    # MacOSX backend exposes show() which calls makeKeyAndOrderFront: internally.
-    # Other backends may use window.raise_() / window.activateWindow().
-    if callable(getattr(mgr, 'show', None)):
-        try:
-            mgr.show()
+def raise_window(win_or_fig):
+    """Bring a window or figure to the front (best-effort; backend-dependent)."""
+    # If it's a matplotlib figure, get the window manager
+    if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
+        mgr = win_or_fig.canvas.manager
+        if mgr is None:
             return
-        except Exception:
-            pass
-    win = getattr(mgr, 'window', None)
+        win = getattr(mgr, "window", None)
+        # MacOSX backend exposes show() which calls makeKeyAndOrderFront: internally.
+        if callable(getattr(mgr, "show", None)):
+            try:
+                mgr.show()
+            except Exception:
+                pass
+    else:
+        # Assume it's a direct window object (like tk.Tk)
+        win = win_or_fig
+
     if win is not None:
-        for method in ('raise_', 'activateWindow', 'lift'):
+        # Tkinter specific: force to front on macOS
+        if hasattr(win, "lift"):
+            try:
+                win.lift()
+                if hasattr(win, "attributes"):
+                    win.attributes("-topmost", True)
+                    # after_idle might not be available if not Tk
+                    if hasattr(win, "after_idle"):
+                        win.after_idle(win.attributes, "-topmost", False)
+                    else:
+                        win.attributes("-topmost", False)
+            except Exception:
+                pass
+
+        # Other backends / fallback
+        for method in ("raise_", "activateWindow"):
             if callable(getattr(win, method, None)):
                 try:
                     getattr(win, method)()
-                    return
                 except Exception:
                     pass
+
+
+def set_icon(win_or_fig, icon_name="buda_icon.png"):
+    """Set the application icon for the window or figure."""
+    if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
+        mgr = win_or_fig.canvas.manager
+        if mgr is None:
+            return
+        win = getattr(mgr, "window", None)
+        target = win_or_fig # to store the reference
+    else:
+        win = win_or_fig
+        target = win_or_fig
+
+    if win is None:
+        return
+
+    try:
+        import tkinter as tk
+
+        # Look in project root (one level up from src/)
+        _HERE = os.path.dirname(__file__)
+        icon_path = os.path.join(_HERE, "..", icon_name)
+        
+        if os.path.exists(icon_path) and hasattr(win, "iconphoto"):
+            # Keep a reference to prevent garbage collection
+            if not hasattr(target, "_icon_ref"):
+                target._icon_ref = tk.PhotoImage(file=icon_path)
+            # True means apply to all future windows as well
+            win.iconphoto(True, target._icon_ref)
+    except Exception:
+        pass
 
 def _disable_default_keymaps():
     """Remove default matplotlib keybindings that interfere with BUDA shortcuts."""
@@ -205,6 +255,8 @@ class TopologyExplorer:
 
         self.fig = plt.figure(figsize=(13, 10))
         self.fig.patch.set_facecolor('#f0f0f0')
+        set_icon(self.fig)
+        raise_window(self.fig)
 
         # Main axes — two button rows below; leave y=0.14 for buttons and x-tick labels
         self.ax = self.fig.add_axes([0.05, 0.14, 0.90, 0.81])
@@ -582,7 +634,7 @@ class TopologyExplorer:
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+1', 'ctrl+1'):
-            if self._main_fig is not None: _raise_window(self._main_fig)
+            if self._main_fig is not None: raise_window(self._main_fig)
             return
         if event.key in ('left',  'a'):         self._step_topo(-1)
         if event.key in ('right', 'd'):         self._step_topo(+1)
@@ -1000,6 +1052,9 @@ class BudaVisualizer:
         _disable_default_keymaps()
         self.fig, self.ax = plt.subplots(figsize=(14, 12))
         self.fig.patch.set_facecolor('#f0f0f0')
+        set_icon(self.fig)
+        raise_window(self.fig)
+
         if sidecar_path and self.fig.canvas.manager:
             self.fig.canvas.manager.set_window_title(
                 os.path.splitext(os.path.basename(sidecar_path))[0]
@@ -2038,7 +2093,7 @@ class BudaVisualizer:
         if self._topo_explorer is not None and plt.fignum_exists(self._topo_explorer.fig.number):
             # If it's for the SAME bundle, just raise it.
             if self._topo_explorer.wrappers[0].input.original_bundle.id == self._highlighted:
-                _raise_window(self._topo_explorer.fig)
+                raise_window(self._topo_explorer.fig)
                 return
             else:
                 # Different bundle? Close the old one to avoid confusion/clutter.
