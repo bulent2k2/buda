@@ -1218,6 +1218,12 @@ NUTSResult NUTSEngine::rerun_layer(
         if (ts.layer != layer_id) continue;
         ts.track_position = std::numeric_limits<double>::quiet_NaN();
         ts.placed         = false;
+        // This layer is about to be re-solved unconstrained (resolve_corner_
+        // overlaps is intentionally not run here), so any cross-layer split
+        // bound from the previous full solve is now stale — clear it, or
+        // detailed NUTS would filter these trunks to an obsolete side.
+        ts.track_lo_bound = -kInf;
+        ts.track_hi_bound =  kInf;
     }
     std::map<std::pair<int,int>, double>                         pull_map;
     std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;

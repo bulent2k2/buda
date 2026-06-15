@@ -66,3 +66,27 @@ def test_cross_layer_corner_no_detailed_short():
     shorts, unplaced = _detailed_shorts_and_unplaced(FLOW)
     assert shorts == 0, f"detailed-NUTS stub shorts on M5: {shorts} (expected 0)"
     assert unplaced == 0, f"unplaced bits: {unplaced} (expected 0)"
+
+
+def test_rerun_layer_clears_stale_split_bounds():
+    # A per-layer rerun re-solves the target layer unconstrained (no corner pass),
+    # so any cross-layer split bound from the full solve is now stale and must be
+    # cleared — otherwise detailed NUTS filters the trunk to an obsolete side.
+    sess = buda_cli.BudaSession()
+    sess.no_viz = True
+    sess.do_command(f"source {os.path.abspath(FLOW)}")
+
+    # The full run committed a finite bound on the M4 trunk (layer 4).
+    finite = [ts for ts in sess.nuts_result.segments
+              if ts.layer == 4 and (ts.track_lo_bound != float('-inf')
+                                    or ts.track_hi_bound != float('inf'))]
+    assert finite, "expected a finite cross-layer split bound on the M4 trunk after full run"
+
+    # Re-solving M4 must drop those stale bounds.
+    sess.do_command("run_nuts_on_layer M4")
+    for ts in sess.nuts_result.segments:
+        if ts.layer == 4:
+            assert ts.track_lo_bound == float('-inf'), \
+                f"stale track_lo_bound on re-solved M4 seg: {ts.track_lo_bound}"
+            assert ts.track_hi_bound == float('inf'), \
+                f"stale track_hi_bound on re-solved M4 seg: {ts.track_hi_bound}"
