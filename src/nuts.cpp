@@ -112,12 +112,16 @@ static void build_nuts_maps(
 
             // Use cs.net_pull (computed by ConnTopology) to set the preferred
             // placement coordinate.  net_pull > 0 → slide toward perp_hi,
-            // net_pull < 0 → slide toward perp_lo.
-            net_pull_map[key] = cs.net_pull;
-            if (cs.net_pull != 0) {
+            // net_pull < 0 → slide toward perp_lo.  A dogleg trunk piece is
+            // forced net-zero: pulling it to a face only stretches the jog by as
+            // much as it shortens the stub, so its track is left to the dogleg's
+            // ordering constraints instead.
+            const int eff_net_pull = topo.segments[si].is_dogleg_trunk ? 0 : cs.net_pull;
+            net_pull_map[key] = eff_net_pull;
+            if (eff_net_pull != 0) {
                 constexpr double kSentinel = 5e8;
                 double preferred;
-                if (cs.net_pull > 0)
+                if (eff_net_pull > 0)
                     preferred = (cs.perp_hi < kSentinel) ? static_cast<double>(cs.perp_hi)
                                                          : pull_map[key]; // fallback
                 else
@@ -1506,11 +1510,19 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     if (v_layer < 0) return {};
 
     // Rewrite the trunk as the left piece; append the right piece and the jog.
-    topo.segments[trunk_si] = Segment{ Point{x_lo, yL}, Point{jog_x, yL}, h_layer };
+    // The pieces are marked dogleg trunks (net-zero pull); the jog is marked so
+    // it is exempt from sibling alignment.
+    Segment piece_l{ Point{x_lo, yL}, Point{jog_x, yL}, h_layer };
+    piece_l.is_dogleg_trunk = true;
+    topo.segments[trunk_si] = piece_l;
     const int piece_r_idx = (int)topo.segments.size();
-    topo.segments.push_back(Segment{ Point{jog_x, yR}, Point{x_hi, yR}, h_layer });
+    Segment piece_r{ Point{jog_x, yR}, Point{x_hi, yR}, h_layer };
+    piece_r.is_dogleg_trunk = true;
+    topo.segments.push_back(piece_r);
     const int jog_idx = (int)topo.segments.size();
-    topo.segments.push_back(Segment{ Point{jog_x, yL}, Point{jog_x, yR}, v_layer, /*is_jog=*/true });
+    Segment jog{ Point{jog_x, yL}, Point{jog_x, yR}, v_layer };
+    jog.is_jog = true;
+    topo.segments.push_back(jog);
 
     auto set_layer = [&](int idx, int lid) {
         if ((int)bw.plan.seg_layers.size() <= idx) bw.plan.seg_layers.resize(idx + 1, -1);
