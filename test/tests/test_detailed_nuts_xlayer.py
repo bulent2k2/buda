@@ -50,9 +50,11 @@ def _detailed_shorts_and_unplaced(flow_path):
             if a.layer != b.layer or a.bundle_id == b.bundle_id:
                 continue
             same_track = abs(a.track_position - b.track_position) < 1e-6
-            # Strict span overlap: an end-to-end touch (spans meet) is allowed.
-            span_overlap = a.span_lo < b.span_hi and b.span_lo < a.span_hi
-            if same_track and span_overlap:
+            # Same track + different net: the span axis is CLOSED, so an
+            # end-to-end touch (a.span_hi == b.span_lo) counts as a short — that
+            # collinear bit-end butt is exactly the cross-layer failure mode here.
+            span_touch = a.span_lo <= b.span_hi and b.span_lo <= a.span_hi
+            if same_track and span_touch:
                 shorts += 1
     return shorts, sess.detailed_result.num_unplaced
 

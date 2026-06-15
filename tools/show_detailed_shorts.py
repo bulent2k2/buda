@@ -59,7 +59,9 @@ def main():
         hi = max(s.span_hi for s in segs)
         print(f"  B{key[0]}.s{key[1]} L{segs[0].layer}  tracks={tracks}  span=[{lo:.1f},{hi:.1f}]")
 
-    # A short: different nets, same layer, same track, overlapping (strict) spans.
+    # A short: different nets, same layer, same track, spans overlap OR touch.
+    # The span axis is CLOSED on the same track so an end-to-end touch
+    # (a.span_hi == b.span_lo) — collinear bit ends butting up — counts.
     shorts = []
     for i in range(len(ns)):
         a = ns[i]
@@ -68,7 +70,7 @@ def main():
             if a.layer != b.layer or a.bundle_id == b.bundle_id:
                 continue
             if abs(a.track_position - b.track_position) < 1e-6 and \
-               a.span_lo < b.span_hi and b.span_lo < a.span_hi:
+               a.span_lo <= b.span_hi and b.span_lo <= a.span_hi:
                 shorts.append((a, b))
 
     print(f"\n=== detailed shorts: {len(shorts)}  (unplaced bits: {sess.detailed_result.num_unplaced}) ===")
