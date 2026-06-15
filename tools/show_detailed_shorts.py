@@ -67,7 +67,10 @@ def main():
         a = ns[i]
         for j in range(i + 1, len(ns)):
             b = ns[j]
-            if a.layer != b.layer or a.bundle_id == b.bundle_id:
+            # Same net = same bundle AND same bit_index; different bits of one
+            # bus are distinct nets, so two of them on the same track short.
+            if a.layer != b.layer or (a.bundle_id == b.bundle_id and
+                                      a.bit_index == b.bit_index):
                 continue
             if abs(a.track_position - b.track_position) < 1e-6 and \
                a.span_lo <= b.span_hi and b.span_lo <= a.span_hi:
