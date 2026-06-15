@@ -3116,7 +3116,7 @@ class BudaVisualizer:
         self._btn_blocks.on_clicked(lambda _: self._toggle_blocks())
 
         ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_blknames = Button(ax_blknames, '☑ Blk Names', color='#e8f4e8')
+        self._btn_blknames = Button(ax_blknames, '☑ Names', color='#e8f4e8')
         self._btn_blknames.label.set_fontsize(7.5)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
 
@@ -3126,7 +3126,7 @@ class BudaVisualizer:
         self._btn_hanan.on_clicked(lambda _: self._toggle_hanan())
 
         ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_bustermss = Button(ax_bustermss, '☑ Busterms', color='#e8f4e8')
+        self._btn_bustermss = Button(ax_bustermss, '☑ Terminals', color='#e8f4e8')
         self._btn_bustermss.label.set_fontsize(7.5)
         self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
 
