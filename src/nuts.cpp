@@ -1157,6 +1157,158 @@ void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys)
     extra_y_ = std::move(ys);
 }
 
+void NUTSEngine::orientation_fixpoint(
+    std::vector<TrackSegment>& segments,
+    std::map<int, std::vector<TrackSegment*>>& by_layer,
+    const std::map<std::pair<int,int>, double>& pull_map,
+    const AlignMap& align_map,
+    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+    std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map) const
+{
+    if (by_layer.empty()) return;
+
+    // Partition populated layers into the two orientation groups.
+    std::vector<int> h_all = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
+    std::set<int>    h_set(h_all.begin(), h_all.end());
+    std::vector<int> h_group, v_group;
+    for (auto& [lid, segs] : by_layer) {
+        (void)segs;
+        if (h_set.count(lid)) h_group.push_back(lid);
+        else                  v_group.push_back(lid);
+    }
+
+    // Lead with the orientation of the lowest TOP layer (default rule); if no
+    // TOP layer is populated, fall back to the lowest populated layer.
+    int  lead_lid  = std::numeric_limits<int>::max();
+    bool found_top = false;
+    for (auto& [lid, segs] : by_layer) {
+        (void)segs;
+        const bool top = layers_.is_top(lid);
+        if (top && !found_top)                       { found_top = true; lead_lid = lid; }
+        else if (top == found_top && lid < lead_lid) { lead_lid = lid; }
+    }
+    const bool lead_is_h = h_set.count(lead_lid) > 0;
+    const std::vector<int>& lead_group = lead_is_h ? h_group : v_group;
+    const std::vector<int>& perp_group = lead_is_h ? v_group : h_group;
+
+    // Solve every layer in a group (reset first — GLOBAL re-solve), then
+    // propagate the freshly-pinned trunk positions to all connected spans so
+    // the next group packs against true extents.
+    auto solve_group = [&](const std::vector<int>& group) {
+        for (int lid : group) {
+            for (auto* ts : by_layer[lid]) {
+                ts->track_position = std::numeric_limits<double>::quiet_NaN();
+                ts->placed = false;
+            }
+            solve_layer(by_layer[lid], pull_map, align_map);
+        }
+        std::vector<TrackSegment*> all_placed;
+        for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
+        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+    };
+
+    // Only one orientation present: a single solve with no alternation.
+    if (lead_group.empty() || perp_group.empty()) {
+        solve_group(lead_group.empty() ? perp_group : lead_group);
+        return;
+    }
+
+    struct Snap { double pos, lo, hi; bool placed; };
+    auto take = [&]() {
+        std::vector<Snap> s; s.reserve(segments.size());
+        for (const auto& ts : segments)
+            s.push_back({ts.track_position, ts.span_lo, ts.span_hi, ts.placed});
+        return s;
+    };
+    auto restore = [&](const std::vector<Snap>& s) {
+        for (size_t k = 0; k < segments.size(); ++k) {
+            segments[k].track_position = s[k].pos;
+            segments[k].span_lo        = s[k].lo;
+            segments[k].span_hi        = s[k].hi;
+            segments[k].placed         = s[k].placed;
+        }
+    };
+    // Legacy per-layer order (ascending layer id, per-layer span adjustment,
+    // then a final all-layer pass) — exactly today's solve.  Used as the seed
+    // and the no-regression baseline: an alternating-group state is adopted only
+    // when it STRICTLY reduces overlaps, so on ties we keep this detail-feasible
+    // placement.  (Equal abstract overlap counts can differ in detailed-NUTS
+    // signal-track feasibility; the legacy order is the known-good one.)
+    auto legacy_solve = [&]() {
+        for (auto& [lid, segs] : by_layer) {
+            (void)lid;
+            for (auto* ts : segs) {
+                ts->track_position = std::numeric_limits<double>::quiet_NaN();
+                ts->placed = false;
+            }
+            solve_layer(segs, pull_map, align_map);
+            do_span_adjustments(segs, rev_conn_map, ts_ptr_map);
+        }
+        for (auto& [lid, segs] : by_layer) {
+            (void)lid;
+            do_span_adjustments(segs, rev_conn_map, ts_ptr_map);
+        }
+    };
+    // Integer-rounded placement fingerprint, to detect an oscillating (cyclic)
+    // fixpoint that never strictly improves.
+    auto state_hash = [&]() {
+        size_t h = 0;
+        auto mix = [&](long long v) {
+            h ^= std::hash<long long>{}(v) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        };
+        const long long unp = std::numeric_limits<long long>::min();
+        for (const auto& ts : segments) {
+            mix(ts.placed ? std::llround(ts.track_position) : unp);
+            mix(std::llround(ts.span_lo));
+            mix(std::llround(ts.span_hi));
+        }
+        return h;
+    };
+    // Total distance of placed segments from their planner-reserved band
+    // (pull_map preference) — a proxy for detailed-NUTS feasibility: the planner
+    // sized those bands for the bits, so a placement that strays from them risks
+    // a signal-track shortfall downstream.
+    auto pull_deviation = [&]() {
+        double dev = 0.0;
+        for (const auto& ts : segments) {
+            if (!ts.placed) continue;
+            auto it = pull_map.find({ts.bundle_id, ts.seg_idx});
+            if (it != pull_map.end()) dev += std::abs(ts.track_position - it->second);
+        }
+        return dev;
+    };
+
+    // Seed with the legacy order, then refine with alternating-group sweeps.
+    // Each full sweep is a deterministic function of the current spans, so the
+    // trajectory either reaches a fixed point (state repeats) or cycles — both
+    // caught by the repeated-state set.  Adopt a sweep only when it STRICTLY
+    // reduces overlaps; ties keep the legacy (detail-feasible) baseline.
+    legacy_solve();
+    size_t            best_ov    = find_overlaps(segments).size();
+    const double      legacy_dev = pull_deviation();
+    std::vector<Snap> best_snap  = take();
+    std::set<size_t>  seen{state_hash()};
+
+    // Adopt an alternating sweep only when it STRICTLY reduces overlaps without
+    // pushing buses further from their planner-reserved bands than the legacy
+    // placement did.  Raw overlap count alone is an unfair yardstick: the legacy
+    // placement's residual overlaps are cleaned up by the repair/resolve passes
+    // that run after this, whereas a sweep that "wins" on raw overlaps by
+    // evicting a bus from its reserved band only trades an abstract overlap for
+    // a detailed-NUTS signal-track shortfall.  The band-deviation guard keeps
+    // such trades out while still letting genuinely better sweeps through.
+    const int kMaxIters = 12;
+    for (int iter = 0; iter < kMaxIters && best_ov > 0; ++iter) {
+        solve_group(lead_group);
+        solve_group(perp_group);
+        const size_t n = find_overlaps(segments).size();
+        const double d = pull_deviation();
+        if (n < best_ov && d <= legacy_dev + 1e-6) { best_ov = n; best_snap = take(); }
+        if (!seen.insert(state_hash()).second) break;    // repeated state — converged/cycle
+    }
+    restore(best_snap);
+}
+
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
@@ -1180,14 +1332,12 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles) {
     std::map<int, std::vector<TrackSegment*>> by_layer;
     for (auto& ts : result.segments)
         by_layer[ts.layer].push_back(&ts);
-    for (auto& [layer_id, layer_segs] : by_layer) {
-        solve_layer(layer_segs, pull_map, align_map);
-        do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
-    }
-    // Final pass for all layers to catch cross-layer adjustments from the last-solved layer.
-    for (auto& [layer_id, layer_segs] : by_layer) {
-        do_span_adjustments(layer_segs, rev_conn_map, ts_ptr_map);
-    }
+    // Alternating orientation-group fixpoint: solve a whole orientation group,
+    // propagate spans to the perpendicular group, solve it, propagate back, and
+    // iterate — so each group packs against the other's already-stretched spans
+    // instead of stale ones.  Replaces the naive per-layer loop.
+    orientation_fixpoint(result.segments, by_layer, pull_map, align_map,
+                         rev_conn_map, ts_ptr_map);
     // The final adjustments can extend spans of layers packed earlier,
     // materialising overlaps after their solve — repair them in place.
     repair_overlaps(result.segments, pull_map, net_pull_map, align_map,

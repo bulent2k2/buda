@@ -151,6 +151,24 @@ private:
                      const AlignMap& align_map,
                      const LayerConstraints& constraints = {}) const;
 
+    // Alternating orientation-group fixpoint: solve a whole orientation group
+    // (all H or all V) at once, propagate spans to the perpendicular group,
+    // solve that, propagate back, and iterate to a fixpoint.  Each group thus
+    // packs against the OTHER group's already-stretched spans — proactive
+    // ordering rather than reactive repair.  Leads with the orientation of the
+    // lowest TOP layer.  Keeps the best-by-overlap-count state; stops on no
+    // strict overlap drop or a repeated placement state (a genuine cyclic
+    // vertical constraint).  Replaces the naive per-layer solve loop; the
+    // existing repair_overlaps / resolve_corner_overlaps run after it as a
+    // safety net.
+    void orientation_fixpoint(
+        std::vector<TrackSegment>& segments,
+        std::map<int, std::vector<TrackSegment*>>& by_layer,
+        const std::map<std::pair<int,int>, double>& pull_map,
+        const AlignMap& align_map,
+        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+        std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map) const;
+
     // Post-span-adjustment overlap repair: the final cross-layer span
     // adjustments can extend spans of already-packed layers, materialising
     // overlaps after packing.  Re-places victims of overlapping pairs within
