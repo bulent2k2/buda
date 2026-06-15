@@ -1098,7 +1098,7 @@ class TopologyExplorer:
         bus_label = f"/{self.wrappers[self.bidx].path} " if hasattr(self.wrappers[self.bidx], 'path') else ""
 
         topo = self.topos[self.idx]
-        wl   = topo.wirelength
+        wl   = topo.estimated_wirelength
         sel  = self._find_selection(self.wrapper)
         is_current_selection = (sel is not None and sel.get('topo_index_hint', -1) == self.idx)
         sel_badge = " ★" if is_current_selection else ""
