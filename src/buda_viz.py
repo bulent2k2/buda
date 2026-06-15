@@ -1124,7 +1124,7 @@ class TopologyExplorer:
             p_sum = 0.0
             for conn in cs.conns:
                 if conn.kind == ic.SegConnKind.SEG:
-                    adj_idx = conn.other_seg_index
+                    adj_idx = conn.seg_idx
                     if 0 <= adj_idx < len(cs_list):
                         p_sum += (_draw_perp[adj_idx] - _draw_perp[i])
             _pull_len[i] = p_sum * 0.15   # scale for visualization
@@ -1132,7 +1132,7 @@ class TopologyExplorer:
             # Adjust endpoints to touch connecting segments if they are close to the boundary
             for conn in cs.conns:
                 if conn.kind != ic.SegConnKind.SEG: continue
-                adj_idx = conn.other_seg_index
+                adj_idx = conn.seg_idx
                 if not (0 <= adj_idx < len(cs_list)): continue
                 adj = _draw_perp[adj_idx]
                 if abs(conn.at_pos - cs.along_lo) <= 1:
