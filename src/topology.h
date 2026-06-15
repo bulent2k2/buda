@@ -50,6 +50,11 @@ struct Rect {
 struct Segment {
     Point start, end;
     int layer_hint = 0;
+    // True for a dogleg JOG: the short perpendicular segment NUTS inserts to
+    // bridge two collinear trunk pieces on different tracks.  Marked so build_
+    // nuts_maps excludes it from same-bundle alignment (it must stay on its own
+    // column, not snap onto a sibling stub's track).
+    bool is_jog = false;
 };
 // A busterm is a connection point on a block face.  Currently represented by
 // the block name and its bounding box; can be refined to a pin location later.

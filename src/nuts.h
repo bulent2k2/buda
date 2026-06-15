@@ -167,7 +167,8 @@ private:
         const std::map<std::pair<int,int>, double>& pull_map,
         const AlignMap& align_map,
         const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-        std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map) const;
+        std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map,
+        const std::map<int, LayerConstraints>& seed_cons = {}) const;
 
     // Post-span-adjustment overlap repair: the final cross-layer span
     // adjustments can extend spans of already-packed layers, materialising
