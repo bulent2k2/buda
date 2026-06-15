@@ -282,3 +282,96 @@ def test_optimize_placement_ga(tmp_path):
         b = state.block(name)
         assert b.x1 >= 0 and b.y1 >= 0
         assert b.x2 <= 1000 and b.y2 <= 800
+
+
+def test_optimize_demo_tc1_overlap_storm(tmp_path):
+    """40 blocks all stacked at origin; 80 buses × 64 bits; SA must yield a legal placement."""
+    import buda
+    import random
+    rng = random.Random(42)
+
+    die_w, die_h, grid = 3000.0, 2400.0, 10.0
+    state = fpc.create_bdb(str(tmp_path / "tc1.bdb"), die_w, die_h, grid=grid)
+
+    sizes = [(rng.randint(6, 30) * 10, rng.randint(4, 20) * 10) for _ in range(40)]
+    names = [f"blk_{i:02d}" for i in range(40)]
+    for name, (w, h) in zip(names, sizes):
+        fpc.add_block(state, name, 0, 0, w, h)
+
+    opt = buda.PlacementOptimizer(die_w, die_h, grid)
+    for name, (w, h) in zip(names, sizes):
+        opt.add_block(name, w, h)
+
+    # 80 buses × 64 bits = 5 120 two-pin nets; buses weight wider connections more
+    pairs = [(rng.randint(0, 39), rng.randint(0, 39)) for _ in range(80)]
+    pairs = [(a, (b + 1) % 40 if b == a else b) for a, b in pairs]
+    for a_idx, b_idx in pairs:
+        an, (aw, ah) = names[a_idx], sizes[a_idx]
+        bn, (bw, bh) = names[b_idx], sizes[b_idx]
+        for _ in range(64):
+            opt.add_net([(an, (aw / 2, ah / 2)), (bn, (bw / 2, bh / 2))])
+
+    # Normalize w_wl so one net contributes the same as in single-bus tests;
+    # without this, 5120 nets swamp the overlap penalty and SA never fully legalizes.
+    n_nets = 80 * 64
+    result = opt.run_sa(max_iter=50_000, w_wl=1.0 / n_nets, seed=1)
+
+    for pb in result.placements:
+        state.engine.resize_block_raw(pb.name, pb.x, pb.y, pb.x + pb.w, pb.y + pb.h)
+
+    assert result.overlap < 1.0, f"TC1 overlap={result.overlap:.1f} did not converge to 0"
+    for name in names:
+        b = state.block(name)
+        assert b.x1 >= 0 and b.y1 >= 0
+        assert b.x2 <= die_w and b.y2 <= die_h
+
+
+def test_optimize_demo_tc2_fixed_io(tmp_path):
+    """io_pad pinned at origin; 39 free blocks; 80 buses × 64 bits; SA leaves io_pad unmoved."""
+    import buda
+    import random
+    rng = random.Random(99)
+
+    die_w, die_h, grid = 3000.0, 2400.0, 10.0
+    state = fpc.create_bdb(str(tmp_path / "tc2.bdb"), die_w, die_h, grid=grid)
+
+    io_w, io_h = 100.0, 80.0
+    fpc.add_block(state, "io_pad", 0, 0, io_w, io_h)
+
+    free_sizes = [(rng.randint(8, 30) * 10, rng.randint(5, 20) * 10) for _ in range(39)]
+    free_names = [f"blk_{i:02d}" for i in range(39)]
+    for name, (w, h) in zip(free_names, free_sizes):
+        fpc.add_block(state, name, 0, 0, w, h)
+
+    all_names = ["io_pad"] + free_names
+    all_sizes = [(io_w, io_h)] + free_sizes
+
+    opt = buda.PlacementOptimizer(die_w, die_h, grid)
+    opt.add_block_ex("io_pad", io_w, io_h, 0.0, 0.0, 0.0, 0.0, True, False)
+    for name, (w, h) in zip(free_names, free_sizes):
+        opt.add_block(name, w, h)
+
+    # First 20 buses connect io_pad to a free block; remaining 60 connect free pairs
+    pairs = [(0, rng.randint(1, 39)) for _ in range(20)] + \
+            [(rng.randint(0, 39), rng.randint(0, 39)) for _ in range(60)]
+    pairs = [(a, (b + 1) % 40 if b == a else b) for a, b in pairs]
+    for a_idx, b_idx in pairs:
+        an, (aw, ah) = all_names[a_idx], all_sizes[a_idx]
+        bn, (bw, bh) = all_names[b_idx], all_sizes[b_idx]
+        for _ in range(64):
+            opt.add_net([(an, (aw / 2, ah / 2)), (bn, (bw / 2, bh / 2))])
+
+    n_nets = 80 * 64
+    result = opt.run_sa(max_iter=50_000, w_wl=1.0 / n_nets, seed=2)
+
+    for pb in result.placements:
+        state.engine.resize_block_raw(pb.name, pb.x, pb.y, pb.x + pb.w, pb.y + pb.h)
+
+    io_pb = next(pb for pb in result.placements if pb.name == "io_pad")
+    assert io_pb.x == 0.0 and io_pb.y == 0.0, \
+        f"io_pad moved to ({io_pb.x}, {io_pb.y}) but must stay fixed at (0, 0)"
+    assert result.overlap < 1.0, f"TC2 overlap={result.overlap:.1f} did not converge to 0"
+    for name in all_names:
+        b = state.block(name)
+        assert b.x1 >= 0 and b.y1 >= 0
+        assert b.x2 <= die_w and b.y2 <= die_h
