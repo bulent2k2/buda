@@ -1,0 +1,43 @@
+#!/bin/bash
+# bfp — BUDA Floorplanner launcher with built-in demo scenarios.
+#
+# Usage:
+#   ./bfp tc1 [output.bdb]       create TC1 (40-block overlap storm), open in fp
+#   ./bfp tc2 [output.bdb]       create TC2 (fixed io_pad + 39 free blocks), open in fp
+#   ./bfp path/to/file.bdb       open existing BDB directly in fp
+#   ./bfp path/to/script.buda    run ./buda <script> then open the BDB it declared
+#   ./bfp                        open fp with no file (blank canvas)
+
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
+
+case "$1" in
+  tc1|tc2)
+    DEMO="$1"
+    OUT="${2:-/tmp/bfp_${DEMO}.bdb}"
+    python3 "$PROJECT_ROOT/tools/fp_demo.py" "$DEMO" "$OUT" || exit 1
+    exec python3 "$PROJECT_ROOT/tools/bdb_floorplanner.py" "$OUT"
+    ;;
+
+  *.buda)
+    SCRIPT="$(realpath "$1")"
+    SCRIPT_DIR="$(dirname "$SCRIPT")"
+    BDB_RAW=$(grep -m1 '^open_bdb ' "$SCRIPT" | awk '{print $2}')
+    if [ -z "$BDB_RAW" ]; then
+      echo "bfp: no 'open_bdb' line found in $1" >&2
+      exit 1
+    fi
+    # Resolve relative paths the same way buda_cli.py does (relative to script dir)
+    if [[ "$BDB_RAW" = /* ]]; then
+      BDB="$BDB_RAW"
+    else
+      BDB="$SCRIPT_DIR/$BDB_RAW"
+    fi
+    "$PROJECT_ROOT/buda" "$SCRIPT" || exit 1
+    exec python3 "$PROJECT_ROOT/tools/bdb_floorplanner.py" "$BDB"
+    ;;
+
+  *)
+    exec python3 "$PROJECT_ROOT/tools/bdb_floorplanner.py" "$@"
+    ;;
+esac
