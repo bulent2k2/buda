@@ -253,18 +253,30 @@ def test_planner3_window_capacity_avoids_double_booked_trunk():
 
 
 # ---------------------------------------------------------------------------
-# channel_stress.buda — stress-tests NUTS channel packing.
-# Regression: verifying that the stress flow runs to completion successfully.
-# Overlap/violation counts are the flow's stress payload and intentionally
-# not pinned here.
+# channel_stress.buda — stress-tests NUTS channel packing (62 bundles, 200 nets
+# in a 340-unit channel).  The raw run_nuts leaves many channel overlaps (the
+# stress payload), but post_nuts redistribution onto M3/M7 plus the corner-
+# overlap pass now pack it CLEANLY: the final NUTS state and detailed NUTS are
+# both overlap-free (previously the per-layer reruns bottomed out at 4).
 # ---------------------------------------------------------------------------
 
-def test_channel_stress_runs_to_completion():
+def test_channel_stress_packs_clean():
     out, rc = run_script("channel_stress.buda")
     assert rc == 0, f"channel_stress.buda crashed (exit {rc})\n{out[-2000:]}"
     assert "Fatal Python error" not in out
-    # The pipeline must still run to completion
-    nuts_summary(out)
+    # Pin the end state: the last full NUTS summary is overlap/violation-free,
+    # and detailed NUTS places every bit.
+    finals = re.findall(
+        r"\[NUTS\] \d+ segments placed.*?"
+        r"Interval violations: (\d+), Track overlaps: (\d+)", out)
+    assert finals, "no NUTS summary found"
+    last_viol, last_ovlp = finals[-1]
+    assert int(last_ovlp) == 0, f"channel_stress final overlaps {last_ovlp} (expected 0)"
+    assert int(last_viol) == 0
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(2)) == 0
 
 
 # ---------------------------------------------------------------------------
