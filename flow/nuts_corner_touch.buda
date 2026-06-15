@@ -1,0 +1,51 @@
+# From nuts_corner_overlap_3layer.buda
+# 
+# Corner-overlap resolution in a THREE-TOP-layer stack (M4/M5/M6).
+#
+# Companion to nuts_corner_overlap.buda (2-layer M5/M6).  Here the stack has
+# three TOP layers; NUTS solves them in ascending order M4 → M5 → M6.  An M6
+# keepout across the trunk corridor forces both Z-topo H-trunks down onto M4 —
+# the FIRST layer solved — so this exercises the corner-overlap pass deriving a
+# vertical constraint on the first-solved layer (the 2-layer test constrains the
+# last-solved M6 instead).  Same geometry/conflict as the 2-layer case: u1 and u3
+# share the x≈90 column, so V1a (grows up) and V2a (grows down) cross unless H1 is
+# placed below H2.  The pass detects the overlap, orders the M4 trunks, and clears
+# both the track overlap and the detailed-NUTS bits it caused.
+
+def_layer 4 M4 H TOP 52.94
+def_layer 5 M5 V TOP 50.00
+def_layer 6 M6 H TOP 52.94
+def_track_pattern 4 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 5    0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 6 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+
+add_block u1    80   50   100 100
+add_block u2    150  50   200 100
+add_block u3    80  150   100 200
+add_block u4    175 150   225 200
+
+# Block the M6 trunk corridor so both H trunks must use M4 (solved first).
+# add_keepout 60 105 240 145 M6
+
+add_bus x[4]  u1.o u4.i
+add_bus y[4]  u3.o u2.i
+
+run_bundler strict
+
+corner_margin dy 2 dx 2
+set_min_stub_length 2
+generate_topologies
+check_connectivity topo
+
+# force the corner overlap
+# bundle one has a layer assignment, too
+#select_topologies 1,2 4
+select_topologies 2 4
+run_planner 1
+
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize

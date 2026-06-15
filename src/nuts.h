@@ -63,11 +63,18 @@ struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
 // multicast trunk's two opposite stubs onto one band.
 using AlignMap = std::map<std::pair<int,int>, std::vector<std::pair<int,int>>>;
 
-// Ordering constraints for corner-overlap resolution: key → the set of
-// same-layer segments that must be placed BELOW it (a lower track).  Built
-// lazily from detected corner overlaps and fed back into solve_layer (phase 0).
-using OrderConstraints =
-    std::map<std::pair<int,int>, std::set<std::pair<int,int>>>;
+// Constraints for one layer's phase-0 corner-overlap resolution, fed back into
+// solve_layer.  Two kinds, both built lazily from detected corner overlaps:
+//   preds  — key → same-layer segments that must sit BELOW it (relative
+//            ordering; same-trunk-layer pairs, bottom-edge packed).
+//   bounds — key → fixed track-coordinate bounds [lo, hi] for cross-trunk-layer
+//            pairs (a trunk nudged to one side of a split coordinate); placed by
+//            preferred_fit toward the nearer bound.  Default {-inf, +inf}.
+struct LayerConstraints {
+    std::map<std::pair<int,int>, std::set<std::pair<int,int>>> preds;
+    std::map<std::pair<int,int>, std::pair<double,double>>     bounds;
+    bool empty() const { return preds.empty() && bounds.empty(); }
+};
 
 class NUTSEngine {
 public:
@@ -115,13 +122,13 @@ private:
     // pull_map: (bundle_id, seg_idx) -> preferred perpendicular centre; absent entries
     // fall back to first-fit (lowest valid) behaviour.
     // align_map: same-bundle sibling preference (see AlignMap).
-    // order_preds: optional ordering constraints (corner-overlap resolution) —
-    // a constrained segment is placed in a phase-0 pass above all its
-    // predecessors before the normal anchor/sweep phases.  Empty = no change.
+    // constraints: optional phase-0 corner-overlap constraints (relative
+    // ordering and/or fixed track bounds).  Constrained segments are placed
+    // first, before the normal anchor/sweep phases.  Empty = no change.
     void solve_layer(std::vector<TrackSegment*>& segs,
                      const std::map<std::pair<int,int>, double>& pull_map,
                      const AlignMap& align_map,
-                     const OrderConstraints& order_preds = {}) const;
+                     const LayerConstraints& constraints = {}) const;
 
     // Post-span-adjustment overlap repair: the final cross-layer span
     // adjustments can extend spans of already-packed layers, materialising
@@ -136,22 +143,21 @@ private:
         const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
         std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
 
-    // Corner-overlap resolution (vertical-constraint style): two span-stretched
-    // segments that collide on a layer can't be separated by moving either
-    // (they're perp-locked) — only by reordering the trunks they hang from.
-    // Detect such overlaps, derive trunk ordering edges from the segments'
-    // anchored (non-stretched) ends, re-solve the affected trunk layer under the
-    // accumulated constraints, and keep the result only while the total overlap
-    // count strictly drops (stop-&-reverse).  `stretched` = spans grown by the
-    // preceding span adjustments; the pass short-circuits when it is empty.
+    // Corner-overlap resolution (vertical-constraint style): two stubs that
+    // collide on a layer can't be separated by moving either (they're
+    // perp-locked) — only by adjusting the trunks they hang from.  Same trunk
+    // layer → order the trunks (anchored-end rule, bottom-edge pack).  Different
+    // trunk layers → nudge each trunk within its own layer to opposite sides of
+    // a split.  Re-solve the affected trunk layer(s) under the accumulated
+    // constraints; keep the result only while the total overlap count strictly
+    // drops and no new interval violation appears (stop-&-reverse).
     void resolve_corner_overlaps(
         std::vector<TrackSegment>& segments,
         const std::map<std::pair<int,int>, double>&                pull_map,
         const std::map<std::pair<int,int>, int>&                   net_pull_map,
         const AlignMap&                                            align_map,
         const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
-        const std::set<std::pair<int,int>>&                        stretched) const;
+        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
 
     // First-fit: lowest valid placement position within [lo, hi].
     // Returns NaN if the interval is infeasible.
