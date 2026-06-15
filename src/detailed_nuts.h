@@ -48,6 +48,12 @@ struct BusSegment {
 
     // Abstract NUTS track_position used as anchor for Option B ordering; NaN = unset (fallback)
     double      abstract_pos      = std::numeric_limits<double>::quiet_NaN();
+
+    // Cross-trunk-layer corner resolution: restrict this segment's signal-track
+    // choice to [track_lo_bound, track_hi_bound] so it stays on the bounded side
+    // of the split (carried from the abstract trunk's bound).  Default = unbounded.
+    double      track_lo_bound    = -std::numeric_limits<double>::infinity();
+    double      track_hi_bound    =  std::numeric_limits<double>::infinity();
 };
 
 struct NetSegment {

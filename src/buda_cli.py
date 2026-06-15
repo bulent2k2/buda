@@ -1212,6 +1212,10 @@ class BudaSession:
             bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
             bs.bit_order   = bit_order
             bs.abstract_pos = ts.track_position
+            # Cross-layer corner split bounds (carried into detailed NUTS so the
+            # trunk's bits snap to its committed side on real signal tracks).
+            bs.track_lo_bound = ts.track_lo_bound
+            bs.track_hi_bound = ts.track_hi_bound
 
             # Populate connections from ConnTopology.
             cs_list = bid_to_cs.get(ts.bundle_id, [])

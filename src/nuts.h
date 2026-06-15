@@ -39,6 +39,11 @@ struct TrackSegment {
     double track_position = std::numeric_limits<double>::quiet_NaN(); // assigned output; NaN = unplaced
     bool   placed   = false;
     int    net_pull = 0;                  // from ConnSeg: >0 prefer hi, <0 prefer lo
+    // Cross-trunk-layer corner resolution: the committed fixed track bound for
+    // this trunk (one side of a split).  Carried into detailed NUTS so its bits
+    // snap to the bounded side on real signal tracks.  Default = unbounded.
+    double track_lo_bound = -std::numeric_limits<double>::infinity();
+    double track_hi_bound =  std::numeric_limits<double>::infinity();
 };
 
 // Exact geometry of one overlap pair, after placement.

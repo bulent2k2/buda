@@ -97,6 +97,22 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             double x = (bs.span_lo + bs.span_hi) / 2.0;
 
             auto signal_tracks = grid.signal_tracks_in(x, bs.interval_lo, bs.interval_hi);
+
+            // Cross-layer corner bound (carried from abstract NUTS): keep only
+            // signal tracks on this trunk's committed side of the split, so it
+            // cannot snap onto the other trunk's side and short the stubs that
+            // hang off both.  Default bounds are ±inf (no-op).  If the bounded
+            // side lacks bit_width tracks, the n_sig check below reports the bits
+            // unplaced — an honest spacing failure rather than a silent short.
+            if (bs.track_lo_bound > -std::numeric_limits<double>::infinity() ||
+                bs.track_hi_bound <  std::numeric_limits<double>::infinity()) {
+                std::vector<std::pair<double, TrackSlot>> kept;
+                kept.reserve(signal_tracks.size());
+                for (auto& t : signal_tracks)
+                    if (t.first >= bs.track_lo_bound && t.first <= bs.track_hi_bound)
+                        kept.push_back(t);
+                signal_tracks.swap(kept);
+            }
             int n_sig = (int)signal_tracks.size();
 
             if (n_sig < bs.bit_width) {
