@@ -161,10 +161,12 @@ def _toggle_fullscreen(fig):
         mgr.full_screen_toggle()
 
 def raise_window(win_or_fig):
-    """Bring a window or figure to the front (best-effort; backend-dependent)."""
+    """Bring a window or figure to the front and ensure it has keyboard focus."""
     win = None
+    canvas = None
     if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
-        mgr = win_or_fig.canvas.manager
+        canvas = win_or_fig.canvas
+        mgr = canvas.manager
         if mgr is not None:
             win = getattr(mgr, "window", None)
             if win is None and hasattr(mgr, "canvas"):
@@ -186,12 +188,10 @@ def raise_window(win_or_fig):
 
     if win is not None:
         # macOS specific: force process to front using AppleScript.
-        # This is the most reliable way to steal focus from the terminal.
         if sys.platform == "darwin":
             try:
                 import subprocess
                 pid = os.getpid()
-                # Use both unix id AND process name "Python" as backup
                 as_cmd = f'tell application "System Events" to set frontmost of every process whose unix id is {pid} to true'
                 subprocess.run(["osascript", "-e", as_cmd], capture_output=True)
             except Exception:
@@ -201,11 +201,24 @@ def raise_window(win_or_fig):
         if hasattr(win, "lift"):
             try:
                 win.lift()
-                # Try focus_force immediately AND with a slight delay to ensure it catches after mapping
+                # Focus the window
                 if hasattr(win, "focus_force"):
                     win.focus_force()
-                    if hasattr(win, "after"):
-                        win.after(100, win.focus_force)
+                
+                # CRITICAL: Also focus the canvas widget specifically.
+                # key_press_event often only fires when the canvas has focus.
+                if canvas is not None and hasattr(canvas, "get_tk_widget"):
+                    try:
+                        cw = canvas.get_tk_widget()
+                        cw.focus_force()
+                        # Also schedule a delayed focus in case mapping is slow
+                        if hasattr(win, "after"):
+                            win.after(150, cw.focus_force)
+                    except Exception:
+                        pass
+                elif hasattr(win, "after"):
+                    # Fallback for non-matplotlib windows
+                    win.after(150, win.focus_force)
 
                 if hasattr(win, "attributes"):
                     win.attributes("-topmost", True)
