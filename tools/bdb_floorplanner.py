@@ -486,6 +486,7 @@ class BdbFloorplanner:
                 ax.set_ylim(-margin, dh + margin)
 
         visible = self._visible_names()
+        extra_levels = self._overlay_depth.get()
         for name in visible:
             try:
                 block = self.state.block(name)
@@ -497,7 +498,7 @@ class BdbFloorplanner:
                 facecolor="#8ecae6" if selected else "#d9e8f5",
                 edgecolor="#0f172a" if selected else "#475569",
                 linewidth=2.0 if selected else 0.9,
-                alpha=0.92, picker=True, zorder=2)
+                alpha=0.30 if extra_levels > 0 else 0.92, picker=True, zorder=2)
             ax.add_patch(patch)
             self._patch_to_name[patch] = name
             label = name.split("/")[-1]
@@ -519,8 +520,7 @@ class BdbFloorplanner:
                     ax.add_patch(hp)
                     self._handle_patches.append((hp, name, corner))
 
-        # Depth overlay: draw child blocks at reduced opacity without interaction
-        extra_levels = self._overlay_depth.get()
+        # Depth overlay: draw child blocks above parents so they are visible
         if extra_levels > 0:
             def _draw_overlay(parent_name: str, remaining: int, alpha: float):
                 for child in self._children_of(parent_name):
@@ -530,15 +530,15 @@ class BdbFloorplanner:
                         continue
                     ax.add_patch(mpatches.Rectangle(
                         (cb.x1, cb.y1), cb.x2 - cb.x1, cb.y2 - cb.y1,
-                        facecolor="#fde68a", edgecolor="#92400e",
-                        linewidth=0.6, alpha=alpha, picker=False, zorder=1.5))
+                        facecolor="#fed7aa", edgecolor="#ea580c",
+                        linewidth=1.8, alpha=alpha, picker=False, zorder=2.5))
                     ax.text(cb.x1 + 2, cb.y1 + 2, child.split("/")[-1],
-                            fontsize=6, color="#78350f", alpha=alpha,
-                            clip_on=True, zorder=1.6)
+                            fontsize=7, color="#7c2d12", alpha=alpha,
+                            clip_on=True, zorder=2.6)
                     if remaining > 1:
-                        _draw_overlay(child, remaining - 1, alpha * 0.65)
+                        _draw_overlay(child, remaining - 1, alpha * 0.72)
             for name in visible:
-                _draw_overlay(name, extra_levels, 0.5)
+                _draw_overlay(name, extra_levels, 0.85)
 
         self._update_selection_label()
         if not zoom_set:
