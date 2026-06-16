@@ -1,0 +1,39 @@
+def_layer 4 M4 H TOP 52.94
+def_layer 5 M5 V TOP 50.00
+#def_layer 6 M6 H TOP 52.94
+def_track_pattern 4 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+def_track_pattern 5    0  POWER 3 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+#def_track_pattern 6 -400  POWER 4 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 4 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
+
+add_block bot1     50  50   100 100
+add_block bot2    150  50   200 100
+add_block bot3    250  50   300 100
+add_block top1     50 350   100 400
+add_block top2    150 350   200 400
+add_block top3    250 350   300 400
+# move so that bot3 (xcenter=275) is at exact midpoint between top1 and top4:
+# top1 xcenter=75. 75 + x = 550 => 475
+add_block top4    450 350   500 400
+
+add_bus x[8]  bot1.o top2.i
+add_bus y[8]  bot2.o top3.i
+add_bus z[8]  bot3.o top1.i,top4.i
+
+run_bundler strict
+
+corner_margin dy 2 dx 2
+set_min_stub_length 2
+generate_topologies
+check_connectivity topo
+
+# force a cycle:
+select_topologies 1,2 4
+select_topologies 3 5
+run_planner 1
+
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+
+visualize

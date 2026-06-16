@@ -282,7 +282,7 @@ static void do_span_adjustments(
     std::map<std::pair<int,int>, TrackSegment*>&                     ts_ptr_map,
     bool                                                             only_unplaced = false)
 {
-    struct AdjReq { double center; bool lo_end; bool is_endpoint; };
+    struct AdjReq { double center; bool lo_end; bool is_endpoint; bool from_jog; };
     std::map<std::pair<int,int>, std::vector<AdjReq>> adj_map;
 
     for (const TrackSegment* ts : layer_segs) {
@@ -296,7 +296,7 @@ static void do_span_adjustments(
             TrackSegment* other = jt->second;
             if (only_unplaced && other->placed) continue;
             adj_map[{sc.src_bid, sc.src_si}].push_back(
-                {ts->track_position, sc.lo_end, sc.is_endpoint});
+                {ts->track_position, sc.lo_end, sc.is_endpoint, ts->is_jog});
         }
     }
 
@@ -304,30 +304,39 @@ static void do_span_adjustments(
         auto jt = ts_ptr_map.find(key);
         if (jt == ts_ptr_map.end()) continue;
         TrackSegment* other = jt->second;
-        
+
         bool has_lo = false, has_hi = false;
         double min_lo = std::numeric_limits<double>::infinity();
         double max_hi = -std::numeric_limits<double>::infinity();
         bool all_lo_endpoints = true, all_hi_endpoints = true;
+        // A dogleg piece's inner end is DEFINED by the jog it meets: when the jog
+        // slides, that end must track it (contract, not just extend).  The piece's
+        // nominal span was set at the pre-slide split column, so extend-only would
+        // leave it overstretched past a jog that slid inward.  Treat an endpoint
+        // connection to a jog as authoritative for that end even when an interior
+        // tap (e.g. a multicast driver stub on the split column) shares it.
+        bool lo_jog = false, hi_jog = false;
 
         for (const auto& req : reqs) {
             if (req.lo_end) {
                 has_lo = true;
                 min_lo = std::min(min_lo, req.center);
                 if (!req.is_endpoint) all_lo_endpoints = false;
+                if (req.from_jog && req.is_endpoint) lo_jog = true;
             } else {
                 has_hi = true;
                 max_hi = std::max(max_hi, req.center);
                 if (!req.is_endpoint) all_hi_endpoints = false;
+                if (req.from_jog && req.is_endpoint) hi_jog = true;
             }
         }
 
         if (has_lo) {
-            if (all_lo_endpoints) other->span_lo = min_lo;
+            if (all_lo_endpoints || lo_jog) other->span_lo = min_lo;
             else other->span_lo = std::min(other->span_lo, min_lo);
         }
         if (has_hi) {
-            if (all_hi_endpoints) other->span_hi = max_hi;
+            if (all_hi_endpoints || hi_jog) other->span_hi = max_hi;
             else other->span_hi = std::max(other->span_hi, max_hi);
         }
     }

@@ -168,6 +168,37 @@ def test_dogleg_subtrunks_share_slide_multicast():
     _check_subtrunks_share_slide("dogleg2.buda")
 
 
+def test_dogleg_aligned_stub_no_overstretch():
+    # Repro of the "original stub on the jog column" case: top1/top4 are placed
+    # symmetric about bot3, so the multicast driver stub (bot3) sits exactly on
+    # the jog column and becomes an interior tap on the split trunk.  The lower
+    # sub-trunk must meet the jog where it actually slid to, not stay stretched
+    # to the pre-slide split column — span_adjustments must CONTRACT a piece's
+    # inner end to the jog (an interior tap at that end must not block it).
+    sess = _run("dogleg2-aligned-dogleg-stub.buda")
+    assert sess.nuts_result.dogleg_topologies, "expected a dogleg"
+    assert sess.nuts_result.num_overlaps == 0, \
+        f"abstract overlaps {sess.nuts_result.num_overlaps} (expected 0)"
+    assert sess.detailed_result.num_unplaced == 0
+    assert _detailed_shorts(sess) == 0
+    for bid in sess.nuts_result.dogleg_topologies:
+        jogs = [t for t in sess.nuts_result.segments if t.bundle_id == bid and t.is_jog]
+        pieces = [t for t in sess.nuts_result.segments if t.bundle_id == bid and t.horiz]
+        assert len(jogs) == 1 and len(pieces) == 2
+        jx = jogs[0].track_position
+        a, b = pieces
+        # The two sub-trunks meet AT the jog column; they must not overlap in the
+        # routing direction beyond it (an overstretched piece straddles the jog
+        # and overlaps its sibling's span — wasted, mis-placed abstract footprint).
+        overlap = min(a.span_hi, b.span_hi) - max(a.span_lo, b.span_lo)
+        assert overlap <= 1e-6, \
+            f"sub-trunks overlap in span by {overlap} (overstretch past the jog)"
+        # Each piece terminates exactly at the jog column on its inner end.
+        for p in (a, b):
+            assert abs(p.span_lo - jx) < 1e-6 or abs(p.span_hi - jx) < 1e-6, \
+                f"piece span [{p.span_lo},{p.span_hi}] does not meet the jog at {jx}"
+
+
 def test_dogleg_resolution_survives_resolve():
     # Re-running NUTS on the adopted (doglegged) bundle must stay resolved: the
     # adoption carries the mutated seg_perp / seg_net_pull / seg_slide, so the
