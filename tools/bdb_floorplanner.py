@@ -1270,7 +1270,11 @@ def main():
     app = BdbFloorplanner(root)
     if len(sys.argv) > 1:
         path = sys.argv[1]
-        if os.path.exists(path):
+        if not os.path.exists(path):
+            app._status.set(f"File not found: {path}")
+            messagebox.showerror("File Not Found",
+                                 f"Cannot open BDB — file not found:\n{path}")
+        else:
             app.state = fpc.load_bdb(path)
             app._path = []
             app._bdb_var.set(path)
