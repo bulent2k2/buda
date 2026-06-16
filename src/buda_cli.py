@@ -1269,6 +1269,15 @@ class BudaSession:
         self._dogleg_slot.pop(bid, None)
         self._dogleg_originals.pop(bid, None)
 
+    @staticmethod
+    def _pin_instance(pin):
+        """Instance (block) name for a pin, matching the bundler's rule
+        (bundler.cpp: substr up to the LAST '.').  A block name may itself contain
+        dots (e.g. 'u.core' with pin 'u.core.tx'), so split on the last dot, not the
+        first — otherwise the endpoint resolves to 'u' and misroutes / fails to
+        validate against the real block 'u.core'."""
+        return pin.rsplit('.', 1)[0]
+
     def _validate_endpoint_blocks(self, net_name, src, dsts):
         """Fatal input validation: every block a net/bus connects to must exist in
         the floorplan.  get_block_bounds() silently returns {0,0,0,0} for an unknown
@@ -1583,8 +1592,8 @@ class BudaSession:
             inout_dir   = (last_kw == "inout")
             name, drv_pin, rcv_str = args[0], args[1], args[2]
             rcv_pins = rcv_str.split(',')
-            drv_inst = drv_pin.split('.')[0]
-            rcv_insts = [r.split('.')[0] for r in rcv_pins]
+            drv_inst = self._pin_instance(drv_pin)
+            rcv_insts = [self._pin_instance(r) for r in rcv_pins]
             if not (unknown_dir or inout_dir) and drv_inst in rcv_insts:
                 print(f"Error: block '{drv_inst}' is used as both driver and receiver in net '{name}'")
                 sys.exit(1)
@@ -1617,8 +1626,8 @@ class BudaSession:
                 lo, hi = 0, int(m.group(2)) - 1
             drv_pin  = bus_args[1]
             rcv_pins = bus_args[2].split(',')
-            drv_inst = drv_pin.split('.')[0]
-            rcv_insts = [r.split('.')[0] for r in rcv_pins]
+            drv_inst = self._pin_instance(drv_pin)
+            rcv_insts = [self._pin_instance(r) for r in rcv_pins]
             if not (unknown_dir or inout_dir) and drv_inst in rcv_insts:
                 print(f"Error: block '{drv_inst}' is used as both driver and receiver in bus '{prefix}'")
                 sys.exit(1)

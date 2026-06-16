@@ -76,3 +76,20 @@ def test_defined_blocks_pass():
     sess.do_command("generate_topologies")               # must not raise
     w = [b for b in sess.bundles if 'dft_0' in list(b.input.original_bundle.get_net_names())][0]
     assert len(w.input.candidates) > 0
+
+
+def test_dotted_block_name_resolves_to_last_dot():
+    # A block name may itself contain dots; the instance is everything up to the
+    # LAST dot (matching the bundler), so 'u.core.tx' resolves to block 'u.core',
+    # not 'u'.  The validator must not false-reject, and routing must use 'u.core'.
+    sess = buda_cli.BudaSession()
+    sess.no_viz = True
+    sess.do_command("def_layer 4 M4 H TOP 1.0")
+    sess.do_command("def_layer 5 M5 V TOP 1.0")
+    sess.do_command("add_block u.core 100 100 300 300")
+    sess.do_command("add_block SINK 700 500 900 700")
+    sess.do_command("add_net n u.core.tx SINK.rx")
+    assert sess._net_endpoints["n"] == ("u.core", ["SINK"])
+    sess.do_command("run_bundler strict")
+    sess.do_command("generate_topologies")               # must not raise/exit
+    assert len(sess.bundles[0].input.candidates) > 0
