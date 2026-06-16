@@ -571,3 +571,64 @@ def optimize_placement(
         except Exception:
             pass
     return result
+
+
+def compute_hpwl(state) -> float:
+    """HPWL from live engine positions and BDB pin connectivity."""
+    if state.bdb is None:
+        return 0.0
+    comp_by_id = {c.id: c for c in state.bdb.all_components()}
+    net_xs: dict = {}
+    net_ys: dict = {}
+    for p in state.bdb.all_pins():
+        c = comp_by_id.get(p.comp_id)
+        if c is None:
+            continue
+        try:
+            b = state.engine.get_block(c.name)
+            bx1, by1, bx2, by2 = b.x1, b.y1, b.x2, b.y2
+        except Exception:
+            bx1, by1, bx2, by2 = c.x1, c.y1, c.x2, c.y2
+        w, h = bx2 - bx1, by2 - by1
+        px = (bx1 + p.px) if p.px >= 0 else (bx1 + w / 2)
+        py = (by1 + p.py) if p.py >= 0 else (by1 + h / 2)
+        net_xs.setdefault(p.net_id, []).append(px)
+        net_ys.setdefault(p.net_id, []).append(py)
+    hpwl = 0.0
+    for nid in net_xs:
+        xs, ys = net_xs[nid], net_ys[nid]
+        if len(xs) >= 2:
+            hpwl += (max(xs) - min(xs)) + (max(ys) - min(ys))
+    return hpwl
+
+
+def distribute_h(state, names: list) -> None:
+    """Space blocks evenly horizontally (leftmost and rightmost anchored)."""
+    pairs = sorted(((n, state.engine.get_block(n)) for n in names),
+                   key=lambda x: x[1].x1)
+    if len(pairs) < 3:
+        return
+    total_w = sum(b.x2 - b.x1 for _, b in pairs)
+    span = pairs[-1][1].x2 - pairs[0][1].x1
+    gap = (span - total_w) / (len(pairs) - 1)
+    x = pairs[0][1].x1
+    for name, b in pairs:
+        w = b.x2 - b.x1
+        state.engine.resize_block_raw(name, x, b.y1, x + w, b.y2)
+        x += w + gap
+
+
+def distribute_v(state, names: list) -> None:
+    """Space blocks evenly vertically (topmost and bottommost anchored)."""
+    pairs = sorted(((n, state.engine.get_block(n)) for n in names),
+                   key=lambda x: x[1].y1)
+    if len(pairs) < 3:
+        return
+    total_h = sum(b.y2 - b.y1 for _, b in pairs)
+    span = pairs[-1][1].y2 - pairs[0][1].y1
+    gap = (span - total_h) / (len(pairs) - 1)
+    y = pairs[0][1].y1
+    for name, b in pairs:
+        h = b.y2 - b.y1
+        state.engine.resize_block_raw(name, b.x1, y, b.x2, y + h)
+        y += h + gap
