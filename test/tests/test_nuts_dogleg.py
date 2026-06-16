@@ -222,15 +222,30 @@ def test_dogleg_resolution_survives_resolve():
 
 def test_dogleg_state_cleared_on_regenerate():
     # Regenerating a bundle's candidate list after a dogleg was adopted replaces
-    # the appended split candidate, so its slot index no longer refers to anything.
-    # generate_topologies must forget the dogleg bookkeeping; otherwise a later
-    # _adopt_doglegs would overwrite an unrelated fresh candidate at the stale slot.
+    # the appended split candidate, so its slot index and the bundle's selection
+    # (which pointed at that appended split) no longer refer to anything.  Without
+    # a reset, the dangling selected_topology_index dereferences past the fresh,
+    # shorter candidate list and optimize_topologies crashes (ValueError: vector).
     sess = _run("dogleg2.buda")
     assert sess.nuts_result.dogleg_topologies and sess._dogleg_slot, \
         "expected an adopted dogleg with slot bookkeeping"
     sess.do_command("generate_topologies")
+    # Bookkeeping forgotten and every regenerated bundle reset to 'not planned'.
     assert sess._dogleg_slot == {} and sess._dogleg_originals == {}, \
         "dogleg bookkeeping survived candidate regeneration"
+    for w in sess.bundles:
+        sel = w.plan.selected_topology_index
+        assert sel < len(w.input.candidates), \
+            f"B{w.input.original_bundle.id}: stale selection {sel} >= {len(w.input.candidates)}"
+    # The full re-plan + re-solve sequence that used to crash now completes and
+    # re-detects the cycle from scratch.
+    sess.do_command("select_topologies 1,2 4")
+    sess.do_command("select_topologies 3 5")
+    sess.do_command("run_planner 1")
+    sess.do_command("run_nuts")
+    assert sess.nuts_result.num_overlaps == 0, \
+        f"re-solve after regenerate left {sess.nuts_result.num_overlaps} overlap(s)"
+    assert sess.nuts_result.dogleg_topologies, "dogleg not re-detected after regenerate"
 
 
 def test_dogleg_reset_on_replan():

@@ -378,6 +378,7 @@ class BudaSession:
             src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
             dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
             w.input.candidates = tg.generate_candidates(src_local, dsts_local)
+            self._reset_plan_for_regen(w)
             label = f"{src_local}→{dsts_local[0]}"
             n = len(w.input.candidates)
             if n == 0:
@@ -416,6 +417,7 @@ class BudaSession:
                 return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour)
             w.input.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
+            self._reset_plan_for_regen(w)
             label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
                      if len(b.rcv_spec_paths) == 1
                      else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
@@ -445,6 +447,7 @@ class BudaSession:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
             w.input.candidates = tg.generate_candidates(src, dsts)
+            self._reset_plan_for_regen(w)
             label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
             n = len(w.input.candidates)
             if n == 0:
@@ -1245,13 +1248,26 @@ class BudaSession:
         self._dogleg_originals = {}
         self._dogleg_slot = {}
 
-    def _clear_dogleg_state(self):
-        """Forget all dogleg bookkeeping without touching candidates.  Called when
-        a command regenerates a bundle's candidate list wholesale (generate_*): the
-        appended split candidate and its slot index no longer refer to anything, so
-        a later _adopt_doglegs must not try to overwrite/restore a stale slot."""
-        self._dogleg_originals = {}
-        self._dogleg_slot = {}
+    def _reset_plan_for_regen(self, w):
+        """Reset one wrapper to the pristine 'candidates generated, not yet planned'
+        state after its candidate list was regenerated.  A prior plan's
+        selected_topology_index and per-segment overrides are indexed into the OLD
+        candidate list; after regeneration they are stale, and a dogleg may have left
+        selected_topology_index pointing at an appended split the fresh list no longer
+        has — optimize_topologies would then dereference an out-of-range candidate
+        (ValueError: vector).  Also drop this bundle's dogleg bookkeeping so a later
+        _adopt_doglegs cannot overwrite/restore a slot that no longer exists.  The
+        user must re-pin/re-plan after regenerating, so dropping the pin is correct."""
+        w.plan.selected_topology_index = -1
+        w.input.topology_pinned = False
+        w.plan.seg_layers     = []
+        w.plan.seg_perp       = []
+        w.plan.seg_net_pull   = []
+        w.plan.seg_slide_lo   = []
+        w.plan.seg_slide_hi   = []
+        bid = w.input.original_bundle.id
+        self._dogleg_slot.pop(bid, None)
+        self._dogleg_originals.pop(bid, None)
 
     def _run_detailed_nuts(self, bit_order="LO_HI"):
         """Execute bit-level track assignment using DetailedNUTSEngine."""
@@ -1737,7 +1753,6 @@ class BudaSession:
             # Multiple dst → multicast trunk+branch candidates
             # Append "center_mode"    to use block centres instead of busterm faces.
             # Append "double_detour"  to include UU_VHV / UU_HVH high-congestion variants.
-            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
             pos_args = [a for a in args if a not in ("center_mode", "double_detour")]
@@ -1756,6 +1771,7 @@ class BudaSession:
                         continue
                     src, dsts = ep
                     w.input.candidates = topo_gen.generate_candidates(src, dsts)
+                    self._reset_plan_for_regen(w)
                     label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                     print(f"Generated {len(w.input.candidates)} topologies for bundle "
                           f"{w.input.original_bundle.id} ({label})")
@@ -1766,7 +1782,6 @@ class BudaSession:
             # Usage: generate_topologies [center_mode] [double_detour]
             # Generates topologies for every bundle produced by run_bundler,
             # deriving src/dst block names from the netlist automatically.
-            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
             topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour)
@@ -1778,6 +1793,7 @@ class BudaSession:
                     continue
                 src, dsts = ep
                 w.input.candidates = topo_gen.generate_candidates(src, dsts)
+                self._reset_plan_for_regen(w)
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.input.candidates)} topologies for bundle "
                       f"{w.input.original_bundle.id} ({label})")
@@ -1791,7 +1807,6 @@ class BudaSession:
             #   (b) same-level cross-block             → BDB depth-D floorplan
             if self.bdb is None:
                 print("Error: generate_hier_topologies requires an open BDB"); return
-            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
 
@@ -1829,7 +1844,6 @@ class BudaSession:
                 else:
                     print(f"Error: bundle {bid} not found")
                 return
-            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             fp_cache = {}
             comps_by_name = {c.name: c for c in self.bdb.all_components()}
             n = self._generate_hier_topo_one(target_w, use_center, use_double_detour,
