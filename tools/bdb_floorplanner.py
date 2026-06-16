@@ -841,10 +841,13 @@ class _OptimizeDialog:
 
         hdr_f = ttk.Frame(bc_f)
         hdr_f.pack(fill=tk.X)
-        ttk.Label(hdr_f, text="Block", width=20, anchor="w").pack(side=tk.LEFT)
-        ttk.Label(hdr_f, text="Fixed",      width=7,  anchor="center").pack(side=tk.LEFT)
-        ttk.Label(hdr_f, text="Reshapeable", width=12, anchor="center").pack(side=tk.LEFT)
-        ttk.Label(hdr_f, text="Min W × H",  width=14, anchor="center").pack(side=tk.LEFT)
+        hdr_f.columnconfigure(0, minsize=160)
+        hdr_f.columnconfigure(1, minsize=60)
+        hdr_f.columnconfigure(2, minsize=90)
+        ttk.Label(hdr_f, text="Block",       anchor="w"     ).grid(row=0, column=0, sticky="w", padx=2)
+        ttk.Label(hdr_f, text="Fixed",       anchor="center").grid(row=0, column=1)
+        ttk.Label(hdr_f, text="Reshapeable", anchor="center").grid(row=0, column=2)
+        ttk.Label(hdr_f, text="Min Size",    anchor="w"     ).grid(row=0, column=3, padx=(4, 0))
 
         scroll_canvas = tk.Canvas(bc_f, height=min(len(root_blocks) * 28 + 4, 200),
                                   bd=0, highlightthickness=0)
@@ -858,6 +861,9 @@ class _OptimizeDialog:
         rows_f.bind("<Configure>",
                     lambda e: scroll_canvas.configure(
                         scrollregion=scroll_canvas.bbox("all")))
+        rows_f.columnconfigure(0, minsize=160)
+        rows_f.columnconfigure(1, minsize=60)
+        rows_f.columnconfigure(2, minsize=90)
 
         self._fixed_vars:    dict[str, tk.BooleanVar] = {}
         self._reshape_vars:  dict[str, tk.BooleanVar] = {}
@@ -871,40 +877,34 @@ class _OptimizeDialog:
         _s_min_w   = settings.get("min_w",        {})
         _s_min_h   = settings.get("min_h",        {})
 
-        for name in root_blocks:
-            row = ttk.Frame(rows_f)
-            row.pack(fill=tk.X, pady=1)
-
-            ttk.Label(row, text=name, width=20, anchor="w").pack(side=tk.LEFT)
-
+        for i, name in enumerate(root_blocks):
             fv = tk.BooleanVar(value=_s_fixed.get(name, False))
             self._fixed_vars[name] = fv
-            ttk.Checkbutton(row, variable=fv).pack(side=tk.LEFT, padx=(10, 0))
-
             rv = tk.BooleanVar(value=_s_reshape.get(name, False))
             self._reshape_vars[name] = rv
-            ttk.Checkbutton(row, variable=rv,
-                            command=lambda n=name: self._on_reshape_toggle(n)).pack(
-                side=tk.LEFT, padx=(20, 0))
-
             mw = tk.DoubleVar(value=_s_min_w.get(name, 0.0))
             mh = tk.DoubleVar(value=_s_min_h.get(name, 0.0))
             self._min_w_vars[name] = mw
             self._min_h_vars[name] = mh
 
             reshape_on = _s_reshape.get(name, False)
-            sp_w = ttk.Spinbox(row, textvariable=mw, from_=0, to=99999,
+            ttk.Label(rows_f, text=name, anchor="w").grid(
+                row=i, column=0, sticky="w", padx=2, pady=1)
+            ttk.Checkbutton(rows_f, variable=fv).grid(
+                row=i, column=1, pady=1)
+            ttk.Checkbutton(rows_f, variable=rv,
+                            command=lambda n=name: self._on_reshape_toggle(n)).grid(
+                row=i, column=2, pady=1)
+            sp_w = ttk.Spinbox(rows_f, textvariable=mw, from_=0, to=99999,
                                increment=10, width=6,
                                state="normal" if reshape_on else "disabled")
-            sp_w.pack(side=tk.LEFT, padx=(12, 0))
+            sp_w.grid(row=i, column=3, padx=(4, 0), pady=1)
             self._min_w_spins[name] = sp_w
-
-            ttk.Label(row, text="×").pack(side=tk.LEFT, padx=2)
-
-            sp_h = ttk.Spinbox(row, textvariable=mh, from_=0, to=99999,
+            ttk.Label(rows_f, text="×").grid(row=i, column=4, padx=2, pady=1)
+            sp_h = ttk.Spinbox(rows_f, textvariable=mh, from_=0, to=99999,
                                increment=10, width=6,
                                state="normal" if reshape_on else "disabled")
-            sp_h.pack(side=tk.LEFT)
+            sp_h.grid(row=i, column=5, pady=1)
             self._min_h_spins[name] = sp_h
 
         # ── Buttons ───────────────────────────────────────────────────────────
