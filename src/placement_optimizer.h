@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <random>
 #include <string>
@@ -83,25 +84,29 @@ public:
     void add_net(const std::vector<std::pair<std::string,
                                              std::pair<double,double>>>& pins);
 
+    using ProgressFn = std::function<void(int /*current*/, int /*total*/)>;
+
     // ── Simulated Annealing ───────────────────────────────────────────────
-    OptimizerResult run_sa(int    max_iter  = 50000,
-                           double t_init    = 1.0,
-                           double t_min     = 1e-4,
-                           double alpha     = 0.995,
-                           double w_wl      = 1.0,
-                           double w_area    = 0.1,
-                           double w_ovlp    = 10.0,
-                           int    seed      = 42);
+    OptimizerResult run_sa(int        max_iter   = 50000,
+                           double     t_init     = 1.0,
+                           double     t_min      = 1e-4,
+                           double     alpha      = 0.995,
+                           double     w_wl       = 1.0,
+                           double     w_area     = 0.1,
+                           double     w_ovlp     = 10.0,
+                           int        seed       = 42,
+                           ProgressFn progress_fn = nullptr);
 
     // ── Genetic / Evolutionary Algorithm ─────────────────────────────────
-    OptimizerResult run_ga(int    population    = 80,
-                           int    generations   = 400,
-                           double mutation_rate  = 0.15,
-                           double crossover_rate = 0.8,
-                           double w_wl           = 1.0,
-                           double w_area         = 0.1,
-                           double w_ovlp         = 10.0,
-                           int    seed           = 42);
+    OptimizerResult run_ga(int        population    = 80,
+                           int        generations   = 400,
+                           double     mutation_rate  = 0.15,
+                           double     crossover_rate = 0.8,
+                           double     w_wl           = 1.0,
+                           double     w_area         = 0.1,
+                           double     w_ovlp         = 10.0,
+                           int        seed           = 42,
+                           ProgressFn progress_fn    = nullptr);
 
 private:
     // Per-block mutable state during optimization (position + current size).

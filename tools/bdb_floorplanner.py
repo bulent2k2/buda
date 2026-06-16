@@ -27,7 +27,9 @@ from __future__ import annotations
 import os
 import sys
 import tkinter as tk
-from tkinter import filedialog, simpledialog, ttk
+import queue
+import threading
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -907,11 +909,18 @@ class _OptimizeDialog:
             sp_h.grid(row=i, column=5, pady=1)
             self._min_h_spins[name] = sp_h
 
-        # ── Buttons ───────────────────────────────────────────────────────────
+        # ── Buttons + inline progress bar ─────────────────────────────────────
         btn_f = ttk.Frame(self.top)
+        self._btn_f = btn_f
         btn_f.pack(fill=tk.X, padx=8, pady=8)
-        ttk.Button(btn_f, text="Run",    command=self._run).pack(side=tk.RIGHT, padx=(4, 0))
+        self._run_btn = ttk.Button(btn_f, text="Run", command=self._run)
+        self._run_btn.pack(side=tk.RIGHT, padx=(4, 0))
         ttk.Button(btn_f, text="Cancel", command=self.top.destroy).pack(side=tk.RIGHT)
+        # Progress widgets — packed into btn_f (left side) only while running
+        self._progress_var = tk.IntVar(value=0)
+        self._prog_bar = ttk.Progressbar(btn_f, variable=self._progress_var,
+                                          maximum=100, length=160)
+        self._prog_lbl = ttk.Label(btn_f, text="", width=10)
 
     def _on_alg_change(self):
         self._iter_lbl.config(
@@ -955,13 +964,60 @@ class _OptimizeDialog:
             "min_h":       {n: v.get() for n, v in self._min_h_vars.items()},
         })
 
-        self.result = fpc.optimize_placement(
-            self.state, method=method,
-            fixed=fixed, reshapeable=reshapeable,
-            min_sizes=min_sizes or None,
-            **kwargs,
-        )
-        self.top.destroy()
+        # Disable Run button and show progress bar
+        self._run_btn.config(state="disabled")
+        self._prog_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._prog_lbl.pack(side=tk.LEFT, padx=(6, 0))
+        self._progress_var.set(0)
+        self._prog_lbl.config(text="0%")
+
+        q: queue.SimpleQueue = queue.SimpleQueue()
+        total = kwargs.get("max_iter") or kwargs.get("generations") or 100
+
+        def progress_cb(cur: int, tot: int) -> None:
+            pct = int(100 * cur / tot) if tot else 0
+            q.put(("progress", pct, cur, tot))
+
+        kwargs["progress_fn"] = progress_cb
+
+        state   = self.state
+        m_sizes = min_sizes or None
+
+        def worker() -> None:
+            try:
+                result = fpc.optimize_placement(
+                    state, method=method,
+                    fixed=fixed, reshapeable=reshapeable,
+                    min_sizes=m_sizes, **kwargs)
+                q.put(("done", result))
+            except Exception as exc:
+                q.put(("error", str(exc)))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._poll(q)
+
+    def _poll(self, q: queue.SimpleQueue) -> None:
+        try:
+            while True:
+                msg = q.get_nowait()
+                kind = msg[0]
+                if kind == "progress":
+                    _, pct, cur, tot = msg
+                    self._progress_var.set(pct)
+                    self._prog_lbl.config(text=f"{pct}%")
+                elif kind == "done":
+                    self.result = msg[1]
+                    self.top.destroy()
+                    return
+                elif kind == "error":
+                    messagebox.showerror("Optimizer Error", msg[1], parent=self.top)
+                    self._run_btn.config(state="normal")
+                    self._prog_bar.pack_forget()
+                    self._prog_lbl.pack_forget()
+                    return
+        except queue.Empty:
+            pass
+        self.top.after(100, lambda: self._poll(q))
 
 
 def main():

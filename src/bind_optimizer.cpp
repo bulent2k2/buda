@@ -56,17 +56,60 @@ void bind_optimizer(py::module_& m) {
 
         .def("add_net", &PlacementOptimizer::add_net, py::arg("pins"))
 
-        .def("run_sa", &PlacementOptimizer::run_sa,
-             py::arg("max_iter")  = 50000,
-             py::arg("t_init")    = 1.0,
-             py::arg("t_min")     = 1e-4,
-             py::arg("alpha")     = 0.995,
-             py::arg("w_wl")      = 1.0,
-             py::arg("w_area")    = 0.1,
-             py::arg("w_ovlp")    = 10.0,
-             py::arg("seed")      = 42)
+        .def("run_sa",
+             [](PlacementOptimizer& self,
+                int max_iter, double t_init, double t_min, double alpha,
+                double w_wl, double w_area, double w_ovlp, int seed,
+                py::object progress_fn) -> OptimizerResult {
+                 // Wrap the Python callable in a shared_ptr whose custom deleter
+                 // acquires the GIL before Py_DECREF.  This lets the std::function
+                 // be safely destroyed inside C++ code that holds no GIL.
+                 PlacementOptimizer::ProgressFn cb;
+                 if (!progress_fn.is_none()) {
+                     // release() steals our reference without changing the refcount.
+                     auto sptr = std::shared_ptr<PyObject>(
+                         progress_fn.release().ptr(),
+                         [](PyObject* p) { py::gil_scoped_acquire g; Py_XDECREF(p); });
+                     cb = [sptr](int cur, int total) {
+                         py::gil_scoped_acquire gil;
+                         py::reinterpret_borrow<py::object>(sptr.get())(cur, total);
+                     };
+                 }
+                 py::gil_scoped_release release;
+                 return self.run_sa(max_iter, t_init, t_min, alpha,
+                                    w_wl, w_area, w_ovlp, seed, std::move(cb));
+             },
+             py::arg("max_iter")    = 50000,
+             py::arg("t_init")      = 1.0,
+             py::arg("t_min")       = 1e-4,
+             py::arg("alpha")       = 0.995,
+             py::arg("w_wl")        = 1.0,
+             py::arg("w_area")      = 0.1,
+             py::arg("w_ovlp")      = 10.0,
+             py::arg("seed")        = 42,
+             py::arg("progress_fn") = py::none())
 
-        .def("run_ga", &PlacementOptimizer::run_ga,
+        .def("run_ga",
+             [](PlacementOptimizer& self,
+                int population, int generations,
+                double mutation_rate, double crossover_rate,
+                double w_wl, double w_area, double w_ovlp, int seed,
+                py::object progress_fn) -> OptimizerResult {
+                 PlacementOptimizer::ProgressFn cb;
+                 if (!progress_fn.is_none()) {
+                     auto sptr = std::shared_ptr<PyObject>(
+                         progress_fn.release().ptr(),
+                         [](PyObject* p) { py::gil_scoped_acquire g; Py_XDECREF(p); });
+                     cb = [sptr](int cur, int total) {
+                         py::gil_scoped_acquire gil;
+                         py::reinterpret_borrow<py::object>(sptr.get())(cur, total);
+                     };
+                 }
+                 py::gil_scoped_release release;
+                 return self.run_ga(population, generations,
+                                    mutation_rate, crossover_rate,
+                                    w_wl, w_area, w_ovlp, seed, std::move(cb));
+             },
              py::arg("population")    = 80,
              py::arg("generations")   = 400,
              py::arg("mutation_rate") = 0.15,
@@ -74,5 +117,6 @@ void bind_optimizer(py::module_& m) {
              py::arg("w_wl")          = 1.0,
              py::arg("w_area")        = 0.1,
              py::arg("w_ovlp")        = 10.0,
-             py::arg("seed")          = 42);
+             py::arg("seed")          = 42,
+             py::arg("progress_fn")   = py::none());
 }

@@ -252,7 +252,8 @@ size_t PlacementOptimizer::_tournament(const std::vector<double>& fitness,
 
 OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t_min,
                                             double alpha, double w_wl, double w_area,
-                                            double w_ovlp, int seed) {
+                                            double w_ovlp, int seed,
+                                            ProgressFn progress_fn) {
     if (_blocks.empty()) return {};
     std::mt19937 rng(static_cast<unsigned>(seed));
     std::uniform_real_distribution<double> uniform01(0.0, 1.0);
@@ -262,6 +263,8 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
     double cur_cost  = _cost(p, w_wl, w_area, w_ovlp);
     double best_cost = cur_cost;
     double T = t_init;
+
+    const int report_every = std::max(1, max_iter / 20);
 
     for (int iter = 0; iter < max_iter; iter++) {
         Placement p2    = _perturb(p, rng);
@@ -276,6 +279,8 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
             }
         }
         T = std::max(T * alpha, t_min);
+        if (progress_fn && (iter + 1) % report_every == 0)
+            progress_fn(iter + 1, max_iter);
     }
     return _make_result(best, max_iter);
 }
@@ -285,7 +290,7 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
 OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
                                             double mutation_rate, double crossover_rate,
                                             double w_wl, double w_area, double w_ovlp,
-                                            int seed) {
+                                            int seed, ProgressFn progress_fn) {
     if (_blocks.empty()) return {};
     if (population < 2) population = 2;
     std::mt19937 rng(static_cast<unsigned>(seed));
@@ -313,6 +318,8 @@ OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
     }
 
     const size_t n = _blocks.size();
+
+    const int report_every_ga = std::max(1, generations / 20);
 
     for (int gen = 0; gen < generations; gen++) {
         std::vector<Placement> new_pop;
@@ -345,6 +352,8 @@ OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
             double c = _cost(pop[static_cast<size_t>(i)], w_wl, w_area, w_ovlp);
             if (c < best_cost) { best_cost = c; best_ind = pop[static_cast<size_t>(i)]; }
         }
+        if (progress_fn && (gen + 1) % report_every_ga == 0)
+            progress_fn(gen + 1, generations);
     }
     return _make_result(best_ind, generations);
 }
