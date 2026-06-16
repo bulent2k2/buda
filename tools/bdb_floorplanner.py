@@ -183,7 +183,7 @@ class BdbFloorplanner:
         ttk.Button(checks, text="Validate", command=self._validate).pack(fill=tk.X)
         ttk.Label(checks, textvariable=self._issue_var, anchor="w", justify=tk.LEFT).pack(fill=tk.X, pady=(4, 0))
         ttk.Label(checks, textvariable=self._hpwl_var, anchor="w",
-                  foreground="#1d4ed8").pack(fill=tk.X, pady=(2, 0))
+                  font=("TkDefaultFont", 9, "bold")).pack(fill=tk.X, pady=(2, 0))
 
         canvas_f = ttk.Frame(main)
         canvas_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -219,6 +219,9 @@ class BdbFloorplanner:
         self.root.bind("<Control-Z>", lambda e: self._redo())
         self.root.bind("<Control-y>", lambda e: self._redo())
 
+        # f — toggle maximize (skip when a text widget has focus)
+        self.root.bind("f", self._toggle_maximize)
+
         ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
         self._draw()
@@ -230,6 +233,12 @@ class BdbFloorplanner:
                     increment=increment, width=10).grid(
             row=row, column=1, sticky="ew", pady=1)
         parent.columnconfigure(1, weight=1)
+
+    def _toggle_maximize(self, _event=None):
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        self.root.state("normal" if self.root.state() == "zoomed" else "zoomed")
 
     # ------------------------------------------------------------------
     # Overlay depth control
