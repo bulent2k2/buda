@@ -64,6 +64,7 @@ class BdbFloorplanner:
         self._patch_to_name: dict = {}
         self._handle_patches: list[tuple] = []   # (patch, name, corner_str)
         self._drag = None
+        self._canvas_sel: set[str] = set()       # canvas multi-selection
         self._path: list[str] = []               # drill-down stack
         self._status = tk.StringVar(value="Open or create a BDB to begin.")
 
@@ -187,8 +188,8 @@ class BdbFloorplanner:
         self._canvas.mpl_connect("button_release_event", self._on_release)
 
         # Arrow-key bindings for nudging the selected block
-        self.root.bind("<Up>",    lambda e: self._arrow_move(0,  -self._step.get()))
-        self.root.bind("<Down>",  lambda e: self._arrow_move(0,   self._step.get()))
+        self.root.bind("<Up>",    lambda e: self._arrow_move(0,   self._step.get()))
+        self.root.bind("<Down>",  lambda e: self._arrow_move(0,  -self._step.get()))
         self.root.bind("<Left>",  lambda e: self._arrow_move(-self._step.get(), 0))
         self.root.bind("<Right>", lambda e: self._arrow_move( self._step.get(), 0))
 
@@ -241,6 +242,7 @@ class BdbFloorplanner:
 
     def _go_top(self):
         self._path = []
+        self._canvas_sel.clear()
         self.state.selected = None
         self._refresh_breadcrumbs()
         self._refresh_tree()
@@ -248,6 +250,7 @@ class BdbFloorplanner:
 
     def _go_depth(self, depth: int):
         self._path = self._path[:depth]
+        self._canvas_sel.clear()
         self.state.selected = None
         self._refresh_breadcrumbs()
         self._refresh_tree()
@@ -255,6 +258,7 @@ class BdbFloorplanner:
 
     def _drill_into(self, name: str):
         self._path.append(name)
+        self._canvas_sel.clear()
         self.state.selected = None
         self._refresh_breadcrumbs()
         self._refresh_tree()
@@ -390,7 +394,7 @@ class BdbFloorplanner:
             self._draw()
 
     def _do_align(self, fn, edge: str):
-        names = self._selected_tree_names()
+        names = list(self._canvas_sel | set(self._selected_tree_names()))
         if len(names) < 2:
             self._status.set("Select at least two blocks to align.")
             return
@@ -519,6 +523,7 @@ class BdbFloorplanner:
     def _on_tree_select(self, _event=None):
         sel = self._tree.selection()
         if sel:
+            self._canvas_sel = set(sel)
             self.state.selected = sel[0]
             self._draw()
 
@@ -528,6 +533,7 @@ class BdbFloorplanner:
             self._drill_into(sel[0])
 
     def _select_name(self, name: str):
+        self._canvas_sel = {name}
         self.state.selected = name
         try:
             self._tree.selection_set(name)
@@ -583,12 +589,14 @@ class BdbFloorplanner:
                 block = self.state.block(name)
             except Exception:
                 continue
-            selected = block.name == self.state.selected
+            selected  = block.name == self.state.selected
+            in_sel    = block.name in self._canvas_sel and not selected
+            fc = "#8ecae6" if selected else ("#bae6fd" if in_sel else "#d9e8f5")
+            ec = "#0f172a" if selected else ("#1e40af" if in_sel else "#475569")
+            lw = 2.0      if selected else (1.5       if in_sel else 0.9)
             patch = mpatches.Rectangle(
                 (block.x1, block.y1), block.x2 - block.x1, block.y2 - block.y1,
-                facecolor="#8ecae6" if selected else "#d9e8f5",
-                edgecolor="#0f172a" if selected else "#475569",
-                linewidth=2.0 if selected else 0.9,
+                facecolor=fc, edgecolor=ec, linewidth=lw,
                 alpha=0.30 if extra_levels > 0 else 0.92, picker=True, zorder=2)
             ax.add_patch(patch)
             self._patch_to_name[patch] = name
@@ -659,21 +667,26 @@ class BdbFloorplanner:
         self._canvas.draw_idle()
 
     def _arrow_move(self, dx: float, dy: float) -> None:
-        """Nudge the selected block by (dx, dy); ignored when a text widget has focus."""
+        """Nudge all canvas-selected blocks; ignored when a text widget has focus."""
         fw = self.root.focus_get()
         if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
             return
-        if self.state is None or self.state.selected is None:
+        if self.state is None or not self._canvas_sel:
             return
-        name = self.state.selected
-        try:
-            b = self.state.block(name)
-        except Exception:
-            return
-        fpc.move_block(self.state, name, b.x1 + dx, b.y1 + dy)
+        for name in self._canvas_sel:
+            try:
+                b = self.state.block(name)
+                fpc.move_block(self.state, name, b.x1 + dx, b.y1 + dy)
+            except Exception:
+                pass
         self._draw()
-        self._status.set(
-            f"{name.split('/')[-1]}: ({b.x1 + dx:.0f}, {b.y1 + dy:.0f})")
+        if self.state.selected:
+            try:
+                b = self.state.block(self.state.selected)
+                label = self.state.selected.split("/")[-1]
+                self._status.set(f"{label}: ({b.x1:.0f}, {b.y1:.0f})")
+            except Exception:
+                pass
 
     def _draw_flylines(self, ax) -> None:
         """Draw dashed lines from selected block to every connected block, with net counts.
@@ -742,6 +755,10 @@ class BdbFloorplanner:
                         zorder=4)
 
     def _update_selection_label(self):
+        if len(self._canvas_sel) > 1:
+            self._sel_var.set(f"{len(self._canvas_sel)} blocks selected.")
+            self._make_unique_btn.pack_forget()
+            return
         name = self.state.selected
         if not name:
             self._sel_var.set("No block selected.")
@@ -792,6 +809,10 @@ class BdbFloorplanner:
         if tb and getattr(tb, "mode", ""):
             return
 
+        # Detect Shift key via the underlying tkinter event's state bitmask
+        gui_ev    = getattr(event, "guiEvent", None)
+        shift_held = bool(gui_ev and getattr(gui_ev, "state", 0) & 0x1)
+
         # 1. Check corner handles first
         for hp, name, corner in self._handle_patches:
             if hp.contains(event)[0]:
@@ -802,11 +823,27 @@ class BdbFloorplanner:
         for patch, name in self._patch_to_name.items():
             if patch.contains(event)[0]:
                 b = self.state.block(name)
-                self._select_name(name)
                 if event.dblclick:
+                    self._select_name(name)
                     self._draw()
                     self._drill_into(name)
                     return
+                if shift_held:
+                    # Toggle this block in the canvas multi-selection
+                    if name in self._canvas_sel:
+                        self._canvas_sel.discard(name)
+                        self.state.selected = next(iter(self._canvas_sel), None)
+                    else:
+                        self._canvas_sel.add(name)
+                        self.state.selected = name
+                    try:
+                        self._tree.selection_set(list(self._canvas_sel))
+                    except Exception:
+                        pass
+                    self._draw()
+                    return
+                # Plain click: single-select and start drag
+                self._select_name(name)
                 self._drag = {
                     "mode": "move",
                     "name": name,
@@ -815,6 +852,12 @@ class BdbFloorplanner:
                 }
                 self._draw()
                 return
+
+        # Click on empty canvas: clear canvas selection (unless shift held)
+        if not shift_held:
+            self._canvas_sel.clear()
+            self.state.selected = None
+            self._draw()
 
     def _on_motion(self, event):
         if not self._drag or event.inaxes != self._ax:
