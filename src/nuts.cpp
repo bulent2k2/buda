@@ -135,13 +135,22 @@ static void build_nuts_maps(
             net_pull_map[key] = eff_net_pull;
             if (eff_net_pull != 0) {
                 constexpr double kSentinel = 5e8;
+                // Pull toward the slide-window bound.  When the dogleg pinned the
+                // slide range (slide_map was set from seg_slide_* just above), pull
+                // toward THAT bound — the original trunk's extent — not the per-piece
+                // bound ConnTopology recomputes on the split, which narrows it and
+                // would tug the piece back off the trunk's exported position.
+                const bool slide_pinned =
+                    (slide_ok && !std::isnan(bw.plan.seg_slide_lo[si]));
+                const double hi = slide_pinned ? slide_map[key].second
+                                               : static_cast<double>(cs.perp_hi);
+                const double lo = slide_pinned ? slide_map[key].first
+                                               : static_cast<double>(cs.perp_lo);
                 double preferred;
                 if (eff_net_pull > 0)
-                    preferred = (cs.perp_hi < kSentinel) ? static_cast<double>(cs.perp_hi)
-                                                         : pull_map[key]; // fallback
+                    preferred = (hi < kSentinel) ? hi : pull_map[key];  // fallback
                 else
-                    preferred = (cs.perp_lo > -kSentinel) ? static_cast<double>(cs.perp_lo)
-                                                          : pull_map[key]; // fallback
+                    preferred = (lo > -kSentinel) ? lo : pull_map[key]; // fallback
                 pull_map[key] = preferred;
             } else if (n_bt == 0 &&
                        si < (int)bw.plan.seg_perp.size() &&
@@ -1610,8 +1619,13 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     (void)colL; (void)colR;
     for (auto& s : topo.segments) {
         if (s.start.x != s.end.x) continue;                 // only vertical stubs
+        if (s.is_jog) continue;                             // skip the jog we appended
+        // Skip by the is_jog flag, NOT by x==jog_x: an ORIGINAL stub may also sit
+        // at the rounded jog column (multicast/odd-grid).  Such a stub still has an
+        // endpoint at y_t and must be extended to yL like any left-of-jog stub, so
+        // it touches the left piece's endpoint (jog_x, yL) and stays connected; the
+        // jog itself (endpoints yL/yR, never y_t) would be untouched regardless.
         const int sx = s.start.x;
-        if (sx == jog_x) continue;                          // the jog itself
         const int new_y = (sx <= jog_x) ? yL : yR;
         if (s.start.y == y_t)      s.start.y = new_y;
         else if (s.end.y == y_t)   s.end.y   = new_y;
