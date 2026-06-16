@@ -75,17 +75,49 @@ if [ "$RUN_TESTS" = true ]; then
     cd ..
     mkdir -p log
     TEST_LOG="log/pytest_$(date +%Y%m%d_%H%M%S).log"
+    # Define awk filter for single-line progress indicator
+    AWK_FILTER='
+    BEGIN {
+        CR = "\r"
+        CL = "\033[K"
+    }
+    /\[\s*[0-9]+%\]/ {
+        match($0, /\[\s*[0-9]+%\]/)
+        pct = substr($0, RSTART, RLENGTH)
+        test_info = $1
+        n = split(test_info, parts, "/")
+        display_name = parts[n]
+        if ($0 ~ / FAILED / || $0 ~ / ERROR /) {
+            printf "%s%s%s\n", CR, CL, $0
+        } else {
+            if (length(display_name) > 60) {
+                display_name = substr(display_name, 1, 57) "..."
+            }
+            printf "%s%sRunning: %s %s", CR, CL, pct, display_name
+            fflush()
+        }
+        next
+    }
+    /===|---|FAILURES|test_.*FAILED|collected/ {
+        printf "%s%s%s\n", CR, CL, $0
+        next
+    }
+    END {
+        printf "%s%s", CR, CL
+    }
+    '
+
     if [ "$SLOW_TESTS" = true ]; then
         echo "Running pytest (including slow tests)... (output redirected to $TEST_LOG)"
         set +e
-        pytest -v -o addopts="" > >(tee "$TEST_LOG" | awk '/===|---|FAILURES|test_.*FAILED/ {print}' | uniq) 2>&1
-        PYTEST_RC=$?
+        pytest -v -o addopts="" 2>&1 | tee "$TEST_LOG" | awk "$AWK_FILTER"
+        PYTEST_RC=${PIPESTATUS[0]}
         set -e
     else
         echo "Running pytest (excluding slow tests)... (output redirected to $TEST_LOG)"
         set +e
-        pytest -v > >(tee "$TEST_LOG" | awk '/===|---|FAILURES|test_.*FAILED/ {print}' | uniq) 2>&1
-        PYTEST_RC=$?
+        pytest -v 2>&1 | tee "$TEST_LOG" | awk "$AWK_FILTER"
+        PYTEST_RC=${PIPESTATUS[0]}
         set -e
     fi
 
