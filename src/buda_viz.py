@@ -673,6 +673,10 @@ class TopologyExplorer:
     def _current_is_selected(self):
         sel  = self._find_selection()
         if sel is not None:
+            # Check by hint index first (faster and more robust if saved)
+            if sel.get('topo_index_hint', -1) == self.idx:
+                return True
+            # Fallback for manual sidecar edits
             topo = self.topos[self.idx]
             if topo.type == sel['topo_type'] and topo.estimated_wirelength == sel['topo_wl']:
                 return True
@@ -911,28 +915,53 @@ class TopologyExplorer:
             # as it snatches focus from the TopologyExplorer.
             # User can use 'cmd+1' (on Mac) or just click the window.
 
+    def fig_redraw(self):
+        self._draw()
+
     def _draw(self):
         ax = self.ax
         ax.clear()
+        n   = len(self.topos)
+        nb  = len(self.wrappers)
+        bid = self.wrapper.input.original_bundle.id
+        _w  = self.wrappers[self.bidx]
+        if hasattr(_w, 'path') and _w.path:
+            bus_label = f"/{_w.path} "
+        elif nb > 1:
+            bus_label = f"bus {self.bidx + 1}/{nb} · "
+        else:
+            bus_label = ""
 
-        topo  = self.topos[self.idx]
-        n     = len(self.topos)
-        bid   = self.wrapper.input.original_bundle.id
-        wl    = topo.estimated_wirelength
-        ct      = self._build_conn_topo(topo)
-        cs_list = list(ct.segs())
-        viz_lw  = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 14.0)
+        topo = self.topos[self.idx]
+        wl   = topo.estimated_wirelength
 
-        is_sel = self._current_is_selected()
-        has_any_sel = self._find_selection() is not None or getattr(self.wrapper.input, 'topology_pinned', False)
-        is_planner_active = (self.idx == self.wrapper.plan.selected_topology_index)
+        # Use centralized selection check
+        sel = self._find_selection()
+        is_current_selection = self._current_is_selected()
+        has_any_sel = (sel is not None
+                       or getattr(self.wrapper.input, 'topology_pinned', False))
 
-        # ── Enable/Disable Tuning Row ──
-        for b in self._bax2:
-            b.set_visible(is_sel)
+        # Planner is active if the current display topo matches the planner's choice
+        is_planner_active = (self.wrapper.plan is not None and
+                             self.wrapper.plan.selected_topology_index == self.idx)
+
+        if is_planner_active and is_current_selection:
+            sel_badge = "  ★ PLANNER SELECTED (PINNED)"
+        elif is_planner_active:
+            sel_badge = "  ★ PLANNER SELECTED"
+        elif is_current_selection:
+            sel_badge = "  ★ PINNED"
+        else:
+            sel_badge = ""
+
+        # Tuning buttons are only visible when the current topo is selected/pinned.
+        # This allows per-segment layer overrides to be persisted.
+        if hasattr(self, '_bax2'):
+            for bax in self._bax2:
+                bax.set_visible(is_current_selection)
 
         # ── Update selection button states ──
-        if is_sel:
+        if is_current_selection:
             self._btn_select.label.set_text('★  Pinned')
             self._btn_select.ax.set_facecolor('#aadd88')
         elif is_planner_active:
@@ -944,42 +973,24 @@ class TopologyExplorer:
         self._btn_deselect.ax.set_facecolor('#ffbbaa' if has_any_sel else '#f0f0f0')
 
         # ── Axes border: gold for pinned, blue for planner, subtle grey otherwise ──
-        if is_planner_active and is_sel:
-            border_col = '#BDB76B' # Dark Khaki
-            border_lw  = 3.5
+        if is_planner_active and is_current_selection:
+            border_col, border_lw = '#BDB76B', 3.5  # Dark Khaki
         elif is_planner_active:
-            border_col = '#4682B4' # Steel Blue
-            border_lw  = 3.5
-        elif is_sel:
-            border_col = '#FFD700' # Gold
-            border_lw  = 3.5
+            border_col, border_lw = '#4682B4', 3.5  # Steel Blue
+        elif is_current_selection:
+            border_col, border_lw = '#FFD700', 3.5  # Gold
         else:
-            border_col = '#cccccc'
-            border_lw  = 0.8
-            
+            border_col, border_lw = '#cccccc', 0.8
         for spine in ax.spines.values():
             spine.set_edgecolor(border_col)
             spine.set_linewidth(border_lw)
 
-        nb   = len(self.wrappers)
-        n_bt = sum(1 for cs in ct.segs()
-                   for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
-        bus_label = (f"bus {self.bidx + 1}/{nb} · " if nb > 1 else "")
-        
-        is_current_selection = is_sel
-        
-        if is_planner_active and is_current_selection:
-            sel_badge = "  ★ PLANNER SELECTED (PINNED)"
-        elif is_planner_active:
-            sel_badge = "  ★ PLANNER SELECTED"
-        elif is_current_selection:
-            sel_badge = "  ★ PINNED"
-        else:
-            sel_badge = ""
+        ct = self._build_conn_topo(topo)
+        cs_list = list(ct.segs())
 
-        # Topology segments — width proportional to bundle width
+        # Determine display geometry for segments — width proportional to bundle width
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 14.0)
         actual_lids = []
-        sel = self._find_selection()
 
         # ── Pre-compute display geometry for all segments ──────────────────
         # Minimum pull-arrow length in data units (prevents invisible arrows on
@@ -989,7 +1000,7 @@ class TopologyExplorer:
 
         # Pass A: centered perp position + pull-arrow length per segment.
         #
-        # cs.net_pull is computed by ConnTopology.compute_net_pull() in C++:
+        # net_pull (from ConnTopology / NUTS override) is computed in C++:
         #   > 0  more connected-stub anchors lie above perp_pos → slide up/right
         #   < 0  more anchors lie below perp_pos                → slide down/left
         #   = 0  balanced or no stub connections                → no preferred direction
@@ -1029,163 +1040,9 @@ class TopologyExplorer:
             for conn in cs.conns:
                 if conn.kind != ic.SegConnKind.SEG:
                     continue
-                adj = _draw_perp[conn.seg_idx]
-                if abs(conn.at_pos - cs.along_lo) <= 1:
-                    _draw_lo[i] = adj
-                elif abs(conn.at_pos - cs.along_hi) <= 1:
-                    _draw_hi[i] = adj
-        # ──────────────────────────────────────────────────────────────────
-
-        for i, seg in enumerate(topo.segments):
-            lid = -1
-            # 1. Pinned layers (from sidecar/active tuning)
-            if is_current_selection and sel and 'seg_layers' in sel:
-                pinned = sel['seg_layers']
-                if len(pinned) == len(topo.segments):
-                    lid = pinned[i]
-
-            # 2. Planned layers (from CongestionPlanner result)
-            if lid == -1 and is_planner_active:
-                if len(self.wrapper.plan.seg_layers) == len(topo.segments):
-                    lid = self.wrapper.plan.seg_layers[i]
-
-            # 3. Default from topology generator
-            if lid == -1:
-                lid = seg.layer_hint
-            actual_lids.append(lid)
-
-            col      = _LAYER_COLOR.get(lid, '#888888')
-            cs       = cs_list[i]
-            dp       = _draw_perp[i]
-            dlo, dhi = _draw_lo[i], _draw_hi[i]
-
-            if cs.horiz:
-                x0, y0, x1, y1 = dlo, dp, dhi, dp
-            else:
-                x0, y0, x1, y1 = dp, dlo, dp, dhi
-
-            # Highlight selected segment; dim others
-            seg_alpha = 1.0
-            if self.sidx != -1:
-                if i == self.sidx:
-                    ax.plot([x0, x1], [y0, y1],
-                            color='white', linewidth=viz_lw + 4,
-                            alpha=0.6, solid_capstyle='round', zorder=9)
-                else:
-                    seg_alpha = 0.3
-
-            ax.plot([x0, x1], [y0, y1],
-                    color=col, linewidth=viz_lw,
-                    solid_capstyle='round', zorder=10, alpha=seg_alpha)
-            ax.plot(x0, y0, 'o',
-                    color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
-            ax.plot(x1, y1, 'o',
-                    color=col, markersize=viz_lw * 0.6, zorder=11, alpha=seg_alpha)
-
-            # Pull arrow: from display position toward the direction that reduces
-            # total wirelength of SEG-connected neighbours (positive = up / right).
-            plen = _pull_len[i]
-            if abs(plen) > 1e-6:
-                mid = (dlo + dhi) / 2.0
-                if cs.horiz:
-                    ax.annotate("",
-                        xy=(mid, dp + plen), xytext=(mid, dp),
-                        arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
-                                        mutation_scale=11),
-                        zorder=12, alpha=seg_alpha)
-                else:
-                    ax.annotate("",
-                        xy=(dp + plen, mid), xytext=(dp, mid),
-                        arrowprops=dict(arrowstyle='->', color=col, lw=1.5,
-                                        mutation_scale=11),
-                        zorder=12, alpha=seg_alpha)
-
-        # Update title with layer info (Compacted: M4x5 M5x3)
-        counts = {}
-        for lid in actual_lids:
-            counts[lid] = counts.get(lid, 0) + 1
-        
-        # Sort by layer ID for consistency
-        sorted_lids = sorted(counts.keys())
-        layer_summary_parts = []
-        for lid in sorted_lids:
-            lbl = _LAYER_LABEL.get(lid, f"L{lid}").split()[0]
-            cnt = counts[lid]
-            if cnt > 1:
-                layer_summary_parts.append(f"{lbl}x{cnt}")
-            else:
-                layer_summary_parts.append(lbl)
-        layer_summary = " ".join(layer_summary_parts)
-        
-        nterms = self.wrapper.input.original_bundle.num_terminals
-        title_main = (
-            f"{bus_label}B{bid} ({nterms} terms/{len(topo.segments)} segs) · topo {self.idx + 1}/{n} "
-            f"· {topo.type} · WL={wl} · [{layer_summary}]{sel_badge}"
-        )
-        
-        title_color = 'black'
-        if is_planner_active and is_current_selection:
-            title_color = '#666600'  # mixture
-        elif is_current_selection:
-            title_color = '#886600'  # gold
-        elif is_planner_active:
-            title_color = '#005588'  # blue
-
-        ax.set_title(title_main, fontsize=12, pad=10, color=title_color)
-
-        if self.fig.canvas.manager:
-            bid_  = self.wrapper.input.original_bundle.id
-            names_ = self.wrapper.input.original_bundle.get_net_names()
-            net0  = names_[0] if names_ else f"B{bid_}"
-            self.fig.canvas.manager.set_window_title(f"{net0} (Bundle {bid_})")
-
-    def fig_redraw(self):
-        self._draw()
-
-    def _draw(self):
-        ax = self.ax
-        ax.clear()
-        n = len(self.topos)
-        bid = self.wrapper.input.original_bundle.id
-        bus_label = f"/{self.wrappers[self.bidx].path} " if hasattr(self.wrappers[self.bidx], 'path') else ""
-
-        topo = self.topos[self.idx]
-        wl   = topo.estimated_wirelength
-        sel  = self._find_selection(self.wrapper)
-        is_current_selection = (sel is not None and sel.get('topo_index_hint', -1) == self.idx)
-        sel_badge = " ★" if is_current_selection else ""
-
-        is_planner_active = (self.wrapper.plan is not None and self.wrapper.plan.selected_topology_index != -1)
-
-        ct = self._build_conn_topo(topo)
-        cs_list = list(ct.segs())
-
-        # Determine display coordinates for segments
-        viz_lw = 4.0
-        _draw_perp = [self._centered_perp(cs) for cs in cs_list]
-        _draw_lo   = [float(cs.along_lo) for cs in cs_list]
-        _draw_hi   = [float(cs.along_hi) for cs in cs_list]
-        _pull_len  = [0.0] * len(cs_list)
-
-        actual_lids = []
-
-        # Pass 1: find pull arrows and adjust drawn endpoints to meet neighbors
-        for i, cs in enumerate(cs_list):
-            # Compute pull direction (sum of SEG-connection offsets)
-            # This logic mimics ConnTopology::get_pull_hints
-            p_sum = 0.0
-            for conn in cs.conns:
-                if conn.kind == ic.SegConnKind.SEG:
-                    adj_idx = conn.seg_idx
-                    if 0 <= adj_idx < len(cs_list):
-                        p_sum += (_draw_perp[adj_idx] - _draw_perp[i])
-            _pull_len[i] = p_sum * 0.15   # scale for visualization
-
-            # Adjust endpoints to touch connecting segments if they are close to the boundary
-            for conn in cs.conns:
-                if conn.kind != ic.SegConnKind.SEG: continue
                 adj_idx = conn.seg_idx
-                if not (0 <= adj_idx < len(cs_list)): continue
+                if not (0 <= adj_idx < len(cs_list)):
+                    continue
                 adj = _draw_perp[adj_idx]
                 if abs(conn.at_pos - cs.along_lo) <= 1:
                     _draw_lo[i] = adj
@@ -1223,7 +1080,7 @@ class TopologyExplorer:
 
             # Highlight selected segment; dim others
             seg_alpha = 1.0
-            if self.sidx != -1:
+            if is_current_selection and self.sidx != -1:
                 if i == self.sidx:
                     ax.plot([x0, x1], [y0, y1],
                             color='white', linewidth=viz_lw + 4,
