@@ -87,14 +87,22 @@ static void build_nuts_maps(
         ct.build(topo, floorplan);
         const auto& conn_segs = ct.segs();
 
+        // The dogleg's per-segment overrides (seg_net_pull / seg_slide_*) are
+        // indexed by the doglegged topology's segments.  A later run_planner may
+        // select a DIFFERENT topology for this bundle without refreshing them, so
+        // honor an override array only when its length still matches the current
+        // topology — otherwise it would be applied to unrelated segments.
+        const bool np_ok    = (bw.plan.seg_net_pull.size() == conn_segs.size());
+        const bool slide_ok = (bw.plan.seg_slide_lo.size() == conn_segs.size() &&
+                               bw.plan.seg_slide_hi.size() == conn_segs.size());
+
         for (int si = 0; si < (int)conn_segs.size(); ++si) {
             const ConnSeg& cs = conn_segs[si];
             auto key = std::make_pair(bid, si);
 
             // A dogleg pins its sub-trunks' / jog's slide range (ConnTopology
             // would recompute a narrower range on the split topology); honor it.
-            if (si < (int)bw.plan.seg_slide_lo.size() &&
-                !std::isnan(bw.plan.seg_slide_lo[si]))
+            if (slide_ok && !std::isnan(bw.plan.seg_slide_lo[si]))
                 slide_map[key] = { bw.plan.seg_slide_lo[si], bw.plan.seg_slide_hi[si] };
             else
                 slide_map[key] = { static_cast<double>(cs.perp_lo),
@@ -122,8 +130,7 @@ static void build_nuts_maps(
             // (bw.plan.seg_net_pull, set by the dogleg pass) pins the value when
             // ConnTopology would recompute it wrongly on the split topology.
             int eff_net_pull = cs.net_pull;
-            if (si < (int)bw.plan.seg_net_pull.size() &&
-                bw.plan.seg_net_pull[si] != INT_MIN)
+            if (np_ok && bw.plan.seg_net_pull[si] != INT_MIN)
                 eff_net_pull = bw.plan.seg_net_pull[si];
             net_pull_map[key] = eff_net_pull;
             if (eff_net_pull != 0) {

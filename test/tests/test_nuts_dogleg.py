@@ -180,3 +180,19 @@ def test_dogleg_resolution_survives_resolve():
     assert sess.nuts_result.num_overlaps == 0, \
         f"re-solve reintroduced {sess.nuts_result.num_overlaps} overlap(s)"
     assert len(sess.nuts_result.segments) == n_segs, "dogleg lost on re-solve"
+
+
+def test_dogleg_overrides_tied_to_topology_size():
+    # The dogleg overrides are honored only while their length matches the
+    # selected topology's segment count.  A re-plan that keeps the (pinned)
+    # doglegged topology preserves them (size matches) and stays resolved; a
+    # re-plan onto a differently-sized topology must ignore the stale arrays
+    # rather than apply them to unrelated segments.
+    sess = _run("dogleg2.buda")
+    w = [b for b in sess.bundles if b.input.original_bundle.id == 3][0]
+    n_topo_segs = len(w.input.candidates[w.plan.selected_topology_index].segments)
+    assert len(w.plan.seg_net_pull) == n_topo_segs
+    sess.do_command("run_planner 1")
+    sess.do_command("run_nuts")
+    assert sess.nuts_result.num_overlaps == 0, \
+        f"re-plan reintroduced {sess.nuts_result.num_overlaps} overlap(s)"

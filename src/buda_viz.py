@@ -393,32 +393,37 @@ class TopologyExplorer:
     # only when the explorer is showing that topology — then the view matches
     # what NUTS actually used.
     def _show_overrides(self):
+        # Only the SELECTED topology, and only while an override array still
+        # matches that topology's segment count — a later run_planner can replace
+        # the selected topology without refreshing these, so a size mismatch means
+        # the overrides are stale and must be ignored (as build_nuts_maps does).
         return self.idx == self.wrapper.plan.selected_topology_index
 
+    def _n_segs(self):
+        return len(self.topos[self.idx].segments)
+
     def _seg_net_pull(self, cs, ci):
-        if self._show_overrides():
-            snp = getattr(self.wrapper.plan, 'seg_net_pull', None)
-            _INT_MIN = -2147483648
-            if snp and ci < len(snp) and snp[ci] != _INT_MIN:
+        snp = getattr(self.wrapper.plan, 'seg_net_pull', None)
+        if self._show_overrides() and snp and len(snp) == self._n_segs():
+            if snp[ci] != -2147483648:
                 return snp[ci]
         return cs.net_pull
 
     def _seg_slide(self, cs, ci):
-        if self._show_overrides():
-            slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
-            shi = getattr(self.wrapper.plan, 'seg_slide_hi', None)
-            if slo and shi and ci < len(slo) and not math.isnan(slo[ci]):
-                return slo[ci], shi[ci]
+        slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
+        shi = getattr(self.wrapper.plan, 'seg_slide_hi', None)
+        if (self._show_overrides() and slo and shi and len(slo) == self._n_segs()
+                and not math.isnan(slo[ci])):
+            return slo[ci], shi[ci]
         return cs.perp_lo, cs.perp_hi
 
     def _is_dogleg_seg(self, ci):
         # A dogleg piece/jog carries a pinned slide window; such a segment must
         # display at its NOMINAL position (the two pieces share a slide range, so
         # the range-centre display would collapse them and hide the dogleg step).
-        if not self._show_overrides():
-            return False
         slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
-        return bool(slo) and ci < len(slo) and not math.isnan(slo[ci])
+        return bool(self._show_overrides() and slo and len(slo) == self._n_segs()
+                    and not math.isnan(slo[ci]))
 
     def _draw_busterm_markers(self, topo, ct, viz_lw):
         """Draw a diamond at every busterm connection point."""
