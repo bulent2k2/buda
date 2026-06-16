@@ -24,6 +24,7 @@ HBundle-flow script export, not as the final polished editor.
 
 from __future__ import annotations
 
+import collections
 import os
 import sys
 import tkinter as tk
@@ -66,6 +67,8 @@ class BdbFloorplanner:
         self._drag = None
         self._canvas_sel: set[str] = set()       # canvas multi-selection
         self._path: list[str] = []               # drill-down stack
+        self._undo_stack: collections.deque = collections.deque(maxlen=50)
+        self._redo_stack: list = []
         self._status = tk.StringVar(value="Open or create a BDB to begin.")
 
         self._bdb_var = tk.StringVar()
@@ -75,6 +78,7 @@ class BdbFloorplanner:
         self._step = tk.DoubleVar(value=10.0)
         self._sel_var = tk.StringVar(value="")
         self._issue_var = tk.StringVar(value="")
+        self._hpwl_var = tk.StringVar(value="")
         self._overlay_depth = tk.IntVar(value=0)   # extra depth levels to overlay
 
         self._opt_settings: dict = {
@@ -146,10 +150,13 @@ class BdbFloorplanner:
         self._align_mb.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         align_menu = tk.Menu(self._align_mb, tearoff=False)
         self._align_mb["menu"] = align_menu
-        align_menu.add_command(label="Top  ↑",    command=self._align_top)
-        align_menu.add_command(label="Bottom ↓",  command=self._align_bottom)
-        align_menu.add_command(label="Left  ←",   command=self._align_left)
-        align_menu.add_command(label="Right →",   command=self._align_right)
+        align_menu.add_command(label="Top  ↑",      command=self._align_top)
+        align_menu.add_command(label="Bottom ↓",   command=self._align_bottom)
+        align_menu.add_command(label="Left  ←",    command=self._align_left)
+        align_menu.add_command(label="Right →",    command=self._align_right)
+        align_menu.add_separator()
+        align_menu.add_command(label="Distribute H", command=self._distribute_h)
+        align_menu.add_command(label="Distribute V", command=self._distribute_v)
         filter_f2 = ttk.Frame(blocks)
         filter_f2.pack(fill=tk.X, pady=(4, 0))
         ttk.Button(filter_f2, text="Optimize…",
@@ -175,6 +182,8 @@ class BdbFloorplanner:
         checks.pack(fill=tk.X)
         ttk.Button(checks, text="Validate", command=self._validate).pack(fill=tk.X)
         ttk.Label(checks, textvariable=self._issue_var, anchor="w", justify=tk.LEFT).pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(checks, textvariable=self._hpwl_var, anchor="w",
+                  foreground="#1d4ed8").pack(fill=tk.X, pady=(2, 0))
 
         canvas_f = ttk.Frame(main)
         canvas_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -198,6 +207,17 @@ class BdbFloorplanner:
         self.root.bind("<Control-Down>",  lambda e: self._align_bottom())
         self.root.bind("<Control-Left>",  lambda e: self._align_left())
         self.root.bind("<Control-Right>", lambda e: self._align_right())
+
+        # Ctrl+Shift+Arrow for Distribute
+        self.root.bind("<Control-Shift-Left>",  lambda e: self._distribute_h())
+        self.root.bind("<Control-Shift-Right>", lambda e: self._distribute_h())
+        self.root.bind("<Control-Shift-Up>",    lambda e: self._distribute_v())
+        self.root.bind("<Control-Shift-Down>",  lambda e: self._distribute_v())
+
+        # Undo / Redo
+        self.root.bind("<Control-z>", lambda e: self._undo())
+        self.root.bind("<Control-Z>", lambda e: self._redo())
+        self.root.bind("<Control-y>", lambda e: self._redo())
 
         ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
@@ -404,6 +424,7 @@ class BdbFloorplanner:
         if len(names) < 2:
             self._status.set("Select at least two blocks to align.")
             return
+        self._push_undo(self._snapshot())
         fn(self.state, names)
         self._draw()
         self._status.set(f"Aligned {len(names)} block(s) to {edge} edge.")
@@ -413,6 +434,19 @@ class BdbFloorplanner:
     def _align_left(self):   self._do_align(fpc.align_left,   "left")
     def _align_right(self):  self._do_align(fpc.align_right,  "right")
 
+    def _do_distribute(self, fn, direction: str):
+        names = list(self._canvas_sel | set(self._selected_tree_names()))
+        if len(names) < 3:
+            self._status.set("Select at least three blocks to distribute.")
+            return
+        self._push_undo(self._snapshot())
+        fn(self.state, names)
+        self._draw()
+        self._status.set(f"Distributed {len(names)} block(s) {direction}.")
+
+    def _distribute_h(self): self._do_distribute(fpc.distribute_h, "horizontally")
+    def _distribute_v(self): self._do_distribute(fpc.distribute_v, "vertically")
+
     def _open_optimize_dialog(self):
         if self.state is None:
             self._status.set("Open or create a BDB first.")
@@ -421,9 +455,11 @@ class BdbFloorplanner:
         if not root_blocks:
             self._status.set("No root-level blocks to optimize.")
             return
+        snap = self._snapshot()
         dlg = _OptimizeDialog(self.root, self.state, root_blocks, self._opt_settings)
         self.root.wait_window(dlg.top)
         if dlg.result is not None:
+            self._push_undo(snap)
             self._draw()
             r = dlg.result
             self._status.set(
@@ -672,6 +708,13 @@ class BdbFloorplanner:
         ax.set_title(title, fontsize=11)
         self._canvas.draw_idle()
 
+        # Live HPWL
+        if self.state is not None and self.state.bdb is not None:
+            hpwl = fpc.compute_hpwl(self.state)
+            self._hpwl_var.set(f"HPWL: {hpwl:.1f}")
+        else:
+            self._hpwl_var.set("")
+
     def _arrow_move(self, dx: float, dy: float) -> None:
         """Nudge all canvas-selected blocks; ignored when a text widget has focus."""
         fw = self.root.focus_get()
@@ -679,6 +722,7 @@ class BdbFloorplanner:
             return
         if self.state is None or not self._canvas_sel:
             return
+        self._push_undo(self._snapshot())
         for name in self._canvas_sel:
             try:
                 b = self.state.block(name)
@@ -693,6 +737,51 @@ class BdbFloorplanner:
                 self._status.set(f"{label}: ({b.x1:.0f}, {b.y1:.0f})")
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Undo / Redo
+    # ------------------------------------------------------------------
+
+    def _snapshot(self) -> dict:
+        """Capture current block positions from the live engine."""
+        snap = {}
+        if self.state is None:
+            return snap
+        for name in self.state.block_names:
+            try:
+                b = self.state.engine.get_block(name)
+                snap[name] = (b.x1, b.y1, b.x2, b.y2)
+            except Exception:
+                pass
+        return snap
+
+    def _push_undo(self, snap: dict) -> None:
+        self._undo_stack.append(snap)
+        self._redo_stack.clear()
+
+    def _restore(self, snap: dict) -> None:
+        for name, (x1, y1, x2, y2) in snap.items():
+            try:
+                self.state.engine.resize_block_raw(name, x1, y1, x2, y2)
+            except Exception:
+                pass
+        self._draw()
+
+    def _undo(self) -> None:
+        if not self._undo_stack:
+            self._status.set("Nothing to undo.")
+            return
+        self._redo_stack.append(self._snapshot())
+        self._restore(self._undo_stack.pop())
+        self._status.set(f"Undo — {len(self._undo_stack)} step(s) remaining.")
+
+    def _redo(self) -> None:
+        if not self._redo_stack:
+            self._status.set("Nothing to redo.")
+            return
+        self._undo_stack.append(self._snapshot())
+        self._restore(self._redo_stack.pop())
+        self._status.set(f"Redo — {len(self._redo_stack)} step(s) remaining.")
 
     def _draw_flylines(self, ax) -> None:
         """Draw dashed lines from selected block to every connected block, with net counts.
@@ -822,7 +911,8 @@ class BdbFloorplanner:
         # 1. Check corner handles first
         for hp, name, corner in self._handle_patches:
             if hp.contains(event)[0]:
-                self._drag = {"mode": "resize", "name": name, "corner": corner}
+                self._drag = {"mode": "resize", "name": name, "corner": corner,
+                              "snap": self._snapshot()}
                 return
 
         # 2. Check block body
@@ -855,6 +945,7 @@ class BdbFloorplanner:
                     "name": name,
                     "dx": event.xdata - b.x1,
                     "dy": event.ydata - b.y1,
+                    "snap": self._snapshot(),
                 }
                 self._draw()
                 return
@@ -900,7 +991,10 @@ class BdbFloorplanner:
             return
         mode = self._drag.get("mode", "move")
         name = self._drag.get("name")
+        snap = self._drag.get("snap")
         self._drag = None
+        if snap is not None:
+            self._push_undo(snap)
         if mode == "resize" and name:
             b = self.state.block(name)
             cell, n = fpc.sync_cell_to_instances(

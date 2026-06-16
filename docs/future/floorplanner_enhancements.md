@@ -9,48 +9,47 @@ each group.
 
 ## Quick wins — GUI only (hours each)
 
-### 1. Undo / Redo
-**Keybinding:** `Ctrl+Z` / `Ctrl+Y`
+### 1. Undo / Redo ✅ *Implemented*
+**Keybinding:** `Ctrl+Z` / `Ctrl+Y` (also `Ctrl+Shift+Z` for redo)
 
 After every user action that mutates block positions (drag, resize, arrow-nudge,
-optimize, align), snapshot the engine state into a bounded deque
+optimize, align, distribute), snapshot the engine state into a bounded deque
 (`collections.deque(maxlen=50)`).  On undo, pop the top snapshot and restore it
 to `state.engine` via `resize_block_raw`.  On redo, push forward.
 
-This is the single most-missed feature in any interactive placement editor.
-A single accidental drag should never require re-running the optimizer.
+The snapshot is taken **before** each action: at drag-press for mouse moves,
+inline for arrow-nudges, aligns, distributes, and optimization runs.  Cancel in
+the Optimize dialog does not push a snapshot, so cancelled edits don't count.
 
 **Key files:** `tools/bdb_floorplanner.py` only.  No C++ changes needed.
 
 ---
 
-### 2. Live HPWL in the status bar
+### 2. Live HPWL in the status bar ✅ *Implemented*
 
-As the user drags a block, recompute and display total HPWL in the status bar
-in real time.  `fpc.optimize_placement` already computes HPWL; a lightweight
-standalone helper that reads `state.bdb.all_pins()` and current engine positions
-can do the same without running the optimizer.
+HPWL is recomputed on every `_draw()` call (including during drag) and shown as
+a blue label in the Validation panel.  A lightweight `compute_hpwl(state)`
+helper reads `state.bdb.all_pins()` for connectivity and `state.engine.get_block()`
+for current positions — no optimizer invocation needed.
 
-Immediate feedback on whether a manual move improves or worsens wire length.
-
-**Key files:** `tools/floorplanner_commands.py` (add `compute_hpwl(state)`),
-`tools/bdb_floorplanner.py` (call from `_on_motion` and `_on_release`).
+**Key files:** `tools/floorplanner_commands.py` (`compute_hpwl`),
+`tools/bdb_floorplanner.py` (label in Validation frame, updated in `_draw()`).
 
 ---
 
-### 3. Distribute evenly (H and V)
+### 3. Distribute evenly (H and V) ✅ *Implemented*
 
-Natural complement to the four Align commands.  Select N blocks:
-- **Distribute H** — fix leftmost and rightmost X positions; space the interior
-  blocks at equal horizontal intervals.
-- **Distribute V** — fix top and bottom Y positions; space interior blocks
-  equally vertically.
+Natural complement to the four Align commands.  Select N ≥ 3 blocks:
+- **Distribute H** (`Ctrl+Shift+Left/Right`) — fix leftmost and rightmost X
+  positions; space the interior blocks at equal horizontal intervals.
+- **Distribute V** (`Ctrl+Shift+Up/Down`) — fix top and bottom Y positions;
+  space interior blocks equally vertically.
 
-Implementation follows the same pattern as `fpc.align_*`: a Python helper that
-sorts blocks by position and reassigns coordinates, called from the Align menu
-and via keybindings (e.g. `Ctrl+Shift+Left` / `Ctrl+Shift+Up`).
+Both commands appear in the **Align ▾** menu and in the keybindings above.
+Each distribute action is also undo-able via `Ctrl+Z`.
 
-**Key files:** `tools/floorplanner_commands.py`, `tools/bdb_floorplanner.py`.
+**Key files:** `tools/floorplanner_commands.py` (`distribute_h`, `distribute_v`),
+`tools/bdb_floorplanner.py` (`_do_distribute`, `_distribute_h/v`, menu + bindings).
 
 ---
 
@@ -185,15 +184,15 @@ physical grouping on top.
 
 ## Summary table
 
-| # | Feature | Effort | BUDA integration |
-|---|---------|--------|-----------------|
-| 1 | Undo / Redo | Low | No |
-| 2 | Live HPWL in status bar | Low | Partial (BDB pins) |
-| 3 | Distribute evenly H/V | Low | No |
-| 4 | Convergence plot | Low–Medium | No |
-| 5 | Congestion heatmap overlay | Medium | Yes — planner |
-| 6 | Routing preview overlay | Medium | Yes — NUTS |
-| 7 | "Run Flow" button | Medium | Yes — full pipeline |
-| 8 | Snap-to-block-edge | Medium | No |
-| 9 | Cross-link with buda_viz | Medium–High | Yes — viz |
-| 10 | Interactive hierarchy building | High | Partial |
+| # | Feature | Effort | BUDA integration | Status |
+|---|---------|--------|-----------------|--------|
+| 1 | Undo / Redo | Low | No | ✅ Done |
+| 2 | Live HPWL in status bar | Low | Partial (BDB pins) | ✅ Done |
+| 3 | Distribute evenly H/V | Low | No | ✅ Done |
+| 4 | Convergence plot | Low–Medium | No | — |
+| 5 | Congestion heatmap overlay | Medium | Yes — planner | — |
+| 6 | Routing preview overlay | Medium | Yes — NUTS | — |
+| 7 | "Run Flow" button | Medium | Yes — full pipeline | — |
+| 8 | Snap-to-block-edge | Medium | No | — |
+| 9 | Cross-link with buda_viz | Medium–High | Yes — viz | — |
+| 10 | Interactive hierarchy building | High | Partial | — |
