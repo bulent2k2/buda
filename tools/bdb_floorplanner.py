@@ -676,20 +676,37 @@ class BdbFloorplanner:
             f"{name.split('/')[-1]}: ({b.x1 + dx:.0f}, {b.y1 + dy:.0f})")
 
     def _draw_flylines(self, ax) -> None:
-        """Draw dashed lines from selected block to every connected block, with net counts."""
+        """Draw dashed lines from selected block to every connected block, with net counts.
+
+        Connectivity (which net_ids link which component ids) comes from the BDB,
+        which stores the pin→net→component graph and is never mutated by the optimizer.
+        Block *positions* come from state.engine, which is always up-to-date (the
+        optimizer calls engine.resize_block_raw after each run).
+        """
         if self.state is None or self.state.selected is None:
             return
         if self.state.bdb is None:
             return
         sel_name = self.state.selected
 
-        comp_by_id   = {c.id: c for c in self.state.bdb.all_components()}
-        comp_by_name = {c.name: c for c in self.state.bdb.all_components()}
-        if sel_name not in comp_by_name:
+        # BDB gives us the id↔name mapping and the pin connectivity graph.
+        comp_by_id = {c.id: c for c in self.state.bdb.all_components()}
+        sel_comp = next((c for c in comp_by_id.values() if c.name == sel_name), None)
+        if sel_comp is None:
             return
-        sel_comp = comp_by_name[sel_name]
-        sel_cx = (sel_comp.x1 + sel_comp.x2) / 2
-        sel_cy = (sel_comp.y1 + sel_comp.y2) / 2
+
+        # Positions come from the live engine (updated by optimizer / drag).
+        def _center(name: str):
+            try:
+                b = self.state.engine.get_block(name)
+                return (b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2
+            except Exception:
+                return None
+
+        sel_center = _center(sel_name)
+        if sel_center is None:
+            return
+        sel_cx, sel_cy = sel_center
 
         # Collect net_ids that include the selected block
         sel_nets: set[int] = set()
@@ -709,8 +726,10 @@ class BdbFloorplanner:
             other = comp_by_id.get(cid)
             if other is None:
                 continue
-            ocx = (other.x1 + other.x2) / 2
-            ocy = (other.y1 + other.y2) / 2
+            other_center = _center(other.name)
+            if other_center is None:
+                continue
+            ocx, ocy = other_center
             count = len(nets)
             ax.plot([sel_cx, ocx], [sel_cy, ocy],
                     color="#f97316", alpha=0.55, linewidth=0.9,
