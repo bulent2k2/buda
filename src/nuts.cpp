@@ -95,6 +95,9 @@ static void build_nuts_maps(
         const bool np_ok    = (bw.plan.seg_net_pull.size() == conn_segs.size());
         const bool slide_ok = (bw.plan.seg_slide_lo.size() == conn_segs.size() &&
                                bw.plan.seg_slide_hi.size() == conn_segs.size());
+        // seg_perp is planner-managed and normally matches the topology; guard it
+        // too so a stale dogleg seg_perp can never be applied to a different one.
+        const bool perp_ok  = (bw.plan.seg_perp.size() == conn_segs.size());
 
         for (int si = 0; si < (int)conn_segs.size(); ++si) {
             const ConnSeg& cs = conn_segs[si];
@@ -152,8 +155,7 @@ static void build_nuts_maps(
                 else
                     preferred = (lo > -kSentinel) ? lo : pull_map[key]; // fallback
                 pull_map[key] = preferred;
-            } else if (n_bt == 0 &&
-                       si < (int)bw.plan.seg_perp.size() &&
+            } else if (n_bt == 0 && perp_ok &&
                        bw.plan.seg_perp[si] != INT_MIN) {
                 // Planner band preference: the slide-aware congestion lookup
                 // charged this segment to a specific Hanan band (seg_perp =
@@ -175,7 +177,12 @@ static void build_nuts_maps(
     // sides).  rev_conn_map[T] lists the segs whose span follows T; any two of
     // them sharing T are siblings.
     for (const auto& [t_key, followers] : rev_conn_map) {
-        (void)t_key;
+        // The two sub-trunks both follow the jog (T = the jog), so they appear as
+        // siblings here.  Aligning them would place one piece on the other's track,
+        // collapsing the split — and on a re-solve the seed's no-swap ordering is
+        // gone, so this is the only thing standing between them.  Skip alignment
+        // whenever the shared perpendicular T is itself a jog.
+        if (jog_set.count(t_key)) continue;
         for (size_t i = 0; i < followers.size(); ++i)
             for (size_t j = i + 1; j < followers.size(); ++j) {
                 if (followers[i].src_bid != followers[j].src_bid) continue;

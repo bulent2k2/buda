@@ -1189,10 +1189,11 @@ class BudaSession:
             # at its index for run_planner to re-evaluate; _reset_doglegs drops this
             # appended slot.  A re-solve (run_nuts again, no re-plan) overwrites the
             # same slot rather than appending a duplicate.
-            if bid in self._dogleg_slot:
-                slot = self._dogleg_slot[bid]
-                cands[slot] = dl[bid]
+            slot = self._dogleg_slot.get(bid)
+            if slot is not None and 0 <= slot < len(cands):
+                cands[slot] = dl[bid]          # re-solve: overwrite the same slot
             else:
+                # First adoption (or stale slot after a candidate regen): append.
                 self._dogleg_originals[bid] = w.plan.selected_topology_index
                 cands.append(dl[bid])
                 slot = len(cands) - 1
@@ -1230,12 +1231,25 @@ class BudaSession:
             if 0 <= slot < len(cands):       # appended last; drop it
                 del cands[slot]
                 w.input.candidates = cands
-            w.plan.selected_topology_index = self._dogleg_originals.get(bid, 0)
-            # seg_layers / seg_perp are refreshed by the planner from its
-            # assignments; these pins are not, so clear them explicitly.
+            orig_sel = self._dogleg_originals.get(bid, 0)
+            cands = w.input.candidates
+            w.plan.selected_topology_index = orig_sel if 0 <= orig_sel < len(cands) else 0
+            # The planner refreshes seg_layers/seg_perp from its assignments for
+            # every routed bundle, but a bundle it does not return would keep the
+            # dogleg's pins; clear them all explicitly so nothing indexed by the
+            # obsolete split topology survives.
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
+            w.plan.seg_perp = []
+        self._dogleg_originals = {}
+        self._dogleg_slot = {}
+
+    def _clear_dogleg_state(self):
+        """Forget all dogleg bookkeeping without touching candidates.  Called when
+        a command regenerates a bundle's candidate list wholesale (generate_*): the
+        appended split candidate and its slot index no longer refer to anything, so
+        a later _adopt_doglegs must not try to overwrite/restore a stale slot."""
         self._dogleg_originals = {}
         self._dogleg_slot = {}
 
@@ -1723,6 +1737,7 @@ class BudaSession:
             # Multiple dst → multicast trunk+branch candidates
             # Append "center_mode"    to use block centres instead of busterm faces.
             # Append "double_detour"  to include UU_VHV / UU_HVH high-congestion variants.
+            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
             pos_args = [a for a in args if a not in ("center_mode", "double_detour")]
@@ -1751,6 +1766,7 @@ class BudaSession:
             # Usage: generate_topologies [center_mode] [double_detour]
             # Generates topologies for every bundle produced by run_bundler,
             # deriving src/dst block names from the netlist automatically.
+            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
             topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour)
@@ -1775,6 +1791,7 @@ class BudaSession:
             #   (b) same-level cross-block             → BDB depth-D floorplan
             if self.bdb is None:
                 print("Error: generate_hier_topologies requires an open BDB"); return
+            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
 
@@ -1812,6 +1829,7 @@ class BudaSession:
                 else:
                     print(f"Error: bundle {bid} not found")
                 return
+            self._clear_dogleg_state()   # regenerated candidates invalidate any split
             fp_cache = {}
             comps_by_name = {c.name: c for c in self.bdb.all_components()}
             n = self._generate_hier_topo_one(target_w, use_center, use_double_detour,

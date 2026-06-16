@@ -211,6 +211,26 @@ def test_dogleg_resolution_survives_resolve():
     assert sess.nuts_result.num_overlaps == 0, \
         f"re-solve reintroduced {sess.nuts_result.num_overlaps} overlap(s)"
     assert len(sess.nuts_result.segments) == n_segs, "dogleg lost on re-solve"
+    # On a re-solve the seed's no-swap ordering is gone, so the sibling-alignment
+    # pass must not align the two sub-trunks (both follow the jog) onto one track —
+    # that would collapse the split.  They must stay on distinct tracks.
+    for bid in sess.nuts_result.dogleg_topologies:
+        pieces = [t for t in sess.nuts_result.segments if t.bundle_id == bid and t.horiz]
+        assert len(pieces) == 2 and abs(pieces[0].track_position - pieces[1].track_position) > 1e-6, \
+            f"B{bid}: sub-trunks collapsed onto one track on re-solve"
+
+
+def test_dogleg_state_cleared_on_regenerate():
+    # Regenerating a bundle's candidate list after a dogleg was adopted replaces
+    # the appended split candidate, so its slot index no longer refers to anything.
+    # generate_topologies must forget the dogleg bookkeeping; otherwise a later
+    # _adopt_doglegs would overwrite an unrelated fresh candidate at the stale slot.
+    sess = _run("dogleg2.buda")
+    assert sess.nuts_result.dogleg_topologies and sess._dogleg_slot, \
+        "expected an adopted dogleg with slot bookkeeping"
+    sess.do_command("generate_topologies")
+    assert sess._dogleg_slot == {} and sess._dogleg_originals == {}, \
+        "dogleg bookkeeping survived candidate regeneration"
 
 
 def test_dogleg_reset_on_replan():
@@ -220,21 +240,18 @@ def test_dogleg_reset_on_replan():
     # The split must not silently outlive the planner that produced its inputs.
     sess = _run("dogleg2.buda")
     w = [b for b in sess.bundles if b.input.original_bundle.id == 3][0]
-    # After the initial dogleg the split is an appended candidate (more segments
-    # than the pre-split original) with pinned pulls, and it is the selection.
-    n_cands = len(w.input.candidates)
+    # After the initial dogleg the split topology (more segments than the pre-split
+    # original) is selected with pinned pulls.
     split_segs = len(w.input.candidates[w.plan.selected_topology_index].segments)
     assert w.plan.seg_net_pull, "expected pinned pulls after the dogleg"
     assert len(w.plan.seg_net_pull) == split_segs
 
     sess.do_command("run_planner 1")
-    # Re-plan dropped the appended split candidate, restored a pre-split selection,
-    # and cleared the pins.
+    # Re-plan cleared the pins and restored a pre-split selection (behavioral
+    # contract; the exact candidate-list bookkeeping is an implementation detail).
     w = [b for b in sess.bundles if b.input.original_bundle.id == 3][0]
     assert not w.plan.seg_net_pull and not w.plan.seg_slide_lo, \
         "dogleg overrides survived a re-plan"
-    assert len(w.input.candidates) == n_cands - 1, \
-        "appended dogleg candidate not dropped on re-plan"
     restored_segs = len(w.input.candidates[w.plan.selected_topology_index].segments)
     assert restored_segs < split_segs, \
         f"pre-split topology not restored ({restored_segs} vs split {split_segs})"

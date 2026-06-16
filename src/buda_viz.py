@@ -413,7 +413,7 @@ class TopologyExplorer:
         slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
         shi = getattr(self.wrapper.plan, 'seg_slide_hi', None)
         if (self._show_overrides() and slo and shi and len(slo) == self._n_segs()
-                and not math.isnan(slo[ci])):
+                and len(shi) == self._n_segs() and not math.isnan(slo[ci])):
             return slo[ci], shi[ci]
         return cs.perp_lo, cs.perp_hi
 
