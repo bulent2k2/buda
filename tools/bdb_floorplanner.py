@@ -71,6 +71,7 @@ class BdbFloorplanner:
         self._die_w = tk.DoubleVar(value=2000.0)
         self._die_h = tk.DoubleVar(value=1200.0)
         self._grid = tk.DoubleVar(value=10.0)
+        self._step = tk.DoubleVar(value=10.0)
         self._sel_var = tk.StringVar(value="")
         self._issue_var = tk.StringVar(value="")
         self._overlay_depth = tk.IntVar(value=0)   # extra depth levels to overlay
@@ -120,11 +121,12 @@ class BdbFloorplanner:
         self._spin(setup, "Die W", self._die_w, 0)
         self._spin(setup, "Die H", self._die_h, 1)
         self._spin(setup, "Grid", self._grid, 2)
+        self._spin(setup, "Step", self._step, 3)
         ttk.Button(setup, text="Apply", command=self._apply_canvas).grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+            row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         # Depth overlay control
         ov_f = ttk.Frame(setup)
-        ov_f.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        ov_f.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         ttk.Label(ov_f, text="Overlay:").pack(side=tk.LEFT)
         ttk.Button(ov_f, text="−", width=2,
                    command=self._overlay_dec).pack(side=tk.LEFT, padx=2)
@@ -153,7 +155,7 @@ class BdbFloorplanner:
                    command=self._open_optimize_dialog).pack(fill=tk.X)
         tv_frame = ttk.Frame(blocks)
         tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-        self._tree = ttk.Treeview(tv_frame, show="tree", selectmode="browse")
+        self._tree = ttk.Treeview(tv_frame, show="tree", selectmode="extended")
         tv_sb = ttk.Scrollbar(tv_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=tv_sb.set)
         self._tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -183,6 +185,12 @@ class BdbFloorplanner:
         self._canvas.mpl_connect("button_press_event", self._on_press)
         self._canvas.mpl_connect("motion_notify_event", self._on_motion)
         self._canvas.mpl_connect("button_release_event", self._on_release)
+
+        # Arrow-key bindings for nudging the selected block
+        self.root.bind("<Up>",    lambda e: self._arrow_move(0,  -self._step.get()))
+        self.root.bind("<Down>",  lambda e: self._arrow_move(0,   self._step.get()))
+        self.root.bind("<Left>",  lambda e: self._arrow_move(-self._step.get(), 0))
+        self.root.bind("<Right>", lambda e: self._arrow_move( self._step.get(), 0))
 
         ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
@@ -590,7 +598,7 @@ class BdbFloorplanner:
 
             # Corner handles for selected block
             if selected:
-                HS = max(vis_ref * 0.012, 1.0)
+                HS = max(vis_ref * 0.005, 1.0)
                 for corner, (cx, cy) in [
                         ("tl", (block.x1, block.y1)),
                         ("tr", (block.x2, block.y1)),
@@ -623,6 +631,7 @@ class BdbFloorplanner:
             for name in visible:
                 _draw_overlay(name, extra_levels, 0.85)
 
+        self._draw_flylines(ax)
         self._update_selection_label()
         if not zoom_set:
             if dw > 0 and dh > 0:
@@ -648,6 +657,70 @@ class BdbFloorplanner:
             title += " — " + " / ".join(n.split("/")[-1] for n in self._path)
         ax.set_title(title, fontsize=11)
         self._canvas.draw_idle()
+
+    def _arrow_move(self, dx: float, dy: float) -> None:
+        """Nudge the selected block by (dx, dy); ignored when a text widget has focus."""
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        if self.state is None or self.state.selected is None:
+            return
+        name = self.state.selected
+        try:
+            b = self.state.block(name)
+        except Exception:
+            return
+        fpc.move_block(self.state, name, b.x1 + dx, b.y1 + dy)
+        self._draw()
+        self._status.set(
+            f"{name.split('/')[-1]}: ({b.x1 + dx:.0f}, {b.y1 + dy:.0f})")
+
+    def _draw_flylines(self, ax) -> None:
+        """Draw dashed lines from selected block to every connected block, with net counts."""
+        if self.state is None or self.state.selected is None:
+            return
+        if self.state.bdb is None:
+            return
+        sel_name = self.state.selected
+
+        comp_by_id   = {c.id: c for c in self.state.bdb.all_components()}
+        comp_by_name = {c.name: c for c in self.state.bdb.all_components()}
+        if sel_name not in comp_by_name:
+            return
+        sel_comp = comp_by_name[sel_name]
+        sel_cx = (sel_comp.x1 + sel_comp.x2) / 2
+        sel_cy = (sel_comp.y1 + sel_comp.y2) / 2
+
+        # Collect net_ids that include the selected block
+        sel_nets: set[int] = set()
+        for p in self.state.bdb.all_pins():
+            if p.comp_id == sel_comp.id:
+                sel_nets.add(p.net_id)
+        if not sel_nets:
+            return
+
+        # Count distinct net_ids per other component
+        other_nets: dict[int, set[int]] = {}  # comp_id → set of net_ids
+        for p in self.state.bdb.all_pins():
+            if p.net_id in sel_nets and p.comp_id != sel_comp.id:
+                other_nets.setdefault(p.comp_id, set()).add(p.net_id)
+
+        for cid, nets in other_nets.items():
+            other = comp_by_id.get(cid)
+            if other is None:
+                continue
+            ocx = (other.x1 + other.x2) / 2
+            ocy = (other.y1 + other.y2) / 2
+            count = len(nets)
+            ax.plot([sel_cx, ocx], [sel_cy, ocy],
+                    color="#f97316", alpha=0.55, linewidth=0.9,
+                    linestyle="--", zorder=2)
+            mx, my = (sel_cx + ocx) / 2, (sel_cy + ocy) / 2
+            ax.annotate(str(count), (mx, my), fontsize=6.5,
+                        color="#c2410c", ha="center", va="center",
+                        bbox=dict(boxstyle="round,pad=0.15",
+                                  fc="white", alpha=0.80, ec="none"),
+                        zorder=4)
 
     def _update_selection_label(self):
         name = self.state.selected
