@@ -8,8 +8,10 @@ to one of three systematic gaps at the planner/NUTS interface. The flow's test
 regressions are caught.
 
 Gaps 1 and 2 are now **resolved** (flow 10: abstract-NUTS overlaps dropped from
-10 → 4, detailed-NUTS placements rose from 1112 → 1224). Gap 3 remains open and
-is documented below with the chosen approach for when it is picked up.
+10 → 4, detailed-NUTS placements rose from 1112 → 1224). Gap 3 is largely
+resolved too: span-stretch corner overlaps, the cross-trunk-layer case, and now
+genuinely **cyclic** vertical constraints (via a dogleg) are handled; the
+remaining open items are noted at the end of §3.
 
 Related context: the planner exports its chosen band per segment
 (`BundleAssignment.seg_perp` → `BundleWrapper.seg_perp`), and NUTS uses it as the
@@ -169,9 +171,48 @@ meet.  If a side genuinely lacks `bit_width` tracks the bits are reported **unpl
 `test_detailed_nuts_xlayer.py` (no same-track/overlapping-span stub pair on
 `nuts_corner_touch`, 0 unplaced).
 
+### Cyclic vertical constraints (dogleg) — RESOLVED
+
+A genuinely **cyclic** vertical constraint (trunk A must sit above B at one column
+but below it at another — generally a directed cycle A→B→C→…→A) admits no single
+track ordering, so the corner pass gives up at its `!new_edge` guard. The cure is
+a **dogleg**: split one trunk on the cycle across two tracks joined by a
+perpendicular jog, so its two pieces become *independent* trunks that straddle
+their neighbours, breaking the cycle.
+
+Implemented (`nuts.cpp`):
+- **Detection** (`detect_dogleg_plans`) builds the same-layer vertical-constraint
+  graph from co-located stub pairs — co-location by the stubs' **Hanan interval**
+  (the column they're constrained to), so it is placement-independent and catches
+  two wide multi-bit stubs that share a narrow column even when NUTS shifted them
+  to different tracks. A directed cycle is found by DFS (handles 2-cycles and
+  longer); one split plan is emitted per trunk on the cycle, carrying the full
+  cycle's ordering edges.
+- **Resolution** runs after the corner pass on a small residual (heavy congestion
+  is the planner's job). It tries splitting each trunk and keeps the cheapest:
+  the trunk's slide window must host two sub-trunks, then the **longest span** wins
+  (more room for the jog), tie-broken on a shorter jog. `apply_dogleg` mutates the
+  selected `Topology` (split trunk + extend its stubs + jog, marked `is_jog` so it
+  is exempt from sibling alignment), and the **full cycle order** is seeded as
+  same-layer `LayerConstraints` (the split trunk redirected to its covering piece),
+  since the corner pass can't impose a 3+-trunk chain.
+- **Detailed NUTS adoption**: the dogleg-mutated topologies are exported
+  (`NUTSResult::dogleg_topologies`) and adopted by the CLI before it rebuilds
+  `ConnTopology`, so the split bundle's stubs route with correct (post-split)
+  connectivity instead of corrupted spans that would short on shared tracks.
+
+Verified by `test_nuts_dogleg.py`: `flow/nuts_dogleg_cycle.buda` (2-cycle) and
+`flow/dogleg1.buda` (3-cycle) each reach 0 abstract overlaps, 0 unplaced detailed
+bits, and 0 bit-level shorts.
+
 ### Still open
 
-- Genuinely **cyclic** vertical constraints (A above B at one column, B above A at
-  another — NP-hard, needs a *dogleg* splitting a trunk across tracks) are left as
-  is by the guard; flow 10's last residual overlap is this class. **Effort:**
-  medium→large.
+- The **alternating orientation-group fixpoint** (solve all H, propagate spans,
+  solve all V, iterate) is scaffolded but only adopts a sweep when it strictly
+  reduces overlaps without straying from planner-reserved bands; a sweep is judged
+  on raw overlaps, which is unsound because the repair/corner passes run after it.
+  A sound version must compare POST-cleanup overlaps. **Effort:** medium.
+- Cycles whose stubs are **cross-layer** (the two trunks on different layers) are
+  handled by the existing `g=1` split + carry-bound, not the dogleg; a dogleg for
+  the cross-layer cyclic case is not implemented. Flow 10's last residual overlap
+  is not a clean same-layer cycle the detector catches (it remains at 1).

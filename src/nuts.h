@@ -39,6 +39,7 @@ struct TrackSegment {
     double track_position = std::numeric_limits<double>::quiet_NaN(); // assigned output; NaN = unplaced
     bool   placed   = false;
     int    net_pull = 0;                  // from ConnSeg: >0 prefer hi, <0 prefer lo
+    bool   is_jog   = false;              // dogleg jog (slide window pruned to the trunk's stub extent)
     // Cross-trunk-layer corner resolution: the committed fixed track bound for
     // this trunk (one side of a split).  Carried into detailed NUTS so its bits
     // snap to the bounded side on real signal tracks.  Default = unbounded.
@@ -61,6 +62,16 @@ struct NUTSResult {
     int num_violations = 0;   // segments placed outside their interval
     int num_overlaps   = 0;   // pairs of segments that physically overlap after placement
     std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
+    // Topologies the dogleg pass mutated (bundle_id -> new selected Topology and
+    // its seg_layers).  The CLI adopts these into its bundles before rebuilding
+    // ConnTopology for detailed NUTS, so the split bundle's stubs get the correct
+    // (post-split) connectivity instead of routing with stale, corrupted spans.
+    std::map<int, Topology>            dogleg_topologies;
+    std::map<int, std::vector<int>>    dogleg_seg_layers;
+    std::map<int, std::vector<int>>    dogleg_seg_net_pull;
+    std::map<int, std::vector<int>>    dogleg_seg_perp;
+    std::map<int, std::vector<double>> dogleg_seg_slide_lo;
+    std::map<int, std::vector<double>> dogleg_seg_slide_hi;
 };
 
 // Non-Uniform Track Sharing engine.
@@ -150,6 +161,25 @@ private:
                      const std::map<std::pair<int,int>, double>& pull_map,
                      const AlignMap& align_map,
                      const LayerConstraints& constraints = {}) const;
+
+    // Alternating orientation-group fixpoint: solve a whole orientation group
+    // (all H or all V) at once, propagate spans to the perpendicular group,
+    // solve that, propagate back, and iterate to a fixpoint.  Each group thus
+    // packs against the OTHER group's already-stretched spans — proactive
+    // ordering rather than reactive repair.  Leads with the orientation of the
+    // lowest TOP layer.  Keeps the best-by-overlap-count state; stops on no
+    // strict overlap drop or a repeated placement state (a genuine cyclic
+    // vertical constraint).  Replaces the naive per-layer solve loop; the
+    // existing repair_overlaps / resolve_corner_overlaps run after it as a
+    // safety net.
+    void orientation_fixpoint(
+        std::vector<TrackSegment>& segments,
+        std::map<int, std::vector<TrackSegment*>>& by_layer,
+        const std::map<std::pair<int,int>, double>& pull_map,
+        const AlignMap& align_map,
+        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+        std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map,
+        const std::map<int, LayerConstraints>& seed_cons = {}) const;
 
     // Post-span-adjustment overlap repair: the final cross-layer span
     // adjustments can extend spans of already-packed layers, materialising

@@ -502,12 +502,23 @@ void ConnTopology::compute_net_pull() {
             // NUTS turns any nonzero pull into "slide to my own range extreme";
             // emitting a pull while already inside the far interval makes the
             // segment overshoot past its target (see flow/pull2.buda).
+            //
+            // This spine contributes a SINGLE unit of pull, not one per far
+            // segment: sliding cs only shortens the spine if cs is an extreme
+            // endpoint of it (all far segments on one side).  Shortening the
+            // spine is worth one unit regardless of how many segments hang off
+            // the other end — so a multi-fanout (multicast) spine must not
+            // multiply the pull.  If far segments lie on both sides, cs is
+            // interior and exerts no pull.
+            int far_hi = 0, far_lo = 0;
             for (const auto& sc : nb.conns) {
                 if (sc.kind != SegConn::SEG || sc.seg_idx == ci) continue;
                 const ConnSeg& far = segs_[sc.seg_idx];
-                if      (cs.perp_pos < far.perp_lo) ++pos;
-                else if (cs.perp_pos > far.perp_hi) ++neg;
+                if      (cs.perp_pos < far.perp_lo) ++far_hi;   // far is above/right of cs
+                else if (cs.perp_pos > far.perp_hi) ++far_lo;   // far is below/left  of cs
             }
+            if      (far_hi > 0 && far_lo == 0) ++pos;   // cs is the low endpoint → pull toward hi
+            else if (far_lo > 0 && far_hi == 0) ++neg;   // cs is the high endpoint → pull toward lo
         }
         cs.net_pull = pos - neg;
     }

@@ -200,7 +200,10 @@ void bind_routing(py::module_& m) {
         .def(py::init<>())
         .def_readwrite("selected_topology_index", &BundlePlan::selected_topology_index)
         .def_readwrite("seg_layers",              &BundlePlan::seg_layers)
-        .def_readwrite("seg_perp",                &BundlePlan::seg_perp);
+        .def_readwrite("seg_perp",                &BundlePlan::seg_perp)
+        .def_readwrite("seg_net_pull",            &BundlePlan::seg_net_pull)
+        .def_readwrite("seg_slide_lo",            &BundlePlan::seg_slide_lo)
+        .def_readwrite("seg_slide_hi",            &BundlePlan::seg_slide_hi);
 
     py::class_<BundleHierMeta>(m, "BundleHierMeta")
         .def(py::init<>())

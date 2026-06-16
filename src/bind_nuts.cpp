@@ -92,6 +92,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("track_position", &TrackSegment::track_position)
         .def_readwrite("placed",         &TrackSegment::placed)
         .def_readwrite("net_pull",       &TrackSegment::net_pull)
+        .def_readwrite("is_jog",         &TrackSegment::is_jog)
         .def_readwrite("track_lo_bound", &TrackSegment::track_lo_bound)
         .def_readwrite("track_hi_bound", &TrackSegment::track_hi_bound);
 
@@ -112,7 +113,13 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("overlap_details",    &NUTSResult::overlap_details)
         .def_readwrite("num_violations",     &NUTSResult::num_violations)
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
-        .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer);
+        .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer)
+        .def_readwrite("dogleg_topologies",   &NUTSResult::dogleg_topologies)
+        .def_readwrite("dogleg_seg_layers",   &NUTSResult::dogleg_seg_layers)
+        .def_readwrite("dogleg_seg_net_pull", &NUTSResult::dogleg_seg_net_pull)
+        .def_readwrite("dogleg_seg_perp",     &NUTSResult::dogleg_seg_perp)
+        .def_readwrite("dogleg_seg_slide_lo", &NUTSResult::dogleg_seg_slide_lo)
+        .def_readwrite("dogleg_seg_slide_hi", &NUTSResult::dogleg_seg_slide_hi);
 
     py::class_<NUTSEngine>(m, "NUTSEngine")
         .def(py::init<const Floorplan&, const LayerStack&>())

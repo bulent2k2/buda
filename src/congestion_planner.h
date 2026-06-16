@@ -77,6 +77,18 @@ struct BundlePlan {
     // placement so buses land in the bands whose capacity the planner
     // actually reserved (connectivity pulls still take precedence).
     std::vector<int> seg_perp;
+    // Per-segment net_pull override (INT_MIN = use ConnTopology's computed
+    // value).  Set by the dogleg pass: a split rewrites the topology so
+    // ConnTopology would recompute the bundle's pulls wrongly, so we pin them —
+    // stubs keep their pre-split pull, both sub-trunks inherit the trunk's, and
+    // the jog is net-zero.
+    std::vector<int> seg_net_pull;
+    // Per-segment slide-window override (NaN = use ConnTopology's computed
+    // range).  Set by the dogleg pass: each sub-trunk inherits the ORIGINAL
+    // trunk's slide range (ConnTopology would give each piece a narrower range
+    // from its stub subset), and the jog is clamped to the trunk's stub extent.
+    std::vector<double> seg_slide_lo;
+    std::vector<double> seg_slide_hi;
 };
 
 struct BundleHierMeta {
