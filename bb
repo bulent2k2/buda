@@ -75,11 +75,10 @@ if [ "$RUN_TESTS" = true ]; then
     cd ..
     mkdir -p log
     TEST_LOG="log/pytest_$(date +%Y%m%d_%H%M%S).log"
-    # Define awk filter for single-line progress indicator
+    # Define awk filter for milestone-based progress indicator
     AWK_FILTER='
     BEGIN {
-        CR = "\r"
-        CL = "\033[K"
+        next_milestone = 0
     }
     {
         if (log_file) {
@@ -87,29 +86,28 @@ if [ "$RUN_TESTS" = true ]; then
             fflush(log_file)
         }
     }
-    /\[\s*[0-9]+%\]/ {
-        match($0, /\[\s*[0-9]+%\]/)
-        pct = substr($0, RSTART, RLENGTH)
-        test_info = $1
-        n = split(test_info, parts, "/")
-        display_name = parts[n]
-        if ($0 ~ / FAILED / || $0 ~ / ERROR /) {
-            printf "%s%s%s\n", CR, CL, $0
-        } else {
-            if (length(display_name) > 60) {
-                display_name = substr(display_name, 1, 57) "..."
+    /\[[[:space:]]*[0-9]+%\]/ {
+        match($0, /\[[[:space:]]*[0-9]+%\]/)
+        pct_str = substr($0, RSTART, RLENGTH)
+        gsub(/[^0-9]/, "", pct_str)
+        pct = int(pct_str)
+        
+        if (pct >= next_milestone) {
+            test_info = $1
+            n = split(test_info, parts, "/")
+            display_name = parts[n]
+            if (length(display_name) > 65) {
+                display_name = substr(display_name, 1, 62) "..."
             }
-            printf "%s%sRunning: %s %s", CR, CL, pct, display_name
+            printf "Progress: [%d%%] %s\n", pct, display_name
             fflush()
+            next_milestone = (int(pct / 10) + 1) * 10
         }
         next
     }
     /===|---|FAILURES|test_.*FAILED|collected/ {
-        printf "%s%s%s\n", CR, CL, $0
+        print $0
         next
-    }
-    END {
-        printf "%s%s", CR, CL
     }
     '
 
