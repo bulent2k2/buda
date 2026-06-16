@@ -182,17 +182,34 @@ def test_dogleg_resolution_survives_resolve():
     assert len(sess.nuts_result.segments) == n_segs, "dogleg lost on re-solve"
 
 
-def test_dogleg_overrides_tied_to_topology_size():
-    # The dogleg overrides are honored only while their length matches the
-    # selected topology's segment count.  A re-plan that keeps the (pinned)
-    # doglegged topology preserves them (size matches) and stays resolved; a
-    # re-plan onto a differently-sized topology must ignore the stale arrays
-    # rather than apply them to unrelated segments.
+def test_dogleg_reset_on_replan():
+    # Re-running the planner discards any adopted dogleg: the bundle's pre-split
+    # topology is restored and the pinned per-segment overrides are dropped, so
+    # the next NUTS re-detects cycles from scratch (neighbors may have moved).
+    # The split must not silently outlive the planner that produced its inputs.
     sess = _run("dogleg2.buda")
     w = [b for b in sess.bundles if b.input.original_bundle.id == 3][0]
-    n_topo_segs = len(w.input.candidates[w.plan.selected_topology_index].segments)
-    assert len(w.plan.seg_net_pull) == n_topo_segs
+    # After the initial dogleg the split is an appended candidate (more segments
+    # than the pre-split original) with pinned pulls, and it is the selection.
+    n_cands = len(w.input.candidates)
+    split_segs = len(w.input.candidates[w.plan.selected_topology_index].segments)
+    assert w.plan.seg_net_pull, "expected pinned pulls after the dogleg"
+    assert len(w.plan.seg_net_pull) == split_segs
+
     sess.do_command("run_planner 1")
+    # Re-plan dropped the appended split candidate, restored a pre-split selection,
+    # and cleared the pins.
+    w = [b for b in sess.bundles if b.input.original_bundle.id == 3][0]
+    assert not w.plan.seg_net_pull and not w.plan.seg_slide_lo, \
+        "dogleg overrides survived a re-plan"
+    assert len(w.input.candidates) == n_cands - 1, \
+        "appended dogleg candidate not dropped on re-plan"
+    restored_segs = len(w.input.candidates[w.plan.selected_topology_index].segments)
+    assert restored_segs < split_segs, \
+        f"pre-split topology not restored ({restored_segs} vs split {split_segs})"
+
+    # The next NUTS re-detects the cycle and re-applies the dogleg → still clean.
     sess.do_command("run_nuts")
+    assert sess.nuts_result.dogleg_topologies, "dogleg not re-detected after re-plan"
     assert sess.nuts_result.num_overlaps == 0, \
         f"re-plan reintroduced {sess.nuts_result.num_overlaps} overlap(s)"

@@ -101,6 +101,8 @@ class BudaSession:
         self.script_path = None      # set when a .buda script is sourced
         self.routing_grid = None     # RoutingGridStack (stage 8)
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
+        self._dogleg_originals = {}  # bid -> pre-split selected_topology_index (restored on re-plan)
+        self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology
         self.no_viz = False          # set by --no-viz CLI flag
         self.bdb = None              # BDB (opened by open_bdb command)
         self._bdb_added_ids = set()  # component ids loaded into fp via add_blocks_from_bdb
@@ -1180,10 +1182,23 @@ class BudaSession:
             bid = w.input.original_bundle.id
             if bid not in dl:
                 continue
-            sel = w.plan.selected_topology_index
             cands = w.input.candidates        # pybind copy
-            cands[sel] = dl[bid]
+            # Append the split as a NEW candidate (never overwrite the original in
+            # place — pybind hands back live element handles, so we cannot snapshot
+            # the pre-split Topology to restore later).  The pristine original stays
+            # at its index for run_planner to re-evaluate; _reset_doglegs drops this
+            # appended slot.  A re-solve (run_nuts again, no re-plan) overwrites the
+            # same slot rather than appending a duplicate.
+            if bid in self._dogleg_slot:
+                slot = self._dogleg_slot[bid]
+                cands[slot] = dl[bid]
+            else:
+                self._dogleg_originals[bid] = w.plan.selected_topology_index
+                cands.append(dl[bid])
+                slot = len(cands) - 1
+                self._dogleg_slot[bid] = slot
             w.input.candidates = cands        # reassign the whole vector back
+            w.plan.selected_topology_index = slot
             w.plan.seg_layers = list(seg_layers[bid])
             np = getattr(self.nuts_result, "dogleg_seg_net_pull", None)
             if np and bid in np:
@@ -1196,6 +1211,33 @@ class BudaSession:
             if slo and bid in slo:
                 w.plan.seg_slide_lo = list(slo[bid])
                 w.plan.seg_slide_hi = list(shi[bid])
+
+    def _reset_doglegs(self):
+        """Discard any adopted dogleg before re-planning: drop the appended split
+        candidate, restore the pre-split selection, and clear the pinned per-segment
+        overrides (seg_net_pull / seg_slide_*).  A fresh run_planner may change
+        neighboring topologies, so the next run_nuts must re-detect cycles from
+        scratch rather than inherit a stale split — and its overrides, indexed by the
+        obsolete split topology, must not survive onto whatever is selected next."""
+        if not self._dogleg_slot:
+            return
+        for w in self.bundles:
+            bid = w.input.original_bundle.id
+            slot = self._dogleg_slot.get(bid)
+            if slot is None:
+                continue
+            cands = w.input.candidates
+            if 0 <= slot < len(cands):       # appended last; drop it
+                del cands[slot]
+                w.input.candidates = cands
+            w.plan.selected_topology_index = self._dogleg_originals.get(bid, 0)
+            # seg_layers / seg_perp are refreshed by the planner from its
+            # assignments; these pins are not, so clear them explicitly.
+            w.plan.seg_net_pull = []
+            w.plan.seg_slide_lo = []
+            w.plan.seg_slide_hi = []
+        self._dogleg_originals = {}
+        self._dogleg_slot = {}
 
     def _run_detailed_nuts(self, bit_order="LO_HI"):
         """Execute bit-level track assignment using DetailedNUTSEngine."""
@@ -1818,6 +1860,8 @@ class BudaSession:
                 if self.bdb is None:
                     print("Error: run_planner hier requires an open BDB"); return
                 iterations = int(args[1]) if len(args) > 1 else 5
+                # Re-planning invalidates any adopted dogleg (and its pins).
+                self._reset_doglegs()
                 # Apply user-pinned selections to template wrappers BEFORE expansion
                 # so topology_pinned + pinned_seg_layers propagate to all instances.
                 self._apply_selections()
@@ -1857,6 +1901,9 @@ class BudaSession:
                 self.bundles = expanded
                 print(f"run_planner hier: {len(self.bundles)} wrappers after expansion")
             else:
+                # Re-planning invalidates any adopted dogleg (and its pins): the
+                # planner may move neighbors, so cycles are re-detected next NUTS.
+                self._reset_doglegs()
                 self.planner = buda.CongestionPlanner(self.fp, self.layers)
                 for pname, pval in self._planner_params.items():
                     self.planner.set_planner_param(pname, pval)
