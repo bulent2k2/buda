@@ -1566,6 +1566,11 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
 
     const int yL = y_t + (highL ? delta : -delta);
     const int yR = y_t + (highR ? delta : -delta);
+    // The two pieces must land on DIFFERENT tracks or the split separates nothing.
+    // detect_dogleg_plans always emits high1=true/high2=false, so highL != highR and
+    // yL != yR; guard anyway so a future change to that convention can't silently
+    // collapse the pieces onto one track.
+    if (yL == yR) return {};
 
     int h_layer = trunk.layer_hint;
     if (trunk_si < (int)bw.plan.seg_layers.size() && bw.plan.seg_layers[trunk_si] >= 0)
@@ -1654,7 +1659,10 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
         if (s.start.y == y_t)      s.start.y = new_y;
         else if (s.end.y == y_t)   s.end.y   = new_y;
     }
-    return DoglegResult{ true, jog_idx, trunk_si, piece_r_idx, jog_x, highL };
+    // piece_l_high reports which piece sits on the higher track, derived from the
+    // EMITTED geometry (yL vs yR) — the single source of truth — rather than highL,
+    // so the no-swap seed edge can never disagree with the tracks actually placed.
+    return DoglegResult{ true, jog_idx, trunk_si, piece_r_idx, jog_x, (yL > yR) };
 }
 
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
@@ -1752,6 +1760,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         for (const DoglegPlan& p : plans) {
             int bw_idx = find_bw(p.split_trunk.first);
             if (bw_idx < 0) continue;
+            // Don't split a bundle twice: apply_dogleg re-assigns (overwrites) the
+            // whole seg_net_pull / seg_slide_* arrays, which would wipe an earlier
+            // iteration's pins for this bundle.  A second cycle through it is left to
+            // a later iteration on a different bundle, or to the BEST_EFFORT residual.
+            if (doglegged_bids.count(p.split_trunk.first)) continue;
             // Trunk geometry: its slide window (interval) must hold two sub-trunks,
             // and a longer span gives the jog more room to slide — so among the
             // cycle's trunks we prefer the one with the longest span (tie-broken on
@@ -1796,6 +1809,13 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                 if (node != p.split_trunk) return node;
                 return (col <= dr.jog_x) ? piece_l : piece_r;
             };
+            // The split only breaks the cycle if the trunk's two contradictory edges
+            // (col1/col2) land on DIFFERENT pieces.  They are guaranteed > kColTol
+            // apart and jog_x is their midpoint, so this normally holds; reject the
+            // plan if it doesn't (an N>=3 cycle with both edges on one side of the
+            // jog, or a column near jog_x) rather than seed a cycle-preserving order.
+            if (redirect(p.split_trunk, p.col1) == redirect(p.split_trunk, p.col2))
+                continue;
             std::map<int, LayerConstraints> seed;
             for (const CycleEdge& e : p.cycle_edges) {
                 const auto a = redirect(e.from, e.col);   // a below b
