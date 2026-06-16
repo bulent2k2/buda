@@ -73,6 +73,18 @@ class BdbFloorplanner:
         self._issue_var = tk.StringVar(value="")
         self._overlay_depth = tk.IntVar(value=0)   # extra depth levels to overlay
 
+        self._opt_settings: dict = {
+            "alg":         "sa",
+            "iter":        20000,
+            "w_wl":        1.0,
+            "w_area":      0.1,
+            "w_ovlp":      10.0,
+            "fixed":       {},
+            "reshapeable": {},
+            "min_w":       {},
+            "min_h":       {},
+        }
+
         self._build_ui()
 
     def _build_ui(self):
@@ -133,7 +145,10 @@ class BdbFloorplanner:
         align_menu.add_command(label="Bottom ↓",  command=self._align_bottom)
         align_menu.add_command(label="Left  ←",   command=self._align_left)
         align_menu.add_command(label="Right →",   command=self._align_right)
-        ttk.Button(filter_f, text="Optimize…", command=self._open_optimize_dialog).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+        filter_f2 = ttk.Frame(blocks)
+        filter_f2.pack(fill=tk.X, pady=(4, 0))
+        ttk.Button(filter_f2, text="Optimize…",
+                   command=self._open_optimize_dialog).pack(fill=tk.X)
         tv_frame = ttk.Frame(blocks)
         tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
         self._tree = ttk.Treeview(tv_frame, show="tree", selectmode="browse")
@@ -386,7 +401,7 @@ class BdbFloorplanner:
         if not root_blocks:
             self._status.set("No root-level blocks to optimize.")
             return
-        dlg = _OptimizeDialog(self.root, self.state, root_blocks)
+        dlg = _OptimizeDialog(self.root, self.state, root_blocks, self._opt_settings)
         self.root.wait_window(dlg.top)
         if dlg.result is not None:
             self._draw()
@@ -772,9 +787,10 @@ class BdbFloorplanner:
 class _OptimizeDialog:
     """Modal dialog for configuring and launching the placement optimizer."""
 
-    def __init__(self, parent, state, root_blocks: list[str]):
-        self.state  = state
-        self.result = None
+    def __init__(self, parent, state, root_blocks: list[str], settings: dict):
+        self.state    = state
+        self.result   = None
+        self._settings = settings
 
         self.top = tk.Toplevel(parent)
         self.top.title("Optimize Placement")
@@ -786,7 +802,7 @@ class _OptimizeDialog:
         # ── Algorithm ────────────────────────────────────────────────────────
         alg_f = ttk.LabelFrame(self.top, text="Algorithm", padding=6)
         alg_f.pack(fill=tk.X, padx=8, pady=(8, 0))
-        self._alg = tk.StringVar(value="sa")
+        self._alg = tk.StringVar(value=settings.get("alg", "sa"))
         ttk.Radiobutton(alg_f, text="SA  (Simulated Annealing)",
                         variable=self._alg, value="sa",
                         command=self._on_alg_change).pack(anchor="w")
@@ -796,18 +812,20 @@ class _OptimizeDialog:
 
         iter_f = ttk.Frame(alg_f)
         iter_f.pack(fill=tk.X, pady=(4, 0))
-        self._iter_lbl = ttk.Label(iter_f, text="Iterations:")
+        alg_val = settings.get("alg", "sa")
+        self._iter_lbl = ttk.Label(iter_f,
+                                   text="Iterations:" if alg_val == "sa" else "Generations:")
         self._iter_lbl.pack(side=tk.LEFT)
-        self._iter_var = tk.IntVar(value=20000)
+        self._iter_var = tk.IntVar(value=settings.get("iter", 20000))
         ttk.Spinbox(iter_f, textvariable=self._iter_var,
                     from_=100, to=500000, increment=1000, width=9).pack(side=tk.LEFT, padx=(4, 0))
 
         # ── Weights ───────────────────────────────────────────────────────────
         wt_f = ttk.LabelFrame(self.top, text="Weights", padding=6)
         wt_f.pack(fill=tk.X, padx=8, pady=(6, 0))
-        self._w_wl   = tk.DoubleVar(value=1.0)
-        self._w_area = tk.DoubleVar(value=0.1)
-        self._w_ovlp = tk.DoubleVar(value=10.0)
+        self._w_wl   = tk.DoubleVar(value=settings.get("w_wl",   1.0))
+        self._w_area = tk.DoubleVar(value=settings.get("w_area", 0.1))
+        self._w_ovlp = tk.DoubleVar(value=settings.get("w_ovlp", 10.0))
         for col, (lbl, var) in enumerate([
                 ("Wire-length", self._w_wl),
                 ("Area", self._w_area),
@@ -848,36 +866,44 @@ class _OptimizeDialog:
         self._min_w_spins:   dict[str, ttk.Spinbox]  = {}
         self._min_h_spins:   dict[str, ttk.Spinbox]  = {}
 
+        _s_fixed = settings.get("fixed",       {})
+        _s_reshape = settings.get("reshapeable", {})
+        _s_min_w   = settings.get("min_w",        {})
+        _s_min_h   = settings.get("min_h",        {})
+
         for name in root_blocks:
             row = ttk.Frame(rows_f)
             row.pack(fill=tk.X, pady=1)
 
             ttk.Label(row, text=name, width=20, anchor="w").pack(side=tk.LEFT)
 
-            fv = tk.BooleanVar(value=False)
+            fv = tk.BooleanVar(value=_s_fixed.get(name, False))
             self._fixed_vars[name] = fv
             ttk.Checkbutton(row, variable=fv).pack(side=tk.LEFT, padx=(10, 0))
 
-            rv = tk.BooleanVar(value=False)
+            rv = tk.BooleanVar(value=_s_reshape.get(name, False))
             self._reshape_vars[name] = rv
             ttk.Checkbutton(row, variable=rv,
                             command=lambda n=name: self._on_reshape_toggle(n)).pack(
                 side=tk.LEFT, padx=(20, 0))
 
-            mw = tk.DoubleVar(value=0.0)
-            mh = tk.DoubleVar(value=0.0)
+            mw = tk.DoubleVar(value=_s_min_w.get(name, 0.0))
+            mh = tk.DoubleVar(value=_s_min_h.get(name, 0.0))
             self._min_w_vars[name] = mw
             self._min_h_vars[name] = mh
 
+            reshape_on = _s_reshape.get(name, False)
             sp_w = ttk.Spinbox(row, textvariable=mw, from_=0, to=99999,
-                               increment=10, width=6, state="disabled")
+                               increment=10, width=6,
+                               state="normal" if reshape_on else "disabled")
             sp_w.pack(side=tk.LEFT, padx=(12, 0))
             self._min_w_spins[name] = sp_w
 
             ttk.Label(row, text="×").pack(side=tk.LEFT, padx=2)
 
             sp_h = ttk.Spinbox(row, textvariable=mh, from_=0, to=99999,
-                               increment=10, width=6, state="disabled")
+                               increment=10, width=6,
+                               state="normal" if reshape_on else "disabled")
             sp_h.pack(side=tk.LEFT)
             self._min_h_spins[name] = sp_h
 
@@ -915,6 +941,19 @@ class _OptimizeDialog:
         kwargs["w_wl"]   = self._w_wl.get()
         kwargs["w_area"] = self._w_area.get()
         kwargs["w_ovlp"] = self._w_ovlp.get()
+
+        # Persist settings so the next dialog open pre-fills them.
+        self._settings.update({
+            "alg":         method,
+            "iter":        self._iter_var.get(),
+            "w_wl":        self._w_wl.get(),
+            "w_area":      self._w_area.get(),
+            "w_ovlp":      self._w_ovlp.get(),
+            "fixed":       {n: v.get() for n, v in self._fixed_vars.items()},
+            "reshapeable": {n: v.get() for n, v in self._reshape_vars.items()},
+            "min_w":       {n: v.get() for n, v in self._min_w_vars.items()},
+            "min_h":       {n: v.get() for n, v in self._min_h_vars.items()},
+        })
 
         self.result = fpc.optimize_placement(
             self.state, method=method,
