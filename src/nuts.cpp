@@ -91,8 +91,14 @@ static void build_nuts_maps(
             const ConnSeg& cs = conn_segs[si];
             auto key = std::make_pair(bid, si);
 
-            slide_map[key] = { static_cast<double>(cs.perp_lo),
-                               static_cast<double>(cs.perp_hi) };
+            // A dogleg pins its sub-trunks' / jog's slide range (ConnTopology
+            // would recompute a narrower range on the split topology); honor it.
+            if (si < (int)bw.plan.seg_slide_lo.size() &&
+                !std::isnan(bw.plan.seg_slide_lo[si]))
+                slide_map[key] = { bw.plan.seg_slide_lo[si], bw.plan.seg_slide_hi[si] };
+            else
+                slide_map[key] = { static_cast<double>(cs.perp_lo),
+                                   static_cast<double>(cs.perp_hi) };
 
             int n_seg = 0, n_bt = 0;
             for (const auto& c : cs.conns) {
@@ -1496,7 +1502,8 @@ struct DoglegResult {
 };
 static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
                                  double col1, bool high1, double col2, bool high2,
-                                 int delta, const std::vector<int>& orig_net_pull)
+                                 int delta, const std::vector<int>& orig_net_pull,
+                                 double orig_slide_lo, double orig_slide_hi)
 {
     if (bw.plan.selected_topology_index < 0) return {};
     Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
@@ -1567,6 +1574,19 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     snp[piece_r_idx] = trunk_pull;                       // right piece inherits trunk
     snp[jog_idx]     = 0;                                // jog is net-zero
 
+    // Pin slide windows: each sub-trunk inherits the ORIGINAL trunk's slide
+    // range (ConnTopology, seeing only a subset of stubs per piece, would give a
+    // narrower one), and the jog is clamped to the trunk's stub extent [x_lo,
+    // x_hi] so it cannot slide beyond any stub/busterm the trunk connected to.
+    const double kNaN = std::numeric_limits<double>::quiet_NaN();
+    auto& slo = bw.plan.seg_slide_lo;
+    auto& shi = bw.plan.seg_slide_hi;
+    slo.assign(topo.segments.size(), kNaN);
+    shi.assign(topo.segments.size(), kNaN);
+    slo[trunk_si]    = orig_slide_lo;  shi[trunk_si]    = orig_slide_hi;  // left piece
+    slo[piece_r_idx] = orig_slide_lo;  shi[piece_r_idx] = orig_slide_hi;  // right piece
+    slo[jog_idx]     = x_lo;           shi[jog_idx]     = x_hi;           // jog footprint
+
     // Clear the rewritten piece's stale planner band: seg_perp[trunk_si] still
     // names the ORIGINAL trunk's charged band (≈ the old single track), which
     // build_nuts_maps would prefer over the new high/low nominal and undo the
@@ -1616,30 +1636,6 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
         apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
         relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
-        // Prune a dogleg jog's slide window to the trunk's stub extent: the jog
-        // should not slide beyond any stub/busterm the original trunk connected
-        // to, on either side — i.e. within the span of the trunk's two pieces
-        // (which run from the leftmost to the rightmost of those connections).
-        // Keep the clamp only if it leaves a feasible window (the jog must still
-        // fit); a too-tight footprint is left unpruned.
-        {
-            std::map<int, std::pair<double,double>> trunk_span;  // bundle → [lo, hi] of its H pieces
-            for (const auto& ts : result.segments)
-                if (ts.horiz) {
-                    auto& e = trunk_span.emplace(ts.bundle_id,
-                                  std::make_pair(kInf, -kInf)).first->second;
-                    e.first  = std::min(e.first,  ts.span_lo);
-                    e.second = std::max(e.second, ts.span_hi);
-                }
-            for (auto& ts : result.segments) {
-                if (!ts.is_jog) continue;
-                auto it = trunk_span.find(ts.bundle_id);
-                if (it == trunk_span.end()) continue;
-                const double lo = std::max(ts.interval_lo, it->second.first);
-                const double hi = std::min(ts.interval_hi, it->second.second);
-                if (hi - lo >= ts.width) { ts.interval_lo = lo; ts.interval_hi = hi; }
-            }
-        }
         std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
         for (auto& ts : result.segments)
             ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
@@ -1716,11 +1712,14 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
             // cycle's trunks we prefer the one with the longest span (tie-broken on
             // a shorter jog), skipping any whose slide window is too narrow.
             double trunk_w = 1.0, trunk_span = 0.0, trunk_slide = 0.0;
+            double trunk_slide_lo = 0.0, trunk_slide_hi = 0.0;
             for (const auto& ts : out.result.segments)
                 if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == p.split_trunk.second) {
-                    trunk_w     = ts.width;
-                    trunk_span  = ts.span_hi - ts.span_lo;
-                    trunk_slide = ts.interval_hi - ts.interval_lo;
+                    trunk_w        = ts.width;
+                    trunk_span     = ts.span_hi - ts.span_lo;
+                    trunk_slide_lo = ts.interval_lo;
+                    trunk_slide_hi = ts.interval_hi;
+                    trunk_slide    = ts.interval_hi - ts.interval_lo;
                 }
             if (trunk_slide < 2.0 * trunk_w + 2.0 * track_pitch_) continue;  // can't host two pieces
             // Capture this bundle's pre-split net_pull per seg_idx, so apply_dogleg
@@ -1738,7 +1737,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
             std::vector<BundleWrapper> trial = bundles;
             DoglegResult dr = apply_dogleg(trial[bw_idx], p.split_trunk.second,
                                            p.col1, p.high1, p.col2, p.high2, delta,
-                                           orig_net_pull);
+                                           orig_net_pull, trunk_slide_lo, trunk_slide_hi);
             if (!dr.ok) continue;
 
             // Seed the FULL cycle ordering (preds[X] = segments below X), with
@@ -1758,6 +1757,12 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                 const auto b = redirect(e.to,   e.col);
                 if (a != b) seed[p.layer].preds[b].insert(a);
             }
+            // Pin the two sub-trunks' relative order so they can never swap: the
+            // high piece must sit above the low piece.  They don't overlap in the
+            // routing direction (they only touch at the jog), so nothing else
+            // enforces this — one explicit edge keeps the jog from inverting.
+            seed[p.layer].preds[dr.piece_l_high ? piece_l : piece_r]
+                         .insert(dr.piece_l_high ? piece_r : piece_l);
             SolveOut t = solve(trial, seed);
 
             // Jog length of the placed jog segment (tie-break; shorter is cheaper).
@@ -1806,8 +1811,10 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                 bw.plan.selected_topology_index >= 0) {
                 out.result.dogleg_topologies[bid] =
                     bw.input.candidates[bw.plan.selected_topology_index];
-                out.result.dogleg_seg_layers[bid]   = bw.plan.seg_layers;
+                out.result.dogleg_seg_layers[bid]    = bw.plan.seg_layers;
                 out.result.dogleg_seg_net_pull[bid]  = bw.plan.seg_net_pull;
+                out.result.dogleg_seg_slide_lo[bid]  = bw.plan.seg_slide_lo;
+                out.result.dogleg_seg_slide_hi[bid]  = bw.plan.seg_slide_hi;
             }
 
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "

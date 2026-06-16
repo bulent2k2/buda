@@ -1188,6 +1188,11 @@ class BudaSession:
             np = getattr(self.nuts_result, "dogleg_seg_net_pull", None)
             if np and bid in np:
                 w.plan.seg_net_pull = list(np[bid])
+            slo = getattr(self.nuts_result, "dogleg_seg_slide_lo", None)
+            shi = getattr(self.nuts_result, "dogleg_seg_slide_hi", None)
+            if slo and bid in slo:
+                w.plan.seg_slide_lo = list(slo[bid])
+                w.plan.seg_slide_hi = list(shi[bid])
 
     def _run_detailed_nuts(self, bit_order="LO_HI"):
         """Execute bit-level track assignment using DetailedNUTSEngine."""

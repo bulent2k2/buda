@@ -143,3 +143,26 @@ def test_dogleg_jog_window_pruned_2cycle():
 
 def test_dogleg_jog_window_pruned_multicast():
     _check_jog_window_pruned("dogleg2.buda")
+
+
+def _check_subtrunks_share_slide(flow):
+    # The dogleg's two sub-trunks (the H pieces) inherit the SAME slide window
+    # from the original trunk, and they sit on distinct tracks (no swap into one).
+    sess = _run(flow)
+    for bid in sess.nuts_result.dogleg_topologies:
+        pieces = [t for t in sess.nuts_result.segments if t.bundle_id == bid and t.horiz]
+        assert len(pieces) == 2, f"{flow}: expected 2 sub-trunks on B{bid}, got {len(pieces)}"
+        a, b = pieces
+        assert abs(a.interval_lo - b.interval_lo) < 1e-6 and \
+               abs(a.interval_hi - b.interval_hi) < 1e-6, \
+            f"{flow}: sub-trunks have different slide windows [{a.interval_lo},{a.interval_hi}] vs [{b.interval_lo},{b.interval_hi}]"
+        assert abs(a.track_position - b.track_position) > 1e-6, \
+            f"{flow}: sub-trunks collapsed onto the same track {a.track_position}"
+
+
+def test_dogleg_subtrunks_share_slide_2cycle():
+    _check_subtrunks_share_slide("nuts_dogleg_cycle.buda")
+
+
+def test_dogleg_subtrunks_share_slide_multicast():
+    _check_subtrunks_share_slide("dogleg2.buda")

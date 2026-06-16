@@ -387,6 +387,39 @@ class TopologyExplorer:
         ct.build(topo, self.fp)
         return ct
 
+    # The dogleg pass pins per-segment net_pull and slide windows on the plan
+    # (ConnTopology would recompute them wrongly on the split topology).  Those
+    # overrides are indexed by the SELECTED topology's segments, so honor them
+    # only when the explorer is showing that topology — then the view matches
+    # what NUTS actually used.
+    def _show_overrides(self):
+        return self.idx == self.wrapper.plan.selected_topology_index
+
+    def _seg_net_pull(self, cs, ci):
+        if self._show_overrides():
+            snp = getattr(self.wrapper.plan, 'seg_net_pull', None)
+            _INT_MIN = -2147483648
+            if snp and ci < len(snp) and snp[ci] != _INT_MIN:
+                return snp[ci]
+        return cs.net_pull
+
+    def _seg_slide(self, cs, ci):
+        if self._show_overrides():
+            slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
+            shi = getattr(self.wrapper.plan, 'seg_slide_hi', None)
+            if slo and shi and ci < len(slo) and not math.isnan(slo[ci]):
+                return slo[ci], shi[ci]
+        return cs.perp_lo, cs.perp_hi
+
+    def _is_dogleg_seg(self, ci):
+        # A dogleg piece/jog carries a pinned slide window; such a segment must
+        # display at its NOMINAL position (the two pieces share a slide range, so
+        # the range-centre display would collapse them and hide the dogleg step).
+        if not self._show_overrides():
+            return False
+        slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
+        return bool(slo) and ci < len(slo) and not math.isnan(slo[ci])
+
     def _draw_busterm_markers(self, topo, ct, viz_lw):
         """Draw a diamond at every busterm connection point."""
         ax = self.ax
@@ -451,8 +484,9 @@ class TopologyExplorer:
         cs_list = list(ct.segs())
         cs_map  = {j: cs_list[j] for j in range(len(cs_list))}
 
-        for raw_seg, cs in zip(topo.segments, cs_list):
+        for ci, (raw_seg, cs) in enumerate(zip(topo.segments, cs_list)):
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
+            slide_lo, slide_hi = self._seg_slide(cs, ci)   # NUTS override if any
 
             # Extend the along range to cover the perp intervals of perpendicular
             # stubs connected at our endpoints.  A trunk's band should span the
@@ -470,33 +504,33 @@ class TopologyExplorer:
                     ext_hi = max(ext_hi, other.perp_hi)
 
             if cs.horiz:
-                band_y0 = clamp_y(cs.perp_lo)
-                band_y1 = clamp_y(cs.perp_hi)
+                band_y0 = clamp_y(slide_lo)
+                band_y1 = clamp_y(slide_hi)
                 if band_y0 >= band_y1:
                     continue
                 ax.add_patch(patches.Rectangle(
                     (ext_lo, band_y0), ext_hi - ext_lo, band_y1 - band_y0,
                     linewidth=0, facecolor=col, alpha=0.10, zorder=3))
-                for y_b, label in ((cs.perp_lo, 'lo'), (cs.perp_hi, 'hi')):
+                for y_b, label in ((slide_lo, 'lo'), (slide_hi, 'hi')):
                     if abs(y_b) < _UNCONSTRAINED:
                         ax.plot([ext_lo, ext_hi], [y_b, y_b],
                                 color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
-                        ax.text((ext_lo + ext_hi) / 2, y_b, f' {y_b}',
+                        ax.text((ext_lo + ext_hi) / 2, y_b, f' {y_b:.0f}',
                                 fontsize=6, color=col, va='bottom' if label == 'lo' else 'top',
                                 ha='center', zorder=5, alpha=0.85)
             else:
-                band_x0 = clamp_x(cs.perp_lo)
-                band_x1 = clamp_x(cs.perp_hi)
+                band_x0 = clamp_x(slide_lo)
+                band_x1 = clamp_x(slide_hi)
                 if band_x0 >= band_x1:
                     continue
                 ax.add_patch(patches.Rectangle(
                     (band_x0, ext_lo), band_x1 - band_x0, ext_hi - ext_lo,
                     linewidth=0, facecolor=col, alpha=0.10, zorder=3))
-                for x_b, label in ((cs.perp_lo, 'lo'), (cs.perp_hi, 'hi')):
+                for x_b, label in ((slide_lo, 'lo'), (slide_hi, 'hi')):
                     if abs(x_b) < _UNCONSTRAINED:
                         ax.plot([x_b, x_b], [ext_lo, ext_hi],
                                 color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
-                        ax.text(x_b, (ext_lo + ext_hi) / 2, f' {x_b}',
+                        ax.text(x_b, (ext_lo + ext_hi) / 2, f' {x_b:.0f}',
                                 fontsize=6, color=col, va='center',
                                 ha='left' if label == 'lo' else 'right', zorder=5, alpha=0.85)
 
@@ -855,15 +889,22 @@ class TopologyExplorer:
         # Display at interval centre when both bounds are finite; at perp_pos otherwise.
         _draw_perp = []
         _pull_len  = []
-        for cs in cs_list:
-            lo, hi  = cs.perp_lo, cs.perp_hi
+        for ci, cs in enumerate(cs_list):
+            lo, hi  = self._seg_slide(cs, ci)      # NUTS slide override if any
+            net_pull = self._seg_net_pull(cs, ci)  # NUTS net_pull override if any
             lo_ok   = abs(lo) < _UNCONSTRAINED
             hi_ok   = abs(hi) < _UNCONSTRAINED
-            dp      = (lo + hi) / 2.0 if (lo_ok and hi_ok) else float(cs.perp_pos)
+            if self._is_dogleg_seg(ci):
+                # Show a dogleg piece/jog at its nominal position so the step is
+                # visible (its two pieces share a slide range).
+                raw = topo.segments[ci]
+                dp  = float(raw.start.y if cs.horiz else raw.start.x)
+            else:
+                dp  = (lo + hi) / 2.0 if (lo_ok and hi_ok) else float(cs.perp_pos)
 
-            if cs.net_pull != 0:
+            if net_pull != 0:
                 interval_w = (hi - lo) if (lo_ok and hi_ok) else 0.0
-                plen = max(interval_w / 4.0, float(_MIN_ARROW)) * (1.0 if cs.net_pull > 0 else -1.0)
+                plen = max(interval_w / 4.0, float(_MIN_ARROW)) * (1.0 if net_pull > 0 else -1.0)
             else:
                 plen = 0.0
 

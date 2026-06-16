@@ -66,9 +66,11 @@ struct NUTSResult {
     // its seg_layers).  The CLI adopts these into its bundles before rebuilding
     // ConnTopology for detailed NUTS, so the split bundle's stubs get the correct
     // (post-split) connectivity instead of routing with stale, corrupted spans.
-    std::map<int, Topology>          dogleg_topologies;
-    std::map<int, std::vector<int>>  dogleg_seg_layers;
-    std::map<int, std::vector<int>>  dogleg_seg_net_pull;
+    std::map<int, Topology>            dogleg_topologies;
+    std::map<int, std::vector<int>>    dogleg_seg_layers;
+    std::map<int, std::vector<int>>    dogleg_seg_net_pull;
+    std::map<int, std::vector<double>> dogleg_seg_slide_lo;
+    std::map<int, std::vector<double>> dogleg_seg_slide_hi;
 };
 
 // Non-Uniform Track Sharing engine.
