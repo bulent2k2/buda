@@ -1269,6 +1269,25 @@ class BudaSession:
         self._dogleg_slot.pop(bid, None)
         self._dogleg_originals.pop(bid, None)
 
+    def _validate_endpoint_blocks(self, net_name, src, dsts):
+        """Fatal input validation: every block a net/bus connects to must exist in
+        the floorplan.  get_block_bounds() silently returns {0,0,0,0} for an unknown
+        name, so a typo'd endpoint (e.g. 'IOPAD' for the block 'IO_PAD') would route
+        from the chip origin instead of the intended block, with no error.  Surface
+        it as a fatal error and quit rather than misroute."""
+        missing = [b for b in [src, *dsts] if not self.fp.has_block(b)]
+        if not missing:
+            return
+        import difflib
+        known = sorted(n for n, _ in self.fp.get_all_blocks())
+        for b in missing:
+            hint = difflib.get_close_matches(b, known, n=1)
+            suffix = f" — did you mean '{hint[0]}'?" if hint else ""
+            print(f"Error: net '{net_name}' references block '{b}', which is not "
+                  f"defined in the floorplan{suffix}")
+        print(f"  Defined blocks: {', '.join(known) if known else '(none)'}")
+        sys.exit(1)
+
     def _run_detailed_nuts(self, bit_order="LO_HI"):
         """Execute bit-level track assignment using DetailedNUTSEngine."""
         if self.nuts_result is None or self.routing_grid is None:
@@ -1770,6 +1789,7 @@ class BudaSession:
                         print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
                         continue
                     src, dsts = ep
+                    self._validate_endpoint_blocks(net_name, src, dsts)
                     w.input.candidates = topo_gen.generate_candidates(src, dsts)
                     self._reset_plan_for_regen(w)
                     label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
@@ -1792,6 +1812,7 @@ class BudaSession:
                     print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
                     continue
                 src, dsts = ep
+                self._validate_endpoint_blocks(net_name, src, dsts)
                 w.input.candidates = topo_gen.generate_candidates(src, dsts)
                 self._reset_plan_for_regen(w)
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
