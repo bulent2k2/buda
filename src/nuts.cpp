@@ -1170,8 +1170,16 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             double headroom = kInf;
             for (const auto& k : done) {
                 const TrackSegment* ts = layer_map[k];
-                headroom = std::min(headroom,
-                                    (ts->interval_hi - ts->width / 2.0) - ts->track_position);
+                // Cap the rigid shift by each member's own hard interval AND its
+                // finite phase-0 upper bound: when solve_layer runs under
+                // resolve_corner_overlaps' cross-layer constraints, order_bounds
+                // pins a bounded trunk to a split side, and the cluster must not
+                // ride past it (that would undo the corner split the pass relies on).
+                double cap = ts->interval_hi - ts->width / 2.0;
+                auto bit = order_bounds.find(k);
+                if (bit != order_bounds.end() && bit->second.second < kInf)
+                    cap = std::min(cap, bit->second.second);
+                headroom = std::min(headroom, cap - ts->track_position);
             }
             if (headroom > 0)
                 for (const auto& k : done) layer_map[k]->track_position += headroom;
