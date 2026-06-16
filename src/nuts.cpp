@@ -1813,6 +1813,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                     bw.input.candidates[bw.plan.selected_topology_index];
                 out.result.dogleg_seg_layers[bid]    = bw.plan.seg_layers;
                 out.result.dogleg_seg_net_pull[bid]  = bw.plan.seg_net_pull;
+                out.result.dogleg_seg_perp[bid]      = bw.plan.seg_perp;
                 out.result.dogleg_seg_slide_lo[bid]  = bw.plan.seg_slide_lo;
                 out.result.dogleg_seg_slide_hi[bid]  = bw.plan.seg_slide_hi;
             }

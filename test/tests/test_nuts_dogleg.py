@@ -166,3 +166,17 @@ def test_dogleg_subtrunks_share_slide_2cycle():
 
 def test_dogleg_subtrunks_share_slide_multicast():
     _check_subtrunks_share_slide("dogleg2.buda")
+
+
+def test_dogleg_resolution_survives_resolve():
+    # Re-running NUTS on the adopted (doglegged) bundle must stay resolved: the
+    # adoption carries the mutated seg_perp / seg_net_pull / seg_slide, so the
+    # split pieces are not pulled back to the original single-trunk band (which
+    # would reintroduce the cycle).
+    sess = _run("dogleg2.buda")
+    assert sess.nuts_result.num_overlaps == 0
+    n_segs = len(sess.nuts_result.segments)
+    sess.do_command("run_nuts")
+    assert sess.nuts_result.num_overlaps == 0, \
+        f"re-solve reintroduced {sess.nuts_result.num_overlaps} overlap(s)"
+    assert len(sess.nuts_result.segments) == n_segs, "dogleg lost on re-solve"

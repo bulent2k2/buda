@@ -117,6 +117,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("dogleg_topologies",   &NUTSResult::dogleg_topologies)
         .def_readwrite("dogleg_seg_layers",   &NUTSResult::dogleg_seg_layers)
         .def_readwrite("dogleg_seg_net_pull", &NUTSResult::dogleg_seg_net_pull)
+        .def_readwrite("dogleg_seg_perp",     &NUTSResult::dogleg_seg_perp)
         .def_readwrite("dogleg_seg_slide_lo", &NUTSResult::dogleg_seg_slide_lo)
         .def_readwrite("dogleg_seg_slide_hi", &NUTSResult::dogleg_seg_slide_hi);
 

@@ -1188,6 +1188,9 @@ class BudaSession:
             np = getattr(self.nuts_result, "dogleg_seg_net_pull", None)
             if np and bid in np:
                 w.plan.seg_net_pull = list(np[bid])
+            sp = getattr(self.nuts_result, "dogleg_seg_perp", None)
+            if sp and bid in sp:
+                w.plan.seg_perp = list(sp[bid])   # carries the cleared trunk band
             slo = getattr(self.nuts_result, "dogleg_seg_slide_lo", None)
             shi = getattr(self.nuts_result, "dogleg_seg_slide_hi", None)
             if slo and bid in slo:

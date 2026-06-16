@@ -69,6 +69,7 @@ struct NUTSResult {
     std::map<int, Topology>            dogleg_topologies;
     std::map<int, std::vector<int>>    dogleg_seg_layers;
     std::map<int, std::vector<int>>    dogleg_seg_net_pull;
+    std::map<int, std::vector<int>>    dogleg_seg_perp;
     std::map<int, std::vector<double>> dogleg_seg_slide_lo;
     std::map<int, std::vector<double>> dogleg_seg_slide_hi;
 };
