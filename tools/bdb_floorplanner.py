@@ -849,7 +849,8 @@ class _OptimizeDialog:
         ttk.Label(hdr_f, text="Block",       anchor="w"     ).grid(row=0, column=0, sticky="w", padx=2)
         ttk.Label(hdr_f, text="Fixed",       anchor="center").grid(row=0, column=1)
         ttk.Label(hdr_f, text="Reshapeable", anchor="center").grid(row=0, column=2)
-        ttk.Label(hdr_f, text="Min Size",    anchor="w"     ).grid(row=0, column=3, padx=(4, 0))
+        ttk.Label(hdr_f, text="Min Width",   anchor="center").grid(row=0, column=3, padx=(4, 0))
+        ttk.Label(hdr_f, text="Min Height",  anchor="center").grid(row=0, column=5)
 
         scroll_canvas = tk.Canvas(bc_f, height=min(len(root_blocks) * 28 + 4, 200),
                                   bd=0, highlightthickness=0)
