@@ -8,6 +8,7 @@ def_layer 5 M5 V TOP 1.0
 # Format: <layer_id> <origin> [<type> <width> <spacing>] ...
 def_track_pattern 4 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0  CLK 1.5 1.0
 def_track_pattern 5 0.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  SIGNAL 1.0 1.0  POWER 2.0 1.0  GROUND 2.0 1.0  CLK 1.5 1.0
+report_overhead
 
 # ── Step 2: Define Floorplan ──
 # Name, x1, y1, x2, y2
@@ -15,6 +16,7 @@ add_block CPU  100 100 300 300
 add_block MEM  700 500 900 700
 add_block GPU  400 800 600 1000
 add_block PLL  100 400 140 460
+add_block IO.PAD 500 0 900  50
 # Optional: Add margins to keep wires away from block corners
 corner_margin dx 20 dy 20
 
@@ -28,10 +30,12 @@ add_bus mem_to_gpu[8] MEM.tx GPU.rx
 # two more
 add_bus mem_to_cpu[8] MEM.tx CPU.rx
 add_bus data[4]       MEM.tx CPU.rx,GPU.rx
+add_bus dft[3]        IO.PAD.io CPU.io,MEM.io,GPU.io
 
 # ── Step 4: Execute Planning ──
 run_bundler strict
 generate_topologies
+select_topologies 1,2 3 3-5 2
 run_planner
 run_nuts
 run_detailed_nuts

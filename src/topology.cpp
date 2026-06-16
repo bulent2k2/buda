@@ -76,6 +76,9 @@ Rect Floorplan::get_block_bounds(const std::string& name) const {
     if (blocks_.count(name)) return blocks_.at(name);
     return Rect{0,0,0,0};
 }
+bool Floorplan::has_block(const std::string& name) const {
+    return blocks_.count(name) > 0;
+}
 void Floorplan::set_detour_channel(const std::string& dirs, int size) {
     for (char c : dirs) {
         switch (std::toupper(static_cast<unsigned char>(c))) {

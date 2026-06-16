@@ -168,6 +168,10 @@ public:
     const DetourChannelSpec& get_detour_channel() const { return detour_channel_; }
 
     Rect get_block_bounds(const std::string& name) const;
+    // True iff a block with this exact name has been registered (get_block_bounds
+    // silently returns a degenerate {0,0,0,0} for unknown names, so callers that
+    // need to validate an endpoint must use this instead).
+    bool has_block(const std::string& name) const;
     // Returns per-block margin if set, else global margin, else {0,0}.
     BlockCornerMargin get_block_corner_margin(const std::string& name) const;
     void get_hanan_grid(std::vector<int>& x_coords, std::vector<int>& y_coords) const;

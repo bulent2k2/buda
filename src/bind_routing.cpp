@@ -135,6 +135,7 @@ void bind_routing(py::module_& m) {
         })
         .def("get_block_corner_margin", &Floorplan::get_block_corner_margin)
         .def("get_block_bounds",        &Floorplan::get_block_bounds)
+        .def("has_block",               &Floorplan::has_block)
         .def("get_hanan_grid", [](const Floorplan& fp) {
             std::vector<int> x, y; fp.get_hanan_grid(x, y); return std::make_pair(x, y);
         })
