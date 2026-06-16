@@ -193,6 +193,12 @@ class BdbFloorplanner:
         self.root.bind("<Left>",  lambda e: self._arrow_move(-self._step.get(), 0))
         self.root.bind("<Right>", lambda e: self._arrow_move( self._step.get(), 0))
 
+        # Ctrl+Arrow keybindings for Align commands
+        self.root.bind("<Control-Up>",    lambda e: self._align_top())
+        self.root.bind("<Control-Down>",  lambda e: self._align_bottom())
+        self.root.bind("<Control-Left>",  lambda e: self._align_left())
+        self.root.bind("<Control-Right>", lambda e: self._align_right())
+
         ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
         self._draw()
