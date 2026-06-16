@@ -81,6 +81,12 @@ if [ "$RUN_TESTS" = true ]; then
         CR = "\r"
         CL = "\033[K"
     }
+    {
+        if (log_file) {
+            print $0 > log_file
+            fflush(log_file)
+        }
+    }
     /\[\s*[0-9]+%\]/ {
         match($0, /\[\s*[0-9]+%\]/)
         pct = substr($0, RSTART, RLENGTH)
@@ -110,13 +116,13 @@ if [ "$RUN_TESTS" = true ]; then
     if [ "$SLOW_TESTS" = true ]; then
         echo "Running pytest (including slow tests)... (output redirected to $TEST_LOG)"
         set +e
-        pytest -v -o addopts="" 2>&1 | tee "$TEST_LOG" | awk "$AWK_FILTER"
+        PYTHONUNBUFFERED=1 pytest -v -o addopts="" 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
         PYTEST_RC=${PIPESTATUS[0]}
         set -e
     else
         echo "Running pytest (excluding slow tests)... (output redirected to $TEST_LOG)"
         set +e
-        pytest -v 2>&1 | tee "$TEST_LOG" | awk "$AWK_FILTER"
+        PYTHONUNBUFFERED=1 pytest -v 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
         PYTEST_RC=${PIPESTATUS[0]}
         set -e
     fi
