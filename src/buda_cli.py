@@ -37,6 +37,26 @@ import buda
 faulthandler.enable()
 from buda_viz import BudaVisualizer, TopologyExplorer, collect_candidate_bundles
 
+# Every command BudaSession.do_command() understands. Used to detect typos in
+# scripts (e.g. 'add_layer' for 'def_layer') and suggest the closest match.
+# Keep in sync with the dispatch chain in do_command().
+KNOWN_COMMANDS = frozenset({
+    "add_block", "add_blocks_from_bdb", "add_bus", "add_cell", "add_cell_pin",
+    "add_comp", "add_grid_override", "add_inst", "add_inst_to_cell", "add_keepout",
+    "add_net", "bdb_net_mode", "check_connectivity", "corner_margin",
+    "def_layer", "def_track_pattern", "derive_busterms", "detour_channel",
+    "dump_hbundles", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
+    "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
+    "import_def_lef", "import_verilog", "move_comp", "open_bdb", "refine_busterms",
+    "report_overhead", "resize_cell", "rotate_comp", "run_bundler",
+    "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
+    "run_planner", "select_topologies", "select_topology", "set_die",
+    "set_min_stub_length", "set_min_stub_length_dir", "set_min_stub_length_layer",
+    "set_planner_param", "set_track_pitch", "source", "visualize",
+    "visualize_topologies",
+})
+
+
 class _TeeStream:
     """Write to two streams simultaneously.
 
@@ -2513,6 +2533,34 @@ class BudaSession:
                             self.do_command(line)
             finally:
                 self._script_stack.pop()
+
+        elif cmd == "exit":
+            # Stop the run mid-script (handy for debugging a flow incrementally).
+            # Optional integer exit code (default 0 = clean stop).
+            code = 0
+            if args:
+                try:
+                    code = int(args[0])
+                except ValueError:
+                    print(f"Error: exit code must be an integer, got '{args[0]}'")
+                    code = 1
+            where = (f" in {os.path.basename(self._script_stack[-1])}"
+                     if self._script_stack else "")
+            print(f"Exiting on 'exit' command{where} (code {code}).")
+            sys.exit(code)
+
+        else:
+            # Unknown command — fail loudly rather than silently skipping it.
+            # A typo like 'add_layer' (the command is 'def_layer') would otherwise
+            # leave the design misconfigured (no layers) with no warning.
+            import difflib
+            sugg = difflib.get_close_matches(cmd, KNOWN_COMMANDS, n=1)
+            hint = f" Did you mean '{sugg[0]}'?" if sugg else ""
+            where = (f" in {os.path.basename(self._script_stack[-1])}"
+                     if self._script_stack else "")
+            print(f"Error: unknown command '{cmd}'{where} — "
+                  f"'{cmd_line.strip()}'.{hint}")
+            sys.exit(1)
 
     def _check_connectivity(self, stage: str, all_candidates: bool = False):
         if stage in ("nuts", "dnuts") and self.nuts_result is None:
