@@ -120,10 +120,11 @@ class BudaSession:
         return base + '.json'
 
     def _apply_selections(self):
-        """Load the sidecar and override selected_topology_index for pinned bundles.
+        """Load the sidecar and apply pinned topologies and layer overrides.
 
-        Selected bundles are processed first by the real planner (future work).
-        For now we simply force the topology index after optimize_topologies runs.
+        This acts as a baseline load. If a bundle is already pinned (e.g., via
+        a `select_topology` script command), the script's choice is respected,
+        but any matching layer overrides from the sidecar will still be applied.
         """
         path = self._sidecar_path()
         if not path or not os.path.exists(path):
@@ -141,46 +142,66 @@ class BudaSession:
                         if w.input.original_bundle.get_net_names() and
                            w.input.original_bundle.get_net_names()[0].startswith(hint)]
             if not matching:
-                print(f"Warning: no bundle found for hint '{hint}' — skipping")
                 continue
 
-            # Prefer stable (type, wl) match; fall back to stored index hint.
-            # Resolution uses the first match; all instances share the same candidate set.
             first_w = matching[0]
-            resolved = None
+            bid = first_w.input.original_bundle.id
+
+            # 1. Resolve which topology the sidecar points to
+            resolved_sidecar_idx = None
             for i, cand in enumerate(first_w.input.candidates):
                 if (cand.type == sel['topo_type'] and
                         cand.estimated_wirelength == sel['topo_wl']):
-                    resolved = i
+                    resolved_sidecar_idx = i
                     break
-            if resolved is None:
+            
+            if resolved_sidecar_idx is None:
                 idx_hint = sel.get('topo_index_hint', -1)
-                bid = first_w.input.original_bundle.id
                 if 0 <= idx_hint < len(first_w.input.candidates):
-                    resolved = idx_hint
-                    print(f"Warning: selection for bundle {bid} matched by index hint "
-                          f"(type/WL changed?) — using topo {resolved + 1}")
+                    resolved_sidecar_idx = idx_hint
+                    print(f"Warning: sidecar selection for bundle {bid} matched by index hint "
+                          f"(type/WL changed?) — using topo {resolved_sidecar_idx + 1}")
                 else:
-                    print(f"Warning: selection for bundle {bid} could not be resolved — ignored")
+                    print(f"Warning: sidecar selection for bundle {bid} could not be resolved — ignored")
                     continue
 
-            # Apply pin to ALL matching wrappers (handles multiple cell instances).
-            pinned_layers = sel.get('seg_layers')
+            # 2. Apply per wrapper (the candidate set is shared across instances,
+            #    so resolved_sidecar_idx is common, but the pin decision is not):
+            #    a script-pinned wrapper keeps its own topology; an unpinned one
+            #    adopts the sidecar's.  Sidecar layer overrides are applied only
+            #    when that wrapper's selected topology matches the sidecar's, so
+            #    their segment count lines up.
+            sidecar_layers = sel.get('seg_layers')
+            n_adopted = 0   # wrappers newly pinned from the sidecar
+            n_layered = 0   # wrappers that received layer overrides
             for w in matching:
-                w.plan.selected_topology_index = resolved
-                w.input.topology_pinned = True
-                if pinned_layers is not None:
-                    topo = w.input.candidates[resolved]
-                    if len(pinned_layers) == len(topo.segments):
-                        w.input.pinned_seg_layers = list(pinned_layers)
+                w_pinned = getattr(w.input, 'topology_pinned', False)
+                target_idx = (w.plan.selected_topology_index if w_pinned
+                              else resolved_sidecar_idx)
+
+                if not w_pinned:
+                    w.plan.selected_topology_index = target_idx
+                    w.input.topology_pinned = True
+                    n_adopted += 1
+
+                if (sidecar_layers is not None
+                        and target_idx == resolved_sidecar_idx
+                        and 0 <= target_idx < len(w.input.candidates)
+                        and len(sidecar_layers) == len(w.input.candidates[target_idx].segments)):
+                    w.input.pinned_seg_layers = list(sidecar_layers)
+                    n_layered += 1
 
             n = len(matching)
-            bid = first_w.input.original_bundle.id
             suffix = f" [{n} instances]" if n > 1 else ""
-            if pinned_layers is not None and len(pinned_layers) == len(first_w.input.candidates[resolved].segments):
-                print(f"  (pinned {len(pinned_layers)} segment layers)")
-            print(f"Pinned bundle {bid} to topology {resolved + 1} "
-                  f"({sel['topo_type']}, WL={sel['topo_wl']}){suffix}")
+            if n_adopted:
+                msg = (f"Pinned bundle {bid} to topology {resolved_sidecar_idx + 1} "
+                       f"({sel['topo_type']}, WL={sel['topo_wl']})")
+                if n_layered:
+                    msg += f" with {len(sidecar_layers)} layer overrides"
+                print(msg + suffix)
+            elif n_layered:
+                print(f"Merged sidecar layer overrides ({len(sidecar_layers)}) "
+                      f"onto script-pinned bundle {bid}{suffix}")
 
     def _add_blocks_from_bdb(self, depth: int, mode: str = "deepest"):
         """Walk BDB hierarchy and call fp.add_block() for components at `depth`.
