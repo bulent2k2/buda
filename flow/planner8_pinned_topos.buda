@@ -1,0 +1,20 @@
+# planner needs to reserve space for all pinned topos and
+# detour others with ripup-reroute if necessary
+
+source tracks_flip_orient.buda
+add_block b1   0   0  50  50
+add_block b2 250 200 300 250
+add_bus v[16] b1.o b2.i
+add_bus w[16] b2.i b1.o
+run_bundler strict
+generate_topologies
+
+# free bundle 1 to rip it up and reroute after bundle 2
+select_topology 2 3
+
+run_planner
+run_nuts
+
+run_detailed_nuts
+
+visualize
