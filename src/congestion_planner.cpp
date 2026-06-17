@@ -858,10 +858,20 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
             plan = plan_bundle(bw, PlanMode::ALLOW_OVERFLOW);
             if (plan.found) {
                 stage = 2;   // soft overflow
-                std::cout << "[Planner] WARNING: Bundle " << bw.input.original_bundle.id
-                          << ": no overflow-free candidate (even after rip-up); "
-                          << "committing least-cost with overflow="
-                          << plan.overflow << ".\n";
+                // A pinned bundle has only its one pinned candidate to commit, so
+                // "least-cost candidate" would be misleading — there is no choice.
+                if (bw.input.topology_pinned) {
+                    std::cout << "[Planner] WARNING: Bundle " << bw.input.original_bundle.id
+                              << ": pinned topology overflows and cannot be rerouted"
+                              << " (rip-up of other bundles did not help); committing"
+                              << " the pinned topology with overflow="
+                              << plan.overflow << ".\n";
+                } else {
+                    std::cout << "[Planner] WARNING: Bundle " << bw.input.original_bundle.id
+                              << ": no overflow-free candidate (even after rip-up); "
+                              << "committing least-cost candidate with overflow="
+                              << plan.overflow << ".\n";
+                }
             }
         }
 
