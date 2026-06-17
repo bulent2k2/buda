@@ -210,6 +210,12 @@ class BudaSession:
                         and len(sidecar_layers) == len(w.input.candidates[target_idx].segments)):
                     w.input.pinned_seg_layers = list(sidecar_layers)
                     n_layered += 1
+                else:
+                    # The sidecar's layer overrides belong to its topology; when the
+                    # script pinned a *different* topology they don't apply, so clear
+                    # any stale overrides (e.g. left by an earlier baseline apply)
+                    # rather than let the planner truncate them onto the new topo.
+                    w.input.pinned_seg_layers = []
 
             n = len(matching)
             suffix = f" [{n} instances]" if n > 1 else ""

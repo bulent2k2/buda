@@ -19,10 +19,11 @@ generate_topologies
 # here we can create pin in the GUI, too and assign non-default layers on some segments
 visualize_topologies
 
-# Now, sidecar exists and pins it to a topo with custom layer assignments.
-# What happens if those two pins are distinct?
-# Does the sidecar overwrite? It shouldn't.
-# If they are the same, then the layer customization should be applied.
+# The sidecar pins a topo with custom layer assignments. If a script
+# select_topology(ies) picks a DIFFERENT topo, the script wins and the sidecar's
+# layer overrides (which belong to its own topo) are discarded — the planner
+# assigns layers automatically. If the script picks the SAME topo as the
+# sidecar, the sidecar's custom layer overrides are applied.
 
 run_planner
 run_nuts
