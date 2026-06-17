@@ -285,7 +285,111 @@ def test_optimize_placement_ga(tmp_path):
         assert b.x2 <= 1000 and b.y2 <= 800
 
 
-@pytest.mark.slow
+def test_resize_after_move_preserves_position_on_reload(tmp_path):
+    """Regression for sync_cell_to_instances using stale BDB coords.
+
+    Lifecycle: create → write (BDB records origin positions) → move blocks in
+    engine only (simulating optimizer) → resize one block via
+    sync_cell_to_instances → write → reload → assert positions and count.
+
+    Before the fix, sync_cell_to_instances read c.x1/c.y1 from
+    all_components() (stale BDB values) and called resize_block_raw with those
+    stale coordinates, reverting the engine to the pre-move position.
+    """
+    bdb_path = str(tmp_path / "pos.bdb")
+
+    # 1. Create BDB with three blocks at the origin.
+    state = fpc.create_bdb(bdb_path, 1000, 800, grid=10)
+    fpc.add_block(state, "cpu", 0, 0, 100, 80)
+    fpc.add_block(state, "mem", 0, 0, 150, 100)
+    fpc.add_block(state, "io",  0, 0,  60, 50)
+    fpc.write_bdb(state)   # BDB records all three at (0, 0)
+
+    # 2. Simulate optimizer: move blocks in the engine only (BDB still stale).
+    state.engine.move_block_raw("cpu", 200.0, 100.0)
+    state.engine.move_block_raw("mem", 400.0, 300.0)
+    state.engine.move_block_raw("io",  100.0, 500.0)
+
+    # 3. Resize "cpu" — calls sync_cell_to_instances (as the GUI does after a
+    #    corner-handle drag).  Before the fix this reverted "cpu" to (0, 0).
+    b = state.block("cpu")
+    new_w, new_h = 120, 90
+    new_x2, new_y2 = b.x1 + new_w, b.y1 + new_h
+    state.engine.resize_block_raw("cpu", b.x1, b.y1, new_x2, new_y2)
+    fpc.sync_cell_to_instances(state, "cpu", b.x1, b.y1, new_x2, new_y2)
+
+    b = state.block("cpu")
+    assert (b.x1, b.y1) == (200, 100), \
+        f"cpu position reverted to stale BDB coords: ({b.x1}, {b.y1})"
+    assert (b.x2 - b.x1, b.y2 - b.y1) == (new_w, new_h)
+
+    # Other blocks must be unaffected by the resize of an unrelated cell.
+    assert state.block("mem").x1 == 400
+    assert state.block("io").x1 == 100
+
+    # 4. Write and reload — all three blocks must survive with correct positions.
+    fpc.write_bdb(state)
+    reloaded = fpc.load_bdb(bdb_path)
+
+    assert set(reloaded.block_names) == {"cpu", "mem", "io"}, \
+        f"Unexpected block names after reload: {reloaded.block_names}"
+
+    rb = reloaded.block("cpu")
+    assert (rb.x1, rb.y1) == (200, 100), \
+        f"Reloaded cpu position wrong: ({rb.x1}, {rb.y1})"
+    assert (rb.x2 - rb.x1, rb.y2 - rb.y1) == (new_w, new_h)
+
+    assert reloaded.block("mem").x1 == 400
+    assert reloaded.block("io").x1 == 100
+
+
+def test_resize_shared_cell_preserves_sibling_positions(tmp_path):
+    """Regression: resizing a block whose cell type is shared by another block
+    must apply the new dimensions to the sibling while keeping the sibling's
+    live engine position, not reverting it to stale BDB coordinates.
+    """
+    bdb_path = str(tmp_path / "shared.bdb")
+    state = fpc.create_bdb(bdb_path, 2000, 1000, grid=10)
+
+    # Two parent blocks each containing a child named "slot" → both children
+    # will get cell type "slot_cell" and share a cell definition.
+    fpc.add_block(state, "rack_a",       0,   0, 300, 200)
+    fpc.add_block(state, "rack_b",     400,   0, 300, 200)
+    fpc.add_block(state, "rack_a/slot",  10,  10, 100, 80)
+    fpc.add_block(state, "rack_b/slot",  10,  10, 100, 80)
+    fpc.write_bdb(state)   # BDB records both slots at local (10, 10)
+
+    # Simulate optimizer moving rack_b/slot to a new absolute position.
+    state.engine.move_block_raw("rack_b/slot", 450.0, 50.0)
+
+    # Resize rack_a/slot; sync_cell_to_instances must update rack_b/slot's
+    # size while preserving its optimizer-placed position (450, 50).
+    b_a = state.block("rack_a/slot")
+    new_w, new_h = 120, 90
+    new_x2, new_y2 = b_a.x1 + new_w, b_a.y1 + new_h
+    state.engine.resize_block_raw("rack_a/slot", b_a.x1, b_a.y1, new_x2, new_y2)
+    fpc.sync_cell_to_instances(state, "rack_a/slot", b_a.x1, b_a.y1, new_x2, new_y2)
+
+    b_b = state.block("rack_b/slot")
+    assert (b_b.x1, b_b.y1) == (450, 50), \
+        f"Sibling position reverted to stale BDB coords: ({b_b.x1}, {b_b.y1})"
+    assert (b_b.x2 - b_b.x1, b_b.y2 - b_b.y1) == (new_w, new_h), \
+        f"Sibling size not synced: ({b_b.x2 - b_b.x1}, {b_b.y2 - b_b.y1})"
+
+    # Write and reload — all four blocks survive with correct positions.
+    fpc.write_bdb(state)
+    reloaded = fpc.load_bdb(bdb_path)
+
+    expected = {"rack_a", "rack_b", "rack_a/slot", "rack_b/slot"}
+    assert set(reloaded.block_names) >= expected, \
+        f"Missing blocks after reload: {expected - set(reloaded.block_names)}"
+
+    rb = reloaded.block("rack_b/slot")
+    assert (rb.x1, rb.y1) == (450, 50), \
+        f"Reloaded sibling position wrong: ({rb.x1}, {rb.y1})"
+    assert (rb.x2 - rb.x1, rb.y2 - rb.y1) == (new_w, new_h)
+
+
 def test_optimize_demo_tc1_overlap_storm(tmp_path):
     """40 blocks all stacked at origin; 80 buses × 64 bits; SA must yield a legal placement."""
     import buda
