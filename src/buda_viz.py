@@ -27,7 +27,24 @@ import buda as ic
 from ui_state import ViewState
 
 _LAYER_COLOR = {1: '#000075', 2: '#a9a9a9', 3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC', 8: '#F032E6', 9: '#42D4F4', 10: '#9A6324'}
+# Default-orientation fallback only; the real H/V comes from the LayerStack via
+# _layer_label() (def_layer can override these, e.g. M4 V instead of M4 H).
 _LAYER_LABEL = {1: 'M1 V', 2: 'M2 H', 3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V', 8: 'M8 H', 9: 'M9 V', 10: 'M10 H'}
+
+
+def _layer_label(lid, layer_stack=None):
+    """'M<id> <H|V>' using the actual orientation from the layer stack when
+    available, so a def_layer that overrides the default (e.g. M4 V) is honored
+    in the UI. Falls back to the default-orientation table otherwise."""
+    if layer_stack is not None:
+        try:
+            if layer_stack.has_layer(lid):
+                d = ('H' if layer_stack.get_layer_dir(lid) == ic.LayerDir.HORIZONTAL
+                     else 'V')
+                return f"M{lid} {d}"
+        except Exception:
+            pass
+    return _LAYER_LABEL.get(lid, f"M{lid}")
 
 stat_title = "Bundle-based Design Assistant (BUDA) with Non-Uniform Track Sharing (NUTS)"
 
@@ -1391,7 +1408,7 @@ class TopologyExplorer:
         from matplotlib.lines import Line2D
         used_layers = sorted(set(actual_lids))
         handles = [Line2D([0], [0], color=_LAYER_COLOR.get(l, '#888'), lw=3,
-                          label=_LAYER_LABEL.get(l, f'Layer {l}'))
+                          label=_layer_label(l, self.layer_stack))
                    for l in used_layers]
         handles.append(patches.Patch(facecolor='#888888', alpha=0.20,
                                      label='slide range'))
@@ -2056,8 +2073,8 @@ class BudaVisualizer:
                     transform=ax.transAxes, fontsize=9, color=txt_color,
                     va='center', clip_on=True)
 
-            # Layer name ("M4 H").
-            ax.text(0.22, y_name, _LAYER_LABEL.get(lid, f'M{lid}'),
+            # Layer name with its actual orientation ("M4 V" when overridden).
+            ax.text(0.22, y_name, _layer_label(lid, self.layer_stack),
                     transform=ax.transAxes, fontsize=9, color=txt_color,
                     va='center', clip_on=True, fontweight='bold')
 

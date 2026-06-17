@@ -2048,6 +2048,19 @@ class BudaSession:
                         w.plan.seg_perp = list(asn.seg_perp)
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
+            # NUTS places the planner-selected topology of each bundle, so it
+            # needs a plan first. Without one every selected_topology_index is -1
+            # (reset by generate_topologies) and NUTS would place 0 segments.
+            if not self.bundles:
+                print("Warning: run_nuts has no bundles — run run_bundler, "
+                      "generate_topologies, and run_planner first.")
+                return
+            if not any(0 <= w.plan.selected_topology_index < len(w.input.candidates)
+                       for w in self.bundles):
+                print("Warning: run_nuts found no selected topology to place — run "
+                      "`run_planner` (or `run_planner hier`) after generate_topologies "
+                      "first (or pin one with select_topology).")
+                return
             # Default to the stored pitch (possibly set via set_track_pitch
             # before run_planner) rather than resetting to 1.0, so a planner
             # that reserved bands for a non-default pitch stays consistent.
