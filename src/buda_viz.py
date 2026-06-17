@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import types
 from datetime import datetime
 
 import matplotlib.pyplot as plt
@@ -237,6 +238,148 @@ def raise_window(win_or_fig):
                     getattr(win, method)()
                 except Exception:
                     pass
+
+
+def install_tk_geometry_resync(fig, settle_ms=80):
+    """Keep the TkAgg canvas hit-testing aligned with the rendered layout.
+
+    matplotlib's TkAgg ``resize`` re-places the figure image *centered for the
+    size carried by each <Configure> event*::
+
+        self._tkcanvas.create_image(int(width/2), int(height/2), image=...)
+
+    During map / maximize / fullscreen transitions an intermediate or stale size
+    can be used, leaving the image — and therefore mouse hit-testing — vertically
+    offset from the widgets, so clicks miss buttons (especially noticeable on
+    macOS) until a real resize occurs.
+
+    This re-runs ``resize`` with the *settled* widget size after every geometry
+    change (debounced) so the image re-centers correctly. It changes no window
+    geometry, so it works in fullscreen too. No-op on non-Tk backends.
+    """
+    try:
+        canvas = fig.canvas
+        tkw = canvas.get_tk_widget()
+        win = tkw.winfo_toplevel()
+    except Exception:
+        return  # not a Tk backend; nothing to do
+
+    state = {"after_id": None}
+
+    def _resync(prev=None, tries=0):
+        state["after_id"] = None
+        try:
+            w, h = tkw.winfo_width(), tkw.winfo_height()
+        except Exception:
+            return
+        if w > 1 and h > 1:
+            try:
+                ev = types.SimpleNamespace(width=w, height=h)
+                canvas.resize(ev)
+            except Exception:
+                pass
+        # An async maximize/fullscreen settles over several frames; keep
+        # re-running resize until the widget size stops changing so the figure
+        # image is finally centered for the *settled* size (cap the retries).
+        if (w, h) != prev and tries < 12:
+            try:
+                state["after_id"] = win.after(
+                    settle_ms, lambda: _resync((w, h), tries + 1))
+            except Exception:
+                pass
+
+    def _schedule(_evt=None):
+        if state["after_id"] is not None:
+            try:
+                win.after_cancel(state["after_id"])
+            except Exception:
+                pass
+        try:
+            state["after_id"] = win.after(settle_ms, _resync)
+        except Exception:
+            pass
+
+    try:
+        # React only to toplevel geometry changes (children also emit <Configure>).
+        win.bind("<Configure>",
+                 lambda e: _schedule() if e.widget is win else None, add="+")
+        # <Map> covers the nested case where the window is shown already maximized.
+        win.bind("<Map>", lambda e: _schedule() if e.widget is win else None, add="+")
+    except Exception:
+        pass
+    _schedule()  # initial alignment once the current geometry settles
+
+
+def extract_from_fullscreen_tab(fig, settle_ms=180, regain_ms=300):
+    """Pop a window out of another window's macOS fullscreen tab group.
+
+    On macOS, a window opened while another app window is fullscreen is placed
+    *into that window's fullscreen Space* and merged into a tabbed window with a
+    tab bar. Tk doesn't account for the tab bar, so mouse hit-testing is shifted
+    and clicks miss the widgets — and (unlike a plain resize) only leaving the tab
+    group fixes it. The reliable cure the user found is pressing 'f' twice
+    (fullscreen off then on), which moves the window into its *own* Space.
+
+    This replicates that: once the window has settled, if it is fullscreen with a
+    tab bar above the canvas (``canvas.winfo_rooty() > 0``), toggle ``-fullscreen``
+    off and back on. A standalone fullscreen window has rooty 0 and is left alone,
+    so there is no flicker in the common case. No-op off macOS / non-Tk.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        canvas = fig.canvas
+        tkw = canvas.get_tk_widget()
+        win = tkw.winfo_toplevel()
+    except Exception:
+        return
+
+    def _step(tries=0):
+        try:
+            if bool(win.attributes("-fullscreen")):
+                if tkw.winfo_rooty() > 0:          # tab bar present → tabbed
+                    win.attributes("-fullscreen", False)
+                    win.after(regain_ms,
+                              lambda: win.attributes("-fullscreen", True))
+                    return
+                return  # standalone fullscreen (rooty 0) — nothing to do
+            if tries < 8:                          # not settled yet — retry
+                win.after(settle_ms, lambda: _step(tries + 1))
+        except Exception:
+            pass
+
+    try:
+        win.after(settle_ms, _step)
+    except Exception:
+        pass
+
+
+def _hover_color(color, factor=0.82):
+    """A clearly-visible hover/feedback shade (darkened) for a button.
+
+    matplotlib's default Button.hovercolor ('0.95') is invisible on buttons whose
+    resting color is already near-white, so hovering gives no feedback. Darkening
+    the resting color gives a consistent, noticeable cue on every button.
+    """
+    try:
+        import matplotlib.colors as mcolors
+        r, g, b = mcolors.to_rgb(color)
+        return (r * factor, g * factor, b * factor)
+    except Exception:
+        return color
+
+
+def style_button(btn, color):
+    """Set a Button's resting color, a derived hovercolor, and repaint now.
+
+    Setting only ``btn.ax.set_facecolor(...)`` is fragile: Button repaints the
+    axes to ``btn.color``/``btn.hovercolor`` on every mouse-motion event, so a
+    directly-set facecolor is wiped on the next mouse move. Updating ``btn.color``
+    makes the color persist and keeps hover feedback consistent.
+    """
+    btn.color = color
+    btn.hovercolor = _hover_color(color)
+    btn.ax.set_facecolor(color)
 
 
 def set_icon(win_or_fig, icon_name="buda_icon.png"):
@@ -467,6 +610,15 @@ class TopologyExplorer:
         self._btn_promote.on_clicked(lambda _: self._cycle_layer(+1))
         self._btn_demote  = Button(_bax2[3], _tune_specs[3][0], color=_tune_specs[3][1])
         self._btn_demote.on_clicked(lambda _: self._cycle_layer(-1))
+
+        # Give every button a clearly-visible hover shade (the default '0.95'
+        # is invisible on the near-white buttons, so they showed no feedback).
+        for _btn in (self._btn_bprev, self._btn_tprev, self._btn_select,
+                     self._btn_deselect, self._btn_rerun, self._btn_tnext,
+                     self._btn_bnext, self._btn_sprev, self._btn_snext,
+                     self._btn_promote, self._btn_demote):
+            if _btn is not None:
+                _btn.hovercolor = _hover_color(_btn.color)
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
         self.fig.canvas.mpl_connect('close_event', self._on_close)
@@ -961,16 +1113,18 @@ class TopologyExplorer:
                 bax.set_visible(is_current_selection)
 
         # ── Update selection button states ──
+        # Set via style_button (btn.color), not ax.set_facecolor alone, so the
+        # state color survives Button's motion-driven repaints.
         if is_current_selection:
             self._btn_select.label.set_text('★  Pinned')
-            self._btn_select.ax.set_facecolor('#aadd88')
+            style_button(self._btn_select, '#aadd88')
         elif is_planner_active:
             self._btn_select.label.set_text('★  Pin Planner Choice')
-            self._btn_select.ax.set_facecolor('#cceeff')
+            style_button(self._btn_select, '#cceeff')
         else:
             self._btn_select.label.set_text('★  Pin Topo')
-            self._btn_select.ax.set_facecolor('#f0f0f0')
-        self._btn_deselect.ax.set_facecolor('#ffbbaa' if has_any_sel else '#f0f0f0')
+            style_button(self._btn_select, '#f0f0f0')
+        style_button(self._btn_deselect, '#ffbbaa' if has_any_sel else '#f0f0f0')
 
         # ── Axes border: gold for pinned, blue for planner, subtle grey otherwise ──
         if is_planner_active and is_current_selection:
@@ -1193,6 +1347,8 @@ class TopologyExplorer:
 
     def show(self):
         raise_window(self.fig)
+        install_tk_geometry_resync(self.fig)
+        extract_from_fullscreen_tab(self.fig)
         plt.show()
 
 
@@ -2230,6 +2386,8 @@ class BudaVisualizer:
             layer_stack=self.layer_stack,
             ui_state=self.ui_state)
         self._topo_explorer.fig.show()
+        install_tk_geometry_resync(self._topo_explorer.fig)
+        extract_from_fullscreen_tab(self._topo_explorer.fig)
 
     def _zoom_home(self):
         if self._home_xlim is not None:
@@ -3193,6 +3351,8 @@ class BudaVisualizer:
             print(f'[buda_viz] IPC timer started (backend={self.fig.canvas.__class__.__name__})')
 
         raise_window(self.fig)
+        install_tk_geometry_resync(self.fig)
+        extract_from_fullscreen_tab(self.fig)
         plt.show()
 
 # Just for ref. No longer used.
