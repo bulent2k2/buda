@@ -2247,21 +2247,24 @@ class BudaSession:
             if self.no_viz:
                 return
             # Usage:
-            #   visualize_topologies <hint>         — first matching bundle
-            #   visualize_topologies -all [hints…]  — all matching bundles
+            #   visualize_topologies [hint]         — load ALL bundles; a hint just
+            #                                         picks which one it opens on, and
+            #                                         you can step through the rest
+            #                                         with the ◀/▶ Bundle buttons.
+            #   visualize_topologies -all [hints…]  — load only bundles matching hints
             #                                         (no hints = every bundle)
-            all_mode = args and args[0] == '-all'
+            all_mode = bool(args) and args[0] == '-all'
             hints    = args[1:] if all_mode else args[:1]
 
-            seen, wrappers = set(), []
-            # For cell-level bundles expanded by run_planner hier, deduplicate by
-            # (cell_context, reason) so the same cell-level template isn't listed once
-            # per instance.  We keep the first instance and annotate it.
+            # Collect every candidate-bearing bundle once.  For cell-level bundles
+            # expanded by run_planner hier, deduplicate by (cell_context, reason) so
+            # the same cell-level template isn't listed once per instance.
+            seen, all_wrappers = set(), []
             cell_seen: dict[tuple, tuple[object, int]] = {}  # key → (wrapper, count)
             for w in self.bundles:
                 if not w.input.candidates: continue
-                bid  = w.input.original_bundle.id
-                b    = w.input.original_bundle
+                b   = w.input.original_bundle
+                bid = b.id
                 if bid in seen: continue
                 cell_key = (b.cell_context, b.reason) if b.cell_context else None
                 if cell_key is not None:
@@ -2270,17 +2273,28 @@ class BudaSession:
                         cell_seen[cell_key] = (first_w, cnt + 1)
                         continue
                     cell_seen[cell_key] = (w, 1)
-                net0 = b.get_net_names()[0] if b.get_net_names() else ""
-                if not hints or any(net0.startswith(h) for h in hints):
-                    wrappers.append(w)
-                    seen.add(bid)
-                    if not all_mode:
-                        break   # single-bundle mode: stop at first match
+                seen.add(bid)
+                all_wrappers.append(w)
 
-            if not wrappers:
-                print(f"Warning: no bundle with candidates matching {hints or '(any)'}")
+            def _matches(w):
+                names = w.input.original_bundle.get_net_names()
+                net0  = names[0] if names else ""
+                return (not hints) or any(net0.startswith(h) for h in hints)
+
+            if not all_wrappers:
+                print("Warning: no bundle with candidates")
             else:
-                for w in wrappers:
+                if all_mode:
+                    # Filter to matching bundles (or all if no hints given).
+                    wrappers = [w for w in all_wrappers if _matches(w)] or all_wrappers
+                    start = 0
+                else:
+                    # Load every bundle; open on the first one matching the hint.
+                    wrappers = all_wrappers
+                    start = next((i for i, w in enumerate(all_wrappers)
+                                  if _matches(w)), 0)
+
+                for i, w in enumerate(wrappers):
                     b = w.input.original_bundle
                     cell_key = (b.cell_context, b.reason) if b.cell_context else None
                     inst_note = ""
@@ -2288,10 +2302,13 @@ class BudaSession:
                         cnt = cell_seen[cell_key][1]
                         if cnt > 1:
                             inst_note = f" ({cnt} instances — showing first)"
-                    print(f"  bundle {b.id}: {len(w.input.candidates)} topologies{inst_note}")
+                    marker = "  ← opens here" if (not all_mode and i == start) else ""
+                    print(f"  bundle {b.id}: {len(w.input.candidates)} "
+                          f"topologies{inst_note}{marker}")
                 TopologyExplorer(self.fp, wrappers,
                                  sidecar_path=self._sidecar_path(),
-                                 layer_stack=self.layers).show()
+                                 layer_stack=self.layers,
+                                 start_bidx=start).show()
         elif cmd == "visualize":
             if self.no_viz:
                 return

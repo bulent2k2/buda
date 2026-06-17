@@ -471,16 +471,16 @@ class TopologyExplorer:
     """Cycle through topology candidates across one or more bundles.
 
     Navigation:
-      ← / →  (or ◀/▶ Topo buttons)  — prev / next topology within bundle
-      cmd-p / cmd-n                  — prev / next topology within bundle
-      [ / ]  (or ◀/▶ Bus buttons)   — prev / next bundle
-      s (or Select button)           — toggle selection (pin/unpin)
-      cmd-1                          — raise the main BUDA viz window
+      ← / →  (or ◀/▶ Topo buttons)    — prev / next topology within bundle
+      cmd-p / cmd-n                    — prev / next topology within bundle
+      [ / ]  (or ◀/▶ Bundle buttons)  — prev / next bundle
+      s (or Select button)             — toggle selection (pin/unpin)
+      cmd-1                            — raise the main BUDA viz window
     """
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
-                 ui_state: ViewState = None):
+                 ui_state: ViewState = None, start_bidx=0):
         self.fp          = fp
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
@@ -496,8 +496,9 @@ class TopologyExplorer:
 
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
-        self.bidx     = 0   # current bundle index
-        w0_selected   = self.wrappers[0].plan.selected_topology_index
+        # Open on the requested bundle (e.g. the one matched by a viz hint).
+        self.bidx     = start_bidx if 0 <= start_bidx < len(self.wrappers) else 0
+        w0_selected   = self.wrappers[self.bidx].plan.selected_topology_index
         self.idx      = w0_selected if w0_selected >= 0 else 0
         self.sidx     = -1  # current selected segment index within current topology
 
@@ -508,10 +509,10 @@ class TopologyExplorer:
         if sidecar_path and os.path.exists(sidecar_path):
             self._load_sidecar()
             # Jump to the saved topo index so the gold border appears on open.
-            saved_sel = self._find_selection(self.wrappers[0])
+            saved_sel = self._find_selection(self.wrappers[self.bidx])
             if saved_sel is not None:
                 saved = saved_sel.get('topo_index_hint', 0)
-                n_cands = len(self.wrappers[0].input.candidates)
+                n_cands = len(self.wrappers[self.bidx].input.candidates)
                 if 0 <= saved < n_cands:
                     self.idx = saved
 
@@ -530,7 +531,7 @@ class TopologyExplorer:
         _GAP       = 0.008
 
         _nav_specs = [
-            ('◀  Bus',     '#d9f5d9', 1.0),
+            ('◀  Bundle',  '#d9f5d9', 1.0),
             ('◀  Topo',    '#ddeeff', 1.0),
             ('★  Select',  '#f0f0f0', 1.0),
             ('✕  Desel',   '#f0f0f0', 0.85),
@@ -539,7 +540,7 @@ class TopologyExplorer:
             _nav_specs.append(('▶  Re-run', '#ffe0b0', 1.2))
         _nav_specs += [
             ('Topo  ▶',   '#ddeeff', 1.0),
-            ('Bus  ▶',    '#d9f5d9', 1.0),
+            ('Bundle  ▶', '#d9f5d9', 1.0),
         ]
 
         _n1          = len(_nav_specs)
@@ -961,7 +962,7 @@ class TopologyExplorer:
         if event.key in ('down', 'j'):          self._step_segment(+1)
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
         if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
-        if event.key == 'b':                    self._toggle_blocks()
+        if event.key == 'b':                    self.ui_state.toggle_blocks()
         if event.key == 's':
             if self._current_is_selected(): self._deselect_current()
             else:                           self._select_current()
@@ -1080,7 +1081,7 @@ class TopologyExplorer:
         if hasattr(_w, 'path') and _w.path:
             bus_label = f"/{_w.path} "
         elif nb > 1:
-            bus_label = f"bus {self.bidx + 1}/{nb} · "
+            bus_label = f"bundle {self.bidx + 1}/{nb} · "
         else:
             bus_label = ""
 

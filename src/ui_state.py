@@ -103,6 +103,8 @@ class ViewState:
         self.heatmap = self.all_vis
         self.busterms = self.all_vis
         self.vias_conns = self.all_vis
+        self.hanan_grid = self.all_vis
+        self.tracks = self.all_vis
         self.notify()
 
     def toggle_solo(self):
