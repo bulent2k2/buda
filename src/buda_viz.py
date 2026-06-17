@@ -1681,9 +1681,16 @@ class BudaVisualizer:
             
         for a in self._block_patch_artists:
             a.set_visible(self.ui_state.blocks)
-            
+
         for a in self._block_name_artists:
             a.set_visible(self.ui_state.block_names and self.ui_state.blocks)
+
+        # Detailed-mode track rails: re-apply the set_visible gate (alpha is
+        # handled by _refresh_highlight). Without this, flags flipped via the
+        # All toggle would show the Tracks button as on while rails hidden by a
+        # prior Tracks-off stay invisible.
+        for e in self._grid_rail_artists:
+            e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
 
         # 3. Complex redraws (blocks, highlights)
         self._refresh_highlight()
