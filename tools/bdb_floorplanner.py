@@ -730,7 +730,8 @@ class BdbFloorplanner:
     # 0x0004 = Control (all platforms)
     # 0x0008 = Mod1   — Cmd on macOS (most Tk 8.6 builds), Alt on some Linux
     # 0x0010 = Mod2   — Cmd on some older macOS Tk builds; Num Lock on Linux
-    _MOD_CTRL_CMD = 0x4 | 0x8 | 0x10
+    # Only include Mod1/Mod2 on macOS — on Linux Mod2 is Num Lock, not Cmd.
+    _MOD_CTRL_CMD = 0x4 | (0x8 | 0x10 if sys.platform == "darwin" else 0)
 
     def _on_arrow(self, event, dx: int, dy: int) -> None:
         """Route arrow key to move / align / distribute based on modifier state."""
@@ -1300,17 +1301,17 @@ def main():
     if len(sys.argv) > 1:
         path = sys.argv[1]
         if not os.path.exists(path):
-            app._status.set(f"File not found: {path}")
             messagebox.showerror("File Not Found",
                                  f"Cannot open BDB — file not found:\n{path}")
-        else:
-            app.state = fpc.load_bdb(path)
-            app._path = []
-            app._bdb_var.set(path)
-            app._sync_canvas_vars()
-            app._refresh_breadcrumbs()
-            app._refresh_tree()
-            app._draw()
+            root.destroy()
+            return
+        app.state = fpc.load_bdb(path)
+        app._path = []
+        app._bdb_var.set(path)
+        app._sync_canvas_vars()
+        app._refresh_breadcrumbs()
+        app._refresh_tree()
+        app._draw()
     root.mainloop()
 
 
