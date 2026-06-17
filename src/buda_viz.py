@@ -466,6 +466,34 @@ def _disable_default_keymaps():
 _UNCONSTRAINED = 1_000_000_000
 
 
+def collect_candidate_bundles(bundles):
+    """Every candidate-bearing bundle once, in order, for the topology explorer.
+
+    Cell-level hier templates (expanded per instance by ``run_planner hier``) are
+    deduplicated by ``(cell_context, reason)`` so the same template is listed once.
+
+    Returns ``(wrappers, cell_seen)`` where ``cell_seen`` maps each cell key to
+    ``(representative_wrapper, instance_count)`` for annotation.
+    """
+    seen, wrappers = set(), []
+    cell_seen = {}
+    for w in bundles:
+        if not w.input.candidates:
+            continue
+        b = w.input.original_bundle
+        if b.id in seen:
+            continue
+        cell_key = (b.cell_context, b.reason) if b.cell_context else None
+        if cell_key is not None:
+            if cell_key in cell_seen:
+                rep, cnt = cell_seen[cell_key]
+                cell_seen[cell_key] = (rep, cnt + 1)
+                continue
+            cell_seen[cell_key] = (w, 1)
+        seen.add(b.id)
+        wrappers.append(w)
+    return wrappers, cell_seen
+
 
 class TopologyExplorer:
     """Cycle through topology candidates across one or more bundles.
@@ -941,6 +969,17 @@ class TopologyExplorer:
         self.sidx = -1
         self._reset_rerun_btn()
         self._draw()
+
+    def show_bundle_index(self, idx):
+        """Jump to a specific bundle (used when the explorer is already open and
+        the parent viz wants to focus a different highlighted bundle)."""
+        if 0 <= idx < len(self.wrappers) and idx != self.bidx:
+            self.bidx = idx
+            w_selected = self.wrappers[idx].plan.selected_topology_index
+            self.idx  = w_selected if w_selected >= 0 else 0
+            self.sidx = -1
+            self._reset_rerun_btn()
+            self._draw()
 
     def _redraw_topo(self):
         # We trigger a fig_redraw so the UI state updates correctly.
@@ -2351,6 +2390,24 @@ class BudaVisualizer:
 
     # ------------------------------------------------------------------
 
+    def _topo_start_index(self, wrappers, bid):
+        """Index in `wrappers` of bundle `bid`, falling back to its cell-level
+        template representative (collect_candidate_bundles dedups instances), else 0."""
+        idx = next((i for i, w in enumerate(wrappers)
+                    if w.input.original_bundle.id == bid), None)
+        if idx is not None:
+            return idx
+        # Highlighted bundle may be a deduped cell instance — match its template.
+        hl = next((w.input.original_bundle for w in self.bundles
+                   if w.input.original_bundle.id == bid), None)
+        if hl is not None and hl.cell_context:
+            key = (hl.cell_context, hl.reason)
+            idx = next((i for i, w in enumerate(wrappers)
+                        if w.input.original_bundle.cell_context
+                        and (w.input.original_bundle.cell_context,
+                             w.input.original_bundle.reason) == key), None)
+        return idx if idx is not None else 0
+
     def _open_topo_explorer(self):
         if self._highlighted is None:
             # Automatically select the first bundle that has candidates.
@@ -2362,30 +2419,31 @@ class BudaVisualizer:
 
         if self._highlighted is None:
             return
-        wrapper = next((w for w in self.bundles
-                        if w.input.original_bundle.id == self._highlighted), None)
-        if wrapper is None or not wrapper.input.candidates:
-            return
 
-        # Singleton Pattern: check if a TopologyExplorer window is already open.
+        # Load *all* candidate-bearing bundles so the ◀/▶ Bundle buttons can page
+        # through them, opening on the currently highlighted bundle.
+        wrappers, _ = collect_candidate_bundles(self.bundles)
+        if not wrappers:
+            return
+        start = self._topo_start_index(wrappers, self._highlighted)
+
+        # Singleton Pattern: one explorer covers all bundles. If already open,
+        # just raise it and jump to the highlighted bundle.
         if self._topo_explorer is not None and plt.fignum_exists(self._topo_explorer.fig.number):
-            # If it's for the SAME bundle, just raise it.
-            if self._topo_explorer.wrappers[0].input.original_bundle.id == self._highlighted:
-                raise_window(self._topo_explorer.fig)
-                return
-            else:
-                # Different bundle? Close the old one to avoid confusion/clutter.
-                plt.close(self._topo_explorer.fig)
+            raise_window(self._topo_explorer.fig)
+            self._topo_explorer.show_bundle_index(start)
+            return
 
         refresh_fn = self._redraw_nuts_tracks if self._rerun_fn is not None else None
         self._topo_explorer = TopologyExplorer(
-            self.fp, wrapper,
+            self.fp, wrappers,
             sidecar_path=self._selections_path,
             main_fig=self.fig,
             rerun_fn=self._rerun_fn,
             refresh_fn=refresh_fn,
             layer_stack=self.layer_stack,
-            ui_state=self.ui_state)
+            ui_state=self.ui_state,
+            start_bidx=start)
         self._topo_explorer.fig.show()
         install_tk_geometry_resync(self._topo_explorer.fig)
         extract_from_fullscreen_tab(self._topo_explorer.fig)

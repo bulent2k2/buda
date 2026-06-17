@@ -35,7 +35,7 @@ if sys.platform == 'darwin':
 import buda
 
 faulthandler.enable()
-from buda_viz import BudaVisualizer, TopologyExplorer
+from buda_viz import BudaVisualizer, TopologyExplorer, collect_candidate_bundles
 
 class _TeeStream:
     """Write to two streams simultaneously.
@@ -2256,25 +2256,9 @@ class BudaSession:
             all_mode = bool(args) and args[0] == '-all'
             hints    = args[1:] if all_mode else args[:1]
 
-            # Collect every candidate-bearing bundle once.  For cell-level bundles
-            # expanded by run_planner hier, deduplicate by (cell_context, reason) so
-            # the same cell-level template isn't listed once per instance.
-            seen, all_wrappers = set(), []
-            cell_seen: dict[tuple, tuple[object, int]] = {}  # key → (wrapper, count)
-            for w in self.bundles:
-                if not w.input.candidates: continue
-                b   = w.input.original_bundle
-                bid = b.id
-                if bid in seen: continue
-                cell_key = (b.cell_context, b.reason) if b.cell_context else None
-                if cell_key is not None:
-                    if cell_key in cell_seen:
-                        first_w, cnt = cell_seen[cell_key]
-                        cell_seen[cell_key] = (first_w, cnt + 1)
-                        continue
-                    cell_seen[cell_key] = (w, 1)
-                seen.add(bid)
-                all_wrappers.append(w)
+            # Collect every candidate-bearing bundle once (cell-level hier
+            # templates deduplicated); shared with the GUI "View Topologies" path.
+            all_wrappers, cell_seen = collect_candidate_bundles(self.bundles)
 
             def _matches(w):
                 names = w.input.original_bundle.get_net_names()
