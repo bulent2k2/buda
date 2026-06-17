@@ -196,28 +196,19 @@ class BdbFloorplanner:
         self._canvas.mpl_connect("motion_notify_event", self._on_motion)
         self._canvas.mpl_connect("button_release_event", self._on_release)
 
-        # Arrow-key bindings for nudging the selected block
-        self.root.bind("<Up>",    lambda e: self._arrow_move(0,   self._step.get()))
-        self.root.bind("<Down>",  lambda e: self._arrow_move(0,  -self._step.get()))
-        self.root.bind("<Left>",  lambda e: self._arrow_move(-self._step.get(), 0))
-        self.root.bind("<Right>", lambda e: self._arrow_move( self._step.get(), 0))
+        # Arrow keys — modifier-aware routing via event.state.
+        # Separate <Control-*> / <Meta-*> bindings don't work reliably on
+        # macOS (Cmd+Arrow is delivered as plain <Arrow> with state bits set).
+        # Read the state bitmask inside a single handler instead.
+        #   no modifier        → nudge (move by Step)
+        #   Ctrl or Cmd        → align
+        #   Ctrl+Shift or Cmd+Shift → distribute
+        self.root.bind("<Up>",    lambda e: self._on_arrow(e,  0,  1))
+        self.root.bind("<Down>",  lambda e: self._on_arrow(e,  0, -1))
+        self.root.bind("<Left>",  lambda e: self._on_arrow(e, -1,  0))
+        self.root.bind("<Right>", lambda e: self._on_arrow(e,  1,  0))
 
-        # Ctrl+Arrow keybindings for Align (Linux/Windows)
-        # Cmd+Arrow for the same on macOS (Ctrl+Arrow is reserved by the OS)
-        for mod in ("<Control-", "<Meta-"):
-            self.root.bind(f"{mod}Up>",    lambda e: self._align_top())
-            self.root.bind(f"{mod}Down>",  lambda e: self._align_bottom())
-            self.root.bind(f"{mod}Left>",  lambda e: self._align_left())
-            self.root.bind(f"{mod}Right>", lambda e: self._align_right())
-
-        # Ctrl+Shift+Arrow / Cmd+Shift+Arrow for Distribute
-        for mod in ("<Control-Shift-", "<Meta-Shift-"):
-            self.root.bind(f"{mod}Left>",  lambda e: self._distribute_h())
-            self.root.bind(f"{mod}Right>", lambda e: self._distribute_h())
-            self.root.bind(f"{mod}Up>",    lambda e: self._distribute_v())
-            self.root.bind(f"{mod}Down>",  lambda e: self._distribute_v())
-
-        # Undo / Redo (Ctrl on Linux/Windows, Cmd on macOS)
+        # Undo / Redo
         self.root.bind("<Control-z>", lambda e: self._undo())
         self.root.bind("<Control-Z>", lambda e: self._redo())
         self.root.bind("<Control-y>", lambda e: self._redo())
@@ -728,6 +719,34 @@ class BdbFloorplanner:
             self._hpwl_var.set(f"HPWL: {hpwl:.1f}")
         else:
             self._hpwl_var.set("")
+
+    # State-bitmask constants for modifier detection in <Key> events.
+    # 0x0001 = Shift
+    # 0x0004 = Control (all platforms)
+    # 0x0008 = Mod1   — Cmd on macOS (most Tk 8.6 builds), Alt on some Linux
+    # 0x0010 = Mod2   — Cmd on some older macOS Tk builds; Num Lock on Linux
+    _MOD_CTRL_CMD = 0x4 | 0x8 | 0x10
+
+    def _on_arrow(self, event, dx: int, dy: int) -> None:
+        """Route arrow key to move / align / distribute based on modifier state."""
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        state = getattr(event, 'state', 0)
+        shift        = bool(state & 0x1)
+        ctrl_or_cmd  = bool(state & self._MOD_CTRL_CMD)
+        if ctrl_or_cmd and shift:
+            if dx != 0:
+                self._distribute_h()
+            else:
+                self._distribute_v()
+        elif ctrl_or_cmd:
+            if   dx < 0: self._align_left()
+            elif dx > 0: self._align_right()
+            elif dy > 0: self._align_top()
+            else:        self._align_bottom()
+        else:
+            self._arrow_move(dx * self._step.get(), dy * self._step.get())
 
     def _arrow_move(self, dx: float, dy: float) -> None:
         """Nudge all canvas-selected blocks; ignored when a text widget has focus."""
