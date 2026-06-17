@@ -29,35 +29,37 @@ Step size is set by the **Step** spinbox in the Canvas panel.
 | `←` | Move selected block(s) left (−X) |
 | `→` | Move selected block(s) right (+X) |
 
-### Align (Ctrl+Arrow)
+### Align (Ctrl+Arrow or Cmd+Arrow on macOS)
 
-Requires two or more blocks selected.
+Requires two or more blocks selected.  `Ctrl+Arrow` is intercepted by macOS
+(Mission Control / Spaces), so `Cmd+Arrow` is the macOS equivalent.  Both
+bindings are registered; use whichever the OS delivers.
 
-| Key | Action |
-|---|---|
-| `Ctrl+↑` | Align top edges |
-| `Ctrl+↓` | Align bottom edges |
-| `Ctrl+←` | Align left edges |
-| `Ctrl+→` | Align right edges |
+| Key (Linux/Windows) | Key (macOS) | Action |
+|---|---|---|
+| `Ctrl+↑` | `Cmd+↑` | Align top edges |
+| `Ctrl+↓` | `Cmd+↓` | Align bottom edges |
+| `Ctrl+←` | `Cmd+←` | Align left edges |
+| `Ctrl+→` | `Cmd+→` | Align right edges |
 
-### Distribute (Ctrl+Shift+Arrow)
+### Distribute (Ctrl+Shift+Arrow or Cmd+Shift+Arrow on macOS)
 
 Requires three or more blocks selected.
 
-| Key | Action |
-|---|---|
-| `Ctrl+Shift+←` | Distribute horizontally (equal H gaps) |
-| `Ctrl+Shift+→` | Distribute horizontally (equal H gaps) |
-| `Ctrl+Shift+↑` | Distribute vertically (equal V gaps) |
-| `Ctrl+Shift+↓` | Distribute vertically (equal V gaps) |
+| Key (Linux/Windows) | Key (macOS) | Action |
+|---|---|---|
+| `Ctrl+Shift+←` | `Cmd+Shift+←` | Distribute horizontally (equal H gaps) |
+| `Ctrl+Shift+→` | `Cmd+Shift+→` | Distribute horizontally (equal H gaps) |
+| `Ctrl+Shift+↑` | `Cmd+Shift+↑` | Distribute vertically (equal V gaps) |
+| `Ctrl+Shift+↓` | `Cmd+Shift+↓` | Distribute vertically (equal V gaps) |
 
 ### Undo / Redo
 
-| Key | Action |
-|---|---|
-| `Ctrl+Z` | Undo last placement mutation |
-| `Ctrl+Y` | Redo |
-| `Ctrl+Shift+Z` | Redo |
+| Key (Linux/Windows) | Key (macOS) | Action |
+|---|---|---|
+| `Ctrl+Z` | `Cmd+Z` | Undo last placement mutation |
+| `Ctrl+Y` | `Cmd+Shift+Z` | Redo |
+| `Ctrl+Shift+Z` | — | Redo |
 
 Undo history: bounded deque, max 50 snapshots.  Snapshots are taken before drag,
 resize, arrow-nudge, align, distribute, and optimize.  Cancelling the Optimize

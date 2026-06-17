@@ -202,22 +202,27 @@ class BdbFloorplanner:
         self.root.bind("<Left>",  lambda e: self._arrow_move(-self._step.get(), 0))
         self.root.bind("<Right>", lambda e: self._arrow_move( self._step.get(), 0))
 
-        # Ctrl+Arrow keybindings for Align commands
-        self.root.bind("<Control-Up>",    lambda e: self._align_top())
-        self.root.bind("<Control-Down>",  lambda e: self._align_bottom())
-        self.root.bind("<Control-Left>",  lambda e: self._align_left())
-        self.root.bind("<Control-Right>", lambda e: self._align_right())
+        # Ctrl+Arrow keybindings for Align (Linux/Windows)
+        # Cmd+Arrow for the same on macOS (Ctrl+Arrow is reserved by the OS)
+        for mod in ("<Control-", "<Meta-"):
+            self.root.bind(f"{mod}Up>",    lambda e: self._align_top())
+            self.root.bind(f"{mod}Down>",  lambda e: self._align_bottom())
+            self.root.bind(f"{mod}Left>",  lambda e: self._align_left())
+            self.root.bind(f"{mod}Right>", lambda e: self._align_right())
 
-        # Ctrl+Shift+Arrow for Distribute
-        self.root.bind("<Control-Shift-Left>",  lambda e: self._distribute_h())
-        self.root.bind("<Control-Shift-Right>", lambda e: self._distribute_h())
-        self.root.bind("<Control-Shift-Up>",    lambda e: self._distribute_v())
-        self.root.bind("<Control-Shift-Down>",  lambda e: self._distribute_v())
+        # Ctrl+Shift+Arrow / Cmd+Shift+Arrow for Distribute
+        for mod in ("<Control-Shift-", "<Meta-Shift-"):
+            self.root.bind(f"{mod}Left>",  lambda e: self._distribute_h())
+            self.root.bind(f"{mod}Right>", lambda e: self._distribute_h())
+            self.root.bind(f"{mod}Up>",    lambda e: self._distribute_v())
+            self.root.bind(f"{mod}Down>",  lambda e: self._distribute_v())
 
-        # Undo / Redo
+        # Undo / Redo (Ctrl on Linux/Windows, Cmd on macOS)
         self.root.bind("<Control-z>", lambda e: self._undo())
         self.root.bind("<Control-Z>", lambda e: self._redo())
         self.root.bind("<Control-y>", lambda e: self._redo())
+        self.root.bind("<Meta-z>",    lambda e: self._undo())
+        self.root.bind("<Meta-Z>",    lambda e: self._redo())
 
         # f — toggle maximize (skip when a text widget has focus)
         self.root.bind("f", self._toggle_maximize)

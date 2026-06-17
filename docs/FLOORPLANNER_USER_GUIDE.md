@@ -130,10 +130,10 @@ Unique** first to resize independently.
 
 ## Undo and Redo
 
-| Key | Action |
-|---|---|
-| `Ctrl+Z` | Undo the last placement action |
-| `Ctrl+Y` or `Ctrl+Shift+Z` | Redo |
+| Linux / Windows | macOS | Action |
+|---|---|---|
+| `Ctrl+Z` | `Cmd+Z` | Undo the last placement action |
+| `Ctrl+Y` / `Ctrl+Shift+Z` | `Cmd+Shift+Z` | Redo |
 
 The undo history holds up to 50 snapshots.  Every mutating action creates a
 snapshot: drag, resize, arrow-nudge, align, distribute, and optimize.  Cancelling
@@ -147,25 +147,26 @@ Select two or more blocks, then open the **Align ▾** menu or use a keybinding.
 
 ### Align Commands
 
-Aligns all selected blocks to the edge of the block that is furthest in that
-direction.
+Aligns all selected blocks to the edge of the block furthest in that direction.
+`Ctrl+Arrow` is intercepted by macOS (Mission Control / Spaces); use `Cmd+Arrow`
+there instead.
 
-| Menu item | Keybinding | Effect |
-|---|---|---|
-| Top ↑ | `Ctrl+↑` | Align top edges |
-| Bottom ↓ | `Ctrl+↓` | Align bottom edges |
-| Left ← | `Ctrl+←` | Align left edges |
-| Right → | `Ctrl+→` | Align right edges |
+| Menu item | Linux/Windows | macOS | Effect |
+|---|---|---|---|
+| Top ↑ | `Ctrl+↑` | `Cmd+↑` | Align top edges |
+| Bottom ↓ | `Ctrl+↓` | `Cmd+↓` | Align bottom edges |
+| Left ← | `Ctrl+←` | `Cmd+←` | Align left edges |
+| Right → | `Ctrl+→` | `Cmd+→` | Align right edges |
 
 ### Distribute Commands
 
 Requires three or more blocks.  The two outermost blocks stay fixed; interior
 blocks are spaced with equal gaps.
 
-| Menu item | Keybinding | Effect |
-|---|---|---|
-| Distribute H | `Ctrl+Shift+←` or `Ctrl+Shift+→` | Equal horizontal spacing |
-| Distribute V | `Ctrl+Shift+↑` or `Ctrl+Shift+↓` | Equal vertical spacing |
+| Menu item | Linux/Windows | macOS | Effect |
+|---|---|---|---|
+| Distribute H | `Ctrl+Shift+←/→` | `Cmd+Shift+←/→` | Equal horizontal spacing |
+| Distribute V | `Ctrl+Shift+↑/↓` | `Cmd+Shift+↑/↓` | Equal vertical spacing |
 
 All align and distribute operations are undo-able.
 
