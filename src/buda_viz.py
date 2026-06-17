@@ -851,17 +851,40 @@ class TopologyExplorer:
                         if s.get('bundle_id') == bid), None)
         return sel
 
-    def _current_is_selected(self):
-        sel  = self._find_selection()
+    def _selected_topo_index(self):
+        """The single topology index pinned for the current bundle, or -1.
+
+        A bundle has at most ONE pinned topology.  Resolution order:
+          1. The live pin (script `select_topology` or an applied sidecar,
+             reflected in plan.selected_topology_index + topology_pinned) — this
+             is authoritative after run_planner and honours script-vs-sidecar
+             precedence.
+          2. Otherwise a sidecar entry for this bundle (used before run_planner,
+             e.g. right after generate_topologies): its saved index, else the
+             first candidate matching the saved (type, wirelength).
+
+        Previously each of these criteria was OR'd inside _current_is_selected,
+        so a stale sidecar could light up several different topologies of one
+        bundle as "pinned" at once.
+        """
+        w = self.wrapper
+        if getattr(w.input, 'topology_pinned', False):
+            idx = w.plan.selected_topology_index
+            return idx if 0 <= idx < len(self.topos) else -1
+
+        sel = self._find_selection()
         if sel is not None:
-            # Check by hint index first (faster and more robust if saved)
-            if sel.get('topo_index_hint', -1) == self.idx:
-                return True
-            # Fallback for manual sidecar edits
-            topo = self.topos[self.idx]
-            if topo.type == sel['topo_type'] and topo.estimated_wirelength == sel['topo_wl']:
-                return True
-        return (self.idx == self.wrapper.plan.selected_topology_index and getattr(self.wrapper.input, 'topology_pinned', False))
+            hint = sel.get('topo_index_hint', -1)
+            if 0 <= hint < len(self.topos):
+                return hint
+            for i, topo in enumerate(self.topos):
+                if (topo.type == sel['topo_type'] and
+                        topo.estimated_wirelength == sel['topo_wl']):
+                    return i
+        return -1
+
+    def _current_is_selected(self):
+        return self.idx == self._selected_topo_index()
 
     def _select_current(self):
         topo = self.topos[self.idx]
