@@ -498,8 +498,13 @@ class BdbFloorplanner:
                 self._new_bdb()
                 return
             self.state.bdb_path = path
-        fpc.write_bdb(self.state)
-        self._status.set(f"Placements written to {self.state.bdb_path}.")
+        try:
+            fpc.write_bdb(self.state)
+            self._status.set(f"Placements written to {self.state.bdb_path}.")
+        except Exception as exc:
+            messagebox.showerror("Write Failed",
+                                 f"Could not write BDB:\n{exc}")
+            self._status.set(f"Write failed: {exc}")
 
     def _export_flow(self):
         path = filedialog.asksaveasfilename(defaultextension=".buda",

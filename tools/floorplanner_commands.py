@@ -371,7 +371,8 @@ def sync_cell_to_instances(state: FloorplannerAppState, name: str,
     for c in state.bdb.all_components():
         if c.cell == cell and c.name in state.block_names:
             try:
-                state.engine.resize_block_raw(c.name, c.x1, c.y1, c.x2, c.y2)
+                b = state.engine.get_block(c.name)
+                state.engine.resize_block_raw(c.name, b.x1, b.y1, b.x1 + w, b.y1 + h)
                 count += 1
             except Exception:
                 pass
