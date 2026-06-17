@@ -1173,12 +1173,16 @@ class TopologyExplorer:
         has_any_sel = (sel is not None
                        or getattr(self.wrapper.input, 'topology_pinned', False))
 
-        # Planner is active if the current display topo matches the planner's choice
+        # Planner is active only if the planner actually ran (it assigns
+        # per-segment layers) and chose this topo. select_topology(ies) also sets
+        # selected_topology_index, so that alone would mislabel a script pin as a
+        # planner choice when run_planner was never called.
         is_planner_active = (self.wrapper.plan is not None and
-                             self.wrapper.plan.selected_topology_index == self.idx)
+                             self.wrapper.plan.selected_topology_index == self.idx and
+                             len(self.wrapper.plan.seg_layers) > 0)
 
         if is_planner_active and is_current_selection:
-            sel_badge = "  ★ PLANNER SELECTED (PINNED)"
+            sel_badge = "  ★ PINNED & PLANNER SELECTED"
         elif is_planner_active:
             sel_badge = "  ★ PLANNER SELECTED"
         elif is_current_selection:
