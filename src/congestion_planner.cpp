@@ -137,10 +137,11 @@ void CongestionPlanner::rebuild_cuts_() {
         int x_mid = (x_grid_[i] + x_grid_[i+1]) / 2;
         for (int lid : h_layers) {
             GlobalCut c;
-            c.p1        = {x_mid, y_grid_.front()};
-            c.p2        = {x_mid, y_grid_.back()};
-            c.cut_coord = x_mid;
-            c.dir       = LayerDir::VERTICAL;
+            c.p1           = {x_mid, y_grid_.front()};
+            c.p2           = {x_mid, y_grid_.back()};
+            c.cut_coord    = x_mid;
+            c.cut_coord_2x = x_grid_[i] + x_grid_[i+1];   // exact midpoint, doubled
+            c.dir          = LayerDir::VERTICAL;
             c.layer_id  = lid;
             // Leaf cells reach LOW layers via `keepouts` (low_layer_keepouts),
             // so blocks no longer carve capacity directly.
@@ -157,10 +158,11 @@ void CongestionPlanner::rebuild_cuts_() {
         int y_mid = (y_grid_[i] + y_grid_[i+1]) / 2;
         for (int lid : v_layers) {
             GlobalCut c;
-            c.p1        = {x_grid_.front(), y_mid};
-            c.p2        = {x_grid_.back(),  y_mid};
-            c.cut_coord = y_mid;
-            c.dir       = LayerDir::HORIZONTAL;
+            c.p1           = {x_grid_.front(), y_mid};
+            c.p2           = {x_grid_.back(),  y_mid};
+            c.cut_coord    = y_mid;
+            c.cut_coord_2x = y_grid_[i] + y_grid_[i+1];   // exact midpoint, doubled
+            c.dir          = LayerDir::HORIZONTAL;
             c.layer_id  = lid;
             c.init_bands(n_xbands, [&](int b) {
                 return band_available_length(y_mid, false, keepouts, lid, x_grid_[b], x_grid_[b+1]);
@@ -241,7 +243,7 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
     if (lo >= hi) return;
 
     // Closed interval [lo, hi]: a cut line is crossed by the segment iff the
-    // cut coordinate lies anywhere on it, including its endpoints (Issue #22).
+    // cut midpoint lies anywhere on it, including its endpoints (Issue #22).
     // A half-open [lo, hi) silently drops a segment whose endpoint lands exactly
     // on a cut — which happens at every Z/U trunk junction, since cuts sit at
     // Hanan-cell midpoints and a trunk arm terminates on the midpoint cut it
@@ -250,15 +252,22 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
     // Closing the interval cannot double-count: an endpoint coincides with a cut
     // only at a trunk junction, where the two arms are perpendicular (counted on
     // different cut directions) or land in different perpendicular bands.
+    //
+    // The comparison runs in doubled coordinates (cut_coord_2x vs 2*lo / 2*hi)
+    // so the exact half-integer midpoint of an odd-width cell is respected.
+    // Using the rounded cut_coord would, on a width-1 cell whose midpoint
+    // truncates onto the lower grid line, let a neighbour segment ending there
+    // falsely charge this cell's cut.
+    const long lo2 = 2L * lo, hi2 = 2L * hi;
     for (int ci = 0; ci < (int)cuts_.size(); ++ci) {
         const GlobalCut& c = cuts_[ci];
         if (c.layer_id != layer_id) continue;
         if (is_h && c.dir == LayerDir::VERTICAL) {
-            if (!(c.cut_coord >= lo && c.cut_coord <= hi)) continue;
+            if (!(c.cut_coord_2x >= lo2 && c.cut_coord_2x <= hi2)) continue;
             int b = find_band(/*is_vcut=*/true, pp_h);
             if (b >= 0 && b < c.num_bands()) fn(ci, b);
         } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
-            if (!(c.cut_coord >= lo && c.cut_coord <= hi)) continue;
+            if (!(c.cut_coord_2x >= lo2 && c.cut_coord_2x <= hi2)) continue;
             int b = find_band(/*is_vcut=*/false, pp_v);
             if (b >= 0 && b < c.num_bands()) fn(ci, b);
         }

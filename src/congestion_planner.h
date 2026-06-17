@@ -29,7 +29,13 @@ namespace buda {
 // H-cut (dir=HORIZONTAL): y fixed, bands along X grid → counts V-segments crossing it.
 struct GlobalCut {
     Point    p1, p2;           // endpoints of the cut line (for visualisation)
-    int      cut_coord = 0;    // x_mid (V-cut) or y_mid (H-cut)
+    int      cut_coord = 0;    // x_mid (V-cut) or y_mid (H-cut), rounded to int
+    // Exact midpoint doubled (= g_lo + g_hi of the cell along the cut axis).
+    // cut_coord truncates the true half-integer midpoint of an odd-width cell;
+    // for a width-1 cell that collapses it onto the lower grid line, so a
+    // closed-interval segment match would falsely charge a neighbour ending
+    // there.  Matching uses cut_coord_2x against 2*lo / 2*hi to stay exact.
+    int      cut_coord_2x = 0;
     LayerDir dir;
     int      layer_id = 0;
 
