@@ -1877,6 +1877,11 @@ class BudaSession:
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.input.candidates)} topologies for bundle "
                       f"{w.input.original_bundle.id} ({label})")
+            # Restore the sidecar baseline (pins + per-segment layer overrides) onto
+            # the freshly generated candidates, so the live state matches the GUI
+            # even before run_planner. A later select_topology overrides it; the
+            # sidecar's layer overrides for a matching topology are still merged.
+            self._apply_selections()
 
         elif cmd == "generate_hier_topologies":
             # generate_hier_topologies [center_mode] [double_detour]
@@ -1905,6 +1910,9 @@ class BudaSession:
                 total_candidates += n
             print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
                   f"{total_candidates} total candidates")
+            # Restore the sidecar baseline onto the fresh candidates (see
+            # generate_topologies); keeps live state and GUI consistent pre-plan.
+            self._apply_selections()
 
         elif cmd == "generate_topologies_for_hbundle":
             # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour]

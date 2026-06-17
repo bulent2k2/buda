@@ -543,8 +543,7 @@ class TopologyExplorer:
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
         # Open on the requested bundle (e.g. the one matched by a viz hint).
         self.bidx     = start_bidx if 0 <= start_bidx < len(self.wrappers) else 0
-        w0_selected   = self.wrappers[self.bidx].plan.selected_topology_index
-        self.idx      = w0_selected if w0_selected >= 0 else 0
+        self.idx      = 0
         self.sidx     = -1  # current selected segment index within current topology
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
@@ -553,13 +552,10 @@ class TopologyExplorer:
         _disable_default_keymaps()
         if sidecar_path and os.path.exists(sidecar_path):
             self._load_sidecar()
-            # Jump to the saved topo index so the gold border appears on open.
-            saved_sel = self._find_selection(self.wrappers[self.bidx])
-            if saved_sel is not None:
-                saved = saved_sel.get('topo_index_hint', 0)
-                n_cands = len(self.wrappers[self.bidx].input.candidates)
-                if 0 <= saved < n_cands:
-                    self.idx = saved
+        # Focus the bundle's pinned topology (live pin or sidecar), else the
+        # planner's choice — same resolution used when cycling bundles, so the
+        # gold border lands consistently on open and after switching.
+        self.idx = self._focus_topo_index()
 
         self.fig = plt.figure(figsize=(13, 10))
         self.fig.patch.set_facecolor('#f0f0f0')
@@ -900,6 +896,19 @@ class TopologyExplorer:
                     return i
         return -1
 
+    def _focus_topo_index(self):
+        """Which topology to display when opening or switching to the current
+        bundle: its pinned topology (live pin or sidecar) if any, else the
+        planner's choice, else topo 0.  Used by __init__, bundle cycling, and
+        jump-to-bundle so all three focus the bundle's pin consistently."""
+        idx = self._selected_topo_index()          # pinned (live or sidecar) or -1
+        if idx >= 0:
+            return idx
+        sel = self.wrapper.plan.selected_topology_index
+        if 0 <= sel < len(self.topos):              # planner's choice (unpinned)
+            return sel
+        return 0
+
     def _current_is_selected(self):
         return self.idx == self._selected_topo_index()
 
@@ -1004,8 +1013,7 @@ class TopologyExplorer:
 
     def _step_bundle(self, delta):
         self.bidx = (self.bidx + delta) % len(self.wrappers)
-        w_selected = self.wrappers[self.bidx].plan.selected_topology_index
-        self.idx  = w_selected if w_selected >= 0 else 0
+        self.idx  = self._focus_topo_index()   # jump to this bundle's pinned topo
         self.sidx = -1
         self._reset_rerun_btn()
         self._draw()
@@ -1015,8 +1023,7 @@ class TopologyExplorer:
         the parent viz wants to focus a different highlighted bundle)."""
         if 0 <= idx < len(self.wrappers) and idx != self.bidx:
             self.bidx = idx
-            w_selected = self.wrappers[idx].plan.selected_topology_index
-            self.idx  = w_selected if w_selected >= 0 else 0
+            self.idx  = self._focus_topo_index()   # jump to its pinned topo
             self.sidx = -1
             self._reset_rerun_btn()
             self._draw()
