@@ -24,6 +24,7 @@ HBundle-flow script export, not as the final polished editor.
 
 from __future__ import annotations
 
+import collections
 import os
 import sys
 import tkinter as tk
@@ -69,6 +70,8 @@ class BdbFloorplanner:
         self._drag = None
         self._canvas_sel: set[str] = set()       # canvas multi-selection
         self._path: list[str] = []               # drill-down stack
+        self._undo_stack: collections.deque = collections.deque(maxlen=50)
+        self._redo_stack: list = []
         self._status = tk.StringVar(value="Open or create a BDB to begin.")
 
         self._bdb_var = tk.StringVar()
@@ -78,6 +81,7 @@ class BdbFloorplanner:
         self._step = tk.DoubleVar(value=10.0)
         self._sel_var = tk.StringVar(value="")
         self._issue_var = tk.StringVar(value="")
+        self._hpwl_var = tk.StringVar(value="")
         self._overlay_depth = tk.IntVar(value=0)   # extra depth levels to overlay
 
         self._opt_settings: dict = {
@@ -149,10 +153,13 @@ class BdbFloorplanner:
         self._align_mb.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         align_menu = tk.Menu(self._align_mb, tearoff=False)
         self._align_mb["menu"] = align_menu
-        align_menu.add_command(label="Top  ↑",    command=self._align_top)
-        align_menu.add_command(label="Bottom ↓",  command=self._align_bottom)
-        align_menu.add_command(label="Left  ←",   command=self._align_left)
-        align_menu.add_command(label="Right →",   command=self._align_right)
+        align_menu.add_command(label="Top  ↑",      command=self._align_top)
+        align_menu.add_command(label="Bottom ↓",   command=self._align_bottom)
+        align_menu.add_command(label="Left  ←",    command=self._align_left)
+        align_menu.add_command(label="Right →",    command=self._align_right)
+        align_menu.add_separator()
+        align_menu.add_command(label="Distribute H", command=self._distribute_h)
+        align_menu.add_command(label="Distribute V", command=self._distribute_v)
         filter_f2 = ttk.Frame(blocks)
         filter_f2.pack(fill=tk.X, pady=(4, 0))
         ttk.Button(filter_f2, text="Optimize…",
@@ -186,6 +193,8 @@ class BdbFloorplanner:
         checks.pack(fill=tk.X)
         ttk.Button(checks, text="Validate", command=self._validate).pack(fill=tk.X)
         ttk.Label(checks, textvariable=self._issue_var, anchor="w", justify=tk.LEFT).pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(checks, textvariable=self._hpwl_var, anchor="w",
+                  font=("TkDefaultFont", 9, "bold")).pack(fill=tk.X, pady=(2, 0))
 
         canvas_f = ttk.Frame(main)
         canvas_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -198,11 +207,27 @@ class BdbFloorplanner:
         self._canvas.mpl_connect("motion_notify_event", self._on_motion)
         self._canvas.mpl_connect("button_release_event", self._on_release)
 
-        # Arrow-key bindings for nudging the selected block
-        self.root.bind("<Up>",    lambda e: self._arrow_move(0,   self._step.get()))
-        self.root.bind("<Down>",  lambda e: self._arrow_move(0,  -self._step.get()))
-        self.root.bind("<Left>",  lambda e: self._arrow_move(-self._step.get(), 0))
-        self.root.bind("<Right>", lambda e: self._arrow_move( self._step.get(), 0))
+        # Arrow keys — modifier-aware routing via event.state.
+        # Separate <Control-*> / <Meta-*> bindings don't work reliably on
+        # macOS (Cmd+Arrow is delivered as plain <Arrow> with state bits set).
+        # Read the state bitmask inside a single handler instead.
+        #   no modifier        → nudge (move by Step)
+        #   Ctrl or Cmd        → align
+        #   Ctrl+Shift or Cmd+Shift → distribute
+        self.root.bind("<Up>",    lambda e: self._on_arrow(e,  0,  1))
+        self.root.bind("<Down>",  lambda e: self._on_arrow(e,  0, -1))
+        self.root.bind("<Left>",  lambda e: self._on_arrow(e, -1,  0))
+        self.root.bind("<Right>", lambda e: self._on_arrow(e,  1,  0))
+
+        # Undo / Redo
+        self.root.bind("<Control-z>", lambda e: self._undo())
+        self.root.bind("<Control-Z>", lambda e: self._redo())
+        self.root.bind("<Control-y>", lambda e: self._redo())
+        self.root.bind("<Meta-z>",    lambda e: self._undo())
+        self.root.bind("<Meta-Z>",    lambda e: self._redo())
+
+        # f — toggle maximize (skip when a text widget has focus)
+        self.root.bind("f", self._toggle_maximize)
 
         ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
@@ -219,6 +244,12 @@ class BdbFloorplanner:
                     increment=increment, width=10).grid(
             row=row, column=1, sticky="ew", pady=1)
         parent.columnconfigure(1, weight=1)
+
+    def _toggle_maximize(self, _event=None):
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        self.root.state("normal" if self.root.state() == "zoomed" else "zoomed")
 
     # ------------------------------------------------------------------
     # Overlay depth control
@@ -413,6 +444,7 @@ class BdbFloorplanner:
         if len(names) < 2:
             self._status.set("Select at least two blocks to align.")
             return
+        self._push_undo(self._snapshot())
         fn(self.state, names)
         self._draw()
         self._status.set(f"Aligned {len(names)} block(s) to {edge} edge.")
@@ -422,6 +454,19 @@ class BdbFloorplanner:
     def _align_left(self):   self._do_align(fpc.align_left,   "left")
     def _align_right(self):  self._do_align(fpc.align_right,  "right")
 
+    def _do_distribute(self, fn, direction: str):
+        names = list(self._canvas_sel | set(self._selected_tree_names()))
+        if len(names) < 3:
+            self._status.set("Select at least three blocks to distribute.")
+            return
+        self._push_undo(self._snapshot())
+        fn(self.state, names)
+        self._draw()
+        self._status.set(f"Distributed {len(names)} block(s) {direction}.")
+
+    def _distribute_h(self): self._do_distribute(fpc.distribute_h, "horizontally")
+    def _distribute_v(self): self._do_distribute(fpc.distribute_v, "vertically")
+
     def _open_optimize_dialog(self):
         if self.state is None:
             self._status.set("Open or create a BDB first.")
@@ -430,9 +475,11 @@ class BdbFloorplanner:
         if not root_blocks:
             self._status.set("No root-level blocks to optimize.")
             return
+        snap = self._snapshot()
         dlg = _OptimizeDialog(self.root, self.state, root_blocks, self._opt_settings)
         self.root.wait_window(dlg.top)
         if dlg.result is not None:
+            self._push_undo(snap)
             self._draw()
             r = dlg.result
             self._status.set(
@@ -466,8 +513,13 @@ class BdbFloorplanner:
                 self._new_bdb()
                 return
             self.state.bdb_path = path
-        fpc.write_bdb(self.state)
-        self._status.set(f"Placements written to {self.state.bdb_path}.")
+        try:
+            fpc.write_bdb(self.state)
+            self._status.set(f"Placements written to {self.state.bdb_path}.")
+        except Exception as exc:
+            messagebox.showerror("Write Failed",
+                                 f"Could not write BDB:\n{exc}")
+            self._status.set(f"Write failed: {exc}")
 
     def _export_flow(self):
         path = filedialog.asksaveasfilename(defaultextension=".buda",
@@ -685,6 +737,42 @@ class BdbFloorplanner:
         ax.set_title(title, fontsize=11)
         self._canvas.draw_idle()
 
+        # Live HPWL
+        if self.state is not None and self.state.bdb is not None:
+            hpwl = fpc.compute_hpwl(self.state)
+            self._hpwl_var.set(f"HPWL: {hpwl:.1f}")
+        else:
+            self._hpwl_var.set("")
+
+    # State-bitmask constants for modifier detection in <Key> events.
+    # 0x0001 = Shift
+    # 0x0004 = Control (all platforms)
+    # 0x0008 = Mod1   — Cmd on macOS (most Tk 8.6 builds), Alt on some Linux
+    # 0x0010 = Mod2   — Cmd on some older macOS Tk builds; Num Lock on Linux
+    # Only include Mod1/Mod2 on macOS — on Linux Mod2 is Num Lock, not Cmd.
+    _MOD_CTRL_CMD = 0x4 | (0x8 | 0x10 if sys.platform == "darwin" else 0)
+
+    def _on_arrow(self, event, dx: int, dy: int) -> None:
+        """Route arrow key to move / align / distribute based on modifier state."""
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        state = getattr(event, 'state', 0)
+        shift        = bool(state & 0x1)
+        ctrl_or_cmd  = bool(state & self._MOD_CTRL_CMD)
+        if ctrl_or_cmd and shift:
+            if dx != 0:
+                self._distribute_h()
+            else:
+                self._distribute_v()
+        elif ctrl_or_cmd:
+            if   dx < 0: self._align_left()
+            elif dx > 0: self._align_right()
+            elif dy > 0: self._align_top()
+            else:        self._align_bottom()
+        else:
+            self._arrow_move(dx * self._step.get(), dy * self._step.get())
+
     def _arrow_move(self, dx: float, dy: float) -> None:
         """Nudge all canvas-selected blocks; ignored when a text widget has focus."""
         fw = self.root.focus_get()
@@ -692,6 +780,7 @@ class BdbFloorplanner:
             return
         if self.state is None or not self._canvas_sel:
             return
+        self._push_undo(self._snapshot())
         for name in self._canvas_sel:
             try:
                 b = self.state.block(name)
@@ -706,6 +795,51 @@ class BdbFloorplanner:
                 self._status.set(f"{label}: ({b.x1:.0f}, {b.y1:.0f})")
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    # Undo / Redo
+    # ------------------------------------------------------------------
+
+    def _snapshot(self) -> dict:
+        """Capture current block positions from the live engine."""
+        snap = {}
+        if self.state is None:
+            return snap
+        for name in self.state.block_names:
+            try:
+                b = self.state.engine.get_block(name)
+                snap[name] = (b.x1, b.y1, b.x2, b.y2)
+            except Exception:
+                pass
+        return snap
+
+    def _push_undo(self, snap: dict) -> None:
+        self._undo_stack.append(snap)
+        self._redo_stack.clear()
+
+    def _restore(self, snap: dict) -> None:
+        for name, (x1, y1, x2, y2) in snap.items():
+            try:
+                self.state.engine.resize_block_raw(name, x1, y1, x2, y2)
+            except Exception:
+                pass
+        self._draw()
+
+    def _undo(self) -> None:
+        if not self._undo_stack:
+            self._status.set("Nothing to undo.")
+            return
+        self._redo_stack.append(self._snapshot())
+        self._restore(self._undo_stack.pop())
+        self._status.set(f"Undo — {len(self._undo_stack)} step(s) remaining.")
+
+    def _redo(self) -> None:
+        if not self._redo_stack:
+            self._status.set("Nothing to redo.")
+            return
+        self._undo_stack.append(self._snapshot())
+        self._restore(self._redo_stack.pop())
+        self._status.set(f"Redo — {len(self._redo_stack)} step(s) remaining.")
 
     def _draw_flylines(self, ax) -> None:
         """Draw dashed lines from selected block to every connected block, with net counts.
@@ -835,7 +969,8 @@ class BdbFloorplanner:
         # 1. Check corner handles first
         for hp, name, corner in self._handle_patches:
             if hp.contains(event)[0]:
-                self._drag = {"mode": "resize", "name": name, "corner": corner}
+                self._drag = {"mode": "resize", "name": name, "corner": corner,
+                              "snap": self._snapshot()}
                 return
 
         # 2. Check block body
@@ -868,6 +1003,7 @@ class BdbFloorplanner:
                     "name": name,
                     "dx": event.xdata - b.x1,
                     "dy": event.ydata - b.y1,
+                    "snap": self._snapshot(),
                 }
                 self._draw()
                 return
@@ -913,7 +1049,10 @@ class BdbFloorplanner:
             return
         mode = self._drag.get("mode", "move")
         name = self._drag.get("name")
+        snap = self._drag.get("snap")
         self._drag = None
+        if snap is not None:
+            self._push_undo(snap)
         if mode == "resize" and name:
             b = self.state.block(name)
             cell, n = fpc.sync_cell_to_instances(
@@ -1180,14 +1319,18 @@ def main():
     app = BdbFloorplanner(root)
     if len(sys.argv) > 1:
         path = sys.argv[1]
-        if os.path.exists(path):
-            app.state = fpc.load_bdb(path)
-            app._path = []
-            app._bdb_var.set(path)
-            app._sync_canvas_vars()
-            app._refresh_breadcrumbs()
-            app._refresh_tree()
-            app._draw()
+        if not os.path.exists(path):
+            messagebox.showerror("File Not Found",
+                                 f"Cannot open BDB — file not found:\n{path}")
+            root.destroy()
+            return
+        app.state = fpc.load_bdb(path)
+        app._path = []
+        app._bdb_var.set(path)
+        app._sync_canvas_vars()
+        app._refresh_breadcrumbs()
+        app._refresh_tree()
+        app._draw()
     buda_viz.raise_window(root)
     root.mainloop()
 
