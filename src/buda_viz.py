@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import types
 from datetime import datetime
 
 import matplotlib.pyplot as plt
@@ -23,11 +24,58 @@ import matplotlib.patches as patches
 from matplotlib.widgets import Button
 
 import buda as ic
+from ui_state import ViewState
 
 _LAYER_COLOR = {1: '#000075', 2: '#a9a9a9', 3: '#FF8800', 4: '#007ACC', 5: '#CC0000', 6: '#00AA44', 7: '#8800CC', 8: '#F032E6', 9: '#42D4F4', 10: '#9A6324'}
 _LAYER_LABEL = {1: 'M1 V', 2: 'M2 H', 3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V', 8: 'M8 H', 9: 'M9 V', 10: 'M10 H'}
 
 stat_title = "Bundle-based Design Assistant (BUDA) with Non-Uniform Track Sharing (NUTS)"
+
+
+def _draw_hanan_grid(ax, fp, ui_state: ViewState):
+    """Draw the Hanan grid and return the line artists. Visibility is set by ui_state."""
+    artists = []
+    xs, ys = fp.get_hanan_grid()
+    # Style: prominent dashed line for debugging
+    color = '#94a3b8'  # slate-400
+    for x in xs:
+        l = ax.axvline(x=x, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
+        l.set_visible(ui_state.hanan_grid)
+        artists.append(l)
+    for y in ys:
+        l = ax.axhline(y=y, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
+        l.set_visible(ui_state.hanan_grid)
+        artists.append(l)
+    return artists
+
+
+def _draw_blocks(ax, fp, ui_state: ViewState, highlight_names=None):
+    """Draw all floorplan blocks based on ViewState.
+    
+    Returns (patch_artists, name_artists).
+    """
+    patch_artists = []
+    name_artists = []
+    if not ui_state.blocks:
+        return patch_artists, name_artists
+
+    highlights = highlight_names or set()
+    for name, rect in fp.get_all_blocks():
+        if name in highlights:
+            # Highlighted style for busterm blocks
+            ps, txt = _draw_block(ax, name, rect, fp,
+                                  lw=1.8, edge='#333333', face='#d0f0d0',
+                                  alpha=0.50, fontsize=8, zorder=1.5)
+        else:
+            # Dimmed style for the rest
+            ps, txt = _draw_block(ax, name, rect, fp,
+                                  lw=1.0, alpha=0.18, fontsize=7)
+        patch_artists.extend(ps)
+        if txt is not None:
+            txt.set_visible(ui_state.block_names)
+            name_artists.append(txt)
+    return patch_artists, name_artists
+
 
 # Bulent: no longer used. But keep as ref.
 def _rects_disconnected(rects_raw):
@@ -114,30 +162,36 @@ def _toggle_fullscreen(fig):
         mgr.full_screen_toggle()
 
 def raise_window(win_or_fig):
-    """Bring a window or figure to the front (best-effort; backend-dependent)."""
-    # If it's a matplotlib figure, get the window manager
+    """Bring a window or figure to the front and ensure it has keyboard focus."""
+    win = None
+    canvas = None
     if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
-        mgr = win_or_fig.canvas.manager
-        if mgr is None:
-            return
-        win = getattr(mgr, "window", None)
-        # MacOSX backend exposes show() which calls makeKeyAndOrderFront: internally.
-        if callable(getattr(mgr, "show", None)):
-            try:
-                mgr.show()
-            except Exception:
-                pass
+        canvas = win_or_fig.canvas
+        mgr = canvas.manager
+        if mgr is not None:
+            win = getattr(mgr, "window", None)
+            if win is None and hasattr(mgr, "canvas"):
+                try:
+                    # Fallback for some matplotlib backends (like TkAgg)
+                    win = mgr.canvas.get_tk_widget().winfo_toplevel()
+                except Exception:
+                    pass
+
+            # MacOSX backend exposes show() which calls makeKeyAndOrderFront: internally.
+            if win is None and callable(getattr(mgr, "show", None)):
+                try:
+                    mgr.show()
+                except Exception:
+                    pass
     else:
         # Assume it's a direct window object (like tk.Tk)
         win = win_or_fig
 
     if win is not None:
         # macOS specific: force process to front using AppleScript.
-        # This is the most reliable way to steal focus from the terminal.
         if sys.platform == "darwin":
             try:
                 import subprocess
-
                 pid = os.getpid()
                 as_cmd = f'tell application "System Events" to set frontmost of every process whose unix id is {pid} to true'
                 subprocess.run(["osascript", "-e", as_cmd], capture_output=True)
@@ -148,9 +202,24 @@ def raise_window(win_or_fig):
         if hasattr(win, "lift"):
             try:
                 win.lift()
-                # Also try focus_force to pull keyboard focus
+                # Focus the window
                 if hasattr(win, "focus_force"):
                     win.focus_force()
+                
+                # CRITICAL: Also focus the canvas widget specifically.
+                # key_press_event often only fires when the canvas has focus.
+                if canvas is not None and hasattr(canvas, "get_tk_widget"):
+                    try:
+                        cw = canvas.get_tk_widget()
+                        cw.focus_force()
+                        # Also schedule a delayed focus in case mapping is slow
+                        if hasattr(win, "after"):
+                            win.after(150, cw.focus_force)
+                    except Exception:
+                        pass
+                elif hasattr(win, "after"):
+                    # Fallback for non-matplotlib windows
+                    win.after(150, win.focus_force)
 
                 if hasattr(win, "attributes"):
                     win.attributes("-topmost", True)
@@ -171,34 +240,207 @@ def raise_window(win_or_fig):
                     pass
 
 
+def install_tk_geometry_resync(fig, settle_ms=80):
+    """Keep the TkAgg canvas hit-testing aligned with the rendered layout.
+
+    matplotlib's TkAgg ``resize`` re-places the figure image *centered for the
+    size carried by each <Configure> event*::
+
+        self._tkcanvas.create_image(int(width/2), int(height/2), image=...)
+
+    During map / maximize / fullscreen transitions an intermediate or stale size
+    can be used, leaving the image — and therefore mouse hit-testing — vertically
+    offset from the widgets, so clicks miss buttons (especially noticeable on
+    macOS) until a real resize occurs.
+
+    This re-runs ``resize`` with the *settled* widget size after every geometry
+    change (debounced) so the image re-centers correctly. It changes no window
+    geometry, so it works in fullscreen too. No-op on non-Tk backends.
+    """
+    try:
+        canvas = fig.canvas
+        tkw = canvas.get_tk_widget()
+        win = tkw.winfo_toplevel()
+    except Exception:
+        return  # not a Tk backend; nothing to do
+
+    state = {"after_id": None}
+
+    def _resync(prev=None, tries=0):
+        state["after_id"] = None
+        try:
+            w, h = tkw.winfo_width(), tkw.winfo_height()
+        except Exception:
+            return
+        if w > 1 and h > 1:
+            try:
+                ev = types.SimpleNamespace(width=w, height=h)
+                canvas.resize(ev)
+            except Exception:
+                pass
+        # An async maximize/fullscreen settles over several frames; keep
+        # re-running resize until the widget size stops changing so the figure
+        # image is finally centered for the *settled* size (cap the retries).
+        if (w, h) != prev and tries < 12:
+            try:
+                state["after_id"] = win.after(
+                    settle_ms, lambda: _resync((w, h), tries + 1))
+            except Exception:
+                pass
+
+    def _schedule(_evt=None):
+        if state["after_id"] is not None:
+            try:
+                win.after_cancel(state["after_id"])
+            except Exception:
+                pass
+        try:
+            state["after_id"] = win.after(settle_ms, _resync)
+        except Exception:
+            pass
+
+    try:
+        # React only to toplevel geometry changes (children also emit <Configure>).
+        win.bind("<Configure>",
+                 lambda e: _schedule() if e.widget is win else None, add="+")
+        # <Map> covers the nested case where the window is shown already maximized.
+        win.bind("<Map>", lambda e: _schedule() if e.widget is win else None, add="+")
+    except Exception:
+        pass
+    _schedule()  # initial alignment once the current geometry settles
+
+
+def extract_from_fullscreen_tab(fig, settle_ms=180, regain_ms=300):
+    """Pop a window out of another window's macOS fullscreen tab group.
+
+    On macOS, a window opened while another app window is fullscreen is placed
+    *into that window's fullscreen Space* and merged into a tabbed window with a
+    tab bar. Tk doesn't account for the tab bar, so mouse hit-testing is shifted
+    and clicks miss the widgets — and (unlike a plain resize) only leaving the tab
+    group fixes it. The reliable cure the user found is pressing 'f' twice
+    (fullscreen off then on), which moves the window into its *own* Space.
+
+    This replicates that: once the window has settled, if it is fullscreen with a
+    tab bar above the canvas (``canvas.winfo_rooty() > 0``), toggle ``-fullscreen``
+    off and back on. A standalone fullscreen window has rooty 0 and is left alone,
+    so there is no flicker in the common case. No-op off macOS / non-Tk.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        canvas = fig.canvas
+        tkw = canvas.get_tk_widget()
+        win = tkw.winfo_toplevel()
+    except Exception:
+        return
+
+    def _step(tries=0):
+        try:
+            if bool(win.attributes("-fullscreen")):
+                if tkw.winfo_rooty() > 0:          # tab bar present → tabbed
+                    win.attributes("-fullscreen", False)
+                    win.after(regain_ms,
+                              lambda: win.attributes("-fullscreen", True))
+                    return
+                return  # standalone fullscreen (rooty 0) — nothing to do
+            if tries < 8:                          # not settled yet — retry
+                win.after(settle_ms, lambda: _step(tries + 1))
+        except Exception:
+            pass
+
+    try:
+        win.after(settle_ms, _step)
+    except Exception:
+        pass
+
+
+def _hover_color(color, factor=0.82):
+    """A clearly-visible hover/feedback shade (darkened) for a button.
+
+    matplotlib's default Button.hovercolor ('0.95') is invisible on buttons whose
+    resting color is already near-white, so hovering gives no feedback. Darkening
+    the resting color gives a consistent, noticeable cue on every button.
+    """
+    try:
+        import matplotlib.colors as mcolors
+        r, g, b = mcolors.to_rgb(color)
+        return (r * factor, g * factor, b * factor)
+    except Exception:
+        return color
+
+
+def style_button(btn, color):
+    """Set a Button's resting color, a derived hovercolor, and repaint now.
+
+    Setting only ``btn.ax.set_facecolor(...)`` is fragile: Button repaints the
+    axes to ``btn.color``/``btn.hovercolor`` on every mouse-motion event, so a
+    directly-set facecolor is wiped on the next mouse move. Updating ``btn.color``
+    makes the color persist and keeps hover feedback consistent.
+    """
+    btn.color = color
+    btn.hovercolor = _hover_color(color)
+    btn.ax.set_facecolor(color)
+
+
 def set_icon(win_or_fig, icon_name="buda_icon.png"):
     """Set the application icon for the window or figure."""
+    # 1. Resolve absolute path to the icon file
+    try:
+        _HERE = os.path.dirname(os.path.abspath(__file__))
+        # Icon is in project root, one level up from src/
+        icon_path = os.path.join(_HERE, "..", icon_name)
+        if not os.path.exists(icon_path):
+            # Fallback: maybe we are in a flattened structure or frozen?
+            icon_path = os.path.join(_HERE, icon_name)
+        
+        if not os.path.exists(icon_path):
+            return
+    except Exception:
+        return
+
+    # 2. Extract the window object
+    win = None
+    target = win_or_fig
     if hasattr(win_or_fig, "canvas") and hasattr(win_or_fig.canvas, "manager"):
         mgr = win_or_fig.canvas.manager
-        if mgr is None:
-            return
-        win = getattr(mgr, "window", None)
-        target = win_or_fig # to store the reference
+        if mgr is not None:
+            win = getattr(mgr, "window", None)
+            if win is None and hasattr(mgr, "canvas"):
+                # Fallback for some matplotlib backends
+                try:
+                    win = mgr.canvas.get_tk_widget().winfo_toplevel()
+                except Exception:
+                    pass
     else:
         win = win_or_fig
-        target = win_or_fig
 
     if win is None:
         return
 
+    # 3. Apply the icon using Tkinter
     try:
         import tkinter as tk
-
-        # Look in project root (one level up from src/)
-        _HERE = os.path.dirname(__file__)
-        icon_path = os.path.join(_HERE, "..", icon_name)
         
-        if os.path.exists(icon_path) and hasattr(win, "iconphoto"):
-            # Keep a reference to prevent garbage collection
+        # We need a reference to the root to call iconphoto properly
+        root = win
+        if hasattr(win, "winfo_toplevel"):
+            root = win.winfo_toplevel()
+
+        if hasattr(root, "iconphoto"):
+            # Load the image. tk.PhotoImage supports PNG in Tk 8.6+
+            # We store it on the target to prevent garbage collection.
             if not hasattr(target, "_icon_ref"):
-                target._icon_ref = tk.PhotoImage(file=icon_path)
-            # True means apply to all future windows as well
-            win.iconphoto(True, target._icon_ref)
+                target._icon_ref = tk.PhotoImage(file=icon_path, master=root)
+            
+            # Set as default for all windows (important for macOS dock/switcher)
+            root.iconphoto(True, target._icon_ref)
+            
+            # macOS specific: sometimes default=True isn't enough for the dock icon
+            if sys.platform == "darwin":
+                try:
+                    root.tk.call('wm', 'iconphoto', root._w, "-default", target._icon_ref)
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -224,35 +466,67 @@ def _disable_default_keymaps():
 _UNCONSTRAINED = 1_000_000_000
 
 
+def collect_candidate_bundles(bundles):
+    """Every candidate-bearing bundle once, in order, for the topology explorer.
+
+    Cell-level hier templates (expanded per instance by ``run_planner hier``) are
+    deduplicated by ``(cell_context, reason)`` so the same template is listed once.
+
+    Returns ``(wrappers, cell_seen)`` where ``cell_seen`` maps each cell key to
+    ``(representative_wrapper, instance_count)`` for annotation.
+    """
+    seen, wrappers = set(), []
+    cell_seen = {}
+    for w in bundles:
+        if not w.input.candidates:
+            continue
+        b = w.input.original_bundle
+        if b.id in seen:
+            continue
+        cell_key = (b.cell_context, b.reason) if b.cell_context else None
+        if cell_key is not None:
+            if cell_key in cell_seen:
+                rep, cnt = cell_seen[cell_key]
+                cell_seen[cell_key] = (rep, cnt + 1)
+                continue
+            cell_seen[cell_key] = (w, 1)
+        seen.add(b.id)
+        wrappers.append(w)
+    return wrappers, cell_seen
+
 
 class TopologyExplorer:
     """Cycle through topology candidates across one or more bundles.
 
     Navigation:
-      ← / →  (or ◀/▶ Topo buttons)  — prev / next topology within bundle
-      cmd-p / cmd-n                  — prev / next topology within bundle
-      [ / ]  (or ◀/▶ Bus buttons)   — prev / next bundle
-      s (or Select button)           — toggle selection (pin/unpin)
-      cmd-1                          — raise the main BUDA viz window
+      ← / →  (or ◀/▶ Topo buttons)    — prev / next topology within bundle
+      cmd-p / cmd-n                    — prev / next topology within bundle
+      [ / ]  (or ◀/▶ Bundle buttons)  — prev / next bundle
+      s (or Select button)             — toggle selection (pin/unpin)
+      cmd-1                            — raise the main BUDA viz window
     """
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
-                 rerun_fn=None, refresh_fn=None, layer_stack=None):
+                 rerun_fn=None, refresh_fn=None, layer_stack=None,
+                 ui_state: ViewState = None, start_bidx=0):
         self.fp          = fp
         self.layer_stack = layer_stack
+        self.ui_state    = ui_state or ViewState()
         self._main_fig   = main_fig    # back-reference to main viz figure for cmd-1
         self._rerun_fn   = rerun_fn    # () -> NUTSResult | None
         self._refresh_fn = refresh_fn  # (NUTSResult) -> None
         
-        self._blocks_visible = True
-        self._block_names_visible = True
         self._block_patch_artists = []
         self._block_name_artists = []
 
+        # Listen for global visibility changes (e.g. from parent BudaVisualizer)
+        self.ui_state.add_listener(self.fig_redraw)
+
         # Accept a single wrapper or a list for backward compatibility.
         self.wrappers = wrappers if isinstance(wrappers, list) else [wrappers]
-        self.bidx     = 0   # current bundle index
-        w0_selected   = self.wrappers[0].plan.selected_topology_index
+        # Open on the requested bundle (e.g. the one matched by a viz hint).
+        self.bidx     = start_bidx if 0 <= start_bidx < len(self.wrappers) else 0
+        w0_selected   = self.wrappers[self.bidx].plan.selected_topology_index
         self.idx      = w0_selected if w0_selected >= 0 else 0
         self.sidx     = -1  # current selected segment index within current topology
 
@@ -263,10 +537,10 @@ class TopologyExplorer:
         if sidecar_path and os.path.exists(sidecar_path):
             self._load_sidecar()
             # Jump to the saved topo index so the gold border appears on open.
-            saved_sel = self._find_selection(self.wrappers[0])
+            saved_sel = self._find_selection(self.wrappers[self.bidx])
             if saved_sel is not None:
                 saved = saved_sel.get('topo_index_hint', 0)
-                n_cands = len(self.wrappers[0].input.candidates)
+                n_cands = len(self.wrappers[self.bidx].input.candidates)
                 if 0 <= saved < n_cands:
                     self.idx = saved
 
@@ -285,7 +559,7 @@ class TopologyExplorer:
         _GAP       = 0.008
 
         _nav_specs = [
-            ('◀  Bus',     '#d9f5d9', 1.0),
+            ('◀  Bundle',  '#d9f5d9', 1.0),
             ('◀  Topo',    '#ddeeff', 1.0),
             ('★  Select',  '#f0f0f0', 1.0),
             ('✕  Desel',   '#f0f0f0', 0.85),
@@ -294,7 +568,7 @@ class TopologyExplorer:
             _nav_specs.append(('▶  Re-run', '#ffe0b0', 1.2))
         _nav_specs += [
             ('Topo  ▶',   '#ddeeff', 1.0),
-            ('Bus  ▶',    '#d9f5d9', 1.0),
+            ('Bundle  ▶', '#d9f5d9', 1.0),
         ]
 
         _n1          = len(_nav_specs)
@@ -366,9 +640,23 @@ class TopologyExplorer:
         self._btn_demote  = Button(_bax2[3], _tune_specs[3][0], color=_tune_specs[3][1])
         self._btn_demote.on_clicked(lambda _: self._cycle_layer(-1))
 
+        # Give every button a clearly-visible hover shade (the default '0.95'
+        # is invisible on the near-white buttons, so they showed no feedback).
+        for _btn in (self._btn_bprev, self._btn_tprev, self._btn_select,
+                     self._btn_deselect, self._btn_rerun, self._btn_tnext,
+                     self._btn_bnext, self._btn_sprev, self._btn_snext,
+                     self._btn_promote, self._btn_demote):
+            if _btn is not None:
+                _btn.hovercolor = _hover_color(_btn.color)
+
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
+        self.fig.canvas.mpl_connect('close_event', self._on_close)
 
         self._draw()
+
+    def _on_close(self, event):
+        if hasattr(self, 'ui_state'):
+            self.ui_state.remove_listener(self.fig_redraw)
 
     # ------------------------------------------------------------------
 
@@ -566,6 +854,10 @@ class TopologyExplorer:
     def _current_is_selected(self):
         sel  = self._find_selection()
         if sel is not None:
+            # Check by hint index first (faster and more robust if saved)
+            if sel.get('topo_index_hint', -1) == self.idx:
+                return True
+            # Fallback for manual sidecar edits
             topo = self.topos[self.idx]
             if topo.type == sel['topo_type'] and topo.estimated_wirelength == sel['topo_wl']:
                 return True
@@ -678,13 +970,20 @@ class TopologyExplorer:
         self._reset_rerun_btn()
         self._draw()
 
-    def _toggle_blocks(self):
-        self._blocks_visible = not self._blocks_visible
-        for p in self._block_patch_artists:
-            p.set_visible(self._blocks_visible)
-        for t in self._block_name_artists:
-            t.set_visible(self._blocks_visible)
-        self.fig.canvas.draw_idle()
+    def show_bundle_index(self, idx):
+        """Jump to a specific bundle (used when the explorer is already open and
+        the parent viz wants to focus a different highlighted bundle)."""
+        if 0 <= idx < len(self.wrappers) and idx != self.bidx:
+            self.bidx = idx
+            w_selected = self.wrappers[idx].plan.selected_topology_index
+            self.idx  = w_selected if w_selected >= 0 else 0
+            self.sidx = -1
+            self._reset_rerun_btn()
+            self._draw()
+
+    def _redraw_topo(self):
+        # We trigger a fig_redraw so the UI state updates correctly.
+        self.fig_redraw()
 
     def _on_key(self, event):
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
@@ -702,7 +1001,7 @@ class TopologyExplorer:
         if event.key in ('down', 'j'):          self._step_segment(+1)
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
         if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
-        if event.key == 'b':                    self._toggle_blocks()
+        if event.key == 'b':                    self.ui_state.toggle_blocks()
         if event.key == 's':
             if self._current_is_selected(): self._deselect_current()
             else:                           self._select_current()
@@ -808,63 +1107,36 @@ class TopologyExplorer:
             # as it snatches focus from the TopologyExplorer.
             # User can use 'cmd+1' (on Mac) or just click the window.
 
+    def fig_redraw(self):
+        self._draw()
+
     def _draw(self):
         ax = self.ax
         ax.clear()
-
-        topo  = self.topos[self.idx]
-        n     = len(self.topos)
-        bid   = self.wrapper.input.original_bundle.id
-        wl    = topo.estimated_wirelength
-        ct      = self._build_conn_topo(topo)
-        cs_list = list(ct.segs())
-        viz_lw  = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 14.0)
-
-        is_sel = self._current_is_selected()
-        has_any_sel = self._find_selection() is not None or getattr(self.wrapper.input, 'topology_pinned', False)
-        is_planner_active = (self.idx == self.wrapper.plan.selected_topology_index)
-
-        # ── Enable/Disable Tuning Row ──
-        for b in self._bax2:
-            b.set_visible(is_sel)
-
-        # ── Update selection button states ──
-        if is_sel:
-            self._btn_select.label.set_text('★  Pinned')
-            self._btn_select.ax.set_facecolor('#aadd88')
-        elif is_planner_active:
-            self._btn_select.label.set_text('★  Pin Planner Choice')
-            self._btn_select.ax.set_facecolor('#cceeff')
+        n   = len(self.topos)
+        nb  = len(self.wrappers)
+        bid = self.wrapper.input.original_bundle.id
+        _w  = self.wrappers[self.bidx]
+        if hasattr(_w, 'path') and _w.path:
+            bus_label = f"/{_w.path} "
+        elif nb > 1:
+            bus_label = f"bundle {self.bidx + 1}/{nb} · "
         else:
-            self._btn_select.label.set_text('★  Pin Topo')
-            self._btn_select.ax.set_facecolor('#f0f0f0')
-        self._btn_deselect.ax.set_facecolor('#ffbbaa' if has_any_sel else '#f0f0f0')
+            bus_label = ""
 
-        # ── Axes border: gold for pinned, blue for planner, subtle grey otherwise ──
-        if is_planner_active and is_sel:
-            border_col = '#BDB76B' # Dark Khaki
-            border_lw  = 3.5
-        elif is_planner_active:
-            border_col = '#4682B4' # Steel Blue
-            border_lw  = 3.5
-        elif is_sel:
-            border_col = '#FFD700' # Gold
-            border_lw  = 3.5
-        else:
-            border_col = '#cccccc'
-            border_lw  = 0.8
-            
-        for spine in ax.spines.values():
-            spine.set_edgecolor(border_col)
-            spine.set_linewidth(border_lw)
+        topo = self.topos[self.idx]
+        wl   = topo.estimated_wirelength
 
-        nb   = len(self.wrappers)
-        n_bt = sum(1 for cs in ct.segs()
-                   for c in cs.conns if c.kind == ic.SegConnKind.BUSTERM)
-        bus_label = (f"bus {self.bidx + 1}/{nb} · " if nb > 1 else "")
-        
-        is_current_selection = is_sel
-        
+        # Use centralized selection check
+        sel = self._find_selection()
+        is_current_selection = self._current_is_selected()
+        has_any_sel = (sel is not None
+                       or getattr(self.wrapper.input, 'topology_pinned', False))
+
+        # Planner is active if the current display topo matches the planner's choice
+        is_planner_active = (self.wrapper.plan is not None and
+                             self.wrapper.plan.selected_topology_index == self.idx)
+
         if is_planner_active and is_current_selection:
             sel_badge = "  ★ PLANNER SELECTED (PINNED)"
         elif is_planner_active:
@@ -874,9 +1146,45 @@ class TopologyExplorer:
         else:
             sel_badge = ""
 
-        # Topology segments — width proportional to bundle width
+        # Tuning buttons are only visible when the current topo is selected/pinned.
+        # This allows per-segment layer overrides to be persisted.
+        if hasattr(self, '_bax2'):
+            for bax in self._bax2:
+                bax.set_visible(is_current_selection)
+
+        # ── Update selection button states ──
+        # Set via style_button (btn.color), not ax.set_facecolor alone, so the
+        # state color survives Button's motion-driven repaints.
+        if is_current_selection:
+            self._btn_select.label.set_text('★  Pinned')
+            style_button(self._btn_select, '#aadd88')
+        elif is_planner_active:
+            self._btn_select.label.set_text('★  Pin Planner Choice')
+            style_button(self._btn_select, '#cceeff')
+        else:
+            self._btn_select.label.set_text('★  Pin Topo')
+            style_button(self._btn_select, '#f0f0f0')
+        style_button(self._btn_deselect, '#ffbbaa' if has_any_sel else '#f0f0f0')
+
+        # ── Axes border: gold for pinned, blue for planner, subtle grey otherwise ──
+        if is_planner_active and is_current_selection:
+            border_col, border_lw = '#BDB76B', 3.5  # Dark Khaki
+        elif is_planner_active:
+            border_col, border_lw = '#4682B4', 3.5  # Steel Blue
+        elif is_current_selection:
+            border_col, border_lw = '#FFD700', 3.5  # Gold
+        else:
+            border_col, border_lw = '#cccccc', 0.8
+        for spine in ax.spines.values():
+            spine.set_edgecolor(border_col)
+            spine.set_linewidth(border_lw)
+
+        ct = self._build_conn_topo(topo)
+        cs_list = list(ct.segs())
+
+        # Determine display geometry for segments — width proportional to bundle width
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 14.0)
         actual_lids = []
-        sel = self._find_selection()
 
         # ── Pre-compute display geometry for all segments ──────────────────
         # Minimum pull-arrow length in data units (prevents invisible arrows on
@@ -886,7 +1194,7 @@ class TopologyExplorer:
 
         # Pass A: centered perp position + pull-arrow length per segment.
         #
-        # cs.net_pull is computed by ConnTopology.compute_net_pull() in C++:
+        # net_pull (from ConnTopology / NUTS override) is computed in C++:
         #   > 0  more connected-stub anchors lie above perp_pos → slide up/right
         #   < 0  more anchors lie below perp_pos                → slide down/left
         #   = 0  balanced or no stub connections                → no preferred direction
@@ -926,7 +1234,10 @@ class TopologyExplorer:
             for conn in cs.conns:
                 if conn.kind != ic.SegConnKind.SEG:
                     continue
-                adj = _draw_perp[conn.seg_idx]
+                adj_idx = conn.seg_idx
+                if not (0 <= adj_idx < len(cs_list)):
+                    continue
+                adj = _draw_perp[adj_idx]
                 if abs(conn.at_pos - cs.along_lo) <= 1:
                     _draw_lo[i] = adj
                 elif abs(conn.at_pos - cs.along_hi) <= 1:
@@ -963,7 +1274,7 @@ class TopologyExplorer:
 
             # Highlight selected segment; dim others
             seg_alpha = 1.0
-            if self.sidx != -1:
+            if is_current_selection and self.sidx != -1:
                 if i == self.sidx:
                     ax.plot([x0, x1], [y0, y1],
                             color='white', linewidth=viz_lw + 4,
@@ -1040,31 +1351,11 @@ class TopologyExplorer:
         highlight_blocks = set(topo.connected_block_names)
 
         # Floorplan blocks
-        self._block_patch_artists = []
-        self._block_name_artists = []
-        for name, rect in self.fp.get_all_blocks():
-            if name in highlight_blocks:
-                # Highlighted style for busterm blocks
-                ps, txt = _draw_block(ax, name, rect, self.fp,
-                                      lw=1.8, edge='#333333', face='#d0f0d0',
-                                      alpha=0.50, fontsize=8, zorder=1.5)
-            else:
-                # Dimmed style for the rest
-                ps, txt = _draw_block(ax, name, rect, self.fp,
-                                      lw=1.0, alpha=0.18, fontsize=7)
-            self._block_patch_artists.extend(ps)
-            if txt is not None:
-                self._block_name_artists.append(txt)
-        
-        for p in self._block_patch_artists: p.set_visible(self._blocks_visible)
-        for t in self._block_name_artists:  t.set_visible(self._blocks_visible)
+        self._block_patch_artists, self._block_name_artists = _draw_blocks(
+            ax, self.fp, self.ui_state, highlight_blocks)
 
         # Hanan grid
-        xs, ys = self.fp.get_hanan_grid()
-        for x in xs:
-            ax.axvline(x=x, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
-        for y in ys:
-            ax.axhline(y=y, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
+        _draw_hanan_grid(ax, self.fp, self.ui_state)
 
 
         # Slide-range bands (drawn before segments so segments sit on top)
@@ -1095,6 +1386,9 @@ class TopologyExplorer:
         self.fig.canvas.draw_idle()
 
     def show(self):
+        raise_window(self.fig)
+        install_tk_geometry_resync(self.fig)
+        extract_from_fullscreen_tab(self.fig)
         plt.show()
 
 
@@ -1123,6 +1417,9 @@ class BudaVisualizer:
                 os.path.splitext(os.path.basename(sidecar_path))[0]
             )
 
+        self.ui_state = ViewState()
+        self.ui_state.add_listener(self.fig_redraw)
+
         # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
         self._bundle_artists    = {}
         self._highlighted       = None
@@ -1130,7 +1427,6 @@ class BudaVisualizer:
         self._selected_overlap  = None    # OverlapDetail currently selected
         self._overlap_state     = 0       # 0=none 1=both 2=A-only 3=B-only
         self._highlight_overlays = []   # thin boundary lines added on selection
-        self._solo           = False
         self._layer_visible  = {}   # populated in show()
         self._layer_ids      = []   # sorted list of active layer IDs
         self._bundle_visible = {}     # bid -> bool; populated in show()
@@ -1153,15 +1449,9 @@ class BudaVisualizer:
         self._pick_happened  = False
         self._cbar_ax        = None   # colorbar axes for congestion heatmap
         self._heatmap_artists = []    # patches + texts created by draw_congestion_map
+        self._hanan_artists  = []     # lines created by draw_hanan_grid
         self._block_patch_artists = [] # block rectangle patches
         self._block_name_artists = [] # text artists created by draw_blocks
-        self._heatmap_visible    = True
-        self._keepouts_visible   = True
-        self._block_names_visible = True
-        self._blocks_visible     = True
-        self._bustermss_visible  = True
-        self._vias_conns_visible = True
-        self._all_vis            = True
         self._home_xlim          = None
         self._home_ylim          = None
         self._busterm_artists    = []    # driver/receiver terminal artists
@@ -1176,16 +1466,15 @@ class BudaVisualizer:
         self._btn_all        = None
         self._btn_detailed   = None
         self._btn_tracks     = None
+        self._btn_hanan      = None
 
         # Layout constants for the left panel (view toggles + heatmap)
         self._LX, self._LW = 0.005, 0.065
-        # Start with a conservative estimate to leave room for ~7 buttons (7 * 0.046 = 0.322)
-        # 0.97 - 0.322 = 0.648.
-        self._ly_post_buttons = 0.62 
+        # Start with a conservative estimate to leave room for ~8 buttons (8 * 0.046 = 0.368)
+        # 0.97 - 0.368 = 0.602.
+        self._ly_post_buttons = 0.60 
 
         # Detailed NUTS (Stage 9) visualisation state.
-        self._detailed_mode          = False
-        self._tracks_visible         = True
         self._detailed_bundle_artists = {}   # bid -> [{artist,alpha,lw,is_band,layer}]
         self._grid_rail_artists      = []    # POWER/GND/CLK stripe patches (not per-bundle)
         self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
@@ -1228,7 +1517,7 @@ class BudaVisualizer:
     def _on_pick(self, event):
         self._pick_happened = True
         active_reg = (self._detailed_bundle_artists
-                      if self._detailed_mode else self._bundle_artists)
+                      if self.ui_state.detailed_mode else self._bundle_artists)
         for bid, entries in active_reg.items():
             for e in entries:
                 if event.artist is e['artist']:
@@ -1348,6 +1637,65 @@ class BudaVisualizer:
 
         self._refresh_highlight()
 
+    def fig_redraw(self):
+        """Callback for ViewState changes. Syncs UI elements and redraws."""
+        # 1. Update button labels
+        if self._btn_heatmap:
+            self._btn_heatmap.label.set_text('☑ Heatmap' if self.ui_state.heatmap else '☐ Heatmap')
+        if self._btn_keepouts:
+            self._btn_keepouts.label.set_text('☑ Keepouts' if self.ui_state.keepouts else '☐ Keepouts')
+        if self._btn_blknames:
+            self._btn_blknames.label.set_text('☑ Names' if self.ui_state.block_names else '☐ Names')
+        if self._btn_blocks:
+            self._btn_blocks.label.set_text('☑ Blocks' if self.ui_state.blocks else '☐ Blocks')
+        if self._btn_bustermss:
+            self._btn_bustermss.label.set_text('☑ Terminals' if self.ui_state.busterms else '☐ Terminals')
+        if self._btn_vias_conns:
+            self._btn_vias_conns.label.set_text('☑ Vias/Conns' if self.ui_state.vias_conns else '☐ Vias/Conns')
+        if self._btn_all:
+            self._btn_all.label.set_text('☑ All' if self.ui_state.all_vis else '☐ All')
+        if self._btn_detailed:
+            self._btn_detailed.label.set_text('☑ Detailed' if self.ui_state.detailed_mode else '☐ Detailed')
+        if self._btn_tracks:
+            self._btn_tracks.label.set_text('☑ Tracks' if self.ui_state.tracks else '☐ Tracks')
+        if self._btn_hanan:
+            self._btn_hanan.label.set_text('☑ Hanan' if self.ui_state.hanan_grid else '☐ Hanan')
+
+        # 2. Update artist visibility directly for simple toggles
+        for a in self._heatmap_artists:
+            a.set_visible(self.ui_state.heatmap)
+        if self._cbar_ax:
+            self._cbar_ax.set_visible(self.ui_state.heatmap)
+        
+        for a in self._keepout_artists:
+            a.set_visible(self.ui_state.keepouts)
+        
+        for a in self._busterm_artists:
+            a.set_visible(self.ui_state.busterms)
+            
+        for a in self._vias_conns_artists:
+            a.set_visible(self.ui_state.vias_conns)
+            
+        for a in self._hanan_artists:
+            a.set_visible(self.ui_state.hanan_grid)
+            
+        for a in self._block_patch_artists:
+            a.set_visible(self.ui_state.blocks)
+
+        for a in self._block_name_artists:
+            a.set_visible(self.ui_state.block_names and self.ui_state.blocks)
+
+        # Detailed-mode track rails: re-apply the set_visible gate (alpha is
+        # handled by _refresh_highlight). Without this, flags flipped via the
+        # All toggle would show the Tracks button as on while rails hidden by a
+        # prior Tracks-off stay invisible.
+        for e in self._grid_rail_artists:
+            e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
+
+        # 3. Complex redraws (blocks, highlights)
+        self._refresh_highlight()
+        self.fig.canvas.draw_idle()
+
     def _refresh_highlight(self):
         """Apply highlight + solo + layer-visibility + bundle-visibility to all artists."""
         from matplotlib.lines import Line2D as MplLine2D
@@ -1370,7 +1718,7 @@ class BudaVisualizer:
         self._highlight_overlays.clear()
 
         active_reg = (self._detailed_bundle_artists
-                      if self._detailed_mode else self._bundle_artists)
+                      if self.ui_state.detailed_mode else self._bundle_artists)
 
         for bid, entries in active_reg.items():
             bundle_on = self._bundle_visible.get(bid, True)
@@ -1399,22 +1747,22 @@ class BudaVisualizer:
                 elif selected:
                     a.set_alpha(0.2 if e['is_band'] else 1.0)
                 else:
-                    a.set_alpha(0.0 if self._solo else (0.03 if e['is_band'] else 0.1))
+                    a.set_alpha(0.0 if self.ui_state.solo else (0.03 if e['is_band'] else 0.1))
 
         # Apply layer visibility to non-bundle detailed artists (grid rails).
-        # These are only shown when _detailed_mode is active.
-        if self._detailed_mode:
+        # These are only shown when detailed_mode is active.
+        if self.ui_state.detailed_mode:
             for e in self._grid_rail_artists:
                 a = e['artist']
                 layer_on = self._layer_visible.get(e['layer'], True)
-                tracks_on = self._tracks_visible
+                tracks_on = self.ui_state.tracks
                 # Use stored base alpha (0.15 for rails, 0.10 for signal)
                 base_alpha = e.get('alpha', 0.15)
                 a.set_alpha(base_alpha if (layer_on and tracks_on) else 0.0)
 
         # Draw thin white boundary lines over each selected bundle's segments.
         # Skipped in detailed mode — overlays would cover bit-wire lines entirely.
-        if active_bids is not None and not self._detailed_mode:
+        if active_bids is not None and not self.ui_state.detailed_mode:
             for sel_bid in active_bids:
                 for e in active_reg.get(sel_bid, []):
                     a = e['artist']
@@ -1441,18 +1789,11 @@ class BudaVisualizer:
             # For ref: old title had f"BUDA — Overlap: {msg}  (click row to cycle, All Overlaps to clear)"
             self.ax.set_title(f"BUDA — Overlap: {msg}", fontsize=13)
         elif bundle_id is not None:
-            solo_hint = "  [Solo ON]" if self._solo else ""
+            solo_hint = "  [Solo ON]" if self.ui_state.solo else ""
             bname = self._bundle_name(bundle_id)
             nbits = self._bundle_bits(bundle_id)
 
             wrapper = next((w for w in self.bundles if w.input.original_bundle.id == bundle_id), None)
-
-            # for ref only. Old code:
-            # Get busterm count from the active topology.
-            # nterms = 0
-            # if wrapper and wrapper.input.candidates and wrapper.plan.selected_topology_index >= 0:
-            #    topo = wrapper.input.candidates[wrapper.plan.selected_topology_index]
-            #    nterms = _get_nterms(topo)
 
             # Get busterm count from the bundle metadata.
             nterms = wrapper.input.original_bundle.num_terminals
@@ -1482,24 +1823,13 @@ class BudaVisualizer:
         self._ipc_send_highlight(self._highlighted)
 
     def _toggle_heatmap(self):
-        self._heatmap_visible = not self._heatmap_visible
-        vis = self._heatmap_visible
-        for a in self._heatmap_artists:
-            a.set_visible(vis)
-        if self._cbar_ax is not None:
-            self._cbar_ax.set_visible(vis)
-        if self._btn_heatmap is not None:
-            self._btn_heatmap.label.set_text('☑ Heatmap' if vis else '☐ Heatmap')
-        self.fig.canvas.draw_idle()
+        self.ui_state.toggle_heatmap()
 
     def _toggle_keepouts(self):
-        self._keepouts_visible = not self._keepouts_visible
-        vis = self._keepouts_visible
-        for a in self._keepout_artists:
-            a.set_visible(vis)
-        if self._btn_keepouts is not None:
-            self._btn_keepouts.label.set_text('☑ Keepouts' if vis else '☐ Keepouts')
-        self.fig.canvas.draw_idle()
+        self.ui_state.toggle_keepouts()
+
+    def _toggle_hanan(self):
+        self.ui_state.toggle_hanan_grid()
 
     def _reset_view(self):
         """Force all bundles and layers to visible, and clear selection."""
@@ -1507,20 +1837,25 @@ class BudaVisualizer:
         self._highlighted_set  = set()
         self._selected_overlap = None
         self._overlap_state    = 0
-        self._solo             = False
+        
+        # Reset ViewState to defaults (most ON, Hanan OFF)
+        self.ui_state.solo = False
+        self.ui_state.all_vis = True
+        self.ui_state.blocks = True
+        self.ui_state.block_names = True
+        self.ui_state.heatmap = True
+        self.ui_state.keepouts = True
+        self.ui_state.busterms = True
+        self.ui_state.vias_conns = True
+        self.ui_state.hanan_grid = False
+        
         if self._btn_solo is not None:
              self._btn_solo.label.set_text("Solo OFF")
              self._btn_solo.ax.set_facecolor('#f0f0f0')
 
-        # Reset design element toggles to True.
-        self._all_vis             = True
-        self._heatmap_visible     = True
-        self._keepouts_visible    = True
-        self._blocks_visible      = True
-        self._block_names_visible = True
-        self._bustermss_visible   = True
-        self._vias_conns_visible  = True
-        self._tracks_visible      = True
+        # Redraw all via notification
+        self.ui_state.notify()
+        self.ui_state.tracks = True
 
         # Toggle All logic (forced to True)
         if self._btn_all is not None:
@@ -1545,7 +1880,7 @@ class BudaVisualizer:
         for a in self._busterm_artists: a.set_visible(True)
         for a in self._vias_conns_artists: a.set_visible(True)
         for e in self._grid_rail_artists:
-             e['artist'].set_visible(self._detailed_mode)
+             e['artist'].set_visible(self.ui_state.detailed_mode)
 
         # Update button labels
         if self._btn_heatmap is not None: self._btn_heatmap.label.set_text('☑ Heatmap')
@@ -1564,55 +1899,8 @@ class BudaVisualizer:
         self.fig.canvas.draw_idle()
 
     def _toggle_all(self):
-        self._all_vis = not self._all_vis
-        vis = self._all_vis
-        self._btn_all.label.set_text('☑ All' if vis else '☐ All')
-
-        # Heatmap
-        self._heatmap_visible = vis
-        for a in self._heatmap_artists:
-            a.set_visible(vis)
-        if self._cbar_ax is not None:
-            self._cbar_ax.set_visible(vis)
-        if self._btn_heatmap is not None:
-            self._btn_heatmap.label.set_text('☑ Heatmap' if vis else '☐ Heatmap')
-
-        # Block names
-        self._block_names_visible = vis
-        for txt in self._block_name_artists:
-            txt.set_visible(vis)
-        if self._btn_blknames is not None:
-            self._btn_blknames.label.set_text('☑ Blk Names' if vis else '☐ Blk Names')
-
-        # Blocks
-        self._blocks_visible = vis
-        for p in self._block_patch_artists:
-            p.set_visible(vis)
-        if self._btn_blocks is not None:
-            self._btn_blocks.label.set_text('☑ Blocks' if vis else '☐ Blocks')
-
-        # Busterms
-        self._bustermss_visible = vis
-        for a in self._busterm_artists:
-            a.set_visible(vis)
-        if self._btn_bustermss is not None:
-            self._btn_bustermss.label.set_text('☑ Busterms' if vis else '☐ Busterms')
-
-        # Vias/Conns
-        self._vias_conns_visible = vis
-        for a in self._vias_conns_artists:
-            a.set_visible(vis)
-        if self._btn_vias_conns is not None:
-            self._btn_vias_conns.label.set_text('☑ Vias/Conns' if vis else '☐ Vias/Conns')
-
-        # Tracks
-        self._tracks_visible = vis
-        if self._btn_tracks is not None:
-            lbl = '☑ Tracks' if vis else '☐ Tracks'
-            self._btn_tracks.label.set_text(lbl)
-            self._btn_tracks.ax.set_facecolor('#ffe8cc' if vis else '#e8f4e8')
-            for e in self._grid_rail_artists:
-                e['artist'].set_visible(self._detailed_mode and vis)
+        self.ui_state.toggle_all()
+        vis = self.ui_state.all_vis
 
         # All layers
         for lid in self._layer_visible:
@@ -1633,53 +1921,26 @@ class BudaVisualizer:
         self.fig.canvas.draw_idle()
 
     def _toggle_bustermss(self):
-        self._bustermss_visible = not self._bustermss_visible
-        vis = self._bustermss_visible
-        for a in self._busterm_artists:
-            a.set_visible(vis)
-        label = '☑ Busterms' if vis else '☐ Busterms'
-        self._btn_bustermss.label.set_text(label)
-        self.fig.canvas.draw_idle()
+        self.ui_state.toggle_busterms()
 
     def _toggle_vias_conns(self):
-        self._vias_conns_visible = not self._vias_conns_visible
-        vis = self._vias_conns_visible
-        for a in self._vias_conns_artists:
-            a.set_visible(vis)
-        label = '☑ Vias/Conns' if vis else '☐ Vias/Conns'
-        self._btn_vias_conns.label.set_text(label)
-        self.fig.canvas.draw_idle()
+        self.ui_state.toggle_vias_conns()
 
     def _toggle_blocks(self):
-        self._blocks_visible = not self._blocks_visible
-        vis = self._blocks_visible
-        for p in self._block_patch_artists:
-            p.set_visible(vis)
-        label = '☑ Blocks' if vis else '☐ Blocks'
-        if self._btn_blocks is not None:
-            self._btn_blocks.label.set_text(label)
-        self.fig.canvas.draw_idle()
+        self.ui_state.toggle_blocks()
 
     def _toggle_block_names(self):
-        self._block_names_visible = not self._block_names_visible
-        vis = self._block_names_visible
-        for txt in self._block_name_artists:
-            txt.set_visible(vis)
-        label = '☑ Blk Names' if vis else '☐ Blk Names'
-        if self._btn_blknames is not None:
-            self._btn_blknames.label.set_text(label)
-        self.fig.canvas.draw_idle()
+        self.ui_state.toggle_block_names()
 
     def _toggle_solo(self):
-        self._solo = not self._solo
+        self.ui_state.toggle_solo()
         if self._btn_solo is not None:
-            if self._solo:
+            if self.ui_state.solo:
                 self._btn_solo.label.set_text('Solo  ON')
                 self._btn_solo.ax.set_facecolor('#ffddaa')
             else:
                 self._btn_solo.label.set_text('Solo OFF')
                 self._btn_solo.ax.set_facecolor('#f0f0f0')
-        self._refresh_highlight()
 
     # ------------------------------------------------------------------
     # Layer panel (custom, replaces CheckButtons)
@@ -2136,6 +2397,24 @@ class BudaVisualizer:
 
     # ------------------------------------------------------------------
 
+    def _topo_start_index(self, wrappers, bid):
+        """Index in `wrappers` of bundle `bid`, falling back to its cell-level
+        template representative (collect_candidate_bundles dedups instances), else 0."""
+        idx = next((i for i, w in enumerate(wrappers)
+                    if w.input.original_bundle.id == bid), None)
+        if idx is not None:
+            return idx
+        # Highlighted bundle may be a deduped cell instance — match its template.
+        hl = next((w.input.original_bundle for w in self.bundles
+                   if w.input.original_bundle.id == bid), None)
+        if hl is not None and hl.cell_context:
+            key = (hl.cell_context, hl.reason)
+            idx = next((i for i, w in enumerate(wrappers)
+                        if w.input.original_bundle.cell_context
+                        and (w.input.original_bundle.cell_context,
+                             w.input.original_bundle.reason) == key), None)
+        return idx if idx is not None else 0
+
     def _open_topo_explorer(self):
         if self._highlighted is None:
             # Automatically select the first bundle that has candidates.
@@ -2147,30 +2426,34 @@ class BudaVisualizer:
 
         if self._highlighted is None:
             return
-        wrapper = next((w for w in self.bundles
-                        if w.input.original_bundle.id == self._highlighted), None)
-        if wrapper is None or not wrapper.input.candidates:
-            return
 
-        # Singleton Pattern: check if a TopologyExplorer window is already open.
+        # Load *all* candidate-bearing bundles so the ◀/▶ Bundle buttons can page
+        # through them, opening on the currently highlighted bundle.
+        wrappers, _ = collect_candidate_bundles(self.bundles)
+        if not wrappers:
+            return
+        start = self._topo_start_index(wrappers, self._highlighted)
+
+        # Singleton Pattern: one explorer covers all bundles. If already open,
+        # just raise it and jump to the highlighted bundle.
         if self._topo_explorer is not None and plt.fignum_exists(self._topo_explorer.fig.number):
-            # If it's for the SAME bundle, just raise it.
-            if self._topo_explorer.wrappers[0].input.original_bundle.id == self._highlighted:
-                raise_window(self._topo_explorer.fig)
-                return
-            else:
-                # Different bundle? Close the old one to avoid confusion/clutter.
-                plt.close(self._topo_explorer.fig)
+            raise_window(self._topo_explorer.fig)
+            self._topo_explorer.show_bundle_index(start)
+            return
 
         refresh_fn = self._redraw_nuts_tracks if self._rerun_fn is not None else None
         self._topo_explorer = TopologyExplorer(
-            self.fp, wrapper,
+            self.fp, wrappers,
             sidecar_path=self._selections_path,
             main_fig=self.fig,
             rerun_fn=self._rerun_fn,
             refresh_fn=refresh_fn,
-            layer_stack=self.layer_stack)
+            layer_stack=self.layer_stack,
+            ui_state=self.ui_state,
+            start_bidx=start)
         self._topo_explorer.fig.show()
+        install_tk_geometry_resync(self._topo_explorer.fig)
+        extract_from_fullscreen_tab(self._topo_explorer.fig)
 
     def _zoom_home(self):
         if self._home_xlim is not None:
@@ -2191,7 +2474,7 @@ class BudaVisualizer:
         if event.key == 'Z': self._interactive_zoom(event, zoom_in=False); return
         if event.key in ('h', 'H', 'cmd+a', 'ctrl+a'): self._zoom_home(); return
         if event.key == 'a':
-            if self._detailed_mode: self._set_highlight(None)
+            if self.ui_state.detailed_mode: self._set_highlight(None)
             else:                   self._reset_view()
             return
         if event.key in ('n', 'cmd+n', 'ctrl+n'): self._step_bundle(+1)
@@ -2247,9 +2530,9 @@ class BudaVisualizer:
                 self._block_name_artists.append(txt)
 
         for p in self._block_patch_artists:
-            p.set_visible(self._blocks_visible)
+            p.set_visible(self.ui_state.blocks)
         for txt in self._block_name_artists:
-            txt.set_visible(self._blocks_visible and self._block_names_visible)
+            txt.set_visible(self.ui_state.blocks and self.ui_state.block_names)
 
     def draw_blocks(self):
         self._redraw_blocks()
@@ -2258,7 +2541,7 @@ class BudaVisualizer:
     def draw_keepouts(self):
         """Draw KeepoutZones as hatched rectangles with layer labels."""
         self._keepout_artists = []
-        vis = self._keepouts_visible
+        vis = self.ui_state.keepouts
         for koz in self.fp.get_keepout_zones():
             r = koz.bbox
             w = r.x2 - r.x1
@@ -2367,7 +2650,7 @@ class BudaVisualizer:
                         self._heatmap_artists.append(txt)
 
         # Apply current visibility state.
-        vis = self._heatmap_visible
+        vis = self.ui_state.heatmap
         for a in self._heatmap_artists:
             a.set_visible(vis)
 
@@ -2425,15 +2708,14 @@ class BudaVisualizer:
         cbar.set_label('Congestion', fontsize=8, labelpad=4)
         cbar.ax.yaxis.set_label_position('left')
         cbar.ax.yaxis.set_ticks_position('left')
-        self._cbar_ax.set_visible(self._heatmap_visible)
+        self._cbar_ax.set_visible(self.ui_state.heatmap)
 
     def draw_hanan_grid(self):
-        # Hanan grid
-        xs, ys = self.fp.get_hanan_grid()
-        for x in xs:
-            self.ax.axvline(x=x, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
-        for y in ys:
-            self.ax.axhline(y=y, color='#dddddd', linestyle=':', linewidth=0.4, zorder=0)
+        # Remove any existing
+        for a in self._hanan_artists:
+            try: a.remove()
+            except Exception: pass
+        self._hanan_artists = _draw_hanan_grid(self.ax, self.fp, self.ui_state)
 
     @staticmethod
     def _busterm_positions(topo, ct, ts_map=None, bid=None, offset=0.0):
@@ -2472,7 +2754,7 @@ class BudaVisualizer:
                            alpha=alpha, zorder=zorder + 1, clip_on=True)
         self._register(bid, xm, alpha=alpha, lw=msz * 0.65, layer=layer)
         self._vias_conns_artists.append(xm)
-        if not self._vias_conns_visible:
+        if not self.ui_state.vias_conns:
             sq.set_visible(False)
             xm.set_visible(False)
 
@@ -2483,7 +2765,7 @@ class BudaVisualizer:
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
         self._register(bid, sq, alpha=alpha, lw=msz, layer=layer)
         self._vias_conns_artists.append(sq)
-        if not self._vias_conns_visible:
+        if not self.ui_state.vias_conns:
             sq.set_visible(False)
 
     def _draw_seg_connectors(self, bid, seg_idx, cs, sx, sy, col, msz, alpha,
@@ -2762,14 +3044,14 @@ class BudaVisualizer:
         if self._btn_detailed is not None:
             self._btn_detailed.ax.set_visible(True)
         if self._btn_tracks is not None and self._grid_rail_artists:
-            self._btn_tracks.ax.set_visible(self._detailed_mode)
+            self._btn_tracks.ax.set_visible(self.ui_state.detailed_mode)
 
         # Update bundle list to show bit placement stats.
         self._redraw_bundle_list()
 
     def _toggle_detailed(self):
-        self._detailed_mode = not self._detailed_mode
-        active = self._detailed_mode
+        self.ui_state.toggle_detailed()
+        active = self.ui_state.detailed_mode
 
         # Show/hide the inactive set first (bulk operation without highlight logic).
         for entries in self._bundle_artists.values():
@@ -2779,7 +3061,7 @@ class BudaVisualizer:
             for e in entries:
                 e['artist'].set_visible(active)
         for e in self._grid_rail_artists:
-            e['artist'].set_visible(active and self._tracks_visible)
+            e['artist'].set_visible(active and self.ui_state.tracks)
 
         if self._btn_detailed is not None:
             lbl = '☑ Detailed' if active else '☐ Detailed'
@@ -2794,12 +3076,12 @@ class BudaVisualizer:
         self.fig.canvas.draw_idle()
 
     def _toggle_tracks(self):
-        self._tracks_visible = not self._tracks_visible
-        vis = self._tracks_visible
+        self.ui_state.toggle_tracks()
+        vis = self.ui_state.tracks
         
         for e in self._grid_rail_artists:
             # Visibility is hard-gated by detailed_mode, alpha by _refresh_highlight.
-            e['artist'].set_visible(self._detailed_mode and vis)
+            e['artist'].set_visible(self.ui_state.detailed_mode and vis)
             
         if self._btn_tracks is not None:
             lbl = '☑ Tracks' if vis else '☐ Tracks'
@@ -2846,7 +3128,7 @@ class BudaVisualizer:
 
         self._busterm_artists.extend(new_artists)
         # Apply current visibility state to newly created artists
-        if not self._bustermss_visible:
+        if not self.ui_state.busterms:
             for a in new_artists:
                 a.set_visible(False)
 
@@ -2968,12 +3250,17 @@ class BudaVisualizer:
         self._btn_blocks.on_clicked(lambda _: self._toggle_blocks())
 
         ax_blknames = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_blknames = Button(ax_blknames, '☑ Blk Names', color='#e8f4e8')
+        self._btn_blknames = Button(ax_blknames, '☑ Names', color='#e8f4e8')
         self._btn_blknames.label.set_fontsize(7.5)
         self._btn_blknames.on_clicked(lambda _: self._toggle_block_names())
 
+        ax_hanan = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_hanan = Button(ax_hanan, '☐ Hanan', color='#e8f4e8')
+        self._btn_hanan.label.set_fontsize(7.5)
+        self._btn_hanan.on_clicked(lambda _: self._toggle_hanan())
+
         ax_bustermss = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_bustermss = Button(ax_bustermss, '☑ Busterms', color='#e8f4e8')
+        self._btn_bustermss = Button(ax_bustermss, '☑ Terminals', color='#e8f4e8')
         self._btn_bustermss.label.set_fontsize(7.5)
         self._btn_bustermss.on_clicked(lambda _: self._toggle_bustermss())
 
@@ -3011,7 +3298,7 @@ class BudaVisualizer:
         self._btn_tracks.label.set_fontsize(7.5)
         self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
         # Only visible when detailed mode is active and there are rail artists.
-        if not self._detailed_mode or not self._grid_rail_artists:
+        if not self.ui_state.detailed_mode or not self._grid_rail_artists:
             self._btn_tracks.ax.set_visible(False)
 
         # Store the current packing position for the colorbar.
@@ -3129,6 +3416,9 @@ class BudaVisualizer:
             self._ipc_timer.start()
             print(f'[buda_viz] IPC timer started (backend={self.fig.canvas.__class__.__name__})')
 
+        raise_window(self.fig)
+        install_tk_geometry_resync(self.fig)
+        extract_from_fullscreen_tab(self.fig)
         plt.show()
 
 # Just for ref. No longer used.

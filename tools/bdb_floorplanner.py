@@ -49,6 +49,7 @@ if _SRC not in sys.path:
 
 import floorplanner_commands as fpc
 import buda_viz
+from ui_state import ViewState
 
 
 class BdbFloorplanner:
@@ -62,6 +63,8 @@ class BdbFloorplanner:
         buda_viz.raise_window(self.root)
 
         self.state = fpc.new_state()
+        self.ui_state = ViewState()
+        self.ui_state.add_listener(self._draw)
         self._patch_to_name: dict = {}
         self._handle_patches: list[tuple] = []   # (patch, name, corner_str)
         self._drag = None
@@ -178,6 +181,14 @@ class BdbFloorplanner:
                                            command=self._on_make_unique)
         # Shown only when a replicated block is selected (packed in _update_selection_label)
 
+        # View settings panel
+        view_f = ttk.LabelFrame(left, text="View", padding=6)
+        view_f.pack(fill=tk.X, pady=(0, 4))
+
+        self._var_names = tk.BooleanVar(value=self.ui_state.block_names)
+        self._var_names.trace_add("write", lambda *args: self._on_view_toggle('block_names', self._var_names))
+        ttk.Checkbutton(view_f, text="Names", variable=self._var_names).pack(side=tk.LEFT, padx=2)
+
         checks = ttk.LabelFrame(left, text="Validation", padding=6)
         checks.pack(fill=tk.X)
         ttk.Button(checks, text="Validate", command=self._validate).pack(fill=tk.X)
@@ -221,6 +232,10 @@ class BdbFloorplanner:
         ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
         self._draw()
+
+    def _on_view_toggle(self, prop: str, var: tk.BooleanVar):
+        setattr(self.ui_state, prop, var.get())
+        self.ui_state.notify()
 
     @staticmethod
     def _spin(parent, label, var, row, from_=1, increment=10):
@@ -636,6 +651,7 @@ class BdbFloorplanner:
 
         visible = self._visible_names()
         extra_levels = self._overlay_depth.get()
+        
         for name in visible:
             try:
                 block = self.state.block(name)
@@ -652,10 +668,12 @@ class BdbFloorplanner:
                 alpha=0.30 if extra_levels > 0 else 0.92, picker=True, zorder=2)
             ax.add_patch(patch)
             self._patch_to_name[patch] = name
-            label = name.split("/")[-1]
-            ax.text(block.x1 + 4, block.y1 + 4, label,
-                    fontsize=7.5, color="#0f172a", va="bottom", clip_on=True, zorder=3)
-
+            
+            if self.ui_state.block_names:
+                label = name.split("/")[-1]
+                ax.text(block.x1 + 4, block.y1 + 4, label,
+                        fontsize=7.5, color="#0f172a", va="bottom", clip_on=True, zorder=3)
+            
             # Corner handles for selected block
             if selected:
                 HS = max(vis_ref * 0.005, 1.0)
@@ -683,9 +701,10 @@ class BdbFloorplanner:
                         (cb.x1, cb.y1), cb.x2 - cb.x1, cb.y2 - cb.y1,
                         facecolor="#fed7aa", edgecolor="#ea580c",
                         linewidth=1.8, alpha=alpha, picker=False, zorder=2.5))
-                    ax.text(cb.x1 + 2, cb.y1 + 2, child.split("/")[-1],
-                            fontsize=7, color="#7c2d12", alpha=alpha,
-                            clip_on=True, zorder=2.6)
+                    if self.ui_state.block_names:
+                        ax.text(cb.x1 + 2, cb.y1 + 2, child.split("/")[-1],
+                                fontsize=7, color="#7c2d12", alpha=alpha,
+                                clip_on=True, zorder=2.6)
                     if remaining > 1:
                         _draw_overlay(child, remaining - 1, alpha * 0.72)
             for name in visible:
@@ -1312,6 +1331,7 @@ def main():
         app._refresh_breadcrumbs()
         app._refresh_tree()
         app._draw()
+    buda_viz.raise_window(root)
     root.mainloop()
 
 

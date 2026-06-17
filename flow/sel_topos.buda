@@ -12,6 +12,7 @@ add_bus c[16] rcv2.o drv1.i,rcv1.i
 
 run_bundler strict
 generate_topologies
+visualize_topologies
 
 # force bundle 3 to switch to another topo:
 add_keepout 600 250 650 350 M6
