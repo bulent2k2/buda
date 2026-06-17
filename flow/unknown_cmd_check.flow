@@ -1,0 +1,10 @@
+add_block b1   0 0 100 100
+add_block b2 200 0 300 100
+add_net n1 b1 b2
+exit 1 # no command named add_layer:
+add_layer M3 V TOP 10
+add_layer M4 H TOP 10
+# 5 topologies for the only bundle
+generate_topologies
+run_planner
+run_nuts

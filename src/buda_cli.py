@@ -1852,6 +1852,15 @@ class BudaSession:
             # Usage: generate_topologies [center_mode] [double_detour]
             # Generates topologies for every bundle produced by run_bundler,
             # deriving src/dst block names from the netlist automatically.
+            if not self.bundles:
+                if self._net_endpoints:
+                    print("Warning: no bundles to generate topologies for — nets are "
+                          "defined but the netlist hasn't been bundled. Run `run_bundler` "
+                          "(or `run_hier_bundler` for a BDB hierarchy) first.")
+                else:
+                    print("Warning: no bundles to generate topologies for — define nets "
+                          "with add_net/add_bus, then run `run_bundler` first.")
+                return
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
             topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour)
@@ -1878,6 +1887,10 @@ class BudaSession:
             #   (b) same-level cross-block             → BDB depth-D floorplan
             if self.bdb is None:
                 print("Error: generate_hier_topologies requires an open BDB"); return
+            if not self.bundles:
+                print("Warning: no HBundles to generate topologies for — run "
+                      "`run_hier_bundler` first.")
+                return
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
 
