@@ -1,0 +1,30 @@
+# There are two mechanisms to select a topo:
+#  1) the command below (`select_topology`) and
+#  2) .json sidecar.
+# Only the latter can override segment layer assignments (from UI).
+# Internally, run_planner does auto layer assignment.
+source tracks4top.buda
+add_block b1 0 0 100 100
+add_block b2 200 200 300 300
+add_bus v[4] b1.o b2.i
+add_bus w[4] b2.i b1.o
+run_bundler strict
+generate_topologies
+
+# a bundle can be pinned to a topo here (B1 -> topo 3):
+# select_topologies 1 3
+# TopoExp now focuses each bundle's pinned topology (sidecar or script pin)
+# consistently — on open, when cycling bundles, and on direct jump.
+
+# here we can create pin in the GUI, too and assign non-default layers on some segments
+visualize_topologies
+
+# Now, sidecar exists and pins it to a topo with custom layer assignments.
+# What happens if those two pins are distinct?
+# Does the sidecar overwrite? It shouldn't.
+# If they are the same, then the layer customization should be applied.
+
+run_planner
+run_nuts
+run_detailed_nuts
+visualize

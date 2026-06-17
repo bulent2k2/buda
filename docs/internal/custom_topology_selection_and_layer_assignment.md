@@ -1,9 +1,9 @@
-# Proposal for custom topology selection and layer assignment features in Buda UI
+# Custom topology selection and layer assignment in the Buda UI
 
-This document outlines the architecture for handling topology selection precedence between `.json` sidecar files and `.buda` script commands.
+This document describes how topology selection precedence is handled between `.json` sidecar files and `.buda` script commands. The behavior described below is implemented.
 
 ## Overview
-When a `select_topology` call in a `.buda` script and a `.json` sidecar file both specify a topology for the same bus, a conflict arises. Previously, the sidecar unconditionally overwrote the script because `run_planner` applied it blindly. A simple "skip if pinned" logic would lose the detailed layer overrides (GUI manual tuning) which are a key feature of the sidecar system.
+When a `select_topology` or `select_topologies` call in a `.buda` script and a `.json` sidecar file both specify a topology for the same bus, a conflict arises. Previously, the sidecar unconditionally overwrote the script because `run_planner` applied it blindly. A simple "skip if pinned" logic would lose the detailed layer overrides (GUI manual tuning) which are a key feature of the sidecar system.
 
 This architecture ensures the **sidecar acts as a persistent baseline** and the **script acts as an explicit override**, while maintaining full metadata compatibility.
 
@@ -17,12 +17,17 @@ This architecture ensures the **sidecar acts as a persistent baseline** and the 
 *   **Precedence:** The script dictates the *Topology*, but the sidecar still provides the *Layer overrides* for that topology if they exist.
 
 ## 3. Robust `_apply_selections` Merging
-`_apply_selections` distinguishes between "Initial Pinning" and "Metadata Enrichment":
+`_apply_selections` distinguishes between "Initial Pinning" and "Metadata Enrichment", resolved **per matching wrapper** (so multi-instance bundles with different pin states are handled independently):
 *   If a bundle is **not yet pinned**: Apply both the topology choice and the segment layers from the sidecar.
-*   If a bundle is **already pinned** (by a script): **Respect the script's topology choice**, but still copy the `seg_layers` from the sidecar if the sidecar entry matches the script-chosen topology.
+*   If a bundle is **already pinned** (by a script): **Respect the script's topology choice**, but still copy the `seg_layers` from the sidecar if the sidecar entry matches the script-chosen topology (same type/wirelength and segment count).
 
-## 4. GUI Refinement
-*   The `TopologyExplorer` prioritizes the "live" state in memory (from the script) when first opening, rather than jumping back to the sidecar's preferred index if they differ.
+## 4. Consistent GUI Selection
+The `TopologyExplorer` resolves a bundle's pinned topology through **one** shared helper so display and navigation always agree:
+
+*   `_selected_topo_index()` — the single pinned topology (a bundle has at most one): the **live pin** (`topology_pinned` + `plan.selected_topology_index`, which reflects §1–§3 and honors script-vs-sidecar precedence) if set, otherwise the sidecar entry for that bundle (saved index, else first candidate matching type/wirelength). The pin **badge** (`★ PINNED` / `★ PLANNER SELECTED` / `★ PINNED & PLANNER SELECTED`) is driven by this.
+*   `_focus_topo_index()` — which topology to *show* when opening or switching to a bundle: the pinned topology above, else the planner's choice, else topo 0. Used by **initial open, bundle cycling (`◀/▶ Bundle`, `[`/`]`), and direct jump** alike, so the explorer always lands on the bundle's pinned topology — not just on first open.
+
+Because §1 restores the sidecar baseline into live state at `generate_topologies` time, the live pin is authoritative even before `run_planner` / `visualize_topologies`, keeping the engine and the GUI consistent.
 
 ## Example Scenario
 1.  **Sidecar (`.json`)**: Pins **Topo 1** and overrides **Segment 0 to Layer M6**.
