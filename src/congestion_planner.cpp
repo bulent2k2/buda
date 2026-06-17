@@ -234,15 +234,31 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
         }
     }
 
+    // A zero-extent along-span (lo == hi) routes nothing here — e.g. a non-TOP
+    // segment fully clamped inside its endpoint block above.  It must match no
+    // cut; the half-open test did this implicitly, the closed test below needs
+    // it explicit (a cut sitting exactly on that point would otherwise count).
+    if (lo >= hi) return;
+
+    // Closed interval [lo, hi]: a cut line is crossed by the segment iff the
+    // cut coordinate lies anywhere on it, including its endpoints (Issue #22).
+    // A half-open [lo, hi) silently drops a segment whose endpoint lands exactly
+    // on a cut — which happens at every Z/U trunk junction, since cuts sit at
+    // Hanan-cell midpoints and a trunk arm terminates on the midpoint cut it
+    // connects to.  That under-counted real congestion (mirror arms cancelling,
+    // a free bundle routing straight through a pinned bundle's hidden demand).
+    // Closing the interval cannot double-count: an endpoint coincides with a cut
+    // only at a trunk junction, where the two arms are perpendicular (counted on
+    // different cut directions) or land in different perpendicular bands.
     for (int ci = 0; ci < (int)cuts_.size(); ++ci) {
         const GlobalCut& c = cuts_[ci];
         if (c.layer_id != layer_id) continue;
         if (is_h && c.dir == LayerDir::VERTICAL) {
-            if (!(c.cut_coord >= lo && c.cut_coord < hi)) continue;
+            if (!(c.cut_coord >= lo && c.cut_coord <= hi)) continue;
             int b = find_band(/*is_vcut=*/true, pp_h);
             if (b >= 0 && b < c.num_bands()) fn(ci, b);
         } else if (!is_h && c.dir == LayerDir::HORIZONTAL) {
-            if (!(c.cut_coord >= lo && c.cut_coord < hi)) continue;
+            if (!(c.cut_coord >= lo && c.cut_coord <= hi)) continue;
             int b = find_band(/*is_vcut=*/false, pp_v);
             if (b >= 0 && b < c.num_bands()) fn(ci, b);
         }
