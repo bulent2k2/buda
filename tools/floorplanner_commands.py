@@ -286,12 +286,65 @@ def validate(state: FloorplannerAppState):
     return list(state.engine.validate())
 
 
+def _sync_cell_children(state: FloorplannerAppState) -> None:
+    """Update cell_children with local offsets from live engine positions.
+
+    Called by write_bdb() after engine.write_bdb() so the cell template
+    reflects the final written instance positions, regardless of interactive
+    edits or undo operations performed during the session.
+
+    Only updates shared-cell parents (those with more than one instance) since
+    unique-cell parents have no siblings to template-expand into.
+    """
+    if state.bdb is None:
+        return
+    # Single pass to build name→cell and cell→count mappings.
+    comp_cells: dict[str, str] = {}
+    cell_counts: dict[str, int] = {}
+    for c in state.bdb.all_components():
+        comp_cells[c.name] = c.cell
+        cell_counts[c.cell] = cell_counts.get(c.cell, 0) + 1
+
+    processed: set[tuple[str, str]] = set()
+    for name in state.block_names:
+        parts = name.split("/")
+        if len(parts) < 2:
+            continue
+        inst_local_name = parts[-1]
+        parent_path = "/".join(parts[:-1])
+
+        parent_cell = comp_cells.get(parent_path)
+        if parent_cell is None or cell_counts.get(parent_cell, 0) <= 1:
+            continue
+
+        key = (parent_cell, inst_local_name)
+        if key in processed:
+            continue
+        processed.add(key)
+
+        child_cell = comp_cells.get(name)
+        if child_cell is None:
+            continue
+        try:
+            parent_b = state.engine.get_block(parent_path)
+            b = state.engine.get_block(name)
+            local_x = b.x1 - parent_b.x1
+            local_y = b.y1 - parent_b.y1
+            state.bdb.add_inst_to_cell(parent_cell, inst_local_name, child_cell,
+                                       local_x, local_y)
+        except Exception:
+            pass
+
+
 def write_bdb(state: FloorplannerAppState):
     if state.bdb is None:
         if not state.bdb_path:
             raise RuntimeError("No BDB path set")
         state.bdb = buda.BDB(state.bdb_path)
     state.engine.write_bdb(state.bdb)
+    # Update cell_children so the template is consistent with the written
+    # component positions for shared-cell hierarchies.
+    _sync_cell_children(state)
 
 
 def export_hbundle_script(state: FloorplannerAppState, path: str, depth: int = 1,
@@ -360,8 +413,11 @@ def sync_cell_to_instances(state: FloorplannerAppState, name: str,
                             x2: float, y2: float) -> tuple[str, int]:
     """Apply a new size to every engine block that shares this block's cell type.
 
-    BDB mutations are intentionally deferred to write_bdb() so that undo
-    (which only restores engine positions) leaves the BDB consistent.
+    The cell table row is updated immediately so that the original cell name
+    (which may differ from the synthesized _leaf + '_cell' name written by
+    write_bdb) reflects the new dimensions.  Component bboxes are deferred to
+    write_bdb() so that undo (which only restores engine positions) leaves
+    the BDB positions consistent.
 
     Returns (cell_name, instance_count).  count=0 means no BDB or unique cell.
     """
@@ -369,6 +425,8 @@ def sync_cell_to_instances(state: FloorplannerAppState, name: str,
     if cell is None:
         return ("", 0)
     w, h = x2 - x1, y2 - y1
+    # Keep the cell row current so template expansion uses the new dimensions.
+    state.bdb.add_cell(cell, w, h)
     count = 0
     for c in state.bdb.all_components():
         if c.cell == cell and c.name in state.block_names:
