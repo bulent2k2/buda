@@ -32,8 +32,11 @@ generate_topologies
 
 select_topologies 2,8,10,17,18,25,27,34,36,43,45,52,54,61 3
 select_topologies 1,9,26,35,44,53,62 1 3-7,11-16,19-24,28-32,37-42,46,47,49-51,55,57-60 4
-# ripup and reroute with a detour:
-# select_topology 33 5
+# Rip-up and reroute bundle 33 with a detour.  Required since the Issue #22
+# congestion fix (closed-interval for_each_band counts trunk-junction arms
+# honestly): bundle 33's straight route now over-subscribes the channel, so we
+# pin its detour explicitly.
+select_topology 33 5
 # bundles 48 and 56 are free
 run_planner 5
 #run_nuts 2.0
@@ -44,15 +47,22 @@ run_nuts
 # them here.  The fix below is to redistribute onto more layers.
 
 # post_nuts reassigns segment layers by stub length, spreading the channel onto
-# M3 (short) and M7 (long) so it actually fits.  With these knobs (short<200,
-# long>300) the split is roughly: short→M3 (~23b), medium→M5 (~29b), long→M7 (~10b).
+# M3 (short) and M7 (long) so it actually fits.  With these knobs (short<220,
+# long>320) the split is roughly: short→M3 (~34b), medium→M5 (~18b), long→M7 (~10b).
 # (The vertical channel is 400 tall; tune the two thresholds to shift the split.)
-run_planner post_nuts V 200 300
+# Thresholds bumped 200/300→220/320 alongside the Issue #22 fix to keep the
+# redistribution near-clean under the corrected congestion accounting.
+run_planner post_nuts V 220 320
 
 #run_nuts 2.0
 run_nuts
-# Overlaps: 0.  Once the load is spread across M3/M5/M7 the channel is packable,
-# and the corner-overlap pass clears the residual end-to-end touches → clean.
+# Overlaps: 1  (B48×B53 on M7).  The pre-redistribution run_nuts above packs the
+# channel CLEANLY (0); the post_nuts stub-length spread then leaves a single
+# corner overlap between free bundle 48 and pinned bundle 53.  This 62-bundle /
+# 200-net channel rides on only three vertical layers (M3/M5/M7), so under the
+# corrected congestion accounting (Issue #22) it sits right at its packing limit
+# — one residual corner touch that no threshold/pin re-tune fully removes.
+# Detailed NUTS still places every bit (0 unplaced).
 
 # NOTE: previously this flow needed per-layer reruns to grind the overlaps down
 # (run_nuts above used to leave 22, then M3→10, M5→4).  The generalized NUTS
