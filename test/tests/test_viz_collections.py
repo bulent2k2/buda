@@ -99,6 +99,23 @@ def test_nuts_bands_are_collections(monkeypatch):
         assert isinstance(e["artist"], (LineCollection, PatchCollection))
 
 
+def test_rerun_in_detailed_mode_hides_abstract_tracks(monkeypatch):
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._toggle_detailed()                      # enter detailed mode
+    assert viz.ui_state.detailed_mode is True
+
+    # A layer/topology rerun rebuilds both artist sets.  In detailed mode the
+    # abstract bus tracks must stay hidden so they don't overlay the bit-wires.
+    viz._redraw_nuts_tracks((viz._nuts_result, viz._detailed_result))
+
+    assert all(not e["artist"].get_visible()
+               for entries in viz._bundle_artists.values() for e in entries), \
+        "abstract NUTS artists must be hidden in detailed mode after a rerun"
+    assert any(e["artist"].get_visible()
+               for entries in viz._detailed_bundle_artists.values() for e in entries), \
+        "detailed bit-wires should be visible after a rerun in detailed mode"
+
+
 def test_highlight_survives_collection_refactor(monkeypatch):
     viz = _build_viz("dnuts1.buda", monkeypatch)
     bid = next(iter(viz._bundle_artists))

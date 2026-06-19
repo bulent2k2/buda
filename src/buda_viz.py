@@ -2175,6 +2175,12 @@ class BudaVisualizer:
             # the window isn't left empty until the next toggle.
             if self.ui_state.detailed_mode:
                 self._build_detailed_artists()
+                # draw_nuts_tracks() just created the abstract artists visible;
+                # hide them so detailed mode doesn't overlay both sets
+                # (_refresh_highlight only governs _detailed_bundle_artists here).
+                for entries in self._bundle_artists.values():
+                    for e in entries:
+                        e['artist'].set_visible(False)
                 for entries in self._detailed_bundle_artists.values():
                     for e in entries:
                         e['artist'].set_visible(True)
