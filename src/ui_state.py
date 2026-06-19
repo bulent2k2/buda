@@ -30,7 +30,8 @@ class ViewState:
         self.block_names = True
         self.hanan_grid = False
         self.keepouts = True
-        self.heatmap = True
+        self.heatmap = False   # off by default: the congestion overlay is the
+                               # heaviest layer to render on large designs
         self.busterms = True
         self.vias_conns = True
         self.detailed_mode = False
