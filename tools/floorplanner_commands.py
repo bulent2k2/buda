@@ -335,6 +335,68 @@ def align_right(state: FloorplannerAppState, names: Iterable[str]):
         state.engine.align_right(names)
 
 
+def align_center_h(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Align horizontal centerlines: move all blocks to share the first block's x-mid."""
+    names = list(names)
+    if len(names) < 2:
+        return
+    ref = state.engine.get_block(names[0])
+    cx = (ref.x1 + ref.x2) / 2
+    for name in names:
+        b = state.engine.get_block(name)
+        state.engine.move_block_raw(name, cx - (b.x2 - b.x1) / 2, b.y1)
+
+
+def align_center_v(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Align vertical centerlines: move all blocks to share the first block's y-mid."""
+    names = list(names)
+    if len(names) < 2:
+        return
+    ref = state.engine.get_block(names[0])
+    cy = (ref.y1 + ref.y2) / 2
+    for name in names:
+        b = state.engine.get_block(name)
+        state.engine.move_block_raw(name, b.x1, cy - (b.y2 - b.y1) / 2)
+
+
+def rotate_blocks_cw(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Rotate each block 90° clockwise around its own lower-left corner.
+
+    In y-up coordinates, CW 90° maps (dx, dy) → (dy, -dx) relative to the
+    pivot.  For a block at (x1, y1) with width w and height h the result is:
+        new bbox = (x1, y1-w, x1+h, y1)   [width becomes h, height becomes w]
+    The block shifts downward by w.  Out-of-die positions are flagged by
+    validate() — the caller is responsible for checking.
+    """
+    for name in names:
+        try:
+            b = state.engine.get_block(name)
+        except Exception:
+            continue
+        x1, y1 = b.x1, b.y1
+        w, h = b.x2 - b.x1, b.y2 - b.y1
+        state.engine.resize_block_raw(name, x1, y1 - w, x1 + h, y1)
+
+
+def rotate_blocks_ccw(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Rotate each block 90° counter-clockwise around its own lower-left corner.
+
+    In y-up coordinates, CCW 90° maps (dx, dy) → (-dy, dx) relative to the
+    pivot.  For a block at (x1, y1) with width w and height h the result is:
+        new bbox = (x1-h, y1, x1, y1+w)   [width becomes h, height becomes w]
+    The block shifts leftward by h.  Out-of-die positions are flagged by
+    validate().
+    """
+    for name in names:
+        try:
+            b = state.engine.get_block(name)
+        except Exception:
+            continue
+        x1, y1 = b.x1, b.y1
+        w, h = b.x2 - b.x1, b.y2 - b.y1
+        state.engine.resize_block_raw(name, x1 - h, y1, x1, y1 + w)
+
+
 def validate(state: FloorplannerAppState):
     return list(state.engine.validate())
 

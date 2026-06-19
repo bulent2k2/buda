@@ -183,6 +183,12 @@ class BdbFloorplanner:
         align_menu.add_separator()
         align_menu.add_command(label="Distribute H", command=self._distribute_h)
         align_menu.add_command(label="Distribute V", command=self._distribute_v)
+        align_menu.add_separator()
+        align_menu.add_command(label="Center H  ↔", command=self._align_center_h)
+        align_menu.add_command(label="Center V  ↕", command=self._align_center_v)
+        align_menu.add_separator()
+        align_menu.add_command(label="Rot 90°  ↻ CW",  command=self._rotate_cw)
+        align_menu.add_command(label="Rot 90°  ↺ CCW", command=self._rotate_ccw)
         filter_f2 = ttk.Frame(blocks)
         filter_f2.pack(fill=tk.X, pady=(4, 0))
         self._opt_btn = ttk.Button(filter_f2, text="Optimize…",
@@ -502,6 +508,22 @@ class BdbFloorplanner:
 
     def _distribute_h(self): self._do_distribute(fpc.distribute_h, "horizontally")
     def _distribute_v(self): self._do_distribute(fpc.distribute_v, "vertically")
+
+    def _align_center_h(self): self._do_align(fpc.align_center_h, "horizontal center")
+    def _align_center_v(self): self._do_align(fpc.align_center_v, "vertical center")
+
+    def _do_rotate(self, fn, label: str):
+        names = list(self._canvas_sel | set(self._selected_tree_names()))
+        if not names or self.state is None:
+            self._status.set("Select at least one block to rotate.")
+            return
+        self._push_undo(self._snapshot())
+        fn(self.state, names)
+        self._draw()
+        self._status.set(f"Rotated {len(names)} block(s) {label}.")
+
+    def _rotate_cw(self):  self._do_rotate(fpc.rotate_blocks_cw,  "90° CW")
+    def _rotate_ccw(self): self._do_rotate(fpc.rotate_blocks_ccw, "90° CCW")
 
     def _open_optimize_dialog(self):
         if self.state is None:
