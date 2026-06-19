@@ -22,6 +22,7 @@ FloorplannerEngine so the same operations are testable without Tk.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import fcntl
 import os
 import subprocess
 import sys
@@ -56,6 +57,43 @@ class BlockNode:
         return f"{self.leaf_name}  [{self.cell}]"
 
 
+def _try_acquire_write_lock(path: str) -> int | None:
+    """Try a non-blocking exclusive flock on `path`.
+
+    Returns an open file descriptor (the caller must keep it alive to hold the
+    lock) or None if another process already holds the lock.  The OS releases
+    the lock automatically when the fd is closed or the process exits, so
+    there are no stale-lock issues.
+
+    Falls back to None (no lock, always writable) on platforms without fcntl.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except BlockingIOError:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        return None
+    except Exception:
+        # File not yet created, unsupported platform, etc. — allow write.
+        return None
+
+
+def release_bdb_lock(state: "FloorplannerAppState") -> None:
+    """Release the exclusive write lock held by this session, if any."""
+    if state._lock_fd is not None:
+        try:
+            fcntl.flock(state._lock_fd, fcntl.LOCK_UN)
+            os.close(state._lock_fd)
+        except Exception:
+            pass
+        state._lock_fd = None
+        state.is_read_only = False
+
+
 @dataclass
 class FloorplannerAppState:
     engine: object = field(default_factory=buda.FloorplannerEngine)
@@ -65,6 +103,8 @@ class FloorplannerAppState:
     block_names: list[str] = field(default_factory=list)
     unplaced_names: list[str] = field(default_factory=list)
     selected: str | None = None
+    is_read_only: bool = False
+    _lock_fd: int | None = None
 
     def add_name(self, name: str):
         if name not in self.block_names:
@@ -100,6 +140,13 @@ def load_bdb(path: str) -> FloorplannerAppState:
     state.bdb = buda.BDB(path)
     state.bdb_path = path
 
+    fd = _try_acquire_write_lock(path)
+    if fd is not None:
+        state._lock_fd = fd
+        state.is_read_only = False
+    else:
+        state.is_read_only = True
+
     die_w, die_h = state.bdb.die_w(), state.bdb.die_h()
     if die_w > 0 and die_h > 0:
         state.engine.set_die(die_w, die_h)
@@ -118,6 +165,12 @@ def create_bdb(path: str, die_w: float, die_h: float, grid: float = 10.0) -> Flo
     state.bdb_path = path
     state.engine.set_die(float(die_w), float(die_h))
     state.engine.set_grid(float(grid))
+    # File exists now that BDB() created it; acquire the write lock.
+    fd = _try_acquire_write_lock(path)
+    if fd is not None:
+        state._lock_fd = fd
+    else:
+        state.is_read_only = True
     return state
 
 
@@ -337,6 +390,9 @@ def _sync_cell_children(state: FloorplannerAppState) -> None:
 
 
 def write_bdb(state: FloorplannerAppState):
+    if state.is_read_only:
+        raise PermissionError(
+            "This session is read-only — another fp session has the write lock.")
     if state.bdb is None:
         if not state.bdb_path:
             raise RuntimeError("No BDB path set")
