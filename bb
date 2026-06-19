@@ -20,7 +20,36 @@ cd "$REPO_DIR"
 # Parse arguments
 CLEAN=false
 RUN_TESTS=false
-SLOW_TESTS=false
+TEST_TIER=fast   # fast | mid | slow (cumulative)
+
+usage() {
+    cat <<'EOF'
+Usage: ./bb [options]
+
+Build BUDA (incremental by default) and optionally run the test suite.
+
+Build options:
+  -c, --clean       Clean rebuild (make clean before building)
+
+Test options (each implies a build first; tiers are cumulative):
+  -t, --test, test  Run the FAST tier only       (~8s, 434 tests)
+  -m, --mid,  mid   Run FAST + MID tiers          (+full-pipeline flow tests, ~27s total)
+  -s, --slow, slow  Run ALL tiers                 (+SA/GA optimizer storms, ~47s total)
+
+Other:
+  -h, --help        Show this help and exit
+
+Tier definitions live in pytest.ini (the `mid` and `slow` markers); per-test
+runtimes are documented in docs/internal/test_runtime_analysis.md.
+
+Examples:
+  ./bb              # incremental build, no tests
+  ./bb -c           # clean rebuild, no tests
+  ./bb -t           # build + fast tests (default inner-loop check)
+  ./bb -m           # build + fast + mid (integration) tests
+  ./bb -s           # build + everything, before pushing
+EOF
+}
 
 for arg in "$@"; do
     case "$arg" in
@@ -30,8 +59,22 @@ for arg in "$@"; do
         --test|-t|test)
             RUN_TESTS=true
             ;;
+        --mid|-m|mid)
+            RUN_TESTS=true
+            TEST_TIER=mid
+            ;;
         --slow|-s|slow)
-            SLOW_TESTS=true
+            RUN_TESTS=true
+            TEST_TIER=slow
+            ;;
+        --help|-h|help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg" >&2
+            echo "Try './bb --help' for usage." >&2
+            exit 1
             ;;
     esac
 done
@@ -111,19 +154,25 @@ if [ "$RUN_TESTS" = true ]; then
     }
     '
 
-    if [ "$SLOW_TESTS" = true ]; then
-        echo "Running pytest (including slow tests)... (output redirected to $TEST_LOG)"
-        set +e
-        PYTHONUNBUFFERED=1 pytest -v -o addopts="" 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
-        PYTEST_RC=${PIPESTATUS[0]}
-        set -e
-    else
-        echo "Running pytest (excluding slow tests)... (output redirected to $TEST_LOG)"
-        set +e
-        PYTHONUNBUFFERED=1 pytest -v 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
-        PYTEST_RC=${PIPESTATUS[0]}
-        set -e
-    fi
+    case "$TEST_TIER" in
+        slow)
+            echo "Running pytest (fast + mid + slow tiers)... (output redirected to $TEST_LOG)"
+            MARK_OPT=(-o "addopts=")              # clear the default marker filter -> everything
+            ;;
+        mid)
+            echo "Running pytest (fast + mid tiers)... (output redirected to $TEST_LOG)"
+            MARK_OPT=(-o 'addopts=-m "not slow"') # keep mid, drop slow
+            ;;
+        *)
+            echo "Running pytest (fast tier only)... (output redirected to $TEST_LOG)"
+            MARK_OPT=()                            # use pytest.ini default ("not slow and not mid")
+            ;;
+    esac
+
+    set +e
+    PYTHONUNBUFFERED=1 pytest -v "${MARK_OPT[@]}" 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
+    PYTEST_RC=${PIPESTATUS[0]}
+    set -e
 
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))

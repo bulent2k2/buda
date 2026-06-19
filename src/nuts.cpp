@@ -1837,7 +1837,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                     jog_len = ts.span_hi - ts.span_lo;
             // Prefer: fewer overlaps, then the LONGER trunk (more jog room), then
             // the shorter jog.
-            const size_t ov = t.result.num_overlaps;
+            const int ov = t.result.num_overlaps;
             const bool better =
                 !applied ||
                 ov <  best_out.result.num_overlaps ||

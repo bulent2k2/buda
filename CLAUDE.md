@@ -35,9 +35,15 @@ Use the build wrapper script `bb` at the repository root. By default it performs
 ```bash
 ./bb            # incremental build into build/
 ./bb --clean    # clean rebuild (-c also works)
-./bb test       # build, then run pytest (slow tests excluded)
-./bb slow       # build, then run pytest including slow tests
+./bb test       # build, then run the FAST test tier (~8s; -t also works)
+./bb mid        # build, then run FAST + MID tiers (+flow-script integration; -m also works)
+./bb slow       # build, then run ALL tiers (+SA/GA optimizer storms; -s also works)
+./bb --help     # describe all options (-h)
 ```
+
+Tests are split into three cumulative tiers via pytest markers (`mid`, `slow` in
+`pytest.ini`); the default run excludes both. Per-test runtimes and the tier
+rationale live in [docs/internal/test_runtime_analysis.md](docs/internal/test_runtime_analysis.md).
 
 Manual build:
 
@@ -139,10 +145,11 @@ Unknown commands are a hard error (the CLI fails fast rather than silently ignor
 Run from the repository root — `pytest.ini` configures `testpaths=test/tests`, `pythonpath=build src`, and excludes `slow`-marked tests by default:
 
 ```bash
-pytest                        # all tests except those marked slow
-pytest -m slow                # only the slow tests
+pytest                        # fast tier (excludes 'mid' and 'slow' markers)
+pytest -m "not slow"          # fast + mid tiers
+pytest -o addopts="" -m slow  # only the slow tier
 pytest test/tests/test_nuts.py -v   # single file
-./bb test                     # build + run pytest (excludes slow); ./bb slow includes them
+./bb test                     # build + fast tier; ./bb mid adds integration, ./bb slow adds all
 ```
 
 Feature files in `test/tests/features/` (pytest-bdd). Most stages have a corresponding `.feature` and `test_*.py` file, including BDB (`test_bdb.py`, `bdb_*.feature`), hier flow (`test_hier_*`), floorplanner (`test_floorplanner_*`), connectivity (`test_check_connectivity_hbundle.py`, `test_check_layer_dir.py`), routing grid, and detailed NUTS.

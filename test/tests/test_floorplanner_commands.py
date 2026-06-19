@@ -419,6 +419,7 @@ def test_resize_shared_cell_preserves_sibling_positions(tmp_path):
             f"child y1={child.y1} != {new_rack_y + expected_local_y}"
 
 
+@pytest.mark.slow
 def test_optimize_demo_tc1_overlap_storm(tmp_path):
     """40 blocks all stacked at origin; 80 buses × 64 bits; SA must yield a legal placement."""
     import buda
@@ -449,7 +450,10 @@ def test_optimize_demo_tc1_overlap_storm(tmp_path):
     # Normalize w_wl so one net contributes the same as in single-bus tests;
     # without this, 5120 nets swamp the overlap penalty and SA never fully legalizes.
     n_nets = 80 * 64
-    result = opt.run_sa(max_iter=50_000, w_wl=1.0 / n_nets, seed=1)
+    # 12k iterations converge to overlap=0 for this seed (the floor is ~8k; 50k was
+    # overkill).  Keeps a ~1.5x margin while cutting the test ~3.4x.  See
+    # docs/internal/test_runtime_analysis.md.
+    result = opt.run_sa(max_iter=12_000, w_wl=1.0 / n_nets, seed=1)
 
     for pb in result.placements:
         state.engine.resize_block_raw(pb.name, pb.x, pb.y, pb.x + pb.w, pb.y + pb.h)
@@ -498,7 +502,9 @@ def test_optimize_demo_tc2_fixed_io(tmp_path):
             opt.add_net([(an, (aw / 2, ah / 2)), (bn, (bw / 2, bh / 2))])
 
     n_nets = 80 * 64
-    result = opt.run_sa(max_iter=50_000, w_wl=1.0 / n_nets, seed=2)
+    # 12k iterations converge to overlap=0 for this seed (see tc1 above and
+    # docs/internal/test_runtime_analysis.md); 50k was overkill.
+    result = opt.run_sa(max_iter=12_000, w_wl=1.0 / n_nets, seed=2)
 
     for pb in result.placements:
         state.engine.resize_block_raw(pb.name, pb.x, pb.y, pb.x + pb.w, pb.y + pb.h)

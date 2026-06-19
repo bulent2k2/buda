@@ -24,6 +24,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+# Full-pipeline integration smoke tests: each spawns buda_cli.py on a .buda
+# script (~1s apiece, ~19s total).  They form the "mid" tier — deselected from
+# the default fast run, included by `bb -m`/`bb -s` (see pytest.ini, bb).
+pytestmark = pytest.mark.mid
+
 _ROOT   = Path(__file__).parents[2]
 FLOW    = _ROOT / "flow"
 CLI     = _ROOT / "src" / "buda_cli.py"
