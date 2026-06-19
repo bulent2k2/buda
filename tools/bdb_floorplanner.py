@@ -236,6 +236,7 @@ class BdbFloorplanner:
         self._canvas.mpl_connect("button_press_event", self._on_press)
         self._canvas.mpl_connect("motion_notify_event", self._on_motion)
         self._canvas.mpl_connect("button_release_event", self._on_release)
+        self._canvas.mpl_connect("key_press_event", self._on_key)
 
         # Arrow keys — modifier-aware routing via event.state.
         # Separate <Control-*> / <Meta-*> bindings don't work reliably on
@@ -1152,6 +1153,27 @@ class BdbFloorplanner:
                 self._status.set("Block moved.")
             self._refresh_tree()
             self._draw()
+
+    def _zoom(self, event, zoom_in: bool):
+        """Zoom the canvas in or out, centred on the cursor (or view centre)."""
+        ax = self._ax
+        scale = 0.8 if zoom_in else 1.25
+        x, y = event.xdata, event.ydata
+        if event.inaxes != ax or x is None or y is None:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            x = (xlim[0] + xlim[1]) / 2
+            y = (ylim[0] + ylim[1]) / 2
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        ax.set_xlim(x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
+        ax.set_ylim(y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
+        self._fig.canvas.draw_idle()
+
+    def _on_key(self, event):
+        """Handle matplotlib canvas key events (zoom only — other keys via Tk)."""
+        if event.key == "z": self._zoom(event, zoom_in=True)
+        if event.key == "Z": self._zoom(event, zoom_in=False)
 
 
 class _OptimizeDialog:
