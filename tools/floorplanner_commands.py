@@ -272,6 +272,11 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
                     state.engine.add_child_block(child.name, lx, ly, default_w, default_h)
                     state.add_name(child.name)
                     state.add_unplaced(child.name)
+    fd = _try_acquire_write_lock(bdb_path)
+    if fd is not None:
+        state._lock_fd = fd
+    else:
+        state.is_read_only = True
     return state
 
 

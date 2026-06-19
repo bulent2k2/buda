@@ -115,6 +115,7 @@ class BdbFloorplanner:
         self._add_btn.config(state=s)
         self._align_mb.config(state=s)
         self._opt_btn.config(state=s)
+        self._run_flow_btn.config(state=s)
         if ro:
             self._status.set(
                 f"Opened read-only — another fp session holds the write lock on {base}.")
@@ -131,7 +132,8 @@ class BdbFloorplanner:
         self._write_btn = ttk.Button(top, text="Write", command=self._write_bdb)
         self._write_btn.grid(row=0, column=5, padx=2)
         ttk.Button(top, text="Export Flow", command=self._export_flow).grid(row=0, column=6, padx=2)
-        ttk.Button(top, text="Run Flow", command=self._run_flow).grid(row=0, column=7, padx=2)
+        self._run_flow_btn = ttk.Button(top, text="Run Flow", command=self._run_flow)
+        self._run_flow_btn.grid(row=0, column=7, padx=2)
         top.columnconfigure(1, weight=1)
 
         # Breadcrumb bar
@@ -671,7 +673,7 @@ class BdbFloorplanner:
         """Select every visible block (current drill-down level)."""
         if self.state is None:
             return
-        visible = self._current_level_names()
+        visible = self._visible_names()
         if not visible:
             return
         self._canvas_sel = set(visible)
