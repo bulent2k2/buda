@@ -4,6 +4,7 @@
 # Usage:
 #   ./bfp tc1 [output.bdb]       create TC1 (40-block overlap storm), open in fp
 #   ./bfp tc2 [output.bdb]       create TC2 (fixed io_pad + 39 free blocks), open in fp
+#   ./bfp tc3 [output.bdb]       create TC3 (4 io_pads at corners, 40 free, multi-bit buses)
 #   ./bfp path/to/file.bdb       open existing BDB directly in fp
 #   ./bfp path/to/script.buda    run ./buda <script> then open the BDB it declared
 #   ./bfp                        open fp with no file (blank canvas)
@@ -12,7 +13,7 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
 
 case "$1" in
-  tc1|tc2)
+  tc1|tc2|tc3)
     DEMO="$1"
     OUT="${2:-/tmp/bfp_${DEMO}.bdb}"
     python3 "$PROJECT_ROOT/tools/fp_demo.py" "$DEMO" "$OUT" || exit 1

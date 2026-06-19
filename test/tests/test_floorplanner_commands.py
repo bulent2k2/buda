@@ -376,6 +376,14 @@ def test_resize_shared_cell_preserves_sibling_positions(tmp_path):
     assert (b_b.x2 - b_b.x1, b_b.y2 - b_b.y1) == (new_w, new_h), \
         f"Sibling size not synced: ({b_b.x2 - b_b.x1}, {b_b.y2 - b_b.y1})"
 
+    # The cell table row must reflect the new dimensions immediately
+    # (fix for non-synthesized cell names that write_bdb would not update).
+    cells = {c.name: c for c in state.bdb.all_cells()}
+    slot_cell_name = fpc.get_block_cell(state, "rack_a/slot")
+    assert slot_cell_name is not None
+    assert cells[slot_cell_name].width  == new_w, "Cell row width not updated"
+    assert cells[slot_cell_name].height == new_h, "Cell row height not updated"
+
     # Write and reload — all four blocks survive with correct positions.
     fpc.write_bdb(state)
     reloaded = fpc.load_bdb(bdb_path)
@@ -388,6 +396,27 @@ def test_resize_shared_cell_preserves_sibling_positions(tmp_path):
     assert (rb.x1, rb.y1) == (450, 50), \
         f"Reloaded sibling position wrong: ({rb.x1}, {rb.y1})"
     assert (rb.x2 - rb.x1, rb.y2 - rb.y1) == (new_w, new_h)
+
+    # Verify cell_children is up-to-date: adding a new instance of rack_a's
+    # parent cell should expand the child "slot" at the offset matching rack_a/slot's
+    # final engine position relative to rack_a (fix for deferred cell_children update).
+    rack_a_cell = fpc.get_block_cell(state, "rack_a")
+    if rack_a_cell is not None and fpc.count_cell_instances(state, rack_a_cell) > 1:
+        rack_a_b = state.block("rack_a")
+        slot_b   = state.block("rack_a/slot")
+        expected_local_x = slot_b.x1 - rack_a_b.x1
+        expected_local_y = slot_b.y1 - rack_a_b.y1
+        # add_inst expands cell_children; the new child should land at
+        # (new_rack_x + expected_local_x, new_rack_y + expected_local_y).
+        new_rack_x, new_rack_y = 800.0, 100.0
+        reloaded.bdb.add_inst("rack_c", rack_a_cell, "", new_rack_x, new_rack_y)
+        comps = {c.name: c for c in reloaded.bdb.all_components()}
+        assert "rack_c/slot" in comps, "cell_children not expanded for new instance"
+        child = comps["rack_c/slot"]
+        assert child.x1 == new_rack_x + expected_local_x, \
+            f"child x1={child.x1} != {new_rack_x + expected_local_x}"
+        assert child.y1 == new_rack_y + expected_local_y, \
+            f"child y1={child.y1} != {new_rack_y + expected_local_y}"
 
 
 def test_optimize_demo_tc1_overlap_storm(tmp_path):
