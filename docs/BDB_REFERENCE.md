@@ -1095,10 +1095,19 @@ importers:
   depth) the same way Verilog elaboration does.
 - **Layer mapping:** the export `(layer, datatype)` table inverted to recover
   the BUDA layer / pre-route class of each shape.
-- **No logical netlist:** GDS carries **geometry only** — a GDS import recovers
-  placement and shapes but **not net connectivity**. Pair it with
-  `import_verilog` for nets, exactly as DEF placement is paired with Verilog
-  hierarchy today (see §4 *DEF + Verilog merge*).
+- **Connectivity is optional (file-dependent):** GDS has no standard netlist,
+  but a given GDS *may or may not* carry physical connectivity. Both cases are
+  in scope:
+  - *Connectivity present* — many flows annotate shapes with net names via
+    `TEXT` / label records (on a pin or label `(layer, datatype)`) or a known
+    labeling convention. When such labels exist, the importer parses them to
+    recover `net` / `pin` rows directly from the GDS.
+  - *Geometry only* — no labels: import placement and shapes, then pair with
+    `import_verilog` for nets, exactly as DEF placement is paired with Verilog
+    hierarchy today (see §4 *DEF + Verilog merge*).
+
+  A mode flag (or auto-detect on the presence of label records) chooses per
+  file; the two paths converge on the same BDB tables.
 - **Units:** GDS stores integers scaled by the `UNITS` record
   (`user-units / database-unit`); convert to **µm** on read, as `import_def_lef`
   does for DEF DBUs.
