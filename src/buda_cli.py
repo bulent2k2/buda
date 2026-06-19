@@ -124,6 +124,7 @@ class BudaSession:
         self._dogleg_originals = {}  # bid -> pre-split selected_topology_index (restored on re-plan)
         self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology
         self.no_viz = False          # set by --no-viz CLI flag
+        self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.bdb = None              # BDB (opened by open_bdb command)
         self._bdb_added_ids = set()  # component ids loaded into fp via add_blocks_from_bdb
         self._busterm_gen = None     # BustermGen instance (created by derive_busterms)
@@ -2653,6 +2654,7 @@ class BudaSession:
                         for w in ws}
 
         total = 0
+        collected = []   # (prefix, violation) — aggregated below unless --verbose-conn
         for w in self.bundles:
             if not w.input.candidates:
                 continue
@@ -2689,22 +2691,92 @@ class BudaSession:
 
                 for v in res.violations:
                     if all_candidates and stage == "topo":
-                        print(f"  Bundle {bid} topo {topo_idx + 1} ({topo.type}): {v.message}")
+                        prefix = f"Bundle {bid} topo {topo_idx + 1} ({topo.type})"
                     else:
-                        print(f"  Bundle {bid}: {v.message}")
+                        prefix = f"Bundle {bid}"
+                    collected.append((prefix, v))
                     total += 1
 
         if total == 0:
             print("  Success: no opens found.")
+        elif self.verbose_conn:
+            for prefix, v in collected:
+                print(f"  {prefix}: {v.message}")
+        else:
+            self._report_violations_summary(collected)
+
+    # Reason text per ViolationKind, used when collapsing per-bit violations.
+    _CONN_KIND_REASON = {
+        "UNPLACED":     "unplaced (no track in DetailedNUTS)",
+        "BUSTERM_OPEN": "no pass-through/busterm connection",
+        "BUSTERM_FACE": "invalid busterm face",
+        "SEG_OPEN":     "segment disconnected",
+        "LAYER_DIR":    "wrong layer direction",
+    }
+    _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest
+
+    def _report_violations_summary(self, collected):
+        """Collapse the per-bit connectivity violations into one line per
+        (bundle, topo, kind, locus) group.  On a large design this turns tens
+        of thousands of 'Seg N Bit M ...' lines into a few hundred.  Pass
+        --verbose-conn to restore the full per-bit dump."""
+        from collections import OrderedDict
+        groups = OrderedDict()
+        for prefix, v in collected:
+            key = (prefix, v.kind.name, v.seg_idx, v.seg_idx2, v.block_name)
+            g = groups.get(key)
+            if g is None:
+                g = {"prefix": prefix, "kind": v.kind.name, "seg_idx": v.seg_idx,
+                     "seg_idx2": v.seg_idx2, "block": v.block_name,
+                     "bits": set(), "msg": v.message}
+                groups[key] = g
+            if v.bit_index >= 0:
+                g["bits"].add(v.bit_index)
+
+        def locus(g):
+            if g["block"]:
+                return f"Block '{g['block']}'"
+            if g["seg_idx"] >= 0 and g["seg_idx2"] >= 0:
+                return f"Seg {g['seg_idx']}<->{g['seg_idx2']}"
+            if g["seg_idx"] >= 0:
+                return f"Seg {g['seg_idx']}"
+            return ""
+
+        bundles = set()
+        for i, g in enumerate(groups.values()):
+            bundles.add(g["prefix"])
+            if i >= self._CONN_GROUP_CAP:
+                continue
+            nbits = len(g["bits"])
+            if nbits == 0:
+                # Not a per-bit violation (topo/nuts stage) — show it verbatim.
+                print(f"  {g['prefix']}: {g['msg']}")
+            else:
+                loc = locus(g)
+                loc_part = f"{loc}: " if loc else ""
+                reason = self._CONN_KIND_REASON.get(g["kind"], g["kind"])
+                print(f"  {g['prefix']}: {loc_part}{nbits} bit(s) — {reason}")
+
+        n_groups = len(groups)
+        if n_groups > self._CONN_GROUP_CAP:
+            print(f"  ... and {n_groups - self._CONN_GROUP_CAP} more group(s) "
+                  f"(use --verbose-conn for full detail).")
+        total = sum(max(1, len(g["bits"])) for g in groups.values())
+        print(f"  Total: {total} violation(s) in {n_groups} group(s) across "
+              f"{len(bundles)} bundle(s). Use --verbose-conn for per-bit detail.")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('script', nargs='?')
     parser.add_argument('--no-viz', action='store_true',
                         help='skip visualize commands (useful for batch/CI runs)')
+    parser.add_argument('--verbose-conn', action='store_true',
+                        help='print every connectivity violation individually; '
+                             'default collapses per-bit violations into a summary')
     args = parser.parse_args()
     session = BudaSession()
     session.no_viz = args.no_viz
+    session.verbose_conn = args.verbose_conn
     if args.script:
         script = args.script
         if not os.path.exists(script) and not script.endswith('.buda'):

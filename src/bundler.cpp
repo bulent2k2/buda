@@ -128,9 +128,7 @@ HierarchicalBundler::_endpoints_at_depth(
             ep.driver_comp_id = unknown_comp_ids[0];
             for (size_t i = 1; i < unknown_comp_ids.size(); ++i)
                 ep.receiver_comp_ids.push_back(unknown_comp_ids[i]);
-            std::cerr << "[HierBundler] net_id=" << net_id
-                      << " at depth " << depth
-                      << ": using UNKNOWN-direction pins as positional driver/receivers\n";
+            ++_unk_fallback_count;
         }
         if (ep.driver_comp_id >= 0 && !ep.receiver_comp_ids.empty())
             result[net_id] = std::move(ep);
@@ -139,6 +137,7 @@ HierarchicalBundler::_endpoints_at_depth(
 }
 
 std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
+    _unk_fallback_count = 0;
     _db.infer_pin_dirs_from_cell_pins();
 
     // ── 1. Index BDB ──────────────────────────────────────────────────────────
@@ -302,8 +301,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             }
             if (info.rcv_spec_depth < 0 && !info.rcv_spec_comp_ids.empty())
                 info.rcv_spec_depth = info.unk_spec_depth;
-            std::cerr << "[HierBundler] net_id=" << net_id
-                      << ": using UNKNOWN-direction pins as positional driver/receivers\n";
+            ++_unk_fallback_count;
         }
         if (info.drv_spec_depth < 0 || info.rcv_spec_depth < 0) continue;
         info.is_cross = (info.drv_spec_depth != info.rcv_spec_depth);
@@ -499,6 +497,11 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             tmpl.child_ids.push_back(replica.id);
         }
     }
+
+    if (_unk_fallback_count > 0)
+        std::cerr << "[HierBundler] " << _unk_fallback_count
+                  << " net(s) used UNKNOWN-direction pins as positional "
+                     "driver/receivers (set pin directions to silence).\n";
 
     return bundles;
 }

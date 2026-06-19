@@ -83,6 +83,10 @@ public:
 private:
     BDB& _db;
 
+    // Counts nets that fell back to UNKNOWN-direction positional driver/receiver
+    // assignment during a run(); summarized once instead of one line per net.
+    mutable int _unk_fallback_count = 0;
+
     struct NetEndpoints {
         int driver_comp_id = -1;
         std::vector<int> receiver_comp_ids;
