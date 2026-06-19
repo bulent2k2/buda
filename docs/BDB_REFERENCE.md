@@ -28,7 +28,7 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 5. [Notes and caveats](#5-notes-and-caveats)
 6. [Design interchange formats](#6-design-interchange-formats)
    - [Supported today: LEF/DEF + Verilog](#supported-today-lefdef--verilog)
-   - [Planned: GDSII export](#planned-gdsii-export)
+   - [Planned: GDSII import/export](#planned-gdsii-importexport)
    - [Planned: OpenAccess import/export](#planned-openaccess-importexport)
 
 ---
@@ -999,7 +999,7 @@ shape of the planned export/round-trip formats.
 | LEF | import | ✅ supported (subset) | `import_def_lef` |
 | DEF | import | ✅ supported (subset) | `import_def_lef` |
 | Verilog (structural) | import | ✅ supported (subset) | `import_verilog` |
-| GDSII | export | 🚧 planned | — |
+| GDSII | import + export | 🚧 planned | — |
 | OpenAccess | import + export | 🚧 planned | — |
 
 ### Supported today: LEF/DEF + Verilog
@@ -1065,14 +1065,16 @@ depth-0 with no parent until Verilog overlays the hierarchy.
 > bit-blasting beyond simple base-name extraction. These are intentionally
 > out of scope for an interconnect-*planning* tool.
 
-### Planned: GDSII export
+### Planned: GDSII import/export
 
 **Status: not implemented — design intent only.** No GDS code exists in the
 tree.
 
-Intended capability: stream the placed-and-routed result out to a **GDSII**
-layout for sign-off and viewing in standard layout tools (KLayout, etc.).
-Sketch of the intended design:
+Intended capability: round-trip a **GDSII** layout against BDB — export the
+placed-and-routed result for sign-off/viewing (KLayout, etc.) and import an
+existing layout's geometry back into BDB.
+
+**Export** — sketch of the intended design:
 
 - **Inputs:** BDB `component` bounding boxes (cell outlines / blockages) plus
   the routed wires — abstract NUTS `BusSegment`s or, preferably, detailed-NUTS
@@ -1084,9 +1086,22 @@ Sketch of the intended design:
   `structure` per BDB cell type with `SREF`/`AREF` placements mirroring the
   component hierarchy (the latter reuses the template-per-cell-type model the
   hier flow already builds).
-- **Scope:** **export only.** GDS is a geometry interchange for downstream
-  viewing/sign-off; ingestion stays on LEF/DEF + Verilog (GDS carries no
-  logical netlist).
+
+**Import** — the inverse, populating the same BDB tables as the other
+importers:
+
+- **Shapes:** `BOUNDARY` / `BOX` records become cell or blockage geometry;
+  `SREF` / `AREF` placements rebuild the `component` hierarchy (dotted paths,
+  depth) the same way Verilog elaboration does.
+- **Layer mapping:** the export `(layer, datatype)` table inverted to recover
+  the BUDA layer / pre-route class of each shape.
+- **No logical netlist:** GDS carries **geometry only** — a GDS import recovers
+  placement and shapes but **not net connectivity**. Pair it with
+  `import_verilog` for nets, exactly as DEF placement is paired with Verilog
+  hierarchy today (see §4 *DEF + Verilog merge*).
+- **Units:** GDS stores integers scaled by the `UNITS` record
+  (`user-units / database-unit`); convert to **µm** on read, as `import_def_lef`
+  does for DEF DBUs.
 
 ### Planned: OpenAccess import/export
 
@@ -1110,4 +1125,4 @@ vendored, the implementation would:
   coordinates to **µm** (OA stores in DBU; convert using the tech `oaDBUPerUU`).
 
 Until OA support lands, the supported interchange path is **LEF/DEF + Verilog
-in, GDS out (once available)**.
+in, with GDS import/export once available**.
