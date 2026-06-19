@@ -22,6 +22,7 @@ FloorplannerEngine so the same operations are testable without Tk.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import fcntl
 import os
 import subprocess
 import sys
@@ -56,6 +57,43 @@ class BlockNode:
         return f"{self.leaf_name}  [{self.cell}]"
 
 
+def _try_acquire_write_lock(path: str) -> int | None:
+    """Try a non-blocking exclusive flock on `path`.
+
+    Returns an open file descriptor (the caller must keep it alive to hold the
+    lock) or None if another process already holds the lock.  The OS releases
+    the lock automatically when the fd is closed or the process exits, so
+    there are no stale-lock issues.
+
+    Falls back to None (no lock, always writable) on platforms without fcntl.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except BlockingIOError:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        return None
+    except Exception:
+        # File not yet created, unsupported platform, etc. — allow write.
+        return None
+
+
+def release_bdb_lock(state: "FloorplannerAppState") -> None:
+    """Release the exclusive write lock held by this session, if any."""
+    if state._lock_fd is not None:
+        try:
+            fcntl.flock(state._lock_fd, fcntl.LOCK_UN)
+            os.close(state._lock_fd)
+        except Exception:
+            pass
+        state._lock_fd = None
+        state.is_read_only = False
+
+
 @dataclass
 class FloorplannerAppState:
     engine: object = field(default_factory=buda.FloorplannerEngine)
@@ -65,6 +103,8 @@ class FloorplannerAppState:
     block_names: list[str] = field(default_factory=list)
     unplaced_names: list[str] = field(default_factory=list)
     selected: str | None = None
+    is_read_only: bool = False
+    _lock_fd: int | None = None
 
     def add_name(self, name: str):
         if name not in self.block_names:
@@ -100,6 +140,13 @@ def load_bdb(path: str) -> FloorplannerAppState:
     state.bdb = buda.BDB(path)
     state.bdb_path = path
 
+    fd = _try_acquire_write_lock(path)
+    if fd is not None:
+        state._lock_fd = fd
+        state.is_read_only = False
+    else:
+        state.is_read_only = True
+
     die_w, die_h = state.bdb.die_w(), state.bdb.die_h()
     if die_w > 0 and die_h > 0:
         state.engine.set_die(die_w, die_h)
@@ -118,6 +165,12 @@ def create_bdb(path: str, die_w: float, die_h: float, grid: float = 10.0) -> Flo
     state.bdb_path = path
     state.engine.set_die(float(die_w), float(die_h))
     state.engine.set_grid(float(grid))
+    # File exists now that BDB() created it; acquire the write lock.
+    fd = _try_acquire_write_lock(path)
+    if fd is not None:
+        state._lock_fd = fd
+    else:
+        state.is_read_only = True
     return state
 
 
@@ -167,58 +220,95 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
     Verilog import gives hierarchy/connectivity but no physical sizes.  The
     prototype creates editable top-level blocks so the designer can begin a
     quick manual floorplan immediately.
+
+    Raises PermissionError if bdb_path already exists and is write-locked by
+    another floorplanner session — the import is aborted before any mutation.
     """
-    state = new_state()
-    state.bdb = buda.BDB(bdb_path)
-    state.bdb_path = bdb_path
-    state.verilog_path = v_path
-    state.bdb.import_verilog(v_path)
-    state.bdb.set_die(float(die_w), float(die_h))
-    state.engine.set_die(float(die_w), float(die_h))
-    state.engine.set_grid(float(grid))
+    # If the target already exists, acquire the exclusive write lock BEFORE
+    # opening or mutating it.  import_verilog() clears the DB (destructive),
+    # so we must refuse if another session is editing the file.
+    pre_existing = os.path.exists(bdb_path)
+    if pre_existing:
+        fd = _try_acquire_write_lock(bdb_path)
+        if fd is None:
+            raise PermissionError(
+                f"Cannot import: another fp session holds the write lock on "
+                f"{os.path.basename(bdb_path)}. Close that session first.")
+    else:
+        fd = None  # File doesn't exist yet; lock acquired after BDB creates it.
 
-    comps = state.bdb.all_components()
-    roots = [c for c in comps if c.parent_id == -1]
-    subtree_count, children = _subtree_sizes(comps)
-    root_dims = {}
-    for comp in roots:
-        child_count = max(1, len(children.get(comp.id, [])))
-        cols = max(1, int(child_count ** 0.5 + 0.999))
-        rows = max(1, int((child_count + cols - 1) / cols))
-        w = max(default_w, cols * (default_w + 2.0 * grid) + 2.0 * grid)
-        h = max(default_h, rows * (default_h + 2.0 * grid) + 2.0 * grid)
-        # Give larger hierarchy roots a little more room for manual refinement.
-        scale = min(1.8, max(1.0, subtree_count.get(comp.id, 1) / 8.0))
-        root_dims[comp.name] = (w * scale, h * scale)
+    try:
+        state = new_state()
+        state.bdb = buda.BDB(bdb_path)
+        state.bdb_path = bdb_path
+        state.verilog_path = v_path
+        state.bdb.import_verilog(v_path)
+        state.bdb.set_die(float(die_w), float(die_h))
+        state.engine.set_die(float(die_w), float(die_h))
+        state.engine.set_grid(float(grid))
 
-    origins = list(_pack_origins(
-        len(roots), die_w, grid,
-        max((d[0] for d in root_dims.values()), default=default_w),
-        max((d[1] for d in root_dims.values()), default=default_h)))
+        comps = state.bdb.all_components()
+        roots = [c for c in comps if c.parent_id == -1]
+        subtree_count, children = _subtree_sizes(comps)
+        root_dims = {}
+        for comp in roots:
+            child_count = max(1, len(children.get(comp.id, [])))
+            cols = max(1, int(child_count ** 0.5 + 0.999))
+            rows = max(1, int((child_count + cols - 1) / cols))
+            w = max(default_w, cols * (default_w + 2.0 * grid) + 2.0 * grid)
+            h = max(default_h, rows * (default_h + 2.0 * grid) + 2.0 * grid)
+            # Give larger hierarchy roots a little more room for manual refinement.
+            scale = min(1.8, max(1.0, subtree_count.get(comp.id, 1) / 8.0))
+            root_dims[comp.name] = (w * scale, h * scale)
 
-    for comp in sorted(roots, key=lambda c: c.name):
-        idx = sorted(roots, key=lambda c: c.name).index(comp)
-        seed_w, seed_h = root_dims[comp.name]
-        if comp.x1 >= 0 and comp.y1 >= 0 and comp.x2 > comp.x1 and comp.y2 > comp.y1:
-            state.engine.add_block(comp.name, comp.x1, comp.y1, comp.x2, comp.y2)
+        origins = list(_pack_origins(
+            len(roots), die_w, grid,
+            max((d[0] for d in root_dims.values()), default=default_w),
+            max((d[1] for d in root_dims.values()), default=default_h)))
+
+        for comp in sorted(roots, key=lambda c: c.name):
+            idx = sorted(roots, key=lambda c: c.name).index(comp)
+            seed_w, seed_h = root_dims[comp.name]
+            if comp.x1 >= 0 and comp.y1 >= 0 and comp.x2 > comp.x1 and comp.y2 > comp.y1:
+                state.engine.add_block(comp.name, comp.x1, comp.y1, comp.x2, comp.y2)
+            else:
+                x, y = origins[idx]
+                state.engine.add_block(comp.name, x, y, x + seed_w, y + seed_h)
+                state.add_unplaced(comp.name)
+            state.add_name(comp.name)
+
+            if seed_depth >= 1:
+                kids = sorted(children.get(comp.id, []), key=lambda c: c.name)
+                if kids:
+                    cols = max(1, int(len(kids) ** 0.5 + 0.999))
+                    for i, child in enumerate(kids):
+                        col = i % cols
+                        row = i // cols
+                        lx = 2.0 * grid + col * (default_w + 2.0 * grid)
+                        ly = 2.0 * grid + row * (default_h + 2.0 * grid)
+                        state.engine.add_child_block(child.name, lx, ly, default_w, default_h)
+                        state.add_name(child.name)
+                        state.add_unplaced(child.name)
+
+        # For new files, the file now exists — acquire the lock.
+        if fd is None:
+            fd = _try_acquire_write_lock(bdb_path)
+        if fd is not None:
+            state._lock_fd = fd
+            fd = None  # Ownership transferred; do not release in the except block.
         else:
-            x, y = origins[idx]
-            state.engine.add_block(comp.name, x, y, x + seed_w, y + seed_h)
-            state.add_unplaced(comp.name)
-        state.add_name(comp.name)
-
-        if seed_depth >= 1:
-            kids = sorted(children.get(comp.id, []), key=lambda c: c.name)
-            if kids:
-                cols = max(1, int(len(kids) ** 0.5 + 0.999))
-                for i, child in enumerate(kids):
-                    col = i % cols
-                    row = i // cols
-                    lx = 2.0 * grid + col * (default_w + 2.0 * grid)
-                    ly = 2.0 * grid + row * (default_h + 2.0 * grid)
-                    state.engine.add_child_block(child.name, lx, ly, default_w, default_h)
-                    state.add_name(child.name)
-                    state.add_unplaced(child.name)
+            state.is_read_only = True
+    except Exception:
+        # If fd was acquired but ownership was never transferred to state,
+        # release it now so the process doesn't hold a leaked write lock.
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+            except Exception:
+                pass
+        raise
+    return state
     return state
 
 
@@ -282,6 +372,68 @@ def align_right(state: FloorplannerAppState, names: Iterable[str]):
         state.engine.align_right(names)
 
 
+def align_center_h(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Align horizontal centerlines: move all blocks to share the first block's x-mid."""
+    names = list(names)
+    if len(names) < 2:
+        return
+    ref = state.engine.get_block(names[0])
+    cx = (ref.x1 + ref.x2) / 2
+    for name in names:
+        b = state.engine.get_block(name)
+        state.engine.move_block_raw(name, cx - (b.x2 - b.x1) / 2, b.y1)
+
+
+def align_center_v(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Align vertical centerlines: move all blocks to share the first block's y-mid."""
+    names = list(names)
+    if len(names) < 2:
+        return
+    ref = state.engine.get_block(names[0])
+    cy = (ref.y1 + ref.y2) / 2
+    for name in names:
+        b = state.engine.get_block(name)
+        state.engine.move_block_raw(name, b.x1, cy - (b.y2 - b.y1) / 2)
+
+
+def rotate_blocks_cw(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Rotate each block 90° clockwise around its own lower-left corner.
+
+    In y-up coordinates, CW 90° maps (dx, dy) → (dy, -dx) relative to the
+    pivot.  For a block at (x1, y1) with width w and height h the result is:
+        new bbox = (x1, y1-w, x1+h, y1)   [width becomes h, height becomes w]
+    The block shifts downward by w.  Out-of-die positions are flagged by
+    validate() — the caller is responsible for checking.
+    """
+    for name in names:
+        try:
+            b = state.engine.get_block(name)
+        except Exception:
+            continue
+        x1, y1 = b.x1, b.y1
+        w, h = b.x2 - b.x1, b.y2 - b.y1
+        state.engine.resize_block_raw(name, x1, y1 - w, x1 + h, y1)
+
+
+def rotate_blocks_ccw(state: FloorplannerAppState, names: Iterable[str]) -> None:
+    """Rotate each block 90° counter-clockwise around its own lower-left corner.
+
+    In y-up coordinates, CCW 90° maps (dx, dy) → (-dy, dx) relative to the
+    pivot.  For a block at (x1, y1) with width w and height h the result is:
+        new bbox = (x1-h, y1, x1, y1+w)   [width becomes h, height becomes w]
+    The block shifts leftward by h.  Out-of-die positions are flagged by
+    validate().
+    """
+    for name in names:
+        try:
+            b = state.engine.get_block(name)
+        except Exception:
+            continue
+        x1, y1 = b.x1, b.y1
+        w, h = b.x2 - b.x1, b.y2 - b.y1
+        state.engine.resize_block_raw(name, x1 - h, y1, x1, y1 + w)
+
+
 def validate(state: FloorplannerAppState):
     return list(state.engine.validate())
 
@@ -337,6 +489,9 @@ def _sync_cell_children(state: FloorplannerAppState) -> None:
 
 
 def write_bdb(state: FloorplannerAppState):
+    if state.is_read_only:
+        raise PermissionError(
+            "This session is read-only — another fp session has the write lock.")
     if state.bdb is None:
         if not state.bdb_path:
             raise RuntimeError("No BDB path set")

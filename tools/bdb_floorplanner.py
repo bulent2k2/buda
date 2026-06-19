@@ -96,7 +96,29 @@ class BdbFloorplanner:
             "min_h":       {},
         }
 
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build_ui()
+
+    def _on_close(self):
+        fpc.release_bdb_lock(self.state)
+        self.root.destroy()
+
+    def _apply_ro_state(self):
+        """Reflect state.is_read_only in the window title and button states."""
+        ro = getattr(self.state, "is_read_only", False)
+        path = self.state.bdb_path or "BUDA Floorplanner"
+        base = os.path.basename(path) if path else "BUDA Floorplanner"
+        suffix = "  [read-only]" if ro else ""
+        self.root.title(f"BUDA Floorplanner — {base}{suffix}")
+        s = "disabled" if ro else "normal"
+        self._write_btn.config(state=s)
+        self._add_btn.config(state=s)
+        self._align_mb.config(state=s)
+        self._opt_btn.config(state=s)
+        self._run_flow_btn.config(state=s)
+        if ro:
+            self._status.set(
+                f"Opened read-only — another fp session holds the write lock on {base}.")
 
     def _build_ui(self):
         top = ttk.Frame(self.root, padding=(6, 4))
@@ -107,9 +129,11 @@ class BdbFloorplanner:
         ttk.Button(top, text="Open", command=self._open_bdb).grid(row=0, column=2, padx=2)
         ttk.Button(top, text="New", command=self._new_bdb).grid(row=0, column=3, padx=2)
         ttk.Button(top, text="Import Verilog", command=self._import_verilog).grid(row=0, column=4, padx=2)
-        ttk.Button(top, text="Write", command=self._write_bdb).grid(row=0, column=5, padx=2)
+        self._write_btn = ttk.Button(top, text="Write", command=self._write_bdb)
+        self._write_btn.grid(row=0, column=5, padx=2)
         ttk.Button(top, text="Export Flow", command=self._export_flow).grid(row=0, column=6, padx=2)
-        ttk.Button(top, text="Run Flow", command=self._run_flow).grid(row=0, column=7, padx=2)
+        self._run_flow_btn = ttk.Button(top, text="Run Flow", command=self._run_flow)
+        self._run_flow_btn.grid(row=0, column=7, padx=2)
         top.columnconfigure(1, weight=1)
 
         # Breadcrumb bar
@@ -148,7 +172,8 @@ class BdbFloorplanner:
         blocks.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
         filter_f = ttk.Frame(blocks)
         filter_f.pack(fill=tk.X)
-        ttk.Button(filter_f, text="Add", command=self._add_block).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._add_btn = ttk.Button(filter_f, text="Add", command=self._add_block)
+        self._add_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self._align_mb = tk.Menubutton(filter_f, text="Align ▾", relief="raised")
         self._align_mb.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         align_menu = tk.Menu(self._align_mb, tearoff=False)
@@ -160,10 +185,17 @@ class BdbFloorplanner:
         align_menu.add_separator()
         align_menu.add_command(label="Distribute H", command=self._distribute_h)
         align_menu.add_command(label="Distribute V", command=self._distribute_v)
+        align_menu.add_separator()
+        align_menu.add_command(label="Center H  ↔", command=self._align_center_h)
+        align_menu.add_command(label="Center V  ↕", command=self._align_center_v)
+        align_menu.add_separator()
+        align_menu.add_command(label="Rot 90°  ↻ CW",  command=self._rotate_cw)
+        align_menu.add_command(label="Rot 90°  ↺ CCW", command=self._rotate_ccw)
         filter_f2 = ttk.Frame(blocks)
         filter_f2.pack(fill=tk.X, pady=(4, 0))
-        ttk.Button(filter_f2, text="Optimize…",
-                   command=self._open_optimize_dialog).pack(fill=tk.X)
+        self._opt_btn = ttk.Button(filter_f2, text="Optimize…",
+                                   command=self._open_optimize_dialog)
+        self._opt_btn.pack(fill=tk.X)
         tv_frame = ttk.Frame(blocks)
         tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
         self._tree = ttk.Treeview(tv_frame, show="tree", selectmode="extended")
@@ -206,6 +238,7 @@ class BdbFloorplanner:
         self._canvas.mpl_connect("button_press_event", self._on_press)
         self._canvas.mpl_connect("motion_notify_event", self._on_motion)
         self._canvas.mpl_connect("button_release_event", self._on_release)
+        self._canvas.mpl_connect("key_press_event", self._on_key)
 
         # Arrow keys — modifier-aware routing via event.state.
         # Separate <Control-*> / <Meta-*> bindings don't work reliably on
@@ -225,6 +258,10 @@ class BdbFloorplanner:
         self.root.bind("<Control-y>", lambda e: self._redo())
         self.root.bind("<Meta-z>",    lambda e: self._undo())
         self.root.bind("<Meta-Z>",    lambda e: self._redo())
+
+        # Select all
+        self.root.bind("<Control-a>", lambda e: self._select_all())
+        self.root.bind("<Meta-a>",    lambda e: self._select_all())
 
         # f — toggle maximize (skip when a text widget has focus)
         self.root.bind("f", self._toggle_maximize)
@@ -329,6 +366,7 @@ class BdbFloorplanner:
         path = filedialog.askopenfilename(filetypes=[("BDB", "*.bdb"), ("All", "*")])
         if not path:
             return
+        fpc.release_bdb_lock(self.state)
         self.state = fpc.load_bdb(path)
         self._path = []
         self._bdb_var.set(path)
@@ -336,23 +374,28 @@ class BdbFloorplanner:
         self._refresh_breadcrumbs()
         self._refresh_tree()
         self._draw()
-        max_depth = max((n.count("/") for n in self.state.block_names), default=0)
-        self._status.set(
-            f"Loaded {len(self.state.block_names)} block(s), "
-            f"{max_depth + 1} level(s).")
+        self._apply_ro_state()
+        if not self.state.is_read_only:
+            max_depth = max((n.count("/") for n in self.state.block_names), default=0)
+            self._status.set(
+                f"Loaded {len(self.state.block_names)} block(s), "
+                f"{max_depth + 1} level(s).")
 
     def _new_bdb(self):
         path = filedialog.asksaveasfilename(defaultextension=".bdb",
                                             filetypes=[("BDB", "*.bdb"), ("All", "*")])
         if not path:
             return
+        fpc.release_bdb_lock(self.state)
         self.state = fpc.create_bdb(path, self._die_w.get(), self._die_h.get(), self._grid.get())
         self._path = []
         self._bdb_var.set(path)
         self._refresh_breadcrumbs()
         self._refresh_tree()
         self._draw()
-        self._status.set("Created new floorplan BDB.")
+        self._apply_ro_state()
+        if not self.state.is_read_only:
+            self._status.set("Created new floorplan BDB.")
 
     def _import_verilog(self):
         v_path = filedialog.askopenfilename(
@@ -367,14 +410,22 @@ class BdbFloorplanner:
             filetypes=[("BDB", "*.bdb"), ("All", "*")])
         if not bdb_path:
             return
-        self.state = fpc.import_verilog(
-            v_path, bdb_path, self._die_w.get(), self._die_h.get(), self._grid.get())
+        try:
+            new_state = fpc.import_verilog(
+                v_path, bdb_path, self._die_w.get(), self._die_h.get(), self._grid.get())
+        except PermissionError as exc:
+            messagebox.showerror("Import Failed", str(exc))
+            self._status.set(str(exc))
+            return
+        fpc.release_bdb_lock(self.state)   # Release only after successful import
+        self.state = new_state
         self._path = []
         self._bdb_var.set(bdb_path)
         self._sync_canvas_vars()
         self._refresh_breadcrumbs()
         self._refresh_tree()
         self._draw()
+        self._apply_ro_state()
         max_depth = max((n.count("/") for n in self.state.block_names), default=0)
         suffix = ""
         if self.state.unplaced_names:
@@ -466,6 +517,22 @@ class BdbFloorplanner:
 
     def _distribute_h(self): self._do_distribute(fpc.distribute_h, "horizontally")
     def _distribute_v(self): self._do_distribute(fpc.distribute_v, "vertically")
+
+    def _align_center_h(self): self._do_align(fpc.align_center_h, "horizontal center")
+    def _align_center_v(self): self._do_align(fpc.align_center_v, "vertical center")
+
+    def _do_rotate(self, fn, label: str):
+        names = list(self._canvas_sel | set(self._selected_tree_names()))
+        if not names or self.state is None:
+            self._status.set("Select at least one block to rotate.")
+            return
+        self._push_undo(self._snapshot())
+        fn(self.state, names)
+        self._draw()
+        self._status.set(f"Rotated {len(names)} block(s) {label}.")
+
+    def _rotate_cw(self):  self._do_rotate(fpc.rotate_blocks_cw,  "90° CW")
+    def _rotate_ccw(self): self._do_rotate(fpc.rotate_blocks_ccw, "90° CCW")
 
     def _open_optimize_dialog(self):
         if self.state is None:
@@ -607,6 +674,21 @@ class BdbFloorplanner:
             self._tree.see(name)
         except Exception:
             pass
+
+    def _select_all(self):
+        """Select every visible block (current drill-down level)."""
+        if self.state is None:
+            return
+        visible = self._visible_names()
+        if not visible:
+            return
+        self._canvas_sel = set(visible)
+        self.state.selected = visible[0]
+        try:
+            self._tree.selection_set(visible)
+        except Exception:
+            pass
+        self._draw()
 
     # ------------------------------------------------------------------
     # Drawing
@@ -962,9 +1044,11 @@ class BdbFloorplanner:
         if tb and getattr(tb, "mode", ""):
             return
 
-        # Detect Shift key via the underlying tkinter event's state bitmask
-        gui_ev    = getattr(event, "guiEvent", None)
-        shift_held = bool(gui_ev and getattr(gui_ev, "state", 0) & 0x1)
+        # Detect Shift or Ctrl/Cmd via the underlying tkinter event's state bitmask.
+        # Either modifier turns a click into a toggle (add/remove from selection).
+        gui_ev = getattr(event, "guiEvent", None)
+        ev_state = getattr(gui_ev, "state", 0) if gui_ev else 0
+        shift_held = bool(ev_state & 0x1) or bool(ev_state & self._MOD_CTRL_CMD)
 
         # 1. Check corner handles first
         for hp, name, corner in self._handle_patches:
@@ -1077,6 +1161,27 @@ class BdbFloorplanner:
                 self._status.set("Block moved.")
             self._refresh_tree()
             self._draw()
+
+    def _zoom(self, event, zoom_in: bool):
+        """Zoom the canvas in or out, centred on the cursor (or view centre)."""
+        ax = self._ax
+        scale = 0.8 if zoom_in else 1.25
+        x, y = event.xdata, event.ydata
+        if event.inaxes != ax or x is None or y is None:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            x = (xlim[0] + xlim[1]) / 2
+            y = (ylim[0] + ylim[1]) / 2
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        ax.set_xlim(x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
+        ax.set_ylim(y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
+        self._fig.canvas.draw_idle()
+
+    def _on_key(self, event):
+        """Handle matplotlib canvas key events (zoom only — other keys via Tk)."""
+        if event.key == "z": self._zoom(event, zoom_in=True)
+        if event.key == "Z": self._zoom(event, zoom_in=False)
 
 
 class _OptimizeDialog:
@@ -1331,6 +1436,7 @@ def main():
         app._refresh_breadcrumbs()
         app._refresh_tree()
         app._draw()
+        app._apply_ro_state()
     buda_viz.raise_window(root)
     root.mainloop()
 
