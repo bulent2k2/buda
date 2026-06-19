@@ -450,7 +450,7 @@ Violations are typed (`SEG_OPEN`, `BUSTERM_OPEN`, `BUSTERM_FACE`, `UNPLACED`, `L
 **Row types** (returned to Python / other modules): `ComponentRow` (hierarchical instance: parent_id, depth, bbox, is_leaf, is_replicated), `NetRow`, `PinRow` (net↔component pin with dir + absolute position), `NetPropsRow` (hpwl, fanout, bus_name, bit_index, bundle_id), `BustermRow` (routing interface: hier_path, depth, bbox, resolution BLOCK/SPATIAL_CLUSTER/PORT, optional multi-rect JSON), `BundleRow`, `GrpRow` (group tree), `CellRow`, `CellPinRow` (cell-type port interface).
 
 **Capabilities:**
-- **Ingestion:** `import_def_lef`, `import_verilog` (LEF cell sizes + pins parsed in-house).
+- **Ingestion:** `import_def_lef`, `import_verilog` — self-contained parsers (no OpenDB / Cadence / Si2 dependency), detailed below.
 - **Hierarchy construction:** `add_cell` / `add_cell_pin` define cell types; `add_inst_to_cell` defines a cell's internal structure; `add_inst` places an instance and eagerly expands all `cell_children` into component rows.
 - **Net wiring:** `add_net_pins` derives instance pins from `inst/path.pin` endpoints and inserts interface pins at every ancestor between leaf and common-ancestor (hierarchy propagation). Direction variants: `_undirected` (UNKNOWN, positional fallback) and `_inout` (INOUT = secondary driver).
 - **Mutations:** `move_comp`, `set_comp_bbox`, `resize_cell`, `flip_comp`, `rotate_comp` (90/180/270, keeping lower-left fixed).
@@ -459,6 +459,27 @@ Violations are typed (`SEG_OPEN`, `BUSTERM_OPEN`, `BUSTERM_FACE`, `UNPLACED`, `L
 - **Queries:** `all_components`, `components_at_depth`, `pins_by_comp`, `nets_by_hpwl`, `comps_in_rect`, `common_nets`, etc. Hot read paths use cached prepared statements.
 
 Busterms are derived from the hierarchy by `BustermGen` (`derive_busterms`, Phase A of the hier pipeline). The hierarchy-aware bundler (`HierarchicalBundler`) and topology/planner `hier` variants consume this data. See [BDB Reference](docs/BDB_REFERENCE.md) and [HBundle pipeline notes](docs/session_hbundle_pipeline.md).
+
+#### Design ingestion & interchange
+
+All importers are hand-written, line-by-line state machines in `bdb.cpp` (no external EDA library). The two together populate the same `component` / `cell` / `net` / `pin` tables and are designed to be run **in sequence** — placement from DEF, hierarchy from Verilog. All stored coordinates are **µm**.
+
+**`import_def_lef(def, lef)` — physical placement (`bdb.cpp::import_def_lef`)**
+- **LEF first** (`_parse_lef_sizes` + `_parse_lef_pins`): walks `MACRO … END` blocks. `SIZE w BY h` → cell footprint (fills the `cell` table); each `PIN … END` block contributes a port whose offset is the **centroid of its `RECT` shapes** and whose `DIRECTION` becomes the pin dir (missing → `UNKNOWN`). Pins with `USE POWER|GROUND|CLOCK` are skipped (they are pre-routes, not signal terminals). Everything else in the LEF is ignored.
+- **DEF second:** a three-state machine (`IDLE → IN_COMPONENTS → IN_NETS`). Reads `UNITS DISTANCE MICRONS` (the integer→µm divisor), `DIEAREA ( 0 0 ) ( x y )` (sets `die_w/die_h`), each `COMPONENTS` entry `- inst cell + PLACED|FIXED ( x y ) orient` (depth-0 leaf component, bbox = DEF origin + LEF `SIZE`, default `0.5×0.5` if the cell is absent from the LEF), and each `NETS` entry `- net … ( inst pin ) …` (creates `net` + `net_props` rows and a `pin` row per connection, resolving absolute pin position and direction from the LEF). DEF name escaping (`\[`, `\]`) is stripped so names match Verilog-elaborated paths.
+- **Clears** `pin`/`net_props`/`net`/`component`/`cell` first — a fresh load. Components have `depth=0` and no parent until `import_verilog` overlays the hierarchy.
+
+**`import_verilog(v)` — logical hierarchy (`bdb.cpp::import_verilog`)**
+- **Phase 1** scans every `module` declaration, recording definition order; the **top module is the last module not instantiated by any other** (no explicit top needed).
+- **Phase 2** parses each module body: instance lines (`cell inst ( .port(net), … );`) and port directions (`input/output/inout`). A custom `parse_portmap` handles `\`-escaped names, bit-selects (`net[3:0]` → base name), constants/concatenations/`UNCONNECTED` (skipped), and nested parens; a Verilog keyword set filters out non-instance statements.
+- **Elaboration** walks from the top module, expanding instances into hierarchical `component` rows (dotted `parent/child` paths, growing `depth`) and wiring `net`/`pin` rows from the port maps. Instance pins default to `UNKNOWN`, then are overridden per-pin from any matching `cell_pin` direction (`infer_pin_dirs_from_cell_pins`).
+- **UPSERT, not replace:** when run after `import_def_lef`, it `INSERT … ON CONFLICT DO UPDATE`s `cell`/`parent_id`/`depth`/`is_leaf` but **preserves `x1..y2`** so DEF placement survives. Components only in the Verilog get `x1=y1=x2=y2=−1` (unplaced); components only in the DEF keep their placement with no parent/depth. This is the canonical "DEF + Verilog merge" flow.
+
+**Planned interchange formats (not yet implemented — roadmap):**
+- **GDSII export** — flatten/stream the placed-and-routed result (`component` bboxes + NUTS/detailed-NUTS `NetSegment` wires per layer) to a GDSII layout for sign-off/visualization in standard layout viewers. Read-only export is the near-term target; the layer→GDS datatype mapping would extend `LayerStack`. No reader is planned (LEF/DEF/Verilog already cover ingestion).
+- **OpenAccess (Si2 OA) import/export** — round-trip designs through an OA design database (`oaDesign`, `oaBlock`, `oaInst`, `oaNet`) so BUDA can sit inside an OA-based flow. Gated on the proprietary OA C++ libraries, so it would live behind an optional CMake feature flag and a separate translation module (e.g. `oa_bridge.cpp`) rather than in `buda_core`. Until then, LEF/DEF + Verilog is the supported interchange path.
+
+These planned formats are tracked here for design intent only — there is **no GDS/OA code in the tree today** (`grep -ri gds\|openaccess src/` returns nothing). When implementing, follow the existing pattern: a standalone parser/writer in its own translation unit, populating or reading the same BDB tables, with coordinates normalized to µm.
 
 ---
 
