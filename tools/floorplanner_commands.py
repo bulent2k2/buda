@@ -237,65 +237,78 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
     else:
         fd = None  # File doesn't exist yet; lock acquired after BDB creates it.
 
-    state = new_state()
-    state.bdb = buda.BDB(bdb_path)
-    state.bdb_path = bdb_path
-    state.verilog_path = v_path
-    state.bdb.import_verilog(v_path)
-    state.bdb.set_die(float(die_w), float(die_h))
-    state.engine.set_die(float(die_w), float(die_h))
-    state.engine.set_grid(float(grid))
+    try:
+        state = new_state()
+        state.bdb = buda.BDB(bdb_path)
+        state.bdb_path = bdb_path
+        state.verilog_path = v_path
+        state.bdb.import_verilog(v_path)
+        state.bdb.set_die(float(die_w), float(die_h))
+        state.engine.set_die(float(die_w), float(die_h))
+        state.engine.set_grid(float(grid))
 
-    comps = state.bdb.all_components()
-    roots = [c for c in comps if c.parent_id == -1]
-    subtree_count, children = _subtree_sizes(comps)
-    root_dims = {}
-    for comp in roots:
-        child_count = max(1, len(children.get(comp.id, [])))
-        cols = max(1, int(child_count ** 0.5 + 0.999))
-        rows = max(1, int((child_count + cols - 1) / cols))
-        w = max(default_w, cols * (default_w + 2.0 * grid) + 2.0 * grid)
-        h = max(default_h, rows * (default_h + 2.0 * grid) + 2.0 * grid)
-        # Give larger hierarchy roots a little more room for manual refinement.
-        scale = min(1.8, max(1.0, subtree_count.get(comp.id, 1) / 8.0))
-        root_dims[comp.name] = (w * scale, h * scale)
+        comps = state.bdb.all_components()
+        roots = [c for c in comps if c.parent_id == -1]
+        subtree_count, children = _subtree_sizes(comps)
+        root_dims = {}
+        for comp in roots:
+            child_count = max(1, len(children.get(comp.id, [])))
+            cols = max(1, int(child_count ** 0.5 + 0.999))
+            rows = max(1, int((child_count + cols - 1) / cols))
+            w = max(default_w, cols * (default_w + 2.0 * grid) + 2.0 * grid)
+            h = max(default_h, rows * (default_h + 2.0 * grid) + 2.0 * grid)
+            # Give larger hierarchy roots a little more room for manual refinement.
+            scale = min(1.8, max(1.0, subtree_count.get(comp.id, 1) / 8.0))
+            root_dims[comp.name] = (w * scale, h * scale)
 
-    origins = list(_pack_origins(
-        len(roots), die_w, grid,
-        max((d[0] for d in root_dims.values()), default=default_w),
-        max((d[1] for d in root_dims.values()), default=default_h)))
+        origins = list(_pack_origins(
+            len(roots), die_w, grid,
+            max((d[0] for d in root_dims.values()), default=default_w),
+            max((d[1] for d in root_dims.values()), default=default_h)))
 
-    for comp in sorted(roots, key=lambda c: c.name):
-        idx = sorted(roots, key=lambda c: c.name).index(comp)
-        seed_w, seed_h = root_dims[comp.name]
-        if comp.x1 >= 0 and comp.y1 >= 0 and comp.x2 > comp.x1 and comp.y2 > comp.y1:
-            state.engine.add_block(comp.name, comp.x1, comp.y1, comp.x2, comp.y2)
+        for comp in sorted(roots, key=lambda c: c.name):
+            idx = sorted(roots, key=lambda c: c.name).index(comp)
+            seed_w, seed_h = root_dims[comp.name]
+            if comp.x1 >= 0 and comp.y1 >= 0 and comp.x2 > comp.x1 and comp.y2 > comp.y1:
+                state.engine.add_block(comp.name, comp.x1, comp.y1, comp.x2, comp.y2)
+            else:
+                x, y = origins[idx]
+                state.engine.add_block(comp.name, x, y, x + seed_w, y + seed_h)
+                state.add_unplaced(comp.name)
+            state.add_name(comp.name)
+
+            if seed_depth >= 1:
+                kids = sorted(children.get(comp.id, []), key=lambda c: c.name)
+                if kids:
+                    cols = max(1, int(len(kids) ** 0.5 + 0.999))
+                    for i, child in enumerate(kids):
+                        col = i % cols
+                        row = i // cols
+                        lx = 2.0 * grid + col * (default_w + 2.0 * grid)
+                        ly = 2.0 * grid + row * (default_h + 2.0 * grid)
+                        state.engine.add_child_block(child.name, lx, ly, default_w, default_h)
+                        state.add_name(child.name)
+                        state.add_unplaced(child.name)
+
+        # For new files, the file now exists — acquire the lock.
+        if fd is None:
+            fd = _try_acquire_write_lock(bdb_path)
+        if fd is not None:
+            state._lock_fd = fd
+            fd = None  # Ownership transferred; do not release in the except block.
         else:
-            x, y = origins[idx]
-            state.engine.add_block(comp.name, x, y, x + seed_w, y + seed_h)
-            state.add_unplaced(comp.name)
-        state.add_name(comp.name)
-
-        if seed_depth >= 1:
-            kids = sorted(children.get(comp.id, []), key=lambda c: c.name)
-            if kids:
-                cols = max(1, int(len(kids) ** 0.5 + 0.999))
-                for i, child in enumerate(kids):
-                    col = i % cols
-                    row = i // cols
-                    lx = 2.0 * grid + col * (default_w + 2.0 * grid)
-                    ly = 2.0 * grid + row * (default_h + 2.0 * grid)
-                    state.engine.add_child_block(child.name, lx, ly, default_w, default_h)
-                    state.add_name(child.name)
-                    state.add_unplaced(child.name)
-
-    # For new files, the file now exists — acquire the lock.
-    if fd is None:
-        fd = _try_acquire_write_lock(bdb_path)
-    if fd is not None:
-        state._lock_fd = fd
-    else:
-        state.is_read_only = True
+            state.is_read_only = True
+    except Exception:
+        # If fd was acquired but ownership was never transferred to state,
+        # release it now so the process doesn't hold a leaked write lock.
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+            except Exception:
+                pass
+        raise
+    return state
     return state
 
 
