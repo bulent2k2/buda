@@ -170,7 +170,7 @@ if [ "$RUN_TESTS" = true ]; then
     esac
 
     set +e
-    PYTHONUNBUFFERED=1 pytest -v "${MARK_OPT[@]}" 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
+    PYTHONUNBUFFERED=1 python -m pytest -v "${MARK_OPT[@]}" 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
     PYTEST_RC=${PIPESTATUS[0]}
     set -e
 
