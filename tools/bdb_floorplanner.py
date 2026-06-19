@@ -410,9 +410,15 @@ class BdbFloorplanner:
             filetypes=[("BDB", "*.bdb"), ("All", "*")])
         if not bdb_path:
             return
-        fpc.release_bdb_lock(self.state)
-        self.state = fpc.import_verilog(
-            v_path, bdb_path, self._die_w.get(), self._die_h.get(), self._grid.get())
+        try:
+            new_state = fpc.import_verilog(
+                v_path, bdb_path, self._die_w.get(), self._die_h.get(), self._grid.get())
+        except PermissionError as exc:
+            messagebox.showerror("Import Failed", str(exc))
+            self._status.set(str(exc))
+            return
+        fpc.release_bdb_lock(self.state)   # Release only after successful import
+        self.state = new_state
         self._path = []
         self._bdb_var.set(bdb_path)
         self._sync_canvas_vars()

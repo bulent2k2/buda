@@ -220,7 +220,23 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
     Verilog import gives hierarchy/connectivity but no physical sizes.  The
     prototype creates editable top-level blocks so the designer can begin a
     quick manual floorplan immediately.
+
+    Raises PermissionError if bdb_path already exists and is write-locked by
+    another floorplanner session — the import is aborted before any mutation.
     """
+    # If the target already exists, acquire the exclusive write lock BEFORE
+    # opening or mutating it.  import_verilog() clears the DB (destructive),
+    # so we must refuse if another session is editing the file.
+    pre_existing = os.path.exists(bdb_path)
+    if pre_existing:
+        fd = _try_acquire_write_lock(bdb_path)
+        if fd is None:
+            raise PermissionError(
+                f"Cannot import: another fp session holds the write lock on "
+                f"{os.path.basename(bdb_path)}. Close that session first.")
+    else:
+        fd = None  # File doesn't exist yet; lock acquired after BDB creates it.
+
     state = new_state()
     state.bdb = buda.BDB(bdb_path)
     state.bdb_path = bdb_path
@@ -272,7 +288,10 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
                     state.engine.add_child_block(child.name, lx, ly, default_w, default_h)
                     state.add_name(child.name)
                     state.add_unplaced(child.name)
-    fd = _try_acquire_write_lock(bdb_path)
+
+    # For new files, the file now exists — acquire the lock.
+    if fd is None:
+        fd = _try_acquire_write_lock(bdb_path)
     if fd is not None:
         state._lock_fd = fd
     else:
