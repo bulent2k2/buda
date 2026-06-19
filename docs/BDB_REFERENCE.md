@@ -26,6 +26,10 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
    - [Metadata](#metadata)
 4. [Typical workflows](#4-typical-workflows)
 5. [Notes and caveats](#5-notes-and-caveats)
+6. [Design interchange formats](#6-design-interchange-formats)
+   - [Supported today: LEF/DEF + Verilog](#supported-today-lefdef--verilog)
+   - [Planned: GDSII import/export](#planned-gdsii-importexport)
+   - [Planned: OpenAccess import/export](#planned-openaccess-importexport)
 
 ---
 
@@ -978,3 +982,156 @@ transaction.
 All coordinates stored in BDB are in **µm** regardless of the DEF
 `UNITS DISTANCE MICRONS` value. `import_def_lef` converts on read.
 `add_comp` and `move_comp` accept µm directly.
+
+---
+
+## 6. Design interchange formats
+
+BUDA reads industry netlist/layout formats directly into BDB with
+**hand-written parsers** in `bdb.cpp` — there is no dependency on OpenDB,
+Cadence OpenAccess, or any Si2 library. This keeps the build self-contained
+(only pybind11 + bundled SQLite) at the cost of supporting a pragmatic subset
+of each format. This section documents what is parsed today and the intended
+shape of the planned export/round-trip formats.
+
+| Format | Direction | Status | Entry point |
+|---|---|---|---|
+| LEF | import | ✅ supported (subset) | `import_def_lef` |
+| DEF | import | ✅ supported (subset) | `import_def_lef` |
+| Verilog (structural) | import | ✅ supported (subset) | `import_verilog` |
+| GDSII | import + export | 🚧 planned | — |
+| OpenAccess | import + export | 🚧 planned | — |
+
+### Supported today: LEF/DEF + Verilog
+
+These two importers are meant to be run **in sequence** (`import_def_lef` then
+`import_verilog`) to merge physical placement with logical hierarchy. Both are
+forgiving line-by-line state machines; unrecognized constructs are skipped
+rather than erroring.
+
+**LEF (`_parse_lef_sizes`, `_parse_lef_pins`)** — what is consumed:
+
+| LEF construct | Use in BDB |
+|---|---|
+| `MACRO <name> … END <name>` | one `cell` row |
+| `SIZE <w> BY <h> ;` | cell footprint (`cell.width/height`) |
+| `PIN <name> … END <name>` | one `cell_pin` port |
+| `DIRECTION INPUT\|OUTPUT\|INOUT ;` | pin direction (absent → `UNKNOWN`) |
+| `USE POWER\|GROUND\|CLOCK ;` | **pin skipped** (pre-route, not a signal terminal) |
+| `RECT x1 y1 x2 y2 ;` | pin offset = **centroid of all its RECTs** |
+
+Everything else (layers, vias, OBS, antenna, properties, units header) is
+ignored. The LEF supplies cell *sizes* and *pin offsets/directions* only.
+
+**DEF (`import_def_lef`)** — a three-state machine
+(`IDLE → IN_COMPONENTS → IN_NETS`):
+
+| DEF construct | Use in BDB |
+|---|---|
+| `UNITS DISTANCE MICRONS <n> ;` | integer→µm divisor (`units()`); everything stored as µm |
+| `DIEAREA ( 0 0 ) ( x y ) ;` | `die_w` / `die_h` |
+| `- <inst> <cell> + PLACED\|FIXED ( x y ) <orient>` | depth-0 leaf `component`; bbox = DEF origin + LEF `SIZE` (fallback `0.5×0.5` if the cell is missing from the LEF) |
+| `- <net> … ( <inst> <pin> ) …` | `net` + `net_props` row, and one `pin` row per connection with absolute position + direction resolved from the LEF |
+
+DEF name escaping (`\[`, `\]`) is stripped so instance names match the
+Verilog-elaborated paths. Component **orientation is parsed but only the
+origin is used** — bounding boxes are axis-aligned `SIZE` boxes, not rotated
+geometry. `import_def_lef` **clears** the `pin`/`net_props`/`net`/`component`/
+`cell` tables first: it is a fresh load, and the produced components are all
+depth-0 with no parent until Verilog overlays the hierarchy.
+
+**Verilog (`import_verilog`)** — structural netlist elaboration:
+
+- **Top detection:** the top module is the last module *not instantiated by
+  any other module* in the file — no explicit top argument.
+- **Parsing:** instance statements `cell inst ( .port(net), … );` and port
+  direction declarations (`input/output/inout`). The custom `parse_portmap`
+  handles `\`-escaped identifiers, bit-selects (`d[3:0]` → base `d`),
+  constants / concatenations / `UNCONNECTED` (skipped), and nested parentheses.
+  A Verilog keyword set filters out behavioral statements.
+- **Elaboration:** walks from the top module, creating hierarchical
+  `component` rows with dotted `parent/child` paths and increasing `depth`,
+  and wiring `net`/`pin` rows from the port maps. Instance pins start as
+  `UNKNOWN` and are overridden from any matching `cell_pin` direction.
+- **Merge semantics (UPSERT):** when run after `import_def_lef`, it updates
+  `cell`/`parent_id`/`depth`/`is_leaf` but **preserves `x1..y2`**, so DEF
+  placement survives. Verilog-only components get `x1=y1=x2=y2=−1` (unplaced);
+  DEF-only components keep placement with no parent/depth. See §5
+  *UPSERT semantics* for the `last_insert_rowid` caveat.
+
+> **Subset caveats.** No support for: DEF `SPECIALNETS`/routing geometry,
+> `BLOCKAGES`, `REGIONS`, `GROUPS`; LEF routing/via rules; Verilog `generate`
+> blocks, parameter elaboration, `assign` aliasing, or hierarchical port
+> bit-blasting beyond simple base-name extraction. These are intentionally
+> out of scope for an interconnect-*planning* tool.
+
+### Planned: GDSII import/export
+
+**Status: not implemented — design intent only.** No GDS code exists in the
+tree.
+
+Intended capability: round-trip a **GDSII** layout against BDB — export the
+placed-and-routed result for sign-off/viewing (KLayout, etc.) and import an
+existing layout's geometry back into BDB.
+
+**Export** — sketch of the intended design:
+
+- **Inputs:** BDB `component` bounding boxes (cell outlines / blockages) plus
+  the routed wires — abstract NUTS `BusSegment`s or, preferably, detailed-NUTS
+  `NetSegment`s (one polygon per bit-wire) keyed by layer.
+- **Layer mapping:** a `LayerStack` → GDS `(layer, datatype)` table so each
+  metal layer and each pre-route class (POWER/GROUND/CLOCK/SHIELD/SIGNAL from
+  the `RoutingGrid`) lands on a distinct GDS purpose.
+- **Hierarchy:** either flatten to a single top cell, or emit one GDS
+  `structure` per BDB cell type with `SREF`/`AREF` placements mirroring the
+  component hierarchy (the latter reuses the template-per-cell-type model the
+  hier flow already builds).
+
+**Import** — the inverse, populating the same BDB tables as the other
+importers:
+
+- **Shapes:** `BOUNDARY` / `BOX` records become cell or blockage geometry;
+  `SREF` / `AREF` placements rebuild the `component` hierarchy (dotted paths,
+  depth) the same way Verilog elaboration does.
+- **Layer mapping:** the export `(layer, datatype)` table inverted to recover
+  the BUDA layer / pre-route class of each shape.
+- **Connectivity is optional (file-dependent):** GDS has no standard netlist,
+  but a given GDS *may or may not* carry physical connectivity. Both cases are
+  in scope:
+  - *Connectivity present* — many flows annotate shapes with net names via
+    `TEXT` / label records (on a pin or label `(layer, datatype)`) or a known
+    labeling convention. When such labels exist, the importer parses them to
+    recover `net` / `pin` rows directly from the GDS.
+  - *Geometry only* — no labels: import placement and shapes, then pair with
+    `import_verilog` for nets, exactly as DEF placement is paired with Verilog
+    hierarchy today (see §4 *DEF + Verilog merge*).
+
+  A mode flag (or auto-detect on the presence of label records) chooses per
+  file; the two paths converge on the same BDB tables.
+- **Units:** GDS stores integers scaled by the `UNITS` record
+  (`user-units / database-unit`); convert to **µm** on read, as `import_def_lef`
+  does for DEF DBUs.
+
+### Planned: OpenAccess import/export
+
+**Status: not implemented — design intent only.** No OA code exists in the
+tree.
+
+Intended capability: round-trip designs through a **Si2 OpenAccess** database
+(`oaDesign`/`oaBlock`/`oaInst`/`oaNet`/`oaTerm`) so BUDA can drop into an
+OA-based production flow — import placed instances + connectivity into BDB,
+run the planning pipeline, and write routed geometry back into the OA design.
+
+Because OpenAccess ships as **proprietary C++ libraries** that cannot be
+vendored, the implementation would:
+
+- live in a **separate translation unit** (e.g. `oa_bridge.cpp`) behind an
+  **optional CMake feature flag** (`BUDA_ENABLE_OPENACCESS`), so the default
+  build keeps zero external EDA dependencies;
+- be **dlopen-isolated** from `buda_core` — the OA SDK is found at configure
+  time and only the bridge module links against it;
+- translate OA objects ↔ the same BDB tables documented in §1, normalizing all
+  coordinates to **µm** (OA stores in DBU; convert using the tech `oaDBUPerUU`).
+
+Until OA support lands, the supported interchange path is **LEF/DEF + Verilog
+in, with GDS import/export once available**.
