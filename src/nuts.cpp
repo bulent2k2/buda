@@ -346,6 +346,26 @@ static void do_span_adjustments(
             if (all_hi_endpoints || hi_jog) other->span_hi = max_hi;
             else other->span_hi = std::max(other->span_hi, max_hi);
         }
+
+        // Coverage guarantee: a segment must physically reach every segment
+        // connected to it.  The lo_end/hi_end split above is keyed on NOMINAL
+        // geometry, so when placement moves a tap across the trunk (e.g. a
+        // keepout or congestion pushes a stub past the far end) its stale label
+        // routes it to the wrong end and the trunk stops short — a real open.
+        // Extend the geometric extent to include any out-of-range connection
+        // center, mapping back to span_lo/span_hi by their current ordering so
+        // endpoint identity (possibly span_lo > span_hi) is preserved.  This
+        // only ever extends, so it cannot undo a legitimate jog contraction.
+        for (const auto& req : reqs) {
+            const double lo = std::min(other->span_lo, other->span_hi);
+            const double hi = std::max(other->span_lo, other->span_hi);
+            const bool ordered = (other->span_lo <= other->span_hi);
+            if (req.center < lo) {
+                (ordered ? other->span_lo : other->span_hi) = req.center;
+            } else if (req.center > hi) {
+                (ordered ? other->span_hi : other->span_lo) = req.center;
+            }
+        }
         // span_lo/span_hi intentionally keep NOMINAL endpoint identity (span_lo
         // is the lo_end coordinate, span_hi the hi_end) even when placement
         // leaves span_lo > span_hi: corner/dogleg logic derives the fixed anchor

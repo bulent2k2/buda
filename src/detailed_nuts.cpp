@@ -330,8 +330,21 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             // check takes min/max locally rather than reordering them.
             if (has_ep_lo) ns.span_lo = ep_lo;
             if (has_ep_hi) ns.span_hi = ep_hi;
-            if (cover_lo < ns.span_lo) ns.span_lo = cover_lo;
-            if (cover_hi > ns.span_hi) ns.span_hi = cover_hi;
+
+            // Extend the span to cover mid-span (interior) connections.  Ordered
+            // so a reversed span (span_lo > span_hi) keeps both endpoints: a raw
+            // `cover_hi > span_hi` test would overwrite the nominal lo endpoint
+            // (e.g. ends 80/20 + a tap at 90 -> [80,90], dropping the 20 end).
+            // Mirrors the abstract-NUTS coverage pass in nuts.cpp.
+            auto cover = [&](double c) {
+                const double lo = std::min(ns.span_lo, ns.span_hi);
+                const double hi = std::max(ns.span_lo, ns.span_hi);
+                const bool ordered = (ns.span_lo <= ns.span_hi);
+                if (c < lo)      (ordered ? ns.span_lo : ns.span_hi) = c;
+                else if (c > hi) (ordered ? ns.span_hi : ns.span_lo) = c;
+            };
+            if (cover_lo !=  std::numeric_limits<double>::infinity()) cover(cover_lo);
+            if (cover_hi != -std::numeric_limits<double>::infinity()) cover(cover_hi);
         }
     }
 
