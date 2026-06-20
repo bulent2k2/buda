@@ -329,6 +329,13 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             if (has_ep_hi) ns.span_hi = ep_hi;
             if (cover_lo < ns.span_lo) ns.span_lo = cover_lo;
             if (cover_hi > ns.span_hi) ns.span_hi = cover_hi;
+
+            // lo_end/hi_end are nominal labels; placement can swap the actual
+            // order of the two endpoint connections, leaving span_lo > span_hi.
+            // Normalise so the (backwards but valid) extent is not misread as an
+            // open by the dnuts connectivity check.  Mirrors the abstract-NUTS
+            // span normalisation in nuts.cpp.
+            if (ns.span_lo > ns.span_hi) std::swap(ns.span_lo, ns.span_hi);
         }
     }
 
