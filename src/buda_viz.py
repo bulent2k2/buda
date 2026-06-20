@@ -736,7 +736,13 @@ class TopologyExplorer:
                     and not math.isnan(slo[ci]))
 
     def _draw_busterm_markers(self, topo, ct, viz_lw):
-        """Draw a diamond at every busterm connection point."""
+        """Draw a diamond at every busterm connection point.
+
+        Gated on the shared ui_state.busterms (the "Terminals" toggle) so the
+        setting carries over from the main BUDA viz, like Blocks and Hanan.
+        """
+        if not self.ui_state.busterms:
+            return
         ax = self.ax
         msz = viz_lw * 1.1 + 3
 
@@ -1064,6 +1070,7 @@ class TopologyExplorer:
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
         if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
         if event.key == 'b':                    self.ui_state.toggle_blocks()
+        if event.key == 't':                    self.ui_state.toggle_busterms()
         if event.key == 's':
             if self._current_is_selected(): self._deselect_current()
             else:                           self._select_current()
