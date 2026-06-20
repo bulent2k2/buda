@@ -65,15 +65,21 @@ def _try_acquire_write_lock(path: str) -> int | None:
     the lock automatically when the fd is closed or the process exits, so
     there are no stale-lock issues.
 
-    The lock is taken on a dedicated sidecar file ``<path>.fplock``, NOT on the
-    BDB file itself: SQLite's macOS VFS already holds an ``flock`` on the open
-    database, so flocking the same file would collide with our own live
+    The lock is taken on a dedicated sidecar file ``<canonical-path>.fplock``,
+    NOT on the BDB file itself: SQLite's macOS VFS already holds an ``flock`` on
+    the open database, so flocking the same file would collide with our own live
     ``buda.BDB`` connection and wrongly report the session as read-only.  A
     separate sidecar is never touched by SQLite and works on every platform.
 
+    The path is canonicalised with ``os.path.realpath`` first so that aliases of
+    the same database (symlinks, ``..`` segments, relative vs absolute) map to a
+    single sidecar — otherwise two sessions opening the same DB through different
+    paths would lock distinct files and both stay writable, letting their
+    ``write_bdb`` calls clobber each other.
+
     Falls back to None (no lock, always writable) on platforms without fcntl.
     """
-    lock_path = path + ".fplock"
+    lock_path = os.path.realpath(path) + ".fplock"
     try:
         fd = os.open(lock_path, os.O_RDONLY | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
