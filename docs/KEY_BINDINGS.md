@@ -12,7 +12,7 @@ Here are the keyboard shortcuts available in each view.
 | `p`, `cmd+p`, `ctrl+p` | Select the **previous** bundle in the list. |
 | `]`, `pageup` | Select the **next** bundle. |
 | `[`, `pagedown` | Select the **previous** bundle. |
-| `v`, `t`, `cmd+t`, `ctrl+t` | Open the **Topology Explorer** for the currently highlighted bundle. |
+| `v`, `cmd+t`, `ctrl+t` | Open the **Topology Explorer** for the currently highlighted bundle. |
 | `z` | **Zoom In** (centered on the mouse cursor). |
 | `Z` (Shift+z) | **Zoom Out** (centered on the mouse cursor). |
 | `cmd+z`, `ctrl+z` | **Zoom to Selection**: Fit the view to the currently highlighted bundle. |

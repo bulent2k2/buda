@@ -153,6 +153,18 @@ def test_step_bundle_reveals_selected_when_all_bundles_off(monkeypatch):
         "previously selected bundle returns to hidden when the spotlight moves"
 
 
+def test_t_key_toggles_busterms_not_explorer(monkeypatch):
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._topo_explorer is None
+    before = viz.ui_state.busterms
+    viz._on_key(types.SimpleNamespace(key="t"))   # 't' = busterms only, NOT TopoExp
+    assert viz.ui_state.busterms != before
+    assert viz._topo_explorer is None, "'t' must not open the Topology Explorer"
+    viz._on_key(types.SimpleNamespace(key="t"))
+    assert viz.ui_state.busterms == before
+
+
 def test_g_key_toggles_hanan_grid(monkeypatch):
     import types
     viz = _build_viz("dnuts1.buda", monkeypatch)
