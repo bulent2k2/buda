@@ -295,13 +295,26 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
 
                         // Only enforce push-out if this is an actual relay stub (length > 0).
                         // Direct connections (perp_pos == f) are exempt from Pass 2 push-out.
+                        // The spine must stay on the OUTWARD side of the stub's face f,
+                        // ideally with the full min-stub clearance m.  When the full
+                        // f±m clearance would empty the slide window against a pass-1
+                        // busterm bound (e.g. the spine sits on a block edge), relax to
+                        // the face f itself — a shorter stub but still the correct side —
+                        // and drop the constraint only if even the face would invert
+                        // (connectivity wins over the stub-length floor).
                         if (std::abs(cs.perp_pos - f) > 0) {
                             int m = fp.get_min_stub_length(1 /*VERTICAL*/, stub.layer_id);
-                            if (cs.perp_pos > f) new_lo = std::max(new_lo, f + m);
-                            else                  new_hi = std::min(new_hi, f - m);
+                            if (cs.perp_pos > f) {
+                                if      (f + m <= new_hi) new_lo = std::max(new_lo, f + m);
+                                else if (f     <= new_hi) new_lo = std::max(new_lo, f);
+                            } else {
+                                if      (f - m >= new_lo) new_hi = std::min(new_hi, f - m);
+                                else if (f     >= new_lo) new_hi = std::min(new_hi, f);
+                            }
                         }
 
-                        if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
+                        if (new_lo <= new_hi
+                            && (new_lo != cs.perp_lo || new_hi != cs.perp_hi)) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
                             changed = true;
                         }
@@ -310,13 +323,22 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                         int f = sc.face_coord;
                         int new_lo = cs.perp_lo, new_hi = cs.perp_hi;
 
+                        // See the H-spine branch: keep the outward-side constraint,
+                        // relaxing the full min-stub clearance to the face when it
+                        // would otherwise empty the busterm-bounded slide window.
                         if (std::abs(cs.perp_pos - f) > 0) {
                             int m = fp.get_min_stub_length(0 /*HORIZONTAL*/, stub.layer_id);
-                            if (cs.perp_pos > f) new_lo = std::max(new_lo, f + m);
-                            else                  new_hi = std::min(new_hi, f - m);
+                            if (cs.perp_pos > f) {
+                                if      (f + m <= new_hi) new_lo = std::max(new_lo, f + m);
+                                else if (f     <= new_hi) new_lo = std::max(new_lo, f);
+                            } else {
+                                if      (f - m >= new_lo) new_hi = std::min(new_hi, f - m);
+                                else if (f     >= new_lo) new_hi = std::min(new_hi, f);
+                            }
                         }
 
-                        if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
+                        if (new_lo <= new_hi
+                            && (new_lo != cs.perp_lo || new_hi != cs.perp_hi)) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
                             changed = true;
                         }
