@@ -3,7 +3,7 @@
 tools/bdb2buda.py — Convert a BDB to a flat .buda script.
 
 Usage:
-  python3 tools/bdb2buda.py <file.bdb> [-cell <cellname>] [-o <output.buda>]
+  python3 tools/bdb2buda.py <file.bdb> [-cell <cellname>] [-scale <N>] [-o <output.buda>]
 
 With no -cell flag, the top-level (depth-0) components are written as blocks
 and all nets connecting them are emitted.
@@ -11,6 +11,11 @@ and all nets connecting them are emitted.
 With -cell <cellname>, the children of the first component whose name or
 cell-type matches <cellname> are written instead.  Block coordinates are
 made relative to the parent's lower-left corner.
+
+-scale <N> (default 10) multiplies all coordinates by N and rounds to the
+nearest integer.  The flat routing flow expects integer coordinates; the
+default factor of 10 converts µm values (e.g. 12.5 µm) to tenths of a µm
+(125), avoiding precision loss.  Use -scale 1 to suppress scaling.
 
 Nets with ≥2 endpoints inside the selected scope are emitted.  If a net has
 a pin with direction DRIVER or OUTPUT it becomes the driver; otherwise the
@@ -77,13 +82,13 @@ def _fmt_pin(comp_name: str, pin_name: str) -> str:
     return f"{leaf}.{pin_name}"
 
 
-def _g(v: float) -> str:
-    """Format a coordinate: integer when lossless, else up to 6 significant figures."""
-    i = int(v)
-    return str(i) if i == v else f"{v:.6g}"
+def _sc(v: float, scale: float) -> str:
+    """Scale v by scale and format as an integer (routing flow requires integers)."""
+    return str(round(v * scale))
 
 
-def convert(bdb_path: str, cell_name: Optional[str] = None) -> str:
+def convert(bdb_path: str, cell_name: Optional[str] = None,
+            scale: float = 10.0) -> str:
     """
     Convert a BDB to a flat .buda script and return it as a string.
 
@@ -95,6 +100,10 @@ def convert(bdb_path: str, cell_name: Optional[str] = None) -> str:
         If given, export the children of the first component whose ``name``
         or ``cell`` field matches this string.  Default: top-level (depth-0)
         components.
+    scale :
+        Multiply every coordinate by this factor and round to the nearest
+        integer.  Default 10 converts µm → tenths-of-µm so that fractional
+        coordinates (e.g. 12.5 µm) become valid integers (125).
     """
     db = buda_db.BDB(bdb_path)
     all_comps = {c.id: c for c in db.all_components()}
@@ -201,16 +210,19 @@ def convert(bdb_path: str, cell_name: Optional[str] = None) -> str:
         bus_net_ids.update(net_ids)
 
     # ── Assemble the script ───────────────────────────────────────────────────
+    def s(v: float) -> str:
+        return _sc(v, scale)
+
     lines: list = []
-    lines.append(f"set_die {_g(die_w)} {_g(die_h)}")
+    lines.append(f"set_die {s(die_w)} {s(die_h)}")
     lines.append("")
 
     for c in sorted(target_comps, key=lambda c: c.name):
         leaf = _leaf(c.name)
         lines.append(
             f"add_block {leaf}"
-            f" {_g(c.x1 - ox)} {_g(c.y1 - oy)}"
-            f" {_g(c.x2 - ox)} {_g(c.y2 - oy)}"
+            f" {s(c.x1 - ox)} {s(c.y1 - oy)}"
+            f" {s(c.x2 - ox)} {s(c.y2 - oy)}"
         )
 
     if net_descs:
@@ -243,19 +255,31 @@ def main() -> None:
     bdb_path  = argv[0]
     cell_name: Optional[str] = None
     out_path:  Optional[str] = None
+    scale: float = 10.0
 
     i = 1
     while i < len(argv):
         if argv[i] in ("-cell", "--cell") and i + 1 < len(argv):
             cell_name = argv[i + 1]
             i += 2
+        elif argv[i] in ("-scale", "--scale") and i + 1 < len(argv):
+            try:
+                scale = float(argv[i + 1])
+            except ValueError:
+                print(f"Error: -scale requires a number, got {argv[i+1]!r}",
+                      file=sys.stderr)
+                sys.exit(1)
+            i += 2
         elif argv[i] in ("-o", "--output") and i + 1 < len(argv):
             out_path = argv[i + 1]
             i += 2
         else:
             print(f"Unknown argument: {argv[i]}", file=sys.stderr)
-            print("Usage: bdb2buda.py <file.bdb> [-cell <cellname>] [-o <output.buda>]",
-                  file=sys.stderr)
+            print(
+                "Usage: bdb2buda.py <file.bdb> [-cell <cellname>] "
+                "[-scale <N>] [-o <output.buda>]",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     if not os.path.exists(bdb_path):
@@ -263,7 +287,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        script = convert(bdb_path, cell_name)
+        script = convert(bdb_path, cell_name, scale)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

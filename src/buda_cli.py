@@ -125,6 +125,8 @@ class BudaSession:
         self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
+        self._die_w = 0.0            # stored by set_die when no BDB is open (flat flow)
+        self._die_h = 0.0
         self.bdb = None              # BDB (opened by open_bdb command)
         self._bdb_added_ids = set()  # component ids loaded into fp via add_blocks_from_bdb
         self._busterm_gen = None     # BustermGen instance (created by derive_busterms)
@@ -2445,7 +2447,11 @@ class BudaSession:
             # set_die <w> <h>
             if len(args) < 2:
                 print("Error: set_die requires <w> <h>"); return
-            self.bdb.set_die(float(args[0]), float(args[1]))
+            w, h = float(args[0]), float(args[1])
+            if self.bdb is not None:
+                self.bdb.set_die(w, h)
+            else:
+                self._die_w, self._die_h = w, h
         elif cmd == "move_comp":
             # move_comp <name> <x> <y>
             if len(args) < 3:
