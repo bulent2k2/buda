@@ -15,6 +15,7 @@
  */
 
 #include "verify.h"
+#include <algorithm>
 #include <map>
 #include <set>
 #include <sstream>
@@ -208,10 +209,18 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
             auto it_j = ts_map.find(j);
             if (it_j == ts_map.end() || !it_j->second->placed) continue;
             const TrackSegment& ts_j = *it_j->second;
-            bool i_reach_j = (ts_i.span_lo <= ts_j.track_position &&
-                               ts_j.track_position <= ts_i.span_hi);
-            bool j_reach_i = (ts_j.span_lo <= ts_i.track_position &&
-                               ts_i.track_position <= ts_j.span_hi);
+            // span_lo/span_hi encode nominal endpoint identity, so they may be
+            // stored with lo > hi after placement swaps the two ends.  Reach is
+            // a geometric (order-independent) test, so compare against the
+            // ordered [min,max] extent.
+            const double i_lo = std::min(ts_i.span_lo, ts_i.span_hi);
+            const double i_hi = std::max(ts_i.span_lo, ts_i.span_hi);
+            const double j_lo = std::min(ts_j.span_lo, ts_j.span_hi);
+            const double j_hi = std::max(ts_j.span_lo, ts_j.span_hi);
+            bool i_reach_j = (i_lo <= ts_j.track_position &&
+                               ts_j.track_position <= i_hi);
+            bool j_reach_i = (j_lo <= ts_i.track_position &&
+                               ts_i.track_position <= j_hi);
             if (!i_reach_j || !j_reach_i) {
                 ConnViolation v;
                 v.kind = ViolationKind::SEG_OPEN;
@@ -221,11 +230,11 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
                 if (!i_reach_j)
                     msg << "; track_pos[" << j << "]=" << ts_j.track_position
                         << " not in span[" << i << "]=["
-                        << ts_i.span_lo << "," << ts_i.span_hi << "]";
+                        << i_lo << "," << i_hi << "]";
                 if (!j_reach_i)
                     msg << "; track_pos[" << i << "]=" << ts_i.track_position
                         << " not in span[" << j << "]=["
-                        << ts_j.span_lo << "," << ts_j.span_hi << "]";
+                        << j_lo << "," << j_hi << "]";
                 v.message = msg.str();
                 result.violations.push_back(std::move(v));
             }
@@ -270,12 +279,16 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
             if (ts.bundle_id != bundle_id || !ts.placed || covered) continue;
             if (ts.seg_idx < 0 || ts.seg_idx >= n) continue;
             const ConnSeg& cs = segs[ts.seg_idx];
+            // span_lo/span_hi may be stored reversed (nominal endpoint identity);
+            // crossing a block is an ordered-extent test.
+            const double s_lo = std::min(ts.span_lo, ts.span_hi);
+            const double s_hi = std::max(ts.span_lo, ts.span_hi);
             for (const Rect& r : rects) {
                 bool through = cs.horiz
                     ? (ts.track_position >= r.y1 && ts.track_position <= r.y2
-                       && ts.span_lo <= r.x2 && ts.span_hi >= r.x1)
+                       && s_lo <= r.x2 && s_hi >= r.x1)
                     : (ts.track_position >= r.x1 && ts.track_position <= r.x2
-                       && ts.span_lo <= r.y2 && ts.span_hi >= r.y1);
+                       && s_lo <= r.y2 && s_hi >= r.y1);
                 if (through) { covered = true; break; }
             }
         }
@@ -371,10 +384,16 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                 if (it_i == ns_map.end() || it_j == ns_map.end()) continue;
                 const NetSegment& ns_i = *it_i->second;
                 const NetSegment& ns_j = *it_j->second;
-                bool i_reach_j = (ns_i.span_lo <= ns_j.track_position &&
-                                   ns_j.track_position <= ns_i.span_hi);
-                bool j_reach_i = (ns_j.span_lo <= ns_i.track_position &&
-                                   ns_i.track_position <= ns_j.span_hi);
+                // span_lo/span_hi keep nominal endpoint identity (may be lo>hi);
+                // reach is order-independent, so use the ordered [min,max] extent.
+                const double i_lo = std::min(ns_i.span_lo, ns_i.span_hi);
+                const double i_hi = std::max(ns_i.span_lo, ns_i.span_hi);
+                const double j_lo = std::min(ns_j.span_lo, ns_j.span_hi);
+                const double j_hi = std::max(ns_j.span_lo, ns_j.span_hi);
+                bool i_reach_j = (i_lo <= ns_j.track_position &&
+                                   ns_j.track_position <= i_hi);
+                bool j_reach_i = (j_lo <= ns_i.track_position &&
+                                   ns_i.track_position <= j_hi);
                 if (!i_reach_j || !j_reach_i) {
                     ConnViolation v;
                     v.kind = ViolationKind::SEG_OPEN;
@@ -386,11 +405,11 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                     if (!i_reach_j)
                         msg << "; track_pos[" << j << "]=" << ns_j.track_position
                             << " not in span[" << i << "]=["
-                            << ns_i.span_lo << "," << ns_i.span_hi << "]";
+                            << i_lo << "," << i_hi << "]";
                     if (!j_reach_i)
                         msg << "; track_pos[" << i << "]=" << ns_i.track_position
                             << " not in span[" << j << "]=["
-                            << ns_j.span_lo << "," << ns_j.span_hi << "]";
+                            << j_lo << "," << j_hi << "]";
                     v.message = msg.str();
                     result.violations.push_back(std::move(v));
                 }
@@ -430,12 +449,15 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                 if (it == ns_map.end()) continue;
                 const NetSegment& ns = *it->second;
                 const ConnSeg& cs = segs[i];
+                // Ordered extent: span_lo/span_hi may be stored reversed.
+                const double s_lo = std::min(ns.span_lo, ns.span_hi);
+                const double s_hi = std::max(ns.span_lo, ns.span_hi);
                 for (const Rect& r : rects) {
                     bool through = cs.horiz
                         ? (ns.track_position >= r.y1 && ns.track_position <= r.y2
-                           && ns.span_lo <= r.x2 && ns.span_hi >= r.x1)
+                           && s_lo <= r.x2 && s_hi >= r.x1)
                         : (ns.track_position >= r.x1 && ns.track_position <= r.x2
-                           && ns.span_lo <= r.y2 && ns.span_hi >= r.y1);
+                           && s_lo <= r.y2 && s_hi >= r.y1);
                     if (through) { covered = true; break; }
                 }
             }

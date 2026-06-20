@@ -1,4 +1,4 @@
-source /Users/ben/src/git/buda/gem/flow/tracks4top.buda
+source ../tracks4top.buda
 source tc3a_flat_x10.buda
 run_bundler
 generate_topologies
