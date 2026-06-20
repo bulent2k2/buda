@@ -42,5 +42,9 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `r` | **Re-run Planner**: Re-evaluate global routing and NUTS track assignment after changing a pin. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
 | `cmd+1`, `ctrl+1` | Bring the **Main View** window to the front. |
+| `z` | **Zoom In** (centered on the mouse cursor). |
+| `Z` (Shift+z) | **Zoom Out** (centered on the mouse cursor). |
+| `cmd+z`, `ctrl+z` | **Zoom to Selection**: Fit the view to the active bundle's terminals/topology. |
+| `h`, `H`, `cmd+a`, `ctrl+a` | **Home**: Reset zoom and return to the original full view. |
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close all visualizer windows. |

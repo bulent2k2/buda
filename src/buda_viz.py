@@ -522,6 +522,9 @@ class TopologyExplorer:
       [ / ]  (or ◀/▶ Bundle buttons)  — prev / next bundle
       s (or Select button)             — toggle selection (pin/unpin)
       cmd-1                            — raise the main BUDA viz window
+      z / Z                            — zoom in / out
+      cmd-z / ctrl-z                   — zoom to active bundle extent
+      h / H / cmd-a / ctrl-a           — reset zoom to home full view
     """
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
