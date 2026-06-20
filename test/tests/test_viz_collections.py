@@ -97,6 +97,24 @@ def test_detailed_artists_built_lazily(monkeypatch):
         assert e["artist"].get_visible()
 
 
+def test_all_toggle_builds_rails_in_detailed_mode(monkeypatch):
+    # Tracks can be enabled via the All toggle (ViewState.toggle_all sets
+    # tracks=True and only notifies fig_redraw, bypassing _toggle_tracks).  The
+    # lazy rails must still get built on that path.
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._toggle_detailed()                 # detailed on; Tracks still off
+    assert viz._rails_built is False and viz._grid_rail_artists == []
+
+    viz._toggle_all()                      # All -> OFF (tracks stays off)
+    assert viz._rails_built is False
+    viz._toggle_all()                      # All -> ON (tracks True via toggle_all)
+
+    assert viz.ui_state.tracks is True
+    assert viz._rails_built is True, "All-on must build the lazy rails"
+    assert any(e["artist"].get_visible() for e in viz._grid_rail_artists), \
+        "rails should be visible after All turns Tracks on in detailed mode"
+
+
 def test_nuts_bands_are_collections(monkeypatch):
     viz = _build_viz("dnuts1.buda", monkeypatch)
     # The NUTS interval bands (footprints + dashed bounds) are batched into
