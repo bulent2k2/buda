@@ -537,6 +537,11 @@ class TopologyExplorer:
         self._block_patch_artists = []
         self._block_name_artists = []
 
+        # Zoom state
+        self._autoscale_needed = True
+        self._home_xlim        = None
+        self._home_ylim        = None
+
         # Listen for global visibility changes (e.g. from parent BudaVisualizer)
         self.ui_state.add_listener(self.fig_redraw)
 
@@ -1016,6 +1021,7 @@ class TopologyExplorer:
         self.bidx = (self.bidx + delta) % len(self.wrappers)
         self.idx  = self._focus_topo_index()   # jump to this bundle's pinned topo
         self.sidx = -1
+        self._autoscale_needed = True
         self._reset_rerun_btn()
         self._draw()
 
@@ -1026,6 +1032,7 @@ class TopologyExplorer:
             self.bidx = idx
             self.idx  = self._focus_topo_index()   # jump to its pinned topo
             self.sidx = -1
+            self._autoscale_needed = True
             self._reset_rerun_btn()
             self._draw()
 
@@ -1039,6 +1046,10 @@ class TopologyExplorer:
         if event.key in ('cmd+1', 'ctrl+1'):
             if self._main_fig is not None: raise_window(self._main_fig)
             return
+        if event.key in ('cmd+z', 'ctrl+z'):    self._zoom_to_bundle(); return
+        if event.key == 'z':                    self._interactive_zoom(event, zoom_in=True); return
+        if event.key == 'Z':                    self._interactive_zoom(event, zoom_in=False); return
+        if event.key in ('h', 'H', 'cmd+a', 'ctrl+a'): self._zoom_home(); return
         if event.key in ('left',  'a'):         self._step_topo(-1)
         if event.key in ('right', 'd'):         self._step_topo(+1)
         if event.key in ('n', 'cmd+n', 'ctrl+n'):    self._step_topo(+1)
@@ -1160,6 +1171,12 @@ class TopologyExplorer:
 
     def _draw(self):
         ax = self.ax
+        if not getattr(self, '_autoscale_needed', True):
+            curr_xlim = ax.get_xlim()
+            curr_ylim = ax.get_ylim()
+        else:
+            curr_xlim = None
+            curr_ylim = None
         ax.clear()
         n   = len(self.topos)
         nb  = len(self.wrappers)
@@ -1434,7 +1451,72 @@ class TopologyExplorer:
         ax.legend(handles=handles, loc='upper right', fontsize=9)
 
         ax.set_aspect('equal')
-        ax.autoscale_view()
+        if curr_xlim is not None:
+            ax.set_xlim(curr_xlim)
+            ax.set_ylim(curr_ylim)
+        else:
+            ax.autoscale_view()
+            self._home_xlim = ax.get_xlim()
+            self._home_ylim = ax.get_ylim()
+            self._autoscale_needed = False
+
+        self.fig.canvas.draw_idle()
+
+    def _zoom_home(self):
+        if self._home_xlim is not None:
+            self.ax.set_xlim(self._home_xlim)
+            self.ax.set_ylim(self._home_ylim)
+            toolbar = getattr(self.fig.canvas, 'toolbar', None)
+            if toolbar is not None:
+                toolbar.update()   # reset toolbar nav stack to current limits
+        else:
+            self.ax.autoscale()
+        self.fig.canvas.draw_idle()
+
+    def _zoom_to_bundle(self, _=None):
+        """Zoom axes to the bounding box of the active bundle's terminals/topology."""
+        topo = self.topos[self.idx]
+        xs, ys = [], []
+        # Add topology endpoints
+        for seg in topo.segments:
+            xs.extend([float(seg.start.x), float(seg.end.x)])
+            ys.extend([float(seg.start.y), float(seg.end.y)])
+        # Add terminal positions
+        b = self.wrapper.input.original_bundle
+        xs.append(float(b.driver_position[0]))
+        ys.append(float(b.driver_position[1]))
+        for rcv in b.receiver_positions:
+            xs.append(float(rcv[0]))
+            ys.append(float(rcv[1]))
+
+        if not xs:
+            return
+        x0, x1 = min(xs), max(xs)
+        y0, y1 = min(ys), max(ys)
+        pad_x = max((x1 - x0) * 0.2, 50)
+        pad_y = max((y1 - y0) * 0.2, 50)
+        self.ax.set_xlim(x0 - pad_x, x1 + pad_x)
+        self.ax.set_ylim(y0 - pad_y, y1 + pad_y)
+        self.fig.canvas.draw_idle()
+
+    def _interactive_zoom(self, event, zoom_in: bool):
+        scale = 0.8 if zoom_in else 1.25
+        ax = self.ax
+        x, y = event.xdata, event.ydata
+        if event.inaxes != ax or x is None or y is None:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            x = (xlim[0] + xlim[1]) / 2
+            y = (ylim[0] + ylim[1]) / 2
+
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        new_xlim = (x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
+        new_ylim = (y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
+        
+        ax.set_xlim(new_xlim)
+        ax.set_ylim(new_ylim)
         self.fig.canvas.draw_idle()
 
     def show(self):
