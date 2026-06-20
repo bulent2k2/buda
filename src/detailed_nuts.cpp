@@ -324,18 +324,14 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             }
 
             // Ends with no endpoint conn (e.g. a BUSTERM face) keep the
-            // abstract span.
+            // abstract span.  span_lo/span_hi keep nominal endpoint identity
+            // (set from lo_end/hi_end connections) and may end up span_lo >
+            // span_hi when placement swaps the two ends; the dnuts connectivity
+            // check takes min/max locally rather than reordering them.
             if (has_ep_lo) ns.span_lo = ep_lo;
             if (has_ep_hi) ns.span_hi = ep_hi;
             if (cover_lo < ns.span_lo) ns.span_lo = cover_lo;
             if (cover_hi > ns.span_hi) ns.span_hi = cover_hi;
-
-            // lo_end/hi_end are nominal labels; placement can swap the actual
-            // order of the two endpoint connections, leaving span_lo > span_hi.
-            // Normalise so the (backwards but valid) extent is not misread as an
-            // open by the dnuts connectivity check.  Mirrors the abstract-NUTS
-            // span normalisation in nuts.cpp.
-            if (ns.span_lo > ns.span_hi) std::swap(ns.span_lo, ns.span_hi);
         }
     }
 

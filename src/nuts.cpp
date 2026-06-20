@@ -346,15 +346,12 @@ static void do_span_adjustments(
             if (all_hi_endpoints || hi_jog) other->span_hi = max_hi;
             else other->span_hi = std::max(other->span_hi, max_hi);
         }
-
-        // The lo_end/hi_end labels come from the segment's NOMINAL orientation,
-        // but NUTS placement can swap the actual order of the two end
-        // connections (e.g. a Z-trunk whose left/right via positions flip).
-        // That leaves span_lo > span_hi — a backwards but geometrically valid
-        // extent that downstream consumers (connectivity checks, detailed NUTS)
-        // misread as an open.  Normalise so span_lo <= span_hi always holds.
-        if (other->span_lo > other->span_hi)
-            std::swap(other->span_lo, other->span_hi);
+        // span_lo/span_hi intentionally keep NOMINAL endpoint identity (span_lo
+        // is the lo_end coordinate, span_hi the hi_end) even when placement
+        // leaves span_lo > span_hi: corner/dogleg logic derives the fixed anchor
+        // as `lo_end ? span_hi : span_lo` and relies on that pairing.  Consumers
+        // that need an ordered extent (the connectivity checks) take min/max
+        // locally rather than mutating the stored bounds here.
     }
 }
 
