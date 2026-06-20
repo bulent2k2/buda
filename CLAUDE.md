@@ -27,6 +27,7 @@ The **Floorplanner** (`./fp`, `./bfp`) is a separate interactive GUI tool that e
 - [Congestion Planner](docs/congestion_planner.md) — Internal design of the bundle planner: cost model, hard overflow constraint, rip-up & replan.
 - [Detailed NUTS](docs/detailed_nuts.md) — Internal design of bit-level track assignment.
 - [Routing Grid](docs/routing_grid.md), [Detailed Viz](docs/detailed_viz.md), [Key Bindings](docs/KEY_BINDINGS.md).
+- [BDB → Flat Script Converter](docs/BDB2BUDA.md) — `tools/bdb2buda.py`: export a BDB as a flat `.buda` routing script.
 
 ## Build
 
