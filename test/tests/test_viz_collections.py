@@ -127,6 +127,54 @@ def test_nuts_bands_are_collections(monkeypatch):
         assert isinstance(e["artist"], (LineCollection, PatchCollection))
 
 
+def test_step_bundle_reveals_selected_when_all_bundles_off(monkeypatch):
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+
+    viz._on_bundle_toggle_all()                 # turn All Bundles OFF
+    assert all(e["artist"].get_alpha() == 0
+               for es in viz._bundle_artists.values() for e in es), \
+        "All Bundles off should hide every bundle"
+
+    viz._on_key(types.SimpleNamespace(key="n"))  # step to a bundle
+    sel = viz._highlighted
+    assert sel is not None
+    # The selected bus's segs are revealed despite All Bundles being off...
+    assert any((e["artist"].get_alpha() or 0) > 0.5
+               for e in viz._bundle_artists[sel] if not e["is_band"]), \
+        "selected bundle should become visible after n/p"
+    # ...and everything else stays hidden (spotlight, not accumulate).
+    assert all(e["artist"].get_alpha() == 0
+               for bid, es in viz._bundle_artists.items() if bid != sel
+               for e in es)
+
+    viz._on_key(types.SimpleNamespace(key="p"))  # move spotlight off `sel`
+    assert all(e["artist"].get_alpha() == 0 for e in viz._bundle_artists[sel]), \
+        "previously selected bundle returns to hidden when the spotlight moves"
+
+
+def test_t_key_toggles_busterms_not_explorer(monkeypatch):
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._topo_explorer is None
+    before = viz.ui_state.busterms
+    viz._on_key(types.SimpleNamespace(key="t"))   # 't' = busterms only, NOT TopoExp
+    assert viz.ui_state.busterms != before
+    assert viz._topo_explorer is None, "'t' must not open the Topology Explorer"
+    viz._on_key(types.SimpleNamespace(key="t"))
+    assert viz.ui_state.busterms == before
+
+
+def test_g_key_toggles_hanan_grid(monkeypatch):
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    before = viz.ui_state.hanan_grid
+    viz._on_key(types.SimpleNamespace(key="g"))
+    assert viz.ui_state.hanan_grid != before
+    viz._on_key(types.SimpleNamespace(key="g"))
+    assert viz.ui_state.hanan_grid == before
+
+
 def test_rerun_in_detailed_mode_hides_abstract_tracks(monkeypatch):
     viz = _build_viz("dnuts1.buda", monkeypatch)
     viz._toggle_detailed()                      # enter detailed mode

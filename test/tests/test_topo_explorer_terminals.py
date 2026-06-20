@@ -74,6 +74,21 @@ def test_terminals_setting_carries_over_to_explorer():
         plt.close("all")
 
 
+def test_explorer_g_key_toggles_hanan():
+    import types
+    import matplotlib.pyplot as plt
+    s = _session()
+    st = ViewState()
+    exp = buda_viz.TopologyExplorer(
+        s.fp, s.bundles, layer_stack=s.layers, ui_state=st)
+    try:
+        before = st.hanan_grid
+        exp._on_key(types.SimpleNamespace(key="g"))   # 'g' toggles the Hanan grid
+        assert st.hanan_grid != before
+    finally:
+        plt.close("all")
+
+
 def test_explorer_t_key_toggles_terminals():
     import matplotlib.pyplot as plt
     s = _session()
