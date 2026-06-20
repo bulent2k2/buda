@@ -279,12 +279,16 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
             if (ts.bundle_id != bundle_id || !ts.placed || covered) continue;
             if (ts.seg_idx < 0 || ts.seg_idx >= n) continue;
             const ConnSeg& cs = segs[ts.seg_idx];
+            // span_lo/span_hi may be stored reversed (nominal endpoint identity);
+            // crossing a block is an ordered-extent test.
+            const double s_lo = std::min(ts.span_lo, ts.span_hi);
+            const double s_hi = std::max(ts.span_lo, ts.span_hi);
             for (const Rect& r : rects) {
                 bool through = cs.horiz
                     ? (ts.track_position >= r.y1 && ts.track_position <= r.y2
-                       && ts.span_lo <= r.x2 && ts.span_hi >= r.x1)
+                       && s_lo <= r.x2 && s_hi >= r.x1)
                     : (ts.track_position >= r.x1 && ts.track_position <= r.x2
-                       && ts.span_lo <= r.y2 && ts.span_hi >= r.y1);
+                       && s_lo <= r.y2 && s_hi >= r.y1);
                 if (through) { covered = true; break; }
             }
         }
@@ -445,12 +449,15 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                 if (it == ns_map.end()) continue;
                 const NetSegment& ns = *it->second;
                 const ConnSeg& cs = segs[i];
+                // Ordered extent: span_lo/span_hi may be stored reversed.
+                const double s_lo = std::min(ns.span_lo, ns.span_hi);
+                const double s_hi = std::max(ns.span_lo, ns.span_hi);
                 for (const Rect& r : rects) {
                     bool through = cs.horiz
                         ? (ns.track_position >= r.y1 && ns.track_position <= r.y2
-                           && ns.span_lo <= r.x2 && ns.span_hi >= r.x1)
+                           && s_lo <= r.x2 && s_hi >= r.x1)
                         : (ns.track_position >= r.x1 && ns.track_position <= r.x2
-                           && ns.span_lo <= r.y2 && ns.span_hi >= r.y1);
+                           && s_lo <= r.y2 && s_hi >= r.y1);
                     if (through) { covered = true; break; }
                 }
             }

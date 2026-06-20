@@ -377,6 +377,13 @@ static void do_span_adjustments(
 
 // KeepoutZones on the segment's layer that intersect its span, as occupied
 // perpendicular intervals.
+// span_lo/span_hi carry NOMINAL endpoint identity and may be stored with
+// span_lo > span_hi after placement (see do_span_adjustments).  Geometric tests
+// — overlap detection, keepout/occupancy, block coverage — need the ORDERED
+// extent, so they take these instead of reading span_lo/span_hi directly.
+static inline double sp_lo(const TrackSegment& s) { return std::min(s.span_lo, s.span_hi); }
+static inline double sp_hi(const TrackSegment& s) { return std::max(s.span_lo, s.span_hi); }
+
 static void keepout_occupied(const std::vector<KeepoutZone>& kozs,
                              const TrackSegment* t,
                              std::vector<std::pair<double,double>>& occ)
@@ -385,12 +392,12 @@ static void keepout_occupied(const std::vector<KeepoutZone>& kozs,
         if (!koz.layer_ids.count(t->layer)) continue;
         if (t->horiz) {
             // Horizontal segment: span in X, pos in Y.
-            if (t->span_lo < koz.bbox.x2 && t->span_hi > koz.bbox.x1)
+            if (sp_lo(*t) < koz.bbox.x2 && sp_hi(*t) > koz.bbox.x1)
                 occ.push_back({static_cast<double>(koz.bbox.y1),
                                static_cast<double>(koz.bbox.y2)});
         } else {
             // Vertical segment: span in Y, pos in X.
-            if (t->span_lo < koz.bbox.y2 && t->span_hi > koz.bbox.y1)
+            if (sp_lo(*t) < koz.bbox.y2 && sp_hi(*t) > koz.bbox.y1)
                 occ.push_back({static_cast<double>(koz.bbox.x1),
                                static_cast<double>(koz.bbox.x2)});
         }
@@ -410,7 +417,7 @@ static bool segs_overlap(const TrackSegment& a, const TrackSegment& b)
     // PERPENDICULAR (track), a parallel touch just means two bundles sit edge to
     // edge; intra-bundle spacing covers it → not a DRC: the perp test stays
     // STRICT.  So: spans overlap-or-touch AND tracks strictly overlap.
-    if (a.span_hi < b.span_lo || b.span_hi < a.span_lo) return false;
+    if (sp_hi(a) < sp_lo(b) || sp_hi(b) < sp_lo(a)) return false;
     return a.track_position + a.width / 2.0 > b.track_position - b.width / 2.0 &&
            b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0;
 }
@@ -432,16 +439,17 @@ static std::vector<std::pair<int,int>> find_overlaps(
     std::vector<int> active;
     for (auto& [layer, idx] : by_layer) {
         std::sort(idx.begin(), idx.end(), [&](int a, int b) {
-            return segments[a].span_lo < segments[b].span_lo;
+            return sp_lo(segments[a]) < sp_lo(segments[b]);
         });
         active.clear();
         for (int i : idx) {
-            const double lo_i = segments[i].span_lo;
+            const double lo_i = sp_lo(segments[i]);
             // Evict only segments whose span ended strictly before i starts —
             // a segment ending exactly at lo_i still TOUCHES i and must be
-            // compared (segs_overlap treats touch as a conflict).
+            // compared (segs_overlap treats touch as a conflict).  Ordered bounds:
+            // span_lo/span_hi may be stored reversed (nominal endpoint identity).
             active.erase(std::remove_if(active.begin(), active.end(),
-                [&](int a) { return segments[a].span_hi < lo_i; }), active.end());
+                [&](int a) { return sp_hi(segments[a]) < lo_i; }), active.end());
             for (int a : active)
                 if (segs_overlap(segments[i], segments[a]))
                     pairs.push_back({std::min(i, a), std::max(i, a)});
@@ -480,8 +488,8 @@ static void compute_metrics(NUTSResult& result)
         od.layer   = a.layer;
         od.bid_a   = a.bundle_id;  od.seg_a = a.seg_idx;
         od.bid_b   = b.bundle_id;  od.seg_b = b.seg_idx;
-        od.span_lo = std::max(a.span_lo, b.span_lo);
-        od.span_hi = std::min(a.span_hi, b.span_hi);
+        od.span_lo = std::max(sp_lo(a), sp_lo(b));   // ordered: spans may be reversed
+        od.span_hi = std::min(sp_hi(a), sp_hi(b));
         od.perp_lo = std::max(a.track_position - a.width / 2.0,
                               b.track_position - b.width / 2.0);
         od.perp_hi = std::min(a.track_position + a.width / 2.0,
@@ -569,7 +577,7 @@ void NUTSEngine::repair_overlaps(
                 if (&o == victim || !o.placed) continue;
                 if (o.layer != victim->layer) continue;
                 if (o.bundle_id == victim->bundle_id) continue;
-                if (o.span_lo <= victim->span_hi && victim->span_lo <= o.span_hi) {  // closed: touch = occupied
+                if (sp_lo(o) <= sp_hi(*victim) && sp_lo(*victim) <= sp_hi(o)) {  // closed: touch = occupied
                     const double h = o.width / 2.0;
                     occ.push_back({o.track_position - h, o.track_position + h});
                 }
@@ -973,7 +981,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             // ts is occupancy too, so ts is kept off o's track and the two don't
             // end up collinear (an end-to-end DRC).  Spans that are truly
             // disjoint (gap > 0) still don't block.
-            if (o->span_lo <= ts->span_hi && ts->span_lo <= o->span_hi) {
+            if (sp_lo(*o) <= sp_hi(*ts) && sp_lo(*ts) <= sp_hi(*o)) {
                 const double h = o->width / 2.0;
                 occ.push_back({o->track_position - h, o->track_position + h});
             }
@@ -1030,7 +1038,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             for (const TrackSegment* o : segs) {
                 if (!o->placed || member_set.count(o)) continue;
                 if (o->bundle_id == m->bundle_id) continue;
-                if (o->span_lo <= m->span_hi && m->span_lo <= o->span_hi) {  // closed: touch = occupied
+                if (sp_lo(*o) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*o)) {  // closed: touch = occupied
                     const double h = o->width / 2.0;
                     occ.push_back({o->track_position - h, o->track_position + h});
                 }
@@ -1043,7 +1051,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                 // (e.g. blk-local buses left and right of a cross-chip
                 // trunk, all at the same Hanan band) are packed as if
                 // simultaneous and wedge a window that has room for all.
-                if (!(pm->span_lo <= m->span_hi && m->span_lo <= pm->span_hi))  // closed: touch = occupied
+                if (!(sp_lo(*pm) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*pm)))  // closed: touch = occupied
                     continue;
                 const double h = pm->width / 2.0;
                 occ.push_back({ppos - h, ppos + h});
@@ -1252,7 +1260,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // nearest free track.
     std::stable_sort(free_segs.begin(), free_segs.end(),
         [](const TrackSegment* a, const TrackSegment* b) {
-            return a->span_lo < b->span_lo;
+            return sp_lo(*a) < sp_lo(*b);   // ordered: span_lo may be reversed
         });
     for (TrackSegment* ts : free_segs) place_seg(ts);
 }
@@ -1800,7 +1808,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
             for (const auto& ts : out.result.segments)
                 if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == p.split_trunk.second) {
                     trunk_w        = ts.width;
-                    trunk_span     = ts.span_hi - ts.span_lo;
+                    trunk_span     = sp_hi(ts) - sp_lo(ts);   // ordered length
                     trunk_slide_lo = ts.interval_lo;
                     trunk_slide_hi = ts.interval_hi;
                     trunk_slide    = ts.interval_hi - ts.interval_lo;
@@ -1860,7 +1868,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
             double jog_len = std::numeric_limits<double>::max();
             for (const auto& ts : t.result.segments)
                 if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == dr.jog_si)
-                    jog_len = ts.span_hi - ts.span_lo;
+                    jog_len = sp_hi(ts) - sp_lo(ts);   // ordered length
             // Prefer: fewer overlaps, then the LONGER trunk (more jog room), then
             // the shorter jog.
             const int ov = t.result.num_overlaps;
