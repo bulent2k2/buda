@@ -42,6 +42,42 @@ def test_floorplanner_commands_create_move_validate_and_write(tmp_path):
     assert (comps["u_cpu"].x1, comps["u_cpu"].y1) == (120, 150)
 
 
+def test_write_lock_excludes_second_session(tmp_path):
+    bdb_path = str(tmp_path / "locked.bdb")
+    s1 = fpc.create_bdb(bdb_path, 1000, 800)
+    assert s1.is_read_only is False
+    # A second session on the same DB must be read-only while s1 holds the lock.
+    s2 = fpc.load_bdb(bdb_path)
+    assert s2.is_read_only is True
+    with pytest.raises(PermissionError):
+        fpc.write_bdb(s2)
+    # After s1 releases, a fresh session becomes writable again.
+    fpc.release_bdb_lock(s1)
+    s3 = fpc.load_bdb(bdb_path)
+    assert s3.is_read_only is False
+
+
+def test_write_lock_shared_across_path_aliases(tmp_path):
+    # Aliases of the same DB (symlink, relative-vs-absolute) must resolve to one
+    # lock so two sessions can't both stay writable and clobber each other.
+    real = str(tmp_path / "real.bdb")
+    link = str(tmp_path / "link.bdb")
+    s1 = fpc.create_bdb(real, 1000, 800)
+    assert s1.is_read_only is False
+
+    os.symlink(real, link)
+    s_link = fpc.load_bdb(link)
+    assert s_link.is_read_only is True, "symlink alias must share the lock"
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        s_rel = fpc.load_bdb("real.bdb")
+    finally:
+        os.chdir(cwd)
+    assert s_rel.is_read_only is True, "relative-path alias must share the lock"
+
+
 def test_validate_parent_child_not_flagged(tmp_path):
     state = fpc.create_bdb(str(tmp_path / "v.bdb"), 1000, 800, grid=10)
     # Parent fully contains child — must NOT be an overlap

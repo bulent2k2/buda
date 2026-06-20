@@ -58,17 +58,30 @@ class BlockNode:
 
 
 def _try_acquire_write_lock(path: str) -> int | None:
-    """Try a non-blocking exclusive flock on `path`.
+    """Try a non-blocking exclusive flock coordinating fp sessions on `path`.
 
     Returns an open file descriptor (the caller must keep it alive to hold the
     lock) or None if another process already holds the lock.  The OS releases
     the lock automatically when the fd is closed or the process exits, so
     there are no stale-lock issues.
 
+    The lock is taken on a dedicated sidecar file ``<canonical-path>.fplock``,
+    NOT on the BDB file itself: SQLite's macOS VFS already holds an ``flock`` on
+    the open database, so flocking the same file would collide with our own live
+    ``buda.BDB`` connection and wrongly report the session as read-only.  A
+    separate sidecar is never touched by SQLite and works on every platform.
+
+    The path is canonicalised with ``os.path.realpath`` first so that aliases of
+    the same database (symlinks, ``..`` segments, relative vs absolute) map to a
+    single sidecar — otherwise two sessions opening the same DB through different
+    paths would lock distinct files and both stay writable, letting their
+    ``write_bdb`` calls clobber each other.
+
     Falls back to None (no lock, always writable) on platforms without fcntl.
     """
+    lock_path = os.path.realpath(path) + ".fplock"
     try:
-        fd = os.open(path, os.O_RDONLY)
+        fd = os.open(lock_path, os.O_RDONLY | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         return fd
     except BlockingIOError:
@@ -78,7 +91,7 @@ def _try_acquire_write_lock(path: str) -> int | None:
             pass
         return None
     except Exception:
-        # File not yet created, unsupported platform, etc. — allow write.
+        # Unsupported platform, unwritable directory, etc. — allow write.
         return None
 
 
