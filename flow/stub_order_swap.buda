@@ -1,0 +1,22 @@
+source tracks4top.buda
+
+add_block blk_00 2960 7760 4560 9160
+add_block blk_06 200 9460 2700 10560
+add_block blk_08 200 4370 2300 5270
+
+add_net bus_020[8] blk_08.p blk_06.p,blk_00.p
+
+run_bundler
+generate_topologies
+select_topology 1 1
+run_planner
+
+# insert keepout in the middle of the pipeline!?
+add_keepout 1000 8900 2800 9100 M7
+
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+visualize
+
