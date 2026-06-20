@@ -15,6 +15,23 @@ else()
     add_compile_options(-O3 -march=native -Wall -Wextra -fPIC)
 endif()
 
+# assert()s are cheap correctness guards (e.g. ConnTopology's slide-window
+# invariants) and we keep them ON by default.  This project always optimizes
+# (-O3 above) regardless of build type, so CMAKE_BUILD_TYPE only controls
+# whether -DNDEBUG is added (Release/RelWithDebInfo/MinSizeRel compile asserts
+# OUT).  That choice was leaking from each build dir's *cached* CMAKE_BUILD_TYPE,
+# so the same source asserted in one checkout and silently skipped the guard in
+# another.  Make the policy explicit and cache-independent: the -U/-D below is a
+# directory compile option, emitted AFTER the per-config flags, so it wins over
+# any -DNDEBUG a build type adds.  Opt into an assert-free build with
+# -DBUDA_ASSERTS=OFF.
+option(BUDA_ASSERTS "Keep assert() active regardless of build type" ON)
+if(MSVC)
+    add_compile_options($<IF:$<BOOL:${BUDA_ASSERTS}>,/UNDEBUG,/DNDEBUG>)
+else()
+    add_compile_options($<IF:$<BOOL:${BUDA_ASSERTS}>,-UNDEBUG,-DNDEBUG>)
+endif()
+
 execute_process(
     COMMAND python3 -c "import pybind11; print(pybind11.get_cmake_dir())"
     OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
