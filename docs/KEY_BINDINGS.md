@@ -19,6 +19,8 @@ Here are the keyboard shortcuts available in each view.
 | `h`, `H`, `cmd+a`, `ctrl+a` | **Home**: Reset zoom and return to the original full view. |
 | `a` | **Reset/Clear**: Clear the current bundle highlight. If in detailed mode, resets to global view. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
+| `t` | Toggle visibility of **busterms**. |
+| `g` | Toggle visibility of the **Hanan** grid. |
 | `d` | Toggle **Detailed Mode** (shows 1.5-D track assignments if `run_detailed_nuts` was used). |
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close the visualizer. |
@@ -41,6 +43,8 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `x` | **Deselect/Unpin**: Remove the manual pin, letting the planner choose automatically. |
 | `r` | **Re-run Planner**: Re-evaluate global routing and NUTS track assignment after changing a pin. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
+| `t` | Toggle visibility of **busterms**. |
+| `g` | Toggle visibility of the **Hanan** grid. |
 | `cmd+1`, `ctrl+1` | Bring the **Main View** window to the front. |
 | `z` | **Zoom In** (centered on the mouse cursor). |
 | `Z` (Shift+z) | **Zoom Out** (centered on the mouse cursor). |

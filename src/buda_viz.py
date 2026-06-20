@@ -1070,6 +1070,7 @@ class TopologyExplorer:
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
         if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
         if event.key == 'b':                    self.ui_state.toggle_blocks()
+        if event.key == 'g':                    self.ui_state.toggle_hanan_grid()
         if event.key == 't':                    self.ui_state.toggle_busterms()
         if event.key == 's':
             if self._current_is_selected(): self._deselect_current()
@@ -1887,12 +1888,16 @@ class BudaVisualizer:
         for bid, entries in active_reg.items():
             bundle_on = self._bundle_visible.get(bid, True)
             selected  = (active_bids is None) or (bid in active_bids)
+            # An *explicitly* selected bundle is revealed even when "All Bundles"
+            # hid it, so n/p step through and turn on the chosen bus's segs/bits.
+            explicitly_selected = (active_bids is not None) and (bid in active_bids)
 
             for e in entries:
                 a = e['artist']
 
-                # Bundle visibility: hard gate — always off when hidden.
-                if not bundle_on:
+                # Bundle visibility: hard gate — off when hidden, unless this is
+                # the explicitly selected bundle (highlight overrides the toggle).
+                if not bundle_on and not explicitly_selected:
                     a.set_alpha(0.0)
                     if e['lw'] is not None: a.set_linewidth(e['lw'])
                     continue
@@ -2667,6 +2672,7 @@ class BudaVisualizer:
         if event.key in (']', 'pagedown'): self._step_bundle(+1)
         if event.key in ('v', 't', 'cmd+t', 'ctrl+t'): self._open_topo_explorer()
         if event.key == 'b':                  self._toggle_blocks()
+        if event.key == 'g':                  self._toggle_hanan()
         if event.key == 'd' and self._has_detailed_data: self._toggle_detailed()
 
     # ------------------------------------------------------------------
