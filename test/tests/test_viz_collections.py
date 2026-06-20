@@ -153,6 +153,25 @@ def test_step_bundle_reveals_selected_when_all_bundles_off(monkeypatch):
         "previously selected bundle returns to hidden when the spotlight moves"
 
 
+def test_arrow_keys_pan_the_view(monkeypatch):
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+
+    x0 = viz.ax.get_xlim()
+    viz._on_key(types.SimpleNamespace(key="right"))
+    x1 = viz.ax.get_xlim()
+    assert x1[0] > x0[0] and x1[1] > x0[1], "right should pan the view right"
+    viz._on_key(types.SimpleNamespace(key="left"))
+    assert viz.ax.get_xlim()[0] < x1[0], "left should pan back"
+
+    y0 = viz.ax.get_ylim()
+    viz._on_key(types.SimpleNamespace(key="up"))
+    y1 = viz.ax.get_ylim()
+    assert y1[0] > y0[0], "up should pan the view up"
+    viz._on_key(types.SimpleNamespace(key="down"))
+    assert viz.ax.get_ylim()[0] < y1[0], "down should pan back"
+
+
 def test_t_key_toggles_busterms_not_explorer(monkeypatch):
     import types
     viz = _build_viz("dnuts1.buda", monkeypatch)
