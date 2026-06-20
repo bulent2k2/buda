@@ -1,0 +1,10 @@
+source /Users/ben/src/git/buda/gem/flow/tracks4top.buda
+source tc3a_flat_x10.buda
+run_bundler
+generate_topologies
+run_planner
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+visualize
