@@ -74,7 +74,7 @@ def test_detailed_artists_built_lazily(monkeypatch):
     assert viz._detailed_bundle_artists == {}
     assert viz._grid_rail_artists == []
 
-    viz._toggle_detailed()  # opens the detailed view → triggers the lazy build
+    viz._toggle_detailed()  # opens the detailed view → builds bit-wires only
 
     assert viz._detailed_built is True
     assert viz._detailed_bundle_artists, "bit-wire collections should now exist"
@@ -82,9 +82,19 @@ def test_detailed_artists_built_lazily(monkeypatch):
     for entries in viz._detailed_bundle_artists.values():
         for e in entries:
             assert isinstance(e["artist"], LineCollection)
-    # Rail stripes are PatchCollections (one per layer×kind).
+
+    # Background rail stripes (Tracks) are off by default and must NOT be built
+    # just because the detailed view opened — they are deferred to [Tracks].
+    assert viz.ui_state.tracks is False
+    assert viz._rails_built is False
+    assert viz._grid_rail_artists == []
+
+    viz._toggle_tracks()  # first [Tracks] enable → builds the rail stripes
+    assert viz._rails_built is True
+    assert viz._grid_rail_artists, "rail collections should exist after Tracks on"
     for e in viz._grid_rail_artists:
         assert isinstance(e["artist"], PatchCollection)
+        assert e["artist"].get_visible()
 
 
 def test_nuts_bands_are_collections(monkeypatch):
