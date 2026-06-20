@@ -1479,18 +1479,24 @@ class TopologyExplorer:
     def _zoom_to_bundle(self, _=None):
         """Zoom axes to the bounding box of the active bundle's terminals/topology."""
         topo = self.topos[self.idx]
+        ct = self._build_conn_topo(topo)
         xs, ys = [], []
         # Add topology endpoints
         for seg in topo.segments:
             xs.extend([float(seg.start.x), float(seg.end.x)])
             ys.extend([float(seg.start.y), float(seg.end.y)])
-        # Add terminal positions
-        b = self.wrapper.input.original_bundle
-        xs.append(float(b.driver_position[0]))
-        ys.append(float(b.driver_position[1]))
-        for rcv in b.receiver_positions:
-            xs.append(float(rcv[0]))
-            ys.append(float(rcv[1]))
+        # Add busterm connection positions
+        for cs in ct.segs():
+            display_perp = self._centered_perp(cs)
+            for conn in cs.conns:
+                if conn.kind != ic.SegConnKind.BUSTERM:
+                    continue
+                if cs.horiz:
+                    px, py = conn.at_pos, display_perp
+                else:
+                    px, py = display_perp, conn.at_pos
+                xs.append(float(px))
+                ys.append(float(py))
 
         if not xs:
             return
