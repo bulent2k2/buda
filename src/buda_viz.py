@@ -1621,10 +1621,13 @@ class BudaVisualizer:
         self._detailed_bundle_artists = {}   # bid -> [{artist,alpha,lw,is_band,layer}]
         self._grid_rail_artists      = []    # POWER/GND/CLK stripe collections (not per-bundle)
         self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
-        # Lazy build: detailed bit-wires + rail stripes (~thousands of artists)
-        # are only created on the first [Detailed] toggle, not at load.
+        # Lazy build: bit-wires are created on the first [Detailed] toggle; the
+        # background rail stripes (~thousands of track rects) are deferred even
+        # further — to the first [Tracks] enable — since Tracks is off by default
+        # and most detailed-view sessions only look at the routing wiring.
         self._has_detailed_data      = False
-        self._detailed_built         = False
+        self._detailed_built         = False   # bit-wire LineCollections built
+        self._rails_built            = False   # rail-stripe PatchCollections built
         self._detailed_result        = None
         self._detailed_grid_stack    = None
         self._detailed_layer_stack   = None
@@ -1835,10 +1838,14 @@ class BudaVisualizer:
         for a in self._block_name_artists:
             a.set_visible(self.ui_state.block_names and self.ui_state.blocks)
 
-        # Detailed-mode track rails: re-apply the set_visible gate (alpha is
-        # handled by _refresh_highlight). Without this, flags flipped via the
-        # All toggle would show the Tracks button as on while rails hidden by a
-        # prior Tracks-off stay invisible.
+        # Detailed-mode track rails.  Tracks can be turned on via paths that
+        # don't go through _toggle_tracks() — notably the All toggle, which sets
+        # ui_state.tracks via ViewState.toggle_all() and only notifies — so build
+        # the (lazy) rails here if they're now needed but not yet built.
+        if (self.ui_state.tracks and self.ui_state.detailed_mode
+                and not self._rails_built and self._has_detailed_data):
+            self._build_rail_artists()
+        # Re-apply the set_visible gate (alpha is handled by _refresh_highlight).
         for e in self._grid_rail_artists:
             e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
 
@@ -2257,15 +2264,19 @@ class BudaVisualizer:
         self._detailed_bundle_artists.clear()
         self._grid_rail_artists.clear()
         self._detailed_built = False   # force lazy rebuild from the new result
+        self._rails_built    = False
 
         # Redraw segments at new track positions.
         self.draw_nuts_tracks(nuts_result)
         if detailed_result is not None and self.routing_grid and self.layer_stack:
             self.draw_detailed_tracks(detailed_result, self.routing_grid, self.layer_stack)
             # If the detailed view is currently open, rebuild its artists now so
-            # the window isn't left empty until the next toggle.
+            # the window isn't left empty until the next toggle.  Rails are only
+            # rebuilt when Tracks is actually on (kept lazy otherwise).
             if self.ui_state.detailed_mode:
                 self._build_detailed_artists()
+                if self.ui_state.tracks:
+                    self._build_rail_artists()
                 # draw_nuts_tracks() just created the abstract artists visible;
                 # hide them so detailed mode doesn't overlay both sets
                 # (_refresh_highlight only governs _detailed_bundle_artists here).
@@ -3164,21 +3175,31 @@ class BudaVisualizer:
         # Update bundle list to show bit placement stats.
         self._redraw_bundle_list()
 
-    def _build_detailed_artists(self):
-        """Create the detailed bit-wire + rail-stripe artists (once, lazily).
+    def _has_rail_layers(self):
+        """True if any layer has a track pattern (so rails could be drawn).
 
-        Bit-wires are grouped into one LineCollection per (bundle, layer) and
-        rails into one PatchCollection per (layer, kind), collapsing thousands
-        of individual artists into a few hundred so the detailed view renders
-        quickly.  All artists start hidden; the toggle reveals them.
+        Cheap check (no rect enumeration) used to decide whether the [Tracks]
+        button is meaningful, without eagerly building the rail artists.
         """
-        if self._detailed_built or not self._has_detailed_data:
+        grid = self._detailed_grid_stack
+        if grid is None:
+            return False
+        return any(grid.has_layer(lid) for lid in self._layer_is_h)
+
+    def _build_rail_artists(self):
+        """Create the background rail-stripe artists (once, lazily).
+
+        Deferred to the first [Tracks] enable: enumerating every track across
+        the layout (tracks_in_range per layer) and building a Rectangle each is
+        the costly part of the detailed view, and Tracks is off by default, so
+        most sessions never need it.  Rails are grouped into one PatchCollection
+        per (layer, kind); they start hidden and the toggle reveals them.
+        """
+        if self._rails_built or not self._has_detailed_data:
             return
-        self._detailed_built = True
+        self._rails_built = True
 
         routing_grid_stack = self._detailed_grid_stack
-        layer_stack        = self._detailed_layer_stack
-        detailed_result    = self._detailed_result
 
         # Layout bounding box for grid-rail extent.
         all_blocks = list(self.fp.get_all_blocks())
@@ -3228,6 +3249,21 @@ class BudaVisualizer:
             self.ax.add_collection(pc)
             self._grid_rail_artists.append({'artist': pc, 'layer': lid, 'alpha': base_alpha})
 
+    def _build_detailed_artists(self):
+        """Create the detailed bit-wire artists (once, lazily).
+
+        Bit-wires are grouped into one LineCollection per (bundle, layer),
+        collapsing thousands of individual artists into a few hundred so the
+        detailed view renders quickly.  The background rail stripes are built
+        separately by _build_rail_artists() on the first [Tracks] enable.  All
+        artists start hidden; the toggle reveals them.
+        """
+        if self._detailed_built or not self._has_detailed_data:
+            return
+        self._detailed_built = True
+
+        detailed_result = self._detailed_result
+
         # Bit-wire NetSegments → one LineCollection per (bundle, layer).
         # span_lo/span_hi are already junction-adjusted by DetailedNUTSEngine.
         layer_specs = {k: {'color': v} for k, v in _LAYER_COLOR.items()}
@@ -3267,6 +3303,9 @@ class BudaVisualizer:
         for entries in self._detailed_bundle_artists.values():
             for e in entries:
                 e['artist'].set_visible(active)
+        # If Tracks is already on when entering Detailed, build the rails now.
+        if active and self.ui_state.tracks and not self._rails_built:
+            self._build_rail_artists()
         for e in self._grid_rail_artists:
             e['artist'].set_visible(active and self.ui_state.tracks)
 
@@ -3274,9 +3313,11 @@ class BudaVisualizer:
             lbl = '☑ Detailed' if active else '☐ Detailed'
             self._btn_detailed.label.set_text(lbl)
             self._btn_detailed.ax.set_facecolor('#ffe8cc' if active else '#e8f4e8')
-            
+
         if self._btn_tracks is not None:
-            self._btn_tracks.ax.set_visible(active and bool(self._grid_rail_artists))
+            # Gate on rail-layer availability (cheap) — not on built artifacts —
+            # so the button appears before the rails are lazily built.
+            self._btn_tracks.ax.set_visible(active and self._has_rail_layers())
 
         # Re-apply highlight/layer/bundle visibility to the now-active set.
         self._refresh_highlight()
@@ -3285,7 +3326,12 @@ class BudaVisualizer:
     def _toggle_tracks(self):
         self.ui_state.toggle_tracks()
         vis = self.ui_state.tracks
-        
+
+        # Build the rail stripes the first time Tracks is enabled (deferred from
+        # the [Detailed] build since Tracks is off by default).
+        if vis and not self._rails_built:
+            self._build_rail_artists()
+
         for e in self._grid_rail_artists:
             # Visibility is hard-gated by detailed_mode, alpha by _refresh_highlight.
             e['artist'].set_visible(self.ui_state.detailed_mode and vis)
@@ -3506,8 +3552,10 @@ class BudaVisualizer:
         self._btn_tracks = Button(ax_tracks, '☐ Tracks', color='#e8f4e8')
         self._btn_tracks.label.set_fontsize(7.5)
         self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
-        # Only visible when detailed mode is active and there are rail artists.
-        if not self.ui_state.detailed_mode or not self._grid_rail_artists:
+        # Only visible when detailed mode is active and rails are possible.
+        # Gate on rail-layer availability (cheap), not on built artifacts —
+        # rails are built lazily on the first [Tracks] enable.
+        if not self.ui_state.detailed_mode or not self._has_rail_layers():
             self._btn_tracks.ax.set_visible(False)
 
         # Store the current packing position for the colorbar.
