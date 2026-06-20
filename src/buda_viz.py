@@ -1999,7 +1999,7 @@ class BudaVisualizer:
 
         # Redraw all via notification
         self.ui_state.notify()
-        self.ui_state.tracks = True
+        self.ui_state.tracks = False
 
         # Toggle All logic (forced to True)
         if self._btn_all is not None:
@@ -2024,7 +2024,7 @@ class BudaVisualizer:
         for a in self._busterm_artists: a.set_visible(True)
         for a in self._vias_conns_artists: a.set_visible(True)
         for e in self._grid_rail_artists:
-             e['artist'].set_visible(self.ui_state.detailed_mode)
+             e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
 
         # Update button labels
         if self._btn_heatmap is not None: self._btn_heatmap.label.set_text('☑ Heatmap')
@@ -2034,8 +2034,8 @@ class BudaVisualizer:
         if self._btn_bustermss is not None: self._btn_bustermss.label.set_text('☑ Busterms')
         if self._btn_vias_conns is not None: self._btn_vias_conns.label.set_text('☑ Vias/Conns')
         if self._btn_tracks is not None:
-             self._btn_tracks.label.set_text('☑ Tracks')
-             self._btn_tracks.ax.set_facecolor('#ffe8cc')
+             self._btn_tracks.label.set_text('☐ Tracks')
+             self._btn_tracks.ax.set_facecolor('#e8f4e8')
 
         self._redraw_layer_list()
         self._redraw_bundle_list()
@@ -3497,7 +3497,7 @@ class BudaVisualizer:
             self._btn_detailed.ax.set_visible(False)
 
         ax_tracks = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
-        self._btn_tracks = Button(ax_tracks, '☑ Tracks', color='#ffe8cc')
+        self._btn_tracks = Button(ax_tracks, '☐ Tracks', color='#e8f4e8')
         self._btn_tracks.label.set_fontsize(7.5)
         self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
         # Only visible when detailed mode is active and there are rail artists.

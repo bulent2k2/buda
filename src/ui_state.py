@@ -35,7 +35,7 @@ class ViewState:
         self.busterms = True
         self.vias_conns = True
         self.detailed_mode = False
-        self.tracks = True
+        self.tracks = False
         self.all_vis = True
         self.solo = False
 
