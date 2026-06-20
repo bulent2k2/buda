@@ -301,7 +301,13 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                             else                  new_hi = std::min(new_hi, f - m);
                         }
 
-                        if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
+                        // The min-stub clearance can conflict with a busterm
+                        // bound already set in pass 1 (e.g. the spine sits on a
+                        // block edge), which would empty the slide window and
+                        // assert downstream.  Connectivity wins over the stub
+                        // length floor: skip a push-out that would invert.
+                        if (new_lo <= new_hi
+                            && (new_lo != cs.perp_lo || new_hi != cs.perp_hi)) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
                             changed = true;
                         }
@@ -316,7 +322,10 @@ void ConnTopology::compute_slide_ranges(const Floorplan& fp) {
                             else                  new_hi = std::min(new_hi, f - m);
                         }
 
-                        if (new_lo != cs.perp_lo || new_hi != cs.perp_hi) {
+                        // See the H-spine branch: don't let the min-stub push-out
+                        // invert the (busterm-bounded) slide window.
+                        if (new_lo <= new_hi
+                            && (new_lo != cs.perp_lo || new_hi != cs.perp_hi)) {
                             cs.perp_lo = new_lo; cs.perp_hi = new_hi;
                             changed = true;
                         }

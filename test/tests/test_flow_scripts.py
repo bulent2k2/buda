@@ -73,6 +73,18 @@ def nuts_summary(out: str):
 # connectivity at topo/nuts/dnuts levels (PSI: perp slide interval case)
 # ---------------------------------------------------------------------------
 
+def test_tc3a_flat_no_perp_range_inversion():
+    """Regression: ConnTopology::build asserted (perp_lo > perp_hi) on the big
+    flat tc3a design.  A min-stub-length push-out (compute_slide_ranges pass 2)
+    collided with a busterm bound (pass 1) for a spine sitting on a shared block
+    edge, emptying the perpendicular slide window.  With asserts on this aborted
+    the process; the flow must now complete (no SIGABRT, no opens)."""
+    out, rc = run_script("big_data_test/tc3a_flat.buda")
+    assert rc == 0, f"tc3a_flat aborted (rc={rc}) — perp-range inversion?\n{out[-3000:]}"
+    # Connectivity must still verify clean (the fix preserves connectivity).
+    assert out.count("Success: no opens found.") >= 2, out[-2000:]
+
+
 def test_two():
     out, rc = run_script("two.buda")
     assert_clean(out, rc, "two.buda")
