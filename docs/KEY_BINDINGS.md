@@ -17,6 +17,7 @@ Here are the keyboard shortcuts available in each view.
 | `Z` (Shift+z) | **Zoom Out** (centered on the mouse cursor). |
 | `cmd+z`, `ctrl+z` | **Zoom to Selection**: Fit the view to the currently highlighted bundle. |
 | `h`, `H`, `cmd+a`, `ctrl+a` | **Home**: Reset zoom and return to the original full view. |
+| `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
 | `a` | **Reset/Clear**: Clear the current bundle highlight. If in detailed mode, resets to global view. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
 | `t` | Toggle visibility of **busterms**. |
@@ -31,12 +32,13 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 
 | Key(s) | Action |
 | :--- | :--- |
-| `right`, `d`, `n`, `cmd+n` | View the **next** topology candidate for this bundle. |
-| `left`, `a`, `p`, `cmd+p` | View the **previous** topology candidate for this bundle. |
+| `d`, `n`, `cmd+n` | View the **next** topology candidate for this bundle. |
+| `a`, `p`, `cmd+p` | View the **previous** topology candidate for this bundle. |
 | `]`, `pagedown` | Switch to the **next bundle** and view its selected topology. |
 | `[`, `pageup` | Switch to the **previous bundle** and view its selected topology. |
-| `up`, `k` | Select the **previous segment** of the current topology. |
-| `down`, `j` | Select the **next segment** of the current topology. |
+| `k` | Select the **previous segment** of the current topology. |
+| `j` | Select the **next segment** of the current topology. |
+| `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
 | `+`, `=`, `u` | **Layer Up**: Assign the selected segment to the next higher valid routing layer. |
 | `-`, `_`, `d` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. |
 | `s` | **Select/Pin**: Pin the currently viewed topology (and any manual layer assignments) so the planner uses it. |

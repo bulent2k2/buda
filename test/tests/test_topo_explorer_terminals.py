@@ -74,6 +74,27 @@ def test_terminals_setting_carries_over_to_explorer():
         plt.close("all")
 
 
+def test_explorer_arrow_keys_pan_not_navigate():
+    import types
+    import matplotlib.pyplot as plt
+    s = _session()
+    exp = buda_viz.TopologyExplorer(
+        s.fp, s.bundles, layer_stack=s.layers, ui_state=ViewState())
+    try:
+        exp.fig_redraw()
+        idx0 = exp.idx
+        x0 = exp.ax.get_xlim()
+        exp._on_key(types.SimpleNamespace(key="right"))   # arrow pans, no nav
+        assert exp.idx == idx0, "arrow keys must not change the topology"
+        assert exp.ax.get_xlim()[0] > x0[0], "right should pan the view"
+        # the letter alias still navigates topologies
+        if len(exp.topos) > 1:
+            exp._on_key(types.SimpleNamespace(key="d"))
+            assert exp.idx != idx0
+    finally:
+        plt.close("all")
+
+
 def test_explorer_g_key_toggles_hanan():
     import types
     import matplotlib.pyplot as plt

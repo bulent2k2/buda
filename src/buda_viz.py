@@ -478,6 +478,34 @@ def _disable_default_keymaps():
                 vals.remove(v)
         except Exception:
             pass
+    # The arrow keys drive BUDA's own pan; drop matplotlib's defaults (back =
+    # 'left', forward = 'right') so they don't also fire and undo the pan.
+    for key in ('keymap.back', 'keymap.forward'):
+        try:
+            vals = plt.rcParams.get(key, [])
+            for v in ('left', 'right', 'up', 'down'):
+                if v in vals:
+                    vals.remove(v)
+        except Exception:
+            pass
+
+def _pan_axes(ax, fig, dx_frac, dy_frac):
+    """Pan the view by a fraction of its current span (arrow-key panning).
+
+    The viewport follows the arrow direction: right/up reveal content to the
+    right/above.  A fixed fraction keeps the step size consistent at any zoom.
+    """
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    dx = (x1 - x0) * dx_frac
+    dy = (y1 - y0) * dy_frac
+    ax.set_xlim(x0 + dx, x1 + dx)
+    ax.set_ylim(y0 + dy, y1 + dy)
+    fig.canvas.draw_idle()
+
+
+# Fraction of the visible span to shift per arrow-key press.
+_PAN_STEP = 0.15
 
 # Values beyond this magnitude are the INT_MIN/2 or INT_MAX/2 sentinels
 # that ConnTopology uses for "unconstrained" slide ranges.
@@ -1059,14 +1087,20 @@ class TopologyExplorer:
         if event.key == 'z':                    self._interactive_zoom(event, zoom_in=True); return
         if event.key == 'Z':                    self._interactive_zoom(event, zoom_in=False); return
         if event.key in ('h', 'H', 'cmd+a', 'ctrl+a'): self._zoom_home(); return
-        if event.key in ('left',  'a'):         self._step_topo(-1)
-        if event.key in ('right', 'd'):         self._step_topo(+1)
+        # Arrow keys pan the view (see below); topo/segment nav uses the letter
+        # aliases a/d (prev/next topology) and k/j (prev/next segment).
+        if event.key == 'left':   _pan_axes(self.ax, self.fig, -_PAN_STEP, 0); return
+        if event.key == 'right':  _pan_axes(self.ax, self.fig, +_PAN_STEP, 0); return
+        if event.key == 'up':     _pan_axes(self.ax, self.fig, 0, +_PAN_STEP); return
+        if event.key == 'down':   _pan_axes(self.ax, self.fig, 0, -_PAN_STEP); return
+        if event.key == 'a':                    self._step_topo(-1)
+        if event.key == 'd':                    self._step_topo(+1)
         if event.key in ('n', 'cmd+n', 'ctrl+n'):    self._step_topo(+1)
         if event.key in ('p', 'cmd+p', 'ctrl+p'):    self._step_topo(-1)
         if event.key in ('[', 'pageup'):        self._step_bundle(-1)
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
-        if event.key in ('up', 'k'):            self._step_segment(-1)
-        if event.key in ('down', 'j'):          self._step_segment(+1)
+        if event.key == 'k':                    self._step_segment(-1)
+        if event.key == 'j':                    self._step_segment(+1)
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
         if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
         if event.key == 'b':                    self.ui_state.toggle_blocks()
@@ -2666,6 +2700,10 @@ class BudaVisualizer:
             if self.ui_state.detailed_mode: self._set_highlight(None)
             else:                   self._reset_view()
             return
+        if event.key == 'left':   _pan_axes(self.ax, self.fig, -_PAN_STEP, 0); return
+        if event.key == 'right':  _pan_axes(self.ax, self.fig, +_PAN_STEP, 0); return
+        if event.key == 'up':     _pan_axes(self.ax, self.fig, 0, +_PAN_STEP); return
+        if event.key == 'down':   _pan_axes(self.ax, self.fig, 0, -_PAN_STEP); return
         if event.key in ('n', 'cmd+n', 'ctrl+n'): self._step_bundle(+1)
         if event.key in ('p', 'cmd+p', 'ctrl+p'): self._step_bundle(-1)
         if event.key in ('[', 'pageup'):   self._step_bundle(-1)
