@@ -85,6 +85,22 @@ def test_tc3a_flat_no_perp_range_inversion():
     assert out.count("Success: no opens found.") >= 2, out[-2000:]
 
 
+def test_pinless_buses_stay_separate():
+    """Issue #16: two distinct shorthand (no-dot) buses must not merge.
+
+    `extract_instance` used to map every pinless endpoint to the sentinel "top",
+    so `a left right` and `b up down` shared the STRICT signature top->[top],
+    collapsed into one bundle, and b_* silently routed left->right (the first
+    net's endpoints).  Now the bare token is the block name, so they stay in two
+    bundles routed left->right and up->down.
+    """
+    out, rc = run_script("no_pin_suffix.buda")
+    assert_clean(out, rc, "no_pin_suffix.buda")
+    assert "Bundler created 2 hbundles." in out, out
+    assert "(left->right)" in out, out
+    assert "(up->down)" in out, out
+
+
 def test_two():
     out, rc = run_script("two.buda")
     assert_clean(out, rc, "two.buda")

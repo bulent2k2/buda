@@ -1,0 +1,15 @@
+add_block left  0    0   100  100
+add_block right 200  0   300  100
+add_block up    100  200 200  300
+add_block down  100 -200 200 -100
+# these work and give us two bundles::
+# add_bus a[6] left.o right.i
+# add_bus b[6] up.o   down.i
+# these don't:
+add_bus a[6] left right
+add_bus b[6] up   down
+run_bundler strict
+generate_topologies
+run_planner
+run_nuts
+# visualize

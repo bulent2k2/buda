@@ -22,7 +22,12 @@
 namespace buda {
 std::string extract_instance(const std::string& pin) {
     size_t last_dot = pin.find_last_of('.');
-    if (last_dot == std::string::npos) return "top";
+    // A pin with no dot is the shorthand form: the bare token IS the block name
+    // (this is how BudaSession._pin_instance and the topology path treat it).
+    // Returning a "top" sentinel here collapsed every pinless endpoint to one
+    // grouping key, so two distinct shorthand buses (e.g. `a left right` and
+    // `b up down`) merged into a single bundle and mis-routed (issue #16).
+    if (last_dot == std::string::npos) return pin;
     return pin.substr(0, last_dot);
 }
 std::string Net::get_driver_instance() const { return extract_instance(driver_pin); }
