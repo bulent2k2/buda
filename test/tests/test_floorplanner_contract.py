@@ -20,55 +20,55 @@ import buda
 _GUI_FEATURE = "features/floorplanner_gui_basic.feature"
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "create a design canvas with die size and grid")
 def test_gui_create_design_canvas():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "place top-level modules by dragging them on the canvas")
 def test_gui_place_top_level_modules():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "resize a block with handles")
 def test_gui_resize_block_with_handles():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "align selected blocks to a common edge")
 def test_gui_align_selected_blocks():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "distribute selected blocks horizontally")
 def test_gui_distribute_selected_blocks():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "edit a child block inside a hierarchical parent")
 def test_gui_edit_child_block():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "rotate a block and transform its descendants")
 def test_gui_rotate_block():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "validate a floorplan before HBundle generation")
 def test_gui_validate_floorplan():
     pass
 
 
-@pytest.mark.xfail(strict=False, reason="Floorplanner GUI is not implemented yet")
+@pytest.mark.xfail(strict=False, reason="requires headless display driver; GUI is implemented but no automated display-based test harness exists yet")
 @scenario(_GUI_FEATURE, "export an HBundle-ready BUDA script")
 def test_gui_export_hbundle_script():
     pass
