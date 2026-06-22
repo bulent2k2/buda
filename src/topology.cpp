@@ -717,6 +717,123 @@ static void annotate_endpoints(Topology& topo,
 }
 
 // ---------------------------------------------------------------------------
+// MST feedthrough completion
+// ---------------------------------------------------------------------------
+//
+// MST edges land each edge's L-shape on a block's nearest face independently
+// (closest_points per edge), so a block with MST degree >= 2 ends up touched by
+// two or more segment endpoints at DIFFERENT points.  Those segments do not
+// share a vertex; they are "connected" only because both touch the block, i.e.
+// the block is silently used as a feedthrough relay.  That (a) under-counts
+// wirelength and (b) relies on intra-block routing the designer never requested.
+//
+// A *feedthru* -- a block that connects two or more of a bundle's stubs via its
+// own lower-level (intra-block) routing -- is an opt-in OPTION that does not
+// exist yet.  Until it does, every topology must be physically self-connected.
+// This pass adds the missing wire: at each relay block it picks one junction
+// point J (the medoid of the incident landing points, so one incident edge
+// already reaches J) and routes every other incident point to J with an
+// L-connector.  Connectors may cross the block footprint -- that is a benign
+// global wire (like a trunk passing through a block), NOT a feedthru.
+//
+// A straight trunk crossing a block is one continuous wire and is left
+// untouched: its endpoints do not land on the crossed block's faces, so the
+// block collects zero incident endpoints here.
+static void complete_relay_junctions(Topology& topo,
+                                     const std::vector<Busterm>& blocks,
+                                     const Floorplan& fp,
+                                     int h_layer, int v_layer) {
+    (void)fp;  // min-stub is intentionally not enforced on completion connectors:
+               // a relay MUST be completed (correctness over the min-stub heuristic).
+    auto on_face = [](const Point& P, bool horiz, const Busterm& bt) -> bool {
+        auto check_rect = [&](const Rect& r) -> bool {
+            return horiz
+                ? (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2
+                : (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
+        };
+        if (bt.rects.empty()) return check_rect(bt.orig_bbox) || check_rect(bt.bbox);
+        for (const Rect& ri : bt.rects)
+            if (check_rect(ri)) return true;
+        return false;
+    };
+
+    // Gather the distinct landing points on each block's face, tagging each with
+    // the orientation of the segment whose endpoint lands there.  Snapshot the
+    // segment count first: we append connectors below.
+    struct Inc { Point p; bool seg_horiz; };
+    int n_seg = (int)topo.segments.size();
+    std::map<int, std::vector<Inc>> incident;     // block idx -> distinct landings
+    auto add_incident = [&](int bi, const Point& P, bool seg_horiz) {
+        auto& v = incident[bi];
+        for (const Inc& q : v) if (q.p.x == P.x && q.p.y == P.y) return;  // distinct
+        v.push_back({P, seg_horiz});
+    };
+    for (int s = 0; s < n_seg; ++s) {
+        const Segment& seg = topo.segments[s];
+        bool horiz = (seg.start.y == seg.end.y);
+        for (int e = 0; e < 2; ++e) {
+            const Point& P = (e == 0) ? seg.start : seg.end;
+            for (int bi = 0; bi < (int)blocks.size(); ++bi)
+                if (on_face(P, horiz, blocks[bi])) { add_incident(bi, P, horiz); break; }
+        }
+    }
+
+    // Connect two incident landings.  CRITICAL: each connector leg must meet its
+    // incident segment PERPENDICULARLY (an L-corner / T-junction) -- a collinear
+    // end-to-end join is not inferred by ConnTopology.  So the connector leaves
+    // each landing in the direction perpendicular to that landing's segment
+    // (leave horizontally off a vertical stub, and vice-versa).  This realizes
+    // the "dogleg" (same-orientation landings) and "stretch & connect"
+    // (orthogonal landings) shapes.
+    auto connect = [&](const Inc& a, const Inc& b) {
+        if (a.p.x == b.p.x && a.p.y == b.p.y) return;
+        bool leaveA_h = !a.seg_horiz;   // perpendicular to a's incident segment
+        bool leaveB_h = !b.seg_horiz;
+        if (leaveA_h && leaveB_h) {                 // both leave horizontally
+            if (a.p.y == b.p.y) {                   // same row: a single H wire
+                topo.segments.push_back(make_seg(a.p.x, a.p.y, b.p.x, b.p.y, h_layer));
+            } else {                                // Z: H, V, H via an off-column
+                int lo = std::min(a.p.x, b.p.x), hi = std::max(a.p.x, b.p.x);
+                int mx = (hi - lo >= 2) ? (lo + hi) / 2 : hi + 2;  // not on a/b column
+                topo.segments.push_back(make_seg(a.p.x, a.p.y, mx, a.p.y, h_layer));
+                topo.segments.push_back(make_seg(mx, a.p.y, mx, b.p.y, v_layer));
+                topo.segments.push_back(make_seg(mx, b.p.y, b.p.x, b.p.y, h_layer));
+            }
+        } else if (!leaveA_h && !leaveB_h) {        // both leave vertically
+            if (a.p.x == b.p.x) {                   // same column: a single V wire
+                topo.segments.push_back(make_seg(a.p.x, a.p.y, b.p.x, b.p.y, v_layer));
+            } else {                                // Z: V, H, V via an off-row
+                int lo = std::min(a.p.y, b.p.y), hi = std::max(a.p.y, b.p.y);
+                int my = (hi - lo >= 2) ? (lo + hi) / 2 : hi + 2;
+                topo.segments.push_back(make_seg(a.p.x, a.p.y, a.p.x, my, v_layer));
+                topo.segments.push_back(make_seg(a.p.x, my, b.p.x, my, h_layer));
+                topo.segments.push_back(make_seg(b.p.x, my, b.p.x, b.p.y, v_layer));
+            }
+        } else {                                    // orthogonal: an L meeting at a corner
+            if (leaveA_h) {                         // A leaves H, B leaves V; corner (b.x,a.y)
+                topo.segments.push_back(make_seg(a.p.x, a.p.y, b.p.x, a.p.y, h_layer));
+                topo.segments.push_back(make_seg(b.p.x, a.p.y, b.p.x, b.p.y, v_layer));
+            } else {                                // A leaves V, B leaves H; corner (a.x,b.y)
+                topo.segments.push_back(make_seg(a.p.x, a.p.y, a.p.x, b.p.y, v_layer));
+                topo.segments.push_back(make_seg(a.p.x, b.p.y, b.p.x, b.p.y, h_layer));
+            }
+        }
+    };
+
+    for (auto& [bi, pts] : incident) {
+        if (pts.size() < 2) continue;        // leaf terminal: nothing to relay
+        // Chain the landings (sorted) so all incident segments end up in one
+        // wire-connected component through the block's junction.
+        std::sort(pts.begin(), pts.end(), [](const Inc& a, const Inc& b) {
+            return a.p.x != b.p.x ? a.p.x < b.p.x : a.p.y < b.p.y;
+        });
+        for (size_t k = 1; k < pts.size(); ++k)
+            connect(pts[k - 1], pts[k]);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 // Multicast helpers
 // ---------------------------------------------------------------------------
 
@@ -1391,6 +1508,7 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             }
         }
         if (valid) {
+            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_);
             annotate_endpoints(mst, blocks);
             results.push_back(std::move(mst));
         }
@@ -1497,6 +1615,16 @@ void TopologyGenerator::add_trunk_mst_candidates(
 
         // Only emit if extra segments were actually added (safety: no duplicate trunks).
         if (valid && new_t.segments.size() > trunk_topo.segments.size()) {
+            // NOTE: trunk+MST completion is intentionally NOT applied here.
+            // add_trunk_mst_candidates copies the full trunk (every branch stub)
+            // and then adds MST shortcut edges between the same branch blocks, so
+            // each branch block is already connected via its stub.  Completing the
+            // relay junction would tie the MST edge to the stub and CLOSE A LOOP
+            // (cycle), because the MST edges here are redundant with the trunk
+            // spine.  Making trunk+MST a clean tree requires the MST edge to
+            // REPLACE a stub rather than augment it -- a separate redesign.
+            // Standalone MST (add_mst_candidates) is completed; trunk+MST is left
+            // as-is pending that redesign.
             annotate_endpoints(new_t, blocks);
             results.push_back(std::move(new_t));
         }

@@ -32,6 +32,9 @@ enum class ViolationKind {
     UNPLACED,     // a bit has no concrete track assignment after DetailedNUTS
     LAYER_DIR,    // a segment is assigned to a layer whose routing direction
                   // does not match the segment's orientation (unbuildable wire)
+    FEEDTHRU_RELAY, // a (single-rect) block is used as a feedthrough relay: two
+                  // segments connect to it (BUSTERM) but are not joined by any
+                  // wire path, so they rely on the block's internal routing
 };
 
 struct ConnViolation {

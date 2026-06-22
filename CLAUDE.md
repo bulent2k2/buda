@@ -242,6 +242,8 @@ Netlist / Floorplan (.buda script — flat flow — or projected from BDB)
 - **Z-shape** (3 segments): adds an intermediate trunk segment at a Hanan grid line between the two blocks. Multiple Z candidates are generated — one per intermediate Hanan grid coordinate.
 - **U-shape** (3 segments): routes outside the bounding box of the two blocks, used when a direct L or Z path would traverse an obstacle. Trunk is placed beyond the extreme Hanan grid lines.
 
+**MST shapes & feedthrough completion:** Standalone MST candidates (`MST_HV`/`MST_VH`, N≥4 blocks, `add_mst_candidates`) connect each edge's two blocks at their nearest faces. A block with MST degree ≥2 is thus touched by two edge segments at *different* points that, without correction, are joined only *through the block* — a silent feedthrough relay (which understates wirelength and isn't a real wire). `complete_relay_junctions` (`topology.cpp`) post-processes each MST topology: at every relay block it adds **dogleg** (same-orientation landings) / **stretch** (orthogonal landings) connectors so all incident segments are physically wire-connected (each connector meets its incident segment *perpendicularly*, the only join `ConnTopology` infers). This makes the topology self-connected and the wirelength honest. A *feedthru* — a block that connects ≥2 of a bundle's stubs via its own lower-level routing — is a future opt-in option (no markers yet). **Trunk+MST hybrids (`add_trunk_mst_candidates`) are NOT completed**: their MST edges are redundant with the trunk spine, so completing them would create cycles; that redesign (MST edge *replaces* a stub) is deferred, and `check_topo` correctly flags their relays as `FEEDTHRU_RELAY`.
+
 **Layer hints:** L-shape horizontal segment gets hint=3 (M3), vertical gets hint=4 (M4). All candidates use the same convention; the bundle planner may override.
 
 **Corner margins:** At Busterm construction time, each block's bounding box is inset by its `BlockCornerMargin{dx, dy}` via `Rect::shrink(dx, dy)`. All shape functions (L/Z/U/UU/trunk) operate on the shrunken bbox directly — no per-function margin threading. The Hanan grid is built from the shrunken bboxes, so stub and trunk positions automatically land within the margin zone. `dy` applies to vertical faces (left/right, constrains Y); `dx` to horizontal faces (top/bottom, constrains X). Guard: if `2*margin >= face_extent`, the shrink is skipped for that axis.
@@ -445,10 +447,10 @@ These cross-cutting modules sit beside stages 2–9 and guard correctness.
 - `trunk_mst(...)` builds a Kruskal MST (`compute_mst` over `manhattan_nearest` distances) connecting a trunk to any blocks not yet directly attached — drives large-fanout / multi-block topologies.
 
 **`verify`** runs connectivity audits at three granularities, surfaced by the `check_connectivity` CLI command:
-- `check_topo` — nominal positions from `ConnTopology` (SEG continuity, busterm-face validity, block coverage incl. pass-through blocks).
+- `check_topo` — nominal positions from `ConnTopology` (SEG continuity, busterm-face validity, block coverage incl. pass-through blocks, and feedthrough-relay detection).
 - `check_nuts` — same checks at NUTS-placed positions, plus **layer-direction** validity (H segment on an H layer, V on a V layer — an unbuildable wire otherwise).
 - `check_dnuts` — per-bit checks on `NetSegment` positions after detailed NUTS, plus unplaced-bit detection.
-Violations are typed (`SEG_OPEN`, `BUSTERM_OPEN`, `BUSTERM_FACE`, `UNPLACED`, `LAYER_DIR`). `check_connectivity all` audits every candidate topology and is auto-run before planning.
+Violations are typed (`SEG_OPEN`, `BUSTERM_OPEN`, `BUSTERM_FACE`, `UNPLACED`, `LAYER_DIR`, `FEEDTHRU_RELAY`). `check_connectivity all` audits every candidate topology. **`FEEDTHRU_RELAY`** (check_topo only) flags a single-rect block whose connected segments' wires do not actually touch — i.e. the block is silently used as a feedthrough relay. A *feedthru* (a block that connects ≥2 of a bundle's stubs via its own lower-level/intra-block routing) is an opt-in option not yet implemented; until then every topology must be physically self-connected. A straight trunk *crossing* a block is one continuous wire (a pass-through, no BUSTERM conn) and is NOT a feedthru.
 
 ---
 

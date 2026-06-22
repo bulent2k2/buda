@@ -1208,6 +1208,8 @@ symbols and by the `dump_topologies` inspection of `flow/big_data_test/tc3a_flat
 | 4 / 6 | I/L/Z/U/UU 2-pin shapes | **DONE** | `add_l/z/u/uu_shapes` `:206/:382/:485/:543` |
 | 4.1–4.2 | Single H/V trunk sweep + OOB + pass-through | **DONE** | `add_trunk_h/v` `:734/:918`; `pass_through_count` `topology.h:79` |
 | 4.3 | MST + trunk+MST fallback | **DONE** | `add_mst_candidates` `:1298`, `add_trunk_mst_candidates` `:1400` |
+| 4.3 | **MST feedthrough completion** (standalone MST self-connected) | **DONE** | `complete_relay_junctions`; `FEEDTHRU_RELAY` in `verify.cpp::check_topo` |
+| 4.3 | trunk+MST completion (MST edge replaces a stub; avoid cycles) | **DEFERRED** | completing as-is creates cycles; flagged `FEEDTHRU_RELAY` |
 | 4.4 | **General multi-level trunks** (recursive, V-split, depth>1) | **PARTIAL** | only `add_multi_trunk_candidates`→`BITRUNK_H` `:1506` |
 | 4.5 | Per-leaf **Z-stub / sub-trunk connectors** on a trunk | **MISSING** | trunk builders emit direct/L stubs only |
 | 4.5 | **Candidate dedup** (`deduplicate`) | **MISSING** | no candidate-level dedup; `annotate_and_sort` `:634` |

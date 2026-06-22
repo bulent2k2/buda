@@ -2853,6 +2853,7 @@ class BudaSession:
         "BUSTERM_FACE": "invalid busterm face",
         "SEG_OPEN":     "segment disconnected",
         "LAYER_DIR":    "wrong layer direction",
+        "FEEDTHRU_RELAY": "block used as feedthrough relay (segments not wire-joined)",
     }
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest
 
