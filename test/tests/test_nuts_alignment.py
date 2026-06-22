@@ -93,3 +93,21 @@ def test_rerun_layer_is_idempotent(planner3_session):
              for ts in s.nuts_result.segments if ts.layer == 6}
     assert s.nuts_result.num_overlaps == 0
     assert after == before
+
+
+def test_rerun_layer_keeps_single_layer_contract(planner3_session):
+    """run_nuts_on_layer re-solves and tightens ONLY the named layer: every other
+    layer's track positions must be byte-identical afterwards.  Guards the
+    tighten_pulls(only_layer=...) restriction added for rerun_layer."""
+    s = planner3_session
+    other_before = {(ts.bundle_id, ts.seg_idx): ts.track_position
+                    for ts in s.nuts_result.segments if ts.layer != 6}
+    s.do_command("run_nuts_on_layer M6")
+    other_after = {(ts.bundle_id, ts.seg_idx): ts.track_position
+                   for ts in s.nuts_result.segments if ts.layer != 6}
+    assert other_after == other_before, (
+        "run_nuts_on_layer M6 perturbed a non-M6 track position — tighten must "
+        "only slide segments on the re-solved layer"
+    )
+    assert s.nuts_result.num_overlaps == 0
+    assert s.nuts_result.num_violations == 0

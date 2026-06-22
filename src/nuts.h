@@ -218,11 +218,16 @@ private:
     // its follower spans re-adjusted, and the move kept only when it strictly
     // shortens total wirelength without adding an overlap or interval violation
     // (per-move stop-&-revert).  Biggest gaps first; iterates to a fixpoint.
+    // only_layer >= 0 restricts which segments may be SLID to that layer (used by
+    // rerun_layer to keep its single-layer contract); the overlap / wirelength
+    // guards and follower-span adjustments stay global either way.  Default -1
+    // tightens every layer.
     void tighten_pulls(
         std::vector<TrackSegment>& segments,
         const std::map<std::pair<int,int>, int>&                   net_pull_map,
         const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
+        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
+        int only_layer = -1) const;
 
     // First-fit: lowest valid placement position within [lo, hi].
     // Returns NaN if the interval is infeasible.

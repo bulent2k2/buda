@@ -52,24 +52,30 @@ _SKIP_PREFIXES = ("check_connectivity", "visualize", "run_detailed_nuts")
 
 @pytest.fixture(scope="module")
 def big_nuts_session():
-    from buda_cli import BudaSession
     cwd = os.getcwd()
     os.chdir(_BIG_DIR)            # so `source ../tracks4top.buda` etc. resolve
     try:
-        s = BudaSession()
-        s.script_path = "tc3a_flat.buda"
-        for line in open("tc3a_flat.buda"):
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith(_SKIP_PREFIXES):
-                continue
-            s.do_command(line)
-            if line == _RUN_THROUGH:
-                break
-        yield s
+        yield _build_big_session()
     finally:
         os.chdir(cwd)
+
+
+def _build_big_session():
+    """Drive big.buda through run_nuts in-process.  Caller must already be cwd'd
+    into _BIG_DIR (so the relative `source` lines resolve)."""
+    from buda_cli import BudaSession
+    s = BudaSession()
+    s.script_path = "tc3a_flat.buda"
+    for line in open("tc3a_flat.buda"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(_SKIP_PREFIXES):
+            continue
+        s.do_command(line)
+        if line == _RUN_THROUGH:
+            break
+    return s
 
 
 def _pull_deviation(session):
@@ -136,3 +142,48 @@ def test_tighten_does_not_trade_pull_for_overlaps(big_nuts_session):
     assert res.num_overlaps <= 6, (
         f"abstract track overlaps regressed to {res.num_overlaps} (expected <= 6)"
     )
+
+
+def test_run_nuts_on_layer_tightens_and_keeps_other_layers():
+    """run_nuts_on_layer must (a) re-tighten its own layer to the same pull-tight
+    result the full solve produced — so a single-layer re-solve is idempotent on
+    M7, the most congested layer — and (b) leave every OTHER layer's track
+    positions byte-identical (the single-layer contract; tighten is restricted to
+    the re-solved layer via only_layer).
+
+    Without tighten in rerun_layer, re-solving M7 leaves its pulled trunks
+    un-tightened and M7's positions diverge from the full-solve result."""
+    cwd = os.getcwd()
+    os.chdir(_BIG_DIR)
+    try:
+        s = _build_big_session()
+        m7 = s._layer_name_map["M7"]
+
+        def positions(pred):
+            return {(t.bundle_id, t.seg_idx): t.track_position
+                    for t in s.nuts_result.segments if t.placed and pred(t)}
+
+        m7_before    = positions(lambda t: t.layer == m7)
+        other_before = positions(lambda t: t.layer != m7)
+        ov_before    = s.nuts_result.num_overlaps
+
+        s.do_command("run_nuts_on_layer M7")
+
+        m7_after    = positions(lambda t: t.layer == m7)
+        other_after = positions(lambda t: t.layer != m7)
+
+        # (a) idempotent on the re-solved layer: the full solve already tightened
+        # M7, so a fresh re-solve+tighten must land in the same place.
+        assert m7_after == m7_before, (
+            "run_nuts_on_layer M7 changed M7 — the re-solve is not idempotent, so "
+            "the rerun tighten is missing or diverges from the full-solve result"
+        )
+        # (b) single-layer contract: nothing else moved.
+        assert other_after == other_before, (
+            "run_nuts_on_layer M7 perturbed a non-M7 track position — tighten must "
+            "be restricted to the re-solved layer"
+        )
+        assert s.nuts_result.num_overlaps <= ov_before
+        assert s.nuts_result.num_violations == 0
+    finally:
+        os.chdir(cwd)

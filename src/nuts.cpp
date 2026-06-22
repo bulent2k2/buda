@@ -643,7 +643,8 @@ void NUTSEngine::tighten_pulls(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, int>&                   net_pull_map,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const
+    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
+    int only_layer) const
 {
     const auto kozs = low_keepouts();
 
@@ -708,6 +709,7 @@ void NUTSEngine::tighten_pulls(
         for (int i = 0; i < (int)segments.size(); ++i) {
             const auto& ts = segments[i];
             if (!ts.placed) continue;
+            if (only_layer >= 0 && ts.layer != only_layer) continue;
             int np = pull_of(ts);
             if (np == 0) continue;
             double dev = std::abs(ts.track_position - pull_bound(ts, np));
@@ -2119,6 +2121,10 @@ NUTSResult NUTSEngine::rerun_layer(
     // Note: resolve_corner_overlaps is NOT run here.  It re-solves whole trunk
     // layers, which may differ from layer_id — that would violate rerun_layer's
     // single-layer contract.  Corner overlaps are resolved by the full run().
+    // Tighten only this layer's pulled segments toward their pull bound (the
+    // overlap / wirelength guards stay global, so cross-layer spans are honoured)
+    // — keeps the single-layer contract while still recovering wirelength.
+    tighten_pulls(result.segments, net_pull_map, rev_conn_map, ts_ptr_map, layer_id);
     compute_metrics(result);
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "
