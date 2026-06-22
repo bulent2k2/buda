@@ -1028,39 +1028,65 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                      < (b->interval_hi - b->interval_lo) - b->width;
             });
 
-        std::vector<std::pair<TrackSegment*,double>> repacked;
-        for (TrackSegment* m : members) {
-            std::vector<std::pair<double,double>> occ;
-            add_keepout_occ(m, occ);
-            // Placed segments outside the repack set (including ones whose
-            // sweep interval already ended) that overlap m's span.
-            // Same-bundle segments never conflict (bits may share tracks).
-            for (const TrackSegment* o : segs) {
-                if (!o->placed || member_set.count(o)) continue;
-                if (o->bundle_id == m->bundle_id) continue;
-                if (sp_lo(*o) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*o)) {  // closed: touch = occupied
-                    const double h = o->width / 2.0;
-                    occ.push_back({o->track_position - h, o->track_position + h});
+        // Pack the members in deadline order.  In pull-aware mode each member
+        // seeks its own pull target (pull_map) — so a phase-1 anchor swept into a
+        // repack keeps its pull instead of being bottom-edged — while pull-free
+        // members pack to the low edge (== first_fit) to leave maximal room.  In
+        // dense mode every member first_fits to the low edge.  Returns the packed
+        // positions, or empty on any infeasible member.
+        auto pack = [&](bool pull_aware)
+                    -> std::vector<std::pair<TrackSegment*,double>> {
+            std::vector<std::pair<TrackSegment*,double>> repacked;
+            for (TrackSegment* m : members) {
+                std::vector<std::pair<double,double>> occ;
+                add_keepout_occ(m, occ);
+                // Placed segments outside the repack set (including ones whose
+                // sweep interval already ended) that overlap m's span.
+                // Same-bundle segments never conflict (bits may share tracks).
+                for (const TrackSegment* o : segs) {
+                    if (!o->placed || member_set.count(o)) continue;
+                    if (o->bundle_id == m->bundle_id) continue;
+                    if (sp_lo(*o) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*o)) {  // closed: touch = occupied
+                        const double h = o->width / 2.0;
+                        occ.push_back({o->track_position - h, o->track_position + h});
+                    }
                 }
+                for (const auto& [pm, ppos] : repacked) {
+                    if (pm->bundle_id == m->bundle_id) continue;
+                    // Members conflict only where their spans overlap — same
+                    // physical criterion as the outside-set obstacles above.
+                    // Without this, disjoint-span members sharing one window
+                    // (e.g. blk-local buses left and right of a cross-chip
+                    // trunk, all at the same Hanan band) are packed as if
+                    // simultaneous and wedge a window that has room for all.
+                    if (!(sp_lo(*pm) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*pm)))  // closed: touch = occupied
+                        continue;
+                    const double h = pm->width / 2.0;
+                    occ.push_back({ppos - h, ppos + h});
+                }
+                std::sort(occ.begin(), occ.end());
+                double p;
+                if (pull_aware) {
+                    auto pit = pull_map.find({m->bundle_id, m->seg_idx});
+                    double pref = (m->net_pull != 0 && pit != pull_map.end())
+                                  ? pit->second           // anchor: keep its pull
+                                  : m->interval_lo;        // free: pack low
+                    p = preferred_fit(m->interval_lo, m->interval_hi, m->width, occ, pref);
+                } else {
+                    p = first_fit(m->interval_lo, m->interval_hi, m->width, occ);
+                }
+                if (std::isnan(p)) return {};   // this member can't fit: pack failed
+                repacked.push_back({m, p});
             }
-            for (const auto& [pm, ppos] : repacked) {
-                if (pm->bundle_id == m->bundle_id) continue;
-                // Members conflict only where their spans overlap — same
-                // physical criterion as the outside-set obstacles above.
-                // Without this, disjoint-span members sharing one window
-                // (e.g. blk-local buses left and right of a cross-chip
-                // trunk, all at the same Hanan band) are packed as if
-                // simultaneous and wedge a window that has room for all.
-                if (!(sp_lo(*pm) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*pm)))  // closed: touch = occupied
-                    continue;
-                const double h = pm->width / 2.0;
-                occ.push_back({ppos - h, ppos + h});
-            }
-            std::sort(occ.begin(), occ.end());
-            double p = first_fit(m->interval_lo, m->interval_hi, m->width, occ);
-            if (std::isnan(p)) return false;   // window truly full: keep old state
-            repacked.push_back({m, p});
-        }
+            return repacked;
+        };
+
+        // Honor pulls when the window has room for everyone at their pull; else
+        // fall back to the dense low-edge pack (the proven feasibility path) so a
+        // tight window still resolves its overlap rather than dropping ts.
+        auto repacked = pack(/*pull_aware=*/true);
+        if (repacked.empty()) repacked = pack(/*pull_aware=*/false);
+        if (repacked.empty()) return false;   // window truly full: keep old state
         for (const auto& [pm, ppos] : repacked) pm->track_position = ppos;
         return true;
     };
