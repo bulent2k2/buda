@@ -210,6 +210,20 @@ private:
         const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
         std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
 
+    // Final greedy wirelength-tightening pass.  The sweep/repack place segments
+    // by LOCAL decisions made as the layer fills, so a segment parked away from
+    // its pull is never revisited even after later moves free space next to its
+    // pull bound.  Here, once the layout has settled, each pulled segment is slid
+    // as close to its pull bound as the FINAL occupancy allows (preferred_fit),
+    // its follower spans re-adjusted, and the move kept only when it strictly
+    // shortens total wirelength without adding an overlap or interval violation
+    // (per-move stop-&-revert).  Biggest gaps first; iterates to a fixpoint.
+    void tighten_pulls(
+        std::vector<TrackSegment>& segments,
+        const std::map<std::pair<int,int>, int>&                   net_pull_map,
+        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
+
     // First-fit: lowest valid placement position within [lo, hi].
     // Returns NaN if the interval is infeasible.
     double first_fit(double lo, double hi, double width,

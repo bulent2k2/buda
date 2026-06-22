@@ -639,6 +639,125 @@ void NUTSEngine::repair_overlaps(
                   << " -> " << remaining.size() << ".\n";
 }
 
+void NUTSEngine::tighten_pulls(
+    std::vector<TrackSegment>& segments,
+    const std::map<std::pair<int,int>, int>&                   net_pull_map,
+    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
+    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const
+{
+    const auto kozs = low_keepouts();
+
+    struct Snap { double pos, lo, hi; };
+    std::vector<Snap> pre_move;
+    auto take_snap = [&](std::vector<Snap>& s) {
+        s.clear(); s.reserve(segments.size());
+        for (const auto& ts : segments)
+            s.push_back({ts.track_position, ts.span_lo, ts.span_hi});
+    };
+    auto restore_snap = [&](const std::vector<Snap>& s) {
+        for (size_t k = 0; k < segments.size(); ++k) {
+            segments[k].track_position = s[k].pos;
+            segments[k].span_lo        = s[k].lo;
+            segments[k].span_hi        = s[k].hi;
+        }
+    };
+    // True routed length = sum of every placed segment's span extent.  Sliding a
+    // segment toward its pull contracts the follower spans connected to it, so
+    // this is the quantity the pass minimises.
+    auto total_wl = [&]() {
+        double w = 0;
+        for (const auto& ts : segments) if (ts.placed) w += sp_hi(ts) - sp_lo(ts);
+        return w;
+    };
+    // net_pull (the slide direction that shortens connected stubs) for a segment,
+    // preferring the planner/dogleg-managed value, falling back to the stored one.
+    auto pull_of = [&](const TrackSegment& ts) {
+        auto it = net_pull_map.find({ts.bundle_id, ts.seg_idx});
+        return it == net_pull_map.end() ? ts.net_pull : it->second;
+    };
+    // The pull bound (interval edge the segment wants to reach), clamped so the
+    // bus CENTRE keeps the whole width inside the hard interval.
+    auto pull_bound = [&](const TrackSegment& ts, int np) {
+        const double half = ts.width / 2.0;
+        const double c_lo = ts.interval_lo + half, c_hi = ts.interval_hi - half;
+        double p = (np > 0) ? ts.interval_hi : ts.interval_lo;
+        return (c_lo <= c_hi) ? std::clamp(p, c_lo, c_hi) : ts.track_position;
+    };
+    // Same-layer occupancy from other bundles whose span overlaps ts, plus
+    // keepouts — exactly what a track for ts must avoid.
+    auto build_occ = [&](const TrackSegment& ts,
+                         std::vector<std::pair<double,double>>& occ) {
+        keepout_occupied(kozs, &ts, occ);
+        for (const auto& o : segments) {
+            if (&o == &ts || !o.placed || o.layer != ts.layer) continue;
+            if (o.bundle_id == ts.bundle_id) continue;
+            if (sp_lo(o) <= sp_hi(ts) && sp_lo(ts) <= sp_hi(o)) {  // closed: touch = occupied
+                const double h = o.width / 2.0;
+                occ.push_back({o.track_position - h, o.track_position + h});
+            }
+        }
+        std::sort(occ.begin(), occ.end());
+    };
+
+    int moved = 0;
+    const int kMaxIters = 6;
+    for (int iter = 0; iter < kMaxIters; ++iter) {
+        // Close the biggest pull gaps first: rank pulled, placed segments by
+        // current distance from their pull bound.
+        std::vector<std::pair<double,int>> order;
+        for (int i = 0; i < (int)segments.size(); ++i) {
+            const auto& ts = segments[i];
+            if (!ts.placed) continue;
+            int np = pull_of(ts);
+            if (np == 0) continue;
+            double dev = std::abs(ts.track_position - pull_bound(ts, np));
+            if (dev > 0.5) order.emplace_back(dev, i);
+        }
+        if (order.empty()) break;
+        std::sort(order.begin(), order.end(),
+                  [](const auto& a, const auto& b) { return a.first > b.first; });
+
+        bool progress = false;
+        for (const auto& [dev0, i] : order) {
+            TrackSegment& ts = segments[i];
+            int np = pull_of(ts);
+            if (np == 0) continue;
+            const double pb  = pull_bound(ts, np);
+            const double cur = std::abs(ts.track_position - pb);
+            if (cur <= 0.5) continue;
+
+            std::vector<std::pair<double,double>> occ;
+            build_occ(ts, occ);
+            double pos = preferred_fit(ts.interval_lo, ts.interval_hi, ts.width, occ, pb);
+            if (std::isnan(pos) || std::abs(pos - pb) + 0.5 >= cur)
+                continue;   // no closer-to-pull track is free
+
+            const size_t ov_before = find_overlaps(segments).size();
+            const int    vi_before = count_violations(segments);
+            const double wl_before = total_wl();
+            take_snap(pre_move);
+            ts.track_position = pos;
+            // Pull the followers' spans onto the new track, then keep the move
+            // only if it genuinely shortened wiring without new shorts/violations.
+            std::vector<TrackSegment*> all_placed;
+            for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
+            do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+            if (find_overlaps(segments).size() > ov_before ||
+                count_violations(segments)    > vi_before ||
+                total_wl() + 0.5 >= wl_before) {
+                restore_snap(pre_move);
+                continue;
+            }
+            ++moved;
+            progress = true;
+        }
+        if (!progress) break;
+    }
+    if (moved > 0)
+        std::cout << "[NUTS] wirelength tighten: pulled " << moved
+                  << " segment(s) toward their pull bound.\n";
+}
+
 void NUTSEngine::resolve_corner_overlaps(
     std::vector<TrackSegment>& segments,
     const std::map<std::pair<int,int>, double>&                pull_map,
@@ -1778,6 +1897,10 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // split bounds.
         resolve_corner_overlaps(result.segments, pull_map, net_pull_map, align_map,
                                 rev_conn_map, ts_ptr_map);
+        // Final opportunistic tighten: slide pulled segments toward their pull in
+        // the settled layout (the sweep/repack only ever placed them by local
+        // decisions and never revisited them when space opened next to the pull).
+        tighten_pulls(result.segments, net_pull_map, rev_conn_map, ts_ptr_map);
         compute_metrics(result);
         out.result = std::move(result);
         return out;

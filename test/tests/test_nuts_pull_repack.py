@@ -87,27 +87,52 @@ def _pull_deviation(session):
     return total, n
 
 
-def test_repack_keeps_pulled_anchors_near_pull(big_nuts_session):
+def test_pulled_anchors_end_near_pull(big_nuts_session):
+    """Aggregate pull deviation across the design.  Two mechanisms keep it low,
+    and removing either trips this:
+      - first_fit-only repack (the original bug)  → ≈99,300
+      - pull-aware repack, no final tighten pass   → ≈65,970
+      - pull-aware repack + tighten_pulls (current) → ≈50,700
+    Threshold sits below the no-tighten value so the regression guard covers the
+    final wirelength-tightening pass as well as the repack."""
     total, n = _pull_deviation(big_nuts_session)
     # Sanity: the design really does exercise many pulled segments (so this test
     # is meaningful, not vacuously passing on an all-net_pull==0 result).
     assert n > 100, f"expected many pulled segments, got {n}"
-    # first_fit-only repack (the bug) produces ≈99,300 here; the pull-aware
-    # repack ≈65,970.  Threshold sits clearly between the two with margin.
-    assert total < 85_000.0, (
+    assert total < 60_000.0, (
         f"pulled segments stray {total:.0f} from their pull bound across {n} "
-        f"segments — try_repack is bottom-edging anchors instead of honouring "
-        f"pull (expected < 85k; first_fit-only repack regresses to ≈99k)"
+        f"segments — repack is bottom-edging anchors and/or the tighten pass is "
+        f"not pulling them in (expected < 60k; no-tighten ≈66k, buggy ≈99k)"
     )
 
 
-def test_repack_does_not_trade_pull_for_overlaps(big_nuts_session):
-    """The pull-aware repack must not buy shorter wires with new shorts: it keeps
-    the feasibility fallback, so overlaps stay at or below the pre-fix count."""
+def test_reported_bundles_reach_their_pull(big_nuts_session):
+    """The three trunk segments from the bug report must land essentially AT
+    their pull bound now that tighten_pulls slides them in.  Pre-fix these were
+    bottom-edged far from pull (B9 seg1 at x=4959 vs pull 6820; B28 seg1 at
+    x=10268 vs pull 10950)."""
+    segs = {(ts.bundle_id, ts.seg_idx): ts
+            for ts in big_nuts_session.nuts_result.segments}
+    for bid, sidx in ((9, 1), (20, 2), (28, 1)):
+        ts = segs.get((bid, sidx))
+        assert ts is not None and ts.placed, f"B{bid} seg{sidx} missing/unplaced"
+        assert ts.net_pull > 0, f"B{bid} seg{sidx} expected an upward pull"
+        gap = ts.interval_hi - ts.track_position   # distance below the pull bound
+        assert gap < 300.0, (
+            f"B{bid} seg{sidx} sits {gap:.0f} below its pull bound "
+            f"{ts.interval_hi:.0f} (track={ts.track_position:.0f}); tighten_pulls "
+            f"should have slid it in"
+        )
+
+
+def test_tighten_does_not_trade_pull_for_overlaps(big_nuts_session):
+    """Shorter wires must not be bought with new shorts: every tighten move is
+    accepted only when it adds no overlap, so the final count stays at or below
+    the pre-fix baseline."""
     res = big_nuts_session.nuts_result
     assert res.num_violations == 0, f"interval violations: {res.num_violations}"
-    # first_fit-only repack left 7 abstract track overlaps here; the pull-aware
-    # version leaves 5.  Guard against a regression that trades pull for shorts.
+    # first_fit-only repack left 7 abstract track overlaps here; pull-aware repack
+    # + tighten leaves 4.  Guard against a regression that trades pull for shorts.
     assert res.num_overlaps <= 6, (
         f"abstract track overlaps regressed to {res.num_overlaps} (expected <= 6)"
     )
