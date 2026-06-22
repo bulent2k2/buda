@@ -1,7 +1,12 @@
 # Unified Topology Tree Generation — Design Document
 
-**Status:** Proposal (pre-implementation)  
-**Replaces:** ad-hoc `generate_candidates` (2-pin) + `generate_multicast_candidates` (N-pin)  
+**Status:** Partially implemented — the unified entry point and all single-trunk /
+MST / multi-rect machinery are built and shipping; feedthru, the flexibility score,
+pull-balancing, candidate dedup, and general multi-level trunks are **not** yet built.
+See **§16 Implementation Status** for the per-feature breakdown with code pointers.  
+**Replaces:** ad-hoc `generate_candidates` (2-pin) + `generate_multicast_candidates` (N-pin)
+— *done*: `TopologyGenerator::generate_candidates` (`topology.cpp:1550`) is now the single
+entry point, dispatching to `generate_2pin` / `generate_npin`.  
 **Authors:** BUDA team  
 
 ---
@@ -110,6 +115,17 @@ topology.  The I/L/Z/U/UU shapes remain exactly as implemented.
 
 ## 4. Unified Generation Algorithm
 
+> **Status — mostly [IMPLEMENTED], two gaps.** Phases 0–3 are built:
+> `generate_npin` (`topology.cpp:1130`) runs the aligned-case pre-check, sweeps trunk
+> positions via `add_trunk_h`/`add_trunk_v` (`:734`/`:918`), and falls back to
+> `add_mst_candidates` (`:1298`). Phase 4 is only **partially** built —
+> `add_multi_trunk_candidates` (`:1506`) emits a single `BITRUNK_H` split, not the
+> general recursive multi-level trunk described here (no `BITRUNK_V`, no depth>1).
+> Phase 5 `deduplicate` is **[MISSING]** (no candidate-level dedup exists) and
+> `annotate_and_sort` (`:634`) sorts by raw `estimated_wirelength`, **not** `adjusted_wl`
+> (the flexibility score of §10 is unbuilt). The signature here,
+> `GenerateTopologies(busterms)`, is realized as `generate_candidates(src, dsts)`.
+
 ```
 GenerateTopologies(busterms: List[Busterm]) → List[Topology]
 ```
@@ -189,6 +205,15 @@ depth.
 
 ## 5. Feedthru Configuration
 
+> **Status — [MISSING].** No `FeedthruConfig`, `Floorplan::feedthru_blocks`, or
+> `add_feedthru` CLI command exists in the tree (`grep -ri feedthru src/` finds only
+> `pass_through_count`). Today a trunk that crosses a block's bbox is recorded as a
+> **pass-through** (`Topology::pass_through_count`, `topology.h:79`) but is never
+> deliberately *configured* as routable; the connectivity verifier tolerates it. The
+> opt-in/opt-out semantics below are unbuilt. `test/tests/test_feedthru.py` carries the
+> xfail spec. Per the iteration-1 priorities, feedthru is **deferred** behind richer
+> trunk shapes and dedup.
+
 A **feedthru** is a block that a trunk is allowed to pass through electrically
 disconnected.  The trunk segment spans across the block's face-to-face extent
 without generating a stub.  The connection is completed later by physical
@@ -255,6 +280,16 @@ set_feedthru_layer <layer_id> [true|false]    # per-layer override
 ---
 
 ## 6. Connector Shape Selection (detail)
+
+> **Status — [PARTIAL].** The trunk builders attach each leaf with a **direct/L-stub**
+> only (`add_trunk_h`/`add_trunk_v`). The richer per-leaf connector choice described
+> here — in particular dropping a **Z-stub** off the trunk for an offset leaf, or a
+> recursive sub-trunk for a leaf that is itself a sub-tree — is **not** generated inside
+> a trunk candidate. (Standalone `Z_HVH`/`Z_VHV` shapes exist only for the 2-pin case,
+> `add_z_shapes` `:382`.) Per-leaf Z-stubs on trunks are the headline item of the
+> **"richer trunk shapes"** workstream (iteration 2). The tc3a analysis
+> ([topology_tc3a_findings.md](topology_tc3a_findings.md)) shows why: 70/80 bundles
+> route trunks straight *through* intervening blocks rather than branching to them.
 
 The existing L/Z/U shapes map naturally onto the tree connector role.  The key
 insight is that the choice of connector shape for a leaf depends on *both* the
@@ -391,6 +426,18 @@ parameter controls this.
 ---
 
 ## 10. Topology Ranking — Routing Flexibility Score
+
+> **Status — [MISSING] (ranking) / [IMPLEMENTED] (the input metric).** The raw slide
+> range this section builds on **is** computed and exposed:
+> `ConnTopology::build` fills each `ConnSeg.perp_lo`/`perp_hi`
+> (`conn_topology.cpp:210`, bound to Python in `bind_nuts.cpp:58`), and the
+> `dump_topologies` CLI command reports the per-candidate `min_slide` from it. What is
+> **unbuilt** is everything that *consumes* it for ranking: there is no `flex_score`,
+> no `adjusted_wl`, no `kFlex` knob, and `annotate_and_sort` (`topology.cpp:634`) still
+> sorts by raw `estimated_wirelength`. `test/tests/test_topology_flexibility.py` (16
+> xfail markers) and `test_pull_preference.py` (§10.7, 10 xfail) hold the specs. The
+> tc3a dump confirms the gap empirically: candidates with `min_slide=40` routinely sort
+> *above* `min_slide=1100` siblings purely because they are a few units shorter.
 
 ### 10.1 Motivation
 
@@ -920,6 +967,13 @@ Feature: Pull preference and pull-balanced trunk generation
 
 ## 15. Multi-Rect Blocks and Equivalent Busterms
 
+> **Status — [IMPLEMENTED].** `add_block <name> rect …` parses into a multi-rect
+> busterm (`Busterm::rects`, `topology.h:67`); the trunk builders pick the best-fit rect
+> per trunk position via `best_rect_for_h`/`best_rect_for_v` (`topology.cpp:669`/`:681`);
+> and `teg_mode thru|over` drives the bridge logic (`Topology::bridge_segments`). The
+> `.buda` syntax and TEG behaviour are documented in CLAUDE.md ("Stage 2"). Covered by
+> the multi-rect tests under `test/tests/`.
+
 ### 15.1 Motivation
 
 Two real-world layout situations require connecting to more than one candidate
@@ -1139,3 +1193,62 @@ MST minimises total WL but ignores:
 The trunk-first approach (Phase 1 and 2) generates fewer total segments and
 aligns naturally with the layer-assignment model in Stage 3.  MST is kept as a
 fallback (Phase 3) when no single trunk covers all busterms.
+
+---
+
+## 16. Implementation Status
+
+Snapshot of this design vs. the code on the analysis branch
+(`claude/claude-md-docs-c72lbp`, off `main@f125a49`). Verified by reading the cited
+symbols and by the `dump_topologies` inspection of `flow/big_data_test/tc3a_flat.buda`.
+
+| § | Feature | Status | Code / evidence |
+|---|---|---|---|
+| 4 | Unified entry point (`generate_candidates` → 2pin/Npin) | **DONE** | `topology.cpp:1550` / `:1563` / `:1130` |
+| 4 / 6 | I/L/Z/U/UU 2-pin shapes | **DONE** | `add_l/z/u/uu_shapes` `:206/:382/:485/:543` |
+| 4.1–4.2 | Single H/V trunk sweep + OOB + pass-through | **DONE** | `add_trunk_h/v` `:734/:918`; `pass_through_count` `topology.h:79` |
+| 4.3 | MST + trunk+MST fallback | **DONE** | `add_mst_candidates` `:1298`, `add_trunk_mst_candidates` `:1400` |
+| 4.4 | **General multi-level trunks** (recursive, V-split, depth>1) | **PARTIAL** | only `add_multi_trunk_candidates`→`BITRUNK_H` `:1506` |
+| 4.5 | Per-leaf **Z-stub / sub-trunk connectors** on a trunk | **MISSING** | trunk builders emit direct/L stubs only |
+| 4.5 | **Candidate dedup** (`deduplicate`) | **MISSING** | no candidate-level dedup; `annotate_and_sort` `:634` |
+| 15 | Multi-rect blocks + TEG bridge | **DONE** | `Busterm::rects` `topology.h:67`, `best_rect_for_h/v` `:669/:681` |
+| — | Slide range (`perp_lo/hi`), `net_pull` | **DONE** | `conn_topology.cpp:210/:499`, `bind_nuts.cpp:53–60` |
+| 10 | **Flexibility score** (`flex_score`/`adjusted_wl`/`kFlex`), flex-aware sort | **MISSING** | sort still by `estimated_wirelength`; 16 xfail in `test_topology_flexibility.py` |
+| 10.7 | **Pull-balanced centroid** (`lo_pull`/`hi_pull`, `~CEN`) | **MISSING** | 10 xfail in `test_pull_preference.py` |
+| 5 | **Feedthru** (`FeedthruConfig`, `add_feedthru`) | **MISSING** | `grep -ri feedthru src/` → none; 3 xfail in `test_feedthru.py` |
+
+### 16.1 Naming reconciliation (doc ↔ code)
+
+| This document | In the code |
+|---|---|
+| `GenerateTopologies(busterms)` | `TopologyGenerator::generate_candidates(src, dsts)` |
+| `add_block(... rects ...)` | `add_block <name> rect …` → `Busterm::rects` |
+| `deduplicate` (Phase 5) | *not present* |
+| `adjusted_wl` sort key | `estimated_wirelength` (raw) |
+| `feedthru_blocks` | *not present* (`pass_through_count` is the nearest geometric analogue) |
+
+### 16.2 Prioritized backlog (set in iteration 1)
+
+The empirical driver is the tc3a candidate explosion — see
+[topology_tc3a_findings.md](topology_tc3a_findings.md). On `tc3a_flat` the 80 bundles
+generate **2780 candidates (avg 35/bundle)**, of which **~91 % are straight-trunk
+sweeps** (`TRUNK_H/V` ± `+MST` ± `OOB`) while genuinely distinct shapes (L/Z/U/I/MST)
+are a small minority. Ordered next steps:
+
+1. **Richer trunk shapes** *(NEXT)* — §4.4 general multi-level trunks and §4.5/§6
+   per-leaf Z-stubs/sub-trunks. Replaces dozens of straight-trunk-through-block
+   candidates with a few branching ones that actually drop off at each leaf (addresses
+   the 70/80 pass-through bundles).
+2. **Dedup + noise reduction** *(NEXT)* — §4.5 `deduplicate`, plus snapping trunk
+   positions to a meaningful subset of Hanan lines and suppressing redundant `+MST`
+   twins. Directly cuts the ~91 % trunk-sweep noise and the 11/80 geometric duplicates.
+3. **Flexibility score** *(LATER)* — §10. The slide metric already exists; only the
+   ranking consumer is missing.
+4. **Pull-balanced centroid** *(LATER)* — §10.7.
+5. **Feedthru** *(LATER)* — §5.
+
+> **Inspection tooling:** the `dump_topologies [hint] [--problems]` CLI command
+> (added in iteration 1) prints the per-bundle candidate table — type, wirelength,
+> segment count, pass-through count, `min_slide`, selected/pinned marker — and flags
+> duplicate/pinched/single-candidate/pass-through bundles plus an aggregate summary.
+> Use it to re-measure after each backlog item lands.

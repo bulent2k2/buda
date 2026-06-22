@@ -1,0 +1,8 @@
+# Scratch flow for topology-generation analysis (iteration 1).
+# Mirrors tc3a_flat.buda up to topology generation, then dumps per-bundle
+# candidate tables instead of planning/routing. Read-only inspection.
+source ../tracks4top.buda
+source tc3a_flat_x10.buda
+run_bundler
+generate_topologies
+dump_topologies --problems
