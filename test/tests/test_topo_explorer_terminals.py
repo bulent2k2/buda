@@ -29,9 +29,14 @@ matplotlib.use("Agg")   # headless; no window
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
+import pytest    # noqa: E402
 import buda_cli   # noqa: E402
 import buda_viz   # noqa: E402
 from ui_state import ViewState  # noqa: E402
+
+# Each test builds a full TopologyExplorer over a routed flow (integration), so
+# keep this file in the mid tier — the fast tier (`bb -t`) must stay under ~10s.
+pytestmark = pytest.mark.mid
 
 
 def _session():

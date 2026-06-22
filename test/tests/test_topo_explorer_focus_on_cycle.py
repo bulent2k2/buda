@@ -29,8 +29,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
+import pytest  # noqa: E402
 import buda_cli  # noqa: E402
 import buda_viz  # noqa: E402
+
+# Builds a full TopologyExplorer over a routed flow (integration) -> mid tier,
+# so the fast tier (`bb -t`) stays under ~10s.
+pytestmark = pytest.mark.mid
 
 
 def _session():
