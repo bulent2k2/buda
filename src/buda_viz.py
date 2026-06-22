@@ -1101,8 +1101,10 @@ class TopologyExplorer:
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
         if event.key == 'k':                    self._step_segment(-1)
         if event.key == 'j':                    self._step_segment(+1)
+        # Layer up/down: 'u' pairs with prev/next-topology 'a'/'d', so 'd' is NOT
+        # a layer-down alias (it was double-bound: next-topo AND layer-down).
         if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
-        if event.key in ('-', '_', 'd'):        self._cycle_layer(-1)
+        if event.key in ('-', '_'):             self._cycle_layer(-1)
         if event.key == 'b':                    self.ui_state.toggle_blocks()
         if event.key == 'g':                    self.ui_state.toggle_hanan_grid()
         if event.key == 't':                    self.ui_state.toggle_busterms()
@@ -2712,6 +2714,7 @@ class BudaVisualizer:
         if event.key == 'b':                  self._toggle_blocks()
         if event.key == 't':                  self._toggle_bustermss()
         if event.key == 'g':                  self._toggle_hanan()
+        if event.key == 's':                  self._toggle_solo()
         if event.key == 'd' and self._has_detailed_data: self._toggle_detailed()
 
     # ------------------------------------------------------------------

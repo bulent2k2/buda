@@ -74,6 +74,30 @@ def test_terminals_setting_carries_over_to_explorer():
         plt.close("all")
 
 
+def test_explorer_d_is_next_topo_not_layer_down():
+    # Regression: 'd' was double-bound — next-topology AND layer-down — so one
+    # press advanced the topology and dropped the layer.  It must now be
+    # next-topology only; '-'/'_' remain layer-down.
+    import types
+    import matplotlib.pyplot as plt
+    s = _session()
+    exp = buda_viz.TopologyExplorer(
+        s.fp, s.bundles, layer_stack=s.layers, ui_state=ViewState())
+    try:
+        exp.fig_redraw()
+        n = {"topo": 0, "layer": 0}
+        _st, _cl = exp._step_topo, exp._cycle_layer
+        exp._step_topo = lambda d, _o=_st: (n.__setitem__("topo", n["topo"] + 1), _o(d))[1]
+        exp._cycle_layer = lambda d, _o=_cl: (n.__setitem__("layer", n["layer"] + 1), _o(d))[1]
+
+        exp._on_key(types.SimpleNamespace(key="d"))
+        assert n["topo"] == 1 and n["layer"] == 0, "'d' must be next-topology only"
+        exp._on_key(types.SimpleNamespace(key="-"))
+        assert n["layer"] == 1, "'-' should still be layer-down"
+    finally:
+        plt.close("all")
+
+
 def test_explorer_arrow_keys_pan_not_navigate():
     import types
     import matplotlib.pyplot as plt

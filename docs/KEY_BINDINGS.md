@@ -22,6 +22,7 @@ Here are the keyboard shortcuts available in each view.
 | `b` | Toggle visibility of the floorplan **blocks**. |
 | `t` | Toggle visibility of **busterms**. |
 | `g` | Toggle visibility of the **Hanan** grid. |
+| `s` | Toggle **Solo** mode (ON/OFF): show only the highlighted bundle, fully hiding the rest. |
 | `d` | Toggle **Detailed Mode** (shows 1.5-D track assignments if `run_detailed_nuts` was used). |
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close the visualizer. |
@@ -40,7 +41,7 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `j` | Select the **next segment** of the current topology. |
 | `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
 | `+`, `=`, `u` | **Layer Up**: Assign the selected segment to the next higher valid routing layer. |
-| `-`, `_`, `d` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. |
+| `-`, `_` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. (`d` is **next topology**, not layer-down.) |
 | `s` | **Select/Pin**: Pin the currently viewed topology (and any manual layer assignments) so the planner uses it. |
 | `x` | **Deselect/Unpin**: Remove the manual pin, letting the planner choose automatically. |
 | `r` | **Re-run Planner**: Re-evaluate global routing and NUTS track assignment after changing a pin. |

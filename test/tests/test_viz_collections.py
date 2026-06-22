@@ -155,6 +155,16 @@ def test_step_bundle_reveals_selected_when_all_bundles_off(monkeypatch):
         "previously selected bundle returns to hidden when the spotlight moves"
 
 
+def test_s_key_toggles_solo(monkeypatch):
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    before = viz.ui_state.solo
+    viz._on_key(types.SimpleNamespace(key="s"))
+    assert viz.ui_state.solo != before, "'s' should toggle Solo mode"
+    viz._on_key(types.SimpleNamespace(key="s"))
+    assert viz.ui_state.solo == before
+
+
 def test_arrow_keys_pan_the_view(monkeypatch):
     import types
     viz = _build_viz("dnuts1.buda", monkeypatch)
