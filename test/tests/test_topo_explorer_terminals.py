@@ -94,6 +94,11 @@ def test_explorer_d_is_next_topo_not_layer_down():
         assert n["topo"] == 1 and n["layer"] == 0, "'d' must be next-topology only"
         exp._on_key(types.SimpleNamespace(key="-"))
         assert n["layer"] == 1, "'-' should still be layer-down"
+        exp._on_key(types.SimpleNamespace(key="+"))
+        assert n["layer"] == 2, "'+' should still be layer-up"
+        # The letter aliases were dropped: 'u' no longer cycles the layer.
+        exp._on_key(types.SimpleNamespace(key="u"))
+        assert n["layer"] == 2, "'u' must no longer be a layer key"
     finally:
         plt.close("all")
 

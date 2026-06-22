@@ -40,8 +40,8 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `k` | Select the **previous segment** of the current topology. |
 | `j` | Select the **next segment** of the current topology. |
 | `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
-| `+`, `=`, `u` | **Layer Up**: Assign the selected segment to the next higher valid routing layer. |
-| `-`, `_` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. (`d` is **next topology**, not layer-down.) |
+| `+`, `=` | **Layer Up**: Assign the selected segment to the next higher valid routing layer. |
+| `-`, `_` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. |
 | `s` | **Select/Pin**: Pin the currently viewed topology (and any manual layer assignments) so the planner uses it. |
 | `x` | **Deselect/Unpin**: Remove the manual pin, letting the planner choose automatically. |
 | `r` | **Re-run Planner**: Re-evaluate global routing and NUTS track assignment after changing a pin. |

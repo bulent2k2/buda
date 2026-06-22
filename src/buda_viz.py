@@ -1101,9 +1101,10 @@ class TopologyExplorer:
         if event.key in (']', 'pagedown'):      self._step_bundle(+1)
         if event.key == 'k':                    self._step_segment(-1)
         if event.key == 'j':                    self._step_segment(+1)
-        # Layer up/down: 'u' pairs with prev/next-topology 'a'/'d', so 'd' is NOT
-        # a layer-down alias (it was double-bound: next-topo AND layer-down).
-        if event.key in ('+', '=', 'u'):        self._cycle_layer(+1)
+        # Layer up/down use the symbol keys only.  The letter aliases were
+        # dropped: 'd' was double-bound (next-topology AND layer-down), and 'u'
+        # was its orphaned layer-up partner.
+        if event.key in ('+', '='):             self._cycle_layer(+1)
         if event.key in ('-', '_'):             self._cycle_layer(-1)
         if event.key == 'b':                    self.ui_state.toggle_blocks()
         if event.key == 'g':                    self.ui_state.toggle_hanan_grid()
