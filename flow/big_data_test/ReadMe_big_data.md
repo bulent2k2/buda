@@ -31,7 +31,7 @@ cp ~/chip_designs/tc3a* flow/big_data_test
 bfp flow/big_data_test/tc3a.bdb &
 buda flow/big_data_test/tc3a.buda &
 
-# big dump problem
+# FIXED. big dump problem
 15k lines:
 wc ./out.log
 ## 5k + lines total: 
