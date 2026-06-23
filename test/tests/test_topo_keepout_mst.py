@@ -309,8 +309,14 @@ def test_trunk_mst_connected_block_names_complete():
         )
 
 
-def test_trunk_mst_wirelength_geq_trunk():
-    """TRUNK+MST estimated_wirelength >= corresponding plain TRUNK."""
+def test_trunk_mst_wirelength_is_honest():
+    """TRUNK+MST estimated_wirelength reflects its ACTUAL segments.
+
+    Before completion landed, the hybrid added shortcut edges on top of the full
+    trunk (so its WL was always >= the plain trunk).  The completion redesign makes
+    each MST edge *replace* a child block's trunk stub, so a +MST hybrid is a clean
+    trunk-rooted tree whose wirelength can be BELOW the plain trunk -- and must
+    equal the sum of its own segment lengths (no under/over-counting)."""
     fp = buda.Floorplan()
     fp.add_block("A", 0,   0, 100, 100)
     fp.add_block("B", 200, 0, 300, 100)
@@ -319,16 +325,15 @@ def test_trunk_mst_wirelength_geq_trunk():
     gen = _make_gen(fp)
     cands = gen.generate_candidates("A", ["B", "C"])
 
-    plain = {c.trunk_location: c for c in cands
-             if "TRUNK_H" in c.type and "+MST" not in c.type}
-    for c in cands:
-        if "TRUNK_H+MST" in c.type and c.trunk_location in plain:
-            assert c.estimated_wirelength >= plain[c.trunk_location].estimated_wirelength, (
-                f"TRUNK+MST WL ({c.estimated_wirelength}) < plain TRUNK WL "
-                f"({plain[c.trunk_location].estimated_wirelength})"
-            )
-            return
-    pytest.skip("No overlapping trunk pair found")
+    hybrids = [c for c in cands if "+MST" in c.type]
+    assert hybrids, "expected at least one TRUNK+MST hybrid"
+    for c in hybrids:
+        seg_sum = sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
+                      for s in c.segments)
+        assert c.estimated_wirelength == seg_sum, (
+            f"{c.type}: estimated_wirelength {c.estimated_wirelength} != "
+            f"segment-length sum {seg_sum}"
+        )
 
 
 def test_trunk_mst_no_legs_shorter_than_min_stub():

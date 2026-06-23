@@ -716,6 +716,62 @@ static void annotate_endpoints(Topology& topo,
     }
 }
 
+// Remove segment `idx` from a topology, re-keying seg_busterms to the compacted
+// indices (entries below idx unchanged, entries above shifted down by one).
+static void erase_segment(Topology& topo, int idx) {
+    topo.segments.erase(topo.segments.begin() + idx);
+    std::map<int, SegEndpoints> nb;
+    for (auto& [k, v] : topo.seg_busterms) {
+        if (k < idx)       nb[k] = v;
+        else if (k > idx)  nb[k - 1] = v;
+        // k == idx is dropped
+    }
+    topo.seg_busterms = std::move(nb);
+}
+
+// Number of connected components of `topo` under the SEG (wire-junction)
+// connections ConnTopology infers -- the connectivity the downstream stages see.
+static int conn_seg_components(const Topology& topo, const Floorplan& fp) {
+    ConnTopology ct;
+    ct.build(topo, fp);
+    const auto& segs = ct.segs();
+    int n = (int)segs.size();
+    if (n == 0) return 0;
+    std::vector<int> uf(n);
+    std::iota(uf.begin(), uf.end(), 0);
+    auto find = [&uf](int x) { while (uf[x] != x) { uf[x] = uf[uf[x]]; x = uf[x]; } return x; };
+    for (int i = 0; i < n; ++i)
+        for (const auto& c : segs[i].conns)
+            if (c.kind == SegConn::SEG) uf[find(i)] = find(c.seg_idx);
+    std::set<int> roots;
+    for (int i = 0; i < n; ++i) roots.insert(find(i));
+    return (int)roots.size();
+}
+
+// True if any connector (index >= n_orig) is collinear-contained within another
+// segment -- the overlap that can close a redundant loop at a high-degree relay.
+static bool has_collinear_overlap(const Topology& topo, int n_orig) {
+    auto covers = [](const Segment& o, const Segment& c) {
+        bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
+        if (o_h != c_h) return false;
+        if (c_h) {
+            if (o.start.y != c.start.y) return false;
+            int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
+            int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
+            return olo <= clo && chi <= ohi;
+        }
+        if (o.start.x != c.start.x) return false;
+        int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
+        int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
+        return olo <= clo && chi <= ohi;
+    };
+    int n = (int)topo.segments.size();
+    for (int c = n_orig; c < n; ++c)
+        for (int o = 0; o < n; ++o)
+            if (o != c && covers(topo.segments[o], topo.segments[c])) return true;
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // MST feedthrough completion
 // ---------------------------------------------------------------------------
@@ -752,8 +808,9 @@ static void complete_relay_junctions(Topology& topo,
                                      const std::vector<Busterm>& blocks,
                                      const Floorplan& fp,
                                      int h_layer, int v_layer) {
-    (void)fp;  // min-stub is intentionally not enforced on completion connectors:
-               // a relay MUST be completed (correctness over the min-stub heuristic).
+    // min-stub is intentionally not enforced on completion connectors: a relay
+    // MUST be completed (correctness over the min-stub heuristic).  fp is used by
+    // the verified de-overlap pass at the end.
     auto on_face = [](const Point& P, bool horiz, const Busterm& bt) -> bool {
         auto check_rect = [&](const Rect& r) -> bool {
             return horiz
@@ -772,8 +829,10 @@ static void complete_relay_junctions(Topology& topo,
     // annotation.  Snapshot the segment count first: we append connectors below.
     struct Inc { Point p; bool seg_horiz; int seg_idx; int ep; };
     int n_seg = (int)topo.segments.size();
-    std::map<int, std::vector<Inc>> incident;     // block idx -> distinct landings
+    std::map<int, std::vector<Inc>> incident;     // block idx -> distinct landing POINTS (chaining)
+    std::map<int, std::vector<Inc>> all_land;     // block idx -> EVERY landing endpoint (single-tap)
     auto add_incident = [&](int bi, const Point& P, bool seg_horiz, int seg_idx, int ep) {
+        all_land[bi].push_back({P, seg_horiz, seg_idx, ep});
         auto& v = incident[bi];
         for (const Inc& q : v) if (q.p.x == P.x && q.p.y == P.y) return;  // distinct
         v.push_back({P, seg_horiz, seg_idx, ep});
@@ -872,31 +931,40 @@ static void complete_relay_junctions(Topology& topo,
         });
         for (size_t k = 1; k < pts.size(); ++k)
             connect(pts[k - 1], pts[k]);
+    }
 
-        // Single-tap model: keep the busterm tap on EXACTLY ONE incident stub
-        // and demote every other landing to an internal (SEG) junction.  Without
-        // this, every landing stays annotated as a busterm on block bi, so
-        // ConnTopology infers a BUSTERM connection at each and SKIPS the SEG
-        // junction between the relay connectors and the stubs -- the wire we just
-        // added is invisible downstream and NUTS could slide the pieces apart,
-        // silently re-opening the through-block feedthrough.  Demoting the extras
-        // to nullopt forces infer_connections to wire them as real SEG junctions.
-        //
-        // Pick the tap on the stub with the most slide flexibility: a stub on a
-        // vertical (x) face slides in y (flexibility = the block's y-extent); on a
-        // horizontal (y) face it slides in x (the x-extent).  The connectors run
-        // along the block faces, so tapping a stub (which slides ALONG its face)
-        // keeps the single anchor cleanly on the block.
+    // De-overlap is handled after annotations are final (see end of function).
+
+    // Single-tap model: keep the busterm tap on EXACTLY ONE landing per block and
+    // demote every other landing to an internal (SEG) junction.  Without this,
+    // every landing stays annotated as a busterm on the block, so ConnTopology
+    // infers a BUSTERM connection at each and SKIPS the SEG junction between the
+    // relay connectors and the stubs -- the wire we just added is invisible
+    // downstream and NUTS could slide the pieces apart, silently re-opening the
+    // through-block feedthrough.  Demoting the extras to nullopt forces
+    // infer_connections to wire them as real SEG junctions.
+    //
+    // Iterate over ALL landing endpoints, not just distinct points: when two
+    // segments share one landing point (e.g. a kept trunk stub and an MST edge
+    // both leaving a block's corner in a trunk+MST hybrid) both would otherwise
+    // keep the busterm tag -- a double tap on the same block.
+    //
+    // Pick the tap on the stub with the most slide flexibility: a stub on a
+    // vertical (x) face slides in y (flexibility = the block's y-extent); on a
+    // horizontal (y) face it slides in x (the x-extent).  The connectors run
+    // along the block faces, so tapping a stub (which slides ALONG its face)
+    // keeps the single anchor cleanly on the block.
+    for (auto& [bi, lands] : all_land) {
         const Rect& bb = blocks[bi].orig_bbox;
         auto flex = [&](const Inc& q) {
             return q.seg_horiz ? (bb.y2 - bb.y1) : (bb.x2 - bb.x1);
         };
         size_t best = 0;
-        for (size_t k = 1; k < pts.size(); ++k)
-            if (flex(pts[k]) > flex(pts[best])) best = k;
-        for (size_t k = 0; k < pts.size(); ++k) {
-            auto& ep   = topo.seg_busterms[pts[k].seg_idx];
-            auto& slot = (pts[k].ep == 0) ? ep.first : ep.second;
+        for (size_t k = 1; k < lands.size(); ++k)
+            if (flex(lands[k]) > flex(lands[best])) best = k;
+        for (size_t k = 0; k < lands.size(); ++k) {
+            auto& ep   = topo.seg_busterms[lands[k].seg_idx];
+            auto& slot = (lands[k].ep == 0) ? ep.first : ep.second;
             if (k == best) slot = blocks[bi];    // the single busterm tap
             else           slot = std::nullopt;  // demote to an internal SEG junction
         }
@@ -910,6 +978,50 @@ static void complete_relay_junctions(Topology& topo,
         auto& ep = topo.seg_busterms[s];
         ep.first  = std::nullopt;
         ep.second = std::nullopt;
+    }
+
+    // De-overlap connectors.  At a high-degree relay the landing-chaining can lay
+    // one connector's leg collinear on top of another's, a redundant parallel wire
+    // that closes a cycle (the PLUS centre block).  Such a connector is usually
+    // droppable -- but NOT always: if it is the only inferable SEG link to a
+    // busterm-annotated edge endpoint (ConnTopology suppresses SEG inference at a
+    // busterm-tagged endpoint, and does not infer collinear overlaps), dropping it
+    // disconnects the topology.  So we remove a collinear-contained connector only
+    // after VERIFYING the result stays one connected component, one connector at a
+    // time.  Gated on an overlap actually existing (the common case does nothing).
+    if (has_collinear_overlap(topo, n_seg)) {
+        auto covers = [](const Segment& o, const Segment& c) {
+            bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
+            if (o_h != c_h) return false;
+            if (c_h) {
+                if (o.start.y != c.start.y) return false;
+                int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
+                int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
+                return olo <= clo && chi <= ohi;
+            }
+            if (o.start.x != c.start.x) return false;
+            int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
+            int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
+            return olo <= clo && chi <= ohi;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            int n = (int)topo.segments.size();
+            for (int c = n_seg; c < n; ++c) {
+                bool contained = false;
+                for (int o = 0; o < n; ++o)
+                    if (o != c && covers(topo.segments[o], topo.segments[c])) { contained = true; break; }
+                if (!contained) continue;
+                Topology trial = topo;
+                erase_segment(trial, c);
+                if (conn_seg_components(trial, fp) <= conn_seg_components(topo, fp)) {
+                    topo = std::move(trial);   // removal kept connectivity -> commit
+                    changed = true;
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -1599,6 +1711,42 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
     }
 }
 
+// Is `topo` a clean routing TREE under the SEG junctions ConnTopology infers --
+// i.e. one connected component AND acyclic?  A completed trunk+MST candidate is
+// accepted only when this holds:
+//   • connected: a collinear stub/edge end-to-end join (which ConnTopology does
+//     not infer) can split the wire into pieces even though it is geometrically
+//     continuous;
+//   • acyclic: a kept stub that crosses another branch block (a pass-through)
+//     leaves a redundant second path to the trunk, which completion would close
+//     into a real loop.
+// Either defect means the hybrid is not a faithful tree, so it is dropped rather
+// than emitted.  The acyclic test mirrors conftest._has_no_cycles (undirected
+// cycle detection over unique SEG edges).
+static bool topology_is_clean_tree(const Topology& topo, const Floorplan& fp) {
+    ConnTopology ct;
+    ct.build(topo, fp);
+    const auto& segs = ct.segs();
+    int n = (int)segs.size();
+    if (n == 0) return true;
+    std::vector<int> uf(n);
+    std::iota(uf.begin(), uf.end(), 0);
+    auto find = [&uf](int x) { while (uf[x] != x) { uf[x] = uf[uf[x]]; x = uf[x]; } return x; };
+    std::set<std::pair<int,int>> edges;          // unique undirected SEG edges
+    for (int i = 0; i < n; ++i)
+        for (const auto& c : segs[i].conns)
+            if (c.kind == SegConn::SEG)
+                edges.insert({std::min(i, c.seg_idx), std::max(i, c.seg_idx)});
+    for (const auto& [a, b] : edges) {
+        int ra = find(a), rb = find(b);
+        if (ra == rb) return false;              // a SEG edge re-closes a component -> cycle
+        uf[ra] = rb;
+    }
+    int root = find(0);
+    for (int i = 1; i < n; ++i) if (find(i) != root) return false;   // disconnected
+    return true;
+}
+
 void TopologyGenerator::add_trunk_mst_candidates(
     const std::vector<Busterm>& blocks,
     std::vector<Topology>& results)
@@ -1635,8 +1783,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
         if (branch_idx.size() < 2) continue;
 
         // Build MST among branch blocks.  Use the block rect nearest to the
-        // trunk as the representative rect for each block.
+        // trunk as the representative rect for each block.  Record each block's
+        // distance to the trunk so we can root the MST at the trunk-nearest block.
         std::vector<std::pair<std::string, Rect>> nodes;
+        std::vector<int> node_trunk_dist;
         for (int idx : branch_idx) {
             const Busterm& bt = blocks[idx];
             auto rects = bt.rects.empty() ? std::vector<Rect>{bt.orig_bbox} : bt.rects;
@@ -1649,21 +1799,56 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 if (d < best_d) { best_d = d; best = r; }
             }
             nodes.emplace_back(bt.block_name, best);
+            node_trunk_dist.push_back(best_d);
         }
 
         auto mst_edges = compute_mst(nodes);
         if (mst_edges.empty()) continue;
 
-        // Build new topology: copy trunk + append MST inter-branch edge segments.
-        // Place "+MST" before the "@..." positional tag so substring checks work.
-        Topology new_t = trunk_topo;
-        {
-            auto at = trunk_topo.type.find('@');
-            new_t.type = (at != std::string::npos)
-                ? trunk_topo.type.substr(0, at) + "+MST" + trunk_topo.type.substr(at)
-                : trunk_topo.type + "+MST";
-        }
+        // ── Trunk-rooted tree: make each MST edge REPLACE a stub ──────────────
+        // The copied trunk already stubs to every branch block; the MST edges add
+        // a second path between the same blocks, so completing the relays as-is
+        // would close a cycle (hence completion was historically skipped here).
+        // Instead, root the MST at the branch block nearest the trunk and drop the
+        // trunk stub of every OTHER branch block: each non-root block now reaches
+        // the trunk solely through its MST parent edge, so the hybrid is a clean
+        // trunk-rooted tree that complete_relay_junctions can wire up safely.
+        //
+        // Scope to single-rect branch blocks: a multi-rect/TEG-OVER block can own
+        // two V stubs plus a bridge, and dropping those would dangle the bridge.
+        // For those we keep the legacy (un-completed) behaviour, still flagged.
+        bool simple = true;
+        for (int idx : branch_idx)
+            if (!blocks[idx].rects.empty()) { simple = false; break; }
 
+        // The root keeps its trunk stub; every other branch block reaches the
+        // trunk through the MST tree rooted at it.  The root must therefore
+        // actually OWN a stub: a pass-through block (one the trunk reaches only by
+        // another block's stub crossing it) appears in no busterm entry, and
+        // "keeping" its nonexistent stub would leave the whole MST cluster
+        // detached from the spine.  Root at the trunk-nearest stub-owning block.
+        std::set<std::string> stub_owners;
+        for (const auto& [sidx, eps] : trunk_topo.seg_busterms) {
+            (void)sidx;
+            if (eps.first)  stub_owners.insert(eps.first->block_name);
+            if (eps.second) stub_owners.insert(eps.second->block_name);
+        }
+        int root_node = -1;
+        for (int k = 0; k < (int)nodes.size(); ++k) {
+            if (!stub_owners.count(nodes[k].first)) continue;      // must own a stub
+            if (root_node < 0 || node_trunk_dist[k] < node_trunk_dist[root_node])
+                root_node = k;
+        }
+        if (root_node < 0) simple = false;   // no stub-owning branch block to root at
+
+        std::set<std::string> child_names;   // branch blocks whose stub the MST replaces
+        if (simple)
+            for (int k = 0; k < (int)nodes.size(); ++k)
+                if (k != root_node) child_names.insert(nodes[k].first);
+
+        // Realize the MST inter-branch edges as segments once; both the legacy and
+        // the completed-tree form append the same edge geometry.
+        std::vector<Segment> edge_segs;
         bool valid = true;
         for (const auto& edge : mst_edges) {
             const Rect& r_u = nodes[edge.u].second;
@@ -1674,10 +1859,10 @@ void TopologyGenerator::add_trunk_mst_candidates(
 
             if (p1.x == p2.x) {
                 if (std::abs(p2.y - p1.y) < m_v) { valid = false; break; }
-                new_t.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+                edge_segs.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
             } else if (p1.y == p2.y) {
                 if (std::abs(p2.x - p1.x) < m_h) { valid = false; break; }
-                new_t.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+                edge_segs.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
             } else {
                 // Diagonal L-shape: both legs must meet their minimum length,
                 // otherwise the edge would stop short of the branch block and
@@ -1688,30 +1873,77 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 }
                 if (is_h) {
                     // first perpendicular to trunk direction, then along it
-                    new_t.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-                    new_t.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
+                    edge_segs.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+                    edge_segs.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
                 } else {
-                    new_t.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-                    new_t.segments.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+                    edge_segs.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+                    edge_segs.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
                 }
             }
         }
+        if (!valid || edge_segs.empty()) continue;   // no usable shortcut edges
 
-        // Only emit if extra segments were actually added (safety: no duplicate trunks).
-        if (valid && new_t.segments.size() > trunk_topo.segments.size()) {
-            // NOTE: trunk+MST completion is intentionally NOT applied here.
-            // add_trunk_mst_candidates copies the full trunk (every branch stub)
-            // and then adds MST shortcut edges between the same branch blocks, so
-            // each branch block is already connected via its stub.  Completing the
-            // relay junction would tie the MST edge to the stub and CLOSE A LOOP
-            // (cycle), because the MST edges here are redundant with the trunk
-            // spine.  Making trunk+MST a clean tree requires the MST edge to
-            // REPLACE a stub rather than augment it -- a separate redesign.
-            // Standalone MST (add_mst_candidates) is completed; trunk+MST is left
-            // as-is pending that redesign.
-            annotate_endpoints(new_t, blocks);
-            results.push_back(std::move(new_t));
+        std::string mst_type;
+        {
+            auto at = trunk_topo.type.find('@');
+            mst_type = (at != std::string::npos)
+                ? trunk_topo.type.substr(0, at) + "+MST" + trunk_topo.type.substr(at)
+                : trunk_topo.type + "+MST";
         }
+
+        // Legacy form: full trunk (every stub) + shortcut edges, annotated only.
+        // This is the historical un-completed hybrid; check_topo flags its relays
+        // as FEEDTHRU_RELAY.  It is the fallback when the tree form can't be cleanly
+        // completed.
+        auto build_legacy = [&]() {
+            Topology t = trunk_topo;
+            t.type = mst_type;
+            for (const auto& s : edge_segs) t.segments.push_back(s);
+            annotate_endpoints(t, blocks);
+            return t;
+        };
+
+        // Completed-tree form (single-rect blocks with a stub-owning root): drop
+        // each non-root child's trunk stub so the MST edge REPLACES it, yielding a
+        // cycle-free trunk-rooted tree that complete_relay_junctions can wire up
+        // (single busterm tap per block + SEG junctions).  We accept it only when
+        // the result verifies as one SEG-connected component -- a stub that is
+        // collinear with an incident MST edge defeats ConnTopology's perpendicular
+        // junction inference, and those cases fall back to the legacy form.
+        if (simple && !child_names.empty()) {
+            Topology tree = trunk_topo;
+            tree.type = mst_type;
+            std::vector<Segment> kept;
+            std::map<int, SegEndpoints> kept_bt;
+            int ni = 0;
+            for (int s = 0; s < (int)trunk_topo.segments.size(); ++s) {
+                bool drop = false;
+                auto it = trunk_topo.seg_busterms.find(s);
+                if (it != trunk_topo.seg_busterms.end())
+                    for (const auto& opt : {it->second.first, it->second.second})
+                        if (opt && child_names.count(opt->block_name)) { drop = true; break; }
+                if (drop) continue;
+                kept.push_back(trunk_topo.segments[s]);
+                if (it != trunk_topo.seg_busterms.end()) kept_bt[ni] = it->second;
+                ++ni;
+            }
+            tree.segments     = std::move(kept);
+            tree.seg_busterms = std::move(kept_bt);
+            for (const auto& s : edge_segs) tree.segments.push_back(s);
+            annotate_endpoints(tree, blocks);
+            complete_relay_junctions(tree, blocks, floorplan_, h_layer_, v_layer_);
+            if (topology_is_clean_tree(tree, floorplan_))
+                results.push_back(std::move(tree));
+            // Otherwise a single-rect hybrid that cannot be cleanly completed
+            // (a stub collinear with an incident MST edge) is DROPPED rather than
+            // emitted as a feedthru/model-disconnected candidate: the base trunk
+            // and the (always-completed) standalone MST already cover this bundle,
+            // and dropping trims candidate noise.
+            continue;
+        }
+        // Multi-rect / no stub-owning root: completion is out of scope, so emit
+        // the historical legacy hybrid (check_topo still flags its relays).
+        results.push_back(build_legacy());
     }
 }
 

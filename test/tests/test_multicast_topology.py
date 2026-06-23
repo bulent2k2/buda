@@ -128,7 +128,10 @@ def block_has_v_stub(ctx, ttype, blk, length):
 def trunk_h_stub_to_b(ctx):
     b = ctx['fp'].get_block_bounds('B')
     for c in ctx['candidates']:
-        if not c.type.startswith('TRUNK_H') or 'OOB' in c.type:
+        # +MST hybrids intentionally REPLACE some per-block stubs with MST edges
+        # (trunk+MST completion), so the "stub to each block" invariant does not
+        # apply to them.
+        if not c.type.startswith('TRUNK_H') or 'OOB' in c.type or '+MST' in c.type:
             continue
         ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
@@ -150,7 +153,7 @@ def trunk_h_stub_to_b(ctx):
 def trunk_h_stub_to_c(ctx):
     c_rect = ctx['fp'].get_block_bounds('C')
     for c in ctx['candidates']:
-        if not c.type.startswith('TRUNK_H') or 'OOB' in c.type:
+        if not c.type.startswith('TRUNK_H') or 'OOB' in c.type or '+MST' in c.type:
             continue
         ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
@@ -179,7 +182,7 @@ def trunk_v_exists(ctx):
 @then('every TRUNK_V candidate has an H stub to each block whose face_x differs from the trunk x')
 def trunk_v_h_stubs(ctx):
     for c in ctx['candidates']:
-        if not c.type.startswith('TRUNK_V') or 'OOB' in c.type:
+        if not c.type.startswith('TRUNK_V') or 'OOB' in c.type or '+MST' in c.type:
             continue
         ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])

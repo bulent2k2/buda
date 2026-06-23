@@ -175,6 +175,34 @@ def _seg_components(ct):
     return len({find(i) for i in range(n)})
 
 
+def _seg_has_cycle(ct):
+    """True if the SEG (wire-junction) graph has a cycle: a unique undirected SEG
+    edge that re-closes an already-connected component.  A faithful routing tree
+    must be acyclic -- a cycle is a redundant wire loop (e.g. duplicate connectors
+    at a high-degree relay)."""
+    segs = ct.segs()
+    n = len(segs)
+    uf = list(range(n))
+
+    def find(x):
+        while uf[x] != x:
+            uf[x] = uf[uf[x]]
+            x = uf[x]
+        return x
+
+    edges = set()
+    for i, cs in enumerate(segs):
+        for co in cs.conns:
+            if co.kind == buda.SegConnKind.SEG:
+                edges.add((min(i, co.seg_idx), max(i, co.seg_idx)))
+    for a, b in edges:
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return True
+        uf[ra] = rb
+    return False
+
+
 def test_completion_adds_wire_for_relay_block():
     """The staircase MST has a relay block (degree >= 2) and completion adds the
     bridging wire.  The raw (un-completed) MST of this 4-block staircase has
@@ -213,8 +241,10 @@ def test_completion_seg_connected_downstream():
     """The real fix for the reviewer's concern: the completed MST must be ONE
     component under SEG (wire-junction) connectivity alone -- not merely touching
     geometrically, and not bridged through a block's busterm.  Otherwise NUTS /
-    detailed-NUTS see disconnected pieces and may slide them apart.  Also guards
-    against degenerate zero-length connector segments."""
+    detailed-NUTS see disconnected pieces and may slide them apart.  The completion
+    must also be a TREE (acyclic): at a high-degree relay the landing-chaining can
+    lay collinear connector wire on top of itself, closing a redundant loop -- the
+    de-overlap pass drops those.  Also guards against zero-length connectors."""
     for coords, src, dsts in (STAIRCASE, PLUS, GRID):
         fp = _make_fp(coords)
         for c in _mst_cands(_gen(fp).generate_candidates(src, dsts)):
@@ -228,6 +258,68 @@ def test_completion_seg_connected_downstream():
                 f"{c.type} on {list(coords)}: SEG-connectivity has {nc} components "
                 f"(connectors modelled as busterm taps, not wire junctions)"
             )
+            assert not _seg_has_cycle(ct), (
+                f"{c.type} on {list(coords)}: completed MST has a wire cycle "
+                f"(redundant overlapping connectors at a high-degree relay)"
+            )
+
+
+def test_high_degree_relay_has_no_overlapping_connectors():
+    """Regression for the PLUS centre (a degree-4 relay): chaining its four MST
+    edges used to lay one connector's return leg collinear on top of the next
+    connector, an overlap that closed a cycle.  The de-overlap pass drops the
+    contained connector, so no two segments are collinear-overlapping."""
+
+    def _overlap(a, b):
+        a_h, b_h = a.start.y == a.end.y, b.start.y == b.end.y
+        if a_h != b_h:
+            return False
+        if a_h:
+            if a.start.y != b.start.y:
+                return False
+            alo, ahi = sorted((a.start.x, a.end.x))
+            blo, bhi = sorted((b.start.x, b.end.x))
+        else:
+            if a.start.x != b.start.x:
+                return False
+            alo, ahi = sorted((a.start.y, a.end.y))
+            blo, bhi = sorted((b.start.y, b.end.y))
+        return min(ahi, bhi) > max(alo, blo)   # share more than a single point
+
+    coords, src, dsts = PLUS
+    fp = _make_fp(coords)
+    msts = _mst_cands(_gen(fp).generate_candidates(src, dsts))
+    assert msts
+    for c in msts:
+        segs = c.segments
+        for i in range(len(segs)):
+            for j in range(i + 1, len(segs)):
+                assert not _overlap(segs[i], segs[j]), (
+                    f"{c.type}: segments {i} and {j} collinear-overlap "
+                    f"(redundant connector wire not de-overlapped)"
+                )
+
+
+def test_contained_connector_kept_when_load_bearing():
+    """The de-overlap pass must not drop a collinear-contained connector that is the
+    only inferable SEG link to a busterm-annotated edge endpoint.  ConnTopology
+    suppresses SEG inference at a busterm-tagged endpoint and does not infer
+    collinear overlaps, so the covering segment cannot stand in for it -- dropping
+    it would split the topology.  Regression for the reviewer's 4-block case: every
+    completed MST candidate stays ONE SEG-connected component."""
+    coords = {"A": (300, 600, 350, 650), "B": (400, 400, 450, 450),
+              "C": (200, 400, 250, 450), "D": (700, 200, 750, 250)}
+    fp = _make_fp(coords)
+    msts = _mst_cands(_gen(fp).generate_candidates("A", ["B", "C", "D"]))
+    assert msts
+    for c in msts:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        assert _seg_components(ct) == 1, (
+            f"{c.type}: {_seg_components(ct)} SEG components -- a load-bearing "
+            f"contained connector was wrongly de-overlapped"
+        )
+        assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
 
 
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────
@@ -287,22 +379,54 @@ def test_straight_trunk_through_block_not_flagged():
         )
 
 
-def test_trunk_mst_relay_currently_flagged_deferred():
-    """trunk+MST hybrids are NOT completed yet (their MST edges are redundant with
-    the trunk spine; completing would create cycles -- redesign deferred).  Until
-    then the verifier correctly flags their feedthrough relays.  This test pins
-    that current behavior; update it when trunk+MST completion lands."""
+def test_trunk_mst_completed_no_feedthru():
+    """trunk+MST hybrids are now COMPLETED (the redesign: each MST edge replaces a
+    child block's trunk stub, so the hybrid is a cycle-free trunk-rooted tree that
+    complete_relay_junctions wires up).  For single-rect designs every emitted
+    +MST hybrid must therefore be clean: no FEEDTHRU_RELAY, one SEG-connected
+    component, a single busterm tap per block, and no zero-length segments.  A
+    hybrid that cannot be cleanly completed (a stub collinear with an incident MST
+    edge) is dropped, not emitted -- so there is nothing left flagged here."""
+    for coords, src, dsts in (STAIRCASE, PLUS, GRID):
+        fp = _make_fp(coords)
+        hybrids = [c for c in _gen(fp).generate_candidates(src, dsts)
+                   if "+MST" in c.type]
+        assert hybrids, f"expected trunk+MST hybrids for {list(coords)}"
+        for c in hybrids:
+            zero = [(s.start.x, s.start.y) for s in c.segments
+                    if s.start.x == s.end.x and s.start.y == s.end.y]
+            assert not zero, f"{c.type} on {list(coords)}: zero-length segs {zero}"
+            ct = buda.ConnTopology()
+            ct.build(c, fp)
+            assert _feedthru_count(ct, c, fp) == 0, (
+                f"{c.type} on {list(coords)}: still FEEDTHRU_RELAY-flagged after "
+                f"trunk+MST completion"
+            )
+            assert _seg_components(ct) == 1, (
+                f"{c.type} on {list(coords)}: {_seg_components(ct)} SEG components "
+                f"(emitted but not cleanly completed)"
+            )
+            assert not _seg_has_cycle(ct), (
+                f"{c.type} on {list(coords)}: emitted hybrid has a wire cycle "
+                f"(should be a clean trunk-rooted tree or dropped)"
+            )
+            multi = {b: sorted(s) for b, s in _busterm_taps(ct).items() if len(s) > 1}
+            assert not multi, f"{c.type} on {list(coords)}: blocks double-tapped: {multi}"
+
+
+def test_trunk_mst_root_double_tap_demoted():
+    """Regression for the single-tap demotion over ALL landings (not just distinct
+    points): in a trunk+MST tree the root keeps its trunk stub AND is an MST-edge
+    endpoint, so two segments leave it at the same corner.  Both must not stay
+    tagged as a busterm -- exactly one keeps the tap, the other becomes a SEG
+    junction.  Covered by the no-double-tap assertion across all hybrids above;
+    this pins the STAIRCASE root case explicitly."""
     coords, src, dsts = STAIRCASE
     fp = _make_fp(coords)
-    cands = _gen(fp).generate_candidates(src, dsts)
-    mst_hybrids = [c for c in cands if "+MST" in c.type]
-    if not mst_hybrids:
-        import pytest
-        pytest.skip("no trunk+MST candidate for this geometry")
-    flagged = 0
-    for c in mst_hybrids:
+    hybrids = [c for c in _gen(fp).generate_candidates(src, dsts) if "+MST" in c.type]
+    assert hybrids
+    for c in hybrids:
         ct = buda.ConnTopology()
         ct.build(c, fp)
-        if _feedthru_count(ct, c, fp) > 0:
-            flagged += 1
-    assert flagged > 0, "expected at least one trunk+MST hybrid to be flagged"
+        for blk, segs in _busterm_taps(ct).items():
+            assert len(segs) == 1, f"{c.type}: block {blk} tapped by {sorted(segs)}"

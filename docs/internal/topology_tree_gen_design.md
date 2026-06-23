@@ -1208,8 +1208,8 @@ symbols and by the `dump_topologies` inspection of `flow/big_data_test/tc3a_flat
 | 4 / 6 | I/L/Z/U/UU 2-pin shapes | **DONE** | `add_l/z/u/uu_shapes` `:206/:382/:485/:543` |
 | 4.1–4.2 | Single H/V trunk sweep + OOB + pass-through | **DONE** | `add_trunk_h/v` `:734/:918`; `pass_through_count` `topology.h:79` |
 | 4.3 | MST + trunk+MST fallback | **DONE** | `add_mst_candidates` `:1298`, `add_trunk_mst_candidates` `:1400` |
-| 4.3 | **MST feedthrough completion** (standalone MST self-connected) | **DONE** | `complete_relay_junctions`; `FEEDTHRU_RELAY` in `verify.cpp::check_topo` |
-| 4.3 | trunk+MST completion (MST edge replaces a stub; avoid cycles) | **DEFERRED** | completing as-is creates cycles; flagged `FEEDTHRU_RELAY` |
+| 4.3 | **MST feedthrough completion** (standalone MST self-connected; single busterm tap + SEG junctions) | **DONE** | `complete_relay_junctions` (single-tap, PR #43); `FEEDTHRU_RELAY` in `verify.cpp::check_topo` |
+| 4.3 | trunk+MST completion (MST edge replaces a stub; avoid cycles) | **DONE** | `add_trunk_mst_candidates`: root MST at trunk-nearest stub-owner, drop child stubs, `complete_relay_junctions`; emit only `topology_is_clean_tree` (connected + acyclic) hybrids, else legacy/drop |
 | 4.4 | **General multi-level trunks** (recursive, V-split, depth>1) | **PARTIAL** | only `add_multi_trunk_candidates`→`BITRUNK_H` `:1506` |
 | 4.5 | Per-leaf **Z-stub / sub-trunk connectors** on a trunk | **MISSING** | trunk builders emit direct/L stubs only |
 | 4.5 | **Candidate dedup** (`deduplicate`) | **MISSING** | no candidate-level dedup; `annotate_and_sort` `:634` |
@@ -1254,3 +1254,97 @@ are a small minority. Ordered next steps:
 > segment count, pass-through count, `min_slide`, selected/pinned marker — and flags
 > duplicate/pinched/single-candidate/pass-through bundles plus an aggregate summary.
 > Use it to re-measure after each backlog item lands.
+
+---
+
+## 17. Deferred Work & Follow-ups (post single-tap completion, 2026-06-23)
+
+Captured after PR #43 merged the MST feedthrough completion **and** its single-tap
+refinement: `complete_relay_junctions` now keeps a busterm tap on exactly **one**
+incident stub per relay (the most slide-flexible one) and demotes every other
+landing — plus both endpoints of each appended connector — to a `nullopt`
+annotation, so `infer_connections` wires them as real **SEG** junctions (previously
+they were BUSTERM-only, so NUTS/detailed-NUTS still saw a through-block feedthrough
+and could slide the pieces apart). `connect()` also gained an off-line detour for
+degree-3 same-row/column orthogonal landings (which used to collapse into a
+zero-length leg + a collinear, non-inferrable join). Verified on STAIRCASE / PLUS /
+GRID (`MST_HV` + `MST_VH`): single tap per block, one SEG-connected component, no
+zero-length segments, no `check_topo` violations.
+
+The known remainders, in priority order:
+
+### Deferred by design
+
+1. **Trunk+MST hybrid completion** — **DONE** (see
+   [trunk_mst_and_feedthru_plan.md](trunk_mst_and_feedthru_plan.md) §1).
+   `add_trunk_mst_candidates` now roots the branch MST at the trunk-nearest
+   **stub-owning** block, drops every other branch block's trunk stub (the MST edge
+   *replaces* it), and runs `complete_relay_junctions` on the resulting cycle-free
+   trunk-rooted tree. A completed hybrid is emitted only if it verifies as a clean
+   tree (`topology_is_clean_tree`: one SEG component **and** acyclic) — single-rect
+   hybrids that cannot be cleanly completed (a stub collinear with an incident MST
+   edge, or a pass-through crossing that re-closes a loop) are dropped; multi-rect /
+   un-rootable cases keep the legacy (still `FEEDTHRU_RELAY`-flagged) form.
+   `test_trunk_mst_completed_no_feedthru` pins the new invariant. Side effect: the
+   completed hybrids have honest (often lower) wirelength, so they sort earlier in
+   the WL-ordered candidate list — index-pinned flows (e.g. `dogleg2.buda`) were
+   re-pinned accordingly.
+
+2. **Feedthru as an opt-in option** *(planned — see
+   [trunk_mst_and_feedthru_plan.md](trunk_mst_and_feedthru_plan.md) §2; design in
+   §5 above)*. A genuine feedthru — a block that deliberately relays a bus across
+   its interior via its own lower-level routing — is still unmodelled: no
+   `FeedthruConfig`, no `Floorplan::feedthru_blocks`, no `add_feedthru`
+   (`grep -ri feedthru src/` → only `pass_through_count`; 3 xfail in
+   `test_feedthru.py`). Today every topology must be physically self-connected and
+   `FEEDTHRU_RELAY` flags any block that is not. Feedthru turns that hard error into
+   a per-block/per-layer opt-in.
+
+### Exposed / observed, not yet resolved
+
+3. **`tc3a_flat`: 40 unplaced detailed-NUTS bits.** Noted in PR #43 as a
+   routing-quality interaction (honest, footprint-crossing MST topologies cut
+   abstract-NUTS overlaps 8→2 but left one bundle with 40 unplaced bits) — measured
+   **before** the single-tap fix. Re-run `flow/big_data_test/tc3a_flat.buda` through
+   detailed NUTS now that connectors are real SEG junctions, then decide whether the
+   residue is a detailed-NUTS packing issue to chase separately. Not a completion
+   bug; connectivity still verifies clean ("no opens").
+
+4. **Mid-tier viz failures (environmental).** `matplotlib.cm.get_cmap` was removed
+   in matplotlib 3.9+; the mid-tier visualization tests fail on that
+   (`buda_viz.py:2916`), unrelated to topology. A small compatibility shim
+   (`matplotlib.colormaps[...]`) clears it.
+
+5. **Standalone-MST cycle at high-degree relays** — **FIXED**. Surfaced by the
+   acyclicity check added for trunk+MST: `complete_relay_junctions`, when chaining
+   the landings of a **degree-≥4** relay (e.g. the centre block of the PLUS
+   arrangement), laid one dogleg connector's return leg collinear on top of the next
+   connector, an overlap that closed a redundant wire **loop** (`MST_HV`/`MST_VH` for
+   PLUS were cyclic on `main`; PR #43's completion tests checked SEG-connectivity but
+   not acyclicity). Fixed with a de-overlap pass in `complete_relay_junctions`: any
+   connector segment collinear-contained within another segment carries no unique
+   junction but creates the parallel path, so it is dropped (connectivity preserved
+   by the covering segment). Tests: `test_completion_seg_connected_downstream` now
+   also asserts acyclicity, plus `test_high_degree_relay_has_no_overlapping_connectors`.
+
+### Open question (owner decision)
+
+6. **Dogleg tap placement.** Single-tap currently taps the most-flexible **stub**
+   in all relay cases. The original suggestion was to tap the *middle dogleg
+   connector* segment; that was not adopted because a busterm on an along-face
+   connector lets it slide into the block **interior** (wrong side), whereas a stub
+   slides cleanly *along* its face. Revisit only if a configuration needs the
+   connector to hold the tap.
+
+### Optional refinements (low priority)
+
+7. **Tap-selection metric.** "Most slide flexibility" uses a geometric proxy (the
+   block face extent in the slide direction) rather than `ConnTopology`'s computed
+   `perp_lo/hi` slide ranges (which are derived downstream). Exact enough in
+   practice; tighten only if a misranked tap ever shows up.
+
+8. **Detour offset robustness in `connect()`.** The degree-3 same-row/column detour
+   uses a fixed `±2` off-line offset (`ym = a.p.y - 2`, `xm = a.p.x - 2`). Near
+   coordinate 0 it can go slightly negative and is not chosen to avoid the block.
+   Harmless for the abstract topology (all tests pass); a direction-aware offset
+   (toward open space, magnitude ≥ `min_stub`) would be tidier.
