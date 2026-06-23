@@ -730,11 +730,20 @@ static void annotate_endpoints(Topology& topo,
 // A *feedthru* -- a block that connects two or more of a bundle's stubs via its
 // own lower-level (intra-block) routing -- is an opt-in OPTION that does not
 // exist yet.  Until it does, every topology must be physically self-connected.
-// This pass adds the missing wire: at each relay block it picks one junction
-// point J (the medoid of the incident landing points, so one incident edge
-// already reaches J) and routes every other incident point to J with an
-// L-connector.  Connectors may cross the block footprint -- that is a benign
-// global wire (like a trunk passing through a block), NOT a feedthru.
+// This pass adds the missing wire: at each relay block it chains the incident
+// landings with perpendicular L/dogleg connectors so they form one physically
+// connected component.  Connectors may run along or cross the block footprint --
+// that is a benign global wire (like a trunk passing through a block), NOT a
+// feedthru.
+//
+// It then enforces a SINGLE-TAP model: the relay keeps a busterm tap on exactly
+// one incident stub (the one with the most slide flexibility) and every other
+// landing -- and both endpoints of each appended connector -- is annotated as an
+// internal (nullopt) junction.  This is essential: ConnTopology treats a busterm
+// annotation as authoritative and skips SEG inference at it, so leaving every
+// landing tagged as a busterm would make the connector wire invisible downstream
+// (NUTS/detailed-NUTS would still see a through-block feedthrough and could slide
+// the pieces apart).  Demoting the extras to nullopt forces real SEG junctions.
 //
 // A straight trunk crossing a block is one continuous wire and is left
 // untouched: its endpoints do not land on the crossed block's faces, so the
@@ -758,15 +767,16 @@ static void complete_relay_junctions(Topology& topo,
     };
 
     // Gather the distinct landing points on each block's face, tagging each with
-    // the orientation of the segment whose endpoint lands there.  Snapshot the
-    // segment count first: we append connectors below.
-    struct Inc { Point p; bool seg_horiz; };
+    // the orientation of the segment whose endpoint lands there plus the
+    // (segment, endpoint) it came from so we can later rewrite its busterm
+    // annotation.  Snapshot the segment count first: we append connectors below.
+    struct Inc { Point p; bool seg_horiz; int seg_idx; int ep; };
     int n_seg = (int)topo.segments.size();
     std::map<int, std::vector<Inc>> incident;     // block idx -> distinct landings
-    auto add_incident = [&](int bi, const Point& P, bool seg_horiz) {
+    auto add_incident = [&](int bi, const Point& P, bool seg_horiz, int seg_idx, int ep) {
         auto& v = incident[bi];
         for (const Inc& q : v) if (q.p.x == P.x && q.p.y == P.y) return;  // distinct
-        v.push_back({P, seg_horiz});
+        v.push_back({P, seg_horiz, seg_idx, ep});
     };
     for (int s = 0; s < n_seg; ++s) {
         const Segment& seg = topo.segments[s];
@@ -774,7 +784,7 @@ static void complete_relay_junctions(Topology& topo,
         for (int e = 0; e < 2; ++e) {
             const Point& P = (e == 0) ? seg.start : seg.end;
             for (int bi = 0; bi < (int)blocks.size(); ++bi)
-                if (on_face(P, horiz, blocks[bi])) { add_incident(bi, P, horiz); break; }
+                if (on_face(P, horiz, blocks[bi])) { add_incident(bi, P, horiz, s, e); break; }
         }
     }
 
@@ -785,37 +795,70 @@ static void complete_relay_junctions(Topology& topo,
     // (leave horizontally off a vertical stub, and vice-versa).  This realizes
     // the "dogleg" (same-orientation landings) and "stretch & connect"
     // (orthogonal landings) shapes.
+    // Emit a connector leg, skipping any degenerate zero-length segment (which
+    // carries no wire and would only confuse downstream SEG-junction inference).
+    auto emit = [&](int x1, int y1, int x2, int y2, int layer) {
+        if (x1 == x2 && y1 == y2) return;
+        topo.segments.push_back(make_seg(x1, y1, x2, y2, layer));
+    };
     auto connect = [&](const Inc& a, const Inc& b) {
         if (a.p.x == b.p.x && a.p.y == b.p.y) return;
         bool leaveA_h = !a.seg_horiz;   // perpendicular to a's incident segment
         bool leaveB_h = !b.seg_horiz;
         if (leaveA_h && leaveB_h) {                 // both leave horizontally
             if (a.p.y == b.p.y) {                   // same row: a single H wire
-                topo.segments.push_back(make_seg(a.p.x, a.p.y, b.p.x, b.p.y, h_layer));
+                emit(a.p.x, a.p.y, b.p.x, b.p.y, h_layer);
             } else {                                // Z: H, V, H via an off-column
                 int lo = std::min(a.p.x, b.p.x), hi = std::max(a.p.x, b.p.x);
                 int mx = (hi - lo >= 2) ? (lo + hi) / 2 : hi + 2;  // not on a/b column
-                topo.segments.push_back(make_seg(a.p.x, a.p.y, mx, a.p.y, h_layer));
-                topo.segments.push_back(make_seg(mx, a.p.y, mx, b.p.y, v_layer));
-                topo.segments.push_back(make_seg(mx, b.p.y, b.p.x, b.p.y, h_layer));
+                emit(a.p.x, a.p.y, mx, a.p.y, h_layer);
+                emit(mx, a.p.y, mx, b.p.y, v_layer);
+                emit(mx, b.p.y, b.p.x, b.p.y, h_layer);
             }
         } else if (!leaveA_h && !leaveB_h) {        // both leave vertically
             if (a.p.x == b.p.x) {                   // same column: a single V wire
-                topo.segments.push_back(make_seg(a.p.x, a.p.y, b.p.x, b.p.y, v_layer));
+                emit(a.p.x, a.p.y, b.p.x, b.p.y, v_layer);
             } else {                                // Z: V, H, V via an off-row
                 int lo = std::min(a.p.y, b.p.y), hi = std::max(a.p.y, b.p.y);
                 int my = (hi - lo >= 2) ? (lo + hi) / 2 : hi + 2;
-                topo.segments.push_back(make_seg(a.p.x, a.p.y, a.p.x, my, v_layer));
-                topo.segments.push_back(make_seg(a.p.x, my, b.p.x, my, h_layer));
-                topo.segments.push_back(make_seg(b.p.x, my, b.p.x, b.p.y, v_layer));
+                emit(a.p.x, a.p.y, a.p.x, my, v_layer);
+                emit(a.p.x, my, b.p.x, my, h_layer);
+                emit(b.p.x, my, b.p.x, b.p.y, v_layer);
             }
-        } else {                                    // orthogonal: an L meeting at a corner
-            if (leaveA_h) {                         // A leaves H, B leaves V; corner (b.x,a.y)
-                topo.segments.push_back(make_seg(a.p.x, a.p.y, b.p.x, a.p.y, h_layer));
-                topo.segments.push_back(make_seg(b.p.x, a.p.y, b.p.x, b.p.y, v_layer));
-            } else {                                // A leaves V, B leaves H; corner (a.x,b.y)
-                topo.segments.push_back(make_seg(a.p.x, a.p.y, a.p.x, b.p.y, v_layer));
-                topo.segments.push_back(make_seg(a.p.x, b.p.y, b.p.x, b.p.y, h_layer));
+        } else {                                    // orthogonal landings
+            // The natural 2-leg L corner is (b.x,a.y) when A leaves H, else
+            // (a.x,b.y).  When the two landings share that perpendicular line the
+            // corner coincides with an endpoint: one leg vanishes and the other
+            // runs collinear into an incident segment (no inferrable junction).
+            // Detour through an off-line so BOTH ends meet perpendicularly (HVHV).
+            if (leaveA_h) {                         // A leaves H, B leaves V
+                if (a.p.y != b.p.y) {               // clean 2-leg L, corner (b.x,a.y)
+                    emit(a.p.x, a.p.y, b.p.x, a.p.y, h_layer);
+                    emit(b.p.x, a.p.y, b.p.x, b.p.y, v_layer);
+                } else {                            // same row -> detour off-row
+                    int lo = std::min(a.p.x, b.p.x), hi = std::max(a.p.x, b.p.x);
+                    int xm = (hi - lo >= 2) ? (lo + hi) / 2
+                                            : a.p.x + (a.p.x < b.p.x ? 1 : -1);
+                    int ym = a.p.y - 2;
+                    emit(a.p.x, a.p.y, xm, a.p.y, h_layer);
+                    emit(xm, a.p.y, xm, ym, v_layer);
+                    emit(xm, ym, b.p.x, ym, h_layer);
+                    emit(b.p.x, ym, b.p.x, b.p.y, v_layer);
+                }
+            } else {                                // A leaves V, B leaves H
+                if (a.p.x != b.p.x) {               // clean 2-leg L, corner (a.x,b.y)
+                    emit(a.p.x, a.p.y, a.p.x, b.p.y, v_layer);
+                    emit(a.p.x, b.p.y, b.p.x, b.p.y, h_layer);
+                } else {                            // same column -> detour off-column
+                    int lo = std::min(a.p.y, b.p.y), hi = std::max(a.p.y, b.p.y);
+                    int ym = (hi - lo >= 2) ? (lo + hi) / 2
+                                            : a.p.y + (a.p.y < b.p.y ? 1 : -1);
+                    int xm = a.p.x - 2;
+                    emit(a.p.x, a.p.y, a.p.x, ym, v_layer);
+                    emit(a.p.x, ym, xm, ym, h_layer);
+                    emit(xm, ym, xm, b.p.y, v_layer);
+                    emit(xm, b.p.y, b.p.x, b.p.y, h_layer);
+                }
             }
         }
     };
@@ -829,6 +872,44 @@ static void complete_relay_junctions(Topology& topo,
         });
         for (size_t k = 1; k < pts.size(); ++k)
             connect(pts[k - 1], pts[k]);
+
+        // Single-tap model: keep the busterm tap on EXACTLY ONE incident stub
+        // and demote every other landing to an internal (SEG) junction.  Without
+        // this, every landing stays annotated as a busterm on block bi, so
+        // ConnTopology infers a BUSTERM connection at each and SKIPS the SEG
+        // junction between the relay connectors and the stubs -- the wire we just
+        // added is invisible downstream and NUTS could slide the pieces apart,
+        // silently re-opening the through-block feedthrough.  Demoting the extras
+        // to nullopt forces infer_connections to wire them as real SEG junctions.
+        //
+        // Pick the tap on the stub with the most slide flexibility: a stub on a
+        // vertical (x) face slides in y (flexibility = the block's y-extent); on a
+        // horizontal (y) face it slides in x (the x-extent).  The connectors run
+        // along the block faces, so tapping a stub (which slides ALONG its face)
+        // keeps the single anchor cleanly on the block.
+        const Rect& bb = blocks[bi].orig_bbox;
+        auto flex = [&](const Inc& q) {
+            return q.seg_horiz ? (bb.y2 - bb.y1) : (bb.x2 - bb.x1);
+        };
+        size_t best = 0;
+        for (size_t k = 1; k < pts.size(); ++k)
+            if (flex(pts[k]) > flex(pts[best])) best = k;
+        for (size_t k = 0; k < pts.size(); ++k) {
+            auto& ep   = topo.seg_busterms[pts[k].seg_idx];
+            auto& slot = (pts[k].ep == 0) ? ep.first : ep.second;
+            if (k == best) slot = blocks[bi];    // the single busterm tap
+            else           slot = std::nullopt;  // demote to an internal SEG junction
+        }
+    }
+
+    // Every connector segment appended above is internal wire: annotate both its
+    // endpoints as nullopt so infer_connections treats them as SEG junctions (and
+    // does not fall back to the geometric busterm search, which would re-tag the
+    // connector endpoints that happen to run along a block face).
+    for (int s = n_seg; s < (int)topo.segments.size(); ++s) {
+        auto& ep = topo.seg_busterms[s];
+        ep.first  = std::nullopt;
+        ep.second = std::nullopt;
     }
 }
 
@@ -1508,8 +1589,11 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             }
         }
         if (valid) {
-            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_);
+            // Annotate the raw stubs first, then complete: completion rewrites the
+            // relay busterm taps (single tap + SEG junctions) and annotates the
+            // connectors it appends, so it must run after the baseline annotation.
             annotate_endpoints(mst, blocks);
+            complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_);
             results.push_back(std::move(mst));
         }
     }

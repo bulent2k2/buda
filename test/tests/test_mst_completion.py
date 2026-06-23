@@ -144,6 +144,37 @@ def test_mst_topology_is_single_geometric_component():
             )
 
 
+def _busterm_taps(ct):
+    """block_name -> set of segment indices that BUSTERM-tap it."""
+    taps = defaultdict(set)
+    for i, cs in enumerate(ct.segs()):
+        for co in cs.conns:
+            if co.kind == buda.SegConnKind.BUSTERM:
+                taps[co.block_name].add(i)
+    return taps
+
+
+def _seg_components(ct):
+    """Number of connected components using ONLY SEG (wire-junction) connections.
+    This is the connectivity the downstream stages (NUTS / detailed-NUTS) see: a
+    component bridged only through a block's busterm is NOT one wire."""
+    segs = ct.segs()
+    n = len(segs)
+    uf = list(range(n))
+
+    def find(x):
+        while uf[x] != x:
+            uf[x] = uf[uf[x]]
+            x = uf[x]
+        return x
+
+    for i, cs in enumerate(segs):
+        for co in cs.conns:
+            if co.kind == buda.SegConnKind.SEG:
+                uf[find(i)] = find(co.seg_idx)
+    return len({find(i) for i in range(n)})
+
+
 def test_completion_adds_wire_for_relay_block():
     """The staircase MST has a relay block (degree >= 2) and completion adds the
     bridging wire.  The raw (un-completed) MST of this 4-block staircase has
@@ -154,19 +185,49 @@ def test_completion_adds_wire_for_relay_block():
     msts = _mst_cands(_gen(fp).generate_candidates(src, dsts))
     assert msts
     for c in msts:
-        ct = buda.ConnTopology()
-        ct.build(c, fp)
-        block_segs = defaultdict(set)
-        for i, cs in enumerate(ct.segs()):
-            for co in cs.conns:
-                if co.kind == buda.SegConnKind.BUSTERM:
-                    block_segs[co.block_name].add(i)
-        relays = [b for b, s in block_segs.items() if len(s) >= 2]
-        assert relays, f"{c.type}: expected a relay block to complete"
         assert len(c.segments) > 6, (
             f"{c.type}: expected completion connectors beyond the 6 raw edge "
             f"segments, got {len(c.segments)}"
         )
+
+
+def test_relay_keeps_single_busterm_tap():
+    """Single-tap model: after completion every block is tapped by AT MOST one
+    segment.  A relay block used to be tapped by >= 2 segments (the through-block
+    feedthrough); now exactly one stub keeps the busterm and the rest are wired
+    as SEG junctions."""
+    for coords, src, dsts in (STAIRCASE, PLUS, GRID):
+        fp = _make_fp(coords)
+        for c in _mst_cands(_gen(fp).generate_candidates(src, dsts)):
+            ct = buda.ConnTopology()
+            ct.build(c, fp)
+            taps = _busterm_taps(ct)
+            multi = {b: sorted(s) for b, s in taps.items() if len(s) > 1}
+            assert not multi, (
+                f"{c.type} on {list(coords)}: blocks with >1 busterm tap "
+                f"(feedthrough not removed): {multi}"
+            )
+
+
+def test_completion_seg_connected_downstream():
+    """The real fix for the reviewer's concern: the completed MST must be ONE
+    component under SEG (wire-junction) connectivity alone -- not merely touching
+    geometrically, and not bridged through a block's busterm.  Otherwise NUTS /
+    detailed-NUTS see disconnected pieces and may slide them apart.  Also guards
+    against degenerate zero-length connector segments."""
+    for coords, src, dsts in (STAIRCASE, PLUS, GRID):
+        fp = _make_fp(coords)
+        for c in _mst_cands(_gen(fp).generate_candidates(src, dsts)):
+            zero = [(s.start.x, s.start.y) for s in c.segments
+                    if s.start.x == s.end.x and s.start.y == s.end.y]
+            assert not zero, f"{c.type} on {list(coords)}: zero-length segs {zero}"
+            ct = buda.ConnTopology()
+            ct.build(c, fp)
+            nc = _seg_components(ct)
+            assert nc == 1, (
+                f"{c.type} on {list(coords)}: SEG-connectivity has {nc} components "
+                f"(connectors modelled as busterm taps, not wire junctions)"
+            )
 
 
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────
