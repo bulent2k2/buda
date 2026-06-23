@@ -160,39 +160,54 @@ Authoritative behaviour, straight from `feedthru.feature`:
 So feedthru only changes the **straddle / pass-through** case, turning the implicit
 continuous pass-through into an explicit split-with-gap that is recorded.
 
-### 2.2 Data model
+### 2.2 Data model — a true block×layer grid (NOT the MinStubLength shape)
 
-`feedthru_blocks` must be a **`std::vector<std::string>` of block names** — the
-feature steps test `blk in c.feedthru_blocks` (a name membership test), so exposing
-structs would break the contract. Crossing geometry (enter/exit face x or y) is
-recoverable from the split segment endpoints; no struct needed for the MVP.
-
-Add to `Floorplan` (`topology.h`, mirroring the existing `MinStubLength` block at
-`topology.h:153-162` / member at `:190`):
+Feedthru is genuinely **per-(block, layer)**: a block may be routable-through on the
+H-trunk layer but not the V-trunk layer, and the designer wants to scope a set of
+blocks to a *subset* of layers. `MinStubLength`'s shape (independent `per_block` and
+`per_layer` fallback axes) **cannot express this** — `per_block[A]=true` forces A
+feedthru on every layer. So feedthru needs a **4-tier** config with an explicit
+(block, layer) layer, resolved most-specific-first:
 
 ```cpp
-struct FeedthruConfig {                    // place near MinStubLength (topology.h:101)
-    bool global = false;
-    std::map<std::string,bool> per_block;
-    std::map<int,bool>         per_layer;
+struct FeedthruConfig {                    // topology.h, near MinStubLength (:101)
+    std::map<std::pair<std::string,int>, bool> per_block_layer;  // (block, layer)  — most specific
+    std::map<std::string, bool>                per_block;         // (block, *)
+    std::map<int, bool>                        per_layer;         // (*, layer)
+    bool                                       global = false;    // (*, *)        — least specific
 };
 // in class Floorplan (public, after the min-stub accessors ~topology.h:156):
-void set_feedthru(bool v)                       { feedthru_.global = v; }
-void set_feedthru_block(const std::string& n, bool v) { feedthru_.per_block[n] = v; }
-void set_feedthru_layer(int layer_id, bool v)   { feedthru_.per_layer[layer_id] = v; }
-bool get_feedthru(const std::string& n, int layer_id) const {   // per_block > per_layer > global
-    if (feedthru_.per_block.count(n))       return feedthru_.per_block.at(n);
-    if (feedthru_.per_layer.count(layer_id)) return feedthru_.per_layer.at(layer_id);
+void set_feedthru(bool v)                              { feedthru_.global = v; }
+void set_feedthru_block(const std::string& n, bool v)  { feedthru_.per_block[n] = v; }
+void set_feedthru_layer(int lid, bool v)               { feedthru_.per_layer[lid] = v; }
+void set_feedthru_block_layer(const std::string& n, int lid, bool v) {
+    feedthru_.per_block_layer[{n, lid}] = v;
+}
+bool get_feedthru(const std::string& n, int lid) const {   // most specific wins
+    auto it = feedthru_.per_block_layer.find({n, lid});
+    if (it != feedthru_.per_block_layer.end()) return it->second;
+    if (feedthru_.per_block.count(n))   return feedthru_.per_block.at(n);
+    if (feedthru_.per_layer.count(lid)) return feedthru_.per_layer.at(lid);
     return feedthru_.global;
 }
 // private member (~topology.h:190):  FeedthruConfig feedthru_;
 ```
+
+**Precedence (block beats layer):** `(block,layer) > (block,*) > (*,layer) > (*,*)`.
+This makes carve-outs work as a designer expects: `set_feedthru * M4 on` then
+`set_feedthru A M4 off` leaves A-on-M4 **off** (the `(A,M4)` rule beats `(*,M4)`).
+Each rule stores an explicit bool, so a more-specific `off` overrides a broader `on`
+(and vice-versa); a less-specific rule never overrides a more-specific one. Document
+this ordering in `BUDA_SCRIPT_REFERENCE.md`.
 
 Add to `Topology` (`topology.h:74-91`, beside `bridge_segments`):
 
 ```cpp
 std::vector<std::string> feedthru_blocks;   // names the trunk passes through (opt-in)
 ```
+`feedthru_blocks` stays a **`vector<std::string>` of names** — the feature steps test
+`blk in c.feedthru_blocks` (name membership); crossing geometry is recoverable from
+the split segment endpoints, so no struct is needed for the MVP.
 
 ### 2.3 Generator changes (stage 2, `topology.cpp`) — the core
 
@@ -252,23 +267,65 @@ faces, so per-bit `span_lo/hi` (`detailed_nuts.h:38-39`) are correct by construc
 this stage is only needed if we later want an explicit "internal bridge" annotation.
 Deferrable past the MVP; the feature scenarios do not exercise dNUTS.
 
-### 2.6 CLI + bindings + visualizer
+### 2.6 CLI command — one unified block×layer grid
 
-- **CLI** (`buda_cli.py`): three commands mirroring the min-stub block at
-  `buda_cli.py:1671-1689`, plus names in the command allowlist (`:54`):
-  ```
-  set_feedthru [true|false]                 # global default
-  set_feedthru_block <name> [true|false]    # per-block
-  set_feedthru_layer <layer_id> [true|false]
-  ```
-  Document in `BUDA_SCRIPT_REFERENCE.md` and the `CLAUDE.md` setup-command table.
-- **Bindings** (`bind_routing.cpp`): expose the four `Floorplan` methods beside
-  `set_min_stub_length*` at `bind_routing.cpp:120-124`, and add a `.def_readonly`
-  / `.def_readwrite("feedthru_blocks", …)` on the `Topology` class binding.
+A **single** command (chosen over the MinStubLength-style trio so the full grid,
+including per-pair carve-outs, is expressible):
+
+```
+set_feedthru <blocks> <layers> [on|off]
+```
+
+- `<blocks>`: comma-separated block names (`A,B,C`) **or** `*` / `all` (no spaces
+  inside the token — it is one positional arg).
+- `<layers>`: comma-separated layer names or ids (`M4,M5` or `4,5`) **or** `*` / `all`.
+- `[on|off]`: optional, default **`on`** (also accept `true`/`false`, `1`/`0`).
+
+```
+set_feedthru FT *           # FT, all layers, on
+set_feedthru * M4,M5        # all blocks, layers M4+M5
+set_feedthru A,B M4         # blocks A,B on M4 only
+set_feedthru A M5 off       # carve out one (block,layer) pair
+set_feedthru * * on         # global default on
+```
+
+**Parsing** (new `elif cmd == "set_feedthru"` branch in `do_command`, plus
+`"set_feedthru"` in the `KNOWN_COMMANDS` allowlist at `buda_cli.py:43-57`):
+
+1. `blocks_tok = args[0]`; `blocks_wild = blocks_tok.lower() in ("*", "all")`; else
+   `blocks = blocks_tok.split(",")`, validated against `fp.get_all_blocks()`
+   (the name set used at `buda_cli.py:1465` / `:2770`) — warn on unknown, mirroring
+   `add_keepout`'s warn-and-skip.
+2. `layers_tok = args[1]`; `layers_wild = layers_tok.lower() in ("*", "all")`; else
+   for each `t in layers_tok.split(",")`: `int(t)` if `t.isdigit()` else
+   `self._layer_name_map.get(t)` — the exact name→id resolution `add_keepout`
+   (`:1708-1741`) and `set_min_stub_length_layer` (`:1683-1689`) already use.
+3. `val = True` unless `args[2]` parses to off/false/0.
+4. **Dispatch** to the four `Floorplan` setters by wildcard combination:
+   | blocks | layers | call |
+   |---|---|---|
+   | `*` | `*` | `fp.set_feedthru(val)` |
+   | `*` | list | `for lid: fp.set_feedthru_layer(lid, val)` |
+   | list | `*` | `for n: fp.set_feedthru_block(n, val)` |
+   | list | list | `for n,lid: fp.set_feedthru_block_layer(n, lid, val)` |
+
+   (No new range parser needed; comma-`split` suffices. If `m-n` layer ranges are ever
+   wanted, lift the inline range parser from `select_topologies` at
+   `buda_cli.py:2413-2434` into a shared helper.)
+
+Document the command + the precedence rule in `BUDA_SCRIPT_REFERENCE.md` and the
+`CLAUDE.md` setup-command table.
+
+### 2.7 Bindings + visualizer
+
+- **Bindings** (`bind_routing.cpp`): expose the four `Floorplan` feedthru setters +
+  `get_feedthru` beside `set_min_stub_length*` at `bind_routing.cpp:120-124`, and add
+  `.def_readwrite("feedthru_blocks", &Topology::feedthru_blocks)` on the `Topology`
+  binding (so the feature steps can read it).
 - **Visualizer** (`buda_viz.py`): draw a feedthru block with a dashed outline and the
   trunk gap over it (the feature file's `+-·-·+` notation); optional per-type toggle.
 
-### 2.7 Tests
+### 2.8 Tests
 
 - **Un-`xfail`** `test/tests/test_feedthru.py` (drop the module-level `pytestmark` at
   `test_feedthru.py:27-30`); its `features/feedthru.feature` scenarios already encode:
@@ -280,16 +337,20 @@ Deferrable past the MVP; the feature scenarios do not exercise dNUTS.
 - Keep the existing completion suite green (feedthru must not perturb non-feedthru
   topologies — the split path is gated entirely on `get_feedthru`).
 
-### 2.8 Phasing & effort
+### 2.9 Phasing & effort
 
 Medium, low algorithmic risk (mostly a gated split + plumbing). Land as a short stack,
 each step green before the next:
 
-1. **Config + bindings + CLI** — `FeedthruConfig` on `Floorplan`, the four setters,
-   the CLI commands. No behaviour change yet; quick to verify in isolation.
+1. **Config + bindings + CLI** — the 4-tier `FeedthruConfig` on `Floorplan`, the four
+   setters + `get_feedthru` (§2.2), the unified `set_feedthru` command (§2.6), and the
+   bindings (§2.7). No behaviour change yet; verify the resolver + precedence in
+   isolation (a pytest exercising the grid: `*`/`*`, block-only, layer-only, per-pair,
+   and a carve-out).
 2. **Generator split + `feedthru_blocks`** — the §2.3 trunk-split. This un-`xfail`s the
    bulk of `feedthru.feature`.
-3. **Verifier skip + visualizer** — the one-line relay skip and the dashed-block draw.
+3. **Verifier skip + visualizer** — the one-line relay skip (§2.4) and the dashed-block
+   draw (§2.7).
 4. *(optional)* dNUTS internal-bridge annotation (§2.5).
 
 ---
