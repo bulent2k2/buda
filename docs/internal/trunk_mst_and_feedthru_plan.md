@@ -136,100 +136,161 @@ assertions, which fail loudly if a stub is wrongly kept (cycle) or wrongly dropp
 
 ## 2. Opt-in feedthru (build the §5 design)
 
-### 2.1 Scope
+> **Status — PLANNED (implementation-ready).** The contract is already pinned by
+> `test/tests/features/feedthru.feature` + `test_feedthru.py` (currently
+> `xfail`-marked). This section is reconciled with the post-#44 code and the exact
+> behaviour those scenarios assert. Line anchors are against `main@101139a`.
 
-Implement the §5 `FeedthruConfig` so a block can be **declared routable-through**: a
-trunk that crosses an opted-in block does **not** stub to it and is **not** flagged
-`FEEDTHRU_RELAY`; instead the crossing is recorded so the visualizer and detailed
-NUTS treat the block's interior as the place the connection is completed later.
+### 2.1 What feedthru means (reconciled with the completion work)
 
-This is the inverse policy knob to PR #43's single-tap completion: completion makes
-every relay a real wire (the safe default); feedthru lets the designer say "no, this
-block's own router will bridge it — leave it disconnected on purpose."
+#43/#44 made every relay a **real wire** (the safe default): a block touched by two
+bus segments is wired through with connectors, and `check_topo` hard-errors
+(`FEEDTHRU_RELAY`) on any block that is silently relayed. Feedthru is the **opt-in
+inverse**: the designer declares a (usually large) block as routable-through, and the
+trunk is allowed to enter one face and exit the other **without** a physical
+connection inside it — the block's own lower-level router bridges the gap later.
+
+Authoritative behaviour, straight from `feedthru.feature`:
+
+| Situation | Default (no feedthru) | Feedthru enabled for the block |
+|---|---|---|
+| Trunk **straddles** block `FT` (trunk pos ∈ `FT` bbox) | one **continuous** trunk segment crossing `FT`; `FT` counted in `pass_through_count`; `feedthru_blocks` empty | trunk is **split** into two segments at `FT`'s two crossed faces (a gap over `FT`); **no** stub to `FT`; `FT` name added to `Topology::feedthru_blocks` |
+| Trunk pos **outside** `FT` bbox | normal stub to `FT` | **ignored** — still a normal stub (§5.5 rule 1) |
+
+So feedthru only changes the **straddle / pass-through** case, turning the implicit
+continuous pass-through into an explicit split-with-gap that is recorded.
 
 ### 2.2 Data model
 
-Per §5.2–5.3, add to `Floorplan` (`topology.h/cpp`):
+`feedthru_blocks` must be a **`std::vector<std::string>` of block names** — the
+feature steps test `blk in c.feedthru_blocks` (a name membership test), so exposing
+structs would break the contract. Crossing geometry (enter/exit face x or y) is
+recoverable from the split segment endpoints; no struct needed for the MVP.
+
+Add to `Floorplan` (`topology.h`, mirroring the existing `MinStubLength` block at
+`topology.h:153-162` / member at `:190`):
 
 ```cpp
-struct FeedthruConfig {
+struct FeedthruConfig {                    // place near MinStubLength (topology.h:101)
     bool global = false;
     std::map<std::string,bool> per_block;
     std::map<int,bool>         per_layer;
 };
-// resolution: per_block > per_layer > global
-bool Floorplan::get_feedthru(const std::string& block, int layer_id) const;
-void Floorplan::set_feedthru(bool);
-void Floorplan::set_feedthru_block(const std::string&, bool);
-void Floorplan::set_feedthru_layer(int, bool);
+// in class Floorplan (public, after the min-stub accessors ~topology.h:156):
+void set_feedthru(bool v)                       { feedthru_.global = v; }
+void set_feedthru_block(const std::string& n, bool v) { feedthru_.per_block[n] = v; }
+void set_feedthru_layer(int layer_id, bool v)   { feedthru_.per_layer[layer_id] = v; }
+bool get_feedthru(const std::string& n, int layer_id) const {   // per_block > per_layer > global
+    if (feedthru_.per_block.count(n))       return feedthru_.per_block.at(n);
+    if (feedthru_.per_layer.count(layer_id)) return feedthru_.per_layer.at(layer_id);
+    return feedthru_.global;
+}
+// private member (~topology.h:190):  FeedthruConfig feedthru_;
 ```
 
-Add `std::vector<FeedthruCross> feedthru_blocks;` to `Topology` (new field), where a
-`FeedthruCross` records `{block_name, enter_point, exit_point, layer}` for each trunk
-segment that passes through an opted-in block. This mirrors how `bridge_segments`
-already lives beside `segments`.
+Add to `Topology` (`topology.h:74-91`, beside `bridge_segments`):
 
-### 2.3 Generator changes (stage 2, `topology.cpp`)
+```cpp
+std::vector<std::string> feedthru_blocks;   // names the trunk passes through (opt-in)
+```
 
-In the trunk builders (`add_trunk_h`/`add_trunk_v`) and the pass-through detection at
-`topology.cpp:160`:
+### 2.3 Generator changes (stage 2, `topology.cpp`) — the core
 
-- When the trunk projection `pos` falls **inside** block `b.bbox` and
-  `get_feedthru(b.name, trunk_layer)` is true → **do not** emit the stub; record a
-  `FeedthruCross` (enter/exit = the two faces where the trunk crosses `b`) in
-  `Topology::feedthru_blocks`. (Today this is already a "pass-through"; feedthru just
-  makes it explicit + recorded instead of an implicit relay.)
-- When `pos` is **outside** `b.bbox` → ignore feedthru, emit the normal stub
-  (§5.5 rule 1).
+The trunk builders already detect the straddle/pass-through case. In
+`add_trunk_h` the spine emission is at **`topology.cpp:1149-1152`** (`pass_through_count`
+loop building the single `x_lo..x_hi` H segment); `add_trunk_v` mirrors it at
+**`:1353-1356`**. The straddle test is `block.y1 <= y_trunk <= block.y2` (H) /
+`x1 <= x_trunk <= x2` (V) — the same `is_spine` predicate `add_trunk_mst_candidates`
+uses at `topology.cpp:1777`.
 
-### 2.4 Verifier changes (`verify.cpp::check_topo`)
+Change: when building the trunk spine, collect every straddling block that is
+**feedthru-enabled** for the trunk layer (`fp.get_feedthru(name, h_layer_/v_layer_)`),
+sort their crossed-face coordinates, and **split** the spine at those faces instead of
+emitting one segment:
 
-`FEEDTHRU_RELAY` must become **conditional**: a relay/pass-through on a block listed
-in `Topology::feedthru_blocks` (i.e. `get_feedthru` true for that block+layer) is
-**expected** and not a violation. Add a distinct informational kind if useful
-(`FEEDTHRU_OK`) or simply suppress the violation. Keep flagging non-opted-in
-through-blocks — that is still the safety net.
+- H trunk over feedthru blocks with x-extents `[a₁,b₁],[a₂,b₂],…` (sorted, clipped to
+  `[x_lo,x_hi]`): emit H segments `x_lo→a₁`, `b₁→a₂`, …, `bₙ→x_hi`, **skipping** each
+  `[aᵢ,bᵢ]` gap. Push each such block name to `t.feedthru_blocks`. Do **not** increment
+  `pass_through_count` for a feedthru block (it is now an explicit split, not a silent
+  pass-through). Non-feedthru straddlers keep today's behaviour (continuous + counted).
+- V trunk symmetric (split on y-faces).
+- Guard: a feedthru gap that would swallow the whole trunk (only one block, spanning
+  `x_lo..x_hi`) still emits the two outer segments (possibly zero-length → skip via the
+  existing `if (x_lo < x_hi)` guard); ensure at least the stub-bearing pieces survive.
 
-### 2.5 Detailed NUTS changes (stage 9, `detailed_nuts.cpp`)
+No new helper is needed for stub suppression — a straddling block already gets **no**
+stub (it is a spine/pass-through, `has_stub` false). Feedthru only changes the spine
+from continuous to split + records the name.
 
-Per §5.5: a feedthru block's crossing positions must be included in the bit-wire span
-so each bit reaches **both** crossed faces (the internal router bridges between them).
-For each `FeedthruCross` on a bus segment, extend the per-bit `span_lo/hi` to the
-enter/exit faces (do not place tracks *inside* the block; just ensure the wire lands
-on both faces). No new track placement — only span endpoints.
+**Edge cases:**
+- Multi-rect / TEG blocks: scope the MVP to single-rect feedthru blocks (skip
+  `get_block_rects(name).size() > 1`), matching how the TEG bridge path is kept
+  separate; a multi-rect feedthru is a future extension.
+- A feedthru block that is also a bus **endpoint** (src/dst): feedthru should be
+  ignored (it must actually connect). Guard with "not in `connected_block_names`".
+
+### 2.4 Verifier (`verify.cpp::check_topo`)
+
+The split-trunk case needs **no** verifier change: the two trunk halves carry no
+`BUSTERM` conn to `FT`, so the `FEEDTHRU_RELAY` check (`verify.cpp:160-221`, fires only
+on ≥2 BUSTERM segments on one block, `:208-209`) never triggers for `FT`, and `FT` is
+not in `connected_block_names` so the coverage check (`:139`) is satisfied.
+
+Still add the opt-in skip for completeness, so a feedthru block used as an **MST relay**
+(≥2 stubs landing on it) is allowed rather than hard-errored — one line beside the
+existing TEG skip at `verify.cpp:210`:
+
+```cpp
+if (fp.get_feedthru(bname, segs[sidx[0]].layer_id)) continue;  // opted-in relay
+```
+
+### 2.5 Detailed NUTS (stage 9, `detailed_nuts.cpp`) — refinement
+
+For sign-off geometry each bit must reach **both** crossed faces so the block's
+internal router can bridge them. The split already lands the two trunk halves on the
+faces, so per-bit `span_lo/hi` (`detailed_nuts.h:38-39`) are correct by construction —
+this stage is only needed if we later want an explicit "internal bridge" annotation.
+Deferrable past the MVP; the feature scenarios do not exercise dNUTS.
 
 ### 2.6 CLI + bindings + visualizer
 
-- **CLI** (`buda_cli.py`): `set_feedthru [true|false]`,
-  `set_feedthru_block <name> [true|false]`, `set_feedthru_layer <id> [true|false]`
-  → `BudaSession.floorplan` setters. Register in `do_command` + document in
-  `BUDA_SCRIPT_REFERENCE.md` and the `CLAUDE.md` command table.
-- **Bindings** (`bind_routing.cpp` — Floorplan lives in the routing module): expose
-  the four `Floorplan` feedthru methods and `Topology::feedthru_blocks`.
-- **Visualizer** (`buda_viz.py`): draw feedthru crossings distinctly (e.g. a dashed
-  segment across the block + a small marker), and ideally a per-type toggle, so a
-  designer can see which blocks are being routed through on purpose.
+- **CLI** (`buda_cli.py`): three commands mirroring the min-stub block at
+  `buda_cli.py:1671-1689`, plus names in the command allowlist (`:54`):
+  ```
+  set_feedthru [true|false]                 # global default
+  set_feedthru_block <name> [true|false]    # per-block
+  set_feedthru_layer <layer_id> [true|false]
+  ```
+  Document in `BUDA_SCRIPT_REFERENCE.md` and the `CLAUDE.md` setup-command table.
+- **Bindings** (`bind_routing.cpp`): expose the four `Floorplan` methods beside
+  `set_min_stub_length*` at `bind_routing.cpp:120-124`, and add a `.def_readonly`
+  / `.def_readwrite("feedthru_blocks", …)` on the `Topology` class binding.
+- **Visualizer** (`buda_viz.py`): draw a feedthru block with a dashed outline and the
+  trunk gap over it (the feature file's `+-·-·+` notation); optional per-type toggle.
 
 ### 2.7 Tests
 
-- Un-xfail `test/tests/test_feedthru.py` (3 specs already written to the §5 design)
-  and extend:
-  - config resolution order (`per_block > per_layer > global`);
-  - opted-in crossing → no stub, `feedthru_blocks` populated, **no** `FEEDTHRU_RELAY`;
-  - opted-out crossing of the same geometry → stub present (or `FEEDTHRU_RELAY` if a
-    relay), proving the knob actually gates behaviour;
-  - `pos` outside bbox → stub regardless of feedthru (§5.5 rule 1);
-  - detailed-NUTS: feedthru bus segment's bits span to both faces.
-- A `.feature` file (`feedthru.feature`) per the Gherkin stub in §14.
+- **Un-`xfail`** `test/tests/test_feedthru.py` (drop the module-level `pytestmark` at
+  `test_feedthru.py:27-30`); its `features/feedthru.feature` scenarios already encode:
+  enabled straddle → split at the two faces + no stub + `FT` in `feedthru_blocks`;
+  disabled → continuous trunk + `pass_through_count += 1` + empty `feedthru_blocks`;
+  OOB feedthru path; pass-through count assertions.
+- Add C++/py unit coverage for **resolution order** (`per_block > per_layer > global`)
+  and the **endpoint-guard** (a feedthru-marked src/dst still connects).
+- Keep the existing completion suite green (feedthru must not perturb non-feedthru
+  topologies — the split path is gated entirely on `get_feedthru`).
 
-### 2.8 Effort / risk
+### 2.8 Phasing & effort
 
-Medium–large: touches stages 2, 3-verify, 4/9, CLI, two binding files, and the
-visualizer. Lower algorithmic risk than item 1 (it is mostly plumbing a config flag
-and *suppressing* work), but broad surface area → land behind the existing xfail
-specs and grow tests stage by stage. Recommend a **stacked sub-sequence**: (a) config
-+ generator + verifier (makes the xfail topology tests pass), (b) detailed-NUTS span,
-(c) CLI + viz.
+Medium, low algorithmic risk (mostly a gated split + plumbing). Land as a short stack,
+each step green before the next:
+
+1. **Config + bindings + CLI** — `FeedthruConfig` on `Floorplan`, the four setters,
+   the CLI commands. No behaviour change yet; quick to verify in isolation.
+2. **Generator split + `feedthru_blocks`** — the §2.3 trunk-split. This un-`xfail`s the
+   bulk of `feedthru.feature`.
+3. **Verifier skip + visualizer** — the one-line relay skip and the dashed-block draw.
+4. *(optional)* dNUTS internal-bridge annotation (§2.5).
 
 ---
 
