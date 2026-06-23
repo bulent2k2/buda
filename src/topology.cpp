@@ -1153,6 +1153,10 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     // block's two faces and the block's internal route bridges the gap.  Only
     // blocks this topology actually connects to are eligible: an unrelated
     // block the trunk merely crosses is a pass-through, never a feedthru.
+    // Because the block is a busterm, ConnTopology infers a BUSTERM conn at
+    // each face, so the two half-spines are anchored to the block's faces (they
+    // cannot slide off it or onto separate tracks) and the lower-level bridge
+    // keeps two valid landings -- no separate downstream slide-clamp needed.
     // Gated on feedthru_active() (default off); single-rect blocks only (MVP).
     std::vector<std::pair<int,int>> ft_gaps;   // (x1,x2) faces of feedthru blocks
     std::vector<bool> is_feedthru(n, false);
