@@ -39,6 +39,11 @@ struct TrackSegment {
     double track_position = std::numeric_limits<double>::quiet_NaN(); // assigned output; NaN = unplaced
     bool   placed   = false;
     int    net_pull = 0;                  // from ConnSeg: >0 prefer hi, <0 prefer lo
+    // Resolved pull target: the coordinate this segment wants to reach (the
+    // clamped pull_bound — the slide-window bound, or the nominal position when
+    // the bound was the unbounded sentinel).  NaN for net_pull==0.  Set after
+    // build_nuts_maps; consumed by tighten_pulls and exposed for tests / viz.
+    double pull_target = std::numeric_limits<double>::quiet_NaN();
     bool   is_jog   = false;              // dogleg jog (slide window pruned to the trunk's stub extent)
     // Cross-trunk-layer corner resolution: the committed fixed track bound for
     // this trunk (one side of a split).  Carried into detailed NUTS so its bits
@@ -224,8 +229,8 @@ private:
     // tightens every layer.
     void tighten_pulls(
         std::vector<TrackSegment>& segments,
-        const std::map<std::pair<int,int>, double>&                pull_map,
         const std::map<std::pair<int,int>, int>&                   net_pull_map,
+        const AlignMap&                                            align_map,
         const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
         std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
         int only_layer = -1) const;

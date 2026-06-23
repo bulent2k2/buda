@@ -639,10 +639,41 @@ void NUTSEngine::repair_overlaps(
                   << " -> " << remaining.size() << ".\n";
 }
 
+// Resolve each segment's pull_target — the coordinate it wants to reach, clamped
+// so the bus CENTRE keeps the whole width inside the hard interval.  Uses the
+// RESOLVED pull_map value, not the raw interval edge: build_nuts_maps
+// deliberately falls back to the nominal position when a net-pull direction had
+// only the sentinel (unbounded) slide bound (apply_interval_constraints leaves
+// the interval at the floorplan boundary there), so the raw edge would drag such
+// a segment toward the chip edge.  NaN when the segment has no pull or its
+// interval is narrower than its width.  Set once after the maps are built so
+// tighten_pulls (and Python / the visualizer) read the code's true objective.
+static void set_pull_targets(
+    std::vector<TrackSegment>& segments,
+    const std::map<std::pair<int,int>, double>& pull_map,
+    const std::map<std::pair<int,int>, int>&    net_pull_map)
+{
+    for (auto& ts : segments) {
+        auto npit = net_pull_map.find({ts.bundle_id, ts.seg_idx});
+        const int np = (npit != net_pull_map.end()) ? npit->second : ts.net_pull;
+        const double half = ts.width / 2.0;
+        const double c_lo = ts.interval_lo + half, c_hi = ts.interval_hi - half;
+        if (np == 0 || c_lo > c_hi) {
+            ts.pull_target = std::numeric_limits<double>::quiet_NaN();
+            continue;
+        }
+        auto it = pull_map.find({ts.bundle_id, ts.seg_idx});
+        const double p = (it != pull_map.end())
+                         ? it->second
+                         : (np > 0 ? ts.interval_hi : ts.interval_lo);
+        ts.pull_target = std::clamp(p, c_lo, c_hi);
+    }
+}
+
 void NUTSEngine::tighten_pulls(
     std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, double>&                pull_map,
     const std::map<std::pair<int,int>, int>&                   net_pull_map,
+    const AlignMap&                                            align_map,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
     std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
     int only_layer) const
@@ -677,25 +708,9 @@ void NUTSEngine::tighten_pulls(
         auto it = net_pull_map.find({ts.bundle_id, ts.seg_idx});
         return it == net_pull_map.end() ? ts.net_pull : it->second;
     };
-    // The coordinate the segment wants to reach, clamped so the bus CENTRE keeps
-    // the whole width inside the hard interval.  Use the RESOLVED pull_map target,
-    // not the raw interval edge: build_nuts_maps deliberately falls back to the
-    // nominal position when a net-pull direction had only the sentinel (unbounded)
-    // slide bound, so apply_interval_constraints left the interval at the
-    // floorplan boundary.  Targeting the raw edge here would drag such a segment
-    // toward the chip edge — the very thing build_nuts_maps avoided.
-    auto pull_bound = [&](const TrackSegment& ts, int np) {
-        const double half = ts.width / 2.0;
-        const double c_lo = ts.interval_lo + half, c_hi = ts.interval_hi - half;
-        if (c_lo > c_hi) return ts.track_position;
-        auto it = pull_map.find({ts.bundle_id, ts.seg_idx});
-        double p = (it != pull_map.end())
-                   ? it->second
-                   : (np > 0 ? ts.interval_hi : ts.interval_lo);  // fallback if absent
-        return std::clamp(p, c_lo, c_hi);
-    };
     // Same-layer occupancy from other bundles whose span overlaps ts, plus
-    // keepouts — exactly what a track for ts must avoid.
+    // keepouts — exactly what a track for ts must avoid.  (Same-bundle siblings
+    // are exempt, so aligned group members never block each other.)
     auto build_occ = [&](const TrackSegment& ts,
                          std::vector<std::pair<double,double>>& occ) {
         keepout_occupied(kozs, &ts, occ);
@@ -710,64 +725,198 @@ void NUTSEngine::tighten_pulls(
         std::sort(occ.begin(), occ.end());
     };
 
+    // --- Build alignment groups once: connected components over align_map,
+    // restricted to placed, same-layer (only_layer) segments.  Aligned siblings
+    // hang off one trunk; the trunk's length is bound by min(member positions),
+    // so moving one sibling alone leaves the others pinning the junction and the
+    // move is wirelength-neutral (the deadlock this pass exists to break).  They
+    // must move TOGETHER.  Pull-free siblings are included (dragged along) so
+    // they can't re-pin the trunk.  Segments with no alignment edge form
+    // singleton groups → identical to the original per-segment behaviour. ---
+    std::map<std::pair<int,int>, int> idx_of;
+    for (int i = 0; i < (int)segments.size(); ++i)
+        idx_of[{segments[i].bundle_id, segments[i].seg_idx}] = i;
+    auto eligible = [&](int i) {
+        const auto& ts = segments[i];
+        return ts.placed && (only_layer < 0 || ts.layer == only_layer);
+    };
+    std::vector<int> parent(segments.size());
+    for (int i = 0; i < (int)parent.size(); ++i) parent[i] = i;
+    auto find = [&](int x) {
+        while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+    };
+    for (const auto& [k, sibs] : align_map) {
+        auto it = idx_of.find(k);
+        if (it == idx_of.end() || !eligible(it->second)) continue;
+        for (const auto& sk : sibs) {
+            auto jt = idx_of.find(sk);
+            if (jt == idx_of.end() || !eligible(jt->second)) continue;
+            if (segments[it->second].layer != segments[jt->second].layer) continue;
+            parent[find(it->second)] = find(jt->second);
+        }
+    }
+    std::map<int, std::vector<int>> groups;
+    for (int i = 0; i < (int)segments.size(); ++i)
+        if (eligible(i)) groups[find(i)].push_back(i);
+
+    // Clamp a preferred coordinate into a segment's valid CENTRE range so
+    // preferred_fit aims inside the interval — it does not add the far edge as a
+    // fallback candidate, so an out-of-range target (e.g. a pull-free sibling's
+    // group target above its own interval) would otherwise be rejected and the
+    // segment bottom-edged.  Returns the input unchanged for a degenerate range.
+    auto clamp_center = [](double p, double interval_lo, double interval_hi, double width) {
+        const double c_lo = interval_lo + width / 2.0, c_hi = interval_hi - width / 2.0;
+        return (c_lo <= c_hi) ? std::clamp(p, c_lo, c_hi) : p;
+    };
+
+    // Single-segment tightening move toward this segment's own pull_target.  Used
+    // for singleton groups and as the per-member fallback for sign-clash groups,
+    // preserving the original per-segment behaviour.
+    auto try_single = [&](int idx) -> bool {
+        TrackSegment& ts = segments[idx];
+        if (std::isnan(ts.pull_target)) return false;
+        const double pb  = ts.pull_target;                  // already centre-clamped
+        const double cur = std::abs(ts.track_position - pb);
+        if (cur <= 0.5) return false;
+        std::vector<std::pair<double,double>> occ; build_occ(ts, occ);
+        const double pos = preferred_fit(ts.interval_lo, ts.interval_hi, ts.width, occ, pb);
+        if (std::isnan(pos) || std::abs(pos - pb) + 0.5 >= cur) return false;
+        const size_t ov_before = find_overlaps(segments).size();
+        const int    vi_before = count_violations(segments);
+        const double wl_before = total_wl();
+        take_snap(pre_move);
+        ts.track_position = pos;
+        std::vector<TrackSegment*> all_placed;
+        for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
+        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        if (find_overlaps(segments).size() > ov_before ||
+            count_violations(segments)    > vi_before ||
+            total_wl() + 0.5 >= wl_before) { restore_snap(pre_move); return false; }
+        return true;
+    };
+
+    // Attempt one ATOMIC move of an aligned group toward its pull.  Each member
+    // goes to its own best toward pull (split) UNLESS a common shared track
+    // reaches the same trunk bound (collapse → fewer tracks, better
+    // detailed-NUTS sharing).  Kept only when it adds no overlap/violation and
+    // strictly shortens total wirelength; reverted as a unit otherwise.
+    auto try_group = [&](const std::vector<int>& members) -> bool {
+        if (members.size() == 1) return try_single(members[0]);
+        // Pull direction + a target, from the PULLED members; detect a sign clash.
+        int dir = 0; bool clash = false; double group_target = 0; double best_dev = -1;
+        for (int i : members) {
+            const TrackSegment& ts = segments[i];
+            if (std::isnan(ts.pull_target)) continue;
+            const int np = pull_of(ts);
+            const int s = (np > 0) ? 1 : (np < 0 ? -1 : 0);
+            if (s == 0) continue;
+            if (dir == 0) dir = s;
+            else if (dir != s) clash = true;        // opposite pulls in one group
+            const double dev = std::abs(ts.track_position - ts.pull_target);
+            if (dev > best_dev) { best_dev = dev; group_target = ts.pull_target; }
+        }
+        // Opposite pulls can't co-move; fall back to safe per-segment moves so
+        // each member still tightens individually (the outer loop only schedules
+        // group roots, so without this they would never be visited).
+        if (clash) {
+            bool any = false;
+            for (int i : members) any |= try_single(i);
+            return any;
+        }
+        if (dir == 0 || best_dev <= 0.5) return false;
+
+        // Individual best toward the target for each member (pull-free members are
+        // dragged toward the same target so they can't re-pin the trunk).  Clamp
+        // the target into each member's own centre range first.
+        std::vector<double> Bm(members.size());
+        for (size_t mi = 0; mi < members.size(); ++mi) {
+            const TrackSegment& ts = segments[members[mi]];
+            const double tgt = clamp_center(
+                std::isnan(ts.pull_target) ? group_target : ts.pull_target,
+                ts.interval_lo, ts.interval_hi, ts.width);
+            std::vector<std::pair<double,double>> occ; build_occ(ts, occ);
+            const double b = preferred_fit(ts.interval_lo, ts.interval_hi, ts.width, occ, tgt);
+            Bm[mi] = std::isnan(b) ? ts.track_position : b;   // can't move → stays
+        }
+        // Trunk bound a split achieves = the laggard (least toward pull).
+        double M = Bm[0];
+        for (double b : Bm) M = (dir > 0) ? std::min(M, b) : std::max(M, b);
+
+        // Common shared track over the tightest common interval / max width.
+        double common_lo = -kInf, common_hi = kInf, maxw = 0;
+        for (int i : members) {
+            common_lo = std::max(common_lo, segments[i].interval_lo);
+            common_hi = std::min(common_hi, segments[i].interval_hi);
+            maxw      = std::max(maxw, segments[i].width);
+        }
+        std::vector<std::pair<double,double>> union_occ;
+        for (int i : members) build_occ(segments[i], union_occ);
+        std::sort(union_occ.begin(), union_occ.end());
+        const double C = preferred_fit(common_lo, common_hi, maxw, union_occ,
+                                       clamp_center(group_target, common_lo, common_hi, maxw));
+
+        // Collapse to the shared track when it reaches the split's trunk bound
+        // (no WL sacrificed); otherwise split, each member at its own best.
+        const double tol = 1.0;
+        const bool collapse = !std::isnan(C) &&
+            (dir > 0 ? C >= M - tol : C <= M + tol);
+        std::vector<double> tgtpos(members.size());
+        for (size_t mi = 0; mi < members.size(); ++mi)
+            tgtpos[mi] = collapse ? C : Bm[mi];
+
+        bool changes = false;
+        for (size_t mi = 0; mi < members.size(); ++mi)
+            if (std::abs(tgtpos[mi] - segments[members[mi]].track_position) > 0.5)
+                { changes = true; break; }
+        if (!changes) return false;
+
+        // Atomic commit under the global guards.
+        const size_t ov_before = find_overlaps(segments).size();
+        const int    vi_before = count_violations(segments);
+        const double wl_before = total_wl();
+        take_snap(pre_move);
+        for (size_t mi = 0; mi < members.size(); ++mi)
+            segments[members[mi]].track_position = tgtpos[mi];
+        std::vector<TrackSegment*> all_placed;
+        for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
+        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        if (find_overlaps(segments).size() > ov_before ||
+            count_violations(segments)    > vi_before ||
+            total_wl() + 0.5 >= wl_before) {
+            restore_snap(pre_move);
+            return false;
+        }
+        return true;
+    };
+
     int moved = 0;
     const int kMaxIters = 6;
     for (int iter = 0; iter < kMaxIters; ++iter) {
-        // Close the biggest pull gaps first: rank pulled, placed segments by
-        // current distance from their pull bound.
-        std::vector<std::pair<double,int>> order;
-        for (int i = 0; i < (int)segments.size(); ++i) {
-            const auto& ts = segments[i];
-            if (!ts.placed) continue;
-            if (only_layer >= 0 && ts.layer != only_layer) continue;
-            int np = pull_of(ts);
-            if (np == 0) continue;
-            double dev = std::abs(ts.track_position - pull_bound(ts, np));
-            if (dev > 0.5) order.emplace_back(dev, i);
+        // Close the biggest pull gaps first: rank groups by their largest
+        // pulled-member deviation from its pull target.
+        std::vector<std::pair<double,int>> order;   // (deviation, group root)
+        for (const auto& [root, members] : groups) {
+            double gdev = -1;
+            for (int i : members) {
+                const auto& ts = segments[i];
+                if (std::isnan(ts.pull_target)) continue;
+                gdev = std::max(gdev, std::abs(ts.track_position - ts.pull_target));
+            }
+            if (gdev > 0.5) order.emplace_back(gdev, root);
         }
         if (order.empty()) break;
         std::sort(order.begin(), order.end(),
                   [](const auto& a, const auto& b) { return a.first > b.first; });
 
         bool progress = false;
-        for (const auto& [dev0, i] : order) {
-            TrackSegment& ts = segments[i];
-            int np = pull_of(ts);
-            if (np == 0) continue;
-            const double pb  = pull_bound(ts, np);
-            const double cur = std::abs(ts.track_position - pb);
-            if (cur <= 0.5) continue;
-
-            std::vector<std::pair<double,double>> occ;
-            build_occ(ts, occ);
-            double pos = preferred_fit(ts.interval_lo, ts.interval_hi, ts.width, occ, pb);
-            if (std::isnan(pos) || std::abs(pos - pb) + 0.5 >= cur)
-                continue;   // no closer-to-pull track is free
-
-            const size_t ov_before = find_overlaps(segments).size();
-            const int    vi_before = count_violations(segments);
-            const double wl_before = total_wl();
-            take_snap(pre_move);
-            ts.track_position = pos;
-            // Pull the followers' spans onto the new track, then keep the move
-            // only if it genuinely shortened wiring without new shorts/violations.
-            std::vector<TrackSegment*> all_placed;
-            for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
-            do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
-            if (find_overlaps(segments).size() > ov_before ||
-                count_violations(segments)    > vi_before ||
-                total_wl() + 0.5 >= wl_before) {
-                restore_snap(pre_move);
-                continue;
-            }
-            ++moved;
-            progress = true;
-        }
+        for (const auto& [gdev, root] : order)
+            if (try_group(groups[root])) { ++moved; progress = true; }
         if (!progress) break;
     }
     if (moved > 0)
         std::cout << "[NUTS] wirelength tighten: pulled " << moved
-                  << " segment(s) toward their pull bound.\n";
+                  << " group(s) toward their pull bound.\n";
 }
 
 void NUTSEngine::resolve_corner_overlaps(
@@ -1890,6 +2039,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
         apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
         relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
+        set_pull_targets(result.segments, pull_map, net_pull_map);
         std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
         for (auto& ts : result.segments)
             ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
@@ -1922,7 +2072,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // Final opportunistic tighten: slide pulled segments toward their pull in
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
-        tighten_pulls(result.segments, pull_map, net_pull_map, rev_conn_map, ts_ptr_map);
+        tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map);
         compute_metrics(result);
         out.result = std::move(result);
         return out;
@@ -2125,6 +2275,7 @@ NUTSResult NUTSEngine::rerun_layer(
     build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
     apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
     relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set, layer_id);
+    set_pull_targets(result.segments, pull_map, net_pull_map);
     std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
     for (auto& ts : result.segments)
         ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
@@ -2144,7 +2295,7 @@ NUTSResult NUTSEngine::rerun_layer(
     // Tighten only this layer's pulled segments toward their pull bound (the
     // overlap / wirelength guards stay global, so cross-layer spans are honoured)
     // — keeps the single-layer contract while still recovering wirelength.
-    tighten_pulls(result.segments, pull_map, net_pull_map, rev_conn_map, ts_ptr_map, layer_id);
+    tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map, layer_id);
     compute_metrics(result);
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "
