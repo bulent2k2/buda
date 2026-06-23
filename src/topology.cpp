@@ -716,6 +716,62 @@ static void annotate_endpoints(Topology& topo,
     }
 }
 
+// Remove segment `idx` from a topology, re-keying seg_busterms to the compacted
+// indices (entries below idx unchanged, entries above shifted down by one).
+static void erase_segment(Topology& topo, int idx) {
+    topo.segments.erase(topo.segments.begin() + idx);
+    std::map<int, SegEndpoints> nb;
+    for (auto& [k, v] : topo.seg_busterms) {
+        if (k < idx)       nb[k] = v;
+        else if (k > idx)  nb[k - 1] = v;
+        // k == idx is dropped
+    }
+    topo.seg_busterms = std::move(nb);
+}
+
+// Number of connected components of `topo` under the SEG (wire-junction)
+// connections ConnTopology infers -- the connectivity the downstream stages see.
+static int conn_seg_components(const Topology& topo, const Floorplan& fp) {
+    ConnTopology ct;
+    ct.build(topo, fp);
+    const auto& segs = ct.segs();
+    int n = (int)segs.size();
+    if (n == 0) return 0;
+    std::vector<int> uf(n);
+    std::iota(uf.begin(), uf.end(), 0);
+    auto find = [&uf](int x) { while (uf[x] != x) { uf[x] = uf[uf[x]]; x = uf[x]; } return x; };
+    for (int i = 0; i < n; ++i)
+        for (const auto& c : segs[i].conns)
+            if (c.kind == SegConn::SEG) uf[find(i)] = find(c.seg_idx);
+    std::set<int> roots;
+    for (int i = 0; i < n; ++i) roots.insert(find(i));
+    return (int)roots.size();
+}
+
+// True if any connector (index >= n_orig) is collinear-contained within another
+// segment -- the overlap that can close a redundant loop at a high-degree relay.
+static bool has_collinear_overlap(const Topology& topo, int n_orig) {
+    auto covers = [](const Segment& o, const Segment& c) {
+        bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
+        if (o_h != c_h) return false;
+        if (c_h) {
+            if (o.start.y != c.start.y) return false;
+            int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
+            int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
+            return olo <= clo && chi <= ohi;
+        }
+        if (o.start.x != c.start.x) return false;
+        int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
+        int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
+        return olo <= clo && chi <= ohi;
+    };
+    int n = (int)topo.segments.size();
+    for (int c = n_orig; c < n; ++c)
+        for (int o = 0; o < n; ++o)
+            if (o != c && covers(topo.segments[o], topo.segments[c])) return true;
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // MST feedthrough completion
 // ---------------------------------------------------------------------------
@@ -752,8 +808,9 @@ static void complete_relay_junctions(Topology& topo,
                                      const std::vector<Busterm>& blocks,
                                      const Floorplan& fp,
                                      int h_layer, int v_layer) {
-    (void)fp;  // min-stub is intentionally not enforced on completion connectors:
-               // a relay MUST be completed (correctness over the min-stub heuristic).
+    // min-stub is intentionally not enforced on completion connectors: a relay
+    // MUST be completed (correctness over the min-stub heuristic).  fp is used by
+    // the verified de-overlap pass at the end.
     auto on_face = [](const Point& P, bool horiz, const Busterm& bt) -> bool {
         auto check_rect = [&](const Rect& r) -> bool {
             return horiz
@@ -876,48 +933,7 @@ static void complete_relay_junctions(Topology& topo,
             connect(pts[k - 1], pts[k]);
     }
 
-    // De-overlap the connectors.  At a high-degree relay, consecutive-landing
-    // connectors can lay collinear wire on top of each other -- e.g. the return
-    // leg of one dogleg Z runs back along a row that the next connector already
-    // spans.  A connector whose span is collinear-contained within another segment
-    // carries no unique junction (every point on it lies on the covering segment),
-    // but the overlap creates a redundant parallel path that closes a cycle.  Drop
-    // such connectors: connectivity is preserved (the covering segment provides
-    // every junction) and the relay completion stays a tree.  Only connectors
-    // (index >= n_seg) are dropped, and they carry no busterm annotation yet, so
-    // topo.segments can be rebuilt without touching seg_busterms (whose keys are
-    // all original-segment indices < n_seg).
-    auto collinear_covers = [](const Segment& o, const Segment& c) {
-        bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
-        if (o_h != c_h) return false;
-        if (c_h) {
-            if (o.start.y != c.start.y) return false;
-            int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
-            int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
-            return olo <= clo && chi <= ohi;
-        }
-        if (o.start.x != c.start.x) return false;
-        int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
-        int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
-        return olo <= clo && chi <= ohi;
-    };
-    int tot = (int)topo.segments.size();
-    std::vector<bool> drop(tot, false);
-    bool any_drop = false;
-    for (int c = n_seg; c < tot; ++c) {
-        for (int o = 0; o < tot; ++o) {
-            if (o == c || drop[o]) continue;
-            if (!collinear_covers(topo.segments[o], topo.segments[c])) continue;
-            // Equal spans cover each other; keep exactly one (the lower index).
-            if (collinear_covers(topo.segments[c], topo.segments[o]) && o > c) continue;
-            drop[c] = true; any_drop = true; break;
-        }
-    }
-    if (any_drop) {
-        std::vector<Segment> kept;
-        for (int s = 0; s < tot; ++s) if (!drop[s]) kept.push_back(topo.segments[s]);
-        topo.segments = std::move(kept);
-    }
+    // De-overlap is handled after annotations are final (see end of function).
 
     // Single-tap model: keep the busterm tap on EXACTLY ONE landing per block and
     // demote every other landing to an internal (SEG) junction.  Without this,
@@ -962,6 +978,50 @@ static void complete_relay_junctions(Topology& topo,
         auto& ep = topo.seg_busterms[s];
         ep.first  = std::nullopt;
         ep.second = std::nullopt;
+    }
+
+    // De-overlap connectors.  At a high-degree relay the landing-chaining can lay
+    // one connector's leg collinear on top of another's, a redundant parallel wire
+    // that closes a cycle (the PLUS centre block).  Such a connector is usually
+    // droppable -- but NOT always: if it is the only inferable SEG link to a
+    // busterm-annotated edge endpoint (ConnTopology suppresses SEG inference at a
+    // busterm-tagged endpoint, and does not infer collinear overlaps), dropping it
+    // disconnects the topology.  So we remove a collinear-contained connector only
+    // after VERIFYING the result stays one connected component, one connector at a
+    // time.  Gated on an overlap actually existing (the common case does nothing).
+    if (has_collinear_overlap(topo, n_seg)) {
+        auto covers = [](const Segment& o, const Segment& c) {
+            bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
+            if (o_h != c_h) return false;
+            if (c_h) {
+                if (o.start.y != c.start.y) return false;
+                int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
+                int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
+                return olo <= clo && chi <= ohi;
+            }
+            if (o.start.x != c.start.x) return false;
+            int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
+            int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
+            return olo <= clo && chi <= ohi;
+        };
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            int n = (int)topo.segments.size();
+            for (int c = n_seg; c < n; ++c) {
+                bool contained = false;
+                for (int o = 0; o < n; ++o)
+                    if (o != c && covers(topo.segments[o], topo.segments[c])) { contained = true; break; }
+                if (!contained) continue;
+                Topology trial = topo;
+                erase_segment(trial, c);
+                if (conn_seg_components(trial, fp) <= conn_seg_components(topo, fp)) {
+                    topo = std::move(trial);   // removal kept connectivity -> commit
+                    changed = true;
+                    break;
+                }
+            }
+        }
     }
 }
 

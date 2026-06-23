@@ -300,6 +300,28 @@ def test_high_degree_relay_has_no_overlapping_connectors():
                 )
 
 
+def test_contained_connector_kept_when_load_bearing():
+    """The de-overlap pass must not drop a collinear-contained connector that is the
+    only inferable SEG link to a busterm-annotated edge endpoint.  ConnTopology
+    suppresses SEG inference at a busterm-tagged endpoint and does not infer
+    collinear overlaps, so the covering segment cannot stand in for it -- dropping
+    it would split the topology.  Regression for the reviewer's 4-block case: every
+    completed MST candidate stays ONE SEG-connected component."""
+    coords = {"A": (300, 600, 350, 650), "B": (400, 400, 450, 450),
+              "C": (200, 400, 250, 450), "D": (700, 200, 750, 250)}
+    fp = _make_fp(coords)
+    msts = _mst_cands(_gen(fp).generate_candidates("A", ["B", "C", "D"]))
+    assert msts
+    for c in msts:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        assert _seg_components(ct) == 1, (
+            f"{c.type}: {_seg_components(ct)} SEG components -- a load-bearing "
+            f"contained connector was wrongly de-overlapped"
+        )
+        assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
+
+
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────
 
 def _seg(x1, y1, x2, y2, layer):
