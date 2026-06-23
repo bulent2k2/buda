@@ -760,14 +760,51 @@ void NUTSEngine::tighten_pulls(
     for (int i = 0; i < (int)segments.size(); ++i)
         if (eligible(i)) groups[find(i)].push_back(i);
 
+    // Clamp a preferred coordinate into a segment's valid CENTRE range so
+    // preferred_fit aims inside the interval — it does not add the far edge as a
+    // fallback candidate, so an out-of-range target (e.g. a pull-free sibling's
+    // group target above its own interval) would otherwise be rejected and the
+    // segment bottom-edged.  Returns the input unchanged for a degenerate range.
+    auto clamp_center = [](double p, double interval_lo, double interval_hi, double width) {
+        const double c_lo = interval_lo + width / 2.0, c_hi = interval_hi - width / 2.0;
+        return (c_lo <= c_hi) ? std::clamp(p, c_lo, c_hi) : p;
+    };
+
+    // Single-segment tightening move toward this segment's own pull_target.  Used
+    // for singleton groups and as the per-member fallback for sign-clash groups,
+    // preserving the original per-segment behaviour.
+    auto try_single = [&](int idx) -> bool {
+        TrackSegment& ts = segments[idx];
+        if (std::isnan(ts.pull_target)) return false;
+        const double pb  = ts.pull_target;                  // already centre-clamped
+        const double cur = std::abs(ts.track_position - pb);
+        if (cur <= 0.5) return false;
+        std::vector<std::pair<double,double>> occ; build_occ(ts, occ);
+        const double pos = preferred_fit(ts.interval_lo, ts.interval_hi, ts.width, occ, pb);
+        if (std::isnan(pos) || std::abs(pos - pb) + 0.5 >= cur) return false;
+        const size_t ov_before = find_overlaps(segments).size();
+        const int    vi_before = count_violations(segments);
+        const double wl_before = total_wl();
+        take_snap(pre_move);
+        ts.track_position = pos;
+        std::vector<TrackSegment*> all_placed;
+        for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
+        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        if (find_overlaps(segments).size() > ov_before ||
+            count_violations(segments)    > vi_before ||
+            total_wl() + 0.5 >= wl_before) { restore_snap(pre_move); return false; }
+        return true;
+    };
+
     // Attempt one ATOMIC move of an aligned group toward its pull.  Each member
     // goes to its own best toward pull (split) UNLESS a common shared track
     // reaches the same trunk bound (collapse → fewer tracks, better
     // detailed-NUTS sharing).  Kept only when it adds no overlap/violation and
     // strictly shortens total wirelength; reverted as a unit otherwise.
     auto try_group = [&](const std::vector<int>& members) -> bool {
-        // Pull direction + a target, from the PULLED members; bail on sign clash.
-        int dir = 0; double group_target = 0; double best_dev = -1;
+        if (members.size() == 1) return try_single(members[0]);
+        // Pull direction + a target, from the PULLED members; detect a sign clash.
+        int dir = 0; bool clash = false; double group_target = 0; double best_dev = -1;
         for (int i : members) {
             const TrackSegment& ts = segments[i];
             if (std::isnan(ts.pull_target)) continue;
@@ -775,18 +812,29 @@ void NUTSEngine::tighten_pulls(
             const int s = (np > 0) ? 1 : (np < 0 ? -1 : 0);
             if (s == 0) continue;
             if (dir == 0) dir = s;
-            else if (dir != s) return false;        // opposite pulls: don't co-move
+            else if (dir != s) clash = true;        // opposite pulls in one group
             const double dev = std::abs(ts.track_position - ts.pull_target);
             if (dev > best_dev) { best_dev = dev; group_target = ts.pull_target; }
+        }
+        // Opposite pulls can't co-move; fall back to safe per-segment moves so
+        // each member still tightens individually (the outer loop only schedules
+        // group roots, so without this they would never be visited).
+        if (clash) {
+            bool any = false;
+            for (int i : members) any |= try_single(i);
+            return any;
         }
         if (dir == 0 || best_dev <= 0.5) return false;
 
         // Individual best toward the target for each member (pull-free members are
-        // dragged toward the same target so they can't re-pin the trunk).
+        // dragged toward the same target so they can't re-pin the trunk).  Clamp
+        // the target into each member's own centre range first.
         std::vector<double> Bm(members.size());
         for (size_t mi = 0; mi < members.size(); ++mi) {
             const TrackSegment& ts = segments[members[mi]];
-            const double tgt = std::isnan(ts.pull_target) ? group_target : ts.pull_target;
+            const double tgt = clamp_center(
+                std::isnan(ts.pull_target) ? group_target : ts.pull_target,
+                ts.interval_lo, ts.interval_hi, ts.width);
             std::vector<std::pair<double,double>> occ; build_occ(ts, occ);
             const double b = preferred_fit(ts.interval_lo, ts.interval_hi, ts.width, occ, tgt);
             Bm[mi] = std::isnan(b) ? ts.track_position : b;   // can't move → stays
@@ -805,7 +853,8 @@ void NUTSEngine::tighten_pulls(
         std::vector<std::pair<double,double>> union_occ;
         for (int i : members) build_occ(segments[i], union_occ);
         std::sort(union_occ.begin(), union_occ.end());
-        const double C = preferred_fit(common_lo, common_hi, maxw, union_occ, group_target);
+        const double C = preferred_fit(common_lo, common_hi, maxw, union_occ,
+                                       clamp_center(group_target, common_lo, common_hi, maxw));
 
         // Collapse to the shared track when it reaches the split's trunk bound
         // (no WL sacrificed); otherwise split, each member at its own best.
