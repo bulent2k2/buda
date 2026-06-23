@@ -16,7 +16,9 @@
 
 #include "verify.h"
 #include <algorithm>
+#include <functional>
 #include <map>
+#include <numeric>
 #include <set>
 #include <sstream>
 
@@ -152,6 +154,74 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
             v.message = "Block '" + bname
                 + "' has no BUSTERM connection and no pass-through segment";
             result.violations.push_back(std::move(v));
+        }
+    }
+
+    // 4. FEEDTHRU_RELAY: a block must not be silently used as a feedthrough relay.
+    //    Two segments that both connect to a block (BUSTERM) but whose wires do
+    //    not actually touch are "connected" only through the block's internal
+    //    routing -- an opt-in feedthru we do not support yet (raw MST edges did
+    //    this).  Connectivity here is GEOMETRIC (do the wires share a point or
+    //    T-junction?), NOT ConnTopology's SEG conns: ConnTopology models any
+    //    endpoint on a block face as a BUSTERM-only terminal and suppresses SEG
+    //    inference there, so a SEG-component test could never see the completion
+    //    wire.  Flag a block whose BUSTERM segments span more than one geometric
+    //    component.
+    //    Not affected: a straight trunk crossing a block is a continuous wire with
+    //    no BUSTERM conn (pass-through); multi-rect/TEG blocks are skipped because
+    //    their internal terminal-equivalence routing is intentional.
+    {
+        // Endpoints and on-span test derived from each ConnSeg's nominal geometry.
+        auto ep_lo = [](const ConnSeg& s) -> std::pair<int,int> {
+            return s.horiz ? std::make_pair(s.along_lo, s.perp_pos)
+                           : std::make_pair(s.perp_pos, s.along_lo);
+        };
+        auto ep_hi = [](const ConnSeg& s) -> std::pair<int,int> {
+            return s.horiz ? std::make_pair(s.along_hi, s.perp_pos)
+                           : std::make_pair(s.perp_pos, s.along_hi);
+        };
+        auto pt_on = [](int px, int py, const ConnSeg& s) -> bool {
+            return s.horiz ? (py == s.perp_pos && px >= s.along_lo && px <= s.along_hi)
+                           : (px == s.perp_pos && py >= s.along_lo && py <= s.along_hi);
+        };
+        auto touch = [&](const ConnSeg& a, const ConnSeg& b) -> bool {
+            auto al = ep_lo(a), ah = ep_hi(a), bl = ep_lo(b), bh = ep_hi(b);
+            return pt_on(al.first, al.second, b) || pt_on(ah.first, ah.second, b)
+                || pt_on(bl.first, bl.second, a) || pt_on(bh.first, bh.second, a);
+        };
+
+        std::vector<int> uf(n);
+        std::iota(uf.begin(), uf.end(), 0);
+        std::function<int(int)> find = [&](int x){ return uf[x]==x ? x : uf[x]=find(uf[x]); };
+        for (int i = 0; i < n; ++i)
+            for (int j = i + 1; j < n; ++j)
+                if (touch(segs[i], segs[j])) uf[find(i)] = find(j);
+
+        std::map<std::string, std::vector<int>> block_segs;
+        for (int i = 0; i < n; ++i)
+            for (const auto& conn : segs[i].conns)
+                if (conn.kind == SegConn::BUSTERM) {
+                    auto& v = block_segs[conn.block_name];
+                    if (std::find(v.begin(), v.end(), i) == v.end()) v.push_back(i);
+                }
+
+        for (const auto& [bname, sidx] : block_segs) {
+            if (sidx.size() < 2) continue;
+            if (fp.get_block_rects(bname).size() > 1) continue;  // TEG: internal eq. OK
+            int root = find(sidx[0]);
+            for (size_t k = 1; k < sidx.size(); ++k) {
+                if (find(sidx[k]) == root) continue;
+                ConnViolation v;
+                v.kind = ViolationKind::FEEDTHRU_RELAY;
+                v.bundle_id = bundle_id;
+                v.seg_idx = sidx[0]; v.seg_idx2 = sidx[(int)k];
+                v.block_name = bname;
+                v.message = "Block '" + bname + "' used as feedthrough relay: seg "
+                    + std::to_string(sidx[0]) + " and seg " + std::to_string(sidx[(int)k])
+                    + " connect to it but their wires do not touch";
+                result.violations.push_back(std::move(v));
+                break;  // one violation per block suffices
+            }
         }
     }
 

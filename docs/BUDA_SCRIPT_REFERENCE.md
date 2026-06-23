@@ -40,6 +40,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 8 | `report_overhead` | Compare `def_layer` overhead% against the track pattern; print corrected `def_layer` commands for any mismatch |
 | 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
 | Verify | `check_connectivity` | Verify connectivity at topo, nuts, or dnuts stages and detect opens |
+| — | `dump_topologies` | Text dump of per-bundle candidate topologies (inspection) |
 | — | `visualize` | Open interactive NUTS result viewer |
 | — | `visualize_topologies` | Open topology explorer |
 | — | `source` | Include another `.buda` file |
@@ -1420,6 +1421,42 @@ Opens the interactive NUTS result viewer (matplotlib window). No arguments.
 preserved in `<script>.json` and loaded by the next `run_planner` invocation.
 
 ---
+
+### `dump_topologies`
+
+```
+dump_topologies [<hint>] [--problems]
+```
+
+Text (non-GUI) inspection of the candidate topologies generated for each bundle.
+Run it after `generate_topologies` (or `generate_hier_topologies`). Read-only — it
+never mutates session state, so it is safe to insert anywhere after topology
+generation.
+
+| Argument | Behaviour |
+|---|---|
+| *(none)* | Dump every bundle's candidate table, then an aggregate summary. |
+| `<hint>` | Only bundles whose first net name starts with `<hint>`. |
+| `--problems` | Only bundles with a flagged candidate (see below), plus the summary. |
+
+Each candidate row prints: `idx`, `type`, `wl` (estimated wirelength), `segs`
+(segment count), `pass` (`pass_through_count` — blocks the trunk crosses with no
+stub), `mslide` (minimum perpendicular slide freedom across the candidate's
+ConnSegs, via `ConnTopology`; `0` = pinched, `-` = not computable), and notes
+(`*SEL` selected, `dup`, `pinch`). Per-bundle flags: `DUP(n)` geometric duplicates,
+`PINCH(n)` zero-slide candidates, `SINGLE` only one candidate, `PASSTHRU(n)`
+pass-through candidates. The summary reports the candidate-count distribution,
+duplicate / pinched / single / pass-through bundle counts, and a shape-family
+histogram (trunk `@coord` suffixes collapsed).
+
+```
+dump_topologies                 # every bundle + summary
+dump_topologies bus_007         # bundles whose first net starts with bus_007
+dump_topologies --problems      # only flagged bundles + summary
+```
+
+See [internal/topology_tc3a_findings.md](internal/topology_tc3a_findings.md) for an
+analysis driven by this command.
 
 ### `visualize_topologies`
 

@@ -226,7 +226,8 @@ void bind_nuts(py::module_& m) {
         .value("BUSTERM_OPEN", ViolationKind::BUSTERM_OPEN)
         .value("BUSTERM_FACE", ViolationKind::BUSTERM_FACE)
         .value("UNPLACED",     ViolationKind::UNPLACED)
-        .value("LAYER_DIR",    ViolationKind::LAYER_DIR);
+        .value("LAYER_DIR",    ViolationKind::LAYER_DIR)
+        .value("FEEDTHRU_RELAY", ViolationKind::FEEDTHRU_RELAY);
 
     py::class_<ConnViolation>(m, "ConnViolation")
         .def_readwrite("kind",       &ConnViolation::kind)

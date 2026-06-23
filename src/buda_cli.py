@@ -45,7 +45,7 @@ KNOWN_COMMANDS = frozenset({
     "add_comp", "add_grid_override", "add_inst", "add_inst_to_cell", "add_keepout",
     "add_net", "bdb_net_mode", "check_connectivity", "corner_margin",
     "def_layer", "def_track_pattern", "derive_busterms", "detour_channel",
-    "dump_hbundles", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
+    "dump_hbundles", "dump_topologies", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
     "import_def_lef", "import_verilog", "move_comp", "open_bdb", "refine_busterms",
     "report_overhead", "resize_cell", "rotate_comp", "run_bundler",
@@ -1319,6 +1319,130 @@ class BudaSession:
         self._dogleg_slot.pop(bid, None)
         self._dogleg_originals.pop(bid, None)
 
+    # ── topology inspection (dump_topologies) ──────────────────────────────
+    @staticmethod
+    def _topo_geom_sig(topo):
+        """Geometric signature of a candidate: frozenset of its segment
+        coordinate tuples. Two candidates with the same signature draw the
+        identical set of wires and are redundant (dedup target)."""
+        return frozenset(
+            (s.start.x, s.start.y, s.end.x, s.end.y) for s in topo.segments)
+
+    def _topo_min_slide(self, topo):
+        """Minimum perpendicular slide (perp_hi - perp_lo) across the candidate's
+        ConnSegs, via the same ConnTopology API the flexibility tests use. A value
+        of 0 means a pinched/zero-freedom candidate. Returns None if connectivity
+        can't be built (e.g. a hier candidate in a non-self.fp floorplan)."""
+        try:
+            ct = buda.ConnTopology()
+            ct.build(topo, self.fp)
+            slides = [cs.perp_hi - cs.perp_lo for cs in ct.segs()
+                      if cs.perp_hi > cs.perp_lo]
+            return min(slides) if slides else 0
+        except Exception:
+            return None
+
+    def _dump_topologies(self, hint, problems_only):
+        if not self.bundles:
+            print("Warning: no bundles — run the bundler and generate_topologies first.")
+            return
+        wraps = self.bundles
+        if hint:
+            wraps = [w for w in wraps
+                     if w.input.original_bundle.get_net_names()
+                     and w.input.original_bundle.get_net_names()[0].startswith(hint)]
+            if not wraps:
+                print(f"No bundles whose first net name starts with '{hint}'.")
+                return
+
+        # Aggregates across the (possibly filtered) set.
+        n_bundles = len(wraps)
+        cand_counts = []
+        shape_hist = {}
+        n_dup_bundles = n_pinch_bundles = n_single_bundles = n_passthru_bundles = 0
+        n_dup_cands = 0
+        printed = 0
+
+        for w in wraps:
+            b = w.input.original_bundle
+            cands = list(w.input.candidates)
+            cand_counts.append(len(cands))
+            sel = w.plan.selected_topology_index
+            pinned = bool(getattr(w.input, "topology_pinned", False))
+
+            # Per-candidate facts.
+            rows = []          # (idx, type, wl, nsegs, passthru, min_slide)
+            sigs = {}          # geom signature -> [idx,...]
+            for i, c in enumerate(cands):
+                ms = self._topo_min_slide(c)
+                rows.append((i, c.type, c.estimated_wirelength,
+                             len(c.segments), c.pass_through_count, ms))
+                sigs.setdefault(self._topo_geom_sig(c), []).append(i)
+                # Histogram on the shape *family* (strip the @coord suffix that
+                # makes every Hanan-line trunk a distinct string) so the report
+                # shows how many candidates each family contributes.
+                fam = c.type.split("@", 1)[0]
+                shape_hist[fam] = shape_hist.get(fam, 0) + 1
+
+            dup_groups = [idxs for idxs in sigs.values() if len(idxs) > 1]
+            dup_idx = {i for idxs in dup_groups for i in idxs}
+            pinch_idx = {i for (i, _, _, _, _, ms) in rows if ms == 0}
+            passthru_idx = {i for (i, _, _, _, pt, _) in rows if pt > 0}
+
+            has_dup = bool(dup_groups)
+            has_pinch = bool(pinch_idx)
+            is_single = len(cands) <= 1
+            has_passthru = bool(passthru_idx)
+            if has_dup:      n_dup_bundles += 1
+            if has_pinch:    n_pinch_bundles += 1
+            if is_single:    n_single_bundles += 1
+            if has_passthru: n_passthru_bundles += 1
+            n_dup_cands += sum(len(idxs) - 1 for idxs in dup_groups)
+
+            if problems_only and not (has_dup or has_pinch or is_single or has_passthru):
+                continue
+
+            printed += 1
+            flags = []
+            if has_dup:      flags.append(f"DUP({len(dup_idx)})")
+            if has_pinch:    flags.append(f"PINCH({len(pinch_idx)})")
+            if is_single:    flags.append("SINGLE")
+            if has_passthru: flags.append(f"PASSTHRU({len(passthru_idx)})")
+            net0 = (b.get_net_names()[0] if b.get_net_names() else "?")
+            pin_s = " PINNED" if pinned else ""
+            print(f"\n── bundle {b.id}  nets={len(b.net_names)} ({net0}…)  "
+                  f"width={w.input.width}  sel={sel}{pin_s}  "
+                  f"cands={len(cands)}  {' '.join(flags)}")
+            print(f"   {'idx':>3} {'type':<14} {'wl':>8} {'segs':>4} "
+                  f"{'pass':>4} {'mslide':>7}  notes")
+            for (i, typ, wl, nsegs, pt, ms) in rows:
+                marks = []
+                if i == sel:      marks.append("*SEL")
+                if i in dup_idx:  marks.append("dup")
+                if i in pinch_idx: marks.append("pinch")
+                ms_s = "-" if ms is None else str(ms)
+                print(f"   {i:>3} {typ:<14} {wl:>8} {nsegs:>4} {pt:>4} "
+                      f"{ms_s:>7}  {','.join(marks)}")
+
+        # Aggregate summary.
+        import statistics as _st
+        tot_cands = sum(cand_counts)
+        avg = (tot_cands / n_bundles) if n_bundles else 0
+        med = _st.median(cand_counts) if cand_counts else 0
+        print(f"\n══ summary ({n_bundles} bundles"
+              f"{f', {printed} shown' if problems_only else ''}) ══")
+        print(f"   candidates: total={tot_cands} avg={avg:.1f} median={med} "
+              f"min={min(cand_counts) if cand_counts else 0} "
+              f"max={max(cand_counts) if cand_counts else 0}")
+        print(f"   bundles with duplicates : {n_dup_bundles}/{n_bundles} "
+              f"({n_dup_cands} redundant candidates)")
+        print(f"   bundles with pinched cand: {n_pinch_bundles}/{n_bundles}")
+        print(f"   single-candidate bundles : {n_single_bundles}/{n_bundles}")
+        print(f"   bundles with pass-through: {n_passthru_bundles}/{n_bundles}")
+        top_shapes = sorted(shape_hist.items(), key=lambda kv: -kv[1])
+        print("   shape histogram: "
+              + ", ".join(f"{t}={n}" for t, n in top_shapes))
+
     @staticmethod
     def _pin_instance(pin):
         """Instance (block) name for a pin, matching the bundler's rule
@@ -2377,6 +2501,17 @@ class BudaSession:
                                  sidecar_path=self._sidecar_path(),
                                  layer_stack=self.layers,
                                  start_bidx=start).show()
+        elif cmd == "dump_topologies":
+            # Usage: dump_topologies [hint] [--problems]
+            # Text inspection of the candidate topologies generated per bundle.
+            # `hint` filters to bundles whose first net name starts with it.
+            # `--problems` prints only bundles with flagged candidates (duplicate
+            # geometry, pinched/zero-slide, single-candidate, pass-through) and
+            # an aggregate summary. Read-only: never mutates session state.
+            problems_only = "--problems" in args
+            hint = next((a for a in args if not a.startswith("--")), None)
+            self._dump_topologies(hint, problems_only)
+
         elif cmd == "visualize":
             if self.no_viz:
                 return
@@ -2718,6 +2853,7 @@ class BudaSession:
         "BUSTERM_FACE": "invalid busterm face",
         "SEG_OPEN":     "segment disconnected",
         "LAYER_DIR":    "wrong layer direction",
+        "FEEDTHRU_RELAY": "block used as feedthrough relay (segments not wire-joined)",
     }
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest
 
