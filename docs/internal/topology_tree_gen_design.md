@@ -205,14 +205,19 @@ depth.
 
 ## 5. Feedthru Configuration
 
-> **Status — [MISSING].** No `FeedthruConfig`, `Floorplan::feedthru_blocks`, or
-> `add_feedthru` CLI command exists in the tree (`grep -ri feedthru src/` finds only
-> `pass_through_count`). Today a trunk that crosses a block's bbox is recorded as a
-> **pass-through** (`Topology::pass_through_count`, `topology.h:79`) but is never
-> deliberately *configured* as routable; the connectivity verifier tolerates it. The
-> opt-in/opt-out semantics below are unbuilt. `test/tests/test_feedthru.py` carries the
-> xfail spec. Per the iteration-1 priorities, feedthru is **deferred** behind richer
-> trunk shapes and dedup.
+> **Status — PARTIALLY BUILT (config + trunk-split).** The `FeedthruConfig`
+> (4-tier: per-(block,layer) > per-block > per-layer > global), the `set_feedthru
+> <blocks|*> <layers|*> [on|off]` CLI command, `Floorplan::get_feedthru`/`set_*`, and
+> `Topology::feedthru_blocks` are **implemented**, as is the generator trunk-split:
+> `add_trunk_h`/`add_trunk_v` split the spine where it crosses a feedthru-enabled
+> non-endpoint block (`test_feedthru_config.py`, `test_feedthru_topology.py`). The
+> concrete shape differs from the §5 sketch below — the split scans
+> `floorplan_.get_all_blocks()` for crossed non-endpoints rather than walking endpoint
+> busterms, and `feedthru_blocks` is a `vector<string>` of names. **Still deferred:**
+> straight/I-shape feedthru (only multicast `TRUNK_*` splits today), the
+> `feedthru_penalty` ranking, dNUTS bridge annotation, and realigning the idealized
+> `features/feedthru.feature` (still xfail) to real trunk geometry. See
+> `trunk_mst_and_feedthru_plan.md` §2 for the as-built notes.
 
 A **feedthru** is a block that a trunk is allowed to pass through electrically
 disconnected.  The trunk segment spans across the block's face-to-face extent
