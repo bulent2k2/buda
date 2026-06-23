@@ -641,6 +641,7 @@ void NUTSEngine::repair_overlaps(
 
 void NUTSEngine::tighten_pulls(
     std::vector<TrackSegment>& segments,
+    const std::map<std::pair<int,int>, double>&                pull_map,
     const std::map<std::pair<int,int>, int>&                   net_pull_map,
     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
     std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
@@ -676,13 +677,22 @@ void NUTSEngine::tighten_pulls(
         auto it = net_pull_map.find({ts.bundle_id, ts.seg_idx});
         return it == net_pull_map.end() ? ts.net_pull : it->second;
     };
-    // The pull bound (interval edge the segment wants to reach), clamped so the
-    // bus CENTRE keeps the whole width inside the hard interval.
+    // The coordinate the segment wants to reach, clamped so the bus CENTRE keeps
+    // the whole width inside the hard interval.  Use the RESOLVED pull_map target,
+    // not the raw interval edge: build_nuts_maps deliberately falls back to the
+    // nominal position when a net-pull direction had only the sentinel (unbounded)
+    // slide bound, so apply_interval_constraints left the interval at the
+    // floorplan boundary.  Targeting the raw edge here would drag such a segment
+    // toward the chip edge — the very thing build_nuts_maps avoided.
     auto pull_bound = [&](const TrackSegment& ts, int np) {
         const double half = ts.width / 2.0;
         const double c_lo = ts.interval_lo + half, c_hi = ts.interval_hi - half;
-        double p = (np > 0) ? ts.interval_hi : ts.interval_lo;
-        return (c_lo <= c_hi) ? std::clamp(p, c_lo, c_hi) : ts.track_position;
+        if (c_lo > c_hi) return ts.track_position;
+        auto it = pull_map.find({ts.bundle_id, ts.seg_idx});
+        double p = (it != pull_map.end())
+                   ? it->second
+                   : (np > 0 ? ts.interval_hi : ts.interval_lo);  // fallback if absent
+        return std::clamp(p, c_lo, c_hi);
     };
     // Same-layer occupancy from other bundles whose span overlaps ts, plus
     // keepouts — exactly what a track for ts must avoid.
@@ -1912,7 +1922,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // Final opportunistic tighten: slide pulled segments toward their pull in
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
-        tighten_pulls(result.segments, net_pull_map, rev_conn_map, ts_ptr_map);
+        tighten_pulls(result.segments, pull_map, net_pull_map, rev_conn_map, ts_ptr_map);
         compute_metrics(result);
         out.result = std::move(result);
         return out;
@@ -2134,7 +2144,7 @@ NUTSResult NUTSEngine::rerun_layer(
     // Tighten only this layer's pulled segments toward their pull bound (the
     // overlap / wirelength guards stay global, so cross-layer spans are honoured)
     // — keeps the single-layer contract while still recovering wirelength.
-    tighten_pulls(result.segments, net_pull_map, rev_conn_map, ts_ptr_map, layer_id);
+    tighten_pulls(result.segments, pull_map, net_pull_map, rev_conn_map, ts_ptr_map, layer_id);
     compute_metrics(result);
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "

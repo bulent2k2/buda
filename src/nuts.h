@@ -224,6 +224,7 @@ private:
     // tightens every layer.
     void tighten_pulls(
         std::vector<TrackSegment>& segments,
+        const std::map<std::pair<int,int>, double>&                pull_map,
         const std::map<std::pair<int,int>, int>&                   net_pull_map,
         const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
         std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
