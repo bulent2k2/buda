@@ -1150,8 +1150,45 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     for (int i = 0; i < n; ++i)
         if (!has_stub[i] && att_x[i] != x_lo && att_x[i] != x_hi)
             ++t.pass_through_count;
-    if (x_lo < x_hi)
-        t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
+
+    // Opt-in feedthru: split the trunk where it crosses a feedthru-enabled
+    // floorplan block that is NOT one of this bundle's endpoints.  The block's
+    // own lower-level router bridges the gap (no stub emitted).  Gated on
+    // feedthru_active() (default off) so non-feedthru flows are byte-identical.
+    // Single-rect blocks only (MVP).
+    std::vector<std::pair<int,int>> ft_gaps;   // (x1,x2) faces of feedthru blocks
+    if (floorplan_.feedthru_active()) {
+        std::set<std::string> endpoint_names;
+        for (int i = 0; i < n; ++i) endpoint_names.insert(blocks[i].block_name);
+        for (const auto& [bname, bbox] : floorplan_.get_all_blocks()) {
+            if (endpoint_names.count(bname)) continue;
+            if (!floorplan_.get_feedthru(bname, h_layer_)) continue;
+            if (floorplan_.get_block_rects(bname).size() > 1) continue;  // MVP
+            if (y_trunk < bbox.y1 || y_trunk > bbox.y2) continue;        // must straddle
+            int fx1 = std::max(x_lo, bbox.x1);
+            int fx2 = std::min(x_hi, bbox.x2);
+            if (fx1 < fx2) {
+                ft_gaps.push_back({fx1, fx2});
+                t.feedthru_blocks.push_back(bname);  // get_all_blocks is name-sorted
+            }
+        }
+    }
+    if (x_lo < x_hi) {
+        if (ft_gaps.empty()) {
+            t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
+        } else {
+            // Split the spine, skipping each feedthru block's x-extent.
+            std::sort(ft_gaps.begin(), ft_gaps.end());
+            int cur = x_lo;
+            for (const auto& g : ft_gaps) {
+                if (cur < g.first)
+                    t.segments.push_back(make_seg(cur, y_trunk, g.first, y_trunk, h_layer_));
+                cur = std::max(cur, g.second);
+            }
+            if (cur < x_hi)
+                t.segments.push_back(make_seg(cur, y_trunk, x_hi, y_trunk, h_layer_));
+        }
+    }
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {
@@ -1355,8 +1392,40 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         if (!has_stub[i] && att_y[i] != y_lo && att_y[i] != y_hi)
             ++t.pass_through_count;
 
-    if (y_lo < y_hi)
-        t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
+    // Opt-in feedthru (mirror of add_trunk_h): split the trunk where it crosses a
+    // feedthru-enabled non-endpoint block at its y-faces.  Single-rect MVP.
+    std::vector<std::pair<int,int>> ft_gaps;   // (y1,y2) faces of feedthru blocks
+    if (floorplan_.feedthru_active()) {
+        std::set<std::string> endpoint_names;
+        for (int i = 0; i < n; ++i) endpoint_names.insert(blocks[i].block_name);
+        for (const auto& [bname, bbox] : floorplan_.get_all_blocks()) {
+            if (endpoint_names.count(bname)) continue;
+            if (!floorplan_.get_feedthru(bname, v_layer_)) continue;
+            if (floorplan_.get_block_rects(bname).size() > 1) continue;  // MVP
+            if (x_trunk < bbox.x1 || x_trunk > bbox.x2) continue;        // must straddle
+            int fy1 = std::max(y_lo, bbox.y1);
+            int fy2 = std::min(y_hi, bbox.y2);
+            if (fy1 < fy2) {
+                ft_gaps.push_back({fy1, fy2});
+                t.feedthru_blocks.push_back(bname);
+            }
+        }
+    }
+    if (y_lo < y_hi) {
+        if (ft_gaps.empty()) {
+            t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
+        } else {
+            std::sort(ft_gaps.begin(), ft_gaps.end());
+            int cur = y_lo;
+            for (const auto& g : ft_gaps) {
+                if (cur < g.first)
+                    t.segments.push_back(make_seg(x_trunk, cur, x_trunk, g.first, v_layer_));
+                cur = std::max(cur, g.second);
+            }
+            if (cur < y_hi)
+                t.segments.push_back(make_seg(x_trunk, cur, x_trunk, y_hi, v_layer_));
+        }
+    }
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {

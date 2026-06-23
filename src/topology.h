@@ -88,6 +88,11 @@ struct Topology {
     // Set by generate_candidates; used by connectivity verifier to detect
     // pass-through blocks that have no explicit BUSTERM endpoint connection.
     std::vector<std::string> connected_block_names;
+    // Blocks the trunk is routed *through* on purpose (opt-in feedthru): the trunk
+    // is split at the block's two crossed faces (no stub to the block) and the
+    // block's own lower-level router bridges the gap.  Empty unless a straddling
+    // block was marked feedthru for the trunk layer (Floorplan::get_feedthru).
+    std::vector<std::string> feedthru_blocks;
 };
 // Per-block corner margin: keeps trunk/stub connections away from block corners.
 // dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).
@@ -190,6 +195,12 @@ public:
         if (feedthru_.per_block.count(name))     return feedthru_.per_block.at(name);
         if (feedthru_.per_layer.count(layer_id)) return feedthru_.per_layer.at(layer_id);
         return feedthru_.global;
+    }
+    // True iff any feedthru rule has been set — lets the generator skip the
+    // crossed-block scan entirely on the common (no-feedthru) path.
+    bool feedthru_active() const {
+        return feedthru_.global || !feedthru_.per_block.empty()
+            || !feedthru_.per_layer.empty() || !feedthru_.per_block_layer.empty();
     }
 
     // Detour channel outer margin.

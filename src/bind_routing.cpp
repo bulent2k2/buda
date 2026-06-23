@@ -77,7 +77,8 @@ void bind_routing(py::module_& m) {
         .def_readwrite("pass_through_count",    &Topology::pass_through_count)
         .def_readwrite("seg_busterms",          &Topology::seg_busterms)
         .def_readwrite("bridge_segments",       &Topology::bridge_segments)
-        .def_readwrite("connected_block_names", &Topology::connected_block_names);
+        .def_readwrite("connected_block_names", &Topology::connected_block_names)
+        .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks);
 
     // ── Floorplan ─────────────────────────────────────────────────────────
     py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
