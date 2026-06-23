@@ -205,14 +205,22 @@ depth.
 
 ## 5. Feedthru Configuration
 
-> **Status — [MISSING].** No `FeedthruConfig`, `Floorplan::feedthru_blocks`, or
-> `add_feedthru` CLI command exists in the tree (`grep -ri feedthru src/` finds only
-> `pass_through_count`). Today a trunk that crosses a block's bbox is recorded as a
-> **pass-through** (`Topology::pass_through_count`, `topology.h:79`) but is never
-> deliberately *configured* as routable; the connectivity verifier tolerates it. The
-> opt-in/opt-out semantics below are unbuilt. `test/tests/test_feedthru.py` carries the
-> xfail spec. Per the iteration-1 priorities, feedthru is **deferred** behind richer
-> trunk shapes and dedup.
+> **Status — PARTIALLY BUILT (config + trunk-split + verifier skip).** The
+> `FeedthruConfig` (4-tier: per-(block,layer) > per-block > per-layer > global), the
+> `set_feedthru <blocks|*> <layers|*> [on|off]` CLI command, `Floorplan::get_feedthru`/
+> `set_*`, and `Topology::feedthru_blocks` are **implemented**, as is the generator
+> trunk-split and the verifier skip (`test_feedthru_config.py`,
+> `test_feedthru_topology.py`). **Key model point** (matching §5.1 below): a feedthru
+> block is a **busterm of the bundle that the trunk passes through** (`!has_stub[i]` in
+> `add_trunk_h`/`add_trunk_v`), *not* an unrelated crossed block — a trunk merely
+> crossing an unconnected block stays a pass-through. The split lands the two half-spines
+> on the block's two faces, giving it two BUSTERM connections; `check_topo` skips the
+> `FEEDTHRU_RELAY` violation for names in `topo.feedthru_blocks` (undeclared relays still
+> flagged). `feedthru_blocks` is a `vector<string>` of names. **Still deferred:**
+> straight/I-shape feedthru (only multicast `TRUNK_*` splits today), the
+> `feedthru_penalty` ranking, the dashed-block visualizer, and realigning the idealized
+> `features/feedthru.feature` (still xfail) to real trunk geometry. See
+> `trunk_mst_and_feedthru_plan.md` §2 for the as-built notes.
 
 A **feedthru** is a block that a trunk is allowed to pass through electrically
 disconnected.  The trunk segment spans across the block's face-to-face extent

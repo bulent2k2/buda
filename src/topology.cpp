@@ -1146,12 +1146,58 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
                            + "@y" + std::to_string(y_trunk);
     t.trunk_location     = y_trunk;
+
+    // Opt-in feedthru: a bundle block the trunk passes straight through (a
+    // busterm of THIS bundle that gets no stub) may relay the bus across its
+    // interior via its own lower-level routing -- the trunk is split at the
+    // block's two faces and the block's internal route bridges the gap.  Only
+    // blocks this topology actually connects to are eligible: an unrelated
+    // block the trunk merely crosses is a pass-through, never a feedthru.
+    // Because the block is a busterm, ConnTopology infers a BUSTERM conn at
+    // each face, so the two half-spines are anchored to the block's faces (they
+    // cannot slide off it or onto separate tracks) and the lower-level bridge
+    // keeps two valid landings -- no separate downstream slide-clamp needed.
+    // Gated on feedthru_active() (default off); single-rect blocks only (MVP).
+    std::vector<std::pair<int,int>> ft_gaps;   // (x1,x2) faces of feedthru blocks
+    std::vector<bool> is_feedthru(n, false);
+    if (floorplan_.feedthru_active()) {
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i]) continue;                 // trunk doesn't pass through it
+            if (!floorplan_.get_feedthru(blocks[i].block_name, h_layer_)) continue;
+            if (blocks[i].rects.size() > 1) continue;  // MVP: single-rect only
+            int fx1 = std::max(x_lo, blocks[i].orig_bbox.x1);
+            int fx2 = std::min(x_hi, blocks[i].orig_bbox.x2);
+            if (fx1 < fx2) {
+                ft_gaps.push_back({fx1, fx2});
+                is_feedthru[i] = true;
+                t.feedthru_blocks.push_back(blocks[i].block_name);
+            }
+        }
+        std::sort(t.feedthru_blocks.begin(), t.feedthru_blocks.end());
+    }
+
+    // Pass-through count excludes feedthru blocks (those are explicit splits).
     t.pass_through_count = 0;
     for (int i = 0; i < n; ++i)
-        if (!has_stub[i] && att_x[i] != x_lo && att_x[i] != x_hi)
+        if (!has_stub[i] && !is_feedthru[i] && att_x[i] != x_lo && att_x[i] != x_hi)
             ++t.pass_through_count;
-    if (x_lo < x_hi)
-        t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
+
+    if (x_lo < x_hi) {
+        if (ft_gaps.empty()) {
+            t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
+        } else {
+            // Split the spine, skipping each feedthru block's x-extent.
+            std::sort(ft_gaps.begin(), ft_gaps.end());
+            int cur = x_lo;
+            for (const auto& g : ft_gaps) {
+                if (cur < g.first)
+                    t.segments.push_back(make_seg(cur, y_trunk, g.first, y_trunk, h_layer_));
+                cur = std::max(cur, g.second);
+            }
+            if (cur < x_hi)
+                t.segments.push_back(make_seg(cur, y_trunk, x_hi, y_trunk, h_layer_));
+        }
+    }
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {
@@ -1350,13 +1396,50 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
                            + "@x" + std::to_string(x_trunk);
     t.trunk_location     = x_trunk;
+
+    // Opt-in feedthru (mirror of add_trunk_h): a bundle block the trunk passes
+    // straight through (a busterm of THIS bundle with no stub) may relay the bus
+    // across its interior; split the trunk at the block's y-faces.  Only blocks
+    // this topology connects to are eligible.  Single-rect MVP.
+    std::vector<std::pair<int,int>> ft_gaps;   // (y1,y2) faces of feedthru blocks
+    std::vector<bool> is_feedthru(n, false);
+    if (floorplan_.feedthru_active()) {
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i] || stub_suppressed[i]) continue;  // not passed through
+            if (!floorplan_.get_feedthru(blocks[i].block_name, v_layer_)) continue;
+            if (blocks[i].rects.size() > 1) continue;         // MVP: single-rect only
+            int fy1 = std::max(y_lo, blocks[i].orig_bbox.y1);
+            int fy2 = std::min(y_hi, blocks[i].orig_bbox.y2);
+            if (fy1 < fy2) {
+                ft_gaps.push_back({fy1, fy2});
+                is_feedthru[i] = true;
+                t.feedthru_blocks.push_back(blocks[i].block_name);
+            }
+        }
+        std::sort(t.feedthru_blocks.begin(), t.feedthru_blocks.end());
+    }
+
+    // Pass-through count excludes feedthru blocks (those are explicit splits).
     t.pass_through_count = 0;
     for (int i = 0; i < n; ++i)
-        if (!has_stub[i] && att_y[i] != y_lo && att_y[i] != y_hi)
+        if (!has_stub[i] && !is_feedthru[i] && att_y[i] != y_lo && att_y[i] != y_hi)
             ++t.pass_through_count;
 
-    if (y_lo < y_hi)
-        t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
+    if (y_lo < y_hi) {
+        if (ft_gaps.empty()) {
+            t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
+        } else {
+            std::sort(ft_gaps.begin(), ft_gaps.end());
+            int cur = y_lo;
+            for (const auto& g : ft_gaps) {
+                if (cur < g.first)
+                    t.segments.push_back(make_seg(x_trunk, cur, x_trunk, g.first, v_layer_));
+                cur = std::max(cur, g.second);
+            }
+            if (cur < y_hi)
+                t.segments.push_back(make_seg(x_trunk, cur, x_trunk, y_hi, v_layer_));
+        }
+    }
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {

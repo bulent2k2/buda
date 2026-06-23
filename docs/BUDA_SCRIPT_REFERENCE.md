@@ -20,6 +20,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | Setup | `add_block` | Place floorplan blocks (with optional per-block corner margin) |
 | Setup | `corner_margin` | Set global corner margin for all blocks without a per-block override |
 | Setup | `set_min_stub_length`, `_dir`, `_layer` | Set minimum stub length globally, per direction, or per layer |
+| Setup | `set_feedthru` | Mark a block×layer set as routable-through (opt-in feedthru) |
 | Setup | `set_track_pitch` | Declare inter-bus pitch so `run_planner` band reservations match the NUTS solve |
 | Setup | `add_net`, `add_bus` | Declare nets / buses in the netlist |
 | Setup | `detour_channel` | Set outer-band width for U-shape / UU-shape detour trunks per compass direction |
@@ -477,6 +478,49 @@ Set the minimum stub length for a specific metal layer.
 **Example:**
 ```buda
 set_min_stub_length_layer M3 10
+```
+
+---
+
+### `set_feedthru`
+
+```
+set_feedthru <blocks> <layers> [on|off]
+```
+
+Mark a set of blocks as **feedthru-capable** (routable-through) on a set of trunk
+layers. A feedthru-enabled block must be a **busterm of the bundle that the trunk
+passes straight through** (a destination/relay it would otherwise stub to but whose
+body the spine crosses). When such a block opts in, the `TRUNK_H`/`TRUNK_V` spine is
+*split* at the block's two crossed faces — landing a BUSTERM connection on each face,
+so the block "connects ≥2 of the bundle's stubs" — and the block's own lower-level
+router bridges the gap. `check_topo` accepts this declared relay (it is recorded in
+`Topology::feedthru_blocks`); an *undeclared* relay on the same geometry is still
+flagged. An *unrelated* block the trunk merely crosses (not a bundle busterm) is a
+pass-through, never a feedthru. Straight/I-shape feedthru and a `feedthru_penalty`
+ranking knob are later phases.
+
+Feedthru is genuinely **per-(block, layer)** — a block may be routable-through on one
+trunk layer but not another — so the command sets a full block×layer grid rather than
+two independent axes.
+
+| Argument | Type | Description |
+|---|---|---|
+| `blocks` | str | Comma-separated block names (`A,B,C`), or `*` / `all` for every block. One token — no spaces. |
+| `layers` | str | Comma-separated layer names or ids (`M4,M5` or `4,5`), or `*` / `all` for every layer. One token — no spaces. |
+| `on\|off` | flag | Optional. Enable (`on`/`true`/`1`) or disable (`off`/`false`/`0`). Default `on`. |
+
+**Resolution** (most-specific rule wins, so a block-scoped rule beats a layer-scoped
+one): `(block, layer) > (block, *) > (*, layer) > (*, *)`. Each call stores explicit
+on/off values, so a narrower `off` carves an exception out of a broader `on`.
+
+**Examples:**
+```buda
+set_feedthru FT *           # block FT, all layers, on
+set_feedthru * M4,M5        # all blocks, layers M4 and M5
+set_feedthru A,B M4         # blocks A and B, on M4 only
+set_feedthru A M5 off       # carve out one (block, layer) pair
+set_feedthru * * on         # global default on
 ```
 
 ---

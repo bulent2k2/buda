@@ -77,7 +77,8 @@ void bind_routing(py::module_& m) {
         .def_readwrite("pass_through_count",    &Topology::pass_through_count)
         .def_readwrite("seg_busterms",          &Topology::seg_busterms)
         .def_readwrite("bridge_segments",       &Topology::bridge_segments)
-        .def_readwrite("connected_block_names", &Topology::connected_block_names);
+        .def_readwrite("connected_block_names", &Topology::connected_block_names)
+        .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks);
 
     // ── Floorplan ─────────────────────────────────────────────────────────
     py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
@@ -125,6 +126,11 @@ void bind_routing(py::module_& m) {
         .def("get_min_stub_length", [](const Floorplan& fp, LayerDir dir, int layer_id) {
             return fp.get_min_stub_length(static_cast<int>(dir), layer_id);
         })
+        .def("set_feedthru",            &Floorplan::set_feedthru)
+        .def("set_feedthru_block",      &Floorplan::set_feedthru_block)
+        .def("set_feedthru_layer",      &Floorplan::set_feedthru_layer)
+        .def("set_feedthru_block_layer",&Floorplan::set_feedthru_block_layer)
+        .def("get_feedthru",            &Floorplan::get_feedthru)
         .def("set_detour_channel",      &Floorplan::set_detour_channel)
         .def("get_detour_channel", [](const Floorplan& fp) {
             const auto& dc = fp.get_detour_channel();
