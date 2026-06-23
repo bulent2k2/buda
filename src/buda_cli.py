@@ -573,6 +573,7 @@ class BudaSession:
         new_t.trunk_location        = topo.trunk_location   # metadata only; not transformed
         new_t.pass_through_count    = topo.pass_through_count
         new_t.connected_block_names = topo.connected_block_names
+        new_t.feedthru_blocks       = topo.feedthru_blocks  # names rewritten below
         new_segs = []
         for s in topo.segments:
             ns = buda.Segment()
@@ -683,6 +684,13 @@ class BudaSession:
                     topo.connected_block_names = [
                         inst_name + "/" + n if "/" not in n else n
                         for n in topo.connected_block_names
+                    ]
+                    # Same rewrite for feedthru block names, so a cell-local
+                    # feedthru candidate keeps a resolvable block identity after
+                    # expansion to instance coordinates.
+                    topo.feedthru_blocks = [
+                        inst_name + "/" + n if "/" not in n else n
+                        for n in topo.feedthru_blocks
                     ]
                 # Propagate topology pinning from template to each instance.
                 # Candidate indices are preserved (expansion offsets coordinates
