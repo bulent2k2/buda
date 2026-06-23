@@ -104,6 +104,21 @@ struct MinStubLength {
     std::map<int, int> per_layer;
 };
 
+// Opt-in feedthru: a block declared routable-through on a given trunk layer is not
+// stubbed to and is allowed to be crossed (the block's own router bridges the gap).
+// Feedthru is genuinely per-(block, layer): unlike MinStubLength's independent
+// per_block/per_layer fallback axes, a true grid is needed so a block can be
+// feedthru on one layer but not another.  Rules are resolved most-specific-first:
+//   (block, layer) > (block, *) > (*, layer) > (*, *)
+// i.e. a block-scoped rule beats a layer-scoped rule.  Each rule stores an explicit
+// bool, so a more-specific `off` overrides a broader `on` and vice-versa.
+struct FeedthruConfig {
+    std::map<std::pair<std::string, int>, bool> per_block_layer;  // (block, layer)
+    std::map<std::string, bool>                 per_block;         // (block, *)
+    std::map<int, bool>                         per_layer;         // (*, layer)
+    bool                                        global = false;    // (*, *)
+};
+
 // Per-direction outer margin for U-shape (and UU-shape) detour trunks.
 // -1 means "auto" (topology generator uses its internal heuristic).
 struct DetourChannelSpec {
@@ -161,6 +176,22 @@ public:
         return min_stub_len_.global;
     }
 
+    // Feedthru config (global / per-block / per-layer / per-(block,layer)).
+    void set_feedthru(bool v)                                  { feedthru_.global = v; }
+    void set_feedthru_block(const std::string& name, bool v)   { feedthru_.per_block[name] = v; }
+    void set_feedthru_layer(int layer_id, bool v)              { feedthru_.per_layer[layer_id] = v; }
+    void set_feedthru_block_layer(const std::string& name, int layer_id, bool v) {
+        feedthru_.per_block_layer[{name, layer_id}] = v;
+    }
+    // Resolve feedthru for a block on a trunk layer, most-specific-first.
+    bool get_feedthru(const std::string& name, int layer_id) const {
+        auto it = feedthru_.per_block_layer.find({name, layer_id});
+        if (it != feedthru_.per_block_layer.end()) return it->second;
+        if (feedthru_.per_block.count(name))     return feedthru_.per_block.at(name);
+        if (feedthru_.per_layer.count(layer_id)) return feedthru_.per_layer.at(layer_id);
+        return feedthru_.global;
+    }
+
     // Detour channel outer margin.
     // dirs is any combination of N/S/E/W, or the shorthands Y (N+S), X (E+W), A (all).
     // size < 0 resets the specified directions back to auto.
@@ -188,6 +219,7 @@ private:
     std::map<std::string, BlockCornerMargin> corner_margins_;
     BlockCornerMargin global_corner_margin_{};
     MinStubLength min_stub_len_;
+    FeedthruConfig feedthru_;
     DetourChannelSpec detour_channel_;
     std::vector<KeepoutZone> keepouts_;
 };

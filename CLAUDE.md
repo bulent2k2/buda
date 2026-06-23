@@ -113,6 +113,7 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `add_bus <prefix>[<N>] <drv_pin> <rcv_pin_csv>` | setup | Expand a bus into N nets: `prefix[N]` → `prefix_0`…`prefix_{N-1}`; `prefix[lo:hi]` → explicit range |
 | `def_layer <id> <name> <H\|V> [TOP\|LOW] <overhead%> [span_min N] [span_max N] [kSpan K]` | setup | Register a metal layer; `TOP` marks it for trunk preference; optional span limits and per-layer congestion weight override |
 | `set_min_stub_length <n>` / `set_min_stub_length_dir <H\|V> <n>` / `set_min_stub_length_layer <layer> <n>` | setup | Floor on stub segment length: global, per-direction, or per-layer (avoids tiny unroutable stubs) |
+| `set_feedthru <blocks\|*> <layers\|*> [on\|off]` | setup | Mark a block×layer set as opt-in feedthru (routable-through); resolved most-specific-first `(block,layer) > (block,*) > (*,layer) > global`. Config layer only so far — the trunk-split generator change lands in a later phase. |
 | `detour_channel <N\|S\|E\|W\|A> <width>` | setup | Reserve an outer detour band of the given width on one side (or `A` = all four) for U-shape routes |
 | `run_bundler <STRICT\|CONVERGENT>` | 1 | Group nets into buses |
 | `run_hier_bundler [depth <N>]` | 1 | Group nets into hierarchy-aware HBundles using open BDB |

@@ -51,6 +51,7 @@ KNOWN_COMMANDS = frozenset({
     "report_overhead", "resize_cell", "rotate_comp", "run_bundler",
     "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
     "run_planner", "select_topologies", "select_topology", "set_die",
+    "set_feedthru",
     "set_min_stub_length", "set_min_stub_length_dir", "set_min_stub_length_layer",
     "set_planner_param", "set_track_pitch", "source", "visualize",
     "visualize_topologies",
@@ -1689,6 +1690,63 @@ class BudaSession:
                     self.fp.set_min_stub_length_layer(lid, val)
                 else:
                     print(f"Error: unknown layer '{lname}'")
+        elif cmd == "set_feedthru":
+            # set_feedthru <blocks|*> <layers|*> [on|off]   (value defaults to on)
+            #   blocks : comma-separated block names, or * / all
+            #   layers : comma-separated layer names or ids, or * / all
+            # Resolution is most-specific-first: (block,layer) > (block,*) > (*,layer) > global.
+            if len(args) < 2:
+                print("Error: usage: set_feedthru <blocks|*> <layers|*> [on|off]")
+            else:
+                blocks_tok, layers_tok = args[0], args[1]
+                val, ok = True, True
+                if len(args) >= 3:
+                    v = args[2].lower()
+                    if v in ("on", "true", "1", "yes"):
+                        val = True
+                    elif v in ("off", "false", "0", "no"):
+                        val = False
+                    else:
+                        print(f"Error: unknown on/off value '{args[2]}' — use on or off")
+                        ok = False
+                if ok:
+                    blocks_wild = blocks_tok.lower() in ("*", "all")
+                    layers_wild = layers_tok.lower() in ("*", "all")
+                    block_names = []
+                    if not blocks_wild:
+                        known = {n for n, _ in self.fp.get_all_blocks()}
+                        for b in blocks_tok.split(","):
+                            b = b.strip()
+                            if not b:
+                                continue
+                            if b in known:
+                                block_names.append(b)
+                            else:
+                                print(f"Warning: unknown block '{b}' in set_feedthru")
+                    layer_ids = []
+                    if not layers_wild:
+                        for t in layers_tok.split(","):
+                            t = t.strip()
+                            if not t:
+                                continue
+                            if t.isdigit():
+                                layer_ids.append(int(t))
+                            elif t in self._layer_name_map:
+                                layer_ids.append(self._layer_name_map[t])
+                            else:
+                                print(f"Warning: unknown layer '{t}' in set_feedthru")
+                    if blocks_wild and layers_wild:
+                        self.fp.set_feedthru(val)
+                    elif blocks_wild:
+                        for lid in layer_ids:
+                            self.fp.set_feedthru_layer(lid, val)
+                    elif layers_wild:
+                        for n in block_names:
+                            self.fp.set_feedthru_block(n, val)
+                    else:
+                        for n in block_names:
+                            for lid in layer_ids:
+                                self.fp.set_feedthru_block_layer(n, lid, val)
         elif cmd == "detour_channel":
             # Usage: detour_channel <dir> <size> [<dir> <size> ...]
             # dir : N/S/E/W (single), Y (N+S), X (E+W), A (all four).
