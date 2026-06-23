@@ -138,7 +138,7 @@ def test_tighten_does_not_trade_pull_for_overlaps(big_nuts_session):
     res = big_nuts_session.nuts_result
     assert res.num_violations == 0, f"interval violations: {res.num_violations}"
     # first_fit-only repack left 7 abstract track overlaps here; pull-aware repack
-    # + tighten leaves 4.  Guard against a regression that trades pull for shorts.
+    # + tighten leaves 5.  Guard against a regression that trades pull for shorts.
     assert res.num_overlaps <= 6, (
         f"abstract track overlaps regressed to {res.num_overlaps} (expected <= 6)"
     )

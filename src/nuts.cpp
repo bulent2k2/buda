@@ -1192,6 +1192,16 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                     double pref = (m->net_pull != 0 && pit != pull_map.end())
                                   ? pit->second           // anchor: keep its pull
                                   : m->interval_lo;        // free: pack low
+                    // The pull target is an interval EDGE (interval_hi for an
+                    // upward pull), which lies outside preferred_fit's valid centre
+                    // range [c_lo, c_hi] and is not one of its baseline candidates —
+                    // so without clamping, an upward-pulled member with a clear high
+                    // edge falls back to c_lo and is bottom-packed.  Clamp into the
+                    // centre range first, exactly as place_seg does.
+                    const double half = m->width / 2.0;
+                    const double c_lo = m->interval_lo + half;
+                    const double c_hi = m->interval_hi - half;
+                    if (c_lo <= c_hi) pref = std::clamp(pref, c_lo, c_hi);
                     p = preferred_fit(m->interval_lo, m->interval_hi, m->width, occ, pref);
                 } else {
                     p = first_fit(m->interval_lo, m->interval_hi, m->width, occ);
