@@ -240,7 +240,9 @@ def test_dogleg_state_cleared_on_regenerate():
     # The full re-plan + re-solve sequence that used to crash now completes and
     # re-detects the cycle from scratch.
     sess.do_command("select_topologies 1,2 4")
-    sess.do_command("select_topologies 3 5")
+    # Bundle 3 -> TRUNK_V@x400; its index moved 5->6 once trunk+MST completion let
+    # the cheaper +MST hybrids sort earlier in the WL-ordered candidate list.
+    sess.do_command("select_topologies 3 6")
     sess.do_command("run_planner 1")
     sess.do_command("run_nuts")
     assert sess.nuts_result.num_overlaps == 0, \

@@ -175,6 +175,34 @@ def _seg_components(ct):
     return len({find(i) for i in range(n)})
 
 
+def _seg_has_cycle(ct):
+    """True if the SEG (wire-junction) graph has a cycle: a unique undirected SEG
+    edge that re-closes an already-connected component.  A faithful routing tree
+    must be acyclic -- a cycle is a redundant wire loop (e.g. duplicate connectors
+    at a high-degree relay)."""
+    segs = ct.segs()
+    n = len(segs)
+    uf = list(range(n))
+
+    def find(x):
+        while uf[x] != x:
+            uf[x] = uf[uf[x]]
+            x = uf[x]
+        return x
+
+    edges = set()
+    for i, cs in enumerate(segs):
+        for co in cs.conns:
+            if co.kind == buda.SegConnKind.SEG:
+                edges.add((min(i, co.seg_idx), max(i, co.seg_idx)))
+    for a, b in edges:
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return True
+        uf[ra] = rb
+    return False
+
+
 def test_completion_adds_wire_for_relay_block():
     """The staircase MST has a relay block (degree >= 2) and completion adds the
     bridging wire.  The raw (un-completed) MST of this 4-block staircase has
@@ -287,22 +315,54 @@ def test_straight_trunk_through_block_not_flagged():
         )
 
 
-def test_trunk_mst_relay_currently_flagged_deferred():
-    """trunk+MST hybrids are NOT completed yet (their MST edges are redundant with
-    the trunk spine; completing would create cycles -- redesign deferred).  Until
-    then the verifier correctly flags their feedthrough relays.  This test pins
-    that current behavior; update it when trunk+MST completion lands."""
+def test_trunk_mst_completed_no_feedthru():
+    """trunk+MST hybrids are now COMPLETED (the redesign: each MST edge replaces a
+    child block's trunk stub, so the hybrid is a cycle-free trunk-rooted tree that
+    complete_relay_junctions wires up).  For single-rect designs every emitted
+    +MST hybrid must therefore be clean: no FEEDTHRU_RELAY, one SEG-connected
+    component, a single busterm tap per block, and no zero-length segments.  A
+    hybrid that cannot be cleanly completed (a stub collinear with an incident MST
+    edge) is dropped, not emitted -- so there is nothing left flagged here."""
+    for coords, src, dsts in (STAIRCASE, PLUS, GRID):
+        fp = _make_fp(coords)
+        hybrids = [c for c in _gen(fp).generate_candidates(src, dsts)
+                   if "+MST" in c.type]
+        assert hybrids, f"expected trunk+MST hybrids for {list(coords)}"
+        for c in hybrids:
+            zero = [(s.start.x, s.start.y) for s in c.segments
+                    if s.start.x == s.end.x and s.start.y == s.end.y]
+            assert not zero, f"{c.type} on {list(coords)}: zero-length segs {zero}"
+            ct = buda.ConnTopology()
+            ct.build(c, fp)
+            assert _feedthru_count(ct, c, fp) == 0, (
+                f"{c.type} on {list(coords)}: still FEEDTHRU_RELAY-flagged after "
+                f"trunk+MST completion"
+            )
+            assert _seg_components(ct) == 1, (
+                f"{c.type} on {list(coords)}: {_seg_components(ct)} SEG components "
+                f"(emitted but not cleanly completed)"
+            )
+            assert not _seg_has_cycle(ct), (
+                f"{c.type} on {list(coords)}: emitted hybrid has a wire cycle "
+                f"(should be a clean trunk-rooted tree or dropped)"
+            )
+            multi = {b: sorted(s) for b, s in _busterm_taps(ct).items() if len(s) > 1}
+            assert not multi, f"{c.type} on {list(coords)}: blocks double-tapped: {multi}"
+
+
+def test_trunk_mst_root_double_tap_demoted():
+    """Regression for the single-tap demotion over ALL landings (not just distinct
+    points): in a trunk+MST tree the root keeps its trunk stub AND is an MST-edge
+    endpoint, so two segments leave it at the same corner.  Both must not stay
+    tagged as a busterm -- exactly one keeps the tap, the other becomes a SEG
+    junction.  Covered by the no-double-tap assertion across all hybrids above;
+    this pins the STAIRCASE root case explicitly."""
     coords, src, dsts = STAIRCASE
     fp = _make_fp(coords)
-    cands = _gen(fp).generate_candidates(src, dsts)
-    mst_hybrids = [c for c in cands if "+MST" in c.type]
-    if not mst_hybrids:
-        import pytest
-        pytest.skip("no trunk+MST candidate for this geometry")
-    flagged = 0
-    for c in mst_hybrids:
+    hybrids = [c for c in _gen(fp).generate_candidates(src, dsts) if "+MST" in c.type]
+    assert hybrids
+    for c in hybrids:
         ct = buda.ConnTopology()
         ct.build(c, fp)
-        if _feedthru_count(ct, c, fp) > 0:
-            flagged += 1
-    assert flagged > 0, "expected at least one trunk+MST hybrid to be flagged"
+        for blk, segs in _busterm_taps(ct).items():
+            assert len(segs) == 1, f"{c.type}: block {blk} tapped by {sorted(segs)}"

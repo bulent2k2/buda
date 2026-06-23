@@ -1209,7 +1209,7 @@ symbols and by the `dump_topologies` inspection of `flow/big_data_test/tc3a_flat
 | 4.1–4.2 | Single H/V trunk sweep + OOB + pass-through | **DONE** | `add_trunk_h/v` `:734/:918`; `pass_through_count` `topology.h:79` |
 | 4.3 | MST + trunk+MST fallback | **DONE** | `add_mst_candidates` `:1298`, `add_trunk_mst_candidates` `:1400` |
 | 4.3 | **MST feedthrough completion** (standalone MST self-connected; single busterm tap + SEG junctions) | **DONE** | `complete_relay_junctions` (single-tap, PR #43); `FEEDTHRU_RELAY` in `verify.cpp::check_topo` |
-| 4.3 | trunk+MST completion (MST edge replaces a stub; avoid cycles) | **DEFERRED** | completing as-is creates cycles; flagged `FEEDTHRU_RELAY`; plan in §17.1 / `trunk_mst_and_feedthru_plan.md` |
+| 4.3 | trunk+MST completion (MST edge replaces a stub; avoid cycles) | **DONE** | `add_trunk_mst_candidates`: root MST at trunk-nearest stub-owner, drop child stubs, `complete_relay_junctions`; emit only `topology_is_clean_tree` (connected + acyclic) hybrids, else legacy/drop |
 | 4.4 | **General multi-level trunks** (recursive, V-split, depth>1) | **PARTIAL** | only `add_multi_trunk_candidates`→`BITRUNK_H` `:1506` |
 | 4.5 | Per-leaf **Z-stub / sub-trunk connectors** on a trunk | **MISSING** | trunk builders emit direct/L stubs only |
 | 4.5 | **Candidate dedup** (`deduplicate`) | **MISSING** | no candidate-level dedup; `annotate_and_sort` `:634` |
@@ -1275,17 +1275,20 @@ The known remainders, in priority order:
 
 ### Deferred by design
 
-1. **Trunk+MST hybrid completion** *(planned — see
-   [trunk_mst_and_feedthru_plan.md](trunk_mst_and_feedthru_plan.md) §1)*.
-   `add_trunk_mst_candidates` (`topology.cpp:1602`) is intentionally left
-   un-completed: it copies the full trunk (every branch stub) **and** adds MST
-   shortcut edges between the same branch blocks, so each branch block is already
-   connected via its stub. Running `complete_relay_junctions` would tie the MST
-   edge to the stub and **close a loop** (cycle). The redesign makes the MST edge
-   *replace* a stub rather than augment it, yielding a clean trunk-rooted tree that
-   completion can safely process. Until then `check_topo` flags these relays as
-   `FEEDTHRU_RELAY`; `test_trunk_mst_relay_currently_flagged_deferred` pins that
-   behaviour and must flip when the redesign lands.
+1. **Trunk+MST hybrid completion** — **DONE** (see
+   [trunk_mst_and_feedthru_plan.md](trunk_mst_and_feedthru_plan.md) §1).
+   `add_trunk_mst_candidates` now roots the branch MST at the trunk-nearest
+   **stub-owning** block, drops every other branch block's trunk stub (the MST edge
+   *replaces* it), and runs `complete_relay_junctions` on the resulting cycle-free
+   trunk-rooted tree. A completed hybrid is emitted only if it verifies as a clean
+   tree (`topology_is_clean_tree`: one SEG component **and** acyclic) — single-rect
+   hybrids that cannot be cleanly completed (a stub collinear with an incident MST
+   edge, or a pass-through crossing that re-closes a loop) are dropped; multi-rect /
+   un-rootable cases keep the legacy (still `FEEDTHRU_RELAY`-flagged) form.
+   `test_trunk_mst_completed_no_feedthru` pins the new invariant. Side effect: the
+   completed hybrids have honest (often lower) wirelength, so they sort earlier in
+   the WL-ordered candidate list — index-pinned flows (e.g. `dogleg2.buda`) were
+   re-pinned accordingly.
 
 2. **Feedthru as an opt-in option** *(planned — see
    [trunk_mst_and_feedthru_plan.md](trunk_mst_and_feedthru_plan.md) §2; design in
@@ -1308,12 +1311,24 @@ The known remainders, in priority order:
    bug; connectivity still verifies clean ("no opens").
 
 4. **Mid-tier viz failures (environmental).** `matplotlib.cm.get_cmap` was removed
-   in matplotlib 3.9+; the mid-tier visualization tests fail on that, unrelated to
-   topology. A small compatibility shim (`matplotlib.colormaps[...]`) clears it.
+   in matplotlib 3.9+; the mid-tier visualization tests fail on that
+   (`buda_viz.py:2916`), unrelated to topology. A small compatibility shim
+   (`matplotlib.colormaps[...]`) clears it.
+
+5. **Standalone-MST cycle at high-degree relays.** Surfaced by the acyclicity check
+   added for trunk+MST: `complete_relay_junctions`, when chaining the landings of a
+   **degree-≥4** relay (e.g. the centre block of the PLUS arrangement), can emit two
+   connectors that bridge the same junction pair, closing a redundant wire **loop**.
+   `MST_HV`/`MST_VH` for PLUS are cyclic on `main` today — PR #43's completion tests
+   checked SEG-connectivity but not acyclicity, so it slipped through. The chaining
+   needs to skip a connector whose endpoints are already wire-connected (or chain a
+   minimum spanning set of the landings rather than the full sorted sequence). The
+   `topology_is_clean_tree` helper (`topology.cpp`) and `_seg_has_cycle`
+   (`test_mst_completion.py`) are ready to gate the fix.
 
 ### Open question (owner decision)
 
-5. **Dogleg tap placement.** Single-tap currently taps the most-flexible **stub**
+6. **Dogleg tap placement.** Single-tap currently taps the most-flexible **stub**
    in all relay cases. The original suggestion was to tap the *middle dogleg
    connector* segment; that was not adopted because a busterm on an along-face
    connector lets it slide into the block **interior** (wrong side), whereas a stub
@@ -1322,12 +1337,12 @@ The known remainders, in priority order:
 
 ### Optional refinements (low priority)
 
-6. **Tap-selection metric.** "Most slide flexibility" uses a geometric proxy (the
+7. **Tap-selection metric.** "Most slide flexibility" uses a geometric proxy (the
    block face extent in the slide direction) rather than `ConnTopology`'s computed
    `perp_lo/hi` slide ranges (which are derived downstream). Exact enough in
    practice; tighten only if a misranked tap ever shows up.
 
-7. **Detour offset robustness in `connect()`.** The degree-3 same-row/column detour
+8. **Detour offset robustness in `connect()`.** The degree-3 same-row/column detour
    uses a fixed `±2` off-line offset (`ym = a.p.y - 2`, `xm = a.p.x - 2`). Near
    coordinate 0 it can go slightly negative and is not chosen to avoid the block.
    Harmless for the abstract topology (all tests pass); a direction-aware offset

@@ -26,7 +26,9 @@ check_connectivity topo
 
 # force a cycle:
 select_topologies 1,2 4
-select_topologies 3 5
+# Bundle 3 -> TRUNK_V@x400 (its index shifted from 5 to 6 when trunk+MST
+# completion made the cheaper +MST hybrids sort earlier in the WL-ordered list).
+select_topologies 3 6
 run_planner 1
 
 run_nuts

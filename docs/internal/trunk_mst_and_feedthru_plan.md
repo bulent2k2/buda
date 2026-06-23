@@ -18,7 +18,19 @@ through stages 2/3/4/9 + visualizer).
 
 ---
 
-## 1. Trunk+MST hybrid completion (MST edge *replaces* a stub)
+## 1. Trunk+MST hybrid completion (MST edge *replaces* a stub) — IMPLEMENTED
+
+> **Status — DONE.** Implemented in `add_trunk_mst_candidates` per the plan below,
+> with one addition the plan did not anticipate: the completed hybrid is accepted
+> only if it verifies as a clean tree (`topology_is_clean_tree`: one SEG component
+> **and** acyclic). Two geometries defeat a naive completion and are dropped rather
+> than emitted — (a) a kept stub *collinear* with an incident MST edge (ConnTopology
+> can't infer the collinear join → split), and (b) a kept stub that *crosses* another
+> branch block (pass-through), leaving a redundant second path that completion closes
+> into a loop. The root is chosen among **stub-owning** branch blocks (a pass-through
+> block owns no stub, so rooting there would detach the cluster). Multi-rect / blocks
+> with no stub-owning root keep the legacy flagged form. Tests:
+> `test_trunk_mst_completed_no_feedthru`, `test_trunk_mst_root_double_tap_demoted`.
 
 ### 1.1 The problem, precisely
 
