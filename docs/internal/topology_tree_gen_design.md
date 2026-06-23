@@ -1315,16 +1315,17 @@ The known remainders, in priority order:
    (`buda_viz.py:2916`), unrelated to topology. A small compatibility shim
    (`matplotlib.colormaps[...]`) clears it.
 
-5. **Standalone-MST cycle at high-degree relays.** Surfaced by the acyclicity check
-   added for trunk+MST: `complete_relay_junctions`, when chaining the landings of a
-   **degree-≥4** relay (e.g. the centre block of the PLUS arrangement), can emit two
-   connectors that bridge the same junction pair, closing a redundant wire **loop**.
-   `MST_HV`/`MST_VH` for PLUS are cyclic on `main` today — PR #43's completion tests
-   checked SEG-connectivity but not acyclicity, so it slipped through. The chaining
-   needs to skip a connector whose endpoints are already wire-connected (or chain a
-   minimum spanning set of the landings rather than the full sorted sequence). The
-   `topology_is_clean_tree` helper (`topology.cpp`) and `_seg_has_cycle`
-   (`test_mst_completion.py`) are ready to gate the fix.
+5. **Standalone-MST cycle at high-degree relays** — **FIXED**. Surfaced by the
+   acyclicity check added for trunk+MST: `complete_relay_junctions`, when chaining
+   the landings of a **degree-≥4** relay (e.g. the centre block of the PLUS
+   arrangement), laid one dogleg connector's return leg collinear on top of the next
+   connector, an overlap that closed a redundant wire **loop** (`MST_HV`/`MST_VH` for
+   PLUS were cyclic on `main`; PR #43's completion tests checked SEG-connectivity but
+   not acyclicity). Fixed with a de-overlap pass in `complete_relay_junctions`: any
+   connector segment collinear-contained within another segment carries no unique
+   junction but creates the parallel path, so it is dropped (connectivity preserved
+   by the covering segment). Tests: `test_completion_seg_connected_downstream` now
+   also asserts acyclicity, plus `test_high_degree_relay_has_no_overlapping_connectors`.
 
 ### Open question (owner decision)
 

@@ -241,8 +241,10 @@ def test_completion_seg_connected_downstream():
     """The real fix for the reviewer's concern: the completed MST must be ONE
     component under SEG (wire-junction) connectivity alone -- not merely touching
     geometrically, and not bridged through a block's busterm.  Otherwise NUTS /
-    detailed-NUTS see disconnected pieces and may slide them apart.  Also guards
-    against degenerate zero-length connector segments."""
+    detailed-NUTS see disconnected pieces and may slide them apart.  The completion
+    must also be a TREE (acyclic): at a high-degree relay the landing-chaining can
+    lay collinear connector wire on top of itself, closing a redundant loop -- the
+    de-overlap pass drops those.  Also guards against zero-length connectors."""
     for coords, src, dsts in (STAIRCASE, PLUS, GRID):
         fp = _make_fp(coords)
         for c in _mst_cands(_gen(fp).generate_candidates(src, dsts)):
@@ -256,6 +258,46 @@ def test_completion_seg_connected_downstream():
                 f"{c.type} on {list(coords)}: SEG-connectivity has {nc} components "
                 f"(connectors modelled as busterm taps, not wire junctions)"
             )
+            assert not _seg_has_cycle(ct), (
+                f"{c.type} on {list(coords)}: completed MST has a wire cycle "
+                f"(redundant overlapping connectors at a high-degree relay)"
+            )
+
+
+def test_high_degree_relay_has_no_overlapping_connectors():
+    """Regression for the PLUS centre (a degree-4 relay): chaining its four MST
+    edges used to lay one connector's return leg collinear on top of the next
+    connector, an overlap that closed a cycle.  The de-overlap pass drops the
+    contained connector, so no two segments are collinear-overlapping."""
+
+    def _overlap(a, b):
+        a_h, b_h = a.start.y == a.end.y, b.start.y == b.end.y
+        if a_h != b_h:
+            return False
+        if a_h:
+            if a.start.y != b.start.y:
+                return False
+            alo, ahi = sorted((a.start.x, a.end.x))
+            blo, bhi = sorted((b.start.x, b.end.x))
+        else:
+            if a.start.x != b.start.x:
+                return False
+            alo, ahi = sorted((a.start.y, a.end.y))
+            blo, bhi = sorted((b.start.y, b.end.y))
+        return min(ahi, bhi) > max(alo, blo)   # share more than a single point
+
+    coords, src, dsts = PLUS
+    fp = _make_fp(coords)
+    msts = _mst_cands(_gen(fp).generate_candidates(src, dsts))
+    assert msts
+    for c in msts:
+        segs = c.segments
+        for i in range(len(segs)):
+            for j in range(i + 1, len(segs)):
+                assert not _overlap(segs[i], segs[j]), (
+                    f"{c.type}: segments {i} and {j} collinear-overlap "
+                    f"(redundant connector wire not de-overlapped)"
+                )
 
 
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────

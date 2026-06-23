@@ -876,6 +876,49 @@ static void complete_relay_junctions(Topology& topo,
             connect(pts[k - 1], pts[k]);
     }
 
+    // De-overlap the connectors.  At a high-degree relay, consecutive-landing
+    // connectors can lay collinear wire on top of each other -- e.g. the return
+    // leg of one dogleg Z runs back along a row that the next connector already
+    // spans.  A connector whose span is collinear-contained within another segment
+    // carries no unique junction (every point on it lies on the covering segment),
+    // but the overlap creates a redundant parallel path that closes a cycle.  Drop
+    // such connectors: connectivity is preserved (the covering segment provides
+    // every junction) and the relay completion stays a tree.  Only connectors
+    // (index >= n_seg) are dropped, and they carry no busterm annotation yet, so
+    // topo.segments can be rebuilt without touching seg_busterms (whose keys are
+    // all original-segment indices < n_seg).
+    auto collinear_covers = [](const Segment& o, const Segment& c) {
+        bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
+        if (o_h != c_h) return false;
+        if (c_h) {
+            if (o.start.y != c.start.y) return false;
+            int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
+            int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
+            return olo <= clo && chi <= ohi;
+        }
+        if (o.start.x != c.start.x) return false;
+        int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
+        int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
+        return olo <= clo && chi <= ohi;
+    };
+    int tot = (int)topo.segments.size();
+    std::vector<bool> drop(tot, false);
+    bool any_drop = false;
+    for (int c = n_seg; c < tot; ++c) {
+        for (int o = 0; o < tot; ++o) {
+            if (o == c || drop[o]) continue;
+            if (!collinear_covers(topo.segments[o], topo.segments[c])) continue;
+            // Equal spans cover each other; keep exactly one (the lower index).
+            if (collinear_covers(topo.segments[c], topo.segments[o]) && o > c) continue;
+            drop[c] = true; any_drop = true; break;
+        }
+    }
+    if (any_drop) {
+        std::vector<Segment> kept;
+        for (int s = 0; s < tot; ++s) if (!drop[s]) kept.push_back(topo.segments[s]);
+        topo.segments = std::move(kept);
+    }
+
     // Single-tap model: keep the busterm tap on EXACTLY ONE landing per block and
     // demote every other landing to an internal (SEG) junction.  Without this,
     // every landing stays annotated as a busterm on the block, so ConnTopology
