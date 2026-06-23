@@ -4,7 +4,7 @@ Structure, coverage, and xfail/skip inventory for the BUDA pytest suite.
 Companion to [test_runtime_analysis.md](test_runtime_analysis.md), which
 covers per-test runtimes and the three-tier marker scheme.
 
-> Last updated: 2026-06-21
+> Last updated: 2026-06-23
 
 ---
 
@@ -14,10 +14,12 @@ covers per-test runtimes and the three-tier marker scheme.
 |---|---|
 | Test files | 56 |
 | Feature files (pytest-bdd) | 38 |
-| Total test functions / scenarios | ~530 |
+| Total test functions / scenarios | ~521 |
 | xfail groups (whole-file or per-scenario) | 5 |
 | Scenarios blocked by missing C++ features | ~35 |
-| Tests currently passing (fast tier) | ~434 |
+| Tests currently passing (fast tier, `bb -t`) | ~440 |
+| Tests in mid tier (`bb -m`) | 40 |
+| Tests in slow tier (`bb -s`) | 2 |
 
 The suite mixes two styles:
 
@@ -33,16 +35,25 @@ The suite mixes two styles:
 
 Three cumulative tiers defined in `pytest.ini` (`addopts = -m "not slow and not mid"`):
 
-| Tier | Marker | What | Approx tests | Run with |
+| Tier | Marker | What | Tests | Run with |
 |---|---|---|---:|---|
-| **fast** | *(none)* | Unit + component tests | ~434 | `bb -t` / `pytest` |
-| **mid** | `mid` | Full-pipeline `.buda` integration (subprocesses) | 19 | `bb -m` |
+| **fast** | *(none)* | Unit + component tests | ~440 | `bb -t` / `pytest` |
+| **mid** | `mid` | Integration tests (subprocesses + full visualizer builds) | 40 | `bb -m` |
 | **slow** | `slow` | SA/GA placement-optimizer convergence storms | 2 | `bb -s` |
 
-The **mid** marker is applied at module level in `test_flow_scripts.py`
-(`pytestmark = pytest.mark.mid`).  The two **slow** tests are
-`test_optimize_demo_tc1_overlap_storm` and `test_optimize_demo_tc2_fixed_io`
-in `test_floorplanner_commands.py`, each decorated with `@pytest.mark.slow`.
+The **mid** tier (`pytestmark = pytest.mark.mid`) covers:
+
+| File | Tests | Why mid |
+|---|---:|---|
+| `test_flow_scripts.py` | 20 | Each `subprocess.run`s `buda_cli.py` on a `.buda` file (~1s/test) |
+| `test_viz_collections.py` | 12 | Builds a real `BudaVisualizer` over a full flow; Agg backend init (~0.5–3s/test) |
+| `test_topo_explorer_terminals.py` | 5 | Builds a `TopologyExplorer` over a routed flow (~0.3s/test) |
+| `test_topo_explorer_focus_on_cycle.py` | 1 | Same — full Explorer build (~0.5s) |
+| **total** | **40** | |
+
+The two **slow** tests are `test_optimize_demo_tc1_overlap_storm` and
+`test_optimize_demo_tc2_fixed_io` in `test_floorplanner_commands.py`,
+each decorated with `@pytest.mark.slow`.
 
 ---
 
@@ -135,15 +146,15 @@ in `test_floorplanner_commands.py`, each decorated with `@pytest.mark.slow`.
 
 ### CLI / Visualization / Other
 
-| File | Scenarios | Covers |
-|---|---:|---|
-| `test_flow_scripts.py` | 19 | End-to-end `.buda` script execution (mid tier) |
-| `test_unknown_command.py` | 8 | CLI error handling for unknown/malformed commands |
-| `test_viz_collections.py` | 11 | Visualizer internal state management |
-| `test_topo_explorer_focus_on_cycle.py` | 1 | Topology explorer cycle highlight |
-| `test_topo_explorer_pin_badge.py` | 2 | Topology explorer pin badge display |
-| `test_topo_explorer_single_pin.py` | 1 | Topology explorer single-pin view |
-| `test_topo_explorer_terminals.py` | 4 | Topology explorer terminal annotations |
+| File | Tests | Tier | Covers |
+|---|---:|---|---|
+| `test_flow_scripts.py` | 20 | mid | End-to-end `.buda` script execution; includes regression for issue #16 (pinless bus sentinel bug) |
+| `test_unknown_command.py` | 8 | fast | CLI error handling for unknown/malformed commands |
+| `test_viz_collections.py` | 12 | mid | `BudaVisualizer` rendering: collections, lazy detail build, rail toggle, solo mode, pan |
+| `test_topo_explorer_focus_on_cycle.py` | 1 | mid | Topology explorer: pin focus survives cycle |
+| `test_topo_explorer_pin_badge.py` | 2 | fast | Topology explorer: pin badge display (script-pin vs planner-pin) |
+| `test_topo_explorer_single_pin.py` | 1 | fast | Topology explorer: single-pin topology pinning |
+| `test_topo_explorer_terminals.py` | 5 | mid | Topology explorer: terminal display, key bindings ('d', '-', '+', 'u' removed), arrow pan |
 
 ---
 
@@ -322,6 +333,41 @@ markers, and will naturally pass once the full candidate set is generated.
 | hierarchy_depth_planning.feature | 8 | all xfail (group 3) |
 | floorplanner_gui_basic.feature | 9 | all xfail (group 1) |
 | floorplanner_engine_api.feature | 7 | ✓ all pass |
+
+---
+
+## Changelog
+
+### 2026-06-23
+
+**New tests (3):**
+
+- `test_flow_scripts.py::test_pinless_buses_stay_separate` — regression for
+  issue #16: `extract_instance` was mapping every pinless (no-dot) endpoint to
+  the sentinel `"top"`, causing `a left right` and `b up down` to share a
+  STRICT bundler signature and collapse into one bundle. Fix: bare token is now
+  the block name. Test drives `flow/no_pin_suffix.buda` and asserts two bundles
+  are created with the correct driver→receiver pairs.
+
+- `test_viz_collections.py::test_s_key_toggles_solo` — verifies the new `'s'`
+  key (BudaVisualizer solo mode) toggling; both on→off and off→on.
+
+- `test_topo_explorer_terminals.py::test_explorer_d_is_next_topo_not_layer_down`
+  — regression for the `'d'` key double-binding in TopologyExplorer (`'d'` was
+  wired to both *next topology* and *layer-down*, so one keypress did both). Now
+  only next-topology; `'-'`/`'_'` remain layer-down. Also verifies `'u'` is no
+  longer a layer key (alias removed).
+
+**Tier moves (3 files → mid):**
+
+- `test_viz_collections.py` (12 tests) — each builds a full `BudaVisualizer`
+  over `dnuts1.buda`; ~0.5–3s per test.
+- `test_topo_explorer_terminals.py` (5 tests) — each builds a `TopologyExplorer`
+  over a routed flow; ~0.3s per test.
+- `test_topo_explorer_focus_on_cycle.py` (1 test) — same reason, ~0.5s.
+
+**Net effect:** fast tier (`bb -t`) dropped from ~30s to ~15s; mid tier grew
+from 19 to 40 tests.
 
 ---
 
