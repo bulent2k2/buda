@@ -211,45 +211,55 @@ the split segment endpoints, so no struct is needed for the MVP.
 
 ### 2.3 Generator changes (stage 2, `topology.cpp`) — the core — **IMPLEMENTED**
 
-> **Correction to the original anchor.** The first draft proposed walking the
-> endpoint-only `blocks` (busterm) vector in the `pass_through_count` loop. That is
-> wrong: a feedthru block is almost never a src/dst — it is an *unrelated* block the
-> trunk happens to cross, so it never appears in `blocks`. The shipped code instead
-> scans **`floorplan_.get_all_blocks()`** for crossed *non-endpoint* blocks.
+> **The model: a feedthru block is a busterm of the bundle.** Two earlier drafts got
+> this wrong. The *first* walked the endpoint `blocks` vector but assumed a feedthru
+> was a src/dst stub. The *second* (shipped briefly) over-corrected to scanning
+> `floorplan_.get_all_blocks()` for *unrelated* crossed blocks — but per CLAUDE.md a
+> trunk merely crossing an unrelated block is a **pass-through, not a feedthru**. The
+> right model (and what ships now): a feedthru block is one the topology **actually
+> connects to** — a bundle busterm in `blocks[i]` that the trunk passes straight
+> through (`!has_stub[i]`). Splitting at its faces gives it *two* BUSTERM landings, i.e.
+> it "connects ≥2 of the bundle's stubs via its own routing" — the CLAUDE.md feedthru
+> definition exactly. This also makes the split safe for NUTS (see §2.4): the half-spine
+> inner endpoints are busterm-anchored to the block's faces, not free to slide off.
 
 Shipped in `add_trunk_h` (x-faces) and `add_trunk_v` (y-faces). After `x_lo/x_hi`
 (resp. `y_lo/y_hi`) and the spine `y_trunk` (resp. `x_trunk`) are fixed, and gated on
 `floorplan_.feedthru_active()` (cheap "any rule set?" guard so non-feedthru flows are
 byte-identical):
 
-- Build `endpoint_names = { blocks[i].block_name }`.
-- For each `(name, bbox)` in `floorplan_.get_all_blocks()` (name-sorted): skip
-  endpoints; skip unless `get_feedthru(name, h_layer_/v_layer_)`; skip multi-rect
-  (`get_block_rects(name).size() > 1`, MVP); require the bbox to **straddle** the trunk
-  (`bbox.y1 <= y_trunk <= bbox.y2` for H) and overlap `[x_lo,x_hi]`. Record the clipped
-  `[x1,x2]` (resp. `[y1,y2]`) as a gap and push `name` to `t.feedthru_blocks`.
+- For each bundle block `i`: skip unless `!has_stub[i]` (the trunk passes through it —
+  V also skips `stub_suppressed[i]`); skip unless `get_feedthru(blocks[i].block_name,
+  h_layer_/v_layer_)`; skip multi-rect (`blocks[i].rects.size() > 1`, MVP). Clip the
+  block's `orig_bbox` face extent to `[x_lo,x_hi]` (resp. `[y_lo,y_hi]`); if non-empty,
+  record the gap, set `is_feedthru[i]`, and push the name to `t.feedthru_blocks` (sorted).
 - **Split** the spine around the sorted gaps (emit `x_lo→g.first`, skip `[g.first,
   g.second]`, continue from `g.second`; the existing `if (x_lo < x_hi)` guard drops
   zero-length pieces). No gaps → emit the single segment exactly as before.
+- `pass_through_count` now **excludes** feedthru blocks (`!has_stub[i] &&
+  !is_feedthru[i] && …`): a fed-through block is an explicit split, not a silent relay.
 
-`pass_through_count` is **unchanged** (still counts endpoint straddlers only) — a
-feedthru block is a non-endpoint, so it was never in that count.
-
-**Edge cases handled:** endpoints are excluded (must connect); multi-rect feedthru is
-skipped (MVP); only straddling+overlapping blocks are recorded (a far-away feedthru
-block is ignored); per-layer gating falls out of `get_feedthru(name, trunk_layer)`.
+**Edge cases handled:** a block at the trunk's extreme end (`x_lo`/`x_hi`) yields a
+degenerate gap and is skipped, so the src and the outermost dsts are never split — they
+connect normally; multi-rect feedthru is skipped (MVP); per-layer gating falls out of
+`get_feedthru(name, trunk_layer)`; an unrelated block (not a bundle busterm) is never
+even considered.
 
 **Known limitation:** on a multicast bundle that also generates `TRUNK_*+MST` hybrids,
 splitting the spine can make a hybrid fail the clean-tree check (from #44) and be
 dropped on the feedthru path. Acceptable for the MVP (hybrids are an optimization, and
 only feedthru flows are affected); revisit if needed.
 
-### 2.4 Verifier (`verify.cpp::check_topo`)
+### 2.4 Verifier (`verify.cpp::check_topo`) — **IMPLEMENTED**
 
-The split-trunk case needs **no** verifier change: the two trunk halves carry no
-`BUSTERM` conn to `FT`, so the `FEEDTHRU_RELAY` check (`verify.cpp:160-221`, fires only
-on ≥2 BUSTERM segments on one block, `:208-209`) never triggers for `FT`, and `FT` is
-not in `connected_block_names` so the coverage check (`:139`) is satisfied.
+Because a feedthru block is now a busterm with **two** BUSTERM landings (one per
+half-spine), the `FEEDTHRU_RELAY` check (`verify.cpp:160-225`, fires on ≥2 BUSTERM
+segments on one single-rect block whose wires don't geometrically touch) *would* flag
+it — correctly, since the two halves connect only through the block's interior. That is
+exactly the declared, opt-in relay, so `check_topo` now **skips** the violation when the
+block name is in `topo.feedthru_blocks` (beside the existing multi-rect/TEG skip). An
+*undeclared* relay on the same geometry (metadata stripped) is still flagged — the skip
+is gated on the declaration, so silent relays from raw MST edges remain caught.
 
 Still add the opt-in skip for completeness, so a feedthru block used as an **MST relay**
 (≥2 stubs landing on it) is allowed rather than hard-errored — one line beside the
@@ -329,11 +339,13 @@ Document the command + the precedence rule in `BUDA_SCRIPT_REFERENCE.md` and the
 
 - **Shipped:** `test_feedthru_config.py` (8 tests — resolver precedence: global,
   per-layer, per-block, per-pair, block-beats-layer, carve-out, pair-beats-block) and
-  `test_feedthru_topology.py` (7 tests — the trunk-split over a real `A → [B, mid]`
-  multicast: disabled=continuous, per-block/global/per-layer split, endpoint-not-split,
-  straddle-only recording, no-stub-to-feedthru-block via `ConnTopology`).
+  `test_feedthru_topology.py` (8 tests — the trunk-split over a real `A → [mid, B]`
+  multicast where `mid` is a *destination* the trunk passes through: disabled=continuous
+  pass-through, per-block/global/per-layer split at `mid`'s faces, **unrelated block
+  never fed through**, stubbed/extreme dst not split, **two BUSTERM landings on `mid` +
+  `check_topo` clean**, undeclared-relay-still-flagged).
 - The split path is gated entirely on `feedthru_active()`/`get_feedthru`, so the whole
-  existing suite is unperturbed (fast tier: **459 passed**).
+  existing suite is unperturbed (fast tier: **467 passed**).
 - **Deferred:** `features/feedthru.feature` + `test_feedthru.py` stay **xfail**. The
   feature is idealized and does not match generator output — its scenarios assume a
   2-block `A → [B]` net yields `TRUNK_H@y150`, but the generator emits a straight
@@ -344,23 +356,25 @@ Document the command + the precedence rule in `BUDA_SCRIPT_REFERENCE.md` and the
 
 ### 2.9 Phasing & status
 
-1. **Config + bindings + CLI** — ✅ **DONE** (commit on `claude/feedthru-plan`): 4-tier
-   `FeedthruConfig` + setters + `get_feedthru` (§2.2), unified `set_feedthru` command
-   (§2.6), bindings (§2.7), `test_feedthru_config.py`, docs.
-2. **Generator trunk-split + `feedthru_blocks`** — ✅ **DONE**: §2.3 as corrected
-   (crossed-non-endpoint scan), `Topology::feedthru_blocks` + binding,
-   `test_feedthru_topology.py`.
-3. **Verifier skip + visualizer (§2.4, §2.7)** — *not started* (low priority; the
-   split-trunk case needs no verifier change, and the viz is cosmetic).
-4. **dNUTS internal-bridge annotation (§2.5)** — *deferred* (spans correct by
-   construction).
+1. **Config + bindings + CLI** — ✅ **DONE**: 4-tier `FeedthruConfig` + setters +
+   `get_feedthru` (§2.2), unified `set_feedthru` command (§2.6), bindings (§2.7),
+   `test_feedthru_config.py`, docs.
+2. **Generator trunk-split + `feedthru_blocks`** — ✅ **DONE**: §2.3 with the corrected
+   busterm-only model (a fed-through block is a bundle busterm the trunk passes through,
+   not an unrelated crossed block), `Topology::feedthru_blocks` + binding + hier-clone
+   propagation, `test_feedthru_topology.py`.
+3. **Verifier skip (§2.4)** — ✅ **DONE**: `check_topo` skips `FEEDTHRU_RELAY` for blocks
+   declared in `topo.feedthru_blocks`; undeclared relays still flagged.
+4. **Visualizer (§2.7)** — *not started* (cosmetic: dashed feedthru block + gap).
+5. **dNUTS internal-bridge annotation (§2.5)** — *deferred* (the half-spines are
+   busterm-anchored to the block's faces, so spans are correct by construction).
 
 **Deferred follow-ups (own items):**
 - **Feature realignment** — rewrite `feedthru.feature` to multicast-trunk geometries
   (and assert on the real trunk y, not a hardcoded `150`), then un-xfail.
 - **Straight/I-shape feedthru** — extend the split to `I_H`/`I_V` (and `L`/`Z`) so a
-  point-to-point net crossing a feedthru block also splits. Today only the multicast
-  `TRUNK_H`/`TRUNK_V` builders split.
+  point-to-point net through a busterm it passes through also splits. Today only the
+  multicast `TRUNK_H`/`TRUNK_V` builders split.
 - **`feedthru_penalty` ranking** — model the implicit internal-routing cost so a
   feedthru candidate ranks below an equivalent stub candidate (feature scenario 6).
 - **Multi-rect feedthru** and the `TRUNK_*+MST` hybrid interaction (§2.3 limitation).

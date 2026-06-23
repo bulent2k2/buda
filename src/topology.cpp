@@ -1146,33 +1146,38 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
                            + "@y" + std::to_string(y_trunk);
     t.trunk_location     = y_trunk;
-    t.pass_through_count = 0;
-    for (int i = 0; i < n; ++i)
-        if (!has_stub[i] && att_x[i] != x_lo && att_x[i] != x_hi)
-            ++t.pass_through_count;
 
-    // Opt-in feedthru: split the trunk where it crosses a feedthru-enabled
-    // floorplan block that is NOT one of this bundle's endpoints.  The block's
-    // own lower-level router bridges the gap (no stub emitted).  Gated on
-    // feedthru_active() (default off) so non-feedthru flows are byte-identical.
-    // Single-rect blocks only (MVP).
+    // Opt-in feedthru: a bundle block the trunk passes straight through (a
+    // busterm of THIS bundle that gets no stub) may relay the bus across its
+    // interior via its own lower-level routing -- the trunk is split at the
+    // block's two faces and the block's internal route bridges the gap.  Only
+    // blocks this topology actually connects to are eligible: an unrelated
+    // block the trunk merely crosses is a pass-through, never a feedthru.
+    // Gated on feedthru_active() (default off); single-rect blocks only (MVP).
     std::vector<std::pair<int,int>> ft_gaps;   // (x1,x2) faces of feedthru blocks
+    std::vector<bool> is_feedthru(n, false);
     if (floorplan_.feedthru_active()) {
-        std::set<std::string> endpoint_names;
-        for (int i = 0; i < n; ++i) endpoint_names.insert(blocks[i].block_name);
-        for (const auto& [bname, bbox] : floorplan_.get_all_blocks()) {
-            if (endpoint_names.count(bname)) continue;
-            if (!floorplan_.get_feedthru(bname, h_layer_)) continue;
-            if (floorplan_.get_block_rects(bname).size() > 1) continue;  // MVP
-            if (y_trunk < bbox.y1 || y_trunk > bbox.y2) continue;        // must straddle
-            int fx1 = std::max(x_lo, bbox.x1);
-            int fx2 = std::min(x_hi, bbox.x2);
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i]) continue;                 // trunk doesn't pass through it
+            if (!floorplan_.get_feedthru(blocks[i].block_name, h_layer_)) continue;
+            if (blocks[i].rects.size() > 1) continue;  // MVP: single-rect only
+            int fx1 = std::max(x_lo, blocks[i].orig_bbox.x1);
+            int fx2 = std::min(x_hi, blocks[i].orig_bbox.x2);
             if (fx1 < fx2) {
                 ft_gaps.push_back({fx1, fx2});
-                t.feedthru_blocks.push_back(bname);  // get_all_blocks is name-sorted
+                is_feedthru[i] = true;
+                t.feedthru_blocks.push_back(blocks[i].block_name);
             }
         }
+        std::sort(t.feedthru_blocks.begin(), t.feedthru_blocks.end());
     }
+
+    // Pass-through count excludes feedthru blocks (those are explicit splits).
+    t.pass_through_count = 0;
+    for (int i = 0; i < n; ++i)
+        if (!has_stub[i] && !is_feedthru[i] && att_x[i] != x_lo && att_x[i] != x_hi)
+            ++t.pass_through_count;
+
     if (x_lo < x_hi) {
         if (ft_gaps.empty()) {
             t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
@@ -1387,30 +1392,35 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
                            + "@x" + std::to_string(x_trunk);
     t.trunk_location     = x_trunk;
-    t.pass_through_count = 0;
-    for (int i = 0; i < n; ++i)
-        if (!has_stub[i] && att_y[i] != y_lo && att_y[i] != y_hi)
-            ++t.pass_through_count;
 
-    // Opt-in feedthru (mirror of add_trunk_h): split the trunk where it crosses a
-    // feedthru-enabled non-endpoint block at its y-faces.  Single-rect MVP.
+    // Opt-in feedthru (mirror of add_trunk_h): a bundle block the trunk passes
+    // straight through (a busterm of THIS bundle with no stub) may relay the bus
+    // across its interior; split the trunk at the block's y-faces.  Only blocks
+    // this topology connects to are eligible.  Single-rect MVP.
     std::vector<std::pair<int,int>> ft_gaps;   // (y1,y2) faces of feedthru blocks
+    std::vector<bool> is_feedthru(n, false);
     if (floorplan_.feedthru_active()) {
-        std::set<std::string> endpoint_names;
-        for (int i = 0; i < n; ++i) endpoint_names.insert(blocks[i].block_name);
-        for (const auto& [bname, bbox] : floorplan_.get_all_blocks()) {
-            if (endpoint_names.count(bname)) continue;
-            if (!floorplan_.get_feedthru(bname, v_layer_)) continue;
-            if (floorplan_.get_block_rects(bname).size() > 1) continue;  // MVP
-            if (x_trunk < bbox.x1 || x_trunk > bbox.x2) continue;        // must straddle
-            int fy1 = std::max(y_lo, bbox.y1);
-            int fy2 = std::min(y_hi, bbox.y2);
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i] || stub_suppressed[i]) continue;  // not passed through
+            if (!floorplan_.get_feedthru(blocks[i].block_name, v_layer_)) continue;
+            if (blocks[i].rects.size() > 1) continue;         // MVP: single-rect only
+            int fy1 = std::max(y_lo, blocks[i].orig_bbox.y1);
+            int fy2 = std::min(y_hi, blocks[i].orig_bbox.y2);
             if (fy1 < fy2) {
                 ft_gaps.push_back({fy1, fy2});
-                t.feedthru_blocks.push_back(bname);
+                is_feedthru[i] = true;
+                t.feedthru_blocks.push_back(blocks[i].block_name);
             }
         }
+        std::sort(t.feedthru_blocks.begin(), t.feedthru_blocks.end());
     }
+
+    // Pass-through count excludes feedthru blocks (those are explicit splits).
+    t.pass_through_count = 0;
+    for (int i = 0; i < n; ++i)
+        if (!has_stub[i] && !is_feedthru[i] && att_y[i] != y_lo && att_y[i] != y_hi)
+            ++t.pass_through_count;
+
     if (y_lo < y_hi) {
         if (ft_gaps.empty()) {
             t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));

@@ -208,6 +208,11 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
         for (const auto& [bname, sidx] : block_segs) {
             if (sidx.size() < 2) continue;
             if (fp.get_block_rects(bname).size() > 1) continue;  // TEG: internal eq. OK
+            // Opt-in feedthru: the block is *declared* to relay the bus across its
+            // interior via its own lower-level routing, so a multi-component
+            // BUSTERM footprint here is intentional, not a silent relay.
+            if (std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
+                          bname) != topo.feedthru_blocks.end()) continue;
             int root = find(sidx[0]);
             for (size_t k = 1; k < sidx.size(); ++k) {
                 if (find(sidx[k]) == root) continue;

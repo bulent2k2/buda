@@ -489,11 +489,16 @@ set_feedthru <blocks> <layers> [on|off]
 ```
 
 Mark a set of blocks as **feedthru-capable** (routable-through) on a set of trunk
-layers. A feedthru-enabled block straddling a trunk is *not* stubbed to: the trunk is
-split at the block's two crossed faces and the block's own lower-level router is
-relied on to bridge the bus — an opt-in inverse of the default, which physically
-connects every relay. (Phase 1 wires up the configuration and command; the generator
-split itself lands in a later phase.)
+layers. A feedthru-enabled block must be a **busterm of the bundle that the trunk
+passes straight through** (a destination/relay it would otherwise stub to but whose
+body the spine crosses). When such a block opts in, the `TRUNK_H`/`TRUNK_V` spine is
+*split* at the block's two crossed faces — landing a BUSTERM connection on each face,
+so the block "connects ≥2 of the bundle's stubs" — and the block's own lower-level
+router bridges the gap. `check_topo` accepts this declared relay (it is recorded in
+`Topology::feedthru_blocks`); an *undeclared* relay on the same geometry is still
+flagged. An *unrelated* block the trunk merely crosses (not a bundle busterm) is a
+pass-through, never a feedthru. Straight/I-shape feedthru and a `feedthru_penalty`
+ranking knob are later phases.
 
 Feedthru is genuinely **per-(block, layer)** — a block may be routable-through on one
 trunk layer but not another — so the command sets a full block×layer grid rather than

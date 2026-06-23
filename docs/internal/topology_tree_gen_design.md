@@ -205,17 +205,20 @@ depth.
 
 ## 5. Feedthru Configuration
 
-> **Status — PARTIALLY BUILT (config + trunk-split).** The `FeedthruConfig`
-> (4-tier: per-(block,layer) > per-block > per-layer > global), the `set_feedthru
-> <blocks|*> <layers|*> [on|off]` CLI command, `Floorplan::get_feedthru`/`set_*`, and
-> `Topology::feedthru_blocks` are **implemented**, as is the generator trunk-split:
-> `add_trunk_h`/`add_trunk_v` split the spine where it crosses a feedthru-enabled
-> non-endpoint block (`test_feedthru_config.py`, `test_feedthru_topology.py`). The
-> concrete shape differs from the §5 sketch below — the split scans
-> `floorplan_.get_all_blocks()` for crossed non-endpoints rather than walking endpoint
-> busterms, and `feedthru_blocks` is a `vector<string>` of names. **Still deferred:**
+> **Status — PARTIALLY BUILT (config + trunk-split + verifier skip).** The
+> `FeedthruConfig` (4-tier: per-(block,layer) > per-block > per-layer > global), the
+> `set_feedthru <blocks|*> <layers|*> [on|off]` CLI command, `Floorplan::get_feedthru`/
+> `set_*`, and `Topology::feedthru_blocks` are **implemented**, as is the generator
+> trunk-split and the verifier skip (`test_feedthru_config.py`,
+> `test_feedthru_topology.py`). **Key model point** (matching §5.1 below): a feedthru
+> block is a **busterm of the bundle that the trunk passes through** (`!has_stub[i]` in
+> `add_trunk_h`/`add_trunk_v`), *not* an unrelated crossed block — a trunk merely
+> crossing an unconnected block stays a pass-through. The split lands the two half-spines
+> on the block's two faces, giving it two BUSTERM connections; `check_topo` skips the
+> `FEEDTHRU_RELAY` violation for names in `topo.feedthru_blocks` (undeclared relays still
+> flagged). `feedthru_blocks` is a `vector<string>` of names. **Still deferred:**
 > straight/I-shape feedthru (only multicast `TRUNK_*` splits today), the
-> `feedthru_penalty` ranking, dNUTS bridge annotation, and realigning the idealized
+> `feedthru_penalty` ranking, the dashed-block visualizer, and realigning the idealized
 > `features/feedthru.feature` (still xfail) to real trunk geometry. See
 > `trunk_mst_and_feedthru_plan.md` §2 for the as-built notes.
 
