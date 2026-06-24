@@ -179,6 +179,31 @@ def _toggle_fullscreen(fig):
     if mgr:
         mgr.full_screen_toggle()
 
+def _set_lims_filling_box(ax, x0, x1, y0, y1):
+    """Set ax limits to frame [x0,x1]x[y0,y1] but expand the shorter axis so the
+    limits' aspect matches the axes' on-screen box.  With set_aspect('equal')
+    this makes the view fill the whole window instead of collapsing to the
+    narrower dimension (a thin sliver/letterbox in a sea of background)."""
+    # original=True: the full allocated axes rectangle.  With set_aspect('equal')
+    # + adjustable='box', the active position is already shrunk to the data
+    # aspect (the distortion we're undoing), so we must use the original box.
+    pos = ax.get_position(original=True)
+    fw, fh = ax.figure.get_size_inches()
+    ax_h_px = fh * pos.height
+    if ax_h_px <= 0:
+        ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
+        return
+    box_aspect = (fw * pos.width) / ax_h_px   # desired data width / height
+    bw, bh = x1 - x0, y1 - y0
+    if bh <= 0 or bw / bh < box_aspect:        # too narrow -> widen
+        cx, half = (x0 + x1) / 2, max(bh, 1e-9) * box_aspect / 2
+        x0, x1 = cx - half, cx + half
+    else:                                      # too short -> heighten
+        cy, half = (y0 + y1) / 2, bw / box_aspect / 2
+        y0, y1 = cy - half, cy + half
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+
 def raise_window(win_or_fig):
     """Bring a window or figure to the front and ensure it has keyboard focus."""
     win = None
@@ -1549,8 +1574,8 @@ class TopologyExplorer:
         y0, y1 = min(ys), max(ys)
         pad_x = max((x1 - x0) * 0.2, 50)
         pad_y = max((y1 - y0) * 0.2, 50)
-        self.ax.set_xlim(x0 - pad_x, x1 + pad_x)
-        self.ax.set_ylim(y0 - pad_y, y1 + pad_y)
+        _set_lims_filling_box(self.ax, x0 - pad_x, x1 + pad_x,
+                              y0 - pad_y, y1 + pad_y)
         self.fig.canvas.draw_idle()
 
     def _interactive_zoom(self, event, zoom_in: bool):
@@ -1565,10 +1590,10 @@ class TopologyExplorer:
 
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
-        
+
         new_xlim = (x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
         new_ylim = (y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
-        
+
         ax.set_xlim(new_xlim)
         ax.set_ylim(new_ylim)
         self.fig.canvas.draw_idle()
@@ -3466,14 +3491,30 @@ class BudaVisualizer:
                 continue
             xs.extend(a.get_xdata(orig=False))
             ys.extend(a.get_ydata(orig=False))
+        # Include the bundle's busterm connection points so the driver/receiver
+        # terminals are framed even when terminal markers are toggled off.
+        w = next((w for w in self.bundles
+                  if w.input.original_bundle.id == bid), None)
+        if w and w.input.candidates and \
+                0 <= w.plan.selected_topology_index < len(w.input.candidates):
+            topo = w.input.candidates[w.plan.selected_topology_index]
+            ct = ic.ConnTopology(); ct.build(topo, self.fp)
+            for cs in ct.segs():
+                for conn in cs.conns:
+                    if conn.kind != ic.SegConnKind.BUSTERM:
+                        continue
+                    if cs.horiz:
+                        xs.append(float(conn.at_pos)); ys.append(float(cs.perp_pos))
+                    else:
+                        xs.append(float(cs.perp_pos)); ys.append(float(conn.at_pos))
         if not xs:
             return
         x0, x1 = min(xs), max(xs)
         y0, y1 = min(ys), max(ys)
         pad_x = max((x1 - x0) * 0.2, 50)
         pad_y = max((y1 - y0) * 0.2, 50)
-        self.ax.set_xlim(x0 - pad_x, x1 + pad_x)
-        self.ax.set_ylim(y0 - pad_y, y1 + pad_y)
+        _set_lims_filling_box(self.ax, x0 - pad_x, x1 + pad_x,
+                              y0 - pad_y, y1 + pad_y)
         self.fig.canvas.draw_idle()
 
     def _interactive_zoom(self, event, zoom_in: bool):
