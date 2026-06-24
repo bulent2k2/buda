@@ -113,11 +113,16 @@ static void detect_feedthru_relay(const std::vector<ConnSeg>& segs,
         for (int j = i + 1; j < n; ++j)
             if (touch(segs[i], segs[j])) uf[find(i)] = find(j);
 
-    for (const auto& bname : topo.connected_block_names) {
+    // Scan EVERY floorplan block, not just topo.connected_block_names (src+dsts):
+    // a malformed route can relay two stubs through an unrelated macro that is not a
+    // declared connected block (ConnTopology tags such incidental endpoints too).
+    // The inc>=2 gate below means only blocks actually hosting >=2 incident stubs are
+    // examined, so this stays cheap and flags genuine multi-component relays only.
+    for (const auto& [bname, r] : fp.get_all_blocks()) {
+        if (fp.is_container(bname)) continue;                     // transparent envelope, not a leaf cell
         if (fp.get_block_rects(bname).size() > 1) continue;       // TEG: internal eq. OK
         if (std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
                       bname) != topo.feedthru_blocks.end()) continue;   // opt-in feedthru
-        Rect r = fp.get_block_bounds(bname);
         std::vector<int> inc;
         for (int i = 0; i < n; ++i) {
             auto lo = ep_lo(segs[i]), hi = ep_hi(segs[i]);
