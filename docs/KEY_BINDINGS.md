@@ -18,7 +18,7 @@ Here are the keyboard shortcuts available in each view.
 | `cmd+z`, `ctrl+z` | **Zoom to Selection**: Fit the view to the currently highlighted bundle. |
 | `h`, `H`, `cmd+a`, `ctrl+a` | **Home**: Reset zoom and return to the original full view. |
 | `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
-| `a` | **Reset/Clear**: Clear the current bundle highlight. If in detailed mode, resets to global view. |
+| `a` | **Toggle Reset/Highlight**: Toggle between clear/reset mode (showing all/reset view) and highlighting the last selected bundle. Works in both abstract and detailed modes. |
 | `b` | Toggle visibility of the floorplan **blocks**. |
 | `t` | Toggle visibility of **busterms**. |
 | `g` | Toggle visibility of the **Hanan** grid. |
