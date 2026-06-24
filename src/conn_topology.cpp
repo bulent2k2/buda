@@ -56,6 +56,7 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
     infer_connections(topo, fp);
     compute_slide_ranges(fp);
     tighten_passthrough_ranges(topo, fp);
+    pin_relay_tap_connectors();
     compute_net_pull();
 
     for (const auto& cs : segs_) {
@@ -426,6 +427,46 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
                     // Need T.track_position <= along_hi_B.
                     T.perp_hi = std::min(T.perp_hi, along_hi_B);
                 }
+            }
+        }
+    }
+}
+
+// ── ConnTopology::pin_relay_tap_connectors ────────────────────────────────────
+//
+// A relay block keeps exactly ONE busterm tap (complete_relay_junctions' single-
+// tap model); its other landings are demoted to SEG junctions and the landings
+// are chained by connectors that run ALONG the block's faces.  A BUSTERM conn
+// clamps only the tap segment's PERPENDICULAR slide — but the tap's ALONG reach
+// to face_coord is set by the connector attached at that SAME endpoint: after
+// NUTS span adjustment the tap's span end follows that connector's placed perp
+// position.  If the connector is free to slide, NUTS drags the whole staircase
+// off the block face and the tap no longer reaches it — a silent open at NUTS /
+// dNUTS even though the busterm's perpendicular position still lands on the face.
+//
+// Pin each such connector's perp to the tap's face_coord so the along-reach is
+// preserved.  The connector runs along the block edge at face_coord nominally, so
+// this pins it to where it already sits (no nominal geometry change).
+void ConnTopology::pin_relay_tap_connectors() {
+    int n = (int)segs_.size();
+    for (int i = 0; i < n; ++i) {
+        ConnSeg& cs = segs_[i];
+        for (const auto& bc : cs.conns) {
+            if (bc.kind != SegConn::BUSTERM) continue;
+            int f = bc.face_coord;
+            // The busterm sits at one of cs's along endpoints (see check_topo).
+            if (f != cs.along_lo && f != cs.along_hi) continue;
+            // Pin every PERPENDICULAR connector attached at that endpoint: it is
+            // the chain bend whose placed perp becomes cs's span end.
+            for (const auto& sc : cs.conns) {
+                if (sc.kind != SegConn::SEG || !sc.is_endpoint) continue;
+                if (sc.at_pos != f) continue;
+                ConnSeg& T = segs_[sc.seg_idx];
+                if (T.horiz == cs.horiz) continue;            // need a bend, not collinear
+                if (f < T.perp_lo || f > T.perp_hi) continue; // f outside T's window: don't violate invariant
+                T.perp_lo = f;
+                T.perp_hi = f;
+                T.face_pinned = true;
             }
         }
     }

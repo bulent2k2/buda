@@ -2226,7 +2226,9 @@ void TopologyGenerator::filter_pinched(std::vector<Topology>& candidates) {
         ct.build(cand, floorplan_);
         bool pinched = false;
         for (const auto& cs : ct.segs()) {
-            if (cs.perp_lo == cs.perp_hi) {
+            // face_pinned segments are clamped to a relay block's face on purpose;
+            // their zero slide is required for correctness, not a degeneracy.
+            if (cs.perp_lo == cs.perp_hi && !cs.face_pinned) {
                 pinched = true;
                 break;
             }

@@ -353,6 +353,27 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
                 v.message = msg.str();
                 result.violations.push_back(std::move(v));
             }
+            // The placed segment's along-span must still REACH the busterm face.
+            // NUTS span adjustment follows connected segments' placed positions and
+            // can pull a connected end past face_coord, detaching the block even
+            // though track_position (perpendicular) still lands within the face
+            // extent — the perp check above passes coincidentally.  face_coord is on
+            // the along axis (it equals an along endpoint nominally; see check_topo),
+            // so require it to stay within the placed along extent.
+            const double s_lo = std::min(ts.span_lo, ts.span_hi);
+            const double s_hi = std::max(ts.span_lo, ts.span_hi);
+            if (conn.face_coord < s_lo || conn.face_coord > s_hi) {
+                ConnViolation v;
+                v.kind = ViolationKind::BUSTERM_OPEN;
+                v.bundle_id = bundle_id; v.seg_idx = i;
+                v.block_name = conn.block_name;
+                std::ostringstream msg;
+                msg << "Seg " << i << " BUSTERM to '" << conn.block_name
+                    << "'; along-span [" << s_lo << "," << s_hi
+                    << "] no longer reaches face_coord=" << conn.face_coord << " (nuts)";
+                v.message = msg.str();
+                result.violations.push_back(std::move(v));
+            }
         }
     }
 
@@ -460,6 +481,24 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                     msg << "Seg " << i << " Bit " << bit << " BUSTERM to '"
                         << conn.block_name << "'; track_pos="
                         << it->second->track_position << " outside block face (dnuts)";
+                    v.message = msg.str();
+                    result.violations.push_back(std::move(v));
+                }
+                // Along-span must still REACH the busterm face (see check_nuts):
+                // a collapsed span detaches the block even when the perpendicular
+                // per-bit track_position still lands within the face extent.
+                const NetSegment& ns = *it->second;
+                const double s_lo = std::min(ns.span_lo, ns.span_hi);
+                const double s_hi = std::max(ns.span_lo, ns.span_hi);
+                if (conn.face_coord < s_lo || conn.face_coord > s_hi) {
+                    ConnViolation v;
+                    v.kind = ViolationKind::BUSTERM_OPEN;
+                    v.bundle_id = bundle_id; v.seg_idx = i; v.bit_index = bit;
+                    v.block_name = conn.block_name;
+                    std::ostringstream msg;
+                    msg << "Seg " << i << " Bit " << bit << " BUSTERM to '"
+                        << conn.block_name << "'; along-span [" << s_lo << "," << s_hi
+                        << "] no longer reaches face_coord=" << conn.face_coord << " (dnuts)";
                     v.message = msg.str();
                     result.violations.push_back(std::move(v));
                 }
