@@ -7,14 +7,20 @@ add_block u2    150  50   200 100
 add_block u3    50  150   100 200
 add_block u4    150 150   200 200
 
-add_net b1 u1.tx u2.rx
-add_net b2 u1.tx u3.rx
-add_net b3 u1.tx u4.rx
+add_bus b1[4]  u1.tx u2.rx
+add_bus b2[8]  u1.tx u3.rx
+add_bus b3[16] u1.tx u4.rx
+# new:
+add_bus b4[16] u2 u1
+add_bus b5[8]  u3 u1
+add_bus b6[4]  u4 u1
 
 run_bundler strict
-generate_topologies_for_bundle b1 u1 u2
-generate_topologies_for_bundle b2 u1 u3
-generate_topologies_for_bundle b3 u1 u4
-run_planner 1
-run_nuts 2.0
+generate_topologies
+
+# Warning: run_nuts pitch 10.0 differs from the pitch 1.0 run_planner reserved bands for. Set the pitch with 'set_track_pitch <p>' before run_planner (or re-run run_planner) so the planner's pitch-aware band reservations match this NUTS run.
+# without the next setting, we get the warning above
+set_track_pitch 10.0
+run_planner
+run_nuts 10.0
 visualize

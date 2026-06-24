@@ -179,6 +179,31 @@ def _toggle_fullscreen(fig):
     if mgr:
         mgr.full_screen_toggle()
 
+def _set_lims_filling_box(ax, x0, x1, y0, y1):
+    """Set ax limits to frame [x0,x1]x[y0,y1] but expand the shorter axis so the
+    limits' aspect matches the axes' on-screen box.  With set_aspect('equal')
+    this makes the view fill the whole window instead of collapsing to the
+    narrower dimension (a thin sliver/letterbox in a sea of background)."""
+    # original=True: the full allocated axes rectangle.  With set_aspect('equal')
+    # + adjustable='box', the active position is already shrunk to the data
+    # aspect (the distortion we're undoing), so we must use the original box.
+    pos = ax.get_position(original=True)
+    fw, fh = ax.figure.get_size_inches()
+    ax_h_px = fh * pos.height
+    if ax_h_px <= 0:
+        ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
+        return
+    box_aspect = (fw * pos.width) / ax_h_px   # desired data width / height
+    bw, bh = x1 - x0, y1 - y0
+    if bh <= 0 or bw / bh < box_aspect:        # too narrow -> widen
+        cx, half = (x0 + x1) / 2, max(bh, 1e-9) * box_aspect / 2
+        x0, x1 = cx - half, cx + half
+    else:                                      # too short -> heighten
+        cy, half = (y0 + y1) / 2, bw / box_aspect / 2
+        y0, y1 = cy - half, cy + half
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+
 def raise_window(win_or_fig):
     """Bring a window or figure to the front and ensure it has keyboard focus."""
     win = None
@@ -1549,8 +1574,8 @@ class TopologyExplorer:
         y0, y1 = min(ys), max(ys)
         pad_x = max((x1 - x0) * 0.2, 50)
         pad_y = max((y1 - y0) * 0.2, 50)
-        self.ax.set_xlim(x0 - pad_x, x1 + pad_x)
-        self.ax.set_ylim(y0 - pad_y, y1 + pad_y)
+        _set_lims_filling_box(self.ax, x0 - pad_x, x1 + pad_x,
+                              y0 - pad_y, y1 + pad_y)
         self.fig.canvas.draw_idle()
 
     def _interactive_zoom(self, event, zoom_in: bool):
@@ -1565,10 +1590,10 @@ class TopologyExplorer:
 
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
-        
+
         new_xlim = (x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
         new_ylim = (y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
-        
+
         ax.set_xlim(new_xlim)
         ax.set_ylim(new_ylim)
         self.fig.canvas.draw_idle()
@@ -2028,8 +2053,20 @@ class BudaVisualizer:
         else:
             idx = (self._bid_list.index(self._highlighted) + delta) % len(self._bid_list)
         self._highlighted = self._bid_list[idx]
+        self._scroll_bundle_into_view(idx)
         self._refresh_highlight()
         self._ipc_send_highlight(self._highlighted)
+
+    def _scroll_bundle_into_view(self, idx):
+        """Adjust the bundle-list scroll so row `idx` is within the visible window
+        (so the selection's radio stays on screen when cycling with n/p)."""
+        n_vis = self._bundle_list_n_visible()
+        if idx < self._bundle_scroll:
+            self._bundle_scroll = idx
+        elif idx >= self._bundle_scroll + n_vis:
+            self._bundle_scroll = idx - n_vis + 1
+        max_scroll = max(0, len(self._bid_list) - n_vis)
+        self._bundle_scroll = max(0, min(max_scroll, self._bundle_scroll))
 
     def _toggle_heatmap(self):
         self.ui_state.toggle_heatmap()
@@ -2419,9 +2456,12 @@ class BudaVisualizer:
             nterms = w.input.original_bundle.num_terminals
 
             #bits_suffix = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
-            bits_suffix = f" ({nbits} bits)" if nbits > 0 else ""
+            bits_suffix = f" [{nbits}]" if nbits > 0 else ""
             prefix = f"B{bid} "
-            max_name = max(4, 20 - len(prefix) - len(bits_suffix))
+            # Char budget for "{prefix}{name}{suffix}".  Leave room for the
+            # right-aligned [unplaced/total] stats column when it is shown.
+            budget = 20 if self._detailed_result else 26
+            max_name = max(3, budget - len(prefix) - len(bits_suffix))
             name_part = name if len(name) <= max_name else name[:max_name - 1] + "…"
             full  = f"{prefix}{name_part}{bits_suffix}"
 
@@ -2431,7 +2471,7 @@ class BudaVisualizer:
             txt_color  = '#111111' if on else '#bbbbbb'
             sel_color  = '#004488' if bid == self._highlighted else txt_color
 
-            ax.text(0.03, y, radio_char,
+            ax.text(0.04, y, radio_char,
                     transform=ax.transAxes,
                     fontsize=7, color=sel_color,
                     va='center', clip_on=True)
@@ -2452,12 +2492,12 @@ class BudaVisualizer:
                 stats_part = f" [{n_unp}/{n_expected}]"
                 stats_color = '#CC0000' if n_unp > 0 else '#008800'
 
-            ax.text(0.20, y, f"{vis_char} {full}",
+            ax.text(0.11, y, f"{vis_char} {full}",
                     transform=ax.transAxes,
                     fontsize=7, color=txt_color,
                     va='center', clip_on=True)
             if stats_part:
-                 ax.text(0.85, y, stats_part,
+                 ax.text(0.89, y, stats_part,
                         transform=ax.transAxes,
                         fontsize=7, color=stats_color,
                         va='center', ha='right', fontweight='bold', clip_on=True)
@@ -2483,7 +2523,7 @@ class BudaVisualizer:
         self.fig.canvas.draw_idle()
 
     def _on_bundle_list_click(self, event):
-        """Radio column (x<0.18): select bundle.  Checkbox column (x>=0.18): toggle visibility."""
+        """Radio column (x<0.10): select bundle.  Checkbox+label (x>=0.10): toggle visibility."""
         ax = self._ax_bundles
         if ax is None or event.ydata is None or event.xdata is None:
             return
@@ -2493,7 +2533,7 @@ class BudaVisualizer:
         bids = self._bid_list
         if 0 <= idx < len(bids):
             bid = bids[idx]
-            if event.xdata < 0.18:
+            if event.xdata < 0.10:
                 # Radio click → select / deselect bundle in main view.
                 self._set_highlight(bid)   # _set_highlight toggles if same bid
             else:
@@ -3466,14 +3506,30 @@ class BudaVisualizer:
                 continue
             xs.extend(a.get_xdata(orig=False))
             ys.extend(a.get_ydata(orig=False))
+        # Include the bundle's busterm connection points so the driver/receiver
+        # terminals are framed even when terminal markers are toggled off.
+        w = next((w for w in self.bundles
+                  if w.input.original_bundle.id == bid), None)
+        if w and w.input.candidates and \
+                0 <= w.plan.selected_topology_index < len(w.input.candidates):
+            topo = w.input.candidates[w.plan.selected_topology_index]
+            ct = ic.ConnTopology(); ct.build(topo, self.fp)
+            for cs in ct.segs():
+                for conn in cs.conns:
+                    if conn.kind != ic.SegConnKind.BUSTERM:
+                        continue
+                    if cs.horiz:
+                        xs.append(float(conn.at_pos)); ys.append(float(cs.perp_pos))
+                    else:
+                        xs.append(float(cs.perp_pos)); ys.append(float(conn.at_pos))
         if not xs:
             return
         x0, x1 = min(xs), max(xs)
         y0, y1 = min(ys), max(ys)
         pad_x = max((x1 - x0) * 0.2, 50)
         pad_y = max((y1 - y0) * 0.2, 50)
-        self.ax.set_xlim(x0 - pad_x, x1 + pad_x)
-        self.ax.set_ylim(y0 - pad_y, y1 + pad_y)
+        _set_lims_filling_box(self.ax, x0 - pad_x, x1 + pad_x,
+                              y0 - pad_y, y1 + pad_y)
         self.fig.canvas.draw_idle()
 
     def _interactive_zoom(self, event, zoom_in: bool):
