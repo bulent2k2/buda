@@ -2444,9 +2444,12 @@ class BudaVisualizer:
             nterms = w.input.original_bundle.num_terminals
 
             #bits_suffix = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
-            bits_suffix = f" ({nbits} bits)" if nbits > 0 else ""
+            bits_suffix = f" [{nbits}]" if nbits > 0 else ""
             prefix = f"B{bid} "
-            max_name = max(4, 20 - len(prefix) - len(bits_suffix))
+            # Char budget for "{prefix}{name}{suffix}".  Leave room for the
+            # right-aligned [unplaced/total] stats column when it is shown.
+            budget = 20 if self._detailed_result else 26
+            max_name = max(3, budget - len(prefix) - len(bits_suffix))
             name_part = name if len(name) <= max_name else name[:max_name - 1] + "…"
             full  = f"{prefix}{name_part}{bits_suffix}"
 
@@ -2456,7 +2459,7 @@ class BudaVisualizer:
             txt_color  = '#111111' if on else '#bbbbbb'
             sel_color  = '#004488' if bid == self._highlighted else txt_color
 
-            ax.text(0.03, y, radio_char,
+            ax.text(0.04, y, radio_char,
                     transform=ax.transAxes,
                     fontsize=7, color=sel_color,
                     va='center', clip_on=True)
@@ -2477,12 +2480,12 @@ class BudaVisualizer:
                 stats_part = f" [{n_unp}/{n_expected}]"
                 stats_color = '#CC0000' if n_unp > 0 else '#008800'
 
-            ax.text(0.20, y, f"{vis_char} {full}",
+            ax.text(0.11, y, f"{vis_char} {full}",
                     transform=ax.transAxes,
                     fontsize=7, color=txt_color,
                     va='center', clip_on=True)
             if stats_part:
-                 ax.text(0.85, y, stats_part,
+                 ax.text(0.89, y, stats_part,
                         transform=ax.transAxes,
                         fontsize=7, color=stats_color,
                         va='center', ha='right', fontweight='bold', clip_on=True)
