@@ -408,8 +408,15 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
             int lo = span_lo + margin;
             int hi = span_hi - margin;
             if (lo > hi) { lo = span_lo; hi = span_hi; } // margin too large: skip
-            cs.perp_lo = std::max(cs.perp_lo, lo);
-            cs.perp_hi = std::min(cs.perp_hi, hi);
+            // Guard against inverting the window: a segment that taps another block
+            // (busterm) AND passes through this one can have a pre-set window that
+            // the pass-through span does not overlap once a margin is applied; keep
+            // the range valid rather than assert.
+            int nlo = std::max(cs.perp_lo, lo);
+            int nhi = std::min(cs.perp_hi, hi);
+            if (nlo > nhi) continue;
+            cs.perp_lo = nlo;
+            cs.perp_hi = nhi;
 
             // When cs passes through B via a suppressed stub, the spine segment T
             // connected at cs's endpoint must stay on the far side of B so that
@@ -418,14 +425,23 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
             for (const auto& conn : cs.conns) {
                 if (conn.kind != SegConn::SEG || !conn.is_endpoint) continue;
                 ConnSeg& T = segs_[conn.seg_idx];
+                // Guard against inverting T's window: the far-side constraint is a
+                // best-effort tightening (connectivity hint), but [perp_lo,perp_hi]
+                // must stay a valid range.  When the constraint would empty the
+                // window (T is already bounded to the near side by its own busterm),
+                // skip it rather than assert -- mirrors the new_lo<=new_hi guards in
+                // compute_slide_ranges.  Relevant once orthogonal relays cover a
+                // block purely by pass-through (no busterm), exercising this widely.
                 if (conn.at_pos == cs.along_hi) {
                     // T is at hi end; after span adj, span_hi = T.track_position.
                     // Need T.track_position >= along_lo_B.
-                    T.perp_lo = std::max(T.perp_lo, along_lo_B);
+                    if (along_lo_B <= T.perp_hi)
+                        T.perp_lo = std::max(T.perp_lo, along_lo_B);
                 } else if (conn.at_pos == cs.along_lo) {
                     // T is at lo end; after span adj, span_lo = T.track_position.
                     // Need T.track_position <= along_hi_B.
-                    T.perp_hi = std::min(T.perp_hi, along_hi_B);
+                    if (along_hi_B >= T.perp_lo)
+                        T.perp_hi = std::min(T.perp_hi, along_hi_B);
                 }
             }
         }

@@ -109,10 +109,13 @@ _B3_BLOCKS = {
 }
 
 
-def test_relay_tap_connector_pinned_to_face():
-    """On every generated relay (MST/trunk+MST) candidate, the connector attached
-    at a busterm tap's face endpoint is pinned to face_coord (perp_lo == perp_hi),
-    so NUTS span adjustment cannot drag the staircase off the block."""
+def test_relay_tap_connector_bounded_to_cell():
+    """On every generated relay (MST/trunk+MST) candidate, a connector attached at
+    a busterm tap's face endpoint is bounded to the tapped block's footprint (a
+    real over-the-cell window) — NOT a degenerate zero-slide face pin, and NOT
+    unbounded.  It may slide over the cell but never off it, so the tap's along
+    reach is preserved while NUTS still has room to place a positive-width bus."""
+    SENT = 1 << 29
     fp = buda.Floorplan()
     for nm, c in _B3_BLOCKS.items():
         fp.add_block(nm, *c)
@@ -135,6 +138,7 @@ def test_relay_tap_connector_pinned_to_face():
                 f = bc.face_coord
                 if f != cs.along_lo and f != cs.along_hi:
                     continue
+                bb = fp.get_block_bounds(bc.block_name)
                 for sc in cs.conns:
                     if sc.kind != buda.SegConnKind.SEG or not sc.is_endpoint:
                         continue
@@ -143,8 +147,15 @@ def test_relay_tap_connector_pinned_to_face():
                     T = segs[sc.seg_idx]
                     if T.horiz == cs.horiz:   # need a perpendicular bend
                         continue
-                    assert T.perp_lo == T.perp_hi == f, (
-                        f"relay tap connector seg not pinned to face {f}: "
+                    lo, hi = (bb.y1, bb.y2) if T.horiz else (bb.x1, bb.x2)
+                    assert T.perp_lo < T.perp_hi, (
+                        f"relay tap connector zero-slide pinned: "
                         f"perp=[{T.perp_lo},{T.perp_hi}] (cand {cand.type})")
+                    assert abs(T.perp_lo) < SENT and abs(T.perp_hi) < SENT, (
+                        f"relay tap connector unbounded: "
+                        f"perp=[{T.perp_lo},{T.perp_hi}] (cand {cand.type})")
+                    assert lo <= T.perp_lo and T.perp_hi <= hi, (
+                        f"relay tap connector window [{T.perp_lo},{T.perp_hi}] "
+                        f"escapes cell [{lo},{hi}] (cand {cand.type})")
                     checked += 1
     assert checked > 0, "no relay tap/connector pair exercised — test is vacuous"

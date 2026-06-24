@@ -430,14 +430,15 @@ def mst_connects_all(ctx):
             continue
         ct = buda.ConnTopology()
         ct.build(c, ctx['fp'])
-        blocks = set()
-        for cs in _segs_of(ct):
-            for conn in cs.conns:
-                if conn.kind == buda.SegConnKind.BUSTERM and conn.block_name:
-                    blocks.add(conn.block_name)
-        assert len(blocks) >= 4, (
-            f'{c.type}: only reached blocks {blocks}'
-        )
+        # A block is connected if it has a busterm tap OR is covered by a
+        # pass-through wire: an orthogonal relay is wired by EXTENDING its stubs
+        # over the cell to meet, leaving no tap (the block is covered by the
+        # crossing wires).  check_topo's coverage check (BUSTERM_OPEN) accepts
+        # both, so assert no block is left uncovered rather than counting taps.
+        res = buda.check_topo(ct, c, ctx['fp'], 0)
+        opens = [v.block_name for v in res.violations
+                 if v.kind == buda.ViolationKind.BUSTERM_OPEN]
+        assert not opens, f'{c.type}: blocks not connected (uncovered): {opens}'
 
 
 @then('every MST candidate has no cycles')

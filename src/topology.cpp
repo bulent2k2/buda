@@ -922,7 +922,41 @@ static void complete_relay_junctions(Topology& topo,
         }
     };
 
+    // ── Orthogonal 2-stub relay: OTC pass-through extension ──────────────────
+    // A relay block touched by exactly two stubs of OPPOSITE orientation (one H,
+    // one V) is wired most cheaply by EXTENDING both stubs over the cell to meet
+    // at the corner (V's column, H's row) -- a point inside the block footprint
+    // (OTC) -- rather than inserting an L connector.  The crossing wires then
+    // COVER the block (seg_spans_rect), so it needs no busterm tap and leaves no
+    // segment endpoint on its face (so the FEEDTHRU check does not gather it).
+    // This is the "simple extension" shape for orthogonal stubs.  Parallel stubs
+    // still need a JOG and keep a tap -- handled by the general chaining below.
+    std::set<int> otc_handled;
     for (auto& [bi, pts] : incident) {
+        if (pts.size() != 2 || all_land[bi].size() != 2) continue;  // clean 2-stub only
+        const Inc& A = pts[0];
+        const Inc& B = pts[1];
+        if (A.seg_horiz == B.seg_horiz) continue;       // not orthogonal -> JOG path
+        const Inc& Vs = A.seg_horiz ? B : A;            // the vertical stub landing
+        const Inc& Hs = A.seg_horiz ? A : B;            // the horizontal stub landing
+        int cx = Vs.p.x, cy = Hs.p.y;                   // corner over the cell
+        // Extend the vertical stub along y to the corner row.
+        { Segment& s = topo.segments[Vs.seg_idx];
+          ((Vs.ep == 0) ? s.start : s.end).y = cy; }
+        // Extend the horizontal stub along x to the corner column.
+        { Segment& s = topo.segments[Hs.seg_idx];
+          ((Hs.ep == 0) ? s.start : s.end).x = cx; }
+        // Drop the block's busterm on both stubs: it is covered by the crossing
+        // wires (a pass-through), not tapped at a face endpoint.
+        for (const Inc& q : {A, B}) {
+            auto& ep = topo.seg_busterms[q.seg_idx];
+            ((q.ep == 0) ? ep.first : ep.second) = std::nullopt;
+        }
+        otc_handled.insert(bi);
+    }
+
+    for (auto& [bi, pts] : incident) {
+        if (otc_handled.count(bi)) continue; // wired by the OTC extension above
         if (pts.size() < 2) continue;        // leaf terminal: nothing to relay
         // Chain the landings (sorted) so all incident segments end up in one
         // wire-connected component through the block's junction.
@@ -955,6 +989,7 @@ static void complete_relay_junctions(Topology& topo,
     // along the block faces, so tapping a stub (which slides ALONG its face)
     // keeps the single anchor cleanly on the block.
     for (auto& [bi, lands] : all_land) {
+        if (otc_handled.count(bi)) continue; // no tap: covered by the OTC crossing
         const Rect& bb = blocks[bi].orig_bbox;
         auto flex = [&](const Inc& q) {
             return q.seg_horiz ? (bb.y2 - bb.y1) : (bb.x2 - bb.x1);

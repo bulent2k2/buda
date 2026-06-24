@@ -276,12 +276,16 @@ def test_trunk_mst_has_more_segments_than_trunk():
         pytest.skip("No matching trunk pair available for this geometry")
 
     # Find a TRUNK+MST that corresponds to a plain TRUNK (same trunk_location).
+    # The MST hybrid adds inter-branch shortcut edges, so it never has FEWER
+    # segments than the matching plain trunk.  It may have the SAME count when an
+    # orthogonal relay is completed by extending stubs (over-the-cell) rather than
+    # adding a connector, so the bound is >= not strictly >.
     trunk_by_loc = {c.trunk_location: c for c in plain_trunks}
     for mst in mst_trunks:
         loc = mst.trunk_location
         if loc in trunk_by_loc:
-            assert len(mst.segments) > len(trunk_by_loc[loc].segments), (
-                f"TRUNK+MST should have more segments: "
+            assert len(mst.segments) >= len(trunk_by_loc[loc].segments), (
+                f"TRUNK+MST should not have fewer segments than its plain trunk: "
                 f"{len(mst.segments)} vs {len(trunk_by_loc[loc].segments)}"
             )
             return
