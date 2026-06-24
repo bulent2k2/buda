@@ -331,21 +331,50 @@ def test_contained_connector_kept_when_load_bearing():
 
 # ── perimeter-hugging completion (no interior threading) ──────────────────────
 
-def _crosses_interior(s, bbox):
-    """True if segment s passes through the STRICT interior of bbox (i.e. it
-    threads the block body rather than running along a face)."""
+# Tolerance: the orthogonal same-row/column detours nudge their off-line by a
+# fixed ±2 (sub-track), so a connector may run parallel to a face up to 2 units
+# inside it.  That is geometrically negligible (it never collapses a NUTS span);
+# only the big Z-detours -- whose spanning leg would otherwise reach the block
+# CENTRE -- are face-snapped.  A segment "threads" the block only if some point
+# of it sits MORE than this nudge from the nearest block face.
+_FACE_EPS = 2
+
+
+def _max_interior_depth(s, bbox):
+    """Maximum distance-to-boundary over the part of axis-aligned segment s that
+    lies in bbox's open interior.  ~0 for a face-hugging connector; large for a
+    leg that crosses toward the block centre.  Returns -1 if s never enters the
+    open interior."""
     x1, y1, x2, y2 = bbox
-    if s.start.y == s.end.y:                       # horizontal
+    horiz = s.start.y == s.end.y
+    if horiz:
         y = s.start.y
         if not (y1 < y < y2):
-            return False
-        slo, shi = sorted((s.start.x, s.end.x))
-        return min(shi, x2) > max(slo, x1)         # shares more than a point in x
-    x = s.start.x                                  # vertical
+            return -1
+        a, b = sorted((s.start.x, s.end.x))
+        a, b = max(a, x1), min(b, x2)              # clamp to block span
+        if a > b:
+            return -1
+        c = (x1 + x2) / 2                          # x nearest the centre, within [a,b]
+        xx = min(max(c, a), b)
+        return min(min(xx - x1, x2 - xx), min(y - y1, y2 - y))
+    x = s.start.x
     if not (x1 < x < x2):
-        return False
-    slo, shi = sorted((s.start.y, s.end.y))
-    return min(shi, y2) > max(slo, y1)
+        return -1
+    a, b = sorted((s.start.y, s.end.y))
+    a, b = max(a, y1), min(b, y2)
+    if a > b:
+        return -1
+    c = (y1 + y2) / 2
+    yy = min(max(c, a), b)
+    return min(min(x - x1, x2 - x), min(yy - y1, y2 - yy))
+
+
+def _crosses_interior(s, bbox):
+    """True if segment s threads DEEP through bbox's interior (some point sits
+    more than the sub-track face nudge from every face), rather than hugging a
+    face."""
+    return _max_interior_depth(s, bbox) > _FACE_EPS
 
 
 def test_relay_connectors_hug_block_perimeter():

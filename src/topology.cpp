@@ -748,6 +748,30 @@ static int conn_seg_components(const Topology& topo, const Floorplan& fp) {
     return (int)roots.size();
 }
 
+// True if any connector (index >= n_orig) is collinear-contained within another
+// segment -- the overlap that can close a redundant loop at a high-degree relay.
+static bool has_collinear_overlap(const Topology& topo, int n_orig) {
+    auto covers = [](const Segment& o, const Segment& c) {
+        bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
+        if (o_h != c_h) return false;
+        if (c_h) {
+            if (o.start.y != c.start.y) return false;
+            int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
+            int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
+            return olo <= clo && chi <= ohi;
+        }
+        if (o.start.x != c.start.x) return false;
+        int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
+        int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
+        return olo <= clo && chi <= ohi;
+    };
+    int n = (int)topo.segments.size();
+    for (int c = n_orig; c < n; ++c)
+        for (int o = 0; o < n; ++o)
+            if (o != c && covers(topo.segments[o], topo.segments[c])) return true;
+    return false;
+}
+
 
 // ---------------------------------------------------------------------------
 // MST feedthrough completion
@@ -840,16 +864,23 @@ static void complete_relay_junctions(Topology& topo,
     // Relay block currently being wired (set per-block in the chaining loop);
     // the face-snap helpers below route connectors along ITS perimeter.
     Rect bb{};
-    // Snap a connector's detour off-line to JUST OUTSIDE the relay block's nearer
-    // face so the connector hugs the block PERIMETER instead of crossing its
-    // interior.  An interior off-line lays the spanning leg straight through the
-    // block body -- a through-block relay wire that NUTS then collapses
+    // Snap a connector's Z-detour off-line to JUST OUTSIDE the relay block's
+    // nearer face so the connector hugs the block PERIMETER instead of crossing
+    // its interior.  An interior off-line lays the spanning leg straight through
+    // the block body -- a through-block relay wire that NUTS then collapses
     // (understated span, high WL); routing it just outside a face yields the clean
     // "jog-tap + edge clears the block" shape (cf. the proposed bundle-3
     // topology).  Pushing OUTSIDE (rather than onto) the face also keeps the
     // off-line clear of every landing column/row, so it never lands collinear
     // with an incident stub (which would defeat ConnTopology's perpendicular
     // junction inference).  No-op when the off-line already clears the block.
+    //
+    // Applied only to the two big Z-detours (both-leave-H / both-leave-V), where
+    // the spanning leg traverses the block's full width/height -- the crossing
+    // that actually matters.  The orthogonal same-row/column detours nudge the
+    // off-line by just ±2 (sub-track), so snapping them outward buys nothing and
+    // can spawn a perimeter micro-loop at a high-degree relay that the collinear
+    // de-overlap pass cannot dissolve; they are left as-is.
     const int OFF = 2;   // small outward nudge (matches the ±2 idiom below)
     auto face_x = [&](int lo, int hi, int mid) {
         if (mid <= bb.x1 || mid >= bb.x2) return mid;                 // already clears
@@ -900,8 +931,6 @@ static void complete_relay_junctions(Topology& topo,
                     int xm = (hi - lo >= 2) ? (lo + hi) / 2
                                             : a.p.x + (a.p.x < b.p.x ? 1 : -1);
                     int ym = a.p.y - 2;
-                    xm = face_x(lo, hi, xm);        // hug a V face, not the interior
-                    ym = face_y(a.p.y, a.p.y, ym);  // hug an H face, not the interior
                     emit(a.p.x, a.p.y, xm, a.p.y, h_layer);
                     emit(xm, a.p.y, xm, ym, v_layer);
                     emit(xm, ym, b.p.x, ym, h_layer);
@@ -916,7 +945,6 @@ static void complete_relay_junctions(Topology& topo,
                     int ym = (hi - lo >= 2) ? (lo + hi) / 2
                                             : a.p.y + (a.p.y < b.p.y ? 1 : -1);
                     int xm = a.p.x - 2;
-                    xm = face_x(a.p.x, a.p.x, xm);  // hug a's V face, not the interior
                     emit(a.p.x, a.p.y, a.p.x, ym, v_layer);
                     emit(a.p.x, ym, xm, ym, h_layer);
                     emit(xm, ym, xm, b.p.y, v_layer);
@@ -985,28 +1013,51 @@ static void complete_relay_junctions(Topology& topo,
         ep.second = std::nullopt;
     }
 
-    // De-redundify connectors.  At a high-degree relay the landing-chaining can add
-    // a connector that is redundant for connectivity: either collinear on top of
-    // another's leg (a parallel overlap) or a perimeter detour that re-closes a
-    // loop already spanned by another connector (a cycle, e.g. the PLUS centre or a
-    // face-snapped dogleg whose target already lies on a sibling connector).  Such
-    // a connector is droppable -- but NOT always: a load-bearing one (the only
-    // inferable SEG link to a busterm-annotated edge endpoint) is a bridge whose
-    // removal would split the topology.  Remove redundant APPENDED connectors one
-    // at a time, each time VERIFYING the SEG-connectivity does not worsen, so the
-    // completion settles to a minimal acyclic perimeter route.  Skipped entirely
-    // when no connector was appended (the common, non-relay case).
-    if ((int)topo.segments.size() > n_seg) {
-        int base = conn_seg_components(topo, fp);
+    // De-overlap connectors.  At a high-degree relay the landing-chaining can lay
+    // one connector's leg collinear on top of another's, a redundant parallel wire
+    // that closes a cycle (the PLUS centre block).  Such a connector is usually
+    // droppable -- but NOT always: if it is the only inferable SEG link to a
+    // busterm-annotated edge endpoint (ConnTopology suppresses SEG inference at a
+    // busterm-tagged endpoint, and does not infer collinear overlaps), dropping it
+    // disconnects the topology.  So we remove a collinear-contained connector only
+    // after VERIFYING the result stays one connected component, one connector at a
+    // time.  Gated on an overlap actually existing (the common case does nothing).
+    //
+    // The removal MUST stay restricted to collinear-contained connectors: the MST
+    // edges already span a tree, so under the global SEG-component metric ANY
+    // connector looks redundant (its endpoints are reachable via the long tree
+    // path that detours through other blocks).  Dropping a non-collinear connector
+    // on that basis would re-open a feedthru relay -- the very thing this pass
+    // adds wire to prevent.  A collinear-contained connector is genuinely
+    // redundant because the covering segment occupies the same wire locally.
+    if (has_collinear_overlap(topo, n_seg)) {
+        auto covers = [](const Segment& o, const Segment& c) {
+            bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
+            if (o_h != c_h) return false;
+            if (c_h) {
+                if (o.start.y != c.start.y) return false;
+                int olo = std::min(o.start.x, o.end.x), ohi = std::max(o.start.x, o.end.x);
+                int clo = std::min(c.start.x, c.end.x), chi = std::max(c.start.x, c.end.x);
+                return olo <= clo && chi <= ohi;
+            }
+            if (o.start.x != c.start.x) return false;
+            int olo = std::min(o.start.y, o.end.y), ohi = std::max(o.start.y, o.end.y);
+            int clo = std::min(c.start.y, c.end.y), chi = std::max(c.start.y, c.end.y);
+            return olo <= clo && chi <= ohi;
+        };
         bool changed = true;
         while (changed) {
             changed = false;
             int n = (int)topo.segments.size();
             for (int c = n_seg; c < n; ++c) {
+                bool contained = false;
+                for (int o = 0; o < n; ++o)
+                    if (o != c && covers(topo.segments[o], topo.segments[c])) { contained = true; break; }
+                if (!contained) continue;
                 Topology trial = topo;
                 erase_segment(trial, c);
-                if (conn_seg_components(trial, fp) <= base) {
-                    topo = std::move(trial);   // removal kept connectivity -> redundant
+                if (conn_seg_components(trial, fp) <= conn_seg_components(topo, fp)) {
+                    topo = std::move(trial);   // removal kept connectivity -> commit
                     changed = true;
                     break;
                 }
