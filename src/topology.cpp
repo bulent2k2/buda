@@ -922,30 +922,50 @@ static void complete_relay_junctions(Topology& topo,
         }
     };
 
-    // ── Orthogonal 2-stub relay: OTC pass-through extension ──────────────────
-    // A relay block touched by exactly two stubs of OPPOSITE orientation (one H,
-    // one V) is wired most cheaply by EXTENDING both stubs over the cell to meet
-    // at the corner (V's column, H's row) -- a point inside the block footprint
-    // (OTC) -- rather than inserting an L connector.  The crossing wires then
-    // COVER the block (seg_spans_rect), so it needs no busterm tap and leaves no
-    // segment endpoint on its face (so the FEEDTHRU check does not gather it).
-    // This is the "simple extension" shape for orthogonal stubs.  Parallel stubs
-    // still need a JOG and keep a tap -- handled by the general chaining below.
+    // ── 2-stub relay: OTC pass-through extension ─────────────────────────────
+    // A relay block touched by exactly two stubs is wired by EXTENDING the stubs
+    // over the cell (OTC) so the block is COVERED by the crossing wires
+    // (seg_spans_rect pass-through): no busterm tap, and no segment endpoint on
+    // its face, so the FEEDTHRU check does not gather it.  Two shapes:
+    //   • ORTHOGONAL (one H, one V): extend both to the corner (V's column, H's
+    //     row); they meet there, no connector needed.
+    //   • PARALLEL (both H or both V): extend both to a common jog line over the
+    //     cell and add ONE perpendicular jog joining them.  Because both stubs
+    //     now span the block, tighten_passthrough_ranges bounds the jog's slide
+    //     to the cell extent, so NUTS keeps the two stubs flexible -- if their
+    //     perpendicular slides overlap, the jog shrinks to zero and they merge
+    //     into one straight wire through the block.
     std::set<int> otc_handled;
     for (auto& [bi, pts] : incident) {
         if (pts.size() != 2 || all_land[bi].size() != 2) continue;  // clean 2-stub only
         const Inc& A = pts[0];
         const Inc& B = pts[1];
-        if (A.seg_horiz == B.seg_horiz) continue;       // not orthogonal -> JOG path
-        const Inc& Vs = A.seg_horiz ? B : A;            // the vertical stub landing
-        const Inc& Hs = A.seg_horiz ? A : B;            // the horizontal stub landing
-        int cx = Vs.p.x, cy = Hs.p.y;                   // corner over the cell
-        // Extend the vertical stub along y to the corner row.
-        { Segment& s = topo.segments[Vs.seg_idx];
-          ((Vs.ep == 0) ? s.start : s.end).y = cy; }
-        // Extend the horizontal stub along x to the corner column.
-        { Segment& s = topo.segments[Hs.seg_idx];
-          ((Hs.ep == 0) ? s.start : s.end).x = cx; }
+        bool handled = true;
+        if (A.seg_horiz != B.seg_horiz) {
+            // ORTHOGONAL: extend to the corner (V's column, H's row).
+            const Inc& Vs = A.seg_horiz ? B : A;
+            const Inc& Hs = A.seg_horiz ? A : B;
+            int cx = Vs.p.x, cy = Hs.p.y;
+            { Segment& s = topo.segments[Vs.seg_idx]; ((Vs.ep == 0) ? s.start : s.end).y = cy; }
+            { Segment& s = topo.segments[Hs.seg_idx]; ((Hs.ep == 0) ? s.start : s.end).x = cx; }
+        } else if (A.seg_horiz && A.p.y != B.p.y) {
+            // PARALLEL H stubs (land on vertical faces): extend to a common
+            // column over the cell and join their two rows with a V jog.
+            int xj = (A.p.x + B.p.x) / 2;
+            { Segment& s = topo.segments[A.seg_idx]; ((A.ep == 0) ? s.start : s.end).x = xj; }
+            { Segment& s = topo.segments[B.seg_idx]; ((B.ep == 0) ? s.start : s.end).x = xj; }
+            emit(xj, A.p.y, xj, B.p.y, v_layer);
+        } else if (!A.seg_horiz && A.p.x != B.p.x) {
+            // PARALLEL V stubs (land on horizontal faces): extend to a common
+            // row over the cell and join their two columns with an H jog.
+            int yj = (A.p.y + B.p.y) / 2;
+            { Segment& s = topo.segments[A.seg_idx]; ((A.ep == 0) ? s.start : s.end).y = yj; }
+            { Segment& s = topo.segments[B.seg_idx]; ((B.ep == 0) ? s.start : s.end).y = yj; }
+            emit(A.p.x, yj, B.p.x, yj, h_layer);
+        } else {
+            handled = false;   // degenerate same-perp parallel: leave to chaining
+        }
+        if (!handled) continue;
         // Drop the block's busterm on both stubs: it is covered by the crossing
         // wires (a pass-through), not tapped at a face endpoint.
         for (const Inc& q : {A, B}) {

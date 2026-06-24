@@ -457,6 +457,50 @@ def test_orthogonal_relay_extends_without_L_connector():
     assert saw_extension, "no orthogonal-relay extension exercised — test is vacuous"
 
 
+# The six blocks of flow/big_data_test/big.buda bundle 3 (driver blk_01).  blk_09
+# is a parallel relay: an H trunk tap on its EAST face + the H MST edge on its
+# WEST face, at different rows.
+_B3 = {"blk_01": (10680, 2310, 13580, 3310), "blk_34": (200, 3400, 1400, 4100),
+       "blk_39": (11280, 7150, 13580, 9050), "blk_09": (7810, 5520, 10710, 6020),
+       "blk_19": (200, 5540, 2100, 6840), "io_pad_br": (12580, 200, 13580, 1000)}
+
+
+def test_parallel_relay_joined_by_single_jog():
+    """A relay touched by two PARALLEL stubs (both H here: blk_09's east trunk tap
+    + west MST edge, at different rows) is wired by extending both stubs over the
+    cell to a common column and joining them with ONE perpendicular (V) jog -- not
+    the old 3-piece V-H-V dogleg.  The block then holds no busterm tap (covered by
+    the crossing wires), and the jog's slide is bounded to the cell extent so NUTS
+    keeps the two stubs flexible.  Regression for big.buda bundle 3 / blk_09."""
+    fp = _make_fp(_B3)
+    cands = _gen(fp).generate_candidates(
+        "blk_01", ["blk_34", "blk_39", "blk_09", "blk_19", "io_pad_br"])
+    relayish = [c for c in cands if c.type.startswith("MST_") or "+MST" in c.type]
+    assert relayish
+    bx1, by1, bx2, by2 = _B3["blk_09"]
+    saw_jog = False
+    for c in relayish:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        assert _feedthru_count(ct, c, fp) == 0, f"{c.type}: FEEDTHRU_RELAY"
+        assert _seg_components(ct) == 1, f"{c.type}: {_seg_components(ct)} SEG comps"
+        if "blk_09" in _busterm_taps(ct):
+            continue                          # tapped here, not the pass-through shape
+        # blk_09 is pass-through: a short V jog strictly inside it joins two H stubs.
+        for cs in ct.segs():
+            if cs.horiz:
+                continue
+            if not (bx1 < cs.perp_pos < bx2):     # jog column over the cell
+                continue
+            if by1 <= cs.along_lo and cs.along_hi <= by2 and cs.along_lo != cs.along_hi:
+                # its slide range is bounded to the cell's x-extent (flexibility)
+                assert bx1 <= cs.perp_lo and cs.perp_hi <= bx2 and cs.perp_lo < cs.perp_hi, (
+                    f"{c.type}: jog slide [{cs.perp_lo},{cs.perp_hi}] not bounded to "
+                    f"cell x [{bx1},{bx2}]")
+                saw_jog = True
+    assert saw_jog, "no parallel-relay V jog exercised — test is vacuous"
+
+
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────
 
 def _seg(x1, y1, x2, y2, layer):
