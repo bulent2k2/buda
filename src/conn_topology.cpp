@@ -56,6 +56,7 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
     infer_connections(topo, fp);
     compute_slide_ranges(fp);
     tighten_passthrough_ranges(topo, fp);
+    pin_relay_tap_connectors(fp);
     compute_net_pull();
 
     for (const auto& cs : segs_) {
@@ -426,6 +427,60 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
                     // Need T.track_position <= along_hi_B.
                     T.perp_hi = std::min(T.perp_hi, along_hi_B);
                 }
+            }
+        }
+    }
+}
+
+// ── ConnTopology::pin_relay_tap_connectors ────────────────────────────────────
+//
+// A relay block keeps exactly ONE busterm tap (complete_relay_junctions' single-
+// tap model); its other landings are demoted to SEG junctions and the landings
+// are chained by a JOG / extension connector.  A BUSTERM conn clamps only the tap
+// segment's PERPENDICULAR slide — but the tap's ALONG reach to face_coord is set
+// by the connector attached at that SAME endpoint: after NUTS span adjustment the
+// tap's span end follows that connector's placed perp position.  If the connector
+// is free to slide arbitrarily, NUTS drags the whole staircase off the block and
+// the tap no longer reaches it — a silent open at NUTS / dNUTS.
+//
+// The relay block is NOT a feedthru of this bundle, so the JOG / extension is
+// routed OVER THE CELL (OTC).  Bound each such connector's perpendicular slide to
+// the block's footprint extent: it may slide anywhere over the cell but never off
+// it.  As long as the connector stays within [face_lo, face_hi], the tap's span
+// end (which follows it) stays over the cell and still touches the block, so the
+// along-reach is preserved — WITHOUT a degenerate zero-slide pin (which would
+// leave NUTS no room to place a positive-width bus).  Intersect with the
+// connector's existing window so we only tighten, never widen past a real
+// constraint.
+void ConnTopology::pin_relay_tap_connectors(const Floorplan& fp) {
+    std::map<std::string, Rect> bmap;
+    for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
+
+    int n = (int)segs_.size();
+    for (int i = 0; i < n; ++i) {
+        ConnSeg& cs = segs_[i];
+        for (const auto& bc : cs.conns) {
+            if (bc.kind != SegConn::BUSTERM) continue;
+            int f = bc.face_coord;
+            // The busterm sits at one of cs's along endpoints (see check_topo).
+            if (f != cs.along_lo && f != cs.along_hi) continue;
+            auto bm_it = bmap.find(bc.block_name);
+            if (bm_it == bmap.end()) continue;            // block not in this floorplan
+            const Rect& bb = bm_it->second;
+            // OTC window = the cell footprint in the connector's perp direction.
+            for (const auto& sc : cs.conns) {
+                if (sc.kind != SegConn::SEG || !sc.is_endpoint) continue;
+                if (sc.at_pos != f) continue;
+                ConnSeg& T = segs_[sc.seg_idx];
+                if (T.horiz == cs.horiz) continue;        // need a bend, not collinear
+                int lo = T.horiz ? bb.y1 : bb.x1;
+                int hi = T.horiz ? bb.y2 : bb.x2;
+                int nlo = std::max(T.perp_lo, lo);
+                int nhi = std::min(T.perp_hi, hi);
+                if (nlo > nhi) continue;                  // empty: don't violate invariant
+                if (T.perp_pos < nlo || T.perp_pos > nhi) continue;  // nominal outside window
+                T.perp_lo = nlo;
+                T.perp_hi = nhi;
             }
         }
     }

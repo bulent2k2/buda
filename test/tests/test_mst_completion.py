@@ -113,6 +113,13 @@ GRID = ({"A": (0, 0, 100, 100), "B": (300, 0, 400, 100),
          "C": (0, 300, 100, 400), "D": (300, 300, 400, 400),
          "E": (600, 150, 700, 250)},
         "A", ["B", "C", "D", "E"])
+# A WIDE relay block R with MST neighbours on its LEFT and RIGHT faces at the
+# same height: the chaining connector between the two opposite-face landings is a
+# V,H,V JOG routed OVER THE CELL.  Its perpendicular bend must get a real,
+# cell-bounded over-the-cell slide window -- never a zero-slide face pin.
+WIDE_RELAY = ({"L": (0, 0, 100, 100), "R": (300, 0, 900, 100),
+               "Rt": (1100, 0, 1200, 100), "T": (1100, 300, 1200, 400)},
+              "L", ["R", "Rt", "T"])
 
 
 # ── completion correctness ────────────────────────────────────────────────────
@@ -320,6 +327,90 @@ def test_contained_connector_kept_when_load_bearing():
             f"contained connector was wrongly de-overlapped"
         )
         assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
+
+
+# ── OTC (over-the-cell) relay completion ──────────────────────────────────────
+
+def test_relay_connectors_have_no_zero_slide_window():
+    """A relay block that is NOT a feedthru chains its landings with a JOG /
+    extension routed OVER THE CELL (OTC).  The tap connector gets a REAL slide
+    window (the cell footprint) so NUTS has room to place a positive-width bus --
+    never a degenerate zero-slide pin.  No ConnSeg of a relay candidate may have
+    perp_lo == perp_hi."""
+    for coords, src, dsts in (WIDE_RELAY, STAIRCASE, PLUS, GRID):
+        fp = _make_fp(coords)
+        cands = _gen(fp).generate_candidates(src, dsts)
+        relayish = [c for c in cands if c.type.startswith("MST_") or "+MST" in c.type]
+        assert relayish, f"expected MST/hybrid candidates for {list(coords)}"
+        for c in relayish:
+            ct = buda.ConnTopology()
+            ct.build(c, fp)
+            zero = [i for i, cs in enumerate(ct.segs())
+                    if cs.perp_lo == cs.perp_hi]
+            assert not zero, (
+                f"{c.type} on {list(coords)}: zero-slide ConnSeg(s) {zero} "
+                f"(relay connectors must get a real over-the-cell window)"
+            )
+
+
+def test_relay_tap_connector_bounded_to_cell():
+    """The perpendicular connector sharing a relay tap's face endpoint is bounded
+    to the tapped block's footprint: a FINITE window (it slides OVER the cell but
+    never off it), not the unbounded default.  WIDE_RELAY's opposite-face relay
+    exercises this directly."""
+    SENT = 1 << 29
+    coords, src, dsts = WIDE_RELAY
+    fp = _make_fp(coords)
+    cands = [c for c in _gen(fp).generate_candidates(src, dsts)
+             if c.type.startswith("MST_") or "+MST" in c.type]
+    assert cands
+    for c in cands:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        segs = ct.segs()
+        taps = _busterm_taps(ct)
+        for blk, tap_segs in taps.items():
+            x1, y1, x2, y2 = coords[blk]
+            for ti in tap_segs:
+                tap = segs[ti]
+                for co in tap.conns:
+                    if co.kind != buda.SegConnKind.SEG:
+                        continue
+                    T = segs[co.seg_idx]
+                    if T.horiz == tap.horiz:            # need a perpendicular bend
+                        continue
+                    lo, hi = (y1, y2) if T.horiz else (x1, x2)
+                    if not (lo <= T.perp_pos <= hi):    # only the over-cell bend is bounded
+                        continue
+                    assert abs(T.perp_lo) < SENT and abs(T.perp_hi) < SENT, (
+                        f"{c.type}: relay tap connector {co.seg_idx} unbounded "
+                        f"[{T.perp_lo},{T.perp_hi}] (should be over-the-cell bounded)"
+                    )
+                    assert lo <= T.perp_lo and T.perp_hi <= hi, (
+                        f"{c.type}: relay tap connector {co.seg_idx} window "
+                        f"[{T.perp_lo},{T.perp_hi}] escapes cell [{lo},{hi}]"
+                    )
+
+
+def test_wide_relay_completion_is_clean():
+    """The WIDE_RELAY opposite-face relay completes cleanly: no FEEDTHRU_RELAY,
+    one SEG component, a single busterm tap per block, no zero-length segs."""
+    coords, src, dsts = WIDE_RELAY
+    fp = _make_fp(coords)
+    cands = [c for c in _gen(fp).generate_candidates(src, dsts)
+             if c.type.startswith("MST_") or "+MST" in c.type]
+    assert cands
+    for c in cands:
+        zero = [(s.start.x, s.start.y) for s in c.segments
+                if s.start.x == s.end.x and s.start.y == s.end.y]
+        assert not zero, f"{c.type}: zero-length segs {zero}"
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        assert _feedthru_count(ct, c, fp) == 0, f"{c.type}: FEEDTHRU_RELAY"
+        assert _seg_components(ct) == 1, f"{c.type}: {_seg_components(ct)} SEG comps"
+        assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
+        multi = {b: sorted(s) for b, s in _busterm_taps(ct).items() if len(s) > 1}
+        assert not multi, f"{c.type}: double-tapped {multi}"
 
 
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────

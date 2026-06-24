@@ -2226,6 +2226,10 @@ void TopologyGenerator::filter_pinched(std::vector<Topology>& candidates) {
         ct.build(cand, floorplan_);
         bool pinched = false;
         for (const auto& cs : ct.segs()) {
+            // A zero-slide segment is genuinely over-constrained: NUTS has no room
+            // to place the bus.  Relay JOG/extension connectors are no longer
+            // pinned to a face (they get a real over-the-cell window from
+            // pin_relay_tap_connectors), so any zero-slide here is a true pinch.
             if (cs.perp_lo == cs.perp_hi) {
                 pinched = true;
                 break;
