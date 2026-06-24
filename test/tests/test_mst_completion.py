@@ -115,8 +115,8 @@ GRID = ({"A": (0, 0, 100, 100), "B": (300, 0, 400, 100),
         "A", ["B", "C", "D", "E"])
 # A WIDE relay block R with MST neighbours on its LEFT and RIGHT faces at the
 # same height: the chaining connector between the two opposite-face landings is a
-# V,H,V dogleg whose H leg used to run straight across R's interior (the blk_09
-# bug).  Completion must now route that leg along R's perimeter instead.
+# V,H,V JOG routed OVER THE CELL.  Its perpendicular bend must get a real,
+# cell-bounded over-the-cell slide window -- never a zero-slide face pin.
 WIDE_RELAY = ({"L": (0, 0, 100, 100), "R": (300, 0, 900, 100),
                "Rt": (1100, 0, 1200, 100), "T": (1100, 300, 1200, 400)},
               "L", ["R", "Rt", "T"])
@@ -329,60 +329,14 @@ def test_contained_connector_kept_when_load_bearing():
         assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
 
 
-# ── perimeter-hugging completion (no interior threading) ──────────────────────
+# ── OTC (over-the-cell) relay completion ──────────────────────────────────────
 
-# Tolerance: the orthogonal same-row/column detours nudge their off-line by a
-# fixed ±2 (sub-track), so a connector may run parallel to a face up to 2 units
-# inside it.  That is geometrically negligible (it never collapses a NUTS span);
-# only the big Z-detours -- whose spanning leg would otherwise reach the block
-# CENTRE -- are face-snapped.  A segment "threads" the block only if some point
-# of it sits MORE than this nudge from the nearest block face.
-_FACE_EPS = 2
-
-
-def _max_interior_depth(s, bbox):
-    """Maximum distance-to-boundary over the part of axis-aligned segment s that
-    lies in bbox's open interior.  ~0 for a face-hugging connector; large for a
-    leg that crosses toward the block centre.  Returns -1 if s never enters the
-    open interior."""
-    x1, y1, x2, y2 = bbox
-    horiz = s.start.y == s.end.y
-    if horiz:
-        y = s.start.y
-        if not (y1 < y < y2):
-            return -1
-        a, b = sorted((s.start.x, s.end.x))
-        a, b = max(a, x1), min(b, x2)              # clamp to block span
-        if a > b:
-            return -1
-        c = (x1 + x2) / 2                          # x nearest the centre, within [a,b]
-        xx = min(max(c, a), b)
-        return min(min(xx - x1, x2 - xx), min(y - y1, y2 - y))
-    x = s.start.x
-    if not (x1 < x < x2):
-        return -1
-    a, b = sorted((s.start.y, s.end.y))
-    a, b = max(a, y1), min(b, y2)
-    if a > b:
-        return -1
-    c = (y1 + y2) / 2
-    yy = min(max(c, a), b)
-    return min(min(x - x1, x2 - x), min(yy - y1, y2 - yy))
-
-
-def _crosses_interior(s, bbox):
-    """True if segment s threads DEEP through bbox's interior (some point sits
-    more than the sub-track face nudge from every face), rather than hugging a
-    face."""
-    return _max_interior_depth(s, bbox) > _FACE_EPS
-
-
-def test_relay_connectors_hug_block_perimeter():
-    """Completion connectors must route along a relay block's FACES, never across
-    its interior.  A busterm-tapped block is a routing endpoint, not a spine
-    pass-through, so any wire crossing its interior is a through-block relay leg
-    (the blk_09 bug).  WIDE_RELAY forces the opposite-face V,H,V dogleg whose H
-    leg previously threaded the block body; here it must hug a face."""
+def test_relay_connectors_have_no_zero_slide_window():
+    """A relay block that is NOT a feedthru chains its landings with a JOG /
+    extension routed OVER THE CELL (OTC).  The tap connector gets a REAL slide
+    window (the cell footprint) so NUTS has room to place a positive-width bus --
+    never a degenerate zero-slide pin.  No ConnSeg of a relay candidate may have
+    perp_lo == perp_hi."""
     for coords, src, dsts in (WIDE_RELAY, STAIRCASE, PLUS, GRID):
         fp = _make_fp(coords)
         cands = _gen(fp).generate_candidates(src, dsts)
@@ -391,15 +345,51 @@ def test_relay_connectors_hug_block_perimeter():
         for c in relayish:
             ct = buda.ConnTopology()
             ct.build(c, fp)
-            for blk in _busterm_taps(ct):           # tapped == routing endpoint
-                bbox = coords[blk]
-                threaded = [i for i, s in enumerate(c.segments)
-                            if _crosses_interior(s, bbox)]
-                assert not threaded, (
-                    f"{c.type} on {list(coords)}: segment(s) {threaded} thread "
-                    f"the interior of tapped block {blk} {bbox} "
-                    f"(connector should hug a face)"
-                )
+            zero = [i for i, cs in enumerate(ct.segs())
+                    if cs.perp_lo == cs.perp_hi]
+            assert not zero, (
+                f"{c.type} on {list(coords)}: zero-slide ConnSeg(s) {zero} "
+                f"(relay connectors must get a real over-the-cell window)"
+            )
+
+
+def test_relay_tap_connector_bounded_to_cell():
+    """The perpendicular connector sharing a relay tap's face endpoint is bounded
+    to the tapped block's footprint: a FINITE window (it slides OVER the cell but
+    never off it), not the unbounded default.  WIDE_RELAY's opposite-face relay
+    exercises this directly."""
+    SENT = 1 << 29
+    coords, src, dsts = WIDE_RELAY
+    fp = _make_fp(coords)
+    cands = [c for c in _gen(fp).generate_candidates(src, dsts)
+             if c.type.startswith("MST_") or "+MST" in c.type]
+    assert cands
+    for c in cands:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        segs = ct.segs()
+        taps = _busterm_taps(ct)
+        for blk, tap_segs in taps.items():
+            x1, y1, x2, y2 = coords[blk]
+            for ti in tap_segs:
+                tap = segs[ti]
+                for co in tap.conns:
+                    if co.kind != buda.SegConnKind.SEG:
+                        continue
+                    T = segs[co.seg_idx]
+                    if T.horiz == tap.horiz:            # need a perpendicular bend
+                        continue
+                    lo, hi = (y1, y2) if T.horiz else (x1, x2)
+                    if not (lo <= T.perp_pos <= hi):    # only the over-cell bend is bounded
+                        continue
+                    assert abs(T.perp_lo) < SENT and abs(T.perp_hi) < SENT, (
+                        f"{c.type}: relay tap connector {co.seg_idx} unbounded "
+                        f"[{T.perp_lo},{T.perp_hi}] (should be over-the-cell bounded)"
+                    )
+                    assert lo <= T.perp_lo and T.perp_hi <= hi, (
+                        f"{c.type}: relay tap connector {co.seg_idx} window "
+                        f"[{T.perp_lo},{T.perp_hi}] escapes cell [{lo},{hi}]"
+                    )
 
 
 def test_wide_relay_completion_is_clean():

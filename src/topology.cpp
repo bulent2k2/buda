@@ -772,7 +772,6 @@ static bool has_collinear_overlap(const Topology& topo, int n_orig) {
     return false;
 }
 
-
 // ---------------------------------------------------------------------------
 // MST feedthrough completion
 // ---------------------------------------------------------------------------
@@ -861,35 +860,6 @@ static void complete_relay_junctions(Topology& topo,
         if (x1 == x2 && y1 == y2) return;
         topo.segments.push_back(make_seg(x1, y1, x2, y2, layer));
     };
-    // Relay block currently being wired (set per-block in the chaining loop);
-    // the face-snap helpers below route connectors along ITS perimeter.
-    Rect bb{};
-    // Snap a connector's Z-detour off-line to JUST OUTSIDE the relay block's
-    // nearer face so the connector hugs the block PERIMETER instead of crossing
-    // its interior.  An interior off-line lays the spanning leg straight through
-    // the block body -- a through-block relay wire that NUTS then collapses
-    // (understated span, high WL); routing it just outside a face yields the clean
-    // "jog-tap + edge clears the block" shape (cf. the proposed bundle-3
-    // topology).  Pushing OUTSIDE (rather than onto) the face also keeps the
-    // off-line clear of every landing column/row, so it never lands collinear
-    // with an incident stub (which would defeat ConnTopology's perpendicular
-    // junction inference).  No-op when the off-line already clears the block.
-    //
-    // Applied only to the two big Z-detours (both-leave-H / both-leave-V), where
-    // the spanning leg traverses the block's full width/height -- the crossing
-    // that actually matters.  The orthogonal same-row/column detours nudge the
-    // off-line by just ±2 (sub-track), so snapping them outward buys nothing and
-    // can spawn a perimeter micro-loop at a high-degree relay that the collinear
-    // de-overlap pass cannot dissolve; they are left as-is.
-    const int OFF = 2;   // small outward nudge (matches the ±2 idiom below)
-    auto face_x = [&](int lo, int hi, int mid) {
-        if (mid <= bb.x1 || mid >= bb.x2) return mid;                 // already clears
-        return (bb.x2 - hi) <= (lo - bb.x1) ? bb.x2 + OFF : bb.x1 - OFF;
-    };
-    auto face_y = [&](int lo, int hi, int mid) {
-        if (mid <= bb.y1 || mid >= bb.y2) return mid;                 // already clears
-        return (bb.y2 - hi) <= (lo - bb.y1) ? bb.y2 + OFF : bb.y1 - OFF;
-    };
     auto connect = [&](const Inc& a, const Inc& b) {
         if (a.p.x == b.p.x && a.p.y == b.p.y) return;
         bool leaveA_h = !a.seg_horiz;   // perpendicular to a's incident segment
@@ -900,7 +870,6 @@ static void complete_relay_junctions(Topology& topo,
             } else {                                // Z: H, V, H via an off-column
                 int lo = std::min(a.p.x, b.p.x), hi = std::max(a.p.x, b.p.x);
                 int mx = (hi - lo >= 2) ? (lo + hi) / 2 : hi + 2;  // not on a/b column
-                mx = face_x(lo, hi, mx);            // hug a V face, not the interior
                 emit(a.p.x, a.p.y, mx, a.p.y, h_layer);
                 emit(mx, a.p.y, mx, b.p.y, v_layer);
                 emit(mx, b.p.y, b.p.x, b.p.y, h_layer);
@@ -911,7 +880,6 @@ static void complete_relay_junctions(Topology& topo,
             } else {                                // Z: V, H, V via an off-row
                 int lo = std::min(a.p.y, b.p.y), hi = std::max(a.p.y, b.p.y);
                 int my = (hi - lo >= 2) ? (lo + hi) / 2 : hi + 2;
-                my = face_y(lo, hi, my);            // hug an H face, not the interior
                 emit(a.p.x, a.p.y, a.p.x, my, v_layer);
                 emit(a.p.x, my, b.p.x, my, h_layer);
                 emit(b.p.x, my, b.p.x, b.p.y, v_layer);
@@ -956,7 +924,6 @@ static void complete_relay_junctions(Topology& topo,
 
     for (auto& [bi, pts] : incident) {
         if (pts.size() < 2) continue;        // leaf terminal: nothing to relay
-        bb = blocks[bi].orig_bbox;           // face-snap connectors to this block
         // Chain the landings (sorted) so all incident segments end up in one
         // wire-connected component through the block's junction.
         std::sort(pts.begin(), pts.end(), [](const Inc& a, const Inc& b) {
@@ -1022,14 +989,6 @@ static void complete_relay_junctions(Topology& topo,
     // disconnects the topology.  So we remove a collinear-contained connector only
     // after VERIFYING the result stays one connected component, one connector at a
     // time.  Gated on an overlap actually existing (the common case does nothing).
-    //
-    // The removal MUST stay restricted to collinear-contained connectors: the MST
-    // edges already span a tree, so under the global SEG-component metric ANY
-    // connector looks redundant (its endpoints are reachable via the long tree
-    // path that detours through other blocks).  Dropping a non-collinear connector
-    // on that basis would re-open a feedthru relay -- the very thing this pass
-    // adds wire to prevent.  A collinear-contained connector is genuinely
-    // redundant because the covering segment occupies the same wire locally.
     if (has_collinear_overlap(topo, n_seg)) {
         auto covers = [](const Segment& o, const Segment& c) {
             bool o_h = o.start.y == o.end.y, c_h = c.start.y == c.end.y;
@@ -2267,9 +2226,11 @@ void TopologyGenerator::filter_pinched(std::vector<Topology>& candidates) {
         ct.build(cand, floorplan_);
         bool pinched = false;
         for (const auto& cs : ct.segs()) {
-            // face_pinned segments are clamped to a relay block's face on purpose;
-            // their zero slide is required for correctness, not a degeneracy.
-            if (cs.perp_lo == cs.perp_hi && !cs.face_pinned) {
+            // A zero-slide segment is genuinely over-constrained: NUTS has no room
+            // to place the bus.  Relay JOG/extension connectors are no longer
+            // pinned to a face (they get a real over-the-cell window from
+            // pin_relay_tap_connectors), so any zero-slide here is a true pinch.
+            if (cs.perp_lo == cs.perp_hi) {
                 pinched = true;
                 break;
             }

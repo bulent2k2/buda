@@ -72,10 +72,6 @@ struct ConnSeg {
     // net_pull < 0: more anchors lie below → prefer sliding down/left.
     // net_pull == 0: balanced or no stub connections → no preferred direction.
     int  net_pull  = 0;
-    // Set when pin_relay_tap_connectors() clamps this connector to a relay block's
-    // face (perp_lo == perp_hi by intent, not degeneracy).  filter_pinched must not
-    // treat such an intentional pin as a pinched/over-constrained candidate.
-    bool face_pinned = false;
     std::vector<SegConn> conns;
 };
 
@@ -136,7 +132,7 @@ private:
     void tighten_passthrough_ranges(const Topology& topo, const Floorplan& fp);
     // Pin the connector attached at a busterm tap's face endpoint to face_coord so
     // NUTS span adjustment preserves the tap's along-reach to a relay block face.
-    void pin_relay_tap_connectors();
+    void pin_relay_tap_connectors(const Floorplan& fp);
     void compute_net_pull();
 };
 
