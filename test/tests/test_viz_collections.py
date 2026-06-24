@@ -232,3 +232,39 @@ def test_highlight_survives_collection_refactor(monkeypatch):
     assert len(viz._highlight_overlays) > 0
     viz._set_highlight(None)
     assert viz._highlighted is None
+
+
+def test_a_key_toggles_highlight(monkeypatch):
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    bid = next(iter(viz._bundle_artists))
+    
+    # 1. Start in abstract mode with no highlight
+    assert viz._highlighted is None
+    
+    # 2. Highlight a bundle
+    viz._set_highlight(bid)
+    assert viz._highlighted == bid
+    assert viz._last_highlighted == bid
+    
+    # 3. Press 'a' -> should clear highlight (resets view in abstract mode)
+    viz._on_key(types.SimpleNamespace(key="a"))
+    assert viz._highlighted is None
+    assert viz._last_highlighted == bid
+    
+    # 4. Press 'a' again -> should restore highlight
+    viz._on_key(types.SimpleNamespace(key="a"))
+    assert viz._highlighted == bid
+    
+    # 5. Switch to detailed mode
+    viz._toggle_detailed()
+    assert viz.ui_state.detailed_mode is True
+    
+    # 6. Highlight is currently active. Press 'a' -> should clear highlight in detailed mode
+    viz._on_key(types.SimpleNamespace(key="a"))
+    assert viz._highlighted is None
+    assert viz._last_highlighted == bid
+    
+    # 7. Press 'a' again -> should restore highlight in detailed mode
+    viz._on_key(types.SimpleNamespace(key="a"))
+    assert viz._highlighted == bid

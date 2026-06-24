@@ -1611,6 +1611,7 @@ class BudaVisualizer:
         # bundle_id -> list of dicts {artist, alpha, lw, is_band, layer}
         self._bundle_artists    = {}
         self._highlighted       = None
+        self._last_highlighted  = None
         self._highlighted_set   = set()   # multi-highlight (overlap pair selection)
         self._selected_overlap  = None    # OverlapDetail currently selected
         self._overlap_state     = 0       # 0=none 1=both 2=A-only 3=B-only
@@ -1903,6 +1904,8 @@ class BudaVisualizer:
         from matplotlib.lines import Line2D as MplLine2D
 
         bundle_id = self._highlighted
+        if bundle_id is not None:
+            self._last_highlighted = bundle_id
         hset      = self._highlighted_set
 
         # Resolve which bundle ids are "active" (shown at full alpha).
@@ -2700,8 +2703,15 @@ class BudaVisualizer:
         if event.key == 'Z': self._interactive_zoom(event, zoom_in=False); return
         if event.key in ('h', 'H', 'cmd+a', 'ctrl+a'): self._zoom_home(); return
         if event.key == 'a':
-            if self.ui_state.detailed_mode: self._set_highlight(None)
-            else:                   self._reset_view()
+            if self._highlighted is not None:
+                self._last_highlighted = self._highlighted
+                if self.ui_state.detailed_mode:
+                    self._set_highlight(None)
+                else:
+                    self._reset_view()
+            else:
+                if getattr(self, '_last_highlighted', None) is not None:
+                    self._set_highlight(self._last_highlighted)
             return
         if event.key == 'left':   _pan_axes(self.ax, self.fig, -_PAN_STEP, 0); return
         if event.key == 'right':  _pan_axes(self.ax, self.fig, +_PAN_STEP, 0); return
