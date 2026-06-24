@@ -2053,8 +2053,20 @@ class BudaVisualizer:
         else:
             idx = (self._bid_list.index(self._highlighted) + delta) % len(self._bid_list)
         self._highlighted = self._bid_list[idx]
+        self._scroll_bundle_into_view(idx)
         self._refresh_highlight()
         self._ipc_send_highlight(self._highlighted)
+
+    def _scroll_bundle_into_view(self, idx):
+        """Adjust the bundle-list scroll so row `idx` is within the visible window
+        (so the selection's radio stays on screen when cycling with n/p)."""
+        n_vis = self._bundle_list_n_visible()
+        if idx < self._bundle_scroll:
+            self._bundle_scroll = idx
+        elif idx >= self._bundle_scroll + n_vis:
+            self._bundle_scroll = idx - n_vis + 1
+        max_scroll = max(0, len(self._bid_list) - n_vis)
+        self._bundle_scroll = max(0, min(max_scroll, self._bundle_scroll))
 
     def _toggle_heatmap(self):
         self.ui_state.toggle_heatmap()
