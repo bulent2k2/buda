@@ -940,6 +940,22 @@ static void complete_relay_junctions(Topology& topo,
         if (pts.size() != 2 || all_land[bi].size() != 2) continue;  // clean 2-stub only
         const Inc& A = pts[0];
         const Inc& B = pts[1];
+        // Guard: a landing point that also lies on ANOTHER block's boundary (an
+        // adjacent / corner-touching block) may be that block's only pass-through
+        // coverage; moving the endpoint inward could leave it with neither a
+        // busterm nor a spanning segment.  Skip the OTC extension for such a relay
+        // and let the general chaining (which keeps a tap) wire it instead.
+        auto on_other_boundary = [&](const Point& P) {
+            for (int bj = 0; bj < (int)blocks.size(); ++bj) {
+                if (bj == bi) continue;
+                const Rect& r = blocks[bj].orig_bbox;
+                bool onx = (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2;
+                bool ony = (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
+                if (onx || ony) return true;
+            }
+            return false;
+        };
+        if (on_other_boundary(A.p) || on_other_boundary(B.p)) continue;
         bool handled = true;
         if (A.seg_horiz != B.seg_horiz) {
             // ORTHOGONAL: extend to the corner (V's column, H's row).
