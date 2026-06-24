@@ -2523,7 +2523,7 @@ class BudaVisualizer:
         self.fig.canvas.draw_idle()
 
     def _on_bundle_list_click(self, event):
-        """Radio column (x<0.18): select bundle.  Checkbox column (x>=0.18): toggle visibility."""
+        """Radio column (x<0.10): select bundle.  Checkbox+label (x>=0.10): toggle visibility."""
         ax = self._ax_bundles
         if ax is None or event.ydata is None or event.xdata is None:
             return
@@ -2533,7 +2533,7 @@ class BudaVisualizer:
         bids = self._bid_list
         if 0 <= idx < len(bids):
             bid = bids[idx]
-            if event.xdata < 0.18:
+            if event.xdata < 0.10:
                 # Radio click → select / deselect bundle in main view.
                 self._set_highlight(bid)   # _set_highlight toggles if same bid
             else:
