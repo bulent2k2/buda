@@ -113,6 +113,13 @@ GRID = ({"A": (0, 0, 100, 100), "B": (300, 0, 400, 100),
          "C": (0, 300, 100, 400), "D": (300, 300, 400, 400),
          "E": (600, 150, 700, 250)},
         "A", ["B", "C", "D", "E"])
+# A WIDE relay block R with MST neighbours on its LEFT and RIGHT faces at the
+# same height: the chaining connector between the two opposite-face landings is a
+# V,H,V dogleg whose H leg used to run straight across R's interior (the blk_09
+# bug).  Completion must now route that leg along R's perimeter instead.
+WIDE_RELAY = ({"L": (0, 0, 100, 100), "R": (300, 0, 900, 100),
+               "Rt": (1100, 0, 1200, 100), "T": (1100, 300, 1200, 400)},
+              "L", ["R", "Rt", "T"])
 
 
 # ── completion correctness ────────────────────────────────────────────────────
@@ -320,6 +327,71 @@ def test_contained_connector_kept_when_load_bearing():
             f"contained connector was wrongly de-overlapped"
         )
         assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
+
+
+# ── perimeter-hugging completion (no interior threading) ──────────────────────
+
+def _crosses_interior(s, bbox):
+    """True if segment s passes through the STRICT interior of bbox (i.e. it
+    threads the block body rather than running along a face)."""
+    x1, y1, x2, y2 = bbox
+    if s.start.y == s.end.y:                       # horizontal
+        y = s.start.y
+        if not (y1 < y < y2):
+            return False
+        slo, shi = sorted((s.start.x, s.end.x))
+        return min(shi, x2) > max(slo, x1)         # shares more than a point in x
+    x = s.start.x                                  # vertical
+    if not (x1 < x < x2):
+        return False
+    slo, shi = sorted((s.start.y, s.end.y))
+    return min(shi, y2) > max(slo, y1)
+
+
+def test_relay_connectors_hug_block_perimeter():
+    """Completion connectors must route along a relay block's FACES, never across
+    its interior.  A busterm-tapped block is a routing endpoint, not a spine
+    pass-through, so any wire crossing its interior is a through-block relay leg
+    (the blk_09 bug).  WIDE_RELAY forces the opposite-face V,H,V dogleg whose H
+    leg previously threaded the block body; here it must hug a face."""
+    for coords, src, dsts in (WIDE_RELAY, STAIRCASE, PLUS, GRID):
+        fp = _make_fp(coords)
+        cands = _gen(fp).generate_candidates(src, dsts)
+        relayish = [c for c in cands if c.type.startswith("MST_") or "+MST" in c.type]
+        assert relayish, f"expected MST/hybrid candidates for {list(coords)}"
+        for c in relayish:
+            ct = buda.ConnTopology()
+            ct.build(c, fp)
+            for blk in _busterm_taps(ct):           # tapped == routing endpoint
+                bbox = coords[blk]
+                threaded = [i for i, s in enumerate(c.segments)
+                            if _crosses_interior(s, bbox)]
+                assert not threaded, (
+                    f"{c.type} on {list(coords)}: segment(s) {threaded} thread "
+                    f"the interior of tapped block {blk} {bbox} "
+                    f"(connector should hug a face)"
+                )
+
+
+def test_wide_relay_completion_is_clean():
+    """The WIDE_RELAY opposite-face relay completes cleanly: no FEEDTHRU_RELAY,
+    one SEG component, a single busterm tap per block, no zero-length segs."""
+    coords, src, dsts = WIDE_RELAY
+    fp = _make_fp(coords)
+    cands = [c for c in _gen(fp).generate_candidates(src, dsts)
+             if c.type.startswith("MST_") or "+MST" in c.type]
+    assert cands
+    for c in cands:
+        zero = [(s.start.x, s.start.y) for s in c.segments
+                if s.start.x == s.end.x and s.start.y == s.end.y]
+        assert not zero, f"{c.type}: zero-length segs {zero}"
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        assert _feedthru_count(ct, c, fp) == 0, f"{c.type}: FEEDTHRU_RELAY"
+        assert _seg_components(ct) == 1, f"{c.type}: {_seg_components(ct)} SEG comps"
+        assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
+        multi = {b: sorted(s) for b, s in _busterm_taps(ct).items() if len(s) > 1}
+        assert not multi, f"{c.type}: double-tapped {multi}"
 
 
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────
