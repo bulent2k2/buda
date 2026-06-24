@@ -60,6 +60,93 @@ static bool seg_spans_rect(const ConnSeg& cs, double perp, const Rect& r) {
             && cs.along_lo <= r.y2 && cs.along_hi >= r.y1;
 }
 
+// FEEDTHRU_RELAY: a block must not be silently used as a feedthrough relay --
+// every stub landing on a block's face must be wire-connected to the others.
+//
+// Connectivity here is GEOMETRIC (shared endpoint or perpendicular T-junction),
+// NOT ConnTopology's SEG conns and NOT "both tap the block's busterm": relay
+// completion keeps exactly ONE busterm tap per block (so a tag-based test is
+// blind to a genuine relay), and ConnTopology suppresses SEG inference at a
+// busterm-tagged endpoint.  We therefore gather a block's incident segments by
+// geometry (an endpoint on its face) and union them by wire touch.  A block
+// whose incident segments span more than one wire component is relaying the bus
+// through its own body -- the open we forbid.
+//
+// Not flagged: a straight trunk / combined rail CROSSING a block has no endpoint
+// on the block's face (it extends beyond), so it is not gathered; multi-rect/TEG
+// and opt-in feedthru blocks carry intentional internal routing and are skipped.
+// The nominal ConnSeg geometry is the same at every stage, so this structural
+// check serves check_topo / check_nuts / check_dnuts uniformly.
+static void detect_feedthru_relay(const std::vector<ConnSeg>& segs,
+                                  const Topology& topo, const Floorplan& fp,
+                                  int bundle_id, const char* stage,
+                                  ConnResult& result)
+{
+    int n = (int)segs.size();
+    if (n < 2) return;
+    auto ep_lo = [](const ConnSeg& s) -> std::pair<int,int> {
+        return s.horiz ? std::make_pair(s.along_lo, s.perp_pos)
+                       : std::make_pair(s.perp_pos, s.along_lo);
+    };
+    auto ep_hi = [](const ConnSeg& s) -> std::pair<int,int> {
+        return s.horiz ? std::make_pair(s.along_hi, s.perp_pos)
+                       : std::make_pair(s.perp_pos, s.along_hi);
+    };
+    auto pt_on = [](int px, int py, const ConnSeg& s) -> bool {
+        return s.horiz ? (py == s.perp_pos && px >= s.along_lo && px <= s.along_hi)
+                       : (px == s.perp_pos && py >= s.along_lo && py <= s.along_hi);
+    };
+    auto touch = [&](const ConnSeg& a, const ConnSeg& b) -> bool {
+        auto al = ep_lo(a), ah = ep_hi(a), bl = ep_lo(b), bh = ep_hi(b);
+        return pt_on(al.first, al.second, b) || pt_on(ah.first, ah.second, b)
+            || pt_on(bl.first, bl.second, a) || pt_on(bh.first, bh.second, a);
+    };
+    auto on_block_face = [](int px, int py, const Rect& r) -> bool {
+        return ((px == r.x1 || px == r.x2) && py >= r.y1 && py <= r.y2)
+            || ((py == r.y1 || py == r.y2) && px >= r.x1 && px <= r.x2);
+    };
+
+    std::vector<int> uf(n);
+    std::iota(uf.begin(), uf.end(), 0);
+    std::function<int(int)> find = [&](int x){ return uf[x]==x ? x : uf[x]=find(uf[x]); };
+    for (int i = 0; i < n; ++i)
+        for (int j = i + 1; j < n; ++j)
+            if (touch(segs[i], segs[j])) uf[find(i)] = find(j);
+
+    // Scan EVERY floorplan block, not just topo.connected_block_names (src+dsts):
+    // a malformed route can relay two stubs through an unrelated macro that is not a
+    // declared connected block (ConnTopology tags such incidental endpoints too).
+    // The inc>=2 gate below means only blocks actually hosting >=2 incident stubs are
+    // examined, so this stays cheap and flags genuine multi-component relays only.
+    for (const auto& [bname, r] : fp.get_all_blocks()) {
+        if (fp.is_container(bname)) continue;                     // transparent envelope, not a leaf cell
+        if (fp.get_block_rects(bname).size() > 1) continue;       // TEG: internal eq. OK
+        if (std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
+                      bname) != topo.feedthru_blocks.end()) continue;   // opt-in feedthru
+        std::vector<int> inc;
+        for (int i = 0; i < n; ++i) {
+            auto lo = ep_lo(segs[i]), hi = ep_hi(segs[i]);
+            if (on_block_face(lo.first, lo.second, r) || on_block_face(hi.first, hi.second, r))
+                inc.push_back(i);
+        }
+        if (inc.size() < 2) continue;
+        int root = find(inc[0]);
+        for (size_t k = 1; k < inc.size(); ++k) {
+            if (find(inc[k]) == root) continue;
+            ConnViolation v;
+            v.kind = ViolationKind::FEEDTHRU_RELAY;
+            v.bundle_id = bundle_id;
+            v.seg_idx = inc[0]; v.seg_idx2 = inc[(int)k];
+            v.block_name = bname;
+            v.message = std::string("Block '") + bname + "' used as feedthrough relay: seg "
+                + std::to_string(inc[0]) + " and seg " + std::to_string(inc[(int)k])
+                + " land on its face but their wires do not connect (" + stage + ")";
+            result.violations.push_back(std::move(v));
+            break;  // one violation per block suffices
+        }
+    }
+}
+
 // ── check_topo ────────────────────────────────────────────────────────────────
 
 ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
@@ -157,78 +244,9 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
         }
     }
 
-    // 4. FEEDTHRU_RELAY: a block must not be silently used as a feedthrough relay.
-    //    Two segments that both connect to a block (BUSTERM) but whose wires do
-    //    not actually touch are "connected" only through the block's internal
-    //    routing -- an opt-in feedthru we do not support yet (raw MST edges did
-    //    this).  Connectivity here is GEOMETRIC (do the wires share a point or
-    //    T-junction?), NOT ConnTopology's SEG conns: ConnTopology models any
-    //    endpoint on a block face as a BUSTERM-only terminal and suppresses SEG
-    //    inference there, so a SEG-component test could never see the completion
-    //    wire.  Flag a block whose BUSTERM segments span more than one geometric
-    //    component.
-    //    Not affected: a straight trunk crossing a block is a continuous wire with
-    //    no BUSTERM conn (pass-through); multi-rect/TEG blocks are skipped because
-    //    their internal terminal-equivalence routing is intentional.
-    {
-        // Endpoints and on-span test derived from each ConnSeg's nominal geometry.
-        auto ep_lo = [](const ConnSeg& s) -> std::pair<int,int> {
-            return s.horiz ? std::make_pair(s.along_lo, s.perp_pos)
-                           : std::make_pair(s.perp_pos, s.along_lo);
-        };
-        auto ep_hi = [](const ConnSeg& s) -> std::pair<int,int> {
-            return s.horiz ? std::make_pair(s.along_hi, s.perp_pos)
-                           : std::make_pair(s.perp_pos, s.along_hi);
-        };
-        auto pt_on = [](int px, int py, const ConnSeg& s) -> bool {
-            return s.horiz ? (py == s.perp_pos && px >= s.along_lo && px <= s.along_hi)
-                           : (px == s.perp_pos && py >= s.along_lo && py <= s.along_hi);
-        };
-        auto touch = [&](const ConnSeg& a, const ConnSeg& b) -> bool {
-            auto al = ep_lo(a), ah = ep_hi(a), bl = ep_lo(b), bh = ep_hi(b);
-            return pt_on(al.first, al.second, b) || pt_on(ah.first, ah.second, b)
-                || pt_on(bl.first, bl.second, a) || pt_on(bh.first, bh.second, a);
-        };
-
-        std::vector<int> uf(n);
-        std::iota(uf.begin(), uf.end(), 0);
-        std::function<int(int)> find = [&](int x){ return uf[x]==x ? x : uf[x]=find(uf[x]); };
-        for (int i = 0; i < n; ++i)
-            for (int j = i + 1; j < n; ++j)
-                if (touch(segs[i], segs[j])) uf[find(i)] = find(j);
-
-        std::map<std::string, std::vector<int>> block_segs;
-        for (int i = 0; i < n; ++i)
-            for (const auto& conn : segs[i].conns)
-                if (conn.kind == SegConn::BUSTERM) {
-                    auto& v = block_segs[conn.block_name];
-                    if (std::find(v.begin(), v.end(), i) == v.end()) v.push_back(i);
-                }
-
-        for (const auto& [bname, sidx] : block_segs) {
-            if (sidx.size() < 2) continue;
-            if (fp.get_block_rects(bname).size() > 1) continue;  // TEG: internal eq. OK
-            // Opt-in feedthru: the block is *declared* to relay the bus across its
-            // interior via its own lower-level routing, so a multi-component
-            // BUSTERM footprint here is intentional, not a silent relay.
-            if (std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
-                          bname) != topo.feedthru_blocks.end()) continue;
-            int root = find(sidx[0]);
-            for (size_t k = 1; k < sidx.size(); ++k) {
-                if (find(sidx[k]) == root) continue;
-                ConnViolation v;
-                v.kind = ViolationKind::FEEDTHRU_RELAY;
-                v.bundle_id = bundle_id;
-                v.seg_idx = sidx[0]; v.seg_idx2 = sidx[(int)k];
-                v.block_name = bname;
-                v.message = "Block '" + bname + "' used as feedthrough relay: seg "
-                    + std::to_string(sidx[0]) + " and seg " + std::to_string(sidx[(int)k])
-                    + " connect to it but their wires do not touch";
-                result.violations.push_back(std::move(v));
-                break;  // one violation per block suffices
-            }
-        }
-    }
+    // 4. FEEDTHRU_RELAY: every block's incident stubs must be wire-connected, not
+    //    relayed through the block's body (shared helper, geometric wire touch).
+    detect_feedthru_relay(segs, topo, fp, bundle_id, "topo", result);
 
     return result;
 }
@@ -377,6 +395,9 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
             result.violations.push_back(std::move(v));
         }
     }
+
+    // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
+    detect_feedthru_relay(segs, topo, fp, bundle_id, "nuts", result);
 
     return result;
 }
@@ -547,6 +568,9 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
             }
         }
     }
+
+    // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
+    detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);
 
     return result;
 }
