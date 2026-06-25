@@ -69,6 +69,7 @@ class BdbFloorplanner:
         self._handle_patches: list[tuple] = []   # (patch, name, corner_str)
         self._drag = None
         self._rbpatch = None                     # live rubber-band zoom rectangle
+        self._zoom_limits: tuple | None = None   # (xlim, ylim) set by manual zoom
         self._canvas_sel: set[str] = set()       # canvas multi-selection
         self._path: list[str] = []               # drill-down stack
         self._undo_stack: collections.deque = collections.deque(maxlen=50)
@@ -328,6 +329,7 @@ class BdbFloorplanner:
         self._path = []
         self._canvas_sel.clear()
         self.state.selected = None
+        self._zoom_limits = None
         self._refresh_breadcrumbs()
         self._refresh_tree()
         self._draw()
@@ -336,6 +338,7 @@ class BdbFloorplanner:
         self._path = self._path[:depth]
         self._canvas_sel.clear()
         self.state.selected = None
+        self._zoom_limits = None
         self._refresh_breadcrumbs()
         self._refresh_tree()
         self._draw()
@@ -344,6 +347,7 @@ class BdbFloorplanner:
         self._path.append(name)
         self._canvas_sel.clear()
         self.state.selected = None
+        self._zoom_limits = None
         self._refresh_breadcrumbs()
         self._refresh_tree()
         self._draw()
@@ -370,6 +374,7 @@ class BdbFloorplanner:
         fpc.release_bdb_lock(self.state)
         self.state = fpc.load_bdb(path)
         self._path = []
+        self._zoom_limits = None
         self._bdb_var.set(path)
         self._sync_canvas_vars()
         self._refresh_breadcrumbs()
@@ -390,6 +395,7 @@ class BdbFloorplanner:
         fpc.release_bdb_lock(self.state)
         self.state = fpc.create_bdb(path, self._die_w.get(), self._die_h.get(), self._grid.get())
         self._path = []
+        self._zoom_limits = None
         self._bdb_var.set(path)
         self._refresh_breadcrumbs()
         self._refresh_tree()
@@ -421,6 +427,7 @@ class BdbFloorplanner:
         fpc.release_bdb_lock(self.state)   # Release only after successful import
         self.state = new_state
         self._path = []
+        self._zoom_limits = None
         self._bdb_var.set(bdb_path)
         self._sync_canvas_vars()
         self._refresh_breadcrumbs()
@@ -827,6 +834,12 @@ class BdbFloorplanner:
                     pad = max(max(xs) - min(xs), max(ys) - min(ys), 1.0) * 0.12
                     ax.set_xlim(min(xs) - pad, max(xs) + pad)
                     ax.set_ylim(min(ys) - pad, max(ys) + pad)
+
+        # Restore manual zoom (set via bbox-zoom or scroll) unless we just
+        # navigated (drill-in/out/home clears _zoom_limits first).
+        if self._zoom_limits is not None:
+            ax.set_xlim(*self._zoom_limits[0])
+            ax.set_ylim(*self._zoom_limits[1])
 
         ax.set_aspect("equal")
         ax.grid(True, color="#e5e7eb", linewidth=0.5)
@@ -1271,13 +1284,18 @@ class BdbFloorplanner:
             self._refresh_tree()
             self._draw()
 
+    def _ax_pixel_aspect(self) -> float:
+        """Return axes-window pixel aspect ratio (width / height)."""
+        bbox = self._ax.get_window_extent()
+        return bbox.width / bbox.height if bbox.height > 0 else 1.0
+
     def _apply_bbox_zoom(self, x0: float, y0: float, x1: float, y1: float):
         """Apply a rubber-band zoom.
 
         LR drag (x1 > x0): zoom IN — set the view to the drawn box.
         RL drag (x1 < x0): zoom OUT — expand the view so that the current
             viewport would appear at the size of the drawn box.
-        A degenerate box (< 2 px motion) is ignored.
+        A degenerate box (skinny in either dimension) is ignored.
         """
         ax = self._ax
         xlim = ax.get_xlim()
@@ -1286,25 +1304,43 @@ class BdbFloorplanner:
         box_h = abs(y1 - y0)
         view_w = xlim[1] - xlim[0]
         view_h = ylim[1] - ylim[0]
-        # Ignore clicks that barely moved (accidental right-click release)
+        # Ignore clicks that barely moved or are skinny in either dimension
         if box_w < view_w * 0.01 or box_h < view_h * 0.01:
             self._fig.canvas.draw_idle()
             return
+
+        # Expand the box to match the axes pixel aspect so the result fills the
+        # full window without set_aspect("equal") adding whitespace margins.
+        ax_aspect = self._ax_pixel_aspect()   # px_w / px_h
+        cx = (x0 + x1) / 2
+        cy = (y0 + y1) / 2
+        if box_w / box_h < ax_aspect:
+            # Box is taller than the window — widen it
+            box_w = box_h * ax_aspect
+        else:
+            # Box is wider than the window — heighten it
+            box_h = box_w / ax_aspect
+
         if x1 > x0:
-            # Zoom IN: fit the box to the viewport
-            ax.set_xlim(min(x0, x1), max(x0, x1))
-            ax.set_ylim(min(y0, y1), max(y0, y1))
+            # Zoom IN: fit the (aspect-corrected) box to the viewport
+            new_xlim = (cx - box_w / 2, cx + box_w / 2)
+            new_ylim = (cy - box_h / 2, cy + box_h / 2)
+            ax.set_xlim(*new_xlim)
+            ax.set_ylim(*new_ylim)
+            self._zoom_limits = (new_xlim, new_ylim)
             self._status.set("Zoomed in. Right-drag RL to zoom out; z/Z or scroll to step.")
         else:
             # Zoom OUT: current view expands so it fits in the drawn box.
-            # Factor = how many times bigger the new view is vs current.
             fx = view_w / box_w if box_w > 0 else 1.0
             fy = view_h / box_h if box_h > 0 else 1.0
-            f  = max(fx, fy)            # keep aspect ratio
-            cx = (xlim[0] + xlim[1]) / 2
-            cy = (ylim[0] + ylim[1]) / 2
-            ax.set_xlim(cx - view_w * f / 2, cx + view_w * f / 2)
-            ax.set_ylim(cy - view_h * f / 2, cy + view_h * f / 2)
+            f  = max(fx, fy)
+            vcx = (xlim[0] + xlim[1]) / 2
+            vcy = (ylim[0] + ylim[1]) / 2
+            new_xlim = (vcx - view_w * f / 2, vcx + view_w * f / 2)
+            new_ylim = (vcy - view_h * f / 2, vcy + view_h * f / 2)
+            ax.set_xlim(*new_xlim)
+            ax.set_ylim(*new_ylim)
+            self._zoom_limits = (new_xlim, new_ylim)
             self._status.set("Zoomed out. Right-drag LR to zoom in.")
         self._fig.canvas.draw_idle()
 
@@ -1320,8 +1356,11 @@ class BdbFloorplanner:
             y = (ylim[0] + ylim[1]) / 2
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
-        ax.set_xlim(x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
-        ax.set_ylim(y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
+        new_xlim = (x - (x - xlim[0]) * scale, x + (xlim[1] - x) * scale)
+        new_ylim = (y - (y - ylim[0]) * scale, y + (ylim[1] - y) * scale)
+        ax.set_xlim(*new_xlim)
+        ax.set_ylim(*new_ylim)
+        self._zoom_limits = (new_xlim, new_ylim)
         self._fig.canvas.draw_idle()
 
     def _on_key(self, event):
@@ -1577,6 +1616,7 @@ def main():
             return
         app.state = fpc.load_bdb(path)
         app._path = []
+        app._zoom_limits = None
         app._bdb_var.set(path)
         app._sync_canvas_vars()
         app._refresh_breadcrumbs()
