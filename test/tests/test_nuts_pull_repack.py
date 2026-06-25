@@ -196,14 +196,6 @@ def test_group_split_under_asymmetric_congestion():
         os.chdir(cwd)
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing (fails at c3c81d0, before PR #52): single-layer "
-    "run_nuts_on_layer M7 on the congested tc3a_flat design re-solves M7 "
-    "unconstrained and skips resolve_corner_overlaps to honour the single-layer "
-    "contract, so it can regress overlaps / nudge a non-M7 track vs the full "
-    "solve. Root-cause fix in nuts.cpp::rerun_layer is tracked separately.",
-    strict=False,
-)
 def test_run_nuts_on_layer_keeps_other_layers_and_no_regression():
     """run_nuts_on_layer re-solves and tightens ONLY the named layer:
       (a) every OTHER layer's track positions stay byte-identical (the
@@ -228,13 +220,34 @@ def test_run_nuts_on_layer_keeps_other_layers_and_no_regression():
         s.do_command("run_nuts_on_layer M7")
 
         other_after = positions(lambda t: t.layer != m7)
-        assert other_after == other_before, (
+
+        # Violations are an unrelated invariant and must always hold — checked
+        # before the xfail gate so a violation regression still FAILS.
+        assert s.nuts_result.num_violations == 0
+
+        # Pre-existing limitation (NOT a PR #52 regression — fails identically at
+        # c3c81d0): on the congested tc3a_flat design, run_nuts_on_layer M7
+        # re-solves M7 unconstrained and skips resolve_corner_overlaps to honour
+        # the single-layer contract, so it can perturb a non-M7 track or regress
+        # overlaps vs the full solve. xfail is narrowed to exactly these two
+        # invariants via a runtime gate, so setup, the run_nuts_on_layer command,
+        # and the violations check above still fail normally if they break.
+        # Root-cause fix in nuts.cpp::rerun_layer is tracked separately.
+        layers_isolated        = other_after == other_before
+        overlaps_not_regressed = s.nuts_result.num_overlaps <= ov_before
+        if not (layers_isolated and overlaps_not_regressed):
+            pytest.xfail(
+                f"pre-existing rerun_layer limitation (nuts.cpp::rerun_layer): "
+                f"layers_isolated={layers_isolated}, overlaps {ov_before} -> "
+                f"{s.nuts_result.num_overlaps}"
+            )
+
+        assert layers_isolated, (
             "run_nuts_on_layer M7 perturbed a non-M7 track position — tighten "
             "must be restricted to the re-solved layer"
         )
-        assert s.nuts_result.num_overlaps <= ov_before, (
+        assert overlaps_not_regressed, (
             f"rerun regressed overlaps {ov_before} -> {s.nuts_result.num_overlaps}"
         )
-        assert s.nuts_result.num_violations == 0
     finally:
         os.chdir(cwd)
