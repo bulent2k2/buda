@@ -68,6 +68,7 @@ class BdbFloorplanner:
         self._patch_to_name: dict = {}
         self._handle_patches: list[tuple] = []   # (patch, name, corner_str)
         self._drag = None
+        self._rbpatch = None                     # live rubber-band zoom rectangle
         self._canvas_sel: set[str] = set()       # canvas multi-selection
         self._path: list[str] = []               # drill-down stack
         self._undo_stack: collections.deque = collections.deque(maxlen=50)
@@ -1054,10 +1055,20 @@ class BdbFloorplanner:
     # ------------------------------------------------------------------
 
     def _on_press(self, event):
-        if event.inaxes != self._ax or event.button != 1:
+        if event.inaxes != self._ax:
             return
         tb = getattr(self._canvas, "toolbar", None)
         if tb and getattr(tb, "mode", ""):
+            return
+
+        # Right-click drag → rubber-band zoom box
+        if event.button == 3:
+            if event.xdata is not None and event.ydata is not None:
+                self._drag = {"mode": "bbox_zoom",
+                              "x0": event.xdata, "y0": event.ydata}
+            return
+
+        if event.button != 1:
             return
 
         # Detect Shift or Ctrl/Cmd via the underlying tkinter event's state bitmask.
@@ -1164,6 +1175,25 @@ class BdbFloorplanner:
             return
 
         mode = self._drag.get("mode")
+
+        if mode == "bbox_zoom":
+            x0, y0 = self._drag["x0"], self._drag["y0"]
+            x1, y1 = event.xdata, event.ydata
+            # Remove previous rubber-band patch without a full redraw
+            if self._rbpatch is not None:
+                self._rbpatch.remove()
+                self._rbpatch = None
+            zoom_in = x1 > x0
+            color = "#0ea5e9" if zoom_in else "#f97316"  # blue=in, orange=out
+            self._rbpatch = mpatches.Rectangle(
+                (min(x0, x1), min(y0, y1)),
+                abs(x1 - x0), abs(y1 - y0),
+                linewidth=1.5, edgecolor=color, facecolor=color,
+                alpha=0.15, linestyle="--", zorder=10)
+            self._ax.add_patch(self._rbpatch)
+            self._fig.canvas.draw_idle()
+            return
+
         name = self._drag["name"]
 
         if mode == "resize":
@@ -1198,6 +1228,19 @@ class BdbFloorplanner:
         if not self._drag:
             return
         mode = self._drag.get("mode", "move")
+
+        if mode == "bbox_zoom":
+            if self._rbpatch is not None:
+                self._rbpatch.remove()
+                self._rbpatch = None
+            x0, y0 = self._drag["x0"], self._drag["y0"]
+            self._drag = None
+            if event.inaxes == self._ax and event.xdata is not None:
+                self._apply_bbox_zoom(x0, y0, event.xdata, event.ydata)
+            else:
+                self._fig.canvas.draw_idle()
+            return
+
         name = self._drag.get("name")
         snap = self._drag.get("snap")
         self._drag = None
@@ -1227,6 +1270,43 @@ class BdbFloorplanner:
                 self._status.set("Block moved.")
             self._refresh_tree()
             self._draw()
+
+    def _apply_bbox_zoom(self, x0: float, y0: float, x1: float, y1: float):
+        """Apply a rubber-band zoom.
+
+        LR drag (x1 > x0): zoom IN — set the view to the drawn box.
+        RL drag (x1 < x0): zoom OUT — expand the view so that the current
+            viewport would appear at the size of the drawn box.
+        A degenerate box (< 2 px motion) is ignored.
+        """
+        ax = self._ax
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        box_w = abs(x1 - x0)
+        box_h = abs(y1 - y0)
+        view_w = xlim[1] - xlim[0]
+        view_h = ylim[1] - ylim[0]
+        # Ignore clicks that barely moved (accidental right-click release)
+        if box_w < view_w * 0.01 or box_h < view_h * 0.01:
+            self._fig.canvas.draw_idle()
+            return
+        if x1 > x0:
+            # Zoom IN: fit the box to the viewport
+            ax.set_xlim(min(x0, x1), max(x0, x1))
+            ax.set_ylim(min(y0, y1), max(y0, y1))
+            self._status.set("Zoomed in. Right-drag RL to zoom out; z/Z or scroll to step.")
+        else:
+            # Zoom OUT: current view expands so it fits in the drawn box.
+            # Factor = how many times bigger the new view is vs current.
+            fx = view_w / box_w if box_w > 0 else 1.0
+            fy = view_h / box_h if box_h > 0 else 1.0
+            f  = max(fx, fy)            # keep aspect ratio
+            cx = (xlim[0] + xlim[1]) / 2
+            cy = (ylim[0] + ylim[1]) / 2
+            ax.set_xlim(cx - view_w * f / 2, cx + view_w * f / 2)
+            ax.set_ylim(cy - view_h * f / 2, cy + view_h * f / 2)
+            self._status.set("Zoomed out. Right-drag LR to zoom in.")
+        self._fig.canvas.draw_idle()
 
     def _zoom(self, event, zoom_in: bool):
         """Zoom the canvas in or out, centred on the cursor (or view centre)."""

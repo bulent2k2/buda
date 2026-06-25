@@ -55,3 +55,18 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `h`, `H`, `cmd+a`, `ctrl+a` | **Home**: Reset zoom and return to the original full view. |
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close all visualizer windows. |
+
+## Floorplanner (`bdb_floorplanner.py`)
+
+| Interaction | Action |
+| :--- | :--- |
+| **Right-drag LR** (lower-left → upper-right) | **Zoom In**: fit the drawn box to the viewport (blue rubber band). |
+| **Right-drag RL** (upper-right → lower-left) | **Zoom Out**: expand the view so the current viewport fits in the drawn box (orange rubber band). |
+| `z` | **Zoom In** one step, centered on the cursor. |
+| `Z` (Shift+z) | **Zoom Out** one step, centered on the cursor. |
+| Scroll wheel | **Zoom** in or out, centered on the cursor. |
+| **Left-drag block** | **Move** the block (snaps to placement grid). |
+| **Left-drag corner handle** | **Resize** block (two edges at once, snaps to Hanan grid / block edges). |
+| **Left-drag mid-edge handle** | **Resize** one edge (snaps to Hanan grid / block edges). |
+| **Double-click block** | **Drill into** the block (view its children). |
+| **Shift+click** | **Multi-select** blocks on the canvas. |
