@@ -17,7 +17,9 @@ generate_topologies
 add_keepout 600 250 650 350 M6
 
 select_topology 1 3
-select_topology 2 4
+# Bundle 2 -> TRUNK_H@y440; its 1-based index is 5 now that selective trunk+MST
+# generation drops the non-beneficial +MST hybrids that padded the candidate list.
+select_topology 2 5
 #planner selects topo 1 without keepout:
 #select_topology 3 1
 

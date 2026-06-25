@@ -1898,6 +1898,36 @@ static bool topology_is_clean_tree(const Topology& topo, const Floorplan& fp) {
     }
     int root = find(0);
     for (int i = 1; i < n; ++i) if (find(i) != root) return false;   // disconnected
+
+    // Block coverage (mirrors check_topo): every connected block must have either
+    // a BUSTERM tap or a segment spanning it.  SEG-connectivity alone does not
+    // guarantee this -- a selectively-completed relay can drop a block's busterm
+    // tap (OTC pass-through) while no segment actually spans it, leaving the block
+    // silently uncovered.  Reject such a tree at generation so it never becomes a
+    // candidate that check_topo would later flag.
+    auto spans_rect = [](const ConnSeg& cs, double perp, const Rect& r) {
+        if (cs.horiz)
+            return perp >= r.y1 && perp <= r.y2
+                && cs.along_lo <= r.x2 && cs.along_hi >= r.x1;
+        return perp >= r.x1 && perp <= r.x2
+            && cs.along_lo <= r.y2 && cs.along_hi >= r.y1;
+    };
+    std::set<std::string> tapped;
+    for (const auto& cs : segs)
+        for (const auto& c : cs.conns)
+            if (c.kind == SegConn::BUSTERM) tapped.insert(c.block_name);
+    for (const auto& bname : topo.connected_block_names) {
+        if (tapped.count(bname)) continue;
+        auto rects = fp.get_block_rects(bname);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        bool covered = false;
+        for (const auto& cs : segs) {
+            if (covered) break;
+            for (const Rect& r : rects)
+                if (spans_rect(cs, (double)cs.perp_pos, r)) { covered = true; break; }
+        }
+        if (!covered) return false;          // uncovered block -> not a clean tree
+    }
     return true;
 }
 
@@ -1995,47 +2025,43 @@ void TopologyGenerator::add_trunk_mst_candidates(
         }
         if (root_node < 0) simple = false;   // no stub-owning branch block to root at
 
-        std::set<std::string> child_names;   // branch blocks whose stub the MST replaces
-        if (simple)
-            for (int k = 0; k < (int)nodes.size(); ++k)
-                if (k != root_node) child_names.insert(nodes[k].first);
-
-        // Realize the MST inter-branch edges as segments once; both the legacy and
-        // the completed-tree form append the same edge geometry.
-        std::vector<Segment> edge_segs;
-        bool valid = true;
-        for (const auto& edge : mst_edges) {
-            const Rect& r_u = nodes[edge.u].second;
-            const Rect& r_v = nodes[edge.v].second;
-            Point p1, p2;
-            closest_points(r_u, r_v, p1, p2);
-            if (p1.x == p2.x && p1.y == p2.y) continue;
-
-            if (p1.x == p2.x) {
-                if (std::abs(p2.y - p1.y) < m_v) { valid = false; break; }
-                edge_segs.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-            } else if (p1.y == p2.y) {
-                if (std::abs(p2.x - p1.x) < m_h) { valid = false; break; }
-                edge_segs.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-            } else {
-                // Diagonal L-shape: both legs must meet their minimum length,
-                // otherwise the edge would stop short of the branch block and
-                // leave a dangling shortcut.  Reject the whole candidate (same
-                // as standalone MST) rather than emit an incomplete edge.
-                if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v) {
-                    valid = false; break;
+        // ── Selective trunk-rooted tree ──────────────────────────────────────
+        // Root the MST at the trunk-nearest stub-owning block and orient it
+        // outward.  REPLACE a non-root block's trunk stub with its MST parent
+        // edge ONLY when that edge is shorter than the stub (a beneficial
+        // shortcut); otherwise keep the straight, shorter stub and do NOT add the
+        // edge.  Each used edge drops exactly one stub, so the result stays a
+        // cycle-free tree and every block still reaches the trunk (a replaced
+        // block via its parent, a kept block via its own stub).  This lets a
+        // block stacked just past another reach the trunk through a short
+        // inter-block edge instead of a long parallel stub (bundle 8: blk_09
+        // reaches the trunk via a short edge to blk_03, not its own long stub).
+        std::set<std::string> child_names;        // stubs the MST replaces
+        std::vector<bool> used_edge(mst_edges.size(), false);
+        if (simple && root_node >= 0) {
+            std::vector<std::vector<std::pair<int,int>>> adj(nodes.size());
+            for (int e = 0; e < (int)mst_edges.size(); ++e) {
+                adj[mst_edges[e].u].push_back({mst_edges[e].v, e});
+                adj[mst_edges[e].v].push_back({mst_edges[e].u, e});
+            }
+            std::vector<int> parent_edge(nodes.size(), -1);
+            std::vector<bool> seen(nodes.size(), false);
+            std::vector<int> frontier{root_node};
+            seen[root_node] = true;
+            for (size_t qi = 0; qi < frontier.size(); ++qi) {
+                int u = frontier[qi];
+                for (const auto& [v, e] : adj[u]) if (!seen[v]) {
+                    seen[v] = true; parent_edge[v] = e; frontier.push_back(v);
                 }
-                if (is_h) {
-                    // first perpendicular to trunk direction, then along it
-                    edge_segs.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-                    edge_segs.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
-                } else {
-                    edge_segs.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
-                    edge_segs.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+            }
+            for (int k = 0; k < (int)nodes.size(); ++k) {
+                if (k == root_node || parent_edge[k] < 0) continue;
+                if (mst_edges[parent_edge[k]].dist < node_trunk_dist[k]) {
+                    child_names.insert(nodes[k].first);
+                    used_edge[parent_edge[k]] = true;
                 }
             }
         }
-        if (!valid || edge_segs.empty()) continue;   // no usable shortcut edges
 
         std::string mst_type;
         {
@@ -2045,26 +2071,46 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 : trunk_topo.type + "+MST";
         }
 
-        // Legacy form: full trunk (every stub) + shortcut edges, annotated only.
-        // This is the historical un-completed hybrid; check_topo flags its relays
-        // as FEEDTHRU_RELAY.  It is the fallback when the tree form can't be cleanly
-        // completed.
-        auto build_legacy = [&]() {
-            Topology t = trunk_topo;
-            t.type = mst_type;
-            for (const auto& s : edge_segs) t.segments.push_back(s);
-            annotate_endpoints(t, blocks);
-            return t;
+        // Realize a chosen subset of MST edges into segments; returns false if any
+        // selected edge is too short to meet the min-stub floor (reject the whole
+        // candidate rather than emit an incomplete shortcut).
+        auto realize_edges = [&](const std::vector<bool>& take,
+                                 std::vector<Segment>& out) -> bool {
+            for (int e = 0; e < (int)mst_edges.size(); ++e) {
+                if (!take[e]) continue;
+                const Rect& r_u = nodes[mst_edges[e].u].second;
+                const Rect& r_v = nodes[mst_edges[e].v].second;
+                Point p1, p2;
+                closest_points(r_u, r_v, p1, p2);
+                if (p1.x == p2.x && p1.y == p2.y) continue;
+                if (p1.x == p2.x) {
+                    if (std::abs(p2.y - p1.y) < m_v) return false;
+                    out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+                } else if (p1.y == p2.y) {
+                    if (std::abs(p2.x - p1.x) < m_h) return false;
+                    out.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+                } else {
+                    // Diagonal L-shape: both legs must meet their minimum length.
+                    if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v)
+                        return false;
+                    if (is_h) {
+                        out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+                        out.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
+                    } else {
+                        out.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
+                        out.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+                    }
+                }
+            }
+            return true;
         };
 
-        // Completed-tree form (single-rect blocks with a stub-owning root): drop
-        // each non-root child's trunk stub so the MST edge REPLACES it, yielding a
-        // cycle-free trunk-rooted tree that complete_relay_junctions can wire up
-        // (single busterm tap per block + SEG junctions).  We accept it only when
-        // the result verifies as one SEG-connected component -- a stub that is
-        // collinear with an incident MST edge defeats ConnTopology's perpendicular
-        // junction inference, and those cases fall back to the legacy form.
-        if (simple && !child_names.empty()) {
+        // Completed-tree form (single-rect blocks, stub-owning root, >=1 beneficial
+        // shortcut): drop the replaced stubs, add their shortcut edges, complete
+        // the relays, and emit only if it verifies as one clean SEG-connected tree.
+        if (simple && root_node >= 0 && !child_names.empty()) {
+            std::vector<Segment> edge_segs;
+            if (!realize_edges(used_edge, edge_segs) || edge_segs.empty()) continue;
             Topology tree = trunk_topo;
             tree.type = mst_type;
             std::vector<Segment> kept;
@@ -2086,18 +2132,32 @@ void TopologyGenerator::add_trunk_mst_candidates(
             for (const auto& s : edge_segs) tree.segments.push_back(s);
             annotate_endpoints(tree, blocks);
             complete_relay_junctions(tree, blocks, floorplan_, h_layer_, v_layer_);
+            // connected_block_names is populated globally only after this pass
+            // (generate_candidates), so set it here so the gate's coverage check
+            // knows which blocks the tree must cover.
+            if (tree.connected_block_names.empty())
+                for (const auto& b : blocks)
+                    tree.connected_block_names.push_back(b.block_name);
             if (topology_is_clean_tree(tree, floorplan_))
                 results.push_back(std::move(tree));
-            // Otherwise a single-rect hybrid that cannot be cleanly completed
-            // (a stub collinear with an incident MST edge) is DROPPED rather than
-            // emitted as a feedthru/model-disconnected candidate: the base trunk
-            // and the (always-completed) standalone MST already cover this bundle,
-            // and dropping trims candidate noise.
+            // A simple hybrid that can't be cleanly completed is DROPPED (the base
+            // trunk + standalone MST already cover the bundle).
             continue;
         }
-        // Multi-rect / no stub-owning root: completion is out of scope, so emit
-        // the historical legacy hybrid (check_topo still flags its relays).
-        results.push_back(build_legacy());
+        // Simple but no beneficial shortcut: the plain trunk (and standalone MST)
+        // already cover this bundle -- skip the redundant hybrid.
+        if (simple && root_node >= 0) continue;
+
+        // Multi-rect / no stub-owning root: emit the historical legacy hybrid
+        // (full trunk + ALL shortcut edges, un-completed; check_topo flags relays).
+        std::vector<Segment> all_segs;
+        std::vector<bool> all_take(mst_edges.size(), true);
+        if (!realize_edges(all_take, all_segs) || all_segs.empty()) continue;
+        Topology legacy = trunk_topo;
+        legacy.type = mst_type;
+        for (const auto& s : all_segs) legacy.segments.push_back(s);
+        annotate_endpoints(legacy, blocks);
+        results.push_back(std::move(legacy));
     }
 }
 
