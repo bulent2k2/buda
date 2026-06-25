@@ -1287,7 +1287,7 @@ class BdbFloorplanner:
         view_w = xlim[1] - xlim[0]
         view_h = ylim[1] - ylim[0]
         # Ignore clicks that barely moved (accidental right-click release)
-        if box_w < view_w * 0.01 and box_h < view_h * 0.01:
+        if box_w < view_w * 0.01 or box_h < view_h * 0.01:
             self._fig.canvas.draw_idle()
             return
         if x1 > x0:
