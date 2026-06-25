@@ -2963,7 +2963,8 @@ class BudaVisualizer:
         # Build dummy data for ScalarMappable if we haven't already.
         import matplotlib.colors as mcolors
         import numpy as np
-        cmap = plt.cm.get_cmap('RdYlGn_r')
+        # plt.cm.get_cmap was removed in matplotlib 3.9; plt.get_cmap still works.
+        cmap = plt.get_cmap('RdYlGn_r')
 
         if self._cbar_ax is not None:
             try:

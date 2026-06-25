@@ -151,7 +151,7 @@ def test_comprehensive_demo():
 
 
 # ---------------------------------------------------------------------------
-# four_blocks_3_bundles.buda — 3 bundles, 6 segments, 0 track overlaps
+# four_blocks_3_bundles.buda — 6 bundles (b1..b6), 8 segments, 0 track overlaps
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -181,9 +181,10 @@ def test_two_rotated_buses():
 def test_four_blocks_3_bundles():
     out, rc = run_script("four_blocks_3_bundles.buda")
     assert_clean(out, rc, "four_blocks_3_bundles.buda")
-    assert "Bundler created 3 hbundles." in out
+    assert "Bundler created 6 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)
-    assert segs  == 4   # b1=I_H(1), b2=I_V(1), b3=L_HV(2)
+    # b1=I_H(1), b2=I_V(1), b3=L_HV(2), b4=I_H(1), b5=I_V(1), b6=L_HV(2)
+    assert segs  == 8
     assert ovlps == 0
 
 
