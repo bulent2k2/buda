@@ -756,9 +756,12 @@ class BdbFloorplanner:
                 ax.text(block.x1 + 4, block.y1 + 4, label,
                         fontsize=7.5, color="#0f172a", va="bottom", clip_on=True, zorder=3)
             
-            # Corner handles for selected block
+            # Corner + mid-edge handles for selected block
             if selected:
                 HS = max(vis_ref * 0.005, 1.0)
+                mx = (block.x1 + block.x2) / 2
+                my = (block.y1 + block.y2) / 2
+                # Corner handles (square, white) — drag moves two edges at once
                 for corner, (cx, cy) in [
                         ("tl", (block.x1, block.y1)),
                         ("tr", (block.x2, block.y1)),
@@ -770,6 +773,19 @@ class BdbFloorplanner:
                         linewidth=1.0, zorder=5, picker=True)
                     ax.add_patch(hp)
                     self._handle_patches.append((hp, name, corner))
+                # Mid-edge handles (diamond, cyan) — drag moves one edge only
+                for edge, (cx, cy) in [
+                        ("l",  (block.x1, my)),
+                        ("r",  (block.x2, my)),
+                        ("t",  (mx, block.y1)),
+                        ("b",  (mx, block.y2))]:
+                    diamond = mpatches.RegularPolygon(
+                        (cx, cy), numVertices=4, radius=HS * 1.3,
+                        orientation=0,
+                        facecolor="#22d3ee", edgecolor="#0e7490",
+                        linewidth=1.0, zorder=5, picker=True)
+                    ax.add_patch(diamond)
+                    self._handle_patches.append((diamond, name, edge))
 
         # Depth overlay: draw child blocks above parents so they are visible
         if extra_levels > 0:
@@ -1098,6 +1114,49 @@ class BdbFloorplanner:
             self.state.selected = None
             self._draw()
 
+    # ------------------------------------------------------------------
+    # Snapping helpers
+    # ------------------------------------------------------------------
+
+    def _snap(self, val: float, candidates: list, grid: float,
+              view_span: float) -> float:
+        """Snap val to the nearest candidate within 4 % of view_span, else to grid."""
+        threshold = view_span * 0.04
+        best, best_d = None, threshold
+        for c in candidates:
+            d = abs(val - c)
+            if d < best_d:
+                best, best_d = c, d
+        return best if best is not None else round(val / grid) * grid if grid > 0 else val
+
+    def _hanan_xs(self, exclude: str | None = None) -> list:
+        """All block x1/x2 coordinates (+ die boundaries) for X-axis snapping."""
+        xs = [0.0, self.state.engine.die_w()]
+        for n in self.state.block_names:
+            if n == exclude:
+                continue
+            try:
+                b = self.state.block(n)
+                xs.extend([b.x1, b.x2])
+            except Exception:
+                pass
+        return xs
+
+    def _hanan_ys(self, exclude: str | None = None) -> list:
+        """All block y1/y2 coordinates (+ die boundaries) for Y-axis snapping."""
+        ys = [0.0, self.state.engine.die_h()]
+        for n in self.state.block_names:
+            if n == exclude:
+                continue
+            try:
+                b = self.state.block(n)
+                ys.extend([b.y1, b.y2])
+            except Exception:
+                pass
+        return ys
+
+    # ------------------------------------------------------------------
+
     def _on_motion(self, event):
         if not self._drag or event.inaxes != self._ax:
             return
@@ -1111,14 +1170,21 @@ class BdbFloorplanner:
             corner = self._drag["corner"]
             b = self.state.block(name)
             x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
+            grid = self.state.engine.grid()
+            xlim = self._ax.get_xlim()
+            ylim = self._ax.get_ylim()
+            xspan = xlim[1] - xlim[0]
+            yspan = ylim[1] - ylim[0]
+            hxs = self._hanan_xs(exclude=name)
+            hys = self._hanan_ys(exclude=name)
             if "l" in corner:
-                x1 = event.xdata
+                x1 = self._snap(event.xdata, hxs, grid, xspan)
             if "r" in corner:
-                x2 = event.xdata
+                x2 = self._snap(event.xdata, hxs, grid, xspan)
             if "t" in corner:
-                y1 = event.ydata
+                y1 = self._snap(event.ydata, hys, grid, yspan)
             if "b" in corner:
-                y2 = event.ydata
+                y2 = self._snap(event.ydata, hys, grid, yspan)
             fpc.resize_block(self.state, name, x1, y1, x2, y2)
             self._draw()
 
