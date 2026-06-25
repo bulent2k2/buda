@@ -2144,9 +2144,13 @@ void TopologyGenerator::add_trunk_mst_candidates(
             // trunk + standalone MST already cover the bundle).
             continue;
         }
-        // Simple but no beneficial shortcut: the plain trunk (and standalone MST)
-        // already cover this bundle -- skip the redundant hybrid.
-        if (simple && root_node >= 0) continue;
+        // Simple but no beneficial shortcut.  For >=4 blocks a standalone MST
+        // candidate is generated separately (add_mst_candidates), so the plain
+        // trunk plus that standalone MST already cover the bundle -- skip the
+        // redundant hybrid.  For <4 blocks add_mst_candidates bails (no standalone
+        // MST exists), so this hybrid is the bundle's only MST-type coverage:
+        // fall through to the legacy hybrid below instead of dropping it.
+        if (simple && root_node >= 0 && blocks.size() >= 4) continue;
 
         // Multi-rect / no stub-owning root: emit the historical legacy hybrid
         // (full trunk + ALL shortcut edges, un-completed; check_topo flags relays).
