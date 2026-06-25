@@ -210,19 +210,24 @@ def _seg_has_cycle(ct):
     return False
 
 
-def test_completion_adds_wire_for_relay_block():
-    """The staircase MST has a relay block (degree >= 2) and completion adds the
-    bridging wire.  The raw (un-completed) MST of this 4-block staircase has
-    exactly 6 segments (3 diagonal L-edges); completion adds connectors so the
-    candidate carries strictly more, and its wirelength is no longer understated."""
+def test_completion_bridges_relay_block():
+    """The staircase MST has a relay block (degree >= 2); completion bridges it so
+    its wirelength is no longer understated.  The raw (un-completed) MST of this
+    4-block staircase has 6 segments (3 diagonal L-edges).  Completion either ADDS
+    a JOG connector or EXTENDS the incident stubs to meet over the cell (orthogonal
+    relays) -- it never drops an MST edge -- so the candidate keeps >= 6 segments
+    and is ONE physically connected component (no through-block relay)."""
     coords, src, dsts = STAIRCASE
     fp = _make_fp(coords)
     msts = _mst_cands(_gen(fp).generate_candidates(src, dsts))
     assert msts
     for c in msts:
-        assert len(c.segments) > 6, (
-            f"{c.type}: expected completion connectors beyond the 6 raw edge "
-            f"segments, got {len(c.segments)}"
+        assert len(c.segments) >= 6, (
+            f"{c.type}: completion dropped an MST edge, got {len(c.segments)}"
+        )
+        assert _num_geom_components(c.segments) == 1, (
+            f"{c.type}: relay not bridged -- {_num_geom_components(c.segments)} "
+            f"geometric components"
         )
 
 
@@ -411,6 +416,89 @@ def test_wide_relay_completion_is_clean():
         assert not _seg_has_cycle(ct), f"{c.type}: wire cycle"
         multi = {b: sorted(s) for b, s in _busterm_taps(ct).items() if len(s) > 1}
         assert not multi, f"{c.type}: double-tapped {multi}"
+
+
+# ── orthogonal relay: OTC pass-through extension ──────────────────────────────
+
+def test_orthogonal_relay_extends_without_L_connector():
+    """A relay block touched by exactly two orthogonal stubs (one H, one V) is
+    wired by EXTENDING both stubs over the cell to meet at the corner, not by an L
+    connector.  So the block has NO segment endpoint on its face (no busterm tap)
+    and is covered by the crossing wires (pass-through).  Regression for
+    flow/big_data_test/big.buda bundle 3 / blk_19, where the L (one H + one V) was
+    redundant.  This R block has a V stub from below and an H stub from the right
+    -- orthogonal -- so completion must extend, leaving no tap and no FEEDTHRU."""
+    coords = {"S": (0, 0, 100, 100), "R": (300, 300, 500, 500),
+              "B": (350, 700, 450, 800), "E": (800, 350, 900, 450)}
+    fp = _make_fp(coords)
+    cands = _gen(fp).generate_candidates("S", ["R", "B", "E"])
+    relayish = [c for c in cands if c.type.startswith("MST_") or "+MST" in c.type]
+    assert relayish
+    saw_extension = False
+    for c in relayish:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        assert _feedthru_count(ct, c, fp) == 0, f"{c.type}: FEEDTHRU_RELAY"
+        assert _seg_components(ct) == 1, f"{c.type}: {_seg_components(ct)} SEG comps"
+        # If R is wired purely by extension it holds no busterm tap (pass-through).
+        if "R" not in _busterm_taps(ct):
+            # verify R is still covered: some segment overlaps R's footprint.
+            rx1, ry1, rx2, ry2 = coords["R"]
+            covered = any(
+                (s.start.y == s.end.y
+                 and ry1 <= s.start.y <= ry2
+                 and min(s.start.x, s.end.x) <= rx2 and max(s.start.x, s.end.x) >= rx1)
+                or (s.start.x == s.end.x
+                    and rx1 <= s.start.x <= rx2
+                    and min(s.start.y, s.end.y) <= ry2 and max(s.start.y, s.end.y) >= ry1)
+                for s in c.segments)
+            assert covered, f"{c.type}: R untapped AND uncovered"
+            saw_extension = True
+    assert saw_extension, "no orthogonal-relay extension exercised — test is vacuous"
+
+
+# The six blocks of flow/big_data_test/big.buda bundle 3 (driver blk_01).  blk_09
+# is a parallel relay: an H trunk tap on its EAST face + the H MST edge on its
+# WEST face, at different rows.
+_B3 = {"blk_01": (10680, 2310, 13580, 3310), "blk_34": (200, 3400, 1400, 4100),
+       "blk_39": (11280, 7150, 13580, 9050), "blk_09": (7810, 5520, 10710, 6020),
+       "blk_19": (200, 5540, 2100, 6840), "io_pad_br": (12580, 200, 13580, 1000)}
+
+
+def test_parallel_relay_joined_by_single_jog():
+    """A relay touched by two PARALLEL stubs (both H here: blk_09's east trunk tap
+    + west MST edge, at different rows) is wired by extending both stubs over the
+    cell to a common column and joining them with ONE perpendicular (V) jog -- not
+    the old 3-piece V-H-V dogleg.  The block then holds no busterm tap (covered by
+    the crossing wires), and the jog's slide is bounded to the cell extent so NUTS
+    keeps the two stubs flexible.  Regression for big.buda bundle 3 / blk_09."""
+    fp = _make_fp(_B3)
+    cands = _gen(fp).generate_candidates(
+        "blk_01", ["blk_34", "blk_39", "blk_09", "blk_19", "io_pad_br"])
+    relayish = [c for c in cands if c.type.startswith("MST_") or "+MST" in c.type]
+    assert relayish
+    bx1, by1, bx2, by2 = _B3["blk_09"]
+    saw_jog = False
+    for c in relayish:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        assert _feedthru_count(ct, c, fp) == 0, f"{c.type}: FEEDTHRU_RELAY"
+        assert _seg_components(ct) == 1, f"{c.type}: {_seg_components(ct)} SEG comps"
+        if "blk_09" in _busterm_taps(ct):
+            continue                          # tapped here, not the pass-through shape
+        # blk_09 is pass-through: a short V jog strictly inside it joins two H stubs.
+        for cs in ct.segs():
+            if cs.horiz:
+                continue
+            if not (bx1 < cs.perp_pos < bx2):     # jog column over the cell
+                continue
+            if by1 <= cs.along_lo and cs.along_hi <= by2 and cs.along_lo != cs.along_hi:
+                # its slide range is bounded to the cell's x-extent (flexibility)
+                assert bx1 <= cs.perp_lo and cs.perp_hi <= bx2 and cs.perp_lo < cs.perp_hi, (
+                    f"{c.type}: jog slide [{cs.perp_lo},{cs.perp_hi}] not bounded to "
+                    f"cell x [{bx1},{bx2}]")
+                saw_jog = True
+    assert saw_jog, "no parallel-relay V jog exercised — test is vacuous"
 
 
 # ── verifier safety-net (FEEDTHRU_RELAY) ──────────────────────────────────────

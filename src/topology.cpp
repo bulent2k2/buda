@@ -922,7 +922,77 @@ static void complete_relay_junctions(Topology& topo,
         }
     };
 
+    // ── 2-stub relay: OTC pass-through extension ─────────────────────────────
+    // A relay block touched by exactly two stubs is wired by EXTENDING the stubs
+    // over the cell (OTC) so the block is COVERED by the crossing wires
+    // (seg_spans_rect pass-through): no busterm tap, and no segment endpoint on
+    // its face, so the FEEDTHRU check does not gather it.  Two shapes:
+    //   • ORTHOGONAL (one H, one V): extend both to the corner (V's column, H's
+    //     row); they meet there, no connector needed.
+    //   • PARALLEL (both H or both V): extend both to a common jog line over the
+    //     cell and add ONE perpendicular jog joining them.  Because both stubs
+    //     now span the block, tighten_passthrough_ranges bounds the jog's slide
+    //     to the cell extent, so NUTS keeps the two stubs flexible -- if their
+    //     perpendicular slides overlap, the jog shrinks to zero and they merge
+    //     into one straight wire through the block.
+    std::set<int> otc_handled;
     for (auto& [bi, pts] : incident) {
+        if (pts.size() != 2 || all_land[bi].size() != 2) continue;  // clean 2-stub only
+        const Inc& A = pts[0];
+        const Inc& B = pts[1];
+        // Guard: a landing point that also lies on ANOTHER block's boundary (an
+        // adjacent / corner-touching block) may be that block's only pass-through
+        // coverage; moving the endpoint inward could leave it with neither a
+        // busterm nor a spanning segment.  Skip the OTC extension for such a relay
+        // and let the general chaining (which keeps a tap) wire it instead.
+        auto on_other_boundary = [&](const Point& P) {
+            for (int bj = 0; bj < (int)blocks.size(); ++bj) {
+                if (bj == bi) continue;
+                const Rect& r = blocks[bj].orig_bbox;
+                bool onx = (P.x == r.x1 || P.x == r.x2) && P.y >= r.y1 && P.y <= r.y2;
+                bool ony = (P.y == r.y1 || P.y == r.y2) && P.x >= r.x1 && P.x <= r.x2;
+                if (onx || ony) return true;
+            }
+            return false;
+        };
+        if (on_other_boundary(A.p) || on_other_boundary(B.p)) continue;
+        bool handled = true;
+        if (A.seg_horiz != B.seg_horiz) {
+            // ORTHOGONAL: extend to the corner (V's column, H's row).
+            const Inc& Vs = A.seg_horiz ? B : A;
+            const Inc& Hs = A.seg_horiz ? A : B;
+            int cx = Vs.p.x, cy = Hs.p.y;
+            { Segment& s = topo.segments[Vs.seg_idx]; ((Vs.ep == 0) ? s.start : s.end).y = cy; }
+            { Segment& s = topo.segments[Hs.seg_idx]; ((Hs.ep == 0) ? s.start : s.end).x = cx; }
+        } else if (A.seg_horiz && A.p.y != B.p.y) {
+            // PARALLEL H stubs (land on vertical faces): extend to a common
+            // column over the cell and join their two rows with a V jog.
+            int xj = (A.p.x + B.p.x) / 2;
+            { Segment& s = topo.segments[A.seg_idx]; ((A.ep == 0) ? s.start : s.end).x = xj; }
+            { Segment& s = topo.segments[B.seg_idx]; ((B.ep == 0) ? s.start : s.end).x = xj; }
+            emit(xj, A.p.y, xj, B.p.y, v_layer);
+        } else if (!A.seg_horiz && A.p.x != B.p.x) {
+            // PARALLEL V stubs (land on horizontal faces): extend to a common
+            // row over the cell and join their two columns with an H jog.
+            int yj = (A.p.y + B.p.y) / 2;
+            { Segment& s = topo.segments[A.seg_idx]; ((A.ep == 0) ? s.start : s.end).y = yj; }
+            { Segment& s = topo.segments[B.seg_idx]; ((B.ep == 0) ? s.start : s.end).y = yj; }
+            emit(A.p.x, yj, B.p.x, yj, h_layer);
+        } else {
+            handled = false;   // degenerate same-perp parallel: leave to chaining
+        }
+        if (!handled) continue;
+        // Drop the block's busterm on both stubs: it is covered by the crossing
+        // wires (a pass-through), not tapped at a face endpoint.
+        for (const Inc& q : {A, B}) {
+            auto& ep = topo.seg_busterms[q.seg_idx];
+            ((q.ep == 0) ? ep.first : ep.second) = std::nullopt;
+        }
+        otc_handled.insert(bi);
+    }
+
+    for (auto& [bi, pts] : incident) {
+        if (otc_handled.count(bi)) continue; // wired by the OTC extension above
         if (pts.size() < 2) continue;        // leaf terminal: nothing to relay
         // Chain the landings (sorted) so all incident segments end up in one
         // wire-connected component through the block's junction.
@@ -955,6 +1025,7 @@ static void complete_relay_junctions(Topology& topo,
     // along the block faces, so tapping a stub (which slides ALONG its face)
     // keeps the single anchor cleanly on the block.
     for (auto& [bi, lands] : all_land) {
+        if (otc_handled.count(bi)) continue; // no tap: covered by the OTC crossing
         const Rect& bb = blocks[bi].orig_bbox;
         auto flex = [&](const Inc& q) {
             return q.seg_horiz ? (bb.y2 - bb.y1) : (bb.x2 - bb.x1);
