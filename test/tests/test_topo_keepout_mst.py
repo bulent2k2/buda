@@ -398,6 +398,31 @@ def test_mst_any_for_3_blocks():
     )
 
 
+def test_mst_any_for_3_blocks_no_beneficial_shortcut():
+    """3-block bundle keeps MST coverage even when no inter-block edge beats a stub.
+
+    The selective trunk+MST stub replacement only drops a stub when its MST parent
+    edge is a strict shortcut. When no block has a beneficial shortcut, the
+    completed-tree form is skipped -- and since standalone MST needs N>=4, the
+    TRUNK+MST hybrid is the only MST-type coverage for N=3, so it must still be
+    emitted (regression guard for the <4-block fall-through to the legacy hybrid).
+    """
+    # Three blocks spread along a row: short perpendicular stubs to the trunk,
+    # long inter-block edges -- a configuration prone to having no shortcut.
+    fp = buda.Floorplan()
+    fp.add_block("A", 862, 331, 962, 431)
+    fp.add_block("B", 236, 923, 336, 1023)
+    fp.add_block("C", 342, 1394, 442, 1494)
+
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C"])
+    mst_cands = [c for c in cands if "MST" in c.type]
+    assert len(mst_cands) > 0, (
+        f"Expected MST-type coverage for 3 blocks with no beneficial shortcut. "
+        f"Got types: {_type_set(cands)}"
+    )
+
+
 def test_mst_not_generated_for_2_blocks():
     """No MST-type candidate is generated for 2 blocks (degenerates to L/Z/U shapes)."""
     fp = buda.Floorplan()

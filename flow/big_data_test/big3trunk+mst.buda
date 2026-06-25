@@ -1,0 +1,175 @@
+# big3.buda — bundles 57/46/50 (TRUNK+MST variant) extracted from big.buda
+# bundle 57 = bus_030 (48 wide), bundle 50 = bus_047 (84 wide), bundle 46 = bus_069 (18 wide)
+# Full floorplan kept so topology generation (Hanan grid / pass-through) matches the full run.
+# Renumbered in source order: bundle 1 = bus_030, bundle 2 = bus_047, bundle 3 = bus_069.
+
+source ../tracks4top.buda
+
+set_die 30000 24000
+add_block blk_00 2960 7760 4560 9160
+add_block blk_01 10680 2310 13580 3310
+add_block blk_02 9180 11600 11980 12800
+add_block blk_03 7810 4240 10710 5140
+add_block blk_04 6630 200 8130 1200
+add_block blk_05 2660 6690 3860 7390
+add_block blk_06 200 9460 2700 10560
+add_block blk_07 2960 9750 4660 10250
+add_block blk_08 200 4370 2300 5270
+add_block blk_09 7810 5520 10710 6020
+add_block blk_10 8090 3050 9690 3950
+add_block blk_11 2660 3840 3660 5140
+add_block blk_12 11380 9340 13580 11140
+add_block blk_13 5850 2310 7050 3610
+add_block blk_14 4920 5340 6820 6540
+add_block blk_15 4900 6930 7200 8730
+add_block blk_16 200 1170 2290 3130
+add_block blk_17 6660 11300 8760 12800
+add_block blk_18 4380 4140 7180 4940
+add_block blk_19 200 5540 2100 6840
+add_block blk_20 2960 10900 5960 12800
+add_block blk_21 8210 6400 10710 7300
+add_block blk_22 11380 4970 13580 6870
+add_block blk_23 200 10830 2700 11830
+add_block blk_24 9250 7990 10950 9090
+add_block blk_25 8260 200 9560 1800
+add_block blk_26 4890 200 6490 1800
+add_block blk_27 2660 2370 4860 3670
+add_block blk_28 7740 9330 10440 10630
+add_block blk_29 11580 3780 13580 4680
+add_block blk_30 9690 200 12290 2200
+add_block blk_31 200 7990 2700 9190
+add_block blk_32 4870 9430 7470 10630
+add_block blk_33 7740 7490 9140 9090
+add_block blk_34 200 3400 1400 4100
+add_block blk_35 2660 200 4760 2100
+add_block blk_36 8090 2310 10090 2810
+add_block blk_37 240 7120 2340 7720
+add_block blk_38 2660 5470 4160 6370
+add_block blk_39 11280 7150 13580 9050
+add_block io_pad_bl 200 200 1200 1000
+add_block io_pad_br 12580 200 13580 1000
+add_block io_pad_tl 200 12000 1200 12800
+add_block io_pad_tr 12580 12000 13580 12800
+
+# --- bundle 1 (was 57): bus_030 ---
+add_net bus_030_b00 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b01 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b02 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b03 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b04 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b05 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b06 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b07 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b08 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b09 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b10 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b11 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b12 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b13 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b14 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b15 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b16 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b17 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b18 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b19 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b20 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b21 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b22 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b23 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b24 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b25 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b26 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b27 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b28 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b29 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b30 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+add_net bus_030_b31 blk_29.p blk_22.p,blk_08.p,blk_14.p,blk_18.p
+
+# --- bundle 2 (was 50): bus_047 ---
+add_net bus_047_b00 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b01 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b02 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b03 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b04 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b05 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b06 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b07 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b08 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b09 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b10 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b11 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b12 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b13 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b14 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b15 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b16 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b17 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b18 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b19 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b20 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b21 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b22 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b23 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b24 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b25 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b26 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b27 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b28 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b29 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b30 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b31 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b32 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b33 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b34 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b35 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b36 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b37 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b38 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b39 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b40 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b41 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b42 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b43 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b44 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b45 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b46 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b47 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b48 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b49 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b50 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b51 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b52 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b53 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b54 blk_27.p blk_36.p,blk_11.p,blk_26.p
+add_net bus_047_b55 blk_27.p blk_36.p,blk_11.p,blk_26.p
+
+# --- bundle 3 (was 46): bus_069 ---
+add_net bus_069_b00 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b01 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b02 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b03 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b04 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b05 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b06 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b07 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b08 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b09 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b10 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+add_net bus_069_b11 blk_25.p blk_21.p,blk_27.p,blk_18.p,io_pad_tl.p
+
+run_bundler
+generate_topologies
+
+# Select the "best" (lowest-WL) TRUNK_V|H+MST hybrid candidate for each bundle.
+# bundle 1 (bus_069/old-46): idx10 TRUNK_V+MST@x7695
+# bundle 2 (bus_047/old-50): idx4  TRUNK_V+MST@x4260
+# bundle 3 (bus_030/old-57): idx6  TRUNK_V+MST@x5870
+select_topology 1 10
+select_topology 2 4
+select_topology 3 6
+run_planner
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity
+visualize
