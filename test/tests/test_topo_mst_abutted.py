@@ -102,6 +102,33 @@ def test_mst_connects_both_abutment_orientations():
         )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Deferred (same gap as topo-norm defect 2): an internal abutted node "
+    "whose two shared edges are COLLINEAR (A-B-C in a straight line) cannot be "
+    "joined — ConnTopology infers only perpendicular junctions, so the MST keeps "
+    "a FEEDTHRU_RELAY. Needs collinear-join inference; a landing-registration "
+    "tweak cascades through filter_pinched. Will XPASS once collinear-join lands. "
+    "See docs/internal/mst-abutted-blocks.md.",
+)
+def test_mst_collinear_internal_abutted_chain():
+    """Straight A-B-C abutment chain (B internal, both shared edges horizontal)."""
+    coords = {
+        "A": (0,   0,   100, 100),
+        "B": (100, 0,   200, 100),   # abuts A on x=100
+        "C": (200, 0,   300, 100),   # abuts B on x=200 (collinear with A-B at B)
+        "D": (600, 500, 700, 600),
+    }
+    fp = _make_fp(coords)
+    cands = _gen(fp).generate_candidates("A", ["B", "C", "D"])
+    mst = [c for c in cands if c.type.startswith("MST_")]
+    assert mst, "expected standalone MST candidates for 4 blocks"
+    for c in mst:
+        assert "FEEDTHRU_RELAY" not in _violations(c, fp), (
+            f"{c.type} collinear internal abutted node unjoined: {_violations(c, fp)}"
+        )
+
+
 # ── end-to-end repro ──────────────────────────────────────────────────────────
 
 @pytest.mark.mid

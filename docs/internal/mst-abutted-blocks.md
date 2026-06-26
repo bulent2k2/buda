@@ -106,6 +106,29 @@ The change is surgical: non-abutting MST edges never enter the `p1 == p2` branch
 so every design without edge-sharing blocks is byte-for-byte unchanged (verified:
 `tc3a_flat_x10` has zero abutting pairs and its routing is identical pre/post fix).
 
+## Limitation: collinear internal abutted nodes (deferred)
+
+The shared-edge segment lands on both abutting blocks, and `complete_relay_junctions`
+wires an internal abutted node's incident edges **when they are orthogonal** to the
+abutment (the common case — e.g. `big2_b1`'s blk_00 deg-3 / blk_33 deg-2, which
+verify clean). It does **not** fully connect an internal node whose two shared
+edges are **collinear** — a straight A–B–C chain where A, B, C share parallel
+edges. `ConnTopology` infers only **perpendicular** joins (it skips
+same-orientation segments), so B's two collinear shared edges cannot be joined
+end-to-end and the `MST_HV`/`MST_VH` candidate carries a `FEEDTHRU_RELAY` (the
+planner avoids it, but the candidate is not clean).
+
+This is the same architectural gap as **defect 2** in
+[topo-norm-phase2-deferred.md](topo-norm-phase2-deferred.md): the complete fix is
+collinear (end-to-end) join inference in `ConnTopology`, after which the abutment
+landing produced here connects the chain. A naive "register the shared landing on
+both blocks" tweak (dropping the first-match `break` in `complete_relay_junctions`)
+does **not** suffice — it fixes the straight chain but cascades through
+`filter_pinched`: the orthogonal-abutment geometry then loses its MST candidate to
+a zero-slide connector, removing valid candidates. So the collinear-internal case
+is deferred to the collinear-join work; this fix covers leaf and orthogonal-internal
+abutment, which is what the repro needs.
+
 ## Verification
 
 - `./buda --no-viz flow/big_data_test/big2_b1_bus_007.buda`:
