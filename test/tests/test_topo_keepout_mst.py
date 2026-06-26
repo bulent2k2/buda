@@ -459,14 +459,47 @@ def test_mst_any_for_3_blocks_no_beneficial_shortcut():
     )
 
 
+def test_mst_coverage_for_non_simple_3_blocks():
+    """A NON-simple 3-block bundle (multi-rect/TEG branch) still gets MST coverage.
+
+    The forced trunk-rooted tree only fires for the 'simple' case (all branch blocks
+    single-rect with a stub-owning root).  A multi-rect/TEG branch falls through to
+    the legacy hybrid, which the clean-tree gate may drop when completion can't form a
+    tree without dangling the branch's bridge.  Because add_mst_candidates emits no
+    standalone MST_* below 4 blocks, dropping every trunk position would leave the
+    bundle with no MST-type coverage at all -- so add_trunk_mst_candidates keeps a
+    single un-completed hybrid as a last-resort coverage fallback (its over-counted
+    wirelength keeps the planner from ever preferring it to the plain trunk).  Either
+    way the bundle must retain at least one MST-type candidate.  (Regression guard for
+    the P2 review on PR #55: non-simple <4-block hybrids must not silently lose MST
+    coverage.)
+    """
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 80, 80)            # driver, single-rect
+    fp.add_block("B", 600, 0, 680, 80)         # single-rect branch
+    # Multi-rect (TEG-OVER) branch -> the bundle is 'non-simple'.
+    fp.add_block_rects("C", [(200, 200, 280, 280), (200, 460, 280, 540)],
+                       teg_mode=buda.TegMode.OVER)
+
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C"])
+    mst_cands = [c for c in cands if "MST" in c.type]
+    assert len(mst_cands) > 0, (
+        f"Non-simple 3-block bundle lost all MST-type coverage. "
+        f"Got types: {_type_set(cands)}"
+    )
+
+
 def test_trunk_mst_candidates_are_clean_trees():
     """Every generated trunk+MST candidate is a physically self-connected tree.
 
     Defect-3 gate: the legacy hybrid path (full trunk + ALL edges) is cyclic, so it
     is now routed through complete_relay_junctions + topology_is_clean_tree and a
     candidate that cannot be cleanly completed is DROPPED rather than emitted with a
-    silent through-block relay.  No emitted +MST / MST_* candidate may therefore carry
-    a FEEDTHRU_RELAY violation (which understates wirelength and is not a real wire).
+    silent through-block relay.  For >=4 blocks (this config) the base trunk +
+    standalone MST_* cover the bundle, so no +MST / MST_* candidate may carry a
+    FEEDTHRU_RELAY violation.  (The only exception is the <4-block last-resort coverage
+    fallback, which cannot apply here -- see test_mst_coverage_for_non_simple_3_blocks.)
     """
     fp = buda.Floorplan()
     # 4 blocks: B/C straddle the trunk row at very different x, D sits off-spine --

@@ -2025,6 +2025,15 @@ void TopologyGenerator::add_trunk_mst_candidates(
     int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
     int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/,   v_layer_);
 
+    // <4-block coverage fallback: a non-simple hybrid (multi-rect/TEG branch, or no
+    // stub-owning root) whose completion is not a clean tree is normally dropped --
+    // but for <4-block bundles add_mst_candidates emits no standalone MST_*, so if
+    // EVERY trunk position drops, the bundle is left with no MST-type coverage at
+    // all (regressing ad29c1f's 3-pin intent).  Stash the un-completed hybrids here
+    // and emit ONE only if no clean MST candidate was produced for the whole bundle,
+    // so configs that already have clean coverage don't get an extra relay candidate.
+    std::vector<Topology> fallback_pool;
+
     for (int ti = 0; ti < orig_count; ++ti) {
         const Topology& trunk_topo = results[ti];
         bool is_h = (trunk_topo.type.find("TRUNK_H") != std::string::npos);
@@ -2265,13 +2274,51 @@ void TopologyGenerator::add_trunk_mst_candidates(
         Topology legacy = trunk_topo;
         legacy.type = mst_type;
         for (const auto& s : all_segs) legacy.segments.push_back(s);
+        // Snapshot the un-completed hybrid BEFORE completion mutates it -- it is the
+        // <4-block coverage fallback below.
+        Topology uncompleted = legacy;
         annotate_endpoints(legacy, blocks);
         complete_relay_junctions(legacy, blocks, floorplan_, h_layer_, v_layer_);
         if (legacy.connected_block_names.empty())
             for (const auto& b : blocks)
                 legacy.connected_block_names.push_back(b.block_name);
-        if (topology_is_clean_tree(legacy, floorplan_))
+        if (topology_is_clean_tree(legacy, floorplan_)) {
             results.push_back(std::move(legacy));
+        } else if (blocks.size() < 4) {
+            // Completion could not yield a clean tree (e.g. a multi-rect/TEG branch
+            // whose stubs can't be dropped without dangling its bridge, or no
+            // stub-owning root).  Defer it to the post-loop coverage fallback rather
+            // than dropping outright: check_topo flags its relay, but its wirelength
+            // is honestly over-counted (full trunk + every edge), so even if it is
+            // the bundle's only MST option the planner never prefers it to the plain
+            // trunk.  For >=4 blocks the base trunk + standalone MST already cover
+            // the bundle, so non-simple hybrids are dropped (not pooled).
+            annotate_endpoints(uncompleted, blocks);
+            for (const auto& b : blocks)
+                uncompleted.connected_block_names.push_back(b.block_name);
+            fallback_pool.push_back(std::move(uncompleted));
+        }
+    }
+
+    // Emit a single un-completed fallback ONLY if the whole bundle produced no clean
+    // MST-type candidate (neither here nor in the completed-tree path above) -- so a
+    // <4-block bundle never loses MST coverage, without padding bundles that already
+    // have clean hybrids with redundant relay candidates.  Pick the shortest pooled
+    // hybrid (least wasted wire) for the coverage role.
+    bool any_mst = false;
+    for (int i = orig_count; i < (int)results.size(); ++i)
+        if (results[i].type.find("MST") != std::string::npos) { any_mst = true; break; }
+    if (!any_mst && !fallback_pool.empty()) {
+        auto seg_len = [](const Topology& t) {
+            int wl = 0;
+            for (const auto& s : t.segments)
+                wl += std::abs(s.end.x - s.start.x) + std::abs(s.end.y - s.start.y);
+            return wl;
+        };
+        size_t best = 0;
+        for (size_t i = 1; i < fallback_pool.size(); ++i)
+            if (seg_len(fallback_pool[i]) < seg_len(fallback_pool[best])) best = i;
+        results.push_back(std::move(fallback_pool[best]));
     }
 }
 
