@@ -272,6 +272,9 @@ class BdbFloorplanner:
         self.root.bind("h", lambda e: self._home_view())
         self.root.bind("H", lambda e: self._home_view())
 
+        # v — run validation
+        self.root.bind("v", lambda e: self._validate_if_focused())
+
         # Esc — clear block selection
         self.root.bind("<Escape>", lambda e: self._clear_canvas_sel())
 
@@ -568,6 +571,13 @@ class BdbFloorplanner:
                 f"Optimize: HPWL={r.hpwl:.1f}  overlap={r.overlap:.1f}  "
                 f"({r.iterations} iter)"
             )
+
+    def _validate_if_focused(self):
+        """Run validate only when no text widget has keyboard focus (avoids eating 'v' in entry fields)."""
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        self._validate()
 
     def _validate(self):
         issues = fpc.validate(self.state)

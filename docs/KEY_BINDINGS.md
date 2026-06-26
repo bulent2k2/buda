@@ -58,15 +58,32 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 
 ## Floorplanner (`bdb_floorplanner.py`)
 
+### Mouse
+
 | Interaction | Action |
 | :--- | :--- |
 | **Right-drag LR** (lower-left → upper-right) | **Zoom In**: fit the drawn box to the viewport (blue rubber band). |
 | **Right-drag RL** (upper-right → lower-left) | **Zoom Out**: expand the view so the current viewport fits in the drawn box (orange rubber band). |
-| `z` | **Zoom In** one step, centered on the cursor. |
-| `Z` (Shift+z) | **Zoom Out** one step, centered on the cursor. |
-| Scroll wheel | **Zoom** in or out, centered on the cursor. |
 | **Left-drag block** | **Move** the block (snaps to placement grid). |
 | **Left-drag corner handle** | **Resize** block (two edges at once, snaps to Hanan grid / block edges). |
 | **Left-drag mid-edge handle** | **Resize** one edge (snaps to Hanan grid / block edges). |
 | **Double-click block** | **Drill into** the block (view its children). |
 | **Shift+click** | **Multi-select** blocks on the canvas. |
+
+### Keyboard
+
+| Key(s) | Action |
+| :--- | :--- |
+| `h`, `H` | **Home**: reset zoom to the full auto-fit view. |
+| `z` | **Zoom In** one step, centered on the cursor. |
+| `Z` (Shift+z) | **Zoom Out** one step, centered on the cursor. |
+| `←` `→` `↑` `↓` | **Pan** the view (when no block is selected). |
+| `←` `→` `↑` `↓` | **Nudge** the selected block(s) by one grid step (when a block is selected). |
+| `ctrl/cmd` + `←` `→` `↑` `↓` | **Align** selected blocks left / right / top / bottom. |
+| `ctrl/cmd+shift` + `←` `→` | **Distribute** selected blocks horizontally / vertically. |
+| `v` | **Validate**: run overlap / out-of-die checks and show results in the sidebar. |
+| `Esc` | **Deselect** all blocks. |
+| `ctrl+z` / `cmd+z` | **Undo** the last placement change. |
+| `ctrl+Z` / `ctrl+y` / `cmd+Z` | **Redo**. |
+| `ctrl+a` / `cmd+a` | **Select All** blocks. |
+| `f` | **Toggle fullscreen** / maximise the window. |
