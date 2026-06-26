@@ -1119,6 +1119,33 @@ static void closest_points(const Rect& r1, const Rect& r2, Point& p1, Point& p2)
     else { p1.y = p2.y = (std::max(r1.y1, r2.y1) + std::min(r1.y2, r2.y2)) / 2; }
 }
 
+// When r1 and r2 ABUT — touch on exactly one axis (a shared edge) with positive
+// overlap on the other — closest_points collapses that shared edge to a single
+// point (p1 == p2), and the MST edge realizers below drop the resulting
+// zero-length "edge", silently disconnecting the abutted block (its bits then go
+// unplaced in DetailedNUTS).  Realize the abutment as a real wire lying ON the
+// shared boundary and spanning the overlap interval, so it lands on both block
+// faces and keeps the MST tree connected.  Returns false when the rects do not
+// share an edge (disjoint, corner-only touch, or fully coincident).
+static bool shared_edge_segment(const Rect& r1, const Rect& r2,
+                                int h_layer, int v_layer, Segment& out) {
+    const int ox_lo = std::max(r1.x1, r2.x1), ox_hi = std::min(r1.x2, r2.x2);
+    const int oy_lo = std::max(r1.y1, r2.y1), oy_hi = std::min(r1.y2, r2.y2);
+    // Shared vertical edge: rects touch on x, with positive y-overlap.  The wire
+    // runs vertically along the shared column (ox_lo == ox_hi).
+    if ((r1.x2 == r2.x1 || r2.x2 == r1.x1) && oy_hi > oy_lo) {
+        out = make_seg(ox_lo, oy_lo, ox_lo, oy_hi, v_layer);
+        return true;
+    }
+    // Shared horizontal edge: rects touch on y, with positive x-overlap.  The wire
+    // runs horizontally along the shared row (oy_lo == oy_hi).
+    if ((r1.y2 == r2.y1 || r2.y2 == r1.y1) && ox_hi > ox_lo) {
+        out = make_seg(ox_lo, oy_lo, ox_hi, oy_lo, h_layer);
+        return true;
+    }
+    return false;
+}
+
 void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                                      const std::vector<Busterm>& blocks,
                                      int y_trunk, bool out_of_bbox,
@@ -1793,13 +1820,17 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         return d;
     };
 
-    // Closest point pair across all individual rect pairs of two blocks.
-    auto closest_block_points = [&](int u, int v, Point& p1, Point& p2) {
+    // Closest point pair across all individual rect pairs of two blocks; also
+    // reports the chosen rect pair (br_u/br_v) so an abutment can be realized as a
+    // shared-edge segment rather than dropped.
+    auto closest_block_points = [&](int u, int v, Point& p1, Point& p2,
+                                    Rect& br_u, Rect& br_v) {
         int best = INT_MAX;
         for (const Rect& ru : block_rects(u)) {
             for (const Rect& rv : block_rects(v)) {
                 int d = manhattan_nearest(ru, rv);
-                if (d < best) { best = d; closest_points(ru, rv, p1, p2); }
+                if (d < best) { best = d; closest_points(ru, rv, p1, p2);
+                                br_u = ru; br_v = rv; }
             }
         }
     };
@@ -1837,8 +1868,16 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         bool valid = true;
         for (const auto& [eu, ev] : mst_edges) {
             Point p1, p2;
-            closest_block_points(eu, ev, p1, p2);
-            if (p1.x == p2.x && p1.y == p2.y) continue;
+            Rect  br_u, br_v;
+            closest_block_points(eu, ev, p1, p2, br_u, br_v);
+            if (p1.x == p2.x && p1.y == p2.y) {
+                // Abutting (or coincident) rects: realize the shared edge as a
+                // real wire so the block stays connected, instead of dropping it.
+                Segment es;
+                if (shared_edge_segment(br_u, br_v, h_layer_, v_layer_, es))
+                    mst.segments.push_back(es);
+                continue;
+            }
             if (p1.x == p2.x) {
                 mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
             } else if (p1.y == p2.y) {
@@ -2186,7 +2225,14 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 const Rect& r_v = nodes[mst_edges[e].v].second;
                 Point p1, p2;
                 closest_points(r_u, r_v, p1, p2);
-                if (p1.x == p2.x && p1.y == p2.y) continue;
+                if (p1.x == p2.x && p1.y == p2.y) {
+                    // Abutting rects: realize the shared edge instead of dropping
+                    // it (a dropped edge would disconnect the replaced child).
+                    Segment es;
+                    if (shared_edge_segment(r_u, r_v, h_layer_, v_layer_, es))
+                        out.push_back(es);
+                    continue;
+                }
                 if (p1.x == p2.x) {
                     if (std::abs(p2.y - p1.y) < m_v) return false;
                     out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
