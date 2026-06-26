@@ -409,6 +409,74 @@ def align_center_v(state: FloorplannerAppState, names: Iterable[str]) -> None:
         state.engine.move_block_raw(name, b.x1, cy - (b.y2 - b.y1) / 2)
 
 
+def _edge_axis(edge_sel) -> str:
+    """Return 'x' if all edges are l/r (vertical edges), 'y' if all t/b
+    (horizontal edges).  Raises ValueError on a mixed or empty selection."""
+    chars = {e for _, e in edge_sel}
+    if chars and chars <= {"l", "r"}:
+        return "x"
+    if chars and chars <= {"t", "b"}:
+        return "y"
+    raise ValueError(f"edge selection must be all-V or all-H: {chars}")
+
+
+def move_edges(state: FloorplannerAppState, edge_sel, delta: float) -> None:
+    """Shift each selected edge's controlled coordinate by `delta`, holding the
+    opposite edge fixed.
+
+    edge_sel: iterable of (block_name, edge) with edge in {l,r,t,b}, all the
+              same orientation (all l/r OR all t/b).  l->x1, r->x2, t->y1, b->y2.
+    Clamped so a moved edge cannot cross/invert its opposite edge (block extent
+    on that axis stays >= one grid step).
+    """
+    sel = list(edge_sel)
+    if not sel:
+        return
+    _edge_axis(sel)                      # validate homogeneity
+    min_ext = max(state.engine.grid(), 1.0)
+    for name, edge in sel:
+        try:
+            b = state.engine.get_block(name)
+        except Exception:
+            continue
+        x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
+        if   edge == "l": x1 = min(x1 + delta, x2 - min_ext)
+        elif edge == "r": x2 = max(x2 + delta, x1 + min_ext)
+        elif edge == "t": y1 = min(y1 + delta, y2 - min_ext)
+        elif edge == "b": y2 = max(y2 + delta, y1 + min_ext)
+        resize_block(state, name, x1, y1, x2, y2)
+
+
+def align_edges(state: FloorplannerAppState, edge_sel, mode: str) -> None:
+    """Set every selected edge to a common coordinate.
+
+    mode: 'min' | 'max' | 'mean' of the selected edges' current controlled
+          coordinates.  V edges (l/r) align to a common X; H edges (t/b) align
+          to a common Y.  Same anti-inversion clamp as move_edges.
+    """
+    sel = list(edge_sel)
+    if not sel:
+        return
+    _edge_axis(sel)
+    min_ext = max(state.engine.grid(), 1.0)
+    pick = {"l": lambda b: b.x1, "r": lambda b: b.x2,
+            "t": lambda b: b.y1, "b": lambda b: b.y2}
+    blocks = [(n, e, state.engine.get_block(n)) for n, e in sel]
+    vals = [pick[e](b) for _, e, b in blocks]
+    if not vals:
+        return
+    target = (min(vals) if mode == "min"
+              else max(vals) if mode == "max"
+              else sum(vals) / len(vals))
+    for name, edge, b in blocks:
+        x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
+        if   edge == "l": x1 = min(target, x2 - min_ext)
+        elif edge == "r": x2 = max(target, x1 + min_ext)
+        elif edge == "t": y1 = min(target, y2 - min_ext)
+        elif edge == "b": y2 = max(target, y1 + min_ext)
+        resize_block(state, name, x1, y1, x2, y2)
+
+
 def rotate_blocks_cw(state: FloorplannerAppState, names: Iterable[str]) -> None:
     """Rotate each block 90° clockwise around its own lower-left corner.
 

@@ -132,6 +132,109 @@ def test_find_gap_violations_touching_blocks_ok(tmp_path):
     assert not gaps, "touching blocks (gap=0) must not be a violation"
 
 
+def test_move_edges_vertical_group(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "e.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)   # bbox (100,100,300,150)
+    fpc.add_block(state, "b", 400, 100, 200, 50)   # bbox (400,100,600,150)
+    fpc.move_edges(state, [("a", "r"), ("b", "r")], 50)
+    a, b = state.block("a"), state.block("b")
+    assert a.x2 == 350 and b.x2 == 650, "right edges should each shift +50"
+    assert a.x1 == 100 and b.x1 == 400, "left edges unchanged"
+    assert a.y1 == 100 and a.y2 == 150, "y unchanged"
+
+
+def test_move_edges_left_edges(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "e2.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)
+    fpc.add_block(state, "b", 400, 100, 200, 50)
+    fpc.move_edges(state, [("a", "l"), ("b", "l")], -50)
+    a, b = state.block("a"), state.block("b")
+    assert a.x1 == 50 and b.x1 == 350, "left edges should each shift -50"
+    assert a.x2 == 300 and b.x2 == 600, "right edges unchanged"
+
+
+def test_move_edges_horizontal_group(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "e3.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)   # y2 = 150
+    fpc.add_block(state, "b", 400, 100, 200, 50)
+    fpc.move_edges(state, [("a", "b"), ("b", "b")], 30)
+    a, b = state.block("a"), state.block("b")
+    assert a.y2 == 180 and b.y2 == 180, "bottom edges (y2) should each shift +30"
+    assert a.y1 == 100 and b.y1 == 100, "top edges unchanged"
+
+
+def test_move_edges_clamp_no_inversion(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "e4.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)   # bbox (100,100,300,150), grid=10
+    # Pull the right edge far left — must clamp at x1 + grid, never invert.
+    fpc.move_edges(state, [("a", "r")], -10000)
+    a = state.block("a")
+    assert a.x2 == a.x1 + 10, f"right edge should clamp to x1+grid, got {a.x2}"
+    assert a.x2 > a.x1, "block must not invert"
+    # Mirror: push the left edge far right — clamp at x2 - grid.
+    fpc.add_block(state, "c", 100, 100, 200, 50)
+    fpc.move_edges(state, [("c", "l")], 10000)
+    c = state.block("c")
+    assert c.x1 == c.x2 - 10, f"left edge should clamp to x2-grid, got {c.x1}"
+
+
+def test_move_edges_empty_is_noop(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "e5.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)
+    fpc.move_edges(state, [], 50)   # must not raise
+    a = state.block("a")
+    assert (a.x1, a.y1, a.x2, a.y2) == (100, 100, 300, 150)
+
+
+def test_align_edges_min_max_mean_vertical(tmp_path):
+    def _seed():
+        state = fpc.create_bdb(str(tmp_path / "ea.bdb"), 1000, 800, grid=10)
+        # right edges at x2 = 300, 360, 420
+        fpc.add_block(state, "a", 100, 100, 200, 50)   # x2 = 300
+        fpc.add_block(state, "b", 100, 200, 260, 50)   # x2 = 360
+        fpc.add_block(state, "c", 100, 300, 320, 50)   # x2 = 420
+        return state
+    sel = [("a", "r"), ("b", "r"), ("c", "r")]
+
+    state = _seed()
+    fpc.align_edges(state, sel, "max")
+    assert all(state.block(n).x2 == 420 for n in "abc"), "max → all x2 = 420"
+
+    state = _seed()
+    fpc.align_edges(state, sel, "min")
+    assert all(state.block(n).x2 == 300 for n in "abc"), "min → all x2 = 300"
+
+    state = _seed()
+    fpc.align_edges(state, sel, "mean")
+    assert all(state.block(n).x2 == 360 for n in "abc"), "mean → all x2 = 360"
+    # left edges (x1) untouched, no inversion
+    assert all(state.block(n).x2 > state.block(n).x1 for n in "abc")
+
+
+def test_align_edges_horizontal(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "eh.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 50, 80)   # y1 = 100
+    fpc.add_block(state, "b", 200, 160, 50, 80)   # y1 = 160
+    fpc.align_edges(state, [("a", "t"), ("b", "t")], "min")
+    assert state.block("a").y1 == 100 and state.block("b").y1 == 100, \
+        "top edges (y1) align to common min Y"
+
+
+def test_align_edges_single_edge_noop(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "es.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)
+    fpc.align_edges(state, [("a", "r")], "mean")
+    a = state.block("a")
+    assert (a.x1, a.x2) == (100, 300), "single edge aligns to itself (no change)"
+
+
+def test_align_edges_mixed_orientation_raises(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "em.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)
+    with pytest.raises(ValueError):
+        fpc.align_edges(state, [("a", "l"), ("a", "t")], "min")
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"

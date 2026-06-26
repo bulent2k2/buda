@@ -71,6 +71,8 @@ class BdbFloorplanner:
         self._rbpatch = None                     # live rubber-band zoom rectangle
         self._zoom_limits: tuple | None = None   # (xlim, ylim) set by manual zoom
         self._canvas_sel: set[str] = set()       # canvas multi-selection
+        self._edge_mode: bool = False            # edge-selection mode
+        self._edge_sel: list = []                # [(block, edge)], all l/r OR all t/b
         self._path: list[str] = []               # drill-down stack
         self._undo_stack: collections.deque = collections.deque(maxlen=50)
         self._redo_stack: list = []
@@ -193,11 +195,18 @@ class BdbFloorplanner:
         align_menu.add_separator()
         align_menu.add_command(label="Rot 90°  ↻ CW",  command=self._rotate_cw)
         align_menu.add_command(label="Rot 90°  ↺ CCW", command=self._rotate_ccw)
+        align_menu.add_separator()
+        align_menu.add_command(label="Edges → Min",  command=lambda: self._do_align_edges("min"))
+        align_menu.add_command(label="Edges → Max",  command=lambda: self._do_align_edges("max"))
+        align_menu.add_command(label="Edges → Mean", command=lambda: self._do_align_edges("mean"))
         filter_f2 = ttk.Frame(blocks)
         filter_f2.pack(fill=tk.X, pady=(4, 0))
         self._opt_btn = ttk.Button(filter_f2, text="Optimize…",
                                    command=self._open_optimize_dialog)
-        self._opt_btn.pack(fill=tk.X)
+        self._opt_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._edge_mode_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filter_f2, text="Edges", variable=self._edge_mode_var,
+                        command=self._sync_edge_mode).pack(side=tk.LEFT, padx=(4, 0))
         tv_frame = ttk.Frame(blocks)
         tv_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
         self._tree = ttk.Treeview(tv_frame, show="tree", selectmode="extended")
@@ -275,6 +284,9 @@ class BdbFloorplanner:
         # v — run validation
         self.root.bind("v", lambda e: self._validate_if_focused())
 
+        # e — toggle edge-selection mode
+        self.root.bind("e", lambda e: self._flip_edge_mode())
+
         # Esc — clear block selection
         self.root.bind("<Escape>", lambda e: self._clear_canvas_sel())
 
@@ -338,6 +350,7 @@ class BdbFloorplanner:
     def _go_top(self):
         self._path = []
         self._canvas_sel.clear()
+        self._edge_sel = []
         self.state.selected = None
         self._zoom_limits = None
         self._refresh_breadcrumbs()
@@ -347,6 +360,7 @@ class BdbFloorplanner:
     def _go_depth(self, depth: int):
         self._path = self._path[:depth]
         self._canvas_sel.clear()
+        self._edge_sel = []
         self.state.selected = None
         self._zoom_limits = None
         self._refresh_breadcrumbs()
@@ -356,6 +370,7 @@ class BdbFloorplanner:
     def _drill_into(self, name: str):
         self._path.append(name)
         self._canvas_sel.clear()
+        self._edge_sel = []
         self.state.selected = None
         self._zoom_limits = None
         self._refresh_breadcrumbs()
@@ -828,6 +843,33 @@ class BdbFloorplanner:
                     ax.add_patch(diamond)
                     self._handle_patches.append((diamond, name, edge))
 
+            # Edge mode: mid-edge handles on EVERY block; selected edges amber.
+            if self._edge_mode:
+                HS = max(vis_ref * 0.005, 1.0)
+                mx = (block.x1 + block.x2) / 2
+                my = (block.y1 + block.y2) / 2
+                for edge, (cx, cy) in [
+                        ("l",  (block.x1, my)),
+                        ("r",  (block.x2, my)),
+                        ("t",  (mx, block.y1)),
+                        ("b",  (mx, block.y2))]:
+                    is_sel = (name, edge) in self._edge_sel
+                    if is_sel:
+                        # Bold amber line over the edge itself.
+                        if edge == "l":   xs, ys = [block.x1, block.x1], [block.y1, block.y2]
+                        elif edge == "r": xs, ys = [block.x2, block.x2], [block.y1, block.y2]
+                        elif edge == "t": xs, ys = [block.x1, block.x2], [block.y1, block.y1]
+                        else:             xs, ys = [block.x1, block.x2], [block.y2, block.y2]
+                        ax.plot(xs, ys, color="#f59e0b", linewidth=3.0, zorder=4)
+                    diamond = mpatches.RegularPolygon(
+                        (cx, cy), numVertices=4, radius=HS * 1.3,
+                        orientation=0,
+                        facecolor="#fbbf24" if is_sel else "#22d3ee",
+                        edgecolor="#b45309" if is_sel else "#0e7490",
+                        linewidth=1.0, zorder=5, picker=True)
+                    ax.add_patch(diamond)
+                    self._handle_patches.append((diamond, name, edge))
+
         # Depth overlay: draw child blocks above parents so they are visible
         if extra_levels > 0:
             def _draw_overlay(parent_name: str, remaining: int, alpha: float):
@@ -907,7 +949,12 @@ class BdbFloorplanner:
         self._status.set("Home: full view.")
 
     def _clear_canvas_sel(self) -> None:
-        """Deselect all blocks on the canvas."""
+        """Deselect all blocks (or, in edge mode with a selection, clear edges)."""
+        if self._edge_mode and self._edge_sel:
+            self._edge_sel = []
+            self._draw()
+            self._status.set("Edge selection cleared.")
+            return
         self._canvas_sel.clear()
         if self.state is not None:
             self.state.selected = None
@@ -916,6 +963,100 @@ class BdbFloorplanner:
         except Exception:
             pass
         self._draw()
+
+    # ------------------------------------------------------------------
+    # Edge-selection mode
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _edge_orient(edge: str) -> str:
+        return "V" if edge in ("l", "r") else "H"
+
+    def _flip_edge_mode(self) -> None:
+        """Key handler for 'e' — flips the checkbutton var (single source of truth)."""
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        self._edge_mode_var.set(not self._edge_mode_var.get())
+        self._sync_edge_mode()
+
+    def _sync_edge_mode(self) -> None:
+        """Checkbutton command + called by _flip_edge_mode. Var drives _edge_mode."""
+        self._edge_mode = self._edge_mode_var.get()
+        if self._edge_mode:
+            # Edge and block selections are mutually exclusive.
+            self._canvas_sel.clear()
+            if self.state is not None:
+                self.state.selected = None
+            self._status.set("Edge mode ON — click block edges to select (all V or all H).")
+        else:
+            self._edge_sel = []
+            self._status.set("Edge mode OFF.")
+        self._draw()
+
+    def _toggle_edge_in_sel(self, name: str, edge: str) -> None:
+        """Add/remove (name, edge) from the edge selection, enforcing all-V or all-H."""
+        if self._edge_sel and self._edge_orient(edge) != self._edge_orient(self._edge_sel[0][1]):
+            self._edge_sel = [(name, edge)]
+            self._status.set(
+                f"Orientation changed — edge selection restarted "
+                f"({self._edge_orient(edge)}).")
+        elif (name, edge) in self._edge_sel:
+            self._edge_sel.remove((name, edge))
+        else:
+            self._edge_sel.append((name, edge))
+        n = len(self._edge_sel)
+        if n:
+            orient = self._edge_orient(self._edge_sel[0][1])
+            self._status.set(f"{n} edge(s) selected ({orient}).")
+        self._draw()
+
+    def _edge_hit_test(self, event):
+        """Return (name, edge) for the clicked edge: a mid-edge diamond under the
+        cursor, else the nearest edge of the block under the cursor; else None."""
+        # 1. Diamond handle directly hit.
+        for hp, name, edge in self._handle_patches:
+            if edge in ("l", "r", "t", "b") and hp.contains(event)[0]:
+                return (name, edge)
+        # 2. Nearest edge of the block under the cursor.
+        for patch, name in self._patch_to_name.items():
+            if patch.contains(event)[0]:
+                try:
+                    b = self.state.block(name)
+                except Exception:
+                    return None
+                dists = {"l": abs(event.xdata - b.x1), "r": abs(event.xdata - b.x2),
+                         "t": abs(event.ydata - b.y1), "b": abs(event.ydata - b.y2)}
+                return (name, min(dists, key=dists.get))
+        return None
+
+    def _move_edges_by(self, delta: float) -> None:
+        """Shift the selected edges by delta (arrow-key path)."""
+        if self.state is None or not self._edge_sel:
+            return
+        self._push_undo(self._snapshot())
+        fpc.move_edges(self.state, self._edge_sel, delta)
+        self._draw()
+        self._status.set(f"Moved {len(self._edge_sel)} edge(s) by {delta:+.0f}.")
+
+    def _do_align_edges(self, mode: str) -> None:
+        if not self._edge_mode or not self._edge_sel:
+            self._status.set("Select edges first (press e, then click block edges).")
+            return
+        self._push_undo(self._snapshot())
+        fpc.align_edges(self.state, self._edge_sel, mode)
+        self._draw()
+        self._status.set(f"Aligned {len(self._edge_sel)} edge(s) → {mode}.")
+
+    def _restore_silent(self, snap: dict) -> None:
+        """Restore block bboxes from a snapshot without redrawing."""
+        if not snap:
+            return
+        for name, (x1, y1, x2, y2) in snap.items():
+            try:
+                self.state.engine.resize_block_raw(name, x1, y1, x2, y2)
+            except Exception:
+                pass
 
     def _pan_view(self, dx: int, dy: int) -> None:
         """Pan the canvas by 15 % of the current view span per keypress."""
@@ -939,6 +1080,13 @@ class BdbFloorplanner:
         state = getattr(event, 'state', 0)
         shift        = bool(state & 0x1)
         ctrl_or_cmd  = bool(state & self._MOD_CTRL_CMD)
+        if self._edge_mode and self._edge_sel:
+            # Edge mode: V edges move with ←/→, H edges with ↑/↓.
+            axis = self._edge_orient(self._edge_sel[0][1])
+            step = self._step.get()
+            if   axis == "V" and dx != 0: self._move_edges_by(dx * step)
+            elif axis == "H" and dy != 0: self._move_edges_by(dy * step)
+            return
         if ctrl_or_cmd and shift:
             if dx != 0:
                 self._distribute_h()
@@ -1089,6 +1237,12 @@ class BdbFloorplanner:
                         zorder=4)
 
     def _update_selection_label(self):
+        if self._edge_mode:
+            n = len(self._edge_sel)
+            orient = self._edge_orient(self._edge_sel[0][1]) if n else "-"
+            self._sel_var.set(f"Edge mode: {n} edge(s) selected ({orient}).")
+            self._make_unique_btn.pack_forget()
+            return
         if len(self._canvas_sel) > 1:
             self._sel_var.set(f"{len(self._canvas_sel)} blocks selected.")
             self._make_unique_btn.pack_forget()
@@ -1151,6 +1305,26 @@ class BdbFloorplanner:
             return
 
         if event.button != 1:
+            return
+
+        # Edge mode: clicks select/move edges, not blocks.
+        if self._edge_mode:
+            hit = self._edge_hit_test(event)
+            if hit is None:
+                if self._edge_sel:
+                    self._edge_sel = []
+                    self._draw()
+                return
+            name, edge = hit
+            if (name, edge) in self._edge_sel:
+                # Begin a group drag (or, on zero motion, toggle this edge off).
+                self._drag = {"mode": "edge_move",
+                              "axis": "x" if edge in ("l", "r") else "y",
+                              "x0": event.xdata, "y0": event.ydata,
+                              "name": name, "edge": edge,
+                              "snap": self._snapshot(), "moved": False}
+            else:
+                self._toggle_edge_in_sel(name, edge)
             return
 
         # Detect Shift or Ctrl/Cmd via the underlying tkinter event's state bitmask.
@@ -1306,6 +1480,23 @@ class BdbFloorplanner:
             fpc.move_block(self.state, name, raw_x, raw_y)
             self._draw()
 
+        elif mode == "edge_move":
+            grid = self.state.engine.grid()
+            if self._drag["axis"] == "x":
+                xlim = self._ax.get_xlim()
+                target = self._snap(event.xdata, self._hanan_xs(), grid, xlim[1] - xlim[0])
+                delta = target - self._drag["x0"]
+            else:
+                ylim = self._ax.get_ylim()
+                target = self._snap(event.ydata, self._hanan_ys(), grid, ylim[1] - ylim[0])
+                delta = target - self._drag["y0"]
+            if abs(delta) > 0:
+                self._drag["moved"] = True
+            # Restore the pre-drag state, then apply the absolute delta (no drift).
+            self._restore_silent(self._drag["snap"])
+            fpc.move_edges(self.state, self._edge_sel, delta)
+            self._draw()
+
     def _on_release(self, event):
         if not self._drag:
             return
@@ -1321,6 +1512,24 @@ class BdbFloorplanner:
                 self._apply_bbox_zoom(x0, y0, event.xdata, event.ydata)
             else:
                 self._fig.canvas.draw_idle()
+            return
+
+        if mode == "edge_move":
+            moved = self._drag.get("moved", False)
+            snap = self._drag.get("snap")
+            ename, eedge = self._drag.get("name"), self._drag.get("edge")
+            self._drag = None
+            if moved:
+                if snap is not None:
+                    self._push_undo(snap)
+                self._draw()
+                self._status.set(f"Moved {len(self._edge_sel)} edge(s).")
+            else:
+                # Zero-motion click on a selected edge → toggle it off.
+                if (ename, eedge) in self._edge_sel:
+                    self._edge_sel.remove((ename, eedge))
+                self._draw()
+                self._status.set(f"{len(self._edge_sel)} edge(s) selected.")
             return
 
         name = self._drag.get("name")
