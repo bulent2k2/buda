@@ -76,57 +76,60 @@ must be fixed rather than deferred.
 
 ## Fix
 
-Realize an abutment as a **real wire lying on the shared boundary**, spanning the
-overlap interval, instead of dropping it. New helper next to `closest_points`:
+Realize an abutment as a real wire that **crosses** the shared edge, oriented
+**perpendicular** to it, instead of dropping it. New helper next to
+`closest_points`:
 
 ```cpp
 static bool shared_edge_segment(const Rect& r1, const Rect& r2,
                                 int h_layer, int v_layer, Segment& out);
 ```
 
-- Shared **vertical** edge (rects touch on x, positive y-overlap) → a V segment on
-  the shared column `[oy_lo, oy_hi]` on the V layer.
-- Shared **horizontal** edge (touch on y, positive x-overlap) → an H segment on the
-  shared row `[ox_lo, ox_hi]` on the H layer.
+- Shared **vertical** edge (rects touch on x, positive y-overlap) → a **horizontal**
+  wire crossing it at the centre of the common y-span, spanning far-face to far-face.
+- Shared **horizontal** edge (touch on y, positive x-overlap) → a **vertical** wire
+  crossing it at the centre of the common x-span.
 - Returns false for disjoint, corner-only (zero overlap on the touching axis), or
   fully coincident rects — those keep the original `continue`.
 
-Both realizers call it in the `p1 == p2` branch and push the returned segment
-(`add_mst_candidates` also widened the `closest_block_points` lambda to report the
-chosen rect pair so the helper has the actual rects). The segment lands on both
-block faces, so `annotate_endpoints` / `ConnTopology` infer a busterm tap on each
-and the tree stays connected.
+**Why perpendicular, not along the edge.** A wire's bits spread along its
+perpendicular (track) axis, and its slide is bounded by the intersection of the
+faces it connects. A wire laid *along* the shared edge has its track axis pointing
+*across* the edge → pinned to the boundary line → **zero perpendicular slide**, and
+`filter_pinched` then drops the whole candidate (a zero-width channel can't host a
+multi-bit bus). A wire that *crosses* the edge has its track axis running *along*
+the edge, so its slide equals the common span of the two faces (e.g. the x-overlap
+for a horizontal abutment) and the bus's bits fan out across that span. Spanning
+far-face to far-face puts both endpoints on real block faces (clean busterm taps).
 
-**Min-stub:** the abutment join is emitted even when the overlap interval is below
-the layer's min-stub floor. Connectivity wins over the stub-length heuristic at a
-true abutment — a slightly short connector on the shared edge is correct; an open
-is not.
+Both realizers call it in the `p1 == p2` branch (`add_mst_candidates` also widened
+the `closest_block_points` lambda to report the chosen rect pair). This also
+**resolves the collinear internal-abutted-node case** (a straight A–B–C chain):
+the perpendicular crossings of the two edges incident to the internal node overlap
+and touch, so there is no pair of collinear stubs for `ConnTopology` to fail on —
+no `FEEDTHRU_RELAY`. (That was the Codex P1 / topo-norm defect-2 family on the
+along-the-edge version.)
+
+**Min-stub:** a true abutment between blocks narrower than the min-stub floor
+yields an inherently short crossing; the join is emitted anyway (connectivity wins
+over the stub-length heuristic — min-stub is intentionally not enforced on
+abutment/completion connectors). `test_min_stub_length_exhaustive` exempts stubs
+within an abutting pair's footprint accordingly.
 
 The change is surgical: non-abutting MST edges never enter the `p1 == p2` branch,
 so every design without edge-sharing blocks is byte-for-byte unchanged (verified:
 `tc3a_flat_x10` has zero abutting pairs and its routing is identical pre/post fix).
 
-## Limitation: collinear internal abutted nodes (deferred)
+## Known remaining case: corner-diagonal edges (separate fix)
 
-The shared-edge segment lands on both abutting blocks, and `complete_relay_junctions`
-wires an internal abutted node's incident edges **when they are orthogonal** to the
-abutment (the common case — e.g. `big2_b1`'s blk_00 deg-3 / blk_33 deg-2, which
-verify clean). It does **not** fully connect an internal node whose two shared
-edges are **collinear** — a straight A–B–C chain where A, B, C share parallel
-edges. `ConnTopology` infers only **perpendicular** joins (it skips
-same-orientation segments), so B's two collinear shared edges cannot be joined
-end-to-end and the `MST_HV`/`MST_VH` candidate carries a `FEEDTHRU_RELAY` (the
-planner avoids it, but the candidate is not clean).
-
-This is the same architectural gap as **defect 2** in
-[topo-norm-phase2-deferred.md](topo-norm-phase2-deferred.md): the complete fix is
-collinear (end-to-end) join inference in `ConnTopology`, after which the abutment
-landing produced here connects the chain. A naive "register the shared landing on
-both blocks" tweak (dropping the first-match `break` in `complete_relay_junctions`)
-does **not** suffice — it fixes the straight chain but cascades through
-`filter_pinched`: the orthogonal-abutment geometry then loses its MST candidate to
-a zero-slide connector, removing valid candidates. So the collinear-internal case
-is deferred to the collinear-join work; this fix covers leaf and orthogonal-internal
+Distinct from abutment: two blocks can be **corner-diagonal** — their facing edges
+overlap in only a single point (e.g. `big2_b3`'s blk_09 / blk_39 meet only at
+x=4870, no span overlap). `closest_points` then returns a straight edge pinned to
+that single coordinate (zero slide), and `filter_pinched` drops any candidate
+containing it — which is why `big2_b3`'s standalone `MST_HV`/`MST_VH` are still
+suppressed even with the abutment fix. The fix is to realize a corner-diagonal edge
+as an **L-shape** (with a bend) so it has slide, handled on a separate branch. This
+fix covers leaf, orthogonal-internal, and collinear-internal
 abutment, which is what the repro needs.
 
 ## Verification

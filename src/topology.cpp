@@ -1131,16 +1131,18 @@ static bool shared_edge_segment(const Rect& r1, const Rect& r2,
                                 int h_layer, int v_layer, Segment& out) {
     const int ox_lo = std::max(r1.x1, r2.x1), ox_hi = std::min(r1.x2, r2.x2);
     const int oy_lo = std::max(r1.y1, r2.y1), oy_hi = std::min(r1.y2, r2.y2);
-    // Shared vertical edge: rects touch on x, with positive y-overlap.  The wire
-    // runs vertically along the shared column (ox_lo == ox_hi).
+    // Shared vertical edge (touch on x): CROSS it with a horizontal wire at the
+    // centre of the common y-span; track axis = y, slide = [oy_lo, oy_hi].
     if ((r1.x2 == r2.x1 || r2.x2 == r1.x1) && oy_hi > oy_lo) {
-        out = make_seg(ox_lo, oy_lo, ox_lo, oy_hi, v_layer);
+        const int y0 = (oy_lo + oy_hi) / 2;
+        out = make_seg(std::min(r1.x1,r2.x1), y0, std::max(r1.x2,r2.x2), y0, h_layer);
         return true;
     }
-    // Shared horizontal edge: rects touch on y, with positive x-overlap.  The wire
-    // runs horizontally along the shared row (oy_lo == oy_hi).
+    // Shared horizontal edge (touch on y): CROSS it with a vertical wire at the
+    // centre of the common x-span; track axis = x, slide = [ox_lo, ox_hi].
     if ((r1.y2 == r2.y1 || r2.y2 == r1.y1) && ox_hi > ox_lo) {
-        out = make_seg(ox_lo, oy_lo, ox_hi, oy_lo, h_layer);
+        const int x0 = (ox_lo + ox_hi) / 2;
+        out = make_seg(x0, std::min(r1.y1,r2.y1), x0, std::max(r1.y2,r2.y2), v_layer);
         return true;
     }
     return false;
