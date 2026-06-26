@@ -1030,14 +1030,36 @@ class BdbFloorplanner:
                 return (name, min(dists, key=dists.get))
         return None
 
+    def _sync_edges_to_instances(self) -> int:
+        """Propagate each edited block's new size to its shared-cell siblings,
+        mirroring the single-handle resize sync on release.  Returns the total
+        synced instance count (0 if no shared cells)."""
+        total = 0
+        for name in sorted({n for n, _ in self._edge_sel}):
+            try:
+                b = self.state.block(name)
+            except Exception:
+                continue
+            _cell, n = fpc.sync_cell_to_instances(
+                self.state, name, b.x1, b.y1, b.x2, b.y2)
+            if n > 1:
+                total += n
+        if total:
+            self._refresh_tree()
+        return total
+
     def _move_edges_by(self, delta: float) -> None:
         """Shift the selected edges by delta (arrow-key path)."""
         if self.state is None or not self._edge_sel:
             return
         self._push_undo(self._snapshot())
         fpc.move_edges(self.state, self._edge_sel, delta)
+        synced = self._sync_edges_to_instances()
         self._draw()
-        self._status.set(f"Moved {len(self._edge_sel)} edge(s) by {delta:+.0f}.")
+        msg = f"Moved {len(self._edge_sel)} edge(s) by {delta:+.0f}."
+        if synced:
+            msg += f"  Synced {synced} shared instance(s)."
+        self._status.set(msg)
 
     def _do_align_edges(self, mode: str) -> None:
         if not self._edge_mode or not self._edge_sel:
@@ -1045,8 +1067,12 @@ class BdbFloorplanner:
             return
         self._push_undo(self._snapshot())
         fpc.align_edges(self.state, self._edge_sel, mode)
+        synced = self._sync_edges_to_instances()
         self._draw()
-        self._status.set(f"Aligned {len(self._edge_sel)} edge(s) → {mode}.")
+        msg = f"Aligned {len(self._edge_sel)} edge(s) → {mode}."
+        if synced:
+            msg += f"  Synced {synced} shared instance(s)."
+        self._status.set(msg)
 
     def _restore_silent(self, snap: dict) -> None:
         """Restore block bboxes from a snapshot without redrawing."""
@@ -1522,8 +1548,12 @@ class BdbFloorplanner:
             if moved:
                 if snap is not None:
                     self._push_undo(snap)
+                synced = self._sync_edges_to_instances()
                 self._draw()
-                self._status.set(f"Moved {len(self._edge_sel)} edge(s).")
+                msg = f"Moved {len(self._edge_sel)} edge(s)."
+                if synced:
+                    msg += f"  Synced {synced} shared instance(s)."
+                self._status.set(msg)
             else:
                 # Zero-motion click on a selected edge → toggle it off.
                 if (ename, eedge) in self._edge_sel:
