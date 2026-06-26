@@ -581,22 +581,38 @@ class BdbFloorplanner:
 
     def _validate(self):
         issues = fpc.validate(self.state)
-        if not issues:
-            self._issue_var.set("No issues.")
-            self._status.set("Floorplan validation passed.")
-            return
+        step = self._step.get()
+        gaps = fpc.find_gap_violations(self.state, self._visible_names(), step)
+
         lines = []
+        # Overlap / out-of-die issues (up to 5)
         for issue in issues[:5]:
             if issue.kind == "OVERLAP":
-                lines.append(f"OVERLAP: {issue.block_a} / {issue.block_b}")
+                lines.append(f"OVERLAP  {issue.block_a} / {issue.block_b}")
             elif issue.kind == "OUTSIDE_DIE":
-                lines.append(f"OUTSIDE: {issue.block_a}")
+                lines.append(f"OUTSIDE  {issue.block_a}")
             else:
-                lines.append(f"{issue.kind}: {issue.message}")
+                lines.append(f"{issue.kind}  {issue.message}")
         if len(issues) > 5:
-            lines.append(f"... {len(issues) - 5} more")
-        self._issue_var.set("\n".join(lines))
-        self._status.set(f"Validation found {len(issues)} issue(s).")
+            lines.append(f"  … {len(issues) - 5} more overlap/outside issue(s)")
+
+        # Gap violations — one line per block, largest gap first
+        for name, gap, arrow, neighbor in gaps[:8]:
+            leaf = name.split("/")[-1]
+            nb_leaf = neighbor.split("/")[-1]
+            lines.append(f"GAP  {leaf}: {gap:.0f} {arrow} {nb_leaf}")
+        if len(gaps) > 8:
+            lines.append(f"  … {len(gaps) - 8} more gap violation(s)")
+
+        total = len(issues) + len(gaps)
+        if not lines:
+            self._issue_var.set("No issues.")
+            self._status.set("Floorplan validation passed.")
+        else:
+            self._issue_var.set("\n".join(lines))
+            self._status.set(
+                f"Validation: {len(issues)} overlap/outside, {len(gaps)} gap violation(s)."
+            )
 
     def _write_bdb(self):
         if not self.state.bdb_path:

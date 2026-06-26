@@ -451,6 +451,76 @@ def validate(state: FloorplannerAppState):
     return list(state.engine.validate())
 
 
+def find_gap_violations(state: FloorplannerAppState,
+                        names: list,
+                        step: float) -> list:
+    """Return gap violations between immediate neighbors.
+
+    For every block in `names`, scan the other three cardinal directions and
+    find the nearest block whose perpendicular interval overlaps.  The gap to
+    that nearest neighbor is the *immediate-neighbor gap* in that direction.
+    A block is reported when its largest immediate-neighbor gap >= `step`.
+
+    Returns a list of (name, max_gap, direction_arrow, neighbor_name) sorted
+    by max_gap descending.
+    """
+    # Collect bounding boxes.
+    boxes = {}
+    for name in names:
+        try:
+            b = state.block(name)
+            boxes[name] = (b.x1, b.y1, b.x2, b.y2)
+        except Exception:
+            pass
+
+    items = list(boxes.items())
+    # nearest[(name, dir)] = (min_gap, neighbor_name)
+    nearest: dict = {}
+
+    for na, (ax1, ay1, ax2, ay2) in items:
+        for nb, (bx1, by1, bx2, by2) in items:
+            if na == nb:
+                continue
+            # Right: B starts at or beyond A's right edge, Y-intervals overlap
+            if bx1 >= ax2 and min(ay2, by2) > max(ay1, by1):
+                gap = bx1 - ax2
+                k = (na, '→')
+                if k not in nearest or gap < nearest[k][0]:
+                    nearest[k] = (gap, nb)
+            # Left: B ends at or before A's left edge, Y-intervals overlap
+            if bx2 <= ax1 and min(ay2, by2) > max(ay1, by1):
+                gap = ax1 - bx2
+                k = (na, '←')
+                if k not in nearest or gap < nearest[k][0]:
+                    nearest[k] = (gap, nb)
+            # Up: B starts at or beyond A's top edge, X-intervals overlap
+            if by1 >= ay2 and min(ax2, bx2) > max(ax1, bx1):
+                gap = by1 - ay2
+                k = (na, '↑')
+                if k not in nearest or gap < nearest[k][0]:
+                    nearest[k] = (gap, nb)
+            # Down: B ends at or before A's bottom edge, X-intervals overlap
+            if by2 <= ay1 and min(ax2, bx2) > max(ax1, bx1):
+                gap = ay1 - by2
+                k = (na, '↓')
+                if k not in nearest or gap < nearest[k][0]:
+                    nearest[k] = (gap, nb)
+
+    # Per block: keep only the largest gap across all directions.
+    worst: dict = {}  # name -> (max_gap, arrow, neighbor)
+    for (name, arrow), (gap, neighbor) in nearest.items():
+        if name not in worst or gap > worst[name][0]:
+            worst[name] = (gap, arrow, neighbor)
+
+    result = [
+        (name, gap, arrow, neighbor)
+        for name, (gap, arrow, neighbor) in worst.items()
+        if gap >= step
+    ]
+    result.sort(key=lambda x: -x[1])
+    return result
+
+
 def _sync_cell_children(state: FloorplannerAppState) -> None:
     """Update cell_children with local offsets from live engine positions.
 

@@ -95,6 +95,43 @@ def test_validate_parent_child_not_flagged(tmp_path):
                for i in issues), "sibling overlap not detected"
 
 
+def test_find_gap_violations_basic(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "gap.bdb"), 1000, 800, grid=10)
+    # Two side-by-side blocks with a 50-unit gap (step=10 → violation)
+    fpc.add_block(state, "a", 0, 0, 100, 100)
+    fpc.add_block(state, "b", 150, 0, 300, 100)   # gap = 50 to the right of a
+    fpc.add_block(state, "c", 0, 110, 100, 210)   # gap = 10 above a; touches step boundary
+    step = 10.0
+    names = ["a", "b", "c"]
+    gaps = fpc.find_gap_violations(state, names, step)
+    # a→b gap is 50, which is the worst; must be reported
+    names_reported = [g[0] for g in gaps]
+    assert "a" in names_reported, "block 'a' should have a gap violation"
+    a_gap = next(g for g in gaps if g[0] == "a")
+    assert a_gap[1] == 50.0, f"expected gap 50, got {a_gap[1]}"
+    assert a_gap[2] == "→", f"expected direction →, got {a_gap[2]}"
+    assert a_gap[3] == "b"
+    # gap of exactly step (10) is a violation (>= step)
+    assert "c" in names_reported or any(g[0] == "a" and g[1] >= 10 for g in gaps)
+
+
+def test_find_gap_violations_no_y_overlap(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "gap2.bdb"), 1000, 800, grid=10)
+    # Blocks with no Y-overlap should NOT be neighbors
+    fpc.add_block(state, "a", 0, 0, 100, 100)
+    fpc.add_block(state, "b", 110, 200, 300, 300)   # right of a but no y-overlap
+    gaps = fpc.find_gap_violations(state, ["a", "b"], 10.0)
+    assert not gaps, "non-y-overlapping blocks must not generate a gap violation"
+
+
+def test_find_gap_violations_touching_blocks_ok(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "gap3.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 0, 0, 100, 100)
+    fpc.add_block(state, "b", 100, 0, 200, 100)   # touching — gap == 0 < step
+    gaps = fpc.find_gap_violations(state, ["a", "b"], 10.0)
+    assert not gaps, "touching blocks (gap=0) must not be a violation"
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"
