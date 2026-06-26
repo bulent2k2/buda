@@ -178,6 +178,17 @@ def test_move_edges_clamp_no_inversion(tmp_path):
     assert c.x1 == c.x2 - 10, f"left edge should clamp to x2-grid, got {c.x1}"
 
 
+def test_move_edges_opposite_edges_translate(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "et.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a", 100, 100, 200, 50)   # bbox (100,100,300,150)
+    # Selecting BOTH l and r and moving is a translation: width must be preserved
+    # even when the delta exceeds the block width (no clamp corruption).
+    fpc.move_edges(state, [("a", "l"), ("a", "r")], 250)
+    a = state.block("a")
+    assert (a.x1, a.x2) == (350, 550), f"both edges shift +250, got {(a.x1, a.x2)}"
+    assert a.x2 - a.x1 == 200, "width preserved on opposite-edge translation"
+
+
 def test_move_edges_empty_is_noop(tmp_path):
     state = fpc.create_bdb(str(tmp_path / "e5.bdb"), 1000, 800, grid=10)
     fpc.add_block(state, "a", 100, 100, 200, 50)

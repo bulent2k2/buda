@@ -434,16 +434,30 @@ def move_edges(state: FloorplannerAppState, edge_sel, delta: float) -> None:
         return
     _edge_axis(sel)                      # validate homogeneity
     min_ext = max(state.engine.grid(), 1.0)
+    # Group by block so both opposite edges of one block move atomically against
+    # its ORIGINAL bbox: selecting l+r and moving is a translation (extent
+    # preserved), not a clamp-corrupted resize.
+    by_block: dict = {}
     for name, edge in sel:
+        by_block.setdefault(name, set()).add(edge)
+    for name, edges in by_block.items():
         try:
             b = state.engine.get_block(name)
         except Exception:
             continue
         x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
-        if   edge == "l": x1 = min(x1 + delta, x2 - min_ext)
-        elif edge == "r": x2 = max(x2 + delta, x1 + min_ext)
-        elif edge == "t": y1 = min(y1 + delta, y2 - min_ext)
-        elif edge == "b": y2 = max(y2 + delta, y1 + min_ext)
+        if "l" in edges: x1 += delta
+        if "r" in edges: x2 += delta
+        if "t" in edges: y1 += delta
+        if "b" in edges: y2 += delta
+        # Clamp a lone moved edge against its fixed opposite (a translation of
+        # both edges keeps extent, so no clamp fires there).
+        if x2 - x1 < min_ext:
+            if "l" in edges and "r" not in edges: x1 = x2 - min_ext
+            elif "r" in edges and "l" not in edges: x2 = x1 + min_ext
+        if y2 - y1 < min_ext:
+            if "t" in edges and "b" not in edges: y1 = y2 - min_ext
+            elif "b" in edges and "t" not in edges: y2 = y1 + min_ext
         resize_block(state, name, x1, y1, x2, y2)
 
 
@@ -468,12 +482,24 @@ def align_edges(state: FloorplannerAppState, edge_sel, mode: str) -> None:
     target = (min(vals) if mode == "min"
               else max(vals) if mode == "max"
               else sum(vals) / len(vals))
+    # Group by block so a block with both opposite edges selected is set
+    # atomically against its original bbox (one resize, deterministic clamp).
+    by_block: dict = {}
     for name, edge, b in blocks:
+        slot = by_block.setdefault(name, [b, set()])
+        slot[1].add(edge)
+    for name, (b, edges) in by_block.items():
         x1, y1, x2, y2 = b.x1, b.y1, b.x2, b.y2
-        if   edge == "l": x1 = min(target, x2 - min_ext)
-        elif edge == "r": x2 = max(target, x1 + min_ext)
-        elif edge == "t": y1 = min(target, y2 - min_ext)
-        elif edge == "b": y2 = max(target, y1 + min_ext)
+        if "l" in edges: x1 = target
+        if "r" in edges: x2 = target
+        if "t" in edges: y1 = target
+        if "b" in edges: y2 = target
+        if x2 - x1 < min_ext:
+            if "l" in edges and "r" not in edges: x1 = x2 - min_ext
+            elif "r" in edges and "l" not in edges: x2 = x1 + min_ext
+        if y2 - y1 < min_ext:
+            if "t" in edges and "b" not in edges: y1 = y2 - min_ext
+            elif "b" in edges and "t" not in edges: y2 = y1 + min_ext
         resize_block(state, name, x1, y1, x2, y2)
 
 

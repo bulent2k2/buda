@@ -1422,11 +1422,22 @@ class BdbFloorplanner:
                 best, best_d = c, d
         return best if best is not None else round(val / grid) * grid if grid > 0 else val
 
-    def _hanan_xs(self, exclude: str | None = None) -> list:
-        """All block x1/x2 coordinates (+ die boundaries) for X-axis snapping."""
+    @staticmethod
+    def _excl_set(exclude):
+        """Normalize an exclude arg (None / str / iterable of names) to a set."""
+        if exclude is None:
+            return set()
+        if isinstance(exclude, str):
+            return {exclude}
+        return set(exclude)
+
+    def _hanan_xs(self, exclude=None) -> list:
+        """All block x1/x2 coordinates (+ die boundaries) for X-axis snapping.
+        `exclude` may be a single block name or an iterable of names to omit."""
+        excl = self._excl_set(exclude)
         xs = [0.0, self.state.engine.die_w()]
         for n in self.state.block_names:
-            if n == exclude:
+            if n in excl:
                 continue
             try:
                 b = self.state.block(n)
@@ -1435,11 +1446,13 @@ class BdbFloorplanner:
                 pass
         return xs
 
-    def _hanan_ys(self, exclude: str | None = None) -> list:
-        """All block y1/y2 coordinates (+ die boundaries) for Y-axis snapping."""
+    def _hanan_ys(self, exclude=None) -> list:
+        """All block y1/y2 coordinates (+ die boundaries) for Y-axis snapping.
+        `exclude` may be a single block name or an iterable of names to omit."""
+        excl = self._excl_set(exclude)
         ys = [0.0, self.state.engine.die_h()]
         for n in self.state.block_names:
-            if n == exclude:
+            if n in excl:
                 continue
             try:
                 b = self.state.block(n)
@@ -1508,13 +1521,18 @@ class BdbFloorplanner:
 
         elif mode == "edge_move":
             grid = self.state.engine.grid()
+            # Exclude the dragged blocks so their own (moving) edges aren't snap
+            # targets — otherwise edges stick to themselves then jump.
+            excl = {n for n, _ in self._edge_sel}
             if self._drag["axis"] == "x":
                 xlim = self._ax.get_xlim()
-                target = self._snap(event.xdata, self._hanan_xs(), grid, xlim[1] - xlim[0])
+                target = self._snap(event.xdata, self._hanan_xs(exclude=excl),
+                                    grid, xlim[1] - xlim[0])
                 delta = target - self._drag["x0"]
             else:
                 ylim = self._ax.get_ylim()
-                target = self._snap(event.ydata, self._hanan_ys(), grid, ylim[1] - ylim[0])
+                target = self._snap(event.ydata, self._hanan_ys(exclude=excl),
+                                    grid, ylim[1] - ylim[0])
                 delta = target - self._drag["y0"]
             if abs(delta) > 0:
                 self._drag["moved"] = True
