@@ -1,0 +1,19 @@
+# issue: mst topos miss abutted blocks
+
+source ../tracks4top.buda
+add_block blk_00 1250 3780 2230 4775
+add_block blk_05 1250 3225 2230 3780
+add_block blk_06 0 4630 1250 5170
+add_block blk_17 2880 5350 4280 6300
+add_block blk_21 3500 3100 4870 3645
+add_block blk_33 3500 3645 4220 4615
+add_bus bus_007[28] blk_00.p blk_06.p,blk_33.p,blk_17.p,blk_05.p,blk_21.p
+run_bundler
+generate_topologies
+check_connectivity topo all
+run_planner
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity
+visualize

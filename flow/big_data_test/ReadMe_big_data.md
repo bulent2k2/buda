@@ -1,3 +1,14 @@
+# Manual edits to remove channel space:
+moved to ~/chip_designs/tc3b
+## don't edit here
+fp flow/big_data_test/tc3b.bdb &
+
+## After enh for gridded move of block edges:
+cd flow/big_data_test
+cp tc3a.bdb tc3b.bdb
+cd -
+fp flow/big_data_test/tc3b.bdb &
+
 # bdb2buda
 
 cd ~/src/buda

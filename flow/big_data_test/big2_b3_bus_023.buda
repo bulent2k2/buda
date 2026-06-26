@@ -1,0 +1,21 @@
+# issue: no mst, nor hybrid trunk-mst
+
+source ../tracks4top.buda
+
+add_block blk_01 4145 1000 6100 1425
+add_block blk_09 3500 2570 4870 3100
+add_block blk_19 0 2660 1250 3310
+add_block blk_34 0 1600 1250 2085
+add_block blk_39 4870 3365 6100 4425
+add_block io_pad_br 5585 0 6100 1000
+add_net bus_023[16] blk_01.p blk_34.p,blk_39.p,blk_09.p,blk_19.p,io_pad_br.p
+
+run_bundler
+generate_topologies
+check_connectivity topo all
+run_planner
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity
+visualize
