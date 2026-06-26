@@ -1148,6 +1148,34 @@ static bool shared_edge_segment(const Rect& r1, const Rect& r2,
     return false;
 }
 
+// Two blocks can be CORNER-DIAGONAL: their facing projections meet at only a
+// single point (e.g. blk_09.x2 == blk_39.x1 with no y-overlap).  closest_points
+// then returns a straight edge pinned to that single coordinate — zero
+// perpendicular slide — and filter_pinched drops any candidate containing it.
+// Realize such an edge as an L-shape AROUND the corner so each leg taps a real
+// face with room to slide.  There are exactly two L's; the MST_HV / MST_VH
+// strategies select between them (H-first vs V-first), so the congestion planner
+// picks whichever fits the rest of the topology.  Legs run face-centre to
+// face-centre (maximising track room).
+static void corner_diagonal_L(const Rect& u, const Rect& v, int strategy,
+                              int h_layer, int v_layer, std::vector<Segment>& out) {
+    const bool u_left  = (u.x2 <= v.x1);          // u is left of v (else right)
+    const bool u_below = (u.y2 <= v.y1);          // u is below v (else above)
+    const int ucx = (u.x1 + u.x2) / 2, ucy = (u.y1 + u.y2) / 2;
+    const int vcx = (v.x1 + v.x2) / 2, vcy = (v.y1 + v.y2) / 2;
+    const int u_hface = u_left  ? u.x2 : u.x1;    // u's vertical face toward v
+    const int u_vface = u_below ? u.y2 : u.y1;    // u's horizontal face toward v
+    const int v_hface = u_left  ? v.x1 : v.x2;    // v's vertical face toward u
+    const int v_vface = u_below ? v.y1 : v.y2;    // v's horizontal face toward u
+    if (strategy == 1) {                          // V-then-H: up/down off u, then across to v
+        out.push_back(make_seg(ucx, u_vface, ucx, vcy, v_layer));
+        out.push_back(make_seg(ucx, vcy, v_hface, vcy, h_layer));
+    } else {                                       // H-then-V: across off u, then up/down to v
+        out.push_back(make_seg(u_hface, ucy, vcx, ucy, h_layer));
+        out.push_back(make_seg(vcx, ucy, vcx, v_vface, v_layer));
+    }
+}
+
 void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                                      const std::vector<Busterm>& blocks,
                                      int y_trunk, bool out_of_bbox,
@@ -1903,7 +1931,17 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                     mst.segments.push_back(es);
                 continue;
             }
-            if (p1.x == p2.x) {
+            // Corner-diagonal? A straight edge whose shared projection is a single
+            // point is pinned (zero slide); route it around the corner as an L.
+            const int cox_lo = std::max(br_u.x1, br_v.x1), cox_hi = std::min(br_u.x2, br_v.x2);
+            const int coy_lo = std::max(br_u.y1, br_v.y1), coy_hi = std::min(br_u.y2, br_v.y2);
+            const bool corner = (p1.x == p2.x && cox_lo == cox_hi)
+                             || (p1.y == p2.y && coy_lo == coy_hi);
+            if (corner) {
+                std::vector<Segment> ls;
+                corner_diagonal_L(br_u, br_v, strategy, h_layer_, v_layer_, ls);
+                for (const auto& s : ls) mst.segments.push_back(s);
+            } else if (p1.x == p2.x) {
                 mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
             } else if (p1.y == p2.y) {
                 mst.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));

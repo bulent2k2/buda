@@ -145,17 +145,29 @@ Two guards close the gap until collinear-join inference lands (proper fix):
 `test_abutment_collinear_butt_joint_connects` is a strict xfail capturing the
 underlying limitation; it XPASSes once the topology can be realized connected.
 
-## Known remaining case: corner-diagonal edges (separate fix)
+## Corner-diagonal edges (fixed — separate branch)
 
 Distinct from abutment: two blocks can be **corner-diagonal** — their facing edges
 overlap in only a single point (e.g. `big2_b3`'s blk_09 / blk_39 meet only at
-x=4870, no span overlap). `closest_points` then returns a straight edge pinned to
-that single coordinate (zero slide), and `filter_pinched` drops any candidate
-containing it — which is why `big2_b3`'s standalone `MST_HV`/`MST_VH` are still
-suppressed even with the abutment fix. The fix is to realize a corner-diagonal edge
-as an **L-shape** (with a bend) so it has slide, handled on a separate branch. This
-fix covers leaf, orthogonal-internal, and collinear-internal
-abutment, which is what the repro needs.
+x=4870, no span overlap). `closest_points` returns a straight edge pinned to that
+single coordinate (zero slide), and `filter_pinched` dropped any candidate
+containing it — so `big2_b3` had **zero** standalone `MST_HV`/`MST_VH`.
+
+`corner_diagonal_L` realizes such an edge as an **L-shape around the corner** so
+each leg taps a real face with slide. There are exactly two L's, and the MST_HV /
+MST_VH strategies select between them (H-first vs V-first), so both are generated
+and the congestion planner picks per the rest of the topology.
+
+**Which L, and why.** For blk_09 (lower-left) / blk_39 (upper-right):
+- **L1** (V off blk_09's TOP, then H to blk_39's LEFT): taps TOP (x-extent 1370) +
+  LEFT (y-extent 1060) → bottleneck slide **1060**.
+- **L2** (H off blk_09's RIGHT, then V to blk_39's BOTTOM): taps RIGHT (y-extent
+  530) + BOTTOM (x-extent 1230) → bottleneck slide **530**.
+
+L1 is preferable: it taps the **longer faces**, so its tighter leg has ~2× the
+track room (1060 vs 530) for the multi-bit bus; empirically L2 also trips the
+deferred outlier-slide (defect 5) on its short-face leg. Legs run face-centre to
+face-centre to maximise that room. `big2_b3` now generates 2 clean MSTs, 0 unplaced.
 
 ## Verification
 
