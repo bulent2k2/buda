@@ -120,6 +120,31 @@ The change is surgical: non-abutting MST edges never enter the `p1 == p2` branch
 so every design without edge-sharing blocks is byte-for-byte unchanged (verified:
 `tc3a_flat_x10` has zero abutting pairs and its routing is identical pre/post fix).
 
+## Collinear butt-joint guard (Codex P1)
+
+The perpendicular crossing introduces one new collinear case: when the crossing
+meets a **regular** (non-abutment) MST edge **end-to-end** collinearly — e.g. A
+abutted above B with B–C a regular V edge below at the same x — the two segments
+share an endpoint but `ConnTopology::infer_connections` skips collinear pairs
+(`conn_topology.cpp:156`), so it records no SEG join. NUTS would then place the two
+independently and the subtree could detach. This is the deferred **defect 2**
+(collinear-join) reachable through abutment; the old along-the-edge segment was
+perpendicular to a collinear regular edge, so it didn't arise.
+
+Two guards close the gap until collinear-join inference lands (proper fix):
+- **`detect_feedthru_relay`** (`verify.cpp`) — its geometric `touch` now treats a
+  pure collinear butt-joint (segments meeting only at a point) as *disconnected*
+  (collinear OVERLAP still counts), so `check_topo` reports the open it previously
+  missed.
+- **`topology_is_connected` gate** (`topology.cpp`) — `add_mst_candidates` now
+  drops a standalone MST that is not one connected SEG component (the planner's
+  cost loop does not check connectivity, so a disconnected MST was otherwise
+  selectable). Connectivity-only, so a connected-but-cyclic collinear *overlap*
+  (the A–B–C chain) is kept.
+
+`test_abutment_collinear_butt_joint_connects` is a strict xfail capturing the
+underlying limitation; it XPASSes once the topology can be realized connected.
+
 ## Known remaining case: corner-diagonal edges (separate fix)
 
 Distinct from abutment: two blocks can be **corner-diagonal** — their facing edges

@@ -1795,6 +1795,29 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     return results;
 }
 
+// Is `topo` one connected component under ConnTopology's SEG junctions?  Unlike
+// topology_is_clean_tree this does NOT reject cycles -- a collinear OVERLAP join
+// leaves a connected-but-cyclic (redundant) MST that is still routable, whereas a
+// collinear BUTT-joint leaves a genuinely disconnected subtree.  We only want to
+// drop the latter.
+static bool topology_is_connected(const Topology& topo, const Floorplan& fp) {
+    ConnTopology ct;
+    ct.build(topo, fp);
+    const auto& segs = ct.segs();
+    int n = (int)segs.size();
+    if (n == 0) return true;
+    std::vector<int> uf(n);
+    std::iota(uf.begin(), uf.end(), 0);
+    std::function<int(int)> find = [&](int x){ return uf[x]==x ? x : uf[x]=find(uf[x]); };
+    for (int i = 0; i < n; ++i)
+        for (const auto& c : segs[i].conns)
+            if (c.kind == SegConn::SEG)
+                uf[find(i)] = find(c.seg_idx);
+    int root = find(0);
+    for (int i = 1; i < n; ++i) if (find(i) != root) return false;
+    return true;
+}
+
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                                            std::vector<Topology>& results) {
     // MST topologies model daisy-chain connections (each block connects to its
@@ -1908,7 +1931,18 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             // connectors it appends, so it must run after the baseline annotation.
             annotate_endpoints(mst, blocks);
             complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_);
-            results.push_back(std::move(mst));
+            if (mst.connected_block_names.empty())
+                for (const auto& b : blocks)
+                    mst.connected_block_names.push_back(b.block_name);
+            // Drop a standalone MST left DISCONNECTED by a collinear butt-joint
+            // that ConnTopology can't infer (e.g. a perpendicular abutment
+            // crossing meeting a regular edge end-to-end).  The planner cost loop
+            // does not check connectivity, so a disconnected MST would otherwise
+            // be selectable and route to an open.  Connectivity-only (not
+            // clean-tree): a connected-but-cyclic collinear OVERLAP is still
+            // routable and kept.
+            if (topology_is_connected(mst, floorplan_))
+                results.push_back(std::move(mst));
         }
     }
 }

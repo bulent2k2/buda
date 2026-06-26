@@ -97,6 +97,17 @@ static void detect_feedthru_relay(const std::vector<ConnSeg>& segs,
                        : (px == s.perp_pos && py >= s.along_lo && py <= s.along_hi);
     };
     auto touch = [&](const ConnSeg& a, const ConnSeg& b) -> bool {
+        if (a.horiz == b.horiz && a.perp_pos == b.perp_pos) {
+            // Collinear: count as connected only if the wires OVERLAP (share a
+            // span), NOT if they merely butt end-to-end at a single point.
+            // ConnTopology::infer_connections skips collinear pairs, so it never
+            // creates a SEG join for a butt-joint; NUTS would then place the two
+            // segments independently and they could separate.  Treating a butt-
+            // joint as connected here would let detect_feedthru_relay miss that
+            // open -- the collinear-join (defect 2) gap, now reachable via the
+            // perpendicular abutment crossing meeting a regular edge end-to-end.
+            return std::max(a.along_lo, b.along_lo) < std::min(a.along_hi, b.along_hi);
+        }
         auto al = ep_lo(a), ah = ep_hi(a), bl = ep_lo(b), bh = ep_hi(b);
         return pt_on(al.first, al.second, b) || pt_on(ah.first, ah.second, b)
             || pt_on(bl.first, bl.second, a) || pt_on(bh.first, bh.second, a);

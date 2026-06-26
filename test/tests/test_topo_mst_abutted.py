@@ -126,6 +126,33 @@ def test_mst_collinear_internal_abutted_chain():
         )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Deferred collinear-join (defect 2): when a perpendicular abutment "
+    "crossing meets a REGULAR MST edge end-to-end collinearly (here A abutted "
+    "above B, B-C a regular V edge below at the same x), ConnTopology infers no "
+    "SEG join, so the standalone MST is disconnected. check_topo now flags it "
+    "(FEEDTHRU_RELAY) and the connectivity gate drops it (so the planner can't "
+    "route an open), but the topology cannot yet be REALIZED connected. Will "
+    "XPASS once collinear-join inference lands. See docs/internal/"
+    "mst-abutted-blocks.md and Codex review on PR #61.",
+)
+def test_abutment_collinear_butt_joint_connects():
+    """Abutment crossing collinear end-to-end with a regular edge should connect."""
+    coords = {
+        "A": (0, 200, 100, 300),
+        "B": (0, 100, 100, 200),   # A abuts B above (shared y=200)
+        "C": (0, 0,   100, 50),    # B-C regular V edge below (gap), same x => collinear
+        "D": (600, 600, 700, 700),
+    }
+    fp = _make_fp(coords)
+    cands = _gen(fp).generate_candidates("B", ["A", "C", "D"])
+    mst = [c for c in cands if c.type.startswith("MST_")]
+    # The disconnected MST is dropped at generation, so no standalone MST survives
+    # until collinear butt-joints can be inferred/realized.
+    assert mst, "collinear butt-joint MST should connect and survive generation"
+
+
 # ── end-to-end repro ──────────────────────────────────────────────────────────
 
 @pytest.mark.mid
