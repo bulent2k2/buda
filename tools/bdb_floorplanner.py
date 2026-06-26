@@ -268,6 +268,13 @@ class BdbFloorplanner:
         # f — toggle maximize (skip when a text widget has focus)
         self.root.bind("f", self._toggle_maximize)
 
+        # h / H — reset zoom to full view
+        self.root.bind("h", lambda e: self._home_view())
+        self.root.bind("H", lambda e: self._home_view())
+
+        # Esc — clear block selection
+        self.root.bind("<Escape>", lambda e: self._clear_canvas_sel())
+
         ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
                   anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
         self._draw()
@@ -864,8 +871,42 @@ class BdbFloorplanner:
     # Only include Mod1/Mod2 on macOS — on Linux Mod2 is Num Lock, not Cmd.
     _MOD_CTRL_CMD = 0x4 | (0x8 | 0x10 if sys.platform == "darwin" else 0)
 
+    def _home_view(self) -> None:
+        """Reset the canvas to full auto-fit view."""
+        fw = self.root.focus_get()
+        if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
+            return
+        self._zoom_limits = None
+        self._draw()
+        self._status.set("Home: full view.")
+
+    def _clear_canvas_sel(self) -> None:
+        """Deselect all blocks on the canvas."""
+        self._canvas_sel.clear()
+        if self.state is not None:
+            self.state.selected = None
+        try:
+            self._tree.selection_set([])
+        except Exception:
+            pass
+        self._draw()
+
+    def _pan_view(self, dx: int, dy: int) -> None:
+        """Pan the canvas by 15 % of the current view span per keypress."""
+        ax = self._ax
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        xpan = (xlim[1] - xlim[0]) * 0.15 * dx
+        ypan = (ylim[1] - ylim[0]) * 0.15 * dy
+        new_xlim = (xlim[0] + xpan, xlim[1] + xpan)
+        new_ylim = (ylim[0] + ypan, ylim[1] + ypan)
+        ax.set_xlim(*new_xlim)
+        ax.set_ylim(*new_ylim)
+        self._zoom_limits = (new_xlim, new_ylim)
+        self._fig.canvas.draw_idle()
+
     def _on_arrow(self, event, dx: int, dy: int) -> None:
-        """Route arrow key to move / align / distribute based on modifier state."""
+        """Route arrow key to move / align / distribute / pan based on modifier state."""
         fw = self.root.focus_get()
         if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
             return
@@ -882,8 +923,10 @@ class BdbFloorplanner:
             elif dx > 0: self._align_right()
             elif dy > 0: self._align_top()
             else:        self._align_bottom()
-        else:
+        elif self._canvas_sel:
             self._arrow_move(dx * self._step.get(), dy * self._step.get())
+        else:
+            self._pan_view(dx, dy)
 
     def _arrow_move(self, dx: float, dy: float) -> None:
         """Nudge all canvas-selected blocks; ignored when a text widget has focus."""
