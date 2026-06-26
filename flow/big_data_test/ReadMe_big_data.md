@@ -4,6 +4,10 @@ cd ~/src/buda
 python3 tools/bdb2buda.py flow/big_data_test/tc3a.bdb -o flow/big_data_test/tc3a_flat_x10.buda
 > Written to flow/big_data_test/tc3a_flat_x10.buda
 
+cd ~/src/git/buda/gem
+python3 tools/bdb2buda.py ~/chip_designs/tc3b/tc3b.bdb -scale 5 -o flow/big_data_test/tc3b_flat_x5.buda
+> Written to flow/big_data_test/tc3b_flat_x5.buda
+
 ## use it in tc3a_flat.buda
 buda --no-viz flow/big_data_test/tc3a_flat.buda > big_flat_out.log 2> big_flat_err.log &
 > 1.41s user 0.11s system 80% cpu 1.884 total
