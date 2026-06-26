@@ -241,9 +241,9 @@ def test_dogleg_state_cleared_on_regenerate():
     # re-detects the cycle from scratch.
     sess.do_command("select_topologies 1,2 4")
     # Bundle 3 -> TRUNK_H@y225 (the dogleg-forming topology); its 1-based index is
-    # 5 now that selective trunk+MST generation drops the non-beneficial
-    # TRUNK_V+MST hybrids that previously padded the WL-ordered candidate list.
-    sess.do_command("select_topologies 3 5")
+    # 6 now that trunk+MST spines are re-clipped to their extreme kept landing, so
+    # the completed TRUNK_V+MST@x275 tree (honest WL 600) sorts just ahead of it.
+    sess.do_command("select_topologies 3 6")
     sess.do_command("run_planner 1")
     sess.do_command("run_nuts")
     assert sess.nuts_result.num_overlaps == 0, \

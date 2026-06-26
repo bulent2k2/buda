@@ -27,9 +27,10 @@ check_connectivity topo
 # force a cycle:
 select_topologies 1,2 4
 # Bundle 3 -> TRUNK_H@y225 (the dogleg-forming topology).  Its 1-based index is
-# 5 now that selective trunk+MST generation drops the non-beneficial TRUNK_V+MST
-# hybrids that previously padded the WL-ordered candidate list.
-select_topologies 3 5
+# 6: trunk+MST spines are now re-clipped to their extreme kept landing, so the
+# completed TRUNK_V+MST@x275 tree (honest WL 600) sorts just ahead of this
+# TRUNK_H@y225 (629) in the WL-ordered candidate list.
+select_topologies 3 6
 run_planner 1
 
 run_nuts

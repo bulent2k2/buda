@@ -340,6 +340,40 @@ def test_trunk_mst_wirelength_is_honest():
         )
 
 
+def test_trunk_wirelength_counts_teg_over_bridges():
+    """estimated_wirelength includes TEG-OVER bridge segments (defect 4).
+
+    A multi-rect block with teg_mode=OVER whose trunk lands in the gap between its
+    rects gets a bridge segment along the union-bbox outer face.  Bridges live in
+    Topology.bridge_segments, NOT in .segments -- but they are real routed metal, so
+    wirelength() must count them; otherwise the planner ranks a bridged candidate as
+    artificially cheap.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100)
+    # Two disjoint rects with a vertical gap; an H-trunk in the gap stubs to both
+    # rects and bridges over the union top.
+    fp.add_block_rects("M", [(300, 0, 400, 100), (300, 300, 400, 400)],
+                       teg_mode=buda.TegMode.OVER)
+    fp.add_block("B", 300, 600, 400, 700)
+
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["M", "B"])
+
+    bridged = [c for c in cands if c.bridge_segments]
+    assert bridged, "expected at least one TEG-OVER candidate with a bridge segment"
+    for c in bridged:
+        seg_sum = sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
+                      for s in c.segments)
+        bridge_sum = sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
+                         for s in c.bridge_segments.values())
+        assert bridge_sum > 0, f"{c.type}: bridge present but zero length"
+        assert c.estimated_wirelength == seg_sum + bridge_sum, (
+            f"{c.type}: estimated_wirelength {c.estimated_wirelength} != "
+            f"segments {seg_sum} + bridges {bridge_sum}"
+        )
+
+
 def test_trunk_mst_no_legs_shorter_than_min_stub():
     """TRUNK+MST edges never emit a leg shorter than the minimum stub length.
 
@@ -401,11 +435,13 @@ def test_mst_any_for_3_blocks():
 def test_mst_any_for_3_blocks_no_beneficial_shortcut():
     """3-block bundle keeps MST coverage even when no inter-block edge beats a stub.
 
-    The selective trunk+MST stub replacement only drops a stub when its MST parent
-    edge is a strict shortcut. When no block has a beneficial shortcut, the
-    completed-tree form is skipped -- and since standalone MST needs N>=4, the
-    TRUNK+MST hybrid is the only MST-type coverage for N=3, so it must still be
-    emitted (regression guard for the <4-block fall-through to the legacy hybrid).
+    The selective trunk+MST stub replacement drops a stub only when its MST parent
+    edge is a strict shortcut.  When no block has a beneficial shortcut, a <4-block
+    bundle (which has no standalone MST_* candidate, since add_mst_candidates needs
+    N>=4) now FORCES the completed trunk-rooted tree -- using every tree edge -- so a
+    clean TRUNK+MST candidate is still emitted instead of falling through to the
+    cyclic legacy hybrid, which the clean-tree gate would drop.  Regression guard for
+    that forced-tree fall-through (preserves ad29c1f's 3-pin MST coverage).
     """
     # Three blocks spread along a row: short perpendicular stubs to the trunk,
     # long inter-block edges -- a configuration prone to having no shortcut.
@@ -421,6 +457,128 @@ def test_mst_any_for_3_blocks_no_beneficial_shortcut():
         f"Expected MST-type coverage for 3 blocks with no beneficial shortcut. "
         f"Got types: {_type_set(cands)}"
     )
+
+
+def test_mst_coverage_for_non_simple_3_blocks():
+    """A NON-simple 3-block bundle (multi-rect/TEG branch) still gets MST coverage.
+
+    The forced trunk-rooted tree only fires for the 'simple' case (all branch blocks
+    single-rect with a stub-owning root).  A multi-rect/TEG branch falls through to
+    the legacy hybrid, which the clean-tree gate may drop when completion can't form a
+    tree without dangling the branch's bridge.  Because add_mst_candidates emits no
+    standalone MST_* below 4 blocks, dropping every trunk position would leave the
+    bundle with no MST-type coverage at all -- so add_trunk_mst_candidates keeps a
+    single un-completed hybrid as a last-resort coverage fallback (its over-counted
+    wirelength keeps the planner from ever preferring it to the plain trunk).  Either
+    way the bundle must retain at least one MST-type candidate.  (Regression guard for
+    the P2 review on PR #55: non-simple <4-block hybrids must not silently lose MST
+    coverage.)
+    """
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 80, 80)            # driver, single-rect
+    fp.add_block("B", 600, 0, 680, 80)         # single-rect branch
+    # Multi-rect (TEG-OVER) branch -> the bundle is 'non-simple'.
+    fp.add_block_rects("C", [(200, 200, 280, 280), (200, 460, 280, 540)],
+                       teg_mode=buda.TegMode.OVER)
+
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C"])
+    mst_cands = [c for c in cands if "MST" in c.type]
+    assert len(mst_cands) > 0, (
+        f"Non-simple 3-block bundle lost all MST-type coverage. "
+        f"Got types: {_type_set(cands)}"
+    )
+
+
+def test_trunk_mst_candidates_are_clean_trees():
+    """Every generated trunk+MST candidate is a physically self-connected tree.
+
+    Defect-3 gate: the legacy hybrid path (full trunk + ALL edges) is cyclic, so it
+    is now routed through complete_relay_junctions + topology_is_clean_tree and a
+    candidate that cannot be cleanly completed is DROPPED rather than emitted with a
+    silent through-block relay.  For >=4 blocks (this config) the base trunk +
+    standalone MST_* cover the bundle, so no +MST / MST_* candidate may carry a
+    FEEDTHRU_RELAY violation.  (The only exception is the <4-block last-resort coverage
+    fallback, which cannot apply here -- see test_mst_coverage_for_non_simple_3_blocks.)
+    """
+    fp = buda.Floorplan()
+    # 4 blocks: B/C straddle the trunk row at very different x, D sits off-spine --
+    # the configuration that previously produced un-completed legacy hybrids.
+    fp.add_block("A", 0, 0, 100, 100)
+    fp.add_block("B", 200, 0, 300, 100)
+    fp.add_block("C", 600, 0, 700, 100)
+    fp.add_block("D", 400, 400, 500, 500)
+
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C", "D"])
+    mst_cands = [c for c in cands if "MST" in c.type]
+    assert mst_cands, "expected MST-type candidates for 4 blocks"
+    for c in mst_cands:
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        res = buda.check_topo(ct, c, fp, 0)
+        kinds = [str(v.kind) for v in res.violations]
+        assert not any("FEEDTHRU_RELAY" in k for k in kinds), (
+            f"{c.type} is a silent feedthru relay (should have been gated): {kinds}"
+        )
+
+
+def test_trunk_mst_spine_not_overextended_past_junctions():
+    """A completed TRUNK_H+MST spine ends at its outermost trunk-line junction.
+
+    Defect-1: the trunk span is sized in add_trunk_h from *all* branch blocks; when
+    an MST edge replaces+drops a block's stub, the spine was copied verbatim and left
+    dangling dead wire past the last real connection.  clip_spine_to_landings now
+    re-clips the spine to the extreme kept junction -- counting BOTH a stub endpoint
+    that lands on the trunk line AND a perpendicular segment that *crosses* it (a
+    T-junction) -- extended only to still span any pass-through block.  Assert no
+    in-bbox TRUNK_H+MST spine extends past its outermost such junction.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100)        # root, near trunk
+    fp.add_block("B", 300, 0, 400, 100)      # branch, near trunk
+    fp.add_block("C", 500, 400, 600, 500)    # branch, far off-spine (reached via edge)
+
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C"])
+    names = ["A", "B", "C"]
+    checked = 0
+    for c in cands:
+        if not c.type.startswith("TRUNK_H+MST"):
+            continue                          # in-bbox H completed-tree hybrids only
+        tp = c.trunk_location
+        spine = [s for s in c.segments if s.start.y == s.end.y == tp]
+        if len(spine) != 1:
+            continue                          # feedthru-split spine is not clipped
+        sp = spine[0]
+        lo, hi = sorted((sp.start.x, sp.end.x))
+        # Junctions: non-spine endpoints on the trunk line, plus perpendicular
+        # crossings of it.
+        junc = set()
+        for s in c.segments:
+            if s is sp:
+                continue
+            for p in (s.start, s.end):
+                if p.y == tp:
+                    junc.add(p.x)
+            if s.start.x == s.end.x and min(s.start.y, s.end.y) <= tp <= max(s.start.y, s.end.y):
+                junc.add(s.start.x)           # V seg crossing the H trunk
+        # Pass-through blocks the spine must still cover.
+        spans = []
+        for nm in names:
+            b = fp.get_block_bounds(nm)
+            if b.y1 <= tp <= b.y2:
+                spans.append((b.x1, b.x2))
+
+        def anchored(v):
+            return v in junc or any(bl <= v <= bh for bl, bh in spans)
+
+        assert anchored(lo) and anchored(hi), (
+            f"{c.type}: spine [{lo},{hi}] dangles past its outermost junction "
+            f"(junctions={sorted(junc)}, pass-through spans={spans})"
+        )
+        checked += 1
+    assert checked > 0, "no in-bbox TRUNK_H+MST candidate exercised the spine clip"
 
 
 def test_mst_not_generated_for_2_blocks():
