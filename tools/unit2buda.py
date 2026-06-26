@@ -121,6 +121,10 @@ class _RecordingFloorplan(buda.Floorplan):
         self._u2b.append(("set_feedthru_block_layer", block, layer, on))
         return super().set_feedthru_block_layer(block, layer, on)
 
+    def set_feedthru(self, on):
+        self._u2b.append(("set_feedthru", on))
+        return super().set_feedthru(on)
+
 
 class _RecordingTopologyGenerator(buda.TopologyGenerator):
     def __init__(self, fp):
@@ -133,10 +137,17 @@ class _RecordingTopologyGenerator(buda.TopologyGenerator):
         return super().set_layer_ids(h, v)
 
     def generate_candidates(self, driver, receivers):
+        # generate_candidates accepts a single receiver as a bare string; list("u1")
+        # would split it into characters, so keep a str as one endpoint.
+        rcv = [receivers] if isinstance(receivers, str) else list(receivers)
         _GEN_CALLS.append({
             "driver": driver,
-            "receivers": list(receivers),
-            "fp": self._u2b_fp,
+            "receivers": rcv,
+            # Snapshot the floorplan setup recorded SO FAR.  A later generate call may
+            # mutate the same floorplan (e.g. change min-stub between calls), and
+            # emit_script runs only after the whole test returns -- reading the live
+            # list would fold those later mutations into this (earlier) call.
+            "setup": list(self._u2b_fp._u2b),
             "lids": self._u2b_lids,
         })
         return super().generate_candidates(driver, receivers)
@@ -221,9 +232,8 @@ def _dir_word(d):
 
 
 def emit_script(call, test_spec, n_calls):
-    fp = call["fp"]
     lids = call["lids"]
-    calls = getattr(fp, "_u2b", [])
+    calls = call["setup"]
 
     # Collect per-block trailers (corner margin / container / teg) to fold into the
     # block's definition line.
@@ -265,7 +275,9 @@ def emit_script(call, test_spec, n_calls):
         elif c[0] == "set_min_stub_length_dir":
             glob.append(f"set_min_stub_length_dir {_dir_word(c[1])} {c[2]}")
         elif c[0] == "set_min_stub_length_layer":
-            glob.append(f"set_min_stub_length_layer {c[1]} {c[2]}")
+            # The CLI resolves this layer through _layer_name_map (name only, no
+            # numeric fallback), so emit the M<id> name that def_layer defines.
+            glob.append(f"set_min_stub_length_layer M{c[1]} {c[2]}")
         elif c[0] == "set_global_corner_margin":
             glob.append(f"corner_margin dx {c[1]} dy {c[2]}")
     if glob:
@@ -314,6 +326,8 @@ def emit_script(call, test_spec, n_calls):
             fts.append(f"set_feedthru * {c[1]} {'on' if c[2] else 'off'}")
         elif c[0] == "set_feedthru_block_layer":
             fts.append(f"set_feedthru {c[1]} {c[2]} {'on' if c[3] else 'off'}")
+        elif c[0] == "set_feedthru":
+            fts.append(f"set_feedthru * * {'on' if c[1] else 'off'}")
     if fts:
         out.extend(fts)
         out.append("")
