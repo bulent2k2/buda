@@ -628,6 +628,13 @@ static int wirelength(const Topology& t) {
     int wl = 0;
     for (const auto& s : t.segments)
         wl += std::abs(s.end.x - s.start.x) + std::abs(s.end.y - s.start.y);
+    // TEG-OVER bridge wires live outside `segments` but are real routed metal;
+    // count them so WL is honest (otherwise the planner ranks a bridged
+    // candidate as artificially cheap).
+    for (const auto& [bname, s] : t.bridge_segments) {
+        (void)bname;
+        wl += std::abs(s.end.x - s.start.x) + std::abs(s.end.y - s.start.y);
+    }
     return wl;
 }
 
@@ -1931,6 +1938,81 @@ static bool topology_is_clean_tree(const Topology& topo, const Floorplan& fp) {
     return true;
 }
 
+// Re-clip a trunk spine after some of its stubs were REPLACED by MST edges and
+// dropped (completed-tree hybrid).  The spine span was computed in add_trunk_h/v
+// from *all* branch blocks; once an extreme block's stub is dropped (it now
+// reaches the trunk through an inter-block edge) the spine no longer needs to
+// run that far, yet it was copied verbatim -- leaving a phantom overhang past the
+// last real landing (defect: trunk overextension, bundles 14/61).  Recompute the
+// spine's along-axis extent from the extreme *kept* landing on the trunk line,
+// then extend just enough to still span every pass-through block the trunk
+// crosses (those have no busterm tap, so a covering segment is required -- see
+// topology_is_clean_tree).  Only the single-spine case is handled; a
+// feedthru-split spine is already bounded at block faces and is left untouched.
+static void clip_spine_to_landings(Topology& t, int trunk_pos, bool dir_h,
+                                   const std::vector<Busterm>& blocks) {
+    int spine = -1, n_spine = 0;
+    for (int s = 0; s < (int)t.segments.size(); ++s) {
+        const Segment& seg = t.segments[s];
+        bool is_spine = dir_h ? (seg.start.y == trunk_pos && seg.end.y == trunk_pos)
+                              : (seg.start.x == trunk_pos && seg.end.x == trunk_pos);
+        if (is_spine) { spine = s; ++n_spine; }
+    }
+    if (spine < 0 || n_spine != 1) return;   // no spine, or feedthru-split: skip
+
+    auto along    = [&](const Point& p) { return dir_h ? p.x : p.y; };
+    auto on_trunk = [&](const Point& p) { return dir_h ? (p.y == trunk_pos)
+                                                       : (p.x == trunk_pos); };
+
+    // Required span = every place a kept non-spine segment connects to the trunk
+    // line, counting BOTH a stub endpoint that lands on it AND a perpendicular
+    // segment that *crosses* it (a T-junction whose endpoints sit off the trunk
+    // line -- e.g. an MST edge leg spanning the trunk).  Missing the crossing case
+    // would leave the spine dangling out to a dropped block past the last junction.
+    int lo = INT_MAX, hi = INT_MIN;
+    for (int s = 0; s < (int)t.segments.size(); ++s) {
+        if (s == spine) continue;
+        const Segment& seg = t.segments[s];
+        for (const Point& p : {seg.start, seg.end})
+            if (on_trunk(p)) { lo = std::min(lo, along(p)); hi = std::max(hi, along(p)); }
+        // Perpendicular crossing: a V seg crossing an H trunk (or vice-versa).
+        bool seg_h = (seg.start.y == seg.end.y);
+        if (dir_h && !seg_h) {
+            int plo = std::min(seg.start.y, seg.end.y), phi = std::max(seg.start.y, seg.end.y);
+            if (plo <= trunk_pos && trunk_pos <= phi) {
+                lo = std::min(lo, seg.start.x); hi = std::max(hi, seg.start.x);
+            }
+        } else if (!dir_h && seg_h) {
+            int plo = std::min(seg.start.x, seg.end.x), phi = std::max(seg.start.x, seg.end.x);
+            if (plo <= trunk_pos && trunk_pos <= phi) {
+                lo = std::min(lo, seg.start.y); hi = std::max(hi, seg.start.y);
+            }
+        }
+    }
+    if (lo > hi) return;                      // no kept junctions -> leave spine as-is
+
+    // Extend just enough to keep every pass-through block covered.
+    for (const auto& b : blocks) {
+        bool straddle = dir_h ? (b.orig_bbox.y1 <= trunk_pos && trunk_pos <= b.orig_bbox.y2)
+                              : (b.orig_bbox.x1 <= trunk_pos && trunk_pos <= b.orig_bbox.x2);
+        if (!straddle) continue;
+        int b_lo = dir_h ? b.orig_bbox.x1 : b.orig_bbox.y1;
+        int b_hi = dir_h ? b.orig_bbox.x2 : b.orig_bbox.y2;
+        if (b_lo > hi)      hi = b_lo;        // block entirely past hi: reach its near face
+        else if (b_hi < lo) lo = b_hi;        // block entirely before lo: reach its near face
+    }
+
+    // Clip to [lo,hi], never extending past the spine's current extent.
+    Segment& sp = t.segments[spine];
+    int s0 = along(sp.start), s1 = along(sp.end);
+    int cur_lo = std::min(s0, s1), cur_hi = std::max(s0, s1);
+    int new_lo = std::max(cur_lo, lo), new_hi = std::min(cur_hi, hi);
+    if (new_lo >= new_hi) return;             // degenerate -> leave as-is
+    if (new_lo == cur_lo && new_hi == cur_hi) return;   // nothing to clip
+    if (dir_h) { sp.start.x = new_lo; sp.end.x = new_hi; }
+    else       { sp.start.y = new_lo; sp.end.y = new_hi; }
+}
+
 void TopologyGenerator::add_trunk_mst_candidates(
     const std::vector<Busterm>& blocks,
     std::vector<Topology>& results)
@@ -2061,6 +2143,19 @@ void TopologyGenerator::add_trunk_mst_candidates(
                     used_edge[parent_edge[k]] = true;
                 }
             }
+            // <4-block bundles have no standalone MST candidate (add_mst_candidates
+            // needs N>=4), so the completed trunk-rooted tree is their ONLY MST-type
+            // coverage.  If no edge was individually beneficial, force the full tree
+            // (drop every non-root stub, use every tree edge) so a clean TRUNK+MST
+            // candidate is still emitted instead of the cyclic legacy hybrid -- which
+            // the clean-tree gate now drops.  Preserves ad29c1f's 3-pin coverage.
+            if (child_names.empty() && blocks.size() < 4) {
+                for (int k = 0; k < (int)nodes.size(); ++k) {
+                    if (k == root_node || parent_edge[k] < 0) continue;
+                    child_names.insert(nodes[k].first);
+                    used_edge[parent_edge[k]] = true;
+                }
+            }
         }
 
         std::string mst_type;
@@ -2130,6 +2225,9 @@ void TopologyGenerator::add_trunk_mst_candidates(
             tree.segments     = std::move(kept);
             tree.seg_busterms = std::move(kept_bt);
             for (const auto& s : edge_segs) tree.segments.push_back(s);
+            // Dropped child stubs may have set the spine's extent: re-clip it to
+            // the extreme kept landing so no phantom overhang remains (defect 1).
+            clip_spine_to_landings(tree, trunk_pos, is_h, blocks);
             annotate_endpoints(tree, blocks);
             complete_relay_junctions(tree, blocks, floorplan_, h_layer_, v_layer_);
             // connected_block_names is populated globally only after this pass
@@ -2152,8 +2250,15 @@ void TopologyGenerator::add_trunk_mst_candidates(
         // fall through to the legacy hybrid below instead of dropping it.
         if (simple && root_node >= 0 && blocks.size() >= 4) continue;
 
-        // Multi-rect / no stub-owning root: emit the historical legacy hybrid
-        // (full trunk + ALL shortcut edges, un-completed; check_topo flags relays).
+        // Multi-rect / no stub-owning root: attempt the historical hybrid
+        // (full trunk + ALL shortcut edges), but COMPLETE its relays and emit
+        // only if it verifies as one clean SEG-connected tree -- no silent
+        // feedthrough relay.  Previously this path emitted the un-completed
+        // hybrid and relied on check_topo to flag the FEEDTHRU_RELAY after the
+        // fact; that left the planner free to select a physically disconnected
+        // candidate (with an artificially low wirelength).  An un-completable
+        // hybrid is now dropped: the base trunk + standalone MST already cover
+        // the bundle.
         std::vector<Segment> all_segs;
         std::vector<bool> all_take(mst_edges.size(), true);
         if (!realize_edges(all_take, all_segs) || all_segs.empty()) continue;
@@ -2161,7 +2266,12 @@ void TopologyGenerator::add_trunk_mst_candidates(
         legacy.type = mst_type;
         for (const auto& s : all_segs) legacy.segments.push_back(s);
         annotate_endpoints(legacy, blocks);
-        results.push_back(std::move(legacy));
+        complete_relay_junctions(legacy, blocks, floorplan_, h_layer_, v_layer_);
+        if (legacy.connected_block_names.empty())
+            for (const auto& b : blocks)
+                legacy.connected_block_names.push_back(b.block_name);
+        if (topology_is_clean_tree(legacy, floorplan_))
+            results.push_back(std::move(legacy));
     }
 }
 
