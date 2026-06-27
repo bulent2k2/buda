@@ -1119,6 +1119,35 @@ static void closest_points(const Rect& r1, const Rect& r2, Point& p1, Point& p2)
     else { p1.y = p2.y = (std::max(r1.y1, r2.y1) + std::min(r1.y2, r2.y2)) / 2; }
 }
 
+// When r1 and r2 ABUT — touch on exactly one axis (a shared edge) with positive
+// overlap on the other — closest_points collapses that shared edge to a single
+// point (p1 == p2), and the MST edge realizers below drop the resulting
+// zero-length "edge", silently disconnecting the abutted block (its bits then go
+// unplaced in DetailedNUTS).  Realize the abutment as a real wire lying ON the
+// shared boundary and spanning the overlap interval, so it lands on both block
+// faces and keeps the MST tree connected.  Returns false when the rects do not
+// share an edge (disjoint, corner-only touch, or fully coincident).
+static bool shared_edge_segment(const Rect& r1, const Rect& r2,
+                                int h_layer, int v_layer, Segment& out) {
+    const int ox_lo = std::max(r1.x1, r2.x1), ox_hi = std::min(r1.x2, r2.x2);
+    const int oy_lo = std::max(r1.y1, r2.y1), oy_hi = std::min(r1.y2, r2.y2);
+    // Shared vertical edge (touch on x): CROSS it with a horizontal wire at the
+    // centre of the common y-span; track axis = y, slide = [oy_lo, oy_hi].
+    if ((r1.x2 == r2.x1 || r2.x2 == r1.x1) && oy_hi > oy_lo) {
+        const int y0 = (oy_lo + oy_hi) / 2;
+        out = make_seg(std::min(r1.x1,r2.x1), y0, std::max(r1.x2,r2.x2), y0, h_layer);
+        return true;
+    }
+    // Shared horizontal edge (touch on y): CROSS it with a vertical wire at the
+    // centre of the common x-span; track axis = x, slide = [ox_lo, ox_hi].
+    if ((r1.y2 == r2.y1 || r2.y2 == r1.y1) && ox_hi > ox_lo) {
+        const int x0 = (ox_lo + ox_hi) / 2;
+        out = make_seg(x0, std::min(r1.y1,r2.y1), x0, std::max(r1.y2,r2.y2), v_layer);
+        return true;
+    }
+    return false;
+}
+
 void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                                      const std::vector<Busterm>& blocks,
                                      int y_trunk, bool out_of_bbox,
@@ -1766,6 +1795,29 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     return results;
 }
 
+// Is `topo` one connected component under ConnTopology's SEG junctions?  Unlike
+// topology_is_clean_tree this does NOT reject cycles -- a collinear OVERLAP join
+// leaves a connected-but-cyclic (redundant) MST that is still routable, whereas a
+// collinear BUTT-joint leaves a genuinely disconnected subtree.  We only want to
+// drop the latter.
+static bool topology_is_connected(const Topology& topo, const Floorplan& fp) {
+    ConnTopology ct;
+    ct.build(topo, fp);
+    const auto& segs = ct.segs();
+    int n = (int)segs.size();
+    if (n == 0) return true;
+    std::vector<int> uf(n);
+    std::iota(uf.begin(), uf.end(), 0);
+    std::function<int(int)> find = [&](int x){ return uf[x]==x ? x : uf[x]=find(uf[x]); };
+    for (int i = 0; i < n; ++i)
+        for (const auto& c : segs[i].conns)
+            if (c.kind == SegConn::SEG)
+                uf[find(i)] = find(c.seg_idx);
+    int root = find(0);
+    for (int i = 1; i < n; ++i) if (find(i) != root) return false;
+    return true;
+}
+
 void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                                            std::vector<Topology>& results) {
     // MST topologies model daisy-chain connections (each block connects to its
@@ -1793,13 +1845,17 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         return d;
     };
 
-    // Closest point pair across all individual rect pairs of two blocks.
-    auto closest_block_points = [&](int u, int v, Point& p1, Point& p2) {
+    // Closest point pair across all individual rect pairs of two blocks; also
+    // reports the chosen rect pair (br_u/br_v) so an abutment can be realized as a
+    // shared-edge segment rather than dropped.
+    auto closest_block_points = [&](int u, int v, Point& p1, Point& p2,
+                                    Rect& br_u, Rect& br_v) {
         int best = INT_MAX;
         for (const Rect& ru : block_rects(u)) {
             for (const Rect& rv : block_rects(v)) {
                 int d = manhattan_nearest(ru, rv);
-                if (d < best) { best = d; closest_points(ru, rv, p1, p2); }
+                if (d < best) { best = d; closest_points(ru, rv, p1, p2);
+                                br_u = ru; br_v = rv; }
             }
         }
     };
@@ -1837,8 +1893,16 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         bool valid = true;
         for (const auto& [eu, ev] : mst_edges) {
             Point p1, p2;
-            closest_block_points(eu, ev, p1, p2);
-            if (p1.x == p2.x && p1.y == p2.y) continue;
+            Rect  br_u, br_v;
+            closest_block_points(eu, ev, p1, p2, br_u, br_v);
+            if (p1.x == p2.x && p1.y == p2.y) {
+                // Abutting (or coincident) rects: realize the shared edge as a
+                // real wire so the block stays connected, instead of dropping it.
+                Segment es;
+                if (shared_edge_segment(br_u, br_v, h_layer_, v_layer_, es))
+                    mst.segments.push_back(es);
+                continue;
+            }
             if (p1.x == p2.x) {
                 mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
             } else if (p1.y == p2.y) {
@@ -1867,7 +1931,18 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             // connectors it appends, so it must run after the baseline annotation.
             annotate_endpoints(mst, blocks);
             complete_relay_junctions(mst, blocks, floorplan_, h_layer_, v_layer_);
-            results.push_back(std::move(mst));
+            if (mst.connected_block_names.empty())
+                for (const auto& b : blocks)
+                    mst.connected_block_names.push_back(b.block_name);
+            // Drop a standalone MST left DISCONNECTED by a collinear butt-joint
+            // that ConnTopology can't infer (e.g. a perpendicular abutment
+            // crossing meeting a regular edge end-to-end).  The planner cost loop
+            // does not check connectivity, so a disconnected MST would otherwise
+            // be selectable and route to an open.  Connectivity-only (not
+            // clean-tree): a connected-but-cyclic collinear OVERLAP is still
+            // routable and kept.
+            if (topology_is_connected(mst, floorplan_))
+                results.push_back(std::move(mst));
         }
     }
 }
@@ -2186,7 +2261,14 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 const Rect& r_v = nodes[mst_edges[e].v].second;
                 Point p1, p2;
                 closest_points(r_u, r_v, p1, p2);
-                if (p1.x == p2.x && p1.y == p2.y) continue;
+                if (p1.x == p2.x && p1.y == p2.y) {
+                    // Abutting rects: realize the shared edge instead of dropping
+                    // it (a dropped edge would disconnect the replaced child).
+                    Segment es;
+                    if (shared_edge_segment(r_u, r_v, h_layer_, v_layer_, es))
+                        out.push_back(es);
+                    continue;
+                }
                 if (p1.x == p2.x) {
                     if (std::abs(p2.y - p1.y) < m_v) return false;
                     out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
