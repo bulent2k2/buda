@@ -39,3 +39,29 @@ Excluded from the default fast tier, so it doesn't gate `pytest`.
 regression to fix or an acceptable congestion artifact (then update the guard
 threshold with justification). `git bisect` on the overlap count for `tc3a_flat`
 would pinpoint when 2 → 3.
+
+## 3. Planner layer-assignment instability (input-sensitive tie-break)
+
+**What:** `run_planner`'s per-segment layer assignment for a bundle can differ
+between two runs whose `.buda` input is **byte-identical up to and including
+`run_planner`**. Observed with `flow/big_data_test/big2_b4_b24.buda` bundle 2
+(pinned `TRUNK_V@x5485`): the prefix through `run_planner` assigns `[V→M5 H→M4
+H→M4]`, while the full file (same prefix + trailing `run_nuts` / checks) assigns
+`[V→M7 H→M6 H→M6]` — same widths, same selected candidate, different metal. It is
+deterministic per file but sensitive to content that executes *after*
+`run_planner`, which points at an allocation-order / `unordered_*` iteration /
+floating-point-tie dependence in the layer cost comparison rather than true
+randomness.
+
+**Why it matters:** when several same-direction layers tie on cost, the chosen
+metal (and therefore congestion distribution and `dump_topologies --conn`'s
+reported layer) is not stable across otherwise-equivalent flows. Found while
+addressing the PR #66 review; the dump change itself is correct (it faithfully
+reports whatever `plan.seg_layers` holds).
+
+**Where to start:** `src/congestion_planner.cpp` `plan_bundle` layer-selection
+loop (the `best_s`/`best_lid` comparison ~`:604`). Audit the tie-break: make it a
+total order on a stable key (layer id, then deterministic cost) so equal-cost
+layers resolve identically regardless of map iteration / heap layout. Repro by
+diffing the `[Planner] Bundle … → topo …` line between the bare prefix
+(`sed -n '1,/^run_planner$/p'`) and the full file.
