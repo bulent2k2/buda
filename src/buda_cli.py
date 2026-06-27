@@ -1536,6 +1536,7 @@ class BudaSession:
             cs_list = bid_to_cs.get(ts.bundle_id, [])
             if ts.seg_idx < len(cs_list):
                 cs = cs_list[ts.seg_idx]
+                faces = []
                 for conn in cs.conns:
                     if conn.kind == buda.SegConnKind.SEG:
                         c = buda.BusSegmentConn()
@@ -1545,6 +1546,9 @@ class BudaSession:
                         mid = 0.5 * (cs.along_lo + cs.along_hi)
                         c.lo_end      = (c.at_pos <= mid)
                         bs.connections.append(c)
+                    else:  # BUSTERM: keep the block-face tap reachable per-bit
+                        faces.append(float(conn.face_coord))
+                bs.busterm_faces = faces
 
             bus_segs.append(bs)
 

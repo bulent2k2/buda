@@ -59,7 +59,8 @@ static void build_nuts_maps(
     std::set<std::pair<int,int>>&                                busterm_set,
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map,
     std::map<std::pair<int,int>, int>&                            net_pull_map,
-    AlignMap&                                                     align_map)
+    AlignMap&                                                     align_map,
+    std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map)
 {
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
@@ -114,7 +115,12 @@ static void build_nuts_maps(
             int n_seg = 0, n_bt = 0;
             for (const auto& c : cs.conns) {
                 if (c.kind == SegConn::SEG) ++n_seg;
-                else                        ++n_bt;
+                else {
+                    ++n_bt;
+                    // Record the block-face along-coordinate so span adjustment can
+                    // keep this segment reaching its tap after track slides.
+                    busterm_face_map[key].push_back(static_cast<double>(c.face_coord));
+                }
             }
             if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
             if (n_bt >= 1)               busterm_set.insert(key);
@@ -279,6 +285,30 @@ static void apply_interval_constraints(
                 ts.interval_lo = new_lo;
                 ts.interval_hi = new_hi;
             }
+        }
+    }
+}
+
+// BUSTERM face coverage: a segment that taps a block face must always reach that
+// face.  rev_conn_map carries only SEG connectivity, so do_span_adjustments
+// (which follows connected stubs' placed tracks) can leave a face-tapped end
+// short of its block — a silent open at the face (e.g. big2 bus_077 / blk_12,
+// where the M6 trunk's hi end is pulled onto a vertical stub's band ~5934 and
+// drops the x=6100 tap).  Run this ONCE as a final pass, after all packing and
+// tightening: extend (never contract) each segment's along-span to include every
+// recorded BUSTERM face_coord, mapping back to span_lo/span_hi by current ordering
+// so endpoint identity is preserved.  Final-only keeps it a no-op on designs whose
+// SEG-follow already reaches every face (no packing perturbation) while still
+// closing the genuine face opens; reaching a block face can never undo a jog.
+static void cover_busterm_faces(std::vector<TrackSegment>& segments) {
+    for (auto& ts : segments) {
+        if (!ts.placed) continue;
+        for (double fc : ts.busterm_faces) {
+            const double lo = std::min(ts.span_lo, ts.span_hi);
+            const double hi = std::max(ts.span_lo, ts.span_hi);
+            const bool ord = (ts.span_lo <= ts.span_hi);
+            if (fc < lo)      (ord ? ts.span_lo : ts.span_hi) = fc;
+            else if (fc > hi) (ord ? ts.span_hi : ts.span_lo) = fc;
         }
     }
 }
@@ -2036,7 +2066,12 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
         std::map<std::pair<int,int>, int>                            net_pull_map;
         AlignMap                                                     align_map;
-        build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
+        std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
+        build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
+        for (auto& ts : result.segments) {
+            auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
+            if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
+        }
         apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
         relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
         set_pull_targets(result.segments, pull_map, net_pull_map);
@@ -2073,6 +2108,9 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
         tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map);
+        // Final: re-anchor face-tapped segments to their block faces (closes any
+        // face open the SEG-follow above left short; no-op when faces are reached).
+        cover_busterm_faces(result.segments);
         compute_metrics(result);
         out.result = std::move(result);
         return out;
@@ -2272,7 +2310,12 @@ NUTSResult NUTSEngine::rerun_layer(
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     std::map<std::pair<int,int>, int>                            net_pull_map;
     AlignMap                                                     align_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
+    std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
+    for (auto& ts : result.segments) {
+        auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
+        if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
+    }
     apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
     relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set, layer_id);
     set_pull_targets(result.segments, pull_map, net_pull_map);
@@ -2296,6 +2339,7 @@ NUTSResult NUTSEngine::rerun_layer(
     // overlap / wirelength guards stay global, so cross-layer spans are honoured)
     // — keeps the single-layer contract while still recovering wirelength.
     tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map, layer_id);
+    cover_busterm_faces(result.segments);   // re-anchor face taps (see run())
     compute_metrics(result);
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "
