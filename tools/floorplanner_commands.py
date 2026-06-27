@@ -514,12 +514,9 @@ def rotate_blocks_cw(state: FloorplannerAppState, names: Iterable[str]) -> None:
     """
     for name in names:
         try:
-            b = state.engine.get_block(name)
+            state.engine.rotate_block(name, True)   # carries the sub-hierarchy
         except Exception:
             continue
-        x1, y1 = b.x1, b.y1
-        w, h = b.x2 - b.x1, b.y2 - b.y1
-        state.engine.resize_block_raw(name, x1, y1 - w, x1 + h, y1)
 
 
 def rotate_blocks_ccw(state: FloorplannerAppState, names: Iterable[str]) -> None:
@@ -533,12 +530,9 @@ def rotate_blocks_ccw(state: FloorplannerAppState, names: Iterable[str]) -> None
     """
     for name in names:
         try:
-            b = state.engine.get_block(name)
+            state.engine.rotate_block(name, False)  # carries the sub-hierarchy
         except Exception:
             continue
-        x1, y1 = b.x1, b.y1
-        w, h = b.x2 - b.x1, b.y2 - b.y1
-        state.engine.resize_block_raw(name, x1 - h, y1, x1, y1 + w)
 
 
 def validate(state: FloorplannerAppState):
@@ -988,7 +982,7 @@ def distribute_h(state, names: list) -> None:
     x = pairs[0][1].x1
     for name, b in pairs:
         w = b.x2 - b.x1
-        state.engine.resize_block_raw(name, x, b.y1, x + w, b.y2)
+        state.engine.move_block_raw(name, x, b.y1)   # move (carries children)
         x += w + gap
 
 
@@ -1004,5 +998,5 @@ def distribute_v(state, names: list) -> None:
     y = pairs[0][1].y1
     for name, b in pairs:
         h = b.y2 - b.y1
-        state.engine.resize_block_raw(name, b.x1, y, b.x2, y + h)
+        state.engine.move_block_raw(name, b.x1, y)   # move (carries children)
         y += h + gap

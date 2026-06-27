@@ -103,6 +103,49 @@ void FloorplannerEngine::move_block_raw(const std::string& name, double x, doubl
         _translate_descendants(name, dx, dy);
 }
 
+void FloorplannerEngine::rotate_block(const std::string& name, bool cw) {
+    const Block& root = _block_or_throw(name);
+    const double px = root.x1, py = root.y1;   // pivot = lower-left corner
+
+    // The block plus every descendant ("name/...") rotate rigidly about the pivot.
+    std::vector<std::string> subtree{name};
+    const std::string prefix = name + "/";
+    for (const auto& [n, _b] : _blocks)
+        if (n.size() > prefix.size() && n.compare(0, prefix.size(), prefix) == 0)
+            subtree.push_back(n);
+
+    // Rotate each bbox's corners about the pivot; a 90° turn maps an axis-aligned
+    // rect to an axis-aligned rect (w/h swapped).  y-up: CW (dx,dy)→(dy,-dx),
+    // CCW (dx,dy)→(-dy,dx).
+    for (const auto& n : subtree) {
+        Block& b = _block_or_throw(n);
+        double ax1 = b.x1 - px, ay1 = b.y1 - py;
+        double ax2 = b.x2 - px, ay2 = b.y2 - py;
+        double nx1, ny1, nx2, ny2;
+        if (cw) {
+            nx1 = px + ay1; nx2 = px + ay2;
+            ny1 = py - ax2; ny2 = py - ax1;
+        } else {
+            nx1 = px - ay2; nx2 = px - ay1;
+            ny1 = py + ax1; ny2 = py + ax2;
+        }
+        b.x1 = _snap(nx1); b.y1 = _snap(ny1);
+        b.x2 = _snap(nx2); b.y2 = _snap(ny2);
+    }
+    // Recompute local offsets from the (now-rotated) immediate parents.
+    for (const auto& n : subtree) {
+        Block& b = _block_or_throw(n);
+        if (b.has_local) {
+            std::string parent = _parent_path(n);
+            if (!parent.empty()) {
+                const Block& p = _block_or_throw(parent);
+                b.local_x = b.x1 - p.x1;
+                b.local_y = b.y1 - p.y1;
+            }
+        }
+    }
+}
+
 void FloorplannerEngine::_translate_descendants(const std::string& name,
                                                 double dx, double dy) {
     const std::string prefix = name + "/";

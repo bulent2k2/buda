@@ -287,6 +287,55 @@ def test_align_carries_children(tmp_path):
     assert (c.x1, c.y1) == (310, 10), "B's child follows the align move"
 
 
+def test_distribute_carries_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "dist.bdb"), 3000, 2000, grid=10)
+    # Three parents to distribute horizontally; the middle one has a child.
+    fpc.add_block(state, "A", 0, 0, 100, 100)
+    fpc.add_block(state, "B", 200, 0, 300, 100)
+    fpc.add_block(state, "C", 900, 0, 1000, 100)
+    fpc.add_child_block(state, "B/c", 10, 10, 20, 20)    # abs (210,10,230,30)
+    before = state.block("B")
+    cb = state.block("B/c")
+    off = (cb.x1 - before.x1, cb.y1 - before.y1)         # child's offset from B
+
+    fpc.distribute_h(state, ["A", "B", "C"])
+
+    b = state.block("B")
+    c = state.block("B/c")
+    # Child keeps the same offset from its (repositioned) parent.
+    assert (c.x1 - b.x1, c.y1 - b.y1) == off, "child follows B during distribute"
+
+
+def test_rotate_cw_carries_and_rotates_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "rot.bdb"), 2000, 2000, grid=10)
+    # Parent 200 wide x 100 tall at origin; child near its lower-left.
+    fpc.add_block(state, "P", 0, 0, 200, 100)
+    fpc.add_child_block(state, "P/c", 20, 10, 40, 30)    # abs (20,10,60,40)
+
+    fpc.rotate_blocks_cw(state, ["P"])
+
+    # Parent: CW about LL (0,0) → (0, -200, 100, 0): w/h swapped (100 x 200).
+    p = state.block("P")
+    assert (p.x1, p.y1, p.x2, p.y2) == (0, -200, 100, 0)
+    # Child rotated about the SAME pivot, w/h swapped (was 40x30 → 30x40).
+    #   rel LL (20,10), UR (60,40); CW (dx,dy)->(dy,-dx):
+    #   x in [10,40], y in [-60,-20]  → abs (10,-60,40,-20).
+    c = state.block("P/c")
+    assert (c.x1, c.y1, c.x2, c.y2) == (10, -60, 40, -20)
+    assert (c.x2 - c.x1, c.y2 - c.y1) == (30, 40), "child w/h swapped"
+
+
+def test_rotate_ccw_leaf_matches_formula(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "rccw.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "L", 100, 100, 200, 100)        # add_block = (name,x,y,w,h)
+    b0 = state.block("L")
+    assert (b0.x1, b0.y1, b0.x2, b0.y2) == (100, 100, 300, 200)  # w=200, h=100
+    fpc.rotate_blocks_ccw(state, ["L"])
+    # CCW about LL (100,100): new bbox (x1-h, y1, x1, y1+w) = (0,100,100,300).
+    b = state.block("L")
+    assert (b.x1, b.y1, b.x2, b.y2) == (0, 100, 100, 300)
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"

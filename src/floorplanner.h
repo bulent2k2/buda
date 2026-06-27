@@ -57,6 +57,10 @@ public:
     void move_block_raw(const std::string& name, double x, double y);
     void resize_block_raw(const std::string& name,
                           double x1, double y1, double x2, double y2);
+    // Rotate a block 90° (cw=true → clockwise) around its own lower-left corner,
+    // carrying its whole sub-hierarchy: every descendant is rotated about the
+    // same pivot and has its w/h swapped.
+    void rotate_block(const std::string& name, bool cw);
     void move_child_local(const std::string& name, double local_x, double local_y);
     void align_bottom(const std::vector<std::string>& names);
     void align_top(const std::vector<std::string>& names);
