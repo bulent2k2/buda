@@ -1496,15 +1496,21 @@ histogram (trunk `@coord` suffixes collapsed).
 
 **`--conn` detail.** For the selected candidate of each shown bundle (candidate 0
 if not yet planned), `ConnTopology` is rebuilt and each segment is printed with:
-its orientation/layer, along extent and perpendicular position, **slide range**
-(`perp_lo..perp_hi`; `free` when unbounded, `PINCHED` when zero), and **net-pull**
-preference (`→hi` / `→lo` / `none`). Under each segment three lines list **what it
-connects to** — `busterms:` (block-face taps, with `@face=` coord and `(end)`/`(mid)`)
-and `segs:` (other segments, by index and junction position) — and **`passthru:`**,
-the blocks the segment geometrically crosses without tapping (a declared feedthru is
-marked `[feedthru]`). The bundle header also echoes any declared `feedthru=` blocks.
-This is the same connectivity view the planner and NUTS consume, so it is the first
-place to look when a bundle routes with an open or an unexpected slide/pull.
+its orientation and **layer**, along extent and perpendicular position, **slide
+range** (`perp_lo..perp_hi`; `free` when unbounded, `PINCHED` when zero), and
+**net-pull** preference (`→hi` / `→lo` / `none`). The layer is the planner's
+*effective* assignment (`plan.seg_layers` — the metal NUTS actually routes on);
+before planning, or for a candidate that is not the planned one, it falls back to
+the candidate's generation hint and is marked `·hint` (e.g. `M6·hint`). Under each
+segment three lines list **what it connects to** — `busterms:` (block-face taps,
+with `@face=` coord and `(end)`/`(mid)`) and `segs:` (other segments, by index and
+junction position) — and **`passthru:`**, the blocks the segment geometrically
+crosses without tapping. Pass-through is tested against each block's **solid**
+geometry, so a segment through the notch/gap of a multi-rect (TEG) block does not
+count; a declared feedthru is marked `[feedthru]`. The bundle header also echoes any
+declared `feedthru=` blocks. This is the same connectivity view the planner and NUTS
+consume, so it is the first place to look when a bundle routes with an open or an
+unexpected slide/pull.
 
 ```
 dump_topologies                 # every bundle + summary

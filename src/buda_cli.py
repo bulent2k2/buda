@@ -1353,16 +1353,28 @@ class BudaSession:
 
     _SLIDE_SENTINEL = 1e8   # ConnTopology marks an unbounded slide with ~5e8
 
-    def _seg_spans_block(self, cs, rect):
-        """True iff ConnSeg `cs` geometrically crosses `rect` (a pass-through
-        candidate): perp coordinate inside the rect's perp extent and the along
-        span overlapping the rect's along extent.  Mirrors verify's seg_spans_rect."""
+    def _seg_crosses_rect(self, cs, x1, y1, x2, y2):
+        """True iff ConnSeg `cs` geometrically crosses the rect (perp coordinate
+        inside the rect's perp extent and the along span overlapping the rect's
+        along extent).  Mirrors verify's seg_spans_rect."""
         if cs.horiz:   # perp = y (perp_pos), along = x
-            return (rect.y1 <= cs.perp_pos <= rect.y2
-                    and cs.along_lo <= rect.x2 and cs.along_hi >= rect.x1)
+            return (y1 <= cs.perp_pos <= y2
+                    and cs.along_lo <= x2 and cs.along_hi >= x1)
         else:          # perp = x, along = y
-            return (rect.x1 <= cs.perp_pos <= rect.x2
-                    and cs.along_lo <= rect.y2 and cs.along_hi >= rect.y1)
+            return (x1 <= cs.perp_pos <= x2
+                    and cs.along_lo <= y2 and cs.along_hi >= y1)
+
+    def _seg_spans_block(self, cs, name, ubbox):
+        """True iff `cs` crosses block `name`'s SOLID geometry.  Multi-rect / TEG
+        blocks store their real rectangles in get_block_rects(); a segment through
+        a notch/gap between them does NOT cross the block even though it crosses the
+        union bbox.  Single-rect blocks have an empty rect list — fall back to the
+        union bbox (which is their solid extent)."""
+        rects = self.fp.get_block_rects(name)   # [] for single-rect blocks
+        if rects:
+            return any(self._seg_crosses_rect(cs, x1, y1, x2, y2)
+                       for (x1, y1, x2, y2) in rects)
+        return self._seg_crosses_rect(cs, ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
 
     def _dump_conn_detail(self, w, cand_idx):
         """Print per-segment connectivity for one candidate of bundle `w`:
@@ -1383,19 +1395,29 @@ class BudaSession:
             print(f"     (connectivity unavailable: {e})")
             return
 
-        blocks = self.fp.get_all_blocks()   # [(name, Rect)]
+        blocks = self.fp.get_all_blocks()   # [(name, Rect union-bbox)]
         feedthru = set(topo.feedthru_blocks)
+        # Effective per-segment layer: when this candidate IS the planned/selected
+        # one, the planner may have reassigned layers (or honoured a pinned
+        # selection / post_nuts move) — report that, the layer NUTS actually routes
+        # on, not the candidate's original generation layer_hint.  seg_layers is
+        # indexed by the selected topology's segments, so it only aligns here.
+        seg_layers = (list(w.plan.seg_layers)
+                      if cand_idx == w.plan.selected_topology_index else [])
         print(f"   conn detail — candidate {cand_idx}: {topo.type}"
               + (f"   feedthru={sorted(feedthru)}" if feedthru else ""))
         for si, cs in enumerate(segs):
             orient = "H" if cs.horiz else "V"
+            planned = si < len(seg_layers) and seg_layers[si] >= 0
+            layer = seg_layers[si] if planned else cs.layer_id
+            lyr_s = f"M{layer}" + ("" if planned else "·hint")
             rng = cs.perp_hi - cs.perp_lo
             if abs(cs.perp_lo) >= self._SLIDE_SENTINEL or abs(cs.perp_hi) >= self._SLIDE_SENTINEL:
                 slide = "free"
             else:
                 slide = f"[{cs.perp_lo}..{cs.perp_hi}] = {rng}{' PINCHED' if rng == 0 else ''}"
             pull = ("→hi" if cs.net_pull > 0 else "→lo" if cs.net_pull < 0 else "none")
-            print(f"     seg{si:<2} {orient} M{cs.layer_id}  "
+            print(f"     seg{si:<2} {orient} {lyr_s}  "
                   f"along[{cs.along_lo},{cs.along_hi}] perp={cs.perp_pos}  "
                   f"slide={slide}  pull={pull}({cs.net_pull})")
 
@@ -1411,12 +1433,12 @@ class BudaSession:
             print(f"        busterms: {', '.join(bts) if bts else '(none)'}")
             print(f"        segs:     {', '.join(sgs) if sgs else '(none)'}")
 
-            # Pass-through: blocks this seg crosses but does NOT tap.
+            # Pass-through: blocks this seg crosses (solid geometry) but does NOT tap.
             passt = []
-            for name, rect in blocks:
+            for name, ubbox in blocks:
                 if name in tapped:
                     continue
-                if self._seg_spans_block(cs, rect):
+                if self._seg_spans_block(cs, name, ubbox):
                     passt.append(name + ("[feedthru]" if name in feedthru else ""))
             print(f"        passthru: {', '.join(passt) if passt else '(none)'}")
 
