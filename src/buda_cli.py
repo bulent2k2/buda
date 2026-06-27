@@ -2872,8 +2872,15 @@ class BudaSession:
                 full_path = os.path.abspath(raw_path)
 
             if not os.path.exists(full_path):
-                print(f"Error: sourced file not found: {full_path}")
-                return
+                # Fail fast (like an unknown command): a missing/typo'd source
+                # silently continuing would leave the design misconfigured — e.g.
+                # no def_layers loaded, so run_planner falls back to its M4/M5
+                # default and routes on the wrong metal with no obvious cause.
+                where = (f" in {os.path.basename(self._script_stack[-1])}"
+                         if self._script_stack else "")
+                print(f"Error: sourced file not found{where}: {full_path} "
+                      f"('{cmd_line.strip()}').")
+                sys.exit(1)
 
             if self.script_path is None:
                 self.script_path = full_path

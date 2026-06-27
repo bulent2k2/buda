@@ -580,3 +580,59 @@ def test_nuts_corner_touch_xlayer():
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
     assert int(dm.group(2)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Hardening: a missing `source` must fail fast, and an empty layer stack must
+# warn (regression guards for the "planner layer-assignment instability" false
+# alarm — wishlist #3 — where an unresolvable relative source left no def_layers
+# and run_planner silently fell back to M4/M5).
+# ---------------------------------------------------------------------------
+
+def _run_path(path: Path) -> tuple[str, int]:
+    build_dir = _ROOT / "build"
+    tools_dir = _ROOT / "tools"
+    ppath = os.environ.get("PYTHONPATH", "")
+    new_ppath = f"{build_dir}:{tools_dir}:{ppath}" if ppath else f"{build_dir}:{tools_dir}"
+    env = {**os.environ, "PYTHONPATH": new_ppath}
+    r = subprocess.run([sys.executable, str(CLI), "--no-viz", str(path)],
+                       capture_output=True, text=True, env=env)
+    return r.stdout + r.stderr, r.returncode
+
+
+def test_source_missing_file_fails_fast(tmp_path):
+    """`source` on a non-existent file aborts (exit 1) instead of silently
+    continuing with the rest of the script (which would route on the wrong
+    metal because no def_layers loaded)."""
+    script = tmp_path / "broken.buda"
+    script.write_text(
+        "source ./does_not_exist.buda\n"
+        "add_block a 0 0 100 100\n"
+        "add_block b 400 0 500 100\n"
+        "add_bus x[4] a b\n"
+        "run_bundler\n"
+        "generate_topologies\n"
+        "run_planner\n"
+    )
+    out, rc = _run_path(script)
+    assert rc == 1, f"expected exit 1 on missing source, got {rc}\n{out}"
+    assert "sourced file not found" in out, out
+    # It must have aborted at the source line — not reached the planner.
+    assert "[Planner]" not in out, f"ran past the failed source:\n{out}"
+
+
+def test_empty_layer_stack_warns(tmp_path):
+    """A flow with no def_layer still runs (M4/M5 fallback) but emits a one-shot
+    planner warning so the misconfiguration is visible."""
+    script = tmp_path / "nolayers.buda"
+    script.write_text(
+        "add_block a 0 0 100 100\n"
+        "add_block b 400 0 500 100\n"
+        "add_bus x[4] a b\n"
+        "run_bundler\n"
+        "generate_topologies\n"
+        "run_planner\n"
+    )
+    out, rc = _run_path(script)
+    assert rc == 0, f"flow should still complete, got {rc}\n{out}"
+    assert "WARNING: no" in out and "layers defined" in out, out

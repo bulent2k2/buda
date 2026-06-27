@@ -37,28 +37,30 @@ now lands at `<= 2` abstract M7 overlaps, so the test is green. The root cause w
 exactly the over-applied `net_pull` that drove interior/non-binding stubs to their
 slide bounds, congesting the layer; it was never a `tighten_pulls` regression.
 
-## 3. Planner layer-assignment instability (input-sensitive tie-break)
+## 3. Planner "layer-assignment instability" — ✅ RESOLVED (not a bug)
 
-**What:** `run_planner`'s per-segment layer assignment for a bundle can differ
-between two runs whose `.buda` input is **byte-identical up to and including
-`run_planner`**. Observed with `flow/big_data_test/big2_b4_b24.buda` bundle 2
-(pinned `TRUNK_V@x5485`): the prefix through `run_planner` assigns `[V→M5 H→M4
-H→M4]`, while the full file (same prefix + trailing `run_nuts` / checks) assigns
-`[V→M7 H→M6 H→M6]` — same widths, same selected candidate, different metal. It is
-deterministic per file but sensitive to content that executes *after*
-`run_planner`, which points at an allocation-order / `unordered_*` iteration /
-floating-point-tie dependence in the layer cost comparison rather than true
-randomness.
+**Claim (investigated):** `run_planner`'s per-segment layer assignment seemed to
+differ between two runs with input "byte-identical up to `run_planner`" —
+`flow/big_data_test/big2_b4_b24.buda` bundle 2 assigned `[V→M5 H→M4 H→M4]` from a
+`sed`-extracted prefix file but `[V→M7 H→M6 H→M6]` from the full file.
 
-**Why it matters:** when several same-direction layers tie on cost, the chosen
-metal (and therefore congestion distribution and `dump_topologies --conn`'s
-reported layer) is not stable across otherwise-equivalent flows. Found while
-addressing the PR #66 review; the dump change itself is correct (it faithfully
-reports whatever `plan.seg_layers` holds).
+**Finding: the planner is fully deterministic — there is no instability.** A
+sweep of `congestion_planner.cpp/.h` found no `unordered_*` / pointer-keyed /
+hash-ordered containers in the hot path: layer ids come sorted
+(`layering.cpp:89`), cuts/bands iterate by index, and the layer-cost compare
+(`congestion_planner.cpp`) iterates highest-id-first so ties break toward higher
+metal. The full file gives `M7/M6` on every run; the prefix file gives `M5/M4` on
+every run — each deterministic.
 
-**Where to start:** `src/congestion_planner.cpp` `plan_bundle` layer-selection
-loop (the `best_s`/`best_lid` comparison ~`:604`). Audit the tie-break: make it a
-total order on a stable key (layer id, then deterministic cost) so equal-cost
-layers resolve identically regardless of map iteration / heap layout. Repro by
-diffing the `[Planner] Bundle … → topo …` line between the bare prefix
-(`sed -n '1,/^run_planner$/p'`) and the full file.
+The difference was a **reproduction artifact**: the `sed` prefix file was written
+to the scratchpad, so its relative `source ../tracks4top.buda` (resolved against
+the *script's* directory) did not exist. `source` on a missing file used to print
+an error and continue, so the run proceeded with **no `def_layer`s**, and
+`run_planner` silently defaulted to M4(H)/M5(V) — the `M5/M4` assignment. Placing
+the same prefix file *in* `flow/big_data_test/` (where the source resolves) gives
+`[V→M7 H→M6 H→M6]`, identical to the full file. Confirmed.
+
+**Hardening shipped** so this class of confusion can't recur: `source` on a
+missing file is now a hard error (exit 1, like an unknown command), and
+`run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
+before falling back to M4/M5.
