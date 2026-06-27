@@ -583,7 +583,17 @@ std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
 static bool stub_binds_trunk_end(const std::vector<ConnSeg>& segs, int ci,
                                  const ConnSeg& cs, const ConnSeg& nb, int sign) {
     for (const auto& sc : nb.conns) {
-        if (sc.kind != SegConn::SEG || sc.seg_idx == ci) continue;
+        if (sc.kind == SegConn::BUSTERM) {
+            // A direct trunk tap is an IMMOVABLE endpoint-setter: a tap further
+            // from the target busterm than cs already pins that trunk end, so cs
+            // sliding cannot shorten the trunk.  Without this, a TRUNK_H tapping
+            // blocks at both ends with an interior stub would treat the stub as
+            // the binding endpoint (no SEG lies past it) and pull it spuriously.
+            if (sign > 0) { if (sc.face_coord < cs.perp_pos) return false; }
+            else          { if (sc.face_coord > cs.perp_pos) return false; }
+            continue;
+        }
+        if (sc.seg_idx == ci) continue;
         const ConnSeg& o = segs[sc.seg_idx];
         if (sign > 0) {
             if (o.perp_pos < cs.perp_pos) return false;

@@ -186,6 +186,35 @@ def test_multicast_trunk_only_endpoint_stub_pulls():
         )
 
 
+def test_direct_trunk_taps_count_as_endpoints():
+    """A trunk's direct BUSTERM taps are immovable endpoint-setters; an interior
+    stub between a tap and another stub must not pull.
+
+    TRUNK_H@y500 taps L at x=160 and R at x=1050 directly; M's stub is interior
+    at x=510 with P's stub further right at x=800.  Pre-fix the endpoint check saw
+    only SEG stubs: no SEG lay left of M, so M was judged the binding low endpoint
+    and pulled +1 toward R, while the pull toward the left tap was suppressed by P.
+    Counting the left tap as a competitor leaves M (interior on both sides) at 0.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("L", 0,    400, 160,  600)   # driver -> direct left tap (x=160)
+    fp.add_block("R", 1050, 400, 1250, 600)   # receiver -> direct right tap (x=1050)
+    fp.add_block("M", 460,  800, 560,  1000)  # interior V stub at x=510
+    fp.add_block("P", 750,  800, 850,  1000)  # V stub at x=800 (right of M)
+    topo = _candidate(fp, "L", ["R", "M", "P"], "TRUNK_H@y500")
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    for cs in ct.segs():
+        if not cs.horiz and any(c.kind == buda.SegConnKind.BUSTERM
+                                and c.block_name == "M" for c in cs.conns):
+            assert cs.net_pull == 0, (
+                f"interior stub between a direct tap and another stub must not "
+                f"pull (got {cs.net_pull})"
+            )
+            return
+    raise AssertionError("M's interior stub not found")
+
+
 # ---------------------------------------------------------------------------
 # End-to-end: flow scripts place stubs sanely (regression for NUTS overshoot)
 # ---------------------------------------------------------------------------
