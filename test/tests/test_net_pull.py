@@ -133,6 +133,89 @@ def test_pull2_l_stub_outside_far_interval_still_pulls():
 
 
 # ---------------------------------------------------------------------------
+# Multicast trunk: only the endpoint-setting stub pulls toward the tapped block
+# ---------------------------------------------------------------------------
+
+def _b4_fp():
+    """The five blocks of big2 bus_077 (bundle 4): driver blk_02 + receivers.
+    The TRUNK_H@y4887 trunk taps blk_12 at x=6100 (right); the V stubs hang off
+    it toward the left."""
+    fp = buda.Floorplan()
+    for n, r in {
+        "blk_02":    (4280, 5350, 5445, 6300),
+        "blk_22":    (4870, 2385, 6100, 3365),
+        "blk_12":    (4870, 4425, 6100, 5350),
+        "blk_29":    (4870, 1425, 6100, 2385),
+        "io_pad_tr": (5445, 5350, 6100, 6300),
+    }.items():
+        fp.add_block(n, *r)
+    return fp
+
+
+def test_multicast_trunk_only_endpoint_stub_pulls():
+    """A V stub of a busterm-tapped trunk pulls toward the tap ONLY when it sets
+    the trunk's near endpoint — i.e. it is the binding far-extreme or is anchored
+    at its busterm-side slide bound.  Interior or freely-sliding stubs must not be
+    dragged to their slide bound for no wirelength gain.
+
+    big2 bus_077 / TRUNK_H@y4887 taps blk_12 at x=6100.  Of the four V stubs only
+    blk_02's (capped at x=5445 = the trunk's left end) is anchored/binding, so
+    only it pulls; blk_29 (interior) and io_pad_tr (co-located but free to slide
+    right) and blk_22 (already at the tap) must read 0.  Pre-fix all three of
+    blk_02/blk_29/io_pad_tr pulled +1.
+    """
+    fp = _b4_fp()
+    topo = _candidate(fp, "blk_02", ["blk_22", "blk_12", "blk_29", "io_pad_tr"],
+                      "TRUNK_H@y4887")
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    segs = list(ct.segs())
+
+    def stub_for(block):
+        for cs in segs:
+            if any(c.kind == buda.SegConnKind.BUSTERM and c.block_name == block
+                   for c in cs.conns):
+                return cs
+        raise AssertionError(f"no stub taps {block}")
+
+    assert stub_for("blk_02").net_pull > 0, "blk_02's binding/anchored stub must pull"
+    for blk in ("blk_29", "io_pad_tr", "blk_22"):
+        assert stub_for(blk).net_pull == 0, (
+            f"{blk}'s stub does not set the trunk endpoint and must not pull "
+            f"(got {stub_for(blk).net_pull})"
+        )
+
+
+def test_direct_trunk_taps_count_as_endpoints():
+    """A trunk's direct BUSTERM taps are immovable endpoint-setters; an interior
+    stub between a tap and another stub must not pull.
+
+    TRUNK_H@y500 taps L at x=160 and R at x=1050 directly; M's stub is interior
+    at x=510 with P's stub further right at x=800.  Pre-fix the endpoint check saw
+    only SEG stubs: no SEG lay left of M, so M was judged the binding low endpoint
+    and pulled +1 toward R, while the pull toward the left tap was suppressed by P.
+    Counting the left tap as a competitor leaves M (interior on both sides) at 0.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("L", 0,    400, 160,  600)   # driver -> direct left tap (x=160)
+    fp.add_block("R", 1050, 400, 1250, 600)   # receiver -> direct right tap (x=1050)
+    fp.add_block("M", 460,  800, 560,  1000)  # interior V stub at x=510
+    fp.add_block("P", 750,  800, 850,  1000)  # V stub at x=800 (right of M)
+    topo = _candidate(fp, "L", ["R", "M", "P"], "TRUNK_H@y500")
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    for cs in ct.segs():
+        if not cs.horiz and any(c.kind == buda.SegConnKind.BUSTERM
+                                and c.block_name == "M" for c in cs.conns):
+            assert cs.net_pull == 0, (
+                f"interior stub between a direct tap and another stub must not "
+                f"pull (got {cs.net_pull})"
+            )
+            return
+    raise AssertionError("M's interior stub not found")
+
+
+# ---------------------------------------------------------------------------
 # End-to-end: flow scripts place stubs sanely (regression for NUTS overshoot)
 # ---------------------------------------------------------------------------
 

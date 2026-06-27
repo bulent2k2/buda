@@ -567,6 +567,39 @@ std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
     return compute_mst(nodes);
 }
 
+// Is stub cs (index ci) the BINDING far-extreme stub of trunk nb on the side
+// away from a busterm in direction sign (+1 toward perp_hi → cs must be a lowest
+// stub; -1 → highest)?  Only the extreme stub sets that trunk endpoint; a stub
+// with another strictly further from the busterm, or a co-located stub that
+// reaches less far toward it, does not.  Equal-reach co-located stubs all bind
+// (they shorten the trunk only by sliding together — e.g. a TRUNK_V's symmetric
+// top branch stubs), so there is no index tie-break.
+static bool stub_binds_trunk_end(const std::vector<ConnSeg>& segs, int ci,
+                                 const ConnSeg& cs, const ConnSeg& nb, int sign) {
+    for (const auto& sc : nb.conns) {
+        if (sc.kind == SegConn::BUSTERM) {
+            // A direct trunk tap is an IMMOVABLE endpoint-setter: a tap further
+            // from the target busterm than cs already pins that trunk end, so cs
+            // sliding cannot shorten the trunk.  Without this, a TRUNK_H tapping
+            // blocks at both ends with an interior stub would treat the stub as
+            // the binding endpoint (no SEG lies past it) and pull it spuriously.
+            if (sign > 0) { if (sc.face_coord < cs.perp_pos) return false; }
+            else          { if (sc.face_coord > cs.perp_pos) return false; }
+            continue;
+        }
+        if (sc.seg_idx == ci) continue;
+        const ConnSeg& o = segs[sc.seg_idx];
+        if (sign > 0) {
+            if (o.perp_pos < cs.perp_pos) return false;
+            if (o.perp_pos == cs.perp_pos && o.perp_hi < cs.perp_hi) return false;
+        } else {
+            if (o.perp_pos > cs.perp_pos) return false;
+            if (o.perp_pos == cs.perp_pos && o.perp_lo > cs.perp_lo) return false;
+        }
+    }
+    return true;
+}
+
 void ConnTopology::compute_net_pull() {
     for (int ci = 0; ci < (int)segs_.size(); ++ci) {
         ConnSeg& cs = segs_[ci];
@@ -576,8 +609,27 @@ void ConnTopology::compute_net_pull() {
             const ConnSeg& nb = segs_[conn.seg_idx];
             for (const auto& sc : nb.conns) {
                 if (sc.kind != SegConn::BUSTERM) continue;
-                if      (sc.face_coord > cs.perp_pos) ++pos;
-                else if (sc.face_coord < cs.perp_pos) ++neg;
+                int sign = (sc.face_coord > cs.perp_pos) ? +1
+                         : (sc.face_coord < cs.perp_pos) ? -1 : 0;
+                if (sign == 0) continue;
+                // Pull cs toward nb's busterm only when cs actually sets a trunk
+                // endpoint — otherwise an interior or freely-sliding stub gets
+                // dragged to its slide bound for no wirelength gain (the spurious
+                // blk_29 / io_pad_tr right-drift in big2 bus_077's TRUNK_H, where
+                // only blk_02's capped stub should pull).  Two ways cs sets an
+                // endpoint:
+                //   (a) BINDING far-extreme: no other stub is further from the
+                //       busterm, so cs holds the trunk's near end; or
+                //   (b) ANCHORED at its busterm-side bound (perp_pos == perp_hi
+                //       for +1 / perp_lo for -1): its block face already holds it
+                //       as close to the busterm as it can get, and the pull keeps
+                //       it there against being dragged off — e.g. an aligned
+                //       sibling sinking to its interval floor (flow tc3a B20's
+                //       two top stubs both anchored), or a dogleg spine endpoint.
+                bool anchored = (sign > 0) ? (cs.perp_pos >= cs.perp_hi)
+                                           : (cs.perp_pos <= cs.perp_lo);
+                if (anchored || stub_binds_trunk_end(segs_, ci, cs, nb, sign))
+                    (sign > 0) ? ++pos : ++neg;
             }
         }
         for (const auto& conn : cs.conns) {
