@@ -28,6 +28,7 @@ The **Floorplanner** (`./fp`, `./bfp`) is a separate interactive GUI tool that e
 - [Detailed NUTS](docs/detailed_nuts.md) — Internal design of bit-level track assignment.
 - [Routing Grid](docs/routing_grid.md), [Detailed Viz](docs/detailed_viz.md), [Key Bindings](docs/KEY_BINDINGS.md).
 - [BDB → Flat Script Converter](docs/BDB2BUDA.md) — `tools/bdb2buda.py`: export a BDB as a flat `.buda` routing script.
+- [Flat Script → BDB Cell Converter](docs/BUDA2BDB.md) — `tools/buda2bdb.py`: ingest a flat `.buda` script into a BDB as a cell (reverse of `bdb2buda`; replaces an existing cell and size-syncs its instances).
 
 ## Build
 
