@@ -29,6 +29,7 @@ The **Floorplanner** (`./fp`, `./bfp`) is a separate interactive GUI tool that e
 - [Routing Grid](docs/routing_grid.md), [Detailed Viz](docs/detailed_viz.md), [Key Bindings](docs/KEY_BINDINGS.md).
 - [BDB → Flat Script Converter](docs/BDB2BUDA.md) — `tools/bdb2buda.py`: export a BDB as a flat `.buda` routing script.
 - [Flat Script → BDB Cell Converter](docs/BUDA2BDB.md) — `tools/buda2bdb.py`: ingest a flat `.buda` script into a BDB as a cell (reverse of `bdb2buda`; replaces an existing cell and size-syncs its instances).
+- [Hierarchical Demo BDB Builder](docs/BUILD_HIER_DEMO.md) — `tools/build_hier_demo.py`: assemble a hierarchical BDB from several flat scripts (each instantiated twice in a top cell) with random cross-instance top-level buses.
 
 ## Build
 
