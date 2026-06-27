@@ -105,7 +105,9 @@ affects its siblings.
 
 Click and drag any block on the canvas.  The origin snaps to the active grid.
 When multiple blocks are selected, dragging the primary moves only that block;
-use arrow keys to move the entire selection together.
+use arrow keys to move the entire selection together.  Dragging a block that
+contains children carries the whole sub-hierarchy with it (see
+[Editing Hierarchical Blocks](#editing-hierarchical-blocks)).
 
 ### Arrow-Key Nudge
 
@@ -125,6 +127,29 @@ Arrow keys are ignored when a text entry or spinbox has keyboard focus.
 Select a block (single-select).  Drag any of the four corner handles to resize
 it.  Resizing a shared-cell block updates all sibling instances; use **Make
 Unique** first to resize independently.
+
+---
+
+## Editing Hierarchical Blocks
+
+A block may contain a sub-hierarchy of child blocks — for example a cell
+instance and the blocks placed inside it (`chip/i_dnuts1_0` contains
+`chip/i_dnuts1_0/u0`, …).  The editing commands fall into two groups that treat
+children differently:
+
+- **Relocations carry their children.**  Moving a block — by **drag**,
+  **arrow-key nudge**, **Align**, **Center**, **Distribute**, **Rotate**, or the
+  **placement optimizer** — translates (or rotates) the entire sub-hierarchy with
+  it, so a parent and all of its descendants move together as a unit.
+- **Resizes keep their children in place.**  Changing a block's size — by a
+  **corner** or **mid-edge handle**, an **edge move / align**, or a reshape
+  during optimization — grows or shrinks the block *around* its contents.  The
+  children keep their absolute positions, exactly as resizing a container window
+  does not move what is inside it.  A child that ends up outside its parent is
+  reported by **Validate**.
+
+When a selection contains both a parent and one of its own descendants, the
+descendant is moved only once (it follows the parent) — never twice.
 
 ---
 

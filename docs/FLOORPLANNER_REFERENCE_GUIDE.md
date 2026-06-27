@@ -231,6 +231,40 @@ status bar.
 
 ---
 
+## Hierarchy-Aware Editing
+
+Blocks are stored in a flat map keyed by their hierarchical path
+(`parent/child`), each with absolute coordinates plus a cached local offset
+relative to its immediate parent.  Editing commands split into two semantics:
+
+| Semantics | Commands | Effect on a block's children |
+|---|---|---|
+| **Relocate** | drag-move, arrow nudge, align L/R/T/B, center H/V, distribute H/V, rotate CW/CCW, SA/GA optimize | The whole sub-hierarchy moves/rotates with the block |
+| **Resize** | corner / mid-edge handle, edge move / align, optimizer reshape | The block grows/shrinks around its children; children keep their absolute positions |
+
+Implementation notes:
+
+- `FloorplannerEngine::move_block_raw` computes the move delta and calls
+  `_translate_descendants(name, dx, dy)`, shifting every block named `name/…`.
+  Child local offsets are relative to the immediate parent (which moves by the
+  same delta), so only absolute coords change.
+- `FloorplannerEngine::rotate_block(name, cw)` rotates the block **and** every
+  descendant about the block's lower-left pivot (corners rotated, width/height
+  swapped), then recomputes local offsets; the rotated bbox is clamped to at
+  least one grid unit so a sub-grid dimension cannot collapse.
+- `resize_block_raw` deliberately does **not** carry children — resizing a
+  container leaves its contents in place (a child pushed outside is flagged by
+  `validate`).
+- `fpc.topmost(names)` prunes a selection to its topmost blocks (dropping any
+  name whose ancestor is also selected) before a relocate, so a selection holding
+  both a parent and a descendant never moves the descendant twice.  It is applied
+  by every relocate command (and the GUI arrow-nudge).
+- `optimize_placement` operates on root-level blocks and applies a pure
+  relocation via `move_block_raw` (children follow); only a genuine reshape of a
+  `reshapeable` block uses `resize_block_raw`.
+
+---
+
 ## Python Command-Layer API (`tools/floorplanner_commands.py`)
 
 These functions are the testable backend.  The GUI calls them; tests call them
@@ -257,10 +291,15 @@ directly without a display.
 |---|---|
 | `add_block(state, name, x, y, w, h)` | Add root-level block at absolute coords |
 | `add_child_block(state, name, local_x, local_y, w, h)` | Add child in local-parent coords |
-| `move_block(state, name, raw_x, raw_y)` | Move block origin (snapped by engine) |
-| `resize_block(state, name, x1, y1, x2, y2)` | Resize with snap |
+| `move_block(state, name, raw_x, raw_y)` | Move block origin (snapped); **carries children** |
+| `resize_block(state, name, x1, y1, x2, y2)` | Resize with snap; children stay in place |
+| `topmost(names)` | Drop any name whose ancestor is also selected (used before relocates) |
 
 ### Alignment and Distribution
+
+All of these are **relocations** — they carry each block's child sub-hierarchy
+and prune nested selections via `topmost` (see
+[Hierarchy-Aware Editing](#hierarchy-aware-editing)).
 
 | Function | Min blocks | Description |
 |---|---|---|
@@ -268,8 +307,12 @@ directly without a display.
 | `align_bottom(state, names)` | 2 | Align bottom edges |
 | `align_left(state, names)` | 2 | Align left edges |
 | `align_right(state, names)` | 2 | Align right edges |
+| `align_center_h(state, names)` | 2 | Share the first block's horizontal centerline |
+| `align_center_v(state, names)` | 2 | Share the first block's vertical centerline |
 | `distribute_h(state, names)` | 3 | Equal horizontal gaps; outer blocks anchored |
 | `distribute_v(state, names)` | 3 | Equal vertical gaps; outer blocks anchored |
+| `rotate_blocks_cw(state, names)` | 1 | Rotate 90° CW about each block's lower-left corner |
+| `rotate_blocks_ccw(state, names)` | 1 | Rotate 90° CCW about each block's lower-left corner |
 
 ### Optimization
 
@@ -285,6 +328,9 @@ optimize_placement(
 ```
 
 `OptimizerResult` fields: `placements`, `hpwl`, `area`, `overlap`, `iterations`.
+Results are applied to the engine as relocations (`move_block_raw`), so an
+optimized top-level instance carries its children; only a reshaped `reshapeable`
+block is applied as a resize.
 
 ### Metrics
 
