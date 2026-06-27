@@ -24,21 +24,18 @@ an uncovered candidate.
 check_topo coverage logic. Verify with `big2.buda` (no congestion regression) +
 the full test suite.
 
-## 2. Pre-existing failure: `test_tighten_does_not_trade_pull_for_overlaps`
+## 2. Pre-existing failure: `test_tighten_does_not_trade_pull_for_overlaps` — ✅ RESOLVED (PR #69)
 
 **What:** This `mid`-tier test (`test/tests/test_nuts_pull_repack.py`) asserts the
-`tc3a_flat` NUTS solve leaves `<= 2` abstract M7 overlaps, but it currently
-produces **3** (`B59×B74 ×2`, `B56×B79`). The test is red on `main`.
+`tc3a_flat` NUTS solve leaves `<= 2` abstract M7 overlaps, but it produced **3**
+(`B59×B74 ×2`, `B56×B79`) — red on `main`.
 
-**Why deferred:** Confirmed unrelated to the PR #65 fixes — it fails identically
-on `main` with the fixes stashed (same 3 overlaps). It's a drift in the
-`tc3a_flat` design / `tighten_pulls` group-move heuristic that predates this work.
-Excluded from the default fast tier, so it doesn't gate `pytest`.
-
-**Where to start:** Decide whether the 3rd overlap is a genuine `tighten_pulls`
-regression to fix or an acceptable congestion artifact (then update the guard
-threshold with justification). `git bisect` on the overlap count for `tc3a_flat`
-would pinpoint when 2 → 3.
+**Resolution:** Fixed by PR #69 (net_pull only pulls endpoint-setting stubs).
+Removing the spurious multicast-trunk pulls — and, with the busterm-tap endpoint
+check, the interior-stub pulls — changed `tc3a_flat`'s placement enough that it
+now lands at `<= 2` abstract M7 overlaps, so the test is green. The root cause was
+exactly the over-applied `net_pull` that drove interior/non-binding stubs to their
+slide bounds, congesting the layer; it was never a `tighten_pulls` regression.
 
 ## 3. Planner layer-assignment instability (input-sensitive tie-break)
 
