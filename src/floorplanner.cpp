@@ -131,6 +131,10 @@ void FloorplannerEngine::rotate_block(const std::string& name, bool cw) {
         }
         b.x1 = _snap(nx1); b.y1 = _snap(ny1);
         b.x2 = _snap(nx2); b.y2 = _snap(ny2);
+        // Independent corner snapping can collapse a sub-grid extent; keep the
+        // bbox non-degenerate (matches resize_block_raw's guard).
+        if (b.x2 <= b.x1) b.x2 = b.x1 + _grid;
+        if (b.y2 <= b.y1) b.y2 = b.y1 + _grid;
     }
     // Recompute local offsets from the (now-rotated) immediate parents.
     for (const auto& n : subtree) {

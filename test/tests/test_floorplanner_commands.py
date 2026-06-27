@@ -336,6 +336,40 @@ def test_rotate_ccw_leaf_matches_formula(tmp_path):
     assert (b.x1, b.y1, b.x2, b.y2) == (0, 100, 100, 300)
 
 
+def test_topmost_prunes_nested_names():
+    # Children dropped when an ancestor is also selected; order preserved.
+    assert fpc.topmost(["P", "P/c", "Q", "P/c/g", "R/x"]) == ["P", "Q", "R/x"]
+    assert fpc.topmost(["P/c", "P"]) == ["P"]
+    assert fpc.topmost(["A", "B"]) == ["A", "B"]
+
+
+def test_align_with_nested_selection_moves_child_once(tmp_path):
+    # Selecting both parent and child must not translate the child twice.
+    state = fpc.create_bdb(str(tmp_path / "nest.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "P", 0, 200, 100, 100)          # bbox (0,200,100,300)
+    fpc.add_block(state, "Q", 500, 0, 100, 100)          # y1=0 → align target
+    fpc.add_child_block(state, "P/c", 10, 10, 20, 20)    # abs (10,210,30,230)
+    # Align bottom with BOTH P and its child selected.
+    fpc.align_bottom(state, ["P", "P/c", "Q"])
+    p = state.block("P")
+    c = state.block("P/c")
+    assert p.y1 == 0, "P aligned to bottom"
+    # Child keeps its +10 offset from P (moved once, not twice).
+    assert (c.x1, c.y1) == (10, 10), f"child moved once, got {(c.x1, c.y1)}"
+
+
+def test_rotate_clamps_subgrid_extent(tmp_path):
+    # A block thinner than the grid must not collapse to zero extent on rotate.
+    state = fpc.create_bdb(str(tmp_path / "thin.bdb"), 2000, 2000, grid=10)
+    # 100 wide x 4 tall: rotating swaps to 4 wide x 100 tall; the 4-wide side
+    # would snap to 0 — must clamp to >= grid.
+    state.engine.add_block("T", 0, 0, 100, 4)
+    fpc.rotate_blocks_cw(state, ["T"])
+    b = state.block("T")
+    assert b.x2 > b.x1 and b.y2 > b.y1, "rotated bbox must stay non-degenerate"
+    assert b.x2 - b.x1 >= 10, "collapsed extent clamped to grid"
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"

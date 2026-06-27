@@ -361,33 +361,49 @@ def resize_block(state: FloorplannerAppState, name: str,
     state.engine.resize_block_raw(name, float(x1), float(y1), float(x2), float(y2))
 
 
-def align_bottom(state: FloorplannerAppState, names: Iterable[str]):
+def topmost(names: Iterable[str]) -> list:
+    """Drop any name that is a descendant ("A/.../B") of another selected name,
+    preserving order.  Subtree-carrying transforms (move/align/distribute/rotate)
+    move a block's children automatically, so a selection holding both an
+    ancestor and a descendant must not process the descendant twice."""
     names = list(names)
+    nameset = set(names)
+    out = []
+    for n in names:
+        parts = n.split('/')
+        if any('/'.join(parts[:i]) in nameset for i in range(1, len(parts))):
+            continue   # an ancestor of n is also selected → skip n
+        out.append(n)
+    return out
+
+
+def align_bottom(state: FloorplannerAppState, names: Iterable[str]):
+    names = topmost(names)
     if names:
         state.engine.align_bottom(names)
 
 
 def align_top(state: FloorplannerAppState, names: Iterable[str]):
-    names = list(names)
+    names = topmost(names)
     if names:
         state.engine.align_top(names)
 
 
 def align_left(state: FloorplannerAppState, names: Iterable[str]):
-    names = list(names)
+    names = topmost(names)
     if names:
         state.engine.align_left(names)
 
 
 def align_right(state: FloorplannerAppState, names: Iterable[str]):
-    names = list(names)
+    names = topmost(names)
     if names:
         state.engine.align_right(names)
 
 
 def align_center_h(state: FloorplannerAppState, names: Iterable[str]) -> None:
     """Align horizontal centerlines: move all blocks to share the first block's x-mid."""
-    names = list(names)
+    names = topmost(names)
     if len(names) < 2:
         return
     ref = state.engine.get_block(names[0])
@@ -399,7 +415,7 @@ def align_center_h(state: FloorplannerAppState, names: Iterable[str]) -> None:
 
 def align_center_v(state: FloorplannerAppState, names: Iterable[str]) -> None:
     """Align vertical centerlines: move all blocks to share the first block's y-mid."""
-    names = list(names)
+    names = topmost(names)
     if len(names) < 2:
         return
     ref = state.engine.get_block(names[0])
@@ -512,7 +528,7 @@ def rotate_blocks_cw(state: FloorplannerAppState, names: Iterable[str]) -> None:
     The block shifts downward by w.  Out-of-die positions are flagged by
     validate() — the caller is responsible for checking.
     """
-    for name in names:
+    for name in topmost(names):
         try:
             state.engine.rotate_block(name, True)   # carries the sub-hierarchy
         except Exception:
@@ -528,7 +544,7 @@ def rotate_blocks_ccw(state: FloorplannerAppState, names: Iterable[str]) -> None
     The block shifts leftward by h.  Out-of-die positions are flagged by
     validate().
     """
-    for name in names:
+    for name in topmost(names):
         try:
             state.engine.rotate_block(name, False)  # carries the sub-hierarchy
         except Exception:
@@ -972,7 +988,7 @@ def compute_hpwl(state) -> float:
 
 def distribute_h(state, names: list) -> None:
     """Space blocks evenly horizontally (leftmost and rightmost anchored)."""
-    pairs = sorted(((n, state.engine.get_block(n)) for n in names),
+    pairs = sorted(((n, state.engine.get_block(n)) for n in topmost(names)),
                    key=lambda x: x[1].x1)
     if len(pairs) < 3:
         return
@@ -988,7 +1004,7 @@ def distribute_h(state, names: list) -> None:
 
 def distribute_v(state, names: list) -> None:
     """Space blocks evenly vertically (topmost and bottommost anchored)."""
-    pairs = sorted(((n, state.engine.get_block(n)) for n in names),
+    pairs = sorted(((n, state.engine.get_block(n)) for n in topmost(names)),
                    key=lambda x: x[1].y1)
     if len(pairs) < 3:
         return
