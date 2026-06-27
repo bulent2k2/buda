@@ -947,9 +947,18 @@ def optimize_placement(
 
     for pb in result.placements:
         try:
-            state.engine.resize_block_raw(
-                pb.name, pb.x, pb.y, pb.x + pb.w, pb.y + pb.h
-            )
+            b = state.engine.get_block(pb.name)
+            same_size = (abs((b.x2 - b.x1) - pb.w) < 1e-6 and
+                         abs((b.y2 - b.y1) - pb.h) < 1e-6)
+            if same_size:
+                # Pure relocation → move (carries the block's child sub-hierarchy).
+                state.engine.move_block_raw(pb.name, pb.x, pb.y)
+            else:
+                # The optimizer reshaped this block (reshapeable): apply as a
+                # resize (children not carried, same as a manual resize).
+                state.engine.resize_block_raw(
+                    pb.name, pb.x, pb.y, pb.x + pb.w, pb.y + pb.h
+                )
         except Exception:
             pass
     return result

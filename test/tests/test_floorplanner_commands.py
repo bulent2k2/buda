@@ -370,6 +370,26 @@ def test_rotate_clamps_subgrid_extent(tmp_path):
     assert b.x2 - b.x1 >= 10, "collapsed extent clamped to grid"
 
 
+def test_optimize_relocation_carries_children(tmp_path):
+    # The optimizer applies pure relocations via move_block_raw, so a top-level
+    # hierarchical instance carries its children when SA legalizes placement.
+    state = fpc.create_bdb(str(tmp_path / "opt.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "P", 0, 0, 100, 80)             # overlaps Q
+    fpc.add_block(state, "Q", 50, 50, 150, 130)
+    fpc.add_child_block(state, "P/c", 10, 10, 20, 20)    # abs (10,10,30,30)
+    p0 = state.block("P")
+    c0 = state.block("P/c")
+    off = (c0.x1 - p0.x1, c0.y1 - p0.y1)                 # (10, 10)
+
+    fpc.optimize_placement(state, method="sa", max_iter=3000, seed=3)
+
+    p = state.block("P")
+    c = state.block("P/c")
+    assert (c.x1 - p.x1, c.y1 - p.y1) == off, "child follows the optimized parent"
+    # And it actually moved (legalized away from origin overlap).
+    assert (p.x1, p.y1) != (p0.x1, p0.y1) or (c.x1, c.y1) != (c0.x1, c0.y1)
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"
