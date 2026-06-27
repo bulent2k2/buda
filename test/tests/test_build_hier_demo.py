@@ -50,27 +50,34 @@ def test_build_hier_demo_hierarchy_and_buses(tmp_path):
     assert len(db.all_nets()) == 70
 
 
-def test_build_hier_demo_buses_are_hierarchical(tmp_path):
-    out = str(tmp_path / "hier2.bdb")
-    build_hier_demo.build(out, _CELLS, seed=1)
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("seed", [1, 2, 7])
+def test_build_hier_demo_buses_are_hierarchical(tmp_path, seed):
+    # Every top bus must be a genuine cross-instance net (common ancestor = top),
+    # i.e. it must carry depth-1 interface pins on ≥2 distinct "chip/i_*"
+    # ancestors — for ANY seed (regression for the all-in-one-instance case).
+    out = str(tmp_path / f"hier_{seed}.bdb")
+    build_hier_demo.build(out, _CELLS, seed=seed)
 
     db = buda_db.BDB(out)
     cid2name = {c.id: c.name for c in db.all_components()}
     nets = {n.name: n.id for n in db.all_nets()}
-    # Every bus bit-net exists.
-    assert "top_bus6_w16_15" in nets
+    assert "top_bus6_w16_15" in nets       # widest bus's last bit exists
 
-    nid = nets["top_bus0_w4_0"]
-    pins = [p for p in db.all_pins() if p.net_id == nid]
-    # One driver (OUTPUT) leaf, ≥1 receiver (INPUT) leaf.
-    assert any(p.dir == "OUTPUT" for p in pins)
-    assert any(p.dir == "INPUT" for p in pins)
-    # Interface pins are propagated onto depth-1 instance ancestors
-    # (pin_name == net_name on a "chip/i_*" component, no further '/').
-    iface = [p for p in pins
-             if p.pin_name == "top_bus0_w4_0"
-             and cid2name[p.comp_id].count("/") == 1]
-    assert iface, "expected interface pins on instance ancestors"
+    # Check the first bit-net of each of the 7 buses.
+    for bi, w in enumerate(range(4, 17, 2)):
+        nid = nets[f"top_bus{bi}_w{w}_0"]
+        pins = [p for p in db.all_pins() if p.net_id == nid]
+        assert any(p.dir == "OUTPUT" for p in pins)
+        assert any(p.dir == "INPUT" for p in pins)
+        # Depth-1 instance ancestors carrying the net's interface pin.
+        iface_insts = {cid2name[p.comp_id] for p in pins
+                       if p.pin_name == f"top_bus{bi}_w{w}_0"
+                       and cid2name[p.comp_id].count("/") == 1}
+        assert len(iface_insts) >= 2, (
+            f"seed={seed} bus {bi} (w={w}) is not cross-instance: {iface_insts}")
 
 
 def test_build_hier_demo_seed_is_deterministic(tmp_path):

@@ -104,13 +104,24 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top"):
             for inst, _, _, _, blocks in placements for blk in blocks]
 
     # 5. Top-level buses, one per bit width 4 … 16 (even widths), each wiring a
-    #    random subset of leaf blocks: one driver + 2-5 receivers.
+    #    random subset of leaf blocks: one driver + 2-5 receivers.  At least one
+    #    receiver is forced into a DIFFERENT depth-1 instance from the driver so
+    #    every bus is a genuine cross-instance top-level net (common ancestor =
+    #    the top), not an intra-instance one — regardless of seed.
+    def _inst_of(ep):
+        return ep.rsplit('/', 1)[0]                 # "chip/<inst>"
+
     widths = list(range(4, 17, 2))   # 4,6,8,10,12,14,16
     n_nets = 0
     for bi, w in enumerate(widths):
         k = rng.randint(3, 6)                       # total endpoints
-        picks = rng.sample(pool, min(k, len(pool)))
-        drv_base, rcv_bases = picks[0], picks[1:]
+        drv_base = rng.choice(pool)
+        cross = [e for e in pool if _inst_of(e) != _inst_of(drv_base)]
+        first_rcv = rng.choice(cross)               # guaranteed other instance
+        chosen = {drv_base, first_rcv}
+        extra_pool = [e for e in pool if e not in chosen]
+        extra = rng.sample(extra_pool, min(max(k - 2, 0), len(extra_pool)))
+        rcv_bases = [first_rcv] + extra
         bus = f"top_bus{bi}_w{w}"
         for b in range(w):
             db.add_net_pins(f"{bus}_{b}",
