@@ -345,6 +345,13 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             };
             if (cover_lo !=  std::numeric_limits<double>::infinity()) cover(cover_lo);
             if (cover_hi != -std::numeric_limits<double>::infinity()) cover(cover_hi);
+
+            // BUSTERM face coverage: the endpoint snap above (ns.span_* = ep_*)
+            // can pull a face end onto a connected stub's per-bit track, dropping
+            // the block-face tap the abstract span reached.  Re-extend each bit's
+            // span to its block face (extend-only) so the tap always lands on the
+            // block (big2 bus_077 / blk_12).
+            for (double fc : bs_ptr->busterm_faces) cover(fc);
         }
     }
 

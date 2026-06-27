@@ -46,6 +46,13 @@ struct BusSegment {
     // Explicit connectivity list for bit-wire span adjustment.
     std::vector<BusSegmentConn> connections;
 
+    // Along-axis coordinates of this segment's BUSTERM block-face taps.  The
+    // per-bit span-follow below snaps endpoints to connected SEG bits, which can
+    // overwrite a face end (the abstract span already reaches it); these anchors
+    // re-extend each bit's span to its block face so the tap survives (mirror of
+    // TrackSegment::busterm_faces in the abstract stage).
+    std::vector<double> busterm_faces;
+
     // Abstract NUTS track_position used as anchor for Option B ordering; NaN = unset (fallback)
     double      abstract_pos      = std::numeric_limits<double>::quiet_NaN();
 

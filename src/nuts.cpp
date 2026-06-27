@@ -59,7 +59,8 @@ static void build_nuts_maps(
     std::set<std::pair<int,int>>&                                busterm_set,
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&       rev_conn_map,
     std::map<std::pair<int,int>, int>&                            net_pull_map,
-    AlignMap&                                                     align_map)
+    AlignMap&                                                     align_map,
+    std::map<std::pair<int,int>, std::vector<double>>&            busterm_face_map)
 {
     std::set<std::pair<int,int>> jog_set;   // dogleg jogs: excluded from alignment
     // Pass 1 — nominal perpendicular position from the topology.
@@ -114,7 +115,12 @@ static void build_nuts_maps(
             int n_seg = 0, n_bt = 0;
             for (const auto& c : cs.conns) {
                 if (c.kind == SegConn::SEG) ++n_seg;
-                else                        ++n_bt;
+                else {
+                    ++n_bt;
+                    // Record the block-face along-coordinate so span adjustment can
+                    // keep this segment reaching its tap after track slides.
+                    busterm_face_map[key].push_back(static_cast<double>(c.face_coord));
+                }
             }
             if (n_seg >= 2 && n_bt == 0) trunk_set.insert(key);
             if (n_bt >= 1)               busterm_set.insert(key);
@@ -366,6 +372,28 @@ static void do_span_adjustments(
                 (ordered ? other->span_hi : other->span_lo) = req.center;
             }
         }
+
+        // BUSTERM face coverage: a segment that taps a block face must always
+        // reach that face.  rev_conn_map carries only SEG connectivity, so the
+        // span-setting above (which follows a connected stub's placed track) can
+        // overwrite a face-tapped end — a silent open at the block face (e.g.
+        // big2 bus_077 / blk_12, where the M6 trunk's hi end is pulled onto a
+        // vertical stub's band ~5934 and drops the x=6100 tap).  Extend (never
+        // contract) the span to include every recorded BUSTERM face_coord, exactly
+        // like the SEG coverage guarantee above and in the SAME place: keeping it
+        // inside do_span_adjustments (not a final post-pass) means repair_overlaps
+        // / resolve_corner_overlaps / tighten_pulls all run on the re-anchored
+        // spans and repair any overlap the extension materialises, instead of a
+        // late pass leaving a shorted layout.  Applied per mutated `other` so
+        // per-layer calls also cover cross-layer followers not in layer_segs.
+        for (double fc : other->busterm_faces) {
+            const double lo = std::min(other->span_lo, other->span_hi);
+            const double hi = std::max(other->span_lo, other->span_hi);
+            const bool ordered = (other->span_lo <= other->span_hi);
+            if (fc < lo)      (ordered ? other->span_lo : other->span_hi) = fc;
+            else if (fc > hi) (ordered ? other->span_hi : other->span_lo) = fc;
+        }
+
         // span_lo/span_hi intentionally keep NOMINAL endpoint identity (span_lo
         // is the lo_end coordinate, span_hi the hi_end) even when placement
         // leaves span_lo > span_hi: corner/dogleg logic derives the fixed anchor
@@ -2036,7 +2064,12 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
         std::map<std::pair<int,int>, int>                            net_pull_map;
         AlignMap                                                     align_map;
-        build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
+        std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
+        build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
+        for (auto& ts : result.segments) {
+            auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
+            if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
+        }
         apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
         relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
         set_pull_targets(result.segments, pull_map, net_pull_map);
@@ -2272,7 +2305,12 @@ NUTSResult NUTSEngine::rerun_layer(
     std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
     std::map<std::pair<int,int>, int>                            net_pull_map;
     AlignMap                                                     align_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map);
+    std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
+    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
+    for (auto& ts : result.segments) {
+        auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
+        if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
+    }
     apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
     relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set, layer_id);
     set_pull_targets(result.segments, pull_map, net_pull_map);

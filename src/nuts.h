@@ -50,6 +50,11 @@ struct TrackSegment {
     // snap to the bounded side on real signal tracks.  Default = unbounded.
     double track_lo_bound = -std::numeric_limits<double>::infinity();
     double track_hi_bound =  std::numeric_limits<double>::infinity();
+    // Along-axis coordinates of this segment's BUSTERM block-face taps (x for an
+    // H segment, y for a V segment).  rev_conn_map carries only SEG connectivity,
+    // so do_span_adjustments uses these as extend-only anchors to guarantee a
+    // face-tapped segment's along-span always reaches its block face after slides.
+    std::vector<double> busterm_faces;
 };
 
 // Exact geometry of one overlap pair, after placement.

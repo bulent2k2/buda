@@ -1503,18 +1503,40 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
 
         // Suppress stubs made redundant by a longer same-side stub whose att_y
         // already passes through the shorter stub's block.
-        for (int i = 0; i < n; ++i) {
-            if (!has_stub[i]) continue;
-            for (int j = 0; j < n; ++j) {
-                if (i == j || !has_stub[j]) continue;
-                int di = conn_x[i] - x_trunk, dj = conn_x[j] - x_trunk;
-                if (di == 0 || dj == 0) continue;
-                if ((di > 0) != (dj > 0)) continue;          // opposite sides of trunk
-                if (std::abs(dj) <= std::abs(di)) continue;  // j not farther
-                // Does stub j's att_y lie within block i's original y-extent?
-                if (att_y[j] >= blocks[i].orig_bbox.y1 &&
-                    att_y[j] <= blocks[i].orig_bbox.y2) {
-                    stub_suppressed[i] = true; break;
+        //
+        // Coverage-safety: a stub i may only be suppressed by a stub j that
+        // ACTUALLY SURVIVES (is not itself suppressed) — otherwise i is left with
+        // no covering wire (a silent open).  The original loop tested has_stub[j]
+        // only, so a chain A←B←C could suppress B believing C covers it while C's
+        // surviving wire sits at a different att_y that misses B (the
+        // big2 bus_056 / blk_09 bug).  Decide survivors farthest-first per side:
+        // the farthest stub always survives, and a nearer stub is suppressed only
+        // when an already-confirmed survivor's att_y lies within its block's
+        // y-extent (the same pass-through coverage verify.cpp checks).
+        {
+            std::vector<int> order(n);
+            for (int i = 0; i < n; ++i) order[i] = i;
+            // Farthest from trunk first; stubs only.
+            std::sort(order.begin(), order.end(), [&](int a, int b) {
+                return std::abs(conn_x[a] - x_trunk) > std::abs(conn_x[b] - x_trunk);
+            });
+            for (int idx = 0; idx < n; ++idx) {
+                int i = order[idx];
+                if (!has_stub[i]) continue;
+                int di = conn_x[i] - x_trunk;
+                if (di == 0) continue;
+                for (int jdx = 0; jdx < idx; ++jdx) {   // only farther-or-equal blocks seen so far
+                    int j = order[jdx];
+                    if (!has_stub[j] || stub_suppressed[j]) continue;  // j must survive
+                    int dj = conn_x[j] - x_trunk;
+                    if (dj == 0) continue;
+                    if ((di > 0) != (dj > 0)) continue;          // opposite sides of trunk
+                    if (std::abs(dj) <= std::abs(di)) continue;  // j not strictly farther
+                    // Surviving stub j's att_y lies within block i's original y-extent?
+                    if (att_y[j] >= blocks[i].orig_bbox.y1 &&
+                        att_y[j] <= blocks[i].orig_bbox.y2) {
+                        stub_suppressed[i] = true; break;
+                    }
                 }
             }
         }

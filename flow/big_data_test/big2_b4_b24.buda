@@ -164,10 +164,14 @@ add_net bus_056_b47 blk_09.p blk_14.p,blk_39.p,blk_19.p
 run_bundler
 generate_topologies
 
-# Pin the same topologies the full big2.buda selected (the buggy picks):
-#   bundle 1 (b4)=TRUNK_H@y4887 (topo 4),  bundle 2 (b24)=TRUNK_V@x5485 (topo 4)
+# Pin the exact topologies that were buggy in the full big2.buda run, now fixed:
+#   bundle 1 (b4)=TRUNK_H@y4887 (topo 4)  — NUTS span-adjust used to detach blk_12
+#                                            (fixed: BUSTERM face anchors in NUTS)
+#   bundle 2 (b24)=TRUNK_V@x5485 (topo 8) — generation used to leave blk_09 uncovered
+#                                            (fixed: coverage-safe stub suppression).
+# The TRUNK_V candidate index moved (4->8) once blk_09's stub is no longer dropped.
 select_topology 1 4
-select_topology 2 4
+select_topology 2 8
 # Check the SELECTED topologies before planning so a topology-gen coverage gap
 # (bundle 24 / blk_09) is caught at the topo stage and can't be masked by a later
 # NUTS/DNUTS change. Bundle 4's detach is a NUTS-stage artifact (clean at topo).
