@@ -80,6 +80,31 @@ def test_corner_diagonal_mst_generated_and_clean():
         )
 
 
+def test_corner_diagonal_trunk_mst_3blocks():
+    """A 3-block bundle keeps TRUNK+MST coverage across a corner-diagonal edge.
+
+    For N<4 there is no standalone MST (add_mst_candidates bails), so the trunk+MST
+    hybrid is the only MST coverage.  B and C meet at only the point (300,300)/
+    (300,400); pre-fix the hybrid's realize_edges sent that edge through the
+    straight pinned branch and filter_pinched dropped every TRUNK+MST candidate.
+    The L-shape realization in realize_edges keeps them.
+    """
+    coords = {
+        "A": (0,   0,   100, 100),
+        "B": (200, 200, 300, 300),
+        "C": (300, 400, 400, 500),   # corner-diagonal to B (touch x=300, y-gap)
+    }
+    fp = _make_fp(coords)
+    cands = _gen(fp).generate_candidates("A", ["B", "C"])
+    mstish = [c for c in cands if "MST" in c.type]
+    assert mstish, "corner-diagonal edge dropped all TRUNK+MST coverage for 3 blocks"
+    for c in mstish:
+        v = _violations(c, fp)
+        assert "BUSTERM_OPEN" not in v and "FEEDTHRU_RELAY" not in v, (
+            f"{c.type} corner-diagonal hybrid not cleanly connected: {v}"
+        )
+
+
 @pytest.mark.mid
 def test_big2_b3_bus_023_repro_routes_cleanly():
     """The committed repro routes with no opens and 0 unplaced, and now offers MST."""

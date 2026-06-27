@@ -154,8 +154,12 @@ single coordinate (zero slide), and `filter_pinched` dropped any candidate
 containing it — so `big2_b3` had **zero** standalone `MST_HV`/`MST_VH`.
 
 `corner_diagonal_L` realizes such an edge as an **L-shape around the corner** so
-each leg taps a real face with slide. There are exactly two L's, and the MST_HV /
-MST_VH strategies select between them (H-first vs V-first), so both are generated
+each leg taps a real face with slide. It is wired into **both** edge realizers —
+`add_mst_candidates` (standalone MST) and `add_trunk_mst_candidates::realize_edges`
+(the trunk+MST hybrid) — because a `<4`-block bundle has no standalone-MST fallback,
+so a corner-diagonal branch shortcut would otherwise lose all TRUNK+MST coverage.
+There are exactly two L's, and the MST_HV / MST_VH strategies (or the hybrid's
+trunk orientation) select between them (H-first vs V-first), so both are generated
 and the congestion planner picks per the rest of the topology.
 
 **Which L, and why.** For blk_09 (lower-left) / blk_39 (upper-right):

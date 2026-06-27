@@ -2307,6 +2307,17 @@ void TopologyGenerator::add_trunk_mst_candidates(
                         out.push_back(es);
                     continue;
                 }
+                // Corner-diagonal shortcut: faces meet at a single point, so a
+                // straight edge would be pinned (zero slide) and filter_pinched
+                // would drop the hybrid.  Route it around the corner as an L
+                // (same fix as the standalone MST path).  <4-block hybrids have no
+                // standalone-MST fallback, so this is the only MST coverage.
+                const int cox_lo = std::max(r_u.x1, r_v.x1), cox_hi = std::min(r_u.x2, r_v.x2);
+                const int coy_lo = std::max(r_u.y1, r_v.y1), coy_hi = std::min(r_u.y2, r_v.y2);
+                if ((p1.x == p2.x && cox_lo == cox_hi) || (p1.y == p2.y && coy_lo == coy_hi)) {
+                    corner_diagonal_L(r_u, r_v, is_h ? 1 : 0, h_layer_, v_layer_, out);
+                    continue;
+                }
                 if (p1.x == p2.x) {
                     if (std::abs(p2.y - p1.y) < m_v) return false;
                     out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
