@@ -69,6 +69,8 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | **Left-drag mid-edge handle** | **Resize** one edge (snaps to Hanan grid / block edges). |
 | **Double-click block** | **Drill into** the block (view its children). |
 | **Shift+click** | **Multi-select** blocks on the canvas. |
+| **Left-click edge / diamond** *(edge mode)* | **Toggle** that edge in the edge selection (all-V or all-H; picking the opposite orientation restarts the selection). |
+| **Left-drag a selected edge** *(edge mode)* | **Move** all selected edges by the same delta (snaps to Hanan grid / block edges). |
 
 ### Keyboard
 
@@ -81,9 +83,15 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `←` `→` `↑` `↓` | **Nudge** the selected block(s) by one grid step (when a block is selected). |
 | `ctrl/cmd` + `←` `→` `↑` `↓` | **Align** selected blocks left / right / top / bottom. |
 | `ctrl/cmd+shift` + `←` `→` | **Distribute** selected blocks horizontally / vertically. |
-| `v` | **Validate**: run overlap / out-of-die checks and show results in the sidebar. |
-| `Esc` | **Deselect** all blocks. |
+| `e` | **Toggle Edge mode** (mid-edge handles appear on all blocks; click edges to select). |
+| `←` `→` *(edge mode, V edges)* / `↑` `↓` *(edge mode, H edges)* | **Move** the selected edges by one grid step. |
+| `v` | **Validate**: run overlap / out-of-die / gap checks and show results in the sidebar. |
+| `Esc` | **Deselect** all blocks (or, in edge mode, clear the edge selection). |
 | `ctrl+z` / `cmd+z` | **Undo** the last placement change. |
 | `ctrl+Z` / `ctrl+y` / `cmd+Z` | **Redo**. |
 | `ctrl+a` / `cmd+a` | **Select All** blocks. |
 | `f` | **Toggle fullscreen** / maximise the window. |
+
+In **Edge mode** (`e` key or the **Edges** checkbox in the Blocks panel), the
+**Align ▾** menu's *Edges → Min / Max / Mean* entries snap all selected edges to
+a common coordinate (leftmost/topmost, rightmost/bottommost, or average).
