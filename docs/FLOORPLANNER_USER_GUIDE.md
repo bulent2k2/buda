@@ -145,8 +145,10 @@ children differently:
   **corner** or **mid-edge handle**, an **edge move / align**, or a reshape
   during optimization — grows or shrinks the block *around* its contents.  The
   children keep their absolute positions, exactly as resizing a container window
-  does not move what is inside it.  A child that ends up outside its parent is
-  reported by **Validate**.
+  does not move what is inside it.  Parent containment is **not** enforced, so
+  shrinking a parent can leave a child sticking out; **Validate** does not flag
+  that (it checks die bounds and overlaps between non-nested blocks — see
+  [Validation](#validation)).
 
 When a selection contains both a parent and one of its own descendants, the
 descendant is moved only once (it follows the parent) — never twice.

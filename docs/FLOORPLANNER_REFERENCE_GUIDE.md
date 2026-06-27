@@ -253,8 +253,10 @@ Implementation notes:
   swapped), then recomputes local offsets; the rotated bbox is clamped to at
   least one grid unit so a sub-grid dimension cannot collapse.
 - `resize_block_raw` deliberately does **not** carry children — resizing a
-  container leaves its contents in place (a child pushed outside is flagged by
-  `validate`).
+  container leaves its contents in place.  Parent containment is not enforced:
+  `validate` reports die-boundary violations and overlaps between non-nested
+  blocks but skips ancestor/descendant pairs, so a child left outside a shrunken
+  parent is not flagged.
 - `fpc.topmost(names)` prunes a selection to its topmost blocks (dropping any
   name whose ancestor is also selected) before a relocate, so a selection holding
   both a parent and a descendant never moves the descendant twice.  It is applied
