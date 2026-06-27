@@ -567,12 +567,6 @@ std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
     return compute_mst(nodes);
 }
 
-// Is stub `cs` (index ci) the BINDING extreme stub of trunk `nb` on the side
-// away from a busterm lying in direction `sign` (+1 = busterm toward perp_hi, so
-// cs must be the lowest stub; -1 = busterm toward perp_lo, cs must be the
-// highest)?  Only the binding extreme actually sets that trunk endpoint, so only
-// it should pull toward the busterm; an interior or freely-sliding co-located
-// stub does not move the endpoint and must not be dragged to its slide extreme.
 // Is stub cs (index ci) the BINDING far-extreme stub of trunk nb on the side
 // away from a busterm in direction sign (+1 toward perp_hi → cs must be a lowest
 // stub; -1 → highest)?  Only the extreme stub sets that trunk endpoint; a stub
