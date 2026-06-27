@@ -131,7 +131,7 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `set_track_pitch <pitch>` | 3 setup | Declare inter-bus track pitch before `run_planner` so its pitch-aware band reservations match the `run_nuts` that packs tracks; `run_nuts` with no arg reuses it |
 | `run_nuts [pitch]` | 4 | Abstract track placement (defaults to the last `set_track_pitch`/`run_nuts` value; warns if it differs from the pitch `run_planner` reserved for) |
 | `run_nuts_on_layer <layer-name>` | 4 | Re-solve one layer with NUTS without disturbing other layers |
-| `dump_topologies [<hint>] [--problems]` | — | Text dump of per-bundle candidate topologies (type, wirelength, segments, pass-through, `min_slide`, selected/pinned); `--problems` filters to bundles with duplicate/pinched/single/pass-through candidates and prints an aggregate summary. Read-only inspection. |
+| `dump_topologies [<hint>] [--problems] [--conn]` | — | Text dump of per-bundle candidate topologies (type, wirelength, segments, pass-through, `min_slide`, selected/pinned); `--problems` filters to bundles with duplicate/pinched/single/pass-through candidates and prints an aggregate summary; `--conn` adds a per-segment connectivity detail for the selected candidate (what each seg connects to — busterms + other segs, the busterms it passes through, its slide range, and net-pull preference). Read-only inspection. |
 | `visualize_topologies [<hint>]` | — | Open topology explorer for the matching bundle (`-all [hints…]` for multiple) |
 | `visualize` | — | Open interactive matplotlib window |
 | `source <file>` | — | Execute another `.buda` script inline |

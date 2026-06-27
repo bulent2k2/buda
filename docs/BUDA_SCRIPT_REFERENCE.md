@@ -1469,7 +1469,7 @@ preserved in `<script>.json` and loaded by the next `run_planner` invocation.
 ### `dump_topologies`
 
 ```
-dump_topologies [<hint>] [--problems]
+dump_topologies [<hint>] [--problems] [--conn]
 ```
 
 Text (non-GUI) inspection of the candidate topologies generated for each bundle.
@@ -1482,6 +1482,7 @@ generation.
 | *(none)* | Dump every bundle's candidate table, then an aggregate summary. |
 | `<hint>` | Only bundles whose first net name starts with `<hint>`. |
 | `--problems` | Only bundles with a flagged candidate (see below), plus the summary. |
+| `--conn` | After each shown bundle's table, print a per-segment connectivity detail for the selected candidate (see below). |
 
 Each candidate row prints: `idx`, `type`, `wl` (estimated wirelength), `segs`
 (segment count), `pass` (`pass_through_count` — blocks the trunk crosses with no
@@ -1492,6 +1493,24 @@ ConnSegs, via `ConnTopology`; `0` = pinched, `-` = not computable), and notes
 pass-through candidates. The summary reports the candidate-count distribution,
 duplicate / pinched / single / pass-through bundle counts, and a shape-family
 histogram (trunk `@coord` suffixes collapsed).
+
+**`--conn` detail.** For the selected candidate of each shown bundle (candidate 0
+if not yet planned), `ConnTopology` is rebuilt and each segment is printed with:
+its orientation and **layer**, along extent and perpendicular position, **slide
+range** (`perp_lo..perp_hi`; `free` when unbounded, `PINCHED` when zero), and
+**net-pull** preference (`→hi` / `→lo` / `none`). The layer is the planner's
+*effective* assignment (`plan.seg_layers` — the metal NUTS actually routes on);
+before planning, or for a candidate that is not the planned one, it falls back to
+the candidate's generation hint and is marked `·hint` (e.g. `M6·hint`). Under each
+segment three lines list **what it connects to** — `busterms:` (block-face taps,
+with `@face=` coord and `(end)`/`(mid)`) and `segs:` (other segments, by index and
+junction position) — and **`passthru:`**, the blocks the segment geometrically
+crosses without tapping. Pass-through is tested against each block's **solid**
+geometry, so a segment through the notch/gap of a multi-rect (TEG) block does not
+count; a declared feedthru is marked `[feedthru]`. The bundle header also echoes any
+declared `feedthru=` blocks. This is the same connectivity view the planner and NUTS
+consume, so it is the first place to look when a bundle routes with an open or an
+unexpected slide/pull.
 
 ```
 dump_topologies                 # every bundle + summary

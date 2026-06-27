@@ -1351,7 +1351,98 @@ class BudaSession:
         except Exception:
             return None
 
-    def _dump_topologies(self, hint, problems_only):
+    _SLIDE_SENTINEL = 1e8   # ConnTopology marks an unbounded slide with ~5e8
+
+    def _seg_crosses_rect(self, cs, x1, y1, x2, y2):
+        """True iff ConnSeg `cs` geometrically crosses the rect (perp coordinate
+        inside the rect's perp extent and the along span overlapping the rect's
+        along extent).  Mirrors verify's seg_spans_rect."""
+        if cs.horiz:   # perp = y (perp_pos), along = x
+            return (y1 <= cs.perp_pos <= y2
+                    and cs.along_lo <= x2 and cs.along_hi >= x1)
+        else:          # perp = x, along = y
+            return (x1 <= cs.perp_pos <= x2
+                    and cs.along_lo <= y2 and cs.along_hi >= y1)
+
+    def _seg_spans_block(self, cs, name, ubbox):
+        """True iff `cs` crosses block `name`'s SOLID geometry.  Multi-rect / TEG
+        blocks store their real rectangles in get_block_rects(); a segment through
+        a notch/gap between them does NOT cross the block even though it crosses the
+        union bbox.  Single-rect blocks have an empty rect list — fall back to the
+        union bbox (which is their solid extent)."""
+        rects = self.fp.get_block_rects(name)   # [] for single-rect blocks
+        if rects:
+            return any(self._seg_crosses_rect(cs, x1, y1, x2, y2)
+                       for (x1, y1, x2, y2) in rects)
+        return self._seg_crosses_rect(cs, ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
+
+    def _dump_conn_detail(self, w, cand_idx):
+        """Print per-segment connectivity for one candidate of bundle `w`:
+        (1) what each seg connects to (busterms + other segs), (2) the busterms
+        it passes through without tapping, (3) its perpendicular slide range, and
+        (4) its net-pull preference.  Built from ConnTopology — the same view the
+        planner and NUTS consume."""
+        cands = list(w.input.candidates)
+        if not (0 <= cand_idx < len(cands)):
+            print("     (no candidate to detail)")
+            return
+        topo = cands[cand_idx]
+        try:
+            ct = buda.ConnTopology()
+            ct.build(topo, self.fp)
+            segs = list(ct.segs())
+        except Exception as e:
+            print(f"     (connectivity unavailable: {e})")
+            return
+
+        blocks = self.fp.get_all_blocks()   # [(name, Rect union-bbox)]
+        feedthru = set(topo.feedthru_blocks)
+        # Effective per-segment layer: when this candidate IS the planned/selected
+        # one, the planner may have reassigned layers (or honoured a pinned
+        # selection / post_nuts move) — report that, the layer NUTS actually routes
+        # on, not the candidate's original generation layer_hint.  seg_layers is
+        # indexed by the selected topology's segments, so it only aligns here.
+        seg_layers = (list(w.plan.seg_layers)
+                      if cand_idx == w.plan.selected_topology_index else [])
+        print(f"   conn detail — candidate {cand_idx}: {topo.type}"
+              + (f"   feedthru={sorted(feedthru)}" if feedthru else ""))
+        for si, cs in enumerate(segs):
+            orient = "H" if cs.horiz else "V"
+            planned = si < len(seg_layers) and seg_layers[si] >= 0
+            layer = seg_layers[si] if planned else cs.layer_id
+            lyr_s = f"M{layer}" + ("" if planned else "·hint")
+            rng = cs.perp_hi - cs.perp_lo
+            if abs(cs.perp_lo) >= self._SLIDE_SENTINEL or abs(cs.perp_hi) >= self._SLIDE_SENTINEL:
+                slide = "free"
+            else:
+                slide = f"[{cs.perp_lo}..{cs.perp_hi}] = {rng}{' PINCHED' if rng == 0 else ''}"
+            pull = ("→hi" if cs.net_pull > 0 else "→lo" if cs.net_pull < 0 else "none")
+            print(f"     seg{si:<2} {orient} {lyr_s}  "
+                  f"along[{cs.along_lo},{cs.along_hi}] perp={cs.perp_pos}  "
+                  f"slide={slide}  pull={pull}({cs.net_pull})")
+
+            bts, sgs, tapped = [], [], set()
+            for c in cs.conns:
+                if c.kind == buda.SegConnKind.BUSTERM:
+                    tapped.add(c.block_name)
+                    bts.append(f"{c.block_name}@face={c.face_coord}"
+                               f"{'(end)' if c.is_endpoint else '(mid)'}")
+                else:
+                    sgs.append(f"seg{c.seg_idx}@{c.at_pos}"
+                               f"{'(end)' if c.is_endpoint else '(mid)'}")
+            print(f"        busterms: {', '.join(bts) if bts else '(none)'}")
+            print(f"        segs:     {', '.join(sgs) if sgs else '(none)'}")
+
+            # Pass-through: blocks this seg crosses (solid geometry) but does NOT tap.
+            passt = []
+            for name, ubbox in blocks:
+                if name in tapped:
+                    continue
+                if self._seg_spans_block(cs, name, ubbox):
+                    passt.append(name + ("[feedthru]" if name in feedthru else ""))
+            print(f"        passthru: {', '.join(passt) if passt else '(none)'}")
+
+    def _dump_topologies(self, hint, problems_only, conn_detail=False):
         if not self.bundles:
             print("Warning: no bundles — run the bundler and generate_topologies first.")
             return
@@ -1432,6 +1523,11 @@ class BudaSession:
                 ms_s = "-" if ms is None else str(ms)
                 print(f"   {i:>3} {typ:<14} {wl:>8} {nsegs:>4} {pt:>4} "
                       f"{ms_s:>7}  {','.join(marks)}")
+
+            # --conn: per-segment connectivity / pass-through / slide / pull for
+            # the selected candidate (or candidate 0 if not yet planned).
+            if conn_detail:
+                self._dump_conn_detail(w, sel if sel is not None and sel >= 0 else 0)
 
         # Aggregate summary.
         import statistics as _st
@@ -2572,15 +2668,20 @@ class BudaSession:
                                  layer_stack=self.layers,
                                  start_bidx=start).show()
         elif cmd == "dump_topologies":
-            # Usage: dump_topologies [hint] [--problems]
+            # Usage: dump_topologies [hint] [--problems] [--conn]
             # Text inspection of the candidate topologies generated per bundle.
             # `hint` filters to bundles whose first net name starts with it.
             # `--problems` prints only bundles with flagged candidates (duplicate
             # geometry, pinched/zero-slide, single-candidate, pass-through) and
-            # an aggregate summary. Read-only: never mutates session state.
+            # an aggregate summary.
+            # `--conn` adds, per shown bundle, a per-segment connectivity detail
+            # for the selected candidate: what each seg connects to (busterms +
+            # other segs), the busterms it passes through, its slide range, and
+            # its net-pull preference. Read-only: never mutates session state.
             problems_only = "--problems" in args
+            conn_detail = "--conn" in args
             hint = next((a for a in args if not a.startswith("--")), None)
-            self._dump_topologies(hint, problems_only)
+            self._dump_topologies(hint, problems_only, conn_detail)
 
         elif cmd == "visualize":
             if self.no_viz:
