@@ -87,6 +87,8 @@ void FloorplannerEngine::move_block_raw(const std::string& name, double x, doubl
     double h = b.y2 - b.y1;
     double sx = _snap(x);
     double sy = _snap(y);
+    double dx = sx - b.x1;
+    double dy = sy - b.y1;
     b.x1 = sx; b.y1 = sy; b.x2 = sx + w; b.y2 = sy + h;
     if (b.has_local) {
         std::string parent = _parent_path(name);
@@ -94,6 +96,68 @@ void FloorplannerEngine::move_block_raw(const std::string& name, double x, doubl
             const Block& p = _block_or_throw(parent);
             b.local_x = b.x1 - p.x1;
             b.local_y = b.y1 - p.y1;
+        }
+    }
+    // Carry the whole sub-hierarchy: child blocks ("name/...") follow the parent.
+    if (dx != 0.0 || dy != 0.0)
+        _translate_descendants(name, dx, dy);
+}
+
+void FloorplannerEngine::rotate_block(const std::string& name, bool cw) {
+    const Block& root = _block_or_throw(name);
+    const double px = root.x1, py = root.y1;   // pivot = lower-left corner
+
+    // The block plus every descendant ("name/...") rotate rigidly about the pivot.
+    std::vector<std::string> subtree{name};
+    const std::string prefix = name + "/";
+    for (const auto& [n, _b] : _blocks)
+        if (n.size() > prefix.size() && n.compare(0, prefix.size(), prefix) == 0)
+            subtree.push_back(n);
+
+    // Rotate each bbox's corners about the pivot; a 90° turn maps an axis-aligned
+    // rect to an axis-aligned rect (w/h swapped).  y-up: CW (dx,dy)→(dy,-dx),
+    // CCW (dx,dy)→(-dy,dx).
+    for (const auto& n : subtree) {
+        Block& b = _block_or_throw(n);
+        double ax1 = b.x1 - px, ay1 = b.y1 - py;
+        double ax2 = b.x2 - px, ay2 = b.y2 - py;
+        double nx1, ny1, nx2, ny2;
+        if (cw) {
+            nx1 = px + ay1; nx2 = px + ay2;
+            ny1 = py - ax2; ny2 = py - ax1;
+        } else {
+            nx1 = px - ay2; nx2 = px - ay1;
+            ny1 = py + ax1; ny2 = py + ax2;
+        }
+        b.x1 = _snap(nx1); b.y1 = _snap(ny1);
+        b.x2 = _snap(nx2); b.y2 = _snap(ny2);
+        // Independent corner snapping can collapse a sub-grid extent; keep the
+        // bbox non-degenerate (matches resize_block_raw's guard).
+        if (b.x2 <= b.x1) b.x2 = b.x1 + _grid;
+        if (b.y2 <= b.y1) b.y2 = b.y1 + _grid;
+    }
+    // Recompute local offsets from the (now-rotated) immediate parents.
+    for (const auto& n : subtree) {
+        Block& b = _block_or_throw(n);
+        if (b.has_local) {
+            std::string parent = _parent_path(n);
+            if (!parent.empty()) {
+                const Block& p = _block_or_throw(parent);
+                b.local_x = b.x1 - p.x1;
+                b.local_y = b.y1 - p.y1;
+            }
+        }
+    }
+}
+
+void FloorplannerEngine::_translate_descendants(const std::string& name,
+                                                double dx, double dy) {
+    const std::string prefix = name + "/";
+    for (auto& [n, b] : _blocks) {
+        if (n.size() > prefix.size() && n.compare(0, prefix.size(), prefix) == 0) {
+            b.x1 += dx; b.y1 += dy; b.x2 += dx; b.y2 += dy;
+            // local_x/local_y are relative to the immediate parent, which shifts
+            // by the same (dx, dy), so they remain correct — no recompute needed.
         }
     }
 }
@@ -143,11 +207,13 @@ void FloorplannerEngine::align_bottom(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double h = b.y2 - b.y1;
+        double dy = edge - b.y1;
         b.y1 = edge; b.y2 = edge + h;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_y = b.y1 - _block_or_throw(p).y1;
         }
+        if (dy != 0.0) _translate_descendants(n, 0.0, dy);
     }
 }
 
@@ -159,11 +225,13 @@ void FloorplannerEngine::align_top(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double h = b.y2 - b.y1;
+        double dy = (edge - h) - b.y1;
         b.y2 = edge; b.y1 = edge - h;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_y = b.y1 - _block_or_throw(p).y1;
         }
+        if (dy != 0.0) _translate_descendants(n, 0.0, dy);
     }
 }
 
@@ -175,11 +243,13 @@ void FloorplannerEngine::align_left(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double w = b.x2 - b.x1;
+        double dx = edge - b.x1;
         b.x1 = edge; b.x2 = edge + w;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_x = b.x1 - _block_or_throw(p).x1;
         }
+        if (dx != 0.0) _translate_descendants(n, dx, 0.0);
     }
 }
 
@@ -191,11 +261,13 @@ void FloorplannerEngine::align_right(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double w = b.x2 - b.x1;
+        double dx = (edge - w) - b.x1;
         b.x2 = edge; b.x1 = edge - w;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_x = b.x1 - _block_or_throw(p).x1;
         }
+        if (dx != 0.0) _translate_descendants(n, dx, 0.0);
     }
 }
 

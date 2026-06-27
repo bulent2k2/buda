@@ -246,6 +246,150 @@ def test_align_edges_mixed_orientation_raises(tmp_path):
         fpc.align_edges(state, [("a", "l"), ("a", "t")], "min")
 
 
+def test_move_block_carries_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "mv.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "P", 0, 0, 200, 200)
+    fpc.add_child_block(state, "P/c0", 10, 10, 50, 50)   # abs (10,10,60,60)
+    fpc.add_child_block(state, "P/c1", 100, 100, 40, 40)  # abs (100,100,140,140)
+    # A grandchild follows too.
+    fpc.add_child_block(state, "P/c0/g", 5, 5, 10, 10)    # abs (15,15,25,25)
+
+    fpc.move_block(state, "P", 300, 400)                  # move parent by (+300,+400)
+
+    p = state.block("P")
+    assert (p.x1, p.y1) == (300, 400)
+    c0 = state.block("P/c0")
+    assert (c0.x1, c0.y1, c0.x2, c0.y2) == (310, 410, 360, 460), "child must follow"
+    c1 = state.block("P/c1")
+    assert (c1.x1, c1.y1) == (400, 500), "second child must follow"
+    g = state.block("P/c0/g")
+    assert (g.x1, g.y1) == (315, 415), "grandchild must follow"
+
+
+def test_move_unrelated_prefix_block_not_dragged(tmp_path):
+    # Moving "P" must not drag "Pother" (a non-child whose name shares the prefix).
+    state = fpc.create_bdb(str(tmp_path / "mv2.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "P", 0, 0, 100, 100)
+    fpc.add_block(state, "Pother", 500, 500, 600, 600)
+    fpc.move_block(state, "P", 200, 200)
+    assert (state.block("Pother").x1, state.block("Pother").y1) == (500, 500)
+
+
+def test_align_carries_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "al.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "A", 0, 0, 100, 100)            # y1=0
+    fpc.add_block(state, "B", 300, 200, 400, 300)        # y1=200
+    fpc.add_child_block(state, "B/c", 10, 10, 20, 20)    # abs (310,210,330,230)
+    fpc.align_bottom(state, ["A", "B"])                  # B drops to y1=0 (min)
+    b = state.block("B")
+    assert b.y1 == 0, "B aligned to bottom edge 0"
+    c = state.block("B/c")
+    assert (c.x1, c.y1) == (310, 10), "B's child follows the align move"
+
+
+def test_distribute_carries_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "dist.bdb"), 3000, 2000, grid=10)
+    # Three parents to distribute horizontally; the middle one has a child.
+    fpc.add_block(state, "A", 0, 0, 100, 100)
+    fpc.add_block(state, "B", 200, 0, 300, 100)
+    fpc.add_block(state, "C", 900, 0, 1000, 100)
+    fpc.add_child_block(state, "B/c", 10, 10, 20, 20)    # abs (210,10,230,30)
+    before = state.block("B")
+    cb = state.block("B/c")
+    off = (cb.x1 - before.x1, cb.y1 - before.y1)         # child's offset from B
+
+    fpc.distribute_h(state, ["A", "B", "C"])
+
+    b = state.block("B")
+    c = state.block("B/c")
+    # Child keeps the same offset from its (repositioned) parent.
+    assert (c.x1 - b.x1, c.y1 - b.y1) == off, "child follows B during distribute"
+
+
+def test_rotate_cw_carries_and_rotates_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "rot.bdb"), 2000, 2000, grid=10)
+    # Parent 200 wide x 100 tall at origin; child near its lower-left.
+    fpc.add_block(state, "P", 0, 0, 200, 100)
+    fpc.add_child_block(state, "P/c", 20, 10, 40, 30)    # abs (20,10,60,40)
+
+    fpc.rotate_blocks_cw(state, ["P"])
+
+    # Parent: CW about LL (0,0) → (0, -200, 100, 0): w/h swapped (100 x 200).
+    p = state.block("P")
+    assert (p.x1, p.y1, p.x2, p.y2) == (0, -200, 100, 0)
+    # Child rotated about the SAME pivot, w/h swapped (was 40x30 → 30x40).
+    #   rel LL (20,10), UR (60,40); CW (dx,dy)->(dy,-dx):
+    #   x in [10,40], y in [-60,-20]  → abs (10,-60,40,-20).
+    c = state.block("P/c")
+    assert (c.x1, c.y1, c.x2, c.y2) == (10, -60, 40, -20)
+    assert (c.x2 - c.x1, c.y2 - c.y1) == (30, 40), "child w/h swapped"
+
+
+def test_rotate_ccw_leaf_matches_formula(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "rccw.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "L", 100, 100, 200, 100)        # add_block = (name,x,y,w,h)
+    b0 = state.block("L")
+    assert (b0.x1, b0.y1, b0.x2, b0.y2) == (100, 100, 300, 200)  # w=200, h=100
+    fpc.rotate_blocks_ccw(state, ["L"])
+    # CCW about LL (100,100): new bbox (x1-h, y1, x1, y1+w) = (0,100,100,300).
+    b = state.block("L")
+    assert (b.x1, b.y1, b.x2, b.y2) == (0, 100, 100, 300)
+
+
+def test_topmost_prunes_nested_names():
+    # Children dropped when an ancestor is also selected; order preserved.
+    assert fpc.topmost(["P", "P/c", "Q", "P/c/g", "R/x"]) == ["P", "Q", "R/x"]
+    assert fpc.topmost(["P/c", "P"]) == ["P"]
+    assert fpc.topmost(["A", "B"]) == ["A", "B"]
+
+
+def test_align_with_nested_selection_moves_child_once(tmp_path):
+    # Selecting both parent and child must not translate the child twice.
+    state = fpc.create_bdb(str(tmp_path / "nest.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "P", 0, 200, 100, 100)          # bbox (0,200,100,300)
+    fpc.add_block(state, "Q", 500, 0, 100, 100)          # y1=0 → align target
+    fpc.add_child_block(state, "P/c", 10, 10, 20, 20)    # abs (10,210,30,230)
+    # Align bottom with BOTH P and its child selected.
+    fpc.align_bottom(state, ["P", "P/c", "Q"])
+    p = state.block("P")
+    c = state.block("P/c")
+    assert p.y1 == 0, "P aligned to bottom"
+    # Child keeps its +10 offset from P (moved once, not twice).
+    assert (c.x1, c.y1) == (10, 10), f"child moved once, got {(c.x1, c.y1)}"
+
+
+def test_rotate_clamps_subgrid_extent(tmp_path):
+    # A block thinner than the grid must not collapse to zero extent on rotate.
+    state = fpc.create_bdb(str(tmp_path / "thin.bdb"), 2000, 2000, grid=10)
+    # 100 wide x 4 tall: rotating swaps to 4 wide x 100 tall; the 4-wide side
+    # would snap to 0 — must clamp to >= grid.
+    state.engine.add_block("T", 0, 0, 100, 4)
+    fpc.rotate_blocks_cw(state, ["T"])
+    b = state.block("T")
+    assert b.x2 > b.x1 and b.y2 > b.y1, "rotated bbox must stay non-degenerate"
+    assert b.x2 - b.x1 >= 10, "collapsed extent clamped to grid"
+
+
+def test_optimize_relocation_carries_children(tmp_path):
+    # The optimizer applies pure relocations via move_block_raw, so a top-level
+    # hierarchical instance carries its children when SA legalizes placement.
+    state = fpc.create_bdb(str(tmp_path / "opt.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "P", 0, 0, 100, 80)             # overlaps Q
+    fpc.add_block(state, "Q", 50, 50, 150, 130)
+    fpc.add_child_block(state, "P/c", 10, 10, 20, 20)    # abs (10,10,30,30)
+    p0 = state.block("P")
+    c0 = state.block("P/c")
+    off = (c0.x1 - p0.x1, c0.y1 - p0.y1)                 # (10, 10)
+
+    fpc.optimize_placement(state, method="sa", max_iter=3000, seed=3)
+
+    p = state.block("P")
+    c = state.block("P/c")
+    assert (c.x1 - p.x1, c.y1 - p.y1) == off, "child follows the optimized parent"
+    # And it actually moved (legalized away from origin overlap).
+    assert (p.x1, p.y1) != (p0.x1, p0.y1) or (c.x1, c.y1) != (c0.x1, c0.y1)
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"

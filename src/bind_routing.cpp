@@ -289,6 +289,8 @@ void bind_routing(py::module_& m) {
         .def("resize_block_raw",     &FloorplannerEngine::resize_block_raw,
              py::arg("name"), py::arg("x1"), py::arg("y1"),
              py::arg("x2"), py::arg("y2"))
+        .def("rotate_block",         &FloorplannerEngine::rotate_block,
+             py::arg("name"), py::arg("cw"))
         .def("move_child_local",     &FloorplannerEngine::move_child_local,
              py::arg("name"), py::arg("local_x"), py::arg("local_y"))
         .def("align_bottom",         &FloorplannerEngine::align_bottom, py::arg("names"))

@@ -1136,7 +1136,9 @@ class BdbFloorplanner:
         if self.state is None or not self._canvas_sel:
             return
         self._push_undo(self._snapshot())
-        for name in self._canvas_sel:
+        # Prune nested selections: move_block carries children, so a selection
+        # holding both a parent and its child must not nudge the child twice.
+        for name in fpc.topmost(self._canvas_sel):
             try:
                 b = self.state.block(name)
                 fpc.move_block(self.state, name, b.x1 + dx, b.y1 + dy)
