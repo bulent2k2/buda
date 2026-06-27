@@ -95,11 +95,20 @@ children and their pins, and reproduces the script.
 ## Replace and Instance Sync
 
 - **Replace:** if `<cell>` already exists, its representative-instance subtree,
-  `cell_children` rows, synthetic child cells, and now-orphaned nets are deleted
-  first (via a scoped SQLite pass), then the cell is rebuilt.
+  `cell_children` rows, stale port declarations, now-orphaned nets, and unused
+  synthetic child cells are deleted first (via a scoped SQLite pass), then the
+  cell is rebuilt. Names are matched literally (not via SQL `LIKE`/`GLOB`), so a
+  cell named `cpu_0` never disturbs an unrelated `cpuA0`.
 - **Instance sync:** after rebuilding, `resize_cell` updates **every** component
   of that cell type — including other instances placed elsewhere in the BDB — to
   the new size, keeping each instance's lower-left origin fixed.
+
+> **Net model / scope.** The canonical netlist lives on the **representative
+> instance** `<cell>` (pins attach to component rows, not to a cell template).
+> Other instances of the cell are placements that get **size-synced** only —
+> their internal child bodies are left in place (never left with dangling cell
+> references). If you need other instances' internals rebuilt from the new
+> definition, re-instantiate them after import.
 
 ---
 

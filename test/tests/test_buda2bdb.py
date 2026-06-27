@@ -143,6 +143,28 @@ def test_replace_cell_drops_old_blocks_and_nets(tmp_path):
     assert "c__old1" not in cells and "c__new1" in cells
 
 
+def test_replace_does_not_corrupt_prefix_collision_cell(tmp_path):
+    # Cell names with '_' must be matched literally: replacing "cpu_0" must not
+    # touch "cpuA0" (which a SQL LIKE 'cpu_0/%' would wrongly match).
+    bdb = str(tmp_path / "coll.bdb")
+    a = _write(tmp_path, "cpu_0.buda",
+               "set_die 400 400\nadd_block x 0 0 100 100\n")
+    b = _write(tmp_path, "cpuA0.buda",
+               "set_die 400 400\nadd_block y 0 0 100 100\nadd_net m y.o y.i\n")
+    buda2bdb.convert(a, bdb, "cpu_0")
+    buda2bdb.convert(b, bdb, "cpuA0")
+
+    # Replace cpu_0 — cpuA0's subtree and net must survive intact.
+    a2 = _write(tmp_path, "cpu_0b.buda",
+                "set_die 200 200\nadd_block x 0 0 50 50\n")
+    buda2bdb.convert(a2, bdb, "cpu_0")
+
+    comps = _comps(bdb)
+    assert "cpuA0" in comps and "cpuA0/y" in comps, "unrelated cell corrupted"
+    nets = {n.name for n in buda_db.BDB(bdb).all_nets()}
+    assert "m" in nets, "unrelated cell's net deleted"
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Sync existing cell instances to the new size
 # ──────────────────────────────────────────────────────────────────────────

@@ -226,8 +226,15 @@ def _cell_size_and_origin(parsed: ParsedScript):
 
 
 def _delete_cell_footprint(bdb_path: str, cell: str) -> None:
-    """Remove the cell's representative instance subtree, cell_children, synthetic
-    child cells, and now-orphaned nets — so a re-run replaces the cell cleanly."""
+    """Remove the cell's representative instance subtree, cell_children, stale
+    synthetic child cells, and now-orphaned nets — so a re-run replaces the cell
+    cleanly without corrupting unrelated hierarchy.
+
+    Name matching is done in Python (NOT SQL LIKE/GLOB) so cell names containing
+    `_`, `%`, `*`, etc. are treated literally.  A synthetic child cell is dropped
+    only when no surviving component still references it, so other instances of
+    the cell keep valid (if size-synced) bodies rather than dangling cell refs.
+    """
     if not os.path.exists(bdb_path):
         return
     con = sqlite3.connect(bdb_path)
@@ -235,32 +242,55 @@ def _delete_cell_footprint(bdb_path: str, cell: str) -> None:
         cur = con.cursor()
         # Tables may not exist yet in a brand-new/empty file.
         tabs = {r[0] for r in cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         if "component" not in tabs:
             return
-        ids = [r[0] for r in cur.execute(
-            "SELECT id FROM component WHERE name=? OR name LIKE ?",
-            (cell, cell + "/%"))]
-        if ids:
-            qmarks = ",".join("?" * len(ids))
-            cur.execute(f"DELETE FROM pin WHERE comp_id IN ({qmarks})", ids)
-            cur.execute(f"DELETE FROM component WHERE id IN ({qmarks})", ids)
+
+        # Representative-instance subtree: exact name == cell, or under "cell/".
+        prefix = cell + "/"
+        rows = cur.execute("SELECT id, name FROM component").fetchall()
+        sub_ids = [cid for cid, name in rows
+                   if name == cell or name.startswith(prefix)]
+        if sub_ids:
+            qm = ",".join("?" * len(sub_ids))
+            cur.execute(f"DELETE FROM pin WHERE comp_id IN ({qm})", sub_ids)
+            cur.execute(f"DELETE FROM component WHERE id IN ({qm})", sub_ids)
+
         # Prune nets left with no pins (the cell's old nets, plus any dead net).
         if "net" in tabs:
             orphans = [r[0] for r in cur.execute(
                 "SELECT id FROM net WHERE id NOT IN "
-                "(SELECT DISTINCT net_id FROM pin WHERE net_id IS NOT NULL)")]
+                "(SELECT DISTINCT net_id FROM pin WHERE net_id IS NOT NULL)"
+            ).fetchall()]
             if orphans:
                 qm = ",".join("?" * len(orphans))
                 if "net_props" in tabs:
                     cur.execute(f"DELETE FROM net_props WHERE net_id IN ({qm})",
                                 orphans)
                 cur.execute(f"DELETE FROM net WHERE id IN ({qm})", orphans)
+
         if "cell_children" in tabs:
             cur.execute("DELETE FROM cell_children WHERE parent_cell=?", (cell,))
+
+        # Synthetic per-block child cells created by this tool ("<cell>__<block>").
         if "cell" in tabs:
-            # Synthetic per-block child cells created by this tool ("<cell>__*").
-            cur.execute("DELETE FROM cell WHERE name GLOB ?", (cell + "__*",))
+            syn_prefix = cell + "__"
+            syn = [r[0] for r in cur.execute("SELECT name FROM cell").fetchall()
+                   if r[0].startswith(syn_prefix)]
+            if syn:
+                qm = ",".join("?" * len(syn))
+                # Always clear stale port declarations so a rebuild re-registers
+                # fresh directions (cell_pin uses INSERT OR IGNORE downstream).
+                if "cell_pin" in tabs:
+                    cur.execute(f"DELETE FROM cell_pin WHERE cell IN ({qm})", syn)
+                # Drop the cell row only when nothing references it anymore — keep
+                # synthetic cells still used by OTHER instances of `cell`.
+                referenced = {r[0] for r in cur.execute(
+                    "SELECT DISTINCT cell FROM component").fetchall()}
+                drop = [s for s in syn if s not in referenced]
+                if drop:
+                    qm = ",".join("?" * len(drop))
+                    cur.execute(f"DELETE FROM cell WHERE name IN ({qm})", drop)
         con.commit()
     finally:
         con.close()
