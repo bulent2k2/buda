@@ -246,6 +246,47 @@ def test_align_edges_mixed_orientation_raises(tmp_path):
         fpc.align_edges(state, [("a", "l"), ("a", "t")], "min")
 
 
+def test_move_block_carries_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "mv.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "P", 0, 0, 200, 200)
+    fpc.add_child_block(state, "P/c0", 10, 10, 50, 50)   # abs (10,10,60,60)
+    fpc.add_child_block(state, "P/c1", 100, 100, 40, 40)  # abs (100,100,140,140)
+    # A grandchild follows too.
+    fpc.add_child_block(state, "P/c0/g", 5, 5, 10, 10)    # abs (15,15,25,25)
+
+    fpc.move_block(state, "P", 300, 400)                  # move parent by (+300,+400)
+
+    p = state.block("P")
+    assert (p.x1, p.y1) == (300, 400)
+    c0 = state.block("P/c0")
+    assert (c0.x1, c0.y1, c0.x2, c0.y2) == (310, 410, 360, 460), "child must follow"
+    c1 = state.block("P/c1")
+    assert (c1.x1, c1.y1) == (400, 500), "second child must follow"
+    g = state.block("P/c0/g")
+    assert (g.x1, g.y1) == (315, 415), "grandchild must follow"
+
+
+def test_move_unrelated_prefix_block_not_dragged(tmp_path):
+    # Moving "P" must not drag "Pother" (a non-child whose name shares the prefix).
+    state = fpc.create_bdb(str(tmp_path / "mv2.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "P", 0, 0, 100, 100)
+    fpc.add_block(state, "Pother", 500, 500, 600, 600)
+    fpc.move_block(state, "P", 200, 200)
+    assert (state.block("Pother").x1, state.block("Pother").y1) == (500, 500)
+
+
+def test_align_carries_children(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "al.bdb"), 2000, 2000, grid=10)
+    fpc.add_block(state, "A", 0, 0, 100, 100)            # y1=0
+    fpc.add_block(state, "B", 300, 200, 400, 300)        # y1=200
+    fpc.add_child_block(state, "B/c", 10, 10, 20, 20)    # abs (310,210,330,230)
+    fpc.align_bottom(state, ["A", "B"])                  # B drops to y1=0 (min)
+    b = state.block("B")
+    assert b.y1 == 0, "B aligned to bottom edge 0"
+    c = state.block("B/c")
+    assert (c.x1, c.y1) == (310, 10), "B's child follows the align move"
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"

@@ -87,6 +87,8 @@ void FloorplannerEngine::move_block_raw(const std::string& name, double x, doubl
     double h = b.y2 - b.y1;
     double sx = _snap(x);
     double sy = _snap(y);
+    double dx = sx - b.x1;
+    double dy = sy - b.y1;
     b.x1 = sx; b.y1 = sy; b.x2 = sx + w; b.y2 = sy + h;
     if (b.has_local) {
         std::string parent = _parent_path(name);
@@ -94,6 +96,21 @@ void FloorplannerEngine::move_block_raw(const std::string& name, double x, doubl
             const Block& p = _block_or_throw(parent);
             b.local_x = b.x1 - p.x1;
             b.local_y = b.y1 - p.y1;
+        }
+    }
+    // Carry the whole sub-hierarchy: child blocks ("name/...") follow the parent.
+    if (dx != 0.0 || dy != 0.0)
+        _translate_descendants(name, dx, dy);
+}
+
+void FloorplannerEngine::_translate_descendants(const std::string& name,
+                                                double dx, double dy) {
+    const std::string prefix = name + "/";
+    for (auto& [n, b] : _blocks) {
+        if (n.size() > prefix.size() && n.compare(0, prefix.size(), prefix) == 0) {
+            b.x1 += dx; b.y1 += dy; b.x2 += dx; b.y2 += dy;
+            // local_x/local_y are relative to the immediate parent, which shifts
+            // by the same (dx, dy), so they remain correct — no recompute needed.
         }
     }
 }
@@ -143,11 +160,13 @@ void FloorplannerEngine::align_bottom(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double h = b.y2 - b.y1;
+        double dy = edge - b.y1;
         b.y1 = edge; b.y2 = edge + h;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_y = b.y1 - _block_or_throw(p).y1;
         }
+        if (dy != 0.0) _translate_descendants(n, 0.0, dy);
     }
 }
 
@@ -159,11 +178,13 @@ void FloorplannerEngine::align_top(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double h = b.y2 - b.y1;
+        double dy = (edge - h) - b.y1;
         b.y2 = edge; b.y1 = edge - h;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_y = b.y1 - _block_or_throw(p).y1;
         }
+        if (dy != 0.0) _translate_descendants(n, 0.0, dy);
     }
 }
 
@@ -175,11 +196,13 @@ void FloorplannerEngine::align_left(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double w = b.x2 - b.x1;
+        double dx = edge - b.x1;
         b.x1 = edge; b.x2 = edge + w;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_x = b.x1 - _block_or_throw(p).x1;
         }
+        if (dx != 0.0) _translate_descendants(n, dx, 0.0);
     }
 }
 
@@ -191,11 +214,13 @@ void FloorplannerEngine::align_right(const std::vector<std::string>& names) {
     for (const auto& n : names) {
         Block& b = _block_or_throw(n);
         double w = b.x2 - b.x1;
+        double dx = (edge - w) - b.x1;
         b.x2 = edge; b.x1 = edge - w;
         if (b.has_local) {
             auto p = _parent_path(n);
             if (!p.empty()) b.local_x = b.x1 - _block_or_throw(p).x1;
         }
+        if (dx != 0.0) _translate_descendants(n, dx, 0.0);
     }
 }
 

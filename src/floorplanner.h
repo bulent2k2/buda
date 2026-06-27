@@ -88,6 +88,10 @@ private:
     Block& _block_or_throw(const std::string& name);
     static std::string _parent_path(const std::string& name);
     static std::string _leaf_name(const std::string& name);
+    // Translate every descendant of `name` (blocks named "name/...") by (dx, dy).
+    // Local offsets are relative to the immediate parent, which moves by the same
+    // delta, so they stay valid — only absolute coords need shifting.
+    void _translate_descendants(const std::string& name, double dx, double dy);
 };
 
 }  // namespace buda
