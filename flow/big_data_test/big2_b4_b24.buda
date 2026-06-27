@@ -1,0 +1,176 @@
+# big2_b4_b24.buda — bundles 4 (bus_077) & 24 (bus_056) extracted from big2.buda
+# Full floorplan kept so topology generation (pass-through) matches the full run.
+
+source ../tracks4top.buda
+
+set_die 6100 6300
+add_block blk_00 1250 3780 2230 4775
+add_block blk_01 4145 1000 6100 1425
+add_block blk_02 4280 5350 5445 6300
+add_block blk_03 3500 2020 4870 2570
+add_block blk_04 3095 0 3500 1790
+add_block blk_05 1250 3225 2230 3780
+add_block blk_06 0 4630 1250 5170
+add_block blk_07 1250 4775 2230 5350
+add_block blk_08 0 2085 1250 2660
+add_block blk_09 3500 2570 4870 3100
+add_block blk_10 3500 1425 4870 2020
+add_block blk_11 1250 1790 2000 2720
+add_block blk_12 4870 4425 6100 5350
+add_block blk_13 2290 1055 3095 1790
+add_block blk_14 2230 2720 3500 3365
+add_block blk_15 2230 3365 3500 4615
+add_block blk_16 0 485 1250 1600
+add_block blk_17 2880 5350 4280 6300
+add_block blk_18 2000 1790 3500 2720
+add_block blk_19 0 2660 1250 3310
+add_block blk_20 1250 5350 2880 6300
+add_block blk_21 3500 3100 4870 3645
+add_block blk_22 4870 2385 6100 3365
+add_block blk_23 0 5170 1250 5900
+add_block blk_24 4220 3645 4870 4615
+add_block blk_25 3500 0 4145 800
+add_block blk_26 2290 0 3095 1055
+add_block blk_27 1250 1055 2290 1790
+add_block blk_28 3500 4615 4870 5350
+add_block blk_29 4870 1425 6100 2385
+add_block blk_30 4145 0 5585 1000
+add_block blk_31 0 3895 1250 4630
+add_block blk_32 2230 4615 3500 5350
+add_block blk_33 3500 3645 4220 4615
+add_block blk_34 0 1600 1250 2085
+add_block blk_35 1250 0 2290 1055
+add_block blk_36 3500 800 4145 1425
+add_block blk_37 0 3310 1250 3895
+add_block blk_38 1250 2720 2230 3225
+add_block blk_39 4870 3365 6100 4425
+add_block io_pad_bl 0 0 1250 485
+add_block io_pad_br 5585 0 6100 1000
+add_block io_pad_tl 0 5900 1250 6300
+add_block io_pad_tr 5445 5350 6100 6300
+
+# --- bundle 4 (bus_077): blk_02 -> blk_22,blk_12,blk_29,io_pad_tr ---
+add_net bus_077_b00 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b01 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b02 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b03 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b04 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b05 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b06 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b07 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b08 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b09 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b10 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b11 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b12 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b13 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b14 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b15 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b16 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b17 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b18 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b19 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b20 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b21 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b22 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b23 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b24 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b25 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b26 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b27 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b28 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b29 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b30 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b31 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b32 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b33 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b34 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b35 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b36 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b37 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b38 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b39 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b40 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b41 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b42 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b43 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b44 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b45 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b46 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b47 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b48 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b49 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b50 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b51 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b52 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b53 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b54 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b55 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b56 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b57 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b58 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+add_net bus_077_b59 blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+
+# --- bundle 24 (bus_056): blk_09 -> blk_14,blk_39,blk_19 ---
+add_net bus_056_b00 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b01 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b02 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b03 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b04 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b05 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b06 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b07 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b08 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b09 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b10 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b11 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b12 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b13 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b14 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b15 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b16 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b17 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b18 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b19 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b20 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b21 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b22 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b23 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b24 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b25 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b26 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b27 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b28 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b29 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b30 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b31 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b32 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b33 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b34 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b35 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b36 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b37 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b38 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b39 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b40 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b41 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b42 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b43 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b44 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b45 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b46 blk_09.p blk_14.p,blk_39.p,blk_19.p
+add_net bus_056_b47 blk_09.p blk_14.p,blk_39.p,blk_19.p
+
+run_bundler
+generate_topologies
+
+# Pin the same topologies the full big2.buda selected (the buggy picks):
+#   bundle 1 (b4)=TRUNK_H@y4887 (topo 4),  bundle 2 (b24)=TRUNK_V@x5485 (topo 4)
+select_topology 1 4
+select_topology 2 4
+run_planner
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity
+exit
