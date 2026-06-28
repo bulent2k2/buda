@@ -728,6 +728,21 @@ void CongestionPlanner::log_choice(const BundleWrapper& bw, const PlanResult& pl
 
 std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         std::vector<BundleWrapper>& bundles, int /*max_iterations*/) {
+    // A missing layer stack (e.g. a def_layer file that failed to `source`)
+    // silently falls back to M4(H)/M5(V) in plan_bundle, routing on default metal
+    // with no obvious cause.  Warn once at the run level so the misconfiguration
+    // is visible (the fallback itself is kept for hand-built test wrappers).
+    {
+        bool no_h = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL).empty();
+        bool no_v = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL).empty();
+        if (no_h || no_v)
+            std::cout << "[Planner] WARNING: no "
+                      << (no_h && no_v ? "HORIZONTAL or VERTICAL"
+                                       : no_h ? "HORIZONTAL" : "VERTICAL")
+                      << " layers defined; defaulting to M4(H)/M5(V). "
+                         "Did a def_layer or source fail?\n";
+    }
+
     // Ensure base grid is populated from floorplan.
     if (x_grid_.empty()) build_congestion_map();
 
