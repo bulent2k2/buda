@@ -879,7 +879,8 @@ class BudaSession:
 
     def _run_post_nuts_planner(self,
                                v_thresholds: tuple[float, float] | None,
-                               h_thresholds: tuple[float, float] | None):
+                               h_thresholds: tuple[float, float] | None,
+                               top_only: bool = False):
         """Stage 4c — Post-NUTS stub layer reassignment.
 
         Classifies every bundle's V and/or H stub segments by max span length
@@ -902,6 +903,15 @@ class BudaSession:
             layers_sorted = sorted(self.layers.get_layer_ids_by_dir(dir_enum))
             dir_label = "V" if dir_enum == buda.LayerDir.VERTICAL else "H"
             is_v = (dir_enum == buda.LayerDir.VERTICAL)
+            # `top` mode: reassign within the TOP layers only, so short stubs land on
+            # the next-highest TOP layer (not the LOW escape layers) and long hauls on
+            # the highest.  E.g. V → {M5(short), M7(long)}, H → {M4(short), M6(long)} —
+            # keeping the over-subscribed top layers for long-haul and spreading short
+            # stubs onto the next TOP tier instead of the LOW (often track-starved) layers.
+            if top_only:
+                tops = [l for l in layers_sorted if self.layers.is_top(l)]
+                if len(tops) >= 2:
+                    layers_sorted = tops
             if len(layers_sorted) < 2:
                 print(f"[Planner] post_nuts {dir_label}: fewer than 2 {dir_label} layers — nothing to reassign")
                 return
@@ -2249,6 +2259,13 @@ class BudaSession:
                 _V_DEFAULTS = (80.0, 200.0)
                 _H_DEFAULTS = (150.0, 400.0)
                 rest = args[1:]
+                # Optional leading 'top' keyword: reassign within TOP layers only
+                # (short → next-highest TOP, long → highest TOP), leaving the LOW
+                # escape layers out of the spread.
+                top_only = False
+                if rest and rest[0].lower() == "top":
+                    top_only = True
+                    rest = rest[1:]
                 v_thresholds = None
                 h_thresholds = None
                 i = 0
@@ -2275,7 +2292,7 @@ class BudaSession:
                 # Bare "post_nuts" with no direction letters → V with defaults.
                 if v_thresholds is None and h_thresholds is None:
                     v_thresholds = _V_DEFAULTS
-                self._run_post_nuts_planner(v_thresholds, h_thresholds)
+                self._run_post_nuts_planner(v_thresholds, h_thresholds, top_only=top_only)
             elif args and args[0] == "hier":
                 # run_planner hier [N]
                 # Hierarchy-aware planning: expand cell-level bundles to per-instance
