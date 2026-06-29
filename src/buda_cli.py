@@ -1513,7 +1513,10 @@ class BudaSession:
             print(f"\n── bundle {b.id}  nets={len(b.net_names)} ({net0}…)  "
                   f"width={w.input.width}  sel={sel}{pin_s}  "
                   f"cands={len(cands)}  {' '.join(flags)}")
-            print(f"   {'idx':>3} {'type':<14} {'wl':>8} {'segs':>4} "
+            # Size the type column to the widest type so every later column
+            # stays aligned regardless of long names like TRUNK_V_OOB@x6282.
+            type_w = max([len("type")] + [len(r[1]) for r in rows])
+            print(f"   {'idx':>3} {'type':<{type_w}} {'wl':>8} {'segs':>4} "
                   f"{'pass':>4} {'mslide':>7}  notes")
             for (i, typ, wl, nsegs, pt, ms) in rows:
                 marks = []
@@ -1521,7 +1524,7 @@ class BudaSession:
                 if i in dup_idx:  marks.append("dup")
                 if i in pinch_idx: marks.append("pinch")
                 ms_s = "-" if ms is None else str(ms)
-                print(f"   {i:>3} {typ:<14} {wl:>8} {nsegs:>4} {pt:>4} "
+                print(f"   {i:>3} {typ:<{type_w}} {wl:>8} {nsegs:>4} {pt:>4} "
                       f"{ms_s:>7}  {','.join(marks)}")
 
             # --conn: per-segment connectivity / pass-through / slide / pull for
