@@ -376,6 +376,50 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
             if (conn.kind == SegConn::BUSTERM)
                 explicitly_connected.insert(conn.block_name);
 
+    // A segment "covers" a pass-through block when it spans one of the block's
+    // rects.  Two grades, by where the segment's perp_pos lands relative to the
+    // rect face:
+    //   STRICT — perp_pos in the OPEN interior; the wire genuinely crosses the
+    //            block (e.g. the trunk spine).  A real cover.
+    //   GRAZE  — perp_pos exactly on a rect face; the wire only rides the boundary
+    //            edge it shares with a neighbour.  A degenerate cover.
+    // The clamp below keeps a pass-through block covered by pinning its coverer's
+    // slide to the block's perp extent.  That clamp is applied with the original
+    // INCLUSIVE span test (so overlap-avoidance on grazing pass-throughs is
+    // preserved) — EXCEPT for one surgical de-pinch case handled at the
+    // intersection: if the clamp would collapse a segment to a single coordinate
+    // (zero slide) AND the block already has a strict-interior coverer, the
+    // segment is only grazing the block's shared edge and is not its cover, so
+    // pinning it to the face needlessly makes a bus-carrying stub unplaceable
+    // (an io_pad_tr-bound stub riding blk_12's top edge went to zero slide and
+    // unplaceable at NUTS).  has_strict_cover lets us tell that case from a SOLE
+    // graze cover, which must stay clamped (dropping it would disconnect the
+    // block; filter_pinched then rejects the over-constrained candidate).
+    auto spans_rect = [](const ConnSeg& s, const Rect& r, bool strict) {
+        if (s.horiz) {
+            bool perp = strict ? (s.perp_pos > r.y1 && s.perp_pos < r.y2)
+                               : (s.perp_pos >= r.y1 && s.perp_pos <= r.y2);
+            return perp && s.along_lo <= r.x2 && s.along_hi >= r.x1;
+        }
+        bool perp = strict ? (s.perp_pos > r.x1 && s.perp_pos < r.x2)
+                           : (s.perp_pos >= r.x1 && s.perp_pos <= r.x2);
+        return perp && s.along_lo <= r.y2 && s.along_hi >= r.y1;
+    };
+
+    std::map<std::string, bool> has_strict_cover;
+    for (const auto& bname : topo.connected_block_names) {
+        if (explicitly_connected.count(bname)) continue;
+        auto rects = fp.get_block_rects(bname);
+        if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
+        bool strict = false;
+        for (const auto& s : segs_) {
+            for (const Rect& r : rects)
+                if (spans_rect(s, r, /*strict=*/true)) { strict = true; break; }
+            if (strict) break;
+        }
+        has_strict_cover[bname] = strict;
+    }
+
     for (auto& cs : segs_) {
         for (const auto& bname : topo.connected_block_names) {
             if (explicitly_connected.count(bname)) continue;
@@ -383,16 +427,17 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
             auto rects = fp.get_block_rects(bname);
             if (rects.empty()) rects.push_back(fp.get_block_bounds(bname));
 
-            // Union perp span and along span of every rect this segment actually spans.
+            // Union perp span and along span of every rect this segment spans
+            // (INCLUSIVE of the boundary face — unchanged from the original; the
+            // grazing de-pinch is handled at the intersection below, not here, so
+            // non-pinching clamps behave exactly as before).
             int span_lo = INT_MAX, span_hi = INT_MIN;
             int along_lo_B = INT_MAX, along_hi_B = INT_MIN;
+            bool cs_strict = false;
             for (const Rect& r : rects) {
-                bool through = cs.horiz
-                    ? (cs.perp_pos >= r.y1 && cs.perp_pos <= r.y2
-                       && cs.along_lo <= r.x2 && cs.along_hi >= r.x1)
-                    : (cs.perp_pos >= r.x1 && cs.perp_pos <= r.x2
-                       && cs.along_lo <= r.y2 && cs.along_hi >= r.y1);
+                bool through = spans_rect(cs, r, /*strict=*/false);
                 if (!through) continue;
+                if (spans_rect(cs, r, /*strict=*/true)) cs_strict = true;
                 if (cs.horiz) {
                     span_lo = std::min(span_lo, r.y1); span_hi = std::max(span_hi, r.y2);
                     along_lo_B = std::min(along_lo_B, r.x1); along_hi_B = std::max(along_hi_B, r.x2);
@@ -415,6 +460,13 @@ void ConnTopology::tighten_passthrough_ranges(const Topology& topo,
             int nlo = std::max(cs.perp_lo, lo);
             int nhi = std::min(cs.perp_hi, hi);
             if (nlo > nhi) continue;
+            // Surgical de-pinch (see the spans_rect comment above): if this clamp
+            // would collapse cs to a single coordinate but the block already has a
+            // strict-interior coverer and cs only grazes it, cs is not the block's
+            // cover — skip rather than pin a bus-carrying stub to zero slide.  A
+            // sole graze cover (no strict coverer) stays clamped to keep the block
+            // connected.  Non-pinching clamps always apply, so nothing else moves.
+            if (nlo == nhi && !cs_strict && has_strict_cover[bname]) continue;
             cs.perp_lo = nlo;
             cs.perp_hi = nhi;
 

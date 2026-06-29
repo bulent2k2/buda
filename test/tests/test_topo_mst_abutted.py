@@ -20,7 +20,7 @@ first and is always chosen — but closest_points collapses the shared edge to a
 single point (p1 == p2) and the edge realizers used to DROP that zero-length edge,
 leaving the abutted block disconnected (unplaced bits in DetailedNUTS).
 See docs/internal/mst-abutted-blocks.md.  Repro flow:
-flow/big_data_test/big2_b1_bus_007.buda.
+flow/big_data_test/big2/b1_bus_007.buda.
 """
 import os
 import subprocess
@@ -158,7 +158,7 @@ def test_abutment_collinear_butt_joint_connects():
 @pytest.mark.mid
 def test_big2_b1_bus_007_repro_routes_cleanly():
     """The committed repro flow routes with no opens and 0 unplaced bits."""
-    repro = _ROOT / "flow" / "big_data_test" / "big2_b1_bus_007.buda"
+    repro = _ROOT / "flow" / "big_data_test" / "big2" / "b1_bus_007.buda"
     build_dir = _ROOT / "build"
     tools_dir = _ROOT / "tools"
     ppath = os.environ.get("PYTHONPATH", "")

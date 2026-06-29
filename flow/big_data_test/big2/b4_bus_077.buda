@@ -16,16 +16,16 @@ run_bundler
 detour_channel N 300 E 500
 generate_topologies double_detour
 
-# Pin the exact topologies that were buggy in the full big2.buda run, now fixed:
-#   bundle 1 (b4)=TRUNK_H@y4887 (topo 4)  — NUTS span-adjust used to detach blk_12
-#                                            (fixed: BUSTERM face anchors in NUTS)
-# select_topology 1 4
-# we need a big enhancement to generalize a "seg-busterm conn:"
-# A segment could be contained within a block/busterm. 
-select_topology 1 1
-# Check the SELECTED topologies before planning so a topology-gen coverage gap
-# (bundle 24 / blk_09) is caught at the topo stage and can't be masked by a later
-# NUTS/DNUTS change. Bundle 4's detach is a NUTS-stage artifact (clean at topo).
+# Flexible "root" trunk (coverage-driven span, under double_detour): the topology
+# generator now emits TRUNK_V@x5772 — a single V spine inside io_pad_tr's x-span
+# that taps all four right-column receivers (blk_22/blk_12/blk_29/io_pad_tr) by
+# pass-through and stubs only the driver blk_02.  Previously this region-4 trunk
+# was dropped (degenerate span) and the in-bbox V trunks pinched the io_pad_tr /
+# driver stub.  Leave the planner free to choose (it routes cleanly); to study a
+# specific candidate, pin it, e.g.:
+#   select_topology 1 5     # TRUNK_V@x5772 (index may shift as generation evolves)
+# Check the SELECTED topologies before planning so a topology-gen coverage gap is
+# caught at the topo stage and can't be masked by a later NUTS/DNUTS change.
 check_connectivity topo
 dump_topologies --conn
 run_planner

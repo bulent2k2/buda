@@ -1275,6 +1275,35 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     for (int i = 0; i < n; ++i) {
         x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]);
     }
+
+    // ── Flexible "root" trunk under double_detour (mirror of add_trunk_v) ────
+    // Minimal connecting span: each stub sits at its NATURAL centerline (block/
+    // rect centre, not the wire-min face), and the spine spans from there out to
+    // the NEAR x-face of every pass-through block it does not yet overlap — no
+    // beyond-bbox margin.  Gives purely-pass-through trunks a valid span, keeps
+    // extreme-endpoint stubs slideable, and stays tight; left unchanged without
+    // double_detour.  See the add_trunk_v counterpart for the rationale.
+    if (use_busterm_ && allow_double_detour_) {
+        auto ctr_x = [&](int i) {
+            return blocks[i].rects.empty() ? blocks[i].orig_bbox.center().x
+                                           : best_r[i].center().x;
+        };
+        int lo = INT_MAX, hi = INT_MIN;
+        for (int i = 0; i < n; ++i) {
+            if (!has_stub[i]) continue;                        // stubs only
+            att_x[i] = ctr_x(i);                               // place stub at its centerline
+            lo = std::min(lo, att_x[i]); hi = std::max(hi, att_x[i]);
+        }
+        bool seeded = (lo <= hi);
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i]) continue;                         // pass-through/contained
+            int b1 = blocks[i].orig_bbox.x1, b2 = blocks[i].orig_bbox.x2;
+            if (!seeded) { lo = b1; hi = b2; seeded = true; continue; }
+            if (b1 > hi) hi = b1;   // block right of the span: reach its near (left)  face
+            if (b2 < lo) lo = b2;   // block left  of the span: reach its near (right) face
+        }
+        if (seeded && lo < hi) { x_lo = lo; x_hi = hi; }
+    }
     if (x_lo >= x_hi) return;
 
     Topology t;
@@ -1546,6 +1575,70 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     for (int i = 0; i < n; ++i) {
         if (stub_suppressed[i]) continue;
         y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]);
+    }
+
+    // ── Flexible "root" trunk under double_detour ───────────────────────────
+    // A trunk is the bundle's root: its endpoints are flexible and span exactly
+    // from the lowest busterm it taps to the topmost stub/connection it carries —
+    // no more (minimise wirelength) and no less (stay connected).  Opt-in via
+    // double_detour.  Two pieces:
+    //   1. Each stub sits at its NATURAL centerline (block/rect centre), not the
+    //      wire-min face the earlier refinement may have pulled an extreme stub
+    //      to.  A stub pinned to the block's near face that also bounds the spine
+    //      end has zero slide (the blk_02 driver stub at x5772 → filter_pinched
+    //      dropped the candidate); placing it at the centre keeps the spine end
+    //      strictly inside the block's face extent so the stub stays slideable.
+    //   2. The span = [min,max] of those stub centerlines, then extended to the
+    //      NEAR face of every pass-through block it does not yet overlap (so it
+    //      still crosses every receiver it connects by containment) — e.g. down
+    //      to blk_29's upper edge, up to the driver-stub centerline.  No
+    //      beyond-bbox margin: the generator is honest and tight, and NUTS
+    //      endpoint-following resolves the rest.
+    // Without double_detour the span is left tight (unchanged behaviour), so
+    // normal flows and their candidate rankings are not disturbed.
+    if (use_busterm_ && allow_double_detour_) {
+        auto ctr_y = [&](int i) {
+            return blocks[i].rects.empty() ? blocks[i].orig_bbox.center().y
+                                           : best_r[i].center().y;
+        };
+        // Place every surviving stub at its natural centerline.
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && !stub_suppressed[i]) att_y[i] = ctr_y(i);
+        // Recentering can move a farther same-side stub off a nearer block it was
+        // suppressing (that block was suppressed precisely because the farther
+        // stub's pre-recenter att_y crossed its y-extent).  A suppressed block is
+        // stubbed — the trunk does NOT pass through it — so if no SURVIVING farther
+        // same-side stub still crosses it at the new att_y, un-suppress it and emit
+        // its own centerline stub.  Monotonic: only ever re-adds coverage, so it
+        // cannot strand a block (the Codex P1 on this PR).
+        for (int i = 0; i < n; ++i) {
+            if (!stub_suppressed[i]) continue;
+            int di = conn_x[i] - x_trunk;
+            bool covered = false;
+            for (int j = 0; j < n && !covered; ++j) {
+                if (j == i || !has_stub[j] || stub_suppressed[j]) continue;
+                int dj = conn_x[j] - x_trunk;
+                if (di == 0 || dj == 0 || (di > 0) != (dj > 0)) continue; // same side
+                if (std::abs(dj) <= std::abs(di)) continue;               // strictly farther
+                covered = (att_y[j] >= blocks[i].orig_bbox.y1 &&
+                           att_y[j] <= blocks[i].orig_bbox.y2);
+            }
+            if (!covered) { stub_suppressed[i] = false; att_y[i] = ctr_y(i); }
+        }
+        int lo = INT_MAX, hi = INT_MIN;
+        for (int i = 0; i < n; ++i) {
+            if (stub_suppressed[i] || !has_stub[i]) continue;  // surviving stubs
+            lo = std::min(lo, att_y[i]); hi = std::max(hi, att_y[i]);
+        }
+        bool seeded = (lo <= hi);
+        for (int i = 0; i < n; ++i) {
+            if (stub_suppressed[i] || has_stub[i]) continue;   // pass-through/contained
+            int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
+            if (!seeded) { lo = b1; hi = b2; seeded = true; continue; }
+            if (b1 > hi) hi = b1;   // block above the span: reach its near (bottom) face
+            if (b2 < lo) lo = b2;   // block below the span: reach its near (top)    face
+        }
+        if (seeded && lo < hi) { y_lo = lo; y_hi = hi; }
     }
     if (y_lo >= y_hi) return;
 
