@@ -66,6 +66,30 @@ perp slide* to blk_00's x-extent ([1250..2210], the "doesn't slide out" guard).
 The user's ask — *"don't force it to connect to a block edge, but ensure it
 doesn't slide out"* — is exactly: keep the perp-containment, drop the edge tap.
 
+## Why a "single straight segment" (approach A) is invalid
+
+A topology segment is a **bus of N bit-wires**, not one wire. N bits need N
+tracks → a perpendicular **interval** of non-zero width, so every segment must
+have `perp_lo < perp_hi`. Segments are therefore assigned to Hanan **intervals**
+(the cells/channels between grid lines), never to Hanan **lines** (block edges,
+which have zero width on their perpendicular axis).
+
+The tempting "single H segment at y=4615" sits exactly on a Hanan line
+(`blk_15.y2 == blk_32.y1 == 4615`): blk_15 and blk_32 **abut** there, so over
+their x-range a segment at y=4615 has `perp_lo == perp_hi == 4615` — zero slide,
+nowhere for the 28 bits. It is not merely a narrow option; it assigns a bus to a
+zero-width line, which is unroutable in principle.
+
+This is exactly why the bus *must* route through `blk_00`'s interior: blk_00
+spans y[3780,4775], straddling the 4615 abutment, so it provides a real interval
+for the bits. Today's `seg0` already does the geometrically-right thing — a
+vertical bus inside blk_00 with a genuine perp interval `slide=[1250..2210]`. The
+defect is purely the **modeling** (edge-tap busterm vs containment), which
+over-extends the along-span to blk_00's far face and hides the pass-through. The
+containment connection must give the contained segment its slide from the
+**block's interior interval** (non-zero, bounded so it cannot exit) — never pin
+it to a face/line.
+
 ## Target model — containment as a first-class connection
 
 An **endpoint/busterm block that the trunk passes through** should be connected by
@@ -117,7 +141,42 @@ An **endpoint/busterm block that the trunk passes through** should be connected 
 - Regression guard: the existing trunk / pass-through / MST-completion suites stay
   green (this changes generation for the contained-endpoint case only).
 
-## Status
+## Status — IMPLEMENTED (generation side)
 
-Design + failing tests first; generation change is guarded to the
-"endpoint block contains the trunk axis" case to keep the blast radius small.
+Landed in `add_trunk_v` / `add_trunk_h` (`topology.cpp`), guarded tightly so the
+blast radius is exactly the contained-endpoint case (full fast+mid+slow suite
+green, big2 unchanged at 9 overlaps / 60 unplaced):
+
+1. **Pull-back.** Before computing the spine span, a no-stub (contained) endpoint
+   block whose extent the STUB span already overlaps has its `att_y`/`att_x`
+   pulled back into the stub span (instead of being pushed to its face). The
+   spine no longer over-extends to manufacture an edge tap; the block is covered
+   by the spine/branches passing through it (pass-through). Single-rect only —
+   multi-rect/TEG keeps its own per-rect handling.
+2. **Degenerate-spine collapse.** When the span collapses (all real attachments
+   share one coordinate) AND the perpendicular stubs alone connect every block
+   (each contained block holds the junction, **≥2 stubs**, all on the **same
+   side** of the trunk so they overlap and stay connected), emit the stubs with
+   no spine. Otherwise the candidate is dropped as before. The `≥2 stubs` /
+   `same-side` guards keep the collapse from emitting zero-slide single-segment
+   "trunks" on an abutment line (the Hanan-line pinch the principle above
+   forbids).
+
+Result on `b34_bus_028`: the `TRUNK_V@x1740` candidate drops from 3 segments /
+wl 1140 to 2 / wl 980, with **blk_00 connected by containment** (a `passthru` on
+both H segments, no BUSTERM edge tap) and non-zero slides (835, 160). Routes
+clean end to end.
+
+### Deferred refinements
+
+- **Duplicate collinear stubs.** When two same-side stubs share a face point
+  (b34: blk_15/blk_32 both at x=2230, y=4615) the collapse emits two *identical*
+  collinear segments (one per block). They overlap (physically one wire) and
+  route clean, but inflate the candidate's reported wirelength and are a
+  redundant representation. A future pass could merge same-line stubs into one
+  segment tapping both blocks.
+- **First-class `CONTAINMENT` SegConn.** This increment achieves containment via
+  the existing pass-through path (no edge tap). A dedicated `SegConn::CONTAINMENT`
+  kind (perp slide = block interior, no along anchor) would make the model
+  explicit and generalise to the non-collinear / multi-rect cases; tracked as a
+  follow-up.

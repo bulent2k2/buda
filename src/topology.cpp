@@ -1271,6 +1271,25 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
     }
 
+    // Seg-busterm containment (mirror of add_trunk_v): a no-stub endpoint block
+    // already overlapped by the STUB span is covered by the trunk by containment —
+    // pull its att_x back into the stub span so the spine stays minimal and the
+    // block connects by pass-through instead of an edge tap.
+    {
+        int stub_lo = INT_MAX, stub_hi = INT_MIN;
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i]) { stub_lo = std::min(stub_lo, att_x[i]); stub_hi = std::max(stub_hi, att_x[i]); }
+        if (stub_lo <= stub_hi) {
+            for (int i = 0; i < n; ++i) {
+                if (has_stub[i]) continue;
+                if (!blocks[i].rects.empty()) continue;            // single-rect only (TEG owns multi-rect)
+                int b1 = blocks[i].orig_bbox.x1, b2 = blocks[i].orig_bbox.x2;
+                if (b1 <= stub_hi && b2 >= stub_lo)
+                    att_x[i] = std::clamp(att_x[i], stub_lo, stub_hi);
+            }
+        }
+    }
+
     int x_lo = INT_MAX, x_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
         x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]);
@@ -1304,7 +1323,27 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
         if (seeded && lo < hi) { x_lo = lo; x_hi = hi; }
     }
-    if (x_lo >= x_hi) return;
+    // Degenerate spine collapse (mirror of add_trunk_v): if the perpendicular
+    // stubs alone connect every block — each no-stub block contains the common
+    // junction x, and all surviving stubs are on the SAME side of y_trunk so they
+    // overlap and stay connected — emit the stubs with no spine (contained blocks
+    // by containment).  Otherwise drop the candidate.
+    if (x_lo >= x_hi) {
+        int n_stubs = 0, side = 0;
+        bool all_covered = true, same_side = true;
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i]) {
+                ++n_stubs;
+                int s = (conn_y[i] > y_trunk) ? 1 : (conn_y[i] < y_trunk ? -1 : 0);
+                if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
+                continue;
+            }
+            if (!blocks[i].rects.empty() ||
+                !(blocks[i].orig_bbox.x1 <= x_lo && x_lo <= blocks[i].orig_bbox.x2))
+                all_covered = false;
+        }
+        if (!(n_stubs >= 2 && all_covered && same_side)) return;
+    }
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
@@ -1571,6 +1610,33 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
     }
 
+    // Seg-busterm containment: a no-stub (the trunk passes through it) endpoint
+    // block that the STUB span already overlaps is covered by the trunk by
+    // containment — the spine need not extend to its face to tap it.  The push
+    // loops above pushed such a block's att_y out to its near face (manufacturing
+    // a BUSTERM edge tap and over-extending the spine, e.g. b34_bus_028 blk_00).
+    // Pull it back into the stub span so the spine stays minimal and the block is
+    // connected by pass-through instead of an edge tap.  Only blocks the stub
+    // span already covers are touched (others still extend to reach their face),
+    // so the blast radius is the contained-and-already-covered case.
+    {
+        int stub_lo = INT_MAX, stub_hi = INT_MIN;
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && !stub_suppressed[i]) {
+                stub_lo = std::min(stub_lo, att_y[i]);
+                stub_hi = std::max(stub_hi, att_y[i]);
+            }
+        if (stub_lo <= stub_hi) {
+            for (int i = 0; i < n; ++i) {
+                if (has_stub[i] || stub_suppressed[i]) continue;   // stubbed/suppressed
+                if (!blocks[i].rects.empty()) continue;            // single-rect only (TEG owns multi-rect)
+                int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
+                if (b1 <= stub_hi && b2 >= stub_lo)                // already covered
+                    att_y[i] = std::clamp(att_y[i], stub_lo, stub_hi);
+            }
+        }
+    }
+
     int y_lo = INT_MAX, y_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
         if (stub_suppressed[i]) continue;
@@ -1640,7 +1706,38 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
         if (seeded && lo < hi) { y_lo = lo; y_hi = hi; }
     }
-    if (y_lo >= y_hi) return;
+    // Degenerate spine (all real attachments share one y).  Normally nothing to
+    // emit — BUT if the perpendicular stubs alone connect every block (each
+    // no-stub endpoint block contains the common junction y, so it is covered by
+    // a stub passing through it), emit the stubs with NO spine: the contained
+    // block is connected by containment, not by extending a redundant spine to
+    // its face (b34_bus_028).  Otherwise (single block, etc.) drop the candidate.
+    if (y_lo >= y_hi) {
+        int n_stubs = 0, side = 0;
+        bool all_covered = true, same_side = true;
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i] && !stub_suppressed[i]) {
+                ++n_stubs;
+                // All surviving stubs must lie on the SAME side of x_trunk so they
+                // OVERLAP at the junction and are physically connected — collinear
+                // stubs on opposite sides meet only at the (spine-less) junction,
+                // which ConnTopology cannot infer a SEG link across (it only joins
+                // perpendicular segments), leaving the topology disconnected.
+                int s = (conn_x[i] > x_trunk) ? 1 : (conn_x[i] < x_trunk ? -1 : 0);
+                if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
+                continue;
+            }
+            if (has_stub[i]) continue;                 // suppressed stub: covered by a survivor
+            // no-stub (contained) block: single-rect, and the junction y_lo must
+            // lie in its extent (multi-rect/TEG is out of scope for the collapse).
+            if (!blocks[i].rects.empty() ||
+                !(blocks[i].orig_bbox.y1 <= y_lo && y_lo <= blocks[i].orig_bbox.y2))
+                all_covered = false;
+        }
+        if (!(n_stubs >= 2 && all_covered && same_side)) return;
+        // fall through with y_lo == y_hi: the spine block below emits no segment,
+        // and the stub loop wires every block (contained ones by pass-through).
+    }
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
