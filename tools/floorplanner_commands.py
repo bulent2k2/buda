@@ -57,6 +57,11 @@ class BlockNode:
         return f"{self.leaf_name}  [{self.cell}]"
 
 
+def _lock_path_for(path: str) -> str:
+    """Canonical sidecar lock path for a BDB (see _try_acquire_write_lock)."""
+    return os.path.realpath(path) + ".fplock"
+
+
 def _try_acquire_write_lock(path: str) -> int | None:
     """Try a non-blocking exclusive flock coordinating fp sessions on `path`.
 
@@ -79,7 +84,7 @@ def _try_acquire_write_lock(path: str) -> int | None:
 
     Falls back to None (no lock, always writable) on platforms without fcntl.
     """
-    lock_path = os.path.realpath(path) + ".fplock"
+    lock_path = _lock_path_for(path)
     try:
         fd = os.open(lock_path, os.O_RDONLY | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -96,14 +101,28 @@ def _try_acquire_write_lock(path: str) -> int | None:
 
 
 def release_bdb_lock(state: "FloorplannerAppState") -> None:
-    """Release the exclusive write lock held by this session, if any."""
+    """Release the exclusive write lock held by this session, if any, and remove
+    the sidecar .fplock file so it isn't left behind after closing.
+
+    Only the lock holder (state._lock_fd set) unlinks, and only its own sidecar,
+    so a concurrent read-only session never deletes a live lock.  The unlink
+    happens while we still hold the lock; the worst case is a brief, harmless
+    window during *our own* exit — acceptable for an interactive single-user
+    tool, and it leaves no clutter behind."""
     if state._lock_fd is not None:
+        lock_path = state._lock_path
+        try:
+            if lock_path and os.path.exists(lock_path):
+                os.unlink(lock_path)
+        except Exception:
+            pass
         try:
             fcntl.flock(state._lock_fd, fcntl.LOCK_UN)
             os.close(state._lock_fd)
         except Exception:
             pass
         state._lock_fd = None
+        state._lock_path = None
         state.is_read_only = False
 
 
@@ -118,6 +137,7 @@ class FloorplannerAppState:
     selected: str | None = None
     is_read_only: bool = False
     _lock_fd: int | None = None
+    _lock_path: str | None = None
 
     def add_name(self, name: str):
         if name not in self.block_names:
@@ -156,6 +176,7 @@ def load_bdb(path: str) -> FloorplannerAppState:
     fd = _try_acquire_write_lock(path)
     if fd is not None:
         state._lock_fd = fd
+        state._lock_path = _lock_path_for(path)
         state.is_read_only = False
     else:
         state.is_read_only = True
@@ -182,6 +203,7 @@ def create_bdb(path: str, die_w: float, die_h: float, grid: float = 10.0) -> Flo
     fd = _try_acquire_write_lock(path)
     if fd is not None:
         state._lock_fd = fd
+        state._lock_path = _lock_path_for(path)
     else:
         state.is_read_only = True
     return state
@@ -308,6 +330,7 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
             fd = _try_acquire_write_lock(bdb_path)
         if fd is not None:
             state._lock_fd = fd
+            state._lock_path = _lock_path_for(bdb_path)
             fd = None  # Ownership transferred; do not release in the except block.
         else:
             state.is_read_only = True

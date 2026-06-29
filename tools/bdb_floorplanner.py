@@ -24,6 +24,7 @@ HBundle-flow script export, not as the final polished editor.
 
 from __future__ import annotations
 
+import atexit
 import collections
 import os
 import sys
@@ -101,11 +102,29 @@ class BdbFloorplanner:
         }
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        # macOS Cmd-Q / the app Quit menu bypass WM_DELETE_WINDOW; route them
+        # through the same cleanup so the .fplock sidecar is released + removed.
+        try:
+            self.root.createcommand("tk::mac::Quit", self._on_close)
+        except Exception:
+            pass
+        # Final safety net for any other exit path (e.g. the interpreter shutting
+        # down after mainloop returns): release the lock + remove the sidecar.
+        atexit.register(self._release_lock_quietly)
         self._build_ui()
 
+    def _release_lock_quietly(self):
+        try:
+            fpc.release_bdb_lock(self.state)
+        except Exception:
+            pass
+
     def _on_close(self):
-        fpc.release_bdb_lock(self.state)
-        self.root.destroy()
+        self._release_lock_quietly()
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
     def _apply_ro_state(self):
         """Reflect state.is_read_only in the window title and button states."""
