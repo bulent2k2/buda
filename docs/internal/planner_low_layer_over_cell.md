@@ -84,6 +84,40 @@ a silent open. TOP layers always return false (they tile cells freely).
 Regression test: `test/tests/test_planner_low_over_cell.py` (mid tier) runs
 `flow/big_data_test/big2/big2_noviz.buda` and asserts zero LOW-over-cell dumps.
 
+## TOP-layer load balancing (NUTS overlaps)
+
+After Gap A part 1 the residual failures were on the TOP layers: 41 NUTS track
+overlaps (40 of them on M6/M7) and 272 DNUTS unplaced. Investigation showed:
+
+- **Not capacity:** 35 of 41 overlaps fit within their assigned band (shared
+  interval ≥ sum of the two bus widths) — the planner hands NUTS packable bands.
+- **Not the `seg_perp` hint:** a prototype spreading the hint had no effect (NUTS
+  overrides it with `net_pull` / repack).
+- **Not the repair guard:** only 1 of 41 was the unrepairable both-pulled case,
+  but relaxing `repair_overlaps` to accept plateau moves changed nothing — the
+  victims' intervals are too full for a single-victim move to find a gap.
+- **Root cause — layer load imbalance.** The planner breaks equal-cost ties
+  toward the highest metal, and on a TOP layer with no span window the
+  span/base costs are 0, so *every* H bus piled onto M6 and *every* V bus onto
+  M7: M6 carried 4.7× M4's load, M7 4.8× M5's. Nearly all overlaps landed on the
+  two overloaded layers.
+
+**Fix:** a load-balancing tie-breaker (`kBalance_`, default 0.01). The per-layer
+committed load is summed at each bundle's turn, and a cost term `kBalance ·
+(layer_load / max same-direction layer load)` biases the choice toward the
+less-loaded of the equal-cost same-direction TOP layers. LOW layers don't
+compete (they already carry the base penalty). Because the load reflects only
+committed bundles, it grows across the greedy schedule and steers later bundles
+onto the layers earlier ones left empty.
+
+**Result on big2:** NUTS overlaps 41 → 9, DNUTS unplaced 272 → 60, 0
+LOW-over-cell, no topo violations. Loads even out (M4 5436 / M6 5832; M5 9117 /
+M7 5752, vs the old 2178 / 10164 and 3609 / 17296). The balance also relieves
+much of the Gap A part 2 TOP over-subscription as a side effect. The kBalance
+plateau holds to ~0.015; above that, over-balancing pushes buses onto LOW layers
+and unplaced climbs. Regression: `test_top_layer_load_balancing` in
+`test/tests/test_span_layer_assignment.py`.
+
 ## Remaining (open)
 
 - **Gap A part 2 — TOP capacity in averaged width.** The residual 272 are M6/M7

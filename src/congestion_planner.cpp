@@ -33,6 +33,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kSpan")             kSpan_             = value;
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
     else if (name == "kWL")               kWL_               = value;
+    else if (name == "kBalance")          kBalance_          = value;
     else if (name == "base_span_ref")     base_span_ref_     = value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
@@ -554,6 +555,24 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // Snapshot cut state so each topology candidate is scored from the same base.
     auto cuts_snapshot = cuts_;
 
+    // Per-layer committed load (summed band usage) at this bundle's turn, and the
+    // max over each direction's layers, for the load-balancing tie-breaker.  The
+    // load reflects only already-committed bundles (within-candidate charges are
+    // restored per candidate), so it grows monotonically across the greedy
+    // schedule and steers later bundles onto the layers earlier ones left empty.
+    std::map<int,double> layer_load;
+    for (const auto& c : cuts_) {
+        double u = 0.0;
+        for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
+        layer_load[c.layer_id] += u;
+    }
+    double max_h_load = 1.0, max_v_load = 1.0;
+    for (const auto& [lid, u] : layer_load) {
+        const Layer* L = layers_.get_layer(lid);
+        if (L && L->dir == LayerDir::HORIZONTAL) max_h_load = std::max(max_h_load, u);
+        else                                     max_v_load = std::max(max_v_load, u);
+    }
+
     int ci_lo = bw.input.topology_pinned ? bw.plan.selected_topology_index     : 0;
     int ci_hi = bw.input.topology_pinned ? bw.plan.selected_topology_index + 1 : (int)bw.input.candidates.size();
 
@@ -657,7 +676,20 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                                   ((span_ref_eff_ > 0.0)
                                        ? std::min(1.0, seg_span / span_ref_eff_)
                                        : 1.0);
-                    double s    = cong + span + base;
+                    // Load-balancing bias: prefer the less-loaded of the
+                    // equal-cost same-direction TOP layers so H load spreads
+                    // across the H layers (and V across the V layers) instead of
+                    // piling on the highest metal.  Only TOP layers compete for
+                    // balancing; LOW layers already carry the base penalty.
+                    double bal = 0.0;
+                    if (layers_.is_top(lid)) {
+                        bool is_hl  = (seg.start.y == seg.end.y);
+                        double maxl = is_hl ? max_h_load : max_v_load;
+                        auto   it   = layer_load.find(lid);
+                        if (it != layer_load.end() && maxl > 0.0)
+                            bal = kBalance_ * (it->second / maxl);
+                    }
+                    double s    = cong + span + base + bal;
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                 }
                 if (best_s == std::numeric_limits<double>::max())
