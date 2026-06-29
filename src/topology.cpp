@@ -1275,6 +1275,31 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     for (int i = 0; i < n; ++i) {
         x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]);
     }
+
+    // ── Flexible "root" trunk under double_detour (mirror of add_trunk_v) ────
+    // Opt-in: the H spine fully traverses every block it connects by
+    // pass-through/containment (y_trunk inside the block's y-span → has_stub
+    // false), reaching the far x-faces, then pushes its extremes beyond the bbox.
+    // Gives purely-pass-through trunks a valid span and un-pins extreme-endpoint
+    // stubs; left tight (unchanged) without double_detour.
+    if (use_busterm_ && allow_double_detour_) {
+        int cov_lo = x_lo, cov_hi = x_hi;
+        bool seeded = (x_lo <= x_hi);
+        bool any_contained = false;
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i]) continue;                         // pass-through/contained
+            int b1 = blocks[i].orig_bbox.x1, b2 = blocks[i].orig_bbox.x2;
+            if (!seeded) { cov_lo = b1; cov_hi = b2; seeded = true; }
+            cov_lo = std::min(cov_lo, b1);
+            cov_hi = std::max(cov_hi, b2);
+            any_contained = true;
+        }
+        if (any_contained) {
+            int margin = std::max(1, (int)(0.1 * (cov_hi - cov_lo)));
+            cov_lo -= margin; cov_hi += margin;
+        }
+        x_lo = cov_lo; x_hi = cov_hi;
+    }
     if (x_lo >= x_hi) return;
 
     Topology t;
@@ -1546,6 +1571,43 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     for (int i = 0; i < n; ++i) {
         if (stub_suppressed[i]) continue;
         y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]);
+    }
+
+    // ── Flexible "root" trunk under double_detour ───────────────────────────
+    // A trunk is the bundle's root: its endpoints should be flexible and reach
+    // every block it connects by pass-through/containment, not stop at the stub
+    // attachment points.  This is opt-in via double_detour (matching the
+    // "for double_detour, extend the extreme points beyond the bbox" intent):
+    // when set, the spine FULLY traverses every contained block (reaching the far
+    // faces) and then pushes its extremes beyond the busterm bbox.  This (a) gives
+    // a valid span to a trunk that connects PURELY by pass-through (the region-4
+    // x≈5772 candidate that was previously dropped with a degenerate span), and
+    // (b) lets a stub attaching at the extreme endpoint slide instead of being
+    // pinned against its own face (the blk_02 driver stub at x5772).  Without
+    // double_detour the span is left tight (unchanged behaviour), so normal flows
+    // and their candidate rankings are not disturbed.
+    if (use_busterm_ && allow_double_detour_) {
+        int cov_lo = y_lo, cov_hi = y_hi;
+        bool seeded = (y_lo <= y_hi);
+        bool any_contained = false;
+        for (int i = 0; i < n; ++i) {
+            if (stub_suppressed[i] || has_stub[i]) continue;   // pass-through/contained
+            int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
+            if (!seeded) { cov_lo = b1; cov_hi = b2; seeded = true; }
+            cov_lo = std::min(cov_lo, b1);
+            cov_hi = std::max(cov_hi, b2);
+            any_contained = true;
+        }
+        // Push the extremes beyond the busterm bbox -- but only for a trunk that
+        // actually passes THROUGH something (a containment root).  An all-stub /
+        // out-of-bbox trunk has nothing to escape past; widening it would only
+        // un-pinch an otherwise-degenerate stub enough to survive filter_pinched
+        // and rank cheaply (the OOB x6282 anomaly), so leave it to be dropped.
+        if (any_contained) {
+            int margin = std::max(1, (int)(0.1 * (cov_hi - cov_lo)));
+            cov_lo -= margin; cov_hi += margin;
+        }
+        y_lo = cov_lo; y_hi = cov_hi;
     }
     if (y_lo >= y_hi) return;
 
