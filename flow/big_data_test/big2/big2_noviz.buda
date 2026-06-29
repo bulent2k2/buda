@@ -1,0 +1,8 @@
+source tracks4top.buda
+source tc3b_flat_x5.buda
+run_bundler
+generate_topologies
+run_planner
+run_nuts
+run_detailed_nuts
+check_connectivity

@@ -224,6 +224,17 @@ private:
 
     int    find_band(bool is_vcut, int perp_pos) const;
 
+    // True if a non-TOP (LOW) segment cannot route on layer_id at the given
+    // perpendicular position because its routed extent — after excluding the
+    // pin-access tails at the two endpoint leaf cells it attaches to — lies over
+    // a leaf cell.  Two cases: a mid-span cell crossing, or a segment wholly
+    // inside one cell.  Either way the bus must route over-the-cell on a TOP
+    // layer, so the LOW layer is infeasible (Gap A).  TOP layers always return
+    // false (they tile cells freely).  perp_pos_override == INT_MIN uses the
+    // segment's nominal perpendicular coordinate.
+    bool   low_seg_obstructed(const Segment& seg, int layer_id,
+                              int perp_pos_override) const;
+
     // Band capacity usable by a segment confined to [slide_lo, slide_hi]:
     // band_cap clamped by the window's overlap with the band.
     double usable_band_cap(const GlobalCut& c, int b, bool is_vcut,

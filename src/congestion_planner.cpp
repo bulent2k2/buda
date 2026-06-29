@@ -274,10 +274,64 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
     }
 }
 
+// True if a non-TOP segment is obstructed by a leaf cell at this perp (Gap A).
+// The endpoint-tail allowance in for_each_band assumes the in-cell portion of a
+// block-attached stub is pin access on another layer — correct for a stub whose
+// far end reaches an open channel.  But it accumulates across blocks and zeroes
+// the whole along-extent when a (possibly trimmed) span ends up wholly inside a
+// cell or crosses one mid-span, so such a segment looked *free* on LOW even
+// though DetailedNUTS finds zero signal tracks over the cell.  This predicate
+// flags exactly those cases so the layer-selection treats LOW as blocked and the
+// bus routes over-the-cell on a TOP layer instead.
+bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
+                                           int perp_pos_override) const {
+    if (layers_.is_top(layer_id)) return false;
+    bool is_h = (seg.start.y == seg.end.y);
+    int perp = (perp_pos_override != INT_MIN) ? perp_pos_override
+                                              : (is_h ? seg.start.y : seg.start.x);
+    int lo = is_h ? std::min(seg.start.x, seg.end.x) : std::min(seg.start.y, seg.end.y);
+    int hi = is_h ? std::max(seg.start.x, seg.end.x) : std::max(seg.start.y, seg.end.y);
+    if (lo >= hi) return false;   // zero-length: nothing routed here
+
+    // Endpoint leaf cells (at this perp): the ones owning a pin-access tail.
+    const Rect* lo_cell = nullptr;
+    const Rect* hi_cell = nullptr;
+    for (const auto& [name, r] : blocks_cache_) {
+        if (floorplan_.is_container(name)) continue;
+        int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
+        int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
+        if (perp < plo || perp > phi) continue;
+        if (lo >= rlo && lo <= rhi) lo_cell = &r;
+        if (hi >= rlo && hi <= rhi) hi_cell = &r;
+    }
+    // Wholly inside one cell → no open-channel portion → unroutable on LOW.
+    if (lo_cell && lo_cell == hi_cell) return true;
+
+    // Trim the two pin-access tails back to their cell faces, then any leaf cell
+    // still overlapping the open interior is a genuine mid-span crossing.
+    int tlo = lo, thi = hi;
+    if (lo_cell) tlo = std::min(is_h ? lo_cell->x2 : lo_cell->y2, hi);
+    if (hi_cell) thi = std::max(is_h ? hi_cell->x1 : hi_cell->y1, tlo);
+    if (tlo >= thi) return false;   // tails meet in a gap: nothing left to route
+
+    for (const auto& [name, r] : blocks_cache_) {
+        if (floorplan_.is_container(name)) continue;
+        int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
+        int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
+        if (perp < plo || perp > phi) continue;
+        if (rlo < thi && rhi > tlo) return true;   // overlaps interior → crossing
+    }
+    return false;
+}
+
 // Score the marginal peak overflow from adding one segment at a specific layer.
 double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
                                    double eff_width, int perp_pos_override,
                                    int slide_lo, int slide_hi) const {
+    // A LOW segment obstructed by a leaf cell at this perp is unroutable here
+    // (Gap A): report a hard overflow so STRICT skips the layer and the bus
+    // routes over-the-cell on TOP.
+    if (low_seg_obstructed(seg, layer_id, perp_pos_override)) return 9999.0;
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak = 0.0;
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
@@ -398,6 +452,8 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
 double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
                                        double eff_width, int perp_pos_override,
                                        int slide_lo, int slide_hi) const {
+    if (low_seg_obstructed(seg, layer_id, perp_pos_override))
+        return kCong_ * 9999.0;   // Gap A: LOW over a leaf cell is unroutable
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak_cost   = 0.0;
     bool   blocked     = false;
