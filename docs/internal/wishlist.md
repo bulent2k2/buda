@@ -99,3 +99,38 @@ forced the `double_detour` gate, and letting the planner prefer the region-4
 pass-through trunk on its merits. Also unlocks always-on generation of the
 "region-4" pass-through trunk (e.g. `TRUNK_V@x5772` in
 `flow/big_data_test/big2/b4_bus_077.buda`) instead of only under `double_detour`.
+
+## Gap A part 2: model band capacity in signal-track count, not layout width
+
+**What:** The bundle planner models a Hanan-band's capacity as available *layout
+width* (`band_available_length` in `src/congestion_planner.cpp` — geometric
+distance minus keepouts), but DetailedNUTS places bits on discrete *signal
+tracks* drawn from the layer's `TrackPattern` (power/ground/clock slots are not
+SIGNAL, so the usable count is a fraction of the width). At a contended interval
+the binding constraint is the per-track signal count, not the width. So the
+planner can commit a bundle `overflow=0` while DNUTS finds the interval short of
+signal tracks → a silent open. Switch the planner's band capacity (and
+`eff_bus_width` charge) to **signal-track-count units** at the segment's actual
+interval, so over-subscription surfaces as `overflow` at planning time and
+engages the existing STRICT rip-up/replan ladder instead of failing at DNUTS.
+
+**Evidence (big2, after Gap A part 1):** 272 residual unplaced bits, all TOP
+`reservation conflict`. Of the 7 failing bundles, 3 (bundles 10, 14, 37 — the
+small 8/36/8-bit needs) have **no NUTS overlap at all** — NUTS's abstract-width
+footprint fit, but the discrete signal-track count fell short. That is the pure
+units-mismatch signature this item addresses. The other 4 (23, 25, 27, 45) also
+overlap at NUTS, i.e. genuine over-capacity the width model under-prices.
+
+**Why deferred:** The user asked to first resolve the **NUTS-stage overlaps** by
+improving the planner (the 41 TOP-layer overlaps that DNUTS opens partly
+correlate with). Capacity-unit conversion is the second TOP-layer lever and
+should follow, since it changes the planner's overflow accounting globally and
+wants the NUTS-overlap work settled first to read its effect cleanly.
+
+**Where to start:** `band_available_length` / `usable_band_cap` /
+`LayerStack::eff_bus_width` (`src/congestion_planner.cpp`, `src/layering.cpp`),
+and how `RoutingGrid`/`TrackPattern` signal density (`signal_density`,
+`dilution_factor`) is consulted. Verify on `flow/big_data_test/big2/big2.buda`:
+the 3 NUTS-clean DNUTS opens (bundles 10/14/37) should become planner `overflow`
+warnings (then rip-up/replan), and total unplaced should drop. See
+`docs/internal/planner_low_layer_over_cell.md` for the full Gap A/C breakdown.
