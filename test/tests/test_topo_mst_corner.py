@@ -20,7 +20,7 @@ blk_09.x2 == blk_39.x1 with no y-overlap) are corner-diagonal.  closest_points
 returns a straight edge pinned to that single coordinate (zero perpendicular
 slide), so filter_pinched dropped the whole MST candidate — leaving the bundle
 with NO standalone MST (issue "no mst, nor hybrid trunk-mst",
-flow/big_data_test/big2_b3_bus_023.buda).  The fix realizes such an edge as an
+flow/big_data_test/big2/b3_bus_023.buda).  The fix realizes such an edge as an
 L-shape around the corner so each leg has slide.
 See docs/internal/mst-abutted-blocks.md.
 """
@@ -108,7 +108,7 @@ def test_corner_diagonal_trunk_mst_3blocks():
 @pytest.mark.mid
 def test_big2_b3_bus_023_repro_routes_cleanly():
     """The committed repro routes with no opens and 0 unplaced, and now offers MST."""
-    repro = _ROOT / "flow" / "big_data_test" / "big2_b3_bus_023.buda"
+    repro = _ROOT / "flow" / "big_data_test" / "big2" / "b3_bus_023.buda"
     build_dir = _ROOT / "build"
     tools_dir = _ROOT / "tools"
     ppath = os.environ.get("PYTHONPATH", "")

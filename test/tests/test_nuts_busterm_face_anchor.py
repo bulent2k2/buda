@@ -25,7 +25,7 @@ DetailedNUTS: "segment disconnected" / "no pass-through/busterm connection").
 This is the big2 bus_077 / blk_12 bug.  The fix records each segment's BUSTERM
 face_coord and extends (never contracts) its along-span to include the face in
 BOTH the abstract span-adjustment (nuts.cpp) and the per-bit pass (detailed_nuts.cpp).
-See flow/big_data_test/big2_b4_b24.buda.
+See flow/big_data_test/big2/big2_b4_b24.buda.
 """
 import os
 import subprocess
@@ -58,7 +58,7 @@ def test_big2_b4_b24_routes_cleanly():
     (bundle 2 / blk_09 — the generation coverage gap).  Asserts the specific
     symptoms are gone end to end.
     """
-    rc, out = _run_buda(_ROOT / "flow" / "big_data_test" / "big2_b4_b24.buda")
+    rc, out = _run_buda(_ROOT / "flow" / "big_data_test" / "big2" / "big2_b4_b24.buda")
     assert rc == 0, f"non-zero exit {rc}\n{out}"
     # Bundle 4 (blk_12): the NUTS face-anchor symptom.
     assert "no longer reaches face_coord" not in out, out

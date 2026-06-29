@@ -90,3 +90,65 @@ def test_true_passthrough_block_still_tightens():
         f"pass-through block must clamp slide to [100,200], got "
         f"[{cs.perp_lo},{cs.perp_hi}]"
     )
+
+
+# ── Boundary-graze de-pinch (flow/big_data_test/big2/b4_bus_077.buda) ──────────
+# A horizontal stub bound for a receiver busterm runs along the TOP edge it shares
+# with a neighbouring pass-through block (perp_pos == block.y2).  The inclusive
+# pass-through clamp used to pin that stub to the neighbour's y-extent, collapsing
+# it against its receiver-face window to ZERO slide (PINCHED) — unplaceable at
+# NUTS.  When the neighbour is already covered by a STRICT-interior coverer (a
+# trunk crossing it), the graze is redundant and the stub must keep its receiver
+# window; when the graze is the SOLE cover, the clamp stays (pinched) so the block
+# is not silently disconnected and filter_pinched can reject the candidate.
+
+def test_grazing_busterm_stub_with_strict_cover_keeps_slide():
+    """seg1 grazes `cover`'s top edge en route to tap `recv`, but `cover` is
+    strictly crossed by the trunk seg0 → seg1 keeps recv's face window, not {300}."""
+    fp = buda.Floorplan()
+    fp.add_block("cover", 100, 100, 300, 300)
+    fp.add_block("recv",  400, 300, 600, 500)
+
+    topo = buda.Topology()
+    topo.type = "TRUNK_V@x200"
+    topo.segments = [
+        _seg(200, 50, 200, 350, 5),    # seg0: V trunk strictly crossing `cover`
+        _seg(200, 300, 400, 300, 6),   # seg1: H stub grazing cover's top, taps recv
+    ]
+    topo.connected_block_names = ["cover", "recv"]
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    h = ct.segs()[1]
+
+    assert h.perp_lo != h.perp_hi, (
+        f"grazing busterm stub must NOT be pinched when the block has a strict "
+        f"coverer, got [{h.perp_lo},{h.perp_hi}]"
+    )
+    assert (h.perp_lo, h.perp_hi) == (300, 500), (
+        f"stub must keep recv's left-face window [300,500], got "
+        f"[{h.perp_lo},{h.perp_hi}]"
+    )
+
+
+def test_grazing_busterm_stub_as_sole_cover_stays_clamped():
+    """Same graze, but no trunk → `cover` is covered ONLY by the grazing stub.
+    The clamp must stay so cover is not disconnected; the stub pinches (the
+    candidate is genuinely over-constrained and filter_pinched would drop it)."""
+    fp = buda.Floorplan()
+    fp.add_block("cover", 100, 100, 300, 300)
+    fp.add_block("recv",  400, 300, 600, 500)
+
+    topo = buda.Topology()
+    topo.type = "I_H"
+    topo.segments = [
+        _seg(200, 300, 400, 300, 6),   # H stub: sole (grazing) cover of `cover`
+    ]
+    topo.connected_block_names = ["cover", "recv"]
+    ct = buda.ConnTopology()
+    ct.build(topo, fp)
+    h = ct.segs()[0]
+
+    assert h.perp_lo == h.perp_hi == 300, (
+        f"sole grazing cover must stay clamped to the shared edge {{300}} so the "
+        f"block stays connected, got [{h.perp_lo},{h.perp_hi}]"
+    )
