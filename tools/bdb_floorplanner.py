@@ -1067,6 +1067,36 @@ class BdbFloorplanner:
             self._refresh_tree()
         return total
 
+    def _edge_move_suffix(self) -> str:
+        """Resulting coordinate of the first selected edge: vertical edge (l/r)
+        moves in X → ' x = N after the move.'; horizontal edge (t/b) → ' y = N'."""
+        if not self._edge_sel:
+            return ""
+        name, edge = self._edge_sel[0]
+        try:
+            b = self.state.block(name)
+        except Exception:
+            return ""
+        if edge in ("l", "r"):
+            coord = b.x1 if edge == "l" else b.x2
+            return f"  x = {coord:.0f} after the move."
+        coord = b.y1 if edge == "t" else b.y2
+        return f"  y = {coord:.0f} after the move."
+
+    def _block_move_suffix(self, name: str | None = None) -> str:
+        """' ll = [x1, y1], ur = [x2, y2] after the move.' for `name`, or the
+        primary/active block when moving a multi-block selection."""
+        if name is None:
+            name = self.state.selected if self.state else None
+        if not name:
+            return ""
+        try:
+            b = self.state.block(name)
+        except Exception:
+            return ""
+        return (f"  ll = [{b.x1:.0f}, {b.y1:.0f}], "
+                f"ur = [{b.x2:.0f}, {b.y2:.0f}] after the move.")
+
     def _move_edges_by(self, delta: float) -> None:
         """Shift the selected edges by delta (arrow-key path)."""
         if self.state is None or not self._edge_sel:
@@ -1075,7 +1105,8 @@ class BdbFloorplanner:
         fpc.move_edges(self.state, self._edge_sel, delta)
         synced = self._sync_edges_to_instances()
         self._draw()
-        msg = f"Moved {len(self._edge_sel)} edge(s) by {delta:+.0f}."
+        msg = f"Moved {len(self._edge_sel)} edge(s) by {delta:+.0f}." \
+            + self._edge_move_suffix()
         if synced:
             msg += f"  Synced {synced} shared instance(s)."
         self._status.set(msg)
@@ -1166,9 +1197,11 @@ class BdbFloorplanner:
         self._draw()
         if self.state.selected:
             try:
-                b = self.state.block(self.state.selected)
                 label = self.state.selected.split("/")[-1]
-                self._status.set(f"{label}: ({b.x1:.0f}, {b.y1:.0f})")
+                n = len(self._canvas_sel)
+                head = f"Moved {label}" if n <= 1 \
+                    else f"Moved {n} blocks (showing {label})"
+                self._status.set(head + self._block_move_suffix(self.state.selected))
             except Exception:
                 pass
 
@@ -1589,7 +1622,8 @@ class BdbFloorplanner:
                     self._push_undo(snap)
                 synced = self._sync_edges_to_instances()
                 self._draw()
-                msg = f"Moved {len(self._edge_sel)} edge(s)."
+                msg = f"Moved {len(self._edge_sel)} edge(s)." \
+                    + self._edge_move_suffix()
                 if synced:
                     msg += f"  Synced {synced} shared instance(s)."
                 self._status.set(msg)
@@ -1622,12 +1656,13 @@ class BdbFloorplanner:
             b = self.state.block(name)
             parent_cell, n = fpc.sync_move_to_instances(
                 self.state, name, b.x1, b.y1)
+            suffix = self._block_move_suffix(name)
             if n > 1:
                 self._status.set(
                     f"Moved {name.split('/')[-1]}; "
-                    f"synced [{parent_cell}] → {n} parent instances.")
+                    f"synced [{parent_cell}] → {n} parent instances." + suffix)
             else:
-                self._status.set("Block moved.")
+                self._status.set("Block moved." + suffix)
             self._refresh_tree()
             self._draw()
 
