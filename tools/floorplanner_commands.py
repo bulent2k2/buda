@@ -57,6 +57,11 @@ class BlockNode:
         return f"{self.leaf_name}  [{self.cell}]"
 
 
+def _lock_path_for(path: str) -> str:
+    """Canonical sidecar lock path for a BDB (see _try_acquire_write_lock)."""
+    return os.path.realpath(path) + ".fplock"
+
+
 def _try_acquire_write_lock(path: str) -> int | None:
     """Try a non-blocking exclusive flock coordinating fp sessions on `path`.
 
@@ -79,7 +84,7 @@ def _try_acquire_write_lock(path: str) -> int | None:
 
     Falls back to None (no lock, always writable) on platforms without fcntl.
     """
-    lock_path = os.path.realpath(path) + ".fplock"
+    lock_path = _lock_path_for(path)
     try:
         fd = os.open(lock_path, os.O_RDONLY | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -96,15 +101,51 @@ def _try_acquire_write_lock(path: str) -> int | None:
 
 
 def release_bdb_lock(state: "FloorplannerAppState") -> None:
-    """Release the exclusive write lock held by this session, if any."""
-    if state._lock_fd is not None:
+    """Release the exclusive write lock held by this session, if any, and remove
+    the sidecar .fplock file so it isn't left behind after closing."""
+    if state._lock_fd is None:
+        return
+    lock_path = state._lock_path
+    # Release our held lock first (never unlink while our fd is still locked —
+    # that would let a racing O_CREAT lock a new inode at the same path).
+    try:
+        fcntl.flock(state._lock_fd, fcntl.LOCK_UN)
+        os.close(state._lock_fd)
+    except Exception:
+        pass
+    state._lock_fd = None
+    state._lock_path = None
+    state.is_read_only = False
+    if lock_path:
+        _safe_unlink_lockfile(lock_path)
+
+
+def _safe_unlink_lockfile(lock_path: str) -> None:
+    """Remove the sidecar lock file race-free.
+
+    Re-open and re-lock it (non-blocking): if a *different* session has taken the
+    lock in the gap since we released, the lock fails and we leave their file in
+    place; if we win it, no other session holds it, so it is safe to unlink.
+    While we hold this re-lock no racing O_CREAT can lock a competing inode at the
+    same path, and the inode check guards against the file being swapped between
+    open and lock — so the single-writer guarantee is preserved."""
+    try:
+        fd = os.open(lock_path, os.O_RDONLY)   # no O_CREAT: don't resurrect it
+    except FileNotFoundError:
+        return
+    except Exception:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if os.fstat(fd).st_ino == os.stat(lock_path).st_ino:
+            os.unlink(lock_path)
+    except Exception:
+        pass   # BlockingIOError → another session owns it now; leave it.
+    finally:
         try:
-            fcntl.flock(state._lock_fd, fcntl.LOCK_UN)
-            os.close(state._lock_fd)
+            os.close(fd)
         except Exception:
             pass
-        state._lock_fd = None
-        state.is_read_only = False
 
 
 @dataclass
@@ -118,6 +159,7 @@ class FloorplannerAppState:
     selected: str | None = None
     is_read_only: bool = False
     _lock_fd: int | None = None
+    _lock_path: str | None = None
 
     def add_name(self, name: str):
         if name not in self.block_names:
@@ -156,6 +198,7 @@ def load_bdb(path: str) -> FloorplannerAppState:
     fd = _try_acquire_write_lock(path)
     if fd is not None:
         state._lock_fd = fd
+        state._lock_path = _lock_path_for(path)
         state.is_read_only = False
     else:
         state.is_read_only = True
@@ -182,6 +225,7 @@ def create_bdb(path: str, die_w: float, die_h: float, grid: float = 10.0) -> Flo
     fd = _try_acquire_write_lock(path)
     if fd is not None:
         state._lock_fd = fd
+        state._lock_path = _lock_path_for(path)
     else:
         state.is_read_only = True
     return state
@@ -308,6 +352,7 @@ def import_verilog(v_path: str, bdb_path: str, die_w: float = 2000.0,
             fd = _try_acquire_write_lock(bdb_path)
         if fd is not None:
             state._lock_fd = fd
+            state._lock_path = _lock_path_for(bdb_path)
             fd = None  # Ownership transferred; do not release in the except block.
         else:
             state.is_read_only = True

@@ -42,6 +42,43 @@ def test_floorplanner_commands_create_move_validate_and_write(tmp_path):
     assert (comps["u_cpu"].x1, comps["u_cpu"].y1) == (120, 150)
 
 
+def test_lock_sidecar_removed_on_release(tmp_path):
+    bdb_path = str(tmp_path / "lk.bdb")
+    sidecar = os.path.realpath(bdb_path) + ".fplock"
+    s = fpc.create_bdb(bdb_path, 1000, 800)
+    assert s._lock_fd is not None and os.path.exists(sidecar), \
+        "holding the lock should create the .fplock sidecar"
+    fpc.release_bdb_lock(s)
+    assert not os.path.exists(sidecar), "release must remove the .fplock sidecar"
+    assert s._lock_fd is None and s._lock_path is None
+
+
+def test_readonly_session_release_keeps_holders_sidecar(tmp_path):
+    # A read-only second session must not delete the lock holder's sidecar.
+    bdb_path = str(tmp_path / "ro.bdb")
+    sidecar = os.path.realpath(bdb_path) + ".fplock"
+    s1 = fpc.create_bdb(bdb_path, 1000, 800)        # holder
+    s2 = fpc.load_bdb(bdb_path)                      # read-only
+    assert s2.is_read_only is True
+    fpc.release_bdb_lock(s2)                         # no-op for the non-holder
+    assert os.path.exists(sidecar), "holder's sidecar must survive"
+    fpc.release_bdb_lock(s1)
+    assert not os.path.exists(sidecar), "holder's release removes the sidecar"
+
+
+def test_safe_unlink_keeps_lockfile_when_another_holds_it(tmp_path):
+    import fcntl
+    path = str(tmp_path / "x.fplock")
+    fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)     # simulate a live holder
+    fpc._safe_unlink_lockfile(path)
+    assert os.path.exists(path), "must not delete a lockfile another session holds"
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
+    fpc._safe_unlink_lockfile(path)                    # now free → removable
+    assert not os.path.exists(path)
+
+
 def test_write_lock_excludes_second_session(tmp_path):
     bdb_path = str(tmp_path / "locked.bdb")
     s1 = fpc.create_bdb(bdb_path, 1000, 800)
