@@ -1,23 +1,10 @@
-# Manual edits to remove channel space:
-moved to ~/chip_designs/tc3b
-## don't edit here
-fp flow/big_data_test/tc3b.bdb &
-
-## After enh for gridded move of block edges:
-cd flow/big_data_test
-cp tc3a.bdb tc3b.bdb
-cd -
-fp flow/big_data_test/tc3b.bdb &
+Also see the [variation on this design](big2/ReadMe-big2.md).
 
 # bdb2buda
 
 cd ~/src/buda
 python3 tools/bdb2buda.py flow/big_data_test/tc3a.bdb -o flow/big_data_test/tc3a_flat_x10.buda
 > Written to flow/big_data_test/tc3a_flat_x10.buda
-
-cd ~/src/git/buda/gem
-python3 tools/bdb2buda.py ~/chip_designs/tc3b/tc3b.bdb -scale 5 -o flow/big_data_test/tc3b_flat_x5.buda
-> Written to flow/big_data_test/tc3b_flat_x5.buda
 
 ## use it in tc3a_flat.buda
 buda --no-viz flow/big_data_test/tc3a_flat.buda > big_flat_out.log 2> big_flat_err.log &

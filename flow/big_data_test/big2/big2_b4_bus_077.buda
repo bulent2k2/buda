@@ -12,7 +12,9 @@ add_block io_pad_tr 5445 5350 6100 6300
 add_bus bus_077[60] blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
 
 run_bundler
-generate_topologies
+
+detour_channel N 300 E 500
+generate_topologies double_detour
 
 # Pin the exact topologies that were buggy in the full big2.buda run, now fixed:
 #   bundle 1 (b4)=TRUNK_H@y4887 (topo 4)  — NUTS span-adjust used to detach blk_12
