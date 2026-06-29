@@ -427,6 +427,49 @@ def test_optimize_relocation_carries_children(tmp_path):
     assert (p.x1, p.y1) != (p0.x1, p0.y1) or (c.x1, c.y1) != (c0.x1, c0.y1)
 
 
+def _mk_optimizer():
+    import buda
+    o = buda.PlacementOptimizer(1000, 1000, 10)
+    for i in range(8):
+        o.add_block_ex(f"b{i}", 100, 80, i * 50, 0, 0, 0, False, False)
+    for i in range(7):
+        o.add_net([(f"b{i}", (50.0, 40.0)), (f"b{i+1}", (50.0, 40.0))])
+    return o
+
+
+def test_optimizer_iteration_mode_unchanged():
+    # Back-compat: a fixed iteration count runs exactly that many.
+    r = _mk_optimizer().run_sa(max_iter=2000)
+    assert r.iterations == 2000
+
+
+def test_optimizer_runtime_budget_soft_bound():
+    import time
+    # Time budget with no iteration cap (max_iter=0) and no early-stop.
+    t0 = time.time()
+    short = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.3, patience=0)
+    dt = time.time() - t0
+    assert short.iterations > 0
+    assert dt < 1.5, f"0.3s budget overran: {dt:.2f}s"   # generous CI tolerance
+    # A longer budget does more work.
+    longer = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.8, patience=0)
+    assert longer.iterations > short.iterations
+
+
+def test_optimizer_patience_early_stop():
+    # A tiny instance converges; patience stops far below the huge iter cap.
+    r = _mk_optimizer().run_sa(max_iter=10_000_000, patience=5)
+    assert 0 < r.iterations < 10_000_000
+
+
+def test_optimizer_ga_runtime_budget():
+    import time
+    t0 = time.time()
+    r = _mk_optimizer().run_ga(generations=0, time_budget_s=0.3, patience=0)
+    dt = time.time() - t0
+    assert r.iterations > 0 and dt < 1.5
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"

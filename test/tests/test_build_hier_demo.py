@@ -46,6 +46,33 @@ def test_optimizer_param_parsing():
     assert bd._opt_kwargs("ga", {}, 1)["generations"] == 200
 
 
+def test_runtime_param_parsing():
+    bd = build_hier_demo
+    assert bd._parse_time("5s") == 5.0
+    assert bd._parse_time("2m") == 120.0
+    assert bd._parse_time("1h") == 3600.0
+    assert bd._parse_time("30") == 30.0
+    # 'time=2m' is 2 minutes, NOT 2 million.
+    assert bd._parse_param("time=2m") == ("time", 120.0)
+    assert bd._parse_param("patience=15") == ("patience", 15)
+    # Time budget maps to time_budget_s; iter becomes 0 (no cap) + patience on.
+    sa = bd._opt_kwargs("sa", {"time": 0.5}, default_seed=1)
+    assert sa["time_budget_s"] == 0.5 and sa["max_iter"] == 0 and sa["patience"] == 10
+    ga = bd._opt_kwargs("ga", {"runtime": 0.5}, default_seed=1)
+    assert ga["time_budget_s"] == 0.5 and ga["generations"] == 0
+    # Iteration mode unchanged (no time budget, no auto-patience).
+    it = bd._opt_kwargs("sa", {"iter": 5000}, 1)
+    assert it["max_iter"] == 5000 and "time_budget_s" not in it and "patience" not in it
+
+
+def test_optimize_with_runtime_budget_builds(tmp_path):
+    out = str(tmp_path / "tb.bdb")
+    build_hier_demo.build(out, [os.path.join(_ROOT, "flow", "dnuts2.buda")],
+                          seed=1, optimize="sa", opt_params={"time": 0.3})
+    db = buda_db.BDB(out)
+    assert len([c for c in db.all_components() if c.depth == 1]) == 2
+
+
 def test_bloat_parsing_and_sizing():
     bd = build_hier_demo
     assert bd._parse_bloat("20%") == {"pct": 20.0}

@@ -61,6 +61,8 @@ suffixes (`iter=20k` → 20000).  Friendly keys:
 | Key | SA (`run_sa`) | GA (`run_ga`) |
 |---|---|---|
 | `iter` | `max_iter` (default 20000) | `generations` (default 200) |
+| `time` / `runtime` | runtime budget (`5s`/`2m`/`1h`); see below | same |
+| `patience` | early-stop after N non-improving checks | same |
 | `wl` / `area` / `ovlp` | `w_wl` / `w_area` / `w_ovlp` | same |
 | `seed` | `seed` (defaults to `--seed`) | same |
 | `pop` / `mutation` / `crossover` | — | `population` / `mutation_rate` / `crossover_rate` |
@@ -68,6 +70,21 @@ suffixes (`iter=20k` → 20000).  Friendly keys:
 
 Any raw `run_sa`/`run_ga` argument name also works; an argument invalid for the
 chosen method reports a clear error.
+
+**Runtime budget** — `--param time=2m` (or `30s`, `1h`) runs the optimizer for a
+soft wall-clock budget instead of a fixed iteration count.  The optimizer
+calibrates per-iteration cost on the current machine, sizes the run to fit (and,
+for SA, anneals the cooling schedule over that estimate), and stops when the
+budget elapses.  Combine with `iter` for a hard ceiling under the soft cap
+(`--param time=10s --param iter=50k`).  Timed runs also **stop early on
+convergence** by default (`patience=10`) — no meaningful improvement for ~10
+checkpoints; pass `--param patience=0` to disable, or a larger value to run
+longer.  `patience` also works in iteration mode (off by default there).
+
+```bash
+# Run GA for one minute, or stop sooner if it converges
+python3 tools/build_hier_demo.py /tmp/opt.bdb --optimize ga --param time=1m
+```
 
 **`--bloat`** reduces utilization so the optimizer leaves channel space for
 routing.  Each instance is inflated **only during optimization** — `--bloat 20%`
