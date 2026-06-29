@@ -30,6 +30,22 @@ _CELLS = [os.path.join(_ROOT, "flow", f)
           for f in ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
 
 
+def test_hier_flow_run_nuts_does_not_crash(tmp_path):
+    # Regression: run_nuts after run_planner hier used to segfault because the
+    # flat Floorplan (and so its Hanan grid) is empty in the hier flow, and
+    # NUTS extract_segments dereferenced an empty grid.  Drive the documented
+    # hier flow end-to-end in-process and assert it places segments.
+    import buda_cli  # on pythonpath via pytest.ini (build src)
+    out = str(tmp_path / "hf.bdb")
+    build_hier_demo.build(out, [os.path.join(_ROOT, "flow", "dnuts2.buda")], seed=1)
+    sess = buda_cli.BudaSession()
+    for cmd in (f"open_bdb {out}", "run_hier_bundler depth 2",
+                "generate_hier_topologies", "run_planner hier", "run_nuts"):
+        sess.do_command(cmd)
+    assert sess.nuts_result is not None
+    assert len(sess.nuts_result.segments) > 0
+
+
 def test_build_hier_demo_hierarchy_and_buses(tmp_path):
     out = str(tmp_path / "hier.bdb")
     build_hier_demo.build(out, _CELLS, seed=1)
