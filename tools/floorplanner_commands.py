@@ -102,28 +102,50 @@ def _try_acquire_write_lock(path: str) -> int | None:
 
 def release_bdb_lock(state: "FloorplannerAppState") -> None:
     """Release the exclusive write lock held by this session, if any, and remove
-    the sidecar .fplock file so it isn't left behind after closing.
+    the sidecar .fplock file so it isn't left behind after closing."""
+    if state._lock_fd is None:
+        return
+    lock_path = state._lock_path
+    # Release our held lock first (never unlink while our fd is still locked —
+    # that would let a racing O_CREAT lock a new inode at the same path).
+    try:
+        fcntl.flock(state._lock_fd, fcntl.LOCK_UN)
+        os.close(state._lock_fd)
+    except Exception:
+        pass
+    state._lock_fd = None
+    state._lock_path = None
+    state.is_read_only = False
+    if lock_path:
+        _safe_unlink_lockfile(lock_path)
 
-    Only the lock holder (state._lock_fd set) unlinks, and only its own sidecar,
-    so a concurrent read-only session never deletes a live lock.  The unlink
-    happens while we still hold the lock; the worst case is a brief, harmless
-    window during *our own* exit — acceptable for an interactive single-user
-    tool, and it leaves no clutter behind."""
-    if state._lock_fd is not None:
-        lock_path = state._lock_path
+
+def _safe_unlink_lockfile(lock_path: str) -> None:
+    """Remove the sidecar lock file race-free.
+
+    Re-open and re-lock it (non-blocking): if a *different* session has taken the
+    lock in the gap since we released, the lock fails and we leave their file in
+    place; if we win it, no other session holds it, so it is safe to unlink.
+    While we hold this re-lock no racing O_CREAT can lock a competing inode at the
+    same path, and the inode check guards against the file being swapped between
+    open and lock — so the single-writer guarantee is preserved."""
+    try:
+        fd = os.open(lock_path, os.O_RDONLY)   # no O_CREAT: don't resurrect it
+    except FileNotFoundError:
+        return
+    except Exception:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if os.fstat(fd).st_ino == os.stat(lock_path).st_ino:
+            os.unlink(lock_path)
+    except Exception:
+        pass   # BlockingIOError → another session owns it now; leave it.
+    finally:
         try:
-            if lock_path and os.path.exists(lock_path):
-                os.unlink(lock_path)
+            os.close(fd)
         except Exception:
             pass
-        try:
-            fcntl.flock(state._lock_fd, fcntl.LOCK_UN)
-            os.close(state._lock_fd)
-        except Exception:
-            pass
-        state._lock_fd = None
-        state._lock_path = None
-        state.is_read_only = False
 
 
 @dataclass

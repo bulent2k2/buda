@@ -66,6 +66,19 @@ def test_readonly_session_release_keeps_holders_sidecar(tmp_path):
     assert not os.path.exists(sidecar), "holder's release removes the sidecar"
 
 
+def test_safe_unlink_keeps_lockfile_when_another_holds_it(tmp_path):
+    import fcntl
+    path = str(tmp_path / "x.fplock")
+    fd = os.open(path, os.O_RDONLY | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)     # simulate a live holder
+    fpc._safe_unlink_lockfile(path)
+    assert os.path.exists(path), "must not delete a lockfile another session holds"
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    os.close(fd)
+    fpc._safe_unlink_lockfile(path)                    # now free → removable
+    assert not os.path.exists(path)
+
+
 def test_write_lock_excludes_second_session(tmp_path):
     bdb_path = str(tmp_path / "locked.bdb")
     s1 = fpc.create_bdb(bdb_path, 1000, 800)
