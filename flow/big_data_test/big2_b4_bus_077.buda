@@ -1,0 +1,33 @@
+# From big2_b4_b24.buda
+source ../tracks4top.buda
+
+set_die 6100 6300
+add_block blk_02 4280 5350 5445 6300
+add_block blk_12 4870 4425 6100 5350
+add_block blk_22 4870 2385 6100 3365
+add_block blk_29 4870 1425 6100 2385
+add_block io_pad_tr 5445 5350 6100 6300
+
+# --- bundle 4 (bus_077):
+add_bus bus_077[60] blk_02.p blk_22.p,blk_12.p,blk_29.p,io_pad_tr.p
+
+run_bundler
+generate_topologies
+
+# Pin the exact topologies that were buggy in the full big2.buda run, now fixed:
+#   bundle 1 (b4)=TRUNK_H@y4887 (topo 4)  — NUTS span-adjust used to detach blk_12
+#                                            (fixed: BUSTERM face anchors in NUTS)
+select_topology 1 4
+# Check the SELECTED topologies before planning so a topology-gen coverage gap
+# (bundle 24 / blk_09) is caught at the topo stage and can't be masked by a later
+# NUTS/DNUTS change. Bundle 4's detach is a NUTS-stage artifact (clean at topo).
+check_connectivity topo
+dump_topologies --conn
+run_planner
+dump_topologies --conn
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity
+visualize
+exit
