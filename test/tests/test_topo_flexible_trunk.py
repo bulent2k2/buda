@@ -95,3 +95,33 @@ def test_flexible_trunk_is_double_detour_gated():
     assert not any(c.type == "TRUNK_V@x5772" for c in cands), (
         "region-4 trunk should only appear under double_detour"
     )
+
+
+def test_recenter_keeps_suppressed_block_covered():
+    """Recentering stubs to their centerlines must not orphan a block that stub
+    suppression dropped (the Codex P1).
+
+    Geometry (V trunk near x=1200, all three blocks to its right/left as stubs):
+    `F` (far right, y[0,100], centre 50) is the lo-extreme, so the att_y
+    refinement pulls it UP to its top face y=100 — which lands inside `N`
+    (near right, y[90,110]), suppressing N's stub (F's wire covers it).  Under
+    double_detour we then recenter F back to its centre y=50, which no longer
+    crosses N.  Without the un-suppress re-validation, N is left with neither a
+    busterm nor pass-through and TRUNK_V@x1200 reports BUSTERM_OPEN; with it, N is
+    re-stubbed and every TRUNK_V candidate stays fully covered.
+    """
+    coords = {
+        "drv": (1000,  0, 1100, 200),   # driver, left of the x≈1200 trunk
+        "N":   (1300, 90, 1500, 110),   # near right stub, y centre 100
+        "F":   (1700,  0, 2000, 100),   # far  right stub, y centre 50 → pulled to 100
+    }
+    fp = buda.Floorplan()
+    for name, (x1, y1, x2, y2) in coords.items():
+        fp.add_block(name, x1, y1, x2, y2)
+    cands = _gen(fp, double_detour=True).generate_candidates("drv", ["N", "F"])
+    trunk_v = [c for c in cands if c.type.startswith("TRUNK_V")]
+    assert trunk_v, "expected TRUNK_V candidates for this multicast bundle"
+    for c in trunk_v:
+        assert "BUSTERM_OPEN" not in _violations(c, fp), (
+            f"{c.type} left a block uncovered after recentering: {_violations(c, fp)}"
+        )

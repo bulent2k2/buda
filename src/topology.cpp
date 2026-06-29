@@ -1601,10 +1601,33 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             return blocks[i].rects.empty() ? blocks[i].orig_bbox.center().y
                                            : best_r[i].center().y;
         };
+        // Place every surviving stub at its natural centerline.
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && !stub_suppressed[i]) att_y[i] = ctr_y(i);
+        // Recentering can move a farther same-side stub off a nearer block it was
+        // suppressing (that block was suppressed precisely because the farther
+        // stub's pre-recenter att_y crossed its y-extent).  A suppressed block is
+        // stubbed — the trunk does NOT pass through it — so if no SURVIVING farther
+        // same-side stub still crosses it at the new att_y, un-suppress it and emit
+        // its own centerline stub.  Monotonic: only ever re-adds coverage, so it
+        // cannot strand a block (the Codex P1 on this PR).
+        for (int i = 0; i < n; ++i) {
+            if (!stub_suppressed[i]) continue;
+            int di = conn_x[i] - x_trunk;
+            bool covered = false;
+            for (int j = 0; j < n && !covered; ++j) {
+                if (j == i || !has_stub[j] || stub_suppressed[j]) continue;
+                int dj = conn_x[j] - x_trunk;
+                if (di == 0 || dj == 0 || (di > 0) != (dj > 0)) continue; // same side
+                if (std::abs(dj) <= std::abs(di)) continue;               // strictly farther
+                covered = (att_y[j] >= blocks[i].orig_bbox.y1 &&
+                           att_y[j] <= blocks[i].orig_bbox.y2);
+            }
+            if (!covered) { stub_suppressed[i] = false; att_y[i] = ctr_y(i); }
+        }
         int lo = INT_MAX, hi = INT_MIN;
         for (int i = 0; i < n; ++i) {
-            if (stub_suppressed[i] || !has_stub[i]) continue;  // stubs only
-            att_y[i] = ctr_y(i);                               // place stub at its centerline
+            if (stub_suppressed[i] || !has_stub[i]) continue;  // surviving stubs
             lo = std::min(lo, att_y[i]); hi = std::max(hi, att_y[i]);
         }
         bool seeded = (lo <= hi);
