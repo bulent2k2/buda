@@ -1,6 +1,9 @@
 source tracks4top.buda
 source tc3b_flat_x5.buda
 run_bundler
+# nuts: 10 overlaps, dnuts: 168 opens
+#generate_topologies double_detour
+# nuts: 6 overlaps,  dnuts: 52
 generate_topologies
 check_connectivity topo all
 run_planner
