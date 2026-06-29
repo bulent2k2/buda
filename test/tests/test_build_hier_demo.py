@@ -30,6 +30,29 @@ _CELLS = [os.path.join(_ROOT, "flow", f)
           for f in ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
 
 
+def test_export_flow_covers_full_hierarchy(tmp_path):
+    # Export Flow must report the design's full depth and load every level.
+    import floorplanner_commands as fpc
+    bdb = str(tmp_path / "full.bdb")
+    build_hier_demo.build(bdb, _CELLS, seed=1)        # chip(0) → inst(1) → leaf(2)
+    state = fpc.load_bdb(bdb)
+    assert fpc.design_max_depth(state) == 2
+    script = str(tmp_path / "full_flow.buda")
+    depth = fpc.export_hbundle_script(state, script, visualize=False)
+    assert depth == 2
+    text = open(script).read()
+    for d in (0, 1, 2):                                # full hierarchy loaded
+        assert (f"add_blocks_from_bdb {d}" in text)
+    assert "derive_busterms 2" in text
+    assert "run_hier_bundler depth 2" in text
+    assert "run_detailed_nuts" in text
+    # Self-contained tech sidecar with layers + track patterns.
+    sidecar = tmp_path / "full_flow_tracks.buda"
+    assert sidecar.exists()
+    sc = sidecar.read_text()
+    assert "def_layer" in sc and "def_track_pattern" in sc
+
+
 def test_hier_flow_run_nuts_does_not_crash(tmp_path):
     # Regression: run_nuts after run_planner hier used to segfault because the
     # flat Floorplan (and so its Hanan grid) is empty in the hier flow, and

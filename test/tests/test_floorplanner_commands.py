@@ -432,14 +432,23 @@ def test_floorplanner_commands_export_hbundle_script(tmp_path):
     script_path = tmp_path / "proto.buda"
     state = fpc.create_bdb(str(bdb_path), 1000, 800, grid=10)
 
-    fpc.export_hbundle_script(state, str(script_path), depth=1)
+    depth = fpc.export_hbundle_script(state, str(script_path), depth=1)
+    assert depth == 1
 
     text = script_path.read_text()
-    assert "source " in text
     assert f"open_bdb {bdb_path}" in text
     assert "derive_busterms 1" in text
+    assert "add_blocks_from_bdb 0" in text
     assert "add_blocks_from_bdb 1 skip" in text
     assert "run_hier_bundler depth 1" in text
+    assert "run_nuts" in text and "run_detailed_nuts" in text
+    assert "check_connectivity dnuts" in text
+    # Self-contained tech sidecar, sourced by relative basename.
+    assert "source proto_tracks.buda" in text
+    sidecar = script_path.parent / "proto_tracks.buda"
+    assert sidecar.exists()
+    sc = sidecar.read_text()
+    assert "def_layer" in sc and "def_track_pattern" in sc
 
 
 def test_floorplanner_commands_import_verilog_seeds_top_level_blocks(tmp_path):

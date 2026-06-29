@@ -668,18 +668,19 @@ class BdbFloorplanner:
                                             filetypes=[("BUDA script", "*.buda"), ("All", "*")])
         if not path:
             return
-        depth = max(1, len(self._path) if self._path else 1)
-        fpc.export_hbundle_script(self.state, path, depth=depth)
-        self._status.set(f"Exported HBundle flow script to {path}.")
+        depth = fpc.export_hbundle_script(self.state, path)
+        self._status.set(
+            f"Exported HBundle flow script (full hierarchy, depth {depth}) "
+            f"to {path}.")
 
     def _run_flow(self):
         if not self.state.bdb_path:
             self._status.set("Create, open, or import a BDB before running flow.")
             return
-        self._status.set("Running HBundle flow...")
+        depth = fpc.design_max_depth(self.state)
+        self._status.set(f"Running HBundle flow (full hierarchy, depth {depth})...")
         self.root.update_idletasks()
-        depth = max(1, len(self._path) if self._path else 1)
-        result = fpc.run_hbundle_flow(self.state, depth=depth)
+        result = fpc.run_hbundle_flow(self.state)
         tail = (result.stdout or result.stderr).strip().splitlines()[-1:] or [""]
         if result.returncode == 0:
             self._status.set(f"HBundle flow completed. {tail[0]}")

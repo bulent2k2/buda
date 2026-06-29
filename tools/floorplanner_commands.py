@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import fcntl
 import os
+import shutil
 import subprocess
 import sys
 from typing import Iterable
@@ -734,18 +735,44 @@ def write_bdb(state: FloorplannerAppState):
     _sync_cell_children(state)
 
 
-def export_hbundle_script(state: FloorplannerAppState, path: str, depth: int = 1,
-                          visualize: bool = True):
+def design_max_depth(state: FloorplannerAppState) -> int:
+    """Deepest component depth in the open BDB (0 if none / no BDB)."""
+    if state.bdb is None:
+        return 0
+    return max((c.depth for c in state.bdb.all_components()), default=0)
+
+
+def export_hbundle_script(state: FloorplannerAppState, path: str,
+                          depth: int | None = None,
+                          visualize: bool = True) -> int:
+    """Write a hier-flow .buda script for the open BDB and return the routing
+    depth it covers.
+
+    The full hierarchy is loaded into the floorplan: `add_blocks_from_bdb` is
+    emitted for every level 0..max_depth so NUTS / topology gen build their
+    Hanan grid from real block edges at all depths.  A self-contained sidecar
+    `<name>_tracks.buda` (copied from flow/tracks4top.buda) defines the layers
+    AND track patterns and is sourced relatively, so the script can run the full
+    flow through detailed NUTS without external tech files.
+    """
     bdb_path = state.bdb_path or "floorplan.bdb"
-    tracks_path = os.path.join(_ROOT, "flow", "tracks.buda")
+    max_depth = design_max_depth(state)
+    # Cover the whole design (never less than its actual depth).
+    depth = max_depth if depth is None else max(depth, max_depth)
+
+    # Self-contained tech sidecar next to the script (layers + track patterns).
+    sidecar = os.path.splitext(path)[0] + "_tracks.buda"
+    shutil.copyfile(os.path.join(_ROOT, "flow", "tracks4top.buda"), sidecar)
+
     lines = [
-        f"source {tracks_path}",
+        f"source {os.path.basename(sidecar)}",   # resolved relative to this script
         f"open_bdb {bdb_path}",
         f"derive_busterms {depth}",
         "add_blocks_from_bdb 0",
     ]
-    if depth > 0:
-        lines.append(f"add_blocks_from_bdb {depth} skip")
+    # Load every routing level (1..max_depth) so the floorplan is fully populated.
+    for d in range(1, depth + 1):
+        lines.append(f"add_blocks_from_bdb {d} skip")
     lines += [
         f"run_hier_bundler depth {depth}",
         "dump_hbundles",
@@ -753,15 +780,18 @@ def export_hbundle_script(state: FloorplannerAppState, path: str, depth: int = 1
         "run_planner hier 5",
         "run_nuts",
         "check_connectivity nuts",
+        "run_detailed_nuts",
+        "check_connectivity dnuts",
     ]
     if visualize:
         lines.append("visualize")
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
+    return depth
 
 
 def run_hbundle_flow(state: FloorplannerAppState, script_path: str | None = None,
-                     depth: int = 1):
+                     depth: int | None = None):
     write_bdb(state)
     if script_path is None:
         stem = os.path.splitext(state.bdb_path or "floorplan.bdb")[0]
