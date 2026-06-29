@@ -94,7 +94,9 @@ chip                         (cell "top", depth 0)
   (`set_die` or the block bounding box becomes the cell size), including the
   blocks **and** the cell's own `add_net`/`add_bus` buses (and any nets pulled in
   by a `source`d file).
-- **Two instances** of each cell are laid out in a row inside the `top` cell.
+- **Two instances** of each cell are laid out in a row inside the `top` cell
+  (or placed in 2D by the optimizer — see
+  [Optimizing the Top-Cell Placement](#optimizing-the-top-cell-placement)).
 - **Cell-internal buses** are replicated into every instance with
   instance-qualified, globally-unique names (e.g. `chip/i_dnuts1_0/n11_0` and
   `chip/i_dnuts1_1/n11_0`) — the same representation `import_verilog` produces.
