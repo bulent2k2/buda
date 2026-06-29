@@ -14,6 +14,8 @@ flow and the Floorplanner.
 ```bash
 python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,c.buda]
                                  [--no-cell-nets] [--no-busterms]
+                                 [--optimize sa|ga] [--param KEY=VALUE ...]
+                                 [--bloat 20% | --bloat dx=50,dy=80]
 ```
 
 | Argument / option | Default | Description |
@@ -23,6 +25,9 @@ python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,c.b
 | `--cells …` | `flow/dnuts1.buda,flow/dnuts2.buda,flow/channel_stress.buda` | Comma-separated flat scripts to use as leaf cells |
 | `--no-cell-nets` | *(off)* | Emit only the top-level buses (lean ~70-net demo) |
 | `--no-busterms` | *(off)* | Skip busterm derivation |
+| `--optimize sa\|ga` | *(off)* | Place the top cell's six instances in 2D to shorten the top buses |
+| `--param KEY=VALUE` | — | Optimizer knob (repeatable); see below |
+| `--bloat …` | *(off)* | Inflate instances *for optimization only* to leave routing channels |
 
 ```bash
 # Defaults
@@ -32,6 +37,47 @@ python3 tools/build_hier_demo.py
 python3 tools/build_hier_demo.py /tmp/my.bdb --seed 7 \
     --cells flow/two.buda,flow/dnuts1.buda,flow/channel_stress.buda
 ```
+
+---
+
+## Optimizing the Top-Cell Placement
+
+By default the six instances are laid out in a fixed row, so the random
+cross-instance top buses are long.  `--optimize sa|ga` runs the
+`PlacementOptimizer` (simulated annealing or genetic algorithm) over the **six
+depth-1 instances**, placing them in 2D to minimize HPWL of the top buses (plus
+area and overlap).  The cells' internal contents follow their instance
+automatically.
+
+```bash
+# SA, 20k iterations, weight wire-length 2×, 25% bloat for routing channels
+python3 tools/build_hier_demo.py /tmp/opt.bdb --optimize sa \
+    --param iter=20k --param wl=2.0 --bloat 25%
+```
+
+**`--param KEY=VALUE`** (repeatable) tunes the optimizer.  Values accept `k`/`m`
+suffixes (`iter=20k` → 20000).  Friendly keys:
+
+| Key | SA (`run_sa`) | GA (`run_ga`) |
+|---|---|---|
+| `iter` | `max_iter` (default 20000) | `generations` (default 200) |
+| `wl` / `area` / `ovlp` | `w_wl` / `w_area` / `w_ovlp` | same |
+| `seed` | `seed` (defaults to `--seed`) | same |
+| `pop` / `mutation` / `crossover` | — | `population` / `mutation_rate` / `crossover_rate` |
+| `t_init` / `t_min` / `alpha` | same | — |
+
+Any raw `run_sa`/`run_ga` argument name also works; an argument invalid for the
+chosen method reports a clear error.
+
+**`--bloat`** reduces utilization so the optimizer leaves channel space for
+routing.  Each instance is inflated **only during optimization** — `--bloat 20%`
+scales both dimensions ×1.2, `--bloat dx=50,dy=80` (or `--bloat 50`) adds an
+absolute margin.  The real-sized instance is then centered in its bloated slot,
+leaving channels on all sides.  More bloat → lower density → fewer track overlaps
+(at the cost of a larger die).
+
+The build prints the optimizer result (`hpwl / area / overlap / iterations`) and
+the resulting top-cell size.  The printed hier-flow steps are unchanged.
 
 ---
 
