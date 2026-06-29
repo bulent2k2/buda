@@ -1169,13 +1169,19 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                 ts.span_lo = std::min(seg.start.x, seg.end.x);
                 ts.span_hi = std::max(seg.start.x, seg.end.x);
                 // Unlock Hanan bands: use full chip boundary as initial interval.
-                ts.interval_lo = static_cast<double>(y_grid.front());
-                ts.interval_hi = static_cast<double>(y_grid.back());
+                // Fall back to the segment's own coordinate if the grid is empty
+                // (degenerate input) so we never dereference an empty vector.
+                ts.interval_lo = y_grid.empty() ? static_cast<double>(seg.start.y)
+                                                : static_cast<double>(y_grid.front());
+                ts.interval_hi = y_grid.empty() ? static_cast<double>(seg.start.y)
+                                                : static_cast<double>(y_grid.back());
             } else {
                 ts.span_lo = std::min(seg.start.y, seg.end.y);
                 ts.span_hi = std::max(seg.start.y, seg.end.y);
-                ts.interval_lo = static_cast<double>(x_grid.front());
-                ts.interval_hi = static_cast<double>(x_grid.back());
+                ts.interval_lo = x_grid.empty() ? static_cast<double>(seg.start.x)
+                                                : static_cast<double>(x_grid.front());
+                ts.interval_hi = x_grid.empty() ? static_cast<double>(seg.start.x)
+                                                : static_cast<double>(x_grid.back());
             }
             result.push_back(ts);
         }
@@ -2048,6 +2054,27 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
     merge_grid(y_grid, extra_y_);
+
+    // The hier flow keeps geometry in the expanded bundle wrappers, not in the
+    // flat Floorplan, so the Hanan grid (and the planner's extra grids) can be
+    // empty here.  Derive a fallback grid from the bundles' own selected-topology
+    // segment coordinates so interval bounds (the chip extent) are well-defined
+    // and extract_segments never dereferences an empty grid.
+    if (x_grid.empty() || y_grid.empty()) {
+        std::set<int> xs, ys;
+        for (const auto& bw : bundles_in) {
+            if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0)
+                continue;
+            int idx = bw.plan.selected_topology_index;
+            if (idx >= (int)bw.input.candidates.size()) continue;
+            for (const auto& seg : bw.input.candidates[idx].segments) {
+                xs.insert(seg.start.x); xs.insert(seg.end.x);
+                ys.insert(seg.start.y); ys.insert(seg.end.y);
+            }
+        }
+        if (x_grid.empty()) x_grid.assign(xs.begin(), xs.end());
+        if (y_grid.empty()) y_grid.assign(ys.begin(), ys.end());
+    }
 
     // One full placement of a (possibly dogleg-mutated) bundle set: extract
     // segments, build maps, run the orientation fixpoint, classify cycles, then
