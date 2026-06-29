@@ -134,3 +134,38 @@ and how `RoutingGrid`/`TrackPattern` signal density (`signal_density`,
 the 3 NUTS-clean DNUTS opens (bundles 10/14/37) should become planner `overflow`
 warnings (then rip-up/replan), and total unplaced should drop. See
 `docs/internal/planner_low_layer_over_cell.md` for the full Gap A/C breakdown.
+
+## NUTS band-level repack for spread-fit overlap clusters
+
+**What:** After Gap A part 1 + TOP-layer load balancing, big2 is down to 9 NUTS
+track overlaps. All 9 are **spread-fit** (the shared Hanan band has room for both
+buses — sum of widths <= interval), i.e. pure placement clustering, not
+over-capacity. They survive because `NUTSEngine::repair_overlaps`
+(`src/nuts.cpp`) only relocates ONE victim per overlap into a gap its own
+interval still has free; when a cluster of 3+ buses share a band (e.g. on big2 M7
+bundle B79 collides with B65, B26 AND B45) no single-victim move separates them,
+and a plateau-move relaxation of the strict-improvement guard was tried and did
+nothing (the victims' intervals are already full given the others' positions).
+
+The fix is a **band-level multi-segment repack**: gather the maximal set of
+mutually-overlapping segments sharing a (layer, span-overlap, interval-overlap)
+cluster and re-distribute all of them at once across the union of their slide
+windows (they provably fit — spread-fit), instead of nudging one at a time. The
+existing dense `try_repack` (`src/nuts.cpp:~1306`) already packs a member set to
+low edges during initial placement; reuse/lift it into `repair_overlaps` as the
+cluster resolver.
+
+**Why deferred:** Single-victim repair + the planner load-balancing already took
+big2 from 43 -> 9 overlaps; the residual needs a genuinely different (cluster)
+algorithm. Out of scope for the current planner-fidelity branch, which is
+planner-only.
+
+**Where to start:** `src/nuts.cpp` `repair_overlaps` (~:529) and the dense
+`try_repack` lambda (~:1306); `find_overlaps`/`segs_overlap` for cluster
+discovery. Verify on `flow/big_data_test/big2/big2.buda`: the 9 residual overlaps
+(M4×1, M6×4, M7×3, M2×1 — all spread-fit) should drop toward 0 with no new DNUTS
+opens. NOTE: do NOT try to "balance" this away in the planner — evening the V
+load (M5 9117 vs M7 5752) was measured to be counter-productive: it pushes load
+toward M7 where the overlaps already sit and regressed DNUTS 60 -> 132 with the
+overlap count unchanged. The residual is a packer problem, not a load problem.
+See `docs/internal/planner_low_layer_over_cell.md`.
