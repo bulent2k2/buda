@@ -191,9 +191,16 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
               "(depth 2 reaches the cell-internal buses):")
         print(f"  PYTHONPATH=build python3 src/buda_cli.py <<'EOF'")
         print(f"  open_bdb {out_path}")
+        # Populate the flat floorplan at every routing level so NUTS builds its
+        # Hanan grid / keepouts from real block edges (chip=0, instances=1,
+        # leaf blocks=2; 'skip' = only that exact depth).
+        print(f"  add_blocks_from_bdb 0")
+        print(f"  add_blocks_from_bdb 1 skip")
+        print(f"  add_blocks_from_bdb 2 skip")
         print(f"  run_hier_bundler depth 2")
         print(f"  generate_hier_topologies")
         print(f"  run_planner hier")
+        print(f"  run_nuts")
         print(f"  EOF")
     return out_path
 

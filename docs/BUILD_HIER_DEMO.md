@@ -87,16 +87,25 @@ bundler must reach that depth to form (and template) the cell-level bundles:
 ```bash
 PYTHONPATH=build python3 src/buda_cli.py <<'EOF'
 open_bdb /tmp/hier_demo.bdb
+add_blocks_from_bdb 0          # chip (top container)
+add_blocks_from_bdb 1 skip     # the 6 instances
+add_blocks_from_bdb 2 skip     # the 48 leaf blocks
 run_hier_bundler depth 2
 generate_hier_topologies
 run_planner hier
+run_nuts
 dump_hbundles expanded
 EOF
 ```
 
-The dnuts1/dnuts2 cell bundles appear as templates with two instances each,
-expanded and planned alongside the top-level buses.  See the
-[BDB Reference](BDB_REFERENCE.md) and [Hier Bundler](HIER_BUNDLER.md).
+`add_blocks_from_bdb` loads the BDB components into the flat floorplan at each
+routing level so NUTS (and topology generation) build their Hanan grid and
+keepouts from the **real block edges** — `skip` adds only components at that
+exact depth.  Omitting them leaves the floorplan empty (NUTS then falls back to a
+coarse grid derived from the routes themselves).  The dnuts1/dnuts2 cell bundles
+appear as templates with two instances each, expanded and planned alongside the
+top-level buses.  See the [BDB Reference](BDB_REFERENCE.md) and
+[Hier Bundler](HIER_BUNDLER.md).
 
 ---
 
