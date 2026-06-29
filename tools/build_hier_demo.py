@@ -9,6 +9,7 @@ the leaf blocks across those six instances.
 
 Usage:
   python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,...]
+                                   [--no-cell-nets] [--no-busterms]
 
 Defaults: out = /tmp/hier_demo.bdb, seed = 1,
           cells = flow/dnuts1.buda, flow/dnuts2.buda, flow/channel_stress.buda
@@ -20,9 +21,18 @@ Resulting hierarchy:
   └── i_<cellC>_0 / _1
   plus top-level buses connecting random leaf blocks across instances.
 
-Open it afterward with the Floorplanner (`./fp out.bdb`) or drive the hier flow.
-The leaf cells contribute placement (blocks); their own internal nets are not
-replicated — the demo's connectivity is the top-level buses.
+Each leaf cell contributes both its placement (blocks) AND its internal buses,
+replicated into every instance with instance-qualified names (e.g.
+chip/i_dnuts1_0/n11_0) — the representation import_verilog produces.  The hier
+flow then templates the two instances of each cell and plans the cell-internal
+and top-level buses together.  Busterms are derived so the BDB is ready for
+run_hier_bundler.
+
+  --no-cell-nets   only emit the top-level buses (lean ~70-net demo)
+  --no-busterms    skip busterm derivation
+
+Open it afterward with the Floorplanner (`./fp out.bdb`) or drive the hier flow
+(the build prints the exact run_hier_bundler / run_planner hier commands).
 """
 
 import os
@@ -47,7 +57,8 @@ _GAP = 200.0  # spacing between instances laid out in a row
 
 def _define_leaf_cell(db, cell, buda_path):
     """Create `cell` (+ a synthetic child cell per block + cell_children rows)
-    from a flat .buda script.  Returns (w, h, [block_names])."""
+    from a flat .buda script.  Returns (w, h, [block_names], [nets]) where each
+    net is {name, drv, rcvs, dir} with `block.port` endpoints (see buda2bdb)."""
     parsed = buda2bdb.parse_script(buda_path)
     if not parsed.blocks:
         sys.exit(f"Error: no blocks in {buda_path}")
@@ -57,10 +68,38 @@ def _define_leaf_cell(db, cell, buda_path):
         child = f"{cell}__{name}"
         db.add_cell(child, x2 - x1, y2 - y1)
         db.add_inst_to_cell(cell, name, child, x1 - ox, y1 - oy)
-    return w, h, list(parsed.blocks.keys())
+    return w, h, list(parsed.blocks.keys()), parsed.nets
 
 
-def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top"):
+def _add_cell_internal_nets(db, top_inst, placements):
+    """Replicate each cell's internal nets into every instance, with endpoints
+    qualified by the instance path and globally-unique hierarchical net names
+    (e.g. chip/i_dnuts1_0/n11_0) — the representation import_verilog produces and
+    the hier bundler templates per cell type.  Returns the net count added."""
+    n_added = 0
+    for inst, _cell, _x, _y, blocks, nets in placements:
+        P = f"{top_inst}/{inst}"
+        block_set = set(blocks)
+        for net in nets:
+            eps = [net["drv"]] + net["rcvs"]
+            # Defensive: skip a net referencing a block not in this cell.
+            if any(ep.rsplit('.', 1)[0] not in block_set for ep in eps):
+                continue
+            nm = f"{P}/{net['name']}"
+            drv = f"{P}/{net['drv']}"
+            rcvs = [f"{P}/{r}" for r in net["rcvs"]]
+            if net["dir"] == "unknown":
+                db.add_net_pins_undirected(nm, [drv] + rcvs)
+            elif net["dir"] == "inout":
+                db.add_net_pins_inout(nm, [drv] + rcvs)
+            else:
+                db.add_net_pins(nm, drv, rcvs)
+            n_added += 1
+    return n_added
+
+
+def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
+          cell_nets=True, busterms=True):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
@@ -72,38 +111,45 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top"):
     db = buda_db.BDB(out_path)
 
     # 1. Define each leaf cell from its .buda file.
-    cells = []  # (cell_name, w, h, blocks)
+    cells = []  # (cell_name, w, h, blocks, nets)
     for path in cell_files:
         name = os.path.splitext(os.path.basename(path))[0]
-        w, h, blocks = _define_leaf_cell(db, name, path)
-        cells.append((name, w, h, blocks))
-        print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  ({len(blocks)} blocks)")
+        w, h, blocks, nets = _define_leaf_cell(db, name, path)
+        cells.append((name, w, h, blocks, nets))
+        print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  "
+              f"({len(blocks)} blocks, {len(nets)} internal nets)")
 
     # 2. Lay out two instances of each cell in a single row; compute top size.
-    placements = []  # (inst_name, cell_name, x, y, blocks)
+    placements = []  # (inst_name, cell_name, x, y, blocks, nets)
     x_cursor, row_h = 0.0, 0.0
-    for name, w, h, blocks in cells:
+    for name, w, h, blocks, nets in cells:
         for k in range(2):
             short = "chan" if name == "channel_stress" else name
             inst = f"i_{short}_{k}"
-            placements.append((inst, name, x_cursor, 0.0, blocks))
+            placements.append((inst, name, x_cursor, 0.0, blocks, nets))
             x_cursor += w + _GAP
             row_h = max(row_h, h)
     top_w, top_h = max(x_cursor - _GAP, 1.0), row_h
 
     # 3. Top cell + its six child instances + materialize the hierarchy.
     db.add_cell(top_cell, top_w, top_h)
-    for inst, cell_name, x, y, _ in placements:
+    for inst, cell_name, x, y, _b, _n in placements:
         db.add_inst_to_cell(top_cell, inst, cell_name, x, y)
     db.add_inst(top_inst, top_cell, "", 0.0, 0.0)
     print(f"  top  {top_cell:16s} {top_w:6.0f} x {top_h:6.0f}  "
           f"({len(placements)} instances)")
 
-    # 4. Pool of leaf endpoints across all instances: "chip/<inst>/<block>".
-    pool = [f"{top_inst}/{inst}/{blk}"
-            for inst, _, _, _, blocks in placements for blk in blocks]
+    # 4. Replicate each cell's internal buses into every instance so the hier
+    #    flow plans them together (and templates the two instances per cell).
+    n_cell_nets = _add_cell_internal_nets(db, top_inst, placements) if cell_nets else 0
+    if cell_nets:
+        print(f"  cell-internal nets: {n_cell_nets} (replicated across instances)")
 
-    # 5. Top-level buses, one per bit width 4 … 16 (even widths), each wiring a
+    # 6. Pool of leaf endpoints across all instances: "chip/<inst>/<block>".
+    pool = [f"{top_inst}/{inst}/{blk}"
+            for inst, _, _, _, blocks, _n in placements for blk in blocks]
+
+    # 7. Top-level buses, one per bit width 4 … 16 (even widths), each wiring a
     #    random subset of leaf blocks: one driver + 2-5 receivers.  At least one
     #    receiver is forced into a DIFFERENT depth-1 instance from the driver so
     #    every bus is a genuine cross-instance top-level net (common ancestor =
@@ -131,9 +177,24 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top"):
         print(f"  bus  {bus:16s} [{w:2d}]  "
               f"{drv_base.split('/', 1)[1]} -> {len(rcv_bases)} rcv")
 
+    # 8. Derive busterms so the BDB is ready for the hier bundler / topology gen.
+    if busterms:
+        buda_db.BustermGen(db).derive(2)
+
     db.compute_all()
+    total_nets = n_cell_nets + n_nets
     print(f"\nWrote {out_path}: {len(placements)} instances, "
-          f"{len(widths)} buses, {n_nets} nets.")
+          f"{len(widths)} top buses, {n_cell_nets} cell-internal nets, "
+          f"{total_nets} nets total.")
+    if busterms:
+        print("\nPlan all buses together with the hier flow "
+              "(depth 2 reaches the cell-internal buses):")
+        print(f"  PYTHONPATH=build python3 src/buda_cli.py <<'EOF'")
+        print(f"  open_bdb {out_path}")
+        print(f"  run_hier_bundler depth 2")
+        print(f"  generate_hier_topologies")
+        print(f"  run_planner hier")
+        print(f"  EOF")
     return out_path
 
 
@@ -144,6 +205,8 @@ def main():
     cell_files = [os.path.join(_ROOT, "flow", f)
                   for f in ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
 
+    cell_nets = True
+    busterms = True
     i = 0
     pos = []
     while i < len(argv):
@@ -153,6 +216,10 @@ def main():
             cell_files = [c if os.path.isabs(c) else os.path.join(_ROOT, c)
                           for c in argv[i + 1].split(",")]
             i += 2
+        elif argv[i] == "--no-cell-nets":
+            cell_nets = False; i += 1
+        elif argv[i] == "--no-busterms":
+            busterms = False; i += 1
         elif argv[i] in ("-h", "--help"):
             print(__doc__); sys.exit(0)
         else:
@@ -165,7 +232,7 @@ def main():
         sys.exit(f"Error: cell file(s) not found: {missing}")
 
     print(f"Building hierarchical demo BDB (seed={seed}) …")
-    build(out_path, cell_files, seed=seed)
+    build(out_path, cell_files, seed=seed, cell_nets=cell_nets, busterms=busterms)
 
 
 if __name__ == "__main__":

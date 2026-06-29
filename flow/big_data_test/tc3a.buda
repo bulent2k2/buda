@@ -1,6 +1,6 @@
 # bfp tc3 ~/chip_designs/tc3a.bdb
 # sa run + manual edits
-source /Users/ben/src/git/buda/gem/flow/tracks4top.buda
+source ../tracks4top.buda
 open_bdb /Users/ben/chip_designs/tc3a.bdb
 derive_busterms 1
 add_blocks_from_bdb 0
