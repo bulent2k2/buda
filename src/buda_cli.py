@@ -909,11 +909,15 @@ class BudaSession:
             # keeping the over-subscribed top layers for long-haul and spreading short
             # stubs onto the next TOP tier instead of the LOW (often track-starved) layers.
             if top_only:
-                tops = [l for l in layers_sorted if self.layers.is_top(l)]
-                if len(tops) >= 2:
-                    layers_sorted = tops
+                # Restrict to TOP layers — never fall back to the LOW escape
+                # layers, even when this direction has fewer than 2 TOP layers
+                # (the `< 2` guard below then no-ops the direction, rather than
+                # letting lo_layer become a LOW layer and reintroducing the
+                # track-starved LOW placement top-only mode exists to avoid).
+                layers_sorted = [l for l in layers_sorted if self.layers.is_top(l)]
             if len(layers_sorted) < 2:
-                print(f"[Planner] post_nuts {dir_label}: fewer than 2 {dir_label} layers — nothing to reassign")
+                scope = "TOP " if top_only else ""
+                print(f"[Planner] post_nuts {dir_label}: fewer than 2 {scope}{dir_label} layers — nothing to reassign")
                 return
             lo_layer = layers_sorted[0]
             hi_layer = layers_sorted[-1]
