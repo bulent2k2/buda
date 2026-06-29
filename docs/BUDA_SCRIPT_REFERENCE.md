@@ -353,7 +353,22 @@ specified compass direction(s). Must be called before `generate_topologies` or
 | `dir` | str | Direction shorthand — see table below |
 | `size` | int | Outer band width in layout units. Negative value resets the direction to auto. |
 
-**Default:** `auto` (represented by size `-1`) for all directions.
+**Default:** `auto` (represented by size `-1`) for all directions — i.e. if you
+never call `detour_channel`, the detour band is **auto-sized per axis**, not a
+fixed distance. For each side the generator ventures out
+
+```
+auto_margin = max( min_stub_length(dir), 1, 0.1 × bundle_span_on_that_axis )
+```
+
+beyond the bundle's bounding box — so **≈ 10% of the bundle's span** on that axis,
+with a floor of the layer's min-stub length (and ≥ 1 unit). East/West use the
+**X-span**, North/South use the **Y-span**. A wider bundle therefore detours
+proportionally farther out; `min_stub_length` defaults to 20 layout units, so the
+band is at least that wide. (`bundle_span` is the extent between the bundle's
+extreme Hanan grid lines — essentially the source+destination bounding box.)
+Setting any direction to a non-negative `size` overrides the auto value for that
+direction only.
 
 **Direction shorthands:**
 
@@ -371,10 +386,11 @@ Multiple `dir size` pairs may appear in one command.
 
 **Background — why this matters:**
 
-The topology generator places U-shape trunks at a distance of
-`max(min_stub_length, 0.1 × block_span)` beyond the bundle bounding box
-(default `min_stub_length` = 20 layout units). This creates an **outer band**
-in the congestion model whose capacity equals that distance.
+The topology generator places U-shape trunks at the auto distance above —
+`max(min_stub_length(dir), 1, 0.1 × bundle_span_on_that_axis)` — beyond the
+bundle bounding box (default `min_stub_length` = 20 layout units; E/W keyed off
+the X-span, N/S off the Y-span). This creates an **outer band** in the congestion
+model whose capacity equals that distance.
 
 If the outer band is narrower than a bus's effective width
 (`bus_width × dilution_factor`), every U-topology candidate will overflow that
