@@ -30,6 +30,59 @@ _CELLS = [os.path.join(_ROOT, "flow", f)
           for f in ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
 
 
+def test_optimizer_param_parsing():
+    bd = build_hier_demo
+    assert bd._parse_param("iter=20k") == ("iter", 20000)
+    assert bd._parse_param("iter=1m") == ("iter", 1_000_000)
+    assert bd._parse_param("wl=2.0") == ("wl", 2.0)
+    assert bd._parse_param("seed=7") == ("seed", 7)
+    # Friendly keys map to the right run_sa/run_ga kwargs.
+    sa = bd._opt_kwargs("sa", {"iter": 5000, "wl": 2.0}, default_seed=3)
+    assert sa["max_iter"] == 5000 and sa["w_wl"] == 2.0 and sa["seed"] == 3
+    ga = bd._opt_kwargs("ga", {"iter": 100, "pop": 40}, default_seed=3)
+    assert ga["generations"] == 100 and ga["population"] == 40
+    # Defaults applied when iter omitted.
+    assert bd._opt_kwargs("sa", {}, 1)["max_iter"] == 20000
+    assert bd._opt_kwargs("ga", {}, 1)["generations"] == 200
+
+
+def test_bloat_parsing_and_sizing():
+    bd = build_hier_demo
+    assert bd._parse_bloat("20%") == {"pct": 20.0}
+    assert bd._parse_bloat("50") == {"dx": 50.0, "dy": 50.0}
+    assert bd._parse_bloat("dx=50,dy=80") == {"dx": 50.0, "dy": 80.0}
+    assert bd._bloated_size(100, 80, {"pct": 25}) == (125.0, 100.0)
+    assert bd._bloated_size(100, 80, {"dx": 40, "dy": 20}) == (140.0, 100.0)
+    assert bd._bloated_size(100, 80, None) == (100, 80)
+
+
+def test_optimize_sa_places_instances_compactly(tmp_path):
+    out = str(tmp_path / "opt.bdb")
+    build_hier_demo.build(out, _CELLS, seed=1, optimize="sa",
+                          opt_params={"iter": 2000}, bloat={"pct": 25})
+    db = buda_db.BDB(out)
+    insts = [c for c in db.all_components() if c.depth == 1]
+    assert len(insts) == 6
+    # Optimized layout is 2D (not the row where every instance has y1 == 0).
+    assert any(c.y1 > 0 for c in insts), "optimizer should spread in Y"
+    # And more compact in X than the 3740-wide row.
+    assert max(c.x2 for c in insts) < 3740
+
+
+def test_optimize_is_deterministic(tmp_path):
+    a, b = str(tmp_path / "a.bdb"), str(tmp_path / "b.bdb")
+    kw = dict(seed=5, optimize="sa", opt_params={"iter": 1500}, bloat={"pct": 20})
+    build_hier_demo.build(a, _CELLS, **kw)
+    build_hier_demo.build(b, _CELLS, **kw)
+
+    def _inst_boxes(path):
+        db = buda_db.BDB(path)
+        return {c.name: (c.x1, c.y1, c.x2, c.y2)
+                for c in db.all_components() if c.depth == 1}
+
+    assert _inst_boxes(a) == _inst_boxes(b)
+
+
 def test_export_flow_covers_full_hierarchy(tmp_path):
     # Export Flow must report the design's full depth and load every level.
     import floorplanner_commands as fpc
