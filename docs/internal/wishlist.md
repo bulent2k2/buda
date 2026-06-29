@@ -70,15 +70,18 @@ before falling back to M4/M5.
 ## Follow-up: true along-flex trunk DOF (Stage C of the flexible-root re-arch)
 
 **Context.** The coverage-driven flexible trunk span (PR on `claude/topo-gen-b4`)
-makes a trunk's endpoints reach every block it connects by pass-through and extend
-beyond the busterm bbox — but only **under `double_detour`**, and only by
-physically extending the *generated* spine to the blocks' far faces. NUTS then
-contracts a spine end **only where the extreme connection sits at the endpoint**
-(`do_span_adjustments` SETs there); a stub at a mid/T-junction is extend-only, and
-there is no along-direction pull. So an extended trunk can carry some dead
-wirelength, and the extension is gated off by default to avoid disturbing
-candidate rankings (it inflated V-trunk WL and flipped planner selections when
-always-on).
+makes a trunk's endpoints span exactly from the lowest busterm it taps to the
+topmost stub centerline — minimal, no dead wire — but only **under
+`double_detour`**, and the minimisation is computed at GENERATION (stub centerline
++ near-face coverage of pass-through blocks).  A stub's slide still comes only from
+its busterm face intersected with the *generated* spine extent; NUTS
+`do_span_adjustments` contracts/extends a spine end **only where the extreme
+connection sits at the endpoint** (it SETs there) — a stub at a mid/T-junction is
+extend-only, and there is no along-direction pull.  So the generated span is the
+binding one (we place stubs at centerlines specifically so the extreme stub keeps
+a positive slide window), and the behaviour is gated off by default to avoid
+disturbing candidate rankings (always-on far-face traversal inflated V-trunk WL
+and flipped planner selections).
 
 **Wish.** A first-class **along-flex DOF** so a trunk spine's endpoints are a
 *range* resolved by pull, not a fixed generated coordinate:
