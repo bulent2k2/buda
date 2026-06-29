@@ -87,6 +87,8 @@ bundler must reach that depth to form (and template) the cell-level bundles:
 ```bash
 PYTHONPATH=build python3 src/buda_cli.py <<'EOF'
 open_bdb /tmp/hier_demo.bdb
+def_layer 4 M4 H TOP 44.44     # TOP routing layers (the BDB carries no tech)
+def_layer 5 M5 V TOP 50.00
 add_blocks_from_bdb 0          # chip (top container)
 add_blocks_from_bdb 1 skip     # the 6 instances
 add_blocks_from_bdb 2 skip     # the 48 leaf blocks
@@ -94,18 +96,26 @@ run_hier_bundler depth 2
 generate_hier_topologies
 run_planner hier
 run_nuts
-dump_hbundles expanded
+check_connectivity nuts
 EOF
 ```
 
-`add_blocks_from_bdb` loads the BDB components into the flat floorplan at each
-routing level so NUTS (and topology generation) build their Hanan grid and
-keepouts from the **real block edges** — `skip` adds only components at that
-exact depth.  Omitting them leaves the floorplan empty (NUTS then falls back to a
-coarse grid derived from the routes themselves).  The dnuts1/dnuts2 cell bundles
-appear as templates with two instances each, expanded and planned alongside the
-top-level buses.  See the [BDB Reference](BDB_REFERENCE.md) and
-[Hier Bundler](HIER_BUNDLER.md).
+Two setup steps the BDB can't carry on its own:
+
+- **`def_layer`** registers the TOP routing layers (M4 horizontal, M5 vertical)
+  the planner and NUTS use.  Without them `check_connectivity` reports every
+  segment as on an *undefined* layer (`unbuildable`).
+- **`add_blocks_from_bdb`** loads the BDB components into the flat floorplan at
+  each routing level so NUTS (and topology generation) build their Hanan grid and
+  keepouts from the **real block edges** (`skip` = only that exact depth).
+  Omitting them leaves the floorplan empty (NUTS then falls back to a coarse grid
+  derived from the routes themselves).
+
+With both in place the dnuts1/dnuts2 cell bundles appear as templates with two
+instances each, expanded and planned alongside the top-level buses, and
+`check_connectivity nuts` reports **no opens**.  (The dense random demo will
+still show track overlaps — genuine congestion, not a connectivity break.)  See
+the [BDB Reference](BDB_REFERENCE.md) and [Hier Bundler](HIER_BUNDLER.md).
 
 ---
 
