@@ -113,6 +113,42 @@ def make_ls_m4_m6(span_max_m4=None, span_min_m6=None,
 
 
 # ---------------------------------------------------------------------------
+# Scenario: TOP-layer load balancing spreads equal-cost buses
+# ---------------------------------------------------------------------------
+
+def test_top_layer_load_balancing():
+    """Equal-cost same-direction TOP layers share load instead of piling on top.
+
+    Two width-2 H bundles both fit either M4 or M6 with zero congestion/span
+    cost, so the choice is a pure tie.  With balancing OFF the tie breaks toward
+    the highest metal and both land on M6 (the pile-up that drives big2's NUTS
+    overlaps).  With balancing ON (default kBalance) the second bundle is biased
+    onto the now-less-loaded M4, so the load spreads one-per-layer.
+    """
+    def assign(kbalance):
+        fp = open_channel_fp()                 # ample H capacity, no congestion
+        ls = make_ls_m4_m6()                   # M4, M6 (TOP H), M5 (TOP V)
+        router = buda.CongestionPlanner(fp, ls)
+        router.set_track_pitch(0.0)            # isolate balancing from pitch
+        router.set_planner_param("kBalance", kbalance)
+        router.build_congestion_map()
+        w1 = make_bundle_wrapper(bid=1, width=2.0, seg=make_h_segment(100, 900, y=100))
+        w2 = make_bundle_wrapper(bid=2, width=2.0, seg=make_h_segment(100, 900, y=100))
+        a = router.optimize_topologies([w1, w2], 1)
+        return {x.bundle_id: x.seg_layers[0] for x in a}
+
+    # Balancing off: both pile on the highest metal M6.
+    off = assign(0.0)
+    assert off[1] == 6 and off[2] == 6, f"kBalance=0 should pile both on M6; got {off}"
+
+    # Balancing on: the two bundles spread across M4 and M6 (one each).
+    on = assign(0.01)
+    assert {on[1], on[2]} == {4, 6}, (
+        f"kBalance should spread the two equal-cost bundles across M4 and M6; got {on}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Scenario: Short segment prefers lower TOP-H layer (M4)
 # ---------------------------------------------------------------------------
 
@@ -265,6 +301,10 @@ def test_overflow_threshold_congestion():
     # so the "2+2=4=cap, edge-to-edge" threshold this test documents holds.
     # The pitch-aware threshold is covered by test_inter_bus_pitch_reserved.
     router.set_track_pitch(0.0)
+    # Also neutralise TOP-layer load balancing so equal-cost ties break toward
+    # the highest metal (M6) as this test assumes — balancing is exercised
+    # separately in test_top_layer_load_balancing.
+    router.set_planner_param("kBalance", 0.0)
     router.build_congestion_map()
 
     seg1 = make_h_segment(100, 500, y=98)
@@ -303,6 +343,10 @@ def test_inter_bus_pitch_reserved():
         ls.add_layer(5, "M5", buda.LayerDir.VERTICAL,   buda.LayerType.TOP)
         router = buda.CongestionPlanner(fp, ls)
         router.set_track_pitch(pitch)
+        # Isolate the pitch effect from TOP-layer load balancing (which would
+        # itself spill the second bundle to M4); balancing is covered by
+        # test_top_layer_load_balancing.
+        router.set_planner_param("kBalance", 0.0)
         router.build_congestion_map()
         w1 = make_bundle_wrapper(bid=1, width=2.0, seg=make_h_segment(100, 500, y=98))
         w2 = make_bundle_wrapper(bid=2, width=2.0, seg=make_h_segment(100, 500, y=98))

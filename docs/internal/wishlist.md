@@ -99,3 +99,73 @@ forced the `double_detour` gate, and letting the planner prefer the region-4
 pass-through trunk on its merits. Also unlocks always-on generation of the
 "region-4" pass-through trunk (e.g. `TRUNK_V@x5772` in
 `flow/big_data_test/big2/b4_bus_077.buda`) instead of only under `double_detour`.
+
+## Gap A part 2: model band capacity in signal-track count, not layout width
+
+**What:** The bundle planner models a Hanan-band's capacity as available *layout
+width* (`band_available_length` in `src/congestion_planner.cpp` — geometric
+distance minus keepouts), but DetailedNUTS places bits on discrete *signal
+tracks* drawn from the layer's `TrackPattern` (power/ground/clock slots are not
+SIGNAL, so the usable count is a fraction of the width). At a contended interval
+the binding constraint is the per-track signal count, not the width. So the
+planner can commit a bundle `overflow=0` while DNUTS finds the interval short of
+signal tracks → a silent open. Switch the planner's band capacity (and
+`eff_bus_width` charge) to **signal-track-count units** at the segment's actual
+interval, so over-subscription surfaces as `overflow` at planning time and
+engages the existing STRICT rip-up/replan ladder instead of failing at DNUTS.
+
+**Evidence (big2, after Gap A part 1):** 272 residual unplaced bits, all TOP
+`reservation conflict`. Of the 7 failing bundles, 3 (bundles 10, 14, 37 — the
+small 8/36/8-bit needs) have **no NUTS overlap at all** — NUTS's abstract-width
+footprint fit, but the discrete signal-track count fell short. That is the pure
+units-mismatch signature this item addresses. The other 4 (23, 25, 27, 45) also
+overlap at NUTS, i.e. genuine over-capacity the width model under-prices.
+
+**Why deferred:** The user asked to first resolve the **NUTS-stage overlaps** by
+improving the planner (the 41 TOP-layer overlaps that DNUTS opens partly
+correlate with). Capacity-unit conversion is the second TOP-layer lever and
+should follow, since it changes the planner's overflow accounting globally and
+wants the NUTS-overlap work settled first to read its effect cleanly.
+
+**Where to start:** `band_available_length` / `usable_band_cap` /
+`LayerStack::eff_bus_width` (`src/congestion_planner.cpp`, `src/layering.cpp`),
+and how `RoutingGrid`/`TrackPattern` signal density (`signal_density`,
+`dilution_factor`) is consulted. Verify on `flow/big_data_test/big2/big2.buda`:
+the 3 NUTS-clean DNUTS opens (bundles 10/14/37) should become planner `overflow`
+warnings (then rip-up/replan), and total unplaced should drop. See
+`docs/internal/planner_low_layer_over_cell.md` for the full Gap A/C breakdown.
+
+## NUTS band-level repack for spread-fit overlap clusters
+
+**What:** After Gap A part 1 + TOP-layer load balancing, big2 is down to 9 NUTS
+track overlaps. All 9 are **spread-fit** (the shared Hanan band has room for both
+buses — sum of widths <= interval), i.e. pure placement clustering, not
+over-capacity. They survive because `NUTSEngine::repair_overlaps`
+(`src/nuts.cpp`) only relocates ONE victim per overlap into a gap its own
+interval still has free; when a cluster of 3+ buses share a band (e.g. on big2 M7
+bundle B79 collides with B65, B26 AND B45) no single-victim move separates them,
+and a plateau-move relaxation of the strict-improvement guard was tried and did
+nothing (the victims' intervals are already full given the others' positions).
+
+The fix is a **band-level multi-segment repack**: gather the maximal set of
+mutually-overlapping segments sharing a (layer, span-overlap, interval-overlap)
+cluster and re-distribute all of them at once across the union of their slide
+windows (they provably fit — spread-fit), instead of nudging one at a time. The
+existing dense `try_repack` (`src/nuts.cpp:~1306`) already packs a member set to
+low edges during initial placement; reuse/lift it into `repair_overlaps` as the
+cluster resolver.
+
+**Why deferred:** Single-victim repair + the planner load-balancing already took
+big2 from 43 -> 9 overlaps; the residual needs a genuinely different (cluster)
+algorithm. Out of scope for the current planner-fidelity branch, which is
+planner-only.
+
+**Where to start:** `src/nuts.cpp` `repair_overlaps` (~:529) and the dense
+`try_repack` lambda (~:1306); `find_overlaps`/`segs_overlap` for cluster
+discovery. Verify on `flow/big_data_test/big2/big2.buda`: the 9 residual overlaps
+(M4×1, M6×4, M7×3, M2×1 — all spread-fit) should drop toward 0 with no new DNUTS
+opens. NOTE: do NOT try to "balance" this away in the planner — evening the V
+load (M5 9117 vs M7 5752) was measured to be counter-productive: it pushes load
+toward M7 where the overlaps already sit and regressed DNUTS 60 -> 132 with the
+overlap count unchanged. The residual is a packer problem, not a load problem.
+See `docs/internal/planner_low_layer_over_cell.md`.

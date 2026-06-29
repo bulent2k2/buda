@@ -209,6 +209,9 @@ def test_v_layer_slide_within_m5():
 
     router = buda.CongestionPlanner(fp, ls)
     router.set_track_pitch(0.0)   # isolate slide behavior from inter-bus pitch (Gap 1)
+    # Isolate the slide-aware lookup from TOP-layer load balancing, which would
+    # otherwise spill the second bundle to M3 rather than slide it within M5.
+    router.set_planner_param("kBalance", 0.0)
     router.build_congestion_map()
 
     w1 = make_bundle_wrapper(bid=1, width=3.0, seg=make_v_segment(x=10, y_lo=0, y_hi=100, layer=5))

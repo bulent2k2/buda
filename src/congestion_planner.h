@@ -224,6 +224,17 @@ private:
 
     int    find_band(bool is_vcut, int perp_pos) const;
 
+    // True if a non-TOP (LOW) segment cannot route on layer_id at the given
+    // perpendicular position because its routed extent — after excluding the
+    // pin-access tails at the two endpoint leaf cells it attaches to — lies over
+    // a leaf cell.  Two cases: a mid-span cell crossing, or a segment wholly
+    // inside one cell.  Either way the bus must route over-the-cell on a TOP
+    // layer, so the LOW layer is infeasible (Gap A).  TOP layers always return
+    // false (they tile cells freely).  perp_pos_override == INT_MIN uses the
+    // segment's nominal perpendicular coordinate.
+    bool   low_seg_obstructed(const Segment& seg, int layer_id,
+                              int perp_pos_override) const;
+
     // Band capacity usable by a segment confined to [slide_lo, slide_hi]:
     // band_cap clamped by the window's overlap with the band.
     double usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
@@ -252,6 +263,16 @@ private:
     double kSpan_             = 0.001;
     double base_cost_non_top_ = 0.5;
     double kWL_               = 0.001;
+    // Same-direction TOP-layer load-balancing weight.  Without it the planner
+    // breaks ties toward the highest metal (span/base costs are 0 on a TOP layer
+    // with no span window), piling every H bus on the top H layer and every V
+    // bus on the top V layer — where nearly all NUTS overlaps then land.  A mild
+    // bias toward the less-loaded equal-cost layer spreads the load.  Cost term:
+    // kBalance_ * (layer's committed load / max same-dir layer load), in [0,1].
+    // 0.01: on big2 this cuts NUTS overlaps 41->9 and DNUTS unplaced 272->60 by
+    // spreading TOP load; the plateau holds to ~0.015, then over-balancing starts
+    // pushing buses onto LOW layers and the unplaced count climbs again.
+    double kBalance_         = 0.01;
     // Span reference for scaling the non-TOP penalty: a segment of length
     // base_span_ref_ (or longer) pays the full base_cost_non_top_; shorter
     // segments pay proportionally less, so short local stubs offload to

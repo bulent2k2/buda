@@ -883,6 +883,7 @@ adjusted between runs to re-plan with different weights.
 | `base_cost_non_top` | `0.5` | Penalty per segment for using a non-`TOP` layer, scaled by segment span (see `base_span_ref`). Keeps the default preference on top layers without hard-blocking lower ones. |
 | `base_span_ref` | 25% of the larger Hanan grid extent | Span at which a segment pays the full `base_cost_non_top`; shorter segments pay proportionally less (`× span/base_span_ref`). Short stubs therefore drop to lower layers when TOP bands saturate instead of detouring on TOP — preserving TOP capacity for long trunks. |
 | `kWL` | `0.001` | Wirelength cost per layout unit, added to the topology score. Steers equal-congestion choices toward shorter topologies, so a detour wins only when it avoids real congestion. |
+| `kBalance` | `0.01` | TOP-layer load-balancing weight. Adds `kBalance × (layer's committed load / max same-direction layer load)` to each candidate `TOP` layer's segment score, biasing an equal-cost segment toward the **less-loaded** of the same-direction TOP layers. Without it, equal-cost ties (e.g. on TOP layers with no span window, where span/base costs are 0) break toward the highest metal, piling every H segment on the top H layer and every V segment on the top V layer — the over-subscription that drives NUTS track overlaps. `LOW` layers don't compete (they carry `base_cost_non_top`). Set `0` to disable balancing and restore the highest-metal tie-break. Effective range is small: the useful plateau is roughly `[0.005, 0.015]`; above it, over-balancing starts pushing buses onto LOW layers. |
 
 **Example:**
 ```
@@ -890,6 +891,7 @@ set_planner_param kCong 2.0          # stronger congestion avoidance
 set_planner_param kSpan 0.005        # stronger span preference
 set_planner_param base_cost_non_top 0.1
 set_planner_param kWL 0.01           # stronger preference for short routes
+set_planner_param kBalance 0.0       # disable TOP-layer load balancing
 ```
 
 ---
@@ -907,11 +909,14 @@ Runs the global congestion-aware router. Bundles are processed widest-first
 2. Scores every topology candidate — for each segment independently selects
    the best layer from the direction-appropriate set (H layers for H segments,
    V layers for V segments).  Segment score = `kCong·overflow/cap + kSpan·excess
-   + base_cost_non_top·min(1, seg_span/base_span_ref)`, where
-   `overflow = max(0, usage+eff_width−cap)` (zero when the segment fits) and the
-   non-TOP penalty scales with segment span so short stubs offload to lower
+   + base_cost_non_top·min(1, seg_span/base_span_ref) + kBalance·load_ratio`,
+   where `overflow = max(0, usage+eff_width−cap)` (zero when the segment fits) and
+   the non-TOP penalty scales with segment span so short stubs offload to lower
    layers cheaply while long trunks stay on TOP (see `set_planner_param
-   base_span_ref`).
+   base_span_ref`).  The final term spreads load across same-direction TOP layers:
+   `load_ratio = layer's committed load / max same-direction layer load` (TOP
+   layers only), so an otherwise-tied segment prefers the less-loaded TOP layer
+   instead of always the highest metal (see `set_planner_param kBalance`).
    The congestion charge goes to the cheapest Hanan band the segment's slide
    interval can host the bus in (slide-aware lookup), not just the band at the
    interval centre.  Band capacity is clamped to the slide window's overlap
@@ -1082,7 +1087,7 @@ select_topologies 1,5-9,11,15-19,22 3 2-4,10,12-14,20,21,23-30 1
 ### `run_planner post_nuts`
 
 ```
-run_planner post_nuts [V [<short_v> [<long_v>]]] [H [<short_h> [<long_h>]]]
+run_planner post_nuts [top] [V [<short_v> [<long_v>]]] [H [<short_h> [<long_h>]]]
 ```
 
 Runs a second planner pass **after** `run_nuts` that resolves **channel pin
@@ -1103,15 +1108,18 @@ violations.
 
 #### Resolution strategy
 
-For each requested direction, stubs are redistributed across all available
+For each requested direction, stubs are redistributed across the available
 layers for that direction using stub span length as a proxy for routing
 distance:
 
 | Stub span (routing-direction extent) | Target layer |
 |---|---|
-| `< short_thresh` | Lowest-numbered layer (e.g. M3) — short stubs close to the block face stay on the nearest metal |
-| `> long_thresh`  | Highest-numbered layer (e.g. M7) — long stubs crossing the full channel use the highest available metal |
-| Between thresholds | Unchanged — stays on the planner-assigned layer (e.g. M5) |
+| `< short_thresh` | Lowest layer in scope (e.g. M3, or M5 in `top` mode) — short stubs close to the block face stay on the nearest in-scope metal |
+| `> long_thresh`  | Highest layer in scope (e.g. M7) — long stubs crossing the full channel use the highest available metal |
+| Between thresholds | Unchanged — stays on the planner-assigned layer |
+
+The set of layers in scope is **all** layers of that direction by default, or
+only the `TOP` layers when the `top` modifier is given (see below).
 
 After all reassignments, a single full NUTS re-run makes all layers consistent
 with the new assignments.
@@ -1120,10 +1128,19 @@ with the new assignments.
 
 | Token | Description |
 |---|---|
+| `top` | Optional leading modifier. Restrict reassignment to the **`TOP`** layers of each direction, so short stubs land on the next-highest TOP layer rather than a `LOW` escape layer. Applies to every direction in the command. |
 | `V` | Enable V-stub reassignment. Up to two numeric thresholds may follow. |
 | `H` | Enable H-stub reassignment. Up to two numeric thresholds may follow. |
-| `<short>` | Stubs shorter than this move to the lowest layer. |
-| `<long>` | Stubs longer than this move to the highest layer. |
+| `<short>` | Stubs shorter than this move to the lowest layer in scope. |
+| `<long>` | Stubs longer than this move to the highest layer in scope. |
+
+**`top` modifier.** Without it, a direction's lowest layer may be a `LOW`
+layer, so short stubs can be pushed down onto it — and a `LOW` layer cannot
+route over a cell, so its bands are often track-starved. `top` keeps the
+redistribution within the TOP layers (e.g. V → M5 short / M7 long, H → M4 short /
+M6 long), reserving the over-subscribed top metal for long hauls while spreading
+short stubs onto the next TOP tier. If a direction has **fewer than two TOP
+layers**, that direction is skipped (it never falls back to a `LOW` layer).
 
 **Default thresholds** (used when a letter is given without explicit values):
 
@@ -1159,6 +1176,10 @@ run_planner post_nuts H 120 350     # custom H thresholds
 # Both directions in one pass (single NUTS re-run)
 run_planner post_nuts V 80 200 H 150 400
 run_planner post_nuts V H           # both with defaults
+
+# top mode — keep stubs on TOP layers (no LOW fallback)
+run_planner post_nuts top V H               # V → M5/M7, H → M4/M6
+run_planner post_nuts top V 100 280 H 150 400
 ```
 
 #### Typical script pattern (congested channel)

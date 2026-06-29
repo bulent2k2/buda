@@ -33,6 +33,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kSpan")             kSpan_             = value;
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
     else if (name == "kWL")               kWL_               = value;
+    else if (name == "kBalance")          kBalance_          = value;
     else if (name == "base_span_ref")     base_span_ref_     = value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
@@ -274,10 +275,64 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
     }
 }
 
+// True if a non-TOP segment is obstructed by a leaf cell at this perp (Gap A).
+// The endpoint-tail allowance in for_each_band assumes the in-cell portion of a
+// block-attached stub is pin access on another layer — correct for a stub whose
+// far end reaches an open channel.  But it accumulates across blocks and zeroes
+// the whole along-extent when a (possibly trimmed) span ends up wholly inside a
+// cell or crosses one mid-span, so such a segment looked *free* on LOW even
+// though DetailedNUTS finds zero signal tracks over the cell.  This predicate
+// flags exactly those cases so the layer-selection treats LOW as blocked and the
+// bus routes over-the-cell on a TOP layer instead.
+bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
+                                           int perp_pos_override) const {
+    if (layers_.is_top(layer_id)) return false;
+    bool is_h = (seg.start.y == seg.end.y);
+    int perp = (perp_pos_override != INT_MIN) ? perp_pos_override
+                                              : (is_h ? seg.start.y : seg.start.x);
+    int lo = is_h ? std::min(seg.start.x, seg.end.x) : std::min(seg.start.y, seg.end.y);
+    int hi = is_h ? std::max(seg.start.x, seg.end.x) : std::max(seg.start.y, seg.end.y);
+    if (lo >= hi) return false;   // zero-length: nothing routed here
+
+    // Endpoint leaf cells (at this perp): the ones owning a pin-access tail.
+    const Rect* lo_cell = nullptr;
+    const Rect* hi_cell = nullptr;
+    for (const auto& [name, r] : blocks_cache_) {
+        if (floorplan_.is_container(name)) continue;
+        int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
+        int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
+        if (perp < plo || perp > phi) continue;
+        if (lo >= rlo && lo <= rhi) lo_cell = &r;
+        if (hi >= rlo && hi <= rhi) hi_cell = &r;
+    }
+    // Wholly inside one cell → no open-channel portion → unroutable on LOW.
+    if (lo_cell && lo_cell == hi_cell) return true;
+
+    // Trim the two pin-access tails back to their cell faces, then any leaf cell
+    // still overlapping the open interior is a genuine mid-span crossing.
+    int tlo = lo, thi = hi;
+    if (lo_cell) tlo = std::min(is_h ? lo_cell->x2 : lo_cell->y2, hi);
+    if (hi_cell) thi = std::max(is_h ? hi_cell->x1 : hi_cell->y1, tlo);
+    if (tlo >= thi) return false;   // tails meet in a gap: nothing left to route
+
+    for (const auto& [name, r] : blocks_cache_) {
+        if (floorplan_.is_container(name)) continue;
+        int rlo = is_h ? r.x1 : r.y1, rhi = is_h ? r.x2 : r.y2;
+        int plo = is_h ? r.y1 : r.x1, phi = is_h ? r.y2 : r.x2;
+        if (perp < plo || perp > phi) continue;
+        if (rlo < thi && rhi > tlo) return true;   // overlaps interior → crossing
+    }
+    return false;
+}
+
 // Score the marginal peak overflow from adding one segment at a specific layer.
 double CongestionPlanner::score_segment(const Segment& seg, int layer_id,
                                    double eff_width, int perp_pos_override,
                                    int slide_lo, int slide_hi) const {
+    // A LOW segment obstructed by a leaf cell at this perp is unroutable here
+    // (Gap A): report a hard overflow so STRICT skips the layer and the bus
+    // routes over-the-cell on TOP.
+    if (low_seg_obstructed(seg, layer_id, perp_pos_override)) return 9999.0;
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak = 0.0;
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
@@ -398,6 +453,8 @@ void CongestionPlanner::apply_reservation(const BundleWrapper& bw, double sign) 
 double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
                                        double eff_width, int perp_pos_override,
                                        int slide_lo, int slide_hi) const {
+    if (low_seg_obstructed(seg, layer_id, perp_pos_override))
+        return kCong_ * 9999.0;   // Gap A: LOW over a leaf cell is unroutable
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak_cost   = 0.0;
     bool   blocked     = false;
@@ -497,6 +554,24 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
 
     // Snapshot cut state so each topology candidate is scored from the same base.
     auto cuts_snapshot = cuts_;
+
+    // Per-layer committed load (summed band usage) at this bundle's turn, and the
+    // max over each direction's layers, for the load-balancing tie-breaker.  The
+    // load reflects only already-committed bundles (within-candidate charges are
+    // restored per candidate), so it grows monotonically across the greedy
+    // schedule and steers later bundles onto the layers earlier ones left empty.
+    std::map<int,double> layer_load;
+    for (const auto& c : cuts_) {
+        double u = 0.0;
+        for (int b = 0; b < c.num_bands(); ++b) u += c.usage(b);
+        layer_load[c.layer_id] += u;
+    }
+    double max_h_load = 1.0, max_v_load = 1.0;
+    for (const auto& [lid, u] : layer_load) {
+        const Layer* L = layers_.get_layer(lid);
+        if (L && L->dir == LayerDir::HORIZONTAL) max_h_load = std::max(max_h_load, u);
+        else                                     max_v_load = std::max(max_v_load, u);
+    }
 
     int ci_lo = bw.input.topology_pinned ? bw.plan.selected_topology_index     : 0;
     int ci_hi = bw.input.topology_pinned ? bw.plan.selected_topology_index + 1 : (int)bw.input.candidates.size();
@@ -601,7 +676,20 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                                   ((span_ref_eff_ > 0.0)
                                        ? std::min(1.0, seg_span / span_ref_eff_)
                                        : 1.0);
-                    double s    = cong + span + base;
+                    // Load-balancing bias: prefer the less-loaded of the
+                    // equal-cost same-direction TOP layers so H load spreads
+                    // across the H layers (and V across the V layers) instead of
+                    // piling on the highest metal.  Only TOP layers compete for
+                    // balancing; LOW layers already carry the base penalty.
+                    double bal = 0.0;
+                    if (layers_.is_top(lid)) {
+                        bool is_hl  = (seg.start.y == seg.end.y);
+                        double maxl = is_hl ? max_h_load : max_v_load;
+                        auto   it   = layer_load.find(lid);
+                        if (it != layer_load.end() && maxl > 0.0)
+                            bal = kBalance_ * (it->second / maxl);
+                    }
+                    double s    = cong + span + base + bal;
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                 }
                 if (best_s == std::numeric_limits<double>::max())
