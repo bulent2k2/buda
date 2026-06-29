@@ -181,9 +181,15 @@ def _optimize_instances(placements, cell_meta, buses, method, params, bloat, see
         opt.add_block_ex(p["inst"], bw, bh, p["x"], p["y"])
 
     def _pin(endpoint):
+        # The real instance is later centered in its bloated slot, so the final
+        # pin sits at (bloated_origin + centering_offset + local_center).  Add the
+        # same offset here so SA/GA optimizes the ACTUAL final pin locations.
         inst, blk = endpoint
-        lcx, lcy = cell_meta[inst_to_cell[inst]][2][blk]
-        return (inst, (lcx, lcy))
+        cell = inst_to_cell[inst]
+        w, h, centers = cell_meta[cell]
+        bw, bh = _bloated_size(w, h, bloat)
+        lcx, lcy = centers[blk]
+        return (inst, (lcx + (bw - w) / 2.0, lcy + (bh - h) / 2.0))
 
     for _name, _w, drv, rcvs in buses:           # one net per bus
         opt.add_net([_pin(drv)] + [_pin(r) for r in rcvs])
