@@ -1,5 +1,5 @@
-# From big2_b4_b24.buda
-source ../tracks4top.buda
+# One bundle from big2_b4_b24.buda
+source tracks4top.buda
 
 set_die 6100 6300
 add_block blk_02 4280 5350 5445 6300

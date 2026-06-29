@@ -1,6 +1,6 @@
 # issue: mst topos miss abutted blocks
 
-source ../tracks4top.buda
+source tracks4top.buda
 add_block blk_00 1250 3780 2230 4775
 add_block blk_05 1250 3225 2230 3780
 add_block blk_06 0 4630 1250 5170

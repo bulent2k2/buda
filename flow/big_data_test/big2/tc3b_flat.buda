@@ -1,4 +1,4 @@
-source ../tracks4top.buda
+source tracks4top.buda
 source tc3b_flat_x5.buda
 run_bundler
 generate_topologies

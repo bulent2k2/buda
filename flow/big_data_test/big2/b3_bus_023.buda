@@ -1,6 +1,6 @@
 # issue: no mst, nor hybrid trunk-mst
 
-source ../tracks4top.buda
+source tracks4top.buda
 
 add_block blk_01 4145 1000 6100 1425
 add_block blk_09 3500 2570 4870 3100

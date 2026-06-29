@@ -1,7 +1,7 @@
 # big2_b4_b24.buda — bundles 4 (bus_077) & 24 (bus_056) extracted from big2.buda
 # Full floorplan kept so topology generation (pass-through) matches the full run.
 
-source ../tracks4top.buda
+source tracks4top.buda
 
 set_die 6100 6300
 add_block blk_00 1250 3780 2230 4775
