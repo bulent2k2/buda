@@ -1643,7 +1643,11 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     // The degenerate sub-case (stubs collapse to one y, so the pulled-back block
     // would leave the spine zero-length) is given a bounded interior spine further
     // below — never a face tap and never a junction-less collapse.
-    {
+    //
+    // Busterm mode only (mirror of add_trunk_h): with busterm mode off (center_mode)
+    // att_y is the point pin's y, and clamping a pin that lies outside the stub span
+    // into it would drop the pin connection (Codex P2 on #88).
+    if (use_busterm_) {
         int stub_lo = INT_MAX, stub_hi = INT_MIN;
         for (int i = 0; i < n; ++i)
             if (has_stub[i] && !stub_suppressed[i]) {
