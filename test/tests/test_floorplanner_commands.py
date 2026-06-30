@@ -470,6 +470,21 @@ def test_optimizer_ga_runtime_budget():
     assert r.iterations > 0 and dt < 1.5
 
 
+def test_optimizer_timed_patience_scales_with_budget():
+    # Regression: a timed run with convergence early-stop ON must scale its
+    # stagnation horizon to the budget, not abandon the run after a tiny fixed
+    # window.  (Previously SA capped the window at 200 → it quit after ~thousands
+    # of iters even for a multi-second budget.)  Compare patience-on vs off on
+    # the SAME machine/budget so the check is independent of CPU speed.
+    no_stop  = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.5, patience=0)
+    with_stop = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.5, patience=10)
+    # The early-stop may converge before the wall-clock cap, but it must not slash
+    # the run to a tiny fraction (the old bug stopped at <1% of the budget).
+    assert with_stop.iterations > 0.1 * no_stop.iterations, (
+        f"timed patience stopped too early: {with_stop.iterations} vs "
+        f"{no_stop.iterations} (no early-stop)")
+
+
 def test_parse_time_budget():
     # The Optimize dialog's Runtime field parser — lives in this GUI-free module
     # so it is testable without importing the Tk frontend.

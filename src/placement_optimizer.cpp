@@ -300,9 +300,16 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
     double T = t_init;
 
     const int report_every = std::max(1, n_target / 20);
-    // patience checkpoint size: ~2% of the run, capped so a huge iteration cap
-    // doesn't make each window enormous.
-    const int window  = std::min(std::max(1, n_target / 50), 200);
+    // Patience checkpoint size = ~2% of the run, so the stagnation horizon
+    // (patience × window) is a fixed FRACTION of the planned iterations.  In
+    // pure iteration mode the window is capped so an explicit huge max_iter still
+    // early-stops responsively; under a time budget the cap is dropped — a budget
+    // run is bounded by the wall clock, and a tiny fixed window would otherwise
+    // declare "converged" in the first fraction of a percent of the run (while
+    // the schedule is still hot and merely exploring), wasting the budget.
+    const int window  = (time_budget_s > 0.0)
+                            ? std::max(1, n_target / 50)
+                            : std::min(std::max(1, n_target / 50), 200);
     double win_best   = best_cost;
     int    stale      = 0;
     const double rel_eps = 1e-4;
@@ -437,9 +444,15 @@ OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
         // Soft wall-clock cap.
         if (time_budget_s > 0.0 && elapsed(t_start) >= time_budget_s) { gen++; break; }
         // Convergence early-stop: no meaningful improvement for `patience` gens.
+        // Under a time budget the horizon scales with the calibrated run (≥ ~2%
+        // of the generations), mirroring SA, so a long budget isn't abandoned
+        // after a fixed handful of stale generations.
         if (patience > 0) {
+            const int eff_patience = (time_budget_s > 0.0)
+                                         ? std::max(patience, n_target / 50)
+                                         : patience;
             if (best_cost < prev_best * (1.0 - rel_eps)) { prev_best = best_cost; stale = 0; }
-            else if (++stale >= patience) { gen++; break; }
+            else if (++stale >= eff_patience) { gen++; break; }
         }
     }
     return _make_result(best_ind, gen);
