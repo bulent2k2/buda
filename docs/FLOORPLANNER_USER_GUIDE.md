@@ -210,6 +210,16 @@ Click **Optimize…** to open the optimizer dialog.
 | **SA** | Simulated Annealing — good for large move diversity; set Iterations (default 20 000) |
 | **GA** | Genetic Algorithm — good for exploring many placements; set Generations (default 200) |
 
+**Runtime** *(optional)* — instead of a fixed Iterations/Generations count, enter
+a wall-clock budget like `30s`, `2m`, or `1h`. The optimizer calibrates its
+per-iteration cost on your machine, runs as many iterations as fit the budget,
+and **stops early if the placement converges** (no meaningful improvement). A
+runtime overrides the count. Leave it blank for the classic iteration-bounded run.
+
+**Patience** *(optional)* — stop after this many consecutive non-improving checks
+(`0` = off). Timed runs default to `10`; set it for iteration-bounded runs too if
+you want convergence early-stop there.
+
 ### Weights
 
 | Weight | Controls |

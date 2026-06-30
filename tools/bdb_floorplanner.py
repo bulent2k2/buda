@@ -53,11 +53,30 @@ import buda_viz
 from ui_state import ViewState
 
 
+def _parse_time_budget(s: str) -> float:
+    """Parse a runtime-budget string to seconds: '5s'→5, '2m'→120, '1h'→3600,
+    '30'→30 (bare number = seconds).  Blank/invalid → 0.0 (= off)."""
+    s = (s or "").strip().lower()
+    if not s:
+        return 0.0
+    mult = 1.0
+    if s.endswith("s"):
+        s = s[:-1]
+    elif s.endswith("m"):
+        mult, s = 60.0, s[:-1]
+    elif s.endswith("h"):
+        mult, s = 3600.0, s[:-1]
+    try:
+        return max(0.0, float(s) * mult)
+    except ValueError:
+        return 0.0
+
+
 class BdbFloorplanner:
     def __init__(self, root):
         self.root = root
         self.root.title("BUDA Floorplanner Prototype")
-        self.root.geometry("1360x820")
+        self.root.geometry("1680x1000")
 
         # Bring window to front and set icon using centralized helpers
         buda_viz.set_icon(self.root, "buda_fp_icon.png")
@@ -92,6 +111,8 @@ class BdbFloorplanner:
         self._opt_settings: dict = {
             "alg":         "sa",
             "iter":        20000,
+            "runtime":     "",      # e.g. "30s"/"2m"/"1h"; blank = iteration-bounded
+            "patience":    0,       # early-stop after N non-improving checks (0=off)
             "w_wl":        1.0,
             "w_area":      0.1,
             "w_ovlp":      10.0,
@@ -260,7 +281,7 @@ class BdbFloorplanner:
 
         canvas_f = ttk.Frame(main)
         canvas_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._fig = Figure(figsize=(9, 7), facecolor="#f3f4f6")
+        self._fig = Figure(figsize=(11, 8.5), facecolor="#f3f4f6")
         self._ax = self._fig.add_subplot(111)
         self._canvas = FigureCanvasTkAgg(self._fig, master=canvas_f)
         NavigationToolbar2Tk(self._canvas, canvas_f).update()
@@ -293,8 +314,8 @@ class BdbFloorplanner:
         self.root.bind("<Control-a>", lambda e: self._select_all())
         self.root.bind("<Meta-a>",    lambda e: self._select_all())
 
-        # f — toggle maximize (skip when a text widget has focus)
-        self.root.bind("f", self._toggle_maximize)
+        # f — toggle fullscreen (skip when a text widget has focus)
+        self.root.bind("f", self._toggle_fullscreen)
 
         # h / H — reset zoom to full view
         self.root.bind("h", lambda e: self._home_view())
@@ -325,11 +346,19 @@ class BdbFloorplanner:
             row=row, column=1, sticky="ew", pady=1)
         parent.columnconfigure(1, weight=1)
 
-    def _toggle_maximize(self, _event=None):
+    def _toggle_fullscreen(self, _event=None):
+        # True fullscreen (borderless, fills the screen), matching buda_viz's
+        # 'f' behavior — not just a maximized/zoomed window.  Press 'f' again
+        # (or Esc-then-f) to leave fullscreen.
         fw = self.root.focus_get()
         if isinstance(fw, (ttk.Spinbox, ttk.Entry, tk.Entry, tk.Spinbox, tk.Text)):
             return
-        self.root.state("normal" if self.root.state() == "zoomed" else "zoomed")
+        try:
+            now = bool(self.root.attributes("-fullscreen"))
+            self.root.attributes("-fullscreen", not now)
+        except tk.TclError:
+            # Fallback for the rare platform without the -fullscreen attribute.
+            self.root.state("normal" if self.root.state() == "zoomed" else "zoomed")
 
     # ------------------------------------------------------------------
     # Overlay depth control
@@ -601,9 +630,11 @@ class BdbFloorplanner:
             self._push_undo(snap)
             self._draw()
             r = dlg.result
+            budget = self._opt_settings.get("runtime", "")
+            bud = f", budget {budget}" if budget else ""
             self._status.set(
                 f"Optimize: HPWL={r.hpwl:.1f}  overlap={r.overlap:.1f}  "
-                f"({r.iterations} iter)"
+                f"({r.iterations} iter{bud})"
             )
 
     def _validate_if_focused(self):
@@ -1788,6 +1819,26 @@ class _OptimizeDialog:
         ttk.Spinbox(iter_f, textvariable=self._iter_var,
                     from_=100, to=500000, increment=1000, width=9).pack(side=tk.LEFT, padx=(4, 0))
 
+        # ── Runtime budget (optional) ─────────────────────────────────────────
+        # When set, a soft wall-clock budget drives the run instead of the fixed
+        # iteration count (per-iteration cost is calibrated on this machine), and
+        # convergence early-stop is on by default.  Blank = iteration-bounded.
+        rt_f = ttk.Frame(alg_f)
+        rt_f.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(rt_f, text="Runtime:").pack(side=tk.LEFT)
+        self._runtime_var = tk.StringVar(value=str(settings.get("runtime", "")))
+        ttk.Entry(rt_f, textvariable=self._runtime_var, width=7).pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Label(rt_f, text="(e.g. 30s, 2m, 1h — overrides count)").pack(side=tk.LEFT, padx=(4, 0))
+
+        pt_f = ttk.Frame(alg_f)
+        pt_f.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(pt_f, text="Patience:").pack(side=tk.LEFT)
+        self._patience_var = tk.IntVar(value=int(settings.get("patience", 0)))
+        ttk.Spinbox(pt_f, textvariable=self._patience_var,
+                    from_=0, to=1000, increment=1, width=7).pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Label(pt_f, text="(0 = off; stop after N non-improving checks)").pack(
+            side=tk.LEFT, padx=(4, 0))
+
         # ── Weights ───────────────────────────────────────────────────────────
         wt_f = ttk.LabelFrame(self.top, text="Weights", padding=6)
         wt_f.pack(fill=tk.X, padx=8, pady=(6, 0))
@@ -1908,12 +1959,22 @@ class _OptimizeDialog:
             for n in reshapeable
             if self._min_w_vars[n].get() > 0 or self._min_h_vars[n].get() > 0
         }
-        method = self._alg.get()
+        method   = self._alg.get()
+        iter_arg = "max_iter" if method == "sa" else "generations"
+        budget   = _parse_time_budget(self._runtime_var.get())
+        patience = max(0, self._patience_var.get())
         kwargs: dict = dict(seed=42)
-        if method == "sa":
-            kwargs["max_iter"] = self._iter_var.get()
+        if budget > 0:
+            # Runtime overrides the count: time fully drives the run (iter/gen
+            # cap removed) and per-iteration cost is calibrated on this machine.
+            # Convergence early-stop defaults on for timed runs.
+            kwargs["time_budget_s"] = budget
+            kwargs[iter_arg] = 0
+            kwargs["patience"] = patience if patience > 0 else 10
         else:
-            kwargs["generations"] = self._iter_var.get()
+            kwargs[iter_arg] = self._iter_var.get()
+            if patience > 0:
+                kwargs["patience"] = patience
         kwargs["w_wl"]   = self._w_wl.get()
         kwargs["w_area"] = self._w_area.get()
         kwargs["w_ovlp"] = self._w_ovlp.get()
@@ -1922,6 +1983,8 @@ class _OptimizeDialog:
         self._settings.update({
             "alg":         method,
             "iter":        self._iter_var.get(),
+            "runtime":     self._runtime_var.get().strip(),
+            "patience":    patience,
             "w_wl":        self._w_wl.get(),
             "w_area":      self._w_area.get(),
             "w_ovlp":      self._w_ovlp.get(),
