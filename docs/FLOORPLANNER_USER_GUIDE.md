@@ -220,6 +220,16 @@ runtime overrides the count. Leave it blank for the classic iteration-bounded ru
 (`0` = off). Timed runs default to `10`; set it for iteration-bounded runs too if
 you want convergence early-stop there.
 
+**Bloat** *(optional)* — inflate each movable block *only during optimization* so
+the result leaves room for routing channels; the real-sized block is then
+re-centered in its bloated slot. Enter `20%` to scale both dimensions, `50` for an
+absolute margin on both, or `dx=50,dy=80` for per-axis margins. Blank = no bloat.
+(Fixed and reshapeable blocks are not bloated.)
+
+When the run finishes, the **status bar** summarizes the result: the change in
+**wire-length** and **area** (before → after, with percent), the final overlap,
+and the **runtime** with the **iteration/generation count**.
+
 ### Weights
 
 | Weight | Controls |

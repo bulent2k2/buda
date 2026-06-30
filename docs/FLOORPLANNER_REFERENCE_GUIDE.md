@@ -185,6 +185,12 @@ a session (reset when the application is restarted).
 | Generations (GA) | 100–500 000 | 200 | Number of GA generations |
 | Runtime | `30s` / `2m` / `1h` (blank) | blank | Soft wall-clock budget; calibrated per-iteration, overrides the count, with convergence early-stop |
 | Patience | 0–1000 | 0 | Stop after N non-improving checks (0 = off; timed runs default to 10) |
+| Bloat | `20%` / `50` / `dx=50,dy=80` (blank) | blank | Inflate each movable block *only during optimization* to leave routing channels; the real-sized block is re-centered in its bloated slot |
+
+When the run finishes, the status bar reports the **change in wirelength and
+area** (before → after, with percent), the final overlap, and the **runtime**
+with the **iteration/generation count** — e.g.
+`Optimize SA:  WL 12,000→9,500 (−20.8%)   area 5,000,000→4,200,000 (−16.0%)   overlap 0   18,432 iter in 3.4s`.
 
 ### Weights Section
 

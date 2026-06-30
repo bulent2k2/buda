@@ -111,6 +111,7 @@ class BdbFloorplanner:
             "iter":        20000,
             "runtime":     "",      # e.g. "30s"/"2m"/"1h"; blank = iteration-bounded
             "patience":    0,       # early-stop after N non-improving checks (0=off)
+            "bloat":       "",      # e.g. "20%"/"dx=50,dy=80"; blank = no bloat
             "w_wl":        1.0,
             "w_area":      0.1,
             "w_ovlp":      10.0,
@@ -648,13 +649,29 @@ class BdbFloorplanner:
         if dlg.result is not None:
             self._push_undo(snap)
             self._draw()
-            r = dlg.result
-            budget = self._opt_settings.get("runtime", "")
-            bud = f", budget {budget}" if budget else ""
-            self._status.set(
-                f"Optimize: HPWL={r.hpwl:.1f}  overlap={r.overlap:.1f}  "
-                f"({r.iterations} iter{bud})"
-            )
+            self._status.set(self._fmt_optimize_status(dlg.metrics))
+
+    @staticmethod
+    def _fmt_optimize_status(m: dict | None) -> str:
+        """One-line summary: change in wirelength and area, overlap, and the
+        runtime + iteration/generation count."""
+        if not m:
+            return "Optimize complete."
+
+        def _chg(before: float, after: float) -> str:
+            if before > 0:
+                pct = (after - before) / before * 100.0
+                return f"{before:,.0f}→{after:,.0f} ({pct:+.1f}%)"
+            return f"{before:,.0f}→{after:,.0f}"
+
+        unit = "iter" if m.get("method") == "sa" else "gen"
+        return (
+            f"Optimize {m.get('method', '').upper()}:  "
+            f"WL {_chg(m['hpwl0'], m['hpwl1'])}   "
+            f"area {_chg(m['area0'], m['area1'])}   "
+            f"overlap {m['overlap']:.0f}   "
+            f"{m['iters']} {unit} in {m['dt']:.1f}s"
+        )
 
     def _validate_if_focused(self):
         """Run validate only when no text widget has keyboard focus (avoids eating 'v' in entry fields)."""
@@ -1813,6 +1830,7 @@ class _OptimizeDialog:
     def __init__(self, parent, state, root_blocks: list[str], settings: dict):
         self.state    = state
         self.result   = None
+        self.metrics  = None
         self._settings = settings
 
         self.top = tk.Toplevel(parent)
@@ -1861,6 +1879,18 @@ class _OptimizeDialog:
         ttk.Spinbox(pt_f, textvariable=self._patience_var,
                     from_=0, to=1000, increment=1, width=7).pack(side=tk.LEFT, padx=(4, 0))
         ttk.Label(pt_f, text="(0 = off; stop after N non-improving checks)").pack(
+            side=tk.LEFT, padx=(4, 0))
+
+        # ── Bloat (optional) ──────────────────────────────────────────────────
+        # Inflate each movable block ONLY during optimization so the result
+        # leaves routing channels; the real-sized block is re-centered in its
+        # bloated slot.  Blank = no bloat.
+        bl_f = ttk.Frame(alg_f)
+        bl_f.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(bl_f, text="Bloat:").pack(side=tk.LEFT)
+        self._bloat_var = tk.StringVar(value=str(settings.get("bloat", "")))
+        ttk.Entry(bl_f, textvariable=self._bloat_var, width=10).pack(side=tk.LEFT, padx=(4, 0))
+        ttk.Label(bl_f, text="(e.g. 20%, 50, dx=50,dy=80 — routing channels)").pack(
             side=tk.LEFT, padx=(4, 0))
 
         # ── Weights ───────────────────────────────────────────────────────────
@@ -2002,6 +2032,7 @@ class _OptimizeDialog:
         kwargs["w_wl"]   = self._w_wl.get()
         kwargs["w_area"] = self._w_area.get()
         kwargs["w_ovlp"] = self._w_ovlp.get()
+        bloat = fpc.parse_bloat(self._bloat_var.get())
 
         # Persist settings so the next dialog open pre-fills them.
         self._settings.update({
@@ -2009,6 +2040,7 @@ class _OptimizeDialog:
             "iter":        self._iter_var.get(),
             "runtime":     self._runtime_var.get().strip(),
             "patience":    patience,
+            "bloat":       self._bloat_var.get().strip(),
             "w_wl":        self._w_wl.get(),
             "w_area":      self._w_area.get(),
             "w_ovlp":      self._w_ovlp.get(),
@@ -2039,11 +2071,24 @@ class _OptimizeDialog:
 
         def worker() -> None:
             try:
+                import time
+                # Before/after metrics so the result can report the change in
+                # wirelength and area alongside runtime and the iter/gen count.
+                hpwl0 = fpc.compute_hpwl(state)
+                area0 = fpc.bbox_area(state)
+                t0 = time.perf_counter()
                 result = fpc.optimize_placement(
                     state, method=method,
                     fixed=fixed, reshapeable=reshapeable,
-                    min_sizes=m_sizes, **kwargs)
-                q.put(("done", result))
+                    min_sizes=m_sizes, bloat=bloat, **kwargs)
+                dt = time.perf_counter() - t0
+                metrics = {
+                    "method": method, "dt": dt, "iters": result.iterations,
+                    "hpwl0": hpwl0, "hpwl1": fpc.compute_hpwl(state),
+                    "area0": area0, "area1": fpc.bbox_area(state),
+                    "overlap": result.overlap,
+                }
+                q.put(("done", result, metrics))
             except Exception as exc:
                 q.put(("error", str(exc)))
 
@@ -2061,6 +2106,7 @@ class _OptimizeDialog:
                     self._prog_lbl.config(text=f"{pct}%")
                 elif kind == "done":
                     self.result = msg[1]
+                    self.metrics = msg[2]
                     self.top.destroy()
                     return
                 elif kind == "error":

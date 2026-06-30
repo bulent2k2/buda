@@ -60,6 +60,72 @@ def parse_time_budget(s: str) -> float:
         return 0.0
 
 
+def parse_bloat(s: str):
+    """Parse an optimizer block-bloat string to a dict, or None when off.
+
+    '20%'          → {'pct': 20.0}          (scale both dims ×1.2)
+    '50'           → {'dx': 50.0,'dy': 50.0}(absolute margin, both dims)
+    'dx=50,dy=80'  → {'dx': 50.0,'dy': 80.0}
+    blank/invalid  → None
+
+    Matches build_hier_demo's --bloat so the GUI and CLI behave the same."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    if s.endswith("%"):
+        try:
+            return {"pct": float(s[:-1])}
+        except ValueError:
+            return None
+    if "=" in s:
+        d = {}
+        for part in s.split(","):
+            if "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            try:
+                d[k.strip()] = float(v)
+            except ValueError:
+                pass
+        if not d:
+            return None
+        dx = d.get("dx", d.get("dy", 0.0))
+        dy = d.get("dy", d.get("dx", 0.0))
+        return {"dx": dx, "dy": dy}
+    try:
+        v = float(s)
+        return {"dx": v, "dy": v}
+    except ValueError:
+        return None
+
+
+def _bloated_size(w: float, h: float, bloat):
+    """Inflated (w, h) used ONLY during optimization, to leave routing channels."""
+    if not bloat:
+        return w, h
+    if "pct" in bloat:
+        f = 1.0 + bloat["pct"] / 100.0
+        return w * f, h * f
+    return w + bloat.get("dx", 0.0), h + bloat.get("dy", 0.0)
+
+
+def bbox_area(state) -> float:
+    """Bounding-box (envelope) area of root-level blocks at live engine positions."""
+    xs, ys = [], []
+    for name in state.block_names:
+        if "/" in name:
+            continue
+        try:
+            b = state.engine.get_block(name)
+        except Exception:
+            continue
+        xs += [b.x1, b.x2]
+        ys += [b.y1, b.y2]
+    if not xs:
+        return 0.0
+    return (max(xs) - min(xs)) * (max(ys) - min(ys))
+
+
 @dataclass
 class BlockNode:
     """One node in the component hierarchy tree."""
@@ -989,6 +1055,7 @@ def optimize_placement(
     fixed=None,
     reshapeable=None,
     min_sizes=None,
+    bloat=None,
     **kwargs,
 ):
     """Run global placement optimization on root-level blocks.
@@ -996,6 +1063,9 @@ def optimize_placement(
     fixed:       names of blocks whose position must not change.
     reshapeable: names of blocks whose aspect ratio may change (area kept constant).
     min_sizes:   {name: (min_w, min_h)} minimum dimension constraints.
+    bloat:       optional {'pct':..} or {'dx':..,'dy':..} — inflate each movable
+                 block ONLY during optimization (so it leaves routing channels);
+                 the real-sized block is then re-centered in its bloated slot.
     **kwargs:    forwarded to run_sa() or run_ga() (e.g. max_iter, seed).
 
     Returns an OptimizerResult; also applies the result to state.engine.
@@ -1011,14 +1081,23 @@ def optimize_placement(
     reshape_set = set(reshapeable or [])
     min_dict    = dict(min_sizes or {})
 
+    # Bloat only movable, non-reshapeable blocks (a fixed block can't move, and
+    # area-preserving reshape doesn't compose with inflation).  bloat_info maps
+    # name -> (real_w, real_h, bloated_w, bloated_h) for those we inflated.
+    bloat_info: dict = {}
+
     for name in state.block_names:
         if "/" in name:
             continue
         b = state.engine.get_block(name)
         w, h   = b.x2 - b.x1, b.y2 - b.y1
+        bw, bh = w, h
+        if bloat and name not in fixed_set and name not in reshape_set:
+            bw, bh = _bloated_size(w, h, bloat)
+            bloat_info[name] = (w, h, bw, bh)
         mw, mh = min_dict.get(name, (0.0, 0.0))
         opt.add_block_ex(
-            name, w, h, b.x1, b.y1, mw, mh,
+            name, bw, bh, b.x1, b.y1, mw, mh,
             fixed=(name in fixed_set),
             reshapeable=(name in reshape_set),
         )
@@ -1033,6 +1112,12 @@ def optimize_placement(
             w, h = c.x2 - c.x1, c.y2 - c.y1
             lx = p.px - c.x1 if p.px >= 0 else w / 2.0
             ly = p.py - c.y1 if p.py >= 0 else h / 2.0
+            if c.name in bloat_info:
+                # The real block is centered in its bloated slot, so the final
+                # pin sits at bloated_origin + centering_offset + local offset.
+                rw, rh, bw, bh = bloat_info[c.name]
+                lx += (bw - rw) / 2.0
+                ly += (bh - rh) / 2.0
             nets_pins.setdefault(p.net_id, []).append((c.name, (lx, ly)))
         for pins in nets_pins.values():
             if len(pins) >= 2:
@@ -1045,6 +1130,13 @@ def optimize_placement(
 
     for pb in result.placements:
         try:
+            if pb.name in bloat_info:
+                # Center the real-sized block inside its bloated slot → routing
+                # channels on all sides.  Pure move (keeps the real footprint).
+                rw, rh, bw, bh = bloat_info[pb.name]
+                state.engine.move_block_raw(
+                    pb.name, pb.x + (bw - rw) / 2.0, pb.y + (bh - rh) / 2.0)
+                continue
             b = state.engine.get_block(pb.name)
             same_size = (abs((b.x2 - b.x1) - pb.w) < 1e-6 and
                          abs((b.y2 - b.y1) - pb.h) < 1e-6)
