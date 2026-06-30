@@ -106,9 +106,6 @@ _STRADDLE = {
 }
 
 
-@pytest.mark.xfail(reason="Artificial TOP tap still emitted in the straddle case "
-                          "(to be fixed: opposing pulls => no edge tap, let it be).",
-                   strict=True)
 def test_straddle_no_artificial_top_or_bottom_tap():
     c, B = _v_trunk_inside(_fp(_STRADDLE), "blk_15", ["blk_32", "blk_00"], "blk_00")
     assert _overlaps(c, B), "trunk should touch blk_00 by overlap"
@@ -175,9 +172,6 @@ _H_STRADDLE = {
 }
 
 
-@pytest.mark.xfail(reason="Artificial RIGHT tap still emitted in the H straddle "
-                          "case (to be fixed: opposing pulls => no edge tap).",
-                   strict=True)
 def test_h_straddle_no_artificial_left_or_right_tap():
     c, B = _trunk_inside(_fp(_H_STRADDLE), "blk_15", ["blk_32", "blk_00"], "blk_00", "H")
     assert _overlaps(c, B), "trunk should touch blk_00 by overlap"
