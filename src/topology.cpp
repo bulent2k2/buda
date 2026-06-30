@@ -1271,6 +1271,29 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
     }
 
+    // Trunk-touches-block, no artificial far-edge tap (mirror of add_trunk_v; #84).
+    // A no-stub block whose extent the STUB span already overlaps is touched by
+    // the trunk by overlap; pull its face-pushed att_x back into the stub span so
+    // the spine is not extended to manufacture an edge tap.  A block the stub span
+    // is OFF (one-directional pull) keeps its near-face att_x and is tapped there.
+    if (use_busterm_) {
+        int stub_lo = INT_MAX, stub_hi = INT_MIN;
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i]) {
+                stub_lo = std::min(stub_lo, att_x[i]);
+                stub_hi = std::max(stub_hi, att_x[i]);
+            }
+        if (stub_lo <= stub_hi) {
+            for (int i = 0; i < n; ++i) {
+                if (has_stub[i]) continue;
+                if (!blocks[i].rects.empty()) continue;        // single-rect only
+                int b1 = blocks[i].orig_bbox.x1, b2 = blocks[i].orig_bbox.x2;
+                if (b1 <= stub_hi && b2 >= stub_lo)            // stub span overlaps block
+                    att_x[i] = std::clamp(att_x[i], stub_lo, stub_hi);
+            }
+        }
+    }
+
     int x_lo = INT_MAX, x_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
         x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]);
@@ -1304,7 +1327,37 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
         if (seeded && lo < hi) { x_lo = lo; x_hi = hi; }
     }
-    if (x_lo >= x_hi) return;
+    // Degenerate spine (all real attachments share one x == the junction).  Mirror
+    // of add_trunk_v (#84): rather than a junction-less spine-less collapse (which
+    // would let parallel stubs separate, a silent open — Codex P1) or a zero-slide
+    // pinch on an abutment line (why the earlier H mirror was reverted), emit a
+    // BOUNDED INTERIOR spine toward a contained straddling block's centre — only
+    // when such a block exists, so a junction with no interior room is dropped.
+    if (x_lo >= x_hi) {
+        const int junction = x_lo;        // == x_hi
+        int n_stubs = 0, side = 0;
+        bool same_side = true, ok = true, have_contained = false;
+        int sp_lo = junction, sp_hi = junction;
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i]) {
+                ++n_stubs;
+                int s = (conn_y[i] > y_trunk) ? 1 : (conn_y[i] < y_trunk ? -1 : 0);
+                if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
+                continue;
+            }
+            const Rect& bb = blocks[i].orig_bbox;
+            if (!blocks[i].rects.empty() || !(bb.x1 <= junction && junction <= bb.x2)) {
+                ok = false; continue;
+            }
+            have_contained = true;
+            int c = bb.center().x;                     // strictly interior (no face tap)
+            sp_lo = std::min(sp_lo, c);
+            sp_hi = std::max(sp_hi, c);
+        }
+        if (!(n_stubs >= 2 && same_side && ok && have_contained && sp_lo < sp_hi))
+            return;
+        x_lo = sp_lo; x_hi = sp_hi;                    // bounded interior spine
+    }
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
@@ -1329,6 +1382,12 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
             if (has_stub[i]) continue;                 // trunk doesn't pass through it
             if (!floorplan_.get_feedthru(blocks[i].block_name, h_layer_)) continue;
             if (blocks[i].rects.size() > 1) continue;  // MVP: single-rect only
+            // A feedthru relay needs the trunk to PASS THROUGH the block (enter one
+            // face, exit the other).  A spine fully contained in the block (the
+            // bounded interior spine, #84) does not pass through, so it must not be
+            // split out — that would delete the only junction (Codex P1).
+            if (x_lo >= blocks[i].orig_bbox.x1 && x_hi <= blocks[i].orig_bbox.x2)
+                continue;
             int fx1 = std::max(x_lo, blocks[i].orig_bbox.x1);
             int fx2 = std::min(x_hi, blocks[i].orig_bbox.x2);
             if (fx1 < fx2) {
@@ -1571,23 +1630,19 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
     }
 
-    // Seg-busterm containment: a no-stub (the trunk passes through it) endpoint
-    // block that the STUB span already overlaps is covered by the trunk by
-    // containment — the spine need not extend to its face to tap it.  The push
-    // loops above pushed such a block's att_y out to its near face (manufacturing
-    // a BUSTERM edge tap and over-extending the spine, e.g. b34_bus_028 blk_00).
-    // Pull it back into the stub span so the spine stays minimal and the block is
-    // connected by pass-through instead of an edge tap.  Only blocks the stub
-    // span already covers are touched (others still extend to reach their face),
-    // so the blast radius is the contained-and-already-covered case.
-    //
-    // GATED ON FEEDTHRU.  Connecting a block by containment (no face tap, the
-    // trunk relays the bus across its interior) is electrically valid only if the
-    // block is a declared feedthru on the trunk layer — that is exactly the
-    // set_feedthru relay contract.  Without feedthru the receiver would never get
-    // the net (the connection is open), so a non-feedthru contained block keeps
-    // its face att_y and is connected by a real edge tap (the spine stays
-    // non-degenerate; b34_bus_028 blk_00 is the canonical non-feedthru case).
+    // Trunk-touches-block, no artificial far-edge tap (issue #84).  A no-stub
+    // endpoint block the trunk passes through is touched by the trunk; whether the
+    // spine must extend to one of its faces to *tap* it is decided by the conn-seg
+    // (stub) span, not by feedthru:
+    //   - the STUB span already OVERLAPS the block (straddle) → the trunk touches
+    //     it by overlap; pull the face-pushed att_y back into the stub span so the
+    //     spine is NOT extended to manufacture an edge tap (b34_bus_028 blk_00).
+    //   - the stub span is OFF the block (one-directional pull) → the overlap test
+    //     below is false, so att_y keeps its near-face value and the spine extends
+    //     to that NEAR edge and taps it (pull-up/pull-down).
+    // The degenerate sub-case (stubs collapse to one y, so the pulled-back block
+    // would leave the spine zero-length) is given a bounded interior spine further
+    // below — never a face tap and never a junction-less collapse.
     {
         int stub_lo = INT_MAX, stub_hi = INT_MIN;
         for (int i = 0; i < n; ++i)
@@ -1599,10 +1654,8 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             for (int i = 0; i < n; ++i) {
                 if (has_stub[i] || stub_suppressed[i]) continue;   // stubbed/suppressed
                 if (!blocks[i].rects.empty()) continue;            // single-rect only (TEG owns multi-rect)
-                if (!floorplan_.get_feedthru(blocks[i].block_name, v_layer_))
-                    continue;                                      // containment ⇒ feedthru only
                 int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
-                if (b1 <= stub_hi && b2 >= stub_lo)                // already covered
+                if (b1 <= stub_hi && b2 >= stub_lo)                // stub span overlaps block
                     att_y[i] = std::clamp(att_y[i], stub_lo, stub_hi);
             }
         }
@@ -1677,42 +1730,46 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
         if (seeded && lo < hi) { y_lo = lo; y_hi = hi; }
     }
-    // Degenerate spine (all real attachments share one y).  Normally nothing to
-    // emit — BUT if the perpendicular stubs alone connect every block (each
-    // no-stub endpoint block contains the common junction y, so it is covered by
-    // a stub passing through it), emit the stubs with NO spine: the contained
-    // block is connected by containment, not by extending a redundant spine to
-    // its face (b34_bus_028).  Otherwise (single block, etc.) drop the candidate.
+    // Degenerate spine (all real attachments share one y == the junction).  A
+    // spine-less topology would leave the same-side collinear stubs joined only by
+    // nominally overlapping at the junction — ConnTopology infers a SEG link only
+    // for *perpendicular* pairs, so two parallel stubs carry no junction constraint
+    // and NUTS could place them on different tracks → a silent open (issue #84,
+    // Codex P1).  Instead, when a contained endpoint block straddles the junction,
+    // emit a BOUNDED INTERIOR spine: a short vertical segment from the junction
+    // toward that block's centre, staying strictly inside it (no face tap).  The
+    // stubs T-junction onto this spine (a real SEG constraint), and the block is
+    // connected by containment (the spine lies inside it).  Otherwise drop it.
     if (y_lo >= y_hi) {
+        const int junction = y_lo;        // == y_hi
         int n_stubs = 0, side = 0;
-        bool all_covered = true, same_side = true;
+        bool same_side = true, ok = true, have_contained = false;
+        int sp_lo = junction, sp_hi = junction;
         for (int i = 0; i < n; ++i) {
             if (has_stub[i] && !stub_suppressed[i]) {
                 ++n_stubs;
-                // All surviving stubs must lie on the SAME side of x_trunk so they
-                // OVERLAP at the junction and are physically connected — collinear
-                // stubs on opposite sides meet only at the (spine-less) junction,
-                // which ConnTopology cannot infer a SEG link across (it only joins
-                // perpendicular segments), leaving the topology disconnected.
+                // Same-side keeps the collinear stubs overlapping so they share the
+                // junction endpoint with the spine.
                 int s = (conn_x[i] > x_trunk) ? 1 : (conn_x[i] < x_trunk ? -1 : 0);
                 if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
                 continue;
             }
             if (has_stub[i]) continue;                 // suppressed stub: covered by a survivor
-            // no-stub (contained) block: single-rect, the junction y_lo must lie
-            // in its extent (multi-rect/TEG is out of scope), AND it must be a
-            // declared feedthru — a containment-only cover is electrically open
-            // otherwise (see the pull-back gate above).  A non-feedthru contained
-            // block fails coverage, so the candidate is dropped rather than
-            // collapsed into an illegal feedthru relay.
-            if (!blocks[i].rects.empty() ||
-                !(blocks[i].orig_bbox.y1 <= y_lo && y_lo <= blocks[i].orig_bbox.y2) ||
-                !floorplan_.get_feedthru(blocks[i].block_name, v_layer_))
-                all_covered = false;
+            // no-stub (contained) block: single-rect, must straddle the junction.
+            const Rect& bb = blocks[i].orig_bbox;
+            if (!blocks[i].rects.empty() || !(bb.y1 <= junction && junction <= bb.y2)) {
+                ok = false; continue;
+            }
+            have_contained = true;
+            int c = bb.center().y;                     // strictly interior (no face tap)
+            sp_lo = std::min(sp_lo, c);
+            sp_hi = std::max(sp_hi, c);
         }
-        if (!(n_stubs >= 2 && all_covered && same_side)) return;
-        // fall through with y_lo == y_hi: the spine block below emits no segment,
-        // and the stub loop wires every block (contained ones by pass-through).
+        if (!(n_stubs >= 2 && same_side && ok && have_contained && sp_lo < sp_hi))
+            return;
+        y_lo = sp_lo; y_hi = sp_hi;                    // bounded interior spine
+        // falls through: the spine block emits the V segment [y_lo,y_hi]; the stub
+        // loop wires blk_15/blk_32; the contained block is covered by the spine.
     }
 
     Topology t;
@@ -1731,6 +1788,12 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             if (has_stub[i] || stub_suppressed[i]) continue;  // not passed through
             if (!floorplan_.get_feedthru(blocks[i].block_name, v_layer_)) continue;
             if (blocks[i].rects.size() > 1) continue;         // MVP: single-rect only
+            // A feedthru relay needs the trunk to PASS THROUGH the block (enter one
+            // face, exit the other).  A spine fully contained in the block (the
+            // bounded interior spine, #84) does not pass through, so it must not be
+            // split out — that would delete the only junction (Codex P1).
+            if (y_lo >= blocks[i].orig_bbox.y1 && y_hi <= blocks[i].orig_bbox.y2)
+                continue;
             int fy1 = std::max(y_lo, blocks[i].orig_bbox.y1);
             int fy2 = std::min(y_hi, blocks[i].orig_bbox.y2);
             if (fy1 < fy2) {

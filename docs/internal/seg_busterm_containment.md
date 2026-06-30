@@ -240,3 +240,56 @@ same applies to the `TRUNK_V_OOB+MST@x1025` hybrid (relay-completion path).
   kind (perp slide = block interior, no along anchor) would make the model
   explicit and generalise to the non-collinear / multi-rect cases; tracked as a
   follow-up.
+
+---
+
+## Resolution — bounded interior spine (issue #84, SUPERSEDES the feedthru gate)
+
+The feedthru-gating above (PR #85) framed the straddle case as "containment needs
+feedthru, else edge-tap". That framing was wrong, and the empirical evidence
+showed why:
+
+- The "artificial tap" we removed and the **junction** are the *same* segment.
+  In the 3-seg shape, the V spine that reaches blk_00's face is exactly what the
+  two H stubs T-junction onto — drop it and the two collinear stubs carry **no
+  `SEG` link** (ConnTopology infers SEG only for *perpendicular* pairs), so NUTS
+  can place the branches on different tracks and the bundle **silently opens**
+  (Codex P1, confirmed on the feedthru collapse: `seg_links=0`).
+- So the correct fix is neither "extend to the face" (artificial far-edge tap)
+  nor "collapse spine-less" (junction-less open). It is a **bounded interior
+  spine**.
+
+**The rule** (driven by the conn-seg span, *not* feedthru — see
+`test/tests/test_topo_trunk_tap_edge.py`): a trunk that touches an endpoint block
+B decides its tap by whether the **stub span overlaps B**:
+
+| Case | Spine |
+|---|---|
+| stub span **off** B (one-directional pull) | extend to B's **near** edge and tap it |
+| stub span **overlaps** B, non-degenerate (contained spine) | spine = stub span (already inside B), no tap |
+| stub span **overlaps** B, **degenerate** (all stubs at one coord) | **bounded interior spine**: from the junction to B's centre, strictly inside B — no face tap, but a real V segment the stubs T-junction onto |
+
+**Implementation** (`add_trunk_v` / `add_trunk_h`, #84):
+1. The pull-back is gated on **stub-span-overlaps-B**, not feedthru — the overlap
+   test itself excludes the one-directional case (which keeps its near-edge tap).
+2. The degenerate branch, when a contained block straddles the junction, sets the
+   spine to `[junction, block.centre]` (a bounded interior segment) instead of a
+   face tap or a spine-less collapse. With no contained straddling block it drops
+   the candidate — which also retires the junction-less suppression-containment
+   `TRUNK_V_OOB@x1025` (its degenerate spine has no interior room) and is the
+   built-in no-pinch guard that previously sank the `add_trunk_h` mirror.
+3. A feedthru relay requires the trunk to **pass through** the block; a spine
+   fully *inside* the block is not a pass-through, so the `ft_gaps` split skips it
+   — otherwise feedthru would delete the only junction (Codex P1 on the feedthru
+   path). Feedthru therefore does not change this geometry; blk_00 is connected by
+   containment either way.
+
+**Result on `b34_bus_028`** (no feedthru): `TRUNK_V@x1740` is a 3-seg shape whose
+seg0 is the bounded interior spine `(1740,4277)→(1740,4615)` (blk_00 centre →
+junction), `seg_links=4` (the junction), blk_00 connected by containment, **no**
+top/bottom tap. Routes clean (NUTS 0/0, DNUTS 84/0, no opens); big2 unchanged at
+9 overlaps / 60 unplaced; full fast+mid green. Tests:
+`test_topo_trunk_tap_edge.py` (8, V+H straddle / one-directional / contained
+spine) and `test_topo_containment.py` (containment + junction, no junction-less
+containment, feedthru keeps the junction). The PR #85 `*_edge_taps_without_feedthru`
+tests are replaced; the deferred OOB xfail is retired (the candidate is dropped).
