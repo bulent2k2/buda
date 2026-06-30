@@ -37,6 +37,29 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build")):
 import buda
 
 
+def parse_time_budget(s: str) -> float:
+    """Parse an optimizer runtime-budget string to seconds: '5s'→5, '2m'→120,
+    '1h'→3600, '30'→30 (bare number = seconds).  Blank/invalid/negative → 0.0
+    (= off; the run stays iteration-bounded).
+
+    Lives in this GUI-free module so it is testable without importing the Tk
+    frontend (and so the Optimize dialog and any CLI share one parser)."""
+    s = (s or "").strip().lower()
+    if not s:
+        return 0.0
+    mult = 1.0
+    if s.endswith("s"):
+        s = s[:-1]
+    elif s.endswith("m"):
+        mult, s = 60.0, s[:-1]
+    elif s.endswith("h"):
+        mult, s = 3600.0, s[:-1]
+    try:
+        return max(0.0, float(s) * mult)
+    except ValueError:
+        return 0.0
+
+
 @dataclass
 class BlockNode:
     """One node in the component hierarchy tree."""

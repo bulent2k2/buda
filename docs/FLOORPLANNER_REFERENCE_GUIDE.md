@@ -183,6 +183,8 @@ a session (reset when the application is restarted).
 | Algorithm | SA / GA | SA | Simulated Annealing or Genetic Algorithm |
 | Iterations (SA) | 100–500 000 | 20 000 | Total SA move attempts |
 | Generations (GA) | 100–500 000 | 200 | Number of GA generations |
+| Runtime | `30s` / `2m` / `1h` (blank) | blank | Soft wall-clock budget; calibrated per-iteration, overrides the count, with convergence early-stop |
+| Patience | 0–1000 | 0 | Stop after N non-improving checks (0 = off; timed runs default to 10) |
 
 ### Weights Section
 

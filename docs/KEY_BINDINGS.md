@@ -90,7 +90,7 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `ctrl+z` / `cmd+z` | **Undo** the last placement change. |
 | `ctrl+Z` / `ctrl+y` / `cmd+Z` | **Redo**. |
 | `ctrl+a` / `cmd+a` | **Select All** blocks. |
-| `f` | **Toggle fullscreen** / maximise the window. |
+| `f` | **Toggle true fullscreen** (borderless, fills the screen — like the viewer); press `f` again to exit. |
 
 In **Edge mode** (`e` key or the **Edges** checkbox in the Blocks panel), the
 **Align ▾** menu's *Edges → Min / Max / Mean* entries snap all selected edges to
