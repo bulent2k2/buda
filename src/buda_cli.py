@@ -19,6 +19,7 @@ import io
 import json
 import math
 import os
+import re
 import sys
 
 # Ensure the compiled extension is loaded from build/ rather than a stale
@@ -408,6 +409,53 @@ class BudaSession:
             return src, dsts
         except (ValueError, IndexError):
             return None, []
+
+    @staticmethod
+    def _fmt_index_ranges(nums):
+        """Compress sorted-unique ints into compact ranges: [0,1,2,3,5,6] -> '0:3,5:6'."""
+        nums = sorted(set(nums))
+        out, i = [], 0
+        while i < len(nums):
+            j = i
+            while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+                j += 1
+            out.append(str(nums[i]) if i == j else f"{nums[i]}:{nums[j]}")
+            i = j + 1
+        return ",".join(out)
+
+    def _bundle_net_summary(self, net_names, max_len=200):
+        """Group a bundle's nets into buses for a compact log line.
+
+        A net named '<bus>_<idx>' or '<bus>_b<idx>' (the two forms add_bus/add_net
+        emit — e.g. 'bus_007_3', 'bus_077_b00') is folded into its bus with a
+        compressed bit range like 'bus_077[0:59]'; nets with no numeric suffix are
+        listed verbatim.  First-seen order is preserved; truncated past max_len."""
+        groups, order, seen = {}, [], set()
+        for nm in net_names:
+            m = re.match(r'^(.*?)_([A-Za-z]*)(\d+)$', nm)
+            if m:
+                key = (m.group(1), m.group(2))      # (bus, bit-tag) e.g. ('bus_077','b')
+                if key not in groups:
+                    groups[key] = []
+                    order.append(('bus', key, m.group(1)))
+                groups[key].append(int(m.group(3)))
+            elif ('net', nm) not in seen:
+                seen.add(('net', nm))
+                order.append(('net', nm, nm))
+        parts = [f"{disp}[{self._fmt_index_ranges(groups[key])}]" if kind == 'bus'
+                 else disp
+                 for kind, key, disp in order]
+        summary = ", ".join(parts)
+        if len(summary) > max_len:
+            summary = summary[:max_len - 1].rstrip(", ") + "…"
+        return summary
+
+    def _log_bundle_nets(self, w):
+        """Print the bundle-id -> buses/nets correspondence for generate_* logs."""
+        nets = w.input.original_bundle.get_net_names()
+        print(f"  bundle {w.input.original_bundle.id} nets: "
+              f"{self._bundle_net_summary(nets)} "
+              f"({len(nets)} net{'' if len(nets) == 1 else 's'})")
 
     def _generate_hier_topo_one(self, w, use_center, use_double_detour,
                                 fp_cache, comps_by_name):
@@ -2431,6 +2479,7 @@ class BudaSession:
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.input.candidates)} topologies for bundle "
                       f"{w.input.original_bundle.id} ({label})")
+                self._log_bundle_nets(w)
             # Restore the sidecar baseline (pins + per-segment layer overrides) onto
             # the freshly generated candidates, so the live state matches the GUI
             # even before run_planner. A later select_topology overrides it; the
@@ -2461,6 +2510,7 @@ class BudaSession:
             for w in self.bundles:
                 n = self._generate_hier_topo_one(w, use_center, use_double_detour,
                                                   fp_cache, comps_by_name)
+                self._log_bundle_nets(w)
                 total_candidates += n
             print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
                   f"{total_candidates} total candidates")
