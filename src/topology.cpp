@@ -1571,6 +1571,43 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
     }
 
+    // Seg-busterm containment: a no-stub (the trunk passes through it) endpoint
+    // block that the STUB span already overlaps is covered by the trunk by
+    // containment — the spine need not extend to its face to tap it.  The push
+    // loops above pushed such a block's att_y out to its near face (manufacturing
+    // a BUSTERM edge tap and over-extending the spine, e.g. b34_bus_028 blk_00).
+    // Pull it back into the stub span so the spine stays minimal and the block is
+    // connected by pass-through instead of an edge tap.  Only blocks the stub
+    // span already covers are touched (others still extend to reach their face),
+    // so the blast radius is the contained-and-already-covered case.
+    //
+    // GATED ON FEEDTHRU.  Connecting a block by containment (no face tap, the
+    // trunk relays the bus across its interior) is electrically valid only if the
+    // block is a declared feedthru on the trunk layer — that is exactly the
+    // set_feedthru relay contract.  Without feedthru the receiver would never get
+    // the net (the connection is open), so a non-feedthru contained block keeps
+    // its face att_y and is connected by a real edge tap (the spine stays
+    // non-degenerate; b34_bus_028 blk_00 is the canonical non-feedthru case).
+    {
+        int stub_lo = INT_MAX, stub_hi = INT_MIN;
+        for (int i = 0; i < n; ++i)
+            if (has_stub[i] && !stub_suppressed[i]) {
+                stub_lo = std::min(stub_lo, att_y[i]);
+                stub_hi = std::max(stub_hi, att_y[i]);
+            }
+        if (stub_lo <= stub_hi) {
+            for (int i = 0; i < n; ++i) {
+                if (has_stub[i] || stub_suppressed[i]) continue;   // stubbed/suppressed
+                if (!blocks[i].rects.empty()) continue;            // single-rect only (TEG owns multi-rect)
+                if (!floorplan_.get_feedthru(blocks[i].block_name, v_layer_))
+                    continue;                                      // containment ⇒ feedthru only
+                int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
+                if (b1 <= stub_hi && b2 >= stub_lo)                // already covered
+                    att_y[i] = std::clamp(att_y[i], stub_lo, stub_hi);
+            }
+        }
+    }
+
     int y_lo = INT_MAX, y_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
         if (stub_suppressed[i]) continue;
@@ -1640,7 +1677,43 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         }
         if (seeded && lo < hi) { y_lo = lo; y_hi = hi; }
     }
-    if (y_lo >= y_hi) return;
+    // Degenerate spine (all real attachments share one y).  Normally nothing to
+    // emit — BUT if the perpendicular stubs alone connect every block (each
+    // no-stub endpoint block contains the common junction y, so it is covered by
+    // a stub passing through it), emit the stubs with NO spine: the contained
+    // block is connected by containment, not by extending a redundant spine to
+    // its face (b34_bus_028).  Otherwise (single block, etc.) drop the candidate.
+    if (y_lo >= y_hi) {
+        int n_stubs = 0, side = 0;
+        bool all_covered = true, same_side = true;
+        for (int i = 0; i < n; ++i) {
+            if (has_stub[i] && !stub_suppressed[i]) {
+                ++n_stubs;
+                // All surviving stubs must lie on the SAME side of x_trunk so they
+                // OVERLAP at the junction and are physically connected — collinear
+                // stubs on opposite sides meet only at the (spine-less) junction,
+                // which ConnTopology cannot infer a SEG link across (it only joins
+                // perpendicular segments), leaving the topology disconnected.
+                int s = (conn_x[i] > x_trunk) ? 1 : (conn_x[i] < x_trunk ? -1 : 0);
+                if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
+                continue;
+            }
+            if (has_stub[i]) continue;                 // suppressed stub: covered by a survivor
+            // no-stub (contained) block: single-rect, the junction y_lo must lie
+            // in its extent (multi-rect/TEG is out of scope), AND it must be a
+            // declared feedthru — a containment-only cover is electrically open
+            // otherwise (see the pull-back gate above).  A non-feedthru contained
+            // block fails coverage, so the candidate is dropped rather than
+            // collapsed into an illegal feedthru relay.
+            if (!blocks[i].rects.empty() ||
+                !(blocks[i].orig_bbox.y1 <= y_lo && y_lo <= blocks[i].orig_bbox.y2) ||
+                !floorplan_.get_feedthru(blocks[i].block_name, v_layer_))
+                all_covered = false;
+        }
+        if (!(n_stubs >= 2 && all_covered && same_side)) return;
+        // fall through with y_lo == y_hi: the spine block below emits no segment,
+        // and the stub loop wires every block (contained ones by pass-through).
+    }
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
