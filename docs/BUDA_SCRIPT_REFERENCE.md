@@ -954,6 +954,32 @@ ladder (see [congestion_planner.md](congestion_planner.md) for the full design):
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `iterations` | int | 5 | Reserved for planned PathFinder-style negotiated-congestion iterations (see [future/planner_ripup_extensions.md](future/planner_ripup_extensions.md)); currently unused beyond the first pass. |
+| `signal_tracks` | keyword | off | Charge band capacity in **signal-track count** instead of layout width (see below). |
+
+**Signal-track band capacity (`signal_tracks`).** By default a Hanan band's
+capacity is its geometric layout width. But DetailedNUTS places each bit on a
+discrete SIGNAL track from the layer's `def_track_pattern` (power/ground/clock
+slots are not usable), and the placeable count is a quantized fraction of the
+width that also depends on the pattern's origin/phase and any `add_grid_override`.
+So the planner can commit a bundle `overflow=0` while the band is actually short
+of signal tracks → a silent DetailedNUTS open. Adding the `signal_tracks` keyword
+makes the planner count the discrete SIGNAL tracks each band holds (honouring the
+grid's keepouts, exactly as DetailedNUTS will) and charge capacity in track units,
+so the shortfall surfaces as **overflow at planning time** and the escalation
+ladder below (STRICT → rip-up/replan) avoids it up front.
+
+- Works on both `run_planner` and `run_planner hier`, e.g. `run_planner 5 signal_tracks`
+  / `run_planner hier 5 signal_tracks`.
+- **Opt-in:** without the keyword the plan is byte-identical to before. Requires at
+  least one `def_track_pattern` (else it warns and falls back to the width model).
+  Layers without a pattern keep the width model even when the keyword is on.
+- `set_planner_param track_cap_slack <n>` grants `n` extra signal tracks per band
+  as a quantization slack (default 0 = exact integer accounting).
+- Measured on `flow/rnr/mix.buda` (hier): the width plan yields 236 DetailedNUTS
+  opens; `run_planner hier 5 signal_tracks` yields **162** with no `ripup_reroute`,
+  because the planner stops over-filling capacity-short bands.
+- The slide-window sub-band clamp counts tracks within the clamped interval too,
+  so it is exact end-to-end. See `docs/internal/planner_signal_track_capacity.md`.
 
 **Output:** Prints per-bundle selection: topology type, assigned per-segment
 layers, ` [pinned]`/` [replanned]` tags, and the raw overflow in layout units

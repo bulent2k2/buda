@@ -1649,27 +1649,69 @@ class BudaSession:
         print(f"  Defined blocks: {', '.join(known) if known else '(none)'}")
         sys.exit(1)
 
+    def _install_leaf_keepouts(self):
+        """Install implicit solid-leaf-cell keepouts on every non-TOP layer grid
+        so signal tracks over cells are excluded — matching the planner and
+        abstract NUTS (Gap 2).  Independent of the order in which blocks,
+        containers, and track patterns were declared.  Guarded per grid object so
+        repeated calls (detailed re-runs, or a `signal_tracks` plan before DNUTS)
+        don't re-add duplicates.  No-op without a routing grid."""
+        if self.routing_grid is None:
+            return
+        if getattr(self, '_leaf_keepouts_grid', None) is self.routing_grid:
+            return
+        for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
+            for lid in self.layers.get_layer_ids_by_dir(d):
+                if self.layers.is_top(lid) or not self.routing_grid.has_layer(lid):
+                    continue
+                for koz in self.fp.low_layer_keepouts([lid]):
+                    if lid in koz.layer_ids:
+                        self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
+                                                      koz.bbox.x2, koz.bbox.y2)
+        self._leaf_keepouts_grid = self.routing_grid
+
+    @staticmethod
+    def _planner_iters(args, default=5):
+        """First numeric token in a run_planner arg list, skipping the `hier` and
+        `signal_tracks` keywords; `default` if none."""
+        for a in args:
+            if a in ("hier", "signal_tracks"):
+                continue
+            try:
+                return int(a)
+            except ValueError:
+                continue
+        return default
+
+    def _configure_capacity_mode(self, args):
+        """Enable the signal-track band-capacity model on self.planner when the
+        `signal_tracks` keyword is present (Gap A part 2).  Requires a routing grid
+        with `def_track_pattern` layers; installs the leaf-cell keepouts first so
+        the planner counts exactly the tracks DetailedNUTS will place.  Must be
+        called after the planner is constructed and before build_congestion_map.
+        No-op (width model) without the keyword."""
+        if "signal_tracks" not in args:
+            return
+        has_pattern = self.routing_grid is not None and any(
+            self.routing_grid.has_layer(lid)
+            for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL)
+            for lid in self.layers.get_layer_ids_by_dir(d))
+        if not has_pattern:
+            print("Error: run_planner signal_tracks requires a routing grid "
+                  "(def_track_pattern); using the width model instead.")
+            return
+        self._install_leaf_keepouts()
+        self.planner.set_routing_grid(self.routing_grid)
+        self.planner.set_capacity_mode(buda.CapacityMode.SIGNAL_TRACKS)
+
     def _run_detailed_nuts(self, bit_order="LO_HI"):
         """Execute bit-level track assignment using DetailedNUTSEngine."""
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
-        # Install implicit solid-leaf-cell keepouts on every non-TOP layer grid
-        # so detailed routing avoids signal tracks over cells, matching the
-        # planner and abstract NUTS (Gap 2).  Done here — just before the solve —
-        # so it is independent of the order in which blocks, containers, and
-        # track patterns were declared.  Guarded per grid object so repeated
-        # detailed runs (e.g. after run_nuts_on_layer) don't re-add duplicates.
-        if getattr(self, '_leaf_keepouts_grid', None) is not self.routing_grid:
-            for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
-                for lid in self.layers.get_layer_ids_by_dir(d):
-                    if self.layers.is_top(lid) or not self.routing_grid.has_layer(lid):
-                        continue
-                    for koz in self.fp.low_layer_keepouts([lid]):
-                        if lid in koz.layer_ids:
-                            self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
-                                                          koz.bbox.x2, koz.bbox.y2)
-            self._leaf_keepouts_grid = self.routing_grid
+        # Match the planner / abstract NUTS by excluding signal tracks over solid
+        # leaf cells on LOW layers before the solve.
+        self._install_leaf_keepouts()
 
         bid_to_nbits = {w.input.original_bundle.id: len(w.input.original_bundle.get_net_names())
                         for w in self.bundles}
@@ -2651,7 +2693,7 @@ class BudaSession:
                 # absolute-coord wrappers, assign priorities, then run the flat planner.
                 if self.bdb is None:
                     print("Error: run_planner hier requires an open BDB"); return
-                iterations = int(args[1]) if len(args) > 1 else 5
+                iterations = self._planner_iters(args)
                 # Re-planning invalidates any adopted dogleg (and its pins).
                 self._reset_doglegs()
                 # Apply user-pinned selections to template wrappers BEFORE expansion
@@ -2675,6 +2717,7 @@ class BudaSession:
                 # pitch ends up differing from the one planned here.
                 self.planner.set_track_pitch(self._nuts_pitch)
                 self._planner_pitch = self._nuts_pitch
+                self._configure_capacity_mode(args)   # opt-in signal_tracks (Gap A part 2)
                 self.planner.build_congestion_map()
                 self._planner_iterations = iterations
                 with buda.ostream_redirect():
@@ -2706,12 +2749,13 @@ class BudaSession:
                 # pitch ends up differing from the one planned here.
                 self.planner.set_track_pitch(self._nuts_pitch)
                 self._planner_pitch = self._nuts_pitch
+                self._configure_capacity_mode(args)   # opt-in signal_tracks (Gap A part 2)
                 self.planner.build_congestion_map()
                 # Apply architect-pinned selections BEFORE optimizing so the
                 # planner scores the correct topology and assigns layers for it.
                 self._apply_selections()
                 self._planner_is_hier = False
-                self._planner_iterations = int(args[0]) if args else 5
+                self._planner_iterations = self._planner_iters(args)
                 with buda.ostream_redirect():
                     assignments = self.planner.optimize_topologies(self.bundles, self._planner_iterations)
                 # Apply planner layer decisions (vector copy in C++ means we must apply here).

@@ -244,10 +244,19 @@ void bind_routing(py::module_& m) {
         .def("cap",       &GlobalCut::cap,   py::arg("band"))
         .def("usage",     &GlobalCut::usage, py::arg("band"));
 
+    py::enum_<CapacityMode>(m, "CapacityMode")
+        .value("WIDTH",         CapacityMode::WIDTH)
+        .value("SIGNAL_TRACKS", CapacityMode::SIGNAL_TRACKS);
+
     py::class_<CongestionPlanner>(m, "CongestionPlanner")
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_planner_param",    &CongestionPlanner::set_planner_param)
         .def("set_track_pitch",      &CongestionPlanner::set_track_pitch)
+        // Opt-in signal-track capacity model (Gap A part 2).  keep_alive so the
+        // RoutingGridStack outlives the planner that stores a pointer to it.
+        .def("set_routing_grid",     &CongestionPlanner::set_routing_grid,
+             py::arg("grid"), py::keep_alive<1, 2>())
+        .def("set_capacity_mode",    &CongestionPlanner::set_capacity_mode, py::arg("mode"))
         .def("build_congestion_map", &CongestionPlanner::build_congestion_map)
         .def("optimize_topologies",  &CongestionPlanner::optimize_topologies)
         .def("get_cuts",             &CongestionPlanner::get_cuts)
