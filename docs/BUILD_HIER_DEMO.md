@@ -14,8 +14,8 @@ more realistic demos and test cases.
 ## Usage
 
 ```bash
-python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,c.buda]
-                                 [--instances N] [--buses N]
+python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a,b,c]
+                                 [--path DIR] [--instances N] [--buses N]
                                  [--no-cell-nets] [--no-busterms]
                                  [--optimize sa|ga] [--param KEY=VALUE ...]
                                  [--bloat 20% | --bloat dx=50,dy=80]
@@ -25,7 +25,8 @@ python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,c.b
 |---|---|---|
 | `out.bdb` | `/tmp/hier_demo.bdb` | Output BDB path (overwritten if it exists) |
 | `--seed N` | `1` | Seed for the random bus wiring (reproducible) |
-| `--cells …` | `flow/dnuts1.buda,flow/dnuts2.buda,flow/channel_stress.buda` | Comma-separated flat scripts to use as leaf cells |
+| `--cells …` | `dnuts1,dnuts2,channel_stress` | Comma-separated leaf cells. The `.buda` extension is inferred when omitted; a bare name is looked up in `--path` (default `flow/`), an absolute path is used as-is, and a directory-qualified entry (`flow/two.buda`) stays relative to the repo root |
+| `--path DIR` | `flow/` | Directory holding the leaf `.buda` files for bare `--cells` names |
 | `--instances SPEC` | `2` | Instances per cell: one int (all cells), a positional list in `--cells` order (`1,4,2`), or named (`dnuts1=3,channel_stress=1`; unlisted → 2). Each count ≥1 |
 | `--buses N` | `7` | **Base** top-level cross-instance buses; bit widths cycle `[4,6,8,10,12,14,16]` (≥0). Extra buses are appended so every instance is wired to ≥3 top buses |
 | `--no-cell-nets` | *(off)* | Emit only the top-level buses (lean ~70-net demo) |
@@ -38,9 +39,12 @@ python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,c.b
 # Defaults
 python3 tools/build_hier_demo.py
 
-# Custom output, seed, and cells
+# Custom output, seed, and cells (extension inferred; looked up in flow/)
 python3 tools/build_hier_demo.py /tmp/my.bdb --seed 7 \
-    --cells flow/two.buda,flow/dnuts1.buda,flow/channel_stress.buda
+    --cells two,dnuts1,channel_stress
+
+# Leaf cells from a different directory
+python3 tools/build_hier_demo.py /tmp/my.bdb --path ~/my_cells --cells alu,fifo,ctrl
 
 # Bigger demo: 4 instances per cell and 16 base top-level buses
 python3 tools/build_hier_demo.py /tmp/big.bdb --instances 4 --buses 16

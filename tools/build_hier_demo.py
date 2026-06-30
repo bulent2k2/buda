@@ -9,12 +9,19 @@ channel_stress), instantiates each a configurable number of times (default
 leaf blocks across those instances.
 
 Usage:
-  python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,...]
-                                   [--instances N] [--buses N]
+  python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a,b,...]
+                                   [--path DIR] [--instances N] [--buses N]
                                    [--no-cell-nets] [--no-busterms]
                                    [--optimize sa|ga] [--param KEY=VALUE ...]
                                    [--bloat 20% | --bloat dx=50,dy=80]
 
+  --cells a,b,...    comma-separated leaf cells. The `.buda` extension is
+                     inferred when omitted (`--cells dnuts1,dnuts2`); a bare name
+                     is looked up in the --path directory (default: flow/), an
+                     absolute path is used as-is, and a directory-qualified entry
+                     (`flow/two.buda`) stays relative to the repo root.
+  --path DIR         directory holding the leaf .buda files for bare --cells
+                     names (default: the repo's flow/ directory).
   --instances SPEC   instances per cell (default 2). SPEC is one int for every
                      cell (`--instances 3`), a positional list in --cells order
                      (`--instances 1,4,2`), or named counts
@@ -38,8 +45,8 @@ Usage:
                      absolute dx/dy) so SA/GA leaves routing channels; the real-
                      sized instance is centered in its bloated slot.
 
-Defaults: out = /tmp/hier_demo.bdb, seed = 1,
-          cells = flow/dnuts1.buda, flow/dnuts2.buda, flow/channel_stress.buda
+Defaults: out = /tmp/hier_demo.bdb, seed = 1, path = flow/,
+          cells = dnuts1, dnuts2, channel_stress  (→ flow/<name>.buda)
 
 Resulting hierarchy (with --instances 2):
   chip                       (cell "top")
@@ -532,12 +539,41 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     return out_path
 
 
+_DEFAULT_CELLS = ["dnuts1", "dnuts2", "channel_stress"]
+_DEFAULT_CELL_DIR = os.path.join(_ROOT, "flow")
+
+
+def _resolve_cell(entry: str, base_dir: str) -> str:
+    """Resolve one --cells entry to a `.buda` path.
+
+    - the `.buda` extension is inferred when missing (`dnuts1` → `dnuts1.buda`);
+    - an absolute path is used as-is;
+    - a path that already names a directory (`flow/two.buda`) is taken relative
+      to the repo root (backward compatible);
+    - a bare cell name is looked up in `base_dir` (the `--path` directory)."""
+    e = entry.strip()
+    if not e.lower().endswith(".buda"):
+        e += ".buda"
+    if os.path.isabs(e):
+        return e
+    if os.path.dirname(e):                 # dir-qualified → relative to repo root
+        return os.path.join(_ROOT, e)
+    return os.path.join(base_dir, e)       # bare cell name → the --path directory
+
+
+def _resolve_cells(entries, path_arg):
+    """Resolve --cells entries against the optional --path directory (default:
+    the repo's flow/ directory)."""
+    base_dir = os.path.abspath(path_arg) if path_arg else _DEFAULT_CELL_DIR
+    return [_resolve_cell(e, base_dir) for e in entries]
+
+
 def main():
     argv = sys.argv[1:]
     out_path = "/tmp/hier_demo.bdb"
     seed = 1
-    cell_files = [os.path.join(_ROOT, "flow", f)
-                  for f in ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
+    cell_entries = list(_DEFAULT_CELLS)
+    path_arg = None
 
     cell_nets = True
     busterms = True
@@ -552,9 +588,10 @@ def main():
         if argv[i] == "--seed" and i + 1 < len(argv):
             seed = int(argv[i + 1]); i += 2
         elif argv[i] == "--cells" and i + 1 < len(argv):
-            cell_files = [c if os.path.isabs(c) else os.path.join(_ROOT, c)
-                          for c in argv[i + 1].split(",")]
+            cell_entries = [c for c in argv[i + 1].split(",") if c.strip()]
             i += 2
+        elif argv[i] in ("--path", "-path") and i + 1 < len(argv):
+            path_arg = argv[i + 1]; i += 2
         elif argv[i] in ("--instances", "-instances") and i + 1 < len(argv):
             n_instances = _parse_instances(argv[i + 1]); i += 2
         elif argv[i] in ("--buses", "-buses") and i + 1 < len(argv):
@@ -583,7 +620,12 @@ def main():
               file=sys.stderr)
     if n_buses < 0:
         sys.exit("Error: --buses must be >= 0")
+    if path_arg and not os.path.isdir(os.path.abspath(path_arg)):
+        sys.exit(f"Error: --path directory not found: {path_arg}")
 
+    if not cell_entries:
+        sys.exit("Error: --cells must name at least one cell")
+    cell_files = _resolve_cells(cell_entries, path_arg)
     missing = [c for c in cell_files if not os.path.exists(c)]
     if missing:
         sys.exit(f"Error: cell file(s) not found: {missing}")
