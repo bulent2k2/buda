@@ -1456,20 +1456,31 @@ the pipeline, and keeps only moves that reduce the metric.
 | `run_nuts` | a | NUTS abstract track overlaps (`num_overlaps`) |
 | `run_detailed_nuts` | b | DetailedNUTS opens / unplaced bits (`num_unplaced`) |
 
-**Algorithm (greedy hill-climb):** each iteration snapshots per-bundle state, then
-for every contending bundle (the bundles on either side of a NUTS overlap, or the
-open bundles in stage b) trials each alternate candidate — re-pinning it and
-re-running planner→NUTS(→DNUTS) silently — and commits the single best move that
-lowers the metric. It stops when the metric reaches 0, no improving move exists, or
-`max_iter` is hit. It is a **no-op** when the metric is already 0 (prints
-`metric already 0 — nothing to do`).
+**Algorithm (greedy hill-climb, first-improving-contender):** each iteration
+snapshots per-bundle state, then scans the contending bundles in priority order
+(the open bundles in stage b, then the bundles on either side of each NUTS
+overlap) and **commits the first contender whose best alternate candidate lowers
+the metric** — re-pinning it and re-running planner→NUTS(→DNUTS) silently. It
+stops when the metric reaches 0, no contender improves, or `max_iter` is hit. It
+is a **no-op** when the metric is already 0 (prints `metric already 0 — nothing
+to do`).
 
-Each committed move logs the bundle and topology change, e.g.:
+> Each trial is a full pipeline re-run, so committing the *first* improving
+> contender (rather than the single best move over *all* contenders) keeps an
+> iteration cheap on large designs. A flushed per-contender heartbeat makes
+> progress visible. On a big design the default `max_iter` may be reached while
+> the metric is still falling — the command says so and suggests re-running or
+> raising `max_iter`.
+
+Output logs each contender tried and each committed move, e.g.:
 
 ```
-[ripup_reroute] stage b (DNUTS opens): start metric=60, max_iter=10
-[ripup_reroute] iter 1: bundle 75 topo 1->2, metric 60->0
-[ripup_reroute] done: metric 60->0 after 1 move(s).
+[ripup_reroute] stage b (DNUTS opens): start metric=236, max_iter=10, 25 contenders
+[ripup_reroute] iter 1: contender 1/25 bundle 102 improves 236->174 (topo 4->6)
+[ripup_reroute] iter 1: COMMIT bundle 102 topo 4->6, metric 236->174
+...
+[ripup_reroute] reached max_iter=10 while still improving — re-run ripup_reroute or raise max_iter (e.g. `ripup_reroute 50`) to continue.
+[ripup_reroute] done: metric 236->46 after 10 move(s), 96 trial(s).
 ```
 
 **Flat and hier flow:** Works after both `run_planner` and `run_planner hier`. In

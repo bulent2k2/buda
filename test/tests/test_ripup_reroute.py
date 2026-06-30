@@ -141,11 +141,17 @@ def no_change(ctx):
     assert _selections(ctx["s"]) == ctx["sel_before"], ctx["out"]
 
 
+def _distinct_iterations(out):
+    """Count distinct `iter K` indices in ripup output (each iteration emits
+    several lines now — per-contender heartbeats + a COMMIT)."""
+    return {line.split(":", 1)[0].split()[-1]
+            for line in out.splitlines()
+            if line.startswith("[ripup_reroute] iter ")}
+
+
 @then("ripup_reroute performed at most 1 iteration")
 def at_most_one_iter(ctx):
-    n_iters = sum(1 for line in ctx["out"].splitlines()
-                  if line.startswith("[ripup_reroute] iter "))
-    assert n_iters <= 1, ctx["out"]
+    assert len(_distinct_iterations(ctx["out"])) <= 1, ctx["out"]
 
 
 # --- big2 integration (@mid): the validated real-world cases ----------------
@@ -222,9 +228,7 @@ def test_big2_max_iter_bounds_moves():
     with contextlib.redirect_stdout(buf):
         s.do_command("ripup_reroute 1")
     out = buf.getvalue()
-    n_iters = sum(1 for line in out.splitlines()
-                  if line.startswith("[ripup_reroute] iter "))
-    assert n_iters <= 1, out
+    assert len(_distinct_iterations(out)) <= 1, out
 
 
 # --- hier flow (@mid): ripup_reroute re-routes per-instance wrappers ---------
@@ -274,3 +278,40 @@ def test_hier_stage_b_clears_opens():
     out = buf.getvalue()
     assert "flat-flow only" not in out
     assert s.detailed_result.num_unplaced < base, out
+
+
+# --- large hier repro (@mid): responsiveness / bounded-cost guardrail --------
+
+_RNR = _ROOT / "flow" / "rnr"
+
+
+@pytest.mark.mid
+def test_hier_large_repro_progress_and_bounded():
+    """The `mix.buda` hier repro (~100 expanded bundles, 21 NUTS overlaps) was the
+    case that *looked* like a hang: best-over-all-contenders cost ~contenders*
+    candidates full pipeline re-runs per iteration, silently.  Guard the fix:
+    first-improving-contender keeps each iteration cheap, emits a per-contender
+    heartbeat, makes progress, and honors max_iter."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"source {_RNR / 'mix_tracks.buda'}")
+        s.do_command(f"open_bdb {_RNR / 'mix.b_db'}")
+        s.do_command("derive_busterms 2")
+        s.do_command("add_blocks_from_bdb 0")
+        s.do_command("add_blocks_from_bdb 1 skip")
+        s.do_command("add_blocks_from_bdb 2 skip")
+        s.do_command("run_hier_bundler depth 2")
+        s.do_command("generate_hier_topologies")
+        s.do_command("run_planner hier 5")
+        s.do_command("run_nuts")
+    assert s._planner_is_hier
+    base = s.nuts_result.num_overlaps
+    assert base > 0, "mix repro should start with NUTS overlaps"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute 2")          # cap iterations: bounded cost
+    out = buf.getvalue()
+    assert "contender" in out, out               # per-contender progress is visible
+    assert len(_distinct_iterations(out)) <= 2, out   # max_iter honored
+    assert s.nuts_result.num_overlaps < base, out     # made real progress
