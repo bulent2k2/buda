@@ -1499,14 +1499,32 @@ other instances.
 **Requires:** `run_planner` (or `run_planner hier`) and at least `run_nuts` to have
 run first.
 
-**Example:**
+**Recommended usage — run it in both places.** The two stages clear *different*
+causes of unplaced bits, so chaining them clears the most:
+
 ```buda
-run_planner 5
+run_planner 5            # or: run_planner hier 5
 run_nuts
-ripup_reroute            # drive NUTS overlaps toward 0 (stage a)
+ripup_reroute            # stage a: drive NUTS overlaps toward 0
 run_detailed_nuts
-ripup_reroute            # drive DNUTS opens toward 0 (stage b)
+ripup_reroute            # stage b: drive the residual DNUTS opens toward 0
 ```
+
+Stage a removes the opens that stem from abstract track **contention** (when two
+buses overlap on a band, DetailedNUTS cannot fit all their bits) — these are the
+cheap, high-yield wins, and clearing them gives DetailedNUTS a much better
+starting point. The opens that survive stage a (with `overlaps=0`) are **not**
+contention-driven; they are signal-track **capacity** shortfalls — a band whose
+abstract width fit but whose discrete SIGNAL-track count is short of the bit count
+— which only stage b can re-route around. Measured on
+`flow/rnr/mix.buda` (a hier design): baseline 21 overlaps / 236 opens → stage a
+**21→0 overlaps, 236→150 opens** → stage b **150→30 opens**, versus 236→46 for
+stage b alone.
+
+> The residual opens that neither pass can clear are the pure capacity-mismatch
+> cases. Predicting them inside the planner (charging band capacity in
+> signal-track count rather than layout width) is a planned follow-on — see
+> *Gap A part 2* in `docs/internal/wishlist.md`.
 
 ---
 
