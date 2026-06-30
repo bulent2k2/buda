@@ -512,7 +512,7 @@ These planned formats are tracked here for design intent only — there is **no 
 - **GUI** (`tools/bdb_floorplanner.py` + `tools/floorplanner_commands.py`) — Tk/matplotlib editor: drag/resize, align/distribute, SA/GA optimize, live HPWL + flylines, validation, and **Run Flow** (writes BDB → generates a hier `.buda` script → runs `buda_cli.py` for immediate routing feedback).
 - **Launchers:** `./fp [file.bdb]` opens the GUI; `./bfp tc1|tc2|<file.bdb>|<script.buda>` adds built-in demo scenarios (`tools/fp_demo.py`) and flow integration.
 
-**Other `tools/`:** DEF/LEF net-clustering visualizers (`def_cluster.py`, `def_viz*.py`, `def_viz_shared.py`), `group_tree.py` (group hierarchy + JSON persistence), `viz_ipc.py` (Unix-socket selection sync between `buda_viz` and `def_viz`), and `show_detailed_shorts.py` (report bit-level detailed-NUTS shorts).
+**Other `tools/`:** DEF/LEF net-clustering visualizers (`def_cluster.py`, `def_viz*.py`, `def_viz_shared.py`), `group_tree.py` (group hierarchy + JSON persistence), `viz_ipc.py` (Unix-socket selection sync between `buda_viz` and `def_viz`), `show_detailed_shorts.py` (report bit-level detailed-NUTS shorts), and `render.py` (headless: pin one bundle's candidate in a `.buda` flow, run planner→NUTS→DetailedNUTS, print `dump_topologies --conn`, and render a topology/NUTS/DNUTS triptych PNG — `tools/render.py <flow.buda> --bundle <id> --topo <id> [--zoom]`).
 
 ---
 
