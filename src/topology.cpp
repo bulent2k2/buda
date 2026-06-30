@@ -1580,6 +1580,14 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     // connected by pass-through instead of an edge tap.  Only blocks the stub
     // span already covers are touched (others still extend to reach their face),
     // so the blast radius is the contained-and-already-covered case.
+    //
+    // GATED ON FEEDTHRU.  Connecting a block by containment (no face tap, the
+    // trunk relays the bus across its interior) is electrically valid only if the
+    // block is a declared feedthru on the trunk layer — that is exactly the
+    // set_feedthru relay contract.  Without feedthru the receiver would never get
+    // the net (the connection is open), so a non-feedthru contained block keeps
+    // its face att_y and is connected by a real edge tap (the spine stays
+    // non-degenerate; b34_bus_028 blk_00 is the canonical non-feedthru case).
     {
         int stub_lo = INT_MAX, stub_hi = INT_MIN;
         for (int i = 0; i < n; ++i)
@@ -1591,6 +1599,8 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             for (int i = 0; i < n; ++i) {
                 if (has_stub[i] || stub_suppressed[i]) continue;   // stubbed/suppressed
                 if (!blocks[i].rects.empty()) continue;            // single-rect only (TEG owns multi-rect)
+                if (!floorplan_.get_feedthru(blocks[i].block_name, v_layer_))
+                    continue;                                      // containment ⇒ feedthru only
                 int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
                 if (b1 <= stub_hi && b2 >= stub_lo)                // already covered
                     att_y[i] = std::clamp(att_y[i], stub_lo, stub_hi);
@@ -1689,10 +1699,15 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                 continue;
             }
             if (has_stub[i]) continue;                 // suppressed stub: covered by a survivor
-            // no-stub (contained) block: single-rect, and the junction y_lo must
-            // lie in its extent (multi-rect/TEG is out of scope for the collapse).
+            // no-stub (contained) block: single-rect, the junction y_lo must lie
+            // in its extent (multi-rect/TEG is out of scope), AND it must be a
+            // declared feedthru — a containment-only cover is electrically open
+            // otherwise (see the pull-back gate above).  A non-feedthru contained
+            // block fails coverage, so the candidate is dropped rather than
+            // collapsed into an illegal feedthru relay.
             if (!blocks[i].rects.empty() ||
-                !(blocks[i].orig_bbox.y1 <= y_lo && y_lo <= blocks[i].orig_bbox.y2))
+                !(blocks[i].orig_bbox.y1 <= y_lo && y_lo <= blocks[i].orig_bbox.y2) ||
+                !floorplan_.get_feedthru(blocks[i].block_name, v_layer_))
                 all_covered = false;
         }
         if (!(n_stubs >= 2 && all_covered && same_side)) return;

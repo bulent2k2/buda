@@ -174,6 +174,59 @@ wl 1140 to 2 / wl 980, with **blk_00 connected by containment** (a `passthru` on
 both H segments, no BUSTERM edge tap) and non-zero slides (835, 160). Routes
 clean end to end.
 
+## Update — containment is GATED ON FEEDTHRU
+
+Connecting a block by containment (the trunk runs over/through its footprint with
+**no stub landing on its face**) is electrically valid only if the block relays
+the bus across its interior to reach its pin — i.e. the block is a declared
+**feedthru** on the trunk layer (`set_feedthru`). Otherwise the receiver never
+gets the net: the connection is *open*. It only "passes" NUTS/dNUTS today because
+those stages check track overlap, not feedthru legality. **Containment ⇒
+feedthru.**
+
+So both halves of the `add_trunk_v` containment machinery are gated on
+`floorplan_.get_feedthru(block, v_layer_)`:
+
+1. **Pull-back** (`topology.cpp` ~1583) — a contained endpoint block is pulled
+   into the stub span (connected by pass-through) only if it is a feedthru.
+   Otherwise it keeps the face `att_y` the push loops gave it, the spine stays
+   non-degenerate, and the block is connected by a real **edge tap**.
+2. **Degenerate-spine collapse** (~1676) — a no-stub contained block counts toward
+   `all_covered` only if it is a feedthru; otherwise the collapse does not fire.
+
+Result on `b34_bus_028` (no feedthru declared): `TRUNK_V@x1740` is **not**
+collapsed — it is a 3-segment edge-tap (blk_00 tapped at its top face), routes
+clean, and big2 is unchanged at 9 overlaps / 60 unplaced. Declaring
+`set_feedthru blk_00` restores the slim 2-segment containment shape. Tests:
+`test_contained_endpoint_edge_taps_without_feedthru` (no feedthru → edge tap) and
+`test_contained_endpoint_connects_by_containment_with_feedthru` (feedthru →
+containment).
+
+### Deferred — OOB / suppression-induced containment (topo 3)
+
+`TRUNK_V_OOB@x1025` connects blk_00 by a **different** containment path: the OOB
+trunk's long blk_15/blk_32 stubs cross blk_00, and the existing **stub
+suppression** removes blk_00's own stub, leaving it covered only by the crossing
+wires (which land at the zero-slide triple corner `2230,4615` — not a real
+interval tap). Per the feedthru principle this is also illegal containment.
+
+The natural fix — *don't suppress a non-feedthru bundle endpoint's own stub* —
+has **broad blast radius**: stub suppression is the same mechanism that removes
+legitimately-redundant stubs across many flows, and big2's routing relies on
+suppression-induced pass-through coverage in several bundles. Gating it
+generally keeps those stubs, and the extra wire overloads the planner: big2's
+DNUTS unplaced regresses **60 → 128** (e.g. bundle 24's 48 bits dump onto M2, a
+LOW layer, over a cell). No *connectivity* regressions (verify still reports no
+opens) — purely a congestion consequence the current planner cannot absorb.
+
+This reveals that the existing pass-through "coverage" model (`verify.cpp` +
+suppression) treats *any* wire crossing a bundle endpoint as connecting it, which
+the feedthru principle says requires feedthru. Making that rigorous is a larger,
+**planner-aware** change (feedthru-aware coverage in verify + a planner that
+absorbs the kept stubs, or auto-detecting when an endpoint genuinely needs its
+own tap). Tracked as `test_oob_trunk_edge_taps_without_feedthru` (xfail). The
+same applies to the `TRUNK_V_OOB+MST@x1025` hybrid (relay-completion path).
+
 ### Deferred refinements
 
 - **Duplicate collinear stubs.** When two same-side stubs share a face point

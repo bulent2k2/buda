@@ -12,24 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Spec for seg-busterm containment (b34_bus_028).
+"""Spec for seg-busterm containment (b34_bus_028), gated on feedthru.
 
 Three abutted blocks where a bus endpoint block (blk_00) CONTAINS the trunk axis.
-The connectivity model only has BUSTERM (endpoint on a block FACE) and SEG
-connections — no containment — so the trunk generator extends the spine to
-blk_00's far face to manufacture an edge tap, instead of connecting by
-containment / pass-through.
-
 A bus segment carries N bit-wires, so it needs a non-zero perpendicular interval
 (it lives in a Hanan *cell*, never on a Hanan *line*).  The "single straight
-segment at y=4615" idea is therefore invalid: y=4615 is the abutment line of
-blk_15/blk_32 (zero slide).  The bus must instead route through blk_00's interior
-(a real interval) — i.e. connect to blk_00 by containment.
+segment at y=4615" idea is invalid: y=4615 is the abutment line of blk_15/blk_32
+(zero slide).  The bus could instead route through blk_00's interior (a real
+interval) — i.e. connect to blk_00 by **containment**.
 
-Target (this spec): a clean candidate connects blk_00 by **containment** — blk_00
-is covered with NO BUSTERM (edge-tap) connection on any segment — rather than by
-pinning a segment to blk_00's boundary.  Marked xfail until the containment model
-lands; see docs/internal/seg_busterm_containment.md.
+But containment connects blk_00 with NO stub landing on its face: the trunk
+relays the bus across blk_00's interior to reach its pin.  That is electrically
+valid only if blk_00 is a declared **feedthru** on the trunk layer — exactly the
+set_feedthru relay contract.  So the containment treatment is GATED:
+
+- blk_00 NOT a feedthru → the trunk is NOT collapsed; blk_00 is connected by a
+  real edge tap (a BUSTERM on its own face with a non-zero slide interval).
+- blk_00 IS a feedthru (set_feedthru) → the slim containment candidate is legal
+  and blk_00 is covered by pass-through (no edge tap).
+
+See docs/internal/seg_busterm_containment.md.
 """
 import os
 import subprocess
@@ -75,27 +77,80 @@ def _busterm_blocks(ct):
     return out
 
 
-def test_contained_endpoint_connects_by_containment_not_edge_tap():
-    """A clean candidate should connect blk_00 by containment (no edge tap).
-
-    Today every clean candidate edge-taps blk_00 (a BUSTERM face conn) and
-    over-extends a stub to its boundary.  The fix should produce a candidate
-    where blk_00 is covered by a segment passing through it — connected with NO
-    BUSTERM conn — while every block stays connected.
-    """
-    fp = _fp()
+def _clean_containment_candidates(fp):
+    """Clean candidates (no BUSTERM_OPEN/FEEDTHRU_RELAY) connecting blk_00 with no
+    edge tap — i.e. by containment."""
     cands = _gen(fp).generate_candidates("blk_15", ["blk_32", "blk_00"])
-    containment = []
+    out = []
     for c in cands:
         ct = _build(c, fp)
         v = _violations(ct, c, fp)
         if "BUSTERM_OPEN" in v or "FEEDTHRU_RELAY" in v:
             continue                          # not a clean connect
         if "blk_00" not in _busterm_blocks(ct):
-            containment.append(c)             # blk_00 connected without an edge tap
+            out.append(c)                     # blk_00 connected without an edge tap
+    return cands, out
+
+
+def test_contained_endpoint_edge_taps_without_feedthru():
+    """blk_00 NOT a feedthru → the in-bbox V trunk edge-taps blk_00, not contains.
+
+    Containment (covering blk_00 by a wire passing over it, no face tap) would
+    rely on blk_00 relaying the bus internally — only legal under feedthru.  With
+    no feedthru declared, the in-bbox trunk (TRUNK_V@x1740) must not collapse: it
+    connects blk_00 by a real BUSTERM edge tap (3 segs, not the slim 2-seg
+    containment shape).
+    """
+    fp = _fp()
+    cands = _gen(fp).generate_candidates("blk_15", ["blk_32", "blk_00"])
+    flagged = [c for c in cands if c.type == "TRUNK_V@x1740"]
+    assert flagged, "expected the in-bbox TRUNK_V@x1740 shape"
+    for c in flagged:
+        ct = _build(c, fp)
+        assert "blk_00" in _busterm_blocks(ct), (
+            f"{c.type} connects blk_00 by containment without feedthru "
+            f"(should edge-tap): {len(c.segments)} segs"
+        )
+
+
+@pytest.mark.xfail(reason="OOB trunk connects blk_00 by suppression-induced "
+                          "containment; gating stub-suppression generally "
+                          "regresses big2 (60→128 unplaced). Deferred — needs a "
+                          "feedthru-aware coverage model + planner that absorbs "
+                          "the kept stubs. See seg_busterm_containment.md.")
+def test_oob_trunk_edge_taps_without_feedthru():
+    """blk_00 NOT a feedthru → the OOB trunk should also edge-tap, not contain.
+
+    TRUNK_V_OOB@x1025 suppresses blk_00's own stub and covers it only by the
+    blk_15/blk_32 stubs crossing it (landing at the zero-slide triple corner
+    2230,4615).  Per the feedthru principle this is illegal containment, but the
+    fix (gating stub-suppression) has broad blast radius — deferred.
+    """
+    fp = _fp()
+    cands = _gen(fp).generate_candidates("blk_15", ["blk_32", "blk_00"])
+    flagged = [c for c in cands if c.type == "TRUNK_V_OOB@x1025"]
+    assert flagged, "expected the OOB TRUNK_V_OOB@x1025 shape"
+    for c in flagged:
+        ct = _build(c, fp)
+        assert "blk_00" in _busterm_blocks(ct), (
+            f"{c.type} connects blk_00 by containment without feedthru"
+        )
+
+
+def test_contained_endpoint_connects_by_containment_with_feedthru():
+    """blk_00 IS a feedthru → a clean candidate connects it by containment.
+
+    With set_feedthru declared the slim containment topology is legal: blk_00 is
+    covered by pass-through (no BUSTERM edge tap) while every block stays
+    connected.
+    """
+    fp = _fp()
+    fp.set_feedthru_block("blk_00", True)
+    cands, containment = _clean_containment_candidates(fp)
     assert containment, (
         "expected a clean candidate connecting blk_00 by containment (no BUSTERM "
-        "edge tap); shapes: " + ", ".join(f"{c.type}({len(c.segments)}seg)" for c in cands)
+        "edge tap) once blk_00 is a feedthru; shapes: "
+        + ", ".join(f"{c.type}({len(c.segments)}seg)" for c in cands)
     )
 
 
