@@ -87,6 +87,11 @@ public:
     using ProgressFn = std::function<void(int /*current*/, int /*total*/)>;
 
     // ── Simulated Annealing ───────────────────────────────────────────────
+    // time_budget_s > 0: soft wall-clock bound — calibrate per-iteration cost,
+    //   run as many iters as fit the budget (max_iter, if > 0, is a hard cap),
+    //   and anneal the cooling schedule over that estimate.
+    // patience > 0: stop early after that many consecutive non-improving
+    //   checkpoints (no meaningful best-cost improvement).
     OptimizerResult run_sa(int        max_iter   = 50000,
                            double     t_init     = 1.0,
                            double     t_min      = 1e-4,
@@ -95,6 +100,8 @@ public:
                            double     w_area     = 0.1,
                            double     w_ovlp     = 10.0,
                            int        seed       = 42,
+                           double     time_budget_s = 0.0,
+                           int        patience   = 0,
                            ProgressFn progress_fn = nullptr);
 
     // ── Genetic / Evolutionary Algorithm ─────────────────────────────────
@@ -106,6 +113,8 @@ public:
                            double     w_area         = 0.1,
                            double     w_ovlp         = 10.0,
                            int        seed           = 42,
+                           double     time_budget_s  = 0.0,
+                           int        patience       = 0,
                            ProgressFn progress_fn    = nullptr);
 
 private:

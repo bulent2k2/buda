@@ -19,6 +19,10 @@ Usage:
                      (iter=20k). Friendly keys: iter, wl, area, ovlp, seed, and
                      for GA pop/mutation/crossover, for SA t_init/t_min/alpha;
                      raw run_sa/run_ga arg names pass through.
+                     time=5s|2m|1h  → run to a soft wall-clock budget instead of
+                                      a fixed iter count (calibrated per-iter).
+                     patience=N     → stop early after N non-improving checks
+                                      (default 10 for timed runs).
   --bloat …          inflate each instance ONLY for optimization (by percent or
                      absolute dx/dy) so SA/GA leaves routing channels; the real-
                      sized instance is centered in its bloated slot.
@@ -90,10 +94,15 @@ def _define_leaf_cell(db, cell, buda_path):
 
 # ── Optimizer option parsing (--optimize / --param / --bloat) ────────────────
 
-_SA_KEYS = {"iter": "max_iter", "wl": "w_wl", "area": "w_area", "ovlp": "w_ovlp"}
+# Keys whose value is a runtime budget (parsed as seconds, not a k/m count).
+_TIME_KEYS = {"time", "runtime", "budget"}
+_COMMON_KEYS = {"time": "time_budget_s", "runtime": "time_budget_s",
+                "budget": "time_budget_s", "patience": "patience"}
+_SA_KEYS = {"iter": "max_iter", "wl": "w_wl", "area": "w_area", "ovlp": "w_ovlp",
+            **_COMMON_KEYS}
 _GA_KEYS = {"iter": "generations", "wl": "w_wl", "area": "w_area",
             "ovlp": "w_ovlp", "pop": "population", "mutation": "mutation_rate",
-            "crossover": "crossover_rate"}
+            "crossover": "crossover_rate", **_COMMON_KEYS}
 
 
 def _parse_value(v: str):
@@ -110,11 +119,26 @@ def _parse_value(v: str):
         return float(v)
 
 
+def _parse_time(v: str) -> float:
+    """Parse a runtime budget to seconds: '5s'→5, '2m'→120, '1h'→3600, '30'→30."""
+    v = v.strip().lower()
+    mult = 1.0
+    if v.endswith("s"):
+        v = v[:-1]
+    elif v.endswith("m"):
+        mult, v = 60.0, v[:-1]
+    elif v.endswith("h"):
+        mult, v = 3600.0, v[:-1]
+    return float(v) * mult
+
+
 def _parse_param(s: str):
     if "=" not in s:
         sys.exit(f"Error: --param expects KEY=VALUE, got '{s}'")
     k, raw = s.split("=", 1)
-    return k.strip(), _parse_value(raw)
+    k = k.strip()
+    # Time budgets use s/m/h suffixes ('2m' = 2 minutes, not 2 million).
+    return k, (_parse_time(raw) if k.lower() in _TIME_KEYS else _parse_value(raw))
 
 
 def _parse_bloat(s: str) -> dict:
@@ -149,8 +173,14 @@ def _opt_kwargs(method: str, params: dict, default_seed: int) -> dict:
     keymap = _SA_KEYS if method == "sa" else _GA_KEYS
     kw = {keymap.get(k, k): v for k, v in params.items()}
     kw.setdefault("seed", default_seed)
-    kw.setdefault("max_iter" if method == "sa" else "generations",
-                  20000 if method == "sa" else 200)
+    iter_arg = "max_iter" if method == "sa" else "generations"
+    if "time_budget_s" in kw:
+        # Time drives the run; the iteration count is only a hard ceiling (0 =
+        # none) and convergence early-stop is on by default for timed runs.
+        kw.setdefault(iter_arg, 0)
+        kw.setdefault("patience", 10)
+    else:
+        kw.setdefault(iter_arg, 20000 if method == "sa" else 200)
     return kw
 
 
@@ -221,9 +251,11 @@ def _optimize_instances(placements, cell_meta, buses, method, params, bloat, see
     top_h = max(p["y"] + cell_meta[p["cell"]][1] for p in placements)
     bl = "" if not bloat else (f" bloat={bloat.get('pct')}%" if "pct" in bloat
                                else f" bloat dx={bloat['dx']:.0f},dy={bloat['dy']:.0f}")
+    budget = kw.get("time_budget_s", 0.0)
+    bud = f" budget={budget:g}s" if budget else ""
     print(f"  optimize {method.upper()}: hpwl={result.hpwl:.0f} "
           f"area={result.area:.0f} overlap={result.overlap:.0f} "
-          f"({result.iterations} iter){bl} → top {top_w:.0f} x {top_h:.0f}")
+          f"({result.iterations} iter{bud}){bl} → top {top_w:.0f} x {top_h:.0f}")
     return top_w, top_h
 
 

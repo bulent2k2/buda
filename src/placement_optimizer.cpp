@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -253,10 +254,44 @@ size_t PlacementOptimizer::_tournament(const std::vector<double>& fitness,
 OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t_min,
                                             double alpha, double w_wl, double w_area,
                                             double w_ovlp, int seed,
+                                            double time_budget_s, int patience,
                                             ProgressFn progress_fn) {
     if (_blocks.empty()) return {};
+    using clock = std::chrono::steady_clock;
+    auto elapsed = [](clock::time_point t0) {
+        return std::chrono::duration<double>(clock::now() - t0).count();
+    };
+
     std::mt19937 rng(static_cast<unsigned>(seed));
     std::uniform_real_distribution<double> uniform01(0.0, 1.0);
+
+    // Choose the iteration target and cooling schedule.  With a time budget,
+    // calibrate per-iteration cost on a scratch placement and size the run (and
+    // anneal alpha) to fit; max_iter, when > 0, is a hard ceiling.
+    int    n_target  = max_iter;
+    double alpha_eff = alpha;
+    if (time_budget_s > 0.0) {
+        std::mt19937 cal_rng(static_cast<unsigned>(seed) ^ 0x9e3779b9u);
+        Placement cp = _random_placement(cal_rng);
+        double cc = _cost(cp, w_wl, w_area, w_ovlp);
+        const int cal_n = 32;
+        auto c0 = clock::now();
+        for (int i = 0; i < cal_n; i++) {
+            Placement p2 = _perturb(cp, cal_rng);
+            double nc = _cost(p2, w_wl, w_area, w_ovlp);
+            if (nc < cc) { cp = std::move(p2); cc = nc; }
+        }
+        double per_iter = std::max(1e-9, elapsed(c0) / cal_n);
+        // Clamp into int range before storing: a long budget on a fast/tiny
+        // problem can estimate > INT_MAX iters, and the wall-clock cap below is
+        // the real bound anyway.
+        long long est = static_cast<long long>(std::ceil(time_budget_s / per_iter));
+        long long cap = (max_iter > 0) ? max_iter
+                                       : std::numeric_limits<int>::max();
+        n_target = static_cast<int>(std::max<long long>(1, std::min(est, cap)));
+        alpha_eff = std::pow(t_min / t_init, 1.0 / std::max(1, n_target));
+    }
+    if (n_target <= 0) return {};   // neither an iteration nor a time bound
 
     Placement p    = _random_placement(rng);
     Placement best = p;
@@ -264,9 +299,17 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
     double best_cost = cur_cost;
     double T = t_init;
 
-    const int report_every = std::max(1, max_iter / 20);
+    const int report_every = std::max(1, n_target / 20);
+    // patience checkpoint size: ~2% of the run, capped so a huge iteration cap
+    // doesn't make each window enormous.
+    const int window  = std::min(std::max(1, n_target / 50), 200);
+    double win_best   = best_cost;
+    int    stale      = 0;
+    const double rel_eps = 1e-4;
+    auto t_start = clock::now();
 
-    for (int iter = 0; iter < max_iter; iter++) {
+    int iter = 0;
+    for (; iter < n_target; iter++) {
         Placement p2    = _perturb(p, rng);
         double new_cost = _cost(p2, w_wl, w_area, w_ovlp);
         double dc       = new_cost - cur_cost;
@@ -278,11 +321,21 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
                 best_cost = cur_cost;
             }
         }
-        T = std::max(T * alpha, t_min);
+        T = std::max(T * alpha_eff, t_min);
         if (progress_fn && (iter + 1) % report_every == 0)
-            progress_fn(iter + 1, max_iter);
+            progress_fn(iter + 1, n_target);
+        // Soft wall-clock cap.
+        if (time_budget_s > 0.0 && elapsed(t_start) >= time_budget_s) {
+            iter++; break;
+        }
+        // Convergence early-stop: no meaningful best improvement for `patience`
+        // consecutive windows.
+        if (patience > 0 && (iter + 1) % window == 0) {
+            if (best_cost < win_best * (1.0 - rel_eps)) { win_best = best_cost; stale = 0; }
+            else if (++stale >= patience) { iter++; break; }
+        }
     }
-    return _make_result(best, max_iter);
+    return _make_result(best, iter);
 }
 
 // ── Genetic / Evolutionary Algorithm ─────────────────────────────────────────
@@ -290,11 +343,23 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
 OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
                                             double mutation_rate, double crossover_rate,
                                             double w_wl, double w_area, double w_ovlp,
-                                            int seed, ProgressFn progress_fn) {
+                                            int seed, double time_budget_s, int patience,
+                                            ProgressFn progress_fn) {
     if (_blocks.empty()) return {};
     if (population < 2) population = 2;
+    using clock = std::chrono::steady_clock;
+    auto elapsed = [](clock::time_point t0) {
+        return std::chrono::duration<double>(clock::now() - t0).count();
+    };
     std::mt19937 rng(static_cast<unsigned>(seed));
     std::uniform_real_distribution<double> uniform01(0.0, 1.0);
+
+    // With a time budget the generation count is calibrated in-loop after gen 0;
+    // start effectively unbounded (capped by `generations` when it is > 0).
+    int n_target = (time_budget_s > 0.0)
+                       ? (generations > 0 ? generations : std::numeric_limits<int>::max())
+                       : generations;
+    if (n_target <= 0 && time_budget_s <= 0.0) return {};
 
     // Initialise population with random placements
     std::vector<Placement> pop(static_cast<size_t>(population));
@@ -319,9 +384,15 @@ OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
 
     const size_t n = _blocks.size();
 
-    const int report_every_ga = std::max(1, generations / 20);
+    const int report_every_ga = std::max(1, (n_target == std::numeric_limits<int>::max()
+                                             ? 20 : n_target) / 20);
+    double prev_best = best_cost;
+    int    stale     = 0;
+    const double rel_eps = 1e-4;
+    auto t_start = clock::now();
 
-    for (int gen = 0; gen < generations; gen++) {
+    int gen = 0;
+    for (; gen < n_target; gen++) {
         std::vector<Placement> new_pop;
         new_pop.reserve(static_cast<size_t>(population));
         new_pop.push_back(best_ind);  // elitism: carry best individual unchanged
@@ -353,9 +424,25 @@ OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
             if (c < best_cost) { best_cost = c; best_ind = pop[static_cast<size_t>(i)]; }
         }
         if (progress_fn && (gen + 1) % report_every_ga == 0)
-            progress_fn(gen + 1, generations);
+            progress_fn(gen + 1, n_target);
+
+        // Calibrate the generation count after the first generation's wall time.
+        if (gen == 0 && time_budget_s > 0.0) {
+            double per_gen = std::max(1e-9, elapsed(t_start));
+            long long est = static_cast<long long>(std::ceil(time_budget_s / per_gen));
+            long long cap = (generations > 0) ? generations
+                                              : std::numeric_limits<int>::max();
+            n_target = static_cast<int>(std::max<long long>(1, std::min(est, cap)));
+        }
+        // Soft wall-clock cap.
+        if (time_budget_s > 0.0 && elapsed(t_start) >= time_budget_s) { gen++; break; }
+        // Convergence early-stop: no meaningful improvement for `patience` gens.
+        if (patience > 0) {
+            if (best_cost < prev_best * (1.0 - rel_eps)) { prev_best = best_cost; stale = 0; }
+            else if (++stale >= patience) { gen++; break; }
+        }
     }
-    return _make_result(best_ind, generations);
+    return _make_result(best_ind, gen);
 }
 
 }  // namespace buda
