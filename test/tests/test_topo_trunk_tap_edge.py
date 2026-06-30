@@ -222,3 +222,50 @@ def test_h_pull_left_taps_left_near_edge():
     taps = _faces_tapped(c, B)
     assert "LEFT" in taps, f"one-directional left-pull must tap blk_00's LEFT (near) edge, got {sorted(taps)}"
     assert "RIGHT" not in taps, f"must not tap the far (RIGHT) edge, got {sorted(taps)}"
+
+
+# =============================================================================
+# Sub-case guardrail: one-directional arrangement, but the spine still lies
+# INSIDE B, so no edge tap is needed.  The discriminator is "does the conn-seg
+# span overlap B?" — not "do the pulls oppose?".  Here B is tall/wide enough that
+# the two stubs (both on one side) attach at distinct positions whose span is a
+# non-degenerate spine contained in B; B is connected by overlap.  These already
+# route correctly today (the artificial-tap bug is specific to the DEGENERATE
+# spine where all stubs share one coordinate); they guard the fix from
+# over-reaching and tapping a far edge when the spine already covers B.
+# =============================================================================
+
+# Tall receiver blk_00 (y[3000,5000]); blk_15/blk_32 both to the right at
+# distinct y's (3400-3800 and 4200-4600).  Spine spans y[3800,4200] ⊂ B.
+_CONTAINED_V = {
+    "blk_00": (1250, 3000, 2230, 5000),
+    "blk_15": (2230, 3400, 3500, 3800),
+    "blk_32": (2230, 4200, 3500, 4600),
+}
+
+
+def test_contained_spine_no_tap_v():
+    c, B = _v_trunk_inside(_fp(_CONTAINED_V), "blk_15", ["blk_32", "blk_00"], "blk_00")
+    assert _overlaps(c, B), "spine should lie inside blk_00 (touched by overlap)"
+    taps = _faces_tapped(c, B)
+    assert "TOP" not in taps and "BOTTOM" not in taps, (
+        f"spine already overlaps blk_00 — no along-axis edge tap needed, got {sorted(taps)}"
+    )
+
+
+# x<->y mirror: wide receiver blk_00 (x[3000,5000]); others above at distinct x's.
+# Spine spans x[3800,4200] ⊂ B.
+_CONTAINED_H = {
+    "blk_00": (3000, 1250, 5000, 2230),
+    "blk_15": (3400, 2230, 3800, 3500),
+    "blk_32": (4200, 2230, 4600, 3500),
+}
+
+
+def test_contained_spine_no_tap_h():
+    c, B = _trunk_inside(_fp(_CONTAINED_H), "blk_15", ["blk_32", "blk_00"], "blk_00", "H")
+    assert _overlaps(c, B), "spine should lie inside blk_00 (touched by overlap)"
+    taps = _faces_tapped(c, B)
+    assert "LEFT" not in taps and "RIGHT" not in taps, (
+        f"spine already overlaps blk_00 — no along-axis edge tap needed, got {sorted(taps)}"
+    )
