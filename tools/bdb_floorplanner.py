@@ -31,6 +31,7 @@ import sys
 import tkinter as tk
 import queue
 import threading
+import warnings
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import matplotlib
@@ -38,6 +39,17 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import matplotlib.patches as mpatches
+
+# The floorplan axes uses set_aspect('equal', adjustable='datalim') with both
+# limits pinned so the drawing fills the canvas and auto-refits on resize.  That
+# combination makes matplotlib emit a benign "Ignoring fixed x limits to fulfill
+# fixed data aspect" on every draw — the axis expansion it describes IS the fill
+# we want — so silence just that one message instead of spamming the terminal.
+warnings.filterwarnings(
+    "ignore",
+    message=r"Ignoring fixed [xy] limits to fulfill fixed data aspect",
+    category=UserWarning,
+)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
