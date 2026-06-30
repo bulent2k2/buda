@@ -1927,10 +1927,12 @@ class BudaSession:
             return
         what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
         print(f"[ripup_reroute] stage {stage} ({what}): start metric={m0}, "
-              f"max_iter={max_iter}")
+              f"max_iter={max_iter}, {len(self._rr_contenders(stage))} contenders",
+              flush=True)
 
         committed = 0
         it = 0
+        n_trials = 0
         # A trial re-runs the planner, mutating every wrapper's layer/perp
         # assignment fields (seg_layers, seg_perp, assigned_*_layer) — which
         # `_rr_snapshot`/`_rr_restore` do NOT capture (they restore only
@@ -1941,23 +1943,35 @@ class BudaSession:
         # before returning, so a later run_nuts/DNUTS/visualization matches the
         # reported metric.
         dirty = False
+        stopped_early = False            # True if we converged / ran out of moves
         while it < max_iter:
             it += 1
             cur = metric()
             if cur == 0:
+                stopped_early = True
                 break
             contenders = self._rr_contenders(stage)
             if not contenders:
                 print(f"[ripup_reroute] iter {it}: no contenders — stop.")
+                stopped_early = True
                 break
             snap = self._rr_snapshot()
+            n_cont = len(contenders)
             best = None                      # (metric, bid, old_tidx, new_tidx)
-            hit_zero = False
-            for bid in contenders:
+            # First-improving-contender.  Each trial is a full pipeline re-run
+            # (~1-2s on a large hier design), so the old "best move over ALL
+            # contenders" sweep cost contenders*candidates re-runs per iteration —
+            # minutes of silent work (e.g. 25 contenders * ~8 candidates ≈ 150
+            # re-runs ≈ 3+ min with no output, which reads as a hang).  Instead,
+            # scan contenders in priority order and commit the FIRST whose best
+            # alternate candidate strictly lowers the metric; a per-contender
+            # heartbeat (flushed) makes progress visible.
+            for ci, bid in enumerate(contenders, 1):
                 w = self._rr_wrapper(bid)
                 if w is None:
                     continue
                 old_tidx = snap['wrap'][bid][0]
+                cand_best = None
                 for tidx in range(min(len(w.input.candidates),
                                       _RR_MAX_CANDIDATES_PER_BUNDLE)):
                     if tidx == old_tidx:
@@ -1965,24 +1979,31 @@ class BudaSession:
                     m = self._rr_trial(w, tidx, stage, metric)
                     self._rr_restore(snap)
                     dirty = True             # trial mutated live plan assignments
-                    if m < cur and (best is None or m < best[0]):
-                        best = (m, bid, old_tidx, tidx)
+                    n_trials += 1
+                    if m < cur and (cand_best is None or m < cand_best[0]):
+                        cand_best = (m, bid, old_tidx, tidx)
                     if m == 0:               # cannot do better — take it now
-                        best = (m, bid, old_tidx, tidx)
-                        hit_zero = True
+                        cand_best = (m, bid, old_tidx, tidx)
                         break
-                if hit_zero:
+                if cand_best is not None:
+                    best = cand_best
+                    print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
+                          f"bundle {bid} improves {cur}->{cand_best[0]} "
+                          f"(topo {old_tidx + 1}->{cand_best[3] + 1})", flush=True)
                     break
+                print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
+                      f"bundle {bid} — no improvement", flush=True)
             if best is None:
                 print(f"[ripup_reroute] iter {it}: no improving re-route "
                       f"(metric={cur}) — stop.")
+                stopped_early = True
                 break
             m_new, bid, old_t, new_t = best
             self._rr_trial(self._rr_wrapper(bid), new_t, stage, metric)  # commit
             dirty = False                    # commit left live plan consistent
             committed += 1
-            print(f"[ripup_reroute] iter {it}: bundle {bid} topo {old_t + 1}"
-                  f"->{new_t + 1}, metric {cur}->{metric()}")
+            print(f"[ripup_reroute] iter {it}: COMMIT bundle {bid} topo {old_t + 1}"
+                  f"->{new_t + 1}, metric {cur}->{metric()}", flush=True)
 
         # If we exited with rejected trials still live, the wrappers carry the
         # last trial's layer assignments while the result refs were restored to
@@ -1992,8 +2013,12 @@ class BudaSession:
         if dirty:
             self._rr_rerun(stage)
 
+        if not stopped_early and metric() > 0:
+            print(f"[ripup_reroute] reached max_iter={max_iter} while still "
+                  f"improving — re-run ripup_reroute or raise max_iter "
+                  f"(e.g. `ripup_reroute {max_iter * 5}`) to continue.", flush=True)
         print(f"[ripup_reroute] done: metric {m0}->{metric()} "
-              f"after {committed} move(s).")
+              f"after {committed} move(s), {n_trials} trial(s).", flush=True)
 
     def _select_single_topology_internal(self, bid, tid):
         """Helper for select_topology/select_topologies: set a pin without re-planning layers.
