@@ -225,3 +225,52 @@ def test_big2_max_iter_bounds_moves():
     n_iters = sum(1 for line in out.splitlines()
                   if line.startswith("[ripup_reroute] iter "))
     assert n_iters <= 1, out
+
+
+# --- hier flow (@mid): ripup_reroute re-routes per-instance wrappers ---------
+# After `run_planner hier`, self.bundles IS the expanded per-instance list, so
+# ripup re-pins a single instance and re-plans the expanded wrappers in place
+# (via _rr_replan_hier — no re-expansion).  The two hbundles flows below are the
+# clean (no-op) and congested (real re-route) hier vehicles.
+
+_HBUNDLES = _ROOT / "flow" / "hbundles"
+
+
+def _source_hier_flow(name):
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"source {_HBUNDLES / name}")
+    return s
+
+
+@pytest.mark.mid
+def test_hier_supported_and_noop_when_clean():
+    """A clean hier flow: ripup_reroute is now supported (no flat-only error) and
+    is a no-op."""
+    s = _source_hier_flow("01_pipeline_hier.buda")
+    assert s._planner_is_hier, "01_pipeline_hier should leave the session in hier mode"
+    assert s.nuts_result.num_overlaps == 0 and s.detailed_result.num_unplaced == 0
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute")
+    out = buf.getvalue()
+    assert "flat-flow only" not in out, "hier must no longer be rejected"
+    assert "metric already 0" in out, out
+    assert s.detailed_result.num_unplaced == 0
+
+
+@pytest.mark.mid
+def test_hier_stage_b_clears_opens():
+    """A congested hier flow: ripup re-routes a per-instance wrapper and drives the
+    DNUTS opens to zero (validated 8 -> 0 by re-pinning expanded bundle 26)."""
+    s = _source_hier_flow("06_multipin_stress.buda")
+    assert s._planner_is_hier
+    base = s.detailed_result.num_unplaced
+    assert base > 0, "06_multipin_stress should start with DNUTS opens"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute")
+    out = buf.getvalue()
+    assert "flat-flow only" not in out
+    assert s.detailed_result.num_unplaced < base, out

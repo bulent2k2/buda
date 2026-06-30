@@ -142,6 +142,7 @@ class BudaSession:
         self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
         self._hier_bundles_orig = []   # pre-expansion snapshot set by run_hier_bundler
+        self._planner_is_hier = False  # True after `run_planner hier` (self.bundles is expanded)
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -1850,17 +1851,52 @@ class BudaSession:
         self._dogleg_slot = dict(snap['dl_slot'])
         self._dogleg_originals = dict(snap['dl_orig'])
 
+    def _rr_replan_hier(self, iterations):
+        """Re-plan the already-expanded hier wrappers in place (no re-expansion).
+
+        `run_planner hier` replaced self.bundles with per-instance absolute-coord
+        wrappers (unique IDs); ripup re-optimizes THOSE directly so a trial re-pins
+        a single instance without rebuilding the template->instance expansion.  The
+        wrappers keep their `.hier.priority` and reservation fields (which the
+        planner only reads — parked +1 up front, released -1 at each bundle's turn,
+        never consumed), and the congestion map is rebuilt here, so re-optimizing is
+        deterministic.  Mirrors the `run_planner hier` branch minus _apply_selections
+        (pins are already baked onto the wrappers) and minus _expand_hier_bundles."""
+        self._reset_doglegs()
+        self.planner = buda.CongestionPlanner(self.fp, self.layers)
+        for pname, pval in self._planner_params.items():
+            self.planner.set_planner_param(pname, pval)
+        self.planner.set_track_pitch(self._nuts_pitch)
+        self._planner_pitch = self._nuts_pitch
+        self.planner.build_congestion_map()
+        assignments = self.planner.optimize_topologies(self.bundles, iterations)
+        bid_to_wrapper = {w.input.original_bundle.id: w for w in self.bundles}
+        for asn in assignments:
+            w = bid_to_wrapper.get(asn.bundle_id)
+            if w is not None:
+                w.plan.selected_topology_index = asn.topo_index
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.plan.seg_perp = list(asn.seg_perp)
+
     def _rr_rerun(self, stage):
         """Silently re-run planner + NUTS (+ DNUTS for stage b).
 
-        Stage b replays DetailedNUTS through the private helper with the user's
-        selected bit order preserved.  The `run_detailed_nuts` *command* resets
-        `_detailed_bit_order` to LO_HI before parsing its (here absent) arg, so
-        driving it via `do_command` would silently flip a HI_LO flow to LO_HI and
-        change detailed wiring semantics unrelated to the topology move."""
+        In hier mode (`run_planner hier` has run, so self.bundles is the expanded
+        per-instance list) the trial re-plans the expanded wrappers in place via
+        _rr_replan_hier — driving the flat `run_planner` would re-expand and corrupt
+        the wrapper set.  Stage b replays DetailedNUTS through the private helper
+        with the user's selected bit order preserved.  The `run_detailed_nuts`
+        *command* resets `_detailed_bit_order` to LO_HI before parsing its (here
+        absent) arg, so driving it via `do_command` would silently flip a HI_LO flow
+        to LO_HI and change detailed wiring semantics unrelated to the topology move."""
         sink = io.StringIO()
         with contextlib.redirect_stdout(sink), buda.ostream_redirect():
-            self.do_command(f"run_planner {self._planner_iterations}")
+            if self._planner_is_hier:
+                self._rr_replan_hier(self._planner_iterations)
+            else:
+                self.do_command(f"run_planner {self._planner_iterations}")
             self.do_command("run_nuts")
             if stage == 'b':
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
@@ -1878,9 +1914,6 @@ class BudaSession:
             return
         if self.planner is None:
             print("Error: ripup_reroute needs run_planner to have run first.")
-            return
-        if self._hier_expansion_map:
-            print("Error: ripup_reroute is flat-flow only in v1 (hier not supported).")
             return
         stage, metric = self._rr_stage_metric()
         if stage is None:
@@ -2633,6 +2666,7 @@ class BudaSession:
                         w.plan.seg_layers = list(asn.seg_layers)
                         w.plan.seg_perp = list(asn.seg_perp)
                 self.bundles = expanded
+                self._planner_is_hier = True
                 print(f"run_planner hier: {len(self.bundles)} wrappers after expansion")
             else:
                 # Re-planning invalidates any adopted dogleg (and its pins): the
@@ -2651,6 +2685,7 @@ class BudaSession:
                 # Apply architect-pinned selections BEFORE optimizing so the
                 # planner scores the correct topology and assigns layers for it.
                 self._apply_selections()
+                self._planner_is_hier = False
                 self._planner_iterations = int(args[0]) if args else 5
                 with buda.ostream_redirect():
                     assignments = self.planner.optimize_topologies(self.bundles, self._planner_iterations)

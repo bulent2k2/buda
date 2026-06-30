@@ -199,12 +199,18 @@ explicitly out of scope for v1.
    ladder, reducing how often `ripup_reroute` is needed. Cross-referenced here as
    the principled follow-on.
 
-3. **Hier-mode support (`run_planner hier`).** v1 errors out in hier flow — the
-   trial re-run calls flat `run_planner`/`run_nuts`. Teach `_rr_rerun` to detect
-   hier mode and drive the matching planner/NUTS variant, and snapshot/restore the
-   per-instance wrapper expansion. *Where to start:* `_rr_rerun` /
-   `_rr_snapshot` / `_rr_restore` in `src/buda_cli.py`; the hier expansion in
-   `run_planner hier`.
+3. **Hier-mode support (`run_planner hier`). — ✅ RESOLVED.** Implemented: after
+   `run_planner hier`, `self.bundles` is already the expanded per-instance list
+   (unique IDs, absolute coords) that NUTS/DNUTS and overlap/open detection key
+   off, so `_rr_snapshot`/`_rr_restore`/`_rr_contenders`/`_rr_wrapper` needed no
+   change. The only hier-specific piece is `_rr_replan_hier` (`src/buda_cli.py`),
+   which re-optimizes the expanded wrappers in place — no re-expansion — preserving
+   their `.hier.priority`/reservation fields (planner-read-only); `_rr_rerun`
+   branches to it on a `_planner_is_hier` flag set by the `run_planner hier` /
+   flat branches. A re-route naturally operates at **instance** granularity (it
+   re-pins one expanded wrapper), which is exactly the right level for local
+   congestion relief. Validated on `flow/hbundles/06_multipin_stress.buda`
+   (stage b 8→0, stage a 2→1) and `01_pipeline_hier.buda` (clean no-op).
 
 4. **"Only-try-relevant-candidates" speedup.** v1 trials every alternate
    candidate (capped at `_RR_MAX_CANDIDATES_PER_BUNDLE`), each a full pipeline
