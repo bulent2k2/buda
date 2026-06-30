@@ -348,6 +348,20 @@ def test_single_instance_builds_without_crash(tmp_path):
     # guarantee is meaningful only once there is more than one instance.)
 
 
+def test_one_block_single_instance_no_crash(tmp_path):
+    # Regression (Codex #82): a one-block cell with a single instance leaves the
+    # whole design with one (inst, block) endpoint, so no driver+receiver pair
+    # exists.  The builder must skip top buses gracefully, not raise IndexError.
+    cell = tmp_path / "solo.buda"
+    cell.write_text("add_block solo 0 0 100 100\n")
+    out = str(tmp_path / "solo.bdb")
+    build_hier_demo.build(out, [str(cell)], seed=1, n_instances=1)
+    db = buda_db.BDB(out)
+    assert len([c for c in db.all_components() if c.depth == 1]) == 1
+    # No top buses could be formed; cell has no internal nets either.
+    assert not any(n.name.startswith("top_bus") for n in db.all_nets())
+
+
 def test_build_hier_demo_seed_is_deterministic(tmp_path):
     a = str(tmp_path / "a.bdb")
     b = str(tmp_path / "b.bdb")

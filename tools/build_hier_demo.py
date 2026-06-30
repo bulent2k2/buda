@@ -450,13 +450,22 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     # One bit width per bus, cycling the palette so n_buses=7 reproduces the
     # historical [4,6,8,10,12,14,16] set (and order) exactly.
     buses = []                  # (name, width, drv(inst,blk), [rcv(inst,blk)…])
-    for bi in range(n_buses):
-        w = _WIDTH_PALETTE[bi % len(_WIDTH_PALETTE)]
-        buses.append(_make_top_bus(bi, w, pool, rng))
-    # Guarantee every instance is wired to ≥3 top buses (appends repair buses
-    # beyond n_buses when the random set leaves an instance under-covered).
-    n_random_buses = len(buses)
-    _ensure_min_buses_per_instance(buses, placements, pool, rng)
+    n_random_buses = 0
+    if len(pool) < 2:
+        # A top bus needs a driver + at least one receiver; with fewer than two
+        # leaf-block endpoints in the whole design (e.g. a one-block cell with a
+        # single instance) none can be formed — skip them rather than crash.
+        if n_buses:
+            print(f"  (no top buses: only {len(pool)} leaf-block endpoint(s); "
+                  f"need ≥2 for a driver + receiver)")
+    else:
+        for bi in range(n_buses):
+            w = _WIDTH_PALETTE[bi % len(_WIDTH_PALETTE)]
+            buses.append(_make_top_bus(bi, w, pool, rng))
+        # Guarantee every instance is wired to ≥3 top buses (appends repair
+        # buses beyond n_buses when the random set leaves one under-covered).
+        n_random_buses = len(buses)
+        _ensure_min_buses_per_instance(buses, placements, pool, rng)
 
     # 4. Optionally optimize the instance placement (mutates placements x/y).
     if optimize:
