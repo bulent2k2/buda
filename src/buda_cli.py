@@ -450,12 +450,12 @@ class BudaSession:
             summary = summary[:max_len - 1].rstrip(", ") + "…"
         return summary
 
-    def _log_bundle_nets(self, w):
-        """Print the bundle-id -> buses/nets correspondence for generate_* logs."""
+    def _bundle_nets_suffix(self, w):
+        """'<n> nets: <bus summary>' appended to a generate_* per-bundle log line,
+        so the bundle-id -> buses/nets correspondence rides on the same line."""
         nets = w.input.original_bundle.get_net_names()
-        print(f"  bundle {w.input.original_bundle.id} nets: "
-              f"{self._bundle_net_summary(nets)} "
-              f"({len(nets)} net{'' if len(nets) == 1 else 's'})")
+        return (f"{len(nets)} net{'' if len(nets) == 1 else 's'}: "
+                f"{self._bundle_net_summary(nets)}")
 
     def _generate_hier_topo_one(self, w, use_center, use_double_detour,
                                 fp_cache, comps_by_name):
@@ -466,6 +466,7 @@ class BudaSession:
         comps_by_name is {name: ComponentRow} from bdb.all_components().
         """
         b = w.input.original_bundle
+        nets_suffix = self._bundle_nets_suffix(w)   # rides on each per-bundle log line
         if b.cell_context and b.entry_busterm_ids:
             # Case (a): cell-local floorplan
             parent_name = b.instances[0] if b.instances else None
@@ -488,10 +489,10 @@ class BudaSession:
             n = len(w.input.candidates)
             if n == 0:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}]")
+                      f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}] {nets_suffix}")
             else:
                 print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"{n} candidates  [cell:{b.cell_context}]")
+                      f"{n} candidates  [cell:{b.cell_context}] {nets_suffix}")
             return n
 
         elif b.drv_spec_depth >= 0:
@@ -530,9 +531,9 @@ class BudaSession:
             tag = f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]"
             if n == 0:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"0 candidates — bundle will be unrouted!  {tag}")
+                      f"0 candidates — bundle will be unrouted!  {tag} {nets_suffix}")
             else:
-                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates  {tag}")
+                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates  {tag} {nets_suffix}")
             return n
 
         else:
@@ -557,9 +558,9 @@ class BudaSession:
             n = len(w.input.candidates)
             if n == 0:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"0 candidates — bundle will be unrouted!")
+                      f"0 candidates — bundle will be unrouted! {nets_suffix}")
             else:
-                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates")
+                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates {nets_suffix}")
             return n
 
     def _floorplan_for_hbundle(self, b, fp_cache, comps_by_name):
@@ -2478,8 +2479,7 @@ class BudaSession:
                 self._reset_plan_for_regen(w)
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.input.candidates)} topologies for bundle "
-                      f"{w.input.original_bundle.id} ({label})")
-                self._log_bundle_nets(w)
+                      f"{w.input.original_bundle.id} ({label}) {self._bundle_nets_suffix(w)}")
             # Restore the sidecar baseline (pins + per-segment layer overrides) onto
             # the freshly generated candidates, so the live state matches the GUI
             # even before run_planner. A later select_topology overrides it; the
@@ -2510,7 +2510,6 @@ class BudaSession:
             for w in self.bundles:
                 n = self._generate_hier_topo_one(w, use_center, use_double_detour,
                                                   fp_cache, comps_by_name)
-                self._log_bundle_nets(w)
                 total_candidates += n
             print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
                   f"{total_candidates} total candidates")

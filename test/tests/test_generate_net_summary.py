@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""generate_topologies / generate_hier_topologies log a `bundle <id> nets: ...`
-line mapping each bundle to its constituent buses/nets, so a reader of the flow
-log can tie a bundle id (used by ripup_reroute, select_topology, dump_topologies)
-back to the buses it carries."""
+"""generate_topologies / generate_hier_topologies append a `<n> nets: <summary>`
+suffix to each per-bundle log line, mapping a bundle to its constituent buses/nets
+so a reader of the flow log can tie a bundle id (used by ripup_reroute,
+select_topology, dump_topologies) back to the buses it carries — e.g.
+`Generated 5 topologies for bundle 3 (u0->v0) 16 nets: bv1[0:15]`."""
 import contextlib
 import io
 import sys
@@ -83,4 +84,4 @@ def test_generate_topologies_logs_bundle_net_correspondence():
         "run_bundler",
         "generate_topologies",
     ])
-    assert "bundle 1 nets: data[0:7] (8 nets)" in out
+    assert "for bundle 1 (A->B) 8 nets: data[0:7]" in out
