@@ -1,0 +1,16 @@
+source mix_tracks.buda
+open_bdb mix.b_db
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+dump_hbundles
+generate_hier_topologies
+run_planner hier 5
+run_nuts
+check_connectivity nuts
+run_detailed_nuts
+check_connectivity dnuts
+ripup_reroute
+visualize
