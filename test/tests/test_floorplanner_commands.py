@@ -470,12 +470,10 @@ def test_optimizer_ga_runtime_budget():
     assert r.iterations > 0 and dt < 1.5
 
 
-def test_floorplanner_gui_parse_time_budget():
-    # The Optimize dialog's Runtime field parser (lives in the Tk GUI module).
-    # Skip where tkinter is unavailable (headless build box); runs for users.
-    pytest.importorskip("tkinter")
-    from tools import bdb_floorplanner as fp
-    pt = fp._parse_time_budget
+def test_parse_time_budget():
+    # The Optimize dialog's Runtime field parser — lives in this GUI-free module
+    # so it is testable without importing the Tk frontend.
+    pt = fpc.parse_time_budget
     assert pt("") == 0.0          # blank → iteration-bounded
     assert pt("5s") == 5.0
     assert pt("2m") == 120.0

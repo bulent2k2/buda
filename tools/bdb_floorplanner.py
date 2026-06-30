@@ -53,25 +53,6 @@ import buda_viz
 from ui_state import ViewState
 
 
-def _parse_time_budget(s: str) -> float:
-    """Parse a runtime-budget string to seconds: '5s'→5, '2m'→120, '1h'→3600,
-    '30'→30 (bare number = seconds).  Blank/invalid → 0.0 (= off)."""
-    s = (s or "").strip().lower()
-    if not s:
-        return 0.0
-    mult = 1.0
-    if s.endswith("s"):
-        s = s[:-1]
-    elif s.endswith("m"):
-        mult, s = 60.0, s[:-1]
-    elif s.endswith("h"):
-        mult, s = 3600.0, s[:-1]
-    try:
-        return max(0.0, float(s) * mult)
-    except ValueError:
-        return 0.0
-
-
 class BdbFloorplanner:
     def __init__(self, root):
         self.root = root
@@ -1961,7 +1942,7 @@ class _OptimizeDialog:
         }
         method   = self._alg.get()
         iter_arg = "max_iter" if method == "sa" else "generations"
-        budget   = _parse_time_budget(self._runtime_var.get())
+        budget   = fpc.parse_time_budget(self._runtime_var.get())
         patience = max(0, self._patience_var.get())
         kwargs: dict = dict(seed=42)
         if budget > 0:
