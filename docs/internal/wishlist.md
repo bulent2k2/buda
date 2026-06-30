@@ -100,7 +100,20 @@ pass-through trunk on its merits. Also unlocks always-on generation of the
 "region-4" pass-through trunk (e.g. `TRUNK_V@x5772` in
 `flow/big_data_test/big2/b4_bus_077.buda`) instead of only under `double_detour`.
 
-## Gap A part 2: model band capacity in signal-track count, not layout width
+## Gap A part 2: model band capacity in signal-track count, not layout width — ✅ IMPLEMENTED
+
+**Shipped** as the opt-in `run_planner [hier] N signal_tracks` keyword. The planner
+is handed the `RoutingGridStack` (`set_routing_grid` / `set_capacity_mode`) and, on
+patterned layers, `usable_band_cap` counts the discrete SIGNAL tracks in the band
+(clamped to the slide window, honouring grid keepouts) × the layer's bit pitch — so
+`nbits·bit_pitch ≤ ntrk·bit_pitch` reduces to the exact integer test `nbits ≤ ntrk`.
+A band whose width fit but whose track count is short now reports overflow at plan
+time and engages the STRICT rip-up/replan ladder. Opt-in (default WIDTH path is
+byte-identical); `set_planner_param track_cap_slack` adds quantization slack.
+Validated on `flow/rnr/mix.buda`: width plan 236 DNUTS opens → `signal_tracks` plan
+**162** with no ripup. Design + rationale: `docs/internal/planner_signal_track_capacity.md`;
+reference: `docs/BUDA_SCRIPT_REFERENCE.md` (`run_planner` → Signal-track band capacity).
+The original analysis follows.
 
 **What:** The bundle planner models a Hanan-band's capacity as available *layout
 width* (`band_available_length` in `src/congestion_planner.cpp` — geometric

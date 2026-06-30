@@ -35,6 +35,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kWL")               kWL_               = value;
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "base_span_ref")     base_span_ref_     = value;
+    else if (name == "track_cap_slack")   track_cap_slack_   = value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
 
@@ -172,23 +173,44 @@ void CongestionPlanner::rebuild_cuts_() {
         }
     }
 
-    // Report minimum per-band capacity per layer.
-    std::cout << "[Planner] Layer channel capacities:\n";
+    // Report minimum per-band capacity per layer.  In SIGNAL_TRACKS mode the
+    // figure is the minimum count of discrete SIGNAL tracks in a band (the unit
+    // the planner now charges against); otherwise it is the geometric band
+    // length minus keepouts.
+    const bool tmode = (cap_mode_ == CapacityMode::SIGNAL_TRACKS && grid_ != nullptr);
+    const char* unit = tmode ? "min_signal_tracks=" : "min_band_cap=";
+    // Minimum over the bands of every cut on `lid`/`cut_dir` — track count in
+    // SIGNAL_TRACKS mode (where the layer has a pattern), else geometric length.
+    auto min_cap_for = [&](int lid, LayerDir cut_dir) -> double {
+        double m = std::numeric_limits<double>::max();
+        const bool ttrack = track_mode_for(lid);
+        const auto& pgrid = (cut_dir == LayerDir::VERTICAL) ? y_grid_ : x_grid_;
+        for (const auto& c : cuts_) {
+            if (c.layer_id != lid || c.dir != cut_dir) continue;
+            for (int b = 0; b < c.num_bands(); ++b) {
+                double v;
+                if (ttrack && b + 1 < (int)pgrid.size())
+                    v = (double)grid_->get_layer_grid(lid)
+                            .signal_tracks_in((double)c.cut_coord,
+                                              (double)pgrid[b], (double)pgrid[b + 1]).size();
+                else
+                    v = c.cap(b);
+                m = std::min(m, v);
+            }
+        }
+        return m;
+    };
+    std::cout << "[Planner] Layer channel capacities"
+              << (tmode ? " (signal-track mode):\n" : ":\n");
     for (int vid : v_layers) {
-        double min_cap = std::numeric_limits<double>::max();
-        for (const auto& c : cuts_)
-            if (c.layer_id == vid && c.dir == LayerDir::HORIZONTAL)
-                for (int b = 0; b < c.num_bands(); ++b) min_cap = std::min(min_cap, c.cap(b));
+        double min_cap = min_cap_for(vid, LayerDir::HORIZONTAL);
         if (min_cap < std::numeric_limits<double>::max())
-            std::cout << "  M" << vid << " (V)  min_band_cap=" << min_cap << "\n";
+            std::cout << "  M" << vid << " (V)  " << unit << min_cap << "\n";
     }
     for (int hid : h_layers) {
-        double min_cap = std::numeric_limits<double>::max();
-        for (const auto& c : cuts_)
-            if (c.layer_id == hid && c.dir == LayerDir::VERTICAL)
-                for (int b = 0; b < c.num_bands(); ++b) min_cap = std::min(min_cap, c.cap(b));
+        double min_cap = min_cap_for(hid, LayerDir::VERTICAL);
         if (min_cap < std::numeric_limits<double>::max())
-            std::cout << "  M" << hid << " (H)  min_band_cap=" << min_cap << "\n";
+            std::cout << "  M" << hid << " (H)  " << unit << min_cap << "\n";
     }
 }
 
@@ -383,6 +405,31 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
 
 double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
                                           int slide_lo, int slide_hi) const {
+    // Signal-track capacity (Gap A part 2): count the discrete SIGNAL tracks the
+    // layer's pattern places inside the band — clamped to the slide window — times
+    // the layer's bit pitch so the result is in the same width units the callers'
+    // eff_bus_width demand is.  ntrk*bit_pitch vs nbits*bit_pitch reduces to the
+    // exact integer test nbits <= ntrk, so a band whose width fit but whose track
+    // count is short of the bit count now reports overflow (it would have been a
+    // silent DetailedNUTS open).  The grid's own keepouts/overrides are honoured
+    // by signal_tracks_in, matching what DetailedNUTS will actually place.
+    if (track_mode_for(c.layer_id)) {
+        const auto& tgrid = is_vcut ? y_grid_ : x_grid_;
+        if (b + 1 >= (int)tgrid.size()) return 0.0;
+        int lo = tgrid[b], hi = tgrid[b + 1];
+        if (slide_lo != INT_MIN) {
+            lo = std::max(lo, slide_lo);
+            hi = std::min(hi, slide_hi);
+        }
+        if (lo >= hi) return 0.0;
+        int ntrk = (int)grid_->get_layer_grid(c.layer_id)
+                       .signal_tracks_in((double)c.cut_coord,
+                                         (double)lo, (double)hi).size();
+        double cap = ((double)ntrk + track_cap_slack_) *
+                     layers_.eff_bus_width(1, 1.0, c.layer_id);   // * bit pitch
+        if (cap <= 0.0) return 0.0;
+        return cap + track_pitch_;
+    }
     double cap = c.cap(b);
     if (slide_lo != INT_MIN) {
         const auto& grid = is_vcut ? y_grid_ : x_grid_;

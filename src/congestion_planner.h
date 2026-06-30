@@ -22,6 +22,7 @@
 #include "bundler.h"
 #include "topology.h"
 #include "layering.h"
+#include "routing_grid.h"
 namespace buda {
 
 // One Hanan-grid cut subdivided into perpendicular bands.
@@ -124,9 +125,28 @@ struct BundleAssignment {
     std::vector<int> seg_perp;   // per-segment charged-band centres (INT_MIN = none)
 };
 
+// How a Hanan band's capacity is measured.
+//   WIDTH         — geometric band length minus keepouts (the default model;
+//                   continuous layout units).
+//   SIGNAL_TRACKS — count of discrete SIGNAL tracks the layer's TrackPattern
+//                   places inside the band (× the layer's bit pitch so it stays
+//                   comparable to the eff_bus_width demand).  Quantises capacity
+//                   exactly as DetailedNUTS does, so a band whose width fit but
+//                   whose integer signal-track count is short of the bit count
+//                   surfaces as planner overflow instead of a silent DNUTS open.
+//                   Opt-in (`run_planner ... signal_tracks`); requires a
+//                   RoutingGridStack with def_track_pattern layers.
+enum class CapacityMode { WIDTH, SIGNAL_TRACKS };
+
 class CongestionPlanner {
 public:
     CongestionPlanner(const Floorplan& fp, const LayerStack& layers);
+
+    // Opt-in signal-track capacity model (Gap A part 2).  Both must be set
+    // before build_congestion_map(); the grid pointer must outlive the planner.
+    // A layer without a grid entry transparently keeps the WIDTH model.
+    void set_routing_grid(const RoutingGridStack* grid) { grid_ = grid; }
+    void set_capacity_mode(CapacityMode m) { cap_mode_ = m; }
     // Tune global planner knobs.  Recognised names:
     //   "kCong"            — overflow cost coefficient: cost = kCong*(overflow/cap) (default 1.0)
     //   "kSpan"            — span-mismatch cost per layout-unit (default 0.001)
@@ -224,6 +244,15 @@ private:
 
     int    find_band(bool is_vcut, int perp_pos) const;
 
+    // True when capacity for this layer should be measured in signal-track
+    // count: SIGNAL_TRACKS mode is on AND the layer has a def_track_pattern grid
+    // (which also guarantees a measured bit pitch).  Layers without a pattern
+    // fall back to the WIDTH model.
+    bool   track_mode_for(int layer_id) const {
+        return cap_mode_ == CapacityMode::SIGNAL_TRACKS &&
+               grid_ != nullptr && grid_->has_layer(layer_id);
+    }
+
     // True if a non-TOP (LOW) segment cannot route on layer_id at the given
     // perpendicular position because its routed extent — after excluding the
     // pin-access tails at the two endpoint leaf cells it attaches to — lies over
@@ -251,6 +280,14 @@ private:
 
     const Floorplan&  floorplan_;
     const LayerStack& layers_;
+    // Opt-in signal-track capacity model (Gap A part 2).  nullptr / WIDTH = the
+    // default geometric-length model; set via set_routing_grid/set_capacity_mode.
+    const RoutingGridStack* grid_ = nullptr;
+    CapacityMode cap_mode_ = CapacityMode::WIDTH;
+    // Extra signal tracks granted per band in SIGNAL_TRACKS mode — a quantisation
+    // slack so exact integer counts do not reject a feasible route by one track.
+    // Tunable via set_planner_param("track_cap_slack"); default 0 (exact).
+    double track_cap_slack_ = 0.0;
     std::vector<GlobalCut> cuts_;
     std::vector<int> x_grid_, y_grid_;
     // Block footprints, cached at cut-rebuild time; used by for_each_band to
