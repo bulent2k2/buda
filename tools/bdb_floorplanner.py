@@ -2032,16 +2032,27 @@ class _OptimizeDialog:
 
 
 def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else None
+    # Validate a file argument BEFORE building the GUI: a bad path should fail
+    # fast on the console with a non-zero exit code, not spin up the whole Tk
+    # window (and an error dialog) only to tear it down.  Doing the check here
+    # also avoids rendering any widgets, so the macOS Cocoa button-height
+    # warning never fires for the bad-arg path.
+    if path is not None and not os.path.exists(path):
+        print(f"fp: cannot open BDB — file not found: {path}", file=sys.stderr)
+        sys.exit(2)
+
     root = tk.Tk()
     app = BdbFloorplanner(root)
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
-        if not os.path.exists(path):
-            messagebox.showerror("File Not Found",
-                                 f"Cannot open BDB — file not found:\n{path}")
+    if path is not None:
+        try:
+            app.state = fpc.load_bdb(path)
+        except Exception as exc:
+            # Existing path but not a readable BDB — report cleanly and exit
+            # rather than leaving a half-initialized window open.
+            print(f"fp: cannot open BDB '{path}': {exc}", file=sys.stderr)
             root.destroy()
-            return
-        app.state = fpc.load_bdb(path)
+            sys.exit(2)
         app._path = []
         app._zoom_limits = None
         app._bdb_var.set(path)
