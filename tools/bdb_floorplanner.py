@@ -273,6 +273,11 @@ class BdbFloorplanner:
         # minimum that clips the toolbar/status on smaller screens.
         self._fig = Figure(figsize=(8, 6), facecolor="#f3f4f6")
         self._ax = self._fig.add_subplot(111)
+        # Trim the default matplotlib margins so the axes uses nearly the whole
+        # canvas (small left/bottom strips for tick labels, a thin top for the
+        # title).  Combined with adjustable='datalim' below, the floorplan fills
+        # the work area instead of sitting in ~80% with wide borders.
+        self._fig.subplots_adjust(left=0.05, right=0.99, top=0.95, bottom=0.05)
         self._canvas = FigureCanvasTkAgg(self._fig, master=canvas_f)
         self._toolbar = NavigationToolbar2Tk(self._canvas, canvas_f)
         self._toolbar.update()
@@ -969,7 +974,12 @@ class BdbFloorplanner:
             ax.set_xlim(*self._zoom_limits[0])
             ax.set_ylim(*self._zoom_limits[1])
 
-        ax.set_aspect("equal")
+        # Equal aspect (blocks keep their true proportions) but fill the axes
+        # box by expanding the DATA limits, not by shrink-wrapping the box to the
+        # data.  Without adjustable='datalim' a wide die (e.g. 1000×200) collapses
+        # the box to a thin strip; with it, the die fills the canvas width (the
+        # constrained axis) and matplotlib re-fits automatically on window resize.
+        ax.set_aspect("equal", adjustable="datalim")
         ax.grid(True, color="#e5e7eb", linewidth=0.5)
         title = "BUDA Floorplanner"
         if self._path:
