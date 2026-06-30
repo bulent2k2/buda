@@ -15,10 +15,15 @@ Usage:
                                    [--optimize sa|ga] [--param KEY=VALUE ...]
                                    [--bloat 20% | --bloat dx=50,dy=80]
 
-  --instances N      number of instances per cell (default 2). Each cell type is
-                     instantiated N times inside the top cell.
-  --buses N          number of top-level cross-instance buses (default 7). Bit
-                     widths cycle the palette [4,6,8,10,12,14,16].
+  --instances SPEC   instances per cell (default 2). SPEC is one int for every
+                     cell (`--instances 3`), a positional list in --cells order
+                     (`--instances 1,4,2`), or named counts
+                     (`--instances dnuts1=3,channel_stress=1`; unlisted cells
+                     default to 2). Each count must be >= 1.
+  --buses N          number of *base* top-level cross-instance buses (default 7;
+                     bit widths cycle the palette [4,6,8,10,12,14,16]). Extra
+                     buses are appended automatically so every instance is wired
+                     to at least three top buses.
   --optimize sa|ga   place the top cell's instances in 2D (SA or GA) to
                      shorten the cross-instance top buses (default: row layout).
   --param KEY=VALUE  optimizer knob (repeatable). Values accept k/m suffixes
@@ -150,6 +155,28 @@ def _parse_param(s: str):
     k = k.strip()
     # Time budgets use s/m/h suffixes ('2m' = 2 minutes, not 2 million).
     return k, (_parse_time(raw) if k.lower() in _TIME_KEYS else _parse_value(raw))
+
+
+def _parse_instances(s: str):
+    """Parse the --instances value into an int, positional list, or named dict.
+
+    '2'                  → 2            (every cell)
+    '2,3,1'              → [2, 3, 1]    (positional, in --cells order)
+    'dnuts1=3,chan=1'    → {'dnuts1':3,'channel_stress'…}  (named; rest default 2)
+    """
+    s = s.strip()
+    if "=" in s:
+        d = {}
+        for part in s.split(","):
+            if not part.strip():
+                continue
+            name, val = part.split("=", 1)
+            d[name.strip()] = int(val)
+        return d
+    parts = [p for p in s.split(",") if p.strip() != ""]
+    if len(parts) == 1:
+        return int(parts[0])
+    return [int(p) for p in parts]
 
 
 def _parse_bloat(s: str) -> dict:
@@ -297,6 +324,86 @@ def _add_cell_internal_nets(db, top_inst, placements):
     return n_added
 
 
+# ── Instance-count + top-bus connectivity helpers ────────────────────────────
+
+_DEFAULT_INSTANCES = 2          # per-cell instance count when unspecified
+_MIN_BUSES_PER_INST = 3         # every instance must be touched by ≥ this many
+
+
+def _normalize_instances(n_instances, cell_names):
+    """Resolve the --instances spec to a {cell_name: count} map.
+
+    Accepts an int (broadcast to every cell), a positional list/tuple aligned
+    to `cell_names`, or a dict keyed by cell name (unlisted cells default to
+    _DEFAULT_INSTANCES).  Every count must be ≥ 1."""
+    if isinstance(n_instances, dict):
+        unknown = set(n_instances) - set(cell_names)
+        if unknown:
+            sys.exit(f"Error: --instances names unknown cell(s): {sorted(unknown)} "
+                     f"(known: {cell_names})")
+        counts = {name: int(n_instances.get(name, _DEFAULT_INSTANCES))
+                  for name in cell_names}
+    elif isinstance(n_instances, (list, tuple)):
+        if len(n_instances) != len(cell_names):
+            sys.exit(f"Error: --instances has {len(n_instances)} values but there "
+                     f"are {len(cell_names)} cells {cell_names}")
+        counts = {name: int(c) for name, c in zip(cell_names, n_instances)}
+    else:
+        counts = {name: int(n_instances) for name in cell_names}
+    for name, c in counts.items():
+        if c < 1:
+            sys.exit(f"Error: --instances count for '{name}' must be >= 1 (got {c})")
+    return counts
+
+
+def _make_top_bus(bi, w, pool, rng, drv=None):
+    """Build one cross-instance top bus (name, width, drv, [rcv…]).  When `drv`
+    is None it is chosen at random; the draw order matches the historical loop
+    so the first N buses are byte-identical to before."""
+    k = rng.randint(3, 6)
+    if drv is None:
+        drv = rng.choice(pool)
+    # Prefer a receiver in a DIFFERENT instance; with a single instance fall
+    # back to any other block (no cross exists).
+    cross = [e for e in pool if e[0] != drv[0]] or [e for e in pool if e != drv]
+    first_rcv = rng.choice(cross)
+    chosen = {drv, first_rcv}
+    extra_pool = [e for e in pool if e not in chosen]
+    extra = rng.sample(extra_pool, min(max(k - 2, 0), len(extra_pool)))
+    return (f"top_bus{bi}_w{w}", w, drv, [first_rcv] + extra)
+
+
+def _instance_touch_counts(buses, inst_names):
+    """For each instance, how many distinct top buses have an endpoint in it."""
+    touch = {inst: 0 for inst in inst_names}
+    for (_name, _w, drv, rcvs) in buses:
+        for inst in {e[0] for e in [drv] + rcvs}:
+            touch[inst] = touch.get(inst, 0) + 1
+    return touch
+
+
+def _ensure_min_buses_per_instance(buses, placements, pool, rng,
+                                   min_per_inst=_MIN_BUSES_PER_INST):
+    """Append extra top buses until every instance is touched by ≥ min_per_inst
+    of them.  Each repair bus is DRIVEN from an under-covered instance (so its
+    count is guaranteed to rise); its receivers also help cover others."""
+    inst_names = [p["inst"] for p in placements]
+    by_inst = {}
+    for (inst, blk) in pool:
+        by_inst.setdefault(inst, []).append((inst, blk))
+    touch = _instance_touch_counts(buses, inst_names)
+    bi = len(buses)
+    for inst in inst_names:
+        while touch[inst] < min_per_inst:
+            w = _WIDTH_PALETTE[bi % len(_WIDTH_PALETTE)]
+            bus = _make_top_bus(bi, w, pool, rng, drv=rng.choice(by_inst[inst]))
+            buses.append(bus)
+            for i2 in {e[0] for e in [bus[2]] + bus[3]}:
+                touch[i2] = touch.get(i2, 0) + 1
+            bi += 1
+    return buses
+
+
 def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
           bloat=None, n_instances=2, n_buses=7):
@@ -321,11 +428,12 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  "
               f"({len(blocks)} blocks, {len(nets)} internal nets)")
 
-    # 2. Name n_instances instances of each cell and lay them out in a row.
+    # 2. Name the instances of each cell (count per cell) and lay them in a row.
+    inst_counts = _normalize_instances(n_instances, [c[0] for c in cells])
     placements = []             # mutable dicts: {inst, cell, x, y, blocks, nets}
     x_cursor, row_h = 0.0, 0.0
     for name, w, h, blocks, nets, _centers in cells:
-        for k in range(n_instances):
+        for k in range(inst_counts[name]):
             short = "chan" if name == "channel_stress" else name
             placements.append({"inst": f"i_{short}_{k}", "cell": name,
                                "x": x_cursor, "y": 0.0,
@@ -341,20 +449,14 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     pool = [(p["inst"], blk) for p in placements for blk in p["blocks"]]
     # One bit width per bus, cycling the palette so n_buses=7 reproduces the
     # historical [4,6,8,10,12,14,16] set (and order) exactly.
-    widths = [_WIDTH_PALETTE[bi % len(_WIDTH_PALETTE)] for bi in range(n_buses)]
     buses = []                  # (name, width, drv(inst,blk), [rcv(inst,blk)…])
-    for bi, w in enumerate(widths):
-        k = rng.randint(3, 6)
-        drv = rng.choice(pool)
-        # Force at least one receiver into a different instance when more than
-        # one instance exists; with a single instance there is no cross, so any
-        # other block in the pool is a valid receiver.
-        cross = [e for e in pool if e[0] != drv[0]] or [e for e in pool if e != drv]
-        first_rcv = rng.choice(cross)
-        chosen = {drv, first_rcv}
-        extra_pool = [e for e in pool if e not in chosen]
-        extra = rng.sample(extra_pool, min(max(k - 2, 0), len(extra_pool)))
-        buses.append((f"top_bus{bi}_w{w}", w, drv, [first_rcv] + extra))
+    for bi in range(n_buses):
+        w = _WIDTH_PALETTE[bi % len(_WIDTH_PALETTE)]
+        buses.append(_make_top_bus(bi, w, pool, rng))
+    # Guarantee every instance is wired to ≥3 top buses (appends repair buses
+    # beyond n_buses when the random set leaves an instance under-covered).
+    n_random_buses = len(buses)
+    _ensure_min_buses_per_instance(buses, placements, pool, rng)
 
     # 4. Optionally optimize the instance placement (mutates placements x/y).
     if optimize:
@@ -392,9 +494,11 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
 
     db.compute_all()
     total_nets = n_cell_nets + n_nets
+    n_repair = len(buses) - n_random_buses
+    repair_note = f" ({n_repair} for ≥3/instance coverage)" if n_repair else ""
     print(f"\nWrote {out_path}: {len(placements)} instances, "
-          f"{len(widths)} top buses, {n_cell_nets} cell-internal nets, "
-          f"{total_nets} nets total.")
+          f"{len(buses)} top buses{repair_note}, {n_cell_nets} cell-internal "
+          f"nets, {total_nets} nets total.")
     if busterms:
         print("\nPlan all buses together with the hier flow "
               "(depth 2 reaches the cell-internal buses):")
@@ -443,7 +547,7 @@ def main():
                           for c in argv[i + 1].split(",")]
             i += 2
         elif argv[i] in ("--instances", "-instances") and i + 1 < len(argv):
-            n_instances = int(argv[i + 1]); i += 2
+            n_instances = _parse_instances(argv[i + 1]); i += 2
         elif argv[i] in ("--buses", "-buses") and i + 1 < len(argv):
             n_buses = int(argv[i + 1]); i += 2
         elif argv[i] == "--no-cell-nets":
@@ -468,8 +572,6 @@ def main():
     if (opt_params or bloat) and not optimize:
         print("buda2bdb: warning: --param/--bloat ignored without --optimize",
               file=sys.stderr)
-    if n_instances < 1:
-        sys.exit("Error: --instances must be >= 1")
     if n_buses < 0:
         sys.exit("Error: --buses must be >= 0")
 

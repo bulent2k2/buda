@@ -30,6 +30,19 @@ _CELLS = [os.path.join(_ROOT, "flow", f)
           for f in ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
 
 
+def _top_bus_coverage(db):
+    """Map each depth-1 instance → number of DISTINCT top buses touching it."""
+    cid2name = {c.id: c.name for c in db.all_components()}
+    netname = {n.id: n.name for n in db.all_nets()}
+    cov = {c.name: set() for c in db.all_components() if c.depth == 1}
+    for p in db.all_pins():
+        nm = netname[p.net_id]
+        comp = cid2name[p.comp_id]
+        if nm.startswith("top_bus") and comp in cov:
+            cov[comp].add(nm.rsplit("_", 1)[0])   # strip _<bit> → bus prefix
+    return {inst: len(buses) for inst, buses in cov.items()}
+
+
 def test_optimizer_param_parsing():
     bd = build_hier_demo
     assert bd._parse_param("iter=20k") == ("iter", 20000)
@@ -165,9 +178,14 @@ def test_build_hier_demo_hierarchy_and_buses(tmp_path):
     assert len(by_depth[1]) == 6
     assert len(by_depth[2]) == 48
 
-    # 7 top buses (70 nets) + cell-internal nets replicated ×2:
-    # dnuts1 128 + dnuts2 16 + channel_stress 200 = 344 per set, ×2 = 688.
-    assert len(db.all_nets()) == 70 + 688
+    # Cell-internal nets replicated ×2: dnuts1 128 + dnuts2 16 +
+    # channel_stress 200 = 344 per set, ×2 = 688.
+    names = {n.name for n in db.all_nets()}
+    assert sum(1 for n in names if n.startswith("chip/i_")) == 688
+    # 7 base top buses (70 nets) plus any coverage-repair buses (≥70 nets).
+    assert sum(1 for n in names if n.startswith("top_bus")) >= 70
+    # Every instance is wired to ≥3 top buses.
+    assert min(_top_bus_coverage(db).values()) >= 3
 
 
 def test_cell_internal_nets_replicated_per_instance(tmp_path):
@@ -215,9 +233,13 @@ def test_cell_nets_templated_by_hier_bundler(tmp_path):
 def test_no_cell_nets_flag(tmp_path):
     out = str(tmp_path / "lean.bdb")
     build_hier_demo.build(out, _CELLS, seed=1, cell_nets=False)
-    names = {n.name for n in buda_db.BDB(out).all_nets()}
-    assert len(names) == 70, "only the 7 top buses (70 nets)"
+    db = buda_db.BDB(out)
+    names = {n.name for n in db.all_nets()}
+    # Only top buses (the 7 base + any coverage-repair buses), no cell nets.
+    assert names and all(n.startswith("top_bus") for n in names)
+    assert len(names) >= 70
     assert not any(n.startswith("chip/i_dnuts1_0/") for n in names)
+    assert min(_top_bus_coverage(db).values()) >= 3
 
 
 @pytest.mark.parametrize("seed", [1, 2, 7])
@@ -264,17 +286,51 @@ def test_instances_count_configurable(tmp_path):
 
 
 def test_buses_count_configurable(tmp_path):
-    # --buses N emits N top-level buses, bit widths cycling [4,6,8,10,12,14,16].
+    # --buses N emits at least N base top buses, bit widths cycling the palette.
     out = str(tmp_path / "b10.bdb")
     build_hier_demo.build(out, _CELLS, seed=1, n_buses=10, cell_nets=False)
     names = {n.name for n in buda_db.BDB(out).all_nets()}
-    # Widths cycle: bus 7→4, bus 8→6, bus 9→8.
-    assert "top_bus7_w4_3" in names      # last bit of the 8th bus (width 4)
-    assert "top_bus9_w8_0" in names      # 10th bus exists
-    assert "top_bus10_w4_0" not in names  # no 11th bus
-    # Total top-bus nets = sum of cycled widths.
-    expected = sum(build_hier_demo._WIDTH_PALETTE[bi % 7] for bi in range(10))
-    assert len(names) == expected
+    # The 10 base buses are present with palette-cycled widths (bus 7→4, 8→6, 9→8).
+    for bi in range(10):
+        w = build_hier_demo._WIDTH_PALETTE[bi % 7]
+        assert f"top_bus{bi}_w{w}_0" in names, f"missing base bus {bi}"
+    assert "top_bus7_w4_3" in names       # last bit of the 8th bus (width 4)
+
+
+def test_instances_per_cell_spec(tmp_path):
+    # Per-cell instance counts: dict (by cell name) and positional list.
+    bd = build_hier_demo
+    assert bd._normalize_instances(3, ["a", "b"]) == {"a": 3, "b": 3}
+    assert bd._normalize_instances([1, 4], ["a", "b"]) == {"a": 1, "b": 4}
+    # Unlisted cells in a dict fall back to the default (2).
+    assert bd._normalize_instances({"a": 5}, ["a", "b"]) == {"a": 5, "b": 2}
+    # CLI value parsing.
+    assert bd._parse_instances("3") == 3
+    assert bd._parse_instances("2,3,1") == [2, 3, 1]
+    assert bd._parse_instances("dnuts1=3,channel_stress=1") == \
+        {"dnuts1": 3, "channel_stress": 1}
+
+    # End-to-end: a positional spec yields the right per-cell instance counts.
+    out = str(tmp_path / "percell.bdb")
+    bd.build(out, _CELLS, seed=1, n_instances=[1, 4, 2])  # 1+4+2 = 7 instances
+    db = buda_db.BDB(out)
+    insts = [c.name for c in db.all_components() if c.depth == 1]
+    assert len(insts) == 7
+    assert sum("i_dnuts2_" in n for n in insts) == 4
+    assert sum("i_chan_" in n for n in insts) == 2
+    assert sum("i_dnuts1_" in n for n in insts) == 1
+
+
+@pytest.mark.parametrize("spec", [2, 3, [1, 4, 2], {"channel_stress": 1}])
+def test_every_instance_has_min_three_buses(tmp_path, spec):
+    # The core guarantee: every depth-1 instance is wired to ≥3 top buses,
+    # regardless of the (possibly per-cell) instance count.
+    out = str(tmp_path / "cov.bdb")
+    build_hier_demo.build(out, _CELLS, seed=1, n_instances=spec, cell_nets=False)
+    db = buda_db.BDB(out)
+    cov = _top_bus_coverage(db)
+    assert cov, "expected depth-1 instances"
+    assert min(cov.values()) >= 3, f"under-covered instances: {cov}"
 
 
 def test_single_instance_builds_without_crash(tmp_path):
@@ -287,6 +343,9 @@ def test_single_instance_builds_without_crash(tmp_path):
     assert len([c for c in db.all_components() if c.depth == 1]) == 1
     names = {n.name for n in db.all_nets()}
     assert "top_bus0_w4_0" in names
+    # (With a single instance the buses are intra-instance, so they cross no
+    # instance boundary and carry no depth-1 interface pin — the ≥3 coverage
+    # guarantee is meaningful only once there is more than one instance.)
 
 
 def test_build_hier_demo_seed_is_deterministic(tmp_path):
