@@ -118,8 +118,11 @@ absolute margin.  The real-sized instance is then centered in its bloated slot,
 leaving channels on all sides.  More bloat → lower density → fewer track overlaps
 (at the cost of a larger die).
 
-The build prints the optimizer result (`hpwl / area / overlap / iterations`) and
-the resulting top-cell size.  The printed hier-flow steps are unchanged.
+While the optimizer runs the build prints a live progress line — `10% 20% …
+100%` — followed by the optimizer result (`hpwl / area / overlap / iterations`,
+**total runtime**) and the resulting top-cell size.  A timed run (`--param
+time=…`) that converges early stops before 100% — the iteration count and
+runtime then show how far it got.  The printed hier-flow steps are unchanged.
 
 ---
 

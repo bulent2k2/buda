@@ -85,6 +85,7 @@ except ModuleNotFoundError:
 
 import math
 import random
+import time
 import buda2bdb  # reuse the .buda parser + cell-size helper
 
 _GAP = 200.0   # spacing between instances laid out in a row
@@ -270,10 +271,39 @@ def _optimize_instances(placements, cell_meta, buses, method, params, bloat, see
         opt.add_net([_pin(drv)] + [_pin(r) for r in rcvs])
 
     kw = _opt_kwargs(method, params, seed)
+
+    # Live progress: print each new 10% milestone on one line as the optimizer
+    # reports it.  (A timed run with convergence early-stop may finish before
+    # 100% — that's expected; the runtime/iters below tell the full story.)
+    print(f"  optimize {method.upper()}:", end="", flush=True)
+    _pct = {"last": 0}
+
+    def _progress(cur, tot):
+        if tot <= 0:
+            return
+        pct = min(100, 100 * cur // tot)
+        while _pct["last"] + 10 <= pct:
+            _pct["last"] += 10
+            print(f" {_pct['last']}%", end="", flush=True)
+
+    kw["progress_fn"] = _progress
+    t0 = time.perf_counter()
     try:
         result = (opt.run_sa(**kw) if method == "sa" else opt.run_ga(**kw))
     except TypeError as exc:
+        print()  # close the progress line before erroring out
         sys.exit(f"Error: invalid --param for {method}: {exc}")
+    runtime = time.perf_counter() - t0
+    # A fixed-count run always completes; round the bar out to 100% (the last
+    # callback rarely lands exactly on the final iter/gen).  A timed run — or one
+    # with convergence early-stop — may legitimately finish sooner, so leave its
+    # honest progress as-is.
+    full_run = "time_budget_s" not in kw and not kw.get("patience")
+    if full_run:
+        while _pct["last"] < 100:
+            _pct["last"] += 10
+            print(f" {_pct['last']}%", end="", flush=True)
+    print(f"  ({runtime:.1f}s)")
 
     placed = {pb.name: pb for pb in result.placements}
     # Center each real-sized instance inside its bloated slot → channels on all
@@ -298,9 +328,10 @@ def _optimize_instances(placements, cell_meta, buses, method, params, bloat, see
                                else f" bloat dx={bloat['dx']:.0f},dy={bloat['dy']:.0f}")
     budget = kw.get("time_budget_s", 0.0)
     bud = f" budget={budget:g}s" if budget else ""
-    print(f"  optimize {method.upper()}: hpwl={result.hpwl:.0f} "
-          f"area={result.area:.0f} overlap={result.overlap:.0f} "
-          f"({result.iterations} iter{bud}){bl} → top {top_w:.0f} x {top_h:.0f}")
+    print(f"    hpwl={result.hpwl:.0f} area={result.area:.0f} "
+          f"overlap={result.overlap:.0f} "
+          f"({result.iterations} iter in {runtime:.1f}s{bud}){bl} "
+          f"→ top {top_w:.0f} x {top_h:.0f}")
     return top_w, top_h
 
 
