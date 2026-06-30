@@ -247,6 +247,48 @@ def test_build_hier_demo_buses_are_hierarchical(tmp_path, seed):
             f"seed={seed} bus {bi} (w={w}) is not cross-instance: {iface_insts}")
 
 
+def test_instances_count_configurable(tmp_path):
+    # --instances N instantiates each cell N times: depth-1 = 3 cells × N,
+    # depth-2 leaf blocks = N × (4 + 4 + 16) = 24N.
+    out = str(tmp_path / "i3.bdb")
+    build_hier_demo.build(out, _CELLS, seed=1, n_instances=3)
+    db = buda_db.BDB(out)
+    by_depth = {}
+    for c in db.all_components():
+        by_depth.setdefault(c.depth, []).append(c)
+    assert len(by_depth[1]) == 9
+    assert len(by_depth[2]) == 72
+    # A third instance's name and its cell-internal nets exist.
+    names = {n.name for n in db.all_nets()}
+    assert "chip/i_dnuts1_2/n11_0" in names
+
+
+def test_buses_count_configurable(tmp_path):
+    # --buses N emits N top-level buses, bit widths cycling [4,6,8,10,12,14,16].
+    out = str(tmp_path / "b10.bdb")
+    build_hier_demo.build(out, _CELLS, seed=1, n_buses=10, cell_nets=False)
+    names = {n.name for n in buda_db.BDB(out).all_nets()}
+    # Widths cycle: bus 7→4, bus 8→6, bus 9→8.
+    assert "top_bus7_w4_3" in names      # last bit of the 8th bus (width 4)
+    assert "top_bus9_w8_0" in names      # 10th bus exists
+    assert "top_bus10_w4_0" not in names  # no 11th bus
+    # Total top-bus nets = sum of cycled widths.
+    expected = sum(build_hier_demo._WIDTH_PALETTE[bi % 7] for bi in range(10))
+    assert len(names) == expected
+
+
+def test_single_instance_builds_without_crash(tmp_path):
+    # With one cell × one instance there is no cross-instance pair; the bus
+    # selection must fall back to intra-instance receivers (no empty-choice raise).
+    out = str(tmp_path / "single.bdb")
+    build_hier_demo.build(out, [os.path.join(_ROOT, "flow", "dnuts1.buda")],
+                          seed=1, n_instances=1, n_buses=3)
+    db = buda_db.BDB(out)
+    assert len([c for c in db.all_components() if c.depth == 1]) == 1
+    names = {n.name for n in db.all_nets()}
+    assert "top_bus0_w4_0" in names
+
+
 def test_build_hier_demo_seed_is_deterministic(tmp_path):
     a = str(tmp_path / "a.bdb")
     b = str(tmp_path / "b.bdb")

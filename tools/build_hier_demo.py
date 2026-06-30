@@ -3,17 +3,23 @@
 tools/build_hier_demo.py — Build a hierarchical demo BDB from scratch.
 
 Defines three leaf cells from existing flat .buda scripts (dnuts1, dnuts2,
-channel_stress), instantiates each **twice** inside a `top` cell, and adds a
-handful of top-level **buses** (bit counts 4 … 16) that wire random subsets of
-the leaf blocks across those six instances.
+channel_stress), instantiates each a configurable number of times (default
+**twice**) inside a `top` cell, and adds a configurable number of top-level
+**buses** (default 7, bit counts cycling 4 … 16) that wire random subsets of the
+leaf blocks across those instances.
 
 Usage:
   python3 tools/build_hier_demo.py [out.bdb] [--seed N] [--cells a.buda,b.buda,...]
+                                   [--instances N] [--buses N]
                                    [--no-cell-nets] [--no-busterms]
                                    [--optimize sa|ga] [--param KEY=VALUE ...]
                                    [--bloat 20% | --bloat dx=50,dy=80]
 
-  --optimize sa|ga   place the top cell's six instances in 2D (SA or GA) to
+  --instances N      number of instances per cell (default 2). Each cell type is
+                     instantiated N times inside the top cell.
+  --buses N          number of top-level cross-instance buses (default 7). Bit
+                     widths cycle the palette [4,6,8,10,12,14,16].
+  --optimize sa|ga   place the top cell's instances in 2D (SA or GA) to
                      shorten the cross-instance top buses (default: row layout).
   --param KEY=VALUE  optimizer knob (repeatable). Values accept k/m suffixes
                      (iter=20k). Friendly keys: iter, wl, area, ovlp, seed, and
@@ -30,7 +36,7 @@ Usage:
 Defaults: out = /tmp/hier_demo.bdb, seed = 1,
           cells = flow/dnuts1.buda, flow/dnuts2.buda, flow/channel_stress.buda
 
-Resulting hierarchy:
+Resulting hierarchy (with --instances 2):
   chip                       (cell "top")
   ├── i_<cellA>_0 / _1       (cell "<cellA>")  → its leaf blocks
   ├── i_<cellB>_0 / _1
@@ -71,6 +77,11 @@ import buda2bdb  # reuse the .buda parser + cell-size helper
 
 _GAP = 200.0   # spacing between instances laid out in a row
 _GRID = 10.0   # snap grid used by the optimizer / applied placements
+
+# Bit widths cycled across the top-level buses (one per bus, wrapping when
+# --buses exceeds the palette length).  Seven entries reproduce the historical
+# default set [4,6,8,10,12,14,16] one-for-one.
+_WIDTH_PALETTE = [4, 6, 8, 10, 12, 14, 16]
 
 
 def _define_leaf_cell(db, cell, buda_path):
@@ -288,7 +299,7 @@ def _add_cell_internal_nets(db, top_inst, placements):
 
 def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
           cell_nets=True, busterms=True, optimize=None, opt_params=None,
-          bloat=None):
+          bloat=None, n_instances=2, n_buses=7):
     rng = random.Random(seed)
     # Leaf .buda files carry full pipeline/tech commands buda2bdb doesn't read;
     # silence its per-line "ignored command" warnings while defining cells.
@@ -310,11 +321,11 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
         print(f"  cell {name:16s} {w:6.0f} x {h:6.0f}  "
               f"({len(blocks)} blocks, {len(nets)} internal nets)")
 
-    # 2. Name two instances of each cell and lay them out in a starting row.
+    # 2. Name n_instances instances of each cell and lay them out in a row.
     placements = []             # mutable dicts: {inst, cell, x, y, blocks, nets}
     x_cursor, row_h = 0.0, 0.0
     for name, w, h, blocks, nets, _centers in cells:
-        for k in range(2):
+        for k in range(n_instances):
             short = "chan" if name == "channel_stress" else name
             placements.append({"inst": f"i_{short}_{k}", "cell": name,
                                "x": x_cursor, "y": 0.0,
@@ -328,12 +339,17 @@ def build(out_path, cell_files, seed=1, top_inst="chip", top_cell="top",
     #    is forced into a DIFFERENT instance from the driver, so every bus is a
     #    genuine cross-instance top-level net regardless of seed.
     pool = [(p["inst"], blk) for p in placements for blk in p["blocks"]]
-    widths = list(range(4, 17, 2))   # 4,6,8,10,12,14,16
+    # One bit width per bus, cycling the palette so n_buses=7 reproduces the
+    # historical [4,6,8,10,12,14,16] set (and order) exactly.
+    widths = [_WIDTH_PALETTE[bi % len(_WIDTH_PALETTE)] for bi in range(n_buses)]
     buses = []                  # (name, width, drv(inst,blk), [rcv(inst,blk)…])
     for bi, w in enumerate(widths):
         k = rng.randint(3, 6)
         drv = rng.choice(pool)
-        cross = [e for e in pool if e[0] != drv[0]]
+        # Force at least one receiver into a different instance when more than
+        # one instance exists; with a single instance there is no cross, so any
+        # other block in the pool is a valid receiver.
+        cross = [e for e in pool if e[0] != drv[0]] or [e for e in pool if e != drv]
         first_rcv = rng.choice(cross)
         chosen = {drv, first_rcv}
         extra_pool = [e for e in pool if e not in chosen]
@@ -415,6 +431,8 @@ def main():
     optimize = None
     opt_params: dict = {}
     bloat = None
+    n_instances = 2
+    n_buses = 7
     i = 0
     pos = []
     while i < len(argv):
@@ -424,6 +442,10 @@ def main():
             cell_files = [c if os.path.isabs(c) else os.path.join(_ROOT, c)
                           for c in argv[i + 1].split(",")]
             i += 2
+        elif argv[i] in ("--instances", "-instances") and i + 1 < len(argv):
+            n_instances = int(argv[i + 1]); i += 2
+        elif argv[i] in ("--buses", "-buses") and i + 1 < len(argv):
+            n_buses = int(argv[i + 1]); i += 2
         elif argv[i] == "--no-cell-nets":
             cell_nets = False; i += 1
         elif argv[i] == "--no-busterms":
@@ -446,6 +468,10 @@ def main():
     if (opt_params or bloat) and not optimize:
         print("buda2bdb: warning: --param/--bloat ignored without --optimize",
               file=sys.stderr)
+    if n_instances < 1:
+        sys.exit("Error: --instances must be >= 1")
+    if n_buses < 0:
+        sys.exit("Error: --buses must be >= 0")
 
     missing = [c for c in cell_files if not os.path.exists(c)]
     if missing:
@@ -454,7 +480,7 @@ def main():
     print(f"Building hierarchical demo BDB (seed={seed}) …")
     build(out_path, cell_files, seed=seed, cell_nets=cell_nets,
           busterms=busterms, optimize=optimize, opt_params=opt_params,
-          bloat=bloat)
+          bloat=bloat, n_instances=n_instances, n_buses=n_buses)
 
 
 if __name__ == "__main__":
