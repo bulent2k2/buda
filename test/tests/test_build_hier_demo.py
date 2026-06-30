@@ -43,6 +43,30 @@ def _top_bus_coverage(db):
     return {inst: len(buses) for inst, buses in cov.items()}
 
 
+def test_resolve_cells_path_and_extension():
+    bd = build_hier_demo
+    ROOT = bd._ROOT
+    flow = os.path.join(ROOT, "flow")
+    # Bare names (no --path): looked up in flow/, .buda inferred.
+    assert bd._resolve_cells(["dnuts1", "dnuts2"], None) == [
+        os.path.join(flow, "dnuts1.buda"), os.path.join(flow, "dnuts2.buda")]
+    # An explicit .buda extension is not doubled.
+    assert bd._resolve_cells(["dnuts1.buda"], None) == [os.path.join(flow, "dnuts1.buda")]
+    # The defaults resolve to the historical flow/*.buda set.
+    assert bd._resolve_cells(bd._DEFAULT_CELLS, None) == [
+        os.path.join(flow, f) for f in
+        ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
+    # --path directory is used for bare names.
+    assert bd._resolve_cells(["foo", "bar"], "/tmp/cells") == [
+        "/tmp/cells/foo.buda", "/tmp/cells/bar.buda"]
+    # A directory-qualified entry stays relative to the repo root (back-compat).
+    assert bd._resolve_cells(["flow/two.buda"], None) == [os.path.join(ROOT, "flow/two.buda")]
+    assert bd._resolve_cells(["flow/two"], None) == [os.path.join(ROOT, "flow/two.buda")]
+    # An absolute path is used as-is (extension still inferred), --path ignored.
+    assert bd._resolve_cells(["/abs/foo"], None) == ["/abs/foo.buda"]
+    assert bd._resolve_cells(["/abs/foo.buda"], "/ignored") == ["/abs/foo.buda"]
+
+
 def test_optimizer_param_parsing():
     bd = build_hier_demo
     assert bd._parse_param("iter=20k") == ("iter", 20000)
