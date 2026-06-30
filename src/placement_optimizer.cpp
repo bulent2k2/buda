@@ -282,9 +282,13 @@ OptimizerResult PlacementOptimizer::run_sa(int max_iter, double t_init, double t
             if (nc < cc) { cp = std::move(p2); cc = nc; }
         }
         double per_iter = std::max(1e-9, elapsed(c0) / cal_n);
-        long est = static_cast<long>(std::ceil(time_budget_s / per_iter));
-        n_target = (max_iter > 0) ? std::min<long>(max_iter, est) : est;
-        n_target = std::max(n_target, 1);
+        // Clamp into int range before storing: a long budget on a fast/tiny
+        // problem can estimate > INT_MAX iters, and the wall-clock cap below is
+        // the real bound anyway.
+        long long est = static_cast<long long>(std::ceil(time_budget_s / per_iter));
+        long long cap = (max_iter > 0) ? max_iter
+                                       : std::numeric_limits<int>::max();
+        n_target = static_cast<int>(std::max<long long>(1, std::min(est, cap)));
         alpha_eff = std::pow(t_min / t_init, 1.0 / std::max(1, n_target));
     }
     if (n_target <= 0) return {};   // neither an iteration nor a time bound
@@ -425,9 +429,10 @@ OptimizerResult PlacementOptimizer::run_ga(int population, int generations,
         // Calibrate the generation count after the first generation's wall time.
         if (gen == 0 && time_budget_s > 0.0) {
             double per_gen = std::max(1e-9, elapsed(t_start));
-            long est = static_cast<long>(std::ceil(time_budget_s / per_gen));
-            n_target = (generations > 0) ? std::min<long>(generations, est) : est;
-            n_target = std::max(n_target, 1);
+            long long est = static_cast<long long>(std::ceil(time_budget_s / per_gen));
+            long long cap = (generations > 0) ? generations
+                                              : std::numeric_limits<int>::max();
+            n_target = static_cast<int>(std::max<long long>(1, std::min(est, cap)));
         }
         // Soft wall-clock cap.
         if (time_budget_s > 0.0 && elapsed(t_start) >= time_budget_s) { gen++; break; }
