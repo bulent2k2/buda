@@ -141,11 +141,18 @@ An **endpoint/busterm block that the trunk passes through** should be connected 
 - Regression guard: the existing trunk / pass-through / MST-completion suites stay
   green (this changes generation for the contained-endpoint case only).
 
-## Status — IMPLEMENTED (generation side)
+## Status — IMPLEMENTED (`add_trunk_v` only)
 
-Landed in `add_trunk_v` / `add_trunk_h` (`topology.cpp`), guarded tightly so the
-blast radius is exactly the contained-endpoint case (full fast+mid+slow suite
-green, big2 unchanged at 9 overlaps / 60 unplaced):
+Landed in `add_trunk_v` (`topology.cpp`), guarded tightly so the blast radius is
+exactly the contained-endpoint case (full fast+mid+slow suite green, big2
+unchanged at 9 overlaps / 60 unplaced). **The `add_trunk_h` mirror was reverted**:
+on b34 it resurrected a degenerate H-trunk (`TRUNK_H@y5062`) whose blk_00 stub
+lands on the abutment Hanan line x=2230 — a zero-slide pinch (`interval[2230,2230]`,
+28/28 unplaced). Worse, it was the *cheapest* candidate (wl 734) so the planner
+auto-selected it. The same-side / ≥2-stub guards don't catch a stub pinned to a
+shared block edge, and b34 is fundamentally a V-trunk case, so the H mirror is
+net-negative; the H-symmetric containment case is deferred until it has its own
+repro and a no-pinch guard. Only `add_trunk_v` is active:
 
 1. **Pull-back.** Before computing the spine span, a no-stub (contained) endpoint
    block whose extent the STUB span already overlaps has its `att_y`/`att_x`

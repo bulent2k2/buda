@@ -121,3 +121,40 @@ def test_b34_bus_028_repro_routes_cleanly():
     assert "no BUSTERM connection" not in out, out
     assert "0 bits unplaced" in out, out
     assert "Success: no opens found." in out, out
+
+
+def test_b34_cheapest_candidate_is_not_a_pinch():
+    """The cheapest (auto-selected) candidate routes clean — no zero-slide pinch.
+
+    Regression: an add_trunk_h collapse once emitted a degenerate H-trunk whose
+    blk_00 stub landed on the abutment Hanan line (zero perp interval), and being
+    the cheapest candidate the planner auto-selected it → 28/28 unplaced.  Drive
+    the flow pinning the FIRST candidate and require a clean route.
+    """
+    src_dir = str(_ROOT / "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    import buda_cli
+    import io
+    import contextlib
+
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = [
+        "add_block blk_00 1250 3780 2230 4775",
+        "add_block blk_15 2230 3365 3500 4615",
+        "add_block blk_32 2230 4615 3500 5350",
+        "add_bus bus_028[28] blk_15.p blk_32.p,blk_00.p",
+        "run_bundler", "generate_topologies",
+        "select_topology 1 1",                      # pin the FIRST (cheapest) candidate
+        f"source {_ROOT / 'flow' / 'big_data_test' / 'big2' / 'tracks4top.buda'}",
+        "run_planner", "run_nuts", "run_detailed_nuts",
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    assert s.nuts_result.num_violations == 0, "NUTS interval violation in first candidate"
+    assert s.detailed_result.num_unplaced == 0, (
+        f"first candidate left {s.detailed_result.num_unplaced} bits unplaced "
+        f"(a zero-slide pinch slipped through as the cheapest candidate)"
+    )

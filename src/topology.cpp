@@ -1271,25 +1271,6 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
     }
 
-    // Seg-busterm containment (mirror of add_trunk_v): a no-stub endpoint block
-    // already overlapped by the STUB span is covered by the trunk by containment —
-    // pull its att_x back into the stub span so the spine stays minimal and the
-    // block connects by pass-through instead of an edge tap.
-    {
-        int stub_lo = INT_MAX, stub_hi = INT_MIN;
-        for (int i = 0; i < n; ++i)
-            if (has_stub[i]) { stub_lo = std::min(stub_lo, att_x[i]); stub_hi = std::max(stub_hi, att_x[i]); }
-        if (stub_lo <= stub_hi) {
-            for (int i = 0; i < n; ++i) {
-                if (has_stub[i]) continue;
-                if (!blocks[i].rects.empty()) continue;            // single-rect only (TEG owns multi-rect)
-                int b1 = blocks[i].orig_bbox.x1, b2 = blocks[i].orig_bbox.x2;
-                if (b1 <= stub_hi && b2 >= stub_lo)
-                    att_x[i] = std::clamp(att_x[i], stub_lo, stub_hi);
-            }
-        }
-    }
-
     int x_lo = INT_MAX, x_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
         x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]);
@@ -1323,27 +1304,7 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
         if (seeded && lo < hi) { x_lo = lo; x_hi = hi; }
     }
-    // Degenerate spine collapse (mirror of add_trunk_v): if the perpendicular
-    // stubs alone connect every block — each no-stub block contains the common
-    // junction x, and all surviving stubs are on the SAME side of y_trunk so they
-    // overlap and stay connected — emit the stubs with no spine (contained blocks
-    // by containment).  Otherwise drop the candidate.
-    if (x_lo >= x_hi) {
-        int n_stubs = 0, side = 0;
-        bool all_covered = true, same_side = true;
-        for (int i = 0; i < n; ++i) {
-            if (has_stub[i]) {
-                ++n_stubs;
-                int s = (conn_y[i] > y_trunk) ? 1 : (conn_y[i] < y_trunk ? -1 : 0);
-                if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
-                continue;
-            }
-            if (!blocks[i].rects.empty() ||
-                !(blocks[i].orig_bbox.x1 <= x_lo && x_lo <= blocks[i].orig_bbox.x2))
-                all_covered = false;
-        }
-        if (!(n_stubs >= 2 && all_covered && same_side)) return;
-    }
+    if (x_lo >= x_hi) return;
 
     Topology t;
     t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
