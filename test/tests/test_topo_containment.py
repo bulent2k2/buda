@@ -105,6 +105,69 @@ def test_contained_endpoint_connects_by_containment_with_junction():
         "the bounded interior spine must carry a SEG junction to both stubs (Codex P1)")
 
 
+def test_degenerate_straddle_spreads_no_dangle_opposing_pulls():
+    """The spine spans BETWEEN the two spread stubs (no dead wire), and the stubs
+    carry opposing net_pull — the straddle pulls (#84 refinement).
+
+    The earlier block-centre anchor left the spine's far endpoint connected to
+    nothing (an overstretched dead segment NUTS cannot retract) and both stubs at
+    the same spine end, so net_pull came out 0.  Spreading each stub toward its own
+    block's side makes both spine endpoints land on a stub and the trunk endpoints
+    pull inward (low=+1 / high=-1).
+    """
+    fp = _fp()
+    c = next(x for x in _gen(fp).generate_candidates("blk_15", ["blk_32", "blk_00"])
+             if x.type == "TRUNK_V@x1740")
+    ct = _build(c, fp)
+    cs = ct.segs()
+    spine_idx = [i for i, s in enumerate(c.segments) if s.start.x == s.end.x]
+    stub_idx = [i for i, s in enumerate(c.segments) if s.start.y == s.end.y]
+    assert len(spine_idx) == 1 and len(stub_idx) == 2, "expected one V spine + two H stubs"
+    sp = c.segments[spine_idx[0]]
+    sp_lo, sp_hi = sorted((sp.start.y, sp.end.y))
+    stub_ys = sorted(c.segments[i].start.y for i in stub_idx)
+    assert (sp_lo, sp_hi) == (stub_ys[0], stub_ys[1]), (
+        f"spine ({sp_lo},{sp_hi}) must span exactly between the stub perps {stub_ys} "
+        f"— no dangling/overstretched endpoint")
+    pulls = [cs[i].net_pull for i in stub_idx]
+    assert pulls[0] * pulls[1] < 0, f"stubs must pull in opposite directions, got {pulls}"
+
+
+def test_spread_stub_stays_on_own_face_large_contained_block():
+    """Spread targets clamp to each stub's OWN face, not the contained block's
+    faces (Codex P1 on #93).
+
+    A contained block far larger than the abutting stub blocks must not push a
+    spread stub off the face it taps — check_topo would flag BUSTERM_FACE.  Here
+    'big' spans y[1000,7000] while the stub blocks' faces are only [3900,4000] and
+    [4000,4100]; the spread must land inside those, not at B's mid-extent.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("big", 1000, 1000, 2000, 7000)   # contained, huge y-extent
+    fp.add_block("lo", 2000, 3900, 3000, 4000)    # below junction, face y[3900,4000]
+    fp.add_block("hi", 2000, 4000, 3000, 4100)    # above junction, face y[4000,4100]
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    cand = [c for c in g.generate_candidates("lo", ["hi", "big"])
+            if c.type.startswith("TRUNK_V") and "MST" not in c.type
+            and 1000 <= c.trunk_location <= 2000]
+    assert cand, "expected an in-'big' TRUNK_V candidate"
+    c = cand[0]
+    ct = _build(c, fp)
+    v = _violations(ct, c, fp)
+    assert "BUSTERM_FACE" not in v and "BUSTERM_OPEN" not in v, v
+    faces = {"lo": (3900, 4000), "hi": (4000, 4100)}
+    for i, s in enumerate(c.segments):
+        if s.start.y != s.end.y:                  # the V spine, not a stub
+            continue
+        bt = c.seg_busterms[i][0]
+        if bt is None or bt.block_name not in faces:
+            continue
+        lo, hi = faces[bt.block_name]
+        assert lo <= s.start.y <= hi, (
+            f"stub for {bt.block_name} at y={s.start.y} is off its face {(lo, hi)}")
+
+
 def test_no_junctionless_containment_without_feedthru():
     """No clean candidate connects blk_00 by junction-less containment.
 

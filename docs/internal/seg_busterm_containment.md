@@ -285,11 +285,34 @@ B decides its tap by whether the **stub span overlaps B**:
    containment either way.
 
 **Result on `b34_bus_028`** (no feedthru): `TRUNK_V@x1740` is a 3-seg shape whose
-seg0 is the bounded interior spine `(1740,4277)→(1740,4615)` (blk_00 centre →
-junction), `seg_links=4` (the junction), blk_00 connected by containment, **no**
+seg0 is the bounded interior spine (first cut `(1740,4277)→(1740,4615)`; after the
+spread refinement below `(1740,4197)→(1740,4695)`), `seg_links=4` (the junction),
+blk_00 connected by containment, **no**
 top/bottom tap. Routes clean (NUTS 0/0, DNUTS 84/0, no opens); big2 unchanged at
 9 overlaps / 60 unplaced; full fast+mid green. Tests:
 `test_topo_trunk_tap_edge.py` (8, V+H straddle / one-directional / contained
 spine) and `test_topo_containment.py` (containment + junction, no junction-less
 containment, feedthru keeps the junction). The PR #85 `*_edge_taps_without_feedthru`
 tests are replaced; the deferred OOB xfail is retired (the candidate is dropped).
+
+### Refinement — spread the stubs instead of anchoring to the block centre
+
+The first cut anchored the spine to `[junction, block.centre]`. That left the
+spine's **far endpoint dangling**: in `b34` seg0 ran `(1740,4277)→(1740,4615)` but
+both stubs connected at the `4615` end, so the `4277` end touched nothing — dead
+wire NUTS cannot retract (it only follows an endpoint whose connections are all
+endpoints; a *free* endpoint has none). And with both stubs at the same spine end,
+`compute_net_pull` saw them at one point and returned `0` for each.
+
+The fix is to **span the spine between its two stubs**: each stub moves toward its
+own block's side of the junction — to the midpoint between the junction and the
+contained block's near face on that side (strictly interior, no face tap) — and
+the spine runs from the low stub to the high stub. Now **both** spine endpoints
+land on a stub (no dead wire), and the trunk's endpoints pull inward — the
+opposing straddle pulls (low stub `+1`, high stub `-1`), exactly the "two conn-segs
+pull the trunk in two directions" intuition that motivated the whole feature.
+
+Result on `b34` (no feedthru): seg0 = `(1740,4197)→(1740,4695)` with
+`seg1@4197(end)` / `seg2@4695(end)` (both ends connected), `net_pull` `+1` / `-1`,
+blk_00 by containment, routes clean. Test:
+`test_degenerate_straddle_spreads_no_dangle_opposing_pulls`.
