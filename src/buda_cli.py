@@ -1698,21 +1698,35 @@ class BudaSession:
         return None, None
 
     def _rr_open_bundles(self):
-        """Bundle ids whose placed-bit count falls short of expected (stage b)."""
+        """Bundle ids whose placed-bit count falls short of expected (stage b).
+
+        Counts placed bits per (bundle, seg_idx), then compares against EVERY
+        segment the bundle's selected topology should have placed — walking
+        `range(n_selected_segments)`, not just the observed seg indices.  A
+        segment DetailedNUTS skipped entirely (0 placed bits — e.g. no valid
+        signal-track window) emits no `net_segments` rows, so iterating only
+        observed segments would miss a bundle whose failed segment has zero bits
+        while its other segments are fully placed."""
         if self.detailed_result is None:
             return []
-        expected = {w.input.original_bundle.id:
-                    len(w.input.original_bundle.get_net_names())
-                    for w in self.bundles}
         per_seg = {}   # bid -> {seg_idx: placed bit count}
         for ns in self.detailed_result.net_segments:
             per_seg.setdefault(ns.bundle_id, {})
             per_seg[ns.bundle_id][ns.seg_idx] = \
                 per_seg[ns.bundle_id].get(ns.seg_idx, 0) + 1
         out = []
-        for bid, segs in per_seg.items():
-            exp = expected.get(bid, 0)
-            if exp and any(cnt < exp for cnt in segs.values()):
+        for w in self.bundles:
+            bid = w.input.original_bundle.id
+            exp = len(w.input.original_bundle.get_net_names())
+            if not exp:
+                continue
+            sel = w.plan.selected_topology_index
+            cands = w.input.candidates
+            if sel < 0 or sel >= len(cands):
+                continue
+            n_segs = len(cands[sel].segments)
+            segs = per_seg.get(bid, {})
+            if any(segs.get(si, 0) < exp for si in range(n_segs)):
                 out.append(bid)
         return out
 
@@ -1788,13 +1802,19 @@ class BudaSession:
         self._dogleg_originals = dict(snap['dl_orig'])
 
     def _rr_rerun(self, stage):
-        """Silently re-run planner + NUTS (+ DNUTS for stage b)."""
+        """Silently re-run planner + NUTS (+ DNUTS for stage b).
+
+        Stage b replays DetailedNUTS through the private helper with the user's
+        selected bit order preserved.  The `run_detailed_nuts` *command* resets
+        `_detailed_bit_order` to LO_HI before parsing its (here absent) arg, so
+        driving it via `do_command` would silently flip a HI_LO flow to LO_HI and
+        change detailed wiring semantics unrelated to the topology move."""
         sink = io.StringIO()
         with contextlib.redirect_stdout(sink), buda.ostream_redirect():
             self.do_command(f"run_planner {self._planner_iterations}")
             self.do_command("run_nuts")
             if stage == 'b':
-                self.do_command("run_detailed_nuts")
+                self._run_detailed_nuts(bit_order=self._detailed_bit_order)
 
     def _rr_trial(self, w, tidx, stage, metric):
         """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
@@ -1829,6 +1849,16 @@ class BudaSession:
 
         committed = 0
         it = 0
+        # A trial re-runs the planner, mutating every wrapper's layer/perp
+        # assignment fields (seg_layers, seg_perp, assigned_*_layer) — which
+        # `_rr_snapshot`/`_rr_restore` do NOT capture (they restore only
+        # selection, pin, and result refs).  After a commit the live plan is
+        # consistent; after rejected trials it carries the last trial's
+        # assignment while the reported result is the snapshot's.  Track that
+        # divergence and rebuild a consistent plan from the committed selections
+        # before returning, so a later run_nuts/DNUTS/visualization matches the
+        # reported metric.
+        dirty = False
         while it < max_iter:
             it += 1
             cur = metric()
@@ -1852,6 +1882,7 @@ class BudaSession:
                         continue
                     m = self._rr_trial(w, tidx, stage, metric)
                     self._rr_restore(snap)
+                    dirty = True             # trial mutated live plan assignments
                     if m < cur and (best is None or m < best[0]):
                         best = (m, bid, old_tidx, tidx)
                     if m == 0:               # cannot do better — take it now
@@ -1866,9 +1897,18 @@ class BudaSession:
                 break
             m_new, bid, old_t, new_t = best
             self._rr_trial(self._rr_wrapper(bid), new_t, stage, metric)  # commit
+            dirty = False                    # commit left live plan consistent
             committed += 1
             print(f"[ripup_reroute] iter {it}: bundle {bid} topo {old_t + 1}"
                   f"->{new_t + 1}, metric {cur}->{metric()}")
+
+        # If we exited with rejected trials still live, the wrappers carry the
+        # last trial's layer assignments while the result refs were restored to
+        # the committed plan.  Rebuild a plan consistent with the committed
+        # selections (deterministic; reproduces the reported metric) so any
+        # later run_nuts/DNUTS/visualization operates on the same plan.
+        if dirty:
+            self._rr_rerun(stage)
 
         print(f"[ripup_reroute] done: metric {m0}->{metric()} "
               f"after {committed} move(s).")

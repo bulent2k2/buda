@@ -191,6 +191,30 @@ def test_big2_stage_a_reduces_overlaps():
 
 
 @pytest.mark.mid
+def test_big2_stage_b_preserves_hi_lo_bit_order():
+    """ripup_reroute's stage-b replay must keep a HI_LO bit-order selection.
+
+    Regression for the bug where the per-trial / committed DNUTS re-run went
+    through `do_command("run_detailed_nuts")`, which resets `_detailed_bit_order`
+    to LO_HI before parsing its (absent) arg — silently flipping a HI_LO flow."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"source {_BIG2 / 'tracks4top.buda'}")
+        s.do_command(f"source {_BIG2 / 'tc3b_flat_x5.buda'}")
+        s.do_command("run_bundler")
+        s.do_command("generate_topologies")
+        s.do_command("run_planner")
+        s.do_command("run_nuts")
+        s.do_command("run_detailed_nuts hi_lo")
+    assert s._detailed_bit_order == "HI_LO"
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute")
+    assert s._detailed_bit_order == "HI_LO", "ripup_reroute flipped the bit order"
+    assert s.detailed_result.num_unplaced == 0
+
+
+@pytest.mark.mid
 def test_big2_max_iter_bounds_moves():
     """max_iter caps the outer loop: with 1, at most one iteration runs."""
     s = _big2_to_stage("a")
