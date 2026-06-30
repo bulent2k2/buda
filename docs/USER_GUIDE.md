@@ -14,6 +14,7 @@ To successfully run a BUDA script, you should follow this sequence:
 4.  **Topology Generation**: Enumerate possible routing shapes for each bundle.
 5.  **Global Planning**: Choose the best topology for each bundle to minimize congestion.
 6.  **Track Assignment (NUTS)**: Solve for the specific track positions of every wire.
+7.  **(Optional) Feedback Re-route**: If NUTS or Detailed NUTS still report overlaps/opens, run `ripup_reroute` to re-route the contending bundles and clear them.
 
 ---
 
@@ -33,6 +34,12 @@ BUDA commands depend on each other. If you skip a setup step, the engine may use
 *   **Prerequisite 1**: Run `run_nuts` first.
 *   **Prerequisite 2**: Use `def_track_pattern` for every used layer.
 *   **Why?**: Detailed NUTS performs bit-level placement. It needs to know the exact width and spacing of tracks (the "pattern") to ensure the layout is physically legal.
+
+### `ripup_reroute`
+*   **Prerequisite**: Run `run_nuts` (and, for the open-clearing pass, `run_detailed_nuts`) first.
+*   **Why?**: This is an *optional* feedback pass. The planner sometimes commits a bundle thinking a band is fine (`overflow=0`) when NUTS or Detailed NUTS later finds it contended — and simply re-running `run_planner` produces the same plan because the planner cannot see the real overlap. `ripup_reroute` reads the **actual** result, re-routes a contending bundle to an alternate topology, re-runs the pipeline, and keeps the move only if it lowers the overlap/open count.
+*   **Which stage?** It auto-detects: run it after `run_nuts` to drive down NUTS **overlaps**, or after `run_detailed_nuts` to drive down DetailedNUTS **opens** (unplaced bits). It is a no-op when there is nothing left to fix, and works in both the flat and hierarchical flows.
+*   **Tip**: Optionally cap the effort with `ripup_reroute <max_iter>` (default 10 iterations, one re-route committed per iteration).
 
 ---
 
@@ -87,6 +94,9 @@ run_planner 5
 
 run_nuts
 run_detailed_nuts
+
+# Optional: if NUTS/Detailed NUTS still report overlaps or opens, clear them.
+ripup_reroute
 
 # ── Step 5: Visualize ──
 # Use the GUI to click on bundles and choose different topologies.

@@ -40,6 +40,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 8 | `add_grid_override` | Override the track pattern for a specific floorplan region on a layer |
 | 8 | `report_overhead` | Compare `def_layer` overhead% against the track pattern; print corrected `def_layer` commands for any mismatch |
 | 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
+| 3↔4/9 | `ripup_reroute` | Feedback-driven rip-up & re-route: read the **actual** NUTS overlaps / DNUTS opens and re-route contending bundles to clear them |
 | Verify | `check_connectivity` | Verify connectivity at topo, nuts, or dnuts stages and detect opens |
 | — | `dump_topologies` | Text dump of per-bundle candidate topologies (inspection) |
 | — | `visualize` | Open interactive NUTS result viewer |
@@ -1427,6 +1428,73 @@ run_detailed_nuts
 With HI_LO ordering:
 ```buda
 run_detailed_nuts hi_lo
+```
+
+---
+
+### `ripup_reroute`
+
+```
+ripup_reroute [max_iter]
+```
+
+Feedback-driven rip-up & re-route. The congestion planner's band-capacity model is
+layout-width based, so it can report `overflow=0` for a band that NUTS (or
+DetailedNUTS) later finds contended — and re-running `run_planner` re-derives the
+same plan. `ripup_reroute` closes that loop: it reads the **actual** overlaps/opens,
+greedily re-routes a contending bundle to an alternate topology candidate, re-runs
+the pipeline, and keeps only moves that reduce the metric.
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `max_iter` | int | `10` | Maximum number of outer hill-climb iterations (each commits at most one re-route). |
+
+**Two stages, auto-detected from pipeline state:**
+
+| Run it after… | Stage | Metric driven down |
+|---|---|---|
+| `run_nuts` | a | NUTS abstract track overlaps (`num_overlaps`) |
+| `run_detailed_nuts` | b | DetailedNUTS opens / unplaced bits (`num_unplaced`) |
+
+**Algorithm (greedy hill-climb):** each iteration snapshots per-bundle state, then
+for every contending bundle (the bundles on either side of a NUTS overlap, or the
+open bundles in stage b) trials each alternate candidate — re-pinning it and
+re-running planner→NUTS(→DNUTS) silently — and commits the single best move that
+lowers the metric. It stops when the metric reaches 0, no improving move exists, or
+`max_iter` is hit. It is a **no-op** when the metric is already 0 (prints
+`metric already 0 — nothing to do`).
+
+Each committed move logs the bundle and topology change, e.g.:
+
+```
+[ripup_reroute] stage b (DNUTS opens): start metric=60, max_iter=10
+[ripup_reroute] iter 1: bundle 75 topo 1->2, metric 60->0
+[ripup_reroute] done: metric 60->0 after 1 move(s).
+```
+
+**Flat and hier flow:** Works after both `run_planner` and `run_planner hier`. In
+hier flow `self.bundles` is the expanded per-instance list, so a re-route re-pins a
+single **instance** wrapper and re-plans the expanded set in place — the right
+granularity for relieving a local congestion hot-spot without disturbing the cell's
+other instances.
+
+**Notes:**
+- It is an explicit congestion-fix pass, so it may re-route any contended bundle —
+  including one pinned earlier by `select_topology` (its pin is replaced).
+- The base flow is unchanged unless an improving move is found; the command is
+  opt-in and additive.
+- A stage-b `hi_lo` bit-order selection is preserved across the re-route.
+
+**Requires:** `run_planner` (or `run_planner hier`) and at least `run_nuts` to have
+run first.
+
+**Example:**
+```buda
+run_planner 5
+run_nuts
+ripup_reroute            # drive NUTS overlaps toward 0 (stage a)
+run_detailed_nuts
+ripup_reroute            # drive DNUTS opens toward 0 (stage b)
 ```
 
 ---
