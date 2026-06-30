@@ -57,7 +57,12 @@ class BdbFloorplanner:
     def __init__(self, root):
         self.root = root
         self.root.title("BUDA Floorplanner Prototype")
-        self.root.geometry("1680x1000")
+        # Open large for a roomy work area, but never bigger than the screen —
+        # an oversized window gets clamped by the WM and clips bottom widgets.
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        win_w, win_h = min(1680, int(sw * 0.92)), min(1000, int(sh * 0.92))
+        self.root.geometry(f"{win_w}x{win_h}")
+        self.root.minsize(900, 600)
 
         # Bring window to front and set icon using centralized helpers
         buda_viz.set_icon(self.root, "buda_fp_icon.png")
@@ -262,10 +267,26 @@ class BdbFloorplanner:
 
         canvas_f = ttk.Frame(main)
         canvas_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self._fig = Figure(figsize=(11, 8.5), facecolor="#f3f4f6")
+        # Keep the figure's *minimum* size modest: the canvas packs with
+        # expand=True and grows to fill the window, so the work area is driven by
+        # the window size, not figsize.  A large figsize only forces a tall
+        # minimum that clips the toolbar/status on smaller screens.
+        self._fig = Figure(figsize=(8, 6), facecolor="#f3f4f6")
         self._ax = self._fig.add_subplot(111)
         self._canvas = FigureCanvasTkAgg(self._fig, master=canvas_f)
-        NavigationToolbar2Tk(self._canvas, canvas_f).update()
+        self._toolbar = NavigationToolbar2Tk(self._canvas, canvas_f)
+        self._toolbar.update()
+        # Status text lives in the toolbar row, to the right of the coordinate
+        # readout (lower-right) — always visible, and frees a whole bottom row
+        # for the canvas.  Pack ours first (side=RIGHT → rightmost), then re-pack
+        # matplotlib's coordinate label so it sits to our left.
+        self._status_lbl = ttk.Label(self._toolbar, textvariable=self._status,
+                                      anchor="e")
+        self._status_lbl.pack(side=tk.RIGHT, padx=(10, 8))
+        _msg = getattr(self._toolbar, "_message_label", None)
+        if _msg is not None:
+            _msg.pack_forget()
+            _msg.pack(side=tk.RIGHT)
         self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._canvas.mpl_connect("button_press_event", self._on_press)
         self._canvas.mpl_connect("motion_notify_event", self._on_motion)
@@ -311,8 +332,8 @@ class BdbFloorplanner:
         # Esc — clear block selection
         self.root.bind("<Escape>", lambda e: self._clear_canvas_sel())
 
-        ttk.Label(self.root, textvariable=self._status, relief=tk.SUNKEN,
-                  anchor="w", padding=(6, 2)).pack(side=tk.BOTTOM, fill=tk.X)
+        # (Status is shown in the toolbar row, to the right of the coordinate
+        # readout — see the canvas setup above; no separate bottom bar.)
         self._draw()
 
     def _on_view_toggle(self, prop: str, var: tk.BooleanVar):
