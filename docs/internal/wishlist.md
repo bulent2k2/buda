@@ -135,6 +135,14 @@ the 3 NUTS-clean DNUTS opens (bundles 10/14/37) should become planner `overflow`
 warnings (then rip-up/replan), and total unplaced should drop. See
 `docs/internal/planner_low_layer_over_cell.md` for the full Gap A/C breakdown.
 
+**Plan written:** the detailed implementation plan lives in
+`docs/internal/planner_signal_track_capacity.md` — shipped as an opt-in
+`run_planner [hier] N signal_tracks` keyword (the planner is handed the
+`RoutingGridStack` and charges band capacity in signal-track count / demand in
+bit count on patterned layers). New evidence from `flow/rnr/mix.buda`: stage-a
+ripup drives 21→0 overlaps but leaves **150 DNUTS opens at `overflow==0`** — the
+exact capacity-mismatch class this item targets.
+
 ## NUTS band-level repack for spread-fit overlap clusters
 
 **What:** After Gap A part 1 + TOP-layer load balancing, big2 is down to 9 NUTS
