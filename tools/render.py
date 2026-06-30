@@ -193,6 +193,25 @@ def _draw_topology(ax, s, w, blocks):
     return contained
 
 
+def _involved_blocks(s, w, blocks):
+    """Blocks the bundle connects to: busterm (driver/receiver) + containment."""
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    ct = buda.ConnTopology()
+    ct.build(topo, s.fp)
+    names = set()
+    for seg in ct.segs():
+        for c in seg.conns:
+            if c.kind == buda.SegConnKind.BUSTERM:
+                names.add(c.block_name)
+    bt = set(names)
+    for seg in ct.segs():
+        for name, r in blocks:
+            if name not in bt and _spans_block(seg.horiz, seg.along_lo,
+                                                seg.along_hi, seg.perp_pos, r):
+                names.add(name)
+    return [(n, r) for n, r in blocks if n in names]
+
+
 def _draw_nuts(ax, s, bundle_id, blocks, highlight):
     _draw_blocks(ax, blocks, highlight)
     segs = [g for g in s.nuts_result.segments if g.bundle_id == bundle_id]
@@ -246,12 +265,14 @@ def _balance(x0, x1, y0, y1, max_aspect=3.0):
     return x0, x1, y0, y1
 
 
-def _extent(blocks, segs_xy, zoom):
-    if zoom and segs_xy:
-        xs = [p[0] for p in segs_xy]
-        ys = [p[1] for p in segs_xy]
-        mx = max(60, (max(xs) - min(xs)) * 0.2)
-        my = max(60, (max(ys) - min(ys)) * 0.2)
+def _extent(blocks, focus, segs_xy, zoom):
+    """View extent.  --zoom frames the bundle's driver/receiver+containment blocks
+    (`focus`) fully, plus its wires; otherwise the whole die."""
+    if zoom and focus:
+        xs = [r.x1 for _, r in focus] + [r.x2 for _, r in focus] + [p[0] for p in segs_xy]
+        ys = [r.y1 for _, r in focus] + [r.y2 for _, r in focus] + [p[1] for p in segs_xy]
+        mx = max(60, (max(xs) - min(xs)) * 0.06)
+        my = max(60, (max(ys) - min(ys)) * 0.06)
         return _balance(min(xs) - mx, max(xs) + mx, min(ys) - my, max(ys) + my)
     xs = [r.x1 for _, r in blocks] + [r.x2 for _, r in blocks]
     ys = [r.y1 for _, r in blocks] + [r.y2 for _, r in blocks]
@@ -291,7 +312,8 @@ def main():
             segs_xy += [(g.span_lo, g.track_position), (g.span_hi, g.track_position)]
         else:
             segs_xy += [(g.track_position, g.span_lo), (g.track_position, g.span_hi)]
-    x0, x1, y0, y1 = _extent(blocks, segs_xy, args.zoom)
+    focus = _involved_blocks(s, w, blocks)
+    x0, x1, y0, y1 = _extent(blocks, focus, segs_xy, args.zoom)
     for ax in axes:
         ax.set_aspect("equal")
         ax.set_xlim(x0, x1)
