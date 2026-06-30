@@ -484,6 +484,45 @@ def test_parse_time_budget():
     assert pt("-5s") == 0.0       # negative clamped to off
 
 
+def test_parse_bloat():
+    # The Optimize dialog's Bloat field parser (GUI-free, shared with the CLI).
+    pb = fpc.parse_bloat
+    assert pb("") is None              # blank → no bloat
+    assert pb("20%") == {"pct": 20.0}
+    assert pb("50") == {"dx": 50.0, "dy": 50.0}
+    assert pb("dx=50,dy=80") == {"dx": 50.0, "dy": 80.0}
+    assert pb("dx=40") == {"dx": 40.0, "dy": 40.0}   # one axis mirrors to the other
+    assert pb("junk") is None
+    # _bloated_size applies the parsed spec.
+    assert fpc._bloated_size(100, 80, {"pct": 25}) == (125.0, 100.0)
+    assert fpc._bloated_size(100, 80, {"dx": 40, "dy": 20}) == (140.0, 100.0)
+    assert fpc._bloated_size(100, 80, None) == (100, 80)
+
+
+def test_bbox_area(tmp_path):
+    state = fpc.create_bdb(str(tmp_path / "area.bdb"), 1000, 800, grid=10)
+    fpc.add_block(state, "a",   0,   0, 100, 100)   # bbox (0,0)-(100,100)
+    fpc.add_block(state, "b", 200, 100, 100, 100)   # bbox (200,100)-(300,200)
+    # Envelope is (0,0)-(300,200) → 300 × 200 = 60 000.
+    assert fpc.bbox_area(state) == 300 * 200
+
+
+def test_optimize_placement_bloat_preserves_real_size(tmp_path):
+    # Bloat inflates blocks only DURING optimization (to leave channels); the
+    # applied result must keep each block's real footprint, re-centered, in-die.
+    state = fpc.create_bdb(str(tmp_path / "bloat.bdb"), 2000, 2000, grid=10)
+    sizes = {"a": (200, 160), "b": (200, 160), "c": (160, 120)}
+    fpc.add_block(state, "a",   0,   0, 200, 160)
+    fpc.add_block(state, "b", 300, 300, 200, 160)
+    fpc.add_block(state, "c", 600,  50, 160, 120)
+    fpc.optimize_placement(state, method="sa", max_iter=3000, seed=1,
+                           bloat={"pct": 20})
+    for nm, (w, h) in sizes.items():
+        b = state.block(nm)
+        assert abs((b.x2 - b.x1) - w) < 1e-6 and abs((b.y2 - b.y1) - h) < 1e-6
+        assert b.x1 >= 0 and b.y1 >= 0 and b.x2 <= 2000 and b.y2 <= 2000
+
+
 def test_floorplanner_commands_export_hbundle_script(tmp_path):
     bdb_path = tmp_path / "proto.bdb"
     script_path = tmp_path / "proto.buda"
