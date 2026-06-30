@@ -14,7 +14,7 @@ To successfully run a BUDA script, you should follow this sequence:
 4.  **Topology Generation**: Enumerate possible routing shapes for each bundle.
 5.  **Global Planning**: Choose the best topology for each bundle to minimize congestion.
 6.  **Track Assignment (NUTS)**: Solve for the specific track positions of every wire.
-7.  **(Optional) Feedback Re-route**: If NUTS or Detailed NUTS still report overlaps/opens, run `ripup_reroute` to re-route the contending bundles and clear them.
+7.  **(Optional) Feedback Re-route**: If NUTS or Detailed NUTS still report overlaps/opens, run `ripup_reroute` to re-route the contending bundles and clear them. For best results run it **twice** — once after `run_nuts` and once after `run_detailed_nuts` (see below).
 
 ---
 
@@ -39,7 +39,15 @@ BUDA commands depend on each other. If you skip a setup step, the engine may use
 *   **Prerequisite**: Run `run_nuts` (and, for the open-clearing pass, `run_detailed_nuts`) first.
 *   **Why?**: This is an *optional* feedback pass. The planner sometimes commits a bundle thinking a band is fine (`overflow=0`) when NUTS or Detailed NUTS later finds it contended — and simply re-running `run_planner` produces the same plan because the planner cannot see the real overlap. `ripup_reroute` reads the **actual** result, re-routes a contending bundle to an alternate topology, re-runs the pipeline, and keeps the move only if it lowers the overlap/open count.
 *   **Which stage?** It auto-detects: run it after `run_nuts` to drive down NUTS **overlaps**, or after `run_detailed_nuts` to drive down DetailedNUTS **opens** (unplaced bits). It is a no-op when there is nothing left to fix, and works in both the flat and hierarchical flows.
-*   **Tip**: Optionally cap the effort with `ripup_reroute <max_iter>` (default 10 iterations, one re-route committed per iteration).
+*   **Best practice — run it in both places.** The two passes clear *different* causes of unplaced bits, so chaining them clears the most:
+    ```buda
+    run_nuts
+    ripup_reroute            # stage a: clear abstract NUTS overlaps
+    run_detailed_nuts
+    ripup_reroute            # stage b: clear the residual capacity-driven opens
+    ```
+    Stage a clears the opens that come from abstract track contention (cheaply — fewer, larger wins), giving DetailedNUTS a much better starting point; stage b then re-routes the bits that still don't fit because a band is short of *signal tracks*. On a congested design this two-pass order reaches far fewer opens than stage b alone.
+*   **Tip**: Optionally cap the effort with `ripup_reroute <max_iter>` (default 10 iterations, one re-route committed per iteration). On a large design the default may stop while still improving — it says so and you can re-run it or pass a larger `max_iter` to continue.
 
 ---
 
@@ -93,10 +101,9 @@ generate_topologies
 run_planner 5
 
 run_nuts
+ripup_reroute            # Optional pass 1: clear NUTS overlaps before bit placement
 run_detailed_nuts
-
-# Optional: if NUTS/Detailed NUTS still report overlaps or opens, clear them.
-ripup_reroute
+ripup_reroute            # Optional pass 2: clear residual DetailedNUTS opens
 
 # ── Step 5: Visualize ──
 # Use the GUI to click on bundles and choose different topologies.
