@@ -133,6 +133,41 @@ def test_degenerate_straddle_spreads_no_dangle_opposing_pulls():
     assert pulls[0] * pulls[1] < 0, f"stubs must pull in opposite directions, got {pulls}"
 
 
+def test_spread_stub_stays_on_own_face_large_contained_block():
+    """Spread targets clamp to each stub's OWN face, not the contained block's
+    faces (Codex P1 on #93).
+
+    A contained block far larger than the abutting stub blocks must not push a
+    spread stub off the face it taps — check_topo would flag BUSTERM_FACE.  Here
+    'big' spans y[1000,7000] while the stub blocks' faces are only [3900,4000] and
+    [4000,4100]; the spread must land inside those, not at B's mid-extent.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("big", 1000, 1000, 2000, 7000)   # contained, huge y-extent
+    fp.add_block("lo", 2000, 3900, 3000, 4000)    # below junction, face y[3900,4000]
+    fp.add_block("hi", 2000, 4000, 3000, 4100)    # above junction, face y[4000,4100]
+    g = buda.TopologyGenerator(fp)
+    g.set_layer_ids(4, 5)
+    cand = [c for c in g.generate_candidates("lo", ["hi", "big"])
+            if c.type.startswith("TRUNK_V") and "MST" not in c.type
+            and 1000 <= c.trunk_location <= 2000]
+    assert cand, "expected an in-'big' TRUNK_V candidate"
+    c = cand[0]
+    ct = _build(c, fp)
+    v = _violations(ct, c, fp)
+    assert "BUSTERM_FACE" not in v and "BUSTERM_OPEN" not in v, v
+    faces = {"lo": (3900, 4000), "hi": (4000, 4100)}
+    for i, s in enumerate(c.segments):
+        if s.start.y != s.end.y:                  # the V spine, not a stub
+            continue
+        bt = c.seg_busterms[i][0]
+        if bt is None or bt.block_name not in faces:
+            continue
+        lo, hi = faces[bt.block_name]
+        assert lo <= s.start.y <= hi, (
+            f"stub for {bt.block_name} at y={s.start.y} is off its face {(lo, hi)}")
+
+
 def test_no_junctionless_containment_without_feedthru():
     """No clean candidate connects blk_00 by junction-less containment.
 

@@ -1358,19 +1358,20 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         if (!(n_stubs >= 2 && same_side && ok && have_B &&
               B_x1 < junction && junction < B_x2))
             return;
-        int new_lo = junction, new_hi = junction;
+        int new_lo = INT_MAX, new_hi = INT_MIN;
         for (int i = 0; i < n; ++i) {
             if (!has_stub[i]) continue;
-            int bc = blocks[i].rects.empty() ? blocks[i].orig_bbox.center().x
-                                             : best_r[i].center().x;
-            int tgt = (bc < junction) ? (junction + B_x1) / 2     // block left  → toward B's left
-                    : (bc > junction) ? (junction + B_x2) / 2     // block right → toward B's right
-                                      : junction;
-            att_x[i] = tgt;
-            new_lo = std::min(new_lo, tgt);
-            new_hi = std::max(new_hi, tgt);
+            // Spread to the midpoint of the stub's OWN face ∩ B's interior (mirror
+            // of add_trunk_v) — keeps the stub on its own face even when B is much
+            // larger than the stub block (Codex P1), and strictly inside B.
+            int fx1 = blocks[i].rects.empty() ? blocks[i].orig_bbox.x1 : best_r[i].x1;
+            int fx2 = blocks[i].rects.empty() ? blocks[i].orig_bbox.x2 : best_r[i].x2;
+            int lo = std::max(fx1, B_x1), hi = std::min(fx2, B_x2);
+            if (lo < hi) att_x[i] = (lo + hi) / 2;     // else keep att_x (the junction)
+            new_lo = std::min(new_lo, att_x[i]);
+            new_hi = std::max(new_hi, att_x[i]);
         }
-        if (new_lo >= new_hi) return;                  // stubs did not straddle the junction
+        if (new_lo >= new_hi) return;                  // stubs did not spread (no interior room)
         x_lo = new_lo; x_hi = new_hi;                  // spine spans between the spread stubs
     }
 
@@ -1788,19 +1789,22 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         if (!(n_stubs >= 2 && same_side && ok && have_B &&
               B_y1 < junction && junction < B_y2))
             return;
-        int new_lo = junction, new_hi = junction;
+        int new_lo = INT_MAX, new_hi = INT_MIN;
         for (int i = 0; i < n; ++i) {
             if (!(has_stub[i] && !stub_suppressed[i])) continue;
-            int bc = blocks[i].rects.empty() ? blocks[i].orig_bbox.center().y
-                                             : best_r[i].center().y;
-            int tgt = (bc < junction) ? (junction + B_y1) / 2     // block below → toward B's bottom
-                    : (bc > junction) ? (junction + B_y2) / 2     // block above → toward B's top
-                                      : junction;
-            att_y[i] = tgt;
-            new_lo = std::min(new_lo, tgt);
-            new_hi = std::max(new_hi, tgt);
+            // Spread to the midpoint of the stub's OWN face ∩ B's interior — never
+            // computed from B's faces alone, which (when B is much larger than the
+            // stub block) could place the stub off its own face → an off-face
+            // BUSTERM (Codex P1).  The intersection naturally lands on the block's
+            // side of the junction and stays strictly inside B (no face tap).
+            int fy1 = blocks[i].rects.empty() ? blocks[i].orig_bbox.y1 : best_r[i].y1;
+            int fy2 = blocks[i].rects.empty() ? blocks[i].orig_bbox.y2 : best_r[i].y2;
+            int lo = std::max(fy1, B_y1), hi = std::min(fy2, B_y2);
+            if (lo < hi) att_y[i] = (lo + hi) / 2;     // else keep att_y (the junction)
+            new_lo = std::min(new_lo, att_y[i]);
+            new_hi = std::max(new_hi, att_y[i]);
         }
-        if (new_lo >= new_hi) return;                  // stubs did not straddle the junction
+        if (new_lo >= new_hi) return;                  // stubs did not spread (no interior room)
         y_lo = new_lo; y_hi = new_hi;                  // spine spans between the spread stubs
         // falls through: the spine block emits the V segment [y_lo,y_hi]; the stub
         // loop wires blk_15/blk_32; the contained block is covered by the spine.
