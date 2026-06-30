@@ -1328,16 +1328,18 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         if (seeded && lo < hi) { x_lo = lo; x_hi = hi; }
     }
     // Degenerate spine (all real attachments share one x == the junction).  Mirror
-    // of add_trunk_v (#84): rather than a junction-less spine-less collapse (which
-    // would let parallel stubs separate, a silent open — Codex P1) or a zero-slide
-    // pinch on an abutment line (why the earlier H mirror was reverted), emit a
-    // BOUNDED INTERIOR spine toward a contained straddling block's centre — only
-    // when such a block exists, so a junction with no interior room is dropped.
+    // of add_trunk_v (#84 refine): rather than a junction-less spine-less collapse
+    // (parallel stubs separate, a silent open — Codex P1) or a block-centre anchor
+    // (which dangles the far spine endpoint), SPREAD the stubs to opposite interior
+    // sides of the junction — each toward its own block's side, to the midpoint
+    // between the junction and the contained block's near face — and span the spine
+    // between them, so both spine endpoints connect to a stub and the trunk pulls
+    // inward.  Only when a contained block straddles the junction; else drop.
     if (x_lo >= x_hi) {
         const int junction = x_lo;        // == x_hi
         int n_stubs = 0, side = 0;
-        bool same_side = true, ok = true, have_contained = false;
-        int sp_lo = junction, sp_hi = junction;
+        bool same_side = true, ok = true, have_B = false;
+        int B_x1 = INT_MIN, B_x2 = INT_MAX;   // intersection of contained blocks' extents
         for (int i = 0; i < n; ++i) {
             if (has_stub[i]) {
                 ++n_stubs;
@@ -1349,14 +1351,27 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
             if (!blocks[i].rects.empty() || !(bb.x1 <= junction && junction <= bb.x2)) {
                 ok = false; continue;
             }
-            have_contained = true;
-            int c = bb.center().x;                     // strictly interior (no face tap)
-            sp_lo = std::min(sp_lo, c);
-            sp_hi = std::max(sp_hi, c);
+            have_B = true;
+            B_x1 = std::max(B_x1, bb.x1);
+            B_x2 = std::min(B_x2, bb.x2);
         }
-        if (!(n_stubs >= 2 && same_side && ok && have_contained && sp_lo < sp_hi))
+        if (!(n_stubs >= 2 && same_side && ok && have_B &&
+              B_x1 < junction && junction < B_x2))
             return;
-        x_lo = sp_lo; x_hi = sp_hi;                    // bounded interior spine
+        int new_lo = junction, new_hi = junction;
+        for (int i = 0; i < n; ++i) {
+            if (!has_stub[i]) continue;
+            int bc = blocks[i].rects.empty() ? blocks[i].orig_bbox.center().x
+                                             : best_r[i].center().x;
+            int tgt = (bc < junction) ? (junction + B_x1) / 2     // block left  → toward B's left
+                    : (bc > junction) ? (junction + B_x2) / 2     // block right → toward B's right
+                                      : junction;
+            att_x[i] = tgt;
+            new_lo = std::min(new_lo, tgt);
+            new_hi = std::max(new_hi, tgt);
+        }
+        if (new_lo >= new_hi) return;                  // stubs did not straddle the junction
+        x_lo = new_lo; x_hi = new_hi;                  // spine spans between the spread stubs
     }
 
     Topology t;
@@ -1740,20 +1755,22 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     // for *perpendicular* pairs, so two parallel stubs carry no junction constraint
     // and NUTS could place them on different tracks → a silent open (issue #84,
     // Codex P1).  Instead, when a contained endpoint block straddles the junction,
-    // emit a BOUNDED INTERIOR spine: a short vertical segment from the junction
-    // toward that block's centre, staying strictly inside it (no face tap).  The
-    // stubs T-junction onto this spine (a real SEG constraint), and the block is
-    // connected by containment (the spine lies inside it).  Otherwise drop it.
+    // SPREAD the stubs to opposite interior sides of it and span the spine between
+    // them: each stub moves toward its own block's side of the junction, to the
+    // midpoint between the junction and the contained block's near face on that
+    // side — strictly interior (no face tap).  seg0 then runs from the low stub to
+    // the high stub, so BOTH its endpoints connect to a stub (no dead wire — the
+    // earlier block-centre anchor left the far endpoint dangling), and the trunk's
+    // endpoints pull inward (the opposing straddle pulls, low=+1 / high=-1).  The
+    // block is connected by containment (the spine lies inside it).  Otherwise drop.
     if (y_lo >= y_hi) {
         const int junction = y_lo;        // == y_hi
         int n_stubs = 0, side = 0;
-        bool same_side = true, ok = true, have_contained = false;
-        int sp_lo = junction, sp_hi = junction;
+        bool same_side = true, ok = true, have_B = false;
+        int B_y1 = INT_MIN, B_y2 = INT_MAX;   // intersection of contained blocks' extents
         for (int i = 0; i < n; ++i) {
             if (has_stub[i] && !stub_suppressed[i]) {
                 ++n_stubs;
-                // Same-side keeps the collinear stubs overlapping so they share the
-                // junction endpoint with the spine.
                 int s = (conn_x[i] > x_trunk) ? 1 : (conn_x[i] < x_trunk ? -1 : 0);
                 if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
                 continue;
@@ -1764,14 +1781,27 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             if (!blocks[i].rects.empty() || !(bb.y1 <= junction && junction <= bb.y2)) {
                 ok = false; continue;
             }
-            have_contained = true;
-            int c = bb.center().y;                     // strictly interior (no face tap)
-            sp_lo = std::min(sp_lo, c);
-            sp_hi = std::max(sp_hi, c);
+            have_B = true;
+            B_y1 = std::max(B_y1, bb.y1);
+            B_y2 = std::min(B_y2, bb.y2);
         }
-        if (!(n_stubs >= 2 && same_side && ok && have_contained && sp_lo < sp_hi))
+        if (!(n_stubs >= 2 && same_side && ok && have_B &&
+              B_y1 < junction && junction < B_y2))
             return;
-        y_lo = sp_lo; y_hi = sp_hi;                    // bounded interior spine
+        int new_lo = junction, new_hi = junction;
+        for (int i = 0; i < n; ++i) {
+            if (!(has_stub[i] && !stub_suppressed[i])) continue;
+            int bc = blocks[i].rects.empty() ? blocks[i].orig_bbox.center().y
+                                             : best_r[i].center().y;
+            int tgt = (bc < junction) ? (junction + B_y1) / 2     // block below → toward B's bottom
+                    : (bc > junction) ? (junction + B_y2) / 2     // block above → toward B's top
+                                      : junction;
+            att_y[i] = tgt;
+            new_lo = std::min(new_lo, tgt);
+            new_hi = std::max(new_hi, tgt);
+        }
+        if (new_lo >= new_hi) return;                  // stubs did not straddle the junction
+        y_lo = new_lo; y_hi = new_hi;                  // spine spans between the spread stubs
         // falls through: the spine block emits the V segment [y_lo,y_hi]; the stub
         // loop wires blk_15/blk_32; the contained block is covered by the spine.
     }

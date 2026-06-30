@@ -105,6 +105,34 @@ def test_contained_endpoint_connects_by_containment_with_junction():
         "the bounded interior spine must carry a SEG junction to both stubs (Codex P1)")
 
 
+def test_degenerate_straddle_spreads_no_dangle_opposing_pulls():
+    """The spine spans BETWEEN the two spread stubs (no dead wire), and the stubs
+    carry opposing net_pull — the straddle pulls (#84 refinement).
+
+    The earlier block-centre anchor left the spine's far endpoint connected to
+    nothing (an overstretched dead segment NUTS cannot retract) and both stubs at
+    the same spine end, so net_pull came out 0.  Spreading each stub toward its own
+    block's side makes both spine endpoints land on a stub and the trunk endpoints
+    pull inward (low=+1 / high=-1).
+    """
+    fp = _fp()
+    c = next(x for x in _gen(fp).generate_candidates("blk_15", ["blk_32", "blk_00"])
+             if x.type == "TRUNK_V@x1740")
+    ct = _build(c, fp)
+    cs = ct.segs()
+    spine_idx = [i for i, s in enumerate(c.segments) if s.start.x == s.end.x]
+    stub_idx = [i for i, s in enumerate(c.segments) if s.start.y == s.end.y]
+    assert len(spine_idx) == 1 and len(stub_idx) == 2, "expected one V spine + two H stubs"
+    sp = c.segments[spine_idx[0]]
+    sp_lo, sp_hi = sorted((sp.start.y, sp.end.y))
+    stub_ys = sorted(c.segments[i].start.y for i in stub_idx)
+    assert (sp_lo, sp_hi) == (stub_ys[0], stub_ys[1]), (
+        f"spine ({sp_lo},{sp_hi}) must span exactly between the stub perps {stub_ys} "
+        f"— no dangling/overstretched endpoint")
+    pulls = [cs[i].net_pull for i in stub_idx]
+    assert pulls[0] * pulls[1] < 0, f"stubs must pull in opposite directions, got {pulls}"
+
+
 def test_no_junctionless_containment_without_feedthru():
     """No clean candidate connects blk_00 by junction-less containment.
 
