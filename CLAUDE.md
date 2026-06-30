@@ -139,6 +139,7 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `def_track_pattern <layer_id> <origin> <type> <w> <sp> ...` | 8 setup | Define repeating track pattern |
 | `add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> ...` | 8 setup | Region-scoped pattern override |
 | `run_detailed_nuts [lo_hi\|hi_lo]` | 9 | Snap bit-wires to concrete tracks |
+| `ripup_reroute [max_iter]` | 3↔4/9 | Feedback-driven rip-up & re-route: greedy hill-climb that reads the **actual** NUTS overlaps (run after `run_nuts`) or DetailedNUTS opens (run after `run_detailed_nuts`), re-pins a contending bundle to an alternate topology, re-runs planner→NUTS(→DNUTS), and keeps moves that reduce the metric — clears congestion the planner's band model under-predicts (`overflow=0`). No-op when already clean; flat-flow v1 (no hier) |
 | `check_connectivity [all]` | verify | Run connectivity verification at the current stage (topo / NUTS / detailed-NUTS). `all` checks every candidate topology; auto-run before planning |
 | `report_overhead` | — | Compare `def_layer` overhead% against the actual track-pattern overhead |
 | `source <file>` / `exit [code]` | — | Execute another `.buda` script inline / stop with an exit code |

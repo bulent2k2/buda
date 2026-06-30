@@ -13,7 +13,9 @@
 # limitations under the License.
 
 import argparse
+import contextlib
 import faulthandler
+import io
 import json
 import math
 import os
@@ -48,7 +50,7 @@ KNOWN_COMMANDS = frozenset({
     "dump_hbundles", "dump_topologies", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
     "import_def_lef", "import_verilog", "move_comp", "open_bdb", "refine_busterms",
-    "report_overhead", "resize_cell", "rotate_comp", "run_bundler",
+    "report_overhead", "resize_cell", "ripup_reroute", "rotate_comp", "run_bundler",
     "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
     "run_planner", "select_topologies", "select_topology", "set_die",
     "set_feedthru",
@@ -56,6 +58,10 @@ KNOWN_COMMANDS = frozenset({
     "set_planner_param", "set_track_pitch", "source", "visualize",
     "visualize_topologies",
 })
+
+# ripup_reroute tuning (greedy hill-climb over topology selections).
+_RR_MAX_CANDIDATES_PER_BUNDLE = 8   # alternate candidates tried per contender / iter
+_RR_DEFAULT_MAX_ITER = 10           # outer-loop cap when no arg given
 
 
 class _TeeStream:
@@ -1675,6 +1681,198 @@ class BudaSession:
               f"{n_unplaced} bits unplaced.")
         return self.detailed_result
 
+    # ---- ripup_reroute: feedback-driven rip-up & re-route -------------------
+    # After run_nuts (stage a) or run_detailed_nuts (stage b) the planner may have
+    # left a congestion-induced NUTS overlap / DNUTS open that its own band model
+    # did not predict (it reports overflow=0).  This greedy hill-climb reads the
+    # ACTUAL overlaps/opens, re-routes a contending bundle to an alternate topology,
+    # re-runs the pipeline, and keeps moves that reduce the metric — the loop the
+    # planner cannot do because it is blind to the real NUTS/DNUTS result.
+
+    def _rr_stage_metric(self):
+        """(stage, metric_fn) for the active pipeline state, or (None, None)."""
+        if self.detailed_result is not None:
+            return 'b', (lambda: self.detailed_result.num_unplaced)
+        if self.nuts_result is not None:
+            return 'a', (lambda: self.nuts_result.num_overlaps)
+        return None, None
+
+    def _rr_open_bundles(self):
+        """Bundle ids whose placed-bit count falls short of expected (stage b)."""
+        if self.detailed_result is None:
+            return []
+        expected = {w.input.original_bundle.id:
+                    len(w.input.original_bundle.get_net_names())
+                    for w in self.bundles}
+        per_seg = {}   # bid -> {seg_idx: placed bit count}
+        for ns in self.detailed_result.net_segments:
+            per_seg.setdefault(ns.bundle_id, {})
+            per_seg[ns.bundle_id][ns.seg_idx] = \
+                per_seg[ns.bundle_id].get(ns.seg_idx, 0) + 1
+        out = []
+        for bid, segs in per_seg.items():
+            exp = expected.get(bid, 0)
+            if exp and any(cnt < exp for cnt in segs.values()):
+                out.append(bid)
+        return out
+
+    def _rr_overlap_bundles(self):
+        """Bundle ids appearing in the current NUTS overlaps (both sides)."""
+        out = []
+        if self.nuts_result is not None:
+            for od in self.nuts_result.overlap_details:
+                out.append(od.bid_a)
+                out.append(od.bid_b)
+        return out
+
+    def _rr_contenders(self, stage):
+        """Ordered, de-duped contender bundle ids, human-pinned ones excluded.
+
+        Stage b lists the OPEN bundles first, then their NUTS-overlap partners (a
+        DNUTS open is caused by a NUTS overlap, so re-routing either side of the
+        overlap can clear it — and the partner's fix is often a lower-index
+        candidate than the victim's).
+
+        ripup_reroute is an explicit congestion-fix pass, so it may re-route ANY
+        contended bundle — including one pinned earlier (its pin is replaced)."""
+        order, seen = [], set()
+        def add(bid):
+            if bid not in seen:
+                seen.add(bid)
+                order.append(bid)
+        if stage == 'b':
+            for bid in self._rr_open_bundles():
+                add(bid)
+        for bid in self._rr_overlap_bundles():
+            add(bid)
+        if not order:                       # fallback: any re-routable bundle
+            for w in self.bundles:
+                if len(w.input.candidates) > 1:
+                    add(w.input.original_bundle.id)
+        return order
+
+    def _rr_wrapper(self, bid):
+        for w in self.bundles:
+            if w.input.original_bundle.id == bid:
+                return w
+        return None
+
+    def _rr_snapshot(self):
+        """Capture the state a trial mutates so it can be fully restored."""
+        return {
+            'wrap': {w.input.original_bundle.id:
+                     (w.plan.selected_topology_index, w.input.topology_pinned,
+                      len(w.input.candidates))
+                     for w in self.bundles},
+            'nuts': self.nuts_result,
+            'dnuts': self.detailed_result,
+            'dl_slot': dict(self._dogleg_slot),
+            'dl_orig': dict(self._dogleg_originals),
+        }
+
+    def _rr_restore(self, snap):
+        for w in self.bundles:
+            bid = w.input.original_bundle.id
+            sel, pinned, ncand = snap['wrap'].get(
+                bid, (w.plan.selected_topology_index, w.input.topology_pinned,
+                      len(w.input.candidates)))
+            cands = w.input.candidates
+            while len(cands) > ncand:        # drop dogleg-appended candidates
+                del cands[len(cands) - 1]
+            w.input.candidates = cands
+            w.plan.selected_topology_index = sel
+            w.input.topology_pinned = pinned
+        self.nuts_result = snap['nuts']
+        self.detailed_result = snap['dnuts']
+        self._dogleg_slot = dict(snap['dl_slot'])
+        self._dogleg_originals = dict(snap['dl_orig'])
+
+    def _rr_rerun(self, stage):
+        """Silently re-run planner + NUTS (+ DNUTS for stage b)."""
+        sink = io.StringIO()
+        with contextlib.redirect_stdout(sink), buda.ostream_redirect():
+            self.do_command(f"run_planner {self._planner_iterations}")
+            self.do_command("run_nuts")
+            if stage == 'b':
+                self.do_command("run_detailed_nuts")
+
+    def _rr_trial(self, w, tidx, stage, metric):
+        """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
+        w.plan.selected_topology_index = tidx
+        w.input.topology_pinned = True
+        self._rr_rerun(stage)
+        return metric()
+
+    def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER):
+        if not self.bundles:
+            print("Error: ripup_reroute has no bundles.")
+            return
+        if self.planner is None:
+            print("Error: ripup_reroute needs run_planner to have run first.")
+            return
+        if self._hier_expansion_map:
+            print("Error: ripup_reroute is flat-flow only in v1 (hier not supported).")
+            return
+        stage, metric = self._rr_stage_metric()
+        if stage is None:
+            print("Error: ripup_reroute needs run_nuts (stage a) or "
+                  "run_detailed_nuts (stage b) to have run first.")
+            return
+
+        m0 = metric()
+        if m0 == 0:
+            print(f"[ripup_reroute] stage {stage}: metric already 0 — nothing to do.")
+            return
+        what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
+        print(f"[ripup_reroute] stage {stage} ({what}): start metric={m0}, "
+              f"max_iter={max_iter}")
+
+        committed = 0
+        it = 0
+        while it < max_iter:
+            it += 1
+            cur = metric()
+            if cur == 0:
+                break
+            contenders = self._rr_contenders(stage)
+            if not contenders:
+                print(f"[ripup_reroute] iter {it}: no contenders — stop.")
+                break
+            snap = self._rr_snapshot()
+            best = None                      # (metric, bid, old_tidx, new_tidx)
+            hit_zero = False
+            for bid in contenders:
+                w = self._rr_wrapper(bid)
+                if w is None:
+                    continue
+                old_tidx = snap['wrap'][bid][0]
+                for tidx in range(min(len(w.input.candidates),
+                                      _RR_MAX_CANDIDATES_PER_BUNDLE)):
+                    if tidx == old_tidx:
+                        continue
+                    m = self._rr_trial(w, tidx, stage, metric)
+                    self._rr_restore(snap)
+                    if m < cur and (best is None or m < best[0]):
+                        best = (m, bid, old_tidx, tidx)
+                    if m == 0:               # cannot do better — take it now
+                        best = (m, bid, old_tidx, tidx)
+                        hit_zero = True
+                        break
+                if hit_zero:
+                    break
+            if best is None:
+                print(f"[ripup_reroute] iter {it}: no improving re-route "
+                      f"(metric={cur}) — stop.")
+                break
+            m_new, bid, old_t, new_t = best
+            self._rr_trial(self._rr_wrapper(bid), new_t, stage, metric)  # commit
+            committed += 1
+            print(f"[ripup_reroute] iter {it}: bundle {bid} topo {old_t + 1}"
+                  f"->{new_t + 1}, metric {cur}->{metric()}")
+
+        print(f"[ripup_reroute] done: metric {m0}->{metric()} "
+              f"after {committed} move(s).")
+
     def _select_single_topology_internal(self, bid, tid):
         """Helper for select_topology/select_topologies: set a pin without re-planning layers.
         Returns True if the bundle (or its hierarchical expansion) was found.
@@ -2561,6 +2759,12 @@ class BudaSession:
                 return
 
             self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+        elif cmd == "ripup_reroute":
+            # Usage: ripup_reroute [max_iter]
+            # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;
+            # else after run_nuts ⇒ drive down NUTS overlaps.
+            max_iter = int(args[0]) if args else _RR_DEFAULT_MAX_ITER
+            self._ripup_reroute(max_iter=max_iter)
         elif cmd == "run_nuts_on_layer":
             # Usage: run_nuts_on_layer <layer-name>
             if not args:
