@@ -26,12 +26,12 @@ from __future__ import annotations
 
 import atexit
 import collections
+import logging
 import os
 import sys
 import tkinter as tk
 import queue
 import threading
-import warnings
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 import matplotlib
@@ -41,15 +41,17 @@ from matplotlib.figure import Figure
 import matplotlib.patches as mpatches
 
 # The floorplan axes uses set_aspect('equal', adjustable='datalim') with both
-# limits pinned so the drawing fills the canvas and auto-refits on resize.  That
-# combination makes matplotlib emit a benign "Ignoring fixed x limits to fulfill
-# fixed data aspect" on every draw — the axis expansion it describes IS the fill
-# we want — so silence just that one message instead of spamming the terminal.
-warnings.filterwarnings(
-    "ignore",
-    message=r"Ignoring fixed [xy] limits to fulfill fixed data aspect",
-    category=UserWarning,
-)
+# limits pinned so the drawing fills the canvas and auto-refits on resize.  On
+# every draw matplotlib emits "Ignoring fixed x/y limits to fulfill fixed data
+# aspect with adjustable data limits." — the axis expansion it describes IS the
+# fill we want, so it is pure noise.  matplotlib logs this via its own LOGGER
+# (logging, not warnings.warn), so a warnings filter does nothing; attach a
+# logging filter to the exact logger that emits it and drop just that record.
+class _DropAspectFillLog(logging.Filter):
+    def filter(self, record):   # False → drop the record
+        return "to fulfill fixed data aspect" not in record.getMessage()
+
+logging.getLogger("matplotlib.axes._base").addFilter(_DropAspectFillLog())
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
@@ -384,16 +386,25 @@ class BdbFloorplanner:
     # Overlay depth control
     # ------------------------------------------------------------------
 
-    def _overlay_dec(self):
-        v = max(0, self._overlay_depth.get() - 1)
+    def _max_overlay(self) -> int:
+        """How many extra levels can be overlaid below the current view: the
+        design's deepest level minus the depth we're currently viewing at.
+        e.g. a 3-level design (depths 0,1,2) viewed from the top → 2."""
+        if self.state is None:
+            return 0
+        return max(0, fpc.design_max_depth(self.state) - len(self._path))
+
+    def _set_overlay(self, v: int):
+        v = max(0, min(self._max_overlay(), v))
         self._overlay_depth.set(v)
         self._overlay_lbl.configure(text=str(v))
+
+    def _overlay_dec(self):
+        self._set_overlay(self._overlay_depth.get() - 1)
         self._draw()
 
     def _overlay_inc(self):
-        v = min(4, self._overlay_depth.get() + 1)
-        self._overlay_depth.set(v)
-        self._overlay_lbl.configure(text=str(v))
+        self._set_overlay(self._overlay_depth.get() + 1)
         self._draw()
 
     # ------------------------------------------------------------------
@@ -474,11 +485,20 @@ class BdbFloorplanner:
         self._refresh_tree()
         self._draw()
         self._apply_ro_state()
-        if not self.state.is_read_only:
-            max_depth = max((n.count("/") for n in self.state.block_names), default=0)
-            self._status.set(
-                f"Loaded {len(self.state.block_names)} block(s), "
-                f"{max_depth + 1} level(s).")
+        self._set_loaded_status()
+
+    def _set_loaded_status(self):
+        """Report the freshly-loaded design in the status bar.  Shared by the
+        File→Open path and the command-line `fp <file.bdb>` path so opening a
+        BDB always replaces the initial 'Open or create a BDB…' message."""
+        if self.state is None or self.state.bdb is None:
+            return
+        if getattr(self.state, "is_read_only", False):
+            return  # _apply_ro_state() shows the read-only banner instead
+        max_depth = max((n.count("/") for n in self.state.block_names), default=0)
+        self._status.set(
+            f"Loaded {len(self.state.block_names)} block(s), "
+            f"{max_depth + 1} level(s).")
 
     def _new_bdb(self):
         path = filedialog.asksaveasfilename(defaultextension=".bdb",
@@ -875,8 +895,12 @@ class BdbFloorplanner:
                 ax.set_ylim(-margin, dh + margin)
 
         visible = self._visible_names()
+        # Clamp the overlay to the levels actually below the current view, so it
+        # can't exceed the design depth (e.g. after drilling in, or on load).
+        if self._overlay_depth.get() > self._max_overlay():
+            self._set_overlay(self._overlay_depth.get())
         extra_levels = self._overlay_depth.get()
-        
+
         for name in visible:
             try:
                 block = self.state.block(name)
@@ -2150,6 +2174,7 @@ def main():
         app._refresh_tree()
         app._draw()
         app._apply_ro_state()
+        app._set_loaded_status()
     buda_viz.raise_window(root)
     root.mainloop()
 
