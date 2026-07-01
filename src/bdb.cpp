@@ -243,11 +243,10 @@ void BDB::_migrate() {
             std::to_string(SCHEMA_VERSION) + "); upgrade BUDA to open this database.");
     if (v < 1) {
         // v0 (pre-versioning) -> v1: absorb the legacy busterm.rects column add
-        // (idempotent) and seed provenance rows.
+        // (idempotent).
         sqlite3_exec(_db,
             "ALTER TABLE busterm ADD COLUMN rects TEXT DEFAULT NULL",
             nullptr, nullptr, nullptr);  // Ignored if column already exists.
-        _seed_provenance();
     }
     if (v < 2) {
         // v1 -> v2: bundle-persistence schema. The bundle tables have never had a
@@ -259,8 +258,13 @@ void BDB::_migrate() {
               "DROP TABLE IF EXISTS bundle;");
         _exec(BUNDLE_DDL);
     }
-    if (v < SCHEMA_VERSION)
+    if (v < SCHEMA_VERSION) {
+        // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
+        // forward migration, not just the initial v0 seed — otherwise an upgraded
+        // DB would keep a stale meta.schema_version while PRAGMA user_version moved.
+        _seed_provenance();
         _exec(("PRAGMA user_version = " + std::to_string(SCHEMA_VERSION) + ";").c_str());
+    }
 }
 
 // ── Cell-level pins ──────────────────────────────────────────────────────────

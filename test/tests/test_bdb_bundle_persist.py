@@ -135,6 +135,9 @@ def test_v1_bundle_schema_migrates_to_v2(tmp_path):
 
     db = buda.BDB(p)                                 # opening migrates v1 -> v2
     assert db.schema_version() == 2
+    # The mirrored meta.schema_version must be refreshed on the v1->v2 bump too,
+    # not left at "1" (keeps the .bdb.sql dump's version consistent).
+    assert db.meta_get("schema_version") == "2"
     del db
     con = sqlite3.connect(p)
     net_cols = {r[1] for r in con.execute("PRAGMA table_info(bundle_net)")}
