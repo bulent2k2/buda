@@ -8,6 +8,11 @@ python3 src/buda_cli.py flow/my_design.buda
 python3 src/buda_cli.py flow/my_design      # .buda extension inferred
 ```
 
+For the `buda` command line itself — invocation, wrappers, and flags such as
+`--no-viz`, `--verbose-conn`, and `--ipc-verbose` — see the
+[BUDA CLI Reference](BUDA_CLI.md). This page documents the commands you write
+*inside* a script.
+
 ---
 
 ## Pipeline overview

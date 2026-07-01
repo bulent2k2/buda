@@ -204,6 +204,36 @@ def _set_lims_filling_box(ax, x0, x1, y0, y1):
     ax.set_xlim(x0, x1)
     ax.set_ylim(y0, y1)
 
+def _install_home_fit_on_first_draw(viz):
+    """Re-apply the maximal home fit once, on the first real draw.
+
+    The fit computed at build time (in show()/_draw) uses the *nominal* figure
+    geometry; the true on-screen axes box is not known until the window is
+    realized by the GUI backend.  Recomputing on the first draw_event — the same
+    math the 'h' key uses — makes the home view maximal from the start instead of
+    only after a manual reset.  Harmless under headless backends where no
+    draw_event fires (the nominal fit already stands)."""
+    def _refit(_event):
+        cid = getattr(viz, '_home_fit_cid', None)
+        if cid is not None:
+            viz.fig.canvas.mpl_disconnect(cid)   # one-shot; also prevents re-entry
+            viz._home_fit_cid = None
+        bbox = getattr(viz, '_home_data_bbox', None)
+        if bbox is None:
+            return
+        # Only refit while the view is still the (nominal) home we set — if the
+        # user already panned/zoomed before the first real draw, leave it alone.
+        cur  = viz.ax.get_xlim() + viz.ax.get_ylim()
+        home = ((viz._home_xlim or (0.0, 0.0)) + (viz._home_ylim or (0.0, 0.0)))
+        if viz._home_xlim is not None and \
+                not all(abs(a - b) <= 1e-6 * (1 + abs(b)) for a, b in zip(cur, home)):
+            return
+        _set_lims_filling_box(viz.ax, *bbox)
+        viz._home_xlim = viz.ax.get_xlim()
+        viz._home_ylim = viz.ax.get_ylim()
+        viz.fig.canvas.draw_idle()
+    viz._home_fit_cid = viz.fig.canvas.mpl_connect('draw_event', _refit)
+
 def raise_window(win_or_fig):
     """Bring a window or figure to the front and ensure it has keyboard focus."""
     win = None
@@ -729,6 +759,10 @@ class TopologyExplorer:
         self.fig.canvas.mpl_connect('close_event', self._on_close)
 
         self._draw()
+        # Make the home view maximal from the first frame (not only after 'h'):
+        # _draw fit the nominal figure size; refit once the real window geometry
+        # is known.
+        _install_home_fit_on_first_draw(self)
 
     def _on_close(self, event):
         if hasattr(self, 'ui_state'):
@@ -1623,10 +1657,11 @@ class TopologyExplorer:
 class BudaVisualizer:
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
                  rerun_fn=None, routing_grid=None, layer_stack=None,
-                 net_endpoints=None, ipc_session=None):
+                 net_endpoints=None, ipc_session=None, ipc_verbose=False):
         self.fp           = floorplan
         self.bundles      = bundles
         self._ipc_session = ipc_session
+        self._ipc_verbose = ipc_verbose   # gated: --ipc-verbose surfaces IPC chatter
         self._ipc         = None
         self.routing_grid = routing_grid
         self.layer_stack  = layer_stack
@@ -3851,14 +3886,22 @@ class BudaVisualizer:
             if _tools not in _sys.path:
                 _sys.path.insert(0, _tools)
             from viz_ipc import VizIPC, POLL_MS
-            self._ipc = VizIPC(self._ipc_session)
+            self._ipc = VizIPC(self._ipc_session, verbose=self._ipc_verbose)
             self._ipc.on_message = self._on_ipc_message
             self._ipc.connect_or_serve()
-            print(f'[buda_viz] IPC session={self._ipc_session!r} connected={self._ipc._connected}')
             self._ipc_timer = self.fig.canvas.new_timer(interval=POLL_MS)
             self._ipc_timer.add_callback(self._ipc.poll)
             self._ipc_timer.start()
-            print(f'[buda_viz] IPC timer started (backend={self.fig.canvas.__class__.__name__})')
+            if self._ipc_verbose:
+                print(f'[buda_viz] IPC session={self._ipc_session!r} '
+                      f'connected={self._ipc._connected}')
+                print(f'[buda_viz] IPC timer started '
+                      f'(backend={self.fig.canvas.__class__.__name__})')
+
+        # Make the home view maximal from the first frame (not only after 'h'):
+        # the fit above used the nominal figure size; refit once the real window
+        # geometry is known.
+        _install_home_fit_on_first_draw(self)
 
         raise_window(self.fig)
         install_tk_geometry_resync(self.fig)

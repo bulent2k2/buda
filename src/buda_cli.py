@@ -164,6 +164,7 @@ class BudaSession:
         self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
+        self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter
         self._die_w = 0.0            # stored by set_die when no BDB is open (flat flow)
         self._die_h = 0.0
         self.bdb = None              # BDB (opened by open_bdb command)
@@ -3429,7 +3430,8 @@ class BudaSession:
                                  routing_grid=self.routing_grid,
                                  layer_stack=self.layers,
                                  net_endpoints=self._net_endpoints,
-                                 ipc_session=ipc_session)
+                                 ipc_session=ipc_session,
+                                 ipc_verbose=self.ipc_verbose)
             viz.draw_blocks()
             if self.planner is not None:
                 cuts = self.planner.get_cuts()
@@ -3851,17 +3853,29 @@ class BudaSession:
               f"{len(bundles)} bundle(s). Use --verbose-conn for per-bit detail.")
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('script', nargs='?')
+    parser = argparse.ArgumentParser(
+        prog='buda',
+        description='Run a BUDA interconnect-planning flow script (.buda). '
+                    'Executes the script top-to-bottom, printing a one-line '
+                    'summary per command; full detail goes to the flow log.',
+        epilog='Script commands are documented in docs/BUDA_SCRIPT_REFERENCE.md; '
+               'these command-line options in docs/BUDA_CLI.md.')
+    parser.add_argument('script', nargs='?',
+                        help='path to a .buda flow script; a missing .buda '
+                             'suffix is added automatically')
     parser.add_argument('--no-viz', action='store_true',
                         help='skip visualize commands (useful for batch/CI runs)')
     parser.add_argument('--verbose-conn', action='store_true',
                         help='print every connectivity violation individually; '
                              'default collapses per-bit violations into a summary')
+    parser.add_argument('--ipc-verbose', action='store_true',
+                        help='surface buda_viz/def_viz IPC socket status chatter '
+                             '(listening/connected/timer lines); off by default')
     args = parser.parse_args()
     session = BudaSession()
     session.no_viz = args.no_viz
     session.verbose_conn = args.verbose_conn
+    session.ipc_verbose = args.ipc_verbose
     if args.script:
         script = args.script
         if not os.path.exists(script) and not script.endswith('.buda'):
