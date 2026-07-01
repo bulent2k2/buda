@@ -94,6 +94,15 @@ bundle is both a driver and a receiver, so the visualizer draws it with its own
 symbol — a green diamond — instead of the driver-square/receiver-circle split.)
 See `test/tests/test_bundler_bidirectional.py`.
 
+BIDIRECTIONAL is available in **both** bundlers: `run_bundler BIDIRECTIONAL`
+(flat) and `run_hier_bundler … BIDIRECTIONAL` (hierarchical). The hier bundler
+keys on the sorted set of all endpoint names at each bundle depth
+(`HierarchicalBundler::_bidir_sig` / `_sig`), and `_parse_bundle_reason`
+(`buda_cli.py`) roots the block-to-block topology at the first instance of a
+`BIDIR:` reason. A single hier bundle can then hold both bidirectional pairs and
+plain one-way nets between the same blocks — see
+`test/tests/test_hier_bidirectional.py`.
+
 ## What we did about it (for now)
 
 - `run_bundler` now **honours** its `STRICT|CONVERGENT|BIDIRECTIONAL` argument

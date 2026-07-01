@@ -106,6 +106,25 @@ std::string HierarchicalBundler::_strict_sig(
     return sig;
 }
 
+std::string HierarchicalBundler::_bidir_sig(std::vector<std::string> all_names) {
+    std::sort(all_names.begin(), all_names.end());
+    all_names.erase(std::unique(all_names.begin(), all_names.end()), all_names.end());
+    std::string sig = "BIDIR:";
+    for (const auto& n : all_names) { sig += n; sig += ','; }
+    return sig;
+}
+
+std::string HierarchicalBundler::_sig(
+        const std::string& drv_name,
+        const std::vector<std::string>& sorted_rcv_names) const {
+    if (_strategy == Strategy::BIDIRECTIONAL) {
+        std::vector<std::string> all = sorted_rcv_names;
+        all.push_back(drv_name);
+        return _bidir_sig(std::move(all));
+    }
+    return _strict_sig(drv_name, sorted_rcv_names);
+}
+
 std::unordered_map<int, HierarchicalBundler::NetEndpoints>
 HierarchicalBundler::_endpoints_at_depth(
         const std::unordered_map<int, std::vector<PinRow>>& pins_by_net,
@@ -352,7 +371,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 if (info.bundle_depth != depth) continue;
                 auto sorted_rcv = info.rcv_spec_paths;
                 std::sort(sorted_rcv.begin(), sorted_rcv.end());
-                xl_sig_to_nets[_strict_sig(info.drv_spec_path, sorted_rcv)].push_back(net_id);
+                xl_sig_to_nets[_sig(info.drv_spec_path, sorted_rcv)].push_back(net_id);
             }
             for (const auto& [sig, net_ids] : xl_sig_to_nets) {
                 HBundle b;
@@ -404,7 +423,7 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 if (rit != comp_by_id.end()) rcv_names.push_back(rit->second.name);
             }
             std::sort(rcv_names.begin(), rcv_names.end());
-            sig_to_nets[_strict_sig(drv_it->second.name, rcv_names)].push_back(net_id);
+            sig_to_nets[_sig(drv_it->second.name, rcv_names)].push_back(net_id);
         }
 
         for (const auto& [sig, net_ids] : sig_to_nets) {

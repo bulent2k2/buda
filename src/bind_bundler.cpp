@@ -62,5 +62,6 @@ void bind_bundler(py::module_& m) {
     // BDB must already be registered (bind_db called first).
     py::class_<HierarchicalBundler>(m, "HierarchicalBundler")
         .def(py::init<BDB&>())
+        .def("set_strategy", &HierarchicalBundler::set_strategy)
         .def("run", &HierarchicalBundler::run, py::arg("max_depth") = 1);
 }

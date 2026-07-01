@@ -121,6 +121,14 @@ sig = "DRV:" + comp_name[driver] + "|REC:" + sorted(comp_names[recv]), joined by
 sig_to_nets: map<sig, [net_id]>
 ```
 
+**Strategy (`set_strategy`).** The default is `STRICT` (the signature above).
+`BIDIRECTIONAL` (via `run_hier_bundler … BIDIRECTIONAL`) instead keys on
+`"BIDIR:" + sorted(unique(comp_names[driver] + comp_names[recv]))` — the
+direction-agnostic set of *all* endpoint names — so a net and its reverse, and
+cyclic multi-receiver groups, land in one bundle. Because such a bundle connects
+the same blocks, the block-to-block trunk routes every net regardless of
+direction. See [`docs/internal/convergent_bundling.md`](internal/convergent_bundling.md).
+
 #### 2c. Create one HBundle per group
 
 Fields set here:
