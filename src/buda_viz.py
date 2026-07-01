@@ -3140,7 +3140,8 @@ class BudaVisualizer:
                                           layer=seg.layer_hint)
 
             drv, rcvs = self._busterm_positions(topo, ct, offset=offset)
-            self._draw_terminals(bid, drv, rcvs, viz_lw, alpha)
+            bidir = wrapper.input.original_bundle.reason.startswith("BIDIR:")
+            self._draw_terminals(bid, drv, rcvs, viz_lw, alpha, bidir=bidir)
 
     def draw_nuts_tracks(self, nuts_result):
         """Draw segments at NUTS-assigned track positions with interval bands."""
@@ -3224,7 +3225,8 @@ class BudaVisualizer:
                                           layer=effective_layer)
 
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
-            self._draw_terminals(bid, drv, rcvs, viz_lw, seg_alpha)
+            bidir = wrapper.input.original_bundle.reason.startswith("BIDIR:")
+            self._draw_terminals(bid, drv, rcvs, viz_lw, seg_alpha, bidir=bidir)
 
         # Emit one footprint PatchCollection + one dashed-bound LineCollection
         # per (bundle, layer, colour) group.
@@ -3451,15 +3453,47 @@ class BudaVisualizer:
         self._refresh_highlight()
         self.fig.canvas.draw_idle()
 
-    def _draw_terminals(self, bundle_id, drv_pos, rcv_positions, viz_lw, alpha):
+    def _draw_terminals(self, bundle_id, drv_pos, rcv_positions, viz_lw, alpha,
+                        bidir=False):
         """Draw driver (cyan square) and receiver (magenta circle) terminals.
 
         rcv_positions may be a single (x,y) or a list of (x,y).
         viz_lw may be the physical bus width (large for wide buses in NUTS view),
         so marker size is capped to stay visually reasonable.
+
+        `bidir` (a BIDIRECTIONAL-strategy bundle) instead draws EVERY terminal as
+        a green diamond: routing is direction-agnostic and each endpoint both
+        drives and receives, so the driver/receiver split would mislabel them.
         """
         msz = max(6, min(viz_lw, 16))
         new_artists = []
+        if bidir:
+            positions = []
+            if drv_pos:
+                positions.append(drv_pos)
+            if rcv_positions is not None:
+                positions += ([rcv_positions] if isinstance(rcv_positions, tuple)
+                              else list(rcv_positions))
+            for pos in positions:
+                if pos is None:
+                    continue
+                m, = self.ax.plot(pos[0], pos[1], 'D', color='#22C55E',
+                                  markeredgecolor='black', markersize=msz,
+                                  alpha=alpha, zorder=20)
+                self._register(bundle_id, m, alpha=alpha, lw=msz)
+                new_artists.append(m)
+            if positions and positions[0] is not None:
+                lbl = self.ax.text(positions[0][0], positions[0][1], f"B{bundle_id}",
+                                   fontsize=8, color='black', fontweight='bold',
+                                   ha='center', va='center', zorder=21, clip_on=True)
+                lbl.set_alpha(alpha)
+                self._register(bundle_id, lbl, alpha=alpha)
+                new_artists.append(lbl)
+            self._busterm_artists.extend(new_artists)
+            if not self.ui_state.busterms:
+                for a in new_artists:
+                    a.set_visible(False)
+            return
         if drv_pos:
             drv, = self.ax.plot(drv_pos[0], drv_pos[1], 's',
                                 color='#00FFFF', markeredgecolor='black',

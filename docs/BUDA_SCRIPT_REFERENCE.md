@@ -595,12 +595,18 @@ called after all `add_net` / `add_bus` commands and before
 |---|---|
 | `strict` | Driver instance **and** sorted receiver instances must match exactly (a true parallel bus). |
 | `convergent` | Only sorted receiver instances must match; different drivers allowed (fan-in). |
-| `bidirectional` | Pairs a net with its reverse: a receiver instance of one is the driver of the other and vice-versa (A→B bundled with B→A — a bus and its return path). Unpaired one-way nets stay singletons. |
+| `bidirectional` | Direction-agnostic: the signature is the sorted set of **all** endpoint instances (driver + receivers), so nets connecting the same group of blocks in any roles bundle together — `A→B` with its return `B→A`, or the cyclic `a→b,c` / `b→c,a` / `c→b,a`. |
 
-> ⚠️ `convergent` and `bidirectional` group nets with **different drivers**, which
-> topology generation (a single `src→dst` per bundle) cannot yet route faithfully
-> — only one driver's direction is routed and the rest are left unrouted. Both
-> print a warning. See [`docs/internal/convergent_bundling.md`](internal/convergent_bundling.md).
+> ℹ️ `bidirectional` groups nets that connect the **same** blocks, so the single
+> block-to-block trunk routes every net (routing is direction-agnostic) — it is
+> sound. In the visualizer such a busterm is both a driver and a receiver and is
+> drawn with its own symbol (green diamond).
+>
+> ⚠️ `convergent`, by contrast, can group nets whose drivers are **different
+> blocks** at different locations, which topology generation (a single `src→dst`
+> per bundle) cannot yet route faithfully — only one driver is reached, the
+> others are left unrouted — so it prints a warning. See
+> [`docs/internal/convergent_bundling.md`](internal/convergent_bundling.md).
 
 Bundle width is computed automatically as `1.5 × (number of nets)` layout
 units. The bundler prints the number of bundles created.
