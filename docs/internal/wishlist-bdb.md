@@ -93,8 +93,8 @@ bus segment into `bus_segment` (placed rectangle + layer) and one **symbolic
 bus-via** per bus-level layer transition into `bus_via` (schema v5). C++ API
 `add_bus_segment` / `add_bus_via` / `clear_bus_routing` / `bus_segments` /
 `bus_vias`; Python `BudaSession._persist_nuts` (+ `_persist_bundle_vias`, which
-records a via wherever two endpoint-sharing segments of a bundle sit on different
-layers). `bundle_id` is a **soft link** (no FK) so the hier flow's expanded
+records a via wherever two segments of a bundle connected per `ConnTopology`
+— including trunk/stub T-junctions — sit on different layers). `bundle_id` is a **soft link** (no FK) so the hier flow's expanded
 per-instance ids persist. Tests: `test/tests/test_bdb_nuts_persist.py`.
 
 **Deferred (follow-ups):**

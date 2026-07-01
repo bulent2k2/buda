@@ -105,9 +105,9 @@ the flat flow (whose nets may not be in the `net` table) persists too.
 
 **Bus-routing persistence.** `run_nuts` writes each placed abstract-NUTS segment
 into `bus_segment` (the placed rectangle + layer) and one **symbolic bus-via** per
-bus-level layer transition into `bus_via` — a via wherever two connected
-(endpoint-sharing) segments of a bundle sit on different layers, one row for all
-`bit_width` bit-vias. `bundle_id` is a **soft link** (no FK): the hier flow's
+bus-level layer transition into `bus_via` — a via wherever two segments of a
+bundle that are connected (per `ConnTopology`, including trunk/stub **T-junctions**)
+sit on different layers, one row for all `bit_width` bit-vias. `bundle_id` is a **soft link** (no FK): the hier flow's
 `run_planner` expands bundles into per-instance wrappers with synthetic ids, so a
 bus row's `bundle_id` may be an instance id with no `bundle` table row.
 `clear_bundles()` also wipes the bus tables. C++ API: `add_bus_segment(BusSegRow)`,

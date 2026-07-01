@@ -83,6 +83,55 @@ def test_bus_via_at_layer_transition(tmp_path):
     assert seg_layers[v.to_seg] == v.to_layer
 
 
+def test_via_at_t_junction_multiterminal(tmp_path):
+    # A 3-way multicast (A -> [B, C, D]) routes as a trunk with stubs that land on
+    # the trunk's INTERIOR (T-junctions), not just shared corners. Vias must be
+    # recorded for those cross-layer T-junctions too — endpoint-equality adjacency
+    # would miss them (Codex #127 P1). Derivation must match the ConnTopology
+    # connection model (which infers T-junctions).
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s,
+           "source flow/rnr/mix_tracks.buda",
+           f"open_bdb {tmp_path / 't.bdb'}",
+           "add_block A 0 550 200 650",           # driver, mid-left
+           "add_block B 900 100 1100 200",        # receivers stacked on the right
+           "add_block C 900 550 1100 650",
+           "add_block D 900 1000 1100 1100",
+           "add_bus bus[8] A.p B.p,C.p,D.p",
+           "run_bundler", "generate_topologies", "run_planner 5", "run_nuts")
+    w = s.bundles[0]
+    bid = str(w.input.original_bundle.id)
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    vias = s.bdb.bus_vias(bid)
+
+    # Expected cross-layer SEG-connected pairs from the canonical connection model.
+    ts_map = {ts.seg_idx: ts for ts in s.nuts_result.segments
+              if ts.bundle_id == w.input.original_bundle.id}
+    ct = buda.ConnTopology()
+    ct.build(topo, s.fp)
+    expected = set()
+    for a, cs in enumerate(ct.segs()):
+        ta = ts_map.get(a)
+        if not ta or not ta.placed:
+            continue
+        for conn in cs.conns:
+            if conn.kind != buda.SegConnKind.SEG:
+                continue
+            tb = ts_map.get(conn.seg_idx)
+            if tb and tb.placed and ta.layer != tb.layer:
+                expected.add((min(a, conn.seg_idx), max(a, conn.seg_idx)))
+    persisted = {(v.from_seg, v.to_seg) for v in vias}
+    assert persisted == expected and expected      # complete, no spurious, non-empty
+
+    # At least one via is a genuine T-junction (segments share NO nominal endpoint)
+    # — the case the old endpoint-only logic dropped. Guards test coverage too.
+    eps = [{(seg.start.x, seg.start.y), (seg.end.x, seg.end.y)}
+           for seg in topo.segments]
+    assert any(not (eps[a] & eps[b]) for (a, b) in persisted), \
+        "scenario no longer exercises a T-junction via"
+
+
 def test_bus_routing_roundtrip_through_sql(tmp_path):
     path = str(tmp_path / "flat.bdb")
     s = _flat_routed_session(path)

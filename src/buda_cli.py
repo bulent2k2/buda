@@ -364,8 +364,10 @@ class BudaSession:
 
     def _persist_bundle_vias(self, w):
         """Record one symbolic bus-via per layer-transition in a bundle's placed
-        segments. Adjacency is a shared nominal endpoint of the selected topology's
-        segments; the via's position is the PLACED junction (from track positions).
+        segments. Segment adjacency comes from `ConnTopology` (the repo's canonical
+        connection model), so it covers both shared-endpoint bends AND T-junctions
+        where a stub lands on a trunk's interior (multi-terminal topologies). The
+        via's position is the PLACED junction (from the segments' track positions).
         """
         sel = w.plan.selected_topology_index
         if sel < 0 or sel >= len(w.input.candidates):
@@ -375,31 +377,39 @@ class BudaSession:
         ts_map = {ts.seg_idx: ts for ts in self.nuts_result.segments
                   if ts.bundle_id == bid}
         bit_width = len(w.input.original_bundle.get_net_names())
-        endpoints = [{(s.start.x, s.start.y), (s.end.x, s.end.y)}
-                     for s in topo.segments]
+        ct = buda.ConnTopology()
+        ct.build(topo, self.fp)
+        segs = list(ct.segs())
         n = 0
-        for a in range(len(topo.segments)):
+        seen = set()
+        for a, cs in enumerate(segs):
             ta = ts_map.get(a)
             if ta is None or not ta.placed:
                 continue
-            for b in range(a + 1, len(topo.segments)):
+            for conn in cs.conns:
+                if conn.kind != buda.SegConnKind.SEG:
+                    continue
+                b = conn.seg_idx
                 tb = ts_map.get(b)
                 if tb is None or not tb.placed:
                     continue
                 if ta.layer == tb.layer:                 # same layer → no via
                     continue
-                if not (endpoints[a] & endpoints[b]):    # not connected
+                key = (min(a, b), max(a, b))
+                if key in seen:                          # conns are symmetric
                     continue
-                if ta.horiz != tb.horiz:                 # the usual H↔V bend
+                seen.add(key)
+                if ta.horiz != tb.horiz:                 # bend or T-junction (H↔V)
                     h, v = (ta, tb) if ta.horiz else (tb, ta)
                     jx, jy = v.track_position, h.track_position
-                else:                                    # stacked same-orientation
-                    sx, sy = next(iter(endpoints[a] & endpoints[b]))
-                    jx, jy = float(sx), float(sy)
+                elif ta.horiz:                           # stacked H segments
+                    jx, jy = conn.at_pos, ta.track_position
+                else:                                    # stacked V segments
+                    jx, jy = ta.track_position, conn.at_pos
                 r = buda.BusViaRow()
                 r.id = str(bid)
-                r.from_seg, r.to_seg = a, b
-                r.from_layer, r.to_layer = ta.layer, tb.layer
+                r.from_seg, r.to_seg = key
+                r.from_layer, r.to_layer = ts_map[key[0]].layer, ts_map[key[1]].layer
                 r.x, r.y = jx, jy
                 r.bit_width = bit_width
                 self.bdb.add_bus_via(r)
