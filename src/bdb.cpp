@@ -126,6 +126,7 @@ static const char* TOPOLOGY_DDL = R"(
         x1 INTEGER, y1 INTEGER, x2 INTEGER, y2 INTEGER,
         layer_hint INTEGER DEFAULT 0,
         is_jog     INTEGER DEFAULT 0,
+        assigned_layer INTEGER DEFAULT -1,  -- planner's per-segment layer (-1 = unassigned)
         PRIMARY KEY (bundle_id, cand_index, seg_index),
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)
@@ -351,6 +352,12 @@ void BDB::_migrate() {
     if (v < 5) {
         // v4 -> v5: add the abstract-NUTS bus routing tables (brand new).
         _exec(NUTS_DDL);
+    }
+    if (v < 6) {
+        // v5 -> v6: planner's per-segment assigned layer (idempotent add).
+        sqlite3_exec(_db,
+            "ALTER TABLE topology_segment ADD COLUMN assigned_layer INTEGER DEFAULT -1",
+            nullptr, nullptr, nullptr);  // ignored if column already exists
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -2201,7 +2208,7 @@ void BDB::add_topology(const TopoRow& tr) {
 void BDB::add_topology_segment(const TopoSegRow& sr) {
     Stmt s(_db,
         "INSERT OR REPLACE INTO topology_segment(bundle_id,cand_index,seg_index,"
-        "x1,y1,x2,y2,layer_hint,is_jog) VALUES(?,?,?,?,?,?,?,?,?)");
+        "x1,y1,x2,y2,layer_hint,is_jog,assigned_layer) VALUES(?,?,?,?,?,?,?,?,?,?)");
     sqlite3_bind_text  (s, 1, sr.id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, sr.cand_index);
     sqlite3_bind_int   (s, 3, sr.seg_index);
@@ -2211,6 +2218,7 @@ void BDB::add_topology_segment(const TopoSegRow& sr) {
     sqlite3_bind_int   (s, 7, sr.y2);
     sqlite3_bind_int   (s, 8, sr.layer_hint);
     sqlite3_bind_int   (s, 9, sr.is_jog ? 1 : 0);
+    sqlite3_bind_int   (s, 10, sr.assigned_layer);
     sqlite3_step(s);
 }
 
@@ -2248,8 +2256,8 @@ std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
 std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
                                                int cand_index) const {
     Stmt q(_db,
-        "SELECT bundle_id,cand_index,seg_index,x1,y1,x2,y2,layer_hint,is_jog"
-        " FROM topology_segment WHERE bundle_id=? AND cand_index=?"
+        "SELECT bundle_id,cand_index,seg_index,x1,y1,x2,y2,layer_hint,is_jog,"
+        "assigned_layer FROM topology_segment WHERE bundle_id=? AND cand_index=?"
         " ORDER BY seg_index");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (q, 2, cand_index);
@@ -2265,9 +2273,49 @@ std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
         s.y2 = sqlite3_column_int(q, 6);
         s.layer_hint = sqlite3_column_int(q, 7);
         s.is_jog     = sqlite3_column_int(q, 8) != 0;
+        s.assigned_layer = sqlite3_column_int(q, 9);
         out.push_back(std::move(s));
     }
     return out;
+}
+
+void BDB::set_topology_selected(const std::string& bundle_id, int cand_index) {
+    Stmt s(_db, "UPDATE topology SET is_selected=(cand_index=?) WHERE bundle_id=?");
+    sqlite3_bind_int (s, 1, cand_index);
+    sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+void BDB::set_segment_layer(const std::string& bundle_id, int cand_index,
+                            int seg_index, int layer) {
+    Stmt s(_db, "UPDATE topology_segment SET assigned_layer=?"
+                " WHERE bundle_id=? AND cand_index=? AND seg_index=?");
+    sqlite3_bind_int (s, 1, layer);
+    sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 3, cand_index);
+    sqlite3_bind_int (s, 4, seg_index);
+    sqlite3_step(s);
+}
+
+void BDB::reset_assigned_layers(const std::string& bundle_id) {
+    Stmt s(_db, "UPDATE topology_segment SET assigned_layer=-1 WHERE bundle_id=?");
+    sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+void BDB::clear_expanded_bundles() {
+    // Expanded per-instance bundles are marked is_replicated=1. Drop them and any
+    // rows keyed to them (topologies, memberships) — children before parents.
+    _exec(
+        "DELETE FROM topology_segment WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM topology WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM bundle_busterm WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM bundle_net WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM bundle WHERE is_replicated=1;");
 }
 
 // ── Abstract-NUTS bus routing persistence ────────────────────────────────────

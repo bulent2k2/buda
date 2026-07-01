@@ -416,6 +416,161 @@ class BudaSession:
                 n += 1
         return n
 
+    def _persist_planner_output(self):
+        """Persist the planner's decision into the BDB after run_planner.
+
+        For every current wrapper: record the selected topology (`is_selected`) and
+        the per-segment assigned layers (`topology_segment.assigned_layer`). Wrappers
+        whose id already has BDB rows (flat bundles, hier cross-block / pass-through)
+        are UPDATED in place; hier's expanded per-instance wrappers (synthetic ids)
+        are ADDED as `is_replicated=1` bundle rows (parent_id = template) with just
+        their selected topology, so `bus_segment` rows join back to a bundle. No-op
+        without an open BDB. See docs/internal/wishlist-bdb.md.
+        """
+        if self.bdb is None:
+            return 0
+        self.bdb.clear_expanded_bundles()          # idempotent re-plan
+        # An id is an expanded per-instance wrapper ONLY if it came from the hier
+        # expansion map — NOT merely because it's absent from the BDB (a flat flow
+        # can open_bdb after generate, so its normal bundles aren't persisted yet).
+        expanded_to_template = {}
+        for tid, wrappers in (self._hier_expansion_map or {}).items():
+            for ew in wrappers:
+                expanded_to_template[ew.input.original_bundle.id] = tid
+        original_ids = {b.id for b in self.bdb.all_bundles()}
+        n = 0
+        for w in self.bundles:
+            sel = w.plan.selected_topology_index
+            if sel < 0 or sel >= len(w.input.candidates):
+                continue
+            hbid = w.input.original_bundle.id
+            bid = str(hbid)
+            if hbid in expanded_to_template:        # genuine hier expanded instance
+                self._add_expanded_bundle(w, sel, expanded_to_template)
+            else:                                   # normal bundle (flat / cross-block)
+                if bid not in original_ids:         # not persisted yet → persist fully
+                    self._persist_normal_bundle(w)
+                self.bdb.set_topology_selected(bid, sel)
+                self.bdb.reset_assigned_layers(bid)  # drop stale layers from a prior plan
+                self._persist_assigned_layers(bid, sel, w)
+            n += 1
+        return n
+
+    def _persist_normal_bundle(self, w):
+        """Persist a single non-expanded bundle (is_replicated=0) and ALL of its
+        candidate topologies — for the flat flow that opened a BDB only after
+        run_bundler/generate_topologies, so nothing was persisted yet."""
+        import json
+        hb = w.input.original_bundle
+        bid = str(hb.id)
+        row = buda.BundleRow()
+        row.id = bid
+        row.level = hb.level
+        row.strategy = self._bundler_strategy
+        row.reason = hb.reason
+        row.num_terminals = hb.num_terminals
+        row.cell_context = hb.cell_context
+        row.instances = json.dumps(list(hb.instances))
+        row.parent_id = str(hb.parent_id) if hb.parent_id >= 0 else ""
+        row.drv_spec_depth = hb.drv_spec_depth
+        row.rcv_spec_depth = hb.rcv_spec_depth
+        row.drv_spec_path = hb.drv_spec_path
+        row.rcv_spec_paths = json.dumps(list(hb.rcv_spec_paths))
+        self.bdb.add_bundle(row)                    # is_replicated defaults to False
+        for nm in hb.get_net_names():
+            self.bdb.add_bundle_net(bid, nm)
+        for bt in hb.entry_busterm_ids:
+            self.bdb.add_bundle_busterm(bid, bt, "entry")
+        for bt in hb.exit_busterm_ids:
+            self.bdb.add_bundle_busterm(bid, bt, "exit")
+        sel = w.plan.selected_topology_index
+        for ci, topo in enumerate(w.input.candidates):
+            tr = buda.TopoRow()
+            tr.id = bid
+            tr.cand_index = ci
+            tr.type = topo.type
+            tr.wirelength = topo.estimated_wirelength
+            tr.trunk_location = topo.trunk_location
+            tr.pass_through_count = topo.pass_through_count
+            tr.connected_blocks = json.dumps(list(topo.connected_block_names))
+            tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
+            tr.is_selected = (ci == sel)
+            self.bdb.add_topology(tr)
+            for si, seg in enumerate(topo.segments):
+                sr = buda.TopoSegRow()
+                sr.id = bid
+                sr.cand_index = ci
+                sr.seg_index = si
+                sr.x1, sr.y1 = seg.start.x, seg.start.y
+                sr.x2, sr.y2 = seg.end.x, seg.end.y
+                sr.layer_hint = seg.layer_hint
+                sr.is_jog = seg.is_jog
+                self.bdb.add_topology_segment(sr)
+
+    def _persist_assigned_layers(self, bid, sel, w):
+        """Write the planner's per-segment assigned layers for a selected topology."""
+        for seg_index, layer in enumerate(w.plan.seg_layers):
+            self.bdb.set_segment_layer(bid, sel, seg_index, int(layer))
+
+    def _add_expanded_bundle(self, w, sel, expanded_to_template):
+        """Add one expanded per-instance bundle row + its selected topology."""
+        import json
+        hb = w.input.original_bundle
+        bid = str(hb.id)
+        row = buda.BundleRow()
+        row.id = bid
+        row.level = hb.level
+        row.strategy = self._bundler_strategy
+        row.reason = hb.reason
+        row.num_terminals = hb.num_terminals
+        row.cell_context = hb.cell_context
+        row.instances = json.dumps(list(hb.instances))
+        # parent_id links the instance back to its template bundle.
+        tpl = expanded_to_template.get(hb.id)
+        row.parent_id = str(tpl) if tpl is not None else ""
+        row.is_replicated = True                   # marks an expanded instance
+        row.drv_spec_depth = hb.drv_spec_depth
+        row.rcv_spec_depth = hb.rcv_spec_depth
+        row.drv_spec_path = hb.drv_spec_path
+        row.rcv_spec_paths = json.dumps(list(hb.rcv_spec_paths))
+        self.bdb.add_bundle(row)
+        for nm in hb.get_net_names():
+            self.bdb.add_bundle_net(bid, nm)
+        # entry/exit busterms may be cell-local (no "/"); qualify with the instance.
+        inst = hb.instances[0] if hb.instances else ""
+        def _qual(bt):
+            return f"{inst}/{bt}" if inst and "/" not in bt else bt
+        for bt in hb.entry_busterm_ids:
+            self.bdb.add_bundle_busterm(bid, _qual(bt), "entry")
+        for bt in hb.exit_busterm_ids:
+            self.bdb.add_bundle_busterm(bid, _qual(bt), "exit")
+        # Persist only the SELECTED (placed) topology for the instance, with the
+        # planner's assigned layers; the template retains the full candidate set.
+        topo = w.input.candidates[sel]
+        tr = buda.TopoRow()
+        tr.id = bid
+        tr.cand_index = sel
+        tr.type = topo.type
+        tr.wirelength = topo.estimated_wirelength
+        tr.trunk_location = topo.trunk_location
+        tr.pass_through_count = topo.pass_through_count
+        tr.connected_blocks = json.dumps(list(topo.connected_block_names))
+        tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
+        tr.is_selected = True
+        self.bdb.add_topology(tr)
+        seg_layers = list(w.plan.seg_layers)
+        for si, seg in enumerate(topo.segments):
+            sr = buda.TopoSegRow()
+            sr.id = bid
+            sr.cand_index = sel
+            sr.seg_index = si
+            sr.x1, sr.y1 = seg.start.x, seg.start.y
+            sr.x2, sr.y2 = seg.end.x, seg.end.y
+            sr.layer_hint = seg.layer_hint
+            sr.is_jog = seg.is_jog
+            sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
+            self.bdb.add_topology_segment(sr)
+
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
 
@@ -3234,6 +3389,10 @@ class BudaSession:
                         w.input.assigned_h_layer = asn.h_layer_id
                         w.plan.seg_layers = list(asn.seg_layers)
                         w.plan.seg_perp = list(asn.seg_perp)
+            # Persist the planner's decision into the BDB: expanded per-instance
+            # bundles (hier), the selected topology, and per-segment assigned
+            # layers — for both flows.
+            self._persist_planner_output()
         elif cmd == "run_nuts":
             # Usage: run_nuts [track_pitch]
             # NUTS places the planner-selected topology of each bundle, so it

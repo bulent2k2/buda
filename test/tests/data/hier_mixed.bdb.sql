@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=5;
+PRAGMA user_version=6;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -153,7 +153,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','5');
+INSERT INTO "meta" VALUES('schema_version','6');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -263,6 +263,7 @@ CREATE TABLE topology_segment (
         x1 INTEGER, y1 INTEGER, x2 INTEGER, y2 INTEGER,
         layer_hint INTEGER DEFAULT 0,
         is_jog     INTEGER DEFAULT 0,
+        assigned_layer INTEGER DEFAULT -1,  -- planner's per-segment layer (-1 = unassigned)
         PRIMARY KEY (bundle_id, cand_index, seg_index),
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)

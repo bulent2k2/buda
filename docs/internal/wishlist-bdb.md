@@ -81,12 +81,19 @@ an `entry`/`exit` role. C++ API: `add_bundle` / `add_bundle_net` /
 `(bundle_id, cand_index)` (composite, no autoincrement → deterministic dumps).
 C++ API `add_topology` / `add_topology_segment` / `clear_topologies` /
 `topologies` / `topology_segments`; Python `BudaSession._persist_topologies`.
-Tests: `test/tests/test_bdb_topology_persist.py`. **Deferred:** marking the
-planner's *selection* (`is_selected`) after `run_planner` — the hier flow expands
-bundles into per-instance wrappers with synthetic ids, and instances of one
-cell-level bundle may pick different candidates, so faithful selection recording
-needs its own design (per-instance vs template). `seg_busterms` / `bridge_segments`
-(re-derivable from geometry via ConnTopology) and slide ranges are also deferred.
+Tests: `test/tests/test_bdb_topology_persist.py`. **Deferred:** `seg_busterms` /
+`bridge_segments` (re-derivable from geometry via ConnTopology) and slide ranges.
+
+**2b. Planner output (Stage 3) — ✅ IMPLEMENTED.** `run_planner` records its
+decision (schema v6): the selected candidate (`topology.is_selected`, via
+`set_topology_selected`) and per-segment assigned layers
+(`topology_segment.assigned_layer`, via `set_segment_layer`), for both flows. The
+**hier** flow's `run_planner hier` expands cell-level bundles into per-instance
+wrappers, now persisted as `is_replicated=1` `bundle` rows (`parent_id` = template)
+carrying their selected topology — so `bus_segment` rows join back to a bundle and
+each instance records its own selection/layers. `clear_expanded_bundles()` keeps
+re-plan idempotent. Python `BudaSession._persist_planner_output`
+(+ `_add_expanded_bundle`); tests: `test/tests/test_bdb_planner_persist.py`.
 
 **3. Abstract NUTS (Stage 4) — ✅ IMPLEMENTED.** `run_nuts` persists each placed
 bus segment into `bus_segment` (placed rectangle + layer) and one **symbolic
@@ -102,9 +109,10 @@ per-instance ids persist. Tests: `test/tests/test_bdb_nuts_persist.py`.
   tracks (the finest OA/GDS geometry), written after `run_detailed_nuts`.
 - **`route_snapshot` + content hash** — a hash over the routing rows so a
   routing change is a reviewable, single-line diff in the `.bdb.sql`.
-- **Hier expanded-bundle persistence** — persist the per-instance expanded
-  bundles/topologies (synthetic ids) so bus rows hard-link back to a bundle row,
-  and record the planner's per-instance topology selection (`is_selected`).
+- **Optional hard FK for `bus_segment`/`bus_via`** — now that hier expanded
+  bundles are persisted (item 2b), a bus row's `bundle_id` joins a `bundle` row
+  for both flows; the link is still *soft* (no FK) to avoid the ordering/silent-
+  fail trap. Adding a real FK is possible if strict integrity is wanted.
 
 These persisted tables are the direct source for the planned **BDB → OA
 (`oaNet`/`oaTerm`/vias) / GDS** export; see

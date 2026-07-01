@@ -123,7 +123,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("x2",         &TopoSegRow::x2)
         .def_readwrite("y2",         &TopoSegRow::y2)
         .def_readwrite("layer_hint", &TopoSegRow::layer_hint)
-        .def_readwrite("is_jog",     &TopoSegRow::is_jog);
+        .def_readwrite("is_jog",     &TopoSegRow::is_jog)
+        .def_readwrite("assigned_layer", &TopoSegRow::assigned_layer);
 
     py::class_<BusSegRow>(m, "BusSegRow")
         .def(py::init<>())
@@ -209,6 +210,14 @@ void bind_db(py::module_& m) {
         .def("topologies",           &BDB::topologies, py::arg("bundle_id"))
         .def("topology_segments",    &BDB::topology_segments,
              py::arg("bundle_id"), py::arg("cand_index"))
+        .def("set_topology_selected", &BDB::set_topology_selected,
+             py::arg("bundle_id"), py::arg("cand_index"))
+        .def("set_segment_layer",     &BDB::set_segment_layer,
+             py::arg("bundle_id"), py::arg("cand_index"),
+             py::arg("seg_index"), py::arg("layer"))
+        .def("reset_assigned_layers", &BDB::reset_assigned_layers,
+             py::arg("bundle_id"))
+        .def("clear_expanded_bundles", &BDB::clear_expanded_bundles)
         .def("add_bus_segment",   &BDB::add_bus_segment, py::arg("r"))
         .def("add_bus_via",       &BDB::add_bus_via, py::arg("r"))
         .def("clear_bus_routing", &BDB::clear_bus_routing)
