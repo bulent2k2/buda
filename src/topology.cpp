@@ -2742,34 +2742,42 @@ void TopologyGenerator::add_trunk_mst_candidates(
     }
 }
 
+// Two-level BITRUNK trees for high-fan-out nets over regular datapath-like
+// placements.  A root spine (one orientation) feeds perpendicular BRANCH trunks,
+// each tapping a cluster of leaf blocks aligned along the root axis; a leaf either
+// stubs to its branch (branch runs beside it) or is a multi-tap pass-through (the
+// branch runs down through the column and covers it).  Both orientations are
+// emitted so the planner can pick the H/T shape that beats a single spine.
+// Opt-in (`set_multi_trunk`); self-gated on the clean-tree check.
 void TopologyGenerator::add_multi_trunk_candidates(
     const std::vector<Point>& pins,
     const std::vector<Busterm>& blocks,
     std::vector<Topology>& results)
 {
-    if (blocks.size() < 4) return;
-    std::vector<int> y_coords;
-    for (const auto& p : pins) y_coords.push_back(p.y);
-    std::sort(y_coords.begin(), y_coords.end());
-    int y_mid = y_coords[y_coords.size() / 2];
-    int y_t1 = y_coords[y_coords.size() / 4];
-    int y_t2 = y_coords[3 * y_coords.size() / 4];
+    const int n = (int)blocks.size();
+    if (n < 4) return;
 
-    if (y_t1 != y_t2) {
+    // Legacy BITRUNK_H (two parallel H trunks + a central V backbone).  Emitted
+    // unconditionally, exactly as before this change, so the DEFAULT candidate set
+    // and planner choices are preserved — the opt-in flag below only ADDS the new
+    // two-level trees.
+    [&]() {
+        std::vector<int> y_coords;
+        for (const auto& p : pins) y_coords.push_back(p.y);
+        std::sort(y_coords.begin(), y_coords.end());
+        int y_mid = y_coords[y_coords.size() / 2];
+        int y_t1  = y_coords[y_coords.size() / 4];
+        int y_t2  = y_coords[3 * y_coords.size() / 4];
+        if (y_t1 == y_t2) return;
         Topology t;
         t.type = "BITRUNK_H";
         int x_min = INT_MAX, x_max = INT_MIN;
-        for (const auto& p : pins) {
-            x_min = std::min(x_min, p.x);
-            x_max = std::max(x_max, p.x);
-        }
+        for (const auto& p : pins) { x_min = std::min(x_min, p.x); x_max = std::max(x_max, p.x); }
         int x_backbone = (x_min + x_max) / 2;
         t.segments.push_back(make_seg(x_min, y_t1, x_max, y_t1, h_layer_));
         t.segments.push_back(make_seg(x_min, y_t2, x_max, y_t2, h_layer_));
         t.segments.push_back(make_seg(x_backbone, y_t1, x_backbone, y_t2, v_layer_));
-
         int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
-
         for (int i = 0; i < (int)blocks.size(); ++i) {
             int yt = (pins[i].y <= y_mid) ? y_t1 : y_t2;
             int src_y = blocks[i].orig_bbox.face_y(yt);
@@ -2778,11 +2786,140 @@ void TopologyGenerator::add_multi_trunk_candidates(
                 t.segments.push_back(make_seg(pins[i].x, src_y, pins[i].x, yt, v_layer_));
                 t.seg_busterms[si].first = blocks[i];
             } else if (yt != src_y) {
-                // BITRUNK needs all stubs. If one is too short, the whole BITRUNK is bad.
-                return; 
+                return;   // a stub too short → legacy BITRUNK_H is not viable
             }
         }
         results.push_back(std::move(t));
+    }();
+
+    // New two-level BITRUNK_HVH / BITRUNK_VHV trees — opt-in only.
+    if (!allow_multi_trunk_) return;   // need enough fan-out for a ≥2-branch tree
+
+    // Split leaf indices into K clusters by a per-leaf key, cutting at the K-1
+    // largest gaps in the sorted keys (natural columns/rows of a datapath).
+    auto cluster = [&](const std::vector<int>& key, int K) {
+        std::vector<int> idx(n);
+        std::iota(idx.begin(), idx.end(), 0);
+        std::sort(idx.begin(), idx.end(), [&](int a, int b){ return key[a] < key[b]; });
+        std::vector<std::pair<int,int>> gaps;   // (gap size, split-after sorted pos)
+        for (int j = 0; j + 1 < n; ++j) gaps.push_back({key[idx[j+1]] - key[idx[j]], j});
+        std::sort(gaps.begin(), gaps.end(), [](auto& a, auto& b){ return a.first > b.first; });
+        std::set<int> splits;
+        for (int k = 0; k < K - 1 && k < (int)gaps.size(); ++k)
+            if (gaps[k].first > 0) splits.insert(gaps[k].second);
+        std::vector<std::vector<int>> out;
+        std::vector<int> cur;
+        for (int j = 0; j < n; ++j) {
+            cur.push_back(idx[j]);
+            if (splits.count(j)) { out.push_back(cur); cur.clear(); }
+        }
+        if (!cur.empty()) out.push_back(cur);
+        return out;
+    };
+
+    const int m_along_h = floorplan_.get_min_stub_length(0 /*H*/, h_layer_);
+    const int m_along_v = floorplan_.get_min_stub_length(1 /*V*/, v_layer_);
+
+    // Emit one BITRUNK candidate.  root_horiz picks the root spine orientation;
+    // the branches and leaf stubs are then the opposite orientation.  Coordinate
+    // helpers read the "root axis" (RA: x if root_horiz) and "perp axis" (PA).
+    auto emit = [&](bool root_horiz, int K) {
+        auto RA  = [&](const Busterm& b){ return root_horiz ? (b.orig_bbox.x1 + b.orig_bbox.x2) / 2
+                                                            : (b.orig_bbox.y1 + b.orig_bbox.y2) / 2; };
+        auto PA  = [&](const Busterm& b){ return root_horiz ? (b.orig_bbox.y1 + b.orig_bbox.y2) / 2
+                                                            : (b.orig_bbox.x1 + b.orig_bbox.x2) / 2; };
+        auto RA1 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.x1 : b.orig_bbox.y1; };
+        auto RA2 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.x2 : b.orig_bbox.y2; };
+        auto PA1 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.y1 : b.orig_bbox.x1; };
+        auto PA2 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.y2 : b.orig_bbox.x2; };
+        auto RAface = [&](const Busterm& b, int toward){
+            return root_horiz ? b.orig_bbox.face_x(toward) : b.orig_bbox.face_y(toward); };
+        // Build a Point from (root-axis coord, perp-axis coord).
+        auto mkpt = [&](int ra, int pa){ return root_horiz ? Point{ra, pa} : Point{pa, ra}; };
+        auto mkseg = [&](int ra1, int pa1, int ra2, int pa2, int layer){
+            Point a = mkpt(ra1, pa1), c = mkpt(ra2, pa2);
+            return make_seg(a.x, a.y, c.x, c.y, layer); };
+
+        std::vector<int> key(n);
+        for (int i = 0; i < n; ++i) key[i] = RA(blocks[i]);
+        auto clusters = cluster(key, K);
+        if ((int)clusters.size() < 2) return;   // a single branch is just a trunk
+
+        // Root spine sits just outside the blocks on the low perp side, clear of
+        // every block, so it never accidentally taps one.
+        int pa_min = INT_MAX;
+        for (const auto& b : blocks) pa_min = std::min(pa_min, PA1(b));
+        const int stub_perp = root_horiz ? m_along_v : m_along_h;   // leaf-stub axis min
+        const int stub_root = root_horiz ? m_along_h : m_along_v;   // root/branch axis min
+        int root_perp = pa_min - std::max(stub_perp, 1);
+
+        const int root_layer   = root_horiz ? h_layer_ : v_layer_;
+        const int branch_layer = root_horiz ? v_layer_ : h_layer_;
+
+        Topology t;
+        t.type = root_horiz ? "BITRUNK_HVH" : "BITRUNK_VHV";
+        std::vector<int> branch_ra;   // root-axis position of each branch
+
+        for (auto& cl : clusters) {
+            // Branch position = mean root-axis centre of its leaves.  A leaf whose
+            // root-axis range straddles the branch is a pass-through (no stub); the
+            // rest get a leaf stub.  Branch perp-span covers every cluster block's
+            // full perp extent (so pass-throughs are covered) and reaches the root.
+            long sum = 0;
+            for (int i : cl) sum += RA(blocks[i]);
+            int b_ra = (int)(sum / (int)cl.size());
+            int b_pa_lo = root_perp, b_pa_hi = INT_MIN;
+            for (int i : cl) { b_pa_lo = std::min(b_pa_lo, PA1(blocks[i]));
+                               b_pa_hi = std::max(b_pa_hi, PA2(blocks[i])); }
+            if (b_pa_hi <= b_pa_lo) return;
+            int branch_idx = (int)t.segments.size();
+            t.segments.push_back(mkseg(b_ra, b_pa_lo, b_ra, b_pa_hi, branch_layer));
+            branch_ra.push_back(b_ra);
+
+            for (int i : cl) {
+                const Busterm& b = blocks[i];
+                bool straddle = (b_ra > RA1(b) && b_ra < RA2(b));
+                if (straddle) continue;   // pass-through: branch covers this block
+                int face = RAface(b, b_ra);
+                if (std::abs(face - b_ra) < stub_root) return;   // stub too short → drop
+                int lp = PA(b);            // leaf connects at its perp centre
+                int si = (int)t.segments.size();
+                t.segments.push_back(mkseg(face, lp, b_ra, lp, root_layer));
+                t.seg_busterms[si].first = b;   // busterm at the leaf-face endpoint
+                (void)branch_idx;
+            }
+        }
+        // Root spine spans the extreme branch positions at root_perp.
+        int r_lo = *std::min_element(branch_ra.begin(), branch_ra.end());
+        int r_hi = *std::max_element(branch_ra.begin(), branch_ra.end());
+        if (r_hi - r_lo < stub_root) return;
+        t.segments.insert(t.segments.begin(),
+                          mkseg(r_lo, root_perp, r_hi, root_perp, root_layer));
+        // seg_busterms indices shifted by the inserted root at index 0.
+        std::map<int, SegEndpoints> shifted;
+        for (auto& [k, v] : t.seg_busterms) shifted[k + 1] = v;
+        t.seg_busterms = std::move(shifted);
+
+        for (const auto& b : blocks) t.connected_block_names.push_back(b.block_name);
+        // Only keep a physically self-connected, acyclic, fully-covered tree.
+        if (!topology_is_clean_tree(t, floorplan_)) return;
+        // Skip a duplicate (different K can yield the same tree).
+        auto same_geo = [](const Topology& a, const Topology& b) {
+            if (a.type != b.type || a.segments.size() != b.segments.size()) return false;
+            for (size_t i = 0; i < a.segments.size(); ++i) {
+                const auto& sa = a.segments[i]; const auto& sb = b.segments[i];
+                if (sa.start.x != sb.start.x || sa.start.y != sb.start.y ||
+                    sa.end.x   != sb.end.x   || sa.end.y   != sb.end.y) return false;
+            }
+            return true;
+        };
+        for (const auto& e : results) if (same_geo(e, t)) return;
+        results.push_back(std::move(t));
+    };
+
+    for (int K = 2; K <= 3; ++K) {
+        emit(true,  K);   // BITRUNK_HVH (root H)
+        emit(false, K);   // BITRUNK_VHV (root V)
     }
 }
 

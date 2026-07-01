@@ -774,7 +774,8 @@ class BudaSession:
                 expansion_map[rid] = [wrapper_at[key]]
         return result, expansion_map
 
-    def _make_topo_gen(self, fp, use_center=False, use_double_detour=False):
+    def _make_topo_gen(self, fp, use_center=False, use_double_detour=False,
+                       use_multi_trunk=False):
         """Create a TopologyGenerator on fp with the current layer stack."""
         tg = buda.TopologyGenerator(fp)
         h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
@@ -796,6 +797,8 @@ class BudaSession:
             tg.set_busterm_mode(False)
         if use_double_detour:
             tg.set_double_detour(True)
+        if use_multi_trunk:
+            tg.set_multi_trunk(True)
         return tg
 
     def _make_layer_names(self):
@@ -2619,7 +2622,9 @@ class BudaSession:
                 return
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
-            topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour)
+            use_multi_trunk   = "multi_trunk"   in args
+            topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour,
+                                           use_multi_trunk)
             for w in self.bundles:
                 net_name = w.input.original_bundle.get_net_names()[0]
                 ep = self._net_endpoints.get(net_name)

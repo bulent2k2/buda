@@ -264,6 +264,14 @@ public:
     // U route is congested.  Only meaningful in busterm mode.
     void set_double_detour(bool v) { allow_double_detour_ = v; }
 
+    // Multi-trunk mode (default false): for high-fan-out nets over regular
+    // datapath-like placements, emit two-level BITRUNK_HVH / BITRUNK_VHV trees —
+    // a root spine (one orientation) feeding perpendicular branch trunks, each
+    // tapping a cluster of aligned leaf blocks — in BOTH orientations, so the
+    // planner can pick the H/T shape that beats a single spine.  Opt-in so
+    // default candidate rankings are unchanged.
+    void set_multi_trunk(bool v) { allow_multi_trunk_ = v; }
+
     // Unified entry point: 1 dst → L/Z/U shapes; N dsts → trunk+branch shapes.
     std::vector<Topology> generate_candidates(
         const std::string& src_name,
@@ -281,6 +289,7 @@ private:
     const Floorplan& floorplan_;
     bool use_busterm_         = true;
     bool allow_double_detour_ = false;
+    bool allow_multi_trunk_   = false;
     int  h_layer_             = 4;
     int  v_layer_             = 5;
     std::vector<int> all_h_layers_ = {4};
