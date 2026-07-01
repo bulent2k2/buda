@@ -62,7 +62,7 @@ bundle           id (TEXT), level, strategy, reason, num_terminals,
                  cell_context, instances (JSON), parent_id→bundle,
                  is_replicated, drv_spec_depth, rcv_spec_depth,
                  drv_spec_path, rcv_spec_paths (JSON)
-bundle_net       bundle_id→bundle, net_name        PRIMARY KEY (bundle_id, net_name)
+bundle_net       bundle_id→bundle, net_id→net      PRIMARY KEY (bundle_id, net_id)
 bundle_busterm   bundle_id→bundle, busterm_id, role ('entry'|'exit')
 
 grp              id (TEXT), name, color, parent_id→grp
@@ -74,15 +74,18 @@ meta             key (TEXT PK), value  — die_w, die_h, units,
 
 **Schema version.** The BDB stamps `PRAGMA user_version` (mirrored in
 `meta.schema_version`) and migrates forward on open. v1 added versioning +
-provenance; v2 added the **bundle-persistence** shape above. `tools/bdb_serialize.py`
-preserves the version across the `*.bdb.sql` round-trip.
+provenance; v2 added the **bundle-persistence** shape above; v3 re-keyed
+`bundle_net` by `net_id`. `tools/bdb_serialize.py` preserves the version across the
+`*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
 their Stage-1 bundles into `bundle` / `bundle_net` / `bundle_busterm` whenever a
-BDB is open (the flat flow persists too — membership is keyed by net **name**, not
-`net.id`). C++ API: `add_bundle(BundleRow)`, `add_bundle_net(bundle_id, net_name)`,
-`add_bundle_busterm(bundle_id, busterm_id, role)`, `clear_bundles()`,
-`all_bundles()`, `bundle_nets(id)`, `bundle_busterms(id)`.
+BDB is open. Membership is keyed by `net_id`; `add_bundle_net(bundle_id, net_name)`
+takes a **name** and resolves it, auto-creating a name-only `net` row if absent so
+the flat flow (whose nets may not be in the `net` table) persists too.
+`bundle_nets(id)` joins back to return names. C++ API: `add_bundle(BundleRow)`,
+`add_bundle_net`, `add_bundle_busterm(bundle_id, busterm_id, role)`,
+`clear_bundles()`, `all_bundles()`, `bundle_nets(id)`, `bundle_busterms(id)`.
 
 **coordinates** are in microns (µm). `import_def_lef` converts from DEF
 internal units using the `UNITS DISTANCE MICRONS` value from the DEF header.

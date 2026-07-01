@@ -62,18 +62,21 @@ diffable in the `.bdb.sql` and is the eventual source for **BDB → OA (`oaNet` 
 
 **1. Bundles (Stage 1) — ✅ IMPLEMENTED.** `run_bundler` (flat) and
 `run_hier_bundler` (hier) write their bundles into the `bundle` / `bundle_net` /
-`bundle_busterm` tables when a BDB is open (schema v2). Membership is keyed by net
-*name* so the flat flow persists even though its nets may not have `net` rows;
-hier busterms carry an `entry`/`exit` role. C++ API: `add_bundle` /
-`add_bundle_net` / `add_bundle_busterm` / `clear_bundles` / `all_bundles` /
-`bundle_nets` / `bundle_busterms` (`src/bdb.cpp`); Python orchestration
+`bundle_busterm` tables when a BDB is open (schema v2 added the tables; v3 re-keyed
+`bundle_net` by `net_id`). Membership is keyed by `net_id`, resolved from the net
+name — `add_bundle_net` auto-creates a name-only `net` row if absent, so the flat
+flow persists even though its nets may not pre-exist in `net`; hier busterms carry
+an `entry`/`exit` role. C++ API: `add_bundle` / `add_bundle_net` /
+`add_bundle_busterm` / `clear_bundles` / `all_bundles` / `bundle_nets` /
+`bundle_busterms` (`src/bdb.cpp`); Python orchestration
 `BudaSession._persist_bundles` (`src/buda_cli.py`). Tests:
 `test/tests/test_bdb_bundle_persist.py`. Deferred: `child_ids` (derivable from
-`parent_id`).
+`parent_id`); auto-enabling `bdb_net_mode` on `open_bdb` to eagerly persist the
+*whole* netlist (+ pins where they resolve), not just bundled nets.
 
 **2. Topologies (Stage 2) — ⬜ NEXT.** Persist each bundle's candidate/selected
 topologies (segments, type, layer hints, slide ranges). New table(s) referencing
-`bundle(id)`; schema v3.
+`bundle(id)`; next schema version.
 
 **3. Abstract NUTS (Stage 4) — ⬜.** `bus_segment` rows (+ **bus-vias / symbolic
 vias** between segments on different layers) with a content hash per snapshot;

@@ -117,8 +117,9 @@ public:
     // Current BDB schema version, stamped into PRAGMA user_version. Bump this
     // and add a step to _migrate() when the schema changes; opening an older DB
     // then migrates it forward. v1 = versioned schema + provenance meta;
-    // v2 = bundle-persistence tables (bundle / bundle_net / bundle_busterm).
-    static constexpr int SCHEMA_VERSION = 2;
+    // v2 = bundle-persistence tables (bundle / bundle_net / bundle_busterm);
+    // v3 = bundle_net re-keyed by net_id (was net_name).
+    static constexpr int SCHEMA_VERSION = 3;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -301,6 +302,9 @@ private:
     void _migrate();
     // Seed/refresh provenance rows in the meta table (idempotent).
     void _seed_provenance();
+    // Return the id of net `name`, creating a name-only row if absent (used by
+    // add_bundle_net so flat-flow nets can be keyed by net_id).
+    int  _ensure_net(const std::string& name);
     // Upsert a meta(key,value) row.
     void _set_meta(const std::string& key, const std::string& value);
     // Insert a pin for net_id at the component named inst_path, auto-register

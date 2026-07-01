@@ -70,8 +70,11 @@ void BDB::_exec(const char* sql) {
 
 // Bundle tables (schema v2). Membership is keyed by net *name* so it is flow-
 // agnostic: the flat flow's nets may not have rows in the BDB `net` table, and
-// names are also the natural identifiers for a later OA/GDS export. Kept in one
-// place so _create_schema (fresh DB) and _migrate (v1->v2 rebuild) never drift.
+// Membership is keyed by net_id (FK to net): consistent with net_props.bundle_id
+// and normalized. The flat flow's nets need not pre-exist in the net table —
+// add_bundle_net auto-creates a name-only net row (_ensure_net) so both flows key
+// by id. Kept in one place so _create_schema (fresh DB) and _migrate (rebuild)
+// never drift.
 static const char* BUNDLE_DDL = R"(
     CREATE TABLE IF NOT EXISTS bundle (
         id             TEXT PRIMARY KEY,
@@ -90,8 +93,8 @@ static const char* BUNDLE_DDL = R"(
     );
     CREATE TABLE IF NOT EXISTS bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
-        net_name  TEXT,
-        PRIMARY KEY (bundle_id, net_name)
+        net_id    INTEGER REFERENCES net(id),
+        PRIMARY KEY (bundle_id, net_id)
     );
     CREATE TABLE IF NOT EXISTS bundle_busterm (
         bundle_id  TEXT REFERENCES bundle(id),
@@ -251,12 +254,37 @@ void BDB::_migrate() {
     if (v < 2) {
         // v1 -> v2: bundle-persistence schema. The bundle tables have never had a
         // write path, so they are always empty — rebuild them to the new shape
-        // (net_name membership, busterm role, extra hier columns) rather than a
-        // long ALTER chain.
+        // (busterm role, extra hier columns) rather than a long ALTER chain.
         _exec("DROP TABLE IF EXISTS bundle_busterm;"
               "DROP TABLE IF EXISTS bundle_net;"
               "DROP TABLE IF EXISTS bundle;");
         _exec(BUNDLE_DDL);
+    }
+    if (v < 3) {
+        // v2 -> v3: re-key bundle_net by net_id (was net_name). Preserve any
+        // persisted memberships: stage the old (bundle_id, net_name) rows, rebuild
+        // the table in the net_id shape, then re-insert (resolving/creating net ids
+        // via add_bundle_net -> _ensure_net, which also covers flat-flow nets).
+        // A fresh DB reached this step with the net_id shape already (the v<2 step
+        // uses the current BUNDLE_DDL), so guard on the column actually present.
+        bool has_net_name = false;
+        { Stmt q(_db, "PRAGMA table_info(bundle_net)");
+          while (sqlite3_step(q) == SQLITE_ROW) {
+              if (std::string(reinterpret_cast<const char*>(
+                      sqlite3_column_text(q, 1))) == "net_name") has_net_name = true;
+          } }
+        if (has_net_name) {
+            std::vector<std::pair<std::string, std::string>> staged;
+            { Stmt q(_db, "SELECT bundle_id, net_name FROM bundle_net");
+              while (sqlite3_step(q) == SQLITE_ROW)
+                  staged.emplace_back(
+                      reinterpret_cast<const char*>(sqlite3_column_text(q, 0)),
+                      reinterpret_cast<const char*>(sqlite3_column_text(q, 1))); }
+            _exec("DROP TABLE bundle_net;");
+            _exec(BUNDLE_DDL);   // recreate bundle_net in the net_id shape
+            for (const auto& [bid, name] : staged)
+                add_bundle_net(bid, name);
+        }
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -1986,10 +2014,23 @@ void BDB::add_bundle(const BundleRow& br) {
     sqlite3_step(s);
 }
 
+int BDB::_ensure_net(const std::string& name) {
+    { Stmt q(_db, "SELECT id FROM net WHERE name=?");
+      sqlite3_bind_text(q, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+      if (sqlite3_step(q) == SQLITE_ROW) return sqlite3_column_int(q, 0); }
+    // Not present (e.g. a flat-flow net): create a name-only row so bundle_net can
+    // FK to it. Pins/props are absent by design — the flat flow has no BDB pins.
+    Stmt ins(_db, "INSERT INTO net(name) VALUES(?)");
+    sqlite3_bind_text(ins, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(ins);
+    return static_cast<int>(sqlite3_last_insert_rowid(_db));
+}
+
 void BDB::add_bundle_net(const std::string& bundle_id, const std::string& net_name) {
-    Stmt s(_db, "INSERT OR IGNORE INTO bundle_net(bundle_id,net_name) VALUES(?,?)");
+    int net_id = _ensure_net(net_name);
+    Stmt s(_db, "INSERT OR IGNORE INTO bundle_net(bundle_id,net_id) VALUES(?,?)");
     sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(s, 2, net_name.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 2, net_id);
     sqlite3_step(s);
 }
 
@@ -2039,7 +2080,9 @@ std::vector<BundleRow> BDB::all_bundles() const {
 }
 
 std::vector<std::string> BDB::bundle_nets(const std::string& bundle_id) const {
-    Stmt q(_db, "SELECT net_name FROM bundle_net WHERE bundle_id=? ORDER BY net_name");
+    // Membership is stored by net_id; join back to net so callers still see names.
+    Stmt q(_db, "SELECT n.name FROM bundle_net b JOIN net n ON b.net_id=n.id"
+                " WHERE b.bundle_id=? ORDER BY n.name");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     std::vector<std::string> out;
     while (sqlite3_step(q) == SQLITE_ROW)

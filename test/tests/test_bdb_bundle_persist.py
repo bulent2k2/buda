@@ -73,6 +73,9 @@ def test_flat_bundles_persist_by_net_name(tmp_path):
     assert s.bdb.bundle_nets(rows[0].id) == [f"d_{i}" for i in range(8)]
     assert rows[0].strategy == "STRICT"
     assert rows[0].level == 0                       # flat = top level
+    # net_id keying: the flat nets were auto-created as name-only net rows so
+    # bundle_net can FK to them.
+    assert {n.name for n in s.bdb.all_nets()} >= {f"d_{i}" for i in range(8)}
 
 
 def test_bundles_roundtrip_through_sql(bdb_input, tmp_path):
@@ -114,9 +117,9 @@ def test_flat_run_bundler_without_bdb_is_noop_persist():
     assert s._persist_bundles("STRICT") == 0        # no BDB → no-op, no crash
 
 
-def test_v1_bundle_schema_migrates_to_v2(tmp_path):
-    # A v1 DB with the OLD bundle_net (net_id) schema must migrate: the bundle
-    # tables are rebuilt to the v2 shape (net_name membership, busterm role).
+def test_v1_bundle_schema_migrates_to_current(tmp_path):
+    # A pre-versioning v1 DB migrates all the way to current: bundle tables rebuilt
+    # (net_id membership, busterm role) and the meta mirror refreshed.
     p = str(tmp_path / "old.bdb")
     con = sqlite3.connect(p)
     con.executescript(
@@ -133,15 +136,53 @@ def test_v1_bundle_schema_migrates_to_v2(tmp_path):
     con.commit()
     con.close()
 
-    db = buda.BDB(p)                                 # opening migrates v1 -> v2
-    assert db.schema_version() == 2
-    # The mirrored meta.schema_version must be refreshed on the v1->v2 bump too,
-    # not left at "1" (keeps the .bdb.sql dump's version consistent).
-    assert db.meta_get("schema_version") == "2"
+    db = buda.BDB(p)                                 # opening migrates forward
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION == 3
+    assert db.meta_get("schema_version") == "3"      # mirror refreshed
     del db
     con = sqlite3.connect(p)
     net_cols = {r[1] for r in con.execute("PRAGMA table_info(bundle_net)")}
     bt_cols = {r[1] for r in con.execute("PRAGMA table_info(bundle_busterm)")}
     con.close()
-    assert "net_name" in net_cols and "net_id" not in net_cols
+    assert "net_id" in net_cols and "net_name" not in net_cols
     assert "role" in bt_cols
+
+
+def test_v2_bundle_net_rekeys_to_v3_preserving_rows(tmp_path):
+    # A v2 DB (bundle_net keyed by net_name) with PERSISTED memberships is re-keyed
+    # to net_id on open WITHOUT losing rows: names already in `net` resolve to
+    # their id, names not present (flat-flow nets) are auto-created.
+    p = str(tmp_path / "v2.bdb")
+    con = sqlite3.connect(p)
+    con.executescript(
+        """
+        CREATE TABLE net (id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL);
+        INSERT INTO net(id,name) VALUES (7,'known_net');
+        CREATE TABLE bundle (id TEXT PRIMARY KEY);
+        INSERT INTO bundle(id) VALUES ('1');
+        CREATE TABLE bundle_net (bundle_id TEXT, net_name TEXT,
+            PRIMARY KEY (bundle_id, net_name));
+        INSERT INTO bundle_net VALUES ('1','known_net'), ('1','flat_only_net');
+        CREATE TABLE bundle_busterm (bundle_id TEXT, busterm_id TEXT, role TEXT,
+            PRIMARY KEY (bundle_id, busterm_id, role));
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES('schema_version','2');
+        PRAGMA user_version = 2;
+        """
+    )
+    con.commit()
+    con.close()
+
+    db = buda.BDB(p)
+    assert db.schema_version() == 3
+    assert db.meta_get("schema_version") == "3"
+    # Membership preserved across the re-key (not dropped).
+    assert db.bundle_nets("1") == ["flat_only_net", "known_net"]
+    del db
+    con = sqlite3.connect(p)
+    net_cols = {r[1] for r in con.execute("PRAGMA table_info(bundle_net)")}
+    # known_net kept its id 7; flat_only_net was auto-created.
+    ids = dict(con.execute("SELECT name, id FROM net").fetchall())
+    con.close()
+    assert "net_id" in net_cols and "net_name" not in net_cols
+    assert ids["known_net"] == 7 and "flat_only_net" in ids
