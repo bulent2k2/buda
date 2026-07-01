@@ -985,8 +985,11 @@ ladder below (STRICT → rip-up/replan) avoids it up front.
 - Works on both `run_planner` and `run_planner hier`, e.g. `run_planner 5 signal_tracks`
   / `run_planner hier 5 signal_tracks`.
 - **Opt-in:** without the keyword the plan is byte-identical to before. Requires at
-  least one `def_track_pattern` (else it warns and falls back to the width model).
-  Layers without a pattern keep the width model even when the keyword is on.
+  least one `def_track_pattern` — requesting `signal_tracks` with none defined is a
+  **hard error** (exit 1), not a silent fall-back to the width model, so a
+  misconfiguration can't quietly plan with a different capacity model than asked
+  for. Layers *individually* without a pattern keep the width model even when the
+  keyword is on (only a stack with **no** pattern at all is the error).
 - `set_planner_param track_cap_slack <n>` grants `n` extra signal tracks per band
   as a quantization slack (default 0 = exact integer accounting).
 - Measured on `flow/rnr/mix.buda` (hier): the width plan yields 236 DetailedNUTS

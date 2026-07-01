@@ -94,15 +94,22 @@ def test_signal_tracks_flat_no_iteration_arg_parses():
     assert s.planner is not None
 
 
-def test_signal_tracks_requires_track_pattern():
-    """Without any def_track_pattern the keyword warns and falls back to width."""
+def test_signal_tracks_without_track_pattern_is_a_hard_error():
+    """Requesting signal_tracks with no def_track_pattern is a hard error (exit 1),
+    NOT a silent fall-back to the width model — planning quietly with a different
+    capacity model than the one asked for would hide that the signal-track
+    accounting never happened."""
     s = _small_session(with_pattern=False)
-    out = _run(s, "run_planner 5 signal_tracks")
-    assert "requires a routing grid" in out, out
-    assert "signal-track mode" not in out, out               # fell back to width
-    # Still produced a usable plan.
-    _run(s, "run_nuts")
-    assert s.nuts_result is not None
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        with pytest.raises(SystemExit) as ei:
+            s.do_command("run_planner 5 signal_tracks")
+    assert ei.value.code == 1
+    out = buf.getvalue()
+    assert "no def_track_pattern is defined" in out, out
+    assert "signal-track mode" not in out, out               # never enabled the mode
+    # It bailed out rather than silently planning with the width model.
+    assert s.planner is None or s.nuts_result is None
 
 
 # --- the real-world effect (@mid) -------------------------------------------
