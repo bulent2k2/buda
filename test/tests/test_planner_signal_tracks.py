@@ -119,7 +119,7 @@ def _mix_to_dnuts(planner_cmd):
     s.no_viz = True
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command(f"source {_RNR / 'mix_tracks.buda'}")
-        s.do_command(f"open_bdb {_RNR / 'mix.b_db'}")
+        s.do_command(f"open_bdb {_RNR / 'mix.b_db.sql'}")
         s.do_command("derive_busterms 2")
         s.do_command("add_blocks_from_bdb 0")
         s.do_command("add_blocks_from_bdb 1 skip")

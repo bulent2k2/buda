@@ -1135,3 +1135,9 @@ vendored, the implementation would:
 
 Until OA support lands, the supported interchange path is **LEF/DEF + Verilog
 in, with GDS import/export once available**.
+
+For committing BDBs as reviewable test data — and the schema-versioning /
+provenance / routing-write-back groundwork that the OA/GDS export will build on —
+see [BDB Test-Data Management](internal/bdb_test_data.md). Its `*.bdb.sql` text
+dump (`tools/bdb_serialize.py`) is the diffable, version-controllable form of a
+BDB.

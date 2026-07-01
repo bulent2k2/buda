@@ -2155,6 +2155,15 @@ def main():
         print(f"fp: cannot open BDB — file not found: {path}", file=sys.stderr)
         sys.exit(2)
 
+    # A serialized BDB (*.bdb.sql / *.b_db.sql) is materialized into a throwaway
+    # temp binary so `fp foo.b_db.sql` and `bfp <script opening a .sql>` work.
+    # Edits are not written back to the .sql (write-back is future work —
+    # see docs/internal/wishlist-bdb.md).
+    if path is not None and path.endswith('.sql'):
+        import bdb_serialize
+        print(f"fp: materializing {path} -> temp binary (edits not written back)")
+        path = bdb_serialize.materialize_if_sql(path)
+
     root = tk.Tk()
     app = BdbFloorplanner(root)
     if path is not None:

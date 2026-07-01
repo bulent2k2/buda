@@ -28,6 +28,11 @@ _build = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'build')
 if _build not in sys.path:
     sys.path.insert(0, _build)
 
+# tools/ holds bdb_serialize (used by open_bdb to load *.bdb.sql text fixtures).
+_tools = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'tools'))
+if _tools not in sys.path:
+    sys.path.append(_tools)
+
 # On macOS the native 'macosx' backend can intermittently segfault,
 # especially with the IPC timer or when multiple windows open.
 # Force TkAgg to ensure stability.
@@ -150,6 +155,32 @@ class BudaSession:
             return None
         base = os.path.splitext(self.script_path)[0]
         return base + '.json'
+
+    def _materialize_bdb_sql(self, sql_path):
+        """Rebuild a serialized BDB (*.bdb.sql text) into a throwaway temp binary.
+
+        The checked-in text fixture is never opened for writing, so the routing
+        pipeline (derive_busterms, etc.) cannot dirty it. Returns the temp path.
+        See tools/bdb_serialize.py and docs/internal/bdb_test_data.md.
+
+        TODO(bdb-writeback): this is always read-only — changes to the temp binary
+        are discarded. When BDB write-back lands (interconnect persisted to the
+        BDB), add an explicit "materialize + dump back to the .sql on close" mode
+        so a flow can update its serialized fixture deliberately, rather than the
+        always-temp behaviour here. Tracked in docs/internal/wishlist-bdb.md.
+        """
+        import tempfile
+        import bdb_serialize
+        base = os.path.basename(sql_path)[:-len('.sql')]  # mix.b_db.sql -> mix.b_db
+        tmp_dir = tempfile.mkdtemp(prefix='buda_bdb_')
+        out = os.path.join(tmp_dir, base)
+        bdb_serialize.load(sql_path, out)
+        if not hasattr(self, '_tmp_bdbs'):
+            self._tmp_bdbs = []
+        self._tmp_bdbs.append(out)
+        print(f"open_bdb: materialized {sql_path} -> temp binary "
+              f"(changes not written back)")
+        return out
 
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
@@ -3202,6 +3233,11 @@ class BudaSession:
                     and bdb_path != ':memory:'):
                 parent_dir = os.path.dirname(self._script_stack[-1])
                 bdb_path = os.path.normpath(os.path.join(parent_dir, bdb_path))
+            # A serialized text BDB (e.g. mix.b_db.sql) is materialized into a
+            # throwaway temp binary so the pipeline never dirties the checked-in
+            # text fixture. See docs/internal/bdb_test_data.md.
+            if bdb_path != ':memory:' and bdb_path.endswith('.sql'):
+                bdb_path = self._materialize_bdb_sql(bdb_path)
             self.bdb = buda.BDB(bdb_path)
         elif cmd == "import_def_lef":
             # import_def_lef <def_path> <lef_path>

@@ -3,6 +3,19 @@
 **/*.bdb
 **/*.bdb-shm
 **/*.bdb-wal
+# A BDB is committed as diffable SQL text (see docs/internal/bdb_test_data.md);
+# rebuild the binary on demand with tools/bdb_serialize.py. Ignore the binary
+# forms of the historical rename tricks (.b-db / .b_db) and their WAL sidecars,
+# but always keep the .sql text tracked.
+**/*.b-db
+**/*.b-db-shm
+**/*.b-db-wal
+**/*.b_db
+**/*.b_db-shm
+**/*.b_db-wal
+!**/*.bdb.sql
+!**/*.b-db.sql
+!**/*.b_db.sql
 **/*.sqbpro
 **/build/
 **/__pycache__/

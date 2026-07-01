@@ -1,5 +1,7 @@
 source mix_tracks.buda
-open_bdb mix.b_db
+# Diffable serialized BDB (see docs/internal/bdb_test_data.md): open_bdb loads the
+# *.sql text into a throwaway temp binary, so this flow never dirties the fixture.
+open_bdb mix.b_db.sql
 derive_busterms 2
 add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip
