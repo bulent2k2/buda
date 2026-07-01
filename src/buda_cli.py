@@ -162,6 +162,12 @@ class BudaSession:
         The checked-in text fixture is never opened for writing, so the routing
         pipeline (derive_busterms, etc.) cannot dirty it. Returns the temp path.
         See tools/bdb_serialize.py and docs/internal/bdb_test_data.md.
+
+        TODO(bdb-writeback): this is always read-only — changes to the temp binary
+        are discarded. When BDB write-back lands (interconnect persisted to the
+        BDB), add an explicit "materialize + dump back to the .sql on close" mode
+        so a flow can update its serialized fixture deliberately, rather than the
+        always-temp behaviour here. Tracked in docs/internal/wishlist-bdb.md.
         """
         import tempfile
         import bdb_serialize

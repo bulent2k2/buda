@@ -1569,7 +1569,7 @@ stage b alone.
 > The residual opens that neither pass can clear are the pure capacity-mismatch
 > cases. Predicting them inside the planner (charging band capacity in
 > signal-track count rather than layout width) is a planned follow-on — see
-> *Gap A part 2* in `docs/internal/wishlist.md`.
+> *Gap A part 2* in `docs/internal/wishlist-planner.md`.
 
 ---
 
