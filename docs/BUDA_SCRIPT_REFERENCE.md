@@ -1875,7 +1875,8 @@ Full reference: **[docs/BDB_REFERENCE.md](BDB_REFERENCE.md)**
 
 | Command | Description |
 |---|---|
-| `open_bdb <path>` | Open or create a `.bdb` file. Use before any other BDB command. |
+| `open_bdb <path> [writeback]` | Open or create a `.bdb`, or materialize a `*.bdb.sql` text fixture to a temp binary. `writeback` (for `.sql` only) dumps changes back to the `.sql` on `save_bdb`/`exit`/end-of-run. Use before any other BDB command. |
+| `save_bdb` | Write the working BDB back to its `*.bdb.sql` source now (after `open_bdb … writeback`). |
 | `import_def_lef <def> <lef>` | Import placements from DEF + cell sizes from LEF. Clears all tables. |
 | `import_verilog <v>` | Elaborate hierarchy from Verilog; preserves coordinates from a prior `import_def_lef`. |
 | `bdb_net_mode on\|off` | Toggle whether nets/buses are written directly to BDB database. |
