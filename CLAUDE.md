@@ -15,7 +15,7 @@ The project is **BDB-centric** (v3 architecture). All hierarchical physical-desi
 1. **Flat flow** — declare blocks and nets directly in a `.buda` script (`add_block`, `add_net`), bundle them, generate topologies, plan, NUTS. No hierarchy. This is the original demo flow and what most stage docs below describe.
 2. **Hierarchy-aware flow** — open/build a BDB (`open_bdb`, `import_def_lef`, `import_verilog`, or the interactive **Floorplanner**), derive busterms, then run the `hier` variants (`run_hier_bundler`, `generate_hier_topologies`, `run_planner hier`). Templates are solved once per cell type and instantiated at every occurrence.
 
-The **Floorplanner** (`./fp`, `./bfp`) is a separate interactive GUI tool that edits block placement in a BDB and can launch the hier routing flow directly.
+The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool that edits block placement in a BDB and can launch the hier routing flow directly.
 
 ## Useful Docs
 - [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
@@ -31,17 +31,32 @@ The **Floorplanner** (`./fp`, `./bfp`) is a separate interactive GUI tool that e
 - [Flat Script → BDB Cell Converter](docs/BUDA2BDB.md) — `tools/buda2bdb.py`: ingest a flat `.buda` script into a BDB as a cell (reverse of `bdb2buda`; replaces an existing cell and size-syncs its instances).
 - [Hierarchical Demo BDB Builder](docs/BUILD_HIER_DEMO.md) — `tools/build_hier_demo.py`: assemble a hierarchical BDB from several flat scripts (each instantiated twice in a top cell) with random cross-instance top-level buses.
 
-## Build
+## Wrapper scripts (`bin/`)
 
-Use the build wrapper script `bb` at the repository root. By default it performs an **incremental** build:
+All the launcher/build wrappers live in **`bin/`** at the repo root: `bb` (build),
+`buda` (routing CLI), `fp` / `bfp` (Floorplanner), `viz` (DEF/BDB visualizer), and
+`u2b` (unit-test → `.buda` visualizer). Each resolves the repo root as its parent
+dir, so it works from any CWD.
+
+**Add `<repo_root>/bin` to your `PATH`** and you can invoke them bare (`bb`, `buda
+flow/x.buda`, `u2b test_foo`); otherwise call them as `bin/bb`, `bin/buda …`, etc.
+The examples below use the `bin/…` form so they work without a PATH change.
 
 ```bash
-./bb            # incremental build into build/
-./bb --clean    # clean rebuild (-c also works)
-./bb test       # build, then run the FAST test tier (~8s; -t also works)
-./bb mid        # build, then run FAST + MID tiers (+flow-script integration; -m also works)
-./bb slow       # build, then run ALL tiers (+SA/GA optimizer storms; -s also works)
-./bb --help     # describe all options (-h)
+export PATH="$PWD/bin:$PATH"   # from the repo root, once per shell (or add to your rc)
+```
+
+## Build
+
+Use the build wrapper script `bin/bb`. By default it performs an **incremental** build:
+
+```bash
+bin/bb            # incremental build into build/
+bin/bb --clean    # clean rebuild (-c also works)
+bin/bb test       # build, then run the FAST test tier (~8s; -t also works)
+bin/bb mid        # build, then run FAST + MID tiers (+flow-script integration; -m also works)
+bin/bb slow       # build, then run ALL tiers (+SA/GA optimizer storms; -s also works)
+bin/bb --help     # describe all options (-h)
 ```
 
 Tests are split into three cumulative tiers via pytest markers (`mid`, `slow` in
@@ -55,7 +70,7 @@ mkdir -p build && cd build
 cmake .. && make -j4
 ```
 
-All build artifacts remain in `build/`. After a build, `bb` removes any stale `.so` copies from `src/` so they cannot shadow the fresh build. Compiled with `-O3 -march=native -Wall -Wextra` (`/O2` on MSVC).
+All build artifacts remain in `build/`. After a build, `bin/bb` removes any stale `.so` copies from `src/` so they cannot shadow the fresh build. Compiled with `-O3 -march=native -Wall -Wextra` (`/O2` on MSVC).
 
 CMake builds **three** artifacts (see `CMakeLists.txt`):
 
@@ -69,14 +84,20 @@ Both extension modules link the same `buda_core`, giving pybind11 one `std::type
 
 ## Run
 
-Prefer the wrapper scripts at the repo root (they set `PYTHONPATH=build:tools`):
+Prefer the `bin/` wrapper scripts (they set `PYTHONPATH=build:tools`):
 
 ```bash
-./buda flow/comprehensive_demo.buda     # routing CLI (src/buda_cli.py)
-./fp  [file.bdb]                         # interactive Floorplanner GUI (tools/bdb_floorplanner.py)
-./bfp tc1                                # Floorplanner with a built-in demo scenario
-./bfp flow/some.buda                     # run a .buda flow, then open its BDB in the Floorplanner
+bin/buda flow/comprehensive_demo.buda   # routing CLI (src/buda_cli.py)
+bin/fp  [file.bdb]                       # interactive Floorplanner GUI (tools/bdb_floorplanner.py)
+bin/bfp tc1                              # Floorplanner with a built-in demo scenario
+bin/bfp flow/some.buda                   # run a .buda flow, then open its BDB in the Floorplanner
+bin/u2b test_column_datapath_hvh         # convert a topology unit test to .buda + open the explorer
 ```
+
+`bin/u2b <test_name>` runs `tools/unit2buda.py` on a fixtureless topology unit
+test (see [BDB2BUDA](docs/BUDA2BDB.md) siblings and `tools/unit2buda.py`), writes
+the equivalent flat `.buda` to `$TMPDIR`, and opens it in the topology explorer —
+a one-shot way to eyeball a test's input floorplan and generated candidates.
 
 Or run the CLI directly:
 
@@ -155,7 +176,7 @@ pytest                        # fast tier (excludes 'mid' and 'slow' markers)
 pytest -m "not slow"          # fast + mid tiers
 pytest -o addopts="" -m slow  # only the slow tier
 pytest test/tests/test_nuts.py -v   # single file
-./bb test                     # build + fast tier; ./bb mid adds integration, ./bb slow adds all
+bin/bb test                   # build + fast tier; bin/bb mid adds integration, bin/bb slow adds all
 ```
 
 Feature files in `test/tests/features/` (pytest-bdd). Most stages have a corresponding `.feature` and `test_*.py` file, including BDB (`test_bdb.py`, `bdb_*.feature`), hier flow (`test_hier_*`), floorplanner (`test_floorplanner_*`), connectivity (`test_check_connectivity_hbundle.py`, `test_check_layer_dir.py`), routing grid, and detailed NUTS.
@@ -511,7 +532,7 @@ These planned formats are tracked here for design intent only — there is **no 
 - **`FloorplannerEngine`** (C++) — die/grid, top-level and child blocks, raw move/resize, align (top/bottom/left/right), grid snapping, `validate()` (overlap / out-of-die / error issues), and `write_bdb(BDB&)` to persist placement. Cross-module `BDB&` passing works because both modules share `buda_core` (see Build).
 - **`PlacementOptimizer`** (C++) — simulated annealing (SA) and genetic algorithm (GA) placement with per-block constraints (Fixed / Reshapeable / min W/H) and weighted cost (wirelength / area / overlap). Exposed via `bind_optimizer.cpp`.
 - **GUI** (`tools/bdb_floorplanner.py` + `tools/floorplanner_commands.py`) — Tk/matplotlib editor: drag/resize, align/distribute, SA/GA optimize, live HPWL + flylines, validation, and **Run Flow** (writes BDB → generates a hier `.buda` script → runs `buda_cli.py` for immediate routing feedback).
-- **Launchers:** `./fp [file.bdb]` opens the GUI; `./bfp tc1|tc2|<file.bdb>|<script.buda>` adds built-in demo scenarios (`tools/fp_demo.py`) and flow integration.
+- **Launchers:** `bin/fp [file.bdb]` opens the GUI; `bin/bfp tc1|tc2|<file.bdb>|<script.buda>` adds built-in demo scenarios (`tools/fp_demo.py`) and flow integration.
 
 **Other `tools/`:** DEF/LEF net-clustering visualizers (`def_cluster.py`, `def_viz*.py`, `def_viz_shared.py`), `group_tree.py` (group hierarchy + JSON persistence), `viz_ipc.py` (Unix-socket selection sync between `buda_viz` and `def_viz`), `show_detailed_shorts.py` (report bit-level detailed-NUTS shorts), and `render.py` (headless: pin one bundle's candidate in a `.buda` flow, run planner→NUTS→DetailedNUTS, print `dump_topologies --conn`, and render a topology/NUTS/DNUTS triptych PNG — `tools/render.py <flow.buda> --bundle <id> --topo <id> [--zoom]`).
 
@@ -534,7 +555,7 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 
 | Area | Files |
 |---|---|
-| Build / wrappers | `CMakeLists.txt`, `bb` (build), `buda` / `fp` / `bfp` (run), `pytest.ini` |
+| Build / wrappers | `CMakeLists.txt`, `bin/bb` (build), `bin/buda` / `bin/fp` / `bin/bfp` / `bin/viz` / `bin/u2b` (run), `pytest.ini` |
 | DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
 | Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |

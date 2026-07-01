@@ -65,7 +65,7 @@ run_hier_bundler.
   --no-cell-nets   only emit the top-level buses (lean ~70-net demo)
   --no-busterms    skip busterm derivation
 
-Open it afterward with the Floorplanner (`./fp out.bdb`) or drive the hier flow
+Open it afterward with the Floorplanner (`bin/fp out.bdb`) or drive the hier flow
 (the build prints the exact run_hier_bundler / run_planner hier commands).
 """
 
@@ -81,7 +81,7 @@ for _p in [os.path.join(_ROOT, "build"), _HERE]:
 try:
     import buda_db
 except ModuleNotFoundError:
-    sys.exit("Error: buda_db not found — run './bb' first, or set PYTHONPATH=build.")
+    sys.exit("Error: buda_db not found — run 'bin/bb' first, or set PYTHONPATH=build.")
 
 import math
 import random

@@ -8,8 +8,8 @@ status reconciliation in
 **How to reproduce:**
 
 ```bash
-./buda --no-viz flow/big_data_test/tc3a_flat_dump.buda    # per-bundle candidate tables
-./buda --no-viz flow/big_data_test/tc3a_flat.buda         # full route (planner→NUTS→dNUTS)
+bin/buda --no-viz flow/big_data_test/tc3a_flat_dump.buda    # per-bundle candidate tables
+bin/buda --no-viz flow/big_data_test/tc3a_flat.buda         # full route (planner→NUTS→dNUTS)
 ```
 
 `tc3a_flat_dump.buda` mirrors `tc3a_flat.buda` up to `generate_topologies`, then runs the

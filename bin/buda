@@ -2,8 +2,8 @@
 # BUDA environment wrapper
 # Sets up PYTHONPATH to include the build directory before running the CLI.
 
-# Get the absolute path of the project root (where this script resides)
-PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Get the absolute path of the project root (this script lives in <root>/bin)
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
 # Add build and tools directories to PYTHONPATH

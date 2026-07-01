@@ -144,10 +144,10 @@ I/O pads at all four corners.
 ## Launching via `bfp`
 
 ```bash
-./bfp tc1              # create /tmp/bfp_tc1.bdb and open in floorplanner
-./bfp tc2              # create /tmp/bfp_tc2.bdb and open in floorplanner
-./bfp tc3              # create /tmp/bfp_tc3.bdb and open in floorplanner
-./bfp tc1 my.bdb       # write to a custom path, then open
+bin/bfp tc1              # create /tmp/bfp_tc1.bdb and open in floorplanner
+bin/bfp tc2              # create /tmp/bfp_tc2.bdb and open in floorplanner
+bin/bfp tc3              # create /tmp/bfp_tc3.bdb and open in floorplanner
+bin/bfp tc1 my.bdb       # write to a custom path, then open
 ```
 
 See [FLOORPLANNER_USER_GUIDE.md](FLOORPLANNER_USER_GUIDE.md) for the full

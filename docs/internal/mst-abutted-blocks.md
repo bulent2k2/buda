@@ -175,7 +175,7 @@ face-centre to maximise that room. `big2_b3` now generates 2 clean MSTs, 0 unpla
 
 ## Verification
 
-- `./buda --no-viz flow/big_data_test/big2_b1_bus_007.buda`:
+- `bin/buda --no-viz flow/big_data_test/big2_b1_bus_007.buda`:
   `check_connectivity topo all` / `nuts` / `dnuts` all "Success: no opens found";
   `[DetailedNUTS] 140 net segments placed, 0 bits unplaced`. The standalone
   `MST_HV` / `MST_VH` candidates pass `check_connectivity topo all` (they failed
