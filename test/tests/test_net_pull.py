@@ -229,7 +229,13 @@ def _run_flow(name):
         [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
         capture_output=True, text=True, env=env)
     assert r.returncode == 0, f"{name} failed:\n{r.stdout}{r.stderr}"
-    return r.stdout + r.stderr
+    # Detail (NUTS/planner/…) now lives once in the flow log; the terminal only
+    # carries an abstract per-command summary whose headlines would double-count
+    # detail lines.  Parse the log (+ stderr for crashes) instead.
+    script = FLOW / name
+    log_path = script.parent / "log" / f"{script.stem}_flow.log"
+    log_text = log_path.read_text() if log_path.exists() else ""
+    return r.stderr + "\n" + log_text
 
 
 def _layer_interval(out, layer):

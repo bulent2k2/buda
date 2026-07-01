@@ -1790,7 +1790,7 @@ the `#` must be the first non-whitespace character.
 |---|---|---|
 | `<script>.json` | `visualize_topologies` → Select | Architect-pinned topology selections. Loaded by `run_planner`. |
 | `<script>_nuts.log` | `run_nuts` | Per-overlap detail report: segment pairs, span/perp rectangles, area. Re-run sections are appended by `run_nuts_on_layer`. |
-| `<script>_flow.log` | Session start | Mirror of all Python `print()` output (planner decisions, NUTS metrics, warnings). C++ output is not captured. Written from the first command; useful for post-mortem review. |
+| `<script>_flow.log` | Per command | Full detail of every command — planner decisions, NUTS metrics, warnings, and C++ output (routed through `sys.stdout`) — each under a `━━━ <command> ━━━` header with a trailing `[runtime] <command>: <secs>s (…)` line. The terminal shows only a one-line **abstract summary per command** (marker + runtime + a headline) plus a final **Runtime summary** table, so stdout and the log are no longer duplicated. Read the log for post-mortem detail. |
 
 ---
 

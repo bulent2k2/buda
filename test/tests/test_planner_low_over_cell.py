@@ -55,7 +55,13 @@ def _run_buda(script):
         [sys.executable, str(_ROOT / "src" / "buda_cli.py"), "--no-viz", str(script)],
         capture_output=True, text=True, env=env,
     )
-    return r.returncode, r.stdout + r.stderr
+    # Detail (NUTS/planner/…) now lives once in the flow log; the terminal only
+    # carries an abstract per-command summary whose headlines would double-count
+    # detail lines.  Parse the log (+ stderr for crashes) instead.
+    script = Path(script)
+    log_path = script.parent / "log" / f"{script.stem}_flow.log"
+    log_text = log_path.read_text() if log_path.exists() else ""
+    return r.returncode, r.stderr + "\n" + log_text
 
 
 @pytest.mark.mid

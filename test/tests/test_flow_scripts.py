@@ -37,8 +37,18 @@ CLI     = _ROOT / "src" / "buda_cli.py"
 SRC_DIR = CLI.parent
 
 
+def _flow_log_text(script: Path) -> str:
+    """Detailed per-command output now lives in <dir>/log/<stem>_flow.log; the
+    terminal only carries an abstract per-command summary.  Return the log text
+    so assertions can still inspect NUTS/planner/etc. detail."""
+    log_path = Path(script).parent / "log" / f"{Path(script).stem}_flow.log"
+    return log_path.read_text() if log_path.exists() else ""
+
+
 def run_script(name: str) -> tuple[str, int]:
-    """Run a .buda script with --no-viz; return (combined output, returncode)."""
+    """Run a .buda script with --no-viz; return (combined output, returncode).
+
+    Combined output = terminal (summary) + the flow log (full detail)."""
     # Ensure build (where buda.so lives) and tools are in PYTHONPATH
     build_dir = _ROOT / "build"
     tools_dir = _ROOT / "tools"
@@ -49,7 +59,11 @@ def run_script(name: str) -> tuple[str, int]:
         [sys.executable, str(CLI), "--no-viz", str(FLOW / name)],
         capture_output=True, text=True, env=env,
     )
-    return r.stdout + r.stderr, r.returncode
+    # Detail (NUTS/planner/…) now lives once in the flow log; the terminal only
+    # carries an abstract per-command summary, whose one-line headlines would
+    # otherwise double-count detail lines.  Parse the log (+ stderr for crashes)
+    # so occurrence counts match the pre-summary behaviour.
+    return r.stderr + "\n" + _flow_log_text(FLOW / name), r.returncode
 
 
 def assert_clean(out: str, rc: int, name: str) -> None:
@@ -597,7 +611,7 @@ def _run_path(path: Path) -> tuple[str, int]:
     env = {**os.environ, "PYTHONPATH": new_ppath}
     r = subprocess.run([sys.executable, str(CLI), "--no-viz", str(path)],
                        capture_output=True, text=True, env=env)
-    return r.stdout + r.stderr, r.returncode
+    return r.stdout + r.stderr + "\n" + _flow_log_text(path), r.returncode
 
 
 def test_source_missing_file_fails_fast(tmp_path):
