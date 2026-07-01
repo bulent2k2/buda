@@ -13,8 +13,8 @@ format_duration() {
 
 START_TIME=$(date +%s)
 
-# Get the directory of this script to run from the root
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Get the repo root (this script lives in <root>/bin) to run from the root
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
 # Parse arguments
@@ -24,7 +24,7 @@ TEST_TIER=fast   # fast | mid | slow (cumulative)
 
 usage() {
     cat <<'EOF'
-Usage: ./bb [options]
+Usage: bb [options]
 
 Build BUDA (incremental by default) and optionally run the test suite.
 
@@ -43,11 +43,11 @@ Tier definitions live in pytest.ini (the `mid` and `slow` markers); per-test
 runtimes are documented in docs/internal/test_runtime_analysis.md.
 
 Examples:
-  ./bb              # incremental build, no tests
-  ./bb -c           # clean rebuild, no tests
-  ./bb -t           # build + fast tests (default inner-loop check)
-  ./bb -m           # build + fast + mid (integration) tests
-  ./bb -s           # build + everything, before pushing
+  bb              # incremental build, no tests
+  bb -c           # clean rebuild, no tests
+  bb -t           # build + fast tests (default inner-loop check)
+  bb -m           # build + fast + mid (integration) tests
+  bb -s           # build + everything, before pushing
 EOF
 }
 
@@ -73,7 +73,7 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown option: $arg" >&2
-            echo "Try './bb --help' for usage." >&2
+            echo "Try 'bb --help' for usage." >&2
             exit 1
             ;;
     esac

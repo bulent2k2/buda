@@ -24,7 +24,8 @@ subclasses, captures that setup, and emits the equivalent flat ``.buda`` script 
 you can drive the same case through the CLI and the visualizer:
 
     tools/unit2buda.py <test name> -o out.buda
-    ./buda out.buda                         # runs + opens the topology explorer
+    bin/buda out.buda                       # runs + opens the topology explorer
+(or simply `bin/u2b <test name>`, which does both steps for you)
 
 ``<test name>`` is the test function name (searched across ``test/tests``) or an
 explicit ``path/to/test_file.py::test_func``.  The captured generator call becomes a
@@ -379,7 +380,7 @@ def main():
             fh.write(script)
         print(f"Wrote {args.output} "
               f"({_GEN_CALLS[0]['driver']} -> {_GEN_CALLS[0]['receivers']}). "
-              f"Run: ./buda {args.output}")
+              f"Run: bin/buda {args.output}")
     else:
         sys.stdout.write(script)
 

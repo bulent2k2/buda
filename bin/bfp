@@ -9,7 +9,7 @@
 #   ./bfp path/to/script.buda    run ./buda <script> then open the BDB it declared
 #   ./bfp                        open fp with no file (blank canvas)
 
-PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
 
 case "$1" in
@@ -34,7 +34,7 @@ case "$1" in
     else
       BDB="$SCRIPT_DIR/$BDB_RAW"
     fi
-    "$PROJECT_ROOT/buda" "$SCRIPT" || exit 1
+    "$PROJECT_ROOT/bin/buda" "$SCRIPT" || exit 1
     exec python3 "$PROJECT_ROOT/tools/bdb_floorplanner.py" "$BDB"
     ;;
 

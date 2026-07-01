@@ -45,7 +45,7 @@ try:
     import buda_db
 except ModuleNotFoundError:
     sys.exit(
-        "Error: buda_db module not found — run './bb' to build first, "
+        "Error: buda_db module not found — run 'bin/bb' to build first, "
         "or set PYTHONPATH=build."
     )
 

@@ -1,0 +1,29 @@
+#!/bin/bash
+# u2b — turn a topology unit test into a runnable .buda script and open it in the
+# interactive topology explorer.
+#
+# Usage:
+#   u2b <test_name>        # e.g.  u2b test_column_datapath_hvh
+#   u2b <file.py::test>    # explicit path::func when the name is ambiguous
+#
+# Runs tools/unit2buda.py on the named test (recording its Floorplan +
+# TopologyGenerator setup), writes the equivalent flat .buda to $TMPDIR, then
+# launches the routing CLI (bin/buda) on it — which ends with
+# visualize_topologies so the input floorplan and generated candidates open in a
+# window.  See docs/BUDA_SCRIPT_REFERENCE.md and tools/unit2buda.py for details.
+
+set -e
+
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+
+if [ -z "$1" ]; then
+    echo "Usage: u2b <test_name>   (e.g. u2b test_column_datapath_hvh)" >&2
+    exit 1
+fi
+
+# A filesystem-safe stem for the output name (strip any path::func decoration).
+STEM="$(echo "$1" | tr '/:.' '___')"
+OUT="${TMPDIR:-/tmp}/u2b_${STEM}.buda"
+
+python3 "$PROJECT_ROOT/tools/unit2buda.py" "$1" -o "$OUT"
+exec "$PROJECT_ROOT/bin/buda" "$OUT"
