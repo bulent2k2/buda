@@ -33,21 +33,43 @@ def _run(tmp_path, *args):
     return r, (out.read_text() if out.exists() else "")
 
 
-def test_flow_test_emits_command_stream(tmp_path):
-    # A fixtureless BudaSession-driven test → the exact do_command sequence.
+def test_flat_flow_appends_full_pipeline(tmp_path):
+    # A fixtureless BudaSession-driven flat test → self-contained setup + the
+    # bundler, then the appended flat downstream pipeline.
     r, txt = _run(tmp_path, "test_bidirectional_pairs_a_net_with_its_reverse")
     assert r.returncode == 0, r.stderr
+    lines = txt.splitlines()
     assert "add_block A 0 0 100 80" in txt      # self-contained setup
-    assert "run_bundler BIDIRECTIONAL" in txt
+    assert "run_bundler BIDIRECTIONAL" in lines
+    # Flat downstream appended, in order.
+    for cmd in ("generate_topologies", "run_planner", "run_nuts",
+                "run_detailed_nuts", "visualize"):
+        assert cmd in lines, cmd
+    assert lines.index("run_bundler BIDIRECTIONAL") < lines.index("generate_topologies")
 
 
-def test_tmp_path_fixture_flow_is_captured(tmp_path):
-    # A tmp_path-fixture, BDB-building, hier-flow test now works (previously the
-    # fixture check rejected it) and emits a runnable open_bdb + hier flow.
+def test_hier_flow_appends_full_pipeline(tmp_path):
+    # A tmp_path-fixture, BDB-building, hier-flow test now works and appends the
+    # hier downstream (generate_hier_topologies / run_planner hier / …).
     r, txt = _run(tmp_path, "test_hier_bidirectional_mixes_directions_in_one_bundle")
     assert r.returncode == 0, r.stderr
+    lines = txt.splitlines()
     assert "open_bdb" in txt
-    assert "run_hier_bundler depth 1 bidirectional" in txt
+    assert "run_hier_bundler depth 1 bidirectional" in lines
+    for cmd in ("generate_hier_topologies", "run_planner hier", "run_nuts",
+                "run_detailed_nuts", "visualize"):
+        assert cmd in lines, cmd
+
+
+def test_appended_pipeline_does_not_duplicate_ran_stages(tmp_path):
+    # A test that ALREADY ran topo/planner/nuts → only the missing stages append,
+    # and flow mode wins over the internal generate_candidates calls.
+    r, txt = _run(tmp_path, "test_hier_bidirectional_pipeline_runs_end_to_end")
+    assert r.returncode == 0, r.stderr
+    lines = txt.splitlines()
+    assert lines.count("generate_hier_topologies") == 1   # not re-appended
+    assert lines.count("run_nuts") == 1
+    assert "run_detailed_nuts" in lines and "visualize" in lines
 
 
 def test_topology_mode_unchanged(tmp_path):
