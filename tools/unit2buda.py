@@ -27,20 +27,31 @@ you can drive the same case through the CLI and the visualizer:
     ./buda out.buda                         # runs + opens the topology explorer
 
 ``<test name>`` is the test function name (searched across ``test/tests``) or an
-explicit ``path/to/test_file.py::test_func``.  The captured generator call becomes a
-single net (driver -> receivers); the script ends with ``generate_topologies`` +
-``visualize_topologies``.
+explicit ``path/to/test_file.py::test_func``.
 
-Limitations: only the flat topology-generation API is captured (Floorplan +
-TopologyGenerator.generate_candidates).  Tests that need pytest fixtures, drive the
-CLI/BDB flow, or never call ``generate_candidates`` are reported and skipped.
+Two capture modes, auto-selected by what the test actually does:
+
+  * **Topology** — the test calls ``TopologyGenerator.generate_candidates``: the
+    captured call becomes a single net (driver -> receivers) and the script ends
+    with ``generate_topologies`` + ``visualize_topologies`` (as above).
+  * **CLI/BDB flow** — the test drives a ``buda.BudaSession`` via ``do_command``
+    (e.g. the hier bundler / planner / NUTS flow): the exact command stream is
+    recorded and emitted verbatim as the ``.buda`` script.
+
+Fixtures & params: common pytest fixtures are supplied automatically —
+``tmp_path`` / ``tmp_path_factory`` (a real, *persistent* temp dir so any BDB the
+test writes survives for the emitted ``open_bdb`` to reference), ``capsys`` /
+``capfd``, and ``monkeypatch``.  ``@pytest.mark.parametrize`` params are filled
+from the first case (or ``--case N``).  Unsupported fixtures are reported.
 """
 
 import argparse
 import importlib.util
 import inspect
 import os
+import pathlib
 import sys
+import tempfile
 import traceback
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -57,6 +68,9 @@ import buda  # noqa: E402  (after sys.path is set up)
 
 # Every TopologyGenerator.generate_candidates call lands here, in order.
 _GEN_CALLS = []  # list of dicts: {driver, receivers, fp, lids}
+
+# Every BudaSession.do_command(cmd_line) lands here, in order (CLI/BDB-flow mode).
+_CMD_CALLS = []  # list of str
 
 
 class _RecordingFloorplan(buda.Floorplan):
@@ -161,6 +175,91 @@ class _RecordingTopologyGenerator(buda.TopologyGenerator):
         return super().generate_candidates(driver, receivers)
 
 
+# ── Fixture / parametrize provisioning ───────────────────────────────────────
+# Enough of pytest's fixtures to run fixture-taking tests headless.  Assertions
+# and captured-output checks in the test are expected to fail and are ignored —
+# we only need the test's setup calls (generate_candidates / do_command).
+
+class _CapsysStub:
+    """Minimal capsys/capfd: readouterr() returns empty out/err."""
+    class _Result:
+        out = ""
+        err = ""
+    def readouterr(self):
+        return _CapsysStub._Result()
+
+
+class _TmpPathFactory:
+    def mktemp(self, name="t", numbered=True):
+        return pathlib.Path(tempfile.mkdtemp(prefix=f"unit2buda_{name}_"))
+    def getbasetemp(self):
+        return pathlib.Path(tempfile.gettempdir())
+
+
+def _make_monkeypatch():
+    try:
+        from _pytest.monkeypatch import MonkeyPatch
+        return MonkeyPatch()
+    except Exception:
+        class _MP:                       # inert fallback
+            def __getattr__(self, _):
+                return lambda *a, **k: None
+        return _MP()
+
+
+def _parametrize_values(fn, case):
+    """Map @pytest.mark.parametrize param names → the chosen case's values."""
+    out = {}
+    for m in getattr(fn, "pytestmark", []):
+        if getattr(m, "name", None) != "parametrize" or len(m.args) < 2:
+            continue
+        names = [n.strip() for n in m.args[0].split(",")]
+        values = list(m.args[1])
+        if not values:
+            continue
+        chosen = values[min(case, len(values) - 1)]
+        if len(names) == 1:
+            out[names[0]] = chosen
+        else:
+            seq = chosen if isinstance(chosen, (tuple, list)) else (chosen,)
+            out.update(dict(zip(names, seq)))
+    return out
+
+
+def _provide_fixtures(fn, case, cleanups, notes):
+    """Build kwargs for a test's required params from parametrize + known fixtures.
+    Exits with a clear message on an unsupported fixture."""
+    params = _parametrize_values(fn, case)
+    kwargs, unknown = {}, []
+    for p in inspect.signature(fn).parameters.values():
+        if p.default is not inspect.Parameter.empty:
+            continue
+        if p.kind not in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY, p.KEYWORD_ONLY):
+            continue
+        name = p.name
+        if name in params:
+            kwargs[name] = params[name]
+        elif name == "tmp_path":
+            d = pathlib.Path(tempfile.mkdtemp(prefix="unit2buda_"))
+            kwargs[name] = d               # persistent: files the test writes survive
+            notes.append(f"tmp_path = {d}  (persistent; holds any BDB the test wrote)")
+        elif name == "tmp_path_factory":
+            kwargs[name] = _TmpPathFactory()
+        elif name in ("capsys", "capfd", "capsysbinary", "capfdbinary"):
+            kwargs[name] = _CapsysStub()
+        elif name == "monkeypatch":
+            mp = _make_monkeypatch()
+            kwargs[name] = mp
+            cleanups.append(getattr(mp, "undo", lambda: None))
+        else:
+            unknown.append(name)
+    if unknown:
+        sys.exit(f"error: {fn.__name__!r} needs unsupported fixture(s) {unknown}. "
+                 "Supported: tmp_path, tmp_path_factory, capsys/capfd, monkeypatch, "
+                 "and @pytest.mark.parametrize params (choose a case with --case N).")
+    return kwargs
+
+
 # ── Test discovery + execution ───────────────────────────────────────────────
 
 def _resolve_test(spec):
@@ -206,27 +305,40 @@ def _load_func(module_path, func_name):
     fn = getattr(mod, func_name, None)
     if fn is None or not callable(fn):
         sys.exit(f"error: {func_name!r} is not a callable in {module_path}")
-    params = [p for p in inspect.signature(fn).parameters.values()
-              if p.default is inspect.Parameter.empty
-              and p.kind in (p.POSITIONAL_OR_KEYWORD, p.POSITIONAL_ONLY)]
-    if params:
-        sys.exit(f"error: {func_name!r} takes fixtures/parameters {[p.name for p in params]} "
-                 "— unit2buda only supports fixtureless topology tests.")
     return fn
 
 
-def _run_capturing(fn):
-    """Run the test with patched constructors; tolerate its assertions failing."""
+def _run_capturing(fn, kwargs):
+    """Run the test with the topology API AND BudaSession.do_command patched to
+    record; tolerate its assertions failing (we only want the setup)."""
     _GEN_CALLS.clear()
+    _CMD_CALLS.clear()
     orig_fp, orig_tg = buda.Floorplan, buda.TopologyGenerator
     buda.Floorplan = _RecordingFloorplan
     buda.TopologyGenerator = _RecordingTopologyGenerator
+
+    # Record the CLI/BDB-flow command stream, if the test drives a BudaSession.
+    buda_cli = orig_do = None
     try:
-        fn()
+        import buda_cli  # noqa: E402
+        orig_do = buda_cli.BudaSession.do_command
+
+        def _rec_do(self, cmd_line, _orig=orig_do):
+            _CMD_CALLS.append(cmd_line.strip())
+            return _orig(self, cmd_line)
+
+        buda_cli.BudaSession.do_command = _rec_do
+    except Exception:  # noqa: BLE001 — buda_cli optional; topology mode still works
+        pass
+
+    try:
+        fn(**kwargs)
     except Exception:  # noqa: BLE001 — the test's own asserts/xfail are expected
         pass
     finally:
         buda.Floorplan, buda.TopologyGenerator = orig_fp, orig_tg
+        if orig_do is not None:
+            buda_cli.BudaSession.do_command = orig_do
 
 
 # ── .buda emission ───────────────────────────────────────────────────────────
@@ -356,30 +468,60 @@ def emit_script(call, test_spec, n_calls):
     return "\n".join(out)
 
 
+def emit_flow_script(cmds, test_spec, notes):
+    """Emit the recorded BudaSession.do_command stream verbatim as a .buda script."""
+    out = [f"# Generated by tools/unit2buda.py from {test_spec}",
+           "# CLI/BDB-flow case: the exact BudaSession.do_command sequence the test ran."]
+    for n in notes:
+        out.append(f"#   {n}")
+    out.append("")
+    out.extend(cmds)
+    out.append("")
+    firsts = {c.split()[0] for c in cmds if c.split()}
+    if not ({"visualize", "visualize_topologies"} & firsts):
+        out.append("# The test asserted rather than visualizing; add a step to inspect, e.g.:")
+        out.append("#   visualize")
+    out.append("")
+    return "\n".join(out)
+
+
 def main():
     ap = argparse.ArgumentParser(
-        description="Convert a topology unit test into a runnable .buda script.")
+        description="Convert a topology or CLI/BDB-flow unit test into a runnable .buda script.")
     ap.add_argument("test", help="test function name, or path/to/test_file.py::test_func")
     ap.add_argument("-o", "--output", help="output .buda path (default: stdout)")
+    ap.add_argument("--case", type=int, default=0,
+                    help="which @pytest.mark.parametrize case to use (default: 0)")
     args = ap.parse_args()
 
     module_path, func_name = _resolve_test(args.test)
     fn = _load_func(module_path, func_name)
-    _run_capturing(fn)
-
-    if not _GEN_CALLS:
-        sys.exit(f"error: {func_name!r} never called TopologyGenerator.generate_candidates "
-                 "— nothing to convert (is it a CLI/BDB-flow or non-topology test?).")
+    cleanups, notes = [], []
+    kwargs = _provide_fixtures(fn, args.case, cleanups, notes)
+    _run_capturing(fn, kwargs)
+    for c in cleanups:
+        try:
+            c()
+        except Exception:  # noqa: BLE001
+            pass
 
     spec = os.path.relpath(module_path, REPO_ROOT) + "::" + func_name
-    script = emit_script(_GEN_CALLS[0], spec, len(_GEN_CALLS))
+
+    if _GEN_CALLS:
+        script = emit_script(_GEN_CALLS[0], spec, len(_GEN_CALLS))
+        summary = f"{_GEN_CALLS[0]['driver']} -> {_GEN_CALLS[0]['receivers']}"
+    elif _CMD_CALLS:
+        script = emit_flow_script(_CMD_CALLS, spec, notes)
+        summary = f"{len(_CMD_CALLS)} CLI command(s)"
+    else:
+        sys.exit(f"error: {func_name!r} neither called "
+                 "TopologyGenerator.generate_candidates nor drove a BudaSession "
+                 "(nothing to convert — is it a pure-API/data test?).")
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as fh:
             fh.write(script)
-        print(f"Wrote {args.output} "
-              f"({_GEN_CALLS[0]['driver']} -> {_GEN_CALLS[0]['receivers']}). "
-              f"Run: ./buda {args.output}")
+        print(f"Wrote {args.output} ({summary}). Run: ./buda {args.output}")
     else:
         sys.stdout.write(script)
 
