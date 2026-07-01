@@ -219,6 +219,11 @@ void BDB::_seed_provenance() {
 
 void BDB::_migrate() {
     int v = schema_version();
+    if (v > SCHEMA_VERSION)
+        throw std::runtime_error(
+            "BDB: schema version " + std::to_string(v) +
+            " is newer than this build supports (max " +
+            std::to_string(SCHEMA_VERSION) + "); upgrade BUDA to open this database.");
     if (v < 1) {
         // v0 (pre-versioning) -> v1: absorb the legacy busterm.rects column add
         // (idempotent) and seed provenance rows.

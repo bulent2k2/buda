@@ -19,6 +19,8 @@ pre-versioning v0 DB (missing the busterm.rects column) migrates cleanly on open
 
 import sqlite3
 
+import pytest
+
 import buda
 import bdb_serialize
 
@@ -84,3 +86,15 @@ def test_v0_db_missing_rects_migrates_on_open(tmp_path):
     con = sqlite3.connect(p)
     assert "rects" in {r[1] for r in con.execute("PRAGMA table_info(busterm)")}
     con.close()
+
+
+def test_newer_schema_version_is_rejected(tmp_path):
+    # A DB written by a newer BUDA (user_version > SCHEMA_VERSION) must fail fast
+    # rather than be opened writable by an older binary that can't understand it.
+    p = str(tmp_path / "future.bdb")
+    con = sqlite3.connect(p)
+    con.execute(f"PRAGMA user_version = {buda.BDB.SCHEMA_VERSION + 1}")
+    con.commit()
+    con.close()
+    with pytest.raises(Exception, match="newer than this build"):
+        buda.BDB(p)
