@@ -83,6 +83,24 @@ def load(sql_path: str, bdb_path: str) -> str:
     return bdb_path
 
 
+def materialize_if_sql(path: str) -> str:
+    """If `path` is a serialized BDB (*.sql), load it into a throwaway temp binary
+    and return that path; otherwise return `path` unchanged.
+
+    Lets any BDB consumer (CLI, floorplanner) accept a committed `*.bdb.sql` /
+    `*.b_db.sql` text fixture transparently. The temp binary lives for the process
+    lifetime; changes to it are NOT written back to the .sql (write-back is future
+    work — see docs/internal/wishlist-bdb.md).
+    """
+    import tempfile
+    if path is None or path == ':memory:' or not path.endswith('.sql'):
+        return path
+    base = os.path.basename(path)[:-len('.sql')]  # mix.b_db.sql -> mix.b_db
+    out = os.path.join(tempfile.mkdtemp(prefix='buda_bdb_'), base)
+    load(path, out)
+    return out
+
+
 def _read(path: str) -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
