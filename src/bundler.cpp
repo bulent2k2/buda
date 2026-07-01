@@ -41,8 +41,21 @@ void Netlist::add_net(const std::string& name, const std::string& driver, const 
     nets_.push_back(n);
 }
 std::string Bundler::generate_signature(const Net& net) const {
-    std::stringstream signature;
     std::set<std::string> recv_insts = net.get_receiver_instances();
+
+    if (current_strategy_ == Strategy::BIDIRECTIONAL) {
+        // Direction-agnostic: key on the sorted set of ALL endpoint instances
+        // (driver + receivers) so nets connecting the same group of instances in
+        // any roles bundle together — A→B with B→A, or a→b,c with b→c,a / c→b,a.
+        std::set<std::string> all_insts = recv_insts;
+        all_insts.insert(net.get_driver_instance());
+        std::string sig = "BIDIR:";
+        bool first = true;
+        for (const auto& inst : all_insts) { if (!first) sig += ","; sig += inst; first = false; }
+        return sig;
+    }
+
+    std::stringstream signature;
     std::string rec_sig;
     for (const auto& inst : recv_insts) {
         if (!rec_sig.empty()) rec_sig += ",";
@@ -55,64 +68,7 @@ std::string Bundler::generate_signature(const Net& net) const {
     }
     return signature.str();
 }
-std::vector<HBundle> Bundler::run_bidirectional(const Netlist& netlist) const {
-    const auto& nets = netlist.get_nets();
-    const int n = (int)nets.size();
-
-    // Per-net driver instance and receiver-instance set; index nets by driver.
-    std::vector<std::string>           drv(n);
-    std::vector<std::set<std::string>> rcv(n);
-    std::unordered_map<std::string, std::vector<int>> driven_by;
-    for (int i = 0; i < n; ++i) {
-        drv[i] = nets[i].get_driver_instance();
-        rcv[i] = nets[i].get_receiver_instances();
-        driven_by[drv[i]].push_back(i);
-    }
-
-    // Union-find (iterative find w/ path halving).
-    std::vector<int> parent(n);
-    for (int i = 0; i < n; ++i) parent[i] = i;
-    auto find = [&](int x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-    auto unite = [&](int a, int b) { a = find(a); b = find(b); if (a != b) parent[a] = b; };
-
-    // Link net i with net j when they are mirror images: a receiver of i drives
-    // j (drv[j] ∈ rcv[i]) AND a receiver of j drives i (drv[i] ∈ rcv[j]).
-    for (int i = 0; i < n; ++i) {
-        for (const auto& r : rcv[i]) {
-            auto it = driven_by.find(r);        // nets driven by receiver r of i
-            if (it == driven_by.end()) continue;
-            for (int j : it->second) {
-                if (j != i && rcv[j].count(drv[i])) unite(i, j);
-            }
-        }
-    }
-
-    // Gather components in a deterministic (root-index) order.
-    std::map<int, std::vector<int>> comps;
-    for (int i = 0; i < n; ++i) comps[find(i)].push_back(i);
-
-    std::vector<HBundle> bundles;
-    int bundle_id_counter = 0;
-    for (const auto& [root, idxs] : comps) {
-        HBundle b;
-        b.id = ++bundle_id_counter;
-        std::set<std::string> talker_insts;   // instances that drive within the group
-        for (int i : idxs) { b.net_names.push_back(nets[i].name); talker_insts.insert(drv[i]); }
-        std::sort(b.net_names.begin(), b.net_names.end());
-        std::string sig = "BIDIR:";
-        bool first = true;
-        for (const auto& s : talker_insts) { if (!first) sig += ","; sig += s; first = false; }
-        b.reason = sig;
-        b.num_terminals = 1 + (int)nets[idxs[0]].get_receiver_instances().size();
-        bundles.push_back(std::move(b));
-    }
-    return bundles;
-}
-
 std::vector<HBundle> Bundler::run(const Netlist& netlist) {
-    if (current_strategy_ == Strategy::BIDIRECTIONAL)
-        return run_bidirectional(netlist);
-
     std::vector<HBundle> bundles;
     std::map<std::string, std::vector<std::string>> groups;
     for (const auto& net : netlist.get_nets()) {
