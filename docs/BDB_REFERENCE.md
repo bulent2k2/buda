@@ -65,6 +65,14 @@ bundle           id (TEXT), level, strategy, reason, num_terminals,
 bundle_net       bundle_id→bundle, net_id→net      PRIMARY KEY (bundle_id, net_id)
 bundle_busterm   bundle_id→bundle, busterm_id, role ('entry'|'exit')
 
+topology         bundle_id→bundle, cand_index, type, wirelength,
+                 trunk_location, pass_through_count, connected_blocks (JSON),
+                 feedthru_blocks (JSON), is_selected
+                 PRIMARY KEY (bundle_id, cand_index)
+topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
+                 layer_hint, is_jog   PK (bundle_id, cand_index, seg_index)
+                 FK (bundle_id, cand_index) → topology
+
 grp              id (TEXT), name, color, parent_id→grp
 grp_member       grp_id→grp, kind, ref
 
@@ -75,8 +83,8 @@ meta             key (TEXT PK), value  — die_w, die_h, units,
 **Schema version.** The BDB stamps `PRAGMA user_version` (mirrored in
 `meta.schema_version`) and migrates forward on open. v1 added versioning +
 provenance; v2 added the **bundle-persistence** shape above; v3 re-keyed
-`bundle_net` by `net_id`. `tools/bdb_serialize.py` preserves the version across the
-`*.bdb.sql` round-trip.
+`bundle_net` by `net_id`; v4 added the **candidate-topology** tables.
+`tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
 their Stage-1 bundles into `bundle` / `bundle_net` / `bundle_busterm` whenever a
@@ -86,6 +94,16 @@ the flat flow (whose nets may not be in the `net` table) persists too.
 `bundle_nets(id)` joins back to return names. C++ API: `add_bundle(BundleRow)`,
 `add_bundle_net`, `add_bundle_busterm(bundle_id, busterm_id, role)`,
 `clear_bundles()`, `all_bundles()`, `bundle_nets(id)`, `bundle_busterms(id)`.
+
+**Topology persistence.** `generate_topologies` (flat) and
+`generate_hier_topologies` (hier) write **all** candidate topologies into
+`topology` / `topology_segment` whenever a BDB is open — **before** `run_planner`,
+so a design's candidates are inspectable/tweakable without paying the planner's
+runtime on large designs. `clear_bundles()` also wipes the topology tables (they
+FK to `bundle`). `is_selected` reflects a pre-plan pin; recording the planner's
+choice is a follow-up. C++ API: `add_topology(TopoRow)`,
+`add_topology_segment(TopoSegRow)`, `clear_topologies()`, `topologies(bundle_id)`,
+`topology_segments(bundle_id, cand_index)`.
 
 **coordinates** are in microns (µm). `import_def_lef` converts from DEF
 internal units using the `UNITS DISTANCE MICRONS` value from the DEF header.

@@ -146,6 +146,7 @@ class BudaSession:
         self.bundler = buda.Bundler()
         self.planner = None
         self.bundles = []
+        self._bundler_strategy = "STRICT"  # last run_[hier_]bundler strategy (for re-persist)
         self.nuts_result = None
         self._layer_overheads = {}   # layer_id -> overhead_percent
         self._planner_params  = {}   # param_name -> value (buffered before planner exists)
@@ -275,6 +276,53 @@ class BudaSession:
             for bt in hb.exit_busterm_ids:
                 self.bdb.add_bundle_busterm(row.id, bt, "exit")
         return len(self.bundles)
+
+    def _persist_topologies(self):
+        """Persist all candidate topologies in self.bundles to the BDB (Stage 2).
+
+        Written at generate_*topologies time (before run_planner) so a design's
+        candidates are inspectable/tweakable up front, without paying the planner's
+        runtime on large designs. Clears and rewrites (idempotent on re-generate).
+        No-op (returns 0) when no BDB is open. `is_selected` reflects any pre-plan
+        pin; marking the planner's choice is a follow-up (see wishlist-bdb.md).
+        """
+        if self.bdb is None:
+            return 0
+        import json
+        # Ensure the FK-parent bundle rows exist and match the current bundles.
+        # (A flat flow may have run run_bundler *before* open_bdb, so the bundles
+        # were never persisted; without this the topology.bundle_id FK would reject
+        # every insert.) Re-persisting is idempotent and keeps the two in sync.
+        self._persist_bundles(self._bundler_strategy)
+        self.bdb.clear_topologies()
+        n_cands = 0
+        for w in self.bundles:
+            bid = str(w.input.original_bundle.id)
+            selected = w.plan.selected_topology_index
+            for ci, topo in enumerate(w.input.candidates):
+                tr = buda.TopoRow()
+                tr.id = bid
+                tr.cand_index = ci
+                tr.type = topo.type
+                tr.wirelength = topo.estimated_wirelength
+                tr.trunk_location = topo.trunk_location
+                tr.pass_through_count = topo.pass_through_count
+                tr.connected_blocks = json.dumps(list(topo.connected_block_names))
+                tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
+                tr.is_selected = (ci == selected)
+                self.bdb.add_topology(tr)
+                for si, seg in enumerate(topo.segments):
+                    sr = buda.TopoSegRow()
+                    sr.id = bid
+                    sr.cand_index = ci
+                    sr.seg_index = si
+                    sr.x1, sr.y1 = seg.start.x, seg.start.y
+                    sr.x2, sr.y2 = seg.end.x, seg.end.y
+                    sr.layer_hint = seg.layer_hint
+                    sr.is_jog = seg.is_jog
+                    self.bdb.add_topology_segment(sr)
+                n_cands += 1
+        return n_cands
 
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
@@ -2741,6 +2789,7 @@ class BudaSession:
                 w.input.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} hbundles.")
+            self._bundler_strategy = strat_arg
             n = self._persist_bundles(strat_arg)
             if n:
                 print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
@@ -2790,6 +2839,7 @@ class BudaSession:
                 print(f"  Warning: {len(dropped)} net(s) not placed in any bundle "
                       f"(possibly UNKNOWN direction or missing receiver): "
                       f"{', '.join(shown)}{ellipsis_str}")
+            self._bundler_strategy = strat
             n = self._persist_bundles(strat)
             if n:
                 print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
@@ -2860,6 +2910,8 @@ class BudaSession:
                           f"{w.input.original_bundle.id} ({label})")
                     found = True
             if not found: print(f"Warning: Could not find bundle matching hint {hint}")
+            elif self._persist_topologies():
+                print("[BDB] re-persisted candidate topologies to the open BDB.")
 
         elif cmd == "generate_topologies":
             # Usage: generate_topologies [center_mode] [double_detour]
@@ -2897,6 +2949,10 @@ class BudaSession:
             # even before run_planner. A later select_topology overrides it; the
             # sidecar's layer overrides for a matching topology are still merged.
             self._apply_selections()
+            nt = self._persist_topologies()
+            if nt:
+                print(f"[BDB] persisted {nt} candidate topolog"
+                      f"{'y' if nt == 1 else 'ies'} to the open BDB.")
 
         elif cmd == "generate_hier_topologies":
             # generate_hier_topologies [center_mode] [double_detour]
@@ -2928,6 +2984,10 @@ class BudaSession:
             # Restore the sidecar baseline onto the fresh candidates (see
             # generate_topologies); keeps live state and GUI consistent pre-plan.
             self._apply_selections()
+            nt = self._persist_topologies()
+            if nt:
+                print(f"[BDB] persisted {nt} candidate topolog"
+                      f"{'y' if nt == 1 else 'ies'} to the open BDB.")
 
         elif cmd == "generate_topologies_for_hbundle":
             # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour]
@@ -2956,6 +3016,8 @@ class BudaSession:
             n = self._generate_hier_topo_one(target_w, use_center, use_double_detour,
                                               fp_cache, comps_by_name)
             print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
+            if self._persist_topologies():
+                print("[BDB] re-persisted candidate topologies to the open BDB.")
 
         elif cmd == "run_planner":
             if args and args[0] == "post_nuts":
@@ -3293,6 +3355,7 @@ class BudaSession:
             tid = int(args[1])
             if self._select_single_topology_internal(bid, tid):
                 self._replan_layers()
+                self._persist_topologies()   # refresh is_selected in the BDB
 
         elif cmd == "select_topologies":
             # Usage: select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
@@ -3337,6 +3400,7 @@ class BudaSession:
                         any_found = True
             if any_found:
                 self._replan_layers()
+                self._persist_topologies()   # refresh is_selected in the BDB
 
         elif cmd == "check_connectivity":
             # Usage: check_connectivity [topo|nuts|dnuts] [all]

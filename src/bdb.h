@@ -98,6 +98,30 @@ struct GrpRow {
     std::string parent_id;
 };
 
+// One candidate topology of a bundle (Stage-2 output). Keyed by (bundle_id,
+// cand_index); segments live in topology_segment.
+struct TopoRow {
+    std::string id;                 // bundle_id (FK to bundle)
+    int         cand_index = 0;     // index in the bundle's candidate list
+    std::string type;               // "L_HV", "Z_trunk_x", "U_top", …
+    int         wirelength = 0;     // estimated wirelength
+    int         trunk_location = 0;
+    int         pass_through_count = 0;
+    std::string connected_blocks;   // JSON array of block names
+    std::string feedthru_blocks;    // JSON array of opt-in feedthru blocks
+    bool        is_selected = false;// pinned/selected candidate (post-plan; pre-plan pin)
+};
+
+// One segment of a candidate topology.
+struct TopoSegRow {
+    std::string id;                 // bundle_id (FK)
+    int         cand_index = 0;
+    int         seg_index = 0;
+    int         x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    int         layer_hint = 0;
+    bool        is_jog = false;
+};
+
 struct CellRow {
     std::string name;
     double      width, height;
@@ -118,8 +142,9 @@ public:
     // and add a step to _migrate() when the schema changes; opening an older DB
     // then migrates it forward. v1 = versioned schema + provenance meta;
     // v2 = bundle-persistence tables (bundle / bundle_net / bundle_busterm);
-    // v3 = bundle_net re-keyed by net_id (was net_name).
-    static constexpr int SCHEMA_VERSION = 3;
+    // v3 = bundle_net re-keyed by net_id (was net_name);
+    // v4 = candidate-topology tables (topology / topology_segment).
+    static constexpr int SCHEMA_VERSION = 4;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -247,11 +272,19 @@ public:
     void add_bundle_busterm(const std::string& bundle_id,
                             const std::string& busterm_id,
                             const std::string& role = "");
-    void clear_bundles();                   // wipe all three bundle tables
+    void clear_bundles();                   // wipe bundle + topology tables
     std::vector<std::string> bundle_nets(const std::string& bundle_id) const;
     // (busterm_id, role) pairs for a bundle.
     std::vector<std::pair<std::string, std::string>>
         bundle_busterms(const std::string& bundle_id) const;
+
+    // ── Candidate topology persistence (Stage-2 output) ────────────────────
+    void add_topology(const TopoRow& tr);           // INSERT OR REPLACE
+    void add_topology_segment(const TopoSegRow& sr);
+    void clear_topologies();                        // wipe topology + segments
+    std::vector<TopoRow> topologies(const std::string& bundle_id) const;
+    std::vector<TopoSegRow> topology_segments(const std::string& bundle_id,
+                                              int cand_index) const;
 
     std::vector<std::string>  nets_by_hpwl(double lo, double hi)              const;
     std::vector<std::string>  comps_in_rect(double xl, double yl,
