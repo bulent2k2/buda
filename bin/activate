@@ -21,16 +21,22 @@ else
 fi
 
 # --- refuse to be executed (a PATH change would vanish with the subshell) -----
+# Detection: bash sets BASH_SOURCE[0]==$0 only when executed; zsh's
+# ZSH_EVAL_CONTEXT ends in ":file" when the current file is being sourced
+# (e.g. "toplevel:file", "toplevel:file:file" when nested) and is just
+# "toplevel" when executed.  Regardless, the guard stops via `return` — valid
+# only in a sourced context — and only falls through to `exit` when `return`
+# fails (truly executed), so a misdetection can never close an interactive shell.
 _buda_sourced=1
 if [ -n "${BASH_SOURCE:-}" ]; then
     [ "${BASH_SOURCE[0]}" = "$0" ] && _buda_sourced=0
 elif [ -n "${ZSH_VERSION:-}" ]; then
-    case "$ZSH_EVAL_CONTEXT" in *:file:*) : ;; *) _buda_sourced=0 ;; esac
+    case "$ZSH_EVAL_CONTEXT" in *:file*) : ;; *) _buda_sourced=0 ;; esac
 fi
 if [ "$_buda_sourced" = 0 ]; then
     echo "bin/activate must be sourced, not executed. Run:" >&2
     echo "    source \"$_buda_self\"" >&2
-    exit 1
+    return 1 2>/dev/null || exit 1
 fi
 
 # --- resolve repo root (one level up, same idiom the wrappers use) ------------
