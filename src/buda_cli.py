@@ -21,6 +21,7 @@ import math
 import os
 import re
 import sys
+import time
 
 # Ensure the compiled extension is loaded from build/ rather than a stale
 # copy that might exist alongside this script.
@@ -70,34 +71,59 @@ _RR_MAX_CANDIDATES_PER_BUNDLE = 8   # alternate candidates tried per contender /
 _RR_DEFAULT_MAX_ITER = 10           # outer-loop cap when no arg given
 
 
-class _TeeStream:
-    """Write to two streams simultaneously.
+class _Capture:
+    """A stdout/stderr replacement installed *per command* during a flow run.
 
-    Used to mirror sys.stdout/sys.stderr to a flow-log file so that all
-    Python-level print() output is preserved alongside the overlap log.
-
-    Note: C++ extensions write directly to fd 1 and are NOT captured here;
-    their key metrics are mirrored into the nuts log from Python data instead.
+    Buffers everything a command writes — Python prints and C++ output routed
+    through sys.stdout via buda.ostream_redirect — so the CLI can persist the
+    full detail to the flow log and derive a one-line terminal summary + runtime
+    stats afterwards.  `fallback` supplies fileno()/isatty() for the rare bit of
+    code that consults them, so fd-level writes still reach the real terminal.
     """
-    def __init__(self, primary, secondary):
-        self._primary   = primary
-        self._secondary = secondary
+    def __init__(self, fallback):
+        self.buf = []
+        self._fallback = fallback
 
     def write(self, data):
-        n = self._primary.write(data)
-        self._secondary.write(data)
-        return n
+        self.buf.append(data)
+        return len(data)
 
     def flush(self):
-        self._primary.flush()
-        self._secondary.flush()
+        pass
 
     def isatty(self):
-        return self._primary.isatty()
+        return False
 
     def fileno(self):
-        # Return primary's fd so C extensions (pybind11) still reach the terminal.
-        return self._primary.fileno()
+        return self._fallback.fileno()
+
+    def getvalue(self):
+        return ''.join(self.buf)
+
+
+# Regexes that identify the "headline" line of a command's output — the one
+# worth echoing to the terminal.  Matched against captured lines bottom-up; the
+# last match wins, else we fall back to a line count / the last non-empty line.
+_SUMMARY_MARKERS = [re.compile(p, re.I) for p in (
+    r'\btotal\b.*(candidate|violation|wrapper|segment|bundle|move|net)',
+    r'\b\d+\s+(hbundles|busterms|blocks|wrappers|candidates|net segments|'
+    r'segments|bundles|nets|violation)',
+    r'segments placed',
+    r'bits unplaced',
+    r'wrappers after expansion',
+    r'materialized',
+    r'\bsuccess\b',
+    r'no opens',
+    r'done:\s*metric',
+    r'metric \d+->\d+',
+    r'added \d+ blocks',
+)]
+
+# Commands that must NOT be redirected/timed: `source` is a container whose
+# child commands are each summarized instead, and the visualize commands open
+# interactive windows whose output belongs on the terminal.
+_PASSTHROUGH_CMDS = frozenset({"source", "visualize", "visualize_topologies"})
+
 
 class BudaSession:
     def _get_log_path(self, suffix):
@@ -150,6 +176,8 @@ class BudaSession:
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
         self._hier_bundles_orig = []   # pre-expansion snapshot set by run_hier_bundler
         self._planner_is_hier = False  # True after `run_planner hier` (self.bundles is expanded)
+        self._flow_log = None          # open flow-log file (set by main); enables per-command logging
+        self._cmd_stats = []           # per-command (cmd_line, elapsed, nlines, nwarn, nerr) for runtime summary
 
     def _sidecar_path(self):
         """Return the .json path for the current script, or None."""
@@ -2177,6 +2205,129 @@ class BudaSession:
             print(f"Error: bundle {bid} not found")
         return found
 
+    # ── Per-command logging / runtime stats ─────────────────────────────────
+    def run_command(self, cmd_line):
+        """Run one script command, routing its detailed output to the flow log
+        and printing only a one-line summary (plus runtime) to the terminal.
+
+        `do_command` stays the raw dispatcher (used directly by tests/tools);
+        this wrapper is what the CLI flow drives so the terminal is not flooded
+        with the same lines the log already captures.
+        """
+        stripped = cmd_line.strip()
+        if not stripped or stripped.startswith('#'):
+            return
+        cmd = stripped.split()[0].lower()
+
+        # No flow log (interactive/embedded use), or a passthrough command:
+        # run it directly with no redirect.  For `source` this means its child
+        # commands recurse back through run_command and are each summarized.
+        if self._flow_log is None or cmd in _PASSTHROUGH_CMDS:
+            return self.do_command(cmd_line)
+
+        real_out, real_err = sys.stdout, sys.stderr
+        cap = _Capture(real_out)
+        sys.stdout = sys.stderr = cap
+        t0 = time.perf_counter()
+        raised = None
+        try:
+            # ostream_redirect routes C++ std::cout/std::cerr to sys.stdout
+            # (now `cap`), so even C++ output printed outside the inner
+            # per-call redirects is captured to the log instead of leaking to
+            # the terminal.
+            with buda.ostream_redirect():
+                self.do_command(cmd_line)
+        except BaseException as e:   # incl. SystemExit from `exit`/fail-fast commands
+            raised = e
+        finally:
+            elapsed = time.perf_counter() - t0
+            sys.stdout, sys.stderr = real_out, real_err
+
+        text     = cap.getvalue()
+        lines    = text.splitlines()
+        nonblank = [ln for ln in lines if ln.strip()]
+        nlines   = len(nonblank)
+        nwarn    = sum(1 for ln in lines if 'warning' in ln.lower())
+        nerr     = sum(1 for ln in lines if 'error' in ln.lower())
+
+        # Silent, instant setup commands (add_block, def_layer, set_*, …) are
+        # not worth a terminal line or a log section — only surface commands
+        # that produced output, took real time, raised, or reported a problem.
+        significant = bool(nonblank) or nwarn or nerr or elapsed >= 0.02 \
+            or raised is not None
+        if significant:
+            # Persist the full detail + a runtime line to the flow log …
+            self._flow_log.write(f"\n━━━ {stripped} ━━━\n")
+            self._flow_log.write(text if text.endswith('\n') or not text else text + '\n')
+            self._flow_log.write(
+                f"[runtime] {stripped}: {elapsed:.3f}s "
+                f"({nlines} lines, {nwarn} warn, {nerr} err)\n")
+            self._flow_log.flush()
+            # … and a one-line abstract summary to the terminal.
+            self._cmd_stats.append((stripped, elapsed, nlines, nwarn, nerr))
+            headline = self._extract_headline(nonblank)
+            self._emit_cmd_summary(real_out, stripped, elapsed, nlines,
+                                   nwarn, nerr, headline)
+
+        if raised is not None:
+            raise raised
+
+    @staticmethod
+    def _extract_headline(nonblank):
+        """Pick the most summary-like line from a command's (non-blank) output."""
+        for ln in reversed(nonblank):
+            if any(m.search(ln) for m in _SUMMARY_MARKERS):
+                return ln.strip()
+        if len(nonblank) > 3:
+            return f"({len(nonblank)} lines)"
+        return nonblank[-1].strip() if nonblank else ""
+
+    @staticmethod
+    def _emit_cmd_summary(out, cmd_line, elapsed, nlines, nwarn, nerr, headline):
+        marker = 'x ' if nerr else ('! ' if nwarn else '  ')
+        flags  = ''
+        if nerr:  flags += f"[{nerr} err] "
+        if nwarn: flags += f"[{nwarn} warn] "
+        detail = (flags + headline).strip()
+        if len(detail) > 68:
+            detail = detail[:67] + '…'
+        label = cmd_line if len(cmd_line) <= 34 else cmd_line[:33] + '…'
+        out.write(f"{marker}{label:<34} {elapsed:6.2f}s  {detail}\n")
+        out.flush()
+
+    def print_runtime_summary(self, out):
+        """Print a per-command runtime table (also to the flow log)."""
+        if not self._cmd_stats:
+            return
+        total = sum(e for _, e, _, _, _ in self._cmd_stats)
+        tw = sum(w for _, _, _, w, _ in self._cmd_stats)
+        te = sum(x for _, _, _, _, x in self._cmd_stats)
+        slowest = max(self._cmd_stats, key=lambda r: r[1])
+        name = os.path.basename(self.script_path) if self.script_path else 'flow'
+        lines = [f"\n═══════ Runtime summary ({name}) ═══════"]
+        for cmd_line, elapsed, _nl, w, e in self._cmd_stats:
+            tag = ' x' if e else (' !' if w else '')
+            lines.append(f"  {cmd_line[:40]:<40} {elapsed:7.2f}s{tag}")
+        lines.append(f"  {'':-<40} {'-'*8}")
+        lines.append(f"  {'total (' + str(len(self._cmd_stats)) + ' commands)':<40} "
+                     f"{total:7.2f}s")
+        lines.append(f"  slowest: {slowest[0][:40]} ({slowest[1]:.2f}s)")
+        if tw or te:
+            lines.append(f"  {te} error line(s), {tw} warning line(s) — see the flow log for detail")
+        text = '\n'.join(lines) + '\n'
+        out.write(text); out.flush()
+        if self._flow_log is not None:
+            self._flow_log.write(text); self._flow_log.flush()
+
+    def _log_write(self, text):
+        """Mirror a diagnostic to the flow log, independent of the per-command
+        capture.  Used by passthrough commands (e.g. a `source` that fails fast)
+        whose own output bypasses run_command's capture but must still land in
+        the post-mortem log."""
+        if self._flow_log is not None:
+            self._flow_log.write(text if text.endswith('\n') else text + '\n')
+            self._flow_log.flush()
+
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
         if not parts or parts[0].startswith('#'): return
@@ -3414,7 +3565,8 @@ class BudaSession:
             print(f"refine_busterms: {len(bts)} busterms written.")
         elif cmd == "source":
             if not args:
-                print("Error: source command requires a file path")
+                msg = "Error: source command requires a file path"
+                print(msg); self._log_write(msg)
                 return
 
             raw_path = args[0]
@@ -3435,8 +3587,9 @@ class BudaSession:
                 # default and routes on the wrong metal with no obvious cause.
                 where = (f" in {os.path.basename(self._script_stack[-1])}"
                          if self._script_stack else "")
-                print(f"Error: sourced file not found{where}: {full_path} "
-                      f"('{cmd_line.strip()}').")
+                msg = (f"Error: sourced file not found{where}: {full_path} "
+                       f"('{cmd_line.strip()}').")
+                print(msg); self._log_write(msg)
                 sys.exit(1)
 
             if self.script_path is None:
@@ -3447,7 +3600,10 @@ class BudaSession:
                 with open(full_path, 'r') as f:
                     for line in f:
                         if not line.strip().startswith('#'):
-                            self.do_command(line)
+                            # run_command times + log-routes each command when a
+                            # flow log is active; it falls back to do_command
+                            # (raw, unlogged) for interactive/embedded callers.
+                            self.run_command(line)
             finally:
                 self._script_stack.pop()
 
@@ -3670,21 +3826,27 @@ def main():
             script = script + '.buda'
         session.script_path = os.path.abspath(script)
 
-        # Install TeeStream so all Python print() output is mirrored to a flow log.
-        # C++ extensions write directly to fd 1 (terminal) and are NOT captured here;
-        # their key [NUTS] metrics are mirrored into the nuts log from Python data.
+        # Open a flow log that captures the FULL detail of every command
+        # (Python prints + C++ output routed through sys.stdout via
+        # buda.ostream_redirect).  run_command mirrors each command's detail
+        # here and prints only a one-line summary to the terminal, so the two
+        # are no longer duplicated.
         flow_log_path = session._get_log_path('flow.log')
         try:
-            _flow_log_file = open(flow_log_path, 'w', buffering=1)
-            sys.stdout = _TeeStream(sys.stdout, _flow_log_file)
-            sys.stderr = _TeeStream(sys.stderr, _flow_log_file)
+            session._flow_log = open(flow_log_path, 'w', buffering=1)
         except OSError as e:
             print(f"Warning: could not open flow log {flow_log_path}: {e}")
 
-        session.do_command(f"source {script}")
-        # Persist a fixture opened with `open_bdb <file>.sql writeback` if the run
-        # completed without an explicit exit (which flushes on its own).
-        session._flush_bdb_writeback()
+        try:
+            session.run_command(f"source {script}")
+            # Persist a fixture opened with `open_bdb <file>.sql writeback` if the
+            # run completed without an explicit exit (which flushes on its own).
+            session._flush_bdb_writeback()
+        finally:
+            session.print_runtime_summary(sys.stdout)
+            if session._flow_log is not None:
+                print(f"Full per-command detail → {flow_log_path}")
+                session._flow_log.close()
 
 if __name__ == "__main__":
     main()
