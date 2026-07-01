@@ -19,8 +19,8 @@ per-subsystem files so each area stays scannable.
 ## Subsystems
 
 - **[wishlist-bdb.md](wishlist-bdb.md)** — BDB, test data & interchange.
-  `open_bdb *.sql` write-back mode; schema versioning; provenance metadata;
-  routing write-back + snapshot hash (feeds OA/GDS).
+  `open_bdb *.sql` write-back mode (✅), schema versioning (✅), provenance
+  metadata (✅); routing write-back + snapshot hash (feeds OA/GDS).
 - **[wishlist-topo.md](wishlist-topo.md)** — Topology generation & connectivity.
   True along-flex trunk DOF (Stage C of the flexible-root re-arch).
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.

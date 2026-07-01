@@ -2157,8 +2157,9 @@ def main():
 
     # A serialized BDB (*.bdb.sql / *.b_db.sql) is materialized into a throwaway
     # temp binary so `fp foo.b_db.sql` and `bfp <script opening a .sql>` work.
-    # Edits are not written back to the .sql (write-back is future work —
-    # see docs/internal/wishlist-bdb.md).
+    # The floorplanner opens it read-only w.r.t. the .sql — edits are not written
+    # back here. (The CLI has `open_bdb … writeback`; wiring the GUI Save to
+    # re-serialize a .sql could follow — see docs/internal/wishlist-bdb.md.)
     if path is not None and path.endswith('.sql'):
         import bdb_serialize
         print(f"fp: materializing {path} -> temp binary (edits not written back)")

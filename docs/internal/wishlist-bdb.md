@@ -3,27 +3,28 @@
 Deferred follow-ups for the BDB layer (`src/bdb.cpp`), its test-data management,
 and the planned OA/GDS interchange. Index: [`wishlist.md`](wishlist.md).
 
-## `open_bdb <file>.sql` is always read-only — add a write-back mode
+## `open_bdb <file>.sql` write-back mode — ✅ IMPLEMENTED
 
-**What:** `open_bdb` on a serialized `*.bdb.sql` / `*.b_db.sql` path materializes
-the text into a **throwaway temp binary** (`BudaSession._materialize_bdb_sql`,
-`src/buda_cli.py`) and discards any changes. That is exactly right for today's
-routing flows, which only *read* the BDB. When BDB **write-back** lands (routing
-interconnect persisted into the BDB — see below), a flow will sometimes want to
-*update* its serialized fixture deliberately. Add an explicit opt-in mode that
-materializes, lets the flow mutate the temp binary, then **dumps it back to the
-`.sql`** on close (via `tools/bdb_serialize.dump`), instead of the current
-always-temp behaviour.
+**Shipped.** `open_bdb <file>.sql writeback` arms the materialized temp binary to
+be dumped back to the source `.sql` (via `tools/bdb_serialize.dump`) on
+[`save_bdb`], on the next `open_bdb`, and at `exit` / end of run
+(`BudaSession._materialize_bdb_sql` / `_write_bdb_sql` / `_flush_bdb_writeback`,
+`src/buda_cli.py`). Opt-in — without the keyword the default read-only,
+discard-changes behaviour is unchanged, so a read-only flow can never silently
+rewrite a committed fixture. `writeback` on a plain binary `.bdb` is ignored (it
+already persists directly). Tests: `test/tests/test_bdb_writeback.py` (save,
+exit-flush, reopen-flush, no-writeback control, binary-ignored). Docs:
+`docs/BDB_REFERENCE.md` (`open_bdb` / `save_bdb`).
 
-**Why deferred:** No write-back path exists yet — the pipeline's routing results
-live only in the Python session, so read-only materialization is correct and
-sufficient. Making it round-trip now would be a write path with nothing to write.
+**Deferred within this item:** stamping a `modified` provenance marker on
+write-back — a wall-clock timestamp would make repeated write-backs a noisy,
+non-deterministic diff. Add it with the same normalization that gates
+provenance timestamps generally.
 
-**Where to start:** `BudaSession._materialize_bdb_sql` and the `open_bdb` branch
-(`src/buda_cli.py`); a flag such as `open_bdb <file>.sql writeback` (or a
-`save_bdb_sql` command) that records the source `.sql` and re-dumps on `exit` /
-session teardown. Guard it so a read-only flow can never silently rewrite a
-committed fixture. Design context: [`bdb_test_data.md`](bdb_test_data.md).
+**Minor follow-up:** the Floorplanner GUI (`tools/bdb_floorplanner.py`) opens a
+`*.bdb.sql` read-only (materializes to a temp binary); wiring its **Save** to
+re-serialize back to the `.sql` (reusing `tools/bdb_serialize.dump`) would give
+the GUI the same opt-in write-back the CLI now has.
 
 ## BDB schema versioning (replace the ad-hoc ALTER TABLE) — ✅ IMPLEMENTED
 

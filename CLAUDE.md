@@ -114,7 +114,8 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 
 | Command | Description |
 |---|---|
-| `open_bdb <path.bdb>` | Open (creating if needed) a BDB for hierarchy-based design data |
+| `open_bdb <path.bdb> [writeback]` | Open (creating if needed) a BDB for hierarchy-based design data. A `*.bdb.sql` text fixture is materialized to a temp binary (read-only by default); `writeback` dumps changes back to the `.sql` on `save_bdb`/`exit`/end-of-run |
+| `save_bdb` | Write the working BDB back to its `*.bdb.sql` source now (after `open_bdb … writeback`) |
 | `import_def_lef <def> <lef>` / `import_verilog <v>` | Ingest a placed design / netlist into the open BDB |
 | `set_die <w> <h>` | Set die dimensions in the BDB |
 | `add_cell <name> <w> <h>` / `add_cell_pin <cell> <pin> [dir] [px py]` | Define a cell type and its port interface |

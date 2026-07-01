@@ -58,7 +58,7 @@ KNOWN_COMMANDS = frozenset({
     "import_def_lef", "import_verilog", "move_comp", "open_bdb", "refine_busterms",
     "report_overhead", "resize_cell", "ripup_reroute", "rotate_comp", "run_bundler",
     "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
-    "run_planner", "select_topologies", "select_topology", "set_die",
+    "run_planner", "save_bdb", "select_topologies", "select_topology", "set_die",
     "set_feedthru",
     "set_min_stub_length", "set_min_stub_length_dir", "set_min_stub_length_layer",
     "set_planner_param", "set_track_pitch", "source", "visualize",
@@ -141,6 +141,8 @@ class BudaSession:
         self._die_w = 0.0            # stored by set_die when no BDB is open (flat flow)
         self._die_h = 0.0
         self.bdb = None              # BDB (opened by open_bdb command)
+        self._bdb_writeback_src = None  # *.sql to write back to on save_bdb/exit (opt-in)
+        self._bdb_writeback_bin = None  # temp binary materialized from that .sql
         self._bdb_added_ids = set()  # component ids loaded into fp via add_blocks_from_bdb
         self._busterm_gen = None     # BustermGen instance (created by derive_busterms)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
@@ -156,18 +158,15 @@ class BudaSession:
         base = os.path.splitext(self.script_path)[0]
         return base + '.json'
 
-    def _materialize_bdb_sql(self, sql_path):
+    def _materialize_bdb_sql(self, sql_path, writeback=False):
         """Rebuild a serialized BDB (*.bdb.sql text) into a throwaway temp binary.
 
-        The checked-in text fixture is never opened for writing, so the routing
-        pipeline (derive_busterms, etc.) cannot dirty it. Returns the temp path.
+        Returns the temp path. By default the checked-in text fixture is never
+        opened for writing, so the routing pipeline (derive_busterms, etc.) cannot
+        dirty it. With `writeback=True` the temp binary is armed to be dumped back
+        to `sql_path` on `save_bdb`, on the next `open_bdb`, and at exit / end of
+        run — an opt-in way to deliberately update a serialized fixture.
         See tools/bdb_serialize.py and docs/internal/bdb_test_data.md.
-
-        TODO(bdb-writeback): this is always read-only — changes to the temp binary
-        are discarded. When BDB write-back lands (interconnect persisted to the
-        BDB), add an explicit "materialize + dump back to the .sql on close" mode
-        so a flow can update its serialized fixture deliberately, rather than the
-        always-temp behaviour here. Tracked in docs/internal/wishlist-bdb.md.
         """
         import tempfile
         import bdb_serialize
@@ -178,9 +177,39 @@ class BudaSession:
         if not hasattr(self, '_tmp_bdbs'):
             self._tmp_bdbs = []
         self._tmp_bdbs.append(out)
-        print(f"open_bdb: materialized {sql_path} -> temp binary "
-              f"(changes not written back)")
+        if writeback:
+            self._bdb_writeback_src = os.path.abspath(sql_path)
+            self._bdb_writeback_bin = out
+            print(f"open_bdb: materialized {sql_path} -> temp binary "
+                  f"(writeback ON: changes are written back on save_bdb/exit)")
+        else:
+            print(f"open_bdb: materialized {sql_path} -> temp binary "
+                  f"(changes not written back)")
         return out
+
+    def _write_bdb_sql(self):
+        """Serialize the working (temp) binary back to its writeback source `.sql`.
+
+        No-op (returns False) unless a writeback target is armed. Keeps the target
+        armed so a later save / exit re-dumps the latest state.
+        """
+        if not self._bdb_writeback_src:
+            return False
+        import bdb_serialize
+        bdb_serialize.dump(self._bdb_writeback_bin, self._bdb_writeback_src)
+        return True
+
+    def _flush_bdb_writeback(self):
+        """Write back a pending serialized fixture, then disarm.
+
+        Called before switching BDBs (`open_bdb` again), on `exit`, and at the end
+        of a run. Disarming afterward prevents a stale temp binary from being
+        re-dumped over a fixture the session has moved on from.
+        """
+        if self._write_bdb_sql():
+            print(f"open_bdb writeback: wrote {self._bdb_writeback_src}")
+        self._bdb_writeback_src = None
+        self._bdb_writeback_bin = None
 
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
@@ -3224,20 +3253,33 @@ class BudaSession:
             viz.show()
         # ── BDB ────────────────────────────────────────────────────────────
         elif cmd == "open_bdb":
-            # open_bdb <path>
+            # open_bdb <path> [writeback]
             if not args:
                 print("Error: open_bdb requires a file path"); return
+            # Persist any fixture armed by a previous open_bdb before switching.
+            self._flush_bdb_writeback()
+            # `writeback` must be the explicit optional argument immediately after
+            # the path. A membership test (`in args[1:]`) would also match the word
+            # inside a trailing comment — do_command only strips full-line comments,
+            # so `open_bdb foo.sql # no writeback` keeps 'writeback' as a token —
+            # silently arming write-back on a fixture from a read-looking line.
+            writeback = len(args) >= 2 and args[1] == "writeback"
             bdb_path = args[0]
             if (self._script_stack
                     and not os.path.isabs(bdb_path)
                     and bdb_path != ':memory:'):
                 parent_dir = os.path.dirname(self._script_stack[-1])
                 bdb_path = os.path.normpath(os.path.join(parent_dir, bdb_path))
-            # A serialized text BDB (e.g. mix.b_db.sql) is materialized into a
+            # A serialized text BDB (e.g. mix.bdb.sql) is materialized into a
             # throwaway temp binary so the pipeline never dirties the checked-in
-            # text fixture. See docs/internal/bdb_test_data.md.
+            # text fixture. With `writeback`, changes are dumped back to the .sql on
+            # save_bdb/exit. See docs/internal/bdb_test_data.md.
             if bdb_path != ':memory:' and bdb_path.endswith('.sql'):
-                bdb_path = self._materialize_bdb_sql(bdb_path)
+                bdb_path = self._materialize_bdb_sql(bdb_path, writeback=writeback)
+            elif writeback:
+                print("open_bdb: 'writeback' applies only to a serialized *.sql "
+                      "fixture; a binary BDB is opened read-write and persists "
+                      "directly — ignoring.")
             self.bdb = buda.BDB(bdb_path)
         elif cmd == "import_def_lef":
             # import_def_lef <def_path> <lef_path>
@@ -3409,6 +3451,15 @@ class BudaSession:
             finally:
                 self._script_stack.pop()
 
+        elif cmd == "save_bdb":
+            # Serialize the working BDB back to its writeback source .sql now.
+            # Only meaningful after `open_bdb <file>.sql writeback`.
+            if self._write_bdb_sql():
+                print(f"save_bdb: wrote {self._bdb_writeback_src}")
+            else:
+                print("save_bdb: nothing to write — open the BDB with "
+                      "`open_bdb <file>.sql writeback` to enable write-back.")
+
         elif cmd == "exit":
             # Stop the run mid-script (handy for debugging a flow incrementally).
             # Optional integer exit code (default 0 = clean stop).
@@ -3419,6 +3470,7 @@ class BudaSession:
                 except ValueError:
                     print(f"Error: exit code must be an integer, got '{args[0]}'")
                     code = 1
+            self._flush_bdb_writeback()  # persist an armed fixture before stopping
             where = (f" in {os.path.basename(self._script_stack[-1])}"
                      if self._script_stack else "")
             print(f"Exiting on 'exit' command{where} (code {code}).")
@@ -3630,6 +3682,9 @@ def main():
             print(f"Warning: could not open flow log {flow_log_path}: {e}")
 
         session.do_command(f"source {script}")
+        # Persist a fixture opened with `open_bdb <file>.sql writeback` if the run
+        # completed without an explicit exit (which flushes on its own).
+        session._flush_bdb_writeback()
 
 if __name__ == "__main__":
     main()

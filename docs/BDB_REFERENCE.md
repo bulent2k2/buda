@@ -148,7 +148,7 @@ if no database is open.
 ### `open_bdb`
 
 ```
-open_bdb <path>
+open_bdb <path> [writeback]
 ```
 
 Open (or create) a BDB at `<path>`. Subsequent BDB commands operate on this
@@ -156,9 +156,33 @@ database. Call once per script; opening a second path replaces the reference
 (the first file is not closed automatically — use the Python API if you need
 multiple simultaneous databases).
 
+A **serialized text fixture** (`*.bdb.sql`, produced by `tools/bdb_serialize.py`)
+is accepted directly: it is materialized into a throwaway temp binary, so the
+pipeline never dirties the checked-in text. By default those changes are
+**discarded**. Add the `writeback` keyword to instead dump the working binary back
+to the source `.sql` — on [`save_bdb`](#save_bdb), on the next `open_bdb`, and at
+`exit` / end of run — an opt-in way to deliberately update a committed fixture.
+`writeback` is ignored (with a note) for a plain binary `.bdb`, which is already
+opened read-write and persists directly. See
+[BDB Test-Data Management](internal/bdb_test_data.md).
+
 | Argument | Description |
 |---|---|
-| `path` | File path for the `.bdb`; created if it does not exist. Use `:memory:` for an in-memory scratch database. |
+| `path` | File path for the `.bdb`; created if it does not exist. A `*.bdb.sql` text fixture is materialized to a temp binary. Use `:memory:` for an in-memory scratch database. |
+| `writeback` | (optional) For a `*.bdb.sql` path, write the working binary back to that `.sql` on `save_bdb`/`exit`/end-of-run. Ignored for a binary `.bdb`. |
+
+---
+
+### `save_bdb`
+
+```
+save_bdb
+```
+
+Serialize the working BDB back to the source `*.bdb.sql` **now** (mid-run). Only
+meaningful after `open_bdb <file>.sql writeback`; otherwise it is a no-op with a
+note. The write also happens automatically on the next `open_bdb`, on `exit`, and
+at end of run, so an explicit `save_bdb` is only needed to checkpoint mid-flow.
 
 ---
 

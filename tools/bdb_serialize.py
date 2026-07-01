@@ -95,8 +95,9 @@ def materialize_if_sql(path: str) -> str:
 
     Lets any BDB consumer (CLI, floorplanner) accept a committed `*.bdb.sql` /
     `*.b_db.sql` text fixture transparently. The temp binary lives for the process
-    lifetime; changes to it are NOT written back to the .sql (write-back is future
-    work — see docs/internal/wishlist-bdb.md).
+    lifetime; changes to it are NOT written back through this helper. (The CLI's
+    `open_bdb <file>.sql writeback` has an opt-in write-back path of its own; this
+    helper stays read-only.)
     """
     import tempfile
     if path is None or path == ':memory:' or not path.endswith('.sql'):
