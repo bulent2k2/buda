@@ -3853,8 +3853,16 @@ class BudaSession:
               f"{len(bundles)} bundle(s). Use --verbose-conn for per-bit detail.")
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('script', nargs='?')
+    parser = argparse.ArgumentParser(
+        prog='buda',
+        description='Run a BUDA interconnect-planning flow script (.buda). '
+                    'Executes the script top-to-bottom, printing a one-line '
+                    'summary per command; full detail goes to the flow log.',
+        epilog='Script commands are documented in docs/BUDA_SCRIPT_REFERENCE.md; '
+               'these command-line options in docs/BUDA_CLI.md.')
+    parser.add_argument('script', nargs='?',
+                        help='path to a .buda flow script; a missing .buda '
+                             'suffix is added automatically')
     parser.add_argument('--no-viz', action='store_true',
                         help='skip visualize commands (useful for batch/CI runs)')
     parser.add_argument('--verbose-conn', action='store_true',
