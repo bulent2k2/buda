@@ -144,6 +144,10 @@ void bind_db(py::module_& m) {
         .def("delete_group",    &BDB::delete_group, py::arg("gid"))
         .def("all_groups",      &BDB::all_groups)
         .def("units",           &BDB::units)
+        .def("schema_version",  &BDB::schema_version)
+        .def("meta_get",        &BDB::meta_get,
+             py::arg("key"), py::arg("def") = std::string())
+        .def_readonly_static("SCHEMA_VERSION", &BDB::SCHEMA_VERSION)
         .def("die_w",           &BDB::die_w)
         .def("die_h",           &BDB::die_h)
         .def("set_die",         &BDB::set_die, py::arg("w"), py::arg("h"))

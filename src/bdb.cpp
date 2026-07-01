@@ -167,10 +167,7 @@ void BDB::_create_schema() {
             value TEXT
         );
     )");
-    // Schema migration: add rects column to busterm if it was created by an older version.
-    sqlite3_exec(_db,
-        "ALTER TABLE busterm ADD COLUMN rects TEXT DEFAULT NULL",
-        nullptr, nullptr, nullptr);  // Ignored if column already exists.
+    _migrate();
     Stmt mq(_db, "SELECT key,value FROM meta");
     while (sqlite3_step(mq) == SQLITE_ROW) {
         std::string k = (const char*)sqlite3_column_text(mq, 0);
@@ -184,6 +181,55 @@ void BDB::_create_schema() {
 std::string BDB::db_path(const std::string& def_path) {
     auto dot = def_path.rfind('.');
     return (dot == std::string::npos ? def_path : def_path.substr(0, dot)) + ".bdb";
+}
+
+// ── Schema version, migration & provenance ───────────────────────────────────
+
+void BDB::_set_meta(const std::string& key, const std::string& value) {
+    Stmt s(_db, "INSERT INTO meta(key,value) VALUES(?,?)"
+                " ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    sqlite3_bind_text(s, 1, key.c_str(),   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 2, value.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+std::string BDB::meta_get(const std::string& key, const std::string& def) const {
+    Stmt q(_db, "SELECT value FROM meta WHERE key=?");
+    sqlite3_bind_text(q, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW)
+        return reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+    return def;
+}
+
+int BDB::schema_version() const {
+    Stmt q(_db, "PRAGMA user_version");
+    return (sqlite3_step(q) == SQLITE_ROW) ? sqlite3_column_int(q, 0) : 0;
+}
+
+void BDB::_seed_provenance() {
+    // schema_version mirrors PRAGMA user_version so it is visible in the diffable
+    // *.bdb.sql dump (iterdump captures meta rows but not the pragma).
+    _set_meta("schema_version", std::to_string(SCHEMA_VERSION));
+    // Tool identifier, written once (not overwritten if already present).
+    _exec("INSERT OR IGNORE INTO meta(key,value) VALUES('bdb_tool','buda-bdb')");
+    // NOTE: wall-clock created/modified timestamps are intentionally NOT stored
+    // here — they would make every fixture regeneration a noisy diff and defeat
+    // build_fixtures.py --check. Add them later behind dump normalization.
+}
+
+void BDB::_migrate() {
+    int v = schema_version();
+    if (v < 1) {
+        // v0 (pre-versioning) -> v1: absorb the legacy busterm.rects column add
+        // (idempotent) and seed provenance rows.
+        sqlite3_exec(_db,
+            "ALTER TABLE busterm ADD COLUMN rects TEXT DEFAULT NULL",
+            nullptr, nullptr, nullptr);  // Ignored if column already exists.
+        _seed_provenance();
+    }
+    // Future: if (v < 2) { ...; }  — keep each step idempotent.
+    if (v < SCHEMA_VERSION)
+        _exec(("PRAGMA user_version = " + std::to_string(SCHEMA_VERSION) + ";").c_str());
 }
 
 // ── Cell-level pins ──────────────────────────────────────────────────────────

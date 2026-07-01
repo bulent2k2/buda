@@ -106,8 +106,22 @@ struct CellPinRow {
 
 class BDB {
 public:
+    // Current BDB schema version, stamped into PRAGMA user_version. Bump this
+    // and add a step to _migrate() when the schema changes; opening an older DB
+    // then migrates it forward. Version 1 = versioned schema + provenance meta.
+    static constexpr int SCHEMA_VERSION = 1;
+
     explicit BDB(const std::string& db_path);
     ~BDB();
+
+    // ── Schema version & metadata ──────────────────────────────────────────
+    // The schema version stored in this DB (PRAGMA user_version). Equals
+    // SCHEMA_VERSION after open, since the constructor migrates forward.
+    int schema_version() const;
+    // Read a meta(key,value) row, or `def` if absent. Provenance keys include
+    // 'schema_version' and 'bdb_tool'.
+    std::string meta_get(const std::string& key,
+                         const std::string& def = "") const;
 
     // ── Ingestion ──────────────────────────────────────────────────────────
     void import_def_lef(const std::string& def_path, const std::string& lef_path);
@@ -259,6 +273,15 @@ private:
 
     void _exec(const char* sql);
     void _create_schema();
+    // Bring the DB from its stored PRAGMA user_version up to SCHEMA_VERSION,
+    // applying each version step in order, then stamp the new version. Steps
+    // must be idempotent (a serialized *.bdb.sql round-trip resets user_version
+    // to 0, so migrations re-run on the next open).
+    void _migrate();
+    // Seed/refresh provenance rows in the meta table (idempotent).
+    void _seed_provenance();
+    // Upsert a meta(key,value) row.
+    void _set_meta(const std::string& key, const std::string& value);
     // Insert a pin for net_id at the component named inst_path, auto-register
     // the cell-type port (INSERT OR IGNORE in cell_pin).
     void _add_pin_by_path(int net_id, const std::string& inst_path,

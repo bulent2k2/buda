@@ -52,8 +52,14 @@ def dump(bdb_path: str, sql_path: str) -> None:
     # Open read-only so serializing never mutates the source (no WAL sidecars).
     con = sqlite3.connect(f"file:{os.path.abspath(bdb_path)}?mode=ro", uri=True)
     try:
+        # iterdump() captures schema + rows but NOT PRAGMA user_version, so emit
+        # it explicitly — otherwise the schema version is lost on load and the DB
+        # would re-migrate from 0. Keeping it in the text also makes the version
+        # visible in the diff.
+        user_version = con.execute("PRAGMA user_version").fetchone()[0]
         with open(sql_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(_HEADER)
+            f.write(f"PRAGMA user_version={int(user_version)};\n")
             for line in con.iterdump():
                 f.write(line)
                 f.write("\n")
