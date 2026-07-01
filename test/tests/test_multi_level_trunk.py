@@ -79,12 +79,19 @@ def two_level_bitrunk_connects_all(ctx, n):
     assert bits, (
         f'No BITRUNK_HVH/VHV candidate. Got: {sorted({c.type for c in ctx["candidates"]})}'
     )
-    for c in bits:
-        reached = set(c.connected_block_names)
-        if len(reached) >= n:
-            ctx['selected_cand'] = c
-            return
-    pytest.fail(
+    # Pin ONE canonical tree that connects all blocks, preferring one that also
+    # has the two-level structure, so every subsequent "that BITRUNK tree" step
+    # validates the SAME candidate (not a different one per step).  Falls back to
+    # a connects-all candidate so the structure step can fail with a precise
+    # message if no single tree satisfies both.
+    connecters = [(c, buda.ConnTopology()) for c in bits
+                  if len(set(c.connected_block_names)) >= n]
+    for c, ct in connecters:
+        ct.build(c, ctx['fp'])
+    both = [(c, ct) for c, ct in connecters if _root_with_perp_branches(ct)]
+    chosen = (both or connecters or [(None, None)])[0]
+    ctx['selected_cand'], ctx['selected_ct'] = chosen
+    assert ctx['selected_cand'] is not None, (
         f'No two-level BITRUNK connects all {n} blocks; '
         f'best={max(len(set(c.connected_block_names)) for c in bits)}'
     )
@@ -92,24 +99,20 @@ def two_level_bitrunk_connects_all(ctx, n):
 
 @then('that BITRUNK tree has no cycles')
 def bitrunk_tree_acyclic(ctx):
-    bits = _two_level_bitrunks(ctx)
-    assert bits, 'No two-level BITRUNK candidate to check for cycles'
-    for c in bits:
-        ct = buda.ConnTopology(); ct.build(c, ctx['fp'])
-        assert _has_no_cycles(ct), f'{c.type}: cycle detected'
+    ct = ctx.get('selected_ct')
+    assert ct is not None, 'No two-level BITRUNK selected (run the connects-all step first)'
+    assert _has_no_cycles(ct), f'{ctx["selected_cand"].type}: cycle detected'
 
 
 @then('that BITRUNK tree has a root trunk feeding at least 2 perpendicular branch trunks')
 def bitrunk_tree_two_level(ctx):
-    bits = _two_level_bitrunks(ctx)
-    assert bits, 'No two-level BITRUNK candidate to check structure'
-    for c in bits:
-        ct = buda.ConnTopology(); ct.build(c, ctx['fp'])
-        if _root_with_perp_branches(ct):
-            return
+    ct = ctx.get('selected_ct')
+    assert ct is not None, 'No two-level BITRUNK selected (run the connects-all step first)'
+    if _root_with_perp_branches(ct):
+        return
     pytest.fail(
-        f'No BITRUNK has a root trunk with >=2 perpendicular branches: '
-        f'{[c.type for c in bits]}'
+        f'Selected BITRUNK {ctx["selected_cand"].type} connects all blocks but its '
+        f'root trunk has <2 perpendicular branches'
     )
 
 
