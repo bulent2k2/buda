@@ -597,6 +597,7 @@ class TopologyExplorer:
         self._autoscale_needed = True
         self._home_xlim        = None
         self._home_ylim        = None
+        self._home_data_bbox   = None   # raw data bbox (x0,x1,y0,y1) for maximal home fit
 
         # Listen for global visibility changes (e.g. from parent BudaVisualizer)
         self.ui_state.add_listener(self.fig_redraw)
@@ -1528,7 +1529,14 @@ class TopologyExplorer:
             ax.set_xlim(curr_xlim)
             ax.set_ylim(curr_ylim)
         else:
+            # Fit to the data bbox, then expand the shorter axis so the view
+            # fills the whole window (same maximal framing as cmd-z), instead of
+            # collapsing to a thin sliver under set_aspect('equal').
             ax.autoscale_view()
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            self._home_data_bbox = (x0, x1, y0, y1)
+            _set_lims_filling_box(ax, x0, x1, y0, y1)
             self._home_xlim = ax.get_xlim()
             self._home_ylim = ax.get_ylim()
             self._autoscale_needed = False
@@ -1536,7 +1544,14 @@ class TopologyExplorer:
         self.fig.canvas.draw_idle()
 
     def _zoom_home(self):
-        if self._home_xlim is not None:
+        if self._home_data_bbox is not None:
+            # Recompute the maximal fill from the cached data bbox so the home
+            # view stays maximal even if the window was resized since first draw.
+            _set_lims_filling_box(self.ax, *self._home_data_bbox)
+            toolbar = getattr(self.fig.canvas, 'toolbar', None)
+            if toolbar is not None:
+                toolbar.update()   # reset toolbar nav stack to current limits
+        elif self._home_xlim is not None:
             self.ax.set_xlim(self._home_xlim)
             self.ax.set_ylim(self._home_ylim)
             toolbar = getattr(self.fig.canvas, 'toolbar', None)
