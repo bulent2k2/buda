@@ -21,6 +21,7 @@ The **Floorplanner** (`./fp`, `./bfp`) is a separate interactive GUI tool that e
 - [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
 - [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation.
 - [BDB Reference](docs/BDB_REFERENCE.md) — Physical design database: schema, `.buda` commands, Python API.
+- [BDB Test-Data Management](docs/internal/bdb_test_data.md) — Diffable `*.bdb.sql` fixtures, the copy-to-temp `bdb_input` test fixture, and the write-back/OA versioning roadmap.
 - [Floorplanner User Guide](docs/FLOORPLANNER_USER_GUIDE.md) / [Reference](docs/FLOORPLANNER_REFERENCE_GUIDE.md) — Interactive placement GUI and engine API.
 - [Hier Bundler](docs/HIER_BUNDLER.md), [Hier Topology](docs/HIER_TOPOLOGY.md), [Hier Planner](docs/HIER_PLANNER.md) — Hierarchy-aware pipeline internals.
 - [Cross-Level Bundling](docs/cross_level_bundling.md) and [HBundle Pipeline session notes](docs/session_hbundle_pipeline.md) — How the hier flow was built (Phases A–E).
@@ -159,6 +160,8 @@ pytest test/tests/test_nuts.py -v   # single file
 ```
 
 Feature files in `test/tests/features/` (pytest-bdd). Most stages have a corresponding `.feature` and `test_*.py` file, including BDB (`test_bdb.py`, `bdb_*.feature`), hier flow (`test_hier_*`), floorplanner (`test_floorplanner_*`), connectivity (`test_check_connectivity_hbundle.py`, `test_check_layer_dir.py`), routing grid, and detailed NUTS.
+
+**Checked-in BDB test data** is committed as **diffable SQL text** (`test/tests/data/*.bdb.sql`), never as a binary blob. The `bdb_input` conftest fixture materializes a throwaway binary copy in `tmp_path` so the pipeline never dirties the checked-in fixture; `tools/bdb_serialize.py` round-trips binary↔text and `test/tests/data/build_fixtures.py` regenerates fixtures deterministically. See [BDB Test-Data Management](docs/internal/bdb_test_data.md).
 
 ---
 

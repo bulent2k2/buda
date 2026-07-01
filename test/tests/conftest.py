@@ -35,6 +35,61 @@ import pytest
 import buda
 from pytest_bdd import given, when, then, parsers
 
+# tools/ holds bdb_serialize; make it importable for the BDB fixtures below.
+_tools = os.path.join(_repo, 'tools')
+if _tools not in sys.path:
+    sys.path.append(_tools)
+
+# ---------------------------------------------------------------------------
+# Checked-in BDB test data (diffable *.bdb.sql text fixtures)
+# ---------------------------------------------------------------------------
+# Test data lives as deterministic SQL text under test/tests/data/*.bdb.sql
+# (regenerate with test/tests/data/build_fixtures.py). A test NEVER opens the
+# checked-in artifact directly — the `bdb_input` fixture materializes a throwaway
+# binary copy in tmp_path, so any pipeline mutation (derive_busterms, WAL side-
+# cars, write-back, …) is discarded and the committed fixture stays clean.
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+if DATA_DIR not in sys.path:   # so tests can `import build_fixtures`
+    sys.path.append(DATA_DIR)
+
+
+@pytest.fixture
+def bdb_input(tmp_path):
+    """Return a factory: `bdb_input("hier_mixed")` -> path to a fresh temp .bdb.
+
+    Rebuilds the binary from the committed test/tests/data/<name>.bdb.sql into
+    tmp_path. Mutate it freely — it is discarded with tmp_path, so the checked-in
+    fixture is never dirtied.
+    """
+    import bdb_serialize
+
+    def _materialize(name):
+        sql_path = os.path.join(DATA_DIR, f'{name}.bdb.sql')
+        if not os.path.exists(sql_path):
+            raise FileNotFoundError(
+                f'no BDB fixture {name!r} at {sql_path} '
+                f'(regenerate via test/tests/data/build_fixtures.py)')
+        out = str(tmp_path / f'{name}.bdb')
+        return bdb_serialize.load(sql_path, out)
+
+    return _materialize
+
+
+def readonly_conn(bdb_path):
+    """Raw read-only sqlite3 connection to a BDB for pure SQL inspection.
+
+    `buda.BDB` opens its own read-write connection, so for tests that only inspect
+    schema/rows this returns a `mode=ro` connection that physically cannot mutate
+    the file (and creates no WAL sidecars). Mutation isolation for `buda.BDB`-based
+    tests comes from the copy-to-temp `bdb_input` fixture, not from here.
+    """
+    import sqlite3
+
+    return sqlite3.connect(
+        f'file:{os.path.abspath(bdb_path)}?mode=ro', uri=True)
+
+
 # ---------------------------------------------------------------------------
 # Shared context fixture
 # ---------------------------------------------------------------------------
