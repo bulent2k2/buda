@@ -1689,7 +1689,13 @@ class BudaSession:
         with `def_track_pattern` layers; installs the leaf-cell keepouts first so
         the planner counts exactly the tracks DetailedNUTS will place.  Must be
         called after the planner is constructed and before build_congestion_map.
-        No-op (width model) without the keyword."""
+        No-op (width model) without the keyword.
+
+        Requesting `signal_tracks` with no `def_track_pattern` defined is a hard
+        error (exit 1), not a silent fall-back: the user asked for a specific
+        capacity model that cannot be honoured, and quietly planning with the
+        width model instead would hide that the signal-track accounting never
+        happened."""
         if "signal_tracks" not in args:
             return
         has_pattern = self.routing_grid is not None and any(
@@ -1697,9 +1703,11 @@ class BudaSession:
             for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL)
             for lid in self.layers.get_layer_ids_by_dir(d))
         if not has_pattern:
-            print("Error: run_planner signal_tracks requires a routing grid "
-                  "(def_track_pattern); using the width model instead.")
-            return
+            print("Error: run_planner signal_tracks needs a routing grid to count "
+                  "signal tracks, but no def_track_pattern is defined. Add "
+                  "def_track_pattern for the routed layers, or drop the "
+                  "signal_tracks option to plan with the width model.")
+            sys.exit(1)
         self._install_leaf_keepouts()
         self.planner.set_routing_grid(self.routing_grid)
         self.planner.set_capacity_mode(buda.CapacityMode.SIGNAL_TRACKS)
