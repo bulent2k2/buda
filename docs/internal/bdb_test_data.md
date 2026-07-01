@@ -105,7 +105,10 @@ Interconnect is currently in-memory only (`self.bundles`, `self.nuts_result`,
 2. **Provenance metadata.** ✅ Implemented — `schema_version` + `bdb_tool` in the
    `meta` table (via `BDB::_seed_provenance`), read with `BDB.meta_get`. Wall-clock
    timestamps deferred so they don't add diff noise to regenerated fixtures.
-3. **Routing write-back + snapshot hash.** When interconnect is persisted, add
+3. **Persist the pipeline (bundles → topologies → NUTS).** Stage 1 (bundles) is
+   implemented — `run_[hier_]bundler` writes the `bundle` / `bundle_net` /
+   `bundle_busterm` tables (schema v2); see [`wishlist-bdb.md`](wishlist-bdb.md).
+   Topologies and abstract-NUTS bus-segments follow. When interconnect is persisted, add
    `route_snapshot` + `bus_segment` / `net_segment` tables (mirroring the stage-4
    / stage-9 structs) with a content hash per snapshot. The `.bdb.sql` dump then
    makes routing changes reviewable in PRs, and these tables are the direct source

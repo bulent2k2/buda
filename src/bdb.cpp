@@ -68,6 +68,39 @@ void BDB::_exec(const char* sql) {
     }
 }
 
+// Bundle tables (schema v2). Membership is keyed by net *name* so it is flow-
+// agnostic: the flat flow's nets may not have rows in the BDB `net` table, and
+// names are also the natural identifiers for a later OA/GDS export. Kept in one
+// place so _create_schema (fresh DB) and _migrate (v1->v2 rebuild) never drift.
+static const char* BUNDLE_DDL = R"(
+    CREATE TABLE IF NOT EXISTS bundle (
+        id             TEXT PRIMARY KEY,
+        level          INTEGER DEFAULT 0,   -- hierarchy level (0 = top / flat)
+        strategy       TEXT,                -- STRICT | CONVERGENT | BIDIRECTIONAL
+        reason         TEXT,                -- grouping signature
+        num_terminals  INTEGER DEFAULT 0,
+        cell_context   TEXT,                -- "" for top-level; cell type otherwise
+        instances      TEXT,                -- JSON array of instance paths
+        parent_id      TEXT REFERENCES bundle(id),  -- "" / NULL for top-level
+        is_replicated  INTEGER DEFAULT 0,
+        drv_spec_depth INTEGER DEFAULT -1,  -- cross-level driver depth (-1 = same-level)
+        rcv_spec_depth INTEGER DEFAULT -1,
+        drv_spec_path  TEXT,
+        rcv_spec_paths TEXT                 -- JSON array
+    );
+    CREATE TABLE IF NOT EXISTS bundle_net (
+        bundle_id TEXT REFERENCES bundle(id),
+        net_name  TEXT,
+        PRIMARY KEY (bundle_id, net_name)
+    );
+    CREATE TABLE IF NOT EXISTS bundle_busterm (
+        bundle_id  TEXT REFERENCES bundle(id),
+        busterm_id TEXT,
+        role       TEXT DEFAULT '',   -- 'entry' | 'exit' (hier flow)
+        PRIMARY KEY (bundle_id, busterm_id, role)
+    );
+)";
+
 void BDB::_create_schema() {
     _exec(R"(
         CREATE TABLE IF NOT EXISTS component (
@@ -112,23 +145,6 @@ void BDB::_create_schema() {
             parent_id  TEXT REFERENCES busterm(id),
             rects      TEXT DEFAULT NULL
         );
-        CREATE TABLE IF NOT EXISTS bundle (
-            id           TEXT PRIMARY KEY,
-            depth        INTEGER DEFAULT 0,
-            strategy     TEXT,
-            parent_id    TEXT REFERENCES bundle(id),
-            is_replicated INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS bundle_net (
-            bundle_id TEXT REFERENCES bundle(id),
-            net_id    INTEGER REFERENCES net(id),
-            PRIMARY KEY (bundle_id, net_id)
-        );
-        CREATE TABLE IF NOT EXISTS bundle_busterm (
-            bundle_id  TEXT REFERENCES bundle(id),
-            busterm_id TEXT REFERENCES busterm(id),
-            PRIMARY KEY (bundle_id, busterm_id)
-        );
         CREATE TABLE IF NOT EXISTS grp (
             id        TEXT PRIMARY KEY,
             name      TEXT NOT NULL,
@@ -167,6 +183,7 @@ void BDB::_create_schema() {
             value TEXT
         );
     )");
+    _exec(BUNDLE_DDL);   // bundle tables (v2 shape) for a fresh DB
     _migrate();
     Stmt mq(_db, "SELECT key,value FROM meta");
     while (sqlite3_step(mq) == SQLITE_ROW) {
@@ -232,7 +249,16 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);  // Ignored if column already exists.
         _seed_provenance();
     }
-    // Future: if (v < 2) { ...; }  — keep each step idempotent.
+    if (v < 2) {
+        // v1 -> v2: bundle-persistence schema. The bundle tables have never had a
+        // write path, so they are always empty — rebuild them to the new shape
+        // (net_name membership, busterm role, extra hier columns) rather than a
+        // long ALTER chain.
+        _exec("DROP TABLE IF EXISTS bundle_busterm;"
+              "DROP TABLE IF EXISTS bundle_net;"
+              "DROP TABLE IF EXISTS bundle;");
+        _exec(BUNDLE_DDL);
+    }
     if (v < SCHEMA_VERSION)
         _exec(("PRAGMA user_version = " + std::to_string(SCHEMA_VERSION) + ";").c_str());
 }
@@ -1925,7 +1951,111 @@ std::vector<BustermRow> BDB::all_busterms() const {
     return rows;
 }
 
-std::vector<BundleRow>   BDB::all_bundles()   const { return {}; }
+// ── Bundle persistence ───────────────────────────────────────────────────────
+
+void BDB::add_bundle(const BundleRow& br) {
+    Stmt s(_db,
+        "INSERT INTO bundle(id,level,strategy,reason,num_terminals,cell_context,"
+        "instances,parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,"
+        "drv_spec_path,rcv_spec_paths) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(id) DO UPDATE SET level=excluded.level,"
+        " strategy=excluded.strategy, reason=excluded.reason,"
+        " num_terminals=excluded.num_terminals, cell_context=excluded.cell_context,"
+        " instances=excluded.instances, parent_id=excluded.parent_id,"
+        " is_replicated=excluded.is_replicated, drv_spec_depth=excluded.drv_spec_depth,"
+        " rcv_spec_depth=excluded.rcv_spec_depth, drv_spec_path=excluded.drv_spec_path,"
+        " rcv_spec_paths=excluded.rcv_spec_paths");
+    sqlite3_bind_text  (s, 1, br.id.c_str(),           -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 2, br.level);
+    sqlite3_bind_text  (s, 3, br.strategy.c_str(),     -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 4, br.reason.c_str(),       -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 5, br.num_terminals);
+    sqlite3_bind_text  (s, 6, br.cell_context.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 7, br.instances.c_str(),    -1, SQLITE_TRANSIENT);
+    if (br.parent_id.empty()) sqlite3_bind_null(s, 8);
+    else sqlite3_bind_text(s, 8, br.parent_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 9, br.is_replicated ? 1 : 0);
+    sqlite3_bind_int   (s, 10, br.drv_spec_depth);
+    sqlite3_bind_int   (s, 11, br.rcv_spec_depth);
+    sqlite3_bind_text  (s, 12, br.drv_spec_path.c_str(),   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 13, br.rcv_spec_paths.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+void BDB::add_bundle_net(const std::string& bundle_id, const std::string& net_name) {
+    Stmt s(_db, "INSERT OR IGNORE INTO bundle_net(bundle_id,net_name) VALUES(?,?)");
+    sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 2, net_name.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+void BDB::add_bundle_busterm(const std::string& bundle_id,
+                             const std::string& busterm_id,
+                             const std::string& role) {
+    Stmt s(_db, "INSERT OR IGNORE INTO bundle_busterm(bundle_id,busterm_id,role)"
+                " VALUES(?,?,?)");
+    sqlite3_bind_text(s, 1, bundle_id.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 2, busterm_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 3, role.c_str(),       -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+void BDB::clear_bundles() {
+    _exec("DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
+}
+
+std::vector<BundleRow> BDB::all_bundles() const {
+    Stmt q(_db,
+        "SELECT id,level,strategy,reason,num_terminals,cell_context,instances,"
+        "parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,drv_spec_path,"
+        "rcv_spec_paths FROM bundle ORDER BY CAST(id AS INTEGER), id");
+    auto txt = [](sqlite3_stmt* st, int c) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, c);
+        return p ? reinterpret_cast<const char*>(p) : std::string();
+    };
+    std::vector<BundleRow> rows;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        BundleRow b;
+        b.id            = txt(q, 0);
+        b.level         = sqlite3_column_int(q, 1);
+        b.strategy      = txt(q, 2);
+        b.reason        = txt(q, 3);
+        b.num_terminals = sqlite3_column_int(q, 4);
+        b.cell_context  = txt(q, 5);
+        b.instances     = txt(q, 6);
+        b.parent_id     = txt(q, 7);
+        b.is_replicated = sqlite3_column_int(q, 8) != 0;
+        b.drv_spec_depth = sqlite3_column_int(q, 9);
+        b.rcv_spec_depth = sqlite3_column_int(q, 10);
+        b.drv_spec_path  = txt(q, 11);
+        b.rcv_spec_paths = txt(q, 12);
+        rows.push_back(std::move(b));
+    }
+    return rows;
+}
+
+std::vector<std::string> BDB::bundle_nets(const std::string& bundle_id) const {
+    Stmt q(_db, "SELECT net_name FROM bundle_net WHERE bundle_id=? ORDER BY net_name");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<std::string> out;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.emplace_back(reinterpret_cast<const char*>(sqlite3_column_text(q, 0)));
+    return out;
+}
+
+std::vector<std::pair<std::string, std::string>>
+BDB::bundle_busterms(const std::string& bundle_id) const {
+    Stmt q(_db, "SELECT busterm_id,role FROM bundle_busterm WHERE bundle_id=?"
+                " ORDER BY role, busterm_id");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<std::pair<std::string, std::string>> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        const unsigned char* r = sqlite3_column_text(q, 1);
+        out.emplace_back(reinterpret_cast<const char*>(sqlite3_column_text(q, 0)),
+                         r ? reinterpret_cast<const char*>(r) : std::string());
+    }
+    return out;
+}
 
 std::string BDB::new_group(const std::string&, const std::string&,
                             const std::string&) { return {}; }

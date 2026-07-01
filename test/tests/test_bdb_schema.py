@@ -28,8 +28,8 @@ import bdb_serialize
 def test_fresh_db_is_stamped_and_has_provenance(tmp_path):
     db = buda.BDB(str(tmp_path / "fresh.bdb"))
     db.add_cell("c", 10, 10)
-    assert db.schema_version() == buda.BDB.SCHEMA_VERSION == 1
-    assert db.meta_get("schema_version") == "1"
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.meta_get("schema_version") == str(buda.BDB.SCHEMA_VERSION)
     assert db.meta_get("bdb_tool") == "buda-bdb"
 
 

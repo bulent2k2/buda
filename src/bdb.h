@@ -77,10 +77,18 @@ struct BustermRow {
 
 struct BundleRow {
     std::string id;
-    int         depth;
-    std::string strategy;
-    std::string parent_id;
-    bool        is_replicated;
+    int         level = 0;             // hierarchy level (0 = top / flat)
+    std::string strategy;             // STRICT | CONVERGENT | BIDIRECTIONAL
+    std::string reason;               // grouping signature
+    int         num_terminals = 0;
+    std::string cell_context;         // "" for top-level; cell type otherwise
+    std::string instances;            // JSON array of instance paths
+    std::string parent_id;            // "" for top-level
+    bool        is_replicated = false;
+    int         drv_spec_depth = -1;  // cross-level driver depth (-1 = same-level)
+    int         rcv_spec_depth = -1;
+    std::string drv_spec_path;
+    std::string rcv_spec_paths;       // JSON array
 };
 
 struct GrpRow {
@@ -108,8 +116,9 @@ class BDB {
 public:
     // Current BDB schema version, stamped into PRAGMA user_version. Bump this
     // and add a step to _migrate() when the schema changes; opening an older DB
-    // then migrates it forward. Version 1 = versioned schema + provenance meta.
-    static constexpr int SCHEMA_VERSION = 1;
+    // then migrates it forward. v1 = versioned schema + provenance meta;
+    // v2 = bundle-persistence tables (bundle / bundle_net / bundle_busterm).
+    static constexpr int SCHEMA_VERSION = 2;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -230,6 +239,18 @@ public:
     std::vector<PinRow>       all_pins()        const;
     std::vector<BustermRow>   all_busterms()    const;
     std::vector<BundleRow>    all_bundles()      const;
+
+    // ── Bundle persistence (Stage 1 output; both flat and hier flows) ──────
+    void add_bundle(const BundleRow& br);   // INSERT OR REPLACE into bundle
+    void add_bundle_net(const std::string& bundle_id, const std::string& net_name);
+    void add_bundle_busterm(const std::string& bundle_id,
+                            const std::string& busterm_id,
+                            const std::string& role = "");
+    void clear_bundles();                   // wipe all three bundle tables
+    std::vector<std::string> bundle_nets(const std::string& bundle_id) const;
+    // (busterm_id, role) pairs for a bundle.
+    std::vector<std::pair<std::string, std::string>>
+        bundle_busterms(const std::string& bundle_id) const;
 
     std::vector<std::string>  nets_by_hpwl(double lo, double hi)              const;
     std::vector<std::string>  comps_in_rect(double xl, double yl,

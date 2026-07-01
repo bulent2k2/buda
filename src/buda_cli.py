@@ -211,6 +211,42 @@ class BudaSession:
         self._bdb_writeback_src = None
         self._bdb_writeback_bin = None
 
+    def _persist_bundles(self, strategy):
+        """Persist self.bundles into the open BDB's bundle tables (Stage-1 output).
+
+        Flow-agnostic: net membership is stored by name, so the flat flow (whose
+        nets may not have rows in the BDB `net` table) persists too. Clears and
+        rewrites so re-running the bundler replaces prior rows. No-op (returns 0)
+        when no BDB is open. See docs/internal/bdb_test_data.md.
+        """
+        if self.bdb is None:
+            return 0
+        import json
+        self.bdb.clear_bundles()
+        for w in self.bundles:
+            hb = w.input.original_bundle
+            row = buda.BundleRow()
+            row.id = str(hb.id)
+            row.level = hb.level
+            row.strategy = strategy
+            row.reason = hb.reason
+            row.num_terminals = hb.num_terminals
+            row.cell_context = hb.cell_context
+            row.instances = json.dumps(list(hb.instances))
+            row.parent_id = str(hb.parent_id) if hb.parent_id >= 0 else ""
+            row.drv_spec_depth = hb.drv_spec_depth
+            row.rcv_spec_depth = hb.rcv_spec_depth
+            row.drv_spec_path = hb.drv_spec_path
+            row.rcv_spec_paths = json.dumps(list(hb.rcv_spec_paths))
+            self.bdb.add_bundle(row)
+            for nm in hb.get_net_names():
+                self.bdb.add_bundle_net(row.id, nm)
+            for bt in hb.entry_busterm_ids:
+                self.bdb.add_bundle_busterm(row.id, bt, "entry")
+            for bt in hb.exit_busterm_ids:
+                self.bdb.add_bundle_busterm(row.id, bt, "exit")
+        return len(self.bundles)
+
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
 
@@ -2553,6 +2589,9 @@ class BudaSession:
                 w.input.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} hbundles.")
+            n = self._persist_bundles(strat_arg)
+            if n:
+                print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
         elif cmd == "run_hier_bundler":
             # run_hier_bundler [depth <N>] [STRICT|BIDIRECTIONAL]
             if self.bdb is None:
@@ -2599,6 +2638,9 @@ class BudaSession:
                 print(f"  Warning: {len(dropped)} net(s) not placed in any bundle "
                       f"(possibly UNKNOWN direction or missing receiver): "
                       f"{', '.join(shown)}{ellipsis_str}")
+            n = self._persist_bundles(strat)
+            if n:
+                print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
         elif cmd == "dump_hbundles":
             # Usage: dump_hbundles [expanded] [depth N]
             # Without 'expanded': prints the pre-expansion HBundle list (from _hier_bundles_orig).
