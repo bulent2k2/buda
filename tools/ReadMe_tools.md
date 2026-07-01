@@ -98,7 +98,7 @@ Terminal 1 — buda_viz:
   What to watch for as failure signals
 
   - def_viz status bar never shows [IPC] prefix → connection didn't form (check /tmp/buda_ipc_ispd19_test1.sock exists with ls -la /tmp/buda_ipc_*.sock)
-  - buda_viz console prints [viz_ipc] … errors → socket errors worth investigating
+  - buda_viz console prints [viz_ipc] … errors → socket errors worth investigating (errors always print; the informational listening/connected/timer chatter is hidden unless you pass `--ipc-verbose`)
   - Highlighting works one direction only → likely _bundle_insts is empty (net_endpoints not populated)
   - Crash on click → exception in _on_ipc_message; Terminal 1/2 will show the traceback
 

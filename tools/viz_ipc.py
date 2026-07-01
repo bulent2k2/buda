@@ -46,7 +46,7 @@ _SOCK_TEMPLATE = '/tmp/buda_ipc_{}.sock'
 
 
 class VizIPC:
-    def __init__(self, session_name: str):
+    def __init__(self, session_name: str, verbose: bool = True):
         self._path       = _SOCK_TEMPLATE.format(session_name)
         self._sock: Optional[socket.socket] = None   # connected peer socket
         self._srv:  Optional[socket.socket] = None   # listening socket (server role)
@@ -55,6 +55,9 @@ class VizIPC:
         self._queue: collections.deque = collections.deque()
         self._recv_buf   = b''
         self.on_message: Optional[Callable[[dict], None]] = None
+        # When False, suppress the informational connect/listen chatter (socket
+        # errors are always printed).  buda_viz sets this from --ipc-verbose.
+        self.verbose     = verbose
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -126,7 +129,8 @@ class VizIPC:
                 self._sock = s
                 self._connected = True
             self._start_recv_thread(s)
-            print(f'[viz_ipc] connected to {self._path}')
+            if self.verbose:
+                print(f'[viz_ipc] connected to {self._path}')
             return True
         except OSError:
             s.close()
@@ -141,7 +145,8 @@ class VizIPC:
         # Clean up stale socket (previous process crashed without cleanup).
         if os.path.exists(self._path):
             if not self._try_connect():   # double-check it's really stale
-                print(f'[viz_ipc] unlinking stale {self._path}')
+                if self.verbose:
+                    print(f'[viz_ipc] unlinking stale {self._path}')
                 try:
                     os.unlink(self._path)
                 except OSError:
@@ -154,7 +159,8 @@ class VizIPC:
             srv.listen(1)
             srv.setblocking(False)
             self._srv = srv
-            print(f'[viz_ipc] listening on {self._path}')
+            if self.verbose:
+                print(f'[viz_ipc] listening on {self._path}')
         except OSError as exc:
             print(f'[viz_ipc] could not bind server: {exc}')
 
@@ -169,7 +175,8 @@ class VizIPC:
                 self._sock = conn
                 self._connected = True
             self._start_recv_thread(conn)
-            print(f'[viz_ipc] accepted connection on {self._path}')
+            if self.verbose:
+                print(f'[viz_ipc] accepted connection on {self._path}')
         except BlockingIOError:
             pass
         except OSError as exc:

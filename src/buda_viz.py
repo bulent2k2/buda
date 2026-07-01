@@ -1657,10 +1657,11 @@ class TopologyExplorer:
 class BudaVisualizer:
     def __init__(self, floorplan, bundles, sidecar_path=None, rerun_layer_fn=None,
                  rerun_fn=None, routing_grid=None, layer_stack=None,
-                 net_endpoints=None, ipc_session=None):
+                 net_endpoints=None, ipc_session=None, ipc_verbose=False):
         self.fp           = floorplan
         self.bundles      = bundles
         self._ipc_session = ipc_session
+        self._ipc_verbose = ipc_verbose   # gated: --ipc-verbose surfaces IPC chatter
         self._ipc         = None
         self.routing_grid = routing_grid
         self.layer_stack  = layer_stack
@@ -3885,14 +3886,17 @@ class BudaVisualizer:
             if _tools not in _sys.path:
                 _sys.path.insert(0, _tools)
             from viz_ipc import VizIPC, POLL_MS
-            self._ipc = VizIPC(self._ipc_session)
+            self._ipc = VizIPC(self._ipc_session, verbose=self._ipc_verbose)
             self._ipc.on_message = self._on_ipc_message
             self._ipc.connect_or_serve()
-            print(f'[buda_viz] IPC session={self._ipc_session!r} connected={self._ipc._connected}')
             self._ipc_timer = self.fig.canvas.new_timer(interval=POLL_MS)
             self._ipc_timer.add_callback(self._ipc.poll)
             self._ipc_timer.start()
-            print(f'[buda_viz] IPC timer started (backend={self.fig.canvas.__class__.__name__})')
+            if self._ipc_verbose:
+                print(f'[buda_viz] IPC session={self._ipc_session!r} '
+                      f'connected={self._ipc._connected}')
+                print(f'[buda_viz] IPC timer started '
+                      f'(backend={self.fig.canvas.__class__.__name__})')
 
         # Make the home view maximal from the first frame (not only after 'h'):
         # the fit above used the nominal figure size; refit once the real window
