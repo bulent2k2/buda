@@ -131,10 +131,17 @@ class _RecordingTopologyGenerator(buda.TopologyGenerator):
         super().__init__(fp)
         self._u2b_fp = fp
         self._u2b_lids = None
+        self._u2b_multi_trunk = False
 
     def set_layer_ids(self, h, v):
         self._u2b_lids = (h, v)
         return super().set_layer_ids(h, v)
+
+    def set_multi_trunk(self, on):
+        # Opt-in flag for the two-level BITRUNK_HVH/VHV trees; captured so the emitted
+        # script drives `generate_topologies multi_trunk` and reproduces those shapes.
+        self._u2b_multi_trunk = bool(on)
+        return super().set_multi_trunk(on)
 
     def generate_candidates(self, driver, receivers):
         # generate_candidates accepts a single receiver as a bare string; list("u1")
@@ -149,6 +156,7 @@ class _RecordingTopologyGenerator(buda.TopologyGenerator):
             # list would fold those later mutations into this (earlier) call.
             "setup": list(self._u2b_fp._u2b),
             "lids": self._u2b_lids,
+            "multi_trunk": self._u2b_multi_trunk,
         })
         return super().generate_candidates(driver, receivers)
 
@@ -338,7 +346,10 @@ def emit_script(call, test_spec, n_calls):
     rcv_csv = ",".join(f"{r}.i" for r in rcvs)
     out.append(f"add_net net0 {drv}.o {rcv_csv}")
     out.append("run_bundler")
-    out.append("generate_topologies")
+    # multi_trunk opt-in adds the two-level BITRUNK_HVH/VHV trees (else they are
+    # suppressed and the case would look identical to the default candidate set).
+    gen_cmd = "generate_topologies multi_trunk" if call.get("multi_trunk") else "generate_topologies"
+    out.append(gen_cmd)
     out.append("# Swap for `visualize` to see the floorplan + nominal buses instead.")
     out.append("visualize_topologies")
     out.append("")

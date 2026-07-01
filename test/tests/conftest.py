@@ -314,6 +314,17 @@ def gen_and_rank_multicast(ctx, src, dsts):
     ctx['candidates'] = _build_gen(ctx).generate_candidates(src, dst_list)
 
 
+@when(parsers.re(
+    r'I generate multi-trunk multicast candidates from "(?P<src>[^"]+)" to \[(?P<dsts>[^\]]+)\] using layers M4,M5'
+))
+def gen_multi_trunk_multicast(ctx, src, dsts):
+    """Opt-in multi_trunk generation: adds the two-level BITRUNK_HVH/VHV trees."""
+    dst_list = re.findall(r'"([^"]+)"', dsts)
+    g = _build_gen(ctx)
+    g.set_multi_trunk(True)
+    ctx['candidates'] = g.generate_candidates(src, dst_list)
+
+
 @when('I compute slide ranges for each candidate')
 def compute_slide_ranges(ctx):
     _build_all_cts(ctx)
