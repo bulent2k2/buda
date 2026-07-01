@@ -1,4 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
+PRAGMA user_version=1;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
             id           TEXT PRIMARY KEY,
@@ -121,6 +122,8 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
+INSERT INTO "meta" VALUES('schema_version','1');
+INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL

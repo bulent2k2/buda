@@ -95,18 +95,16 @@ def test_something(bdb_input):
 
 Not yet implemented — recorded here so write-back lands on the right foundation.
 Interconnect is currently in-memory only (`self.bundles`, `self.nuts_result`,
-`self.detailed_result`); there is no routing table, no schema version, and no
-provenance in the BDB today.
+`self.detailed_result`); there is no routing table today.
 
-1. **Schema versioning.** Replace the ad-hoc `ALTER TABLE … ADD COLUMN rects`
-   (`src/bdb.cpp`, ~line 170) with `PRAGMA user_version` (or a
-   `meta.schema_version` row) plus a small ordered migration hook run at open
-   time. This lets committed `.bdb.sql` fixtures survive schema evolution with an
-   explicit upgrade path.
-2. **Provenance metadata** in `meta`: tool/schema version, source-recipe hash,
-   created/modified markers. Keep volatile fields (timestamps) out of the
-   *diffable* dump — or normalize them — so provenance noise doesn't defeat clean
-   diffs.
+1. **Schema versioning.** ✅ Implemented — `BDB::SCHEMA_VERSION` in
+   `PRAGMA user_version` + an ordered `BDB::_migrate()` ladder run at open (the
+   v0→v1 step absorbs the old ad-hoc `ALTER TABLE … rects`). `bdb_serialize.dump`
+   emits `PRAGMA user_version=N;` so the version survives the round-trip. See
+   [`wishlist-bdb.md`](wishlist-bdb.md).
+2. **Provenance metadata.** ✅ Implemented — `schema_version` + `bdb_tool` in the
+   `meta` table (via `BDB::_seed_provenance`), read with `BDB.meta_get`. Wall-clock
+   timestamps deferred so they don't add diff noise to regenerated fixtures.
 3. **Routing write-back + snapshot hash.** When interconnect is persisted, add
    `route_snapshot` + `bus_segment` / `net_segment` tables (mirroring the stage-4
    / stage-9 structs) with a content hash per snapshot. The `.bdb.sql` dump then

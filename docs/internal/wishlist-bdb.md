@@ -25,35 +25,33 @@ sufficient. Making it round-trip now would be a write path with nothing to write
 session teardown. Guard it so a read-only flow can never silently rewrite a
 committed fixture. Design context: [`bdb_test_data.md`](bdb_test_data.md).
 
-## BDB schema versioning (replace the ad-hoc ALTER TABLE)
+## BDB schema versioning (replace the ad-hoc ALTER TABLE) — ✅ IMPLEMENTED
 
-**What:** There is no schema version today — a single ad-hoc
-`ALTER TABLE busterm ADD COLUMN rects` (`src/bdb.cpp`, ~line 170) is the only
-migration, applied blindly if the column is missing. Add `PRAGMA user_version`
-(or a `meta.schema_version` row) plus a small ordered migration hook run at open
-time, so committed `*.bdb.sql` fixtures survive schema evolution with an explicit
-upgrade path instead of silent add-if-missing.
+**Shipped.** `BDB::SCHEMA_VERSION` (currently 1) is stamped into
+`PRAGMA user_version`; `BDB::_migrate()` (`src/bdb.cpp`) runs an ordered ladder
+from the stored version up to current on every open, then stamps it. The v0→v1
+step absorbs the old ad-hoc `ALTER TABLE busterm ADD COLUMN rects` (kept
+idempotent). `tools/bdb_serialize.py::dump` now emits `PRAGMA user_version=N;`
+(iterdump omits pragmas) so the version survives the `*.bdb.sql` round-trip and is
+visible in the diff; a loaded fixture with version 0 self-heals by re-migrating on
+open. Exposed to Python as `BDB.schema_version()` / `BDB.SCHEMA_VERSION`. Tests:
+`test/tests/test_bdb_schema.py` (fresh stamp, round-trip preservation, v0-missing-
+rects migration).
 
-**Why deferred:** Not needed until the schema starts changing under checked-in
-fixtures; recorded now so the first schema-affecting change adds the hook rather
-than another blind ALTER.
+**Next schema change:** bump `SCHEMA_VERSION`, add an idempotent `if (v < N)` step
+in `_migrate()`, and regenerate fixtures (`build_fixtures.py`).
 
-**Where to start:** BDB open path (`src/bdb.cpp` constructor / schema setup); model
-migrations as an ordered list keyed by version. Verify committed fixtures load and
-`build_fixtures.py --check` stays a no-op.
+## BDB provenance metadata — ✅ IMPLEMENTED (timestamps deferred)
 
-## BDB provenance metadata
+**Shipped.** `BDB::_seed_provenance()` writes `schema_version` (mirror of the
+pragma, so it shows in the diffable dump) and `bdb_tool` into the `meta` table;
+read via `BDB.meta_get(key, def="")`. Wall-clock created/modified timestamps are
+**intentionally deferred** — they would make every fixture regeneration a noisy
+diff and defeat `build_fixtures.py --check`; add them later behind dump
+normalization (and stamp `modified` from the write-back mode above).
 
-**What:** Add self-describing provenance to the `meta` table: tool/schema version,
-source-recipe hash, created/modified markers. Keep volatile fields (timestamps)
-out of the *diffable* dump (or normalize them) so provenance noise doesn't defeat
-clean `*.bdb.sql` diffs.
-
-**Why deferred:** Cosmetic until multiple producers/consumers exist; pairs
-naturally with schema versioning above.
-
-**Where to start:** `meta` read/write in `src/bdb.cpp`; the dump filter in
-`tools/bdb_serialize.py` if any field must be normalized out of the text form.
+**Where to extend:** `_seed_provenance` in `src/bdb.cpp`; the dump in
+`tools/bdb_serialize.py` if a volatile field ever needs normalizing out.
 
 ## Routing write-back + snapshot hash (feeds OA/GDS export)
 
