@@ -625,7 +625,7 @@ run_bundler strict
 ### `run_hier_bundler`
 
 ```
-run_hier_bundler [depth <N>]
+run_hier_bundler [depth <N>] [STRICT|BIDIRECTIONAL]
 ```
 
 Group nets into hierarchy-aware bundles (HBundles) by querying the component hierarchy in the open BDB. Must be called after `open_bdb` and populating the database.
@@ -633,6 +633,7 @@ Group nets into hierarchy-aware bundles (HBundles) by querying the component hie
 | Argument | Type | Description |
 |---|---|---|
 | `depth N` | keyword+int | Optional. Maximum hierarchy depth to traverse and group (defaults to `1`). |
+| `STRICT` / `BIDIRECTIONAL` | keyword | Optional grouping strategy (default `STRICT`, matching `run_bundler`). `BIDIRECTIONAL` is direction-agnostic: it keys on the sorted set of **all** endpoint instances at the bundle depth, so a net and its reverse (and cyclic multi-receiver groups) bundle together — a single bundle may then hold both bidirectional pairs and plain one-way nets. Since a bidirectional bundle connects the **same** blocks, the direction-agnostic block-to-block trunk routes every net (sound, no warning). |
 
 HBundles group signals that cross cell boundaries at different levels of the physical hierarchy, allowing the planner and routing engines to distinguish local intra-cell routing from top-level inter-cell interconnect.
 
@@ -641,6 +642,7 @@ Each net is bundled **exactly once**, at its most specific endpoint projection w
 **Example:**
 ```buda
 run_hier_bundler depth 1
+run_hier_bundler depth 1 bidirectional
 ```
 
 ---

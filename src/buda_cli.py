@@ -402,8 +402,17 @@ class BudaSession:
 
     @staticmethod
     def _parse_bundle_reason(reason):
-        """Parse 'DRV:x|REC:a,b,' → ('x', ['a', 'b']).  Returns (None, []) on failure."""
+        """Parse a bundle reason into (src, [dsts]).
+
+        'DRV:x|REC:a,b,'  → ('x', ['a', 'b'])
+        'BIDIR:a,b,c,'    → ('a', ['b', 'c'])   — direction-agnostic: any
+            instance can root the trunk, so use the first and branch to the rest;
+            the block-to-block topology reaches every instance either way.
+        Returns (None, []) on failure."""
         try:
+            if reason.startswith('BIDIR:'):
+                insts = [n for n in reason[len('BIDIR:'):].split(',') if n]
+                return (insts[0], insts[1:]) if insts else (None, [])
             drv_part, rec_part = reason.split('|REC:')
             src = drv_part[4:]              # strip leading "DRV:"
             dsts = [n for n in rec_part.split(',') if n]
@@ -2482,7 +2491,7 @@ class BudaSession:
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} hbundles.")
         elif cmd == "run_hier_bundler":
-            # run_hier_bundler [depth <N>]
+            # run_hier_bundler [depth <N>] [STRICT|BIDIRECTIONAL]
             if self.bdb is None:
                 print("Error: run_hier_bundler requires an open BDB (use open_bdb first)"); return
             max_depth = 1
@@ -2490,7 +2499,18 @@ class BudaSession:
                 idx = list(args).index("depth")
                 if idx + 1 < len(args):
                     max_depth = int(args[idx + 1])
+            # Optional strategy token (anything that isn't 'depth'/its value).
+            strat_toks = [a.upper() for a in args
+                          if a.lower() != "depth" and not a.isdigit()]
+            strat = strat_toks[0] if strat_toks else "STRICT"
+            if strat not in ("STRICT", "BIDIRECTIONAL"):
+                print(f"Error: run_hier_bundler strategy must be STRICT or "
+                      f"BIDIRECTIONAL, got '{strat}'"); return
             hb = buda.HierarchicalBundler(self.bdb)
+            # BIDIRECTIONAL is direction-agnostic and connects the same blocks, so
+            # (like the flat run_bundler) it routes correctly — no warning needed.
+            hb.set_strategy(buda.Strategy.BIDIRECTIONAL if strat == "BIDIRECTIONAL"
+                            else buda.Strategy.STRICT)
             raw_bundles = hb.run(max_depth)
             self.bundles = []
             for b in raw_bundles:

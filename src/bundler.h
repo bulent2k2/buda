@@ -86,10 +86,15 @@ private:
 class HierarchicalBundler {
 public:
     explicit HierarchicalBundler(BDB& db);
+    // STRICT (default) groups by driver + receivers; BIDIRECTIONAL is
+    // direction-agnostic (sorted set of all endpoint names), so a net and its
+    // reverse — and the cyclic multi-receiver case — bundle together.
+    void set_strategy(Strategy s) { _strategy = s; }
     std::vector<HBundle> run(int max_depth = 1);
 
 private:
     BDB& _db;
+    Strategy _strategy = Strategy::STRICT;
 
     // Counts nets that fell back to UNKNOWN-direction positional driver/receiver
     // assignment during a run(); summarized once instead of one line per net.
@@ -111,5 +116,13 @@ private:
     static std::string _strict_sig(
         const std::string& drv_name,
         const std::vector<std::string>& sorted_rcv_names);
+
+    // Build BIDIRECTIONAL sig: "BIDIR:<name1>,<name2>,…" — the sorted, unique set
+    // of ALL endpoint names (driver + receivers), so direction is ignored.
+    static std::string _bidir_sig(std::vector<std::string> all_names);
+
+    // Signature for the active strategy given a net's driver + receiver names.
+    std::string _sig(const std::string& drv_name,
+                     const std::vector<std::string>& sorted_rcv_names) const;
 };
 }
