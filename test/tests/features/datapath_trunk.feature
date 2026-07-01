@@ -68,9 +68,12 @@ Feature: Multi-trunk BITRUNK trees for high-fan-out datapath nets
     Then some BITRUNK_HVH candidate has a vertical branch spanning column "B0","B1","B2"
 
   # ---------------------------------------------------------------------------
-  # Opt-in guard: without the multi_trunk flag, no BITRUNK candidate is produced.
+  # Opt-in guard: without the multi_trunk flag, the new two-level trees are not
+  # produced.  (The legacy single-level BITRUNK_H remains on the default path, so
+  # default candidate sets are unchanged — only BITRUNK_HVH / BITRUNK_VHV are
+  # gated behind the flag.)
   # ---------------------------------------------------------------------------
-  Scenario: BITRUNK is opt-in — plain generation produces none
+  Scenario: The two-level BITRUNK trees are opt-in — plain generation produces none
     Given a block "S"  at (0,0)-(60,60)
     And a block "A0" at (200,100)-(260,160)
     And a block "A1" at (200,300)-(260,360)
@@ -81,4 +84,5 @@ Feature: Multi-trunk BITRUNK trees for high-fan-out datapath nets
     And layer M4 is HORIZONTAL with id 4
     And layer M5 is VERTICAL with id 5
     When I generate multicast candidates from "S" to ["A0","A1","A2","B0","B1","B2"] using layers M4,M5
-    Then no candidate of type "BITRUNK" exists
+    Then no candidate of type "BITRUNK_HVH" exists
+    And no candidate of type "BITRUNK_VHV" exists

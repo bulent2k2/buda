@@ -2754,10 +2754,46 @@ void TopologyGenerator::add_multi_trunk_candidates(
     const std::vector<Busterm>& blocks,
     std::vector<Topology>& results)
 {
-    (void)pins;
-    if (!allow_multi_trunk_) return;
     const int n = (int)blocks.size();
-    if (n < 4) return;   // need enough fan-out for a ≥2-branch tree
+    if (n < 4) return;
+
+    // Legacy BITRUNK_H (two parallel H trunks + a central V backbone).  Emitted
+    // unconditionally, exactly as before this change, so the DEFAULT candidate set
+    // and planner choices are preserved — the opt-in flag below only ADDS the new
+    // two-level trees.
+    [&]() {
+        std::vector<int> y_coords;
+        for (const auto& p : pins) y_coords.push_back(p.y);
+        std::sort(y_coords.begin(), y_coords.end());
+        int y_mid = y_coords[y_coords.size() / 2];
+        int y_t1  = y_coords[y_coords.size() / 4];
+        int y_t2  = y_coords[3 * y_coords.size() / 4];
+        if (y_t1 == y_t2) return;
+        Topology t;
+        t.type = "BITRUNK_H";
+        int x_min = INT_MAX, x_max = INT_MIN;
+        for (const auto& p : pins) { x_min = std::min(x_min, p.x); x_max = std::max(x_max, p.x); }
+        int x_backbone = (x_min + x_max) / 2;
+        t.segments.push_back(make_seg(x_min, y_t1, x_max, y_t1, h_layer_));
+        t.segments.push_back(make_seg(x_min, y_t2, x_max, y_t2, h_layer_));
+        t.segments.push_back(make_seg(x_backbone, y_t1, x_backbone, y_t2, v_layer_));
+        int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
+        for (int i = 0; i < (int)blocks.size(); ++i) {
+            int yt = (pins[i].y <= y_mid) ? y_t1 : y_t2;
+            int src_y = blocks[i].orig_bbox.face_y(yt);
+            if (std::abs(yt - src_y) >= m_v) {
+                int si = (int)t.segments.size();
+                t.segments.push_back(make_seg(pins[i].x, src_y, pins[i].x, yt, v_layer_));
+                t.seg_busterms[si].first = blocks[i];
+            } else if (yt != src_y) {
+                return;   // a stub too short → legacy BITRUNK_H is not viable
+            }
+        }
+        results.push_back(std::move(t));
+    }();
+
+    // New two-level BITRUNK_HVH / BITRUNK_VHV trees — opt-in only.
+    if (!allow_multi_trunk_) return;   // need enough fan-out for a ≥2-branch tree
 
     // Split leaf indices into K clusters by a per-leaf key, cutting at the K-1
     // largest gaps in the sorted keys (natural columns/rows of a datapath).
