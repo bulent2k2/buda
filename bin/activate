@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# bin/activate — SOURCE this to put BUDA's bin/ on PATH and set PYTHONPATH.
+#
+#   source bin/activate                    # from the repo root
+#   source /abs/path/to/buda/bin/activate  # from anywhere
+#
+# A PATH change only affects the shell that sources the file, so this must be
+# *sourced*, not executed.  Run directly, it just prints how to source it.
+#
+# Idempotent: re-sourcing does not stack duplicate entries.  Works in bash and
+# zsh.  After sourcing you can invoke the wrappers bare (bb, buda, fp, bfp, viz,
+# u2b) and run `python3 src/buda_cli.py …` / `import buda` without a wrapper.
+
+# --- locate this file (bash or zsh) ------------------------------------------
+if [ -n "${BASH_SOURCE:-}" ]; then
+    _buda_self="${BASH_SOURCE[0]}"
+elif [ -n "${ZSH_VERSION:-}" ]; then
+    _buda_self="${(%):-%N}"
+else
+    _buda_self="$0"
+fi
+
+# --- refuse to be executed (a PATH change would vanish with the subshell) -----
+_buda_sourced=1
+if [ -n "${BASH_SOURCE:-}" ]; then
+    [ "${BASH_SOURCE[0]}" = "$0" ] && _buda_sourced=0
+elif [ -n "${ZSH_VERSION:-}" ]; then
+    case "$ZSH_EVAL_CONTEXT" in *:file:*) : ;; *) _buda_sourced=0 ;; esac
+fi
+if [ "$_buda_sourced" = 0 ]; then
+    echo "bin/activate must be sourced, not executed. Run:" >&2
+    echo "    source \"$_buda_self\"" >&2
+    exit 1
+fi
+
+# --- resolve repo root (one level up, same idiom the wrappers use) ------------
+_buda_root="$(cd "$(dirname "$_buda_self")/.." && pwd)"
+
+# --- prepend bin/ to PATH (idempotent) ---------------------------------------
+case ":$PATH:" in
+    *":$_buda_root/bin:"*) : ;;
+    *) PATH="$_buda_root/bin:$PATH" ;;
+esac
+export PATH
+
+# --- prepend build/ + tools/ to PYTHONPATH (idempotent, build-first) ---------
+case ":${PYTHONPATH:-}:" in
+    *":$_buda_root/build:"*) : ;;
+    *) PYTHONPATH="$_buda_root/build:$_buda_root/tools${PYTHONPATH:+:$PYTHONPATH}" ;;
+esac
+export PYTHONPATH
+
+echo "BUDA env ready: $_buda_root/bin on PATH (bb, buda, fp, bfp, viz, u2b); PYTHONPATH set."
+echo "  (run 'bb' once to build if you haven't yet)"
+
+unset _buda_self _buda_root _buda_sourced

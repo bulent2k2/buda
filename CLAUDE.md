@@ -35,13 +35,24 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 ## Wrapper scripts (`bin/`)
 
 All the launcher/build wrappers live in **`bin/`** at the repo root: `bb` (build),
-`buda` (routing CLI), `fp` / `bfp` (Floorplanner), `viz` (DEF/BDB visualizer), and
-`u2b` (unit-test → `.buda` visualizer). Each resolves the repo root as its parent
-dir, so it works from any CWD.
+`buda` (routing CLI), `fp` / `bfp` (Floorplanner), `viz` (DEF/BDB visualizer),
+`u2b` (unit-test → `.buda` visualizer), and `activate` (sourceable env setup).
+Each resolves the repo root as its parent dir, so it works from any CWD.
 
 **Add `<repo_root>/bin` to your `PATH`** and you can invoke them bare (`bb`, `buda
 flow/x.buda`, `u2b test_foo`); otherwise call them as `bin/bb`, `bin/buda …`, etc.
 The examples below use the `bin/…` form so they work without a PATH change.
+
+The one-step way (per shell) is to **source** `bin/activate` — it prepends
+`bin/` to `PATH` and sets `PYTHONPATH=build:tools` (so `python3 src/buda_cli.py …`
+and ad-hoc `import buda` work too). It is idempotent and must be *sourced*, not
+executed (a PATH change only affects the sourcing shell):
+
+```bash
+source bin/activate            # from the repo root, once per shell
+```
+
+Or set `PATH` manually / add it to your shell rc:
 
 ```bash
 export PATH="$PWD/bin:$PATH"   # from the repo root, once per shell (or add to your rc)
@@ -559,7 +570,7 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 
 | Area | Files |
 |---|---|
-| Build / wrappers | `CMakeLists.txt`, `bin/bb` (build), `bin/buda` / `bin/fp` / `bin/bfp` / `bin/viz` / `bin/u2b` (run), `pytest.ini` |
+| Build / wrappers | `CMakeLists.txt`, `bin/bb` (build), `bin/buda` / `bin/fp` / `bin/bfp` / `bin/viz` / `bin/u2b` (run), `bin/activate` (source: PATH+PYTHONPATH), `pytest.ini` |
 | DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
 | Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
