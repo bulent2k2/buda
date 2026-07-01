@@ -32,6 +32,19 @@ buda_system/
     └── pybind11/               # (Submodule) The binding library
 ```
 
+## Quick start
+
+```bash
+source bin/activate                   # per shell: puts bin/ on PATH, sets PYTHONPATH
+bb                                    # build the C++/pybind11 engine into build/
+buda flow/comprehensive_demo.buda     # run a routing flow
+u2b test_column_datapath_hvh          # convert a topology unit test to .buda + visualize
+```
+
+`bin/activate` must be **sourced**, not executed (a PATH change only affects the
+sourcing shell). Without it, invoke the wrappers as `bin/bb`, `bin/buda …`, etc.
+See [CLAUDE.md](CLAUDE.md) for the full build / run / test guide.
+
 ## License
 
 This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for the full text.
