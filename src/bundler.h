@@ -53,7 +53,15 @@ struct HBundle {
 
     std::vector<std::string> get_net_names() const { return net_names; }
 };
-enum class Strategy { STRICT, CONVERGENT };
+// STRICT       — same driver + same receivers (a true parallel bus).
+// CONVERGENT    — same receivers only, driver ignored (fan-in).
+// BIDIRECTIONAL — pairs a net with its reverse: a receiver instance of one net
+//                 is the driver of the other and vice-versa (A→B bundled with
+//                 B→A, e.g. a bus and its return path).  Like CONVERGENT it
+//                 groups nets with different drivers, so topology generation
+//                 (single src→dst per bundle) cannot yet route both directions
+//                 — see docs/internal/convergent_bundling.md.
+enum class Strategy { STRICT, CONVERGENT, BIDIRECTIONAL };
 class Netlist {
 public:
     void add_net(const std::string& name, const std::string& driver, const std::vector<std::string>& receivers);
@@ -71,6 +79,9 @@ private:
     Strategy current_strategy_;
     int depth_ = 0;
     std::string generate_signature(const Net& net) const;
+    // BIDIRECTIONAL grouping: union nets whose driver/receiver roles are mirror
+    // images (A→B with B→A) into one bundle; unpaired nets become singletons.
+    std::vector<HBundle> run_bidirectional(const Netlist& netlist) const;
 };
 
 // Hierarchy-aware bundler: reads nets+pins directly from BDB and produces

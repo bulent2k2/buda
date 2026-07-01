@@ -77,15 +77,28 @@ real (fan-in patterns: multiple masters → one slave, write data → memory), a
 fan-in tree** support so a bundle can root at several drivers and merge toward the
 shared sink. Until then it is a foot-gun.
 
+## The same limitation applies to BIDIRECTIONAL
+
+`run_bundler BIDIRECTIONAL` (`Strategy::BIDIRECTIONAL`, `bundler.cpp`
+`run_bidirectional`) pairs a net with its reverse — a receiver instance of one
+net is the driver of the other and vice-versa (A→B bundled with B→A, e.g. a bus
+and its return path). Such a bundle **spans two drivers by construction** (the
+forward net is driven by A, the reverse by B), so it hits exactly the same
+single-`src→dst` wall: topology generation routes one direction and leaves the
+other unrouted. It therefore warns like CONVERGENT and is covered by the same
+fix below. See `test/tests/test_bundler_bidirectional.py`.
+
 ## What we did about it (for now)
 
-- `run_bundler` now **honours** its `STRICT|CONVERGENT` argument (previously it
-  was parsed but ignored; default remains `STRICT`). Selecting `CONVERGENT`
-  prints a warning that multi-driver bundles route from a single driver and the
-  others are left unrouted, pointing here.
-- `test_bundler_convergent_pipeline.py` locks in all of the above: STRICT routes
-  every driver; CONVERGENT runs but reaches only one source row; the connectivity
-  checker does not flag the gap; and the CLI honours the argument + warns.
+- `run_bundler` now **honours** its `STRICT|CONVERGENT|BIDIRECTIONAL` argument
+  (previously only STRICT, and the argument was ignored; default remains
+  `STRICT`). Selecting `CONVERGENT` or `BIDIRECTIONAL` prints a warning that the
+  multi-driver bundle routes from a single driver and the rest are left unrouted,
+  pointing here.
+- `test_bundler_convergent_pipeline.py` / `test_bundler_bidirectional.py` lock in
+  the above: STRICT routes every driver; CONVERGENT/BIDIRECTIONAL run but reach
+  only one driver's direction; the connectivity checker does not flag the gap;
+  and the CLI honours the argument + warns.
 
 ## If we ever make CONVERGENT real
 

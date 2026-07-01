@@ -2439,21 +2439,27 @@ class BudaSession:
                 print("Error: set_track_pitch requires a pitch value"); return
             self._nuts_pitch = float(args[0])
         elif cmd == "run_bundler":
-            # run_bundler [STRICT|CONVERGENT]  (default STRICT)
+            # run_bundler [STRICT|CONVERGENT|BIDIRECTIONAL]  (default STRICT)
             strat_arg = args[0].upper() if args else "STRICT"
-            if strat_arg not in ("STRICT", "CONVERGENT"):
-                print(f"Error: run_bundler strategy must be STRICT or CONVERGENT, "
-                      f"got '{args[0]}'"); return
+            if strat_arg not in ("STRICT", "CONVERGENT", "BIDIRECTIONAL"):
+                print(f"Error: run_bundler strategy must be STRICT, CONVERGENT "
+                      f"or BIDIRECTIONAL, got '{args[0]}'"); return
+            # CONVERGENT and BIDIRECTIONAL both group nets with DIFFERENT drivers,
+            # which topology generation (a single src->dst per bundle) cannot yet
+            # route faithfully — one driver routes, the rest are left unrouted.
+            # Honour the request but warn rather than silently misroute.
+            # See docs/internal/convergent_bundling.md.
             if strat_arg == "CONVERGENT":
                 self.bundler.set_strategy(buda.Strategy.CONVERGENT)
-                # CONVERGENT groups nets by shared receiver only, so a bundle may
-                # span several drivers.  Topology generation models a bundle by a
-                # single src->dst, so such a bundle routes from ONE driver and the
-                # others are left unrouted.  Warn rather than silently misroute.
-                # See docs/internal/convergent_bundling.md.
                 print("Warning: run_bundler CONVERGENT groups nets by shared "
                       "receiver only; bundles that span multiple drivers are "
                       "routed from a single driver (the others are left "
+                      "unrouted). See docs/internal/convergent_bundling.md.")
+            elif strat_arg == "BIDIRECTIONAL":
+                self.bundler.set_strategy(buda.Strategy.BIDIRECTIONAL)
+                print("Warning: run_bundler BIDIRECTIONAL pairs a net with its "
+                      "reverse (A->B with B->A); such a bundle spans two drivers, "
+                      "so only one direction is routed (the reverse is left "
                       "unrouted). See docs/internal/convergent_bundling.md.")
             else:
                 self.bundler.set_strategy(buda.Strategy.STRICT)
