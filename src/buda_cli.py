@@ -324,6 +324,98 @@ class BudaSession:
                 n_cands += 1
         return n_cands
 
+    def _persist_nuts(self):
+        """Persist abstract-NUTS bus segments + symbolic bus-vias (Stage 4).
+
+        Written after run_nuts. Each placed TrackSegment becomes a bus_segment row
+        whose geometry is the placed rectangle (real coords). A bus-via is recorded
+        wherever two connected (endpoint-sharing) segments of the SAME bundle sit on
+        DIFFERENT layers — one symbolic row per bus-level transition (bit_width bit-
+        vias). No-op (returns (0, 0)) without an open BDB or NUTS result.
+
+        `bundle_id` is a soft link: the hier flow's expanded per-instance ids need
+        not have bundle-table rows (see docs/internal/wishlist-bdb.md).
+        """
+        if self.bdb is None or self.nuts_result is None:
+            return (0, 0)
+        self.bdb.clear_bus_routing()
+        for ts in self.nuts_result.segments:
+            r = buda.BusSegRow()
+            r.id = str(ts.bundle_id)
+            r.seg_idx = ts.seg_idx
+            r.layer = ts.layer
+            r.is_horiz = ts.horiz
+            half = ts.width / 2.0
+            if ts.horiz:                      # span is x; track_position is y
+                r.x1, r.x2 = ts.span_lo, ts.span_hi
+                r.y1, r.y2 = ts.track_position - half, ts.track_position + half
+            else:                             # span is y; track_position is x
+                r.y1, r.y2 = ts.span_lo, ts.span_hi
+                r.x1, r.x2 = ts.track_position - half, ts.track_position + half
+            r.track_position = ts.track_position
+            r.width = ts.width
+            r.placed = ts.placed
+            r.is_jog = ts.is_jog
+            self.bdb.add_bus_segment(r)
+        n_via = 0
+        for w in self.bundles:
+            n_via += self._persist_bundle_vias(w)
+        return (len(self.nuts_result.segments), n_via)
+
+    def _persist_bundle_vias(self, w):
+        """Record one symbolic bus-via per layer-transition in a bundle's placed
+        segments. Segment adjacency comes from `ConnTopology` (the repo's canonical
+        connection model), so it covers both shared-endpoint bends AND T-junctions
+        where a stub lands on a trunk's interior (multi-terminal topologies). The
+        via's position is the PLACED junction (from the segments' track positions).
+        """
+        sel = w.plan.selected_topology_index
+        if sel < 0 or sel >= len(w.input.candidates):
+            return 0
+        topo = w.input.candidates[sel]
+        bid = w.input.original_bundle.id
+        ts_map = {ts.seg_idx: ts for ts in self.nuts_result.segments
+                  if ts.bundle_id == bid}
+        bit_width = len(w.input.original_bundle.get_net_names())
+        ct = buda.ConnTopology()
+        ct.build(topo, self.fp)
+        segs = list(ct.segs())
+        n = 0
+        seen = set()
+        for a, cs in enumerate(segs):
+            ta = ts_map.get(a)
+            if ta is None or not ta.placed:
+                continue
+            for conn in cs.conns:
+                if conn.kind != buda.SegConnKind.SEG:
+                    continue
+                b = conn.seg_idx
+                tb = ts_map.get(b)
+                if tb is None or not tb.placed:
+                    continue
+                if ta.layer == tb.layer:                 # same layer → no via
+                    continue
+                key = (min(a, b), max(a, b))
+                if key in seen:                          # conns are symmetric
+                    continue
+                seen.add(key)
+                if ta.horiz != tb.horiz:                 # bend or T-junction (H↔V)
+                    h, v = (ta, tb) if ta.horiz else (tb, ta)
+                    jx, jy = v.track_position, h.track_position
+                elif ta.horiz:                           # stacked H segments
+                    jx, jy = conn.at_pos, ta.track_position
+                else:                                    # stacked V segments
+                    jx, jy = ta.track_position, conn.at_pos
+                r = buda.BusViaRow()
+                r.id = str(bid)
+                r.from_seg, r.to_seg = key
+                r.from_layer, r.to_layer = ts_map[key[0]].layer, ts_map[key[1]].layer
+                r.x, r.y = jx, jy
+                r.bit_width = bit_width
+                self.bdb.add_bus_via(r)
+                n += 1
+        return n
+
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
 
@@ -3185,6 +3277,10 @@ class BudaSession:
             layer_names = self._make_layer_names()
             diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
             self._write_nuts_log(layer_names, extra_lines=diag)
+            ns, nv = self._persist_nuts()
+            if ns:
+                print(f"[BDB] persisted {ns} bus segment(s) and {nv} bus via(s) "
+                      f"to the open BDB.")
         elif cmd == "def_track_pattern":
             # Usage: def_track_pattern <layer_id> <origin> [<type> <width> <space_after>] ...
             # Example: def_track_pattern 4 0.0  POWER 2.0 1.0  SIGNAL 1.0 1.0  GROUND 2.0 1.0

@@ -21,7 +21,8 @@ per-subsystem files so each area stays scannable.
 - **[wishlist-bdb.md](wishlist-bdb.md)** — BDB, test data & interchange.
   `open_bdb *.sql` write-back mode (✅), schema versioning (✅), provenance
   metadata (✅); persist the pipeline into the BDB — bundles (✅), topologies (✅),
-  abstract NUTS bus-segments + bus-vias (next; feeds OA/GDS).
+  abstract-NUTS bus-segments + bus-vias (✅); detailed-NUTS net-segments,
+  route-snapshot hash, and BDB→OA/GDS export remain.
 - **[wishlist-topo.md](wishlist-topo.md)** — Topology generation & connectivity.
   True along-flex trunk DOF (Stage C of the flexible-root re-arch).
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.

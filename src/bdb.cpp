@@ -132,6 +132,34 @@ static const char* TOPOLOGY_DDL = R"(
     );
 )";
 
+// Abstract-NUTS bus routing tables (schema v5). bundle_id is a *soft* link (no FK):
+// the hier flow's expanded per-instance ids need not exist in the bundle table.
+// Composite keys (no autoincrement) → deterministic *.bdb.sql dumps.
+static const char* NUTS_DDL = R"(
+    CREATE TABLE IF NOT EXISTS bus_segment (
+        bundle_id      TEXT,
+        seg_idx        INTEGER,
+        layer          INTEGER,
+        is_horiz       INTEGER DEFAULT 0,
+        x1 REAL, y1 REAL, x2 REAL, y2 REAL,
+        track_position REAL,
+        width          REAL,
+        placed         INTEGER DEFAULT 0,
+        is_jog         INTEGER DEFAULT 0,
+        PRIMARY KEY (bundle_id, seg_idx)
+    );
+    CREATE TABLE IF NOT EXISTS bus_via (
+        bundle_id  TEXT,
+        from_seg   INTEGER,
+        to_seg     INTEGER,
+        from_layer INTEGER,
+        to_layer   INTEGER,
+        x REAL, y REAL,
+        bit_width  INTEGER,
+        PRIMARY KEY (bundle_id, from_seg, to_seg)
+    );
+)";
+
 void BDB::_create_schema() {
     _exec(R"(
         CREATE TABLE IF NOT EXISTS component (
@@ -216,6 +244,7 @@ void BDB::_create_schema() {
     )");
     _exec(BUNDLE_DDL);     // bundle tables for a fresh DB
     _exec(TOPOLOGY_DDL);   // candidate-topology tables for a fresh DB
+    _exec(NUTS_DDL);       // abstract-NUTS bus routing tables for a fresh DB
     _migrate();
     Stmt mq(_db, "SELECT key,value FROM meta");
     while (sqlite3_step(mq) == SQLITE_ROW) {
@@ -318,6 +347,10 @@ void BDB::_migrate() {
     if (v < 4) {
         // v3 -> v4: add the candidate-topology tables (brand new, no data to move).
         _exec(TOPOLOGY_DDL);
+    }
+    if (v < 5) {
+        // v4 -> v5: add the abstract-NUTS bus routing tables (brand new).
+        _exec(NUTS_DDL);
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -2080,7 +2113,9 @@ void BDB::add_bundle_busterm(const std::string& bundle_id,
 
 void BDB::clear_bundles() {
     // Topologies FK to bundle, so clear them first (children before parents).
-    _exec("DELETE FROM topology_segment; DELETE FROM topology;"
+    // Bus routing is soft-linked to bundles too — drop it when bundles change.
+    _exec("DELETE FROM bus_via; DELETE FROM bus_segment;"
+          "DELETE FROM topology_segment; DELETE FROM topology;"
           "DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
 }
 
@@ -2231,6 +2266,93 @@ std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
         s.layer_hint = sqlite3_column_int(q, 7);
         s.is_jog     = sqlite3_column_int(q, 8) != 0;
         out.push_back(std::move(s));
+    }
+    return out;
+}
+
+// ── Abstract-NUTS bus routing persistence ────────────────────────────────────
+
+void BDB::add_bus_segment(const BusSegRow& r) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO bus_segment(bundle_id,seg_idx,layer,is_horiz,"
+        "x1,y1,x2,y2,track_position,width,placed,is_jog)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
+    sqlite3_bind_text  (s, 1, r.id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 2, r.seg_idx);
+    sqlite3_bind_int   (s, 3, r.layer);
+    sqlite3_bind_int   (s, 4, r.is_horiz ? 1 : 0);
+    sqlite3_bind_double(s, 5, r.x1);
+    sqlite3_bind_double(s, 6, r.y1);
+    sqlite3_bind_double(s, 7, r.x2);
+    sqlite3_bind_double(s, 8, r.y2);
+    sqlite3_bind_double(s, 9, r.track_position);
+    sqlite3_bind_double(s, 10, r.width);
+    sqlite3_bind_int   (s, 11, r.placed ? 1 : 0);
+    sqlite3_bind_int   (s, 12, r.is_jog ? 1 : 0);
+    sqlite3_step(s);
+}
+
+void BDB::add_bus_via(const BusViaRow& r) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO bus_via(bundle_id,from_seg,to_seg,from_layer,"
+        "to_layer,x,y,bit_width) VALUES(?,?,?,?,?,?,?,?)");
+    sqlite3_bind_text  (s, 1, r.id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 2, r.from_seg);
+    sqlite3_bind_int   (s, 3, r.to_seg);
+    sqlite3_bind_int   (s, 4, r.from_layer);
+    sqlite3_bind_int   (s, 5, r.to_layer);
+    sqlite3_bind_double(s, 6, r.x);
+    sqlite3_bind_double(s, 7, r.y);
+    sqlite3_bind_int   (s, 8, r.bit_width);
+    sqlite3_step(s);
+}
+
+void BDB::clear_bus_routing() {
+    _exec("DELETE FROM bus_via; DELETE FROM bus_segment;");
+}
+
+std::vector<BusSegRow> BDB::bus_segments(const std::string& bundle_id) const {
+    Stmt q(_db,
+        "SELECT bundle_id,seg_idx,layer,is_horiz,x1,y1,x2,y2,track_position,"
+        "width,placed,is_jog FROM bus_segment WHERE bundle_id=? ORDER BY seg_idx");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<BusSegRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        BusSegRow r;
+        r.id             = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        r.seg_idx        = sqlite3_column_int(q, 1);
+        r.layer          = sqlite3_column_int(q, 2);
+        r.is_horiz       = sqlite3_column_int(q, 3) != 0;
+        r.x1 = sqlite3_column_double(q, 4);
+        r.y1 = sqlite3_column_double(q, 5);
+        r.x2 = sqlite3_column_double(q, 6);
+        r.y2 = sqlite3_column_double(q, 7);
+        r.track_position = sqlite3_column_double(q, 8);
+        r.width          = sqlite3_column_double(q, 9);
+        r.placed         = sqlite3_column_int(q, 10) != 0;
+        r.is_jog         = sqlite3_column_int(q, 11) != 0;
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+std::vector<BusViaRow> BDB::bus_vias(const std::string& bundle_id) const {
+    Stmt q(_db,
+        "SELECT bundle_id,from_seg,to_seg,from_layer,to_layer,x,y,bit_width"
+        " FROM bus_via WHERE bundle_id=? ORDER BY from_seg, to_seg");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<BusViaRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        BusViaRow r;
+        r.id         = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        r.from_seg   = sqlite3_column_int(q, 1);
+        r.to_seg     = sqlite3_column_int(q, 2);
+        r.from_layer = sqlite3_column_int(q, 3);
+        r.to_layer   = sqlite3_column_int(q, 4);
+        r.x = sqlite3_column_double(q, 5);
+        r.y = sqlite3_column_double(q, 6);
+        r.bit_width  = sqlite3_column_int(q, 7);
+        out.push_back(std::move(r));
     }
     return out;
 }

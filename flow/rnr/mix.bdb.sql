@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=4;
+PRAGMA user_version=5;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -26,6 +26,28 @@ CREATE TABLE bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
         net_id    INTEGER REFERENCES net(id),
         PRIMARY KEY (bundle_id, net_id)
+    );
+CREATE TABLE bus_segment (
+        bundle_id      TEXT,
+        seg_idx        INTEGER,
+        layer          INTEGER,
+        is_horiz       INTEGER DEFAULT 0,
+        x1 REAL, y1 REAL, x2 REAL, y2 REAL,
+        track_position REAL,
+        width          REAL,
+        placed         INTEGER DEFAULT 0,
+        is_jog         INTEGER DEFAULT 0,
+        PRIMARY KEY (bundle_id, seg_idx)
+    );
+CREATE TABLE bus_via (
+        bundle_id  TEXT,
+        from_seg   INTEGER,
+        to_seg     INTEGER,
+        from_layer INTEGER,
+        to_layer   INTEGER,
+        x REAL, y REAL,
+        bit_width  INTEGER,
+        PRIMARY KEY (bundle_id, from_seg, to_seg)
     );
 CREATE TABLE busterm (
             id         TEXT PRIMARY KEY,
@@ -1069,7 +1091,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','4');
+INSERT INTO "meta" VALUES('schema_version','5');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,

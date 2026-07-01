@@ -125,6 +125,32 @@ void bind_db(py::module_& m) {
         .def_readwrite("layer_hint", &TopoSegRow::layer_hint)
         .def_readwrite("is_jog",     &TopoSegRow::is_jog);
 
+    py::class_<BusSegRow>(m, "BusSegRow")
+        .def(py::init<>())
+        .def_readwrite("id",             &BusSegRow::id)
+        .def_readwrite("seg_idx",        &BusSegRow::seg_idx)
+        .def_readwrite("layer",          &BusSegRow::layer)
+        .def_readwrite("is_horiz",       &BusSegRow::is_horiz)
+        .def_readwrite("x1",             &BusSegRow::x1)
+        .def_readwrite("y1",             &BusSegRow::y1)
+        .def_readwrite("x2",             &BusSegRow::x2)
+        .def_readwrite("y2",             &BusSegRow::y2)
+        .def_readwrite("track_position", &BusSegRow::track_position)
+        .def_readwrite("width",          &BusSegRow::width)
+        .def_readwrite("placed",         &BusSegRow::placed)
+        .def_readwrite("is_jog",         &BusSegRow::is_jog);
+
+    py::class_<BusViaRow>(m, "BusViaRow")
+        .def(py::init<>())
+        .def_readwrite("id",         &BusViaRow::id)
+        .def_readwrite("from_seg",   &BusViaRow::from_seg)
+        .def_readwrite("to_seg",     &BusViaRow::to_seg)
+        .def_readwrite("from_layer", &BusViaRow::from_layer)
+        .def_readwrite("to_layer",   &BusViaRow::to_layer)
+        .def_readwrite("x",          &BusViaRow::x)
+        .def_readwrite("y",          &BusViaRow::y)
+        .def_readwrite("bit_width",  &BusViaRow::bit_width);
+
     py::class_<CellRow>(m, "CellRow")
         .def_readwrite("name",   &CellRow::name)
         .def_readwrite("width",  &CellRow::width)
@@ -183,6 +209,11 @@ void bind_db(py::module_& m) {
         .def("topologies",           &BDB::topologies, py::arg("bundle_id"))
         .def("topology_segments",    &BDB::topology_segments,
              py::arg("bundle_id"), py::arg("cand_index"))
+        .def("add_bus_segment",   &BDB::add_bus_segment, py::arg("r"))
+        .def("add_bus_via",       &BDB::add_bus_via, py::arg("r"))
+        .def("clear_bus_routing", &BDB::clear_bus_routing)
+        .def("bus_segments",      &BDB::bus_segments, py::arg("bundle_id"))
+        .def("bus_vias",          &BDB::bus_vias, py::arg("bundle_id"))
         .def("nets_by_hpwl",    &BDB::nets_by_hpwl,
              py::arg("lo"), py::arg("hi"))
         .def("comps_in_rect",   &BDB::comps_in_rect,
