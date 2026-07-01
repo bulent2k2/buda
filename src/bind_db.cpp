@@ -215,6 +215,8 @@ void bind_db(py::module_& m) {
         .def("set_segment_layer",     &BDB::set_segment_layer,
              py::arg("bundle_id"), py::arg("cand_index"),
              py::arg("seg_index"), py::arg("layer"))
+        .def("reset_assigned_layers", &BDB::reset_assigned_layers,
+             py::arg("bundle_id"))
         .def("clear_expanded_bundles", &BDB::clear_expanded_bundles)
         .def("add_bus_segment",   &BDB::add_bus_segment, py::arg("r"))
         .def("add_bus_via",       &BDB::add_bus_via, py::arg("r"))

@@ -320,6 +320,9 @@ public:
     // Set the planner's assigned layer on one topology segment.
     void set_segment_layer(const std::string& bundle_id, int cand_index,
                            int seg_index, int layer);
+    // Reset assigned_layer to -1 for ALL of a bundle's segments (drops stale
+    // planner output when a re-plan picks a different candidate).
+    void reset_assigned_layers(const std::string& bundle_id);
     // Remove the expanded per-instance bundle rows (is_replicated=1) and the
     // topologies keyed to them (idempotency for re-running run_planner hier).
     void clear_expanded_bundles();

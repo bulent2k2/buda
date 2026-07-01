@@ -131,6 +131,48 @@ def test_planner_output_roundtrip_through_sql(tmp_path):
     assert [t.cand_index for t in db2.topologies(bid) if t.is_selected] == [sel]
 
 
+def test_flat_late_open_bdb_persists_as_normal_bundle(tmp_path):
+    # Flat flow that opens the BDB AFTER run_bundler/generate_topologies: the
+    # bundle is absent from the BDB at run_planner, but it must be persisted as a
+    # NORMAL bundle (is_replicated=0, all candidates) — not misclassified as a hier
+    # expanded instance (Codex #128 P2).
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s,
+           "source flow/rnr/mix_tracks.buda",
+           "add_block A 0 0 200 400",
+           "add_block B 600 800 800 1200",
+           "add_bus d[8] A.p B.p",
+           "run_bundler", "generate_topologies",     # no BDB yet
+           f"open_bdb {tmp_path / 'late.bdb'}",       # open late
+           "run_planner 3")
+    rows = s.bdb.all_bundles()
+    assert len(rows) == 1 and not rows[0].is_replicated
+    bid = rows[0].id
+    # ALL candidates persisted (not just the selected one).
+    assert len(s.bdb.topologies(bid)) == len(s.bundles[0].input.candidates)
+    sel = s.bundles[0].plan.selected_topology_index
+    assert [t.cand_index for t in s.bdb.topologies(bid) if t.is_selected] == [sel]
+
+
+def test_replan_resets_stale_assigned_layers(tmp_path):
+    # Re-planning onto a different candidate must clear the prior candidate's
+    # assigned_layer rows — only the currently selected candidate carries layers
+    # (Codex #128 P2).
+    s = _flat_planned(str(tmp_path / "flat.bdb"))
+    bid = str(s.bundles[0].input.original_bundle.id)
+    ncand = len(s.bundles[0].input.candidates)
+    assert ncand >= 2
+    first = s.bundles[0].plan.selected_topology_index
+    other = next(i for i in range(ncand) if i != first)
+    _quiet(s, f"select_topology {bid} {other + 1}", "run_planner 3")  # pin a different candidate
+    with_layers = {t.cand_index for t in s.bdb.topologies(bid)
+                   if any(sg.assigned_layer >= 0
+                          for sg in s.bdb.topology_segments(bid, t.cand_index))}
+    selected = {t.cand_index for t in s.bdb.topologies(bid) if t.is_selected}
+    assert with_layers <= selected           # no stale layers on non-selected candidates
+
+
 def test_v5_db_migrates_to_v6_adds_assigned_layer(tmp_path):
     p = str(tmp_path / "v5.bdb")
     con = sqlite3.connect(p)

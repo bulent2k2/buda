@@ -2297,6 +2297,12 @@ void BDB::set_segment_layer(const std::string& bundle_id, int cand_index,
     sqlite3_step(s);
 }
 
+void BDB::reset_assigned_layers(const std::string& bundle_id) {
+    Stmt s(_db, "UPDATE topology_segment SET assigned_layer=-1 WHERE bundle_id=?");
+    sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
 void BDB::clear_expanded_bundles() {
     // Expanded per-instance bundles are marked is_replicated=1. Drop them and any
     // rows keyed to them (topologies, memberships) — children before parents.
