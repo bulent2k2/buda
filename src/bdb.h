@@ -118,8 +118,9 @@ struct TopoSegRow {
     int         cand_index = 0;
     int         seg_index = 0;
     int         x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-    int         layer_hint = 0;
+    int         layer_hint = 0;     // generation-time hint
     bool        is_jog = false;
+    int         assigned_layer = -1;// planner's per-segment layer (-1 = unassigned)
 };
 
 // One placed abstract-NUTS bus segment (Stage-4 output). `id` is a *soft* link to
@@ -170,8 +171,9 @@ public:
     // v2 = bundle-persistence tables (bundle / bundle_net / bundle_busterm);
     // v3 = bundle_net re-keyed by net_id (was net_name);
     // v4 = candidate-topology tables (topology / topology_segment);
-    // v5 = abstract-NUTS bus routing tables (bus_segment / bus_via).
-    static constexpr int SCHEMA_VERSION = 5;
+    // v5 = abstract-NUTS bus routing tables (bus_segment / bus_via);
+    // v6 = topology_segment.assigned_layer (planner's per-segment layer).
+    static constexpr int SCHEMA_VERSION = 6;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -312,6 +314,15 @@ public:
     std::vector<TopoRow> topologies(const std::string& bundle_id) const;
     std::vector<TopoSegRow> topology_segments(const std::string& bundle_id,
                                               int cand_index) const;
+    // Mark one candidate as the selected topology for a bundle (planner choice or
+    // pin): sets is_selected=1 for cand_index, 0 for the bundle's other rows.
+    void set_topology_selected(const std::string& bundle_id, int cand_index);
+    // Set the planner's assigned layer on one topology segment.
+    void set_segment_layer(const std::string& bundle_id, int cand_index,
+                           int seg_index, int layer);
+    // Remove the expanded per-instance bundle rows (is_replicated=1) and the
+    // topologies keyed to them (idempotency for re-running run_planner hier).
+    void clear_expanded_bundles();
 
     // ── Abstract-NUTS bus routing persistence (Stage-4 output) ─────────────
     void add_bus_segment(const BusSegRow& r);       // INSERT OR REPLACE

@@ -70,7 +70,8 @@ topology         bundle_id→bundle, cand_index, type, wirelength,
                  feedthru_blocks (JSON), is_selected
                  PRIMARY KEY (bundle_id, cand_index)
 topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
-                 layer_hint, is_jog   PK (bundle_id, cand_index, seg_index)
+                 layer_hint, is_jog, assigned_layer (planner's per-seg layer)
+                 PK (bundle_id, cand_index, seg_index)
                  FK (bundle_id, cand_index) → topology
 
 bus_segment      bundle_id (soft link), seg_idx, layer, is_horiz,
@@ -91,8 +92,9 @@ meta             key (TEXT PK), value  — die_w, die_h, units,
 `meta.schema_version`) and migrates forward on open. v1 added versioning +
 provenance; v2 added the **bundle-persistence** shape above; v3 re-keyed
 `bundle_net` by `net_id`; v4 added the **candidate-topology** tables; v5 added the
-**abstract-NUTS bus-routing** tables. `tools/bdb_serialize.py` preserves the
-version across the `*.bdb.sql` round-trip.
+**abstract-NUTS bus-routing** tables; v6 added `topology_segment.assigned_layer`
+(the planner's per-segment layer). `tools/bdb_serialize.py` preserves the version
+across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
 their Stage-1 bundles into `bundle` / `bundle_net` / `bundle_busterm` whenever a
@@ -119,10 +121,19 @@ bus row's `bundle_id` may be an instance id with no `bundle` table row.
 `topology` / `topology_segment` whenever a BDB is open — **before** `run_planner`,
 so a design's candidates are inspectable/tweakable without paying the planner's
 runtime on large designs. `clear_bundles()` also wipes the topology tables (they
-FK to `bundle`). `is_selected` reflects a pre-plan pin; recording the planner's
-choice is a follow-up. C++ API: `add_topology(TopoRow)`,
+FK to `bundle`). C++ API: `add_topology(TopoRow)`,
 `add_topology_segment(TopoSegRow)`, `clear_topologies()`, `topologies(bundle_id)`,
 `topology_segments(bundle_id, cand_index)`.
+
+**Planner-output persistence.** `run_planner` records its decision: it marks the
+selected candidate (`topology.is_selected`, via `set_topology_selected`) and the
+per-segment assigned layers (`topology_segment.assigned_layer`, via
+`set_segment_layer`). In the **hier** flow, `run_planner hier` expands cell-level
+bundles into per-instance wrappers; those are persisted as `is_replicated=1`
+`bundle` rows (`parent_id` = the template bundle) carrying just their selected
+topology, so `bus_segment` rows join back to a bundle. `clear_expanded_bundles()`
+drops those instance rows (idempotent re-plan). Templates keep their full candidate
+set; each instance records its own selection + layers.
 
 **coordinates** are in microns (µm). `import_def_lef` converts from DEF
 internal units using the `UNITS DISTANCE MICRONS` value from the DEF header.
