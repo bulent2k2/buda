@@ -27,8 +27,9 @@ using namespace buda;
 
 void bind_bundler(py::module_& m) {
     py::enum_<Strategy>(m, "Strategy")
-        .value("STRICT",     Strategy::STRICT)
-        .value("CONVERGENT", Strategy::CONVERGENT);
+        .value("STRICT",        Strategy::STRICT)
+        .value("CONVERGENT",    Strategy::CONVERGENT)
+        .value("BIDIRECTIONAL", Strategy::BIDIRECTIONAL);
 
     py::class_<HBundle>(m, "HBundle")
         .def(py::init<>())

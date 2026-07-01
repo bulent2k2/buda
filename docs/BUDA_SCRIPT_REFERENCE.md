@@ -584,15 +584,23 @@ run_nuts               # reuses 2.0 automatically — no need to pass it again
 ```
 run_bundler strict
 run_bundler convergent
+run_bundler bidirectional
 ```
 
-Group all nets in the netlist into `Bundle` objects. Must be called after
-all `add_net` / `add_bus` commands and before `generate_topologies_for_bundle`.
+Group all nets in the netlist into `Bundle` objects (default `strict`). Must be
+called after all `add_net` / `add_bus` commands and before
+`generate_topologies_for_bundle`.
 
 | Strategy | Grouping rule |
 |---|---|
-| `strict` | Driver instance **and** sorted receiver instances must match exactly. |
-| `convergent` | Only sorted receiver instances must match; different drivers allowed. |
+| `strict` | Driver instance **and** sorted receiver instances must match exactly (a true parallel bus). |
+| `convergent` | Only sorted receiver instances must match; different drivers allowed (fan-in). |
+| `bidirectional` | Pairs a net with its reverse: a receiver instance of one is the driver of the other and vice-versa (A→B bundled with B→A — a bus and its return path). Unpaired one-way nets stay singletons. |
+
+> ⚠️ `convergent` and `bidirectional` group nets with **different drivers**, which
+> topology generation (a single `src→dst` per bundle) cannot yet route faithfully
+> — only one driver's direction is routed and the rest are left unrouted. Both
+> print a warning. See [`docs/internal/convergent_bundling.md`](internal/convergent_bundling.md).
 
 Bundle width is computed automatically as `1.5 × (number of nets)` layout
 units. The bundler prints the number of bundles created.
