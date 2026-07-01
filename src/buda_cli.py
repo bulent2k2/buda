@@ -146,6 +146,7 @@ class BudaSession:
         self.bundler = buda.Bundler()
         self.planner = None
         self.bundles = []
+        self._bundler_strategy = "STRICT"  # last run_[hier_]bundler strategy (for re-persist)
         self.nuts_result = None
         self._layer_overheads = {}   # layer_id -> overhead_percent
         self._planner_params  = {}   # param_name -> value (buffered before planner exists)
@@ -287,6 +288,11 @@ class BudaSession:
         if self.bdb is None:
             return 0
         import json
+        # Ensure the FK-parent bundle rows exist and match the current bundles.
+        # (A flat flow may have run run_bundler *before* open_bdb, so the bundles
+        # were never persisted; without this the topology.bundle_id FK would reject
+        # every insert.) Re-persisting is idempotent and keeps the two in sync.
+        self._persist_bundles(self._bundler_strategy)
         self.bdb.clear_topologies()
         n_cands = 0
         for w in self.bundles:
@@ -2782,6 +2788,7 @@ class BudaSession:
                 w.input.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
                 self.bundles.append(w)
             print(f"Bundler created {len(self.bundles)} hbundles.")
+            self._bundler_strategy = strat_arg
             n = self._persist_bundles(strat_arg)
             if n:
                 print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
@@ -2831,6 +2838,7 @@ class BudaSession:
                 print(f"  Warning: {len(dropped)} net(s) not placed in any bundle "
                       f"(possibly UNKNOWN direction or missing receiver): "
                       f"{', '.join(shown)}{ellipsis_str}")
+            self._bundler_strategy = strat
             n = self._persist_bundles(strat)
             if n:
                 print(f"[BDB] persisted {n} bundle(s) to the open BDB.")
@@ -3346,6 +3354,7 @@ class BudaSession:
             tid = int(args[1])
             if self._select_single_topology_internal(bid, tid):
                 self._replan_layers()
+                self._persist_topologies()   # refresh is_selected in the BDB
 
         elif cmd == "select_topologies":
             # Usage: select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
@@ -3390,6 +3399,7 @@ class BudaSession:
                         any_found = True
             if any_found:
                 self._replan_layers()
+                self._persist_topologies()   # refresh is_selected in the BDB
 
         elif cmd == "check_connectivity":
             # Usage: check_connectivity [topo|nuts|dnuts] [all]

@@ -139,6 +139,36 @@ def test_generate_topologies_without_bdb_is_noop():
     assert s._persist_topologies() == 0        # no BDB → no-op, no crash
 
 
+def test_generate_after_late_open_bdb_persists(tmp_path):
+    # run_bundler BEFORE open_bdb: bundles weren't persisted at bundler time, so
+    # _persist_topologies must first sync the FK-parent bundle rows, else the
+    # topology.bundle_id FK silently rejects every insert (Codex #126 P2).
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s,
+           "source flow/rnr/mix_tracks.buda",
+           "add_block A 0 0 200 400",
+           "add_block B 1000 0 1200 400",
+           "add_bus d[8] A.p B.p",
+           "run_bundler",                                  # no BDB yet
+           f"open_bdb {tmp_path / 'late.bdb'}",            # open AFTER bundling
+           "generate_topologies")
+    bid = str(s.bundles[0].input.original_bundle.id)
+    assert len(s.bdb.all_bundles()) == 1                    # bundle row synced
+    assert len(s.bdb.topologies(bid)) >= 1                  # topologies actually landed
+
+
+def test_select_topology_refreshes_is_selected(tmp_path):
+    # Pinning a candidate before run_planner must update is_selected in the BDB,
+    # not just the in-memory index (Codex #126 P2).
+    s = _flat_session(str(tmp_path / "flat.bdb"))
+    bid = str(s.bundles[0].input.original_bundle.id)
+    assert not any(t.is_selected for t in s.bdb.topologies(bid))   # none pinned yet
+    _quiet(s, f"select_topology {bid} 2")                   # pin 1-based #2 -> index 1
+    selected = [t.cand_index for t in s.bdb.topologies(bid) if t.is_selected]
+    assert selected == [1]
+
+
 def test_v3_db_migrates_to_v4_adds_topology_tables(tmp_path):
     p = str(tmp_path / "v3.bdb")
     con = sqlite3.connect(p)
