@@ -3258,7 +3258,12 @@ class BudaSession:
                 print("Error: open_bdb requires a file path"); return
             # Persist any fixture armed by a previous open_bdb before switching.
             self._flush_bdb_writeback()
-            writeback = "writeback" in args[1:]
+            # `writeback` must be the explicit optional argument immediately after
+            # the path. A membership test (`in args[1:]`) would also match the word
+            # inside a trailing comment — do_command only strips full-line comments,
+            # so `open_bdb foo.sql # no writeback` keeps 'writeback' as a token —
+            # silently arming write-back on a fixture from a read-looking line.
+            writeback = len(args) >= 2 and args[1] == "writeback"
             bdb_path = args[0]
             if (self._script_stack
                     and not os.path.isabs(bdb_path)

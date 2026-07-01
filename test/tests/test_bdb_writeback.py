@@ -95,6 +95,22 @@ def test_reopen_flushes_previous_writeback(tmp_path):
     assert "FIRST" in open(sql1).read()
 
 
+def test_inline_comment_does_not_arm_writeback(tmp_path):
+    # `writeback` must be the explicit arg after the path — the word appearing in a
+    # trailing comment (do_command only strips full-line comments) must NOT arm it,
+    # or a read-looking line could rewrite the committed fixture.
+    sql = _make_sql(tmp_path)
+    before = open(sql).read()
+    s = _session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"open_bdb {sql} # no writeback")   # comment mentions writeback
+        assert s._bdb_writeback_src is None              # not armed
+        s.bdb.add_cell("SHOULDNOTPERSIST", 7, 7)
+        with pytest.raises(SystemExit):
+            s.do_command("exit 0")                       # exit flush is a no-op
+    assert open(sql).read() == before                    # fixture untouched
+
+
 def test_writeback_on_binary_path_is_ignored(tmp_path):
     binp = str(tmp_path / "x.bdb")
     db = buda.BDB(binp)
