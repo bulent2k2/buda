@@ -2319,6 +2319,15 @@ class BudaSession:
         if self._flow_log is not None:
             self._flow_log.write(text); self._flow_log.flush()
 
+    def _log_write(self, text):
+        """Mirror a diagnostic to the flow log, independent of the per-command
+        capture.  Used by passthrough commands (e.g. a `source` that fails fast)
+        whose own output bypasses run_command's capture but must still land in
+        the post-mortem log."""
+        if self._flow_log is not None:
+            self._flow_log.write(text if text.endswith('\n') else text + '\n')
+            self._flow_log.flush()
+
     def do_command(self, cmd_line):
         parts = cmd_line.strip().split()
         if not parts or parts[0].startswith('#'): return
@@ -3556,7 +3565,8 @@ class BudaSession:
             print(f"refine_busterms: {len(bts)} busterms written.")
         elif cmd == "source":
             if not args:
-                print("Error: source command requires a file path")
+                msg = "Error: source command requires a file path"
+                print(msg); self._log_write(msg)
                 return
 
             raw_path = args[0]
@@ -3577,8 +3587,9 @@ class BudaSession:
                 # default and routes on the wrong metal with no obvious cause.
                 where = (f" in {os.path.basename(self._script_stack[-1])}"
                          if self._script_stack else "")
-                print(f"Error: sourced file not found{where}: {full_path} "
-                      f"('{cmd_line.strip()}').")
+                msg = (f"Error: sourced file not found{where}: {full_path} "
+                       f"('{cmd_line.strip()}').")
+                print(msg); self._log_write(msg)
                 sys.exit(1)
 
             if self.script_path is None:

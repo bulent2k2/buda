@@ -85,3 +85,20 @@ def test_no_duplication_between_terminal_and_log(tmp_path):
     assert detail_lines, "expected per-layer NUTS detail in the log"
     for ln in detail_lines:
         assert ln not in stdout
+
+
+def test_source_failure_recorded_in_log(tmp_path):
+    """A fail-fast `source` error is a passthrough command's own diagnostic —
+    it must still be mirrored into the flow log for batch post-mortems."""
+    script = tmp_path / "flow.buda"
+    script.write_text("def_layer 4 M4 H TOP 10\nsource nope_missing.buda\n")
+    build_dir, tools_dir = _ROOT / "build", _ROOT / "tools"
+    ppath = os.environ.get("PYTHONPATH", "")
+    env = {**os.environ,
+           "PYTHONPATH": f"{build_dir}:{tools_dir}:{ppath}".rstrip(":")}
+    r = subprocess.run([sys.executable, str(CLI), "--no-viz", str(script)],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 1, r.stdout + r.stderr
+    log = (tmp_path / "log" / "flow_flow.log").read_text()
+    assert "Error: sourced file not found" in log
+    assert "nope_missing.buda" in log
