@@ -1683,6 +1683,7 @@ class BudaVisualizer:
         self._block_name_artists = [] # text artists created by draw_blocks
         self._home_xlim          = None
         self._home_ylim          = None
+        self._home_data_bbox     = None   # raw data bbox (x0,x1,y0,y1) for maximal home fit
         self._busterm_artists    = []    # driver/receiver terminal artists
         self._vias_conns_artists = []    # via and busterm-conn marker artists
         self._keepout_artists    = []    # hatched rectangles + labels
@@ -2740,7 +2741,14 @@ class BudaVisualizer:
         extract_from_fullscreen_tab(self._topo_explorer.fig)
 
     def _zoom_home(self):
-        if self._home_xlim is not None:
+        if self._home_data_bbox is not None:
+            # Recompute the maximal fill from the cached data bbox so the home
+            # view stays maximal even if the window was resized since first draw.
+            _set_lims_filling_box(self.ax, *self._home_data_bbox)
+            toolbar = getattr(self.fig.canvas, 'toolbar', None)
+            if toolbar is not None:
+                toolbar.update()   # reset toolbar nav stack to current limits
+        elif self._home_xlim is not None:
             self.ax.set_xlim(self._home_xlim)
             self.ax.set_ylim(self._home_ylim)
             toolbar = getattr(self.fig.canvas, 'toolbar', None)
@@ -3643,14 +3651,21 @@ class BudaVisualizer:
         ]
         self.ax.legend(handles=legend_handles, loc='upper right')
         self.ax.autoscale_view()
-        self._home_xlim = self.ax.get_xlim()
-        self._home_ylim = self.ax.get_ylim()
+        self._home_data_bbox = self.ax.get_xlim() + self.ax.get_ylim()  # (x0,x1,y0,y1)
 
         # Right panel: x=0.83, width=0.15.  Plot right edge at 0.81.
         # Left panel: centered area for toggles and heatmap.
         # bottom=0.11 reserves room for x-tick labels above the button row.
         # top=0.97 reclaims the wasted margin above the title.
         self.fig.subplots_adjust(left=0.13, bottom=0.11, right=0.81, top=0.97)
+
+        # Expand the autoscaled data bbox to the main axes' on-screen aspect so
+        # the home view fills the window (same maximal framing as cmd-z) instead
+        # of collapsing to a thin sliver under set_aspect('equal').  Done after
+        # subplots_adjust so the axes box reflects the final layout.
+        _set_lims_filling_box(self.ax, *self._home_data_bbox)
+        self._home_xlim = self.ax.get_xlim()
+        self._home_ylim = self.ax.get_ylim()
 
         # ── Left panel: view toggles ──────────────────────────────────────
         LX, LW = self._LX, self._LW
