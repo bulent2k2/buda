@@ -2439,7 +2439,24 @@ class BudaSession:
                 print("Error: set_track_pitch requires a pitch value"); return
             self._nuts_pitch = float(args[0])
         elif cmd == "run_bundler":
-            self.bundler.set_strategy(buda.Strategy.STRICT)
+            # run_bundler [STRICT|CONVERGENT]  (default STRICT)
+            strat_arg = args[0].upper() if args else "STRICT"
+            if strat_arg not in ("STRICT", "CONVERGENT"):
+                print(f"Error: run_bundler strategy must be STRICT or CONVERGENT, "
+                      f"got '{args[0]}'"); return
+            if strat_arg == "CONVERGENT":
+                self.bundler.set_strategy(buda.Strategy.CONVERGENT)
+                # CONVERGENT groups nets by shared receiver only, so a bundle may
+                # span several drivers.  Topology generation models a bundle by a
+                # single src->dst, so such a bundle routes from ONE driver and the
+                # others are left unrouted.  Warn rather than silently misroute.
+                # See docs/internal/convergent_bundling.md.
+                print("Warning: run_bundler CONVERGENT groups nets by shared "
+                      "receiver only; bundles that span multiple drivers are "
+                      "routed from a single driver (the others are left "
+                      "unrouted). See docs/internal/convergent_bundling.md.")
+            else:
+                self.bundler.set_strategy(buda.Strategy.STRICT)
             raw_bundles = self.bundler.run(self.netlist)
             self.bundles = []
             for b in raw_bundles:
