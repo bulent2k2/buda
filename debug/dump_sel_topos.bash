@@ -8,5 +8,5 @@ dump_topologies
 exit
 EOF
 cp /tmp/cl_dump.buda flow/big_data_test/_cl_dump.buda
-./buda --no-viz flow/big_data_test/_cl_dump.buda 2>&1 | grep -E "── bundle (57|46|50) " 
+bin/buda --no-viz flow/big_data_test/_cl_dump.buda 2>&1 | grep -E "── bundle (57|46|50) " 
 rm -f flow/big_data_test/_cl_dump.buda

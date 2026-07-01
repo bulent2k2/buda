@@ -19,7 +19,7 @@ These are plain ``def test_*()`` functions with NO pytest fixtures so that
 ``.buda`` script for eyeballing the input floorplan and the generated tree:
 
     tools/unit2buda.py test_column_datapath_hvh -o /tmp/col.buda
-    ./buda /tmp/col.buda          # opens the topology explorer
+    bin/buda /tmp/col.buda          # opens the topology explorer
 
 Each test builds its own ``buda.Floorplan`` + ``buda.TopologyGenerator`` and
 calls ``generate_candidates`` directly (the exact API unit2buda records), so the

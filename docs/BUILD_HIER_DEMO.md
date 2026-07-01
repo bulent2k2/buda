@@ -173,9 +173,9 @@ version. (The exact coverage-bus count depends on the seed and instance counts.)
 ## Trying It
 
 ```bash
-./bb                                 # ensure the buda_db module is built
+bin/bb                                 # ensure the buda_db module is built
 python3 tools/build_hier_demo.py /tmp/hier_demo.bdb
-./fp /tmp/hier_demo.bdb              # open in the Floorplanner
+bin/fp /tmp/hier_demo.bdb              # open in the Floorplanner
 ```
 
 Busterms are already derived by the builder, so you can plan **all** buses

@@ -3,7 +3,7 @@
 `tools/bdb2buda.py` converts a BDB (Buda Physical Design Database) into a
 flat `.buda` routing script.  The output contains `set_die`, `add_block`,
 `add_net`, and `add_bus` commands that feed directly into the BUDA flat
-routing flow (`./buda out.buda`).
+routing flow (`bin/buda out.buda`).
 
 ---
 
@@ -18,7 +18,7 @@ by `fp_demo.py` — and run the flat routing pipeline on it directly.
 Typical uses:
 
 - Quickly test the routing flow on a Floorplanner demo scenario
-  (`./bfp tc1` → optimize → export → route).
+  (`bin/bfp tc1` → optimize → export → route).
 - Hand-off a placed design from the hier flow to the flat flow for
   debugging a specific routing problem.
 - Generate a baseline `.buda` script that you can then annotate with
@@ -163,14 +163,14 @@ python3 tools/bdb2buda.py design.bdb -o design.buda
 #       source flow/my_tech.buda
 
 # 3. Route
-./buda design.buda
+bin/buda design.buda
 ```
 
 Alternatively, pipe the output into a wrapper script:
 
 ```bash
 python3 tools/bdb2buda.py /tmp/bfp_tc1.bdb | cat flow/tech_header.buda - > /tmp/tc1_routable.buda
-./buda /tmp/tc1_routable.buda
+bin/buda /tmp/tc1_routable.buda
 ```
 
 ---
@@ -181,7 +181,7 @@ Start from a Floorplanner demo scenario and route it:
 
 ```bash
 # 1. Generate demo BDB and open in Floorplanner
-./bfp tc1
+bin/bfp tc1
 
 # 2. (In the GUI) run SA optimizer, spread blocks, close window
 
@@ -199,7 +199,7 @@ head -10 /tmp/tc1.buda
 #   ...
 
 # 5. Add layer definitions and route
-cat flow/my_tech.buda /tmp/tc1.buda | ./buda /dev/stdin
+cat flow/my_tech.buda /tmp/tc1.buda | bin/buda /dev/stdin
 ```
 
 ---

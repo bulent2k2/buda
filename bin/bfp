@@ -2,12 +2,12 @@
 # bfp — BUDA Floorplanner launcher with built-in demo scenarios.
 #
 # Usage:
-#   ./bfp tc1 [output.bdb]       create TC1 (40-block overlap storm), open in fp
-#   ./bfp tc2 [output.bdb]       create TC2 (fixed io_pad + 39 free blocks), open in fp
-#   ./bfp tc3 [output.bdb]       create TC3 (4 io_pads at corners, 40 free, multi-bit buses)
-#   ./bfp path/to/file.bdb       open existing BDB directly in fp
-#   ./bfp path/to/script.buda    run ./buda <script> then open the BDB it declared
-#   ./bfp                        open fp with no file (blank canvas)
+#   bin/bfp tc1 [output.bdb]       create TC1 (40-block overlap storm), open in fp
+#   bin/bfp tc2 [output.bdb]       create TC2 (fixed io_pad + 39 free blocks), open in fp
+#   bin/bfp tc3 [output.bdb]       create TC3 (4 io_pads at corners, 40 free, multi-bit buses)
+#   bin/bfp path/to/file.bdb       open existing BDB directly in fp
+#   bin/bfp path/to/script.buda    run bin/buda <script> then open the BDB it declared
+#   bin/bfp                        open fp with no file (blank canvas)
 
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"

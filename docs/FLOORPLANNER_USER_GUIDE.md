@@ -1,6 +1,6 @@
 # BUDA Floorplanner User Guide
 
-The BUDA floorplanner (`./fp`) is an interactive placement editor for chip
+The BUDA floorplanner (`bin/fp`) is an interactive placement editor for chip
 floorplanning.  It combines a tkinter/matplotlib canvas with the C++
 `FloorplannerEngine` and BDB for placement, and can drive the full hierarchical
 bundle flow directly from the GUI.
@@ -10,8 +10,8 @@ bundle flow directly from the GUI.
 ## Launch
 
 ```bash
-./fp                        # open with a blank canvas
-./fp path/to/design.bdb    # open an existing BDB
+bin/fp                        # open with a blank canvas
+bin/fp path/to/design.bdb    # open an existing BDB
 ```
 
 The wrapper sets `PYTHONPATH` for `build/` and `tools/` automatically.
@@ -304,7 +304,7 @@ Click **Write** to persist current block positions to the open BDB.
 Click **Export Flow** to generate a `.buda` script for the current floorplan.
 The script includes `run_hier_bundler`, `generate_hier_topologies`,
 `run_planner hier`, `run_nuts`, and `visualize` commands ready to run with
-`./buda`.
+`bin/buda`.
 
 ### Run HBundle Flow
 
@@ -322,7 +322,7 @@ produces valid HBundle topologies and NUTS track assignments.
 
 ## Recommended Workflow
 
-1. `./fp` — launch.
+1. `bin/fp` — launch.
 2. **Import Verilog** or **New** — create a BDB.
 3. Set die and grid in the Canvas panel → **Apply**.
 4. Place top-level blocks by dragging, nudging, or running **Optimize…**.

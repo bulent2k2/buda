@@ -31,7 +31,7 @@ Big flow B20
 ===
   Visually inspect the underlying scenario (opens the matplotlib viewer on the
   big flow these tests exercise):
-  ./buda flow/big_data_test/big.buda
+  bin/buda flow/big_data_test/big.buda
   Click B20 to highlight its trunk — you'll see the left V-trunk parked at the
   far-left (x≈219) with the open channel around x≈1731 that it should slide
   into. B9 and B28 (also pulled segments) show the fix working correctly for
