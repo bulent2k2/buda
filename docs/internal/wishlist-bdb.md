@@ -88,11 +88,24 @@ cell-level bundle may pick different candidates, so faithful selection recording
 needs its own design (per-instance vs template). `seg_busterms` / `bridge_segments`
 (re-derivable from geometry via ConnTopology) and slide ranges are also deferred.
 
-**3. Abstract NUTS (Stage 4) — ⬜ NEXT.** `bus_segment` rows (+ **bus-vias /
-symbolic vias** between segments on different layers) with a content hash per
-snapshot; later `net_segment` for detailed NUTS. These tables are the direct
-OA/GDS feed.
+**3. Abstract NUTS (Stage 4) — ✅ IMPLEMENTED.** `run_nuts` persists each placed
+bus segment into `bus_segment` (placed rectangle + layer) and one **symbolic
+bus-via** per bus-level layer transition into `bus_via` (schema v5). C++ API
+`add_bus_segment` / `add_bus_via` / `clear_bus_routing` / `bus_segments` /
+`bus_vias`; Python `BudaSession._persist_nuts` (+ `_persist_bundle_vias`, which
+records a via wherever two endpoint-sharing segments of a bundle sit on different
+layers). `bundle_id` is a **soft link** (no FK) so the hier flow's expanded
+per-instance ids persist. Tests: `test/tests/test_bdb_nuts_persist.py`.
 
-**Where to start (next):** bus-segment schema in `src/bdb.cpp`; write from the CLI
-after `run_nuts` (`src/buda_cli.py`). Interchange design intent:
+**Deferred (follow-ups):**
+- **Detailed NUTS (Stage 9) `net_segment` rows** — per-bit wires on concrete
+  tracks (the finest OA/GDS geometry), written after `run_detailed_nuts`.
+- **`route_snapshot` + content hash** — a hash over the routing rows so a
+  routing change is a reviewable, single-line diff in the `.bdb.sql`.
+- **Hier expanded-bundle persistence** — persist the per-instance expanded
+  bundles/topologies (synthetic ids) so bus rows hard-link back to a bundle row,
+  and record the planner's per-instance topology selection (`is_selected`).
+
+These persisted tables are the direct source for the planned **BDB → OA
+(`oaNet`/`oaTerm`/vias) / GDS** export; see
 [`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) "Planned interchange formats".

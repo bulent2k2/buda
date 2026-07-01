@@ -182,12 +182,12 @@ def test_v3_db_migrates_to_v4_adds_topology_tables(tmp_path):
     con.commit()
     con.close()
 
-    db = buda.BDB(p)
-    assert db.schema_version() == 4
-    assert db.meta_get("schema_version") == "4"
+    db = buda.BDB(p)                            # migrates forward to current
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.meta_get("schema_version") == str(buda.BDB.SCHEMA_VERSION)
     del db
     con = sqlite3.connect(p)
     tables = {r[0] for r in con.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     con.close()
-    assert {"topology", "topology_segment"} <= tables
+    assert {"topology", "topology_segment"} <= tables   # v4 step ran

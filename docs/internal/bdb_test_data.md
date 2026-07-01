@@ -108,9 +108,10 @@ Interconnect is currently in-memory only (`self.bundles`, `self.nuts_result`,
 3. **Persist the pipeline (bundles → topologies → NUTS).** Stage 1 (bundles) is
    implemented — `run_[hier_]bundler` writes the `bundle` / `bundle_net` /
    `bundle_busterm` tables (schema v2; v3 re-keyed `bundle_net` by `net_id`), and
-   candidate topologies into `topology` / `topology_segment` (v4); see
+   candidate topologies into `topology` / `topology_segment` (v4), and abstract-NUTS
+   bus routing into `bus_segment` / `bus_via` (v5); see
    [`wishlist-bdb.md`](wishlist-bdb.md).
-   Abstract-NUTS bus-segments follow. When interconnect is persisted, add
+   Detailed-NUTS net-segments follow. When interconnect is persisted, add
    `route_snapshot` + `bus_segment` / `net_segment` tables (mirroring the stage-4
    / stage-9 structs) with a content hash per snapshot. The `.bdb.sql` dump then
    makes routing changes reviewable in PRs, and these tables are the direct source

@@ -122,6 +122,32 @@ struct TopoSegRow {
     bool        is_jog = false;
 };
 
+// One placed abstract-NUTS bus segment (Stage-4 output). `id` is a *soft* link to
+// a bundle: the flat flow uses the original bundle id, but the hier flow's
+// run_planner expands bundles into per-instance wrappers with synthetic ids, so
+// there is no hard FK. Geometry is the placed rectangle (real coords, µm).
+struct BusSegRow {
+    std::string id;                 // bundle id (soft link)
+    int         seg_idx = 0;
+    int         layer = 0;
+    bool        is_horiz = false;
+    double      x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    double      track_position = 0;
+    double      width = 0;
+    bool        placed = false;
+    bool        is_jog = false;
+};
+
+// One symbolic bus-via: a bus-level layer transition between two connected
+// segments (bit_width bit-vias represented as one row).
+struct BusViaRow {
+    std::string id;                 // bundle id (soft link)
+    int         from_seg = 0, to_seg = 0;
+    int         from_layer = 0, to_layer = 0;
+    double      x = 0, y = 0;       // junction position (µm)
+    int         bit_width = 0;
+};
+
 struct CellRow {
     std::string name;
     double      width, height;
@@ -143,8 +169,9 @@ public:
     // then migrates it forward. v1 = versioned schema + provenance meta;
     // v2 = bundle-persistence tables (bundle / bundle_net / bundle_busterm);
     // v3 = bundle_net re-keyed by net_id (was net_name);
-    // v4 = candidate-topology tables (topology / topology_segment).
-    static constexpr int SCHEMA_VERSION = 4;
+    // v4 = candidate-topology tables (topology / topology_segment);
+    // v5 = abstract-NUTS bus routing tables (bus_segment / bus_via).
+    static constexpr int SCHEMA_VERSION = 5;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -285,6 +312,13 @@ public:
     std::vector<TopoRow> topologies(const std::string& bundle_id) const;
     std::vector<TopoSegRow> topology_segments(const std::string& bundle_id,
                                               int cand_index) const;
+
+    // ── Abstract-NUTS bus routing persistence (Stage-4 output) ─────────────
+    void add_bus_segment(const BusSegRow& r);       // INSERT OR REPLACE
+    void add_bus_via(const BusViaRow& r);           // INSERT OR REPLACE
+    void clear_bus_routing();                       // wipe bus_segment + bus_via
+    std::vector<BusSegRow> bus_segments(const std::string& bundle_id) const;
+    std::vector<BusViaRow> bus_vias(const std::string& bundle_id) const;
 
     std::vector<std::string>  nets_by_hpwl(double lo, double hi)              const;
     std::vector<std::string>  comps_in_rect(double xl, double yl,

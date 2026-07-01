@@ -73,6 +73,13 @@ topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
                  layer_hint, is_jog   PK (bundle_id, cand_index, seg_index)
                  FK (bundle_id, cand_index) → topology
 
+bus_segment      bundle_id (soft link), seg_idx, layer, is_horiz,
+                 x1,y1,x2,y2, track_position, width, placed, is_jog
+                 PRIMARY KEY (bundle_id, seg_idx)
+bus_via          bundle_id (soft link), from_seg, to_seg, from_layer,
+                 to_layer, x, y, bit_width
+                 PRIMARY KEY (bundle_id, from_seg, to_seg)
+
 grp              id (TEXT), name, color, parent_id→grp
 grp_member       grp_id→grp, kind, ref
 
@@ -83,8 +90,9 @@ meta             key (TEXT PK), value  — die_w, die_h, units,
 **Schema version.** The BDB stamps `PRAGMA user_version` (mirrored in
 `meta.schema_version`) and migrates forward on open. v1 added versioning +
 provenance; v2 added the **bundle-persistence** shape above; v3 re-keyed
-`bundle_net` by `net_id`; v4 added the **candidate-topology** tables.
-`tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
+`bundle_net` by `net_id`; v4 added the **candidate-topology** tables; v5 added the
+**abstract-NUTS bus-routing** tables. `tools/bdb_serialize.py` preserves the
+version across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
 their Stage-1 bundles into `bundle` / `bundle_net` / `bundle_busterm` whenever a
@@ -94,6 +102,17 @@ the flat flow (whose nets may not be in the `net` table) persists too.
 `bundle_nets(id)` joins back to return names. C++ API: `add_bundle(BundleRow)`,
 `add_bundle_net`, `add_bundle_busterm(bundle_id, busterm_id, role)`,
 `clear_bundles()`, `all_bundles()`, `bundle_nets(id)`, `bundle_busterms(id)`.
+
+**Bus-routing persistence.** `run_nuts` writes each placed abstract-NUTS segment
+into `bus_segment` (the placed rectangle + layer) and one **symbolic bus-via** per
+bus-level layer transition into `bus_via` — a via wherever two connected
+(endpoint-sharing) segments of a bundle sit on different layers, one row for all
+`bit_width` bit-vias. `bundle_id` is a **soft link** (no FK): the hier flow's
+`run_planner` expands bundles into per-instance wrappers with synthetic ids, so a
+bus row's `bundle_id` may be an instance id with no `bundle` table row.
+`clear_bundles()` also wipes the bus tables. C++ API: `add_bus_segment(BusSegRow)`,
+`add_bus_via(BusViaRow)`, `clear_bus_routing()`, `bus_segments(bundle_id)`,
+`bus_vias(bundle_id)`.
 
 **Topology persistence.** `generate_topologies` (flat) and
 `generate_hier_topologies` (hier) write **all** candidate topologies into
