@@ -85,6 +85,22 @@ void bind_db(py::module_& m) {
         .def_readwrite("color",     &GrpRow::color)
         .def_readwrite("parent_id", &GrpRow::parent_id);
 
+    py::class_<BundleRow>(m, "BundleRow")
+        .def(py::init<>())
+        .def_readwrite("id",             &BundleRow::id)
+        .def_readwrite("level",          &BundleRow::level)
+        .def_readwrite("strategy",       &BundleRow::strategy)
+        .def_readwrite("reason",         &BundleRow::reason)
+        .def_readwrite("num_terminals",  &BundleRow::num_terminals)
+        .def_readwrite("cell_context",   &BundleRow::cell_context)
+        .def_readwrite("instances",      &BundleRow::instances)
+        .def_readwrite("parent_id",      &BundleRow::parent_id)
+        .def_readwrite("is_replicated",  &BundleRow::is_replicated)
+        .def_readwrite("drv_spec_depth", &BundleRow::drv_spec_depth)
+        .def_readwrite("rcv_spec_depth", &BundleRow::rcv_spec_depth)
+        .def_readwrite("drv_spec_path",  &BundleRow::drv_spec_path)
+        .def_readwrite("rcv_spec_paths", &BundleRow::rcv_spec_paths);
+
     py::class_<CellRow>(m, "CellRow")
         .def_readwrite("name",   &CellRow::name)
         .def_readwrite("width",  &CellRow::width)
@@ -129,6 +145,14 @@ void bind_db(py::module_& m) {
         .def("all_pins",        &BDB::all_pins)
         .def("all_busterms",    &BDB::all_busterms)
         .def("all_bundles",     &BDB::all_bundles)
+        .def("add_bundle",      &BDB::add_bundle, py::arg("br"))
+        .def("add_bundle_net",  &BDB::add_bundle_net,
+             py::arg("bundle_id"), py::arg("net_name"))
+        .def("add_bundle_busterm", &BDB::add_bundle_busterm,
+             py::arg("bundle_id"), py::arg("busterm_id"), py::arg("role") = "")
+        .def("clear_bundles",   &BDB::clear_bundles)
+        .def("bundle_nets",     &BDB::bundle_nets, py::arg("bundle_id"))
+        .def("bundle_busterms", &BDB::bundle_busterms, py::arg("bundle_id"))
         .def("nets_by_hpwl",    &BDB::nets_by_hpwl,
              py::arg("lo"), py::arg("hi"))
         .def("comps_in_rect",   &BDB::comps_in_rect,

@@ -1,23 +1,32 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=1;
+PRAGMA user_version=2;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
-            id           TEXT PRIMARY KEY,
-            depth        INTEGER DEFAULT 0,
-            strategy     TEXT,
-            parent_id    TEXT REFERENCES bundle(id),
-            is_replicated INTEGER DEFAULT 0
-        );
+        id             TEXT PRIMARY KEY,
+        level          INTEGER DEFAULT 0,   -- hierarchy level (0 = top / flat)
+        strategy       TEXT,                -- STRICT | CONVERGENT | BIDIRECTIONAL
+        reason         TEXT,                -- grouping signature
+        num_terminals  INTEGER DEFAULT 0,
+        cell_context   TEXT,                -- "" for top-level; cell type otherwise
+        instances      TEXT,                -- JSON array of instance paths
+        parent_id      TEXT REFERENCES bundle(id),  -- "" / NULL for top-level
+        is_replicated  INTEGER DEFAULT 0,
+        drv_spec_depth INTEGER DEFAULT -1,  -- cross-level driver depth (-1 = same-level)
+        rcv_spec_depth INTEGER DEFAULT -1,
+        drv_spec_path  TEXT,
+        rcv_spec_paths TEXT                 -- JSON array
+    );
 CREATE TABLE bundle_busterm (
-            bundle_id  TEXT REFERENCES bundle(id),
-            busterm_id TEXT REFERENCES busterm(id),
-            PRIMARY KEY (bundle_id, busterm_id)
-        );
+        bundle_id  TEXT REFERENCES bundle(id),
+        busterm_id TEXT,
+        role       TEXT DEFAULT '',   -- 'entry' | 'exit' (hier flow)
+        PRIMARY KEY (bundle_id, busterm_id, role)
+    );
 CREATE TABLE bundle_net (
-            bundle_id TEXT REFERENCES bundle(id),
-            net_id    INTEGER REFERENCES net(id),
-            PRIMARY KEY (bundle_id, net_id)
-        );
+        bundle_id TEXT REFERENCES bundle(id),
+        net_name  TEXT,
+        PRIMARY KEY (bundle_id, net_name)
+    );
 CREATE TABLE busterm (
             id         TEXT PRIMARY KEY,
             comp_id    INTEGER REFERENCES component(id),
@@ -122,7 +131,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','1');
+INSERT INTO "meta" VALUES('schema_version','2');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,

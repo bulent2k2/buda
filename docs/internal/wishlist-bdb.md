@@ -54,19 +54,31 @@ normalization (and stamp `modified` from the write-back mode above).
 **Where to extend:** `_seed_provenance` in `src/bdb.cpp`; the dump in
 `tools/bdb_serialize.py` if a volatile field ever needs normalizing out.
 
-## Routing write-back + snapshot hash (feeds OA/GDS export)
+## Persist the routing pipeline into the BDB (feeds OA/GDS export)
 
-**What:** Persist interconnect back into the BDB. Add `route_snapshot` +
-`bus_segment` / `net_segment` tables (mirroring the stage-4 / stage-9 structs) with
-a content hash per snapshot, so routing changes become reviewable in the `.bdb.sql`
-diff. These tables are the direct source for the planned **BDB → OA (`oaNet` /
-`oaTerm`) / GDS** export.
+Persisting the pipeline's output into the BDB, one stage at a time, so it is
+diffable in the `.bdb.sql` and is the eventual source for **BDB → OA (`oaNet` /
+`oaTerm`) / GDS** export. Sub-series:
 
-**Why deferred:** Routing output is in-memory only today (`self.bundles`,
-`self.nuts_result`, `self.detailed_result`); there is no routing table. This is the
-foundation the `open_bdb … writeback` mode above will exercise.
+**1. Bundles (Stage 1) — ✅ IMPLEMENTED.** `run_bundler` (flat) and
+`run_hier_bundler` (hier) write their bundles into the `bundle` / `bundle_net` /
+`bundle_busterm` tables when a BDB is open (schema v2). Membership is keyed by net
+*name* so the flat flow persists even though its nets may not have `net` rows;
+hier busterms carry an `entry`/`exit` role. C++ API: `add_bundle` /
+`add_bundle_net` / `add_bundle_busterm` / `clear_bundles` / `all_bundles` /
+`bundle_nets` / `bundle_busterms` (`src/bdb.cpp`); Python orchestration
+`BudaSession._persist_bundles` (`src/buda_cli.py`). Tests:
+`test/tests/test_bdb_bundle_persist.py`. Deferred: `child_ids` (derivable from
+`parent_id`).
 
-**Where to start:** schema in `src/bdb.cpp`; write from the CLI after
-`run_nuts` / `run_detailed_nuts` (`src/buda_cli.py`). Interchange design intent:
-[`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) "Planned interchange formats" and the
-forward-looking section of [`bdb_test_data.md`](bdb_test_data.md).
+**2. Topologies (Stage 2) — ⬜ NEXT.** Persist each bundle's candidate/selected
+topologies (segments, type, layer hints, slide ranges). New table(s) referencing
+`bundle(id)`; schema v3.
+
+**3. Abstract NUTS (Stage 4) — ⬜.** `bus_segment` rows (+ **bus-vias / symbolic
+vias** between segments on different layers) with a content hash per snapshot;
+later `net_segment` for detailed NUTS. These tables are the direct OA/GDS feed.
+
+**Where to start (next):** topology row schema in `src/bdb.cpp`; write from the CLI
+after `generate_topologies` / `run_planner` (`src/buda_cli.py`). Interchange design
+intent: [`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) "Planned interchange formats".
