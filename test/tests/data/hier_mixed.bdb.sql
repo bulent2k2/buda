@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=3;
+PRAGMA user_version=4;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -131,7 +131,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','3');
+INSERT INTO "meta" VALUES('schema_version','4');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -222,4 +222,27 @@ INSERT INTO "pin" VALUES(16,5,'out','OUTPUT',560.0,150.0);
 INSERT INTO "pin" VALUES(16,4,'in','INPUT',425.0,150.0);
 INSERT INTO "pin" VALUES(17,4,'out','OUTPUT',425.0,150.0);
 INSERT INTO "pin" VALUES(17,5,'in','INPUT',560.0,150.0);
+CREATE TABLE topology (
+        bundle_id          TEXT REFERENCES bundle(id),
+        cand_index         INTEGER,
+        type               TEXT,
+        wirelength         INTEGER DEFAULT 0,
+        trunk_location     INTEGER DEFAULT 0,
+        pass_through_count INTEGER DEFAULT 0,
+        connected_blocks   TEXT,    -- JSON array of block names
+        feedthru_blocks    TEXT,    -- JSON array
+        is_selected        INTEGER DEFAULT 0,
+        PRIMARY KEY (bundle_id, cand_index)
+    );
+CREATE TABLE topology_segment (
+        bundle_id  TEXT,
+        cand_index INTEGER,
+        seg_index  INTEGER,
+        x1 INTEGER, y1 INTEGER, x2 INTEGER, y2 INTEGER,
+        layer_hint INTEGER DEFAULT 0,
+        is_jog     INTEGER DEFAULT 0,
+        PRIMARY KEY (bundle_id, cand_index, seg_index),
+        FOREIGN KEY (bundle_id, cand_index)
+            REFERENCES topology(bundle_id, cand_index)
+    );
 COMMIT;

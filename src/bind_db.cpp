@@ -101,6 +101,30 @@ void bind_db(py::module_& m) {
         .def_readwrite("drv_spec_path",  &BundleRow::drv_spec_path)
         .def_readwrite("rcv_spec_paths", &BundleRow::rcv_spec_paths);
 
+    py::class_<TopoRow>(m, "TopoRow")
+        .def(py::init<>())
+        .def_readwrite("id",                 &TopoRow::id)
+        .def_readwrite("cand_index",         &TopoRow::cand_index)
+        .def_readwrite("type",               &TopoRow::type)
+        .def_readwrite("wirelength",         &TopoRow::wirelength)
+        .def_readwrite("trunk_location",     &TopoRow::trunk_location)
+        .def_readwrite("pass_through_count", &TopoRow::pass_through_count)
+        .def_readwrite("connected_blocks",   &TopoRow::connected_blocks)
+        .def_readwrite("feedthru_blocks",    &TopoRow::feedthru_blocks)
+        .def_readwrite("is_selected",        &TopoRow::is_selected);
+
+    py::class_<TopoSegRow>(m, "TopoSegRow")
+        .def(py::init<>())
+        .def_readwrite("id",         &TopoSegRow::id)
+        .def_readwrite("cand_index", &TopoSegRow::cand_index)
+        .def_readwrite("seg_index",  &TopoSegRow::seg_index)
+        .def_readwrite("x1",         &TopoSegRow::x1)
+        .def_readwrite("y1",         &TopoSegRow::y1)
+        .def_readwrite("x2",         &TopoSegRow::x2)
+        .def_readwrite("y2",         &TopoSegRow::y2)
+        .def_readwrite("layer_hint", &TopoSegRow::layer_hint)
+        .def_readwrite("is_jog",     &TopoSegRow::is_jog);
+
     py::class_<CellRow>(m, "CellRow")
         .def_readwrite("name",   &CellRow::name)
         .def_readwrite("width",  &CellRow::width)
@@ -153,6 +177,12 @@ void bind_db(py::module_& m) {
         .def("clear_bundles",   &BDB::clear_bundles)
         .def("bundle_nets",     &BDB::bundle_nets, py::arg("bundle_id"))
         .def("bundle_busterms", &BDB::bundle_busterms, py::arg("bundle_id"))
+        .def("add_topology",         &BDB::add_topology, py::arg("tr"))
+        .def("add_topology_segment", &BDB::add_topology_segment, py::arg("sr"))
+        .def("clear_topologies",     &BDB::clear_topologies)
+        .def("topologies",           &BDB::topologies, py::arg("bundle_id"))
+        .def("topology_segments",    &BDB::topology_segments,
+             py::arg("bundle_id"), py::arg("cand_index"))
         .def("nets_by_hpwl",    &BDB::nets_by_hpwl,
              py::arg("lo"), py::arg("hi"))
         .def("comps_in_rect",   &BDB::comps_in_rect,

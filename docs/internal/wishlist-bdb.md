@@ -74,14 +74,25 @@ an `entry`/`exit` role. C++ API: `add_bundle` / `add_bundle_net` /
 `parent_id`); auto-enabling `bdb_net_mode` on `open_bdb` to eagerly persist the
 *whole* netlist (+ pins where they resolve), not just bundled nets.
 
-**2. Topologies (Stage 2) — ⬜ NEXT.** Persist each bundle's candidate/selected
-topologies (segments, type, layer hints, slide ranges). New table(s) referencing
-`bundle(id)`; next schema version.
+**2. Topologies (Stage 2) — ✅ IMPLEMENTED.** `generate_topologies` (flat) and
+`generate_hier_topologies` (hier) persist **all** candidate topologies into
+`topology` / `topology_segment` (schema v4) when a BDB is open — before
+`run_planner`, so candidates are inspectable/tweakable up front. Keyed by
+`(bundle_id, cand_index)` (composite, no autoincrement → deterministic dumps).
+C++ API `add_topology` / `add_topology_segment` / `clear_topologies` /
+`topologies` / `topology_segments`; Python `BudaSession._persist_topologies`.
+Tests: `test/tests/test_bdb_topology_persist.py`. **Deferred:** marking the
+planner's *selection* (`is_selected`) after `run_planner` — the hier flow expands
+bundles into per-instance wrappers with synthetic ids, and instances of one
+cell-level bundle may pick different candidates, so faithful selection recording
+needs its own design (per-instance vs template). `seg_busterms` / `bridge_segments`
+(re-derivable from geometry via ConnTopology) and slide ranges are also deferred.
 
-**3. Abstract NUTS (Stage 4) — ⬜.** `bus_segment` rows (+ **bus-vias / symbolic
-vias** between segments on different layers) with a content hash per snapshot;
-later `net_segment` for detailed NUTS. These tables are the direct OA/GDS feed.
+**3. Abstract NUTS (Stage 4) — ⬜ NEXT.** `bus_segment` rows (+ **bus-vias /
+symbolic vias** between segments on different layers) with a content hash per
+snapshot; later `net_segment` for detailed NUTS. These tables are the direct
+OA/GDS feed.
 
-**Where to start (next):** topology row schema in `src/bdb.cpp`; write from the CLI
-after `generate_topologies` / `run_planner` (`src/buda_cli.py`). Interchange design
-intent: [`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) "Planned interchange formats".
+**Where to start (next):** bus-segment schema in `src/bdb.cpp`; write from the CLI
+after `run_nuts` (`src/buda_cli.py`). Interchange design intent:
+[`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) "Planned interchange formats".

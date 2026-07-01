@@ -137,8 +137,8 @@ def test_v1_bundle_schema_migrates_to_current(tmp_path):
     con.close()
 
     db = buda.BDB(p)                                 # opening migrates forward
-    assert db.schema_version() == buda.BDB.SCHEMA_VERSION == 3
-    assert db.meta_get("schema_version") == "3"      # mirror refreshed
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.meta_get("schema_version") == str(buda.BDB.SCHEMA_VERSION)  # mirror refreshed
     del db
     con = sqlite3.connect(p)
     net_cols = {r[1] for r in con.execute("PRAGMA table_info(bundle_net)")}
@@ -174,8 +174,8 @@ def test_v2_bundle_net_rekeys_to_v3_preserving_rows(tmp_path):
     con.close()
 
     db = buda.BDB(p)
-    assert db.schema_version() == 3
-    assert db.meta_get("schema_version") == "3"
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.meta_get("schema_version") == str(buda.BDB.SCHEMA_VERSION)
     # Membership preserved across the re-key (not dropped).
     assert db.bundle_nets("1") == ["flat_only_net", "known_net"]
     del db

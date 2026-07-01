@@ -104,6 +104,34 @@ static const char* BUNDLE_DDL = R"(
     );
 )";
 
+// Candidate-topology tables (schema v4). Keyed by (bundle_id, cand_index) — a
+// composite key with no autoincrement, so the *.bdb.sql dump stays deterministic.
+static const char* TOPOLOGY_DDL = R"(
+    CREATE TABLE IF NOT EXISTS topology (
+        bundle_id          TEXT REFERENCES bundle(id),
+        cand_index         INTEGER,
+        type               TEXT,
+        wirelength         INTEGER DEFAULT 0,
+        trunk_location     INTEGER DEFAULT 0,
+        pass_through_count INTEGER DEFAULT 0,
+        connected_blocks   TEXT,    -- JSON array of block names
+        feedthru_blocks    TEXT,    -- JSON array
+        is_selected        INTEGER DEFAULT 0,
+        PRIMARY KEY (bundle_id, cand_index)
+    );
+    CREATE TABLE IF NOT EXISTS topology_segment (
+        bundle_id  TEXT,
+        cand_index INTEGER,
+        seg_index  INTEGER,
+        x1 INTEGER, y1 INTEGER, x2 INTEGER, y2 INTEGER,
+        layer_hint INTEGER DEFAULT 0,
+        is_jog     INTEGER DEFAULT 0,
+        PRIMARY KEY (bundle_id, cand_index, seg_index),
+        FOREIGN KEY (bundle_id, cand_index)
+            REFERENCES topology(bundle_id, cand_index)
+    );
+)";
+
 void BDB::_create_schema() {
     _exec(R"(
         CREATE TABLE IF NOT EXISTS component (
@@ -186,7 +214,8 @@ void BDB::_create_schema() {
             value TEXT
         );
     )");
-    _exec(BUNDLE_DDL);   // bundle tables (v2 shape) for a fresh DB
+    _exec(BUNDLE_DDL);     // bundle tables for a fresh DB
+    _exec(TOPOLOGY_DDL);   // candidate-topology tables for a fresh DB
     _migrate();
     Stmt mq(_db, "SELECT key,value FROM meta");
     while (sqlite3_step(mq) == SQLITE_ROW) {
@@ -285,6 +314,10 @@ void BDB::_migrate() {
             for (const auto& [bid, name] : staged)
                 add_bundle_net(bid, name);
         }
+    }
+    if (v < 4) {
+        // v3 -> v4: add the candidate-topology tables (brand new, no data to move).
+        _exec(TOPOLOGY_DDL);
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -2046,7 +2079,9 @@ void BDB::add_bundle_busterm(const std::string& bundle_id,
 }
 
 void BDB::clear_bundles() {
-    _exec("DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
+    // Topologies FK to bundle, so clear them first (children before parents).
+    _exec("DELETE FROM topology_segment; DELETE FROM topology;"
+          "DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
 }
 
 std::vector<BundleRow> BDB::all_bundles() const {
@@ -2100,6 +2135,102 @@ BDB::bundle_busterms(const std::string& bundle_id) const {
         const unsigned char* r = sqlite3_column_text(q, 1);
         out.emplace_back(reinterpret_cast<const char*>(sqlite3_column_text(q, 0)),
                          r ? reinterpret_cast<const char*>(r) : std::string());
+    }
+    return out;
+}
+
+// ── Candidate topology persistence ───────────────────────────────────────────
+
+void BDB::add_topology(const TopoRow& tr) {
+    Stmt s(_db,
+        "INSERT INTO topology(bundle_id,cand_index,type,wirelength,trunk_location,"
+        "pass_through_count,connected_blocks,feedthru_blocks,is_selected)"
+        " VALUES(?,?,?,?,?,?,?,?,?)"
+        " ON CONFLICT(bundle_id,cand_index) DO UPDATE SET type=excluded.type,"
+        " wirelength=excluded.wirelength, trunk_location=excluded.trunk_location,"
+        " pass_through_count=excluded.pass_through_count,"
+        " connected_blocks=excluded.connected_blocks,"
+        " feedthru_blocks=excluded.feedthru_blocks, is_selected=excluded.is_selected");
+    sqlite3_bind_text  (s, 1, tr.id.c_str(),               -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 2, tr.cand_index);
+    sqlite3_bind_text  (s, 3, tr.type.c_str(),             -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 4, tr.wirelength);
+    sqlite3_bind_int   (s, 5, tr.trunk_location);
+    sqlite3_bind_int   (s, 6, tr.pass_through_count);
+    sqlite3_bind_text  (s, 7, tr.connected_blocks.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 8, tr.feedthru_blocks.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 9, tr.is_selected ? 1 : 0);
+    sqlite3_step(s);
+}
+
+void BDB::add_topology_segment(const TopoSegRow& sr) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO topology_segment(bundle_id,cand_index,seg_index,"
+        "x1,y1,x2,y2,layer_hint,is_jog) VALUES(?,?,?,?,?,?,?,?,?)");
+    sqlite3_bind_text  (s, 1, sr.id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 2, sr.cand_index);
+    sqlite3_bind_int   (s, 3, sr.seg_index);
+    sqlite3_bind_int   (s, 4, sr.x1);
+    sqlite3_bind_int   (s, 5, sr.y1);
+    sqlite3_bind_int   (s, 6, sr.x2);
+    sqlite3_bind_int   (s, 7, sr.y2);
+    sqlite3_bind_int   (s, 8, sr.layer_hint);
+    sqlite3_bind_int   (s, 9, sr.is_jog ? 1 : 0);
+    sqlite3_step(s);
+}
+
+void BDB::clear_topologies() {
+    _exec("DELETE FROM topology_segment; DELETE FROM topology;");
+}
+
+std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
+    Stmt q(_db,
+        "SELECT bundle_id,cand_index,type,wirelength,trunk_location,"
+        "pass_through_count,connected_blocks,feedthru_blocks,is_selected"
+        " FROM topology WHERE bundle_id=? ORDER BY cand_index");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    auto txt = [](sqlite3_stmt* st, int c) -> std::string {
+        const unsigned char* p = sqlite3_column_text(st, c);
+        return p ? reinterpret_cast<const char*>(p) : std::string();
+    };
+    std::vector<TopoRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        TopoRow t;
+        t.id                 = txt(q, 0);
+        t.cand_index         = sqlite3_column_int(q, 1);
+        t.type               = txt(q, 2);
+        t.wirelength         = sqlite3_column_int(q, 3);
+        t.trunk_location     = sqlite3_column_int(q, 4);
+        t.pass_through_count = sqlite3_column_int(q, 5);
+        t.connected_blocks   = txt(q, 6);
+        t.feedthru_blocks    = txt(q, 7);
+        t.is_selected        = sqlite3_column_int(q, 8) != 0;
+        out.push_back(std::move(t));
+    }
+    return out;
+}
+
+std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
+                                               int cand_index) const {
+    Stmt q(_db,
+        "SELECT bundle_id,cand_index,seg_index,x1,y1,x2,y2,layer_hint,is_jog"
+        " FROM topology_segment WHERE bundle_id=? AND cand_index=?"
+        " ORDER BY seg_index");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (q, 2, cand_index);
+    std::vector<TopoSegRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        TopoSegRow s;
+        s.id         = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        s.cand_index = sqlite3_column_int(q, 1);
+        s.seg_index  = sqlite3_column_int(q, 2);
+        s.x1 = sqlite3_column_int(q, 3);
+        s.y1 = sqlite3_column_int(q, 4);
+        s.x2 = sqlite3_column_int(q, 5);
+        s.y2 = sqlite3_column_int(q, 6);
+        s.layer_hint = sqlite3_column_int(q, 7);
+        s.is_jog     = sqlite3_column_int(q, 8) != 0;
+        out.push_back(std::move(s));
     }
     return out;
 }
