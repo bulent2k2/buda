@@ -261,11 +261,30 @@ void BDB::_migrate() {
         _exec(BUNDLE_DDL);
     }
     if (v < 3) {
-        // v2 -> v3: re-key bundle_net by net_id (was net_name). Only this table
-        // changed; rebuild just it (empty in practice — the feature is nascent and
-        // bundles are re-derived by re-running the bundler).
-        _exec("DROP TABLE IF EXISTS bundle_net;");
-        _exec(BUNDLE_DDL);   // recreates the missing bundle_net (others via IF NOT EXISTS)
+        // v2 -> v3: re-key bundle_net by net_id (was net_name). Preserve any
+        // persisted memberships: stage the old (bundle_id, net_name) rows, rebuild
+        // the table in the net_id shape, then re-insert (resolving/creating net ids
+        // via add_bundle_net -> _ensure_net, which also covers flat-flow nets).
+        // A fresh DB reached this step with the net_id shape already (the v<2 step
+        // uses the current BUNDLE_DDL), so guard on the column actually present.
+        bool has_net_name = false;
+        { Stmt q(_db, "PRAGMA table_info(bundle_net)");
+          while (sqlite3_step(q) == SQLITE_ROW) {
+              if (std::string(reinterpret_cast<const char*>(
+                      sqlite3_column_text(q, 1))) == "net_name") has_net_name = true;
+          } }
+        if (has_net_name) {
+            std::vector<std::pair<std::string, std::string>> staged;
+            { Stmt q(_db, "SELECT bundle_id, net_name FROM bundle_net");
+              while (sqlite3_step(q) == SQLITE_ROW)
+                  staged.emplace_back(
+                      reinterpret_cast<const char*>(sqlite3_column_text(q, 0)),
+                      reinterpret_cast<const char*>(sqlite3_column_text(q, 1))); }
+            _exec("DROP TABLE bundle_net;");
+            _exec(BUNDLE_DDL);   // recreate bundle_net in the net_id shape
+            for (const auto& [bid, name] : staged)
+                add_bundle_net(bid, name);
+        }
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
