@@ -200,6 +200,36 @@ def test_bad_files_raise(tmp_path):
         db.import_gds(str(q))
 
 
+def test_reimport_into_routed_bdb(tmp_path):
+    # Re-importing into a BDB that already holds a ROUTED checkpoint must not
+    # trip the FK constraints: clear_design wipes the derived pipeline rows
+    # (bundles/topologies/routing/busterms) before the design tables. This is
+    # the tools/gds_demo.py re-run scenario, where it was first caught.
+    b = GdsBuilder()
+    b.structure("blkA").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("blkB").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("chip") \
+     .sref("blkA", (0, 0), inst_name="A") \
+     .sref("blkB", (600, 800), inst_name="B")
+    gds = b.write(tmp_path / "chip.gds")
+
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ["source flow/rnr/mix_tracks.buda",
+                  f"open_bdb {tmp_path / 'chip.bdb'}",
+                  f"import_gds {gds}",
+                  "add_blocks_from_bdb 0",
+                  "add_bus d[8] A.p B.p",
+                  "run_bundler", "generate_topologies", "run_planner 3",
+                  "run_nuts",
+                  f"import_gds {gds}"]:      # re-import over the checkpoint
+            s.do_command(c)
+    assert not s.bdb.all_bundles()           # derived rows wiped with the design
+    assert not s.bdb.route_snapshot().hash
+    assert {c.name for c in s.bdb.all_components()} == {"A", "B"}
+
+
 def test_bdb_sql_roundtrip(tmp_path):
     db, _ = _import(tmp_path, _basic_lib(tmp_path / "t.gds"))
     before = sorted((c.name, c.cell, c.depth, c.x1, c.y1, c.x2, c.y2)

@@ -50,8 +50,14 @@ the real exporter in G4.
 Tests: `test/tests/test_gds_import.py` — writer→reader round-trips (units
 scaling, hierarchy/depths/absolute bboxes, AREF expansion, recursive
 footprints, property-named instances, top detection), a full
-import→`add_blocks_from_bdb`→route pipeline run, `.bdb.sql` round-trip, and
-error paths (bad magic, truncation).
+import→`add_blocks_from_bdb`→route pipeline run, `.bdb.sql` round-trip,
+re-import over a routed checkpoint (FK-safe `clear_design`), and error paths
+(bad magic, truncation).
+
+**Demo:** `python3 tools/gds_demo.py` (after `bin/bb` + `source bin/activate`)
+generates a small SoC as GDSII (2×2 core AREF + L2 + IO), imports it, routes
+it through detailed NUTS, and opens the interactive visualizer; `--png <file>`
+renders headlessly, `--no-viz` just prints the summary.
 
 ## Phase G2 — net/pin recovery via TEXT labels — ⬜ NEXT
 

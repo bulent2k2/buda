@@ -988,7 +988,16 @@ BDB::LefPins BDB::_parse_lef_pins(const std::string& lef_path) {
 // ── DEF importer ─────────────────────────────────────────────────────────────
 
 void BDB::clear_design() {
-    _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
+    // A fresh design load must also drop everything DERIVED from the old
+    // design, children before parents: the persisted pipeline rows FK to
+    // net/bundle (clear_bundles handles that whole subtree incl. the 'tb:'
+    // busterm rows), hier busterms FK to component, and cell_children /
+    // cell_pin FK to cell. Without this, re-importing into a BDB that holds
+    // a routed checkpoint trips the FK constraints.
+    clear_bundles();
+    _exec("DELETE FROM busterm; "
+          "DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
+          "DELETE FROM cell_pin; DELETE FROM cell_children; "
           "DELETE FROM component; DELETE FROM cell;");
 }
 
@@ -996,8 +1005,10 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     auto lef_sizes = _parse_lef_sizes(lef_path);
     auto lef_pins  = _parse_lef_pins(lef_path);
 
-    _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
-          "DELETE FROM component; DELETE FROM cell;");
+    // Full design wipe incl. derived pipeline rows — re-importing into a BDB
+    // that holds a routed checkpoint would otherwise trip the FK constraints
+    // (same fix as import_gds; see clear_design).
+    clear_design();
 
     std::ifstream f(def_path);
     if (!f) throw std::runtime_error("BDB: cannot open DEF: " + def_path);
