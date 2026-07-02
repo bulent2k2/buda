@@ -81,8 +81,13 @@ an `entry`/`exit` role. C++ API: `add_bundle` / `add_bundle_net` /
 `(bundle_id, cand_index)` (composite, no autoincrement → deterministic dumps).
 C++ API `add_topology` / `add_topology_segment` / `clear_topologies` /
 `topologies` / `topology_segments`; Python `BudaSession._persist_topologies`.
-Tests: `test/tests/test_bdb_topology_persist.py`. **Deferred:** `seg_busterms` /
-`bridge_segments` (re-derivable from geometry via ConnTopology) and slide ranges.
+Tests: `test/tests/test_bdb_topology_persist.py`. `seg_busterms` is **now
+persisted too** (topo-truth Phase 3, schema v9): each real tap becomes a
+routing-time `tb:<block>` busterm row + a `topology_seg_busterm` link, written by
+the `persist_seg_busterms` bridge and reloaded by `load_seg_busterms` — it is
+**not** re-derivable from geometry anymore (Phase 2 retired ConnTopology's
+geometric fallback; see `single_source_topo_truth.md`). **Still deferred:**
+`bridge_segments` (TEG over-the-block bridges) and slide ranges (recomputed).
 
 **2b. Planner output (Stage 3) — ✅ IMPLEMENTED.** `run_planner` records its
 decision (schema v6): the selected candidate (`topology.is_selected`, via
@@ -164,14 +169,17 @@ from*, not just to diff.
 
 ### Feasibility — the persisted data is sufficient
 
-The load-bearing finding: **`run_planner` recomputes everything derived**. Inside
-`CongestionPlanner::optimize_topologies` each candidate is passed through
-`ConnTopology::build(topo, floorplan)` (`congestion_planner.cpp`), which
-regenerates busterm faces, per-segment slide ranges, `net_pull`, and trunk
-identity from the raw segment geometry + the `Floorplan`. So the rehydrate path
-only has to rebuild the **raw** `Topology` (its segments + a few scalar fields)
-and the `HBundle`; it does **not** need to persist or reconstruct slide ranges,
-`seg_perp`, `seg_busterms`, `bridge_segments`, or trunk info.
+The load-bearing finding: **`run_planner` recomputes everything derived — except
+connectivity**. Inside `CongestionPlanner::optimize_topologies` each candidate is
+passed through `ConnTopology::build(topo, floorplan)` (`congestion_planner.cpp`),
+which regenerates per-segment slide ranges, `net_pull`, and trunk identity from
+the raw segment geometry + the `Floorplan`. Crucially, since topo-truth Phase 2,
+`ConnTopology` **reads** busterm taps from `Topology::seg_busterms` and never
+re-derives them from geometry — an unannotated topology taps *nothing*. So the
+rehydrate path must rebuild the **raw** `Topology` (segments + scalar fields)
+**and restore its `seg_busterms` via `load_seg_busterms`** (persisted since
+Phase 3, schema v9); it does not need slide ranges, `seg_perp`, or trunk info.
+`bridge_segments` remains the one un-persisted `Topology` field (TEG-over gap).
 
 | Needed by `run_planner` | Persisted? | Source on resume |
 |---|---|---|
@@ -181,7 +189,9 @@ and the `HBundle`; it does **not** need to persist or reconstruct slide ranges,
 | `Topology.segments` (`start`/`end`/`layer_hint`/`is_jog`) | ✅ `topology_segment` | `topology_segments(bid, ci)` |
 | `BundleInput.width` | ❌ | recompute `len(net_names) * 1.5` (as `run_bundler` does) |
 | selected index / assigned layers | ✅ `is_selected` / `assigned_layer` | restore for inspection; a fresh `run_planner` overwrites anyway |
-| slide ranges / `net_pull` / `seg_perp` / `seg_busterms` / `bridge_segments` / trunk | ❌ (in-memory only) | **recomputed** by `ConnTopology::build` inside the planner — no action |
+| `Topology.seg_busterms` (endpoint→busterm taps) | ✅ `topology_seg_busterm` + `tb:` busterm rows (v9) | `buda.load_seg_busterms(bdb, bid, ci, topo)` — **required**: ConnTopology no longer re-derives taps (Phase 2) |
+| slide ranges / `net_pull` / `seg_perp` / trunk | ❌ (in-memory only) | **recomputed** by `ConnTopology::build` inside the planner — no action |
+| `Topology.bridge_segments` (TEG-over bridges) | ❌ (in-memory only) | **gap** — persist alongside seg_busterms or regenerate; TEG-over multi-rect designs can't resume losslessly until then |
 
 **The one real prerequisite: the `Floorplan` (and `LayerStack`).** Topology
 segments are absolute coordinates, so `ConnTopology::build` needs the *same*
@@ -236,6 +246,10 @@ for br in bdb.all_bundles():            # filter by is_replicated per `expanded`
             s.layer_hint = sr.layer_hint; s.is_jog = sr.is_jog
             segs.append(s)
         t.segments = segs                          # reassign whole vector
+        # Restore the authoritative endpoint→busterm annotation LOGICALLY
+        # (persisted at generate time; ConnTopology reads it and never
+        # re-derives taps from geometry — an unannotated topology taps nothing).
+        buda.load_seg_busterms(bdb, br.id, tr.cand_index, t)
         cands.append(t)
     w.input.candidates = cands
     self.bundles.append(w)
@@ -271,8 +285,11 @@ for br in bdb.all_bundles():            # filter by is_replicated per `expanded`
    then stops (no planner). Phase 2: a **fresh** `BudaSession` re-declares the
    setup (layers/patterns/blocks), `open_bdb` the same file, `load_pipeline`,
    `run_planner`, `run_nuts`. Assert phase-2 `self.bundles`/candidates match the
-   persisted rows and that a full single-session run of the same inputs yields the
-   **same** planner selection + assigned layers + `route_snapshot` hash.
+   persisted rows — **including `seg_busterms`** (identical ConnTopology BUSTERM
+   taps; a `load_pipeline` that forgets `load_seg_busterms` yields tap-less
+   candidates that silently route disconnected) — and that a full single-session
+   run of the same inputs yields the **same** planner selection + assigned
+   layers + `route_snapshot` hash.
 2. **Hier resume.** Same shape from a `bdb_input('hier_mixed')` fixture:
    `derive_busterms` + `run_hier_bundler` + `generate_hier_topologies` in phase 1;
    `add_blocks_from_bdb` + `load_pipeline expanded` + `run_planner hier` in phase 2.
