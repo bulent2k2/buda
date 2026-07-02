@@ -50,3 +50,18 @@ check, the interior-stub pulls — changed `tc3a_flat`'s placement enough that i
 now lands at `<= 2` abstract M7 overlaps, so the test is green. The root cause was
 exactly the over-applied `net_pull` that drove interior/non-binding stubs to their
 slide bounds, congesting the layer; it was never a `tighten_pulls` regression.
+
+## Hard co-placement of joined segments (seg-to-seg junctions)
+
+**What:** NUTS keeps joined perpendicular segments connected by a *soft*
+post-hoc span-extension (`do_span_adjustments`) rather than a placement
+constraint, so a CPU-dependent track flip can open a zero-margin corner
+(`tc3a_flat` bundle 48) that only DetailedNUTS recovers. Proposal: make
+seg-to-seg joins first-class on `Topology` (symmetric to `seg_busterms`) and
+**co-place** joined endpoints so a join cannot be broken by track selection.
+
+**Where:** design proposal in
+[`seg_junction_coplacement.md`](seg_junction_coplacement.md); touches
+`ConnTopology::infer_connections`, `nuts.cpp` placement core, and topo-gen. See
+also the FP-determinism sub-issue (untoleranced tie-breaks in `preferred_fit` /
+the placement sort comparators) noted there as a cheaper stopgap.
