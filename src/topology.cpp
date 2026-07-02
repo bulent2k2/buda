@@ -16,6 +16,7 @@
 
 #include "topology.h"
 #include "conn_topology.h"
+#include "verify.h"
 #include <cmath>
 #include <climits>
 #include <set>
@@ -3015,13 +3016,69 @@ std::vector<Topology> TopologyGenerator::generate_candidates(
     const std::string& src_name,
     const std::vector<std::string>& dst_names)
 {
+    std::vector<Topology> candidates;
+    bool two_pin = false;
     if (dst_names.size() == 1) {
         bool any_multi_rect = !floorplan_.get_block_rects(src_name).empty() ||
                               !floorplan_.get_block_rects(dst_names[0]).empty();
-        if (!any_multi_rect)
-            return generate_2pin(src_name, dst_names[0]);
+        two_pin = !any_multi_rect;
     }
-    return generate_npin(src_name, dst_names);
+    candidates = two_pin ? generate_2pin(src_name, dst_names[0])
+                         : generate_npin(src_name, dst_names);
+    // Uniform coverage gate — one place, so every generation path (2-pin,
+    // trunk, MST, BITRUNK) and every caller (flat/hier CLI, direct API) is
+    // covered.  Structural per-path guards (topology_is_clean_tree, the
+    // add_trunk_v stub-suppression) remain the first line; this is the backstop
+    // that keeps an uncovered candidate from ever reaching the planner.
+    filter_uncovered(candidates);
+    return candidates;
+}
+
+void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) const {
+    if (candidates.empty()) return;
+    // Pass 1: mark. (No moves here — the common case is zero drops and the
+    // list must come back untouched.)
+    std::vector<char> drop(candidates.size(), 0);
+    int dropped = 0;
+    std::string first_block, first_type;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        ConnTopology ct;
+        ct.build(candidates[i], floorplan_);
+        // Drop ONLY on BUSTERM_OPEN (an uncovered block — a silent open).  Other
+        // kinds are deliberate or diagnostic: FEEDTHRU_RELAY marks the legacy
+        // multi-rect fallback candidates that are intentionally kept flagged,
+        // and the rest stay visible to check_connectivity / dump_topologies.
+        for (const auto& v : check_topo(ct, candidates[i], floorplan_, -1).violations) {
+            if (v.kind == ViolationKind::BUSTERM_OPEN) {
+                drop[i] = 1;
+                if (dropped++ == 0) {
+                    first_block = v.block_name;
+                    first_type  = candidates[i].type;
+                }
+                break;
+            }
+        }
+    }
+    if (dropped == 0) return;
+    if (dropped == (int)candidates.size()) {
+        // Never strand a bundle: keep the (all-uncovered) list and let the
+        // planner's ALLOW_OVERFLOW/BEST_EFFORT ladder commit one with a WARNING;
+        // check_connectivity will report the open.
+        std::cerr << "[TopoGen] WARNING: all " << candidates.size()
+                  << " candidate(s) leave block '" << first_block
+                  << "' unconnected; keeping them (check_connectivity will "
+                     "report the open).\n";
+        return;
+    }
+    // Pass 2: rebuild without the dropped candidates.
+    std::vector<Topology> kept;
+    kept.reserve(candidates.size() - dropped);
+    for (size_t i = 0; i < candidates.size(); ++i)
+        if (!drop[i]) kept.push_back(std::move(candidates[i]));
+    std::cerr << "[TopoGen] dropped " << dropped << " uncovered candidate(s) "
+              << "(first: " << first_type << " missing block '" << first_block
+              << "'); " << kept.size() << " remain.\n";
+    candidates = std::move(kept);
 }
 
 std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_name, const std::string& dst_name) {
