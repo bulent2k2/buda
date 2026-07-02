@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=6;
+PRAGMA user_version=7;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -28,7 +28,10 @@ CREATE TABLE bundle_net (
         PRIMARY KEY (bundle_id, net_id)
     );
 CREATE TABLE bus_segment (
-        bundle_id      TEXT,
+        -- NOT NULL: SQLite treats a NULL child key as satisfying the FK, and PK
+        -- columns are not implicitly NOT NULL in a rowid table, so without this a
+        -- hand-edited dump could insert an orphan (bundle_id IS NULL) row.
+        bundle_id      TEXT NOT NULL REFERENCES bundle(id),
         seg_idx        INTEGER,
         layer          INTEGER,
         is_horiz       INTEGER DEFAULT 0,
@@ -40,7 +43,7 @@ CREATE TABLE bus_segment (
         PRIMARY KEY (bundle_id, seg_idx)
     );
 CREATE TABLE bus_via (
-        bundle_id  TEXT,
+        bundle_id  TEXT NOT NULL REFERENCES bundle(id),   -- NOT NULL: see bus_segment
         from_seg   INTEGER,
         to_seg     INTEGER,
         from_layer INTEGER,
@@ -153,7 +156,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','6');
+INSERT INTO "meta" VALUES('schema_version','7');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -244,6 +247,13 @@ INSERT INTO "pin" VALUES(16,5,'out','OUTPUT',560.0,150.0);
 INSERT INTO "pin" VALUES(16,4,'in','INPUT',425.0,150.0);
 INSERT INTO "pin" VALUES(17,4,'out','OUTPUT',425.0,150.0);
 INSERT INTO "pin" VALUES(17,5,'in','INPUT',560.0,150.0);
+CREATE TABLE route_snapshot (
+        id             INTEGER PRIMARY KEY,   -- always 1 (current routing)
+        hash           TEXT,
+        n_bus_segments INTEGER DEFAULT 0,
+        n_bus_vias     INTEGER DEFAULT 0,
+        stage          TEXT                   -- 'abstract_nuts'
+    );
 CREATE TABLE topology (
         bundle_id          TEXT REFERENCES bundle(id),
         cand_index         INTEGER,
