@@ -1592,6 +1592,12 @@ class TopologyExplorer:
             # Recompute the maximal fill from the cached data bbox so the home
             # view stays maximal even if the window was resized since first draw.
             _set_lims_filling_box(self.ax, *self._home_data_bbox)
+            # Refresh the stored home so _install_home_fit_tracking recognizes
+            # this as home again — otherwise, after a pan → 'h', its guard would
+            # compare later resizes against the stale pre-pan tuple and stop
+            # keeping the view maximal.
+            self._home_xlim = self.ax.get_xlim()
+            self._home_ylim = self.ax.get_ylim()
             toolbar = getattr(self.fig.canvas, 'toolbar', None)
             if toolbar is not None:
                 toolbar.update()   # reset toolbar nav stack to current limits
@@ -2795,6 +2801,12 @@ class BudaVisualizer:
             # Recompute the maximal fill from the cached data bbox so the home
             # view stays maximal even if the window was resized since first draw.
             _set_lims_filling_box(self.ax, *self._home_data_bbox)
+            # Refresh the stored home so _install_home_fit_tracking recognizes
+            # this as home again — otherwise, after a pan → 'h', its guard would
+            # compare later resizes against the stale pre-pan tuple and stop
+            # keeping the view maximal.
+            self._home_xlim = self.ax.get_xlim()
+            self._home_ylim = self.ax.get_ylim()
             toolbar = getattr(self.fig.canvas, 'toolbar', None)
             if toolbar is not None:
                 toolbar.update()   # reset toolbar nav stack to current limits

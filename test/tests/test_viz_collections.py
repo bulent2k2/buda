@@ -373,3 +373,29 @@ def test_home_fit_tracking_does_not_clobber_a_pan(monkeypatch):
         "resize_event", ResizeEvent("resize_event", viz.fig.canvas))
     assert abs(viz.ax.get_xlim()[0] - panned[0]) < 1e-6, \
         "resize clobbered a user pan (home-fit tracking not guarded)"
+
+
+def test_home_fit_tracking_resumes_after_pressing_home(monkeypatch):
+    """After pan → (resize ignored) → 'h', the view is home again, so a later
+    resize must resume keeping it maximal.  Regression for the guard comparing
+    against the stale pre-pan home tuple (Codex #147): _zoom_home must refresh
+    _home_xlim/_home_ylim."""
+    from matplotlib.backend_bases import ResizeEvent
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+
+    def resize(w, h):
+        viz.fig.set_size_inches(w, h)
+        viz.fig.canvas.callbacks.process(
+            "resize_event", ResizeEvent("resize_event", viz.fig.canvas))
+
+    # Pan away, resize while off-home (correctly ignored), then press Home.
+    x0, x1 = viz.ax.get_xlim(); dx = (x1 - x0) * 0.3
+    viz.ax.set_xlim(x0 + dx, x1 + dx)
+    resize(9, 16)
+    viz._zoom_home()                      # 'h' — recompute maximal fill for 9x16
+    assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6
+
+    # A subsequent resize must still be tracked (was the bug: treated as a pan).
+    resize(22, 8)
+    assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6, \
+        "resize after 'h' was not tracked (stale home tuple)"
