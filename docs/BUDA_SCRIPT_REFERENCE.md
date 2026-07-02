@@ -805,6 +805,19 @@ Source and destination block names are derived automatically from the netlist
 - Candidate shapes generated are identical to `generate_topologies_for_bundle` (I, L, Z, U, UU, multicast TRUNK/MST/BITRUNK variants).
 - Bundles with no registered endpoint info emit a warning and are skipped.
 
+**Coverage gate.** Every generation path ends in an automatic coverage filter:
+each candidate is verified with `check_topo`, and a candidate that leaves one of
+the bundle's blocks with **no busterm tap and no pass-through segment**
+(`BUSTERM_OPEN` — a silent open the planner cannot detect) is **dropped**, with a
+one-line `[TopoGen] dropped …` note naming the first missing block. Only
+`BUSTERM_OPEN` drops a candidate — `FEEDTHRU_RELAY`-flagged candidates (the
+legacy multi-rect fallback) and other diagnostics are kept and stay visible to
+`check_connectivity` / `dump_topologies --problems`. If **every** candidate is
+uncovered, the list is kept unchanged with a `[TopoGen] WARNING` so the bundle
+is never stranded (the planner's escalation ladder still commits one). This
+keeps `run_planner` focused on capacity/congestion: it never sees an uncovered
+candidate.
+
 **Example:**
 ```
 run_bundler strict

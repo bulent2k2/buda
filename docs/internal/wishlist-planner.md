@@ -4,27 +4,36 @@ Deferred follow-ups for the bundle / congestion planner
 (`src/congestion_planner.cpp`, `src/layering.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
-## Planner coverage gate (defense-in-depth)
+## Planner coverage gate (defense-in-depth) — ✅ RESOLVED (superseded by the generation-time gate)
 
-**What:** In `CongestionPlanner::plan_bundle` (`src/congestion_planner.cpp`, the
-per-candidate loop ~`:595-645`), demote a candidate to `topo_infeasible` when it
-leaves a bundle block with no busterm/pass-through — alongside the existing
-overflow gate. Reuse the block-coverage predicate from `verify.cpp`'s
-`check_topo` (factor a shared helper if needed). Keep it conservative: the gate
-only demotes uncovered candidates, and the existing escalation ladder
-(`ALLOW_OVERFLOW` / `BEST_EFFORT`) still commits one with a WARNING if *every*
-candidate is uncovered, so it can never strand a bundle.
+**Resolution:** implemented at **topology generation** instead of in the planner,
+keeping `run_planner` focused on capacity/congestion.
+`TopologyGenerator::filter_uncovered` (`src/topology.cpp`) runs at the tail of
+`generate_candidates` — one uniform gate over every generation path (2-pin,
+trunk, MST, BITRUNK) and every caller (flat/hier CLI, direct API). Per
+candidate it runs verify's `check_topo` and drops the candidate iff it has a
+`BUSTERM_OPEN` (a `connected_block_names` block with no busterm tap and no
+pass-through — the silent open the planner cannot detect). Drops are printed,
+never silent. Conservatism preserved exactly as this item asked: drop on
+`BUSTERM_OPEN` **only** (`FEEDTHRU_RELAY`-flagged legacy multi-rect fallback
+candidates are deliberately kept), and a **never-strand** fallback keeps the
+whole list (with a WARNING) when *every* candidate is uncovered, so the
+planner's `ALLOW_OVERFLOW`/`BEST_EFFORT` ladder still commits one. Tests:
+`test/tests/test_topo_coverage_filter.py`; regression: full fast + mid tiers
+with zero drops (the gate is a no-op on today's generator, per PR #65).
 
-**Why deferred:** The generation-side fix in PR #65 (coverage-safe stub
-suppression in `add_trunk_v`) already eliminates the selected-topology coverage
-bug it was meant to backstop. A global selection-behaviour change carries
-regression risk in the already-over-congested `big2.buda`, for no current
-benefit — so it's pure belt-and-suspenders against a *future* generator emitting
-an uncovered candidate.
+**Residual gaps (tracked elsewhere, not planner concerns):** a block missing
+from `topo.connected_block_names` is invisible to any coverage check — that is
+the CONVERGENT list-fidelity gap in
+[`wishlist-bundler.md`](wishlist-bundler.md); post-NUTS slide drift remains
+`check_nuts`'s job.
 
-**Where to start:** `src/congestion_planner.cpp` plan_bundle; `src/verify.cpp`
-check_topo coverage logic. Verify with `big2.buda` (no congestion regression) +
-the full test suite.
+The original proposal (kept for the record): demote uncovered candidates to
+`topo_infeasible` inside `CongestionPlanner::plan_bundle`, deferred because the
+PR #65 generation-side fix had already removed the live bug and a global
+selection-behaviour change carried `big2.buda` regression risk. The
+generation-time gate delivers the same backstop without touching planner
+selection semantics.
 
 ## Model band capacity in signal-track count, not layout width (Gap A part 2) — ✅ IMPLEMENTED
 

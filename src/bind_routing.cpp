@@ -276,6 +276,13 @@ void bind_routing(py::module_& m) {
             if (py::isinstance<py::str>(dsts))
                 return self.generate_candidates(src, {dsts.cast<std::string>()});
             return self.generate_candidates(src, dsts.cast<std::vector<std::string>>());
+        })
+        // Coverage gate, directly testable: returns the filtered list (pybind
+        // copies the vector, so in-place mutation would not reach the caller).
+        .def("filter_uncovered", [](const TopologyGenerator& self,
+                                    std::vector<Topology> cands) {
+            self.filter_uncovered(cands);
+            return cands;
         });
 
     // ── Bundle planner types (defined in congestion_planner.h) ───────────

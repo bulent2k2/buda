@@ -300,6 +300,14 @@ public:
         const std::string& src_name,
         const std::vector<std::string>& dst_names);
 
+    // Uniform coverage gate: drop candidates that leave a connected_block_names
+    // block with no busterm tap and no pass-through segment (verify's
+    // BUSTERM_OPEN — a silent open the planner cannot detect).  Applied by
+    // generate_candidates on every generation path; public for direct testing.
+    // Never strands a bundle: if every candidate is uncovered, the list is kept
+    // unchanged and a warning is printed (the planner ladder still commits one).
+    void filter_uncovered(std::vector<Topology>& candidates) const;
+
 private:
     // Internal dispatch targets.
     std::vector<Topology> generate_2pin(

@@ -6,6 +6,10 @@ per-subsystem files so each area stays scannable.
 
 ## History
 
+- **2026-07-02** — Planner "coverage gate" resolved: superseded by a uniform
+  generation-time gate (`TopologyGenerator::filter_uncovered` runs verify's
+  `check_topo` on every candidate; drops `BUSTERM_OPEN` only, never-strand
+  fallback) so `run_planner` stays focused on capacity/congestion.
 - **2026-07-01** — Split the single flat `wishlist.md` into per-subsystem files
   (`wishlist-bdb`, `-topo`, `-planner`, `-nuts`, `-bundler`, `-ripup`); this page
   became the index. Added the BDB serialization / write-back items (`open_bdb`
@@ -26,7 +30,8 @@ per-subsystem files so each area stays scannable.
 - **[wishlist-topo.md](wishlist-topo.md)** — Topology generation & connectivity.
   True along-flex trunk DOF (Stage C of the flexible-root re-arch).
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.
-  Coverage gate (defense-in-depth); signal-track band capacity (Gap A part 2, ✅
+  Coverage gate (✅ resolved — superseded by the generation-time
+  `filter_uncovered` gate); signal-track band capacity (Gap A part 2, ✅
   implemented); layer-assignment "instability" (✅ resolved, not a bug).
 - **[wishlist-nuts.md](wishlist-nuts.md)** — Abstract & Detailed NUTS.
   Band-level repack for spread-fit overlap clusters; pull-repack test failure (✅
