@@ -213,9 +213,21 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("span_lo",        &NetSegment::span_lo)
         .def_readwrite("span_hi",        &NetSegment::span_hi);
 
+    py::class_<NetVia>(m, "NetVia")
+        .def(py::init<>())
+        .def_readwrite("bundle_id",  &NetVia::bundle_id)
+        .def_readwrite("from_seg",   &NetVia::from_seg)
+        .def_readwrite("to_seg",     &NetVia::to_seg)
+        .def_readwrite("bit_index",  &NetVia::bit_index)
+        .def_readwrite("from_layer", &NetVia::from_layer)
+        .def_readwrite("to_layer",   &NetVia::to_layer)
+        .def_readwrite("x",          &NetVia::x)
+        .def_readwrite("y",          &NetVia::y);
+
     py::class_<DetailedNUTSResult>(m, "DetailedNUTSResult")
         .def(py::init<>())
         .def_readwrite("net_segments", &DetailedNUTSResult::net_segments)
+        .def_readwrite("net_vias",     &DetailedNUTSResult::net_vias)
         .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced);
 
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")

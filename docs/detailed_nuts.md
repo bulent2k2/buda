@@ -48,11 +48,27 @@ One bit-wire, fully resolved to a physical track.
 | `width` | double | Track width from the `TrackSlot` (not from the `BusSegment`) |
 | `layer`, `span_lo`, `span_hi` | — | Propagated from the parent `BusSegment` |
 
+### `NetVia` (output)
+
+One per-bit layer transition. Each bundle-level **symbolic bus-via** (a layer
+transition between two connected segments, one `bus_via` row for the whole bus)
+fans out to `bit_width` NetVias — bit *i* of one segment meets bit *i* of the
+connected segment at the crossing of their two individually-placed tracks.
+
+| Field | Type | Description |
+|---|---|---|
+| `bundle_id` | int | Propagated from the parent segments |
+| `from_seg`, `to_seg` | int | The connected seg pair, always `from_seg < to_seg` (deduped on (min, max) — the same key as the symbolic `bus_via`) |
+| `bit_index` | int | **Logical** bit (`bit_order` is already applied at NetSegment emission, so `net_names[bit_index]` is the bit's net with no HI_LO re-indexing) |
+| `from_layer`, `to_layer` | int | The two bits' layers (always different — same-layer touches are not vias) |
+| `x`, `y` | double | Per-bit crossing: for an H↔V bend/T-junction, `(v_bit.track_position, h_bit.track_position)`; for a stacked same-orientation pair, the bundle-level junction along-axis (`conn.at_pos`) + the lower-seg bit's track (a documented approximation — a buildable via there needs a jog, exactly as at the bundle level) |
+
 ### `DetailedNUTSResult`
 
 | Field | Type | Description |
 |---|---|---|
 | `net_segments` | list of NetSegment | All placed bit-wires, across all input `BusSegment`s |
+| `net_vias` | list of NetVia | All per-bit layer transitions (step 5 below) |
 | `num_unplaced` | int | Total number of bits that could not be placed (all-or-nothing per bus — see below) |
 
 ---
@@ -72,6 +88,22 @@ For each `BusSegment` in the input list:
    - With `timing_critical`: search for a *contiguous window* (see below). If none found, the bus is unplaced.
 
 5. **Emit `NetSegment`s.** One per selected track, with `bit_index = 0, 1, …, bit_width-1`.
+
+Then two post-passes over the emitted bit-wires:
+
+6. **Span adjustment.** Each bit-wire's endpoints are snapped/extended to reach
+   the *connected* segments' same-bit track positions (endpoint conns snap, mid-
+   span conns extend-to-cover, busterm faces re-extend), so bit *i* of segment A
+   physically meets bit *i* of segment B.
+
+7. **Per-bit via emission (step 5 in the source).** For every connection where
+   the two bits sit on **different layers**, one `NetVia` is emitted at the
+   per-bit crossing — deduped on `(bundle_id, min_seg, max_seg, bit_index)`
+   since connections are symmetric. Same-layer touches produce no via. A bit
+   whose counterpart is unplaced produces no via (mirroring the span-adjust
+   skip). Orientation comes from the layer's `RoutingGrid.is_horizontal()`.
+   This runs **after** span adjustment, which never moves `track_position`, so
+   the recorded crossings are final geometry.
 
 ---
 

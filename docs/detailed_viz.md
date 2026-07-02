@@ -78,6 +78,23 @@ Every bit-wire is registered under its `bundle_id`, so click-to-highlight,
 per-bundle visibility, per-layer visibility, and the Solo toggle all work
 identically to the abstract view.
 
+**Per-bit via markers (`NetVia`s)**
+
+Each `NetVia` from `DetailedNUTSResult.net_vias` (one per bit per layer
+transition — the bundle-level symbolic via fanned out to individual bits) is
+drawn as a small white square outlined in the **upper layer's** colour
+(`max(from_layer, to_layer)`), at the bit's exact crossing, above the bit-wires.
+
+Efficiency: vias are batched into **one scatter `PathCollection` per
+(bundle, upper layer)** — thousands of via markers collapse into a handful of
+artists, the same trick as the bit-wire `LineCollection`s — and are built in the
+same lazy `_build_detailed_artists()` pass (first `[Detailed]` toggle), so they
+add no cost to the initial window load. They are registered under their
+`bundle_id` like the bit-wires (highlight / layer / bundle / Solo gating), plus
+an extra hard gate: visible only when **detailed mode AND `[Vias/Conns]`** are
+both on (`_apply_detailed_via_visibility()`), so the existing Vias/Conns button
+controls them exactly as it controls the abstract junction markers.
+
 ---
 
 ## Toggle behaviour

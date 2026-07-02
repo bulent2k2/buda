@@ -88,6 +88,8 @@ public:
     std::vector<std::pair<double, TrackSlot>>
     signal_tracks_in(double x, double lo, double hi) const;
 
+    bool is_horizontal() const { return is_horizontal_; }
+
 private:
     TrackPattern                 global_pattern_;
     std::vector<PatternOverride> overrides_;

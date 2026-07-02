@@ -74,8 +74,23 @@ struct NetSegment {
     double span_hi        = 0.0;
 };
 
+// One per-bit layer transition between two connected segments' bit-wires.
+// Fans out from the bundle-level symbolic bus-via: same key
+// (bundle_id, from_seg, to_seg), one NetVia per bit_index. from_seg < to_seg
+// always (the pair is deduped on (min, max)).
+struct NetVia {
+    int    bundle_id  = 0;
+    int    from_seg   = 0;    // min of the connected seg pair
+    int    to_seg     = 0;    // max of the connected seg pair
+    int    bit_index  = 0;    // LOGICAL bit (bit_order already applied)
+    int    from_layer = 0;    // layer of from_seg's bit-wire
+    int    to_layer   = 0;    // layer of to_seg's bit-wire
+    double x = 0.0, y = 0.0;  // per-bit crossing (µm)
+};
+
 struct DetailedNUTSResult {
     std::vector<NetSegment> net_segments;
+    std::vector<NetVia>     net_vias;
     int num_unplaced = 0;
 };
 

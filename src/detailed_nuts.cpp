@@ -353,6 +353,60 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             // block (big2 bus_077 / blk_12).
             for (double fc : bs_ptr->busterm_faces) cover(fc);
         }
+
+        // -------------------------------------------------------------- //
+        // 5. Per-bit via emission: one NetVia wherever bit i of a segment //
+        //    meets bit i of a connected segment on a DIFFERENT layer.     //
+        //    Fans the symbolic bundle-level bus-via out to bit_width per- //
+        //    bit vias (same (bundle, from_seg, to_seg) key + bit_index).  //
+        //    Runs after the span adjustment, which never moves            //
+        //    track_position — so the crossings below are final geometry.  //
+        // -------------------------------------------------------------- //
+        std::set<std::tuple<int,int,int,int>> emitted; // (bid, lo_seg, hi_seg, bit)
+        for (const auto& ns : result.net_segments) {
+            auto bsit = bs_map.find({ns.bundle_id, ns.seg_idx});
+            if (bsit == bs_map.end() || !bsit->second) continue;
+            for (const auto& conn : bsit->second->connections) {
+                auto it = idx_map.find({ns.bundle_id, conn.seg_idx, ns.bit_index});
+                if (it == idx_map.end()) continue;      // other bit unplaced
+                const NetSegment& other = result.net_segments[it->second];
+                if (other.layer == ns.layer) continue;  // same layer -> no via
+                const int lo_seg = std::min(ns.seg_idx, conn.seg_idx);
+                const int hi_seg = std::max(ns.seg_idx, conn.seg_idx);
+                if (!emitted.insert({ns.bundle_id, lo_seg, hi_seg,
+                                     ns.bit_index}).second)
+                    continue;                           // conns are symmetric
+                if (!stack_.has_layer(ns.layer) || !stack_.has_layer(other.layer))
+                    continue;
+                const bool h_this  = stack_.get_layer_grid(ns.layer).is_horizontal();
+                const bool h_other = stack_.get_layer_grid(other.layer).is_horizontal();
+                double x, y;
+                if (h_this != h_other) {                // H<->V bend or T-junction
+                    const NetSegment& hs = h_this ? ns : other;
+                    const NetSegment& vs = h_this ? other : ns;
+                    x = vs.track_position;
+                    y = hs.track_position;
+                } else {
+                    // Stacked same-orientation cross-layer pair: along-axis from
+                    // the bundle-level junction (conn.at_pos), perpendicular from
+                    // the lower-seg-index bit's track — the same approximation the
+                    // bundle-level bus-via records (a buildable via needs a jog).
+                    const NetSegment& lo = (ns.seg_idx == lo_seg) ? ns : other;
+                    if (h_this) { x = conn.at_pos;         y = lo.track_position; }
+                    else        { x = lo.track_position;   y = conn.at_pos; }
+                }
+                NetVia v;
+                v.bundle_id  = ns.bundle_id;
+                v.from_seg   = lo_seg;
+                v.to_seg     = hi_seg;
+                v.bit_index  = ns.bit_index;
+                v.from_layer = (ns.seg_idx == lo_seg) ? ns.layer : other.layer;
+                v.to_layer   = (ns.seg_idx == lo_seg) ? other.layer : ns.layer;
+                v.x = x;
+                v.y = y;
+                result.net_vias.push_back(v);
+            }
+        }
     }
 
     return result;

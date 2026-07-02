@@ -1741,6 +1741,7 @@ class BudaVisualizer:
 
         # Detailed NUTS (Stage 9) visualisation state.
         self._detailed_bundle_artists = {}   # bid -> [{artist,alpha,lw,is_band,layer}]
+        self._detailed_via_artists   = []    # per-bit via scatters (also registered above)
         self._grid_rail_artists      = []    # POWER/GND/CLK stripe collections (not per-bundle)
         self._layer_is_h             = {}    # layer_id -> bool (populated by draw_detailed_tracks)
         # Lazy build: bit-wires are created on the first [Detailed] toggle; the
@@ -1950,7 +1951,8 @@ class BudaVisualizer:
             
         for a in self._vias_conns_artists:
             a.set_visible(self.ui_state.vias_conns)
-            
+        self._apply_detailed_via_visibility()
+
         for a in self._hanan_artists:
             a.set_visible(self.ui_state.hanan_grid)
             
@@ -2176,6 +2178,7 @@ class BudaVisualizer:
         self._redraw_blocks()   # restores default (all blocks equal) style
         for a in self._busterm_artists: a.set_visible(True)
         for a in self._vias_conns_artists: a.set_visible(True)
+        self._apply_detailed_via_visibility()
         for e in self._grid_rail_artists:
              e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
 
@@ -2402,6 +2405,7 @@ class BudaVisualizer:
             try: e['artist'].remove()
             except Exception: pass
         self._detailed_bundle_artists.clear()
+        self._detailed_via_artists.clear()   # removed above via the registry
         self._grid_rail_artists.clear()
         self._detailed_built = False   # force lazy rebuild from the new result
         self._rails_built    = False
@@ -2426,6 +2430,7 @@ class BudaVisualizer:
                 for entries in self._detailed_bundle_artists.values():
                     for e in entries:
                         e['artist'].set_visible(True)
+                self._apply_detailed_via_visibility()
                 for e in self._grid_rail_artists:
                     e['artist'].set_visible(self.ui_state.tracks)
 
@@ -3456,6 +3461,36 @@ class BudaVisualizer:
             # _refresh_highlight must not overwrite them with a scalar.
             self._register_detailed(bid, lc, alpha=0.9, lw=None, layer=layer)
 
+        # Per-bit vias (NetVia) → one scatter (PathCollection) per
+        # (bundle, upper layer): thousands of via markers collapse into a
+        # handful of artists, same rationale as the bit-wire LineCollections.
+        via_groups = {}   # (bundle_id, upper_layer) -> ([x], [y])
+        for nv in detailed_result.net_vias:
+            up = max(nv.from_layer, nv.to_layer)
+            g = via_groups.setdefault((nv.bundle_id, up), ([], []))
+            g[0].append(nv.x); g[1].append(nv.y)
+        for (bid, up), (xs, ys) in via_groups.items():
+            sc = self.ax.scatter(
+                xs, ys, s=14, marker='s', facecolors='white',
+                edgecolors=_LAYER_COLOR.get(up, '#888888'), linewidths=0.9,
+                zorder=16)   # above the bit-wires (zorder 15)
+            sc.set_alpha(0.95)
+            sc.set_visible(False)
+            self._register_detailed(bid, sc, alpha=0.95, lw=None, layer=up)
+            self._detailed_via_artists.append(sc)
+
+    def _apply_detailed_via_visibility(self):
+        """Per-bit vias show only in detailed mode AND with Vias/Conns on.
+
+        The via scatters are also registered in _detailed_bundle_artists (for
+        layer/bundle/highlight gating), whose bulk set_visible loops would
+        otherwise reveal them whenever detailed mode is entered — this gate
+        runs after those loops.
+        """
+        vis = self.ui_state.detailed_mode and self.ui_state.vias_conns
+        for a in self._detailed_via_artists:
+            a.set_visible(vis)
+
     def _toggle_detailed(self):
         # Build the detailed artists the first time the view is opened.
         if not self.ui_state.detailed_mode and not self._detailed_built:
@@ -3470,6 +3505,7 @@ class BudaVisualizer:
         for entries in self._detailed_bundle_artists.values():
             for e in entries:
                 e['artist'].set_visible(active)
+        self._apply_detailed_via_visibility()
         # If Tracks is already on when entering Detailed, build the rails now.
         if active and self.ui_state.tracks and not self._rails_built:
             self._build_rail_artists()
