@@ -268,6 +268,8 @@ void bind_db(py::module_& m) {
         .def("add_topology_bridge",  &BDB::add_topology_bridge, py::arg("r"))
         .def("topology_bridges",     &BDB::topology_bridges,
              py::arg("bundle_id"), py::arg("cand_index"))
+        .def("all_topology_bridges", &BDB::all_topology_bridges,
+             py::arg("bundle_id"))
         .def("set_topology_selected", &BDB::set_topology_selected,
              py::arg("bundle_id"), py::arg("cand_index"))
         .def("set_segment_layer",     &BDB::set_segment_layer,

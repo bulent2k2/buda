@@ -418,6 +418,11 @@ public:
     void add_topology_bridge(const TopoBridgeRow& r);   // INSERT OR REPLACE
     std::vector<TopoBridgeRow> topology_bridges(
         const std::string& bundle_id, int cand_index) const;
+    // All candidates' bridges for one bundle in a single query (the reload path
+    // buckets by cand_index — avoids one empty SELECT per candidate on designs
+    // without TEG-over blocks, the common case).
+    std::vector<TopoBridgeRow> all_topology_bridges(
+        const std::string& bundle_id) const;
     // Mark one candidate as the selected topology for a bundle (planner choice or
     // pin): sets is_selected=1 for cand_index, 0 for the bundle's other rows.
     void set_topology_selected(const std::string& bundle_id, int cand_index);

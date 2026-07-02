@@ -326,19 +326,25 @@ class BudaSession:
                     sr.layer_hint = seg.layer_hint
                     sr.is_jog = seg.is_jog
                     self.bdb.add_topology_segment(sr)
-                # Persist the authoritative seg-busterm annotation LOGICALLY (the
-                # topology row above is the FK parent). A reload rebuilds
-                # connectivity from these links, never re-deriving from geometry.
-                buda.persist_seg_busterms(self.bdb, bid, ci, topo)
-                self._persist_topology_bridges(bid, ci, topo)
+                self._persist_topology_annotations(bid, ci, topo)
                 n_cands += 1
         return n_cands
 
-    def _persist_topology_bridges(self, bid, ci, topo):
-        """Persist a candidate's TEG-over bridge segments (bridge_segments:
-        block_name -> Segment). The last un-persisted Topology field (v11):
-        without it a load_pipeline resume of a TEG-over multi-rect design would
-        silently drop the bridge over the block's notch."""
+    def _persist_topology_annotations(self, bid, ci, topo):
+        """Persist ONE candidate's derived annotations — ALWAYS as a pair:
+
+        - the authoritative seg-busterm links (LOGICAL connectivity; a reload
+          rebuilds it from these, never re-deriving from geometry), and
+        - the TEG-over bridge segments (bridge_segments: block_name -> Segment,
+          v11 — without them a resumed TEG-over multi-rect design silently
+          drops the bridge over the block's notch).
+
+        The single choke point for every topology-persist site: a future site
+        that called one half but not the other would silently reintroduce a
+        lossy resume, and nothing would fail until that path was resumed.
+        The candidate's topology row must already exist (FK parent).
+        """
+        buda.persist_seg_busterms(self.bdb, bid, ci, topo)
         for name, seg in topo.bridge_segments.items():
             r = buda.TopoBridgeRow()
             r.id = bid
@@ -645,6 +651,11 @@ class BudaSession:
             # was persisted (hier expanded bundles keep just their selected
             # topology, at its original template cand_index).
             cands, sel, sel_ci, pinned = [], -1, -1, False
+            # One bulk read per bundle (empty for non-TEG designs, the common
+            # case) instead of one SELECT per candidate.
+            bridges_by_ci = {}
+            for brg in self.bdb.all_topology_bridges(br.id):
+                bridges_by_ci.setdefault(brg.cand_index, []).append(brg)
             for tr in topos:
                 t = buda.Topology()
                 t.type = tr.type
@@ -678,7 +689,7 @@ class BudaSession:
                 # TEG-over bridges (v11): the explicit segment over a multi-rect
                 # block's notch, kept OUTSIDE t.segments (bridge_segments map).
                 bridges = {}
-                for brg in self.bdb.topology_bridges(br.id, tr.cand_index):
+                for brg in bridges_by_ci.get(tr.cand_index, ()):
                     sg = buda.Segment()
                     sg.start = buda.Point(int(brg.x1), int(brg.y1))
                     sg.end = buda.Point(int(brg.x2), int(brg.y2))
@@ -856,10 +867,9 @@ class BudaSession:
                 sr.layer_hint = seg.layer_hint
                 sr.is_jog = seg.is_jog
                 self.bdb.add_topology_segment(sr)
-            # Logical seg-busterm links (load_pipeline restores them; never
-            # re-derived from geometry).
-            buda.persist_seg_busterms(self.bdb, bid, ci, topo)
-            self._persist_topology_bridges(bid, ci, topo)
+            # Logical seg-busterm links + TEG-over bridges (load_pipeline
+            # restores both; never re-derived from geometry).
+            self._persist_topology_annotations(bid, ci, topo)
 
     def _persist_assigned_layers(self, bid, sel, w):
         """Write the planner's per-segment assigned layers for a selected topology."""
@@ -924,10 +934,10 @@ class BudaSession:
             sr.is_jog = seg.is_jog
             sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
             self.bdb.add_topology_segment(sr)
-        # Logical seg-busterm links for the instance's selected topology, so a
-        # `load_pipeline expanded` resume restores its connectivity too.
-        buda.persist_seg_busterms(self.bdb, bid, sel, topo)
-        self._persist_topology_bridges(bid, sel, topo)
+        # Logical seg-busterm links + TEG-over bridges for the instance's
+        # selected topology, so a `load_pipeline expanded` resume restores its
+        # connectivity (and any bridge) too.
+        self._persist_topology_annotations(bid, sel, topo)
 
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
@@ -1994,17 +2004,31 @@ class BudaSession:
         self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name,
                              extra_lines=[pre_msg] + diag + [rerun_msg])
 
+        # Deliberately NO persist here: this helper is also the visualizer's
+        # interactive ↺ preview (rerun_layer_fn), and exploring an alternative
+        # solve must not overwrite the BDB checkpoint. Committing paths (the
+        # run_nuts_on_layer command, ripup_reroute) call _checkpoint_routing().
         if self.detailed_result is not None:
             self._run_detailed_nuts(bit_order=self._detailed_bit_order)
-            # Re-persist so a BDB checkpoint reflects the re-solved layer (the
-            # engine calls above bypass the run_nuts/run_detailed_nuts command
-            # handlers, which own the persist step). No-op without an open BDB.
-            self._persist_nuts()
-            self._persist_detailed_nuts()
             return self.nuts_result, self.detailed_result
 
-        self._persist_nuts()
         return self.nuts_result
+
+    def _checkpoint_routing(self):
+        """Persist the FULL current routing state to the open BDB: planner
+        selections/layers + abstract-NUTS bus rows (+ detailed rows when
+        present). The single commit choke point for engine-driven re-run paths
+        that bypass the stage command handlers (ripup_reroute, the
+        run_nuts_on_layer command). Interactive visualizer previews (↺ /
+        Re-run & Refresh) deliberately do NOT call this — a checkpoint changes
+        only on explicit commands, never while exploring. No-op without a BDB.
+        """
+        if self.bdb is None:
+            return
+        self._persist_planner_output()
+        self._persist_nuts()
+        if self.detailed_result is not None:
+            self._persist_detailed_nuts()
 
     def _replan_layers(self):
         """Re-run planner layer assignment on the live planner, honoring
@@ -2837,16 +2861,13 @@ class BudaSession:
         print(f"[ripup_reroute] done: metric {m0}->{metric()} "
               f"after {committed} move(s), {n_trials} trial(s).", flush=True)
 
-        # Re-persist the FINAL state: the trials/commits above re-ran the
+        # Commit the FINAL state: the trials/commits above re-ran the
         # planner/NUTS(/DNUTS) internally without going through the command
         # handlers, so the BDB still holds the pre-ripup routing. A checkpoint
         # (save/exit → load_pipeline resume) must reflect what this session now
-        # holds. Idempotent; no-op without an open BDB.
+        # holds. Idempotent; no-op without an open BDB or without moves.
         if self.bdb is not None and committed:
-            self._persist_planner_output()
-            self._persist_nuts()
-            if stage == 'b' and self.detailed_result is not None:
-                self._persist_detailed_nuts()
+            self._checkpoint_routing()
             print(f"[BDB] re-persisted post-ripup routing "
                   f"({committed} re-route(s) committed).")
 
@@ -3953,6 +3974,11 @@ class BudaSession:
                 print("Error: run_nuts must be called before run_nuts_on_layer")
                 return
             self._rerun_nuts_layer(layer_id)
+            # The COMMAND commits the re-solved routing to the BDB; the
+            # visualizer's interactive ↺ (same helper) stays a pure preview.
+            if self.bdb is not None:
+                self._checkpoint_routing()
+                print("[BDB] re-persisted routing after run_nuts_on_layer.")
         elif cmd == "select_topology":
             # Usage: select_topology <bundle_id> <topo_id>
             if len(args) < 2:

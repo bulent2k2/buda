@@ -379,8 +379,11 @@ Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
 charged bands), planner band state, overlap details. TEG-over bridge segments
 **are** restored (`topology_bridge_segment`, v11), so TEG-over multi-rect
 designs resume losslessly. `ripup_reroute` and `run_nuts_on_layer` both
-**re-persist** their final routing (planner output / NUTS + detailed rows), so
-a checkpoint after either resumes from the re-solved routing, not stale rows.
+**commit** their final routing via the `_checkpoint_routing()` choke point
+(planner output + NUTS + detailed rows), so a checkpoint after either resumes
+from the re-solved routing, not stale rows. The visualizer's interactive
+rerun buttons (↺ / Re-run & Refresh) are deliberately **pure previews** — a
+checkpoint changes only on explicit commands, never while exploring.
 Tests: `test/tests/test_bdb_resume.py`, `test/tests/test_bdb_resume_gaps.py`.
 
 ---

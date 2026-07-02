@@ -28,21 +28,8 @@ import io
 import sqlite3
 
 import buda
-import buda_cli
 
-
-def _quiet(session, *cmds):
-    with contextlib.redirect_stdout(io.StringIO()) as buf:
-        for c in cmds:
-            session.do_command(c)
-    return buf.getvalue()
-
-
-def _fresh(*cmds):
-    s = buda_cli.BudaSession()
-    s.no_viz = True
-    out = _quiet(s, *cmds)
-    return s, out
+from test_bdb_resume import _fresh, _quiet
 
 
 # Pure-TEG block: two disjoint rects with an x-gap; a source above the gap makes
@@ -137,6 +124,50 @@ def test_run_nuts_on_layer_repersists_detailed(tmp_path):
     snap = s.bdb.route_snapshot()
     assert snap.stage == "detailed_nuts"
     assert snap.n_net_segments == len(s.bdb.net_segments("1"))
+
+
+def test_expanded_bundle_bridge_roundtrip(bdb_input):
+    # The hier expanded persist path (_add_expanded_bundle) writes bridges via
+    # the same _persist_topology_annotations choke point, and `load_pipeline
+    # expanded` restores them with the compact-index remap. The hier flow
+    # cannot yet PRODUCE bridges (cell-local floorplans build single-rect
+    # blocks only — flat multi-rect TEG blocks are the only producer), so the
+    # bridge is injected into an expanded instance's selected candidate: this
+    # exercises exactly the persist/restore code a hier TEG design would use.
+    db = bdb_input("hier_mixed")
+    s1, _ = _fresh("source flow/rnr/mix_tracks.buda", f"open_bdb {db}",
+                   "derive_busterms 1", "run_hier_bundler depth 1",
+                   "generate_hier_topologies", "run_planner hier 3")
+    rep_ids = {b.id for b in s1.bdb.all_bundles() if b.is_replicated}
+    w = next(w for w in s1.bundles
+             if str(w.input.original_bundle.id) in rep_ids)
+    bid = str(w.input.original_bundle.id)
+    sel = w.plan.selected_topology_index
+    # Inject a bridge into the selected candidate (reassign: pybind copies).
+    cands = list(w.input.candidates)
+    topo = cands[sel]
+    seg = buda.Segment()
+    seg.start = buda.Point(700, 0)
+    seg.end = buda.Point(700, 400)
+    seg.layer_hint = 7
+    topo.bridge_segments = {"proc_a/tegblk": seg}
+    cands[sel] = topo
+    w.input.candidates = cands
+    with contextlib.redirect_stdout(io.StringIO()):
+        s1._persist_planner_output()          # expanded re-persist incl. bridge
+    rows = s1.bdb.topology_bridges(bid, sel)
+    assert [(r.block_name, r.x1, r.y1, r.x2, r.y2, r.layer_hint)
+            for r in rows] == [("proc_a/tegblk", 700, 0, 700, 400, 7)]
+    del s1
+
+    s2, _ = _fresh("source flow/rnr/mix_tracks.buda", f"open_bdb {db}",
+                   "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+                   "add_blocks_from_bdb 2 skip", "load_pipeline expanded")
+    w2 = next(w for w in s2.bundles if str(w.input.original_bundle.id) == bid)
+    t2 = w2.input.candidates[w2.plan.selected_topology_index]
+    got = {n: (sg.start.x, sg.start.y, sg.end.x, sg.end.y, sg.layer_hint)
+           for n, sg in t2.bridge_segments.items()}
+    assert got == {"proc_a/tegblk": (700, 0, 700, 400, 7)}
 
 
 def test_hier_detailed_persistence_flow_level(bdb_input):

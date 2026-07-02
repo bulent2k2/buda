@@ -2564,6 +2564,20 @@ void BDB::add_topology_bridge(const TopoBridgeRow& r) {
     sqlite3_step(s);
 }
 
+static TopoBridgeRow _bridge_row_from(sqlite3_stmt* q) {
+    TopoBridgeRow r;
+    r.id         = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+    r.cand_index = sqlite3_column_int(q, 1);
+    r.block_name = reinterpret_cast<const char*>(sqlite3_column_text(q, 2));
+    r.x1 = sqlite3_column_int(q, 3);
+    r.y1 = sqlite3_column_int(q, 4);
+    r.x2 = sqlite3_column_int(q, 5);
+    r.y2 = sqlite3_column_int(q, 6);
+    r.layer_hint = sqlite3_column_int(q, 7);
+    r.is_jog     = sqlite3_column_int(q, 8) != 0;
+    return r;
+}
+
 std::vector<TopoBridgeRow> BDB::topology_bridges(const std::string& bundle_id,
                                                  int cand_index) const {
     Stmt q(_db,
@@ -2573,19 +2587,21 @@ std::vector<TopoBridgeRow> BDB::topology_bridges(const std::string& bundle_id,
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (q, 2, cand_index);
     std::vector<TopoBridgeRow> out;
-    while (sqlite3_step(q) == SQLITE_ROW) {
-        TopoBridgeRow r;
-        r.id         = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
-        r.cand_index = sqlite3_column_int(q, 1);
-        r.block_name = reinterpret_cast<const char*>(sqlite3_column_text(q, 2));
-        r.x1 = sqlite3_column_int(q, 3);
-        r.y1 = sqlite3_column_int(q, 4);
-        r.x2 = sqlite3_column_int(q, 5);
-        r.y2 = sqlite3_column_int(q, 6);
-        r.layer_hint = sqlite3_column_int(q, 7);
-        r.is_jog     = sqlite3_column_int(q, 8) != 0;
-        out.push_back(std::move(r));
-    }
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.push_back(_bridge_row_from(q));
+    return out;
+}
+
+std::vector<TopoBridgeRow> BDB::all_topology_bridges(
+        const std::string& bundle_id) const {
+    Stmt q(_db,
+        "SELECT bundle_id,cand_index,block_name,x1,y1,x2,y2,layer_hint,is_jog"
+        " FROM topology_bridge_segment WHERE bundle_id=?"
+        " ORDER BY cand_index, block_name");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<TopoBridgeRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        out.push_back(_bridge_row_from(q));
     return out;
 }
 
