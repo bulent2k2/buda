@@ -15,7 +15,7 @@ the standard flow, see the [User Guide](USER_GUIDE.md).
 ## Synopsis
 
 ```
-buda [--no-viz] [--verbose-conn] [--ipc-verbose] [-h] <script.buda>
+buda [-nv | --no-viz] [--verbose-conn] [--ipc-verbose] [-h] <script.buda>
 ```
 
 The CLI itself is `src/buda_cli.py`; you normally invoke it through the `bin/buda`
@@ -49,7 +49,7 @@ relative to the sourcing script's directory.
 | Flag | Default | Effect |
 |---|---|---|
 | `-h`, `--help` | — | Print usage (auto-generated from the flags below) and exit. |
-| `--no-viz` | off | Skip `visualize` / `visualize_topologies` commands so no GUI window opens. Use for batch runs, tests, and CI. The full pipeline still runs and all logs are written. |
+| `-nv`, `--no-viz` | off | Skip `visualize` / `visualize_topologies` commands so no GUI window opens. Use for batch runs, tests, and CI. The full pipeline still runs and all logs are written. |
 | `--verbose-conn` | off | Make `check_connectivity` print **every** per-bit violation individually. By default per-bit violations are collapsed into one line per (bundle, topology, kind, locus) group with a total — on a large design this turns tens of thousands of lines into a few hundred. |
 | `--ipc-verbose` | off | Surface the `buda_viz` ↔ `def_viz` IPC socket **status** chatter (`[viz_ipc] listening on …`, `[buda_viz] IPC session=… connected=…`, `[buda_viz] IPC timer started …`). These are debugging lines and are hidden by default. Socket **errors** are always printed regardless of this flag. |
 
