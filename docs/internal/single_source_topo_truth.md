@@ -103,12 +103,42 @@ for **every** segment, so the shape is fully covered):
   fallback removal just stops ConnTopology from silently guessing when the
   annotation is absent.
 
-- **Phase 3 — BDB reload.** `seg_busterms` is in-memory only (`bdb.cpp`
-  `topology_segment` stores geometry; deferral in `wishlist-bdb.md`). Today every
-  session regenerates candidates via `generate_candidates`, so the annotation is
-  never lost. If a future path reconstructs a `Topology` from persisted rows, give
-  it one explicit re-annotation (`annotate_endpoints(topo, fp)` on load) — or
-  persist `seg_busterms` — so the fallback stays unnecessary in every path.
+- **Phase 3 — persist `seg_busterms` logically (done).** `seg_busterms` now
+  round-trips through the BDB **logically**, so a reload restores connectivity
+  without any geometric re-derivation (re-annotating on load would just relocate
+  the guess — `annotate_topology` is itself geometric, see the Phase 2 caveat).
+  Two schema pieces (v9):
+  1. The `busterm` table is the one-true-source for a tap's geometry+TEG. It
+     gained `teg_mode` + `orig_x1..y2` so a **routing-time** busterm row round-trips
+     the *entire* `topology.h` Busterm — block name, margin bbox, full extent,
+     multi-rect (`rects` JSON), and the TEG solution — losslessly. Routing-time
+     rows use id `tb:<block>`, distinct from the hier-derived `bt:<name>` rows so
+     they never overwrite them; `all_busterms()` filters `tb:` out (the hier
+     bundler / `BustermGen::all` / CLI listing stay unpolluted), and the reload
+     path reaches them by id via `BDB::busterm(id)`.
+  2. `topology_seg_busterm(bundle_id, cand_index, seg_index, endpoint, busterm_id)`
+     is the ONE authoritative record of which segment endpoint taps which busterm.
+     A row exists only for a real tap; a missing `(seg, endpoint)` is a wire
+     junction (`nullopt`). An all-junction segment writes zero rows — the persisted
+     form is canonical.
+
+  The C++ bridge `persist_seg_busterms` / `load_seg_busterms` (buda module,
+  `bind_routing.cpp`) is the single serializer: persist upserts each tap's `tb:`
+  busterm row + its link; load rebuilds `seg_busterms` from the link rows +
+  `BDB::busterm(id)` **alone** — no floorplan, no `annotate_topology`.
+  `generate_topologies` calls persist right after `add_topology_segment`
+  (`_persist_topologies`, `buda_cli.py`). Regressions:
+  `test_seg_busterm_persist.py` (multi-rect + TEG preserved; junction endpoints
+  absent; a reloaded topology drives `ConnTopology`/`check_topo` identically to the
+  in-memory one; the annotation survives the diffable `*.bdb.sql` round-trip).
+
+  This is forward-looking: no reload-and-route consumer exists yet (every session
+  still regenerates candidates), so the deliverable is the persistence + reload
+  primitive + round-trip proof. When a full reload-and-route path is added, the
+  truth is already there in logical form. **One-true-source twice over:** block
+  geometry's source stays the `component` table; the busterm's geometry+TEG source
+  is the `busterm` row; connectivity's source is the `topology_seg_busterm` links —
+  none re-derived from another.
 
 ## Why not just make the fallback smarter?
 
