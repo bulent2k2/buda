@@ -330,8 +330,25 @@ class BudaSession:
                 # topology row above is the FK parent). A reload rebuilds
                 # connectivity from these links, never re-deriving from geometry.
                 buda.persist_seg_busterms(self.bdb, bid, ci, topo)
+                self._persist_topology_bridges(bid, ci, topo)
                 n_cands += 1
         return n_cands
+
+    def _persist_topology_bridges(self, bid, ci, topo):
+        """Persist a candidate's TEG-over bridge segments (bridge_segments:
+        block_name -> Segment). The last un-persisted Topology field (v11):
+        without it a load_pipeline resume of a TEG-over multi-rect design would
+        silently drop the bridge over the block's notch."""
+        for name, seg in topo.bridge_segments.items():
+            r = buda.TopoBridgeRow()
+            r.id = bid
+            r.cand_index = ci
+            r.block_name = name
+            r.x1, r.y1 = seg.start.x, seg.start.y
+            r.x2, r.y2 = seg.end.x, seg.end.y
+            r.layer_hint = seg.layer_hint
+            r.is_jog = seg.is_jog
+            self.bdb.add_topology_bridge(r)
 
     def _persist_nuts(self):
         """Persist abstract-NUTS bus segments + symbolic bus-vias (Stage 4).
@@ -579,9 +596,8 @@ class BudaSession:
         Not restored (recomputed downstream or absent): seg_perp (a NUTS
         placement *preference* from the planner's charged bands — a resumed
         run_nuts may legally place segments at different track positions than
-        the original session), planner band state, overlap details, doglegs,
-        and Topology.bridge_segments (not yet persisted — TEG-over multi-rect
-        designs cannot resume losslessly; see wishlist-bdb.md).
+        the original session), planner band state, overlap details, doglegs.
+        TEG-over bridge segments ARE restored (topology_bridge_segment, v11).
         """
         import json
         if self.bdb is None:
@@ -659,6 +675,18 @@ class BudaSession:
                     # Phase 3: annotate_topology would just re-guess what the
                     # links record exactly).
                     buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
+                # TEG-over bridges (v11): the explicit segment over a multi-rect
+                # block's notch, kept OUTSIDE t.segments (bridge_segments map).
+                bridges = {}
+                for brg in self.bdb.topology_bridges(br.id, tr.cand_index):
+                    sg = buda.Segment()
+                    sg.start = buda.Point(int(brg.x1), int(brg.y1))
+                    sg.end = buda.Point(int(brg.x2), int(brg.y2))
+                    sg.layer_hint = brg.layer_hint
+                    sg.is_jog = brg.is_jog
+                    bridges[brg.block_name] = sg
+                if bridges:
+                    t.bridge_segments = bridges
                 if tr.is_selected:
                     sel = len(cands)     # compact index of this candidate
                     sel_ci = tr.cand_index
@@ -831,6 +859,7 @@ class BudaSession:
             # Logical seg-busterm links (load_pipeline restores them; never
             # re-derived from geometry).
             buda.persist_seg_busterms(self.bdb, bid, ci, topo)
+            self._persist_topology_bridges(bid, ci, topo)
 
     def _persist_assigned_layers(self, bid, sel, w):
         """Write the planner's per-segment assigned layers for a selected topology."""
@@ -898,6 +927,7 @@ class BudaSession:
         # Logical seg-busterm links for the instance's selected topology, so a
         # `load_pipeline expanded` resume restores its connectivity too.
         buda.persist_seg_busterms(self.bdb, bid, sel, topo)
+        self._persist_topology_bridges(bid, sel, topo)
 
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
@@ -1966,8 +1996,14 @@ class BudaSession:
 
         if self.detailed_result is not None:
             self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            # Re-persist so a BDB checkpoint reflects the re-solved layer (the
+            # engine calls above bypass the run_nuts/run_detailed_nuts command
+            # handlers, which own the persist step). No-op without an open BDB.
+            self._persist_nuts()
+            self._persist_detailed_nuts()
             return self.nuts_result, self.detailed_result
 
+        self._persist_nuts()
         return self.nuts_result
 
     def _replan_layers(self):

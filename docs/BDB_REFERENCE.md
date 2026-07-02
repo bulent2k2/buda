@@ -83,6 +83,12 @@ topology_seg_busterm
                  a missing (seg,endpoint) is a wire junction
                  PK (bundle_id, cand_index, seg_index, endpoint)
                  FK (bundle_id, cand_index) → topology
+topology_bridge_segment
+                 bundle_id, cand_index, block_name, x1,y1,x2,y2,
+                 layer_hint, is_jog — one TEG-over bridge per
+                 (candidate, multi-rect block) (v11)
+                 PK (bundle_id, cand_index, block_name)
+                 FK (bundle_id, cand_index) → topology
 
 bus_segment      bundle_id→bundle (FK), seg_idx, layer, is_horiz,
                  x1,y1,x2,y2, track_position, width, placed, is_jog,
@@ -127,7 +133,8 @@ routing-time busterm attributes (`busterm.teg_mode` + `orig_x1..y2`) and the
 [`load_pipeline`](#load_pipeline) resume support — the **stage-4 solver state**
 columns on `bus_segment` (perpendicular interval + corner-split track bounds),
 `bundle_net.ord` (the bundle's bit order), and `topology.is_pinned` (a pre-plan
-pin survives a checkpoint).
+pin survives a checkpoint); v11 added **`topology_bridge_segment`** (TEG-over
+bridges), closing the last un-persisted `Topology` field.
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
@@ -369,12 +376,12 @@ expanded instance persists only its selected topology (at its template
 `cand_index`), so its selection is remapped to the compact in-memory list.
 
 Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
-charged bands), planner band state, overlap details, and
-`Topology.bridge_segments` (TEG over-the-block bridges are not yet persisted,
-so TEG-over multi-rect designs cannot resume losslessly). `ripup_reroute` now
-**re-persists** its final routing (planner output + NUTS + detailed rows when
-at stage b), so a post-ripup checkpoint resumes from the improved routing, not
-the pre-ripup one. Tests: `test/tests/test_bdb_resume.py`.
+charged bands), planner band state, overlap details. TEG-over bridge segments
+**are** restored (`topology_bridge_segment`, v11), so TEG-over multi-rect
+designs resume losslessly. `ripup_reroute` and `run_nuts_on_layer` both
+**re-persist** their final routing (planner output / NUTS + detailed rows), so
+a checkpoint after either resumes from the re-solved routing, not stale rows.
+Tests: `test/tests/test_bdb_resume.py`, `test/tests/test_bdb_resume_gaps.py`.
 
 ---
 
