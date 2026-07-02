@@ -29,8 +29,9 @@ endpoint:
    net never had. (`if (found) continue;` then also suppresses the real SEG
    junction there.)
 
-The fallback is the **only** place connectivity is guessed from geometry — the
-one violation of the principle. Two real bugs traced to it:
+The fallback **was** the only place connectivity was guessed from geometry — the
+one violation of the principle, **removed in Phase 2** (below). Two real bugs
+traced to it:
 
 - **Hier per-instance offset** dropped `seg_busterms`, so every offset candidate
   was unannotated → fallback → corner feedthru (fixed by carrying the annotation
@@ -80,14 +81,27 @@ for **every** segment, so the shape is fully covered):
   faces; BITRUNK is the case where a trunk endpoint can graze a *terminal*
   sibling's face, so it seeds structurally instead of geometrically.
 
-- **Phase 2 — retire the fallback.** Expose `annotate_endpoints(topo, fp)` as a
-  reusable entry point. In `infer_connections`, treat a *missing* `seg_busterms`
-  entry the same as an all-`nullopt` entry (bend/SEG), i.e. never geometrically
-  guess a BUSTERM. Update the handful of tests that hand-build segments-only
-  topologies (`test_passthrough_slide.py`, `test_nuts.py::make_bundle`,
-  `test_hier_planner.py`, `test_bundle_wrapper_api.py`,
-  `test_offset_topology.py::test_unannotated_fallback_still_taps_corner`) to call
-  the annotate helper (or invert the sanity assert). This is the actual removal.
+- **Phase 2 — retire the fallback (done).** The geometric BUSTERM search in
+  `ConnTopology::infer_connections` is deleted: `seg_busterms` is now the *only*
+  busterm source, and a segment with no entry (or a `nullopt` endpoint) is a wire
+  junction that flows to the SEG inference — ConnTopology never re-derives
+  connectivity from geometry. `buda.annotate_topology(topo, fp)` (C++
+  `annotate_topology`) is the explicit, one-time entry point for annotating a
+  hand-built or reloaded topology before `ConnTopology::build`. The tests that
+  built segments-only topologies were migrated to annotate explicitly
+  (`test_corner_margin.py` via a persisting whole-map assign — the old
+  `seg_busterms[i] = …` item-assign never persisted, so those were *silently*
+  on the fallback; `test_passthrough_slide.py`, `test_relay_tap_slide.py`,
+  `test_span_layer_assignment.py` via `annotate_topology`), and the
+  fallback-sanity test now asserts an unannotated topology taps **nothing**.
+
+  Caveat worth knowing: `annotate_topology` is itself *geometric*, so on a
+  corner-graze layout it re-taps the grazed block just as the old fallback did.
+  It is a re-derivation tool for clean / well-formed topologies, **not** a
+  substitute for the generator's graze-safe *structural* seeding (which is what
+  `offset_topology` carries). Generation remains the authoritative source; the
+  fallback removal just stops ConnTopology from silently guessing when the
+  annotation is absent.
 
 - **Phase 3 — BDB reload.** `seg_busterms` is in-memory only (`bdb.cpp`
   `topology_segment` stores geometry; deferral in `wishlist-bdb.md`). Today every

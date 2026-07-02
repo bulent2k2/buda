@@ -46,10 +46,15 @@ def make_h_segment(x_lo, x_hi, y, layer=4):
     return seg
 
 
-def make_bundle_wrapper(bid, width, seg):
+def make_bundle_wrapper(bid, width, seg, fp=None):
     topo = buda.Topology()
     topo.type = "TEST_H"
     topo.segments = [seg]
+    if fp is not None:
+        # Phase 2: annotate the segment's busterm endpoints explicitly so the
+        # planner's ConnTopology computes the block-face perp range (the geometric
+        # fallback that used to supply this implicitly has been retired).
+        buda.annotate_topology(topo, fp)
     bundle = buda.HBundle()
     bundle.id = bid
     w = buda.BundleWrapper()
@@ -311,9 +316,9 @@ def test_overflow_threshold_congestion():
     seg2 = make_h_segment(100, 500, y=98)
     seg3 = make_h_segment(100, 500, y=98)
     # All width=2 so fattest-first order is stable by bundle ID.
-    w1 = make_bundle_wrapper(bid=1, width=2.0, seg=seg1)
-    w2 = make_bundle_wrapper(bid=2, width=2.0, seg=seg2)
-    w3 = make_bundle_wrapper(bid=3, width=2.0, seg=seg3)
+    w1 = make_bundle_wrapper(bid=1, width=2.0, seg=seg1, fp=fp)
+    w2 = make_bundle_wrapper(bid=2, width=2.0, seg=seg2, fp=fp)
+    w3 = make_bundle_wrapper(bid=3, width=2.0, seg=seg3, fp=fp)
 
     assignments = router.optimize_topologies([w1, w2, w3], 1)
     layers = {a.bundle_id: a.seg_layers[0] for a in assignments}
@@ -348,8 +353,8 @@ def test_inter_bus_pitch_reserved():
         # test_top_layer_load_balancing.
         router.set_planner_param("kBalance", 0.0)
         router.build_congestion_map()
-        w1 = make_bundle_wrapper(bid=1, width=2.0, seg=make_h_segment(100, 500, y=98))
-        w2 = make_bundle_wrapper(bid=2, width=2.0, seg=make_h_segment(100, 500, y=98))
+        w1 = make_bundle_wrapper(bid=1, width=2.0, seg=make_h_segment(100, 500, y=98), fp=fp)
+        w2 = make_bundle_wrapper(bid=2, width=2.0, seg=make_h_segment(100, 500, y=98), fp=fp)
         a = router.optimize_topologies([w1, w2], 1)
         return {x.bundle_id: x.seg_layers[0] for x in a}
 

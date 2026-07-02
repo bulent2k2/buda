@@ -24,6 +24,8 @@
 #include "bundler.h"
 namespace buda {
 
+class Floorplan;   // defined below; needed by free-function decls before it
+
 // How a multi-rect block handles a trunk that falls in the gap between its rects.
 enum class TegMode {
     THRU,  // default: connect only the nearest rect; block's internal routing joins sides
@@ -108,6 +110,13 @@ struct Topology {
 // instance-coord floorplan; absolute names are left unchanged.
 Topology offset_topology(const Topology& t, int dx, int dy,
                          const std::string& name_prefix = "");
+
+// Explicitly (re)annotate a topology's seg_busterms from a floorplan's blocks —
+// the authoritative endpoint annotation ConnTopology reads.  For hand-built or
+// BDB-reloaded topologies that did not go through generate_candidates; call it
+// once before ConnTopology::build.  (ConnTopology no longer geometrically guesses
+// busterms — see docs/internal/single_source_topo_truth.md.)
+void annotate_topology(Topology& topo, const Floorplan& fp);
 // Per-block corner margin: keeps trunk/stub connections away from block corners.
 // dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).
 // dy: margin along the vertical direction   (applied to left/right  faces, extent in Y).

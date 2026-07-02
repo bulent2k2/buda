@@ -68,6 +68,26 @@ Topology offset_topology(const Topology& t, int dx, int dy,
     return out;
 }
 
+// Forward decl: the geometric endpoint annotator (defined later in this TU).
+static void annotate_endpoints(Topology& topo, const std::vector<Busterm>& blocks);
+
+void annotate_topology(Topology& topo, const Floorplan& fp) {
+    // Build a Busterm per floorplan block and run the same geometric annotation
+    // the generator uses, so a hand-built or BDB-reloaded topology gets the
+    // authoritative seg_busterms it needs before ConnTopology::build (which no
+    // longer geometrically guesses — see single_source_topo_truth.md).  This is
+    // an EXPLICIT one-time annotation, not a hidden per-endpoint fallback.
+    std::vector<Busterm> bts;
+    for (const auto& [name, rect] : fp.get_all_blocks()) {
+        Busterm b;
+        b.block_name = name;
+        b.bbox       = rect;
+        b.orig_bbox  = rect;
+        bts.push_back(std::move(b));
+    }
+    annotate_endpoints(topo, bts);
+}
+
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     int nx1 = std::min(x1, x2);
     int nx2 = std::max(x1, x2);

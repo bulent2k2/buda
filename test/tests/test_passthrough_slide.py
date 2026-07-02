@@ -44,6 +44,7 @@ def _build_u_hvh(fp):
         _seg(700, 450, 770, 450, 6),   # seg2: H stub off right's right face
     ]
     topo.connected_block_names = ["left", "right"]
+    buda.annotate_topology(topo, fp)   # Phase 2: explicit annotation (no fallback)
     ct = buda.ConnTopology()
     ct.build(topo, fp)
     return ct
@@ -81,6 +82,7 @@ def test_true_passthrough_block_still_tightens():
     topo.type = "I_H"
     topo.segments = [_seg(100, 150, 400, 150, 6)]
     topo.connected_block_names = ["src", "mid", "dst"]
+    buda.annotate_topology(topo, fp)   # Phase 2: explicit annotation (no fallback)
     ct = buda.ConnTopology()
     ct.build(topo, fp)
     cs = ct.segs()[0]
@@ -116,6 +118,7 @@ def test_grazing_busterm_stub_with_strict_cover_keeps_slide():
         _seg(200, 300, 400, 300, 6),   # seg1: H stub grazing cover's top, taps recv
     ]
     topo.connected_block_names = ["cover", "recv"]
+    buda.annotate_topology(topo, fp)   # Phase 2: explicit annotation (no fallback)
     ct = buda.ConnTopology()
     ct.build(topo, fp)
     h = ct.segs()[1]
@@ -144,6 +147,7 @@ def test_grazing_busterm_stub_as_sole_cover_stays_clamped():
         _seg(200, 300, 400, 300, 6),   # H stub: sole (grazing) cover of `cover`
     ]
     topo.connected_block_names = ["cover", "recv"]
+    buda.annotate_topology(topo, fp)   # Phase 2: explicit annotation (no fallback)
     ct = buda.ConnTopology()
     ct.build(topo, fp)
     h = ct.segs()[0]
