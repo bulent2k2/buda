@@ -232,6 +232,32 @@ def test_hier_replan_with_net_rows_is_fk_safe(bdb_input):
     assert not s.bdb.net_segments(reps[0].id)  # child rows went with the bundle
 
 
+def test_late_open_bdb_persists_abstract_stage_too(tmp_path):
+    # BDB opened only AFTER run_nuts: the detailed persist must materialize the
+    # abstract bus rows first — otherwise the DB would record stage
+    # 'detailed_nuts' with zero bus counts and net rows describing bus routing
+    # that isn't there (Codex #134 P2).
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s,
+           "source flow/rnr/mix_tracks.buda",
+           "add_block A 0 0 200 400",
+           "add_block B 600 800 800 1200",
+           "add_bus d[8] A.p B.p",
+           "run_bundler", "generate_topologies", "run_planner 3",
+           "run_nuts",                            # no BDB yet
+           f"open_bdb {tmp_path / 'late.bdb'}",   # open late
+           "run_detailed_nuts")
+    bid = str(s.bundles[0].input.original_bundle.id)
+    assert s.bdb.bus_segments(bid) and s.bdb.bus_vias(bid)   # abstract persisted
+    assert s.bdb.net_segments(bid) and s.bdb.net_vias(bid)
+    snap = s.bdb.route_snapshot()
+    assert snap.stage == "detailed_nuts"
+    assert snap.n_bus_segments == len(s.bdb.bus_segments(bid)) >= 1
+    assert snap.n_bus_vias == len(s.bdb.bus_vias(bid)) >= 1
+    assert snap.n_net_segments == len(s.bdb.net_segments(bid)) >= 1
+
+
 def test_no_bdb_is_noop():
     s = buda_cli.BudaSession()
     s.no_viz = True

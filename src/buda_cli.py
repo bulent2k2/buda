@@ -474,12 +474,21 @@ class BudaSession:
         """
         if self.bdb is None or self.detailed_result is None:
             return (0, 0)
-        # Hard FK: net rows reference bundle(id) — same guard as _persist_nuts.
         referenced = {str(ns.bundle_id)
                       for ns in self.detailed_result.net_segments}
-        persisted = {b.id for b in self.bdb.all_bundles()}
-        if not referenced <= persisted:
-            self._persist_planner_output()
+        # The net rows describe the persisted abstract bus routing. If the bus
+        # rows are missing (e.g. the BDB was opened only after run_nuts ran),
+        # persist the abstract stage first — _persist_nuts also ensures the FK
+        # bundle parents and writes the abstract snapshot whose bus counts we
+        # preserve below. Otherwise just ensure the parents (same guard as
+        # _persist_nuts).
+        missing_bus = {bid for bid in referenced if not self.bdb.bus_segments(bid)}
+        if missing_bus and self.nuts_result is not None:
+            self._persist_nuts()
+        else:
+            persisted = {b.id for b in self.bdb.all_bundles()}
+            if not referenced <= persisted:
+                self._persist_planner_output()
         # Preserve the bus counts for the snapshot rewrite BEFORE the clear
         # drops the singleton along with the old net rows.
         snap = self.bdb.route_snapshot()
