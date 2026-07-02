@@ -138,7 +138,10 @@ static const char* TOPOLOGY_DDL = R"(
 // Composite keys (no autoincrement) → deterministic *.bdb.sql dumps.
 static const char* NUTS_DDL = R"(
     CREATE TABLE IF NOT EXISTS bus_segment (
-        bundle_id      TEXT REFERENCES bundle(id),
+        -- NOT NULL: SQLite treats a NULL child key as satisfying the FK, and PK
+        -- columns are not implicitly NOT NULL in a rowid table, so without this a
+        -- hand-edited dump could insert an orphan (bundle_id IS NULL) row.
+        bundle_id      TEXT NOT NULL REFERENCES bundle(id),
         seg_idx        INTEGER,
         layer          INTEGER,
         is_horiz       INTEGER DEFAULT 0,
@@ -150,7 +153,7 @@ static const char* NUTS_DDL = R"(
         PRIMARY KEY (bundle_id, seg_idx)
     );
     CREATE TABLE IF NOT EXISTS bus_via (
-        bundle_id  TEXT REFERENCES bundle(id),
+        bundle_id  TEXT NOT NULL REFERENCES bundle(id),   -- NOT NULL: see bus_segment
         from_seg   INTEGER,
         to_seg     INTEGER,
         from_layer INTEGER,
@@ -2150,8 +2153,10 @@ void BDB::add_bundle_busterm(const std::string& bundle_id,
 
 void BDB::clear_bundles() {
     // Topology and bus routing both FK to bundle, so clear them first (children
-    // before parents) or the FK constraint would reject the bundle delete.
-    _exec("DELETE FROM bus_via; DELETE FROM bus_segment;"
+    // before parents) or the FK constraint would reject the bundle delete. The
+    // route_snapshot fingerprint describes the bus rows, so it is invalidated too.
+    _exec("DELETE FROM route_snapshot;"
+          "DELETE FROM bus_via; DELETE FROM bus_segment;"
           "DELETE FROM topology_segment; DELETE FROM topology;"
           "DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
 }
@@ -2336,8 +2341,10 @@ void BDB::reset_assigned_layers(const std::string& bundle_id) {
 void BDB::clear_expanded_bundles() {
     // Expanded per-instance bundles are marked is_replicated=1. Drop them and any
     // rows keyed to them (bus routing, topologies, memberships) — children before
-    // parents so the bus_segment/bus_via FK to bundle(id) is never violated.
+    // parents so the bus_segment/bus_via FK to bundle(id) is never violated. This
+    // removes some bus rows, so the route_snapshot fingerprint is invalidated too.
     _exec(
+        "DELETE FROM route_snapshot;"
         "DELETE FROM bus_via WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM bus_segment WHERE bundle_id IN"
@@ -2391,7 +2398,9 @@ void BDB::add_bus_via(const BusViaRow& r) {
 }
 
 void BDB::clear_bus_routing() {
-    _exec("DELETE FROM bus_via; DELETE FROM bus_segment;");
+    // The route_snapshot fingerprint no longer describes the DB once the bus rows
+    // are gone, so drop it too (run_nuts rewrites both together).
+    _exec("DELETE FROM route_snapshot; DELETE FROM bus_via; DELETE FROM bus_segment;");
 }
 
 void BDB::set_route_snapshot(const std::string& hash, int n_bus_segments,

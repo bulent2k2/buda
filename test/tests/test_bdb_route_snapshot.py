@@ -124,6 +124,49 @@ def test_orphan_bus_row_rejected_by_fk(tmp_path):
         con.close()
 
 
+def test_null_bundle_id_bus_row_rejected(tmp_path):
+    # SQLite treats a NULL child key as satisfying the FK, so bundle_id must be
+    # NOT NULL for the "every bus row joins a bundle" invariant to hold even for
+    # direct SQL / hand-edited dump loads (Codex #129 P2).
+    path = str(tmp_path / "flat.bdb")
+    s = _flat_routed_session(path)          # ensure schema exists (v7)
+    del s
+    con = sqlite3.connect(path)
+    con.execute("PRAGMA foreign_keys = ON;")
+    try:
+        for stmt in (
+                "INSERT INTO bus_segment(bundle_id,seg_idx,layer) VALUES(NULL,0,1)",
+                "INSERT INTO bus_via(bundle_id,from_seg,to_seg) VALUES(NULL,0,1)"):
+            raised = False
+            try:
+                con.execute(stmt)
+                con.commit()
+            except sqlite3.IntegrityError:
+                raised = True
+            assert raised, f"NULL bundle_id was accepted: {stmt}"
+    finally:
+        con.close()
+
+
+def test_route_snapshot_invalidated_when_bus_rows_cleared(tmp_path):
+    # Clearing the bus tables (without recomputing) must not leave a stale
+    # fingerprint that no longer describes the DB (Codex #129 P2).
+    s = _flat_routed_session(str(tmp_path / "flat.bdb"))
+    assert s.bdb.route_snapshot().hash          # present after run_nuts
+    s.bdb.clear_bus_routing()
+    snap = s.bdb.route_snapshot()
+    assert not snap.hash and snap.n_bus_segments == 0 and snap.n_bus_vias == 0
+
+
+def test_route_snapshot_invalidated_when_bundles_recomputed(tmp_path):
+    # Re-bundling (clear_bundles via _persist_bundles) drops the bus rows too, so
+    # the fingerprint must be cleared rather than left describing stale routing.
+    s = _flat_routed_session(str(tmp_path / "flat.bdb"))
+    assert s.bdb.route_snapshot().hash
+    _quiet(s, "run_bundler")                     # re-persists bundles -> clear_bundles
+    assert not s.bdb.route_snapshot().hash
+
+
 def test_hier_reexpand_after_nuts_is_fk_safe(bdb_input):
     # Expanded (is_replicated=1) bundles own bus rows after run_nuts. Re-persisting
     # the planner output calls clear_expanded_bundles(), which must drop those bus

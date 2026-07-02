@@ -28,7 +28,10 @@ CREATE TABLE bundle_net (
         PRIMARY KEY (bundle_id, net_id)
     );
 CREATE TABLE bus_segment (
-        bundle_id      TEXT REFERENCES bundle(id),
+        -- NOT NULL: SQLite treats a NULL child key as satisfying the FK, and PK
+        -- columns are not implicitly NOT NULL in a rowid table, so without this a
+        -- hand-edited dump could insert an orphan (bundle_id IS NULL) row.
+        bundle_id      TEXT NOT NULL REFERENCES bundle(id),
         seg_idx        INTEGER,
         layer          INTEGER,
         is_horiz       INTEGER DEFAULT 0,
@@ -40,7 +43,7 @@ CREATE TABLE bus_segment (
         PRIMARY KEY (bundle_id, seg_idx)
     );
 CREATE TABLE bus_via (
-        bundle_id  TEXT REFERENCES bundle(id),
+        bundle_id  TEXT NOT NULL REFERENCES bundle(id),   -- NOT NULL: see bus_segment
         from_seg   INTEGER,
         to_seg     INTEGER,
         from_layer INTEGER,
