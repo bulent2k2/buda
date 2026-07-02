@@ -2831,6 +2831,10 @@ void TopologyGenerator::add_multi_trunk_candidates(
                 return;   // a stub too short → legacy BITRUNK_H is not viable
             }
         }
+        // Annotate the two H trunks + V backbone (the leaf stubs are seeded
+        // above) so the legacy shape carries a complete seg_busterms annotation
+        // like every other generated candidate — no reliance on the fallback.
+        annotate_endpoints(t, blocks);
         results.push_back(std::move(t));
     }();
 
@@ -2943,6 +2947,13 @@ void TopologyGenerator::add_multi_trunk_candidates(
         t.seg_busterms = std::move(shifted);
 
         for (const auto& b : blocks) t.connected_block_names.push_back(b.block_name);
+        // Complete the endpoint annotation for EVERY segment (root spine + branch
+        // trunks, not just the leaf stubs seeded above) so seg_busterms is the
+        // single source of connectivity truth — the clean-tree gate below and all
+        // downstream stages read the annotation, never ConnTopology's geometric
+        // fallback (see docs/internal/single_source_topo_truth.md).  Idempotent:
+        // annotate_endpoints only fills endpoints that are still unset.
+        annotate_endpoints(t, blocks);
         // Only keep a physically self-connected, acyclic, fully-covered tree.
         if (!topology_is_clean_tree(t, floorplan_)) return;
         // Skip a duplicate (different K can yield the same tree).

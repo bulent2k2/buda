@@ -182,6 +182,25 @@ def test_three_column_comb_hvh():
         assert _root_with_branches(ct, root_horiz=True)
 
 
+def test_bitrunk_candidates_are_fully_annotated():
+    """Single-source-of-topo-truth (Phase 1): every BITRUNK candidate — legacy
+    BITRUNK_H and the two-level HVH/VHV trees — annotates seg_busterms for EVERY
+    segment (root spine + branch trunks + leaf stubs), so ConnTopology never
+    consults its geometric face-search fallback for them. See
+    docs/internal/single_source_topo_truth.md."""
+    fp, cands = _gen(_COLUMN, "S", _COLUMN_DSTS)   # multi_trunk on -> legacy + HVH
+    bitrunks = [c for c in cands if c.type.startswith("BITRUNK")]
+    assert bitrunks, "expected at least one BITRUNK candidate"
+    saw_legacy = saw_tree = False
+    for c in bitrunks:
+        missing = [i for i in range(len(c.segments)) if i not in c.seg_busterms]
+        assert not missing, \
+            f"{c.type} segments {missing} unannotated (would hit the fallback)"
+        saw_legacy |= (c.type == "BITRUNK_H")
+        saw_tree |= c.type.startswith(("BITRUNK_HVH", "BITRUNK_VHV"))
+    assert saw_legacy and saw_tree, "want both legacy + two-level shapes covered"
+
+
 def test_optin_guard_default_has_no_bitrunk_trees():
     """Without the multi_trunk flag the two-level trees are suppressed, but the
     legacy single-level BITRUNK_H stays on the default path (byte-identical set)."""
