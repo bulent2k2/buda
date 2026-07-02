@@ -44,7 +44,10 @@ public:
     std::vector<std::string> refine_bundle(const std::string& bundle_id);
 
 private:
-    BDB& _db;
+    // Reserved for the pending refinement implementation (refine()/refine_bundle()
+    // are stubs today).  [[maybe_unused]] silences clang's -Wunused-private-field
+    // while the class is still scaffolding; GCC ignores the attribute harmlessly.
+    [[maybe_unused]] BDB& _db;
 
     bool _can_refine(const BundleRow& b) const;
 };
