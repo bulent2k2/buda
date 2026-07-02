@@ -579,7 +579,9 @@ class BudaSession:
         Not restored (recomputed downstream or absent): seg_perp (a NUTS
         placement *preference* from the planner's charged bands — a resumed
         run_nuts may legally place segments at different track positions than
-        the original session), planner band state, overlap details, doglegs.
+        the original session), planner band state, overlap details, doglegs,
+        and Topology.bridge_segments (not yet persisted — TEG-over multi-rect
+        designs cannot resume losslessly; see wishlist-bdb.md).
         """
         import json
         if self.bdb is None:

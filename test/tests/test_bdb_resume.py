@@ -74,6 +74,22 @@ def test_resume_after_topogen_continues_to_planner_and_nuts(tmp_path):
     ref, _ = _fresh(*SETUP, f"open_bdb {tmp_path / 'ref.bdb'}", *NETS,
                     "run_bundler", "generate_topologies", "run_planner 3",
                     "run_nuts")
+
+    # Reloaded candidates carry the SAME BUSTERM taps as freshly generated ones
+    # (restored logically via load_seg_busterms — ConnTopology never re-derives
+    # taps from geometry, so a loader that skipped this would yield tap-less
+    # candidates that silently route disconnected; topo-truth Phases 2-3).
+    def taps(session):
+        out = []
+        for t in session.bundles[0].input.candidates:
+            m = {}
+            for si, eps in t.seg_busterms.items():   # (start, end) optional pair
+                names = tuple(bt.block_name if bt else None for bt in eps)
+                if any(names):        # persisted form is canonical: junction-only
+                    m[si] = names     # segments carry NO entry (not a (None,None))
+            out.append(m)
+        return out
+    assert taps(s2) == taps(ref) and any(m for m in taps(s2))
     assert s2.bundles[0].plan.selected_topology_index == \
         ref.bundles[0].plan.selected_topology_index
     assert list(s2.bundles[0].plan.seg_layers) == \

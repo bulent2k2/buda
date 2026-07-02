@@ -167,6 +167,11 @@ NUTS→DNUTS, and NUTS+ripup→DNUTS (congested fixture where ripup genuinely
 re-routes), plus fail-fast guards. Tests: `test/tests/test_bdb_resume.py`;
 docs: `docs/BDB_REFERENCE.md` (`load_pipeline`).
 
+**Known gap (from #138's spec correction):** `Topology.bridge_segments` (TEG
+over-the-block bridges) is the one remaining un-persisted `Topology` field, so
+TEG-over multi-rect designs cannot resume losslessly yet — persist it alongside
+the seg-busterm links when needed.
+
 The original design notes below are kept for reference.
 
 **Previously:** the pipeline→BDB persistence was

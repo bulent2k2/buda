@@ -369,7 +369,9 @@ expanded instance persists only its selected topology (at its template
 `cand_index`), so its selection is remapped to the compact in-memory list.
 
 Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
-charged bands), planner band state, overlap details. `ripup_reroute` now
+charged bands), planner band state, overlap details, and
+`Topology.bridge_segments` (TEG over-the-block bridges are not yet persisted,
+so TEG-over multi-rect designs cannot resume losslessly). `ripup_reroute` now
 **re-persists** its final routing (planner output + NUTS + detailed rows when
 at stage b), so a post-ripup checkpoint resumes from the improved routing, not
 the pre-ripup one. Tests: `test/tests/test_bdb_resume.py`.
