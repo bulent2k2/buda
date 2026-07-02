@@ -81,6 +81,14 @@ void bind_routing(py::module_& m) {
         .def_readwrite("connected_block_names", &Topology::connected_block_names)
         .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks);
 
+    // Deep-copy a topology with all geometry shifted by (dx, dy), preserving the
+    // seg_busterms endpoint annotation (used by the hier flow to place a
+    // cell-local candidate at an instance without losing authoritative
+    // connectivity — see conn_topology.cpp geometric-fallback caveat).
+    m.def("offset_topology", &offset_topology,
+          py::arg("topo"), py::arg("dx"), py::arg("dy"),
+          py::arg("name_prefix") = std::string());
+
     // ── Floorplan ─────────────────────────────────────────────────────────
     py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
         .def(py::init<>())

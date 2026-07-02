@@ -1083,26 +1083,6 @@ class BudaSession:
         return fp_cache[cache_key]
 
     @staticmethod
-    def _offset_topology(topo, dx, dy):
-        """Return a new Topology with every segment shifted by (dx, dy)."""
-        new_t = buda.Topology()
-        new_t.type                  = topo.type
-        new_t.estimated_wirelength  = topo.estimated_wirelength
-        new_t.trunk_location        = topo.trunk_location   # metadata only; not transformed
-        new_t.pass_through_count    = topo.pass_through_count
-        new_t.connected_block_names = topo.connected_block_names
-        new_t.feedthru_blocks       = topo.feedthru_blocks  # names rewritten below
-        new_segs = []
-        for s in topo.segments:
-            ns = buda.Segment()
-            ns.start      = buda.Point(s.start.x + dx, s.start.y + dy)
-            ns.end        = buda.Point(s.end.x   + dx, s.end.y   + dy)
-            ns.layer_hint = s.layer_hint
-            new_segs.append(ns)
-        new_t.segments = new_segs
-        return new_t
-
-    @staticmethod
     def _clone_hbundle_with_id(b, new_id):
         """Return a shallow clone of HBundle b with id replaced by new_id."""
         nb = buda.HBundle()
@@ -1184,8 +1164,14 @@ class BudaSession:
                 clone.instances = [inst_name]
                 new_w.input.original_bundle = clone
                 new_w.input.width = w.input.width
-                new_w.input.candidates = [self._offset_topology(t, dx, dy)
-                                    for t in w.input.candidates]
+                # Offset each template candidate to instance coords AND qualify
+                # its cell-local block names (segments' seg_busterms annotation,
+                # connected_block_names, feedthru_blocks) with the instance path,
+                # so ConnTopology's authoritative endpoint annotation resolves
+                # against the global floorplan (no geometric-fallback mis-taps).
+                new_w.input.candidates = [
+                    buda.offset_topology(t, dx, dy, inst_name)
+                    for t in w.input.candidates]
                 # Reserve the instance footprint: until this local bundle is
                 # planned, its demand is parked as virtual usage so earlier
                 # (global) bundles leave room over the cell interior.
@@ -1194,22 +1180,7 @@ class BudaSession:
                 new_w.hier.res_y1 = dy
                 new_w.hier.res_x2 = int(round(parent.x2))
                 new_w.hier.res_y2 = int(round(parent.y2))
-                # Rewrite cell-local block names to absolute paths so that
-                # ConnTopology can look them up in the global floorplan.
-                # Cell-local names have no "/" (e.g. "pa_i"); absolute names
-                # already contain the hierarchy separator.
-                for topo in new_w.input.candidates:
-                    topo.connected_block_names = [
-                        inst_name + "/" + n if "/" not in n else n
-                        for n in topo.connected_block_names
-                    ]
-                    # Same rewrite for feedthru block names, so a cell-local
-                    # feedthru candidate keeps a resolvable block identity after
-                    # expansion to instance coordinates.
-                    topo.feedthru_blocks = [
-                        inst_name + "/" + n if "/" not in n else n
-                        for n in topo.feedthru_blocks
-                    ]
+                # (block-name qualification now done inside offset_topology above)
                 # Propagate topology pinning from template to each instance.
                 # Candidate indices are preserved (expansion offsets coordinates
                 # but keeps the same ordering as the template candidate list).

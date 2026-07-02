@@ -94,6 +94,20 @@ struct Topology {
     // block was marked feedthru for the trunk layer (Floorplan::get_feedthru).
     std::vector<std::string> feedthru_blocks;
 };
+
+// Return a deep copy of `t` with all geometry shifted by (dx, dy): every
+// segment, every seg_busterms Busterm bbox (and orig_bbox / rects), and every
+// bridge segment.  Crucially preserves seg_busterms so an offset (per-instance,
+// hier) candidate keeps its authoritative endpoint annotation — otherwise
+// ConnTopology falls back to a geometric face search that can mis-tap a block
+// whose corner coincidentally grazes an L/Z bend (an unintentional feedthru).
+// `trunk_location` is metadata (not a coordinate) and is copied unchanged.
+// When `name_prefix` is non-empty, every cell-local block name (one with no '/')
+// — in seg_busterms, connected_block_names, feedthru_blocks, and bridge keys —
+// is qualified to `name_prefix + "/" + name` so it resolves against the global
+// instance-coord floorplan; absolute names are left unchanged.
+Topology offset_topology(const Topology& t, int dx, int dy,
+                         const std::string& name_prefix = "");
 // Per-block corner margin: keeps trunk/stub connections away from block corners.
 // dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).
 // dy: margin along the vertical direction   (applied to left/right  faces, extent in Y).
