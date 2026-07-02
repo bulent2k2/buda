@@ -61,7 +61,7 @@ def make_topo_h_on_left_face(blk_name, fp):
     bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
-    topo.seg_busterms[0] = (bt, None)
+    topo.seg_busterms = {0: (bt, None)}
     return topo
 
 
@@ -81,7 +81,7 @@ def make_topo_h_on_right_face(blk_name, fp):
     bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
-    topo.seg_busterms[0] = (None, bt)
+    topo.seg_busterms = {0: (None, bt)}
     return topo
 
 
@@ -101,7 +101,7 @@ def make_topo_v_on_top_face(blk_name, fp):
     bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
-    topo.seg_busterms[0] = (None, bt)
+    topo.seg_busterms = {0: (None, bt)}
     return topo
 
 
@@ -121,7 +121,7 @@ def make_topo_v_on_bottom_face(blk_name, fp):
     bt = buda.Busterm()
     bt.block_name = blk_name
     bt.bbox = rect
-    topo.seg_busterms[0] = (bt, None)
+    topo.seg_busterms = {0: (bt, None)}
     return topo
 
 
@@ -267,7 +267,7 @@ def test_nominal_at_lower_face_boundary_skips_margin():
     bt = buda.Busterm()
     bt.block_name = "src"
     bt.bbox = fp.get_block_bounds("src")
-    topo.seg_busterms[0] = (bt, None)  # only start annotated
+    topo.seg_busterms = {0: (bt, None)}  # only start annotated
 
     ct = buda.ConnTopology()
     ct.build(topo, fp)
@@ -296,7 +296,7 @@ def test_nominal_at_upper_face_boundary_skips_margin():
     bt = buda.Busterm()
     bt.block_name = "src"
     bt.bbox = fp.get_block_bounds("src")
-    topo.seg_busterms[0] = (bt, None)  # only start annotated
+    topo.seg_busterms = {0: (bt, None)}  # only start annotated
 
     ct = buda.ConnTopology()
     ct.build(topo, fp)
@@ -426,10 +426,9 @@ def test_global_margin_applies_to_unoverridden_block():
     assert lo_a == 20 and hi_a == 180, \
         f"Block 'a' (global margin) slide wrong: [{lo_a}, {hi_a}]"
 
-    # Block "b" should use per-block dy=10 (overrides global).
-    # Build the topology inline — do NOT add a helper block at the segment endpoint,
-    # because the geometric busterm fallback would pick it up and apply the global
-    # margin, masking the per-block margin under test.
+    # Block "b" should use per-block dy=10 (overrides global).  fp2 has only "b",
+    # so annotate_topology taps just "b" (the segment end is in open space) — no
+    # helper block needed to expose the per-block margin.
     fp2 = buda.Floorplan()
     fp2.set_global_corner_margin(20, 20)
     fp2.add_block("b", 0, 0, 100, 200)
@@ -443,6 +442,7 @@ def test_global_margin_applies_to_unoverridden_block():
     seg_b.end   = buda.Point(rect_b.x1 + 499, mid_y_b)  # open space, no block
     seg_b.layer_hint = 4
     topo_b.segments = [seg_b]
+    buda.annotate_topology(topo_b, fp2)
     ct_b = buda.ConnTopology()
     ct_b.build(topo_b, fp2)
     lo_b, hi_b = slide_range(ct_b)

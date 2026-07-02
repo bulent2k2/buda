@@ -75,7 +75,7 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
 // we add a SEG connection to both i (pointing at j) and j (pointing at i).
 
 void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) {
-    auto blocks = fp.get_all_blocks();
+    (void)fp;   // connectivity is read from topo.seg_busterms, not fp geometry
     int n = (int)segs_.size();
 
     // Helper: add a SegConn to segs_[i] if it isn't already present.
@@ -96,19 +96,22 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
             const Point& P = (ep == 0) ? si.start : si.end;
             bool found = false;
 
-            // (a) busterm from pre-computed annotation -------------------------
-            // topology.cpp's annotate_endpoints populates topo.seg_busterms so
-            // we know exactly which block each terminal endpoint belongs to —
-            // no geometric search needed, no shared-face ambiguity possible.
-            // When the annotation entry exists but says "no busterm" (nullopt),
-            // the endpoint is a bend/SEG junction — skip the geometric fallback
-            // so a coincidentally-touching block face is not misidentified as a
-            // busterm connection (e.g. L-shape bend at a block corner).
-            bool annotation_present = false;
+            // (a) busterm from the authoritative annotation ------------------
+            // topo.seg_busterms is the SINGLE source of busterm truth: populated
+            // by topology.cpp's annotate_endpoints (or the generator seeding its
+            // taps directly), it names exactly which block each terminal endpoint
+            // taps.  A nullopt endpoint — OR a segment with no entry at all — is a
+            // wire junction, not a block tap, so it falls through to the SEG
+            // inference below.  ConnTopology deliberately does NOT geometrically
+            // search block faces here: that per-endpoint guess (the old fallback,
+            // retired in single-source-of-truth Phase 2) could mis-tap a block
+            // whose corner merely grazes a bend.  A hand-built topology must be
+            // annotated first — `buda.annotate_topology(topo, fp)` /
+            // `annotate_topology` in C++ — before ConnTopology::build.  See
+            // docs/internal/single_source_topo_truth.md.
             {
                 auto it = topo.seg_busterms.find(i);
                 if (it != topo.seg_busterms.end()) {
-                    annotation_present = true;
                     const auto& opt = (ep == 0) ? it->second.first
                                                 : it->second.second;
                     if (opt.has_value()) {
@@ -120,30 +123,6 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
                         c.at_pos     = ci.horiz ? P.x : P.y;
                         add_conn(i, std::move(c));
                         found = true;
-                    }
-                }
-            }
-
-            // (b) geometric fallback — for unannotated topologies (e.g. those
-            // built directly in tests without going through generate_candidates).
-            // Skipped when the annotation entry is present (even if nullopt):
-            // the annotation is authoritative and the bend/junction is a SEG conn.
-            if (!found && !annotation_present) {
-                for (const auto& [bname, rect] : blocks) {
-                    bool on_xface = (P.x == rect.x1 || P.x == rect.x2)
-                                    && in_range(P.y, rect.y1, rect.y2);
-                    bool on_yface = (P.y == rect.y1 || P.y == rect.y2)
-                                    && in_range(P.x, rect.x1, rect.x2);
-                    if ((ci.horiz && on_xface) || (!ci.horiz && on_yface)) {
-                        SegConn c;
-                        c.kind       = SegConn::BUSTERM;
-                        c.block_name = bname;
-                        c.face_coord = ci.horiz ? P.x : P.y;
-                        c.seg_idx    = -1;
-                        c.at_pos     = ci.horiz ? P.x : P.y;
-                        add_conn(i, std::move(c));
-                        found = true;
-                        break;
                     }
                 }
             }

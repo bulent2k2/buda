@@ -68,6 +68,30 @@ Topology offset_topology(const Topology& t, int dx, int dy,
     return out;
 }
 
+// Forward decl: the geometric endpoint annotator (defined later in this TU).
+static void annotate_endpoints(Topology& topo, const std::vector<Busterm>& blocks);
+
+void annotate_topology(Topology& topo, const Floorplan& fp) {
+    // Build a Busterm per floorplan block and run the same geometric annotation
+    // the generator uses, so a hand-built or BDB-reloaded topology gets the
+    // authoritative seg_busterms it needs before ConnTopology::build (which no
+    // longer geometrically guesses — see single_source_topo_truth.md).  This is
+    // an EXPLICIT one-time annotation, not a hidden per-endpoint fallback.
+    std::vector<Busterm> bts;
+    for (const auto& [name, orig] : fp.get_all_blocks()) {
+        // Mirror the generator's busterm construction (generate_2pin/npin mk_bt):
+        // carry the corner-margin-shrunk bbox, the full orig_bbox, the individual
+        // rects (so annotate_endpoints checks each rect face, not the union — a
+        // multi-rect block must not be tapped through the gap between its rects),
+        // and the teg_mode.
+        auto cm = fp.get_block_corner_margin(name);
+        bts.push_back(Busterm{name, orig.shrink(cm.dx, cm.dy), orig,
+                              fp.get_block_rects(name),
+                              fp.get_block_teg_mode(name)});
+    }
+    annotate_endpoints(topo, bts);
+}
+
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     int nx1 = std::min(x1, x2);
     int nx2 = std::max(x1, x2);

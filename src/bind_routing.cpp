@@ -89,6 +89,13 @@ void bind_routing(py::module_& m) {
           py::arg("topo"), py::arg("dx"), py::arg("dy"),
           py::arg("name_prefix") = std::string());
 
+    // Explicitly annotate a (hand-built or reloaded) topology's seg_busterms from
+    // a floorplan, so ConnTopology can read the authoritative endpoint taps
+    // (it no longer geometrically guesses).  Mutates topo in place.
+    m.def("annotate_topology", [](Topology& topo, const Floorplan& fp) {
+        annotate_topology(topo, fp);
+    }, py::arg("topo"), py::arg("fp"));
+
     // ── Floorplan ─────────────────────────────────────────────────────────
     py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
         .def(py::init<>())

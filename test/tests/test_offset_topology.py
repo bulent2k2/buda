@@ -103,19 +103,48 @@ def test_offset_preserves_annotation_no_corner_feedthru():
         [(str(v.kind), v.block_name) for v in res.violations]
 
 
-def test_unannotated_fallback_still_taps_corner():
-    """Sanity: without the annotation (an unannotated topology built by hand),
-    ConnTopology's geometric fallback DOES tap the corner — documenting exactly
-    what offset_topology's annotation-carrying prevents."""
+def test_unannotated_topology_taps_nothing():
+    """Phase 2: the geometric fallback is retired, so an UNannotated topology
+    taps no block at all (a missing seg_busterms entry is a wire junction, never
+    a guessed busterm). This is why offset_topology / annotate_topology must
+    carry the annotation — ConnTopology no longer re-derives it from geometry.
+    An explicit annotate_topology(fp) call then restores the real taps."""
     _fp0, lvh = _cell_local_lvh()
-    # strip the annotation → forces the geometric fallback
     bare = buda.offset_topology(lvh, 0, 0)   # copy
-    bare.seg_busterms = {}
+    bare.seg_busterms = {}                    # strip the annotation
     fp = buda.Floorplan()
     for n, (x1, y1, x2, y2) in _BLOCKS.items():
         fp.add_block(n, x1, y1, x2, y2)
-    ct = buda.ConnTopology()
-    ct.build(bare, fp)
-    taps = _busterm_taps(ct)
-    assert any("top2" in (t or "") for t in taps), \
-        "expected the unannotated geometric fallback to tap the corner block"
+
+    ct = buda.ConnTopology(); ct.build(bare, fp)
+    assert _busterm_taps(ct) == [], \
+        "unannotated topology must tap nothing (geometric fallback retired)"
+
+    # NOTE: annotate_topology(fp) is a *geometric* re-derivation — for this
+    # corner-graze geometry it would re-tap 'top2' (the bend lands on top2's
+    # face), exactly like the retired fallback. That is why the graze-safe truth
+    # comes from the GENERATOR's structural annotation carried by offset_topology
+    # (test_offset_preserves_annotation_no_corner_feedthru), not from re-deriving
+    # it here. So we only assert the retired-fallback fact above.
+
+
+def test_annotate_topology_respects_multi_rect_gaps():
+    """annotate_topology must carry a block's individual rects (Codex P2), so a
+    multi-rect block is NOT tapped through the gap/notch between its rects — an
+    endpoint that lands on the union bbox face but on no real rect face taps
+    nothing; one on an actual rect face taps the block."""
+    fp = buda.Floorplan()
+    # two disjoint rects with a gap in x[40,60]; union bbox is (0,0)-(100,100)
+    fp.add_block_rects("M", [(0, 0, 40, 100), (60, 0, 100, 100)])
+
+    def taps_for_endpoint_x(x):
+        t = buda.Topology(); t.type = "T"
+        s = buda.Segment(); s.start = buda.Point(x, 200); s.end = buda.Point(x, 0)
+        s.layer_hint = 5
+        t.segments = [s]
+        buda.annotate_topology(t, fp)
+        ct = buda.ConnTopology(); ct.build(t, fp)
+        return _busterm_taps(ct)
+
+    assert taps_for_endpoint_x(50) == [], "endpoint in the rect gap must not tap M"
+    assert taps_for_endpoint_x(20) == ["M"], "endpoint on a real rect face taps M"

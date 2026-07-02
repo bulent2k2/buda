@@ -52,6 +52,7 @@ def _two_block_vstub():
     topo = buda.Topology()
     topo.type = "TEST_V"
     topo.segments = [seg]
+    buda.annotate_topology(topo, fp)   # Phase 2: explicit annotation (no fallback)
     ct = buda.ConnTopology()
     ct.build(topo, fp)
     return fp, ls, topo, ct
