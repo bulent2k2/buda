@@ -148,14 +148,17 @@ These persisted tables are the direct source for the planned **BDB → OA
 ## Resume / rehydrate the pipeline from the BDB (checkpoint & continue) — ✅ IMPLEMENTED
 
 **Shipped** as the `load_pipeline [expanded]` command /
-`BudaSession._load_pipeline_from_bdb` (schema v9 added the `bus_segment`
-solver-state columns: perpendicular interval + corner-split track bounds).
-It restores, as deep as was persisted: bundles + all candidate topologies
-(each reloaded candidate re-annotated via `annotate_topology`, so
-ConnTopology reads the same authoritative endpoint taps as freshly generated
-ones — continuations reproduce single-session results **bit-identically**,
-same rows and same `route_snapshot` hash), the planner's selection + assigned
-layers, and a rehydrated `NUTSResult` from `bus_segment`. `ripup_reroute` now
+`BudaSession._load_pipeline_from_bdb` (schema v10 added the `bus_segment`
+solver-state columns — perpendicular interval + corner-split track bounds —
+plus `bundle_net.ord` for bit order and `topology.is_pinned` for pre-plan
+pins). It restores, as deep as was persisted: bundles + all candidate
+topologies (each reloaded candidate's `seg_busterms` restored **logically**
+via `load_seg_busterms` from the v9 `topology_seg_busterm` links — the
+single-source-of-topo-truth Phase 3 primitive, never re-derived from
+geometry — so continuations reproduce single-session results
+**bit-identically**, same rows and same `route_snapshot` hash), the planner's
+selection + assigned layers + pins, and a rehydrated `NUTSResult` from
+`bus_segment`. `ripup_reroute` now
 **re-persists** its final routing (planner output + NUTS + detailed rows at
 stage b) so a post-ripup checkpoint resumes from the improved routing.
 Two-phase tests (stop → fresh session → re-declare setup → `open_bdb` →

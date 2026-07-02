@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=9;
+PRAGMA user_version=10;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -25,6 +25,7 @@ CREATE TABLE bundle_busterm (
 CREATE TABLE bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
         net_id    INTEGER REFERENCES net(id),
+        ord       INTEGER DEFAULT -1,  -- bit order within the bundle (v10)
         PRIMARY KEY (bundle_id, net_id)
     );
 CREATE TABLE bus_segment (
@@ -169,7 +170,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','9');
+INSERT INTO "meta" VALUES('schema_version','10');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -303,6 +304,7 @@ CREATE TABLE topology (
         connected_blocks   TEXT,    -- JSON array of block names
         feedthru_blocks    TEXT,    -- JSON array
         is_selected        INTEGER DEFAULT 0,
+        is_pinned          INTEGER DEFAULT 0,  -- pre-plan select_topology pin (v10)
         PRIMARY KEY (bundle_id, cand_index)
     );
 CREATE TABLE topology_seg_busterm (

@@ -94,6 +94,7 @@ static const char* BUNDLE_DDL = R"(
     CREATE TABLE IF NOT EXISTS bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
         net_id    INTEGER REFERENCES net(id),
+        ord       INTEGER DEFAULT -1,  -- bit order within the bundle (v10)
         PRIMARY KEY (bundle_id, net_id)
     );
     CREATE TABLE IF NOT EXISTS bundle_busterm (
@@ -117,6 +118,7 @@ static const char* TOPOLOGY_DDL = R"(
         connected_blocks   TEXT,    -- JSON array of block names
         feedthru_blocks    TEXT,    -- JSON array
         is_selected        INTEGER DEFAULT 0,
+        is_pinned          INTEGER DEFAULT 0,  -- pre-plan select_topology pin (v10)
         PRIMARY KEY (bundle_id, cand_index)
     );
     CREATE TABLE IF NOT EXISTS topology_segment (
@@ -2292,7 +2294,12 @@ int BDB::_ensure_net(const std::string& name) {
 
 void BDB::add_bundle_net(const std::string& bundle_id, const std::string& net_name) {
     int net_id = _ensure_net(net_name);
-    Stmt s(_db, "INSERT OR IGNORE INTO bundle_net(bundle_id,net_id) VALUES(?,?)");
+    // ord = insertion sequence per bundle: bundle_nets() returns names in this
+    // order, preserving the bundle's BIT order (name-sorting breaks the
+    // bit_index -> net mapping at >= 10 bits: d_10 < d_2 lexicographically).
+    Stmt s(_db,
+        "INSERT OR IGNORE INTO bundle_net(bundle_id,net_id,ord)"
+        " VALUES(?,?,(SELECT COUNT(*) FROM bundle_net WHERE bundle_id=?1))");
     sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (s, 2, net_id);
     sqlite3_step(s);
@@ -2355,8 +2362,10 @@ std::vector<BundleRow> BDB::all_bundles() const {
 
 std::vector<std::string> BDB::bundle_nets(const std::string& bundle_id) const {
     // Membership is stored by net_id; join back to net so callers still see names.
+    // Bit order first (ord, v10); legacy rows (ord=-1/NULL) fall back to name.
     Stmt q(_db, "SELECT n.name FROM bundle_net b JOIN net n ON b.net_id=n.id"
-                " WHERE b.bundle_id=? ORDER BY n.name");
+                " WHERE b.bundle_id=?"
+                " ORDER BY (b.ord IS NULL OR b.ord < 0), b.ord, n.name");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     std::vector<std::string> out;
     while (sqlite3_step(q) == SQLITE_ROW)
@@ -2383,13 +2392,14 @@ BDB::bundle_busterms(const std::string& bundle_id) const {
 void BDB::add_topology(const TopoRow& tr) {
     Stmt s(_db,
         "INSERT INTO topology(bundle_id,cand_index,type,wirelength,trunk_location,"
-        "pass_through_count,connected_blocks,feedthru_blocks,is_selected)"
-        " VALUES(?,?,?,?,?,?,?,?,?)"
+        "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(bundle_id,cand_index) DO UPDATE SET type=excluded.type,"
         " wirelength=excluded.wirelength, trunk_location=excluded.trunk_location,"
         " pass_through_count=excluded.pass_through_count,"
         " connected_blocks=excluded.connected_blocks,"
-        " feedthru_blocks=excluded.feedthru_blocks, is_selected=excluded.is_selected");
+        " feedthru_blocks=excluded.feedthru_blocks, is_selected=excluded.is_selected,"
+        " is_pinned=excluded.is_pinned");
     sqlite3_bind_text  (s, 1, tr.id.c_str(),               -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, tr.cand_index);
     sqlite3_bind_text  (s, 3, tr.type.c_str(),             -1, SQLITE_TRANSIENT);
@@ -2399,6 +2409,7 @@ void BDB::add_topology(const TopoRow& tr) {
     sqlite3_bind_text  (s, 7, tr.connected_blocks.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text  (s, 8, tr.feedthru_blocks.c_str(),  -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 9, tr.is_selected ? 1 : 0);
+    sqlite3_bind_int   (s, 10, tr.is_pinned ? 1 : 0);
     sqlite3_step(s);
 }
 
@@ -2432,7 +2443,7 @@ void BDB::clear_topologies() {
 std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
     Stmt q(_db,
         "SELECT bundle_id,cand_index,type,wirelength,trunk_location,"
-        "pass_through_count,connected_blocks,feedthru_blocks,is_selected"
+        "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned"
         " FROM topology WHERE bundle_id=? ORDER BY cand_index");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
@@ -2451,6 +2462,7 @@ std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
         t.connected_blocks   = txt(q, 6);
         t.feedthru_blocks    = txt(q, 7);
         t.is_selected        = sqlite3_column_int(q, 8) != 0;
+        t.is_pinned          = sqlite3_column_int(q, 9) != 0;
         out.push_back(std::move(t));
     }
     return out;

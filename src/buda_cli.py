@@ -312,6 +312,9 @@ class BudaSession:
                 tr.connected_blocks = json.dumps(list(topo.connected_block_names))
                 tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
                 tr.is_selected = (ci == selected)
+                # A pre-plan select_topology pin must survive a checkpoint so a
+                # resumed run_planner still honors it (v10).
+                tr.is_pinned = bool(w.input.topology_pinned and ci == selected)
                 self.bdb.add_topology(tr)
                 for si, seg in enumerate(topo.segments):
                     sr = buda.TopoSegRow()
@@ -555,19 +558,23 @@ class BudaSession:
     def _load_pipeline_from_bdb(self, expanded=False):
         """Rehydrate the in-memory pipeline from the open BDB (resume path).
 
-        Reverses the persistence: rebuilds self.bundles (HBundle + all candidate
-        Topologies) from bundle / bundle_net / topology / topology_segment, the
-        plan (selected candidate + assigned layers) from is_selected /
-        assigned_layer, and — when bus rows exist — a NUTSResult from bus_segment,
-        so a fresh session can stop after generate_topologies / run_planner /
+        Reverses the persistence: rebuilds self.bundles (HBundle in bit order via
+        bundle_net.ord + all candidate Topologies, their seg_busterms restored
+        LOGICALLY from the topology_seg_busterm links — single-source-of-topo-
+        truth, never re-derived from geometry), the plan (selected candidate +
+        assigned layers + pre-plan pin) from is_selected / assigned_layer /
+        is_pinned, and — when bus rows exist — a NUTSResult from bus_segment, so
+        a fresh session can stop after generate_topologies / run_planner /
         run_nuts and continue with run_planner / run_nuts / run_detailed_nuts.
 
         Requires the Floorplan + LayerStack to be re-declared first (topology
         coordinates are absolute; the planner/NUTS/ConnTopology re-derive slide
-        ranges, busterm faces and net_pull from geometry + Floorplan — none of
-        that is persisted, by design). `expanded` selects the hier post-expansion
-        view (is_replicated=1 per-instance rows + non-template bundles) instead
-        of the pre-expansion templates.
+        ranges and net_pull from geometry + Floorplan — those are recomputed,
+        by design). `expanded` selects the hier post-expansion view
+        (is_replicated=1 per-instance rows + non-template bundles) instead of
+        the pre-expansion templates; an expanded instance persists only its
+        selected topology, so its selected index is remapped to the compact
+        in-memory candidate list.
 
         Not restored (recomputed downstream or absent): seg_perp (a NUTS
         placement *preference* from the planner's charged bands — a resumed
@@ -615,7 +622,11 @@ class BudaSession:
             w = buda.BundleWrapper()
             w.input.original_bundle = hb
             w.input.width = len(hb.get_net_names()) * 1.5   # as run_bundler sets it
-            cands, sel = [], -1
+            # sel/sel_ci: the selected candidate's COMPACT in-memory index vs its
+            # PERSISTED cand_index. They differ when only a subset of candidates
+            # was persisted (hier expanded bundles keep just their selected
+            # topology, at its original template cand_index).
+            cands, sel, sel_ci, pinned = [], -1, -1, False
             for tr in topos:
                 t = buda.Topology()
                 t.type = tr.type
@@ -640,21 +651,26 @@ class BudaSession:
                 if bad:
                     missing_blocks.update(bad)
                 else:
-                    # Recompute the derived seg_busterms annotation from the
-                    # Floorplan — ConnTopology reads these authoritative endpoint
-                    # taps rather than geometrically guessing, so a reloaded
-                    # candidate must be annotated to behave identically to a
-                    # freshly generated one.
-                    buda.annotate_topology(t, self.fp)
+                    # Restore the authoritative seg_busterms annotation from the
+                    # persisted topology_seg_busterm links — LOGICALLY, never
+                    # re-derived from geometry (single-source-of-topo-truth
+                    # Phase 3: annotate_topology would just re-guess what the
+                    # links record exactly).
+                    buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
                 if tr.is_selected:
-                    sel = tr.cand_index
+                    sel = len(cands)     # compact index of this candidate
+                    sel_ci = tr.cand_index
+                    pinned = tr.is_pinned
                 cands.append(t)
             w.input.candidates = cands
             if sel >= 0:
                 # Restore the planner's decision so run_nuts can run directly.
                 w.plan.selected_topology_index = sel
+                # A pre-plan select_topology pin survives the checkpoint so a
+                # resumed run_planner honors it (Codex #136 P2).
+                w.input.topology_pinned = pinned
                 layers = [sr.assigned_layer
-                          for sr in self.bdb.topology_segments(br.id, sel)]
+                          for sr in self.bdb.topology_segments(br.id, sel_ci)]
                 if any(l >= 0 for l in layers):
                     w.plan.seg_layers = layers
                     for l in layers:
@@ -798,6 +814,7 @@ class BudaSession:
             tr.connected_blocks = json.dumps(list(topo.connected_block_names))
             tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
             tr.is_selected = (ci == sel)
+            tr.is_pinned = bool(w.input.topology_pinned and ci == sel)
             self.bdb.add_topology(tr)
             for si, seg in enumerate(topo.segments):
                 sr = buda.TopoSegRow()
@@ -809,6 +826,9 @@ class BudaSession:
                 sr.layer_hint = seg.layer_hint
                 sr.is_jog = seg.is_jog
                 self.bdb.add_topology_segment(sr)
+            # Logical seg-busterm links (load_pipeline restores them; never
+            # re-derived from geometry).
+            buda.persist_seg_busterms(self.bdb, bid, ci, topo)
 
     def _persist_assigned_layers(self, bid, sel, w):
         """Write the planner's per-segment assigned layers for a selected topology."""
@@ -873,6 +893,9 @@ class BudaSession:
             sr.is_jog = seg.is_jog
             sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
             self.bdb.add_topology_segment(sr)
+        # Logical seg-busterm links for the instance's selected topology, so a
+        # `load_pipeline expanded` resume restores its connectivity too.
+        buda.persist_seg_busterms(self.bdb, bid, sel, topo)
 
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.

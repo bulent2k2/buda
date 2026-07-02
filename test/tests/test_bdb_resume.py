@@ -217,17 +217,65 @@ def test_resume_after_nuts_and_ripup_continues_to_dnuts(tmp_path):
     assert s2.bdb.route_snapshot().hash == ref_hash
 
 
+def test_wide_bus_preserves_bit_order(tmp_path):
+    # >= 10 bits: lexicographic net ordering (d_0, d_1, d_10, d_11, d_2, ...)
+    # would map bit_index to the wrong net on resume (Codex #136 P2). The v10
+    # bundle_net.ord column preserves the bundle's bit order.
+    db = str(tmp_path / "wide.bdb")
+    s1, _ = _fresh(*SETUP, f"open_bdb {db}", "add_bus d[12] A.p B.p",
+                   "run_bundler", "generate_topologies", "run_planner 3",
+                   "run_nuts", "run_detailed_nuts")
+    want = [f"d_{i}" for i in range(12)]
+    assert list(s1.bdb.bundle_nets("1")) == want        # bit order, not lexicographic
+    ref = sorted((v.bit_index, v.net_name) for v in s1.bdb.net_vias("1"))
+    del s1
+
+    s2, _ = _fresh(*SETUP, f"open_bdb {db}", "load_pipeline")
+    assert list(s2.bundles[0].input.original_bundle.get_net_names()) == want
+    _quiet(s2, "run_detailed_nuts")                     # re-persists per-bit rows
+    assert sorted((v.bit_index, v.net_name)
+                  for v in s2.bdb.net_vias("1")) == ref  # bit -> net mapping intact
+
+
+def test_resume_restores_preplan_pin(tmp_path):
+    # A select_topology pin checkpointed BEFORE run_planner must survive the
+    # resume: the planner honors it instead of re-choosing (Codex #136 P2).
+    db = str(tmp_path / "pin.bdb")
+    s1, _ = _fresh(*SETUP, f"open_bdb {db}", *NETS,
+                   "run_bundler", "generate_topologies")
+    ncand = len(s1.bundles[0].input.candidates)
+    assert ncand >= 2
+    _quiet(s1, "select_topology 1 2")                   # pin candidate index 1
+    assert s1.bundles[0].input.topology_pinned
+    del s1
+
+    s2, _ = _fresh(*SETUP, f"open_bdb {db}", "load_pipeline")
+    w = s2.bundles[0]
+    assert w.input.topology_pinned                       # pin survived
+    assert w.plan.selected_topology_index == 1
+    _quiet(s2, "run_planner 3")
+    assert w.plan.selected_topology_index == 1           # planner honored the pin
+
+
 def test_hier_expanded_resume(bdb_input):
     # Hier flow: stop after run_planner hier + run_nuts -> fresh session ->
     # re-declare layers + load blocks from the BDB -> load_pipeline expanded.
     # The post-expansion per-instance wrappers, their selections, and the NUTS
-    # result all rehydrate.
+    # result all rehydrate. One template is pinned to a NON-first candidate:
+    # its expanded instances persist only that topology at its original
+    # cand_index, so the loader must remap the selection to the compact
+    # in-memory index or run_nuts/DNUTS would skip the bundle (Codex #136 P1).
     db = bdb_input("hier_mixed")
     s1, _ = _fresh("source flow/rnr/mix_tracks.buda", f"open_bdb {db}",
                    "derive_busterms 1", "run_hier_bundler depth 1",
-                   "generate_hier_topologies", "run_planner hier 3", "run_nuts")
+                   "generate_hier_topologies")
+    pin_id = next(w.input.original_bundle.id for w in s1.bundles
+                  if len(w.input.candidates) >= 2)
+    _quiet(s1, f"select_topology {pin_id} 2",       # non-first candidate
+           "run_planner hier 3", "run_nuts")
     sels1 = {w.input.original_bundle.id: w.plan.selected_topology_index
              for w in s1.bundles}
+    assert any(v > 0 for v in sels1.values())        # the remap case is exercised
     n_bus = len(s1.nuts_result.segments)
     del s1
 
@@ -235,9 +283,13 @@ def test_hier_expanded_resume(bdb_input):
                      "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
                      "add_blocks_from_bdb 2 skip", "load_pipeline expanded")
     assert "rehydrated" in out
-    sels2 = {w.input.original_bundle.id: w.plan.selected_topology_index
-             for w in s2.bundles}
-    assert sels2 == sels1                     # per-instance wrappers + selections
+    # Every rehydrated selection is a valid index into ITS candidate list —
+    # expanded instances keep only the selected topology, so an unmapped
+    # persisted cand_index would fall out of range here.
+    for w in s2.bundles:
+        assert 0 <= w.plan.selected_topology_index < len(w.input.candidates)
+        sel = w.plan.selected_topology_index
+        assert w.input.candidates[sel].segments      # the selected topo is real
     assert s2.nuts_result is not None
     assert len(s2.nuts_result.segments) == n_bus
 

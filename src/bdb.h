@@ -127,6 +127,8 @@ struct TopoRow {
     std::string connected_blocks;   // JSON array of block names
     std::string feedthru_blocks;    // JSON array of opt-in feedthru blocks
     bool        is_selected = false;// pinned/selected candidate (post-plan; pre-plan pin)
+    bool        is_pinned = false;  // pre-plan select_topology pin (v10; load_pipeline
+                                    // restores it so a resumed run_planner honors it)
 };
 
 // One segment of a candidate topology.

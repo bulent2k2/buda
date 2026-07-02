@@ -340,27 +340,33 @@ stopped — checkpoint after `generate_topologies`, `run_planner`, or `run_nuts`
 (+`ripup_reroute`), reopen the BDB later, `load_pipeline`, and run the next
 stage. Restores, as deep as was persisted:
 
-1. **Bundles + all candidate topologies** from `bundle`/`bundle_net` +
-   `topology`/`topology_segment`. Each reloaded candidate is re-annotated
-   (`annotate_topology`) so ConnTopology reads the same authoritative endpoint
-   taps as a freshly generated one — continuations reproduce the single-session
-   results exactly (same rows, same `route_snapshot` hash).
+1. **Bundles + all candidate topologies** from `bundle`/`bundle_net` (net names
+   in **bit order** via `bundle_net.ord`) + `topology`/`topology_segment`. Each
+   reloaded candidate's `seg_busterms` is restored **logically** from the
+   `topology_seg_busterm` links (`load_seg_busterms` — the single source of
+   topo truth, never re-derived from geometry), so ConnTopology reads the same
+   authoritative endpoint taps as a freshly generated one — continuations
+   reproduce the single-session results exactly (same rows, same
+   `route_snapshot` hash).
 2. **The planner's decision** (selected candidate from `topology.is_selected`,
-   per-segment layers from `topology_segment.assigned_layer`) so `run_nuts` can
-   run directly.
-3. **The abstract-NUTS result** from `bus_segment` (incl. the v9 solver-state
+   per-segment layers from `topology_segment.assigned_layer`) plus any
+   **pre-plan pin** (`topology.is_pinned` — a resumed `run_planner` honors a
+   checkpointed `select_topology`), so `run_nuts` can run directly.
+3. **The abstract-NUTS result** from `bus_segment` (incl. the v10 solver-state
    columns: perpendicular interval + corner-split track bounds) so
    `run_detailed_nuts` can run directly.
 
 **Prerequisite:** re-declare the setup first — `def_layer`/`def_track_pattern`
 and the blocks (`add_block` for the flat flow, `add_blocks_from_bdb` for hier).
-Topology coordinates are absolute, and slide ranges / busterm faces / net_pull
-are deliberately *not* persisted — the planner and NUTS recompute them from
-geometry + Floorplan. `load_pipeline` fails fast if a persisted topology
-references a block missing from the current Floorplan.
+Topology coordinates are absolute, and slide ranges / net_pull are deliberately
+*not* persisted — the planner and NUTS recompute them from geometry +
+Floorplan. `load_pipeline` fails fast if a persisted topology references a
+block missing from the current Floorplan.
 
 `expanded` selects the hier post-expansion view (`is_replicated=1` per-instance
-rows + non-template bundles) instead of the pre-expansion templates.
+rows + non-template bundles) instead of the pre-expansion templates. An
+expanded instance persists only its selected topology (at its template
+`cand_index`), so its selection is remapped to the compact in-memory list.
 
 Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
 charged bands), planner band state, overlap details. `ripup_reroute` now

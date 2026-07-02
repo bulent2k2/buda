@@ -111,7 +111,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("pass_through_count", &TopoRow::pass_through_count)
         .def_readwrite("connected_blocks",   &TopoRow::connected_blocks)
         .def_readwrite("feedthru_blocks",    &TopoRow::feedthru_blocks)
-        .def_readwrite("is_selected",        &TopoRow::is_selected);
+        .def_readwrite("is_selected",        &TopoRow::is_selected)
+        .def_readwrite("is_pinned",          &TopoRow::is_pinned);
 
     py::class_<TopoSegRow>(m, "TopoSegRow")
         .def(py::init<>())
