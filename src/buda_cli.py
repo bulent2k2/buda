@@ -57,7 +57,8 @@ KNOWN_COMMANDS = frozenset({
     "def_layer", "def_track_pattern", "derive_busterms", "detour_channel",
     "dump_hbundles", "dump_topologies", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
-    "import_def_lef", "import_verilog", "move_comp", "open_bdb", "refine_busterms",
+    "import_def_lef", "import_verilog", "load_pipeline", "move_comp", "open_bdb",
+    "refine_busterms",
     "report_overhead", "resize_cell", "ripup_reroute", "rotate_comp", "run_bundler",
     "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
     "run_planner", "save_bdb", "select_topologies", "select_topology", "set_die",
@@ -311,6 +312,9 @@ class BudaSession:
                 tr.connected_blocks = json.dumps(list(topo.connected_block_names))
                 tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
                 tr.is_selected = (ci == selected)
+                # A pre-plan select_topology pin must survive a checkpoint so a
+                # resumed run_planner still honors it (v10).
+                tr.is_pinned = bool(w.input.topology_pinned and ci == selected)
                 self.bdb.add_topology(tr)
                 for si, seg in enumerate(topo.segments):
                     sr = buda.TopoSegRow()
@@ -369,6 +373,12 @@ class BudaSession:
             r.width = ts.width
             r.placed = ts.placed
             r.is_jog = ts.is_jog
+            # Stage-4 solver state (v9): lets load_pipeline rehydrate a
+            # NUTSResult good enough to resume into detailed NUTS.
+            r.interval_lo = ts.interval_lo
+            r.interval_hi = ts.interval_hi
+            r.track_lo_bound = ts.track_lo_bound
+            r.track_hi_bound = ts.track_hi_bound
             self.bdb.add_bus_segment(r)
         n_via = 0
         for w in self.bundles:
@@ -545,6 +555,188 @@ class BudaSession:
                                      "detailed_nuts", n_ns, n_nv)
         return (n_ns, n_nv)
 
+    def _load_pipeline_from_bdb(self, expanded=False):
+        """Rehydrate the in-memory pipeline from the open BDB (resume path).
+
+        Reverses the persistence: rebuilds self.bundles (HBundle in bit order via
+        bundle_net.ord + all candidate Topologies, their seg_busterms restored
+        LOGICALLY from the topology_seg_busterm links — single-source-of-topo-
+        truth, never re-derived from geometry), the plan (selected candidate +
+        assigned layers + pre-plan pin) from is_selected / assigned_layer /
+        is_pinned, and — when bus rows exist — a NUTSResult from bus_segment, so
+        a fresh session can stop after generate_topologies / run_planner /
+        run_nuts and continue with run_planner / run_nuts / run_detailed_nuts.
+
+        Requires the Floorplan + LayerStack to be re-declared first (topology
+        coordinates are absolute; the planner/NUTS/ConnTopology re-derive slide
+        ranges and net_pull from geometry + Floorplan — those are recomputed,
+        by design). `expanded` selects the hier post-expansion view
+        (is_replicated=1 per-instance rows + non-template bundles) instead of
+        the pre-expansion templates; an expanded instance persists only its
+        selected topology, so its selected index is remapped to the compact
+        in-memory candidate list.
+
+        Not restored (recomputed downstream or absent): seg_perp (a NUTS
+        placement *preference* from the planner's charged bands — a resumed
+        run_nuts may legally place segments at different track positions than
+        the original session), planner band state, overlap details, doglegs,
+        and Topology.bridge_segments (not yet persisted — TEG-over multi-rect
+        designs cannot resume losslessly; see wishlist-bdb.md).
+        """
+        import json
+        if self.bdb is None:
+            print("Error: load_pipeline requires an open BDB (open_bdb first)")
+            return 0
+        rows = self.bdb.all_bundles()
+        if expanded:
+            template_ids = {b.parent_id for b in rows if b.is_replicated}
+            rows = [b for b in rows
+                    if b.is_replicated or b.id not in template_ids]
+        else:
+            rows = [b for b in rows if not b.is_replicated]
+        if not rows:
+            print("Error: load_pipeline found no persisted bundles — run "
+                  "run_bundler (and generate_topologies) with a BDB open first")
+            return 0
+
+        h_layer_ids = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL))
+        v_layer_ids = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL))
+        bundles, missing_blocks, skipped = [], set(), 0
+        for br in rows:
+            topos = self.bdb.topologies(br.id)
+            if not topos:
+                skipped += 1
+                continue          # no candidates persisted (e.g. bundler-only stop)
+            hb = buda.HBundle()
+            hb.id = int(br.id)
+            hb.net_names = list(self.bdb.bundle_nets(br.id))
+            hb.reason = br.reason
+            hb.num_terminals = br.num_terminals
+            hb.level = br.level
+            hb.cell_context = br.cell_context
+            hb.instances = json.loads(br.instances) if br.instances else []
+            hb.parent_id = int(br.parent_id) if br.parent_id else -1
+            hb.drv_spec_depth = br.drv_spec_depth
+            hb.rcv_spec_depth = br.rcv_spec_depth
+            hb.drv_spec_path = br.drv_spec_path
+            hb.rcv_spec_paths = (json.loads(br.rcv_spec_paths)
+                                 if br.rcv_spec_paths else [])
+            w = buda.BundleWrapper()
+            w.input.original_bundle = hb
+            w.input.width = len(hb.get_net_names()) * 1.5   # as run_bundler sets it
+            # sel/sel_ci: the selected candidate's COMPACT in-memory index vs its
+            # PERSISTED cand_index. They differ when only a subset of candidates
+            # was persisted (hier expanded bundles keep just their selected
+            # topology, at its original template cand_index).
+            cands, sel, sel_ci, pinned = [], -1, -1, False
+            for tr in topos:
+                t = buda.Topology()
+                t.type = tr.type
+                t.estimated_wirelength = tr.wirelength
+                t.trunk_location = tr.trunk_location
+                t.pass_through_count = tr.pass_through_count
+                t.connected_block_names = (json.loads(tr.connected_blocks)
+                                           if tr.connected_blocks else [])
+                t.feedthru_blocks = (json.loads(tr.feedthru_blocks)
+                                     if tr.feedthru_blocks else [])
+                segs = []
+                for sr in self.bdb.topology_segments(br.id, tr.cand_index):
+                    sg = buda.Segment()
+                    sg.start = buda.Point(int(sr.x1), int(sr.y1))
+                    sg.end = buda.Point(int(sr.x2), int(sr.y2))
+                    sg.layer_hint = sr.layer_hint
+                    sg.is_jog = sr.is_jog
+                    segs.append(sg)
+                t.segments = segs        # reassign whole vector (pybind copies)
+                bad = [n for n in t.connected_block_names
+                       if not self.fp.has_block(n)]
+                if bad:
+                    missing_blocks.update(bad)
+                else:
+                    # Restore the authoritative seg_busterms annotation from the
+                    # persisted topology_seg_busterm links — LOGICALLY, never
+                    # re-derived from geometry (single-source-of-topo-truth
+                    # Phase 3: annotate_topology would just re-guess what the
+                    # links record exactly).
+                    buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
+                if tr.is_selected:
+                    sel = len(cands)     # compact index of this candidate
+                    sel_ci = tr.cand_index
+                    pinned = tr.is_pinned
+                cands.append(t)
+            w.input.candidates = cands
+            if sel >= 0:
+                # Restore the planner's decision so run_nuts can run directly.
+                w.plan.selected_topology_index = sel
+                # A pre-plan select_topology pin survives the checkpoint so a
+                # resumed run_planner honors it (Codex #136 P2).
+                w.input.topology_pinned = pinned
+                layers = [sr.assigned_layer
+                          for sr in self.bdb.topology_segments(br.id, sel_ci)]
+                if any(l >= 0 for l in layers):
+                    w.plan.seg_layers = layers
+                    for l in layers:
+                        if l in h_layer_ids and w.input.assigned_h_layer < 0:
+                            w.input.assigned_h_layer = l
+                        if l in v_layer_ids and w.input.assigned_v_layer < 0:
+                            w.input.assigned_v_layer = l
+            bundles.append(w)
+
+        if missing_blocks:
+            print(f"Error: load_pipeline: block(s) "
+                  f"{', '.join(sorted(missing_blocks))} referenced by persisted "
+                  f"topologies are not in the current Floorplan — re-declare the "
+                  f"setup (add_block / add_blocks_from_bdb + def_layer) before "
+                  f"load_pipeline")
+            return 0
+        if not bundles:
+            print("Error: load_pipeline found no persisted candidate topologies "
+                  "— run generate_topologies with a BDB open first")
+            return 0
+        self.bundles = bundles
+
+        # Rehydrate the abstract-NUTS result (if run_nuts was persisted) so
+        # run_detailed_nuts can resume from it.
+        ts_list = []
+        for w in self.bundles:
+            bid = str(w.input.original_bundle.id)
+            for g in self.bdb.bus_segments(bid):
+                ts = buda.TrackSegment()
+                ts.bundle_id = int(g.id)
+                ts.seg_idx = g.seg_idx
+                ts.layer = g.layer
+                ts.horiz = g.is_horiz
+                if g.is_horiz:                # span is x; track_position is y
+                    ts.span_lo, ts.span_hi = g.x1, g.x2
+                else:                         # span is y; track_position is x
+                    ts.span_lo, ts.span_hi = g.y1, g.y2
+                ts.track_position = g.track_position
+                ts.width = g.width
+                ts.placed = g.placed
+                ts.is_jog = g.is_jog
+                ts.interval_lo = g.interval_lo
+                ts.interval_hi = g.interval_hi
+                ts.track_lo_bound = g.track_lo_bound
+                ts.track_hi_bound = g.track_hi_bound
+                ts_list.append(ts)
+        if ts_list:
+            nr = buda.NUTSResult()
+            nr.segments = ts_list
+            self.nuts_result = nr             # persisted routing = final, clean
+
+        n_cand = sum(len(w.input.candidates) for w in self.bundles)
+        n_planned = sum(1 for w in self.bundles
+                        if w.plan.selected_topology_index >= 0)
+        stage = ("abstract NUTS" if ts_list else
+                 "planner" if n_planned else "topologies")
+        print(f"[load_pipeline] rehydrated {len(self.bundles)} bundle(s), "
+              f"{n_cand} candidate topolog{'y' if n_cand == 1 else 'ies'}, "
+              f"{n_planned} planned selection(s)"
+              + (f", {len(ts_list)} placed bus segment(s)" if ts_list else "")
+              + f" from the BDB (deepest persisted stage: {stage})"
+              + (f"; {skipped} bundle(s) skipped (no candidates)" if skipped else ""))
+        return len(self.bundles)
+
     def _persist_planner_output(self):
         """Persist the planner's decision into the BDB after run_planner.
 
@@ -624,6 +816,7 @@ class BudaSession:
             tr.connected_blocks = json.dumps(list(topo.connected_block_names))
             tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
             tr.is_selected = (ci == sel)
+            tr.is_pinned = bool(w.input.topology_pinned and ci == sel)
             self.bdb.add_topology(tr)
             for si, seg in enumerate(topo.segments):
                 sr = buda.TopoSegRow()
@@ -635,6 +828,9 @@ class BudaSession:
                 sr.layer_hint = seg.layer_hint
                 sr.is_jog = seg.is_jog
                 self.bdb.add_topology_segment(sr)
+            # Logical seg-busterm links (load_pipeline restores them; never
+            # re-derived from geometry).
+            buda.persist_seg_busterms(self.bdb, bid, ci, topo)
 
     def _persist_assigned_layers(self, bid, sel, w):
         """Write the planner's per-segment assigned layers for a selected topology."""
@@ -699,6 +895,9 @@ class BudaSession:
             sr.is_jog = seg.is_jog
             sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
             self.bdb.add_topology_segment(sr)
+        # Logical seg-busterm links for the instance's selected topology, so a
+        # `load_pipeline expanded` resume restores its connectivity too.
+        buda.persist_seg_busterms(self.bdb, bid, sel, topo)
 
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
@@ -2602,6 +2801,19 @@ class BudaSession:
         print(f"[ripup_reroute] done: metric {m0}->{metric()} "
               f"after {committed} move(s), {n_trials} trial(s).", flush=True)
 
+        # Re-persist the FINAL state: the trials/commits above re-ran the
+        # planner/NUTS(/DNUTS) internally without going through the command
+        # handlers, so the BDB still holds the pre-ripup routing. A checkpoint
+        # (save/exit → load_pipeline resume) must reflect what this session now
+        # holds. Idempotent; no-op without an open BDB.
+        if self.bdb is not None and committed:
+            self._persist_planner_output()
+            self._persist_nuts()
+            if stage == 'b' and self.detailed_result is not None:
+                self._persist_detailed_nuts()
+            print(f"[BDB] re-persisted post-ripup routing "
+                  f"({committed} re-route(s) committed).")
+
     def _select_single_topology_internal(self, bid, tid):
         """Helper for select_topology/select_topologies: set a pin without re-planning layers.
         Returns True if the bundle (or its hierarchical expansion) was found.
@@ -4073,6 +4285,15 @@ class BudaSession:
                             self.run_command(line)
             finally:
                 self._script_stack.pop()
+
+        elif cmd == "load_pipeline":
+            # Usage: load_pipeline [expanded]
+            # Rehydrate bundles + candidate topologies (+ plan + NUTS result, as
+            # deep as was persisted) from the open BDB, so the pipeline resumes
+            # where a previous session stopped. Requires the Floorplan/LayerStack
+            # setup to be re-declared first (see docs/BDB_REFERENCE.md).
+            self._load_pipeline_from_bdb(
+                expanded=bool(args) and args[0] == "expanded")
 
         elif cmd == "save_bdb":
             # Serialize the working BDB back to its writeback source .sql now.

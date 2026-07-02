@@ -176,8 +176,10 @@ def test_v2_bundle_net_rekeys_to_v3_preserving_rows(tmp_path):
     db = buda.BDB(p)
     assert db.schema_version() == buda.BDB.SCHEMA_VERSION
     assert db.meta_get("schema_version") == str(buda.BDB.SCHEMA_VERSION)
-    # Membership preserved across the re-key (not dropped).
-    assert db.bundle_nets("1") == ["flat_only_net", "known_net"]
+    # Membership preserved across the re-key (not dropped) — in the ORIGINAL
+    # insertion order (v10's bundle_net.ord: bundle_nets() returns bit order,
+    # not name order, since name-sorting breaks bit mapping at >= 10 bits).
+    assert db.bundle_nets("1") == ["known_net", "flat_only_net"]
     del db
     con = sqlite3.connect(p)
     net_cols = {r[1] for r in con.execute("PRAGMA table_info(bundle_net)")}
