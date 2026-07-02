@@ -118,11 +118,23 @@ Tests: `test/tests/test_bdb_nuts_persist.py`.
   The v6→v7 migration rebuilds the bus tables with the FK, dropping pre-FK orphans.
 Tests: `test/tests/test_bdb_route_snapshot.py`.
 
-**Deferred (follow-ups):**
-- **Detailed NUTS (Stage 9) `net_segment` rows** — per-bit wires on concrete
-  tracks (the finest OA/GDS geometry), written after `run_detailed_nuts`. Blocked
-  on working out via definition/insertion in detailed NUTS before persisting the
-  actual per-bit wires.
+**5. Detailed NUTS (Stage 9, schema v8) — ✅ IMPLEMENTED.** The prerequisite —
+via definition/insertion in detailed NUTS — landed first: the DNUTS engine now
+emits per-bit `NetVia`s (each symbolic bus-via fanned out to `bit_width`
+individual vias at each bit's own track crossing; drawn in the visualizer under
+`[Vias/Conns]` in detailed mode). `run_detailed_nuts` then persists:
+- **`net_segment`** — one row per bit-wire (placed rectangle + the bit's net
+  identity: `net_names[bit_index]` resolved to `net_id` via `_ensure_net`).
+- **`net_via`** — one row per per-bit via, sharing the parent `bus_via`'s
+  `(bundle_id, from_seg, to_seg)` key with `bit_index` appended.
+Both carry the hard `bundle(id)` FK (NOT NULL, parent-ensure, delete-order
+rules as the bus tables); `run_nuts`/`clear_bundles`/`clear_expanded_bundles`
+invalidate them; `route_snapshot` is rewritten with stage `detailed_nuts`
+(net rows hashed by net **name**; bus counts preserved; `n_net_*` columns).
+C++ API `add_net_segment` / `add_net_via` / `clear_detailed_routing` /
+`net_segments` / `net_vias`; Python `_persist_detailed_nuts`.
+Tests: `test/tests/test_bdb_dnuts_persist.py`,
+`test/tests/test_detailed_nuts_vias.py` (via model).
 
 These persisted tables are the direct source for the planned **BDB → OA
 (`oaNet`/`oaTerm`/vias) / GDS** export; see

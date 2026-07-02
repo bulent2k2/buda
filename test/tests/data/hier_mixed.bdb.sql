@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=7;
+PRAGMA user_version=8;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -156,7 +156,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','7');
+INSERT INTO "meta" VALUES('schema_version','8');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -188,6 +188,30 @@ CREATE TABLE net_props (
             bit_index    INTEGER,
             bundle_id    INTEGER
         );
+CREATE TABLE net_segment (
+        -- NOT NULL: see bus_segment (a NULL child key would satisfy the FK).
+        bundle_id      TEXT NOT NULL REFERENCES bundle(id),
+        seg_idx        INTEGER,
+        bit_index      INTEGER,
+        net_id         INTEGER REFERENCES net(id),
+        layer          INTEGER,
+        is_horiz       INTEGER DEFAULT 0,
+        x1 REAL, y1 REAL, x2 REAL, y2 REAL,
+        track_position REAL,
+        width          REAL,
+        PRIMARY KEY (bundle_id, seg_idx, bit_index)
+    );
+CREATE TABLE net_via (
+        bundle_id  TEXT NOT NULL REFERENCES bundle(id),
+        from_seg   INTEGER,
+        to_seg     INTEGER,
+        bit_index  INTEGER,
+        net_id     INTEGER REFERENCES net(id),
+        from_layer INTEGER,
+        to_layer   INTEGER,
+        x REAL, y REAL,
+        PRIMARY KEY (bundle_id, from_seg, to_seg, bit_index)
+    );
 CREATE TABLE pin (
             net_id   INTEGER REFERENCES net(id),
             comp_id  INTEGER REFERENCES component(id),
@@ -252,7 +276,9 @@ CREATE TABLE route_snapshot (
         hash           TEXT,
         n_bus_segments INTEGER DEFAULT 0,
         n_bus_vias     INTEGER DEFAULT 0,
-        stage          TEXT                   -- 'abstract_nuts'
+        stage          TEXT,                  -- 'abstract_nuts' / 'detailed_nuts'
+        n_net_segments INTEGER DEFAULT 0,
+        n_net_vias     INTEGER DEFAULT 0
     );
 CREATE TABLE topology (
         bundle_id          TEXT REFERENCES bundle(id),
