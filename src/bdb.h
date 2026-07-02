@@ -21,6 +21,7 @@
 
 #include <string>
 #include <vector>
+#include <optional>
 #include <unordered_map>
 #include "sqlite3.h"
 
@@ -73,6 +74,21 @@ struct BustermRow {
     // Optional multi-rect geometry (e.g. TEG blocks).
     // JSON-encoded: [[x1,y1,x2,y2],...].  Empty string = single-rect (x1..y2 only).
     std::string rects;
+    // Routing-time busterm attributes (topology.h Busterm).  teg_mode is the
+    // TEG-gap handling ('THRU'|'OVER'); orig_* is the full physical extent while
+    // x1..y2 hold the (possibly margin-inset) tap bbox.  Defaults keep hier-derived
+    // rows (which don't set these) well-formed.
+    std::string teg_mode = "THRU";
+    double       orig_x1 = 0, orig_y1 = 0, orig_x2 = 0, orig_y2 = 0;
+};
+
+// One persisted seg_busterms endpoint→busterm link (topology_seg_busterm row).
+struct TopoSegBustermRow {
+    std::string bundle_id;
+    int         cand_index = 0;
+    int         seg_index  = 0;
+    std::string endpoint;    // 'start' | 'end'
+    std::string busterm_id;
 };
 
 struct BundleRow {
@@ -217,8 +233,9 @@ public:
     // v5 = abstract-NUTS bus routing tables (bus_segment / bus_via);
     // v6 = topology_segment.assigned_layer (planner's per-segment layer);
     // v7 = bus_segment/bus_via FK to bundle + route_snapshot fingerprint table;
-    // v8 = detailed-NUTS net_segment/net_via tables + route_snapshot n_net_* counts.
-    static constexpr int SCHEMA_VERSION = 8;
+    // v8 = detailed-NUTS net_segment/net_via tables + route_snapshot n_net_* counts;
+    // v9 = routing-time busterm attrs (teg_mode/orig_*) + topology_seg_busterm join.
+    static constexpr int SCHEMA_VERSION = 9;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -337,7 +354,10 @@ public:
     std::vector<PinRow>       pins_by_comp(int comp_id) const;
     std::vector<NetRow>       all_nets()        const;
     std::vector<PinRow>       all_pins()        const;
-    std::vector<BustermRow>   all_busterms()    const;
+    std::vector<BustermRow>   all_busterms()    const;   // hier-derived only
+    // Fetch a single busterm by id (incl. routing-time 'tb:<name>' rows that
+    // all_busterms filters out); used by the topology-reload bridge.
+    std::optional<BustermRow> busterm(const std::string& id) const;
     std::vector<BundleRow>    all_bundles()      const;
 
     // ── Bundle persistence (Stage 1 output; both flat and hier flows) ──────
@@ -359,6 +379,12 @@ public:
     std::vector<TopoRow> topologies(const std::string& bundle_id) const;
     std::vector<TopoSegRow> topology_segments(const std::string& bundle_id,
                                               int cand_index) const;
+    // Persist / read one seg_busterms endpoint→busterm link.  The routing bridge
+    // (persist_seg_busterms in the buda module) inserts the referenced 'tb:<name>'
+    // busterm row before calling add; only real taps get a row (junction = absent).
+    void add_topology_seg_busterm(const TopoSegBustermRow& r);
+    std::vector<TopoSegBustermRow> topology_seg_busterms(
+        const std::string& bundle_id, int cand_index) const;
     // Mark one candidate as the selected topology for a bundle (planner choice or
     // pin): sets is_selected=1 for cand_index, 0 for the bundle's other rows.
     void set_topology_selected(const std::string& bundle_id, int cand_index);

@@ -56,7 +56,10 @@ net_props        net_id→net, hpwl, fanout, driver_comp,
                  bus_name, bit_index, bundle_id
 
 busterm          id (TEXT), comp_id→component, hier_path,
-                 depth, x1, y1, x2, y2, resolution, parent_id→busterm
+                 depth, x1, y1, x2, y2, resolution, parent_id→busterm,
+                 rects (JSON multi-rect), teg_mode, orig_x1..orig_y2
+                 (routing-time rows id 'tb:<block>' carry the full topology.h
+                 Busterm; hier-derived rows id 'bt:<name>')
 
 bundle           id (TEXT), level, strategy, reason, num_terminals,
                  cell_context, instances (JSON), parent_id→bundle,
@@ -72,6 +75,12 @@ topology         bundle_id→bundle, cand_index, type, wirelength,
 topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
                  layer_hint, is_jog, assigned_layer (planner's per-seg layer)
                  PK (bundle_id, cand_index, seg_index)
+                 FK (bundle_id, cand_index) → topology
+topology_seg_busterm
+                 bundle_id, cand_index, seg_index, endpoint ('start'|'end'),
+                 busterm_id→busterm  — one row per real tap (seg_busterms);
+                 a missing (seg,endpoint) is a wire junction
+                 PK (bundle_id, cand_index, seg_index, endpoint)
                  FK (bundle_id, cand_index) → topology
 
 bus_segment      bundle_id→bundle (FK), seg_idx, layer, is_horiz,
@@ -109,7 +118,9 @@ provenance; v2 added the **bundle-persistence** shape above; v3 re-keyed
 into a **foreign key** to `bundle(id)` and added the **`route_snapshot`**
 fingerprint table (the v6→v7 migration rebuilds the bus tables with the FK,
 dropping any pre-FK orphan rows); v8 added the **detailed-NUTS** `net_segment`/
-`net_via` tables plus the `route_snapshot` `n_net_*` count columns.
+`net_via` tables plus the `route_snapshot` `n_net_*` count columns; v9 added
+routing-time busterm attributes (`busterm.teg_mode` + `orig_x1..y2`) and the
+**`topology_seg_busterm`** join that persists `seg_busterms` logically.
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
@@ -168,6 +179,19 @@ runtime on large designs. `clear_bundles()` also wipes the topology tables (they
 FK to `bundle`). C++ API: `add_topology(TopoRow)`,
 `add_topology_segment(TopoSegRow)`, `clear_topologies()`, `topologies(bundle_id)`,
 `topology_segments(bundle_id, cand_index)`.
+
+Each candidate also persists its **`seg_busterms`** — the authoritative
+segment-endpoint→busterm annotation — **logically**, so a reload restores
+connectivity without re-deriving it from geometry (the single-source-of-topo-truth
+principle; see `docs/internal/single_source_topo_truth.md`). Each real tap becomes
+a routing-time busterm row (`tb:<block>`, carrying the full `Busterm` incl.
+multi-rect + TEG) plus a `topology_seg_busterm` link; a junction endpoint writes no
+row. The buda-module bridge `persist_seg_busterms` / `load_seg_busterms`
+(`bind_routing.cpp`) is the single serializer; `load_seg_busterms` rebuilds the
+annotation from the link rows + `BDB::busterm(id)` alone (no floorplan). C++ API:
+`add_topology_seg_busterm(TopoSegBustermRow)`,
+`topology_seg_busterms(bundle_id, cand_index)`, `busterm(id)` (fetches a single
+row incl. `tb:` — `all_busterms()` returns hier-derived rows only).
 
 **Planner-output persistence.** `run_planner` records its decision: it marks the
 selected candidate (`topology.is_selected`, via `set_topology_selected`) and the

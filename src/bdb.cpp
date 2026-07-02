@@ -131,6 +131,22 @@ static const char* TOPOLOGY_DDL = R"(
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)
     );
+    -- Per-segment-endpoint busterm annotation (topology.h seg_busterms): the ONE
+    -- authoritative record of which segment endpoint taps which busterm.  A row is
+    -- present only for a real tap; a missing (seg,endpoint) is a wire junction
+    -- (nullopt).  busterm_id references a routing-time busterm row (id 'tb:<name>').
+    -- This is what lets a reloaded topology restore its connectivity LOGICALLY,
+    -- without re-deriving it from geometry (see single_source_topo_truth.md Ph.3).
+    CREATE TABLE IF NOT EXISTS topology_seg_busterm (
+        bundle_id  TEXT,
+        cand_index INTEGER,
+        seg_index  INTEGER,
+        endpoint   TEXT,              -- 'start' | 'end'
+        busterm_id TEXT REFERENCES busterm(id),
+        PRIMARY KEY (bundle_id, cand_index, seg_index, endpoint),
+        FOREIGN KEY (bundle_id, cand_index)
+            REFERENCES topology(bundle_id, cand_index)
+    );
 )";
 
 // Abstract-NUTS bus routing tables (schema v5). bundle_id is a *soft* link (no FK):
@@ -249,7 +265,13 @@ void BDB::_create_schema() {
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             resolution TEXT DEFAULT 'BLOCK',
             parent_id  TEXT REFERENCES busterm(id),
-            rects      TEXT DEFAULT NULL
+            rects      TEXT DEFAULT NULL,
+            -- Routing-time busterm attributes (topology.h Busterm): the TEG-gap
+            -- handling mode and the full (un-margin-shrunk) physical extent.  x1..y2
+            -- above hold the possibly margin-inset bbox; these hold the original.
+            teg_mode   TEXT DEFAULT 'THRU',
+            orig_x1 REAL DEFAULT 0, orig_y1 REAL DEFAULT 0,
+            orig_x2 REAL DEFAULT 0, orig_y2 REAL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS grp (
             id        TEXT PRIMARY KEY,
@@ -439,6 +461,21 @@ void BDB::_migrate() {
         sqlite3_exec(_db,
             "ALTER TABLE route_snapshot ADD COLUMN n_net_vias INTEGER DEFAULT 0",
             nullptr, nullptr, nullptr);
+    }
+    if (v < 9) {
+        // v8 -> v9: routing-time busterm attributes on the busterm table
+        // (teg_mode + un-shrunk orig bbox) and the topology_seg_busterm join that
+        // persists seg_busterms logically.  ALTER ADD COLUMN is per-column and
+        // errors if the column already exists, so ignore each result (idempotent);
+        // the new table is created via TOPOLOGY_DDL (all IF NOT EXISTS).
+        for (const char* col : {
+                "ALTER TABLE busterm ADD COLUMN teg_mode TEXT DEFAULT 'THRU'",
+                "ALTER TABLE busterm ADD COLUMN orig_x1 REAL DEFAULT 0",
+                "ALTER TABLE busterm ADD COLUMN orig_y1 REAL DEFAULT 0",
+                "ALTER TABLE busterm ADD COLUMN orig_x2 REAL DEFAULT 0",
+                "ALTER TABLE busterm ADD COLUMN orig_y2 REAL DEFAULT 0" })
+            sqlite3_exec(_db, col, nullptr, nullptr, nullptr);
+        _exec(TOPOLOGY_DDL);   // adds topology_seg_busterm (topology/_segment no-op)
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -2033,10 +2070,16 @@ void BDB::rotate_comp(const std::string& name, int degrees) {
 
 void BDB::add_busterm(const BustermRow& bt) {
     Stmt s(_db,
-        "INSERT OR REPLACE INTO busterm(id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,parent_id,rects)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+        "INSERT OR REPLACE INTO busterm(id,comp_id,hier_path,depth,x1,y1,x2,y2,"
+        "resolution,parent_id,rects,teg_mode,orig_x1,orig_y1,orig_x2,orig_y2)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     sqlite3_bind_text  (s, 1, bt.id.c_str(),         -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int   (s, 2, bt.comp_id);
+    // comp_id is a FK to component(id); routing-time busterms have no component,
+    // so bind NULL (which satisfies the FK) rather than an invalid -1.
+    if (bt.comp_id < 0)
+        sqlite3_bind_null(s, 2);
+    else
+        sqlite3_bind_int(s, 2, bt.comp_id);
     sqlite3_bind_text  (s, 3, bt.hier_path.c_str(),  -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 4, bt.depth);
     sqlite3_bind_double(s, 5, bt.x1);
@@ -2052,6 +2095,11 @@ void BDB::add_busterm(const BustermRow& bt) {
         sqlite3_bind_null(s, 11);
     else
         sqlite3_bind_text(s, 11, bt.rects.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 12, bt.teg_mode.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(s, 13, bt.orig_x1);
+    sqlite3_bind_double(s, 14, bt.orig_y1);
+    sqlite3_bind_double(s, 15, bt.orig_x2);
+    sqlite3_bind_double(s, 16, bt.orig_y2);
     sqlite3_step(s);
 }
 
@@ -2109,32 +2157,62 @@ std::vector<PinRow> BDB::pins_by_comp(int comp_id) const {
     return rows;
 }
 
+// Column list shared by all_busterms() and busterm(): keep the two readers in
+// sync so a routing-time row (teg_mode/orig_*) round-trips through either path.
+static const char* BUSTERM_COLS =
+    "id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,"
+    "COALESCE(parent_id,''),COALESCE(rects,''),"
+    "COALESCE(teg_mode,'THRU'),"
+    "COALESCE(orig_x1,0),COALESCE(orig_y1,0),"
+    "COALESCE(orig_x2,0),COALESCE(orig_y2,0)";
+
+static BustermRow read_busterm_row(sqlite3_stmt* q) {
+    BustermRow r;
+    r.id         = (const char*)sqlite3_column_text(q, 0);
+    r.comp_id    = (sqlite3_column_type(q, 1) == SQLITE_NULL)
+                       ? -1 : sqlite3_column_int(q, 1);
+    r.hier_path  = (const char*)sqlite3_column_text(q, 2);
+    r.depth      = sqlite3_column_int(q, 3);
+    r.x1         = sqlite3_column_double(q, 4);
+    r.y1         = sqlite3_column_double(q, 5);
+    r.x2         = sqlite3_column_double(q, 6);
+    r.y2         = sqlite3_column_double(q, 7);
+    r.resolution = (const char*)sqlite3_column_text(q, 8);
+    r.parent_id  = (const char*)sqlite3_column_text(q, 9);
+    r.rects      = (const char*)sqlite3_column_text(q, 10);
+    r.teg_mode   = (const char*)sqlite3_column_text(q, 11);
+    r.orig_x1    = sqlite3_column_double(q, 12);
+    r.orig_y1    = sqlite3_column_double(q, 13);
+    r.orig_x2    = sqlite3_column_double(q, 14);
+    r.orig_y2    = sqlite3_column_double(q, 15);
+    return r;
+}
+
+// The hierarchy-derived busterms only.  Routing-time busterms (id 'tb:<name>',
+// written by the topology-persist bridge) share this table but describe a
+// different entity (a segment tap, not a hierarchy interface); excluding them
+// here keeps the hier bundler / BustermGen::all / CLI listing unpolluted.  The
+// loader reaches routing rows by id via busterm() instead.
 std::vector<BustermRow> BDB::all_busterms() const {
     if (!_q_all_busterms)
         sqlite3_prepare_v2(_db,
-            "SELECT id,comp_id,hier_path,depth,x1,y1,x2,y2,resolution,"
-            "COALESCE(parent_id,''),COALESCE(rects,'')"
-            " FROM busterm ORDER BY depth,id",
+            (std::string("SELECT ") + BUSTERM_COLS +
+             " FROM busterm WHERE id NOT LIKE 'tb:%' ORDER BY depth,id").c_str(),
             -1, &_q_all_busterms, nullptr);
     sqlite3_reset(_q_all_busterms);
     std::vector<BustermRow> rows;
-    while (sqlite3_step(_q_all_busterms) == SQLITE_ROW) {
-        auto q = _q_all_busterms;
-        BustermRow r;
-        r.id         = (const char*)sqlite3_column_text(q, 0);
-        r.comp_id    = sqlite3_column_int(q, 1);
-        r.hier_path  = (const char*)sqlite3_column_text(q, 2);
-        r.depth      = sqlite3_column_int(q, 3);
-        r.x1         = sqlite3_column_double(q, 4);
-        r.y1         = sqlite3_column_double(q, 5);
-        r.x2         = sqlite3_column_double(q, 6);
-        r.y2         = sqlite3_column_double(q, 7);
-        r.resolution = (const char*)sqlite3_column_text(q, 8);
-        r.parent_id  = (const char*)sqlite3_column_text(q, 9);
-        r.rects      = (const char*)sqlite3_column_text(q, 10);
-        rows.push_back(r);
-    }
+    while (sqlite3_step(_q_all_busterms) == SQLITE_ROW)
+        rows.push_back(read_busterm_row(_q_all_busterms));
     return rows;
+}
+
+std::optional<BustermRow> BDB::busterm(const std::string& id) const {
+    Stmt q(_db, (std::string("SELECT ") + BUSTERM_COLS +
+                 " FROM busterm WHERE id=?").c_str());
+    sqlite3_bind_text(q, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW)
+        return read_busterm_row(q);
+    return std::nullopt;
 }
 
 // ── Bundle persistence ───────────────────────────────────────────────────────
@@ -2207,7 +2285,9 @@ void BDB::clear_bundles() {
     _exec("DELETE FROM route_snapshot;"
           "DELETE FROM net_via; DELETE FROM net_segment;"
           "DELETE FROM bus_via; DELETE FROM bus_segment;"
+          "DELETE FROM topology_seg_busterm;"
           "DELETE FROM topology_segment; DELETE FROM topology;"
+          "DELETE FROM busterm WHERE id LIKE 'tb:%';"
           "DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
 }
 
@@ -2308,7 +2388,13 @@ void BDB::add_topology_segment(const TopoSegRow& sr) {
 }
 
 void BDB::clear_topologies() {
-    _exec("DELETE FROM topology_segment; DELETE FROM topology;");
+    // Children before parents (FK): the seg-busterm links reference both topology
+    // and busterm.  The routing-time 'tb:' busterm rows exist only to back those
+    // links, so drop them too (hier-derived 'bt:' rows are untouched); re-persist
+    // recreates them idempotently, keeping the *.bdb.sql dump deterministic.
+    _exec("DELETE FROM topology_seg_busterm;"
+          "DELETE FROM topology_segment; DELETE FROM topology;"
+          "DELETE FROM busterm WHERE id LIKE 'tb:%';");
 }
 
 std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
@@ -2364,6 +2450,39 @@ std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
     return out;
 }
 
+void BDB::add_topology_seg_busterm(const TopoSegBustermRow& r) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO topology_seg_busterm"
+        "(bundle_id,cand_index,seg_index,endpoint,busterm_id) VALUES(?,?,?,?,?)");
+    sqlite3_bind_text(s, 1, r.bundle_id.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 2, r.cand_index);
+    sqlite3_bind_int (s, 3, r.seg_index);
+    sqlite3_bind_text(s, 4, r.endpoint.c_str(),   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 5, r.busterm_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+std::vector<TopoSegBustermRow> BDB::topology_seg_busterms(
+    const std::string& bundle_id, int cand_index) const {
+    Stmt q(_db,
+        "SELECT bundle_id,cand_index,seg_index,endpoint,busterm_id"
+        " FROM topology_seg_busterm WHERE bundle_id=? AND cand_index=?"
+        " ORDER BY seg_index,endpoint");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (q, 2, cand_index);
+    std::vector<TopoSegBustermRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        TopoSegBustermRow r;
+        r.bundle_id  = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        r.cand_index = sqlite3_column_int(q, 1);
+        r.seg_index  = sqlite3_column_int(q, 2);
+        r.endpoint   = reinterpret_cast<const char*>(sqlite3_column_text(q, 3));
+        r.busterm_id = reinterpret_cast<const char*>(sqlite3_column_text(q, 4));
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
 void BDB::set_topology_selected(const std::string& bundle_id, int cand_index) {
     Stmt s(_db, "UPDATE topology SET is_selected=(cand_index=?) WHERE bundle_id=?");
     sqlite3_bind_int (s, 1, cand_index);
@@ -2402,6 +2521,8 @@ void BDB::clear_expanded_bundles() {
         "DELETE FROM bus_via WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM bus_segment WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM topology_seg_busterm WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM topology_segment WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"

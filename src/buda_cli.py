@@ -322,6 +322,10 @@ class BudaSession:
                     sr.layer_hint = seg.layer_hint
                     sr.is_jog = seg.is_jog
                     self.bdb.add_topology_segment(sr)
+                # Persist the authoritative seg-busterm annotation LOGICALLY (the
+                # topology row above is the FK parent). A reload rebuilds
+                # connectivity from these links, never re-deriving from geometry.
+                buda.persist_seg_busterms(self.bdb, bid, ci, topo)
                 n_cands += 1
         return n_cands
 

@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=8;
+PRAGMA user_version=9;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -60,16 +60,22 @@ CREATE TABLE busterm (
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             resolution TEXT DEFAULT 'BLOCK',
             parent_id  TEXT REFERENCES busterm(id),
-            rects      TEXT DEFAULT NULL
+            rects      TEXT DEFAULT NULL,
+            -- Routing-time busterm attributes (topology.h Busterm): the TEG-gap
+            -- handling mode and the full (un-margin-shrunk) physical extent.  x1..y2
+            -- above hold the possibly margin-inset bbox; these hold the original.
+            teg_mode   TEXT DEFAULT 'THRU',
+            orig_x1 REAL DEFAULT 0, orig_y1 REAL DEFAULT 0,
+            orig_x2 REAL DEFAULT 0, orig_y2 REAL DEFAULT 0
         );
-INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,50.0,50.0,250.0,250.0,'BLOCK',NULL,NULL);
-INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,110.0,110.0,190.0,190.0,'PORT','bt:src_a',NULL);
-INSERT INTO "busterm" VALUES('bt:proc_a',3,'proc_a',0,350.0,50.0,770.0,250.0,'BLOCK',NULL,NULL);
-INSERT INTO "busterm" VALUES('bt:proc_a/pa_i',4,'proc_a/pa_i',1,370.0,110.0,480.0,190.0,'PORT','bt:proc_a',NULL);
-INSERT INTO "busterm" VALUES('bt:proc_a/pb_i',5,'proc_a/pb_i',1,505.0,110.0,615.0,190.0,'PORT','bt:proc_a',NULL);
-INSERT INTO "busterm" VALUES('bt:proc_a/pc_i',6,'proc_a/pc_i',1,640.0,110.0,750.0,190.0,'PORT','bt:proc_a',NULL);
-INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,870.0,50.0,1070.0,250.0,'BLOCK',NULL,NULL);
-INSERT INTO "busterm" VALUES('bt:snk_a/rcv_i',8,'snk_a/rcv_i',1,930.0,110.0,1010.0,190.0,'PORT','bt:snk_a',NULL);
+INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,50.0,50.0,250.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,110.0,110.0,190.0,190.0,'PORT','bt:src_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a',3,'proc_a',0,350.0,50.0,770.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a/pa_i',4,'proc_a/pa_i',1,370.0,110.0,480.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a/pb_i',5,'proc_a/pb_i',1,505.0,110.0,615.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a/pc_i',6,'proc_a/pc_i',1,640.0,110.0,750.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,870.0,50.0,1070.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:snk_a/rcv_i',8,'snk_a/rcv_i',1,930.0,110.0,1010.0,190.0,'PORT','bt:snk_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 CREATE TABLE cell (
             name   TEXT PRIMARY KEY,
             width  REAL NOT NULL,
@@ -156,7 +162,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','8');
+INSERT INTO "meta" VALUES('schema_version','9');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -291,6 +297,16 @@ CREATE TABLE topology (
         feedthru_blocks    TEXT,    -- JSON array
         is_selected        INTEGER DEFAULT 0,
         PRIMARY KEY (bundle_id, cand_index)
+    );
+CREATE TABLE topology_seg_busterm (
+        bundle_id  TEXT,
+        cand_index INTEGER,
+        seg_index  INTEGER,
+        endpoint   TEXT,              -- 'start' | 'end'
+        busterm_id TEXT REFERENCES busterm(id),
+        PRIMARY KEY (bundle_id, cand_index, seg_index, endpoint),
+        FOREIGN KEY (bundle_id, cand_index)
+            REFERENCES topology(bundle_id, cand_index)
     );
 CREATE TABLE topology_segment (
         bundle_id  TEXT,

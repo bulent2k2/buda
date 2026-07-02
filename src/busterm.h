@@ -23,11 +23,20 @@
 // routing-level "Busterm" in topology.h (which carries block_name + Rect).
 
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 #include "bdb.h"
 
 namespace buda {
+
+// Multi-rect JSON codec ("[[x1,y1,x2,y2],...]"), shared so every writer of a
+// BustermRow.rects string (BustermGen and the topology-persist bridge) uses one
+// format.  Empty vector ↔ "".
+std::string encode_rects_json(
+    const std::vector<std::tuple<double,double,double,double>>& rects);
+std::vector<std::tuple<double,double,double,double>>
+decode_rects_json(const std::string& s);
 
 enum class BustermResolution { BLOCK, SPATIAL_CLUSTER, PORT };
 

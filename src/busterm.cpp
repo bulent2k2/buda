@@ -23,7 +23,7 @@ namespace buda {
 // ── JSON helpers (minimal: no external deps) ──────────────────────────────
 
 // Encode a vector of (x1,y1,x2,y2) tuples as [[x1,y1,x2,y2],...].
-static std::string encode_rects(
+std::string encode_rects_json(
     const std::vector<std::tuple<double,double,double,double>>& rects) {
     if (rects.empty()) return "";
     std::string out = "[";
@@ -37,8 +37,8 @@ static std::string encode_rects(
 }
 
 // Decode "[[x1,y1,x2,y2],...]" into a vector.  Returns empty on parse failure.
-static std::vector<std::tuple<double,double,double,double>>
-decode_rects(const std::string& s) {
+std::vector<std::tuple<double,double,double,double>>
+decode_rects_json(const std::string& s) {
     std::vector<std::tuple<double,double,double,double>> result;
     if (s.empty() || s[0] != '[') return result;
     const char* p = s.c_str() + 1;
@@ -121,7 +121,7 @@ void BustermGen::derive(int max_depth) {
                            ? "SPATIAL_CLUSTER"
                            : "BLOCK";
         row.parent_id  = hbt.parent_id;
-        row.rects      = encode_rects(hbt.rects);  // empty unless caller populated rects
+        row.rects      = encode_rects_json(hbt.rects);  // empty unless caller populated rects
         _db.add_busterm(row);
     }
 }
@@ -146,7 +146,7 @@ std::vector<HierBusterm> BustermGen::all() const {
         else
             hbt.resolution = BustermResolution::BLOCK;
         hbt.parent_id = row.parent_id;
-        hbt.rects     = decode_rects(row.rects);
+        hbt.rects     = decode_rects_json(row.rects);
         result.push_back(hbt);
     }
     return result;

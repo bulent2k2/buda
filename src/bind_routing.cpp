@@ -24,9 +24,77 @@
 #include "layering.h"
 #include "congestion_planner.h"
 #include "floorplanner.h"
+#include "bdb.h"        // BDB, BustermRow, TopoSegBustermRow (seg-busterm persistence)
+#include "busterm.h"    // encode/decode_rects_json
 
 namespace py = pybind11;
 using namespace buda;
+
+namespace {
+
+// ── seg_busterms ⇄ BDB (single-source-of-topo-truth, Phase 3) ────────────────
+// Persist a topology's seg_busterms LOGICALLY: each real tap becomes a routing-
+// time busterm row ('tb:<block>', carrying the full Busterm — margin bbox, orig
+// bbox, multi-rect, TEG) plus a topology_seg_busterm link naming which segment
+// endpoint taps it.  A junction endpoint (nullopt) writes no row.  Reload rebuilds
+// the annotation from those rows alone — no geometric re-derivation, no floorplan.
+
+void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
+                          int cand_index, const Topology& topo) {
+    auto put = [&](int seg_idx, const std::optional<Busterm>& bt,
+                   const char* endpoint) {
+        if (!bt) return;                         // junction: no row (the default)
+        BustermRow row;
+        row.id         = "tb:" + bt->block_name; // distinct from hier 'bt:' rows
+        row.comp_id    = -1;                     // no component (bound NULL)
+        row.hier_path  = bt->block_name;
+        row.depth      = -1;
+        row.x1 = bt->bbox.x1; row.y1 = bt->bbox.y1;
+        row.x2 = bt->bbox.x2; row.y2 = bt->bbox.y2;
+        row.resolution = "BLOCK";
+        std::vector<std::tuple<double,double,double,double>> rts;
+        for (const auto& r : bt->rects)
+            rts.emplace_back(r.x1, r.y1, r.x2, r.y2);
+        row.rects    = encode_rects_json(rts);
+        row.teg_mode = (bt->teg_mode == TegMode::OVER) ? "OVER" : "THRU";
+        row.orig_x1 = bt->orig_bbox.x1; row.orig_y1 = bt->orig_bbox.y1;
+        row.orig_x2 = bt->orig_bbox.x2; row.orig_y2 = bt->orig_bbox.y2;
+        bdb.add_busterm(row);
+        bdb.add_topology_seg_busterm(
+            TopoSegBustermRow{bundle_id, cand_index, seg_idx, endpoint, row.id});
+    };
+    for (const auto& [seg_idx, eps] : topo.seg_busterms) {
+        put(seg_idx, eps.first,  "start");
+        put(seg_idx, eps.second, "end");
+    }
+}
+
+// Rebuild topo.seg_busterms from the persisted rows (replacing whatever was there).
+void load_seg_busterms(BDB& bdb, const std::string& bundle_id,
+                       int cand_index, Topology& topo) {
+    auto to_busterm = [](const BustermRow& r) {
+        Busterm bt;
+        bt.block_name = r.hier_path;
+        bt.bbox      = Rect{(int)r.x1, (int)r.y1, (int)r.x2, (int)r.y2};
+        bt.orig_bbox = Rect{(int)r.orig_x1, (int)r.orig_y1,
+                            (int)r.orig_x2, (int)r.orig_y2};
+        for (const auto& [x1, y1, x2, y2] : decode_rects_json(r.rects))
+            bt.rects.push_back(Rect{(int)x1, (int)y1, (int)x2, (int)y2});
+        bt.teg_mode = (r.teg_mode == "OVER") ? TegMode::OVER : TegMode::THRU;
+        return bt;
+    };
+    std::map<int, SegEndpoints> sb;
+    for (const auto& link : bdb.topology_seg_busterms(bundle_id, cand_index)) {
+        auto row = bdb.busterm(link.busterm_id);
+        if (!row) continue;
+        auto& ep = sb[link.seg_index];
+        if (link.endpoint == "start") ep.first  = to_busterm(*row);
+        else                          ep.second = to_busterm(*row);
+    }
+    topo.seg_busterms = std::move(sb);
+}
+
+}  // namespace
 
 void bind_routing(py::module_& m) {
     // ── Layer enums ───────────────────────────────────────────────────────
@@ -66,6 +134,7 @@ void bind_routing(py::module_& m) {
         .def(py::init<>())
         .def_readwrite("block_name", &Busterm::block_name)
         .def_readwrite("bbox",       &Busterm::bbox)
+        .def_readwrite("orig_bbox",  &Busterm::orig_bbox)
         .def_readwrite("rects",      &Busterm::rects)
         .def_readwrite("teg_mode",   &Busterm::teg_mode);
 
@@ -95,6 +164,16 @@ void bind_routing(py::module_& m) {
     m.def("annotate_topology", [](Topology& topo, const Floorplan& fp) {
         annotate_topology(topo, fp);
     }, py::arg("topo"), py::arg("fp"));
+
+    // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
+    // annotation round-trips through the BDB busterm + topology_seg_busterm tables
+    // with no geometric re-derivation.  See single_source_topo_truth.md.
+    m.def("persist_seg_busterms", &persist_seg_busterms,
+          py::arg("bdb"), py::arg("bundle_id"), py::arg("cand_index"),
+          py::arg("topo"));
+    m.def("load_seg_busterms", &load_seg_busterms,
+          py::arg("bdb"), py::arg("bundle_id"), py::arg("cand_index"),
+          py::arg("topo"));
 
     // ── Floorplan ─────────────────────────────────────────────────────────
     py::class_<BlockCornerMargin>(m, "BlockCornerMargin")
