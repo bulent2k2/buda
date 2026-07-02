@@ -152,6 +152,13 @@ void bind_db(py::module_& m) {
         .def_readwrite("y",          &BusViaRow::y)
         .def_readwrite("bit_width",  &BusViaRow::bit_width);
 
+    py::class_<RouteSnapshotRow>(m, "RouteSnapshotRow")
+        .def(py::init<>())
+        .def_readwrite("hash",           &RouteSnapshotRow::hash)
+        .def_readwrite("n_bus_segments", &RouteSnapshotRow::n_bus_segments)
+        .def_readwrite("n_bus_vias",     &RouteSnapshotRow::n_bus_vias)
+        .def_readwrite("stage",          &RouteSnapshotRow::stage);
+
     py::class_<CellRow>(m, "CellRow")
         .def_readwrite("name",   &CellRow::name)
         .def_readwrite("width",  &CellRow::width)
@@ -223,6 +230,10 @@ void bind_db(py::module_& m) {
         .def("clear_bus_routing", &BDB::clear_bus_routing)
         .def("bus_segments",      &BDB::bus_segments, py::arg("bundle_id"))
         .def("bus_vias",          &BDB::bus_vias, py::arg("bundle_id"))
+        .def("set_route_snapshot", &BDB::set_route_snapshot,
+             py::arg("hash"), py::arg("n_bus_segments"),
+             py::arg("n_bus_vias"), py::arg("stage"))
+        .def("route_snapshot",    &BDB::route_snapshot)
         .def("nets_by_hpwl",    &BDB::nets_by_hpwl,
              py::arg("lo"), py::arg("hi"))
         .def("comps_in_rect",   &BDB::comps_in_rect,

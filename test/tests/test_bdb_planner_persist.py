@@ -187,8 +187,8 @@ def test_v5_db_migrates_to_v6_adds_assigned_layer(tmp_path):
     con.close()
 
     db = buda.BDB(p)
-    assert db.schema_version() == 6
-    assert db.meta_get("schema_version") == "6"
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.meta_get("schema_version") == str(buda.BDB.SCHEMA_VERSION)
     del db
     con = sqlite3.connect(p)
     cols = {r[1] for r in con.execute("PRAGMA table_info(topology_segment)")}

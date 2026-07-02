@@ -15,6 +15,7 @@
 import argparse
 import contextlib
 import faulthandler
+import hashlib
 import io
 import json
 import math
@@ -333,11 +334,19 @@ class BudaSession:
         DIFFERENT layers — one symbolic row per bus-level transition (bit_width bit-
         vias). No-op (returns (0, 0)) without an open BDB or NUTS result.
 
-        `bundle_id` is a soft link: the hier flow's expanded per-instance ids need
-        not have bundle-table rows (see docs/internal/wishlist-bdb.md).
+        `bundle_id` is a hard FK to bundle(id): every bus row joins a persisted
+        bundle. Before writing, ensure the referenced parents exist — if any are
+        missing (e.g. run_nuts reached without a persisted run_planner), persist the
+        planner output first so the FK is satisfiable (see docs/internal/wishlist-bdb.md).
         """
         if self.bdb is None or self.nuts_result is None:
             return (0, 0)
+        # Hard FK: bus rows reference bundle(id). Make sure every referenced parent
+        # is present before inserting, else the FK would reject the row.
+        referenced = {str(ts.bundle_id) for ts in self.nuts_result.segments}
+        persisted = {b.id for b in self.bdb.all_bundles()}
+        if not referenced <= persisted:
+            self._persist_planner_output()
         self.bdb.clear_bus_routing()
         for ts in self.nuts_result.segments:
             r = buda.BusSegRow()
@@ -360,7 +369,31 @@ class BudaSession:
         n_via = 0
         for w in self.bundles:
             n_via += self._persist_bundle_vias(w)
-        return (len(self.nuts_result.segments), n_via)
+        n_seg = len(self.nuts_result.segments)
+        self._persist_route_snapshot(n_seg, n_via, "abstract_nuts")
+        return (n_seg, n_via)
+
+    def _persist_route_snapshot(self, n_seg, n_via, stage):
+        """Fingerprint the routed output (all bus_segment + bus_via rows) into the
+        singleton route_snapshot row. The hash is over a canonical, order-independent
+        serialization, so an identical routing always yields the same hash (stable in
+        the *.bdb.sql diff) and any geometry/layer/via change flips exactly one line.
+        """
+        if self.bdb is None:
+            return
+        bids = sorted({b.id for b in self.bdb.all_bundles()})
+        rows = []
+        for bid in bids:
+            for g in self.bdb.bus_segments(bid):
+                rows.append(("S", g.id, g.seg_idx, g.layer, int(g.is_horiz),
+                             g.x1, g.y1, g.x2, g.y2, g.track_position, g.width,
+                             int(g.placed), int(g.is_jog)))
+            for v in self.bdb.bus_vias(bid):
+                rows.append(("V", v.id, v.from_seg, v.to_seg, v.from_layer,
+                             v.to_layer, v.x, v.y, v.bit_width))
+        rows.sort(key=repr)
+        digest = hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
+        self.bdb.set_route_snapshot(digest, n_seg, n_via, stage)
 
     def _persist_bundle_vias(self, w):
         """Record one symbolic bus-via per layer-transition in a bundle's placed

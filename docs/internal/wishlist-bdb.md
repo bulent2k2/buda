@@ -101,18 +101,28 @@ bus-via** per bus-level layer transition into `bus_via` (schema v5). C++ API
 `add_bus_segment` / `add_bus_via` / `clear_bus_routing` / `bus_segments` /
 `bus_vias`; Python `BudaSession._persist_nuts` (+ `_persist_bundle_vias`, which
 records a via wherever two segments of a bundle connected per `ConnTopology`
-— including trunk/stub T-junctions — sit on different layers). `bundle_id` is a **soft link** (no FK) so the hier flow's expanded
-per-instance ids persist. Tests: `test/tests/test_bdb_nuts_persist.py`.
+— including trunk/stub T-junctions — sit on different layers).
+Tests: `test/tests/test_bdb_nuts_persist.py`.
+
+**4. Route fingerprint + hard FK (schema v7) — ✅ IMPLEMENTED.**
+- **`route_snapshot` + content hash** — `run_nuts` writes a singleton
+  `route_snapshot` row (id=1): a SHA-256 over a canonical, order-independent
+  serialization of all `bus_segment` + `bus_via` rows, plus row counts and stage,
+  so a routing change is a reviewable single-line diff in the `.bdb.sql`. C++ API
+  `set_route_snapshot` / `route_snapshot`; Python `_persist_route_snapshot`.
+- **Hard FK for `bus_segment`/`bus_via`** — now that hier expanded bundles are
+  persisted (item 2b), `bundle_id` is a real `REFERENCES bundle(id)` foreign key
+  for both flows. `_persist_nuts` ensures the parent bundles are persisted before
+  inserting bus rows (persisting planner output first if needed), and
+  `clear_bundles` / `clear_expanded_bundles` drop bus rows before their parents.
+  The v6→v7 migration rebuilds the bus tables with the FK, dropping pre-FK orphans.
+Tests: `test/tests/test_bdb_route_snapshot.py`.
 
 **Deferred (follow-ups):**
 - **Detailed NUTS (Stage 9) `net_segment` rows** — per-bit wires on concrete
-  tracks (the finest OA/GDS geometry), written after `run_detailed_nuts`.
-- **`route_snapshot` + content hash** — a hash over the routing rows so a
-  routing change is a reviewable, single-line diff in the `.bdb.sql`.
-- **Optional hard FK for `bus_segment`/`bus_via`** — now that hier expanded
-  bundles are persisted (item 2b), a bus row's `bundle_id` joins a `bundle` row
-  for both flows; the link is still *soft* (no FK) to avoid the ordering/silent-
-  fail trap. Adding a real FK is possible if strict integrity is wanted.
+  tracks (the finest OA/GDS geometry), written after `run_detailed_nuts`. Blocked
+  on working out via definition/insertion in detailed NUTS before persisting the
+  actual per-bit wires.
 
 These persisted tables are the direct source for the planned **BDB → OA
 (`oaNet`/`oaTerm`/vias) / GDS** export; see

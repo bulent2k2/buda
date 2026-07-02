@@ -74,12 +74,14 @@ topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
                  PK (bundle_id, cand_index, seg_index)
                  FK (bundle_id, cand_index) → topology
 
-bus_segment      bundle_id (soft link), seg_idx, layer, is_horiz,
+bus_segment      bundle_id→bundle (FK), seg_idx, layer, is_horiz,
                  x1,y1,x2,y2, track_position, width, placed, is_jog
                  PRIMARY KEY (bundle_id, seg_idx)
-bus_via          bundle_id (soft link), from_seg, to_seg, from_layer,
+bus_via          bundle_id→bundle (FK), from_seg, to_seg, from_layer,
                  to_layer, x, y, bit_width
                  PRIMARY KEY (bundle_id, from_seg, to_seg)
+route_snapshot   id (=1, singleton), hash, n_bus_segments,
+                 n_bus_vias, stage  — fingerprint of the routed output
 
 grp              id (TEXT), name, color, parent_id→grp
 grp_member       grp_id→grp, kind, ref
@@ -93,7 +95,10 @@ meta             key (TEXT PK), value  — die_w, die_h, units,
 provenance; v2 added the **bundle-persistence** shape above; v3 re-keyed
 `bundle_net` by `net_id`; v4 added the **candidate-topology** tables; v5 added the
 **abstract-NUTS bus-routing** tables; v6 added `topology_segment.assigned_layer`
-(the planner's per-segment layer). `tools/bdb_serialize.py` preserves the version
+(the planner's per-segment layer); v7 hardened `bus_segment`/`bus_via.bundle_id`
+into a **foreign key** to `bundle(id)` and added the **`route_snapshot`**
+fingerprint table (the v6→v7 migration rebuilds the bus tables with the FK,
+dropping any pre-FK orphan rows). `tools/bdb_serialize.py` preserves the version
 across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
@@ -109,12 +114,19 @@ the flat flow (whose nets may not be in the `net` table) persists too.
 into `bus_segment` (the placed rectangle + layer) and one **symbolic bus-via** per
 bus-level layer transition into `bus_via` — a via wherever two segments of a
 bundle that are connected (per `ConnTopology`, including trunk/stub **T-junctions**)
-sit on different layers, one row for all `bit_width` bit-vias. `bundle_id` is a **soft link** (no FK): the hier flow's
-`run_planner` expands bundles into per-instance wrappers with synthetic ids, so a
-bus row's `bundle_id` may be an instance id with no `bundle` table row.
-`clear_bundles()` also wipes the bus tables. C++ API: `add_bus_segment(BusSegRow)`,
-`add_bus_via(BusViaRow)`, `clear_bus_routing()`, `bus_segments(bundle_id)`,
-`bus_vias(bundle_id)`.
+sit on different layers, one row for all `bit_width` bit-vias. `bundle_id` is a
+**hard foreign key** to `bundle(id)`: every bus row joins a persisted bundle. The
+hier flow's per-instance wrappers are persisted first (as `is_replicated=1` bundle
+rows) so the FK is satisfiable; if `run_nuts` is reached before the planner output
+was persisted, `_persist_nuts` persists the parents first. `clear_bundles()` /
+`clear_expanded_bundles()` drop the bus rows before their parent bundle rows.
+`run_nuts` also writes a **`route_snapshot`** singleton (id=1): a SHA-256 over a
+canonical, order-independent serialization of all `bus_segment` + `bus_via` rows,
+plus the row counts and stage — so a routing change is one reviewable line in the
+`*.bdb.sql` diff, and it is the natural feed for the planned BDB → OA/GDS export.
+C++ API: `add_bus_segment(BusSegRow)`, `add_bus_via(BusViaRow)`,
+`clear_bus_routing()`, `bus_segments(bundle_id)`, `bus_vias(bundle_id)`,
+`set_route_snapshot(hash, n_seg, n_via, stage)`, `route_snapshot()`.
 
 **Topology persistence.** `generate_topologies` (flat) and
 `generate_hier_topologies` (hier) write **all** candidate topologies into

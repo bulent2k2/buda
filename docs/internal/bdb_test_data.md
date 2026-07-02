@@ -105,17 +105,18 @@ Interconnect is currently in-memory only (`self.bundles`, `self.nuts_result`,
 2. **Provenance metadata.** ✅ Implemented — `schema_version` + `bdb_tool` in the
    `meta` table (via `BDB::_seed_provenance`), read with `BDB.meta_get`. Wall-clock
    timestamps deferred so they don't add diff noise to regenerated fixtures.
-3. **Persist the pipeline (bundles → topologies → NUTS).** Stage 1 (bundles) is
-   implemented — `run_[hier_]bundler` writes the `bundle` / `bundle_net` /
-   `bundle_busterm` tables (schema v2; v3 re-keyed `bundle_net` by `net_id`), and
-   candidate topologies into `topology` / `topology_segment` (v4), and abstract-NUTS
-   bus routing into `bus_segment` / `bus_via` (v5); see
-   [`wishlist-bdb.md`](wishlist-bdb.md).
-   Detailed-NUTS net-segments follow. When interconnect is persisted, add
-   `route_snapshot` + `bus_segment` / `net_segment` tables (mirroring the stage-4
-   / stage-9 structs) with a content hash per snapshot. The `.bdb.sql` dump then
-   makes routing changes reviewable in PRs, and these tables are the direct source
-   for the planned **BDB → OA (`oaNet`/`oaTerm`) / GDS** export
+3. **Persist the pipeline (bundles → topologies → NUTS).** ✅ Implemented through
+   abstract NUTS — `run_[hier_]bundler` writes the `bundle` / `bundle_net` /
+   `bundle_busterm` tables (schema v2; v3 re-keyed `bundle_net` by `net_id`),
+   candidate topologies into `topology` / `topology_segment` (v4), planner output
+   into `topology.is_selected` + `topology_segment.assigned_layer` and hier expanded
+   bundles (v6), and abstract-NUTS bus routing into `bus_segment` / `bus_via` (v5,
+   FK-hardened in v7). A singleton `route_snapshot` row fingerprints the routed
+   output with a content hash (v7), so a routing change is a reviewable single-line
+   `.bdb.sql` diff. See [`wishlist-bdb.md`](wishlist-bdb.md).
+   Detailed-NUTS `net_segment` rows (the finest per-bit geometry) follow once via
+   definition/insertion in detailed NUTS is worked out. These tables are the direct
+   source for the planned **BDB → OA (`oaNet`/`oaTerm`) / GDS** export
    (see [BDB Reference](../BDB_REFERENCE.md) "Planned interchange formats").
 
 ## Files

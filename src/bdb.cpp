@@ -138,7 +138,7 @@ static const char* TOPOLOGY_DDL = R"(
 // Composite keys (no autoincrement) → deterministic *.bdb.sql dumps.
 static const char* NUTS_DDL = R"(
     CREATE TABLE IF NOT EXISTS bus_segment (
-        bundle_id      TEXT,
+        bundle_id      TEXT REFERENCES bundle(id),
         seg_idx        INTEGER,
         layer          INTEGER,
         is_horiz       INTEGER DEFAULT 0,
@@ -150,7 +150,7 @@ static const char* NUTS_DDL = R"(
         PRIMARY KEY (bundle_id, seg_idx)
     );
     CREATE TABLE IF NOT EXISTS bus_via (
-        bundle_id  TEXT,
+        bundle_id  TEXT REFERENCES bundle(id),
         from_seg   INTEGER,
         to_seg     INTEGER,
         from_layer INTEGER,
@@ -158,6 +158,15 @@ static const char* NUTS_DDL = R"(
         x REAL, y REAL,
         bit_width  INTEGER,
         PRIMARY KEY (bundle_id, from_seg, to_seg)
+    );
+    -- Singleton fingerprint of the routed output (bus_segment + bus_via), so a
+    -- routing change is one reviewable line in the *.bdb.sql diff.
+    CREATE TABLE IF NOT EXISTS route_snapshot (
+        id             INTEGER PRIMARY KEY,   -- always 1 (current routing)
+        hash           TEXT,
+        n_bus_segments INTEGER DEFAULT 0,
+        n_bus_vias     INTEGER DEFAULT 0,
+        stage          TEXT                   -- 'abstract_nuts'
     );
 )";
 
@@ -358,6 +367,27 @@ void BDB::_migrate() {
         sqlite3_exec(_db,
             "ALTER TABLE topology_segment ADD COLUMN assigned_layer INTEGER DEFAULT -1",
             nullptr, nullptr, nullptr);  // ignored if column already exists
+    }
+    if (v < 7) {
+        // v6 -> v7: harden bus_segment/bus_via with a real FK to bundle(id) and add
+        // the route_snapshot fingerprint table. SQLite cannot add a FK via ALTER, so
+        // rebuild both bus tables: rename aside, recreate via NUTS_DDL (now carrying
+        // REFERENCES bundle(id)), copy back only rows whose bundle_id still resolves
+        // to a bundle row (dropping any pre-FK orphans), then drop the temps. FK
+        // enforcement is toggled off for the rebuild so the copy itself can't trip.
+        sqlite3_exec(_db, "PRAGMA foreign_keys = OFF;", nullptr, nullptr, nullptr);
+        _exec("ALTER TABLE bus_segment RENAME TO bus_segment_v6;"
+              "ALTER TABLE bus_via RENAME TO bus_via_v6;");
+        _exec(NUTS_DDL);   // recreates bus_segment/bus_via (with FK) + route_snapshot
+        _exec("INSERT INTO bus_segment"
+              " SELECT * FROM bus_segment_v6"
+              " WHERE bundle_id IN (SELECT id FROM bundle);"
+              "INSERT INTO bus_via"
+              " SELECT * FROM bus_via_v6"
+              " WHERE bundle_id IN (SELECT id FROM bundle);"
+              "DROP TABLE bus_segment_v6;"
+              "DROP TABLE bus_via_v6;");
+        sqlite3_exec(_db, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -2119,8 +2149,8 @@ void BDB::add_bundle_busterm(const std::string& bundle_id,
 }
 
 void BDB::clear_bundles() {
-    // Topologies FK to bundle, so clear them first (children before parents).
-    // Bus routing is soft-linked to bundles too — drop it when bundles change.
+    // Topology and bus routing both FK to bundle, so clear them first (children
+    // before parents) or the FK constraint would reject the bundle delete.
     _exec("DELETE FROM bus_via; DELETE FROM bus_segment;"
           "DELETE FROM topology_segment; DELETE FROM topology;"
           "DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
@@ -2305,8 +2335,13 @@ void BDB::reset_assigned_layers(const std::string& bundle_id) {
 
 void BDB::clear_expanded_bundles() {
     // Expanded per-instance bundles are marked is_replicated=1. Drop them and any
-    // rows keyed to them (topologies, memberships) — children before parents.
+    // rows keyed to them (bus routing, topologies, memberships) — children before
+    // parents so the bus_segment/bus_via FK to bundle(id) is never violated.
     _exec(
+        "DELETE FROM bus_via WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM bus_segment WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM topology_segment WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM topology WHERE bundle_id IN"
@@ -2357,6 +2392,34 @@ void BDB::add_bus_via(const BusViaRow& r) {
 
 void BDB::clear_bus_routing() {
     _exec("DELETE FROM bus_via; DELETE FROM bus_segment;");
+}
+
+void BDB::set_route_snapshot(const std::string& hash, int n_bus_segments,
+                             int n_bus_vias, const std::string& stage) {
+    // Singleton row (id=1): the fingerprint of the current routed output.
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO route_snapshot(id,hash,n_bus_segments,n_bus_vias,"
+        "stage) VALUES(1,?,?,?,?)");
+    sqlite3_bind_text(s, 1, hash.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 2, n_bus_segments);
+    sqlite3_bind_int (s, 3, n_bus_vias);
+    sqlite3_bind_text(s, 4, stage.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+RouteSnapshotRow BDB::route_snapshot() const {
+    Stmt q(_db,
+        "SELECT hash,n_bus_segments,n_bus_vias,stage FROM route_snapshot WHERE id=1");
+    RouteSnapshotRow r;
+    if (sqlite3_step(q) == SQLITE_ROW) {
+        const unsigned char* h = sqlite3_column_text(q, 0);
+        r.hash           = h ? reinterpret_cast<const char*>(h) : std::string();
+        r.n_bus_segments = sqlite3_column_int(q, 1);
+        r.n_bus_vias     = sqlite3_column_int(q, 2);
+        const unsigned char* st = sqlite3_column_text(q, 3);
+        r.stage          = st ? reinterpret_cast<const char*>(st) : std::string();
+    }
+    return r;
 }
 
 std::vector<BusSegRow> BDB::bus_segments(const std::string& bundle_id) const {

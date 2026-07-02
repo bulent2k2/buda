@@ -128,7 +128,7 @@ struct TopoSegRow {
 // run_planner expands bundles into per-instance wrappers with synthetic ids, so
 // there is no hard FK. Geometry is the placed rectangle (real coords, µm).
 struct BusSegRow {
-    std::string id;                 // bundle id (soft link)
+    std::string id;                 // bundle id (FK -> bundle.id)
     int         seg_idx = 0;
     int         layer = 0;
     bool        is_horiz = false;
@@ -142,11 +142,21 @@ struct BusSegRow {
 // One symbolic bus-via: a bus-level layer transition between two connected
 // segments (bit_width bit-vias represented as one row).
 struct BusViaRow {
-    std::string id;                 // bundle id (soft link)
+    std::string id;                 // bundle id (FK -> bundle.id)
     int         from_seg = 0, to_seg = 0;
     int         from_layer = 0, to_layer = 0;
     double      x = 0, y = 0;       // junction position (µm)
     int         bit_width = 0;
+};
+
+// Singleton fingerprint of the routed output (bus_segment + bus_via). One row
+// (id=1); its content hash turns a routing change into one reviewable *.bdb.sql
+// diff line and is the natural feed for the planned BDB -> OA/GDS export.
+struct RouteSnapshotRow {
+    std::string hash;
+    int         n_bus_segments = 0;
+    int         n_bus_vias = 0;
+    std::string stage;              // e.g. "abstract_nuts"
 };
 
 struct CellRow {
@@ -172,8 +182,9 @@ public:
     // v3 = bundle_net re-keyed by net_id (was net_name);
     // v4 = candidate-topology tables (topology / topology_segment);
     // v5 = abstract-NUTS bus routing tables (bus_segment / bus_via);
-    // v6 = topology_segment.assigned_layer (planner's per-segment layer).
-    static constexpr int SCHEMA_VERSION = 6;
+    // v6 = topology_segment.assigned_layer (planner's per-segment layer);
+    // v7 = bus_segment/bus_via FK to bundle + route_snapshot fingerprint table.
+    static constexpr int SCHEMA_VERSION = 7;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -333,6 +344,11 @@ public:
     void clear_bus_routing();                       // wipe bus_segment + bus_via
     std::vector<BusSegRow> bus_segments(const std::string& bundle_id) const;
     std::vector<BusViaRow> bus_vias(const std::string& bundle_id) const;
+
+    // Route fingerprint (singleton, id=1).
+    void set_route_snapshot(const std::string& hash, int n_bus_segments,
+                            int n_bus_vias, const std::string& stage);
+    RouteSnapshotRow route_snapshot() const;
 
     std::vector<std::string>  nets_by_hpwl(double lo, double hi)              const;
     std::vector<std::string>  comps_in_rect(double xl, double yl,
