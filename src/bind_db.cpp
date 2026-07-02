@@ -139,7 +139,11 @@ void bind_db(py::module_& m) {
         .def_readwrite("track_position", &BusSegRow::track_position)
         .def_readwrite("width",          &BusSegRow::width)
         .def_readwrite("placed",         &BusSegRow::placed)
-        .def_readwrite("is_jog",         &BusSegRow::is_jog);
+        .def_readwrite("is_jog",         &BusSegRow::is_jog)
+        .def_readwrite("interval_lo",    &BusSegRow::interval_lo)
+        .def_readwrite("interval_hi",    &BusSegRow::interval_hi)
+        .def_readwrite("track_lo_bound", &BusSegRow::track_lo_bound)
+        .def_readwrite("track_hi_bound", &BusSegRow::track_hi_bound);
 
     py::class_<BusViaRow>(m, "BusViaRow")
         .def(py::init<>())

@@ -145,15 +145,34 @@ These persisted tables are the direct source for the planned **BDB → OA
 (`oaNet`/`oaTerm`/vias) / GDS** export; see
 [`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) "Planned interchange formats".
 
-## Resume / rehydrate the pipeline from the BDB (checkpoint & continue) — 📋 SPEC
+## Resume / rehydrate the pipeline from the BDB (checkpoint & continue) — ✅ IMPLEMENTED
 
-**Status: designed, not implemented.** Today the pipeline→BDB persistence is
+**Shipped** as the `load_pipeline [expanded]` command /
+`BudaSession._load_pipeline_from_bdb` (schema v9 added the `bus_segment`
+solver-state columns: perpendicular interval + corner-split track bounds).
+It restores, as deep as was persisted: bundles + all candidate topologies
+(each reloaded candidate re-annotated via `annotate_topology`, so
+ConnTopology reads the same authoritative endpoint taps as freshly generated
+ones — continuations reproduce single-session results **bit-identically**,
+same rows and same `route_snapshot` hash), the planner's selection + assigned
+layers, and a rehydrated `NUTSResult` from `bus_segment`. `ripup_reroute` now
+**re-persists** its final routing (planner output + NUTS + detailed rows at
+stage b) so a post-ripup checkpoint resumes from the improved routing.
+Two-phase tests (stop → fresh session → re-declare setup → `open_bdb` →
+`load_pipeline` → continue): topo-gen→planner→NUTS, planner→NUTS,
+NUTS→DNUTS, and NUTS+ripup→DNUTS (congested fixture where ripup genuinely
+re-routes), plus fail-fast guards. Tests: `test/tests/test_bdb_resume.py`;
+docs: `docs/BDB_REFERENCE.md` (`load_pipeline`).
+
+The original design notes below are kept for reference.
+
+**Previously:** the pipeline→BDB persistence was
 strictly **write-only**: every stage writes its rows, and re-running a stage
-*clears and regenerates* them. Nothing reads persisted `bundle` / `topology` /
-`topology_segment` rows **back** into the live `BudaSession`, so you cannot stop a
+*clears and regenerates* them. Nothing read persisted `bundle` / `topology` /
+`topology_segment` rows **back** into the live `BudaSession`, so you could not stop a
 run after `generate_[hier_]topologies`, reopen the BDB in a fresh session, and
 continue into `run_planner` — `open_bdb` only attaches the DB handle
-(`buda_cli.py` `open_bdb` → `self.bdb = buda.BDB(path)`); `self.bundles` is only
+(`buda_cli.py` `open_bdb` → `self.bdb = buda.BDB(path)`); `self.bundles` was only
 ever built by the bundler engine regenerating from scratch.
 
 **Why it's worth having.** Candidate enumeration (`run_bundler` +

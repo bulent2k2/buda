@@ -40,6 +40,13 @@ CREATE TABLE bus_segment (
         width          REAL,
         placed         INTEGER DEFAULT 0,
         is_jog         INTEGER DEFAULT 0,
+        -- Stage-4 solver state (v9) for load_pipeline resume: the hard
+        -- perpendicular interval and the corner-split track bounds (NULL =
+        -- unbounded; infinities are not valid SQL literals in a dump).
+        interval_lo    REAL,
+        interval_hi    REAL,
+        track_lo_bound REAL,
+        track_hi_bound REAL,
         PRIMARY KEY (bundle_id, seg_idx)
     );
 CREATE TABLE bus_via (

@@ -65,12 +65,13 @@ bundle           id (TEXT), level, strategy, reason, num_terminals,
                  cell_context, instances (JSON), parent_id→bundle,
                  is_replicated, drv_spec_depth, rcv_spec_depth,
                  drv_spec_path, rcv_spec_paths (JSON)
-bundle_net       bundle_id→bundle, net_id→net      PRIMARY KEY (bundle_id, net_id)
+bundle_net       bundle_id→bundle, net_id→net, ord (bit order)
+                 PRIMARY KEY (bundle_id, net_id)
 bundle_busterm   bundle_id→bundle, busterm_id, role ('entry'|'exit')
 
 topology         bundle_id→bundle, cand_index, type, wirelength,
                  trunk_location, pass_through_count, connected_blocks (JSON),
-                 feedthru_blocks (JSON), is_selected
+                 feedthru_blocks (JSON), is_selected, is_pinned
                  PRIMARY KEY (bundle_id, cand_index)
 topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
                  layer_hint, is_jog, assigned_layer (planner's per-seg layer)
@@ -84,7 +85,9 @@ topology_seg_busterm
                  FK (bundle_id, cand_index) → topology
 
 bus_segment      bundle_id→bundle (FK), seg_idx, layer, is_horiz,
-                 x1,y1,x2,y2, track_position, width, placed, is_jog
+                 x1,y1,x2,y2, track_position, width, placed, is_jog,
+                 interval_lo, interval_hi, track_lo_bound, track_hi_bound
+                 (v10 solver state for load_pipeline; NULL bound = unbounded)
                  PRIMARY KEY (bundle_id, seg_idx)
 bus_via          bundle_id→bundle (FK), from_seg, to_seg, from_layer,
                  to_layer, x, y, bit_width
@@ -120,7 +123,11 @@ fingerprint table (the v6→v7 migration rebuilds the bus tables with the FK,
 dropping any pre-FK orphan rows); v8 added the **detailed-NUTS** `net_segment`/
 `net_via` tables plus the `route_snapshot` `n_net_*` count columns; v9 added
 routing-time busterm attributes (`busterm.teg_mode` + `orig_x1..y2`) and the
-**`topology_seg_busterm`** join that persists `seg_busterms` logically.
+**`topology_seg_busterm`** join that persists `seg_busterms` logically; v10 added
+[`load_pipeline`](#load_pipeline) resume support — the **stage-4 solver state**
+columns on `bus_segment` (perpendicular interval + corner-split track bounds),
+`bundle_net.ord` (the bundle's bit order), and `topology.is_pinned` (a pre-plan
+pin survives a checkpoint).
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
@@ -318,6 +325,48 @@ Serialize the working BDB back to the source `*.bdb.sql` **now** (mid-run). Only
 meaningful after `open_bdb <file>.sql writeback`; otherwise it is a no-op with a
 note. The write also happens automatically on the next `open_bdb`, on `exit`, and
 at end of run, so an explicit `save_bdb` is only needed to checkpoint mid-flow.
+
+---
+
+### `load_pipeline`
+
+```
+load_pipeline [expanded]
+```
+
+**Resume / rehydrate**: rebuild the in-memory routing pipeline from the open
+BDB's persisted rows, so a fresh session can continue where a previous one
+stopped — checkpoint after `generate_topologies`, `run_planner`, or `run_nuts`
+(+`ripup_reroute`), reopen the BDB later, `load_pipeline`, and run the next
+stage. Restores, as deep as was persisted:
+
+1. **Bundles + all candidate topologies** from `bundle`/`bundle_net` +
+   `topology`/`topology_segment`. Each reloaded candidate is re-annotated
+   (`annotate_topology`) so ConnTopology reads the same authoritative endpoint
+   taps as a freshly generated one — continuations reproduce the single-session
+   results exactly (same rows, same `route_snapshot` hash).
+2. **The planner's decision** (selected candidate from `topology.is_selected`,
+   per-segment layers from `topology_segment.assigned_layer`) so `run_nuts` can
+   run directly.
+3. **The abstract-NUTS result** from `bus_segment` (incl. the v9 solver-state
+   columns: perpendicular interval + corner-split track bounds) so
+   `run_detailed_nuts` can run directly.
+
+**Prerequisite:** re-declare the setup first — `def_layer`/`def_track_pattern`
+and the blocks (`add_block` for the flat flow, `add_blocks_from_bdb` for hier).
+Topology coordinates are absolute, and slide ranges / busterm faces / net_pull
+are deliberately *not* persisted — the planner and NUTS recompute them from
+geometry + Floorplan. `load_pipeline` fails fast if a persisted topology
+references a block missing from the current Floorplan.
+
+`expanded` selects the hier post-expansion view (`is_replicated=1` per-instance
+rows + non-template bundles) instead of the pre-expansion templates.
+
+Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
+charged bands), planner band state, overlap details. `ripup_reroute` now
+**re-persists** its final routing (planner output + NUTS + detailed rows when
+at stage b), so a post-ripup checkpoint resumes from the improved routing, not
+the pre-ripup one. Tests: `test/tests/test_bdb_resume.py`.
 
 ---
 

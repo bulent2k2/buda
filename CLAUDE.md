@@ -128,6 +128,7 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 |---|---|
 | `open_bdb <path.bdb> [writeback]` | Open (creating if needed) a BDB for hierarchy-based design data. A `*.bdb.sql` text fixture is materialized to a temp binary (read-only by default); `writeback` dumps changes back to the `.sql` on `save_bdb`/`exit`/end-of-run |
 | `save_bdb` | Write the working BDB back to its `*.bdb.sql` source now (after `open_bdb … writeback`) |
+| `load_pipeline [expanded]` | **Resume/rehydrate** the routing pipeline from the open BDB: bundles + all candidate topologies (re-annotated via `annotate_topology`), the planner's selection + assigned layers, and the abstract-NUTS result — as deep as was persisted — so a fresh session continues where a previous one stopped (checkpoint after `generate_topologies` / `run_planner` / `run_nuts`+`ripup_reroute`, reopen, continue). Requires the setup (layers/patterns/blocks) re-declared first; `expanded` = hier post-expansion view. See [BDB Reference](docs/BDB_REFERENCE.md) |
 | `import_def_lef <def> <lef>` / `import_verilog <v>` | Ingest a placed design / netlist into the open BDB |
 | `set_die <w> <h>` | Set die dimensions in the BDB |
 | `add_cell <name> <w> <h>` / `add_cell_pin <cell> <pin> [dir] [px py]` | Define a cell type and its port interface |

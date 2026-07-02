@@ -19,6 +19,7 @@
 // SQLite-backed store for components, nets, pins, busterms, bundles, and groups.
 // All other v3 modules access physical design data exclusively through BDB.
 
+#include <limits>
 #include <string>
 #include <vector>
 #include <optional>
@@ -153,6 +154,13 @@ struct BusSegRow {
     double      width = 0;
     bool        placed = false;
     bool        is_jog = false;
+    // Stage-4 solver state (v9) so a session can rehydrate its NUTSResult from
+    // the BDB (load_pipeline) and continue into detailed NUTS: the hard
+    // perpendicular placement interval, and the cross-trunk-layer corner-split
+    // track bounds (stored NULL when unbounded; +/-inf here).
+    double      interval_lo = 0, interval_hi = 0;
+    double      track_lo_bound = -std::numeric_limits<double>::infinity();
+    double      track_hi_bound =  std::numeric_limits<double>::infinity();
 };
 
 // One symbolic bus-via: a bus-level layer transition between two connected
@@ -234,8 +242,11 @@ public:
     // v6 = topology_segment.assigned_layer (planner's per-segment layer);
     // v7 = bus_segment/bus_via FK to bundle + route_snapshot fingerprint table;
     // v8 = detailed-NUTS net_segment/net_via tables + route_snapshot n_net_* counts;
-    // v9 = routing-time busterm attrs (teg_mode/orig_*) + topology_seg_busterm join.
-    static constexpr int SCHEMA_VERSION = 9;
+    // v9 = routing-time busterm attrs (teg_mode/orig_*) + topology_seg_busterm join;
+    // v10 = load_pipeline resume support: bus_segment stage-4 solver state
+    //       (interval + corner-split track bounds), bundle_net.ord (bit order),
+    //       topology.is_pinned (pre-plan pin survives a checkpoint).
+    static constexpr int SCHEMA_VERSION = 10;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
