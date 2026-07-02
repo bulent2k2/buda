@@ -182,6 +182,55 @@ def test_three_column_comb_hvh():
         assert _root_with_branches(ct, root_horiz=True)
 
 
+def test_bitrunk_candidates_are_fully_annotated():
+    """Single-source-of-topo-truth (Phase 1): every BITRUNK candidate — legacy
+    BITRUNK_H and the two-level HVH/VHV trees — annotates seg_busterms for EVERY
+    segment (root spine + branch trunks + leaf stubs), so ConnTopology never
+    consults its geometric face-search fallback for them. See
+    docs/internal/single_source_topo_truth.md."""
+    fp, cands = _gen(_COLUMN, "S", _COLUMN_DSTS)   # multi_trunk on -> legacy + HVH
+    bitrunks = [c for c in cands if c.type.startswith("BITRUNK")]
+    assert bitrunks, "expected at least one BITRUNK candidate"
+    saw_legacy = saw_tree = False
+    for c in bitrunks:
+        missing = [i for i in range(len(c.segments)) if i not in c.seg_busterms]
+        assert not missing, \
+            f"{c.type} segments {missing} unannotated (would hit the fallback)"
+        saw_legacy |= (c.type == "BITRUNK_H")
+        saw_tree |= c.type.startswith(("BITRUNK_HVH", "BITRUNK_VHV"))
+    assert saw_legacy and saw_tree, "want both legacy + two-level shapes covered"
+
+
+def test_bitrunk_trunk_endpoint_grazing_a_face_stays_a_junction():
+    """Codex P1 guard: a BITRUNK trunk/stub endpoint that coincidentally lies on a
+    NON-terminal (or sibling) block face must remain a wire junction, not become a
+    spurious busterm. The generator completes trunk endpoints as null (authoritative
+    junction), so ConnTopology infers SEG — it must NOT geometrically tap the
+    grazed block (which would disconnect the stub from the trunk)."""
+    fp = buda.Floorplan()
+    fp.add_block("own", 180, 0, 220, 40)      # stub taps this block's top face
+    fp.add_block("nbr", 150, 100, 250, 140)   # bottom face y=100 grazes the stub's trunk-end
+
+    t = buda.Topology()
+    t.type = "BITRUNK_H"
+    trunk = buda.Segment(); trunk.start = buda.Point(0, 100); trunk.end = buda.Point(400, 100)
+    stub = buda.Segment(); stub.start = buda.Point(200, 40); stub.end = buda.Point(200, 100)
+    t.segments = [trunk, stub]
+    # generator-style annotation: stub start taps 'own'; every other endpoint is a
+    # null junction entry (NOT geometrically annotated).
+    own_bt = buda.Busterm(); own_bt.block_name = "own"; own_bt.bbox = buda.Rect(180, 0, 220, 40)
+    t.seg_busterms = {0: (None, None), 1: (own_bt, None)}
+
+    ct = buda.ConnTopology(); ct.build(t, fp)
+    taps = [cc.block_name for cs in ct.segs() for cc in cs.conns
+            if cc.kind == buda.SegConnKind.BUSTERM]
+    assert "nbr" not in taps, f"trunk-end grazing 'nbr' was mis-tapped: {taps}"
+    assert "own" in taps
+    # stub (seg 1) joins the trunk (seg 0) via a SEG junction, not through 'nbr'
+    stub_segs = [cc.seg_idx for cc in ct.segs()[1].conns if cc.kind == buda.SegConnKind.SEG]
+    assert 0 in stub_segs, "stub must connect to the trunk via SEG"
+
+
 def test_optin_guard_default_has_no_bitrunk_trees():
     """Without the multi_trunk flag the two-level trees are suppressed, but the
     legacy single-level BITRUNK_H stays on the default path (byte-identical set)."""
