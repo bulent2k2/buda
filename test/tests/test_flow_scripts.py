@@ -103,10 +103,16 @@ def test_tc3a_flat_no_perp_range_inversion():
     test_ripup_reroute for the same -ffp-contract=off portability story."""
     out, rc = run_script("big_data_test/tc3a_flat.buda")
     assert rc == 0, f"tc3a_flat aborted (rc={rc}) — perp-range inversion?\n{out[-3000:]}"
-    # Topo-level connectivity (where the inversion regression lived) verifies
-    # clean.  Not `>= 2`: that also required NUTS-stage cleanliness, which is
-    # CPU-sensitive here (bundle 48 tips into a NUTS open on some hosts).
-    assert "Success: no opens found." in out, out[-2000:]
+    # Anchor to the TOPO-stage check section specifically — a bare
+    # `"Success..." in out` could be satisfied by a later clean NUTS/DNUTS stage
+    # even if the topo check regressed.  (Not `>= 2` Success lines: that also
+    # required NUTS-stage cleanliness, which is CPU-sensitive here — bundle 48
+    # tips into a NUTS open on some hosts under -march=native.)
+    topo = re.search(
+        r"━━━ check_connectivity topo all ━━━\n(.*?)(?=\n━━━|\Z)", out, re.S)
+    assert topo, f"topo-stage connectivity section not found\n{out[-2000:]}"
+    assert "Success: no opens found." in topo.group(1), \
+        f"topo-stage connectivity not clean (perp-range inversion?):\n{topo.group(1)}"
 
 
 def test_pinless_buses_stay_separate():
