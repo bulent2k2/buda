@@ -10,9 +10,16 @@ else()
 endif()
 
 if(MSVC)
-    add_compile_options(/O2)
+    add_compile_options(/O2 /fp:precise)
 else()
-    add_compile_options(-O3 -march=native -Wall -Wextra -fPIC)
+    # -ffp-contract=off disables FMA contraction so the double-based congestion /
+    # NUTS math rounds the same regardless of which fused-multiply-add / vector
+    # instructions -march=native selects.  Without it, exact overlap/opens counts
+    # drift across CPU microarchitectures and machine-specific golden assertions
+    # (e.g. big2's DNUTS-open baseline) fail on a different host than they were
+    # validated on.  Kept alongside -march=native (perf) — tests also assert
+    # bounds rather than exact goldens as a second line of defence.
+    add_compile_options(-O3 -march=native -ffp-contract=off -Wall -Wextra -fPIC)
 endif()
 
 # assert()s are cheap correctness guards (e.g. ConnTopology's slide-window

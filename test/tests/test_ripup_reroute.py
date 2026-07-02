@@ -175,9 +175,17 @@ def _big2_to_stage(stage):
 
 @pytest.mark.mid
 def test_big2_stage_b_clears_opens():
-    """big2's remaining DNUTS open is driven to 0 (validated 60 -> 0)."""
+    """big2's remaining DNUTS opens are driven to 0 by ripup_reroute (validated
+    60 -> 0 on the reference host).
+
+    The starting count is machine-sensitive — the double-based NUTS math rounds
+    slightly differently across CPUs under -march=native — so we assert a nonzero
+    baseline rather than exactly 60.  The real guard is that ripup clears them to
+    0 (CPU-invariant).  See -ffp-contract=off in CMakeLists (the build-side half
+    of this portability fix)."""
     s = _big2_to_stage("b")
-    assert s.detailed_result.num_unplaced == 60, "baseline drifted from 60"
+    base = s.detailed_result.num_unplaced
+    assert base > 0, f"expected a nonzero DNUTS-open baseline to clear, got {base}"
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("ripup_reroute")
     assert s.detailed_result.num_unplaced == 0
