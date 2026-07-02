@@ -26,6 +26,48 @@
 
 namespace buda {
 
+Topology offset_topology(const Topology& t, int dx, int dy,
+                         const std::string& name_prefix) {
+    auto shift_rect = [dx, dy](const Rect& r) {
+        return Rect{r.x1 + dx, r.y1 + dy, r.x2 + dx, r.y2 + dy};
+    };
+    auto shift_seg = [dx, dy](Segment& s) {
+        s.start = Point{s.start.x + dx, s.start.y + dy};
+        s.end   = Point{s.end.x   + dx, s.end.y   + dy};
+    };
+    auto shift_busterm = [&](Busterm& b) {
+        b.bbox      = shift_rect(b.bbox);
+        b.orig_bbox = shift_rect(b.orig_bbox);
+        for (auto& r : b.rects) r = shift_rect(r);
+    };
+    // A cell-local block name (no hierarchy separator) is qualified with the
+    // instance path so it resolves against the global (instance-coord)
+    // floorplan; an already-absolute name is left alone.
+    auto qualify = [&](const std::string& n) {
+        return (!name_prefix.empty() && n.find('/') == std::string::npos)
+                   ? name_prefix + "/" + n : n;
+    };
+
+    Topology out = t;   // copy type/wirelength/trunk_location/pass_through
+    for (auto& s : out.segments) shift_seg(s);
+    for (auto& [seg_idx, ep] : out.seg_busterms) {
+        (void)seg_idx;
+        if (ep.first)  { shift_busterm(*ep.first);  ep.first->block_name  = qualify(ep.first->block_name); }
+        if (ep.second) { shift_busterm(*ep.second); ep.second->block_name = qualify(ep.second->block_name); }
+    }
+    if (!name_prefix.empty()) {
+        for (auto& n : out.connected_block_names) n = qualify(n);
+        for (auto& n : out.feedthru_blocks)       n = qualify(n);
+    }
+    std::map<std::string, Segment> bridges;
+    for (auto& [name, seg] : out.bridge_segments) {
+        Segment s = seg; shift_seg(s);
+        bridges[qualify(name)] = s;
+    }
+    out.bridge_segments = std::move(bridges);
+    return out;
+}
+
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
     int nx1 = std::min(x1, x2);
     int nx2 = std::max(x1, x2);
