@@ -6,6 +6,24 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
+# Handle help before importing the GUI (which needs tkinter / a display).
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+  cat <<'EOF'
+Usage: fp [file.bdb]
+
+Open the interactive BUDA Floorplanner (Tk/matplotlib GUI) to edit block
+placement in a BDB and, optionally, launch the hier routing flow.
+
+Arguments:
+  file.bdb    BDB to open; omit for a blank canvas
+
+See also:
+  bin/bfp                          demo scenarios (tc1/tc2/tc3) and .buda flows
+  docs/FLOORPLANNER_USER_GUIDE.md
+EOF
+  exit 0
+fi
+
 # Add build and tools directories to PYTHONPATH
 export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"
 
