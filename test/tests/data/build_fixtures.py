@@ -43,26 +43,33 @@ import buda  # noqa: E402
 import bdb_serialize  # noqa: E402
 
 
-def build_hier_mixed(path: str) -> None:
-    """A small hierarchical design mixing uni- and bidirectional nets.
+def _build_hier(path: str, scale: int = 1, staggered: bool = False) -> None:
+    """The shared hier design: a src → proc(pa,pb,pc) → snk lane with a
+    bidirectional pair (pa↔pb) plus an extra one-way net (mirrors
+    test_hier_bidirectional.py). One parameterized builder so the two fixture
+    variants can't drift when cells/nets change.
 
-    Mirrors the shape used by test_hier_bidirectional.py: a src → proc(pa,pb,pc)
-    → snk lane, with a bidirectional pair (pa↔pb) plus an extra one-way net. Rich
-    enough to exercise derive_busterms + the hier bundler, small enough to review.
+    `staggered` offsets the instances vertically (src/snk low, proc high; pb_i
+    raised inside a taller proc_cell) so every route bends through real Hanan
+    cells — combined with `scale`, that makes the design detailed-routable.
     """
+    S = scale
+    proc_h = 300 if staggered else 200
+    pipe_y = (40, 180, 40) if staggered else (60, 60, 60)
+    proc_y = 250 if staggered else 50
     db = buda.BDB(path)
-    for cell, w, h in [("proc_cell", 420, 200), ("pipe_cell", 110, 80),
+    for cell, w, h in [("proc_cell", 420, proc_h), ("pipe_cell", 110, 80),
                        ("src_cell", 200, 200), ("snk_cell", 200, 200),
                        ("gen_cell", 80, 80), ("rcv_cell", 80, 80)]:
-        db.add_cell(cell, w, h)
-    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
-    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
-    db.add_inst_to_cell("proc_cell", "pc_i", "pipe_cell", 290, 60)
-    db.add_inst_to_cell("src_cell", "gen_i", "gen_cell", 60, 60)
-    db.add_inst_to_cell("snk_cell", "rcv_i", "rcv_cell", 60, 60)
-    db.add_inst("src_a", "src_cell", "", 50, 50)
-    db.add_inst("proc_a", "proc_cell", "", 350, 50)
-    db.add_inst("snk_a", "snk_cell", "", 870, 50)
+        db.add_cell(cell, w * S, h * S)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20 * S, pipe_y[0] * S)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155 * S, pipe_y[1] * S)
+    db.add_inst_to_cell("proc_cell", "pc_i", "pipe_cell", 290 * S, pipe_y[2] * S)
+    db.add_inst_to_cell("src_cell", "gen_i", "gen_cell", 60 * S, 60 * S)
+    db.add_inst_to_cell("snk_cell", "rcv_i", "rcv_cell", 60 * S, 60 * S)
+    db.add_inst("src_a", "src_cell", "", 50 * S, 50 * S)
+    db.add_inst("proc_a", "proc_cell", "", 350 * S, proc_y * S)
+    db.add_inst("snk_a", "snk_cell", "", 870 * S, 50 * S)
     for i in range(4):
         db.add_net_pins(f"s2p_{i}", "src_a/gen_i.out", ["proc_a/pa_i.in"])
         db.add_net_pins(f"p2s_{i}", "proc_a/pc_i.out", ["snk_a/rcv_i.in"])
@@ -74,9 +81,24 @@ def build_hier_mixed(path: str) -> None:
     # db is a local — closed on return (SQLite connection released on GC).
 
 
+def build_hier_mixed(path: str) -> None:
+    """Small, review-friendly hier design (aligned; NOT detailed-routable:
+    straight routes sit on Hanan lines → degenerate point intervals)."""
+    _build_hier(path)
+
+
+def build_hier_routed(path: str) -> None:
+    """hier_mixed's x8-scaled, vertically staggered twin: every route bends
+    through real Hanan cells, so with the mix_tracks patterns the full hier
+    flow runs run_detailed_nuts cleanly (0 unplaced) — use it for flow-level
+    detailed-persistence / resume coverage."""
+    _build_hier(path, scale=8, staggered=True)
+
+
 # name -> builder. Add new fixtures here.
 FIXTURES = {
     "hier_mixed": build_hier_mixed,
+    "hier_routed": build_hier_routed,
 }
 
 

@@ -127,6 +127,18 @@ void bind_db(py::module_& m) {
         .def_readwrite("is_jog",     &TopoSegRow::is_jog)
         .def_readwrite("assigned_layer", &TopoSegRow::assigned_layer);
 
+    py::class_<TopoBridgeRow>(m, "TopoBridgeRow")
+        .def(py::init<>())
+        .def_readwrite("id",         &TopoBridgeRow::id)
+        .def_readwrite("cand_index", &TopoBridgeRow::cand_index)
+        .def_readwrite("block_name", &TopoBridgeRow::block_name)
+        .def_readwrite("x1",         &TopoBridgeRow::x1)
+        .def_readwrite("y1",         &TopoBridgeRow::y1)
+        .def_readwrite("x2",         &TopoBridgeRow::x2)
+        .def_readwrite("y2",         &TopoBridgeRow::y2)
+        .def_readwrite("layer_hint", &TopoBridgeRow::layer_hint)
+        .def_readwrite("is_jog",     &TopoBridgeRow::is_jog);
+
     py::class_<BusSegRow>(m, "BusSegRow")
         .def(py::init<>())
         .def_readwrite("id",             &BusSegRow::id)
@@ -253,6 +265,11 @@ void bind_db(py::module_& m) {
         .def("topologies",           &BDB::topologies, py::arg("bundle_id"))
         .def("topology_segments",    &BDB::topology_segments,
              py::arg("bundle_id"), py::arg("cand_index"))
+        .def("add_topology_bridge",  &BDB::add_topology_bridge, py::arg("r"))
+        .def("topology_bridges",     &BDB::topology_bridges,
+             py::arg("bundle_id"), py::arg("cand_index"))
+        .def("all_topology_bridges", &BDB::all_topology_bridges,
+             py::arg("bundle_id"))
         .def("set_topology_selected", &BDB::set_topology_selected,
              py::arg("bundle_id"), py::arg("cand_index"))
         .def("set_segment_layer",     &BDB::set_segment_layer,

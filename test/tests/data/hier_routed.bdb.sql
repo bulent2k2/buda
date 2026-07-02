@@ -76,25 +76,25 @@ CREATE TABLE busterm (
             orig_x1 REAL DEFAULT 0, orig_y1 REAL DEFAULT 0,
             orig_x2 REAL DEFAULT 0, orig_y2 REAL DEFAULT 0
         );
-INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,50.0,50.0,250.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,110.0,110.0,190.0,190.0,'PORT','bt:src_a',NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:proc_a',3,'proc_a',0,350.0,50.0,770.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:proc_a/pa_i',4,'proc_a/pa_i',1,370.0,110.0,480.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:proc_a/pb_i',5,'proc_a/pb_i',1,505.0,110.0,615.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:proc_a/pc_i',6,'proc_a/pc_i',1,640.0,110.0,750.0,190.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,870.0,50.0,1070.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
-INSERT INTO "busterm" VALUES('bt:snk_a/rcv_i',8,'snk_a/rcv_i',1,930.0,110.0,1010.0,190.0,'PORT','bt:snk_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:src_a',1,'src_a',0,400.0,400.0,2000.0,2000.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:src_a/gen_i',2,'src_a/gen_i',1,880.0,880.0,1520.0,1520.0,'PORT','bt:src_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a',3,'proc_a',0,2800.0,2000.0,6160.0,4400.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a/pa_i',4,'proc_a/pa_i',1,2960.0,2320.0,3840.0,2960.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a/pb_i',5,'proc_a/pb_i',1,4040.0,3440.0,4920.0,4080.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:proc_a/pc_i',6,'proc_a/pc_i',1,5120.0,2320.0,6000.0,2960.0,'PORT','bt:proc_a',NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,6960.0,400.0,8560.0,2000.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
+INSERT INTO "busterm" VALUES('bt:snk_a/rcv_i',8,'snk_a/rcv_i',1,7440.0,880.0,8080.0,1520.0,'PORT','bt:snk_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 CREATE TABLE cell (
             name   TEXT PRIMARY KEY,
             width  REAL NOT NULL,
             height REAL NOT NULL
         );
-INSERT INTO "cell" VALUES('proc_cell',420.0,200.0);
-INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0);
-INSERT INTO "cell" VALUES('src_cell',200.0,200.0);
-INSERT INTO "cell" VALUES('snk_cell',200.0,200.0);
-INSERT INTO "cell" VALUES('gen_cell',80.0,80.0);
-INSERT INTO "cell" VALUES('rcv_cell',80.0,80.0);
+INSERT INTO "cell" VALUES('proc_cell',3360.0,2400.0);
+INSERT INTO "cell" VALUES('pipe_cell',880.0,640.0);
+INSERT INTO "cell" VALUES('src_cell',1600.0,1600.0);
+INSERT INTO "cell" VALUES('snk_cell',1600.0,1600.0);
+INSERT INTO "cell" VALUES('gen_cell',640.0,640.0);
+INSERT INTO "cell" VALUES('rcv_cell',640.0,640.0);
 CREATE TABLE cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -103,11 +103,11 @@ CREATE TABLE cell_children (
             y           REAL NOT NULL DEFAULT 0,
             PRIMARY KEY (parent_cell, inst_name)
         );
-INSERT INTO "cell_children" VALUES('proc_cell','pa_i','pipe_cell',20.0,60.0);
-INSERT INTO "cell_children" VALUES('proc_cell','pb_i','pipe_cell',155.0,60.0);
-INSERT INTO "cell_children" VALUES('proc_cell','pc_i','pipe_cell',290.0,60.0);
-INSERT INTO "cell_children" VALUES('src_cell','gen_i','gen_cell',60.0,60.0);
-INSERT INTO "cell_children" VALUES('snk_cell','rcv_i','rcv_cell',60.0,60.0);
+INSERT INTO "cell_children" VALUES('proc_cell','pa_i','pipe_cell',160.0,320.0);
+INSERT INTO "cell_children" VALUES('proc_cell','pb_i','pipe_cell',1240.0,1440.0);
+INSERT INTO "cell_children" VALUES('proc_cell','pc_i','pipe_cell',2320.0,320.0);
+INSERT INTO "cell_children" VALUES('src_cell','gen_i','gen_cell',480.0,480.0);
+INSERT INTO "cell_children" VALUES('snk_cell','rcv_i','rcv_cell',480.0,480.0);
 CREATE TABLE cell_pin (
             cell      TEXT NOT NULL REFERENCES cell(name),
             pin_name  TEXT NOT NULL,
@@ -146,14 +146,14 @@ CREATE TABLE component (
             is_leaf      INTEGER DEFAULT 1,
             is_replicated INTEGER DEFAULT 0
         );
-INSERT INTO "component" VALUES(1,'src_a','src_cell',NULL,0,50.0,50.0,250.0,250.0,0,0);
-INSERT INTO "component" VALUES(2,'src_a/gen_i','gen_cell',1,1,110.0,110.0,190.0,190.0,1,0);
-INSERT INTO "component" VALUES(3,'proc_a','proc_cell',NULL,0,350.0,50.0,770.0,250.0,0,0);
-INSERT INTO "component" VALUES(4,'proc_a/pa_i','pipe_cell',3,1,370.0,110.0,480.0,190.0,1,0);
-INSERT INTO "component" VALUES(5,'proc_a/pb_i','pipe_cell',3,1,505.0,110.0,615.0,190.0,1,0);
-INSERT INTO "component" VALUES(6,'proc_a/pc_i','pipe_cell',3,1,640.0,110.0,750.0,190.0,1,0);
-INSERT INTO "component" VALUES(7,'snk_a','snk_cell',NULL,0,870.0,50.0,1070.0,250.0,0,0);
-INSERT INTO "component" VALUES(8,'snk_a/rcv_i','rcv_cell',7,1,930.0,110.0,1010.0,190.0,1,0);
+INSERT INTO "component" VALUES(1,'src_a','src_cell',NULL,0,400.0,400.0,2000.0,2000.0,0,0);
+INSERT INTO "component" VALUES(2,'src_a/gen_i','gen_cell',1,1,880.0,880.0,1520.0,1520.0,1,0);
+INSERT INTO "component" VALUES(3,'proc_a','proc_cell',NULL,0,2800.0,2000.0,6160.0,4400.0,0,0);
+INSERT INTO "component" VALUES(4,'proc_a/pa_i','pipe_cell',3,1,2960.0,2320.0,3840.0,2960.0,1,0);
+INSERT INTO "component" VALUES(5,'proc_a/pb_i','pipe_cell',3,1,4040.0,3440.0,4920.0,4080.0,1,0);
+INSERT INTO "component" VALUES(6,'proc_a/pc_i','pipe_cell',3,1,5120.0,2320.0,6000.0,2960.0,1,0);
+INSERT INTO "component" VALUES(7,'snk_a','snk_cell',NULL,0,6960.0,400.0,8560.0,2000.0,0,0);
+INSERT INTO "component" VALUES(8,'snk_a/rcv_i','rcv_cell',7,1,7440.0,880.0,8080.0,1520.0,1,0);
 CREATE TABLE grp (
             id        TEXT PRIMARY KEY,
             name      TEXT NOT NULL,
@@ -235,56 +235,56 @@ CREATE TABLE pin (
             py       REAL,    -- absolute pin y in um (-1 if unknown)
             PRIMARY KEY (net_id, comp_id, pin_name)
         );
-INSERT INTO "pin" VALUES(1,2,'out','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(1,1,'s2p_0','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(1,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(1,3,'s2p_0','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(2,6,'out','OUTPUT',695.0,150.0);
-INSERT INTO "pin" VALUES(2,3,'p2s_0','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(2,8,'in','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(2,7,'p2s_0','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(3,4,'out','OUTPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(3,5,'in','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(4,5,'out','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(4,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(5,2,'out','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(5,1,'s2p_1','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(5,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(5,3,'s2p_1','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(6,6,'out','OUTPUT',695.0,150.0);
-INSERT INTO "pin" VALUES(6,3,'p2s_1','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(6,8,'in','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(6,7,'p2s_1','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(7,4,'out','OUTPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(7,5,'in','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(8,5,'out','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(8,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(9,2,'out','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(9,1,'s2p_2','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(9,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(9,3,'s2p_2','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(10,6,'out','OUTPUT',695.0,150.0);
-INSERT INTO "pin" VALUES(10,3,'p2s_2','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(10,8,'in','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(10,7,'p2s_2','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(11,4,'out','OUTPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(11,5,'in','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(12,5,'out','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(12,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(13,2,'out','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(13,1,'s2p_3','OUTPUT',150.0,150.0);
-INSERT INTO "pin" VALUES(13,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(13,3,'s2p_3','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(14,6,'out','OUTPUT',695.0,150.0);
-INSERT INTO "pin" VALUES(14,3,'p2s_3','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(14,8,'in','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(14,7,'p2s_3','INPUT',970.0,150.0);
-INSERT INTO "pin" VALUES(15,4,'out','OUTPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(15,5,'in','INPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(16,5,'out','OUTPUT',560.0,150.0);
-INSERT INTO "pin" VALUES(16,4,'in','INPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(17,4,'out','OUTPUT',425.0,150.0);
-INSERT INTO "pin" VALUES(17,5,'in','INPUT',560.0,150.0);
+INSERT INTO "pin" VALUES(1,2,'out','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(1,1,'s2p_0','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(1,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(1,3,'s2p_0','INPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(2,6,'out','OUTPUT',5560.0,2640.0);
+INSERT INTO "pin" VALUES(2,3,'p2s_0','OUTPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(2,8,'in','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(2,7,'p2s_0','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(3,4,'out','OUTPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(3,5,'in','INPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(4,5,'out','OUTPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(4,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(5,2,'out','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(5,1,'s2p_1','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(5,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(5,3,'s2p_1','INPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(6,6,'out','OUTPUT',5560.0,2640.0);
+INSERT INTO "pin" VALUES(6,3,'p2s_1','OUTPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(6,8,'in','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(6,7,'p2s_1','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(7,4,'out','OUTPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(7,5,'in','INPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(8,5,'out','OUTPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(8,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(9,2,'out','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(9,1,'s2p_2','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(9,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(9,3,'s2p_2','INPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(10,6,'out','OUTPUT',5560.0,2640.0);
+INSERT INTO "pin" VALUES(10,3,'p2s_2','OUTPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(10,8,'in','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(10,7,'p2s_2','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(11,4,'out','OUTPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(11,5,'in','INPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(12,5,'out','OUTPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(12,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(13,2,'out','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(13,1,'s2p_3','OUTPUT',1200.0,1200.0);
+INSERT INTO "pin" VALUES(13,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(13,3,'s2p_3','INPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(14,6,'out','OUTPUT',5560.0,2640.0);
+INSERT INTO "pin" VALUES(14,3,'p2s_3','OUTPUT',4480.0,3200.0);
+INSERT INTO "pin" VALUES(14,8,'in','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(14,7,'p2s_3','INPUT',7760.0,1200.0);
+INSERT INTO "pin" VALUES(15,4,'out','OUTPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(15,5,'in','INPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(16,5,'out','OUTPUT',4480.0,3760.0);
+INSERT INTO "pin" VALUES(16,4,'in','INPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(17,4,'out','OUTPUT',3400.0,2640.0);
+INSERT INTO "pin" VALUES(17,5,'in','INPUT',4480.0,3760.0);
 CREATE TABLE route_snapshot (
         id             INTEGER PRIMARY KEY,   -- always 1 (current routing)
         hash           TEXT,

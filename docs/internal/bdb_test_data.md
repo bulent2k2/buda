@@ -125,6 +125,9 @@ Interconnect is currently in-memory only (`self.bundles`, `self.nuts_result`,
 - `tools/bdb_serialize.py` — dump/load/verify.
 - `test/tests/conftest.py` — `bdb_input` fixture, `readonly_conn`, `DATA_DIR`.
 - `test/tests/data/build_fixtures.py` — deterministic fixture builder.
-- `test/tests/data/*.bdb.sql` — committed diffable fixtures.
+- `test/tests/data/*.bdb.sql` — committed diffable fixtures: `hier_mixed`
+  (small, review-friendly; NOT detailed-routable) and `hier_routed` (its
+  scaled + misaligned twin, routes cleanly through `run_detailed_nuts` — use
+  it for flow-level detailed-persistence / resume coverage).
 - `test/tests/test_bdb_fixture.py` — round-trip, no-dirty-input, staleness guard.
 - `.gitignore` — tracks `*.bdb.sql`, ignores binary BDBs + `.b-db` sidecars.

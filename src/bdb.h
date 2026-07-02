@@ -142,6 +142,19 @@ struct TopoSegRow {
     int         assigned_layer = -1;// planner's per-segment layer (-1 = unassigned)
 };
 
+// One TEG-over bridge segment of a candidate topology (Topology::bridge_segments:
+// block_name -> Segment placed along the outer face of the block's union bbox
+// when the trunk falls in a gap between its rects). Persisted so a load_pipeline
+// resume restores TEG-over designs losslessly (v11).
+struct TopoBridgeRow {
+    std::string id;                 // bundle_id (FK)
+    int         cand_index = 0;
+    std::string block_name;         // the multi-rect block the bridge spans
+    int         x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    int         layer_hint = 0;
+    bool        is_jog = false;
+};
+
 // One placed abstract-NUTS bus segment (Stage-4 output). `id` is a *soft* link to
 // a bundle: the flat flow uses the original bundle id, but the hier flow's
 // run_planner expands bundles into per-instance wrappers with synthetic ids, so
@@ -247,8 +260,10 @@ public:
     // v9 = routing-time busterm attrs (teg_mode/orig_*) + topology_seg_busterm join;
     // v10 = load_pipeline resume support: bus_segment stage-4 solver state
     //       (interval + corner-split track bounds), bundle_net.ord (bit order),
-    //       topology.is_pinned (pre-plan pin survives a checkpoint).
-    static constexpr int SCHEMA_VERSION = 10;
+    //       topology.is_pinned (pre-plan pin survives a checkpoint);
+    // v11 = topology_bridge_segment (TEG-over bridges), closing the last
+    //       un-persisted Topology field so TEG-over designs resume losslessly.
+    static constexpr int SCHEMA_VERSION = 11;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -398,6 +413,16 @@ public:
     void add_topology_seg_busterm(const TopoSegBustermRow& r);
     std::vector<TopoSegBustermRow> topology_seg_busterms(
         const std::string& bundle_id, int cand_index) const;
+    // TEG-over bridge segments (Topology::bridge_segments), one row per
+    // (candidate, block); wiped with the topologies by clear_topologies().
+    void add_topology_bridge(const TopoBridgeRow& r);   // INSERT OR REPLACE
+    std::vector<TopoBridgeRow> topology_bridges(
+        const std::string& bundle_id, int cand_index) const;
+    // All candidates' bridges for one bundle in a single query (the reload path
+    // buckets by cand_index — avoids one empty SELECT per candidate on designs
+    // without TEG-over blocks, the common case).
+    std::vector<TopoBridgeRow> all_topology_bridges(
+        const std::string& bundle_id) const;
     // Mark one candidate as the selected topology for a bundle (planner choice or
     // pin): sets is_selected=1 for cand_index, 0 for the bundle's other rows.
     void set_topology_selected(const std::string& bundle_id, int cand_index);

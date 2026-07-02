@@ -87,7 +87,8 @@ routing-time `tb:<block>` busterm row + a `topology_seg_busterm` link, written b
 the `persist_seg_busterms` bridge and reloaded by `load_seg_busterms` — it is
 **not** re-derivable from geometry anymore (Phase 2 retired ConnTopology's
 geometric fallback; see `single_source_topo_truth.md`). **Still deferred:**
-`bridge_segments` (TEG over-the-block bridges) and slide ranges (recomputed).
+slide ranges (recomputed). `bridge_segments` is persisted too since v11
+(`topology_bridge_segment`; see the resume item below).
 
 **2b. Planner output (Stage 3) — ✅ IMPLEMENTED.** `run_planner` records its
 decision (schema v6): the selected candidate (`topology.is_selected`, via
@@ -167,10 +168,15 @@ NUTS→DNUTS, and NUTS+ripup→DNUTS (congested fixture where ripup genuinely
 re-routes), plus fail-fast guards. Tests: `test/tests/test_bdb_resume.py`;
 docs: `docs/BDB_REFERENCE.md` (`load_pipeline`).
 
-**Known gap (from #138's spec correction):** `Topology.bridge_segments` (TEG
-over-the-block bridges) is the one remaining un-persisted `Topology` field, so
-TEG-over multi-rect designs cannot resume losslessly yet — persist it alongside
-the seg-busterm links when needed.
+**Gap closed (v11):** `Topology.bridge_segments` (TEG over-the-block bridges)
+— flagged by #138 as the one remaining un-persisted `Topology` field — is now
+persisted in `topology_bridge_segment` (written next to the seg-busterm links
+at every topology-persist site) and restored by `load_pipeline`, so TEG-over
+multi-rect designs resume losslessly. `run_nuts_on_layer` also re-persists its
+re-solved routing now (bus + detailed rows — the same stale-checkpoint class
+of bug `ripup_reroute` had), and the detailed-routable `hier_routed` fixture
+gives hier detailed-persistence + hier resume flow-level coverage.
+Tests: `test/tests/test_bdb_resume_gaps.py`.
 
 The original design notes below are kept for reference.
 
@@ -218,7 +224,7 @@ Phase 3, schema v9); it does not need slide ranges, `seg_perp`, or trunk info.
 | selected index / assigned layers | ✅ `is_selected` / `assigned_layer` | restore for inspection; a fresh `run_planner` overwrites anyway |
 | `Topology.seg_busterms` (endpoint→busterm taps) | ✅ `topology_seg_busterm` + `tb:` busterm rows (v9) | `buda.load_seg_busterms(bdb, bid, ci, topo)` — **required**: ConnTopology no longer re-derives taps (Phase 2) |
 | slide ranges / `net_pull` / `seg_perp` / trunk | ❌ (in-memory only) | **recomputed** by `ConnTopology::build` inside the planner — no action |
-| `Topology.bridge_segments` (TEG-over bridges) | ❌ (in-memory only) | **gap** — persist alongside seg_busterms or regenerate; TEG-over multi-rect designs can't resume losslessly until then |
+| `Topology.bridge_segments` (TEG-over bridges) | ✅ `topology_bridge_segment` (v11) | `topology_bridges(bid, ci)` — restored by `load_pipeline` |
 
 **The one real prerequisite: the `Floorplan` (and `LayerStack`).** Topology
 segments are absolute coordinates, so `ConnTopology::build` needs the *same*
