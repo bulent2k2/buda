@@ -434,6 +434,41 @@ is preserved via UPSERT.
 
 ---
 
+### `import_gds`
+
+```
+import_gds <file.gds>
+```
+
+Import a **GDSII stream** file into the open BDB (Phase G1 of
+[`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md)). A
+hand-written binary record reader (`src/gds_io.cpp`, no external EDA library),
+following the importer pattern: **fresh load** (clears
+`pin`/`net_props`/`net`/`component`/`cell` like `import_def_lef`), all
+coordinates normalized to **µm** via the `UNITS` record.
+
+- **Structures → `cell` rows.** Footprint = the *recursive* bbox (own
+  `BOUNDARY`/`BOX`/`PATH` geometry ∪ transformed child references), since a GDS
+  structure is a macro — the LEF `SIZE` analogue is the full extent. Memoized
+  with a cycle guard.
+- **`SREF`/`AREF` → `component` hierarchy.** Unreferenced structures are roots
+  (all of them elaborate); placements expand recursively into absolute-µm
+  component rows with dotted paths and growing depth. `AREF` expands its
+  cols×rows array. `STRANS` mirror / `ANGLE` (snapped to 0/90/180/270 with a
+  warning) / `MAG` apply at bbox level.
+- **Instance names.** GDS references are anonymous; a `PROPVALUE` property on
+  the reference is used as the instance name when present (arrays and
+  duplicates always synthesize), else `<struct>_<ordinal>` deterministically.
+- **`TEXT` labels** are counted and reported but not yet consumed — net/pin
+  recovery is Phase G2; until then pair with `import_verilog`, as with DEF.
+
+Python: `BDB.import_gds(path)` returns a `GdsImportStats` (`n_structures`,
+`n_cells`, `n_components`, `n_texts`, `tops`, `warnings`). Tests generate
+their GDS inputs deterministically with `tools/gds_build.py` (the Phase-G0
+writer, zeroed timestamps): `test/tests/test_gds_import.py`.
+
+---
+
 ### `bdb_net_mode`
 
 ```
@@ -1293,8 +1328,10 @@ depth-0 with no parent until Verilog overlays the hierarchy.
 
 ### Planned: GDSII import/export
 
-**Status: not implemented — design intent only.** No GDS code exists in the
-tree.
+**Status: import (Phase G1) IMPLEMENTED** — see [`import_gds`](#import_gds)
+and the phased plan in
+[`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md).
+Label-based net recovery (G2), layer mapping (G3), and export (G4) follow.
 
 Intended capability: round-trip a **GDSII** layout against BDB — export the
 placed-and-routed result for sign-off/viewing (KLayout, etc.) and import an

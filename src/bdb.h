@@ -280,6 +280,9 @@ public:
     // ── Ingestion ──────────────────────────────────────────────────────────
     void import_def_lef(const std::string& def_path, const std::string& lef_path);
     void import_verilog(const std::string& v_path);
+    // Wipe the design tables (pin/net_props/net/component/cell) for a fresh
+    // load — what import_def_lef does internally; public for import_gds.
+    void clear_design();
 
     // ── Cell definitions ───────────────────────────────────────────────────
     void add_cell(const std::string& name, double w, double h);

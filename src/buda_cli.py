@@ -57,8 +57,8 @@ KNOWN_COMMANDS = frozenset({
     "def_layer", "def_track_pattern", "derive_busterms", "detour_channel",
     "dump_hbundles", "dump_topologies", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
-    "import_def_lef", "import_verilog", "load_pipeline", "move_comp", "open_bdb",
-    "refine_busterms",
+    "import_def_lef", "import_gds", "import_verilog", "load_pipeline",
+    "move_comp", "open_bdb", "refine_busterms",
     "report_overhead", "resize_cell", "ripup_reroute", "rotate_comp", "run_bundler",
     "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
     "run_planner", "save_bdb", "select_topologies", "select_topology", "set_die",
@@ -4187,6 +4187,21 @@ class BudaSession:
             if self.bdb is None:
                 print("Error: open_bdb first"); return
             self.bdb.import_verilog(args[0])
+        elif cmd == "import_gds":
+            # import_gds <file.gds> — GDSII stream -> BDB placement/hierarchy
+            # (fresh load; see docs/internal/gds_oa_interchange.md Phase G1).
+            if not args:
+                print("Error: import_gds requires a file path"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            st = self.bdb.import_gds(args[0])
+            for wmsg in st.warnings:
+                print(f"[import_gds] Warning: {wmsg}")
+            tops = ", ".join(st.tops) if st.tops else "(none)"
+            print(f"[import_gds] {st.n_structures} structure(s) -> "
+                  f"{st.n_cells} cell(s), {st.n_components} component(s); "
+                  f"top(s): {tops}; {st.n_texts} TEXT label(s) "
+                  f"(labels are consumed in Phase G2).")
         elif cmd == "add_blocks_from_bdb":
             # add_blocks_from_bdb <depth> [deepest|skip|error]
             if not args:

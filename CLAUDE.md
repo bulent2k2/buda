@@ -31,6 +31,7 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 - [Routing Grid](docs/routing_grid.md), [Detailed Viz](docs/detailed_viz.md), [Key Bindings](docs/KEY_BINDINGS.md).
 - [BDB → Flat Script Converter](docs/BDB2BUDA.md) — `tools/bdb2buda.py`: export a BDB as a flat `.buda` routing script.
 - [Flat Script → BDB Cell Converter](docs/BUDA2BDB.md) — `tools/buda2bdb.py`: ingest a flat `.buda` script into a BDB as a cell (reverse of `bdb2buda`; replaces an existing cell and size-syncs its instances).
+- [GDS/OA Interchange Plan](docs/internal/gds_oa_interchange.md) — `import_gds` (implemented) and the phased path to label-based nets, layer mapping, GDS export, and the OA bridge.
 - [Hierarchical Demo BDB Builder](docs/BUILD_HIER_DEMO.md) — `tools/build_hier_demo.py`: assemble a hierarchical BDB from several flat scripts (each instantiated twice in a top cell) with random cross-instance top-level buses.
 
 ## Wrapper scripts (`bin/`)
@@ -129,7 +130,7 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `open_bdb <path.bdb> [writeback]` | Open (creating if needed) a BDB for hierarchy-based design data. A `*.bdb.sql` text fixture is materialized to a temp binary (read-only by default); `writeback` dumps changes back to the `.sql` on `save_bdb`/`exit`/end-of-run |
 | `save_bdb` | Write the working BDB back to its `*.bdb.sql` source now (after `open_bdb … writeback`) |
 | `load_pipeline [expanded]` | **Resume/rehydrate** the routing pipeline from the open BDB: bundles + all candidate topologies (`seg_busterms` restored logically from the `topology_seg_busterm` links — never re-derived from geometry — and TEG-over `bridge_segments` from `topology_bridge_segment`), the planner's selection + assigned layers + pre-plan pins, and the abstract-NUTS result — as deep as was persisted — so a fresh session continues where a previous one stopped (checkpoint after `generate_topologies` / `run_planner` / `run_nuts`+`ripup_reroute`, reopen, continue). Requires the setup (layers/patterns/blocks) re-declared first; `expanded` = hier post-expansion view. See [BDB Reference](docs/BDB_REFERENCE.md) |
-| `import_def_lef <def> <lef>` / `import_verilog <v>` | Ingest a placed design / netlist into the open BDB |
+| `import_def_lef <def> <lef>` / `import_verilog <v>` / `import_gds <g>` | Ingest a placed design / netlist / GDSII layout into the open BDB |
 | `set_die <w> <h>` | Set die dimensions in the BDB |
 | `add_cell <name> <w> <h>` / `add_cell_pin <cell> <pin> [dir] [px py]` | Define a cell type and its port interface |
 | `add_inst <inst> <cell> <parent> <x> <y>` / `add_inst_to_cell <parent_cell> <inst> <child_cell> <x> <y>` | Instantiate a cell into the hierarchy / define a cell's internal structure |
@@ -539,13 +540,13 @@ All importers are hand-written, line-by-line state machines in `bdb.cpp` (no ext
 - **Elaboration** walks from the top module, expanding instances into hierarchical `component` rows (dotted `parent/child` paths, growing `depth`) and wiring `net`/`pin` rows from the port maps. Instance pins default to `UNKNOWN`, then are overridden per-pin from any matching `cell_pin` direction (`infer_pin_dirs_from_cell_pins`).
 - **UPSERT, not replace:** when run after `import_def_lef`, it `INSERT … ON CONFLICT DO UPDATE`s `cell`/`parent_id`/`depth`/`is_leaf` but **preserves `x1..y2`** so DEF placement survives. Components only in the Verilog get `x1=y1=x2=y2=−1` (unplaced); components only in the DEF keep their placement with no parent/depth. This is the canonical "DEF + Verilog merge" flow.
 
-**Planned interchange formats (not yet implemented — roadmap):**
-- **GDSII import + export** — round-trip a GDSII layout against BDB.
+**Interchange formats (roadmap in [docs/internal/gds_oa_interchange.md](docs/internal/gds_oa_interchange.md)):**
+- **GDSII import + export** — round-trip a GDSII layout against BDB. **Import is IMPLEMENTED** (Phase G1: `import_gds` / `src/gds_io.cpp` — structures→cells with recursive footprints, SREF/AREF→component hierarchy with bbox-level transforms, PROPVALUE instance names, TEXT labels counted for Phase G2; `tools/gds_build.py` is the deterministic test writer that grows into the exporter).
   - *Export:* flatten/stream the placed-and-routed result (`component` bboxes + NUTS/detailed-NUTS `NetSegment` wires per layer) to a GDSII layout for sign-off/visualization in standard layout viewers. The layer→GDS datatype mapping would extend `LayerStack`.
   - *Import:* read GDSII structures back into BDB component/cell rows — `BOUNDARY`/`BOX` shapes become cell or blockage geometry, `SREF`/`AREF` placements rebuild the component hierarchy, layer→`(layer, datatype)` mapping is inverted. Net connectivity is **optional and file-dependent**: GDS has no standard netlist, but many flows annotate shapes with net names via `TEXT`/label records (on a pin/label layer) or a labeling convention. The importer should support both modes — (a) *connectivity present:* parse the labels to recover `net`/`pin` rows; (b) *geometry only:* import placement/shapes and pair with `import_verilog` for nets, as with DEF today. A flag/auto-detect selects the mode per file.
 - **OpenAccess (Si2 OA) import/export** — round-trip designs through an OA design database (`oaDesign`, `oaBlock`, `oaInst`, `oaNet`) so BUDA can sit inside an OA-based flow. Gated on the proprietary OA C++ libraries, so it would live behind an optional CMake feature flag and a separate translation module (e.g. `oa_bridge.cpp`) rather than in `buda_core`. Until then, LEF/DEF + Verilog is the supported interchange path.
 
-These planned formats are tracked here for design intent only — there is **no GDS/OA code in the tree today** (`grep -ri gds\|openaccess src/` returns nothing). When implementing, follow the existing pattern: a standalone parser/writer in its own translation unit, populating or reading the same BDB tables, with coordinates normalized to µm.
+GDS label-based net recovery (G2), layer mapping (G3), export (G4), and the OA bridge remain roadmap; when implementing, follow the existing pattern: a standalone parser/writer in its own translation unit, populating or reading the same BDB tables, with coordinates normalized to µm.
 
 ---
 
@@ -580,7 +581,7 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 | Area | Files |
 |---|---|
 | Build / wrappers | `CMakeLists.txt`, `bin/bb` (build), `bin/buda` / `bin/fp` / `bin/bfp` / `bin/viz` / `bin/u2b` (run), `bin/activate` (source: PATH+PYTHONPATH), `pytest.ini` |
-| DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
+| DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `gds_io.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
 | Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
 | Python | `src/buda_cli.py` (CLI), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |

@@ -21,6 +21,7 @@
 #include <pybind11/stl.h>
 #include "bdb.h"
 #include "busterm.h"
+#include "gds_io.h"
 
 namespace py = pybind11;
 using namespace buda;
@@ -234,11 +235,22 @@ void bind_db(py::module_& m) {
         .def_readwrite("rects",      &BustermRow::rects);
 
     // ── BDB ───────────────────────────────────────────────────────────────
+    py::class_<GdsImportStats>(m, "GdsImportStats")
+        .def_readonly("n_structures", &GdsImportStats::n_structures)
+        .def_readonly("n_cells",      &GdsImportStats::n_cells)
+        .def_readonly("n_components", &GdsImportStats::n_components)
+        .def_readonly("n_texts",      &GdsImportStats::n_texts)
+        .def_readonly("tops",         &GdsImportStats::tops)
+        .def_readonly("warnings",     &GdsImportStats::warnings);
+
     py::class_<BDB>(m, "BDB")
         .def(py::init<const std::string&>())
         .def("import_def_lef",  &BDB::import_def_lef,
              py::arg("def_path"), py::arg("lef_path"))
         .def("import_verilog",  &BDB::import_verilog, py::arg("v_path"))
+        .def("import_gds", [](BDB& db, const std::string& path) {
+                 return import_gds(db, path);
+             }, py::arg("path"))
         .def("compute_hpwl",    &BDB::compute_hpwl)
         .def("compute_fanout",  &BDB::compute_fanout)
         .def("compute_all",     &BDB::compute_all)

@@ -987,6 +987,11 @@ BDB::LefPins BDB::_parse_lef_pins(const std::string& lef_path) {
 
 // ── DEF importer ─────────────────────────────────────────────────────────────
 
+void BDB::clear_design() {
+    _exec("DELETE FROM pin; DELETE FROM net_props; DELETE FROM net; "
+          "DELETE FROM component; DELETE FROM cell;");
+}
+
 void BDB::import_def_lef(const std::string& def_path, const std::string& lef_path) {
     auto lef_sizes = _parse_lef_sizes(lef_path);
     auto lef_pins  = _parse_lef_pins(lef_path);
