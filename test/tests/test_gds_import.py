@@ -62,22 +62,29 @@ def test_hierarchy_elaborates_with_transforms(tmp_path):
     db, st = _import(tmp_path, _basic_lib(tmp_path / "t.gds"))
     assert list(st.tops) == ["top"]
     comps = {c.name: c for c in db.all_components()}
-    assert st.n_components == len(comps) == 12
+    # The top structure is the die, NOT a component: its refs elaborate as
+    # unprefixed depth-0 roots — exactly how import_verilog elaborates the top
+    # module — so the geometry-only merge matches placements by name.
+    assert st.n_components == len(comps) == 11
+    assert "top" not in comps
     # PROPVALUE names the instance; anonymous refs synthesize <struct>_<n>.
-    assert comps["top/m0"].cell == "mid"
-    assert comps["top/mid_0"].cell == "mid"
+    assert comps["m0"].cell == "mid"
+    assert comps["mid_0"].cell == "mid"
     # Depths grow along the dotted path; leaves are marked.
-    assert comps["top"].depth == 0 and not comps["top"].is_leaf
-    assert comps["top/m0/leaf_0"].depth == 2 and comps["top/m0/leaf_0"].is_leaf
+    assert comps["m0"].depth == 0 and not comps["m0"].is_leaf
+    assert comps["m0/leaf_0"].depth == 1 and comps["m0/leaf_0"].is_leaf
     # AREF 2x2 expanded at its pitches (absolute µm bboxes).
-    l3 = comps["top/m0/leaf_3"]
+    l3 = comps["m0/leaf_3"]
     assert (l3.x1, l3.y1, l3.x2, l3.y2) == (18.0, 19.0, 23.0, 22.0)
     # 90-degree rotation swaps the placed bbox dims (20x12 -> 12x20).
-    m2 = comps["top/mid_0"]
+    m2 = comps["mid_0"]
     assert (m2.x2 - m2.x1, m2.y2 - m2.y1) == (12.0, 20.0)
     # Mirror about X reflects the leaf below its origin.
-    lm = comps["top/leaf_0"]
+    lm = comps["leaf_0"]
     assert (lm.y1, lm.y2) == (-3.0, 0.0)
+    # A single top's extent becomes the die (the DEF DIEAREA analogue).
+    assert float(db.meta_get("die_w")) == 107.0
+    assert float(db.meta_get("die_h")) == 63.0
 
 
 def test_units_scale_to_um(tmp_path):
@@ -101,6 +108,60 @@ def test_texts_counted_not_footprinted(tmp_path):
             for c in db.all_cells()} == {"leaf": (5.0, 3.0)}
 
 
+def test_path_width_grows_footprint(tmp_path):
+    # A stroked PATH's footprint is centerline ± WIDTH/2 (Codex #143 P2):
+    # a 10µm-wide horizontal wire is 100x10 with butt caps (PATHTYPE 0)...
+    b = GdsBuilder()
+    b.structure("wire").path(3, 0, [(0, 0), (100, 0)], width_um=10)
+    db, _ = _import(tmp_path, b.write(tmp_path / "p.gds"))
+    assert {c.name: (c.width, c.height)
+            for c in db.all_cells()} == {"wire": (100.0, 10.0)}
+
+
+def test_path_end_caps_extend(tmp_path):
+    # ...and PATHTYPE 2 (square caps) extends both ends by WIDTH/2.
+    b = GdsBuilder()
+    b.structure("wire").path(3, 0, [(0, 0), (100, 0)], width_um=10, pathtype=2)
+    db, _ = _import(tmp_path, b.write(tmp_path / "p.gds"))
+    assert {c.name: (c.width, c.height)
+            for c in db.all_cells()} == {"wire": (110.0, 10.0)}
+
+
+def test_verilog_pairing_preserves_gds_placement(tmp_path):
+    # The documented geometry-only merge: import_gds then import_verilog.
+    # GDS roots are unprefixed (the top structure is the die, not a component),
+    # so the Verilog UPSERT matches by name and keeps the GDS placement while
+    # attaching pins/nets to the SAME components (Codex #143 P2).
+    b = GdsBuilder()
+    b.structure("blkA").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("blkB").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("chip") \
+     .sref("blkA", (0, 0), inst_name="A") \
+     .sref("blkB", (600, 800), inst_name="B")
+    gds = b.write(tmp_path / "chip.gds")
+    v = tmp_path / "chip.v"
+    v.write_text(
+        "module blkA(p); output p; endmodule\n"
+        "module blkB(p); input p; endmodule\n"
+        "module chip;\n"
+        "  wire n1;\n"
+        "  blkA A(.p(n1));\n"
+        "  blkB B(.p(n1));\n"
+        "endmodule\n")
+
+    db = buda.BDB(str(tmp_path / "m.bdb"))
+    db.import_gds(str(gds))
+    db.import_verilog(str(v))
+    comps = {c.name: c for c in db.all_components()}
+    # Placement survived the merge (no -1 rows for the netlist endpoints)...
+    assert (comps["A"].x1, comps["A"].y1, comps["A"].x2, comps["A"].y2) == \
+        (0.0, 0.0, 200.0, 400.0)
+    assert (comps["B"].x1, comps["B"].y1) == (600.0, 800.0)
+    # ...and the Verilog pins landed on those same placed components.
+    assert db.pins_by_comp(comps["A"].id)
+    assert db.pins_by_comp(comps["B"].id)
+
+
 def test_multiple_tops_all_elaborate(tmp_path):
     b = GdsBuilder()
     b.structure("leaf").boundary(10, 0, [(0, 0), (2, 0), (2, 2), (0, 2)])
@@ -109,7 +170,10 @@ def test_multiple_tops_all_elaborate(tmp_path):
     db, st = _import(tmp_path, b.write(tmp_path / "t.gds"))
     assert sorted(st.tops) == ["a", "b"]
     names = {c.name for c in db.all_components()}
-    assert {"a", "b", "a/leaf_0", "b/leaf_0"} <= names
+    # Both tops' children elaborate as roots; the name collision across tops
+    # is qualified with the top name (+ a warning).
+    assert {"leaf_0", "b_leaf_0"} <= names
+    assert any("collision" in w for w in st.warnings)
 
 
 def test_undefined_ref_warns_and_continues(tmp_path):
@@ -118,7 +182,7 @@ def test_undefined_ref_warns_and_continues(tmp_path):
      .boundary(10, 0, [(0, 0), (4, 0), (4, 4), (0, 4)])
     db, st = _import(tmp_path, b.write(tmp_path / "t.gds"))
     assert any("undefined structure 'ghost'" in w for w in st.warnings)
-    assert {c.name for c in db.all_components()} == {"top"}
+    assert not db.all_components()      # the ghost ref was the only child
 
 
 def test_bad_files_raise(tmp_path):
@@ -166,8 +230,8 @@ def test_cli_import_and_route(tmp_path):
         for c in ["source flow/rnr/mix_tracks.buda",
                   f"open_bdb {tmp_path / 'chip.bdb'}",
                   f"import_gds {gds}",
-                  "add_blocks_from_bdb 1",
-                  "add_bus d[8] chip/A.p chip/B.p",
+                  "add_blocks_from_bdb 0",
+                  "add_bus d[8] A.p B.p",
                   "run_bundler", "generate_topologies", "run_planner 3",
                   "run_nuts", "run_detailed_nuts"]:
             s.do_command(c)

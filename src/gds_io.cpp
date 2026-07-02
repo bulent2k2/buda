@@ -42,9 +42,9 @@ enum : uint8_t {
     R_HEADER = 0x00, R_BGNLIB = 0x01, R_UNITS = 0x03, R_ENDLIB = 0x04,
     R_BGNSTR = 0x05, R_STRNAME = 0x06, R_ENDSTR = 0x07,
     R_BOUNDARY = 0x08, R_PATH = 0x09, R_SREF = 0x0A, R_AREF = 0x0B,
-    R_TEXT = 0x0C, R_XY = 0x10, R_ENDEL = 0x11, R_SNAME = 0x12,
-    R_COLROW = 0x13, R_STRANS = 0x1A, R_MAG = 0x1B, R_ANGLE = 0x1C,
-    R_PROPVALUE = 0x2C, R_BOX = 0x2D,
+    R_TEXT = 0x0C, R_WIDTH = 0x0F, R_XY = 0x10, R_ENDEL = 0x11,
+    R_SNAME = 0x12, R_COLROW = 0x13, R_STRANS = 0x1A, R_MAG = 0x1B,
+    R_ANGLE = 0x1C, R_PATHTYPE = 0x21, R_PROPVALUE = 0x2C, R_BOX = 0x2D,
 };
 
 struct Rec {
@@ -179,8 +179,11 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
     double um_per_dbu = -1.0;
     GStruct* cur = nullptr;
     Ref* cur_ref = nullptr;                    // element being parsed (SREF/AREF)
-    bool in_text = false, in_geom = false;
+    enum { GK_NONE, GK_POLY, GK_PATH } geom_kind = GK_NONE;
+    bool in_text = false;
     bool aref = false;
+    double path_width_dbu = 0;                 // WIDTH record (dbu; abs value)
+    int    path_type = 0;                      // PATHTYPE: 0 butt, 1/2 extended
     bool saw_header = false, saw_endlib = false;
 
     size_t pos = 0;
@@ -219,8 +222,20 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
             case R_ENDSTR:
                 cur = nullptr;
                 break;
-            case R_BOUNDARY: case R_BOX: case R_PATH:
-                in_geom = true;
+            case R_BOUNDARY: case R_BOX:
+                geom_kind = GK_POLY;
+                break;
+            case R_PATH:
+                geom_kind = GK_PATH;
+                path_width_dbu = 0;
+                path_type = 0;
+                break;
+            case R_WIDTH:
+                // Negative = absolute (not magnified); bbox use is the same.
+                path_width_dbu = std::fabs((double)r.i32());
+                break;
+            case R_PATHTYPE:
+                path_type = r.i16();
                 break;
             case R_TEXT:
                 in_text = true;
@@ -277,11 +292,39 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
                         cur_ref->rdx = (x3 - cur_ref->ox) / cur_ref->rows;
                         cur_ref->rdy = (y3 - cur_ref->oy) / cur_ref->rows;
                     }
-                } else if (in_geom && cur) {
+                } else if (geom_kind == GK_POLY && cur) {
                     for (size_t i = 0; i < npts; ++i) {
                         double x, y;
                         xy(i, x, y);
                         cur->geom.grow(x, y);
+                    }
+                } else if (geom_kind == GK_PATH && cur) {
+                    // A PATH's footprint is the stroked centerline: half the
+                    // WIDTH on each side; PATHTYPE 1/2 also extends the ends.
+                    const double hw = path_width_dbu * um_per_dbu / 2.0;
+                    const double ext = (path_type == 1 || path_type == 2) ? hw : 0.0;
+                    double px = 0, py = 0;
+                    for (size_t i = 0; i < npts; ++i) {
+                        double x, y;
+                        xy(i, x, y);
+                        if (i == 0 && npts == 1) {          // degenerate dot
+                            cur->geom.grow(x - hw, y - hw);
+                            cur->geom.grow(x + hw, y + hw);
+                        } else if (i > 0) {
+                            if (px == x) {                  // vertical segment
+                                cur->geom.grow(x - hw, std::min(py, y) - ext);
+                                cur->geom.grow(x + hw, std::max(py, y) + ext);
+                            } else if (py == y) {           // horizontal segment
+                                cur->geom.grow(std::min(px, x) - ext, y - hw);
+                                cur->geom.grow(std::max(px, x) + ext, y + hw);
+                            } else {                        // diagonal: safe over-cover
+                                cur->geom.grow(std::min(px, x) - hw - ext,
+                                               std::min(py, y) - hw - ext);
+                                cur->geom.grow(std::max(px, x) + hw + ext,
+                                               std::max(py, y) + hw + ext);
+                            }
+                        }
+                        px = x; py = y;
                     }
                 }
                 // TEXT XY deliberately ignored: labels must not grow footprints.
@@ -289,7 +332,8 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
             }
             case R_ENDEL:
                 cur_ref = nullptr;
-                in_text = in_geom = false;
+                in_text = false;
+                geom_kind = GK_NONE;
                 aref = false;
                 break;
             case R_ENDLIB:
@@ -393,10 +437,54 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
         }
     };
 
+    // Top structures are NOT materialized as component rows: their references
+    // elaborate as unprefixed depth-0 roots — exactly how import_verilog
+    // elaborates the top module's instances — so the documented geometry-only
+    // merge (import_gds + import_verilog) matches placements by name. A
+    // childless top with own geometry still gets a row (it IS the placement).
+    std::set<std::string> root_names;
     for (const GStruct& s : structs) {
         if (referenced.count(s.name)) continue;
         stats.tops.push_back(s.name);
-        elaborate(s, XForm{}, s.name, "");
+        if (s.refs.empty()) {
+            elaborate(s, XForm{}, s.name, "");
+            continue;
+        }
+        std::map<std::string, int> ordinal;
+        for (const Ref& ref : s.refs) {
+            auto sit = by_name.find(ref.sname);
+            if (sit == by_name.end()) continue;
+            const GStruct& child = structs[sit->second];
+            for (int rr = 0; rr < ref.rows; ++rr)
+                for (int cc = 0; cc < ref.cols; ++cc) {
+                    XForm t = XForm::place(
+                        ref.ox + cc * ref.cdx + rr * ref.rdx,
+                        ref.oy + cc * ref.cdy + rr * ref.rdy,
+                        ref.mirror, ref.angle, ref.mag);
+                    std::string nm = ref.inst_name;
+                    if (nm.empty() || ref.cols * ref.rows > 1 ||
+                        ordinal.count(nm)) {
+                        int n = ordinal[ref.sname]++;
+                        nm = ref.sname + "_" + std::to_string(n);
+                    } else {
+                        ordinal[nm] = 1;
+                    }
+                    if (!root_names.insert(nm).second) {
+                        // Roots from multiple tops may collide; qualify.
+                        nm = s.name + "_" + nm;
+                        root_names.insert(nm);
+                        stats.warnings.push_back(
+                            "root instance name collision across tops; using '" +
+                            nm + "'");
+                    }
+                    elaborate(child, t, nm, "");
+                }
+        }
+    }
+    // A single top's extent is the die (the DEF DIEAREA analogue).
+    if (stats.tops.size() == 1) {
+        BBox tb = bbox_of(stats.tops[0]);
+        if (!tb.empty()) db.set_die(tb.x2 - tb.x1, tb.y2 - tb.y1);
     }
 
     return stats;

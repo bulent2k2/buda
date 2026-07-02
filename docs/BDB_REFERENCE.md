@@ -450,9 +450,14 @@ coordinates normalized to **µm** via the `UNITS` record.
 - **Structures → `cell` rows.** Footprint = the *recursive* bbox (own
   `BOUNDARY`/`BOX`/`PATH` geometry ∪ transformed child references), since a GDS
   structure is a macro — the LEF `SIZE` analogue is the full extent. Memoized
-  with a cycle guard.
-- **`SREF`/`AREF` → `component` hierarchy.** Unreferenced structures are roots
-  (all of them elaborate); placements expand recursively into absolute-µm
+  with a cycle guard. `PATH` geometry is stroked: centerline ± `WIDTH`/2, with
+  `PATHTYPE` 1/2 end extension.
+- **`SREF`/`AREF` → `component` hierarchy.** A top (unreferenced) structure is
+  the **die**, not a component: its references elaborate as *unprefixed*
+  depth-0 roots — exactly how `import_verilog` elaborates the top module — so
+  the geometry-only merge (`import_gds` + `import_verilog`) matches placements
+  by name; a single top's extent also sets the die dimensions (the DEF
+  `DIEAREA` analogue). Placements expand recursively into absolute-µm
   component rows with dotted paths and growing depth. `AREF` expands its
   cols×rows array. `STRANS` mirror / `ANGLE` (snapped to 0/90/180/270 with a
   warning) / `MAG` apply at bbox level.

@@ -36,10 +36,11 @@ import struct
 _HEADER, _BGNLIB, _LIBNAME, _UNITS, _ENDLIB = (0x00, 0x02), (0x01, 0x02), \
     (0x02, 0x06), (0x03, 0x05), (0x04, 0x00)
 _BGNSTR, _STRNAME, _ENDSTR = (0x05, 0x02), (0x06, 0x06), (0x07, 0x00)
-_BOUNDARY, _SREF, _AREF, _TEXT = (0x08, 0x00), (0x0A, 0x00), (0x0B, 0x00), \
-    (0x0C, 0x00)
-_LAYER, _DATATYPE, _XY, _ENDEL = (0x0D, 0x02), (0x0E, 0x02), (0x10, 0x03), \
-    (0x11, 0x00)
+_BOUNDARY, _PATH, _SREF, _AREF, _TEXT = (0x08, 0x00), (0x09, 0x00), \
+    (0x0A, 0x00), (0x0B, 0x00), (0x0C, 0x00)
+_LAYER, _DATATYPE, _WIDTH, _XY, _ENDEL = (0x0D, 0x02), (0x0E, 0x02), \
+    (0x0F, 0x03), (0x10, 0x03), (0x11, 0x00)
+_PATHTYPE = (0x21, 0x02)
 _SNAME, _COLROW, _TEXTTYPE, _STRING = (0x12, 0x06), (0x13, 0x02), \
     (0x16, 0x02), (0x19, 0x06)
 _STRANS, _MAG, _ANGLE = (0x1A, 0x01), (0x1B, 0x05), (0x1C, 0x05)
@@ -97,6 +98,18 @@ class _Struct:
             _rec(_BOUNDARY) + _rec(_LAYER, _ints("h", layer)) +
             _rec(_DATATYPE, _ints("h", datatype)) +
             _rec(_XY, self._xy(pts)) + _rec(_ENDEL))
+        return self
+
+    def path(self, layer, datatype, pts_um, width_um, pathtype=0):
+        """Stroked centerline (WIDTH in µm; PATHTYPE 0 butt, 1 round, 2 square)."""
+        d = self._b._dbu_um
+        rec = _rec(_PATH) + _rec(_LAYER, _ints("h", layer)) + \
+            _rec(_DATATYPE, _ints("h", datatype))
+        if pathtype:
+            rec += _rec(_PATHTYPE, _ints("h", pathtype))
+        rec += _rec(_WIDTH, _ints("i", round(width_um / d))) + \
+            _rec(_XY, self._xy(pts_um)) + _rec(_ENDEL)
+        self._elems.append(rec)
         return self
 
     def _trans(self, mirror, angle, mag):
