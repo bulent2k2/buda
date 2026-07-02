@@ -2035,10 +2035,6 @@ std::vector<Topology> TopologyGenerator::generate_npin(
         pins.push_back(bt.bbox.center()); blocks.push_back(bt);
     }
 
-    bool has_multi_rect = false;
-    for (const auto& bt : blocks)
-        if (!bt.rects.empty()) { has_multi_rect = true; break; }
-
     // Bounding box from all individual rects (not just pin centres) so that
     // Hanan midpoints between separated rects are not filtered out.
     int x_lo = INT_MAX, x_hi = INT_MIN, y_lo = INT_MAX, y_hi = INT_MIN;
