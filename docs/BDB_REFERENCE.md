@@ -80,8 +80,18 @@ bus_segment      bundle_id→bundle (FK), seg_idx, layer, is_horiz,
 bus_via          bundle_id→bundle (FK), from_seg, to_seg, from_layer,
                  to_layer, x, y, bit_width
                  PRIMARY KEY (bundle_id, from_seg, to_seg)
-route_snapshot   id (=1, singleton), hash, n_bus_segments,
-                 n_bus_vias, stage  — fingerprint of the routed output
+route_snapshot   id (=1, singleton), hash, n_bus_segments, n_bus_vias,
+                 stage, n_net_segments, n_net_vias
+                 — fingerprint of the routed output
+
+net_segment      bundle_id→bundle (FK), seg_idx, bit_index,
+                 net_id→net, layer, is_horiz, x1,y1,x2,y2,
+                 track_position, width  — one detailed bit-wire
+                 PRIMARY KEY (bundle_id, seg_idx, bit_index)
+net_via          bundle_id→bundle (FK), from_seg, to_seg, bit_index,
+                 net_id→net, from_layer, to_layer, x, y
+                 — one per-bit via (bus_via fanned out per bit)
+                 PRIMARY KEY (bundle_id, from_seg, to_seg, bit_index)
 
 grp              id (TEXT), name, color, parent_id→grp
 grp_member       grp_id→grp, kind, ref
@@ -98,8 +108,9 @@ provenance; v2 added the **bundle-persistence** shape above; v3 re-keyed
 (the planner's per-segment layer); v7 hardened `bus_segment`/`bus_via.bundle_id`
 into a **foreign key** to `bundle(id)` and added the **`route_snapshot`**
 fingerprint table (the v6→v7 migration rebuilds the bus tables with the FK,
-dropping any pre-FK orphan rows). `tools/bdb_serialize.py` preserves the version
-across the `*.bdb.sql` round-trip.
+dropping any pre-FK orphan rows); v8 added the **detailed-NUTS** `net_segment`/
+`net_via` tables plus the `route_snapshot` `n_net_*` count columns.
+`tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
 their Stage-1 bundles into `bundle` / `bundle_net` / `bundle_busterm` whenever a
@@ -126,7 +137,28 @@ plus the row counts and stage — so a routing change is one reviewable line in 
 `*.bdb.sql` diff, and it is the natural feed for the planned BDB → OA/GDS export.
 C++ API: `add_bus_segment(BusSegRow)`, `add_bus_via(BusViaRow)`,
 `clear_bus_routing()`, `bus_segments(bundle_id)`, `bus_vias(bundle_id)`,
-`set_route_snapshot(hash, n_seg, n_via, stage)`, `route_snapshot()`.
+`set_route_snapshot(hash, n_seg, n_via, stage[, n_net_seg, n_net_via])`,
+`route_snapshot()`.
+
+**Detailed-NUTS persistence (schema v8).** `run_detailed_nuts` writes each
+bit-wire into `net_segment` (the placed rectangle plus the bit's net identity:
+`net_name = net_names[bit_index]` — the **logical** bit, `bit_order` already
+applied — resolved to a `net_id` via `_ensure_net`, auto-creating a name-only
+`net` row as with `bundle_net`) and each per-bit via into `net_via` — the
+symbolic `bus_via` **fanned out per bit**, sharing its
+`(bundle_id, from_seg, to_seg)` key with `bit_index` appended, positioned at
+the crossing of the two bits' placed tracks. Spans are stored **as-is** (they
+may be reversed, `span_lo > span_hi`, after the engine's endpoint snap — same
+convention as `bus_segment`; consumers take min/max). `bundle_id` is a hard FK
+to `bundle(id)` (same NOT NULL + parent-ensure rules as the bus tables), and
+re-solving upstream invalidates downstream: `run_nuts` (clear_bus_routing)
+wipes the net rows too, and `clear_bundles()` / `clear_expanded_bundles()`
+drop them before their parent bundles. The `route_snapshot` is rewritten with
+stage `'detailed_nuts'`, hashing the net rows as well (by net **name**, so the
+digest is independent of net-id autoincrement history) and preserving the bus
+counts. Reads LEFT JOIN `net` to return `net_name`. C++ API:
+`add_net_segment(NetSegRow)`, `add_net_via(NetViaRow)`,
+`clear_detailed_routing()`, `net_segments(bundle_id)`, `net_vias(bundle_id)`.
 
 **Topology persistence.** `generate_topologies` (flat) and
 `generate_hier_topologies` (hier) write **all** candidate topologies into

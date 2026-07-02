@@ -162,14 +162,48 @@ static const char* NUTS_DDL = R"(
         bit_width  INTEGER,
         PRIMARY KEY (bundle_id, from_seg, to_seg)
     );
-    -- Singleton fingerprint of the routed output (bus_segment + bus_via), so a
-    -- routing change is one reviewable line in the *.bdb.sql diff.
+    -- Singleton fingerprint of the routed output (bus_segment + bus_via, plus
+    -- net_segment + net_via after detailed NUTS), so a routing change is one
+    -- reviewable line in the *.bdb.sql diff.
     CREATE TABLE IF NOT EXISTS route_snapshot (
         id             INTEGER PRIMARY KEY,   -- always 1 (current routing)
         hash           TEXT,
         n_bus_segments INTEGER DEFAULT 0,
         n_bus_vias     INTEGER DEFAULT 0,
-        stage          TEXT                   -- 'abstract_nuts'
+        stage          TEXT,                  -- 'abstract_nuts' / 'detailed_nuts'
+        n_net_segments INTEGER DEFAULT 0,
+        n_net_vias     INTEGER DEFAULT 0
+    );
+)";
+
+// Detailed-NUTS per-bit routing tables (schema v8). One net_segment row per
+// bit-wire, one net_via row per per-bit layer transition (the symbolic bus_via
+// fanned out per bit — same (bundle_id, from_seg, to_seg) key + bit_index).
+// net_id joins the net table (resolved from the bit's net name via _ensure_net).
+static const char* NET_DDL = R"(
+    CREATE TABLE IF NOT EXISTS net_segment (
+        -- NOT NULL: see bus_segment (a NULL child key would satisfy the FK).
+        bundle_id      TEXT NOT NULL REFERENCES bundle(id),
+        seg_idx        INTEGER,
+        bit_index      INTEGER,
+        net_id         INTEGER REFERENCES net(id),
+        layer          INTEGER,
+        is_horiz       INTEGER DEFAULT 0,
+        x1 REAL, y1 REAL, x2 REAL, y2 REAL,
+        track_position REAL,
+        width          REAL,
+        PRIMARY KEY (bundle_id, seg_idx, bit_index)
+    );
+    CREATE TABLE IF NOT EXISTS net_via (
+        bundle_id  TEXT NOT NULL REFERENCES bundle(id),
+        from_seg   INTEGER,
+        to_seg     INTEGER,
+        bit_index  INTEGER,
+        net_id     INTEGER REFERENCES net(id),
+        from_layer INTEGER,
+        to_layer   INTEGER,
+        x REAL, y REAL,
+        PRIMARY KEY (bundle_id, from_seg, to_seg, bit_index)
     );
 )";
 
@@ -258,6 +292,7 @@ void BDB::_create_schema() {
     _exec(BUNDLE_DDL);     // bundle tables for a fresh DB
     _exec(TOPOLOGY_DDL);   // candidate-topology tables for a fresh DB
     _exec(NUTS_DDL);       // abstract-NUTS bus routing tables for a fresh DB
+    _exec(NET_DDL);        // detailed-NUTS per-bit routing tables for a fresh DB
     _migrate();
     Stmt mq(_db, "SELECT key,value FROM meta");
     while (sqlite3_step(mq) == SQLITE_ROW) {
@@ -391,6 +426,19 @@ void BDB::_migrate() {
               "DROP TABLE bus_segment_v6;"
               "DROP TABLE bus_via_v6;");
         sqlite3_exec(_db, "PRAGMA foreign_keys = ON;", nullptr, nullptr, nullptr);
+    }
+    if (v < 8) {
+        // v7 -> v8: detailed-NUTS per-bit routing tables (brand new, v4/v5
+        // pattern) + route_snapshot detailed-row counts. A v6-or-older DB got
+        // the new route_snapshot columns from NUTS_DDL in the v<7 step, so the
+        // ALTERs are error-ignored when the columns already exist (v6 pattern).
+        _exec(NET_DDL);
+        sqlite3_exec(_db,
+            "ALTER TABLE route_snapshot ADD COLUMN n_net_segments INTEGER DEFAULT 0",
+            nullptr, nullptr, nullptr);  // ignored if column already exists
+        sqlite3_exec(_db,
+            "ALTER TABLE route_snapshot ADD COLUMN n_net_vias INTEGER DEFAULT 0",
+            nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -2152,10 +2200,12 @@ void BDB::add_bundle_busterm(const std::string& bundle_id,
 }
 
 void BDB::clear_bundles() {
-    // Topology and bus routing both FK to bundle, so clear them first (children
-    // before parents) or the FK constraint would reject the bundle delete. The
-    // route_snapshot fingerprint describes the bus rows, so it is invalidated too.
+    // Topology and bus/net routing all FK to bundle, so clear them first
+    // (children before parents) or the FK constraint would reject the bundle
+    // delete. The route_snapshot fingerprint describes the routed rows, so it
+    // is invalidated too.
     _exec("DELETE FROM route_snapshot;"
+          "DELETE FROM net_via; DELETE FROM net_segment;"
           "DELETE FROM bus_via; DELETE FROM bus_segment;"
           "DELETE FROM topology_segment; DELETE FROM topology;"
           "DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
@@ -2340,11 +2390,15 @@ void BDB::reset_assigned_layers(const std::string& bundle_id) {
 
 void BDB::clear_expanded_bundles() {
     // Expanded per-instance bundles are marked is_replicated=1. Drop them and any
-    // rows keyed to them (bus routing, topologies, memberships) — children before
-    // parents so the bus_segment/bus_via FK to bundle(id) is never violated. This
-    // removes some bus rows, so the route_snapshot fingerprint is invalidated too.
+    // rows keyed to them (net/bus routing, topologies, memberships) — children
+    // before parents so the routing-table FKs to bundle(id) are never violated.
+    // This removes some routed rows, so the route_snapshot is invalidated too.
     _exec(
         "DELETE FROM route_snapshot;"
+        "DELETE FROM net_via WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM net_segment WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM bus_via WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM bus_segment WHERE bundle_id IN"
@@ -2399,26 +2453,34 @@ void BDB::add_bus_via(const BusViaRow& r) {
 
 void BDB::clear_bus_routing() {
     // The route_snapshot fingerprint no longer describes the DB once the bus rows
-    // are gone, so drop it too (run_nuts rewrites both together).
-    _exec("DELETE FROM route_snapshot; DELETE FROM bus_via; DELETE FROM bus_segment;");
+    // are gone, so drop it too (run_nuts rewrites both together). The detailed
+    // net rows are derived from these bus rows, so re-solving abstract NUTS
+    // invalidates them as well.
+    _exec("DELETE FROM route_snapshot;"
+          "DELETE FROM net_via; DELETE FROM net_segment;"
+          "DELETE FROM bus_via; DELETE FROM bus_segment;");
 }
 
 void BDB::set_route_snapshot(const std::string& hash, int n_bus_segments,
-                             int n_bus_vias, const std::string& stage) {
+                             int n_bus_vias, const std::string& stage,
+                             int n_net_segments, int n_net_vias) {
     // Singleton row (id=1): the fingerprint of the current routed output.
     Stmt s(_db,
         "INSERT OR REPLACE INTO route_snapshot(id,hash,n_bus_segments,n_bus_vias,"
-        "stage) VALUES(1,?,?,?,?)");
+        "stage,n_net_segments,n_net_vias) VALUES(1,?,?,?,?,?,?)");
     sqlite3_bind_text(s, 1, hash.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (s, 2, n_bus_segments);
     sqlite3_bind_int (s, 3, n_bus_vias);
     sqlite3_bind_text(s, 4, stage.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 5, n_net_segments);
+    sqlite3_bind_int (s, 6, n_net_vias);
     sqlite3_step(s);
 }
 
 RouteSnapshotRow BDB::route_snapshot() const {
     Stmt q(_db,
-        "SELECT hash,n_bus_segments,n_bus_vias,stage FROM route_snapshot WHERE id=1");
+        "SELECT hash,n_bus_segments,n_bus_vias,stage,n_net_segments,n_net_vias"
+        " FROM route_snapshot WHERE id=1");
     RouteSnapshotRow r;
     if (sqlite3_step(q) == SQLITE_ROW) {
         const unsigned char* h = sqlite3_column_text(q, 0);
@@ -2427,6 +2489,8 @@ RouteSnapshotRow BDB::route_snapshot() const {
         r.n_bus_vias     = sqlite3_column_int(q, 2);
         const unsigned char* st = sqlite3_column_text(q, 3);
         r.stage          = st ? reinterpret_cast<const char*>(st) : std::string();
+        r.n_net_segments = sqlite3_column_int(q, 4);
+        r.n_net_vias     = sqlite3_column_int(q, 5);
     }
     return r;
 }
@@ -2472,6 +2536,112 @@ std::vector<BusViaRow> BDB::bus_vias(const std::string& bundle_id) const {
         r.x = sqlite3_column_double(q, 5);
         r.y = sqlite3_column_double(q, 6);
         r.bit_width  = sqlite3_column_int(q, 7);
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+// ── Detailed-NUTS per-bit routing persistence ────────────────────────────────
+
+void BDB::add_net_segment(const NetSegRow& r) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO net_segment(bundle_id,seg_idx,bit_index,net_id,"
+        "layer,is_horiz,x1,y1,x2,y2,track_position,width)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
+    sqlite3_bind_text(s, 1, r.id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 2, r.seg_idx);
+    sqlite3_bind_int (s, 3, r.bit_index);
+    if (r.net_name.empty())
+        sqlite3_bind_null(s, 4);
+    else
+        sqlite3_bind_int(s, 4, _ensure_net(r.net_name));
+    sqlite3_bind_int   (s, 5, r.layer);
+    sqlite3_bind_int   (s, 6, r.is_horiz ? 1 : 0);
+    sqlite3_bind_double(s, 7, r.x1);
+    sqlite3_bind_double(s, 8, r.y1);
+    sqlite3_bind_double(s, 9, r.x2);
+    sqlite3_bind_double(s, 10, r.y2);
+    sqlite3_bind_double(s, 11, r.track_position);
+    sqlite3_bind_double(s, 12, r.width);
+    sqlite3_step(s);
+}
+
+void BDB::add_net_via(const NetViaRow& r) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO net_via(bundle_id,from_seg,to_seg,bit_index,"
+        "net_id,from_layer,to_layer,x,y) VALUES(?,?,?,?,?,?,?,?,?)");
+    sqlite3_bind_text(s, 1, r.id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 2, r.from_seg);
+    sqlite3_bind_int (s, 3, r.to_seg);
+    sqlite3_bind_int (s, 4, r.bit_index);
+    if (r.net_name.empty())
+        sqlite3_bind_null(s, 5);
+    else
+        sqlite3_bind_int(s, 5, _ensure_net(r.net_name));
+    sqlite3_bind_int   (s, 6, r.from_layer);
+    sqlite3_bind_int   (s, 7, r.to_layer);
+    sqlite3_bind_double(s, 8, r.x);
+    sqlite3_bind_double(s, 9, r.y);
+    sqlite3_step(s);
+}
+
+void BDB::clear_detailed_routing() {
+    // The route_snapshot was hashed over these rows, so it goes with them; the
+    // caller (persist path) rewrites it after re-persisting. Bus rows stay.
+    _exec("DELETE FROM route_snapshot;"
+          "DELETE FROM net_via; DELETE FROM net_segment;");
+}
+
+std::vector<NetSegRow> BDB::net_segments(const std::string& bundle_id) const {
+    Stmt q(_db,
+        "SELECT s.bundle_id,s.seg_idx,s.bit_index,s.net_id,COALESCE(n.name,''),"
+        "s.layer,s.is_horiz,s.x1,s.y1,s.x2,s.y2,s.track_position,s.width"
+        " FROM net_segment s LEFT JOIN net n ON s.net_id = n.id"
+        " WHERE s.bundle_id=? ORDER BY s.seg_idx, s.bit_index");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<NetSegRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        NetSegRow r;
+        r.id        = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        r.seg_idx   = sqlite3_column_int(q, 1);
+        r.bit_index = sqlite3_column_int(q, 2);
+        r.net_id    = sqlite3_column_type(q, 3) == SQLITE_NULL
+                          ? -1 : sqlite3_column_int(q, 3);
+        r.net_name  = reinterpret_cast<const char*>(sqlite3_column_text(q, 4));
+        r.layer     = sqlite3_column_int(q, 5);
+        r.is_horiz  = sqlite3_column_int(q, 6) != 0;
+        r.x1 = sqlite3_column_double(q, 7);
+        r.y1 = sqlite3_column_double(q, 8);
+        r.x2 = sqlite3_column_double(q, 9);
+        r.y2 = sqlite3_column_double(q, 10);
+        r.track_position = sqlite3_column_double(q, 11);
+        r.width          = sqlite3_column_double(q, 12);
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+std::vector<NetViaRow> BDB::net_vias(const std::string& bundle_id) const {
+    Stmt q(_db,
+        "SELECT v.bundle_id,v.from_seg,v.to_seg,v.bit_index,v.net_id,"
+        "COALESCE(n.name,''),v.from_layer,v.to_layer,v.x,v.y"
+        " FROM net_via v LEFT JOIN net n ON v.net_id = n.id"
+        " WHERE v.bundle_id=? ORDER BY v.from_seg, v.to_seg, v.bit_index");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    std::vector<NetViaRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        NetViaRow r;
+        r.id        = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        r.from_seg  = sqlite3_column_int(q, 1);
+        r.to_seg    = sqlite3_column_int(q, 2);
+        r.bit_index = sqlite3_column_int(q, 3);
+        r.net_id    = sqlite3_column_type(q, 4) == SQLITE_NULL
+                          ? -1 : sqlite3_column_int(q, 4);
+        r.net_name  = reinterpret_cast<const char*>(sqlite3_column_text(q, 5));
+        r.from_layer = sqlite3_column_int(q, 6);
+        r.to_layer   = sqlite3_column_int(q, 7);
+        r.x = sqlite3_column_double(q, 8);
+        r.y = sqlite3_column_double(q, 9);
         out.push_back(std::move(r));
     }
     return out;

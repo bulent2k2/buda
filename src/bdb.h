@@ -149,14 +149,47 @@ struct BusViaRow {
     int         bit_width = 0;
 };
 
-// Singleton fingerprint of the routed output (bus_segment + bus_via). One row
-// (id=1); its content hash turns a routing change into one reviewable *.bdb.sql
-// diff line and is the natural feed for the planned BDB -> OA/GDS export.
+// One detailed-NUTS bit-wire (NetSegment) as persisted: placed rectangle plus
+// the bit's net identity. net_name is the WRITE input (resolved to net_id via
+// _ensure_net, auto-creating a name-only net row); reads LEFT JOIN net to fill
+// both fields (net_id = -1 / net_name = "" when unresolved).
+struct NetSegRow {
+    std::string id;                 // bundle id (FK -> bundle.id)
+    int         seg_idx = 0;
+    int         bit_index = 0;      // LOGICAL bit (bit_order already applied)
+    int         net_id = -1;
+    std::string net_name;
+    int         layer = 0;
+    bool        is_horiz = false;
+    double      x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    double      track_position = 0;
+    double      width = 0;
+};
+
+// One per-bit via: the symbolic bus_via row fanned out per bit. Shares the
+// (bundle_id, from_seg, to_seg) key with its parent bus_via; bit_index + the
+// bit's net identity complete the row. from_seg < to_seg always.
+struct NetViaRow {
+    std::string id;                 // bundle id (FK -> bundle.id)
+    int         from_seg = 0, to_seg = 0;
+    int         bit_index = 0;
+    int         net_id = -1;
+    std::string net_name;
+    int         from_layer = 0, to_layer = 0;
+    double      x = 0, y = 0;       // per-bit crossing (µm)
+};
+
+// Singleton fingerprint of the routed output (bus_segment + bus_via, plus
+// net_segment + net_via once detailed NUTS persists). One row (id=1); its
+// content hash turns a routing change into one reviewable *.bdb.sql diff line
+// and is the natural feed for the planned BDB -> OA/GDS export.
 struct RouteSnapshotRow {
     std::string hash;
     int         n_bus_segments = 0;
     int         n_bus_vias = 0;
-    std::string stage;              // e.g. "abstract_nuts"
+    std::string stage;              // "abstract_nuts" or "detailed_nuts"
+    int         n_net_segments = 0;
+    int         n_net_vias = 0;
 };
 
 struct CellRow {
@@ -183,8 +216,9 @@ public:
     // v4 = candidate-topology tables (topology / topology_segment);
     // v5 = abstract-NUTS bus routing tables (bus_segment / bus_via);
     // v6 = topology_segment.assigned_layer (planner's per-segment layer);
-    // v7 = bus_segment/bus_via FK to bundle + route_snapshot fingerprint table.
-    static constexpr int SCHEMA_VERSION = 7;
+    // v7 = bus_segment/bus_via FK to bundle + route_snapshot fingerprint table;
+    // v8 = detailed-NUTS net_segment/net_via tables + route_snapshot n_net_* counts.
+    static constexpr int SCHEMA_VERSION = 8;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -345,9 +379,19 @@ public:
     std::vector<BusSegRow> bus_segments(const std::string& bundle_id) const;
     std::vector<BusViaRow> bus_vias(const std::string& bundle_id) const;
 
+    // ── Detailed-NUTS per-bit routing persistence ──────────────────────────
+    void add_net_segment(const NetSegRow& r);       // INSERT OR REPLACE
+    void add_net_via(const NetViaRow& r);           // INSERT OR REPLACE
+    // Wipe net_segment + net_via (+ the route_snapshot they were hashed into);
+    // bus rows stay. The caller rewrites the snapshot after re-persisting.
+    void clear_detailed_routing();
+    std::vector<NetSegRow> net_segments(const std::string& bundle_id) const;
+    std::vector<NetViaRow> net_vias(const std::string& bundle_id) const;
+
     // Route fingerprint (singleton, id=1).
     void set_route_snapshot(const std::string& hash, int n_bus_segments,
-                            int n_bus_vias, const std::string& stage);
+                            int n_bus_vias, const std::string& stage,
+                            int n_net_segments = 0, int n_net_vias = 0);
     RouteSnapshotRow route_snapshot() const;
 
     std::vector<std::string>  nets_by_hpwl(double lo, double hi)              const;

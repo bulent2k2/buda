@@ -373,11 +373,14 @@ class BudaSession:
         self._persist_route_snapshot(n_seg, n_via, "abstract_nuts")
         return (n_seg, n_via)
 
-    def _persist_route_snapshot(self, n_seg, n_via, stage):
-        """Fingerprint the routed output (all bus_segment + bus_via rows) into the
-        singleton route_snapshot row. The hash is over a canonical, order-independent
+    def _persist_route_snapshot(self, n_seg, n_via, stage, n_net_seg=0, n_net_via=0):
+        """Fingerprint the routed output (all bus_segment + bus_via rows, plus the
+        detailed net_segment + net_via rows once persisted) into the singleton
+        route_snapshot row. The hash is over a canonical, order-independent
         serialization, so an identical routing always yields the same hash (stable in
         the *.bdb.sql diff) and any geometry/layer/via change flips exactly one line.
+        Net rows hash by net_NAME, not net_id, so the digest is independent of the
+        net table's autoincrement history.
         """
         if self.bdb is None:
             return
@@ -391,9 +394,19 @@ class BudaSession:
             for v in self.bdb.bus_vias(bid):
                 rows.append(("V", v.id, v.from_seg, v.to_seg, v.from_layer,
                              v.to_layer, v.x, v.y, v.bit_width))
+            # Empty until _persist_detailed_nuts runs, so the abstract-stage
+            # hash is unchanged by the mere existence of the net tables.
+            for g in self.bdb.net_segments(bid):
+                rows.append(("N", g.id, g.seg_idx, g.bit_index, g.net_name,
+                             g.layer, int(g.is_horiz), g.x1, g.y1, g.x2, g.y2,
+                             g.track_position, g.width))
+            for v in self.bdb.net_vias(bid):
+                rows.append(("W", v.id, v.from_seg, v.to_seg, v.bit_index,
+                             v.net_name, v.from_layer, v.to_layer, v.x, v.y))
         rows.sort(key=repr)
         digest = hashlib.sha256(repr(rows).encode("utf-8")).hexdigest()
-        self.bdb.set_route_snapshot(digest, n_seg, n_via, stage)
+        self.bdb.set_route_snapshot(digest, n_seg, n_via, stage,
+                                    n_net_seg, n_net_via)
 
     def _persist_bundle_vias(self, w):
         """Record one symbolic bus-via per layer-transition in a bundle's placed
@@ -448,6 +461,85 @@ class BudaSession:
                 self.bdb.add_bus_via(r)
                 n += 1
         return n
+
+    def _persist_detailed_nuts(self):
+        """Persist detailed-NUTS per-bit wires + vias (Stage 9, schema v8).
+
+        Written after run_detailed_nuts. Each NetSegment becomes a net_segment row
+        (placed rectangle + the bit's net identity: `net_names[bit_index]`, resolved
+        to a net_id via _ensure_net) and each NetVia a net_via row (the symbolic
+        bus_via fanned out per bit — same (bundle_id, from_seg, to_seg) key). The
+        route_snapshot is rewritten with stage 'detailed_nuts' and hashes the net
+        rows too. No-op (returns (0, 0)) without an open BDB or detailed result.
+        """
+        if self.bdb is None or self.detailed_result is None:
+            return (0, 0)
+        referenced = {str(ns.bundle_id)
+                      for ns in self.detailed_result.net_segments}
+        # The net rows describe the persisted abstract bus routing. If the bus
+        # rows are missing (e.g. the BDB was opened only after run_nuts ran),
+        # persist the abstract stage first — _persist_nuts also ensures the FK
+        # bundle parents and writes the abstract snapshot whose bus counts we
+        # preserve below. Otherwise just ensure the parents (same guard as
+        # _persist_nuts).
+        missing_bus = {bid for bid in referenced if not self.bdb.bus_segments(bid)}
+        if missing_bus and self.nuts_result is not None:
+            self._persist_nuts()
+        else:
+            persisted = {b.id for b in self.bdb.all_bundles()}
+            if not referenced <= persisted:
+                self._persist_planner_output()
+        # Preserve the bus counts for the snapshot rewrite BEFORE the clear
+        # drops the singleton along with the old net rows.
+        snap = self.bdb.route_snapshot()
+        self.bdb.clear_detailed_routing()
+
+        bid_to_names = {w.input.original_bundle.id:
+                        list(w.input.original_bundle.get_net_names())
+                        for w in self.bundles}
+        h_layers = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL))
+
+        def bit_net(bundle_id, bit):
+            names = bid_to_names.get(bundle_id, [])
+            return names[bit] if bit < len(names) else ""
+
+        for ns in self.detailed_result.net_segments:
+            r = buda.NetSegRow()
+            r.id = str(ns.bundle_id)
+            r.seg_idx = ns.seg_idx
+            r.bit_index = ns.bit_index
+            r.net_name = bit_net(ns.bundle_id, ns.bit_index)
+            r.layer = ns.layer
+            r.is_horiz = ns.layer in h_layers
+            half = ns.width / 2.0
+            # Spans are stored AS-IS (may be reversed, span_lo > span_hi, after
+            # the engine's endpoint snap — same convention as bus_segment;
+            # consumers take min/max).
+            if r.is_horiz:                    # span is x; track_position is y
+                r.x1, r.x2 = ns.span_lo, ns.span_hi
+                r.y1, r.y2 = ns.track_position - half, ns.track_position + half
+            else:                             # span is y; track_position is x
+                r.y1, r.y2 = ns.span_lo, ns.span_hi
+                r.x1, r.x2 = ns.track_position - half, ns.track_position + half
+            r.track_position = ns.track_position
+            r.width = ns.width
+            self.bdb.add_net_segment(r)
+
+        for nv in self.detailed_result.net_vias:
+            r = buda.NetViaRow()
+            r.id = str(nv.bundle_id)
+            r.from_seg, r.to_seg = nv.from_seg, nv.to_seg
+            r.bit_index = nv.bit_index
+            r.net_name = bit_net(nv.bundle_id, nv.bit_index)
+            r.from_layer, r.to_layer = nv.from_layer, nv.to_layer
+            r.x, r.y = nv.x, nv.y
+            self.bdb.add_net_via(r)
+
+        n_ns = len(self.detailed_result.net_segments)
+        n_nv = len(self.detailed_result.net_vias)
+        self._persist_route_snapshot(snap.n_bus_segments, snap.n_bus_vias,
+                                     "detailed_nuts", n_ns, n_nv)
+        return (n_ns, n_nv)
 
     def _persist_planner_output(self):
         """Persist the planner's decision into the BDB after run_planner.
@@ -3585,6 +3677,10 @@ class BudaSession:
                 return
 
             self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            n_ns, n_nv = self._persist_detailed_nuts()
+            if n_ns:
+                print(f"[BDB] persisted {n_ns} net segment(s) and {n_nv} "
+                      f"net via(s) to the open BDB.")
         elif cmd == "ripup_reroute":
             # Usage: ripup_reroute [max_iter]
             # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;

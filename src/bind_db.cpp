@@ -152,12 +152,43 @@ void bind_db(py::module_& m) {
         .def_readwrite("y",          &BusViaRow::y)
         .def_readwrite("bit_width",  &BusViaRow::bit_width);
 
+    py::class_<NetSegRow>(m, "NetSegRow")
+        .def(py::init<>())
+        .def_readwrite("id",             &NetSegRow::id)
+        .def_readwrite("seg_idx",        &NetSegRow::seg_idx)
+        .def_readwrite("bit_index",      &NetSegRow::bit_index)
+        .def_readwrite("net_id",         &NetSegRow::net_id)
+        .def_readwrite("net_name",       &NetSegRow::net_name)
+        .def_readwrite("layer",          &NetSegRow::layer)
+        .def_readwrite("is_horiz",       &NetSegRow::is_horiz)
+        .def_readwrite("x1",             &NetSegRow::x1)
+        .def_readwrite("y1",             &NetSegRow::y1)
+        .def_readwrite("x2",             &NetSegRow::x2)
+        .def_readwrite("y2",             &NetSegRow::y2)
+        .def_readwrite("track_position", &NetSegRow::track_position)
+        .def_readwrite("width",          &NetSegRow::width);
+
+    py::class_<NetViaRow>(m, "NetViaRow")
+        .def(py::init<>())
+        .def_readwrite("id",         &NetViaRow::id)
+        .def_readwrite("from_seg",   &NetViaRow::from_seg)
+        .def_readwrite("to_seg",     &NetViaRow::to_seg)
+        .def_readwrite("bit_index",  &NetViaRow::bit_index)
+        .def_readwrite("net_id",     &NetViaRow::net_id)
+        .def_readwrite("net_name",   &NetViaRow::net_name)
+        .def_readwrite("from_layer", &NetViaRow::from_layer)
+        .def_readwrite("to_layer",   &NetViaRow::to_layer)
+        .def_readwrite("x",          &NetViaRow::x)
+        .def_readwrite("y",          &NetViaRow::y);
+
     py::class_<RouteSnapshotRow>(m, "RouteSnapshotRow")
         .def(py::init<>())
         .def_readwrite("hash",           &RouteSnapshotRow::hash)
         .def_readwrite("n_bus_segments", &RouteSnapshotRow::n_bus_segments)
         .def_readwrite("n_bus_vias",     &RouteSnapshotRow::n_bus_vias)
-        .def_readwrite("stage",          &RouteSnapshotRow::stage);
+        .def_readwrite("stage",          &RouteSnapshotRow::stage)
+        .def_readwrite("n_net_segments", &RouteSnapshotRow::n_net_segments)
+        .def_readwrite("n_net_vias",     &RouteSnapshotRow::n_net_vias);
 
     py::class_<CellRow>(m, "CellRow")
         .def_readwrite("name",   &CellRow::name)
@@ -230,9 +261,15 @@ void bind_db(py::module_& m) {
         .def("clear_bus_routing", &BDB::clear_bus_routing)
         .def("bus_segments",      &BDB::bus_segments, py::arg("bundle_id"))
         .def("bus_vias",          &BDB::bus_vias, py::arg("bundle_id"))
+        .def("add_net_segment",   &BDB::add_net_segment, py::arg("r"))
+        .def("add_net_via",       &BDB::add_net_via, py::arg("r"))
+        .def("clear_detailed_routing", &BDB::clear_detailed_routing)
+        .def("net_segments",      &BDB::net_segments, py::arg("bundle_id"))
+        .def("net_vias",          &BDB::net_vias, py::arg("bundle_id"))
         .def("set_route_snapshot", &BDB::set_route_snapshot,
              py::arg("hash"), py::arg("n_bus_segments"),
-             py::arg("n_bus_vias"), py::arg("stage"))
+             py::arg("n_bus_vias"), py::arg("stage"),
+             py::arg("n_net_segments") = 0, py::arg("n_net_vias") = 0)
         .def("route_snapshot",    &BDB::route_snapshot)
         .def("nets_by_hpwl",    &BDB::nets_by_hpwl,
              py::arg("lo"), py::arg("hi"))
