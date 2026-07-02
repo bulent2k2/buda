@@ -4286,7 +4286,7 @@ def main():
     parser.add_argument('script', nargs='?',
                         help='path to a .buda flow script; a missing .buda '
                              'suffix is added automatically')
-    parser.add_argument('--no-viz', action='store_true',
+    parser.add_argument('-nv', '--no-viz', action='store_true',
                         help='skip visualize commands (useful for batch/CI runs)')
     parser.add_argument('--verbose-conn', action='store_true',
                         help='print every connectivity violation individually; '

@@ -19,6 +19,33 @@ set -e
 
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
+# Handle help before treating the first arg as a test name (otherwise `-h` would
+# be forwarded to unit2buda.py and the wrapper would then try to route a
+# nonexistent /tmp/u2b_-h.buda).
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    cat <<'EOF'
+Usage: u2b <test_name> [unit2buda opts]
+
+Turn a topology (or CLI/BDB-flow) unit test into a runnable .buda script and
+open it in the interactive topology explorer.
+
+Arguments:
+  test_name        test function name, or path/to/test_file.py::test_func
+  [unit2buda opts] forwarded to tools/unit2buda.py (e.g. --case N);
+                   do NOT pass -o, the wrapper supplies it
+
+Examples:
+  u2b test_column_datapath_hvh
+  u2b test_column_datapath_hvh --case 2
+  u2b test/tests/test_foo.py::test_bar
+
+Runs tools/unit2buda.py to record the test's floorplan + generated candidates,
+writes the .buda to $TMPDIR, then launches bin/buda on it (which ends with
+visualize_topologies).  See tools/unit2buda.py --help for the full opt list.
+EOF
+    exit 0
+fi
+
 if [ -z "$1" ]; then
     echo "Usage: u2b <test_name> [unit2buda opts]   (e.g. u2b test_column_datapath_hvh --case 2)" >&2
     exit 1

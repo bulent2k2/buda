@@ -13,6 +13,24 @@ PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:$PYTHONPATH"
 
 case "$1" in
+  -h|--help)
+    cat <<'EOF'
+bfp — BUDA Floorplanner launcher with built-in demo scenarios.
+
+Usage:
+  bfp tc1 [output.bdb]     create TC1 (40-block overlap storm), open in fp
+  bfp tc2 [output.bdb]     create TC2 (fixed io_pad + 39 free blocks), open in fp
+  bfp tc3 [output.bdb]     create TC3 (4 io_pads at corners, 40 free, multi-bit buses)
+  bfp path/to/file.bdb     open an existing BDB directly in fp
+  bfp path/to/script.buda  run bin/buda <script>, then open the BDB it declared
+  bfp                      open fp with no file (blank canvas)
+  bfp -h | --help          show this help
+
+See also: bin/fp, docs/FLOORPLANNER_USER_GUIDE.md
+EOF
+    exit 0
+    ;;
+
   tc1|tc2|tc3)
     DEMO="$1"
     OUT="${2:-/tmp/bfp_${DEMO}.bdb}"
