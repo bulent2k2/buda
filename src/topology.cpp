@@ -2831,10 +2831,16 @@ void TopologyGenerator::add_multi_trunk_candidates(
                 return;   // a stub too short → legacy BITRUNK_H is not viable
             }
         }
-        // Annotate the two H trunks + V backbone (the leaf stubs are seeded
-        // above) so the legacy shape carries a complete seg_busterms annotation
-        // like every other generated candidate — no reliance on the fallback.
-        annotate_endpoints(t, blocks);
+        // Give the two H trunks + V backbone a seg_busterms entry (the leaf
+        // stubs are seeded above) so ConnTopology uses the authoritative path for
+        // EVERY segment, never the geometric fallback.  These trunk endpoints tap
+        // no block — they are free ends or wire junctions — so their entries stay
+        // null/null and the backbone↔trunk and stub↔trunk joins are inferred as
+        // SEG.  We deliberately do NOT call annotate_endpoints here: it would
+        // geometrically fill a trunk endpoint that coincidentally grazes a
+        // neighbour block face, turning a junction into a spurious busterm (the
+        // very corner-feedthru this effort removes).
+        for (size_t i = 0; i < t.segments.size(); ++i) (void)t.seg_busterms[i];
         results.push_back(std::move(t));
     }();
 
@@ -2947,13 +2953,18 @@ void TopologyGenerator::add_multi_trunk_candidates(
         t.seg_busterms = std::move(shifted);
 
         for (const auto& b : blocks) t.connected_block_names.push_back(b.block_name);
-        // Complete the endpoint annotation for EVERY segment (root spine + branch
-        // trunks, not just the leaf stubs seeded above) so seg_busterms is the
-        // single source of connectivity truth — the clean-tree gate below and all
-        // downstream stages read the annotation, never ConnTopology's geometric
-        // fallback (see docs/internal/single_source_topo_truth.md).  Idempotent:
-        // annotate_endpoints only fills endpoints that are still unset.
-        annotate_endpoints(t, blocks);
+        // Give the root spine + branch trunks a seg_busterms entry (leaf stubs are
+        // seeded above) so ConnTopology uses the authoritative path for EVERY
+        // segment — the clean-tree gate below and all downstream stages read the
+        // annotation, never the geometric fallback (docs/internal/
+        // single_source_topo_truth.md).  These trunk endpoints tap no block: they
+        // are branch↔root / stub↔branch wire junctions or free column ends, so
+        // their entries stay null/null (the joins are inferred as SEG).  A
+        // pass-through leaf is covered by connected_block_names + span, not an
+        // endpoint busterm.  We deliberately do NOT call annotate_endpoints: it
+        // would geometrically fill a trunk endpoint grazing a block face, turning
+        // a junction into a spurious feedthru busterm.
+        for (size_t i = 0; i < t.segments.size(); ++i) (void)t.seg_busterms[i];
         // Only keep a physically self-connected, acyclic, fully-covered tree.
         if (!topology_is_clean_tree(t, floorplan_)) return;
         // Skip a duplicate (different K can yield the same tree).

@@ -62,12 +62,23 @@ for **every** segment, so the shape is fully covered):
 ## Roadmap
 
 - **Phase 1 — close the BITRUNK gap (done).** `add_multi_trunk_candidates` now
-  calls `annotate_endpoints(t, blocks)` on every candidate (legacy + two-level)
-  before the clean-tree gate, so the trunk/branch/root segments are annotated
-  like every other shape. No generated candidate relies on the fallback anymore.
-  The default candidate set is unchanged (legacy BITRUNK_H is still emitted;
-  annotation is metadata, not geometry). Regression:
-  `test_multi_trunk_units.py::test_bitrunk_candidates_are_fully_annotated`.
+  gives **every** segment a `seg_busterms` entry before the clean-tree gate, so
+  ConnTopology uses the authoritative path for all of them. The leaf stubs are
+  seeded with their block tap; the root spine + branch trunks are completed as
+  **`null`/`null`** (they tap no block — their endpoints are branch↔root /
+  stub↔branch wire junctions or free ends, inferred as SEG). It deliberately does
+  **not** call `annotate_endpoints` here: that geometric annotator would fill a
+  trunk endpoint that coincidentally grazes a neighbour block face, turning a
+  junction into a spurious feedthru busterm (a Codex P1 catch — the very bug this
+  effort removes). Default candidate set unchanged (legacy BITRUNK_H still
+  emitted; annotation is metadata, not geometry). Regressions:
+  `test_multi_trunk_units.py::test_bitrunk_candidates_are_fully_annotated` and
+  `::test_bitrunk_trunk_endpoint_grazing_a_face_stays_a_junction`.
+
+  Note: `annotate_endpoints` is safe for the other shapes because 2-pin shapes
+  pass it only `{src, dst}` and trunk/MST shapes place their spine outside block
+  faces; BITRUNK is the case where a trunk endpoint can graze a *terminal*
+  sibling's face, so it seeds structurally instead of geometrically.
 
 - **Phase 2 — retire the fallback.** Expose `annotate_endpoints(topo, fp)` as a
   reusable entry point. In `infer_connections`, treat a *missing* `seg_busterms`
