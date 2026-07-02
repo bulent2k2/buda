@@ -173,7 +173,7 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `source <file>` | — | Execute another `.buda` script inline |
 | `def_track_pattern <layer_id> <origin> <type> <w> <sp> ...` | 8 setup | Define repeating track pattern |
 | `add_grid_override <layer_id> <x1> <y1> <x2> <y2> <origin> ...` | 8 setup | Region-scoped pattern override |
-| `run_detailed_nuts [lo_hi\|hi_lo]` | 9 | Snap bit-wires to concrete tracks |
+| `run_detailed_nuts [lo_hi\|hi_lo]` | 9 | Snap bit-wires to concrete tracks; emits per-bit `net_vias` (the symbolic bus-vias fanned out per bit, drawn under `[Vias/Conns]` in detailed viz) |
 | `ripup_reroute [max_iter]` | 3↔4/9 | Feedback-driven rip-up & re-route: greedy hill-climb that reads the **actual** NUTS overlaps (run after `run_nuts`) or DetailedNUTS opens (run after `run_detailed_nuts`), re-pins a contending bundle to an alternate topology, re-runs planner→NUTS(→DNUTS), and keeps moves that reduce the metric — clears congestion the planner's band model under-predicts (`overflow=0`). No-op when already clean. Works in both flat flow and **hier flow** (after `run_planner hier`, self.bundles is the expanded per-instance list, so a re-route re-pins one instance and re-plans the expanded wrappers in place) |
 | `check_connectivity [all]` | verify | Run connectivity verification at the current stage (topo / NUTS / detailed-NUTS). `all` checks every candidate topology; auto-run before planning |
 | `report_overhead` | — | Compare `def_layer` overhead% against the actual track-pattern overhead |
@@ -461,8 +461,14 @@ add_grid_override  <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...
 - `bundle_id`, `seg_idx`, `bit_index` (0-based position within bus)
 - `track_position` (track centre), `width` (from the `TrackSlot`), `layer`, `span_lo/hi`
 
+`NetVia` — one per-bit layer transition; output of stage 9
+- The bundle-level symbolic bus-via fanned out to individual bits: same `(bundle_id, from_seg, to_seg)` key (with `from_seg < to_seg`), one row per `bit_index`
+- `from_layer`/`to_layer` (the two bits' layers, always different), `x`/`y` = the per-bit crossing of the two bits' placed tracks
+- `bit_index` is the **logical** bit (`bit_order` already applied), so `net_names[bit_index]` resolves the bit's net with no HI_LO re-indexing
+
 `DetailedNUTSResult`
 - `net_segments`: `vector<NetSegment>`
+- `net_vias`: `vector<NetVia>`
 - `num_unplaced`: int
 
 `DetailedNUTSEngine(stack).run(bus_segments)` drives the placement.
@@ -472,13 +478,14 @@ add_grid_override  <layer_id> <x1> <y1> <x2> <y2> <origin> [<type> <w> <sp>] ...
 2. Take the first `bit_width` signal tracks (LO_HI) or last `bit_width` (HI_LO).
 3. If `timing_critical`, verify the selected tracks are contiguous (no power/clock track between them); if not, search for the tightest contiguous window of `bit_width` signal tracks within the interval.
 4. Emit one `NetSegment` per track with `track_position` = track centre, `width` = track width from `TrackSlot`.
+5. Span-adjust bit-wires so bit i reaches its connected segments' same-bit tracks, then emit one `NetVia` per connected bit pair on **different layers** (deduped per symmetric conn; same-layer touches and unplaced counterparts produce no via).
 
 **`.buda` command:**
 ```
 run_detailed_nuts [lo_hi|hi_lo]
 ```
 
-**Visualization hook:** `draw_detailed_tracks(detailed_result)` draws individual bit-wire lines at their concrete track positions, with per-type visibility toggles (`[VDD] [GND] [CLK] [SIGNAL]`) as matplotlib `Button` widgets.
+**Visualization hook:** `draw_detailed_tracks(detailed_result)` draws individual bit-wire lines at their concrete track positions, with per-type visibility toggles (`[VDD] [GND] [CLK] [SIGNAL]`) as matplotlib `Button` widgets. Per-bit vias are drawn as one scatter `PathCollection` per (bundle, upper layer) — lazy-built with the bit-wires, gated by `[Detailed]` **and** `[Vias/Conns]` — see [Detailed Viz](docs/detailed_viz.md).
 
 ---
 

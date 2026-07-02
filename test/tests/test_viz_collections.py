@@ -15,7 +15,7 @@ real BudaVisualizer over a tiny flow with the Agg backend (no window shown).
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection, PatchCollection
+from matplotlib.collections import LineCollection, PatchCollection, PathCollection
 from pathlib import Path
 
 import pytest
@@ -80,10 +80,12 @@ def test_detailed_artists_built_lazily(monkeypatch):
 
     assert viz._detailed_built is True
     assert viz._detailed_bundle_artists, "bit-wire collections should now exist"
-    # Bit-wires are LineCollections (one per bundle×layer), not per-bit Line2D.
+    # Bit-wires are LineCollections (one per bundle×layer) and per-bit vias are
+    # PathCollections (one per bundle×upper-layer) — never per-bit/per-via
+    # individual artists.
     for entries in viz._detailed_bundle_artists.values():
         for e in entries:
-            assert isinstance(e["artist"], LineCollection)
+            assert isinstance(e["artist"], (LineCollection, PathCollection))
 
     # Background rail stripes (Tracks) are off by default and must NOT be built
     # just because the detailed view opened — they are deferred to [Tracks].
@@ -268,3 +270,59 @@ def test_a_key_toggles_highlight(monkeypatch):
     # 7. Press 'a' again -> should restore highlight in detailed mode
     viz._on_key(types.SimpleNamespace(key="a"))
     assert viz._highlighted == bid
+
+
+def test_detailed_vias_are_grouped_collections(monkeypatch):
+    # Per-bit vias (NetVia) collapse into one PathCollection per
+    # (bundle, upper layer) — the perf pin: never one artist per via.
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._detailed_via_artists == []          # lazy, like the bit-wires
+
+    viz._toggle_detailed()
+    net_vias = list(viz._detailed_result.net_vias)
+    assert net_vias, "flow should produce per-bit vias (layer transitions exist)"
+    assert viz._detailed_via_artists
+    assert all(isinstance(a, PathCollection) for a in viz._detailed_via_artists)
+    n_points = sum(len(a.get_offsets()) for a in viz._detailed_via_artists)
+    assert n_points == len(net_vias)                # every via drawn exactly once
+    groups = {(v.bundle_id, max(v.from_layer, v.to_layer)) for v in net_vias}
+    assert len(viz._detailed_via_artists) == len(groups)
+
+
+def test_detailed_vias_gated_by_vias_conns_and_detailed(monkeypatch):
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._toggle_detailed()                          # detailed on, vias_conns on
+    assert viz.ui_state.vias_conns is True
+    assert all(a.get_visible() for a in viz._detailed_via_artists)
+
+    viz._toggle_vias_conns()                        # Vias/Conns off -> hidden
+    assert not any(a.get_visible() for a in viz._detailed_via_artists)
+    viz._toggle_vias_conns()                        # back on -> visible
+    assert all(a.get_visible() for a in viz._detailed_via_artists)
+
+    viz._toggle_detailed()                          # leave detailed mode -> hidden
+    assert not any(a.get_visible() for a in viz._detailed_via_artists)
+
+
+def test_entering_detailed_respects_vias_conns_off(monkeypatch):
+    # The detailed toggle's bulk reveal of _detailed_bundle_artists must not
+    # leak the via scatters while Vias/Conns is off.
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._toggle_vias_conns()                        # off BEFORE detailed opens
+    viz._toggle_detailed()
+    assert viz._detailed_via_artists                # built...
+    assert not any(a.get_visible() for a in viz._detailed_via_artists)  # ...hidden
+
+
+def test_rerun_rebuilds_detailed_vias(monkeypatch):
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._toggle_detailed()
+    n_before = sum(len(a.get_offsets()) for a in viz._detailed_via_artists)
+
+    viz._redraw_nuts_tracks((viz._nuts_result, viz._detailed_result))
+    n_after = sum(len(a.get_offsets()) for a in viz._detailed_via_artists)
+    assert n_after == n_before >= 1                 # rebuilt, not duplicated
+    assert all(a.get_visible() for a in viz._detailed_via_artists)
+
+    viz._toggle_vias_conns()                        # gate still works post-rerun
+    assert not any(a.get_visible() for a in viz._detailed_via_artists)
