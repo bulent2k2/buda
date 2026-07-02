@@ -146,3 +146,14 @@ A bend-aware fallback (skip a BUSTERM at an endpoint shared with a perpendicular
 segment) would patch the corner-graze symptom, but it keeps *two* connectivity
 oracles and can still mis-handle a real terminal that coincides with a junction.
 One oracle, set at generation, is the durable design.
+
+## Follow-up — the seg-to-seg half
+
+This effort made the **busterm** half of connectivity (segment → block face)
+authoritative. The **seg-to-seg** half (which perpendicular segment joins which)
+is still geometrically re-inferred by `ConnTopology::infer_connections`, and NUTS
+consumes it only as a *soft* post-hoc span-extension rather than a placement
+constraint — the source of the `tc3a_flat` bundle-48 abstract-NUTS open that
+DetailedNUTS recovers. The symmetric completion (first-class `seg_joins` +
+**hard co-placement** in NUTS) is proposed in
+[`seg_junction_coplacement.md`](seg_junction_coplacement.md).
