@@ -204,35 +204,45 @@ def _set_lims_filling_box(ax, x0, x1, y0, y1):
     ax.set_xlim(x0, x1)
     ax.set_ylim(y0, y1)
 
-def _install_home_fit_on_first_draw(viz):
-    """Re-apply the maximal home fit once, on the first real draw.
+def _install_home_fit_tracking(viz):
+    """Keep the home view maximal as the window reaches (and changes) its size.
 
     The fit computed at build time (in show()/_draw) uses the *nominal* figure
-    geometry; the true on-screen axes box is not known until the window is
-    realized by the GUI backend.  Recomputing on the first draw_event — the same
-    math the 'h' key uses — makes the home view maximal from the start instead of
-    only after a manual reset.  Harmless under headless backends where no
-    draw_event fires (the nominal fit already stands)."""
+    geometry; the true on-screen axes box is not known until the GUI backend
+    realizes — and, on macOS, *maximizes* — the window, which settles over
+    several frames AFTER show() (see install_tk_geometry_resync).  A single
+    first-draw refit fires too early, at the pre-maximize size, so the view is
+    only maximal after a manual 'h'.  Instead, re-apply the fill on every
+    resize_event (and the first draws), always with the same math the 'h' key
+    uses, so the home view tracks the window to its final maximized size and
+    stays maximal on any later resize.
+
+    The refit only runs while the view is still the home fit, so it never
+    clobbers a user pan/zoom; and it forces a redraw only when the fill actually
+    changed, so the resize→draw feedback settles instead of looping.  Harmless
+    under headless backends where these events never fire (the nominal fit
+    already stands)."""
     def _refit(_event):
-        cid = getattr(viz, '_home_fit_cid', None)
-        if cid is not None:
-            viz.fig.canvas.mpl_disconnect(cid)   # one-shot; also prevents re-entry
-            viz._home_fit_cid = None
         bbox = getattr(viz, '_home_data_bbox', None)
         if bbox is None:
             return
-        # Only refit while the view is still the (nominal) home we set — if the
-        # user already panned/zoomed before the first real draw, leave it alone.
+        def _close(a, b):
+            return all(abs(p - q) <= 1e-6 * (1 + abs(q)) for p, q in zip(a, b))
         cur  = viz.ax.get_xlim() + viz.ax.get_ylim()
         home = ((viz._home_xlim or (0.0, 0.0)) + (viz._home_ylim or (0.0, 0.0)))
-        if viz._home_xlim is not None and \
-                not all(abs(a - b) <= 1e-6 * (1 + abs(b)) for a, b in zip(cur, home)):
+        # Still at the home fit? If the user has panned/zoomed away, leave it.
+        if viz._home_xlim is not None and not _close(cur, home):
             return
         _set_lims_filling_box(viz.ax, *bbox)
+        new = viz.ax.get_xlim() + viz.ax.get_ylim()
         viz._home_xlim = viz.ax.get_xlim()
         viz._home_ylim = viz.ax.get_ylim()
-        viz.fig.canvas.draw_idle()
-    viz._home_fit_cid = viz.fig.canvas.mpl_connect('draw_event', _refit)
+        # Only redraw when the fill moved, so a resize's follow-up draw_event
+        # (which re-enters here at the settled size) terminates instead of looping.
+        if viz._home_xlim is None or not _close(new, home):
+            viz.fig.canvas.draw_idle()
+    viz.fig.canvas.mpl_connect('resize_event', _refit)
+    viz.fig.canvas.mpl_connect('draw_event', _refit)
 
 def raise_window(win_or_fig):
     """Bring a window or figure to the front and ensure it has keyboard focus."""
@@ -760,9 +770,9 @@ class TopologyExplorer:
 
         self._draw()
         # Make the home view maximal from the first frame (not only after 'h'):
-        # _draw fit the nominal figure size; refit once the real window geometry
-        # is known.
-        _install_home_fit_on_first_draw(self)
+        # _draw fit the nominal figure size; track resizes to the real (and
+        # macOS-maximized) window geometry as it settles.
+        _install_home_fit_tracking(self)
 
     def _on_close(self, event):
         if hasattr(self, 'ui_state'):
@@ -3935,9 +3945,9 @@ class BudaVisualizer:
                       f'(backend={self.fig.canvas.__class__.__name__})')
 
         # Make the home view maximal from the first frame (not only after 'h'):
-        # the fit above used the nominal figure size; refit once the real window
-        # geometry is known.
-        _install_home_fit_on_first_draw(self)
+        # the fit above used the nominal figure size; track resizes to the real
+        # (and macOS-maximized) window geometry as it settles.
+        _install_home_fit_tracking(self)
 
         raise_window(self.fig)
         install_tk_geometry_resync(self.fig)

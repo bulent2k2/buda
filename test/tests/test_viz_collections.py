@@ -326,3 +326,50 @@ def test_rerun_rebuilds_detailed_vias(monkeypatch):
 
     viz._toggle_vias_conns()                        # gate still works post-rerun
     assert not any(a.get_visible() for a in viz._detailed_via_artists)
+
+
+def _axes_aspect(ax):
+    x0, x1 = ax.get_xlim(); y0, y1 = ax.get_ylim()
+    return (x1 - x0) / (y1 - y0)
+
+
+def _box_aspect(ax):
+    pos = ax.get_position(original=True)
+    fw, fh = ax.figure.get_size_inches()
+    return (fw * pos.width) / (fh * pos.height)
+
+
+def test_home_view_tracks_window_resize(monkeypatch):
+    """The home view must stay maximal (data aspect == on-screen axes-box aspect)
+    as the window reaches its final size — the macOS symptom was a one-shot
+    first-draw refit that fired before the async maximize, so the view only
+    became maximal after a manual 'h'.  A resize_event now re-applies the fill."""
+    from matplotlib.backend_bases import ResizeEvent
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+
+    def resize(w, h):
+        viz.fig.set_size_inches(w, h)
+        viz.fig.canvas.callbacks.process(
+            "resize_event", ResizeEvent("resize_event", viz.fig.canvas))
+
+    # A window that maximizes AFTER show() to a wide frame: the fit must follow.
+    resize(24, 9)
+    assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6, \
+        "home view did not refit to the maximized window (still non-maximal)"
+    # A later resize keeps it maximal too.
+    resize(12, 18)
+    assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6
+
+
+def test_home_fit_tracking_does_not_clobber_a_pan(monkeypatch):
+    """Once the user pans away from home, a resize must not yank the view back."""
+    from matplotlib.backend_bases import ResizeEvent
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    x0, x1 = viz.ax.get_xlim(); dx = (x1 - x0) * 0.3
+    viz.ax.set_xlim(x0 + dx, x1 + dx)
+    panned = viz.ax.get_xlim()
+    viz.fig.set_size_inches(10, 10)
+    viz.fig.canvas.callbacks.process(
+        "resize_event", ResizeEvent("resize_event", viz.fig.canvas))
+    assert abs(viz.ax.get_xlim()[0] - panned[0]) < 1e-6, \
+        "resize clobbered a user pan (home-fit tracking not guarded)"
