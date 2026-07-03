@@ -20,6 +20,7 @@ cell/component tables. GDS is binary, so no blobs are checked in.
 
 import contextlib
 import io
+import sqlite3
 
 import pytest
 
@@ -133,6 +134,16 @@ def test_labels_recover_nets_and_pins(tmp_path):
         pins = db.pins_by_comp(comps[name].id)
         assert [(p.pin_name, p.px, p.py, p.dir) for p in pins] == \
             [("n_data", px, py, "UNKNOWN")]
+    # Label nets get net_props rows too, so HPWL/fanout queries see them
+    # (Codex #148 P2): the recovered 2-pin net has a real HPWL after compute.
+    db.compute_all()
+    assert db.nets_by_hpwl(1.0, 1e12) == ["n_data"]   # hpwl = 600 + 800
+    with sqlite3.connect(str(tmp_path / "c.bdb")) as con:
+        hpwl, fanout = con.execute(
+            "SELECT p.hpwl, p.fanout FROM net_props p"
+            " JOIN net n ON n.id = p.net_id WHERE n.name='n_data'").fetchone()
+    # fanout counts INPUT/INOUT pins only; label pins are UNKNOWN → 0.
+    assert (hpwl, fanout) == (1400.0, 0)
 
 
 def test_label_lands_on_deepest_component(tmp_path):

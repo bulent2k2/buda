@@ -1004,6 +1004,14 @@ void BDB::clear_design() {
 void BDB::add_label_pin(const std::string& net_name, int comp_id,
                         const std::string& pin_name, double px, double py) {
     int net_id = _ensure_net(net_name);
+    // A net_props row per net, like the DEF/Verilog importers — without it the
+    // recovered net has no HPWL/fanout row and disappears from compute_all()
+    // and nets_by_hpwl() even though its pins exist.
+    {
+        Stmt np(_db, "INSERT OR IGNORE INTO net_props(net_id) VALUES(?)");
+        sqlite3_bind_int(np, 1, net_id);
+        sqlite3_step(np);
+    }
     Stmt s(_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
         " VALUES(?,?,?,'UNKNOWN',?,?)");
