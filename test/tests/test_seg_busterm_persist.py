@@ -25,6 +25,7 @@ See docs/internal/single_source_topo_truth.md (Phase 3).
 """
 import contextlib
 import io
+import sqlite3
 
 import buda
 import buda_cli
@@ -81,6 +82,36 @@ def _reload(bdb, bid, ci):
     t = buda.Topology()
     buda.load_seg_busterms(bdb, bid, ci, t)
     return t
+
+
+def test_busterm_rows_deduped_across_candidates(tmp_path):
+    """A 'tb:<block>' busterm row is written ONCE per block even though many
+    candidates (and both bus endpoints) tap it — the per-candidate work is only
+    the cheap link row.  Regression for the generate-time persist cost
+    (docs/internal/wishlist-bdb.md): the heavy JSON-rects row is not rewritten
+    per candidate.  Correctness that the dedup preserves the round-trip is
+    covered by the reload tests below (which run through the same persist)."""
+    path = str(tmp_path / "sb.bdb")
+    _session(path)
+    con = sqlite3.connect(path)
+    try:
+        tb_ids = [r[0] for r in con.execute(
+            "SELECT id FROM busterm WHERE id LIKE 'tb:%'").fetchall()]
+        linked = {r[0] for r in con.execute(
+            "SELECT busterm_id FROM topology_seg_busterm").fetchall()}
+        n_links = con.execute(
+            "SELECT COUNT(*) FROM topology_seg_busterm").fetchone()[0]
+    finally:
+        con.close()
+    # Exactly one row per distinct block id — no duplicates from re-persist.
+    assert len(tb_ids) == len(set(tb_ids)), \
+        f"duplicate tb: busterm rows persisted: {tb_ids}"
+    # Every referenced busterm has its backing row (FK integrity after dedup).
+    assert linked <= set(tb_ids)
+    # The dedup actually saved writes: far more links than rows (A + M taps
+    # across ~12 candidates ≫ 2 rows).
+    assert n_links > len(tb_ids), \
+        f"{n_links} links vs {len(tb_ids)} rows — dedup did not consolidate"
 
 
 def test_seg_busterms_roundtrip_all_candidates(tmp_path):
