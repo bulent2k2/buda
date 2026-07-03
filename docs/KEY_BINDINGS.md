@@ -27,6 +27,15 @@ Here are the keyboard shortcuts available in each view.
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close the visualizer. |
 
+### Mouse
+
+| Interaction | Action |
+| :--- | :--- |
+| **Right-drag LR** (left → right) | **Zoom to Box**: fit the drawn box to the window (blue rubber band). |
+| **Right-drag RL** (right → left) | **Zoom Out**: expand the view so the current view fits in the drawn box (orange rubber band). |
+| **Scroll wheel** | Zoom in / out. |
+| **Left-click** a bundle | Select / highlight it; click empty space to deselect. |
+
 ## Topology Explorer (`TopologyExplorer`)
 
 The Topology Explorer allows you to inspect the alternative routing candidate shapes (topologies) generated for a specific bundle, and manually assign layers to specific segments of the trunk.
@@ -55,6 +64,13 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `h`, `H`, `cmd+a`, `ctrl+a` | **Home**: Reset zoom and return to the original full view. |
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close all visualizer windows. |
+
+### Mouse
+
+| Interaction | Action |
+| :--- | :--- |
+| **Right-drag LR** (left → right) | **Zoom to Box**: fit the drawn box to the window (blue rubber band). |
+| **Right-drag RL** (right → left) | **Zoom Out**: expand the view so the current view fits in the drawn box (orange rubber band). |
 
 ## Floorplanner (`bdb_floorplanner.py`)
 

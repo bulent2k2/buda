@@ -244,6 +244,101 @@ def _install_home_fit_tracking(viz):
     viz.fig.canvas.mpl_connect('resize_event', _refit)
     viz.fig.canvas.mpl_connect('draw_event', _refit)
 
+def _apply_bbox_zoom(viz, x0, y0, x1, y1):
+    """Apply a rubber-band zoom to viz.ax (adopted from the Floorplanner).
+
+    LR drag (x1 > x0): zoom IN — frame the drawn box, expanded to fill the
+        window so set_aspect('equal') adds no letterbox (same math as 'h').
+    RL drag (x1 < x0): zoom OUT — the current view expands so it would occupy
+        the drawn box, centred on the current view.
+    A degenerate (barely-moved / skinny) box is ignored."""
+    ax = viz.ax
+    xlim = ax.get_xlim(); ylim = ax.get_ylim()
+    box_w, box_h = abs(x1 - x0), abs(y1 - y0)
+    view_w, view_h = abs(xlim[1] - xlim[0]), abs(ylim[1] - ylim[0])
+    if box_w < view_w * 0.01 or box_h < view_h * 0.01:
+        viz.fig.canvas.draw_idle()
+        return
+    if x1 > x0:
+        _set_lims_filling_box(ax, min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1))
+    else:
+        # Aspect-correct the box to the axes box, then expand the view by
+        # view/box so the current viewport would land inside the drawn box.
+        pos = ax.get_position(original=True)
+        fw, fh = ax.figure.get_size_inches()
+        ax_h = fh * pos.height
+        ax_aspect = (fw * pos.width) / ax_h if ax_h > 0 else 1.0
+        if box_h > 0 and box_w / box_h < ax_aspect:
+            box_w = box_h * ax_aspect
+        elif box_w > 0:
+            box_h = box_w / ax_aspect
+        f = max(view_w / box_w if box_w > 0 else 1.0,
+                view_h / box_h if box_h > 0 else 1.0)
+        vcx = (xlim[0] + xlim[1]) / 2; vcy = (ylim[0] + ylim[1]) / 2
+        ax.set_xlim(vcx - view_w * f / 2, vcx + view_w * f / 2)
+        ax.set_ylim(vcy - view_h * f / 2, vcy + view_h * f / 2)
+    viz.fig.canvas.draw_idle()
+
+def _install_bbox_zoom(viz):
+    """Right-click-drag rubber-band zoom on viz.ax, adopted from the Floorplanner.
+
+    Drag left→right to zoom INTO the box, right→left to zoom OUT.  A live dashed
+    rectangle previews the box (blue = in, orange = out).  Right-click is used so
+    it never conflicts with left-click selection.  A zoomed view is not the home
+    fit, so the resize-tracking guard leaves it alone; 'h' returns to home."""
+    st = {"x0": None, "y0": None, "patch": None}
+
+    def _clear_patch():
+        if st["patch"] is not None:
+            try:
+                st["patch"].remove()
+            except Exception:
+                pass
+            st["patch"] = None
+
+    def _press(event):
+        if event.button != 3 or event.inaxes != viz.ax:
+            return
+        # Don't hijack the gesture while a matplotlib toolbar tool (pan/zoom) is
+        # active — same guard as _on_click and the Floorplanner press handler.
+        toolbar = getattr(viz.fig.canvas, 'toolbar', None)
+        if toolbar is not None and getattr(toolbar, 'mode', '') != '':
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        st["x0"], st["y0"] = event.xdata, event.ydata
+
+    def _motion(event):
+        if st["x0"] is None or event.inaxes != viz.ax:
+            return
+        if event.xdata is None or event.ydata is None:
+            return
+        x0, y0 = st["x0"], st["y0"]
+        x1, y1 = event.xdata, event.ydata
+        _clear_patch()
+        color = "#0ea5e9" if x1 > x0 else "#f97316"   # blue = in, orange = out
+        st["patch"] = patches.Rectangle(
+            (min(x0, x1), min(y0, y1)), abs(x1 - x0), abs(y1 - y0),
+            linewidth=1.5, edgecolor=color, facecolor=color,
+            alpha=0.15, linestyle="--", zorder=1e6)
+        viz.ax.add_patch(st["patch"])
+        viz.fig.canvas.draw_idle()
+
+    def _release(event):
+        if st["x0"] is None:
+            return
+        x0, y0 = st["x0"], st["y0"]
+        st["x0"] = st["y0"] = None
+        _clear_patch()
+        if event.inaxes == viz.ax and event.xdata is not None and event.ydata is not None:
+            _apply_bbox_zoom(viz, x0, y0, event.xdata, event.ydata)
+        else:
+            viz.fig.canvas.draw_idle()
+
+    viz.fig.canvas.mpl_connect('button_press_event',   _press)
+    viz.fig.canvas.mpl_connect('motion_notify_event',  _motion)
+    viz.fig.canvas.mpl_connect('button_release_event', _release)
+
 def raise_window(win_or_fig):
     """Bring a window or figure to the front and ensure it has keyboard focus."""
     win = None
@@ -767,6 +862,7 @@ class TopologyExplorer:
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
         self.fig.canvas.mpl_connect('close_event', self._on_close)
+        _install_bbox_zoom(self)   # right-click-drag zoom-to-box (from the Floorplanner)
 
         self._draw()
         # Make the home view maximal from the first frame (not only after 'h'):
@@ -1791,6 +1887,7 @@ class BudaVisualizer:
         self.fig.canvas.mpl_connect('pick_event',         self._on_pick)
         self.fig.canvas.mpl_connect('button_press_event', self._on_click)
         self.fig.canvas.mpl_connect('key_press_event',    self._on_key)
+        _install_bbox_zoom(self)   # right-click-drag zoom-to-box (from the Floorplanner)
 
     # ------------------------------------------------------------------
     # Artist registry & interaction
@@ -1807,6 +1904,11 @@ class BudaVisualizer:
         })
 
     def _on_pick(self, event):
+        # Right-click is the zoom-to-box gesture (_install_bbox_zoom), not a
+        # selection — ignore picks it triggers so it never changes the highlight.
+        me = getattr(event, 'mouseevent', None)
+        if me is not None and me.button == 3:
+            return
         self._pick_happened = True
         active_reg = (self._detailed_bundle_artists
                       if self.ui_state.detailed_mode else self._bundle_artists)
@@ -1817,6 +1919,10 @@ class BudaVisualizer:
                     return
 
     def _on_click(self, event):
+        # Right-click drives the rubber-band zoom-to-box (_install_bbox_zoom);
+        # it must not select/deselect a bundle.
+        if event.button == 3:
+            return
         # Ignore clicks while a toolbar tool (zoom, pan) is active.
         toolbar = getattr(self.fig.canvas, 'toolbar', None)
         if toolbar is not None and getattr(toolbar, 'mode', '') != '':
