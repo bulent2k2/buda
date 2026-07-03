@@ -41,28 +41,48 @@ namespace {
 // the annotation from those rows alone — no geometric re-derivation, no floorplan.
 
 void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
-                          int cand_index, const Topology& topo) {
+                          int cand_index, const Topology& topo,
+                          py::object seen = py::none()) {
+    // A 'tb:<block>' busterm row is derived purely from block geometry, so it
+    // is byte-identical for every candidate that taps the block — yet the row
+    // (a wide INSERT with JSON-encoded rects) dominates generate-time persist.
+    // When `seen` (a set of already-written 'tb:' ids) is supplied, write each
+    // busterm row ONCE and emit only the cheap per-candidate link row for
+    // repeats.  seen=None keeps the old always-write behavior for callers that
+    // don't dedup (e.g. the planner path, which persists few candidates).
+    const bool dedup = !seen.is_none();
+    py::set seen_set;
+    if (dedup) seen_set = py::reinterpret_borrow<py::set>(seen);
     auto put = [&](int seg_idx, const std::optional<Busterm>& bt,
                    const char* endpoint) {
         if (!bt) return;                         // junction: no row (the default)
-        BustermRow row;
-        row.id         = "tb:" + bt->block_name; // distinct from hier 'bt:' rows
-        row.comp_id    = -1;                     // no component (bound NULL)
-        row.hier_path  = bt->block_name;
-        row.depth      = -1;
-        row.x1 = bt->bbox.x1; row.y1 = bt->bbox.y1;
-        row.x2 = bt->bbox.x2; row.y2 = bt->bbox.y2;
-        row.resolution = "BLOCK";
-        std::vector<std::tuple<double,double,double,double>> rts;
-        for (const auto& r : bt->rects)
-            rts.emplace_back(r.x1, r.y1, r.x2, r.y2);
-        row.rects    = encode_rects_json(rts);
-        row.teg_mode = (bt->teg_mode == TegMode::OVER) ? "OVER" : "THRU";
-        row.orig_x1 = bt->orig_bbox.x1; row.orig_y1 = bt->orig_bbox.y1;
-        row.orig_x2 = bt->orig_bbox.x2; row.orig_y2 = bt->orig_bbox.y2;
-        bdb.add_busterm(row);
+        const std::string id = "tb:" + bt->block_name;  // distinct from hier 'bt:'
+        bool write_row = true;
+        if (dedup) {
+            py::str pid(id);
+            if (seen_set.contains(pid)) write_row = false;
+            else                        seen_set.add(pid);
+        }
+        if (write_row) {
+            BustermRow row;
+            row.id         = id;
+            row.comp_id    = -1;                 // no component (bound NULL)
+            row.hier_path  = bt->block_name;
+            row.depth      = -1;
+            row.x1 = bt->bbox.x1; row.y1 = bt->bbox.y1;
+            row.x2 = bt->bbox.x2; row.y2 = bt->bbox.y2;
+            row.resolution = "BLOCK";
+            std::vector<std::tuple<double,double,double,double>> rts;
+            for (const auto& r : bt->rects)
+                rts.emplace_back(r.x1, r.y1, r.x2, r.y2);
+            row.rects    = encode_rects_json(rts);
+            row.teg_mode = (bt->teg_mode == TegMode::OVER) ? "OVER" : "THRU";
+            row.orig_x1 = bt->orig_bbox.x1; row.orig_y1 = bt->orig_bbox.y1;
+            row.orig_x2 = bt->orig_bbox.x2; row.orig_y2 = bt->orig_bbox.y2;
+            bdb.add_busterm(row);
+        }
         bdb.add_topology_seg_busterm(
-            TopoSegBustermRow{bundle_id, cand_index, seg_idx, endpoint, row.id});
+            TopoSegBustermRow{bundle_id, cand_index, seg_idx, endpoint, id});
     };
     for (const auto& [seg_idx, eps] : topo.seg_busterms) {
         put(seg_idx, eps.first,  "start");
@@ -226,7 +246,7 @@ void bind_routing(py::module_& m) {
     // with no geometric re-derivation.  See single_source_topo_truth.md.
     m.def("persist_seg_busterms", &persist_seg_busterms,
           py::arg("bdb"), py::arg("bundle_id"), py::arg("cand_index"),
-          py::arg("topo"));
+          py::arg("topo"), py::arg("seen") = py::none());
     // Persist / reload a topology's seg_conns logically (Phase 5): the junction
     // links round-trip through topology_seg_conn with no geometric re-derivation.
     m.def("persist_seg_conns", &persist_seg_conns,

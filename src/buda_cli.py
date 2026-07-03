@@ -348,6 +348,10 @@ class BudaSession:
         self._persist_bundles(self._bundler_strategy)
         self.bdb.clear_topologies()
         n_cands = 0
+        # clear_topologies wiped the 'tb:' busterm rows, so this pass rewrites
+        # them; dedup so each block's (identical, JSON-rects-heavy) busterm row
+        # is written once across all candidates, not once per candidate.
+        seen_busterms = set()
         for w in self.bundles:
             bid = str(w.input.original_bundle.id)
             selected = w.plan.selected_topology_index
@@ -376,11 +380,11 @@ class BudaSession:
                     sr.layer_hint = seg.layer_hint
                     sr.is_jog = seg.is_jog
                     self.bdb.add_topology_segment(sr)
-                self._persist_topology_annotations(bid, ci, topo)
+                self._persist_topology_annotations(bid, ci, topo, seen_busterms)
                 n_cands += 1
         return n_cands
 
-    def _persist_topology_annotations(self, bid, ci, topo):
+    def _persist_topology_annotations(self, bid, ci, topo, seen_busterms=None):
         """Persist ONE candidate's derived annotations — ALWAYS as a pair:
 
         - the authoritative seg-busterm links (LOGICAL connectivity; a reload
@@ -396,8 +400,13 @@ class BudaSession:
         that called some but not all of these would silently reintroduce a
         lossy resume, and nothing would fail until that path was resumed.
         The candidate's topology row must already exist (FK parent).
+
+        `seen_busterms` (a set of already-written 'tb:' ids, scoped to one
+        persist pass) dedups the heavy busterm-row insert across a bundle's
+        candidates — the same block busterm is written once, then only the
+        cheap link rows per candidate.  None = write every row (planner path).
         """
-        buda.persist_seg_busterms(self.bdb, bid, ci, topo)
+        buda.persist_seg_busterms(self.bdb, bid, ci, topo, seen_busterms)
         buda.persist_seg_conns(self.bdb, bid, ci, topo)
         for name, seg in topo.bridge_segments.items():
             r = buda.TopoBridgeRow()

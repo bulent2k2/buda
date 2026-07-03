@@ -29,14 +29,28 @@ generate 23.8s → 1.6s in cloud. Tests: `test/tests/test_bdb_batch.py`
 (commit/rollback atomicity + nesting no-op) plus the unchanged persist
 round-trip suite (batching is transparent to output).
 
-**Residual follow-up (not yet done).** The remaining ~1.6s is dominated by
-`persist_seg_busterms` (1.1s / 1236 calls) — it re-inserts a heavy
+**Busterm-row dedup — ✅ IMPLEMENTED (follow-up).** `persist_seg_busterms` was
+the residual after batching (1.1s / 1236 calls): it re-inserted a heavy
 JSON-rects `tb:<block>` busterm row via `add_busterm` for *every candidate*
-that touches a block, even though the same block busterm is identical across
-candidates. Deduping the busterm rows (insert each `tb:<name>` once per persist,
-then only the seg→busterm links per candidate) would cut most of the residual;
-`add_topology_segment`'s per-call statement re-prepare (0.08s / 5990) is a
-smaller second target (cache the prepared insert like the hot read paths do).
+that taps a block, though `tb:<block>` is derived purely from block geometry and
+is byte-identical across candidates. Fixed by threading a `seen` set (the
+already-written `tb:` ids, scoped to one `_persist_topologies` pass) through
+`_persist_topology_annotations` into `persist_seg_busterms` (`bind_routing.cpp`,
+optional `seen` arg; `seen=None` keeps the old always-write path for the planner
+persist, which writes few candidates): each block's busterm row is written once,
+then only the cheap per-candidate `topology_seg_busterm` link. FK-safe — the
+first candidate to tap a block writes the row before any link references it, and
+`clear_topologies` (which wipes `tb:` rows) precedes the fresh `seen` set.
+Measured on slowdown.buda: `persist_seg_busterms` 1.085s → 0.041s (26×),
+generate 1.6s → 0.58s — now bounded by `generate_candidates` (0.15s) plus the
+unavoidable per-row inserts. Test:
+`test/tests/test_seg_busterm_persist.py::test_busterm_rows_deduped_across_candidates`
+(one `tb:` row per block, many links) plus the existing reload round-trip suite
+(dedup preserves correctness).
+
+**Remaining smaller target (not yet done).** `add_topology_segment`'s per-call
+statement re-prepare (~0.07s / 5990 calls) — cache the prepared insert like the
+hot read paths do; minor next to the two wins above.
 
 ## `open_bdb <file>.sql` write-back mode — ✅ IMPLEMENTED
 
