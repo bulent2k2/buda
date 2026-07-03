@@ -796,23 +796,23 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
 
     // The top structure. import_gds materializes a `cell` row for the top
     // structure it reads (footprint = die extent) but no component row — so
-    // this BDB likely holds exactly one "orphan" cell (no instances) whose
-    // size is the die. Exporting that orphan as its own structure PLUS a
-    // synthetic top would re-import as two tops (spurious component, no die):
-    // instead the top structure takes the orphan's name, so re-import
-    // reproduces the same single top, cell row, and die.
+    // a GDS-imported BDB holds an "orphan" cell (no instances) whose size IS
+    // the die. Exporting that orphan as its own structure PLUS a synthetic
+    // top would re-import as two tops (spurious component, no die): instead
+    // the top structure takes the orphan's name, so re-import reproduces the
+    // same single top, cell row, and die. The die-size match is REQUIRED
+    // evidence: a merely-uninstantiated library cell (e.g. an unused LEF
+    // macro — import_def_lef inserts every macro) must keep its own
+    // structure, not be consumed as the top.
     const double die_w = std::atof(db.meta_get("die_w", "0").c_str());
     const double die_h = std::atof(db.meta_get("die_h", "0").c_str());
     std::set<std::string> placed_cells;
     for (const auto& c : comps) placed_cells.insert(c.cell);
-    std::vector<const CellRow*> orphans;
-    for (const auto& c : cells)
-        if (!placed_cells.count(c.name)) orphans.push_back(&c);
     const CellRow* top_cell = nullptr;
-    for (const CellRow* o : orphans)
-        if (die_w > 0 && std::fabs(o->width - die_w) < 1e-6 &&
-            std::fabs(o->height - die_h) < 1e-6) { top_cell = o; break; }
-    if (!top_cell && orphans.size() == 1) top_cell = orphans[0];
+    for (const auto& c : cells)
+        if (!placed_cells.count(c.name) && die_w > 0 &&
+            std::fabs(c.width - die_w) < 1e-6 &&
+            std::fabs(c.height - die_h) < 1e-6) { top_cell = &c; break; }
 
     // ── Stream ──────────────────────────────────────────────────────────────
     GdsWriter w;
@@ -855,9 +855,6 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
     }
     if (die_w > 0 && die_h > 0)
         w.boundary_rect(outline_layer, 0, ox, oy, ox + die_w, oy + die_h);
-    else if (top_cell && (top_cell->width > 0 || top_cell->height > 0))
-        w.boundary_rect(outline_layer, 0, ox, oy,
-                        ox + top_cell->width, oy + top_cell->height);
     for (const ComponentRow* r : roots)
         place(w, r, 0, 0, r->name);
     if (n_dim_mismatch > 0)

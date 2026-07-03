@@ -190,6 +190,25 @@ def test_export_requires_open_bdb(capsys):
     assert "open_bdb first" in capsys.readouterr().out
 
 
+def test_unused_library_cell_keeps_its_structure(tmp_path):
+    # An uninstantiated library cell (the DEF/LEF case: import_def_lef
+    # inserts every LEF macro) is NOT the top — without a die-size match it
+    # must keep its own structure instead of being consumed as the synthetic
+    # top, which would destroy its footprint on re-import (Codex #150 P2).
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.set_die(100, 100)
+    db.add_cell("used", 10, 5)
+    db.add_cell("unused_macro", 7, 3)               # sole orphan, != die size
+    db.add_comp("i0", "used", "", 0, 0, 10, 5, True)
+    st = db.export_gds(str(tmp_path / "out.gds"))
+    assert st.n_structures == 3                     # used, unused_macro, top
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    db2.import_gds(str(tmp_path / "out.gds"))
+    cells = {c.name: (c.width, c.height) for c in db2.all_cells()}
+    assert cells["unused_macro"] == (7.0, 3.0)
+    assert cells["used"] == (10.0, 5.0)
+
+
 def test_dim_mismatch_placement_warns(tmp_path):
     # A component whose bbox differs from its cell footprint (rotated/resized
     # instance) cannot be represented — exported unrotated with a warning.
