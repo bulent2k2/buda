@@ -252,6 +252,13 @@ void bind_routing(py::module_& m) {
              py::arg("bits"), py::arg("base_width"), py::arg("layer_id"))
         .def("set_layer_span",          &LayerStack::set_layer_span)
         .def("set_layer_kspan",         &LayerStack::set_layer_kspan)
+        .def("set_gds_mapping",         &LayerStack::set_gds_mapping,
+             py::arg("id"), py::arg("gds_layer"), py::arg("gds_datatype") = 0)
+        .def("get_gds_layer",           &LayerStack::get_gds_layer)
+        .def("get_gds_datatype",        &LayerStack::get_gds_datatype)
+        .def("layer_for_gds",           &LayerStack::layer_for_gds,
+             py::arg("gds_layer"), py::arg("gds_datatype"))
+        .def("gds_mapped_pairs",        &LayerStack::gds_mapped_pairs)
         .def("is_top",                  &LayerStack::is_top)
         .def("has_layer",               &LayerStack::has_layer)
         .def("get_layer_dir",           &LayerStack::get_layer_dir)

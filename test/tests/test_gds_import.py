@@ -380,3 +380,159 @@ def test_cli_import_and_route(tmp_path):
     # The imported design routed AND persisted like any other BDB design.
     snap = s.bdb.route_snapshot()
     assert snap.stage == "detailed_nuts" and snap.n_net_segments >= 1
+
+
+# ── Phase G3: GDS layer mapping ──────────────────────────────────────────────
+
+def test_gds_layer_mapping_api():
+    ls = buda.LayerStack()
+    ls.add_layer(3, "M3", buda.LayerDir.VERTICAL, buda.LayerType.LOW)
+    ls.add_layer(4, "M4", buda.LayerDir.HORIZONTAL, buda.LayerType.TOP)
+    # Unmapped defaults.
+    assert ls.get_gds_layer(3) == -1 and ls.get_gds_datatype(3) == 0
+    assert ls.layer_for_gds(8, 0) == -1
+    assert ls.gds_mapped_pairs() == []
+    ls.set_gds_mapping(3, 8)                    # datatype defaults to 0
+    ls.set_gds_mapping(4, 9, 5)
+    assert (ls.get_gds_layer(3), ls.get_gds_datatype(3)) == (8, 0)
+    assert (ls.get_gds_layer(4), ls.get_gds_datatype(4)) == (9, 5)
+    # Reverse lookup is datatype-precise; add_layer order on the pair list.
+    assert ls.layer_for_gds(8, 0) == 3 and ls.layer_for_gds(8, 1) == -1
+    assert ls.layer_for_gds(9, 5) == 4
+    assert ls.gds_mapped_pairs() == [(8, 0), (9, 5)]
+    # Re-mapping overwrites; unknown layer id is a silent no-op (the
+    # set_layer_* convention — the CLI guards with has_layer).
+    ls.set_gds_mapping(3, 12, 1)
+    assert (ls.get_gds_layer(3), ls.get_gds_datatype(3)) == (12, 1)
+    ls.set_gds_mapping(99, 1, 1)
+    assert ls.layer_for_gds(1, 1) == -1
+
+
+def test_routing_shapes_excluded_from_footprint(tmp_path):
+    # An exported-then-reimported cell carries wires beyond its outline; with
+    # the wire's (layer, datatype) mapped as routing, the footprint must stay
+    # the outline — the G4 round-trip requirement.
+    def lib(path):
+        b = GdsBuilder()
+        b.structure("blk") \
+         .boundary(10, 0, [(0, 0), (100, 0), (100, 50), (0, 50)]) \
+         .path(8, 0, [(-40, 25), (300, 25)], width_um=2) \
+         .boundary(8, 0, [(200, 0), (220, 0), (220, 20), (200, 20)])
+        return b.write(path)
+    # Unmapped: wire + patch grow the footprint (G1 behavior).
+    db, st = _import(tmp_path, lib(tmp_path / "a.gds"))
+    assert st.n_routing_shapes == 0
+    assert {c.name: (c.width, c.height)
+            for c in db.all_cells()} == {"blk": (340.0, 50.0)}
+    # Mapped: both layer-8 shapes are wires — outline only.
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    st2 = db2.import_gds(str(lib(tmp_path / "b.gds")),
+                         routing_layers=[(8, 0)])
+    assert st2.n_routing_shapes == 2
+    assert {c.name: (c.width, c.height)
+            for c in db2.all_cells()} == {"blk": (100.0, 50.0)}
+
+
+def test_routing_exclusion_is_datatype_precise(tmp_path):
+    # Only the mapped (layer, datatype) pair is a wire: (8,1) still counts
+    # as outline geometry when only (8,0) is mapped.
+    b = GdsBuilder()
+    b.structure("blk") \
+     .boundary(10, 0, [(0, 0), (100, 0), (100, 50), (0, 50)]) \
+     .boundary(8, 0, [(0, 0), (300, 0), (300, 10), (0, 10)]) \
+     .boundary(8, 1, [(0, 0), (100, 0), (100, 80), (0, 80)])
+    db = buda.BDB(str(tmp_path / "d.bdb"))
+    st = db.import_gds(str(b.write(tmp_path / "d.gds")),
+                       routing_layers=[(8, 0)])
+    assert st.n_routing_shapes == 1
+    assert {c.name: (c.width, c.height)
+            for c in db.all_cells()} == {"blk": (100.0, 80.0)}
+
+
+def test_all_routing_structure_is_zero_size_cell(tmp_path):
+    # A structure whose only geometry is routing wires has no outline at all.
+    b = GdsBuilder()
+    b.structure("channel").path(8, 0, [(0, 0), (500, 0)], width_um=4)
+    db = buda.BDB(str(tmp_path / "e.bdb"))
+    st = db.import_gds(str(b.write(tmp_path / "e.gds")),
+                       routing_layers=[(8, 0)])
+    assert st.n_routing_shapes == 1
+    assert {c.name: (c.width, c.height)
+            for c in db.all_cells()} == {"channel": (0.0, 0.0)}
+    assert any("no geometry anywhere" in w for w in st.warnings)
+
+
+def test_cli_def_gds_layer_excludes_wires(tmp_path):
+    # def_gds_layer binds def_layer metals to GDS pairs; import_gds picks the
+    # mapping up automatically and reports the exclusion.
+    b = GdsBuilder()
+    b.structure("blkA") \
+     .boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)]) \
+     .path(8, 0, [(100, 200), (900, 200)], width_um=2)
+    b.structure("blkB").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("chip") \
+     .sref("blkA", (0, 0), inst_name="A") \
+     .sref("blkB", (600, 800), inst_name="B")
+    gds = b.write(tmp_path / "chip.gds")
+
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        for c in ["source flow/rnr/mix_tracks.buda",
+                  "def_gds_layer 3 8 0",
+                  f"open_bdb {tmp_path / 'chip.bdb'}",
+                  f"import_gds {gds}"]:
+            s.do_command(c)
+    assert "1 routing shape(s) excluded" in buf.getvalue()
+    comps = {c.name: c for c in s.bdb.all_components()}
+    assert (comps["A"].x2 - comps["A"].x1) == 200.0   # wire didn't bloat A
+    assert (s.layers.get_gds_layer(3), s.layers.get_gds_datatype(3)) == (8, 0)
+
+
+def test_cli_def_gds_layer_file_and_labels(tmp_path):
+    # Map-file form (with comments) + `labels` form: registered label layers
+    # become import_gds's default TEXT filter, so the layer-9 text is skipped
+    # without an explicit `labels` argument on the import command.
+    mapfile = tmp_path / "gds.map"
+    mapfile.write_text(
+        "# buda_layer  gds_layer  datatype\n"
+        "3  8  0\n"
+        "4  9\n"                                # datatype defaults to 0
+        "\n"
+        "5  10 2\n")
+    b = GdsBuilder()
+    b.structure("blkA").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("chip") \
+     .sref("blkA", (0, 0), inst_name="A") \
+     .text(63, 0, (100, 200), "n_real") \
+     .text(9, 0, (100, 100), "not_a_label")
+    gds = b.write(tmp_path / "chip.gds")
+
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ["source flow/rnr/mix_tracks.buda",
+                  f"def_gds_layer file {mapfile}",
+                  "def_gds_layer labels 63",
+                  f"open_bdb {tmp_path / 'chip.bdb'}",
+                  f"import_gds {gds}"]:
+            s.do_command(c)
+    assert s.layers.gds_mapped_pairs() == [(8, 0), (9, 0), (10, 2)]
+    assert [n.name for n in s.bdb.all_nets()] == ["n_real"]
+
+
+def test_cli_def_gds_layer_errors_and_warnings(capsys):
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.do_command("def_layer 3 M3 V LOW 0")
+    s.do_command("def_layer 4 M4 H TOP 0")
+    # Unknown BUDA layer id: rejected, nothing mapped.
+    s.do_command("def_gds_layer 99 8 0")
+    assert "unknown layer id 99" in capsys.readouterr().out
+    assert s.layers.gds_mapped_pairs() == []
+    # Duplicate GDS pair across two layers: warned, both still map (first
+    # match wins on reverse lookup).
+    s.do_command("def_gds_layer 3 8 0")
+    s.do_command("def_gds_layer 4 8 0")
+    assert "already mapped to layer 3" in capsys.readouterr().out
+    assert s.layers.layer_for_gds(8, 0) == 3

@@ -438,9 +438,12 @@ is preserved via UPSERT.
 
 ```
 import_gds <file.gds> [labels <layer_csv>]
+def_gds_layer <buda_layer_id> <gds_layer> [<gds_datatype>]
+def_gds_layer file <path>
+def_gds_layer labels <layer_csv>
 ```
 
-Import a **GDSII stream** file into the open BDB (Phases G1–G2 of
+Import a **GDSII stream** file into the open BDB (Phases G1–G3 of
 [`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md)). A
 hand-written binary record reader (`src/gds_io.cpp`, no external EDA library),
 following the importer pattern: **fresh load** (clears
@@ -474,12 +477,28 @@ coordinates normalized to **µm** via the `UNITS` record.
   are skipped with a warning. **A labeled GDS runs the hierarchy-aware flow
   with zero Verilog** (`derive_busterms` → `run_hier_bundler` → …); with no
   labels, pair with `import_verilog` as with DEF.
+- **Layer mapping (Phase G3).** `def_gds_layer` binds a `def_layer` metal
+  layer to a GDS `(layer, datatype)` pair (datatype defaults to 0), stored on
+  the `LayerStack`; the map-file form reads `<buda_layer_id> <gds_layer>
+  [<gds_datatype>]` lines (`#` comments). On import, `BOUNDARY`/`BOX`/`PATH`
+  shapes on mapped pairs are **routing wires, not macro-outline geometry** —
+  they are counted (`n_routing_shapes`) but excluded from cell footprints, so
+  re-importing a routed GDS keeps outlines clean (the export→import
+  round-trip requirement); the same map drives the Phase-G4 exporter's
+  metal→GDS direction. `def_gds_layer labels <csv>` registers the default
+  `TEXT` label layers so `import_gds` needs no per-call `labels` argument
+  (an explicit argument still overrides). Like all `def_layer`-family setup,
+  the mapping lives in the session, not the BDB — scripts re-declare it.
 
-Python: `BDB.import_gds(path, label_layers=[])` returns a `GdsImportStats`
-(`n_structures`, `n_cells`, `n_components`, `n_texts`, `n_nets`, `n_pins`,
-`n_labels_skipped`, `tops`, `warnings`). Tests generate their GDS inputs
-deterministically with `tools/gds_build.py` (the Phase-G0 writer, zeroed
-timestamps): `test/tests/test_gds_import.py`.
+Python: `BDB.import_gds(path, label_layers=[], routing_layers=[])` — with
+`routing_layers` a list of `(gds_layer, gds_datatype)` pairs — returns a
+`GdsImportStats` (`n_structures`, `n_cells`, `n_components`, `n_texts`,
+`n_nets`, `n_pins`, `n_labels_skipped`, `n_routing_shapes`, `tops`,
+`warnings`). The mapping API on `LayerStack`: `set_gds_mapping(id, gds_layer,
+gds_datatype=0)`, `get_gds_layer(id)` / `get_gds_datatype(id)`,
+`layer_for_gds(gds_layer, gds_datatype)` (reverse), `gds_mapped_pairs()`.
+Tests generate their GDS inputs deterministically with `tools/gds_build.py`
+(the Phase-G0 writer, zeroed timestamps): `test/tests/test_gds_import.py`.
 
 ---
 
@@ -1342,10 +1361,11 @@ depth-0 with no parent until Verilog overlays the hierarchy.
 
 ### Planned: GDSII import/export
 
-**Status: import (Phase G1) IMPLEMENTED** — see [`import_gds`](#import_gds)
+**Status: import (Phases G1–G3) IMPLEMENTED** — see [`import_gds`](#import_gds)
 and the phased plan in
-[`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md).
-Label-based net recovery (G2), layer mapping (G3), and export (G4) follow.
+[`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md):
+geometry/hierarchy (G1), label-based net recovery (G2), and layer mapping
+with routing-shape exclusion (G3). Export (G4) follows.
 
 Intended capability: round-trip a **GDSII** layout against BDB — export the
 placed-and-routed result for sign-off/viewing (KLayout, etc.) and import an
