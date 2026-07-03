@@ -2770,7 +2770,7 @@ class BudaSession:
         exactly means a rejected trial leaves NO divergence between the live
         plan and the restored result refs — the `dirty` full rebuild is then
         needed only for legacy full-replan trials."""
-        return {
+        snap = {
             'wrap': {w.input.original_bundle.id:
                      (w.plan.selected_topology_index, w.input.topology_pinned,
                       len(w.input.candidates),
@@ -2783,7 +2783,19 @@ class BudaSession:
             'dnuts': self.detailed_result,
             'dl_slot': dict(self._dogleg_slot),
             'dl_orig': dict(self._dogleg_originals),
+            'dl_cand': {},
         }
+        # An adopted dogleg's split candidate is OVERWRITTEN in place when a
+        # trial's NUTS re-solves the same bundle's cycle (cands[slot] = ...,
+        # _adopt_doglegs) — the candidate COUNT doesn't change, so the trim
+        # below can't undo it.  Capture the slot's Topology (the pybind list
+        # conversion hands back an independent copy) so restore can put the
+        # committed split geometry back.
+        for bid, slot in self._dogleg_slot.items():
+            w = self._rr_wrapper(bid)
+            if w is not None and 0 <= slot < len(w.input.candidates):
+                snap['dl_cand'][bid] = w.input.candidates[slot]
+        return snap
 
     def _rr_restore(self, snap):
         for w in self.bundles:
@@ -2806,6 +2818,18 @@ class BudaSession:
             w.plan.seg_slide_hi = seg_slide_hi
             w.input.assigned_v_layer = av
             w.input.assigned_h_layer = ah
+        # Put back the committed split geometry where a trial's re-solve
+        # overwrote an adopted dogleg's slot in place (same count, new content
+        # — the ncand trim above cannot see it).
+        for bid, topo in snap['dl_cand'].items():
+            slot = snap['dl_slot'].get(bid)
+            w = self._rr_wrapper(bid)
+            if w is None or slot is None:
+                continue
+            cands = w.input.candidates
+            if 0 <= slot < len(cands):
+                cands[slot] = topo
+                w.input.candidates = cands
         self.nuts_result = snap['nuts']
         self.detailed_result = snap['dnuts']
         self._dogleg_slot = dict(snap['dl_slot'])
