@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -45,9 +46,11 @@ enum : uint8_t {
     R_BOUNDARY = 0x08, R_PATH = 0x09, R_SREF = 0x0A, R_AREF = 0x0B,
     R_TEXT = 0x0C, R_LAYER = 0x0D, R_DATATYPE = 0x0E, R_WIDTH = 0x0F,
     R_XY = 0x10,
-    R_ENDEL = 0x11, R_SNAME = 0x12, R_COLROW = 0x13, R_STRING = 0x19,
+    R_ENDEL = 0x11, R_SNAME = 0x12, R_COLROW = 0x13, R_TEXTTYPE = 0x16,
+    R_STRING = 0x19,
     R_STRANS = 0x1A, R_MAG = 0x1B,
-    R_ANGLE = 0x1C, R_PATHTYPE = 0x21, R_PROPVALUE = 0x2C, R_BOX = 0x2D,
+    R_ANGLE = 0x1C, R_PATHTYPE = 0x21, R_LIBNAME = 0x02,
+    R_PROPATTR = 0x2B, R_PROPVALUE = 0x2C, R_BOX = 0x2D,
     R_BOXTYPE = 0x2E,
 };
 
@@ -573,6 +576,366 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
     }
     stats.n_nets = (int)net_names.size();
 
+    return stats;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase G4 — GDSII stream writer (the C++ port of tools/gds_build.py, same
+// record conventions: 1nm dbu, zeroed timestamps, PROPATTR 61 instance names).
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+class GdsWriter {
+public:
+    static constexpr double kDbuUm = 0.001;         // 1 nm database unit
+    static constexpr int    kInstNameProp = 61;     // matches gds_build.py
+
+    void header(const std::string& libname) {
+        std::vector<uint8_t> v;
+        put_i16(v, 600);
+        rec(R_HEADER, 2, v);
+        rec(R_BGNLIB, 2, zero12());
+        rec(R_LIBNAME, 6, str_pl(libname));
+        // UNITS: user-units per dbu (user unit = µm), meters per dbu.
+        std::vector<uint8_t> u = real8(kDbuUm);
+        append(u, real8(kDbuUm * 1e-6));
+        rec(R_UNITS, 5, u);
+    }
+    void begin_struct(const std::string& name) {
+        rec(R_BGNSTR, 2, zero12());
+        rec(R_STRNAME, 6, str_pl(name));
+    }
+    void end_struct() { rec(R_ENDSTR, 0, {}); }
+    void end_lib()    { rec(R_ENDLIB, 0, {}); }
+
+    // Axis-aligned rectangle (closed 5-point BOUNDARY).
+    void boundary_rect(int layer, int datatype,
+                       double x1, double y1, double x2, double y2) {
+        rec(R_BOUNDARY, 0, {});
+        rec(R_LAYER, 2, i16_pl(layer));
+        rec(R_DATATYPE, 2, i16_pl(datatype));
+        std::vector<uint8_t> xy;
+        const double xs[5] = {x1, x2, x2, x1, x1};
+        const double ys[5] = {y1, y1, y2, y2, y1};
+        for (int i = 0; i < 5; ++i) {
+            put_i32(xy, to_dbu(xs[i]));
+            put_i32(xy, to_dbu(ys[i]));
+        }
+        rec(R_XY, 3, xy);
+        rec(R_ENDEL, 0, {});
+    }
+    void sref(const std::string& sname, double x, double y,
+              const std::string& inst_name) {
+        rec(R_SREF, 0, {});
+        rec(R_SNAME, 6, str_pl(sname));
+        std::vector<uint8_t> xy;
+        put_i32(xy, to_dbu(x));
+        put_i32(xy, to_dbu(y));
+        rec(R_XY, 3, xy);
+        if (!inst_name.empty()) {
+            rec(R_PROPATTR, 2, i16_pl(kInstNameProp));
+            rec(R_PROPVALUE, 6, str_pl(inst_name));
+        }
+        rec(R_ENDEL, 0, {});
+    }
+    void text(int layer, int texttype, double x, double y,
+              const std::string& s) {
+        rec(R_TEXT, 0, {});
+        rec(R_LAYER, 2, i16_pl(layer));
+        rec(R_TEXTTYPE, 2, i16_pl(texttype));
+        std::vector<uint8_t> xy;
+        put_i32(xy, to_dbu(x));
+        put_i32(xy, to_dbu(y));
+        rec(R_XY, 3, xy);
+        rec(R_STRING, 6, str_pl(s));
+        rec(R_ENDEL, 0, {});
+    }
+
+    void write(const std::string& path) const {
+        std::ofstream f(path, std::ios::binary);
+        if (!f) throw std::runtime_error("export_gds: cannot write " + path);
+        f.write(reinterpret_cast<const char*>(out_.data()),
+                (std::streamsize)out_.size());
+        if (!f) throw std::runtime_error("export_gds: write failed: " + path);
+    }
+
+private:
+    std::vector<uint8_t> out_;
+
+    static int32_t to_dbu_static(double um) {
+        return (int32_t)std::llround(um / kDbuUm);
+    }
+    int32_t to_dbu(double um) const { return to_dbu_static(um); }
+
+    void rec(uint8_t rtype, uint8_t dcode, const std::vector<uint8_t>& payload) {
+        size_t len = 4 + payload.size();
+        out_.push_back((uint8_t)(len >> 8));
+        out_.push_back((uint8_t)(len & 0xFF));
+        out_.push_back(rtype);
+        out_.push_back(dcode);
+        out_.insert(out_.end(), payload.begin(), payload.end());
+    }
+    static void put_i16(std::vector<uint8_t>& p, int v) {
+        p.push_back((uint8_t)((v >> 8) & 0xFF));
+        p.push_back((uint8_t)(v & 0xFF));
+    }
+    static void put_i32(std::vector<uint8_t>& p, int32_t v) {
+        for (int s = 24; s >= 0; s -= 8)
+            p.push_back((uint8_t)(((uint32_t)v >> s) & 0xFF));
+    }
+    static std::vector<uint8_t> i16_pl(int v) {
+        std::vector<uint8_t> p;
+        put_i16(p, v);
+        return p;
+    }
+    static std::vector<uint8_t> str_pl(const std::string& s) {
+        std::vector<uint8_t> p(s.begin(), s.end());
+        if (p.size() % 2) p.push_back(0);       // even-length pad
+        return p;
+    }
+    static std::vector<uint8_t> zero12() {      // 12 zeroed timestamp shorts
+        return std::vector<uint8_t>(24, 0);
+    }
+    // Excess-64 base-16 GDSII 8-byte real (inverse of Rec::real8).
+    static std::vector<uint8_t> real8(double value) {
+        std::vector<uint8_t> p(8, 0);
+        if (value == 0) return p;
+        int sign = value < 0 ? 0x80 : 0;
+        double v = std::fabs(value);
+        int exp = 64;
+        while (v >= 1.0)        { v /= 16.0; ++exp; }
+        while (v < 1.0 / 16.0)  { v *= 16.0; --exp; }
+        uint64_t mant = (uint64_t)(v * (double)(1ULL << 56));
+        p[0] = (uint8_t)(sign | exp);
+        for (int i = 0; i < 7; ++i)
+            p[1 + i] = (uint8_t)((mant >> (8 * (6 - i))) & 0xFF);
+        return p;
+    }
+    static void append(std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+        a.insert(a.end(), b.begin(), b.end());
+    }
+};
+
+std::string last_path_segment(const std::string& p) {
+    size_t n = p.rfind('/');
+    return n == std::string::npos ? p : p.substr(n + 1);
+}
+
+}  // namespace
+
+GdsExportStats export_gds(BDB& db, const std::string& path,
+                          const std::vector<std::tuple<int,int,int>>& layer_map,
+                          int outline_layer, int label_layer,
+                          bool write_labels, double via_size) {
+    GdsExportStats stats;
+
+    std::map<int, std::pair<int,int>> lmap;     // buda layer -> (gds, datatype)
+    for (const auto& [bl, gl, dt] : layer_map) lmap[bl] = {gl, dt};
+    std::set<int> warned_unmapped;
+    auto gds_pair = [&](int layer) -> std::pair<int,int> {
+        auto it = lmap.find(layer);
+        if (it != lmap.end()) return it->second;
+        if (warned_unmapped.insert(layer).second)
+            stats.warnings.push_back(
+                "routing layer " + std::to_string(layer) +
+                " has no def_gds_layer mapping — defaulting to GDS (" +
+                std::to_string(layer) + ",0)");
+        return {layer, 0};
+    };
+
+    // ── Gather + sort the design (deterministic bytes) ──────────────────────
+    auto cells = db.all_cells();
+    std::sort(cells.begin(), cells.end(),
+              [](const CellRow& a, const CellRow& b) { return a.name < b.name; });
+    std::map<std::string, const CellRow*> cell_by_name;
+    for (const auto& c : cells) cell_by_name[c.name] = &c;
+
+    auto comps = db.all_components();
+    std::map<int, const ComponentRow*> comp_by_id;
+    for (const auto& c : comps) comp_by_id[c.id] = &c;
+    std::map<int, std::vector<const ComponentRow*>> children;
+    std::vector<const ComponentRow*> roots;
+    for (const auto& c : comps) {
+        if (c.parent_id >= 0 && comp_by_id.count(c.parent_id))
+            children[c.parent_id].push_back(&c);
+        else
+            roots.push_back(&c);
+    }
+    auto by_name = [](const ComponentRow* a, const ComponentRow* b) {
+        return a->name < b->name;
+    };
+    for (auto& [pid, ch] : children) std::sort(ch.begin(), ch.end(), by_name);
+    std::sort(roots.begin(), roots.end(), by_name);
+
+    // Template instance per cell (lowest component id): cell-internal SREFs
+    // are reconstructed from ITS children at relative offsets — BDB stores
+    // per-instance absolute bboxes, but instances of one cell share their
+    // internal structure (the replication assumption the BDB is built on).
+    std::map<std::string, const ComponentRow*> tmpl;
+    for (const auto& c : comps) {
+        auto it = tmpl.find(c.cell);
+        if (it == tmpl.end() || c.id < it->second->id) tmpl[c.cell] = &c;
+    }
+
+    // Placements carry no orientation: BDB bboxes lose mirror/rotation, so an
+    // instance whose bbox dims differ from its cell is exported unrotated.
+    int n_dim_mismatch = 0;
+    auto place = [&](GdsWriter& w, const ComponentRow* c, double ox, double oy,
+                     const std::string& inst_name) {
+        auto ci = cell_by_name.find(c->cell);
+        if (ci != cell_by_name.end()) {
+            const double bw = c->x2 - c->x1, bh = c->y2 - c->y1;
+            if (std::fabs(bw - ci->second->width) > 1e-9 ||
+                std::fabs(bh - ci->second->height) > 1e-9)
+                ++n_dim_mismatch;
+        }
+        w.sref(c->cell, c->x1 - ox, c->y1 - oy, inst_name);
+        ++stats.n_placements;
+    };
+
+    // The top structure. import_gds materializes a `cell` row for the top
+    // structure it reads (footprint = die extent) but no component row — so
+    // this BDB likely holds exactly one "orphan" cell (no instances) whose
+    // size is the die. Exporting that orphan as its own structure PLUS a
+    // synthetic top would re-import as two tops (spurious component, no die):
+    // instead the top structure takes the orphan's name, so re-import
+    // reproduces the same single top, cell row, and die.
+    const double die_w = std::atof(db.meta_get("die_w", "0").c_str());
+    const double die_h = std::atof(db.meta_get("die_h", "0").c_str());
+    std::set<std::string> placed_cells;
+    for (const auto& c : comps) placed_cells.insert(c.cell);
+    std::vector<const CellRow*> orphans;
+    for (const auto& c : cells)
+        if (!placed_cells.count(c.name)) orphans.push_back(&c);
+    const CellRow* top_cell = nullptr;
+    for (const CellRow* o : orphans)
+        if (die_w > 0 && std::fabs(o->width - die_w) < 1e-6 &&
+            std::fabs(o->height - die_h) < 1e-6) { top_cell = o; break; }
+    if (!top_cell && orphans.size() == 1) top_cell = orphans[0];
+
+    // ── Stream ──────────────────────────────────────────────────────────────
+    GdsWriter w;
+    w.header("BUDA");
+
+    for (const auto& cell : cells) {
+        if (top_cell && &cell == top_cell) continue;    // emitted as the top
+        w.begin_struct(cell.name);
+        if (cell.width > 0 || cell.height > 0)
+            w.boundary_rect(outline_layer, 0, 0, 0, cell.width, cell.height);
+        auto ti = tmpl.find(cell.name);
+        if (ti != tmpl.end()) {
+            auto ki = children.find(ti->second->id);
+            if (ki != children.end())
+                for (const ComponentRow* ch : ki->second)
+                    place(w, ch, ti->second->x1, ti->second->y1,
+                          last_path_segment(ch->name));
+        }
+        w.end_struct();
+        ++stats.n_structures;
+    }
+
+    // Top: die extent + root placements + routing + labels. On re-import the
+    // top is the die, not a component (G1 semantics), so this round-trips to
+    // the same unprefixed depth-0 roots.
+    std::string top_name = top_cell ? top_cell->name : "top";
+    while (!top_cell && cell_by_name.count(top_name)) top_name = "_" + top_name;
+    w.begin_struct(top_name);
+    ++stats.n_structures;
+    // The die is an EXTENT (import sets it from the top's bbox width/height),
+    // so the die rectangle is anchored at the roots' min corner — that keeps
+    // bbox_of(top) == die on re-import even when the layout origin is not 0.
+    double ox = 0, oy = 0;
+    if (!roots.empty()) {
+        ox = oy = std::numeric_limits<double>::infinity();
+        for (const ComponentRow* r : roots) {
+            ox = std::min(ox, r->x1);
+            oy = std::min(oy, r->y1);
+        }
+    }
+    if (die_w > 0 && die_h > 0)
+        w.boundary_rect(outline_layer, 0, ox, oy, ox + die_w, oy + die_h);
+    else if (top_cell && (top_cell->width > 0 || top_cell->height > 0))
+        w.boundary_rect(outline_layer, 0, ox, oy,
+                        ox + top_cell->width, oy + top_cell->height);
+    for (const ComponentRow* r : roots)
+        place(w, r, 0, 0, r->name);
+    if (n_dim_mismatch > 0)
+        stats.warnings.push_back(
+            std::to_string(n_dim_mismatch) + " placement(s) have a bbox that "
+            "differs from the cell footprint (rotated/resized instances) — "
+            "exported unrotated at the bbox origin");
+
+    // Routing from the persisted tables: detailed bit-wires when present,
+    // else the abstract bus rectangles.
+    auto bundles = db.all_bundles();
+    std::sort(bundles.begin(), bundles.end(),
+              [](const BundleRow& a, const BundleRow& b) { return a.id < b.id; });
+    std::vector<NetSegRow> nsegs;
+    std::vector<NetViaRow> nvias;
+    for (const auto& b : bundles) {
+        auto s = db.net_segments(b.id);
+        nsegs.insert(nsegs.end(), s.begin(), s.end());
+        auto v = db.net_vias(b.id);
+        nvias.insert(nvias.end(), v.begin(), v.end());
+    }
+    auto emit_rect = [&](int layer, double x1, double y1, double x2, double y2) {
+        auto [gl, dt] = gds_pair(layer);
+        w.boundary_rect(gl, dt, std::min(x1, x2), std::min(y1, y2),
+                        std::max(x1, x2), std::max(y1, y2));
+        ++stats.n_wire_shapes;
+    };
+    auto emit_via = [&](int from_layer, int to_layer, double x, double y) {
+        auto [gl, dt] = gds_pair(std::max(from_layer, to_layer));
+        const double h = via_size / 2.0;
+        w.boundary_rect(gl, dt, x - h, y - h, x + h, y + h);
+        ++stats.n_via_shapes;
+    };
+    if (!nsegs.empty()) {
+        stats.stage = "detailed_nuts";
+        for (const auto& s : nsegs) emit_rect(s.layer, s.x1, s.y1, s.x2, s.y2);
+        for (const auto& v : nvias) emit_via(v.from_layer, v.to_layer, v.x, v.y);
+    } else {
+        std::vector<BusSegRow> bsegs;
+        std::vector<BusViaRow> bvias;
+        for (const auto& b : bundles) {
+            auto s = db.bus_segments(b.id);
+            bsegs.insert(bsegs.end(), s.begin(), s.end());
+            auto v = db.bus_vias(b.id);
+            bvias.insert(bvias.end(), v.begin(), v.end());
+        }
+        if (!bsegs.empty()) stats.stage = "abstract_nuts";
+        for (const auto& s : bsegs) emit_rect(s.layer, s.x1, s.y1, s.x2, s.y2);
+        for (const auto& v : bvias) emit_via(v.from_layer, v.to_layer, v.x, v.y);
+    }
+
+    // One TEXT label per pin row: net name at the pin position — re-import
+    // in labeled mode recovers the nets/pins (dirs come back UNKNOWN).
+    if (write_labels) {
+        std::map<int, std::string> net_name;
+        for (const auto& n : db.all_nets()) net_name[n.id] = n.name;
+        auto pins = db.all_pins();
+        std::sort(pins.begin(), pins.end(),
+                  [&](const PinRow& a, const PinRow& b) {
+                      const std::string &an = net_name[a.net_id],
+                                        &bn = net_name[b.net_id];
+                      if (an != bn) return an < bn;
+                      if (a.comp_id != b.comp_id) return a.comp_id < b.comp_id;
+                      if (a.px != b.px) return a.px < b.px;
+                      return a.py < b.py;
+                  });
+        for (const auto& p : pins) {
+            if (p.px == -1 && p.py == -1) continue;         // unknown position
+            auto it = net_name.find(p.net_id);
+            if (it == net_name.end() || it->second.empty()) continue;
+            w.text(label_layer, 0, p.px, p.py, it->second);
+            ++stats.n_labels;
+        }
+    }
+
+    w.end_struct();
+    w.end_lib();
+    w.write(path);
     return stats;
 }
 
