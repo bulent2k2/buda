@@ -20,9 +20,10 @@ negotiate_congestion
 ripup_reroute
 run_detailed_nuts
 check_connectivity dnuts
-# improvement (3) (rnr stage b) to reduce number of bit seg opens — affordable
-# now that ripup trials replan one bundle incrementally instead of the whole
-# design (was minutes, now seconds):
+# improvement (3) (rnr stage b) to reduce number of bit seg opens — negotiate
+# first (each open segment's window is injected as band demand, teaching the
+# planner what DetailedNUTS measured), then the hill-climb finishes:
+negotiate_congestion
 ripup_reroute
 check_connectivity dnuts
 visualize

@@ -493,3 +493,19 @@ def test_canned_stage_b_ripup_clears_open():
         s.do_command("ripup_reroute")
     assert s.detailed_result.num_unplaced == 0
     assert s.nuts_result.num_overlaps == 0
+
+
+def test_canned_stage_b_negotiate_clears_open():
+    """Stage-b negotiation on the canned fixture (item 1 v2a): injecting the
+    open segment's window teaches the width-blind planner about the dead band,
+    and ONE cost-driven iteration re-routes the bundle — no per-candidate
+    trials.  The deterministic counterpart of the big2/hier measurements."""
+    s = _build_dnuts_open_session()
+    assert s.detailed_result.num_unplaced == 8
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    out = buf.getvalue()
+    assert s.detailed_result.num_unplaced == 0, out
+    assert s.nuts_result.num_overlaps == 0, out
+    assert "stage b" in out, out

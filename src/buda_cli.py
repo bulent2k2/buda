@@ -3145,14 +3145,21 @@ class BudaSession:
                     # (including H/V mismatches that charge no cuts).
                     w.input.topology_pinned = False
                     w.input.pinned_seg_layers = []
-                    asn = self.planner.replan_bundle(self.bundles, bid)
-                    if asn is None:
-                        continue
-                    w.plan.selected_topology_index = asn.topo_index
-                    w.input.assigned_v_layer = asn.v_layer_id
-                    w.input.assigned_h_layer = asn.h_layer_id
-                    w.plan.seg_layers = list(asn.seg_layers)
-                    w.plan.seg_perp = list(asn.seg_perp)
+                    # The ripup-capable replan (v2b): when the target has no
+                    # overflow-free candidate under the injected prices, the
+                    # planner's own ladder may also displace the committed
+                    # bundle blocking it — both assignments come back and the
+                    # outer accept/restore guard still owns safety.
+                    asns = self.planner.replan_bundle_ripup(self.bundles, bid)
+                    for asn in asns:
+                        w2 = self._rr_wrapper(asn.bundle_id)
+                        if w2 is None:
+                            continue
+                        w2.plan.selected_topology_index = asn.topo_index
+                        w2.input.assigned_v_layer = asn.v_layer_id
+                        w2.input.assigned_h_layer = asn.h_layer_id
+                        w2.plan.seg_layers = list(asn.seg_layers)
+                        w2.plan.seg_perp = list(asn.seg_perp)
                 self._run_nuts_internal()
                 if stage == 'b':
                     self._run_detailed_nuts(bit_order=self._detailed_bit_order)

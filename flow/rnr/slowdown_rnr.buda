@@ -17,6 +17,7 @@ ripup_reroute
 check_connectivity nuts
 run_detailed_nuts
 check_connectivity dnuts
+negotiate_congestion
 ripup_reroute
 check_connectivity dnuts
 exit
