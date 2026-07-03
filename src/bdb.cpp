@@ -68,6 +68,29 @@ void BDB::_exec(const char* sql) {
     }
 }
 
+// Write batching (see bdb.h): fold a burst of autocommit inserts into one
+// transaction so the WAL is fsync'd once, not per statement.  Depth-counted so
+// composing persist helpers nest safely — only depth 0↔1 transitions touch SQL.
+// The counter is advanced ONLY AFTER the SQL succeeds, so a throwing BEGIN/
+// COMMIT leaves depth consistent with SQLite's actual transaction state: a
+// failed outer BEGIN keeps depth 0 (no phantom nesting), and a failed COMMIT
+// keeps depth 1 (the transaction is still open) so the caller can recover with
+// rollback_batch() rather than the next begin_batch() issuing BEGIN inside it.
+void BDB::begin_batch() {
+    if (_batch_depth == 0) _exec("BEGIN");   // throws → depth stays 0
+    ++_batch_depth;
+}
+void BDB::commit_batch() {
+    if (_batch_depth == 0) return;
+    if (_batch_depth == 1) _exec("COMMIT");  // throws → depth stays 1 (txn open)
+    --_batch_depth;
+}
+void BDB::rollback_batch() {
+    if (_batch_depth == 0) return;
+    _batch_depth = 0;                        // reset first: a batch is never left
+    _exec("ROLLBACK");                       // half-open from our bookkeeping's view
+}
+
 // Bundle tables (schema v2). Membership is keyed by net *name* so it is flow-
 // agnostic: the flat flow's nets may not have rows in the BDB `net` table, and
 // Membership is keyed by net_id (FK to net): consistent with net_props.bundle_id

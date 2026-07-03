@@ -420,6 +420,20 @@ public:
     std::vector<std::pair<std::string, std::string>>
         bundle_busterms(const std::string& bundle_id) const;
 
+    // ── Write batching ─────────────────────────────────────────────────────
+    // Wrap a burst of row inserts in ONE transaction so the WAL is fsync'd once
+    // instead of once per statement (autocommit).  Nestable via a depth counter:
+    // only the outermost begin/commit touches the DB, so composing persist
+    // helpers (each guarding its own body) is safe.  rollback_batch collapses
+    // the whole stack — call it on error to discard a partial write.
+    // The depth counter is advanced only AFTER the BEGIN/COMMIT succeeds, so a
+    // throwing outer statement leaves depth consistent with SQLite's real state
+    // (failed BEGIN → depth 0; failed COMMIT → depth 1, txn still open) and the
+    // caller can always recover via rollback_batch().
+    void begin_batch();
+    void commit_batch();
+    void rollback_batch();
+
     // ── Candidate topology persistence (Stage-2 output) ────────────────────
     void add_topology(const TopoRow& tr);           // INSERT OR REPLACE
     void add_topology_segment(const TopoSegRow& sr);
@@ -525,6 +539,7 @@ private:
     mutable sqlite3_stmt* _q_all_busterms       = nullptr;
 
     void _exec(const char* sql);
+    int  _batch_depth = 0;   // begin/commit_batch nesting depth (0 = autocommit)
     void _create_schema();
     // Bring the DB from its stored PRAGMA user_version up to SCHEMA_VERSION,
     // applying each version step in order, then stamp the new version. Steps

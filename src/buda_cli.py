@@ -14,6 +14,7 @@
 
 import argparse
 import contextlib
+import functools
 import faulthandler
 import hashlib
 import io
@@ -126,6 +127,22 @@ _SUMMARY_MARKERS = [re.compile(p, re.I) for p in (
 # child commands are each summarized instead, and the visualize commands open
 # interactive windows whose output belongs on the terminal.
 _PASSTHROUGH_CMDS = frozenset({"source", "visualize", "visualize_topologies"})
+
+
+def _batched(method):
+    """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).
+
+    Every add_* row insert autocommits by default, so a bulk persist (1000s of
+    rows) pays one WAL fsync per statement — this collapses them to a single
+    commit (measured: generate_hier_topologies persist 23s -> ~1.7s on mix).
+    Nestable: the C++ depth counter makes composing persist helpers (e.g.
+    _persist_nuts -> _persist_planner_output) issue only one real BEGIN/COMMIT.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._bdb_batch():
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class BudaSession:
@@ -245,6 +262,7 @@ class BudaSession:
         self._bdb_writeback_src = None
         self._bdb_writeback_bin = None
 
+    @_batched
     def _persist_bundles(self, strategy):
         """Persist self.bundles into the open BDB's bundle tables (Stage-1 output).
 
@@ -281,6 +299,36 @@ class BudaSession:
                 self.bdb.add_bundle_busterm(row.id, bt, "exit")
         return len(self.bundles)
 
+    @contextlib.contextmanager
+    def _bdb_batch(self):
+        """Fold a burst of BDB row inserts into ONE transaction.
+
+        Nestable via the C++ depth counter, so composing persist helpers each
+        wrap their own body safely; a mid-batch exception rolls the whole stack
+        back.  No-op when no BDB is open.  See the _batched decorator.
+        """
+        if self.bdb is None:
+            yield
+            return
+        self.bdb.begin_batch()
+        ok = False
+        try:
+            yield
+            ok = True
+        finally:
+            if not ok:
+                self.bdb.rollback_batch()            # body failed → discard
+            else:
+                # A failed COMMIT leaves the transaction open (begin/commit_batch
+                # only advance the depth on SQL success), so roll it back rather
+                # than leak a half-open batch into the next command.
+                try:
+                    self.bdb.commit_batch()
+                except BaseException:
+                    self.bdb.rollback_batch()
+                    raise
+
+    @_batched
     def _persist_topologies(self):
         """Persist all candidate topologies in self.bundles to the BDB (Stage 2).
 
@@ -362,6 +410,7 @@ class BudaSession:
             r.is_jog = seg.is_jog
             self.bdb.add_topology_bridge(r)
 
+    @_batched
     def _persist_nuts(self):
         """Persist abstract-NUTS bus segments + symbolic bus-vias (Stage 4).
 
@@ -505,6 +554,7 @@ class BudaSession:
                 n += 1
         return n
 
+    @_batched
     def _persist_detailed_nuts(self):
         """Persist detailed-NUTS per-bit wires + vias (Stage 9, schema v8).
 
@@ -786,6 +836,7 @@ class BudaSession:
               + (f"; {skipped} bundle(s) skipped (no candidates)" if skipped else ""))
         return len(self.bundles)
 
+    @_batched
     def _persist_planner_output(self):
         """Persist the planner's decision into the BDB after run_planner.
 
