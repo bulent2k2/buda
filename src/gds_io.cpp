@@ -32,6 +32,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace buda {
 
@@ -42,10 +43,12 @@ enum : uint8_t {
     R_HEADER = 0x00, R_BGNLIB = 0x01, R_UNITS = 0x03, R_ENDLIB = 0x04,
     R_BGNSTR = 0x05, R_STRNAME = 0x06, R_ENDSTR = 0x07,
     R_BOUNDARY = 0x08, R_PATH = 0x09, R_SREF = 0x0A, R_AREF = 0x0B,
-    R_TEXT = 0x0C, R_LAYER = 0x0D, R_WIDTH = 0x0F, R_XY = 0x10,
+    R_TEXT = 0x0C, R_LAYER = 0x0D, R_DATATYPE = 0x0E, R_WIDTH = 0x0F,
+    R_XY = 0x10,
     R_ENDEL = 0x11, R_SNAME = 0x12, R_COLROW = 0x13, R_STRING = 0x19,
     R_STRANS = 0x1A, R_MAG = 0x1B,
     R_ANGLE = 0x1C, R_PATHTYPE = 0x21, R_PROPVALUE = 0x2C, R_BOX = 0x2D,
+    R_BOXTYPE = 0x2E,
 };
 
 struct Rec {
@@ -174,7 +177,8 @@ int snap_angle(double deg, std::vector<std::string>& warnings,
 }  // namespace
 
 GdsImportStats import_gds(BDB& db, const std::string& path,
-                          const std::vector<int>& label_layers) {
+                          const std::vector<int>& label_layers,
+                          const std::vector<std::pair<int,int>>& routing_layers) {
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("import_gds: cannot open " + path);
     std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)),
@@ -194,6 +198,9 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
     bool aref = false;
     double path_width_dbu = 0;                 // WIDTH record (dbu; abs value)
     int    path_type = 0;                      // PATHTYPE: 0 butt, 1/2 extended
+    int    elem_layer = 0, elem_dtype = 0;     // current shape's LAYER/DATATYPE
+    const std::set<std::pair<int,int>> routing(routing_layers.begin(),
+                                               routing_layers.end());
     bool saw_header = false, saw_endlib = false;
 
     size_t pos = 0;
@@ -234,11 +241,13 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
                 break;
             case R_BOUNDARY: case R_BOX:
                 geom_kind = GK_POLY;
+                elem_layer = 0; elem_dtype = 0;
                 break;
             case R_PATH:
                 geom_kind = GK_PATH;
                 path_width_dbu = 0;
                 path_type = 0;
+                elem_layer = 0; elem_dtype = 0;
                 break;
             case R_WIDTH:
                 // Negative = absolute (not magnified); bbox use is the same.
@@ -254,6 +263,10 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
                 break;
             case R_LAYER:
                 if (in_text) cur_text.layer = r.i16();
+                else         elem_layer = r.i16();
+                break;
+            case R_DATATYPE: case R_BOXTYPE:
+                if (!in_text) elem_dtype = r.i16();
                 break;
             case R_STRING:
                 if (in_text) cur_text.str = r.str();
@@ -311,6 +324,12 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
                         cur_ref->rdx = (x3 - cur_ref->ox) / cur_ref->rows;
                         cur_ref->rdy = (y3 - cur_ref->oy) / cur_ref->rows;
                     }
+                } else if ((geom_kind == GK_POLY || geom_kind == GK_PATH) &&
+                           cur && routing.count({elem_layer, elem_dtype})) {
+                    // Phase G3: shapes on mapped routing (layer, datatype)
+                    // pairs are wires, not macro-outline geometry — they must
+                    // not grow the cell footprint (round-trip requirement).
+                    ++stats.n_routing_shapes;
                 } else if (geom_kind == GK_POLY && cur) {
                     for (size_t i = 0; i < npts; ++i) {
                         double x, y;

@@ -39,6 +39,31 @@ void LayerStack::set_layer_kspan(int id, double kspan) {
 void LayerStack::set_bit_pitch(int id, double pitch) {
     for (auto& l : layers_) if (l.id == id) { l.bit_pitch = pitch; return; }
 }
+void LayerStack::set_gds_mapping(int id, int gds_layer, int gds_datatype) {
+    for (auto& l : layers_)
+        if (l.id == id) { l.gds_layer = gds_layer; l.gds_datatype = gds_datatype; return; }
+}
+int LayerStack::get_gds_layer(int id) const {
+    const Layer* l = get_layer(id);
+    return l ? l->gds_layer : -1;
+}
+int LayerStack::get_gds_datatype(int id) const {
+    const Layer* l = get_layer(id);
+    return l ? l->gds_datatype : 0;
+}
+int LayerStack::layer_for_gds(int gds_layer, int gds_datatype) const {
+    for (const auto& l : layers_)
+        if (l.gds_layer == gds_layer && l.gds_datatype == gds_datatype &&
+            l.gds_layer >= 0)
+            return l.id;
+    return -1;
+}
+std::vector<std::pair<int,int>> LayerStack::gds_mapped_pairs() const {
+    std::vector<std::pair<int,int>> out;
+    for (const auto& l : layers_)
+        if (l.gds_layer >= 0) out.emplace_back(l.gds_layer, l.gds_datatype);
+    return out;
+}
 double LayerStack::eff_bus_width(int bits, double base_width, int layer_id) const {
     const Layer* l = get_layer(layer_id);
     if (l && l->bit_pitch > 0.0 && bits > 0)

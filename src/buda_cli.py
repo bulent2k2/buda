@@ -54,7 +54,7 @@ KNOWN_COMMANDS = frozenset({
     "add_block", "add_blocks_from_bdb", "add_bus", "add_cell", "add_cell_pin",
     "add_comp", "add_grid_override", "add_inst", "add_inst_to_cell", "add_keepout",
     "add_net", "bdb_net_mode", "check_connectivity", "corner_margin",
-    "def_layer", "def_track_pattern", "derive_busterms", "detour_channel",
+    "def_gds_layer", "def_layer", "def_track_pattern", "derive_busterms", "detour_channel",
     "dump_hbundles", "dump_topologies", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
     "import_def_lef", "import_gds", "import_verilog", "load_pipeline",
@@ -154,6 +154,7 @@ class BudaSession:
         self._planner_params  = {}   # param_name -> value (buffered before planner exists)
         self._net_endpoints   = {}   # net_name -> (driver_instance, [receiver_instances])
         self._layer_name_map = {}    # layer_name -> layer_id
+        self._gds_label_layers = []  # def_gds_layer labels <csv> (import default)
         self._nuts_pitch = 1.0
         self._planner_pitch = None   # pitch the last run_planner reserved bands for
         self._detailed_bit_order = "LO_HI"
@@ -3354,6 +3355,57 @@ class BudaSession:
                 self._layer_overheads[int(lid)] = ovh_val
             self._layer_name_map[name] = int(lid)
 
+        elif cmd == "def_gds_layer":
+            # def_gds_layer <buda_layer_id> <gds_layer> [<gds_datatype>]
+            # def_gds_layer file <path>      (lines: <id> <gds_layer> [<dt>], # comments)
+            # def_gds_layer labels <csv>     (default TEXT label layers for import_gds)
+            # GDSII layer mapping (Phase G3): binds a def_layer metal layer to a
+            # GDS (layer, datatype) pair. import_gds excludes shapes on mapped
+            # pairs from cell footprints (they are wires, not macro outlines);
+            # export (Phase G4) writes each metal layer to its mapped pair.
+            if len(args) < 2:
+                print("Error: def_gds_layer requires <buda_layer_id> <gds_layer> "
+                      "[<gds_datatype>], 'file <path>', or 'labels <csv>'"); return
+            if args[0] == "labels":
+                self._gds_label_layers = [int(x) for x in args[1].split(",") if x]
+                return
+            entries = []
+            if args[0] == "file":
+                try:
+                    with open(args[1]) as f:
+                        for ln, line in enumerate(f, 1):
+                            line = line.split("#", 1)[0].strip()
+                            if not line:
+                                continue
+                            parts = line.split()
+                            if len(parts) not in (2, 3):
+                                print(f"Error: {args[1]}:{ln}: expected "
+                                      f"<buda_layer_id> <gds_layer> [<gds_datatype>]")
+                                return
+                            entries.append(parts)
+                except OSError as e:
+                    print(f"Error: def_gds_layer file: {e}"); return
+            else:
+                entries.append(args[:3])
+            # Validate the whole map before installing any entry: sourced
+            # scripts continue past a returned error, and a partially
+            # installed map would let a following import_gds exclude only
+            # SOME of the mapped wires from footprints.
+            parsed = []
+            for parts in entries:
+                lid, gl = int(parts[0]), int(parts[1])
+                dt = int(parts[2]) if len(parts) > 2 else 0
+                if not self.layers.has_layer(lid):
+                    print(f"Error: unknown layer id {lid} — define it with "
+                          f"def_layer first (no mappings installed)"); return
+                parsed.append((lid, gl, dt))
+            for lid, gl, dt in parsed:
+                other = self.layers.layer_for_gds(gl, dt)
+                if other >= 0 and other != lid:
+                    print(f"Warning: GDS ({gl},{dt}) already mapped to layer "
+                          f"{other}; layer {lid} also maps it")
+                self.layers.set_gds_mapping(lid, gl, dt)
+
         elif cmd == "set_planner_param":
             name_p, value_p = args[0], float(args[1])
             # Always record in the stash: run_planner builds a fresh
@@ -4190,17 +4242,20 @@ class BudaSession:
         elif cmd == "import_gds":
             # Usage: import_gds <file.gds> [labels <layer_csv>]
             # GDSII stream -> BDB placement/hierarchy + TEXT-label net recovery
-            # (fresh load; see docs/internal/gds_oa_interchange.md, Phases G1-G2).
+            # (fresh load; see docs/internal/gds_oa_interchange.md, Phases G1-G3).
             # `labels 63,64` restricts which GDS layers carry net labels;
-            # default = every TEXT record is a label.
+            # default = layers from `def_gds_layer labels`, else every TEXT
+            # record is a label. Shapes on def_gds_layer-mapped routing pairs
+            # are excluded from cell footprints (wires, not macro outlines).
             if not args:
                 print("Error: import_gds requires a file path"); return
             if self.bdb is None:
                 print("Error: open_bdb first"); return
-            label_layers = []
+            label_layers = list(self._gds_label_layers)
             if len(args) >= 3 and args[1] == "labels":
                 label_layers = [int(x) for x in args[2].split(",") if x]
-            st = self.bdb.import_gds(args[0], label_layers)
+            st = self.bdb.import_gds(args[0], label_layers,
+                                     self.layers.gds_mapped_pairs())
             for wmsg in st.warnings:
                 print(f"[import_gds] Warning: {wmsg}")
             tops = ", ".join(st.tops) if st.tops else "(none)"
@@ -4210,9 +4265,11 @@ class BudaSession:
                       if st.n_labels_skipped else "")
                    if st.n_texts else "no TEXT labels (pair with "
                    "import_verilog for connectivity)")
+            rt = (f" {st.n_routing_shapes} routing shape(s) excluded from "
+                  f"footprints." if st.n_routing_shapes else "")
             print(f"[import_gds] {st.n_structures} structure(s) -> "
                   f"{st.n_cells} cell(s), {st.n_components} component(s); "
-                  f"top(s): {tops}; {lbl}.")
+                  f"top(s): {tops}; {lbl}.{rt}")
         elif cmd == "add_blocks_from_bdb":
             # add_blocks_from_bdb <depth> [deepest|skip|error]
             if not args:

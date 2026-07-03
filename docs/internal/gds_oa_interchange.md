@@ -80,11 +80,31 @@ BDB API: `add_label_pin(net_name, comp_id, pin_name, px, py)`
 Verilog-pairing caveat (stands): name correspondence needs ref properties;
 flows that strip them fall back to labels or synthesized names.
 
-## Phase G3 — layer mapping — ⬜
+## Phase G3 — layer mapping — ✅ IMPLEMENTED
 
-`def_gds_layer <buda_layer_id> <gds_layer> <gds_datatype>` (+ map-file form)
-extending `LayerStack`, both directions: import (outline vs label vs routing
-layers) and export (metal → layer/datatype). Defaults when unmapped.
+`def_gds_layer <buda_layer_id> <gds_layer> [<gds_datatype>]` (datatype
+defaults 0) binds a `def_layer` metal layer to a GDS (layer, datatype) pair,
+stored per-`Layer` on the `LayerStack` (`set_gds_mapping` / `get_gds_layer` /
+`get_gds_datatype` / `layer_for_gds` reverse lookup / `gds_mapped_pairs`).
+Two more command forms: `def_gds_layer file <path>` reads a map file
+(`<buda_layer_id> <gds_layer> [<gds_datatype>]` lines, `#` comments) and
+`def_gds_layer labels <csv>` registers the default TEXT label layers for
+`import_gds` (an explicit `labels` argument on the import still overrides).
+
+Both directions are served:
+- **Import:** the CLI passes `gds_mapped_pairs()` to `import_gds`; shapes on
+  mapped pairs are **routing wires, not macro-outline geometry** — counted
+  (`GdsImportStats.n_routing_shapes`) but excluded from cell footprints. This
+  is what keeps outlines clean when re-importing a routed/exported GDS (the
+  G4 round-trip requirement). Datatype-precise: (8,1) still footprints when
+  only (8,0) is mapped.
+- **Export (G4):** the exporter writes each metal layer's `net_segment`
+  wires to its mapped pair; unmapped layers fall back to a default at export
+  time.
+
+Unmapped GDS layers keep the G1 behavior (all geometry is outline). The
+mapping is session state like `def_layer` itself (scripts re-declare it),
+not persisted in the BDB.
 
 ## Phase G4 — GDS export — ⬜
 

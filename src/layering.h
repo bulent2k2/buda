@@ -18,6 +18,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <utility>
 #include "topology.h"
 namespace buda {
 enum class LayerDir { HORIZONTAL, VERTICAL };
@@ -38,6 +39,11 @@ struct Layer {
     int    span_max      = 1'000'000'000;
     // Per-layer kSpan override; negative means "use global kSpan".
     double kspan_override = -1.0;
+    // GDSII interchange mapping (Phase G3, docs/internal/gds_oa_interchange.md):
+    // the (layer, datatype) pair this metal layer reads from / writes to in a
+    // GDS stream. gds_layer < 0 = unmapped.
+    int gds_layer    = -1;
+    int gds_datatype = 0;
 };
 class LayerStack {
 public:
@@ -56,6 +62,20 @@ public:
     void set_layer_span(int id, int span_min, int span_max);
     // Override the global kSpan coefficient for one layer.
     void set_layer_kspan(int id, double kspan);
+
+    // ── GDSII layer mapping (Phase G3) ────────────────────────────────────
+    // Bind an already-added layer to a GDS (layer, datatype) pair. Used both
+    // directions: import (shapes on mapped pairs are routing wires, not
+    // macro-outline geometry) and export (metal -> GDS layer/datatype).
+    void set_gds_mapping(int id, int gds_layer, int gds_datatype = 0);
+    int  get_gds_layer(int id) const;      // -1 if unmapped / unknown layer
+    int  get_gds_datatype(int id) const;   // 0 if unmapped / unknown layer
+    // Reverse lookup: BUDA layer id for a GDS (layer, datatype) pair;
+    // -1 if no layer maps it. First match wins on duplicates.
+    int  layer_for_gds(int gds_layer, int gds_datatype) const;
+    // All mapped (gds_layer, gds_datatype) pairs, in add_layer order —
+    // the importer's routing-shape exclusion set.
+    std::vector<std::pair<int,int>> gds_mapped_pairs() const;
 
     const Layer* get_layer(int id) const;
     double       get_layer_dilution(int id) const;

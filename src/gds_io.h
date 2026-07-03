@@ -21,6 +21,7 @@
 // BDB tables as import_def_lef/import_verilog, coordinates normalized to µm.
 
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace buda {
@@ -35,6 +36,8 @@ struct GdsImportStats {
     int n_nets       = 0;        // nets recovered from TEXT labels (Phase G2)
     int n_pins       = 0;        // label pins attached to components
     int n_labels_skipped = 0;    // labels outside every component / filtered
+    int n_routing_shapes = 0;    // shapes on mapped routing layers, excluded
+                                 // from cell footprints (Phase G3)
     std::vector<std::string> tops;   // unreferenced structures (roots)
     std::vector<std::string> warnings;
 };
@@ -46,9 +49,14 @@ struct GdsImportStats {
 // DEEPEST component containing the label's elaborated position; labels flow
 // through the hierarchy transforms like geometry). `label_layers` filters
 // which GDS layers carry labels (empty = every TEXT record is a label).
+// `routing_layers` (Phase G3) lists GDS (layer, datatype) pairs that carry
+// routing wires — BOUNDARY/BOX/PATH shapes on those pairs are counted but
+// excluded from cell footprints, so re-importing a routed GDS keeps macro
+// outlines clean (the export->import round-trip requirement).
 // Fresh load: clears the design tables first, like import_def_lef. Throws
 // std::runtime_error on malformed input.
 GdsImportStats import_gds(BDB& db, const std::string& path,
-                          const std::vector<int>& label_layers = {});
+                          const std::vector<int>& label_layers = {},
+                          const std::vector<std::pair<int,int>>& routing_layers = {});
 
 }  // namespace buda
