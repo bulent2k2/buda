@@ -1543,6 +1543,28 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             // anyway, so the value is irrelevant — just avoid the UB.
             if (c_lo <= c_hi) preferred = std::clamp(preferred, c_lo, c_hi);
             pos = preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
+            // Junction infeasibility (Part B): if a placed perpendicular
+            // junction partner's span is DISJOINT from this segment's entire
+            // feasible centre range, no track of ours can honor the junction —
+            // it will close only by a large partner stretch (the bundle-48
+            // class).  Record it so ripup_reroute can re-pin the bundle to an
+            // alternate topology; placement itself proceeds unchanged.
+            {
+                auto jit = jn_map.find(key);
+                if (jit != jn_map.end() && c_lo <= c_hi) {
+                    for (const auto& sc : jit->second) {
+                        auto pj = jn_segs.find({sc.src_bid, sc.src_si});
+                        if (pj == jn_segs.end() || !pj->second->placed) continue;
+                        const TrackSegment* pt = pj->second;
+                        if (pt->horiz == ts->horiz) continue;
+                        const double plo = std::min(pt->span_lo, pt->span_hi);
+                        const double phi = std::max(pt->span_lo, pt->span_hi);
+                        if (c_hi < plo || c_lo > phi)
+                            jn_infeas_.push_back({ts->bundle_id, ts->seg_idx,
+                                                  sc.src_si});
+                    }
+                }
+            }
         }
         // try_repack re-places members with first_fit over their FULL intervals,
         // ignoring lb/ub — so it must not run for a phase-0 constrained placement
@@ -2144,6 +2166,7 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
 }
 
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
+    jn_infeas_.clear();
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
@@ -2392,6 +2415,22 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                 out.result.dogleg_seg_slide_hi[bid]  = bw.plan.seg_slide_hi;
             }
 
+    // Junction infeasibilities: dedup (repair passes re-run solve_layer and
+    // dogleg trials accumulate) and report — one line per distinct edge, like
+    // planner overflow, so a compromised junction is never silent.
+    {
+        std::set<std::tuple<int,int,int>> seen;
+        for (const auto& ji : jn_infeas_) {
+            auto k = std::make_tuple(ji.bundle_id, std::min(ji.seg_a, ji.seg_b),
+                                     std::max(ji.seg_a, ji.seg_b));
+            if (!seen.insert(k).second) continue;
+            out.result.junction_infeasibilities.push_back(ji);
+            std::cout << "[NUTS] junction infeasible: bundle " << ji.bundle_id
+                      << " seg " << ji.seg_a << " cannot reach seg " << ji.seg_b
+                      << " within its slide window (closed by partner stretch;"
+                      << " ripup may re-pin).\n";
+        }
+    }
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "
               << "Interval violations: " << out.result.num_violations << ", "
               << "Track overlaps: " << out.result.num_overlaps << ".\n";
@@ -2403,6 +2442,7 @@ NUTSResult NUTSEngine::rerun_layer(
     const std::vector<BundleWrapper>&  bundles,
     int                                layer_id) const
 {
+    jn_infeas_.clear();
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
