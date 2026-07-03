@@ -92,6 +92,17 @@ struct TopoSegBustermRow {
     std::string busterm_id;
 };
 
+// One persisted seg_conns junction link (topology_seg_conn row, v12): endpoint
+// `endpoint` of segment `seg_index` lands on segment `other_seg`.  One endpoint
+// can join several segments (3+ meeting at a point), hence other_seg in the PK.
+struct TopoSegConnRow {
+    std::string bundle_id;
+    int         cand_index = 0;
+    int         seg_index  = 0;
+    std::string endpoint;    // 'start' | 'end'
+    int         other_seg = 0;
+};
+
 struct BundleRow {
     std::string id;
     int         level = 0;             // hierarchy level (0 = top / flat)
@@ -263,7 +274,7 @@ public:
     //       topology.is_pinned (pre-plan pin survives a checkpoint);
     // v11 = topology_bridge_segment (TEG-over bridges), closing the last
     //       un-persisted Topology field so TEG-over designs resume losslessly.
-    static constexpr int SCHEMA_VERSION = 11;
+    static constexpr int SCHEMA_VERSION = 12;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -420,6 +431,12 @@ public:
     // (persist_seg_busterms in the buda module) inserts the referenced 'tb:<name>'
     // busterm row before calling add; only real taps get a row (junction = absent).
     void add_topology_seg_busterm(const TopoSegBustermRow& r);
+    // Persist / read one seg_conns junction link (v12); the routing bridge
+    // (persist_seg_conns in the buda module) writes one row per real junction —
+    // a missing (seg, endpoint) is a free end or a busterm tap.
+    void add_topology_seg_conn(const TopoSegConnRow& r);
+    std::vector<TopoSegConnRow> topology_seg_conns(
+        const std::string& bundle_id, int cand_index) const;
     std::vector<TopoSegBustermRow> topology_seg_busterms(
         const std::string& bundle_id, int cand_index) const;
     // TEG-over bridge segments (Topology::bridge_segments), one row per

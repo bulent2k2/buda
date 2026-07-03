@@ -149,6 +149,22 @@ static const char* TOPOLOGY_DDL = R"(
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)
     );
+    -- Seg-to-seg junction links (Topology::seg_conns, v12): one row per real
+    -- junction — endpoint `endpoint` of seg_index lands on other_seg.  A missing
+    -- (seg, endpoint) is a free end or a busterm tap; one endpoint can join
+    -- several segments (3+ meeting at a point), hence other_seg in the PK.
+    -- Lets a reloaded topology restore its junction graph LOGICALLY, with no
+    -- geometric re-derivation (single_source_topo_truth.md Phase 5).
+    CREATE TABLE IF NOT EXISTS topology_seg_conn (
+        bundle_id  TEXT,
+        cand_index INTEGER,
+        seg_index  INTEGER,
+        endpoint   TEXT,              -- 'start' | 'end'
+        other_seg  INTEGER,
+        PRIMARY KEY (bundle_id, cand_index, seg_index, endpoint, other_seg),
+        FOREIGN KEY (bundle_id, cand_index)
+            REFERENCES topology(bundle_id, cand_index)
+    );
     -- TEG-over bridge segments (Topology::bridge_segments, v11): one row per
     -- (candidate, multi-rect block) whose trunk falls in a gap between rects.
     -- Persisted so load_pipeline restores TEG-over designs losslessly.
@@ -528,6 +544,11 @@ void BDB::_migrate() {
     if (v < 11) {
         // v10 -> v11: TEG-over bridge segments (brand new table, created via
         // TOPOLOGY_DDL — all IF NOT EXISTS, so this is a no-op for the rest).
+        _exec(TOPOLOGY_DDL);
+    }
+    if (v < 12) {
+        // v11 -> v12: seg-to-seg junction links (topology_seg_conn — brand new
+        // table, created via TOPOLOGY_DDL; IF NOT EXISTS no-ops the rest).
         _exec(TOPOLOGY_DDL);
     }
     if (v < SCHEMA_VERSION) {
@@ -2382,6 +2403,7 @@ void BDB::clear_bundles() {
           "DELETE FROM net_via; DELETE FROM net_segment;"
           "DELETE FROM bus_via; DELETE FROM bus_segment;"
           "DELETE FROM topology_seg_busterm;"
+          "DELETE FROM topology_seg_conn;"
           "DELETE FROM topology_bridge_segment;"
           "DELETE FROM topology_segment; DELETE FROM topology;"
           "DELETE FROM busterm WHERE id LIKE 'tb:%';"
@@ -2494,6 +2516,7 @@ void BDB::clear_topologies() {
     // links, so drop them too (hier-derived 'bt:' rows are untouched); re-persist
     // recreates them idempotently, keeping the *.bdb.sql dump deterministic.
     _exec("DELETE FROM topology_seg_busterm;"
+          "DELETE FROM topology_seg_conn;"
           "DELETE FROM topology_bridge_segment;"
           "DELETE FROM topology_segment; DELETE FROM topology;"
           "DELETE FROM busterm WHERE id LIKE 'tb:%';");
@@ -2581,6 +2604,41 @@ std::vector<TopoSegBustermRow> BDB::topology_seg_busterms(
         r.seg_index  = sqlite3_column_int(q, 2);
         r.endpoint   = reinterpret_cast<const char*>(sqlite3_column_text(q, 3));
         r.busterm_id = reinterpret_cast<const char*>(sqlite3_column_text(q, 4));
+        out.push_back(std::move(r));
+    }
+    return out;
+}
+
+void BDB::add_topology_seg_conn(const TopoSegConnRow& r) {
+    Stmt s(_db,
+        "INSERT OR REPLACE INTO topology_seg_conn"
+        "(bundle_id,cand_index,seg_index,endpoint,other_seg) VALUES(?,?,?,?,?)");
+    sqlite3_bind_text(s, 1, r.bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 2, r.cand_index);
+    sqlite3_bind_int (s, 3, r.seg_index);
+    sqlite3_bind_text(s, 4, r.endpoint.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (s, 5, r.other_seg);
+    sqlite3_step(s);
+}
+
+std::vector<TopoSegConnRow> BDB::topology_seg_conns(
+    const std::string& bundle_id, int cand_index) const {
+    // Ordered for deterministic dumps and so the reload rebuilds seg_conns in
+    // the same i-ascending / endpoint / other-ascending order generation used.
+    Stmt q(_db,
+        "SELECT bundle_id,cand_index,seg_index,endpoint,other_seg"
+        " FROM topology_seg_conn WHERE bundle_id=? AND cand_index=?"
+        " ORDER BY seg_index,endpoint,other_seg");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (q, 2, cand_index);
+    std::vector<TopoSegConnRow> out;
+    while (sqlite3_step(q) == SQLITE_ROW) {
+        TopoSegConnRow r;
+        r.bundle_id  = reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+        r.cand_index = sqlite3_column_int(q, 1);
+        r.seg_index  = sqlite3_column_int(q, 2);
+        r.endpoint   = reinterpret_cast<const char*>(sqlite3_column_text(q, 3));
+        r.other_seg  = sqlite3_column_int(q, 4);
         out.push_back(std::move(r));
     }
     return out;
@@ -2683,6 +2741,8 @@ void BDB::clear_expanded_bundles() {
         "DELETE FROM bus_segment WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM topology_seg_busterm WHERE bundle_id IN"
+        " (SELECT id FROM bundle WHERE is_replicated=1);"
+        "DELETE FROM topology_seg_conn WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"
         "DELETE FROM topology_bridge_segment WHERE bundle_id IN"
         " (SELECT id FROM bundle WHERE is_replicated=1);"

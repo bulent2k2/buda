@@ -336,17 +336,21 @@ class BudaSession:
         """Persist ONE candidate's derived annotations — ALWAYS as a pair:
 
         - the authoritative seg-busterm links (LOGICAL connectivity; a reload
-          rebuilds it from these, never re-deriving from geometry), and
+          rebuilds it from these, never re-deriving from geometry),
+        - the seg-to-seg junction links (seg_conns, v12 — the other half of
+          the topology's connectivity truth; load_seg_busterms restores both,
+          falling back to a geometric derive only for pre-v12 checkpoints), and
         - the TEG-over bridge segments (bridge_segments: block_name -> Segment,
           v11 — without them a resumed TEG-over multi-rect design silently
           drops the bridge over the block's notch).
 
         The single choke point for every topology-persist site: a future site
-        that called one half but not the other would silently reintroduce a
+        that called some but not all of these would silently reintroduce a
         lossy resume, and nothing would fail until that path was resumed.
         The candidate's topology row must already exist (FK parent).
         """
         buda.persist_seg_busterms(self.bdb, bid, ci, topo)
+        buda.persist_seg_conns(self.bdb, bid, ci, topo)
         for name, seg in topo.bridge_segments.items():
             r = buda.TopoBridgeRow()
             r.id = bid
