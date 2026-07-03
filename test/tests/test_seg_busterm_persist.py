@@ -174,6 +174,19 @@ def test_reloaded_topology_drives_conn_topology(tmp_path):
         # that legitimately carries a violation must reproduce it exactly; the
         # reload adds nothing and drops nothing.
         assert taps(ct_re) == taps(ct_mem), f"cand {ci} ({cand.type}) taps diverged"
+        # ...and the same SEG junctions (Codex #151 P2): load_seg_busterms must
+        # hand back a topology whose seg_conns are populated — Phase 4 retired
+        # ConnTopology's geometric junction scan, so an empty seg_conns would
+        # silently drop every stub↔trunk / bend edge on this reload path.
+        def seg_edges(ct):
+            return sorted({(min(i, cc.seg_idx), max(i, cc.seg_idx))
+                           for i, cs in enumerate(ct.segs()) for cc in cs.conns
+                           if cc.kind == buda.SegConnKind.SEG})
+        assert seg_edges(ct_re) == seg_edges(ct_mem), \
+            f"cand {ci} ({cand.type}) SEG junctions diverged on reload"
+        if len(cand.segments) >= 2:
+            assert seg_edges(ct_re), \
+                f"cand {ci} ({cand.type}) lost all SEG junctions on reload"
         assert viols(buda.check_topo(ct_re, t, s.fp, 8)) == \
                viols(buda.check_topo(ct_mem, cand, s.fp, 8)), \
                f"cand {ci} ({cand.type}) check_topo verdict diverged on reload"

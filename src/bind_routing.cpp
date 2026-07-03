@@ -69,7 +69,13 @@ void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
     }
 }
 
-// Rebuild topo.seg_busterms from the persisted rows (replacing whatever was there).
+// Rebuild topo.seg_busterms from the persisted rows (replacing whatever was
+// there), then re-derive seg_conns — EVERY reload path must hand ConnTopology a
+// fully-annotated topology (Phase 4 retired the geometric junction scan, so a
+// reloaded candidate with empty seg_conns would silently lose all stub↔trunk /
+// bend edges — Codex #151 P2).  Callers must assign topo.segments BEFORE
+// calling (load_pipeline does).  INTERIM: the derivation is geometric-at-reload
+// until Phase 5 persists the junction records logically like the taps.
 void load_seg_busterms(BDB& bdb, const std::string& bundle_id,
                        int cand_index, Topology& topo) {
     auto to_busterm = [](const BustermRow& r) {
@@ -92,6 +98,7 @@ void load_seg_busterms(BDB& bdb, const std::string& bundle_id,
         else                          ep.second = to_busterm(*row);
     }
     topo.seg_busterms = std::move(sb);
+    annotate_seg_conns(topo);   // junctions depend on the taps just restored
 }
 
 }  // namespace
