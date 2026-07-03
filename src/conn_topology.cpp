@@ -27,8 +27,6 @@ namespace buda {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-static bool in_range(int v, int lo, int hi) { return v >= lo && v <= hi; }
-
 // ── ConnTopology::build ───────────────────────────────────────────────────────
 
 void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
@@ -67,15 +65,21 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
 
 // ── ConnTopology::infer_connections ───────────────────────────────────────────
 //
-// For every endpoint of every segment we check:
-//   (a) Is this point on a block face?  → BUSTERM connection
-//   (b) Does it lie on (or share an endpoint with) another segment? → SEG connection
+// BOTH connection kinds are read from the topology's authoritative annotations
+// — never re-derived from geometry (single-source-of-topo-truth):
+//   (a) BUSTERM — topo.seg_busterms names which block each terminal endpoint
+//       taps (Phase 2 retired the geometric block-face fallback).
+//   (b) SEG     — topo.seg_conns names which segments each junction endpoint
+//       lands on (Phase 4 retired the geometric touching-segment scan).
 //
-// When an endpoint of segment i is an interior point of segment j (T-junction),
-// we add a SEG connection to both i (pointing at j) and j (pointing at i).
+// When an endpoint of segment i lands on segment j (shared bend or T-junction),
+// we add a SEG connection to both i (pointing at j) and j (pointing at i); the
+// junction's at_pos/is_endpoint labels are derived from the pair's nominal
+// coordinates.  A hand-built topology must be annotated first — one
+// `annotate_topology(topo, fp)` call covers both kinds.
 
 void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) {
-    (void)fp;   // connectivity is read from topo.seg_busterms, not fp geometry
+    (void)fp;   // connectivity is read from topo.seg_busterms/seg_conns, not geometry
     int n = (int)segs_.size();
 
     // Helper: add a SegConn to segs_[i] if it isn't already present.
@@ -129,37 +133,40 @@ void ConnTopology::infer_connections(const Topology& topo, const Floorplan& fp) 
             if (found) continue;
 
             // (c) seg-to-seg connection ----------------------------------------
-            for (int j = 0; j < n; j++) {
-                if (j == i) continue;
+            // Read from topo.seg_conns — the authoritative junction annotation
+            // recorded ONCE at generation (annotate_seg_conns; topo-truth
+            // Phase 4).  ConnTopology no longer scans the geometry for touching
+            // segments: an endpoint with no record is a free end (or a tap,
+            // handled above), never a cue to go guessing.  The junction's
+            // positional labels (at_pos / is_endpoint) are DERIVED here from the
+            // identified pair's nominal coordinates — geometry as value, the
+            // record as the only oracle.  Iteration i-ascending / ep {start,end}
+            // / others-ascending reproduces the retired scan's conn order
+            // exactly (downstream maps and tie-breaks depend on it).
+            auto rec = topo.seg_conns.find({i, ep});
+            if (rec == topo.seg_conns.end()) continue;
+            for (int j : rec->second) {
+                if (j < 0 || j >= n || j == i) continue;  // stale/foreign record
                 const ConnSeg& cj = segs_[j];
-                if (ci.horiz == cj.horiz) continue; // must be perpendicular
-
-                // Does P lie on segment j?
-                bool on_j = ci.horiz
-                    ? (P.x == cj.perp_pos && in_range(P.y, cj.along_lo, cj.along_hi))
-                    : (P.y == cj.perp_pos && in_range(P.x, cj.along_lo, cj.along_hi));
-
-                if (on_j) {
-                    // Connection from i to j: at_pos = position along i
-                    int at_i = ci.horiz ? P.x : P.y;
-                    {
-                        SegConn c;
-                        c.kind    = SegConn::SEG;
-                        c.seg_idx = j;
-                        c.at_pos  = at_i;
-                        c.is_endpoint = (at_i == ci.along_lo || at_i == ci.along_hi);
-                        add_conn(i, std::move(c));
-                    }
-                    // Reciprocal T-junction from j to i: at_pos = position along j
-                    int at_j = ci.horiz ? P.y : P.x;
-                    {
-                        SegConn c;
-                        c.kind    = SegConn::SEG;
-                        c.seg_idx = i;
-                        c.at_pos  = at_j;
-                        c.is_endpoint = (at_j == cj.along_lo || at_j == cj.along_hi);
-                        add_conn(j, std::move(c));
-                    }
+                // Connection from i to j: at_pos = position along i
+                int at_i = ci.horiz ? P.x : P.y;
+                {
+                    SegConn c;
+                    c.kind    = SegConn::SEG;
+                    c.seg_idx = j;
+                    c.at_pos  = at_i;
+                    c.is_endpoint = (at_i == ci.along_lo || at_i == ci.along_hi);
+                    add_conn(i, std::move(c));
+                }
+                // Reciprocal T-junction from j to i: at_pos = position along j
+                int at_j = ci.horiz ? P.y : P.x;
+                {
+                    SegConn c;
+                    c.kind    = SegConn::SEG;
+                    c.seg_idx = i;
+                    c.at_pos  = at_j;
+                    c.is_endpoint = (at_j == cj.along_lo || at_j == cj.along_hi);
+                    add_conn(j, std::move(c));
                 }
             }
         }

@@ -146,6 +146,7 @@ void bind_routing(py::module_& m) {
         .def_readwrite("trunk_location",        &Topology::trunk_location)
         .def_readwrite("pass_through_count",    &Topology::pass_through_count)
         .def_readwrite("seg_busterms",          &Topology::seg_busterms)
+        .def_readwrite("seg_conns",             &Topology::seg_conns)
         .def_readwrite("bridge_segments",       &Topology::bridge_segments)
         .def_readwrite("connected_block_names", &Topology::connected_block_names)
         .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks);
@@ -164,6 +165,15 @@ void bind_routing(py::module_& m) {
     m.def("annotate_topology", [](Topology& topo, const Floorplan& fp) {
         annotate_topology(topo, fp);
     }, py::arg("topo"), py::arg("fp"));
+
+    // Explicitly (re)derive a topology's seg_conns from its segments — the
+    // authoritative seg-to-seg junction annotation ConnTopology reads (it no
+    // longer scans for touching segments; topo-truth Phase 4).  Skips
+    // busterm-tapped endpoints, so call AFTER seg_busterms is in place
+    // (annotate_topology already does both).  Mutates topo in place.
+    m.def("annotate_seg_conns", [](Topology& topo) {
+        annotate_seg_conns(topo);
+    }, py::arg("topo"));
 
     // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables

@@ -688,6 +688,12 @@ class BudaSession:
                     # Phase 3: annotate_topology would just re-guess what the
                     # links record exactly).
                     buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
+                    # Seg-to-seg junctions (topo-truth Phase 4): ConnTopology no
+                    # longer infers them, so a reloaded candidate must carry
+                    # seg_conns.  INTERIM: derive once here (after seg_busterms,
+                    # whose taps the derivation skips) until they are persisted
+                    # logically like the busterm links (Phase 5).
+                    buda.annotate_seg_conns(t)
                 # TEG-over bridges (v11): the explicit segment over a multi-rect
                 # block's notch, kept OUTSIDE t.segments (bridge_segments map).
                 bridges = {}

@@ -83,6 +83,16 @@ struct Topology {
     // ConnTopology::infer_connections can identify busterm connections without
     // scanning the entire floorplan.  Key = segment index.
     std::map<int, SegEndpoints> seg_busterms;
+    // Authoritative seg-to-seg junction annotation (single-source-of-topo-truth
+    // Phase 4): (seg_idx, endpoint 0=start/1=end) -> the segments that endpoint
+    // lands on (sorted ascending; usually one, more when 3+ segments meet at a
+    // point).  Index-only — junction coordinates are always derived from the
+    // identified segments' geometry, so offsetting/mutating segments can never
+    // leave stale coordinates here.  Populated once at generation
+    // (annotate_seg_conns); ConnTopology::infer_connections READS it and never
+    // re-derives seg-to-seg connectivity from geometry.  A missing key means the
+    // endpoint is a busterm tap or a free end — never a cue to go guessing.
+    std::map<std::pair<int,int>, std::vector<int>> seg_conns;
     // Over-the-block bridge segments: block_name → bridge Segment.
     // Non-empty only when teg_mode=OVER and trunk falls in the gap between rects.
     std::map<std::string, Segment> bridge_segments;
@@ -114,9 +124,19 @@ Topology offset_topology(const Topology& t, int dx, int dy,
 // Explicitly (re)annotate a topology's seg_busterms from a floorplan's blocks —
 // the authoritative endpoint annotation ConnTopology reads.  For hand-built or
 // BDB-reloaded topologies that did not go through generate_candidates; call it
-// once before ConnTopology::build.  (ConnTopology no longer geometrically guesses
-// busterms — see docs/internal/single_source_topo_truth.md.)
+// once before ConnTopology::build.  Also (re)derives seg_conns (below), so one
+// call fully annotates a hand-built topology.  (ConnTopology no longer
+// geometrically guesses busterms OR seg-to-seg junctions — see
+// docs/internal/single_source_topo_truth.md.)
 void annotate_topology(Topology& topo, const Floorplan& fp);
+
+// Explicitly (re)derive a topology's seg_conns from its segments: for each
+// endpoint that is not a busterm tap (per seg_busterms), record which
+// perpendicular segments it lands on.  The SAME zero-tolerance predicate
+// ConnTopology used to run per build — executed ONCE, at generation (or after a
+// deliberate geometry mutation such as a NUTS dogleg split), so every stage
+// reads identical connectivity.  Clears and rebuilds the field (idempotent).
+void annotate_seg_conns(Topology& topo);
 // Per-block corner margin: keeps trunk/stub connections away from block corners.
 // dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).
 // dy: margin along the vertical direction   (applied to left/right  faces, extent in Y).
