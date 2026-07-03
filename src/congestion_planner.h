@@ -179,11 +179,27 @@ public:
     // callers fall back to a full replan.
     std::optional<BundleAssignment> replan_bundle(
             std::vector<BundleWrapper>& bundles, int target_bundle_id);
+    // Measured-congestion feedback (negotiate_congestion, wishlist-ripup item
+    // 1): map a REAL NUTS overlap rectangle back onto the planner's bands and
+    // charge it as extra demand, so the next replan_bundle prices the actual
+    // contention the width/track model under-predicted (it reported
+    // overflow=0 there).  `amount` is the caller's pressure (typically the
+    // overlap's perpendicular extent, history-scaled per iteration).  Records
+    // are re-applied by every replan_bundle after it recharges committed
+    // assignments (its usage reset would otherwise wipe them); clear starts
+    // the next feedback iteration fresh.
+    void inject_band_demand(int layer_id, double span_lo, double span_hi,
+                            double perp_lo, double perp_hi, double amount);
+    void clear_injected_demand();
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
     const std::vector<int>& get_x_grid() const { return x_grid_; }
     const std::vector<int>& get_y_grid() const { return y_grid_; }
 
 private:
+    // Injected measured-congestion demand: (cut index, band, amount), applied
+    // on top of the recharged committed assignments in replan_bundle.
+    std::vector<std::tuple<int, int, double>> injected_;
+    void apply_injected_(double sign);
     void rebuild_cuts_();
     // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.
     // perp_pos_override: if != INT_MIN, replaces seg.start.x/y for the perpendicular band

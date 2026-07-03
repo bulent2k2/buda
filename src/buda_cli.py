@@ -60,7 +60,7 @@ KNOWN_COMMANDS = frozenset({
     "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
     "import_def_lef", "import_gds", "import_verilog", "load_pipeline",
-    "move_comp", "open_bdb", "refine_busterms",
+    "move_comp", "negotiate_congestion", "open_bdb", "refine_busterms",
     "report_overhead", "resize_cell", "ripup_reroute", "rotate_comp", "run_bundler",
     "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
     "run_planner", "save_bdb", "select_topologies", "select_topology", "set_die",
@@ -2944,6 +2944,103 @@ class BudaSession:
         self._rr_rerun(stage, target_bid=bid)
         return metric()
 
+    def _negotiate_congestion(self, max_iter=5):
+        """Measured-congestion negotiation (wishlist-ripup item 1, v1: NUTS
+        overlaps).  Instead of guess-and-test over topology candidates, feed
+        the ACTUAL overlaps back into the planner: each overlap rectangle is
+        injected as extra demand on the exact bands where it happened
+        (inject_band_demand), then both bundles of every overlap are re-planned
+        UNPINNED against those corrected prices (replan_bundle) — the cost
+        model itself now steers them off the contended bands, choosing among
+        ALL their candidates in one pass, no per-candidate NUTS trial.
+        Re-injection pressure grows each time the same rectangle re-appears
+        (PathFinder-style history), so persistent contention gets progressively
+        more expensive.  Iterations are accepted only if the overlap count
+        strictly drops (snapshot/restore otherwise) — a safe hill-climb;
+        ripup_reroute remains the finisher for whatever negotiation leaves."""
+        if not self.bundles:
+            print("Error: negotiate_congestion has no bundles.")
+            return
+        if self.planner is None:
+            print("Error: negotiate_congestion needs run_planner to have run first.")
+            return
+        if self.nuts_result is None:
+            print("Error: negotiate_congestion needs run_nuts to have run first.")
+            return
+        m0 = self.nuts_result.num_overlaps
+        if m0 == 0:
+            print("[negotiate] metric already 0 — nothing to do.")
+            return
+        print(f"[negotiate] start: {m0} NUTS overlap(s), max_iter={max_iter}",
+              flush=True)
+        history = {}          # overlap rectangle -> times seen (pressure)
+        accepted = 0
+        for it in range(1, max_iter + 1):
+            cur = self.nuts_result.num_overlaps
+            if cur == 0:
+                break
+            overlaps = list(self.nuts_result.overlap_details)
+            snap = self._rr_snapshot()
+            self.planner.clear_injected_demand()
+            affected = []
+            for od in overlaps:
+                key = (od.layer, round(od.span_lo), round(od.span_hi),
+                       round(od.perp_lo), round(od.perp_hi))
+                history[key] = history.get(key, 0) + 1
+                # Pressure = the physical over-subscription (the overlap's
+                # perpendicular extent + one pitch), scaled by how often this
+                # rectangle has resisted (history) so repeat offenders price up.
+                amount = ((od.perp_hi - od.perp_lo) + self._nuts_pitch) \
+                    * history[key]
+                self.planner.inject_band_demand(
+                    od.layer, od.span_lo, od.span_hi,
+                    od.perp_lo, od.perp_hi, amount)
+                for bid in (od.bid_a, od.bid_b):
+                    if bid not in affected:
+                        affected.append(bid)
+            # Planner convention: widest first.
+            affected.sort(
+                key=lambda b: -(self._rr_wrapper(b).input.width
+                                if self._rr_wrapper(b) is not None else 0.0))
+            sink = io.StringIO()
+            with contextlib.redirect_stdout(sink), buda.ostream_redirect():
+                for bid in affected:
+                    w = self._rr_wrapper(bid)
+                    if w is None:
+                        continue
+                    # Unpin: the corrected prices, not a pinned index, choose
+                    # the topology (snapshot restores the pin on rejection).
+                    w.input.topology_pinned = False
+                    asn = self.planner.replan_bundle(self.bundles, bid)
+                    if asn is None:
+                        continue
+                    w.plan.selected_topology_index = asn.topo_index
+                    w.input.assigned_v_layer = asn.v_layer_id
+                    w.input.assigned_h_layer = asn.h_layer_id
+                    w.plan.seg_layers = list(asn.seg_layers)
+                    w.plan.seg_perp = list(asn.seg_perp)
+                self._run_nuts_internal()
+            new = self.nuts_result.num_overlaps
+            if new < cur:
+                accepted += 1
+                print(f"[negotiate] iter {it}: {len(overlaps)} overlap(s) -> "
+                      f"replanned {len(affected)} bundle(s), metric {cur}->{new}",
+                      flush=True)
+            else:
+                self._rr_restore(snap)
+                print(f"[negotiate] iter {it}: no improvement "
+                      f"(metric {cur}->{new}) — restored, stop.", flush=True)
+                break
+        # Never leak injected demand into later commands: ripup_reroute's
+        # replan_bundle trials would silently re-apply it.
+        self.planner.clear_injected_demand()
+        print(f"[negotiate] done: metric {m0}->{self.nuts_result.num_overlaps} "
+              f"after {accepted} accepted iteration(s).", flush=True)
+        if self.bdb is not None and accepted:
+            self._checkpoint_routing()
+            print(f"[BDB] re-persisted post-negotiate routing "
+                  f"({accepted} iteration(s) accepted).")
+
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
@@ -4213,6 +4310,13 @@ class BudaSession:
             # else after run_nuts ⇒ drive down NUTS overlaps.
             max_iter = int(args[0]) if args else _RR_DEFAULT_MAX_ITER
             self._ripup_reroute(max_iter=max_iter)
+        elif cmd == "negotiate_congestion":
+            # Usage: negotiate_congestion [max_iter]
+            # Measured-congestion feedback (run after run_nuts): inject the
+            # actual NUTS overlaps as band demand and let the planner re-price
+            # both sides of each overlap off the contended bands.
+            max_iter = int(args[0]) if args else 5
+            self._negotiate_congestion(max_iter=max_iter)
         elif cmd == "run_nuts_on_layer":
             # Usage: run_nuts_on_layer <layer-name>
             if not args:

@@ -360,3 +360,63 @@ def test_snapshot_restores_overwritten_dogleg_slot():
     for rs, bs in zip(restored.segments, before.segments):
         assert (rs.start.x, rs.start.y, rs.end.x, rs.end.y) == \
                (bs.start.x, bs.start.y, bs.end.x, bs.end.y)
+
+
+# ---- negotiate_congestion: measured-congestion feedback (band injection) ----
+
+@pytest.mark.mid
+def test_negotiate_requires_pipeline_state():
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    assert "Error" in buf.getvalue()
+
+
+@pytest.mark.mid
+def test_negotiate_noop_when_clean():
+    """With zero NUTS overlaps the command reports and does nothing."""
+    s = _build_session(narrow=False)           # roomy band: no overlap
+    assert s.nuts_result.num_overlaps == 0
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    assert "already 0" in buf.getvalue()
+
+
+@pytest.mark.mid
+def test_negotiate_reroutes_canned_overlap():
+    """The canned two-bus collision: injecting the measured overlap's bands
+    re-prices the contended window, and the planner steers one bus onto an
+    alternate topology by COST — no per-candidate NUTS trials.  The pinned
+    selections must change (negotiation unpins) and the overlap must clear."""
+    s = _build_session(narrow=True)            # forced single NUTS overlap
+    assert s.nuts_result.num_overlaps > 0
+    before = _selections(s)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    out = buf.getvalue()
+    assert s.nuts_result.num_overlaps == 0, out
+    assert _selections(s) != before, out       # a real re-route, not luck
+
+
+@pytest.mark.mid
+def test_negotiate_big2_then_ripup_clears_overlaps():
+    """The headline v1 validation (wishlist-ripup item 1): replaying big2's
+    measured overlaps into the planner as band demand lets its own cost model
+    steer the offenders off the contended bands — most of the 9 overlaps clear
+    in a few sub-second negotiate iterations (no per-candidate NUTS trials),
+    and the ripup hill-climb finishes the residual to 0."""
+    s = _big2_to_stage("a")
+    base = s.nuts_result.num_overlaps
+    assert base > 0
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    after_neg = s.nuts_result.num_overlaps
+    assert after_neg < base, buf.getvalue()    # negotiation made real progress
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute")
+    assert s.nuts_result.num_overlaps == 0     # combined pipeline: fully clean
