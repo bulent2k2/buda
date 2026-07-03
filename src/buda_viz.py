@@ -3643,12 +3643,16 @@ class BudaVisualizer:
                 a.set_visible(False)
 
     def _zoom_to_bundle(self, _=None):
-        """Zoom axes to the bounding box of the selected bundle, or reset to full view."""
+        """Zoom axes to the bounding box of the selected bundle, or reset to the
+        maximal full view when nothing is selected."""
         from matplotlib.lines import Line2D as MplLine2D
         bid = self._highlighted
         if bid is None:
-            self.ax.autoscale()
-            self.fig.canvas.draw_idle()
+            # No selection → reset to the maximal home fill (same as 'h'), NOT
+            # ax.autoscale() — under set_aspect('equal') that collapses to a
+            # non-maximal sliver.  _zoom_home also keeps the resize-tracking
+            # guard (_install_home_fit_tracking) in sync.
+            self._zoom_home()
             return
         xs, ys = [], []
         for e in self._bundle_artists.get(bid, []):

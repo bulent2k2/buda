@@ -399,3 +399,27 @@ def test_home_fit_tracking_resumes_after_pressing_home(monkeypatch):
     resize(22, 8)
     assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6, \
         "resize after 'h' was not tracked (stale home tuple)"
+
+
+def test_ctrl_z_with_no_selection_keeps_maximal_view(monkeypatch):
+    """Ctrl-z ('zoom to bundle') with no bundle selected must reset to the
+    MAXIMAL full view (like 'h'), not ax.autoscale() which collapses to a
+    non-maximal sliver under set_aspect('equal')."""
+    import types
+    from matplotlib.backend_bases import ResizeEvent
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz.fig.set_size_inches(20, 9)
+    viz.fig.canvas.callbacks.process(
+        "resize_event", ResizeEvent("resize_event", viz.fig.canvas))
+    assert viz._highlighted is None, "precondition: no bundle selected"
+    assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6  # maximal now
+
+    viz._on_key(types.SimpleNamespace(key="ctrl+z"))
+    assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6, \
+        "Ctrl-z with no selection shrank the view below maximal"
+
+    # And the resize-tracking guard is still in sync (a later resize tracks).
+    viz.fig.set_size_inches(11, 17)
+    viz.fig.canvas.callbacks.process(
+        "resize_event", ResizeEvent("resize_event", viz.fig.canvas))
+    assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6
