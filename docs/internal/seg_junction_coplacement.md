@@ -1,6 +1,24 @@
 # Seg-to-seg junctions as first-class truth + hard co-placement in NUTS
 
-Status: **design proposal / not yet implemented.** Builds directly on
+Status: **Part A shipped** (as topo-truth **Phase 4**, `Topology::seg_conns` —
+see `single_source_topo_truth.md`; note it retired the geometric scan outright
+rather than demoting it to a fallback, with `annotate_seg_conns` as the explicit
+re-derivation tool). **Phase 0 (FP-determinism stopgap) and the first Part B
+slice (coverage as a maintained invariant) shipped together** on the follow-up
+branch: `preferred_fit` + the pulled/free placement sorts use epsilon-hysteresis
+(1e-6, first-candidate-wins — exact ties keep today's winner byte-identically;
+sub-epsilon FP noise can no longer flip a track across machines), and
+`do_span_adjustments`' coverage guarantee now consults ALL of a segment's
+junction partners via `rev_conn_map`/`ts_ptr_map` (cross-layer), so a per-layer
+call can no longer contract a trunk past a tap outside its slice — the
+`tc3a_flat` bundle-48 mechanism. Verified digest-identical to the Phase 4
+baseline on the flow corpus (mix/dogleg1/dogleg2/aligned/comprehensive); the
+`flow/big_data_test/nuts-open.buda` canary stays clean. A "prefer lower
+coordinate" tie key was tried first and rejected — it shifted real placements
+(mix.buda DNUTS 60→138 unplaced); hysteresis preserves single-machine behavior
+exactly. **Remaining:** full Part B (junction pins as placement constraints,
+below) and Phase 3 persistence (`topology_seg_conn`, planned as topo-truth
+Phase 5). Builds directly on
 [`single_source_topo_truth.md`](single_source_topo_truth.md) (busterm truth,
 Phases 1–3, done) and the abstract-NUTS placement core (`src/nuts.cpp`).
 
