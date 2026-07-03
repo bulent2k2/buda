@@ -79,6 +79,49 @@ def test_batch_nesting_outer_commit_persists(tmp_path):
     assert "nested" in _ids(db)
 
 
+def test_rollback_then_reuse_recovers(tmp_path):
+    """After a rollback the depth counter is clean, so a fresh batch commits
+    normally — no leaked open transaction from the discarded one."""
+    db = buda.BDB(str(tmp_path / "b.bdb"))
+    db.begin_batch()
+    db.add_bundle(_bundle("gone"))
+    db.rollback_batch()                # depth back to 0, txn discarded
+    db.begin_batch()                   # a leaked txn would make this BEGIN throw
+    db.add_bundle(_bundle("kept"))
+    db.commit_batch()
+    ids = _ids(db)
+    assert "kept" in ids and "gone" not in ids
+
+
+def test_commit_without_open_batch_is_noop(tmp_path):
+    """commit_batch / rollback_batch at depth 0 are guarded no-ops (an
+    unbalanced extra commit can never issue COMMIT with no transaction)."""
+    db = buda.BDB(str(tmp_path / "b.bdb"))
+    db.commit_batch()                  # no-op, no error
+    db.rollback_batch()                # no-op, no error
+    db.begin_batch()
+    db.add_bundle(_bundle("b0"))
+    db.commit_batch()
+    db.commit_batch()                  # extra commit past depth 0: still a no-op
+    assert "b0" in _ids(db)
+
+
+def test_rollback_collapses_nested_stack(tmp_path):
+    """rollback_batch discards the WHOLE nested stack (depth -> 0), and the DB
+    is immediately reusable."""
+    db = buda.BDB(str(tmp_path / "b.bdb"))
+    db.begin_batch()
+    db.begin_batch()
+    db.begin_batch()
+    db.add_bundle(_bundle("deep"))
+    db.rollback_batch()                # collapses all three levels
+    assert "deep" not in _ids(db)
+    db.begin_batch()                   # reusable: no residual depth
+    db.add_bundle(_bundle("after"))
+    db.commit_batch()
+    assert "after" in _ids(db)
+
+
 def test_generate_persist_is_batched_and_correct(tmp_path):
     """End-to-end: generate_hier_topologies persists every candidate inside one
     batch, and the persisted rows match the in-memory candidates (the batch is

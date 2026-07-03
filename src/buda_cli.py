@@ -311,13 +311,22 @@ class BudaSession:
             yield
             return
         self.bdb.begin_batch()
+        ok = False
         try:
             yield
-        except BaseException:
-            self.bdb.rollback_batch()
-            raise
-        else:
-            self.bdb.commit_batch()
+            ok = True
+        finally:
+            if not ok:
+                self.bdb.rollback_batch()            # body failed → discard
+            else:
+                # A failed COMMIT leaves the transaction open (begin/commit_batch
+                # only advance the depth on SQL success), so roll it back rather
+                # than leak a half-open batch into the next command.
+                try:
+                    self.bdb.commit_batch()
+                except BaseException:
+                    self.bdb.rollback_batch()
+                    raise
 
     @_batched
     def _persist_topologies(self):

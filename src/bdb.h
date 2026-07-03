@@ -426,6 +426,10 @@ public:
     // only the outermost begin/commit touches the DB, so composing persist
     // helpers (each guarding its own body) is safe.  rollback_batch collapses
     // the whole stack — call it on error to discard a partial write.
+    // The depth counter is advanced only AFTER the BEGIN/COMMIT succeeds, so a
+    // throwing outer statement leaves depth consistent with SQLite's real state
+    // (failed BEGIN → depth 0; failed COMMIT → depth 1, txn still open) and the
+    // caller can always recover via rollback_batch().
     void begin_batch();
     void commit_batch();
     void rollback_batch();
