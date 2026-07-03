@@ -4,6 +4,54 @@ Deferred follow-ups for the feedback-driven `ripup_reroute` pass (Python
 hill-climb in `src/buda_cli.py`, driving planner + NUTS + DetailedNUTS). Index:
 [`wishlist.md`](wishlist.md).
 
+## Incremental trial replan + no-persist reruns — ✅ IMPLEMENTED
+
+**Symptom.** On `flow/rnr/slowdown_rnr.buda` (the hier repro), stage-a ripup
+took 131s and stage-b 619s; profiling put **~90% in
+`CongestionPlanner::optimize_topologies`** — every trial re-planned the ENTIRE
+expanded design (~185 wrappers, ~0.88s/call) to evaluate re-pinning ONE bundle,
+while the NUTS solve being measured was ~0.08s.  A further ~6-8% was per-trial
+waste from driving the full `run_nuts` command handler (BDB persist +
+route-snapshot hash + nuts-log write + diagnostics, discarded for nearly every
+trial and re-done by `_checkpoint_routing` at the end anyway).
+
+**Fix (three pieces).**
+1. **`CongestionPlanner::replan_bundle(bundles, target_bid)`**
+   (`congestion_planner.{h,cpp}`, bound in `bind_routing.cpp`): rebuild band
+   usage by *charging* every other wrapper's committed assignment (a synthetic
+   `PlanResult` from its `seg_layers`/`seg_perp` — no candidate scoring), then
+   run the escalation ladder minus rip-up (a trial may not move others; the
+   Python hill-climb IS the outer rip-up) for the target alone and return its
+   assignment.  Requires the prior full `optimize_topologies` on the same
+   planner instance (grid/cuts/span_ref); `nullopt` → caller falls back to the
+   legacy full replan.  Adopted doglegs stay adopted (their split candidates +
+   exported per-segment pins are exactly the committed state to charge);
+   `_rr_trial` clears only the *target's* stale dogleg overrides.
+2. **`_run_nuts_internal`** — the solver core minus persist/log/diagnostics;
+   `_rr_rerun` uses it for every trial/commit, and `_rr_snapshot`/`_rr_restore`
+   now capture/restore the full per-wrapper plan state (assignment arrays +
+   dogleg overrides), making rejected trials EXACTLY reversible — which
+   retired the post-loop `dirty` full rebuild (with incremental commits that
+   rebuild was actively harmful: full-replanning the committed selections
+   assigns different layers and can destroy the improvement — measured
+   opens 30 → 122 on the hier repro before it was removed).
+3. **Lexicographic stage-b metric `(DNUTS opens, NUTS overlaps)`** + the loop
+   stops only at the ABSOLUTE zero: opens-clearing moves can no longer trade
+   abstract packing away silently (big2's `<=9` overlap guard tripped at 12
+   before this), and after the opens hit 0 the same hill-climb grinds back any
+   collateral overlap creep its own moves introduced.
+
+**Measured (cloud).** slowdown_rnr.buda: stage-a 131s → 4.3s (30×, same
+22→2); stage-b 619s → 45s (14×) with a BETTER endpoint — 92→16 opens, 0
+overlaps, vs the old 60→36.  mix.buda: stage-a ripup 190s → 4.5s (42×), and
+the previously-commented-out "slow improvement (3)" stage-b ripup is now
+enabled in the flow (44s, final dnuts 16 violations vs 66 before).  big2
+goldens hold (opens →0, overlaps ≤9).  Full fast+mid tier green.
+
+**Still deferred:** the C++ band-injection ladder below (item 1) remains the
+principled end-state; `replan_bundle` is a step toward it (the charge-others/
+plan-one machinery it needs now exists).
+
 ## `ripup_reroute` v1 follow-ups (deferred from the implementing PR)
 
 The `ripup_reroute [max_iter]` command (Python greedy hill-climb in

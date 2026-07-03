@@ -9,17 +9,13 @@ add_blocks_from_bdb 2 skip
 run_hier_bundler depth 2
 dump_hbundles
 generate_hier_topologies
-# improvement (1) due to signal_tracks:
 run_planner hier 5 signal_tracks
 run_nuts
 check_connectivity nuts
-# improvement (2) (rnr stage a) to reduce number of bus seg overlaps:
 ripup_reroute
+check_connectivity nuts
 run_detailed_nuts
 check_connectivity dnuts
-# improvement (3) (rnr stage b) to reduce number of bit seg opens — affordable
-# now that ripup trials replan one bundle incrementally instead of the whole
-# design (was minutes, now seconds):
 ripup_reroute
 check_connectivity dnuts
-visualize
+exit

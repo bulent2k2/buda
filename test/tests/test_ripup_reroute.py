@@ -323,3 +323,40 @@ def test_hier_large_repro_progress_and_bounded():
     assert "contender" in out, out               # per-contender progress is visible
     assert len(_distinct_iterations(out)) <= 2, out   # max_iter honored
     assert s.nuts_result.num_overlaps < base, out     # made real progress
+
+
+@pytest.mark.mid
+def test_snapshot_restores_overwritten_dogleg_slot():
+    """A trial's NUTS re-solve OVERWRITES an adopted dogleg's split candidate
+    in place (cands[slot] = ..., same count, new content), which the ncand trim
+    alone cannot undo — a rejected move would poison later trials and the final
+    DNUTS/visualization with unaccepted geometry (Codex review, PR #158).
+    Guard the mechanism directly: snapshot, overwrite the slot, restore, and
+    the committed split geometry must be back."""
+    s = _big2_to_stage("a")
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute")            # may adopt doglegs en route
+    if not s._dogleg_slot:                        # synthesize one: the guard is
+        w0 = s.bundles[0]                         # about snapshot mechanics, not
+        cands = w0.input.candidates               # how the dogleg came to be
+        cands.append(cands[0])
+        w0.input.candidates = cands
+        s._dogleg_slot[w0.input.original_bundle.id] = len(cands) - 1
+        s._dogleg_originals[w0.input.original_bundle.id] = 0
+    bid, slot = next(iter(s._dogleg_slot.items()))
+    w = s._rr_wrapper(bid)
+    before = w.input.candidates[slot]
+    snap = s._rr_snapshot()
+    # Simulate the trial-side in-place overwrite with a distinguishable topology.
+    poisoned = w.input.candidates[(slot + 1) % len(w.input.candidates)]
+    cands = w.input.candidates
+    cands[slot] = poisoned
+    w.input.candidates = cands
+    assert w.input.candidates[slot].type == poisoned.type
+    s._rr_restore(snap)
+    restored = w.input.candidates[slot]
+    assert restored.type == before.type
+    assert len(restored.segments) == len(before.segments)
+    for rs, bs in zip(restored.segments, before.segments):
+        assert (rs.start.x, rs.start.y, rs.end.x, rs.end.y) == \
+               (bs.start.x, bs.start.y, bs.end.x, bs.end.y)

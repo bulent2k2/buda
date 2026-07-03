@@ -453,6 +453,8 @@ void bind_routing(py::module_& m) {
         .def("set_capacity_mode",    &CongestionPlanner::set_capacity_mode, py::arg("mode"))
         .def("build_congestion_map", &CongestionPlanner::build_congestion_map)
         .def("optimize_topologies",  &CongestionPlanner::optimize_topologies)
+        .def("replan_bundle",        &CongestionPlanner::replan_bundle,
+             py::arg("bundles"), py::arg("target_bundle_id"))
         .def("get_cuts",             &CongestionPlanner::get_cuts)
         .def("get_x_grid",           &CongestionPlanner::get_x_grid)
         .def("get_y_grid",           &CongestionPlanner::get_y_grid);
