@@ -1097,7 +1097,8 @@ void NUTSEngine::resolve_corner_overlaps(
                     ts.placed = false;
                     layer_segs.push_back(&ts);
                 }
-            solve_layer(layer_segs, pull_map, align_map, by_layer_cons[layer]);
+            solve_layer(layer_segs, pull_map, align_map, by_layer_cons[layer],
+                        rev_conn_map, ts_ptr_map);
         }
         // Re-fit connected spans to the new trunk positions and repair residue.
         std::vector<TrackSegment*> all_placed;
@@ -1287,7 +1288,9 @@ double NUTSEngine::preferred_fit(
 void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                               const std::map<std::pair<int,int>, double>& pull_map,
                               const AlignMap& align_map,
-                              const LayerConstraints& constraints) const {
+                              const LayerConstraints& constraints,
+                              const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& jn_map,
+                              const std::map<std::pair<int,int>, TrackSegment*>& jn_segs) const {
     if (segs.empty()) return;
     const auto& order_preds = constraints.preds;
     const auto& order_bounds = constraints.bounds;
@@ -1495,6 +1498,37 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                         if (lit == layer_map.end() || !lit->second->placed) continue;
                         double p = lit->second->track_position;
                         if (p >= c_lo && p <= c_hi) { preferred = p; break; }
+                    }
+                }
+            }
+            // Junction-anchored preference (Part B): this segment's track IS a
+            // coordinate along each junction partner (tree edges meet at the
+            // junction vertex).  When a placed partner's span does not already
+            // cover the pull/centre preference, move the preference to the
+            // nearest covered point — the junction is then honored where this
+            // segment LANDS, instead of stretching the partner afterwards
+            // (extension is real occupancy and the source of overstretch).
+            if (std::isnan(preferred)) {
+                auto jit = jn_map.find(key);
+                // Restrict to segments with exactly ONE junction edge (a corner
+                // stub landing on one partner — the bundle-48 shape).  Applying
+                // the preference to multi-junction spines/stub-fans clustered
+                // placements and regressed mix.buda DNUTS 60->74 unplaced.
+                if (jit != jn_map.end() && jit->second.size() == 1) {
+                    auto pit = pull_map.find(key);
+                    const double base = (pit != pull_map.end())
+                                        ? pit->second
+                                        : (ts->interval_lo + ts->interval_hi) / 2.0;
+                    for (const auto& sc : jit->second) {
+                        auto pj = jn_segs.find({sc.src_bid, sc.src_si});
+                        if (pj == jn_segs.end() || !pj->second->placed) continue;
+                        const TrackSegment* pt = pj->second;
+                        if (pt->horiz == ts->horiz) continue;   // partners are perpendicular
+                        const double plo = std::min(pt->span_lo, pt->span_hi);
+                        const double phi = std::max(pt->span_lo, pt->span_hi);
+                        if (base >= plo && base <= phi) break;  // already covered: keep base
+                        const double cand = std::clamp(base, plo, phi);
+                        if (cand >= c_lo && cand <= c_hi) { preferred = cand; break; }
                     }
                 }
             }
@@ -1722,7 +1756,8 @@ void NUTSEngine::orientation_fixpoint(
                 ts->track_position = std::numeric_limits<double>::quiet_NaN();
                 ts->placed = false;
             }
-            solve_layer(by_layer[lid], pull_map, align_map, cons_for(lid));
+            solve_layer(by_layer[lid], pull_map, align_map, cons_for(lid),
+                        rev_conn_map, ts_ptr_map);
         }
         std::vector<TrackSegment*> all_placed;
         for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
@@ -1752,7 +1787,8 @@ void NUTSEngine::orientation_fixpoint(
                 ts->track_position = std::numeric_limits<double>::quiet_NaN();
                 ts->placed = false;
             }
-            solve_layer(segs, pull_map, align_map, cons_for(lid));
+            solve_layer(segs, pull_map, align_map, cons_for(lid),
+                        rev_conn_map, ts_ptr_map);
             do_span_adjustments(segs, rev_conn_map, ts_ptr_map);
         }
         for (auto& [lid, segs] : by_layer) {
@@ -2405,7 +2441,7 @@ NUTSResult NUTSEngine::rerun_layer(
     std::vector<TrackSegment*> layer_segs;
     for (auto& ts : result.segments)
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
-    solve_layer(layer_segs, pull_map, align_map);
+    solve_layer(layer_segs, pull_map, align_map, {}, rev_conn_map, ts_ptr_map);
     // Final pass for all layers to catch cross-layer adjustments from the re-solved layer.
     std::vector<TrackSegment*> all_placed;
     for (auto& ts : result.segments) if (ts.placed) all_placed.push_back(&ts);

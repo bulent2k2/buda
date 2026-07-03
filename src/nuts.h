@@ -167,10 +167,14 @@ private:
     // constraints: optional phase-0 corner-overlap constraints (relative
     // ordering and/or fixed track bounds).  Constrained segments are placed
     // first, before the normal anchor/sweep phases.  Empty = no change.
+    // jn_map/jn_segs: the junction edges (rev_conn_map) + global segment lookup,
+    // used for the junction-anchored preference (Part B) — empty maps disable it.
     void solve_layer(std::vector<TrackSegment*>& segs,
                      const std::map<std::pair<int,int>, double>& pull_map,
                      const AlignMap& align_map,
-                     const LayerConstraints& constraints = {}) const;
+                     const LayerConstraints& constraints = {},
+                     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& jn_map = {},
+                     const std::map<std::pair<int,int>, TrackSegment*>& jn_segs = {}) const;
 
     // Alternating orientation-group fixpoint: solve a whole orientation group
     // (all H or all V) at once, propagate spans to the perpendicular group,
