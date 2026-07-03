@@ -17,6 +17,7 @@
 #pragma once
 #include <climits>
 #include <functional>
+#include <optional>
 #include <set>
 #include <utility>
 #include "bundler.h"
@@ -165,6 +166,19 @@ public:
     void build_congestion_map();
     std::vector<BundleAssignment> optimize_topologies(
             std::vector<BundleWrapper>& bundles, int max_iterations);
+    // Incremental single-bundle replan for ripup_reroute trials: rebuild band
+    // usage by CHARGING every other wrapper's committed assignment (no candidate
+    // scoring), then run the escalation ladder for the target only — minus the
+    // rip-up stage, because a trial asks "does moving ONLY this bundle help"
+    // and must not move others.  Returns the target's winning assignment (the
+    // caller applies it to the wrapper, exactly like optimize_topologies'
+    // results — the pybind list->vector conversion is by copy, so C++-side
+    // wrapper writes would be lost).  Requires a prior optimize_topologies on
+    // this planner instance (grid, cuts, span_ref).  nullopt if that
+    // precondition is missing or the target has no plannable candidate —
+    // callers fall back to a full replan.
+    std::optional<BundleAssignment> replan_bundle(
+            std::vector<BundleWrapper>& bundles, int target_bundle_id);
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
     const std::vector<int>& get_x_grid() const { return x_grid_; }
     const std::vector<int>& get_y_grid() const { return y_grid_; }

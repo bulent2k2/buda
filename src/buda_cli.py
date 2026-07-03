@@ -2651,12 +2651,32 @@ class BudaSession:
     # planner cannot do because it is blind to the real NUTS/DNUTS result.
 
     def _rr_stage_metric(self):
-        """(stage, metric_fn) for the active pipeline state, or (None, None)."""
+        """(stage, metric_fn) for the active pipeline state, or (None, None).
+
+        Stage b's metric is LEXICOGRAPHIC: (DNUTS opens, NUTS overlaps).  The
+        hill-climb optimizes opens first, but among moves with equal opens it
+        must not trade abstract-NUTS packing away as collateral (a move that
+        clears the last opens while adding bus-level overlaps leaves a worse
+        route than one that clears them cleanly — the big2 <=9 guard).  Python
+        tuples compare lexicographically, so the loop's `m < cur` works
+        unchanged; zero/no-op checks use _rr_m_primary."""
         if self.detailed_result is not None:
-            return 'b', (lambda: self.detailed_result.num_unplaced)
+            return 'b', (lambda: (self.detailed_result.num_unplaced,
+                                  self.nuts_result.num_overlaps
+                                  if self.nuts_result is not None else 0))
         if self.nuts_result is not None:
             return 'a', (lambda: self.nuts_result.num_overlaps)
         return None, None
+
+    @staticmethod
+    def _rr_m_primary(m):
+        """The metric's primary component (opens/overlaps count)."""
+        return m[0] if isinstance(m, tuple) else m
+
+    @staticmethod
+    def _rr_m_str(m):
+        """Readable metric for progress lines: '60' or '60 (ovl 9)'."""
+        return f"{m[0]} (ovl {m[1]})" if isinstance(m, tuple) else str(m)
 
     def _rr_open_bundles(self):
         """Bundle ids whose placed-bit count falls short of expected (stage b).
@@ -2741,11 +2761,23 @@ class BudaSession:
         return None
 
     def _rr_snapshot(self):
-        """Capture the state a trial mutates so it can be fully restored."""
+        """Capture the state a trial mutates so it can be fully restored.
+
+        Besides selection/pin/candidate-count, capture every wrapper's plan
+        assignment arrays (seg_layers/seg_perp/assigned_*) and the dogleg
+        per-segment overrides (seg_net_pull/seg_slide_*): an incremental trial
+        (replan_bundle) mutates only its target's arrays, and restoring them
+        exactly means a rejected trial leaves NO divergence between the live
+        plan and the restored result refs — the `dirty` full rebuild is then
+        needed only for legacy full-replan trials."""
         return {
             'wrap': {w.input.original_bundle.id:
                      (w.plan.selected_topology_index, w.input.topology_pinned,
-                      len(w.input.candidates))
+                      len(w.input.candidates),
+                      list(w.plan.seg_layers), list(w.plan.seg_perp),
+                      list(w.plan.seg_net_pull),
+                      list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi),
+                      w.input.assigned_v_layer, w.input.assigned_h_layer)
                      for w in self.bundles},
             'nuts': self.nuts_result,
             'dnuts': self.detailed_result,
@@ -2756,15 +2788,24 @@ class BudaSession:
     def _rr_restore(self, snap):
         for w in self.bundles:
             bid = w.input.original_bundle.id
-            sel, pinned, ncand = snap['wrap'].get(
-                bid, (w.plan.selected_topology_index, w.input.topology_pinned,
-                      len(w.input.candidates)))
+            cap = snap['wrap'].get(bid)
+            if cap is None:
+                continue
+            (sel, pinned, ncand, seg_layers, seg_perp,
+             seg_net_pull, seg_slide_lo, seg_slide_hi, av, ah) = cap
             cands = w.input.candidates
             while len(cands) > ncand:        # drop dogleg-appended candidates
                 del cands[len(cands) - 1]
             w.input.candidates = cands
             w.plan.selected_topology_index = sel
             w.input.topology_pinned = pinned
+            w.plan.seg_layers = seg_layers
+            w.plan.seg_perp = seg_perp
+            w.plan.seg_net_pull = seg_net_pull
+            w.plan.seg_slide_lo = seg_slide_lo
+            w.plan.seg_slide_hi = seg_slide_hi
+            w.input.assigned_v_layer = av
+            w.input.assigned_h_layer = ah
         self.nuts_result = snap['nuts']
         self.detailed_result = snap['dnuts']
         self._dogleg_slot = dict(snap['dl_slot'])
@@ -2799,32 +2840,84 @@ class BudaSession:
                 w.plan.seg_layers = list(asn.seg_layers)
                 w.plan.seg_perp = list(asn.seg_perp)
 
-    def _rr_rerun(self, stage):
+    def _run_nuts_internal(self):
+        """Solve abstract NUTS for the current plan WITHOUT the run_nuts
+        command's reporting/persistence (nuts-log write, diagnostics, BDB
+        persist + route-snapshot hash).  Used by ripup_reroute reruns: nearly
+        every trial result is discarded, and _checkpoint_routing persists the
+        final accepted state once at the end."""
+        nuts = buda.NUTSEngine(self.fp, self.layers)
+        nuts.set_track_pitch(self._nuts_pitch)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
+        with buda.ostream_redirect():
+            self.nuts_result = nuts.run(self.bundles)
+        self._adopt_doglegs()
+
+    def _rr_rerun(self, stage, target_bid=None):
         """Silently re-run planner + NUTS (+ DNUTS for stage b).
 
+        When `target_bid` names the one bundle a trial moved, the replan is
+        INCREMENTAL: CongestionPlanner.replan_bundle recharges every other
+        wrapper's committed assignment (no scoring) and re-plans the target
+        alone — the full-design optimize_topologies per trial was ~90% of
+        ripup_reroute runtime on large hier designs.  Adopted doglegs stay
+        adopted: other bundles' split candidates + exported per-segment pins
+        are exactly the committed state to charge and re-solve against (the
+        target's own stale pins are cleared by _rr_trial).  Returns True when
+        the incremental path was used; precondition failures fall back to the
+        legacy full replan (a rejected trial of either kind restores exactly
+        from the snapshot).
+
         In hier mode (`run_planner hier` has run, so self.bundles is the expanded
-        per-instance list) the trial re-plans the expanded wrappers in place via
-        _rr_replan_hier — driving the flat `run_planner` would re-expand and corrupt
-        the wrapper set.  Stage b replays DetailedNUTS through the private helper
-        with the user's selected bit order preserved.  The `run_detailed_nuts`
-        *command* resets `_detailed_bit_order` to LO_HI before parsing its (here
-        absent) arg, so driving it via `do_command` would silently flip a HI_LO flow
-        to LO_HI and change detailed wiring semantics unrelated to the topology move."""
+        per-instance list) the full replan re-plans the expanded wrappers in place
+        via _rr_replan_hier — driving the flat `run_planner` would re-expand and
+        corrupt the wrapper set.  Stage b replays DetailedNUTS through the private
+        helper with the user's selected bit order preserved.  The
+        `run_detailed_nuts` *command* resets `_detailed_bit_order` to LO_HI before
+        parsing its (here absent) arg, so driving it via `do_command` would
+        silently flip a HI_LO flow to LO_HI and change detailed wiring semantics
+        unrelated to the topology move."""
+        exact = False
         sink = io.StringIO()
         with contextlib.redirect_stdout(sink), buda.ostream_redirect():
-            if self._planner_is_hier:
+            asn = None
+            if target_bid is not None and self.planner is not None:
+                asn = self.planner.replan_bundle(self.bundles, target_bid)
+            if asn is not None:
+                w = self._rr_wrapper(target_bid)
+                w.plan.selected_topology_index = asn.topo_index
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.plan.seg_perp = list(asn.seg_perp)
+                exact = True
+            elif self._planner_is_hier:
                 self._rr_replan_hier(self._planner_iterations)
             else:
                 self.do_command(f"run_planner {self._planner_iterations}")
-            self.do_command("run_nuts")
+            self._run_nuts_internal()
             if stage == 'b':
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+        return exact
 
     def _rr_trial(self, w, tidx, stage, metric):
         """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
         w.plan.selected_topology_index = tidx
         w.input.topology_pinned = True
-        self._rr_rerun(stage)
+        bid = w.input.original_bundle.id
+        if bid in self._dogleg_slot:
+            # The target carries per-segment dogleg overrides indexed by ITS
+            # adopted split topology; pinning a different candidate must not
+            # inherit them (misapplied slide/pull pins — the hazard
+            # _reset_doglegs guards against, scoped here to the one bundle the
+            # trial moves).  The snapshot restores them on rejection.
+            w.plan.seg_net_pull = []
+            w.plan.seg_slide_lo = []
+            w.plan.seg_slide_hi = []
+        self._rr_rerun(stage, target_bid=bid)
         return metric()
 
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER):
@@ -2841,32 +2934,41 @@ class BudaSession:
             return
 
         m0 = metric()
-        if m0 == 0:
+        if self._rr_m_primary(m0) == 0:
             print(f"[ripup_reroute] stage {stage}: metric already 0 — nothing to do.")
             return
         what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
-        print(f"[ripup_reroute] stage {stage} ({what}): start metric={m0}, "
+        print(f"[ripup_reroute] stage {stage} ({what}): "
+              f"start metric={self._rr_m_str(m0)}, "
               f"max_iter={max_iter}, {len(self._rr_contenders(stage))} contenders",
               flush=True)
 
         committed = 0
         it = 0
         n_trials = 0
-        # A trial re-runs the planner, mutating every wrapper's layer/perp
-        # assignment fields (seg_layers, seg_perp, assigned_*_layer) — which
-        # `_rr_snapshot`/`_rr_restore` do NOT capture (they restore only
-        # selection, pin, and result refs).  After a commit the live plan is
-        # consistent; after rejected trials it carries the last trial's
-        # assignment while the reported result is the snapshot's.  Track that
-        # divergence and rebuild a consistent plan from the committed selections
-        # before returning, so a later run_nuts/DNUTS/visualization matches the
-        # reported metric.
-        dirty = False
+        # Rejected trials need no post-loop rebuild: _rr_snapshot captures (and
+        # _rr_restore restores) every field a trial can mutate — selection, pin,
+        # dogleg-appended candidates, the plan assignment arrays
+        # (seg_layers/seg_perp/assigned_*), the dogleg per-segment overrides
+        # (seg_net_pull/seg_slide_*), the result refs, and the dogleg
+        # bookkeeping — so after a restore the live plan and the reported
+        # metric are consistent by construction.  (A full-replan rebuild here
+        # would be WRONG with incremental commits: re-planning the committed
+        # selections from scratch assigns different layers than the committed
+        # single-bundle replans and can destroy the improvement just made.)
         stopped_early = False            # True if we converged / ran out of moves
         while it < max_iter:
             it += 1
             cur = metric()
-            if cur == 0:
+            # Stop only at the metric's ABSOLUTE zero.  For stage b's
+            # lexicographic (opens, overlaps) that means the loop keeps going
+            # after the opens hit 0, grinding back the collateral NUTS-overlap
+            # creep its own opens-clearing moves may have introduced (a strict
+            # tuple improvement with opens already 0 IS an overlap reduction).
+            # Entry with opens already 0 is still a no-op (the primary-based
+            # check above): ripup repairs damage it caused, it does not start
+            # a stage-b run just to chase abstract overlaps.
+            if cur == ((0, 0) if isinstance(cur, tuple) else 0):
                 stopped_early = True
                 break
             contenders = self._rr_contenders(stage)
@@ -2897,53 +2999,51 @@ class BudaSession:
                         continue
                     m = self._rr_trial(w, tidx, stage, metric)
                     self._rr_restore(snap)
-                    dirty = True             # trial mutated live plan assignments
                     n_trials += 1
                     if m < cur and (cand_best is None or m < cand_best[0]):
                         cand_best = (m, bid, old_tidx, tidx)
-                    if m == 0:               # cannot do better — take it now
+                    # Absolute best (stage b: 0 opens AND 0 overlaps) — take it
+                    # now.  A merely-primary zero keeps scanning: among moves
+                    # that clear the opens, the lexicographic metric still
+                    # prefers the one with the least collateral overlap.
+                    if m == ((0, 0) if isinstance(m, tuple) else 0):
                         cand_best = (m, bid, old_tidx, tidx)
                         break
                 if cand_best is not None:
                     best = cand_best
                     print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
-                          f"bundle {bid} improves {cur}->{cand_best[0]} "
+                          f"bundle {bid} improves {self._rr_m_str(cur)}->"
+                          f"{self._rr_m_str(cand_best[0])} "
                           f"(topo {old_tidx + 1}->{cand_best[3] + 1})", flush=True)
                     break
                 print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
                       f"bundle {bid} — no improvement", flush=True)
             if best is None:
                 print(f"[ripup_reroute] iter {it}: no improving re-route "
-                      f"(metric={cur}) — stop.")
+                      f"(metric={self._rr_m_str(cur)}) — stop.")
                 stopped_early = True
                 break
             m_new, bid, old_t, new_t = best
             self._rr_trial(self._rr_wrapper(bid), new_t, stage, metric)  # commit
-            dirty = False                    # commit left live plan consistent
             committed += 1
             print(f"[ripup_reroute] iter {it}: COMMIT bundle {bid} topo {old_t + 1}"
-                  f"->{new_t + 1}, metric {cur}->{metric()}", flush=True)
+                  f"->{new_t + 1}, metric {self._rr_m_str(cur)}->"
+                  f"{self._rr_m_str(metric())}", flush=True)
 
-        # If we exited with rejected trials still live, the wrappers carry the
-        # last trial's layer assignments while the result refs were restored to
-        # the committed plan.  Rebuild a plan consistent with the committed
-        # selections (deterministic; reproduces the reported metric) so any
-        # later run_nuts/DNUTS/visualization operates on the same plan.
-        if dirty:
-            self._rr_rerun(stage)
-
-        if not stopped_early and metric() > 0:
+        if not stopped_early and self._rr_m_primary(metric()) > 0:
             print(f"[ripup_reroute] reached max_iter={max_iter} while still "
                   f"improving — re-run ripup_reroute or raise max_iter "
                   f"(e.g. `ripup_reroute {max_iter * 5}`) to continue.", flush=True)
-        print(f"[ripup_reroute] done: metric {m0}->{metric()} "
+        print(f"[ripup_reroute] done: metric {self._rr_m_str(m0)}->"
+              f"{self._rr_m_str(metric())} "
               f"after {committed} move(s), {n_trials} trial(s).", flush=True)
 
         # Commit the FINAL state: the trials/commits above re-ran the
-        # planner/NUTS(/DNUTS) internally without going through the command
-        # handlers, so the BDB still holds the pre-ripup routing. A checkpoint
-        # (save/exit → load_pipeline resume) must reflect what this session now
-        # holds. Idempotent; no-op without an open BDB or without moves.
+        # planner/NUTS(/DNUTS) through the internal no-persist helpers
+        # (_run_nuts_internal / replan_bundle), so the BDB still holds the
+        # pre-ripup routing. A checkpoint (save/exit → load_pipeline resume)
+        # must reflect what this session now holds. Idempotent; no-op without
+        # an open BDB or without moves.
         if self.bdb is not None and committed:
             self._checkpoint_routing()
             print(f"[BDB] re-persisted post-ripup routing "

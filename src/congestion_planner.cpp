@@ -1111,4 +1111,46 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     return assignments;
 }
 
+std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
+        std::vector<BundleWrapper>& bundles, int target_bundle_id) {
+    // Needs the state a prior optimize_topologies established on this instance:
+    // the (possibly extended) grid + cuts, and the non-TOP span reference.
+    if (x_grid_.empty() || cuts_.empty() || span_ref_eff_ <= 0.0) return std::nullopt;
+
+    BundleWrapper* target = nullptr;
+    for (auto& bw : bundles)
+        if (bw.input.original_bundle.id == target_bundle_id) { target = &bw; break; }
+    if (!target || target->input.candidates.empty()) return std::nullopt;
+    const int tsel = target->plan.selected_topology_index;
+    if (tsel < 0 || tsel >= (int)target->input.candidates.size()) return std::nullopt;
+
+    // Rebuild band usage from every OTHER bundle's committed assignment —
+    // charging only, no scoring.  This is what makes a ripup trial O(one
+    // bundle's candidates) instead of a full-design optimize_topologies (the
+    // ~90% of ripup_reroute runtime on large hier designs).  No reservations:
+    // every bundle is already planned, so all demand is real.
+    for (auto& cut : cuts_) cut.reset_usage();
+    for (const auto& bw : bundles) {
+        if (&bw == target) continue;
+        const int sel = bw.plan.selected_topology_index;
+        if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
+        if (bw.plan.seg_layers.empty()) continue;   // never planned — no demand
+        PlanResult fixed;
+        fixed.found      = true;
+        fixed.best_topo  = sel;
+        fixed.seg_layers = bw.plan.seg_layers;
+        fixed.seg_perp   = bw.plan.seg_perp;
+        commit_plan(bw, fixed);
+    }
+
+    // Escalation ladder for the target, minus rip-up (stage 2): a trial may
+    // not move other bundles, and the caller's hill-climb IS the outer rip-up.
+    PlanResult plan = plan_bundle(*target, PlanMode::STRICT);
+    if (!plan.found) plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW);
+    if (!plan.found) plan = plan_bundle(*target, PlanMode::BEST_EFFORT);
+    if (!plan.found) return std::nullopt;
+    commit_plan(*target, plan);
+    return make_assignment(*target, plan);
+}
+
 } // namespace buda

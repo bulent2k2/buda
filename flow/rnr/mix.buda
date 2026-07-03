@@ -17,6 +17,9 @@ check_connectivity nuts
 ripup_reroute
 run_detailed_nuts
 check_connectivity dnuts
-# slow improvement (3) (rnr stage b) to reduce number of bit seg opens:
-#ripup_reroute
+# improvement (3) (rnr stage b) to reduce number of bit seg opens — affordable
+# now that ripup trials replan one bundle incrementally instead of the whole
+# design (was minutes, now seconds):
+ripup_reroute
+check_connectivity dnuts
 visualize
