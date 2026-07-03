@@ -108,10 +108,17 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("perp_lo", &OverlapDetail::perp_lo)
         .def_readwrite("perp_hi", &OverlapDetail::perp_hi);
 
+    py::class_<JunctionInfeasibility>(m, "JunctionInfeasibility")
+        .def_readwrite("bundle_id", &JunctionInfeasibility::bundle_id)
+        .def_readwrite("seg_a",     &JunctionInfeasibility::seg_a)
+        .def_readwrite("seg_b",     &JunctionInfeasibility::seg_b);
+
     py::class_<NUTSResult>(m, "NUTSResult")
         .def(py::init<>())
         .def_readwrite("segments",           &NUTSResult::segments)
         .def_readwrite("overlap_details",    &NUTSResult::overlap_details)
+        .def_readwrite("junction_infeasibilities",
+                       &NUTSResult::junction_infeasibilities)
         .def_readwrite("num_violations",     &NUTSResult::num_violations)
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
         .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer)

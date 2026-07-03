@@ -16,9 +16,36 @@ baseline on the flow corpus (mix/dogleg1/dogleg2/aligned/comprehensive); the
 `flow/big_data_test/nuts-open.buda` canary stays clean. A "prefer lower
 coordinate" tie key was tried first and rejected — it shifted real placements
 (mix.buda DNUTS 60→138 unplaced); hysteresis preserves single-machine behavior
-exactly. **Remaining:** full Part B (junction pins as placement constraints,
-below) and Phase 3 persistence (`topology_seg_conn`, planned as topo-truth
-Phase 5). Builds directly on
+exactly. **Persistence shipped** as topo-truth Phase 5 (`topology_seg_conn`,
+schema v12). **Part B shipped**: terminology follows the topology-as-tree model
+(bus-segments are *edges*, `seg_conns` records the *junction* vertices — "pin"
+is not used, it is overloaded), and the mechanisms are edge-symmetric per
+junction edge so they chain through multi-trunk BITRUNK_HVH/VHV trees
+(root←branches, branch←stubs) with no trunk/tap dichotomy. Two mechanisms
+landed: (1) **junction-anchored preference** — in `place_seg`, a segment with
+exactly ONE junction edge whose placed perpendicular partner's span does not
+cover its pull/centre preference moves the preference to the nearest covered
+point, clamped into its own centre range (restricted to single-junction
+segments — the corner-stub / bundle-48 class — because applying it to
+multi-junction spines clustered placements and regressed mix.buda DNUTS 60→74
+unplaced); (2) **junction infeasibility as a first-class signal** — when the
+landing segment's entire feasible centre range (slide window) is DISJOINT from
+the spanning partner's NOMINAL span, the junction closes only by stretching
+the partner beyond what the topology intended; a structured
+`NUTSResult::junction_infeasibilities` entry `{bundle_id, seg_a, seg_b}` is
+recorded (deduped, one `[NUTS] junction infeasible` line printed) and
+`_rr_contenders` feeds those bundles to `ripup_reroute` as stage-a re-pin
+contenders. The signal is **derived from the final accepted state** (the
+selected topologies' `seg_conns` against the result's placed segments, in both
+`run()` and `rerun_layer`) rather than collected during placement — solve
+passes also run in tentative paths (fixpoint sweeps that are restored, dogleg
+trials, repair attempts), and a placement-time collector would report
+compromises the accepted placement no longer has (Codex review, PR #154). Full B2 (junction-seeded spans) was **not needed**: the quality
+table (mix/dogleg/big2 corpus) is clean without it — the coverage invariant +
+anchored preference suffice; it remains an option if a future corpus
+regresses. Tests: `test/tests/test_junction_coplacement.py` (forced-far
+window, anchored preference, surfaced infeasibility, BITRUNK tree edges).
+Builds directly on
 [`single_source_topo_truth.md`](single_source_topo_truth.md) (busterm truth,
 Phases 1–3, done) and the abstract-NUTS placement core (`src/nuts.cpp`).
 

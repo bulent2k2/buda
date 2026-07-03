@@ -2660,6 +2660,14 @@ class BudaSession:
                 add(bid)
         for bid in self._rr_overlap_bundles():
             add(bid)
+        # Junction infeasibilities (Part B): a bundle whose junction edge could
+        # only close by a large partner stretch is a re-route contender even
+        # when the stretch produced no overlap — an alternate topology may
+        # avoid the compromise entirely.  Listed after overlaps: they are a
+        # quality signal, overlaps are a hard one.
+        if self.nuts_result is not None:
+            for ji in self.nuts_result.junction_infeasibilities:
+                add(ji.bundle_id)
         if not order:                       # fallback: any re-routable bundle
             for w in self.bundles:
                 if len(w.input.candidates) > 1:

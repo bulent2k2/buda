@@ -51,17 +51,21 @@ now lands at `<= 2` abstract M7 overlaps, so the test is green. The root cause w
 exactly the over-applied `net_pull` that drove interior/non-binding stubs to their
 slide bounds, congesting the layer; it was never a `tighten_pulls` regression.
 
-## Hard co-placement of joined segments (seg-to-seg junctions)
+## Hard co-placement of joined segments (seg-to-seg junctions) — ✅ RESOLVED
 
-**What:** NUTS keeps joined perpendicular segments connected by a *soft*
+**What:** NUTS kept joined perpendicular segments connected by a *soft*
 post-hoc span-extension (`do_span_adjustments`) rather than a placement
-constraint, so a CPU-dependent track flip can open a zero-margin corner
-(`tc3a_flat` bundle 48) that only DetailedNUTS recovers. Proposal: make
-seg-to-seg joins first-class on `Topology` (symmetric to `seg_busterms`) and
-**co-place** joined endpoints so a join cannot be broken by track selection.
+constraint, so a CPU-dependent track flip could open a zero-margin corner
+(`tc3a_flat` bundle 48) that only DetailedNUTS recovered.
 
-**Where:** design proposal in
-[`seg_junction_coplacement.md`](seg_junction_coplacement.md); touches
-`ConnTopology::infer_connections`, `nuts.cpp` placement core, and topo-gen. See
-also the FP-determinism sub-issue (untoleranced tie-breaks in `preferred_fit` /
-the placement sort comparators) noted there as a cheaper stopgap.
+**Resolution (landed in stages):** joins became first-class
+(`Topology::seg_conns`, topo-truth Phase 4; persisted at schema v12), the
+FP-determinism stopgap + cross-layer coverage invariant made a junction unable
+to *open* at NUTS regardless of host, and Part B added junction-aware
+placement: a single-junction landing segment *prefers* a track its placed
+partner's span already covers (junction-anchored preference in `place_seg`),
+and a junction closable only by a large partner stretch is surfaced as a
+structured `NUTSResult::junction_infeasibilities` entry consumed by
+`ripup_reroute` as a re-pin contender. Design + history in
+[`seg_junction_coplacement.md`](seg_junction_coplacement.md); tests in
+`test/tests/test_junction_coplacement.py`.
