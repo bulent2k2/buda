@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=11;
+PRAGMA user_version=12;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -170,7 +170,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','11');
+INSERT INTO "meta" VALUES('schema_version','12');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -325,6 +325,16 @@ CREATE TABLE topology_seg_busterm (
         endpoint   TEXT,              -- 'start' | 'end'
         busterm_id TEXT REFERENCES busterm(id),
         PRIMARY KEY (bundle_id, cand_index, seg_index, endpoint),
+        FOREIGN KEY (bundle_id, cand_index)
+            REFERENCES topology(bundle_id, cand_index)
+    );
+CREATE TABLE topology_seg_conn (
+        bundle_id  TEXT,
+        cand_index INTEGER,
+        seg_index  INTEGER,
+        endpoint   TEXT,              -- 'start' | 'end'
+        other_seg  INTEGER,
+        PRIMARY KEY (bundle_id, cand_index, seg_index, endpoint, other_seg),
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)
     );

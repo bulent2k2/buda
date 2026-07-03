@@ -83,6 +83,13 @@ topology_seg_busterm
                  a missing (seg,endpoint) is a wire junction
                  PK (bundle_id, cand_index, seg_index, endpoint)
                  FK (bundle_id, cand_index) → topology
+topology_seg_conn
+                 bundle_id, cand_index, seg_index, endpoint ('start'|'end'),
+                 other_seg  — one row per seg-to-seg junction link
+                 (seg_conns, v12); a missing (seg,endpoint) is a free
+                 end or a busterm tap
+                 PK (bundle_id, cand_index, seg_index, endpoint, other_seg)
+                 FK (bundle_id, cand_index) → topology
 topology_bridge_segment
                  bundle_id, cand_index, block_name, x1,y1,x2,y2,
                  layer_hint, is_jog — one TEG-over bridge per
@@ -134,7 +141,9 @@ routing-time busterm attributes (`busterm.teg_mode` + `orig_x1..y2`) and the
 columns on `bus_segment` (perpendicular interval + corner-split track bounds),
 `bundle_net.ord` (the bundle's bit order), and `topology.is_pinned` (a pre-plan
 pin survives a checkpoint); v11 added **`topology_bridge_segment`** (TEG-over
-bridges), closing the last un-persisted `Topology` field.
+bridges); v12 added **`topology_seg_conn`** — the seg-to-seg junction links
+(`Topology::seg_conns`, topo-truth Phase 5), so a reload restores BOTH halves of
+a topology's connectivity logically.
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write

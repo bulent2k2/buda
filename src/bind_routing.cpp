@@ -20,6 +20,7 @@
 // bind_db(m) and bind_bundler(m) must be called before this.
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <iostream>
 #include "topology.h"
 #include "layering.h"
 #include "congestion_planner.h"
@@ -69,13 +70,43 @@ void persist_seg_busterms(BDB& bdb, const std::string& bundle_id,
     }
 }
 
+// ── seg_conns ⇄ BDB (single-source-of-topo-truth, Phase 5) ───────────────────
+// Persist a topology's seg_conns LOGICALLY: one topology_seg_conn row per real
+// junction link (seg endpoint → other segment).  Purely index-valued, so the
+// round-trip involves no geometry at all.
+
+void persist_seg_conns(BDB& bdb, const std::string& bundle_id,
+                       int cand_index, const Topology& topo) {
+    for (const auto& [key, others] : topo.seg_conns)
+        for (int other : others)
+            bdb.add_topology_seg_conn(TopoSegConnRow{
+                bundle_id, cand_index, key.first,
+                key.second == 0 ? "start" : "end", other});
+}
+
+// Rebuild topo.seg_conns from the persisted rows (replacing whatever was
+// there).  Returns the number of link rows read — 0 means nothing persisted
+// (pre-v12 checkpoint), which load_seg_busterms uses to fall back.
+int load_seg_conns(BDB& bdb, const std::string& bundle_id,
+                   int cand_index, Topology& topo) {
+    std::map<std::pair<int,int>, std::vector<int>> sc;
+    int n = 0;
+    for (const auto& r : bdb.topology_seg_conns(bundle_id, cand_index)) {
+        sc[{r.seg_index, r.endpoint == "start" ? 0 : 1}].push_back(r.other_seg);
+        ++n;
+    }
+    topo.seg_conns = std::move(sc);   // SELECT order keeps values sorted
+    return n;
+}
+
 // Rebuild topo.seg_busterms from the persisted rows (replacing whatever was
-// there), then re-derive seg_conns — EVERY reload path must hand ConnTopology a
+// there), then restore seg_conns — EVERY reload path must hand ConnTopology a
 // fully-annotated topology (Phase 4 retired the geometric junction scan, so a
 // reloaded candidate with empty seg_conns would silently lose all stub↔trunk /
 // bend edges — Codex #151 P2).  Callers must assign topo.segments BEFORE
-// calling (load_pipeline does).  INTERIM: the derivation is geometric-at-reload
-// until Phase 5 persists the junction records logically like the taps.
+// calling (load_pipeline does).  seg_conns loads LOGICALLY from the
+// topology_seg_conn links (Phase 5); a pre-v12 checkpoint (zero link rows for a
+// multi-segment candidate) falls back to one explicit geometric derivation.
 void load_seg_busterms(BDB& bdb, const std::string& bundle_id,
                        int cand_index, Topology& topo) {
     auto to_busterm = [](const BustermRow& r) {
@@ -98,7 +129,15 @@ void load_seg_busterms(BDB& bdb, const std::string& bundle_id,
         else                          ep.second = to_busterm(*row);
     }
     topo.seg_busterms = std::move(sb);
-    annotate_seg_conns(topo);   // junctions depend on the taps just restored
+    // Junction links: logical restore; geometric derive only for pre-v12
+    // checkpoints (the fallback prints once so a silent downgrade is visible).
+    if (load_seg_conns(bdb, bundle_id, cand_index, topo) == 0 &&
+        topo.segments.size() > 1) {
+        std::cout << "[load] no persisted seg_conns for bundle " << bundle_id
+                  << " cand " << cand_index
+                  << " (pre-v12 checkpoint) — deriving geometrically once.\n";
+        annotate_seg_conns(topo);
+    }
 }
 
 }  // namespace
@@ -186,6 +225,14 @@ void bind_routing(py::module_& m) {
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables
     // with no geometric re-derivation.  See single_source_topo_truth.md.
     m.def("persist_seg_busterms", &persist_seg_busterms,
+          py::arg("bdb"), py::arg("bundle_id"), py::arg("cand_index"),
+          py::arg("topo"));
+    // Persist / reload a topology's seg_conns logically (Phase 5): the junction
+    // links round-trip through topology_seg_conn with no geometric re-derivation.
+    m.def("persist_seg_conns", &persist_seg_conns,
+          py::arg("bdb"), py::arg("bundle_id"), py::arg("cand_index"),
+          py::arg("topo"));
+    m.def("load_seg_conns", &load_seg_conns,
           py::arg("bdb"), py::arg("bundle_id"), py::arg("cand_index"),
           py::arg("topo"));
     m.def("load_seg_busterms", &load_seg_busterms,

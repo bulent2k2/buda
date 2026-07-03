@@ -140,6 +140,17 @@ void bind_db(py::module_& m) {
         .def_readwrite("layer_hint", &TopoBridgeRow::layer_hint)
         .def_readwrite("is_jog",     &TopoBridgeRow::is_jog);
 
+    // One persisted seg_conns junction link (v12); raw-row access for tests —
+    // the routing bridge (persist/load_seg_conns in the buda module) is the
+    // production surface.
+    py::class_<TopoSegConnRow>(m, "TopoSegConnRow")
+        .def(py::init<>())
+        .def_readwrite("bundle_id",  &TopoSegConnRow::bundle_id)
+        .def_readwrite("cand_index", &TopoSegConnRow::cand_index)
+        .def_readwrite("seg_index",  &TopoSegConnRow::seg_index)
+        .def_readwrite("endpoint",   &TopoSegConnRow::endpoint)
+        .def_readwrite("other_seg",  &TopoSegConnRow::other_seg);
+
     py::class_<BusSegRow>(m, "BusSegRow")
         .def(py::init<>())
         .def_readwrite("id",             &BusSegRow::id)
@@ -307,6 +318,9 @@ void bind_db(py::module_& m) {
         .def("topology_segments",    &BDB::topology_segments,
              py::arg("bundle_id"), py::arg("cand_index"))
         .def("add_topology_bridge",  &BDB::add_topology_bridge, py::arg("r"))
+        .def("add_topology_seg_conn", &BDB::add_topology_seg_conn, py::arg("r"))
+        .def("topology_seg_conns",   &BDB::topology_seg_conns,
+             py::arg("bundle_id"), py::arg("cand_index"))
         .def("topology_bridges",     &BDB::topology_bridges,
              py::arg("bundle_id"), py::arg("cand_index"))
         .def("all_topology_bridges", &BDB::all_topology_bridges,

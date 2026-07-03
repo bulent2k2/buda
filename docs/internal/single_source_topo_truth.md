@@ -193,12 +193,24 @@ for **every** segment, so the shape is fully covered):
   that is a real routing behavior change and is deferred as a future refinement
   with its own before/after flow-diff review.
 
-- **Phase 5 — persist `seg_conns` (planned).** The BDB completion, mirroring
-  Phase 3: `topology_seg_conn(bundle_id, cand_index, seg_index, endpoint,
-  other_seg)` (PK includes `other_seg` — one endpoint can join several segments),
-  a `persist_seg_conns`/`load_seg_conns` pair, wired into the topology-persist
-  choke point and `load_pipeline` (which today re-derives via
-  `annotate_seg_conns` as an explicit interim step).
+- **Phase 5 — persist `seg_conns` logically (done, schema v12).** The BDB
+  completion, mirroring Phase 3: `topology_seg_conn(bundle_id, cand_index,
+  seg_index, endpoint, other_seg)` — PK includes `other_seg` because one
+  endpoint can join several segments; rows are pure indices, so the round-trip
+  involves no geometry at all. `persist_seg_conns` writes one row per real
+  junction link from the `_persist_topology_annotations` choke point (beside the
+  busterm links and TEG bridges); `load_seg_busterms` — the single reload API —
+  now restores BOTH annotations, loading junctions logically via
+  `load_seg_conns` and falling back to one explicit, printed geometric
+  derivation only for pre-v12 checkpoints (zero link rows on a multi-segment
+  candidate). Regressions: `test_seg_conn_persist.py` (exact round-trip incl.
+  multi-join endpoints; reloaded candidate drives ConnTopology/check_topo
+  identically; pre-v12 fallback announces itself and reproduces the junctions;
+  an I-shape persists zero rows — absence is canonical; survives the diffable
+  `*.bdb.sql` round-trip). With this, BOTH halves of a topology's connectivity
+  — taps and junctions — are generated once, consumed everywhere, and
+  persisted logically: no stage, and no reload, ever re-derives connectivity
+  from geometry.
 
 ## Why not just make the fallback smarter?
 
