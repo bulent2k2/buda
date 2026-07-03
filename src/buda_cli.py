@@ -687,6 +687,10 @@ class BudaSession:
                     # re-derived from geometry (single-source-of-topo-truth
                     # Phase 3: annotate_topology would just re-guess what the
                     # links record exactly).
+                    # (also re-derives seg_conns — Phase 4's junction records —
+                    # inside the helper, so EVERY reload path gets a fully
+                    # annotated topology, not just load_pipeline; Phase 5 will
+                    # persist them logically like the busterm links.)
                     buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
                 # TEG-over bridges (v11): the explicit segment over a multi-rect
                 # block's notch, kept OUTSIDE t.segments (bridge_segments map).

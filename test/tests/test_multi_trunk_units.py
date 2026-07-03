@@ -205,8 +205,9 @@ def test_bitrunk_trunk_endpoint_grazing_a_face_stays_a_junction():
     """Codex P1 guard: a BITRUNK trunk/stub endpoint that coincidentally lies on a
     NON-terminal (or sibling) block face must remain a wire junction, not become a
     spurious busterm. The generator completes trunk endpoints as null (authoritative
-    junction), so ConnTopology infers SEG — it must NOT geometrically tap the
-    grazed block (which would disconnect the stub from the trunk)."""
+    junction) and records the stub↔trunk junction in seg_conns (topo-truth Phase 4's
+    one-time annotation, mirrored here via annotate_seg_conns) — ConnTopology must
+    NOT geometrically tap the grazed block (which would disconnect the stub)."""
     fp = buda.Floorplan()
     fp.add_block("own", 180, 0, 220, 40)      # stub taps this block's top face
     fp.add_block("nbr", 150, 100, 250, 140)   # bottom face y=100 grazes the stub's trunk-end
@@ -217,9 +218,12 @@ def test_bitrunk_trunk_endpoint_grazing_a_face_stays_a_junction():
     stub = buda.Segment(); stub.start = buda.Point(200, 40); stub.end = buda.Point(200, 100)
     t.segments = [trunk, stub]
     # generator-style annotation: stub start taps 'own'; every other endpoint is a
-    # null junction entry (NOT geometrically annotated).
+    # null junction entry (NOT geometrically annotated as a busterm).
     own_bt = buda.Busterm(); own_bt.block_name = "own"; own_bt.bbox = buda.Rect(180, 0, 220, 40)
     t.seg_busterms = {0: (None, None), 1: (own_bt, None)}
+    # ...and the generator's one-time seg-to-seg junction annotation (the post-pass
+    # every emitted candidate gets); ConnTopology no longer scans for touches.
+    buda.annotate_seg_conns(t)
 
     ct = buda.ConnTopology(); ct.build(t, fp)
     taps = [cc.block_name for cs in ct.segs() for cc in cs.conns

@@ -2027,8 +2027,8 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     // Extend each of the trunk's stubs (a vertical segment with an endpoint at
     // the old trunk y) up/down to meet whichever piece now covers its column —
     // left piece (yL) if it sits left of the jog, right piece (yR) otherwise —
-    // so the nominal topology stays connected (ConnTopology infers the junctions
-    // geometrically).  (void)colL/colR: ordering is by jog_x, not exact column.
+    // so the nominal topology stays connected.  (void)colL/colR: ordering is by
+    // jog_x, not exact column.
     (void)colL; (void)colR;
     for (auto& s : topo.segments) {
         if (s.start.x != s.end.x) continue;                 // only vertical stubs
@@ -2043,6 +2043,14 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
         if (s.start.y == y_t)      s.start.y = new_y;
         else if (s.end.y == y_t)   s.end.y   = new_y;
     }
+    // The split invalidated the generation-time seg_conns records (the trunk
+    // index is now the left piece; a right piece + jog were appended; stub
+    // endpoints moved).  Re-derive them ONCE on the post-split nominal geometry
+    // — the deliberate annotation point for this mutation, since ConnTopology no
+    // longer infers junctions geometrically (topo-truth Phase 4).  seg_busterms
+    // is untouched, exactly as before (the split never lands on a tapped
+    // endpoint).
+    annotate_seg_conns(topo);
     // piece_l_high reports which piece sits on the higher track, derived from the
     // EMITTED geometry (yL vs yR) — the single source of truth — rather than highL,
     // so the no-swap seed edge can never disagree with the tracks actually placed.

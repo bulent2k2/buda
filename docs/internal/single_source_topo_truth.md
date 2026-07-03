@@ -10,10 +10,15 @@ rather than re-deriving connectivity from raw geometry. Re-deriving invites
 divergence: two stages can disagree, and a coincidence in the coordinates (a wire
 grazing a block corner) can be read as a connection that was never intended.
 
-That authoritative description is **`Topology::seg_busterms`**
-(`topology.h`): a `map<seg_index, (optional<Busterm> start, optional<Busterm>
-end)>`. `nullopt` at an endpoint means "internal junction, not a block face."
-`annotate_endpoints` (`topology.cpp`) populates it at generation time.
+That authoritative description is carried by TWO `Topology` fields
+(`topology.h`), both populated at generation time:
+
+- **`seg_busterms`** — `map<seg_index, (optional<Busterm> start, optional<Busterm>
+  end)>`; `nullopt` at an endpoint means "not a block face." Populated by
+  `annotate_endpoints` (Phases 1–3).
+- **`seg_conns`** — `map<(seg_index, endpoint), vector<seg_index>>`; names which
+  sibling segments a junction endpoint lands on. Populated by
+  `annotate_seg_conns` (Phase 4).
 
 ## The leak: ConnTopology's geometric fallback
 
@@ -140,6 +145,61 @@ for **every** segment, so the shape is fully covered):
   is the `busterm` row; connectivity's source is the `topology_seg_busterm` links —
   none re-derived from another.
 
+- **Phase 4 — seg-to-seg connections become logical (done).** The symmetric
+  completion of Phases 1–3 for the OTHER half of connectivity: which segment
+  endpoint lands on which sibling segment (bends, T-junctions). Previously the
+  ONLY derivation was `infer_connections`' section (c) — a zero-tolerance,
+  perpendicular-only coordinate-coincidence scan over nominal geometry — and
+  because ConnTopology is rebuilt at every stage (planner, NUTS `build_nuts_maps`,
+  bus-via persist, DNUTS feed, both verifiers), that geometric inference re-ran
+  everywhere. Now:
+  1. **`Topology::seg_conns`** (`topology.h`): `(seg_idx, endpoint 0=start/1=end)
+     → sorted vector of segment indices that endpoint lands on` (several when 3+
+     segments meet at a point). **Index-only** — junction coordinates are always
+     derived from the identified segments' geometry (geometry as *value*, the
+     record as the only *oracle*), so `offset_topology` carries it with the plain
+     struct copy and a coordinate shift can never leave stale data.
+  2. **`annotate_seg_conns(topo)`** (`topology.cpp`) is the ONE derivation: the
+     exact retired predicate, run ONCE per candidate as a generation post-pass
+     (`generate_npin` / `generate_2pin`, after all busterm annotation — a tapped
+     endpoint is skipped, mirroring the old `if (found) continue;`). Also called
+     by `annotate_topology` (hand-built/reloaded topologies get both kinds in one
+     call), by the mid-generation gates (`conn_seg_components`,
+     `topology_is_connected`, `topology_is_clean_tree` — they run before the
+     post-pass, so they annotate a local copy), and by **`apply_dogleg`**
+     (`nuts.cpp`) after its split — the one post-generation geometry mutation,
+     which previously relied on the per-build geometric re-inference.
+  3. **`infer_connections` section (c) is retired**: SEG conns are read from
+     `seg_conns`, with `at_pos`/`is_endpoint` derived from the pair's nominal
+     coordinates in the same iteration order as the old scan (downstream
+     `rev_conn_map`/`align_map` ordering and tie-breaks preserved). An endpoint
+     with no record is a free end — never a cue to go guessing.
+     `erase_segment` re-keys `seg_conns` alongside `seg_busterms`.
+
+  Because the post-pass runs the identical algorithm on identical nominal
+  coordinates, routing is **bit-identical** — the derivation just moves from
+  every-stage-rebuild to once-at-generation. NUTS/DNUTS themselves needed no
+  changes: they already consumed ConnTopology's conns logically; the leak was
+  ConnTopology re-deriving them each build. Regressions:
+  `test_seg_conn_annotation.py` (all shapes carry records; an unannotated
+  topology has NO SEG junctions; tapped endpoints skipped; multi-join endpoints;
+  offset carry; post-dogleg records validate against the touch invariant).
+
+  Note: the post-pass is geometric-at-generation by design (exactly like
+  `annotate_endpoints` for busterms) — a coincidental same-bundle touch still
+  becomes a junction, as it always did. Recording junctions **explicitly per
+  builder** (L/Z/U bends, trunk attach points, `complete_relay_junctions`'
+  `connect(a,b)`, BITRUNK branches) would eliminate such phantom junctions, but
+  that is a real routing behavior change and is deferred as a future refinement
+  with its own before/after flow-diff review.
+
+- **Phase 5 — persist `seg_conns` (planned).** The BDB completion, mirroring
+  Phase 3: `topology_seg_conn(bundle_id, cand_index, seg_index, endpoint,
+  other_seg)` (PK includes `other_seg` — one endpoint can join several segments),
+  a `persist_seg_conns`/`load_seg_conns` pair, wired into the topology-persist
+  choke point and `load_pipeline` (which today re-derives via
+  `annotate_seg_conns` as an explicit interim step).
+
 ## Why not just make the fallback smarter?
 
 A bend-aware fallback (skip a BUSTERM at an endpoint shared with a perpendicular
@@ -147,13 +207,12 @@ segment) would patch the corner-graze symptom, but it keeps *two* connectivity
 oracles and can still mis-handle a real terminal that coincides with a junction.
 One oracle, set at generation, is the durable design.
 
-## Follow-up — the seg-to-seg half
+## Follow-up — hard co-placement
 
-This effort made the **busterm** half of connectivity (segment → block face)
-authoritative. The **seg-to-seg** half (which perpendicular segment joins which)
-is still geometrically re-inferred by `ConnTopology::infer_connections`, and NUTS
-consumes it only as a *soft* post-hoc span-extension rather than a placement
-constraint — the source of the `tc3a_flat` bundle-48 abstract-NUTS open that
-DetailedNUTS recovers. The symmetric completion (first-class `seg_joins` +
-**hard co-placement** in NUTS) is proposed in
-[`seg_junction_coplacement.md`](seg_junction_coplacement.md).
+Phase 4 made the seg-to-seg **truth** authoritative (`seg_conns`), but NUTS still
+consumes junctions only as a *soft* post-hoc span-extension rather than a
+placement constraint — the source of the `tc3a_flat` bundle-48 abstract-NUTS open
+that DetailedNUTS recovers. **Hard co-placement** in NUTS (placing junction
+partners as a constraint) is proposed separately in
+[`seg_junction_coplacement.md`](seg_junction_coplacement.md); it now builds on
+`seg_conns` rather than needing its own `seg_joins` field.

@@ -91,6 +91,54 @@ void annotate_topology(Topology& topo, const Floorplan& fp) {
                               fp.get_block_teg_mode(name)});
     }
     annotate_endpoints(topo, bts);
+    // seg_conns must be derived AFTER seg_busterms: a busterm-tapped endpoint is
+    // a block tap, never a wire junction, and the derivation skips it.
+    annotate_seg_conns(topo);
+}
+
+void annotate_seg_conns(Topology& topo) {
+    // (Re)derive the authoritative seg-to-seg junction annotation from the
+    // topology's nominal segment geometry — the SAME zero-tolerance,
+    // perpendicular-only predicate ConnTopology::infer_connections used to run
+    // on every build, executed ONCE here so all stages read one truth.
+    // Orientation/axis bookkeeping mirrors ConnTopology::build exactly
+    // (horiz = start.y == end.y; a vertical segment's perp_pos is its x).
+    topo.seg_conns.clear();
+    const int n = (int)topo.segments.size();
+    auto horiz_of = [](const Segment& s) { return s.start.y == s.end.y; };
+    for (int i = 0; i < n; i++) {
+        const Segment& si = topo.segments[i];
+        const bool     hi = horiz_of(si);
+        for (int ep = 0; ep < 2; ++ep) {
+            // A busterm-tapped endpoint is a block tap — mirror
+            // infer_connections' `if (found) continue;` short-circuit.
+            auto bt = topo.seg_busterms.find(i);
+            if (bt != topo.seg_busterms.end()) {
+                const auto& opt = (ep == 0) ? bt->second.first
+                                            : bt->second.second;
+                if (opt.has_value()) continue;
+            }
+            const Point& P = (ep == 0) ? si.start : si.end;
+            std::vector<int> others;
+            for (int j = 0; j < n; j++) {
+                if (j == i) continue;
+                const Segment& sj = topo.segments[j];
+                if (horiz_of(sj) == hi) continue;   // must be perpendicular
+                const bool jh = horiz_of(sj);
+                const int  perp = jh ? sj.start.y : sj.start.x;
+                const int  alo  = jh ? std::min(sj.start.x, sj.end.x)
+                                     : std::min(sj.start.y, sj.end.y);
+                const int  ahi  = jh ? std::max(sj.start.x, sj.end.x)
+                                     : std::max(sj.start.y, sj.end.y);
+                const bool on_j = jh
+                    ? (P.y == perp && P.x >= alo && P.x <= ahi)
+                    : (P.x == perp && P.y >= alo && P.y <= ahi);
+                if (on_j) others.push_back(j);      // j ascending → sorted
+            }
+            if (!others.empty())
+                topo.seg_conns[{i, ep}] = std::move(others);
+        }
+    }
 }
 
 void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y2) {
@@ -801,13 +849,31 @@ static void erase_segment(Topology& topo, int idx) {
         // k == idx is dropped
     }
     topo.seg_busterms = std::move(nb);
+    // Re-key seg_conns the same way: drop records touching idx (as key or as a
+    // connected other), shift indices above idx down by one on both sides.
+    std::map<std::pair<int,int>, std::vector<int>> nc;
+    for (auto& [k, others] : topo.seg_conns) {
+        if (k.first == idx) continue;
+        const int nk = (k.first > idx) ? k.first - 1 : k.first;
+        std::vector<int> no;
+        for (int o : others) {
+            if (o == idx) continue;
+            no.push_back(o > idx ? o - 1 : o);
+        }
+        if (!no.empty()) nc[{nk, k.second}] = std::move(no);
+    }
+    topo.seg_conns = std::move(nc);
 }
 
 // Number of connected components of `topo` under the SEG (wire-junction)
 // connections ConnTopology infers -- the connectivity the downstream stages see.
 static int conn_seg_components(const Topology& topo, const Floorplan& fp) {
+    // Runs mid-generation, BEFORE the candidate's one-time seg_conns post-pass —
+    // derive the junctions on a local copy (ConnTopology no longer infers them).
+    Topology t2 = topo;
+    annotate_seg_conns(t2);
     ConnTopology ct;
-    ct.build(topo, fp);
+    ct.build(t2, fp);
     const auto& segs = ct.segs();
     int n = (int)segs.size();
     if (n == 0) return 0;
@@ -2166,6 +2232,11 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     add_trunk_mst_candidates(blocks, results);
     add_mst_candidates(blocks, results);
     add_multi_trunk_candidates(pins, blocks, results);
+    // One-time seg-to-seg annotation (topo-truth Phase 4): every candidate's
+    // busterm taps are final here (the add_* above annotate their own), so
+    // derive the junction records ONCE; downstream ConnTopology builds
+    // (filter_pinched below, planner, NUTS, DNUTS, verify) only read them.
+    for (auto& t : results) annotate_seg_conns(t);
     annotate_and_sort(results);
     filter_pinched(results);
     for (auto& t : results)
@@ -2181,8 +2252,11 @@ std::vector<Topology> TopologyGenerator::generate_npin(
 // collinear BUTT-joint leaves a genuinely disconnected subtree.  We only want to
 // drop the latter.
 static bool topology_is_connected(const Topology& topo, const Floorplan& fp) {
+    // Mid-generation gate: derive seg_conns on a local copy (see conn_seg_components).
+    Topology t2 = topo;
+    annotate_seg_conns(t2);
     ConnTopology ct;
-    ct.build(topo, fp);
+    ct.build(t2, fp);
     const auto& segs = ct.segs();
     int n = (int)segs.size();
     if (n == 0) return true;
@@ -2350,8 +2424,11 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
 // than emitted.  The acyclic test mirrors conftest._has_no_cycles (undirected
 // cycle detection over unique SEG edges).
 static bool topology_is_clean_tree(const Topology& topo, const Floorplan& fp) {
+    // Mid-generation gate: derive seg_conns on a local copy (see conn_seg_components).
+    Topology t2 = topo;
+    annotate_seg_conns(t2);
     ConnTopology ct;
-    ct.build(topo, fp);
+    ct.build(t2, fp);
     const auto& segs = ct.segs();
     int n = (int)segs.size();
     if (n == 0) return true;
@@ -3178,6 +3255,8 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     if (allow_double_detour_)
         add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
+    // One-time seg-to-seg annotation (topo-truth Phase 4) — see generate_npin.
+    for (auto& t : candidates) annotate_seg_conns(t);
     annotate_and_sort(candidates);
 
     // Keepout filtering for 2-pin: remove topologies whose trunk segment is
