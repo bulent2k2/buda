@@ -437,10 +437,10 @@ is preserved via UPSERT.
 ### `import_gds`
 
 ```
-import_gds <file.gds>
+import_gds <file.gds> [labels <layer_csv>]
 ```
 
-Import a **GDSII stream** file into the open BDB (Phase G1 of
+Import a **GDSII stream** file into the open BDB (Phases G1–G2 of
 [`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md)). A
 hand-written binary record reader (`src/gds_io.cpp`, no external EDA library),
 following the importer pattern: **fresh load** (clears
@@ -464,13 +464,22 @@ coordinates normalized to **µm** via the `UNITS` record.
 - **Instance names.** GDS references are anonymous; a `PROPVALUE` property on
   the reference is used as the instance name when present (arrays and
   duplicates always synthesize), else `<struct>_<ordinal>` deterministically.
-- **`TEXT` labels** are counted and reported but not yet consumed — net/pin
-  recovery is Phase G2; until then pair with `import_verilog`, as with DEF.
+- **`TEXT` labels → `net`/`pin` rows (Phase G2).** Each label string is a
+  net; its pin lands on the **deepest** component containing the label's
+  elaborated position (dir `UNKNOWN` — the hier bundler's positional fallback
+  covers direction). Labels flow through the hierarchy transforms like
+  geometry, so a label inside a referenced structure repeats per instance
+  (the standard GDS flattening semantic). `labels 63,64` restricts which GDS
+  layers carry labels (default: every `TEXT`); labels outside every component
+  are skipped with a warning. **A labeled GDS runs the hierarchy-aware flow
+  with zero Verilog** (`derive_busterms` → `run_hier_bundler` → …); with no
+  labels, pair with `import_verilog` as with DEF.
 
-Python: `BDB.import_gds(path)` returns a `GdsImportStats` (`n_structures`,
-`n_cells`, `n_components`, `n_texts`, `tops`, `warnings`). Tests generate
-their GDS inputs deterministically with `tools/gds_build.py` (the Phase-G0
-writer, zeroed timestamps): `test/tests/test_gds_import.py`.
+Python: `BDB.import_gds(path, label_layers=[])` returns a `GdsImportStats`
+(`n_structures`, `n_cells`, `n_components`, `n_texts`, `n_nets`, `n_pins`,
+`n_labels_skipped`, `tops`, `warnings`). Tests generate their GDS inputs
+deterministically with `tools/gds_build.py` (the Phase-G0 writer, zeroed
+timestamps): `test/tests/test_gds_import.py`.
 
 ---
 

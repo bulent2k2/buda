@@ -42,8 +42,9 @@ enum : uint8_t {
     R_HEADER = 0x00, R_BGNLIB = 0x01, R_UNITS = 0x03, R_ENDLIB = 0x04,
     R_BGNSTR = 0x05, R_STRNAME = 0x06, R_ENDSTR = 0x07,
     R_BOUNDARY = 0x08, R_PATH = 0x09, R_SREF = 0x0A, R_AREF = 0x0B,
-    R_TEXT = 0x0C, R_WIDTH = 0x0F, R_XY = 0x10, R_ENDEL = 0x11,
-    R_SNAME = 0x12, R_COLROW = 0x13, R_STRANS = 0x1A, R_MAG = 0x1B,
+    R_TEXT = 0x0C, R_LAYER = 0x0D, R_WIDTH = 0x0F, R_XY = 0x10,
+    R_ENDEL = 0x11, R_SNAME = 0x12, R_COLROW = 0x13, R_STRING = 0x19,
+    R_STRANS = 0x1A, R_MAG = 0x1B,
     R_ANGLE = 0x1C, R_PATHTYPE = 0x21, R_PROPVALUE = 0x2C, R_BOX = 0x2D,
 };
 
@@ -147,10 +148,17 @@ struct Ref {                                  // one SREF or AREF element
     int cols = 1, rows = 1;
 };
 
+struct Text {                                 // one TEXT label (µm, local coords)
+    int layer = 0;
+    double x = 0, y = 0;
+    std::string str;
+};
+
 struct GStruct {
     std::string name;
     BBox geom;                                // own BOUNDARY/BOX/PATH extent
     std::vector<Ref> refs;
+    std::vector<Text> texts;                  // labels (net recovery, Phase G2)
 };
 
 int snap_angle(double deg, std::vector<std::string>& warnings,
@@ -165,7 +173,8 @@ int snap_angle(double deg, std::vector<std::string>& warnings,
 
 }  // namespace
 
-GdsImportStats import_gds(BDB& db, const std::string& path) {
+GdsImportStats import_gds(BDB& db, const std::string& path,
+                          const std::vector<int>& label_layers) {
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("import_gds: cannot open " + path);
     std::vector<uint8_t> buf((std::istreambuf_iterator<char>(f)),
@@ -181,6 +190,7 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
     Ref* cur_ref = nullptr;                    // element being parsed (SREF/AREF)
     enum { GK_NONE, GK_POLY, GK_PATH } geom_kind = GK_NONE;
     bool in_text = false;
+    Text cur_text;
     bool aref = false;
     double path_width_dbu = 0;                 // WIDTH record (dbu; abs value)
     int    path_type = 0;                      // PATHTYPE: 0 butt, 1/2 extended
@@ -239,7 +249,14 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
                 break;
             case R_TEXT:
                 in_text = true;
-                ++stats.n_texts;               // consumed in Phase G2
+                cur_text = Text{};
+                ++stats.n_texts;
+                break;
+            case R_LAYER:
+                if (in_text) cur_text.layer = r.i16();
+                break;
+            case R_STRING:
+                if (in_text) cur_text.str = r.str();
                 break;
             case R_SREF: case R_AREF:
                 if (cur) {
@@ -281,7 +298,9 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
                     y = r.i32(i * 8 + 4) * um_per_dbu;
                 };
                 size_t npts = r.len / 8;
-                if (cur_ref) {
+                if (in_text) {
+                    xy(0, cur_text.x, cur_text.y);
+                } else if (cur_ref) {
                     xy(0, cur_ref->ox, cur_ref->oy);
                     if (aref && npts >= 3) {
                         double x2, y2, x3, y3;
@@ -327,10 +346,13 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
                         px = x; py = y;
                     }
                 }
-                // TEXT XY deliberately ignored: labels must not grow footprints.
+                // TEXT XY is captured for net recovery but deliberately does
+                // NOT grow the structure's footprint.
                 break;
             }
             case R_ENDEL:
+                if (in_text && cur && !cur_text.str.empty())
+                    cur->texts.push_back(cur_text);
                 cur_ref = nullptr;
                 in_text = false;
                 geom_kind = GK_NONE;
@@ -344,7 +366,6 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
         }
         if (saw_endlib) break;
     }
-    (void)in_text;
     if (!saw_endlib)
         throw std::runtime_error("import_gds: missing ENDLIB (truncated file?): " + path);
     stats.n_structures = (int)structs.size();
@@ -402,14 +423,32 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
     for (const GStruct& s : structs)
         for (const Ref& ref : s.refs) referenced.insert(ref.sname);
 
+    // Placed components (for label containment) + labels elaborated through
+    // the same hierarchy transforms as geometry (Phase G2 net recovery).
+    struct Placed { int id; int depth; BBox bb; };
+    std::vector<Placed> placed;
+    struct Label { std::string net; double x, y; };
+    std::vector<Label> labels;
+    const std::set<int> lab_layers(label_layers.begin(), label_layers.end());
+    auto emit_labels = [&](const GStruct& s, const XForm& xf) {
+        for (const Text& t : s.texts) {
+            if (!lab_layers.empty() && !lab_layers.count(t.layer)) continue;
+            double lx, ly;
+            xf.apply(t.x, t.y, lx, ly);
+            labels.push_back({t.str, lx, ly});
+        }
+    };
+
     std::function<void(const GStruct&, const XForm&, const std::string&,
-                       const std::string&)> elaborate =
+                       const std::string&, int)> elaborate =
         [&](const GStruct& s, const XForm& xf, const std::string& comp_path,
-            const std::string& parent_path) {
+            const std::string& parent_path, int depth) {
         BBox bb = xf.apply(bbox_of(s.name));
         if (bb.empty()) bb = BBox{0, 0, 0, 0};
-        db.add_comp(comp_path, s.name, parent_path, bb.x1, bb.y1, bb.x2, bb.y2,
-                    s.refs.empty());
+        int cid = db.add_comp(comp_path, s.name, parent_path,
+                              bb.x1, bb.y1, bb.x2, bb.y2, s.refs.empty());
+        placed.push_back({cid, depth, bb});
+        emit_labels(s, xf);
         ++stats.n_components;
         std::map<std::string, int> ordinal;     // per-parent synthesized names
         for (const Ref& ref : s.refs) {
@@ -432,7 +471,8 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
                     } else {
                         ordinal[nm] = 1;        // reserve the property name
                     }
-                    elaborate(child, t, comp_path + "/" + nm, comp_path);
+                    elaborate(child, t, comp_path + "/" + nm, comp_path,
+                              depth + 1);
                 }
         }
     };
@@ -447,9 +487,10 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
         if (referenced.count(s.name)) continue;
         stats.tops.push_back(s.name);
         if (s.refs.empty()) {
-            elaborate(s, XForm{}, s.name, "");
+            elaborate(s, XForm{}, s.name, "", 0);
             continue;
         }
+        emit_labels(s, XForm{});   // the top's own labels (identity transform)
         std::map<std::string, int> ordinal;
         for (const Ref& ref : s.refs) {
             auto sit = by_name.find(ref.sname);
@@ -477,7 +518,7 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
                             "root instance name collision across tops; using '" +
                             nm + "'");
                     }
-                    elaborate(child, t, nm, "");
+                    elaborate(child, t, nm, "", 0);
                 }
         }
     }
@@ -486,6 +527,32 @@ GdsImportStats import_gds(BDB& db, const std::string& path) {
         BBox tb = bbox_of(stats.tops[0]);
         if (!tb.empty()) db.set_die(tb.x2 - tb.x1, tb.y2 - tb.y1);
     }
+
+    // ── Phase G2: TEXT labels -> net/pin rows ────────────────────────────────
+    // Each label string is a net; its pin lands on the DEEPEST component
+    // containing the label's elaborated position (a label inside a referenced
+    // structure repeats per instance — the standard GDS flattening semantic,
+    // which shorts those instances' pins onto the label's net).
+    std::set<std::string> net_names;
+    for (const Label& lb : labels) {
+        const Placed* best = nullptr;
+        for (const Placed& pc : placed) {
+            if (lb.x < pc.bb.x1 || lb.x > pc.bb.x2 ||
+                lb.y < pc.bb.y1 || lb.y > pc.bb.y2)
+                continue;
+            if (!best || pc.depth > best->depth) best = &pc;
+        }
+        if (!best) {
+            ++stats.n_labels_skipped;
+            stats.warnings.push_back("label '" + lb.net +
+                                     "' is outside every component — skipped");
+            continue;
+        }
+        db.add_label_pin(lb.net, best->id, lb.net, lb.x, lb.y);
+        net_names.insert(lb.net);
+        ++stats.n_pins;
+    }
+    stats.n_nets = (int)net_names.size();
 
     return stats;
 }

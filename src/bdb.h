@@ -283,6 +283,12 @@ public:
     // Wipe the design tables (pin/net_props/net/component/cell) for a fresh
     // load — what import_def_lef does internally; public for import_gds.
     void clear_design();
+    // Attach a label-recovered pin: ensure a net row for `net_name` (creating
+    // a name-only row if absent) and insert a pin on `comp_id` at (px, py)
+    // with dir UNKNOWN. Used by import_gds Phase G2 (TEXT-label net recovery);
+    // duplicates (same net/comp/pin_name) are ignored.
+    void add_label_pin(const std::string& net_name, int comp_id,
+                       const std::string& pin_name, double px, double py);
 
     // ── Cell definitions ───────────────────────────────────────────────────
     void add_cell(const std::string& name, double w, double h);

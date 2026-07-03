@@ -1001,6 +1001,20 @@ void BDB::clear_design() {
           "DELETE FROM component; DELETE FROM cell;");
 }
 
+void BDB::add_label_pin(const std::string& net_name, int comp_id,
+                        const std::string& pin_name, double px, double py) {
+    int net_id = _ensure_net(net_name);
+    Stmt s(_db,
+        "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
+        " VALUES(?,?,?,'UNKNOWN',?,?)");
+    sqlite3_bind_int   (s, 1, net_id);
+    sqlite3_bind_int   (s, 2, comp_id);
+    sqlite3_bind_text  (s, 3, pin_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(s, 4, px);
+    sqlite3_bind_double(s, 5, py);
+    sqlite3_step(s);
+}
+
 void BDB::import_def_lef(const std::string& def_path, const std::string& lef_path) {
     auto lef_sizes = _parse_lef_sizes(lef_path);
     auto lef_pins  = _parse_lef_pins(lef_path);

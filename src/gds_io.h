@@ -31,16 +31,24 @@ struct GdsImportStats {
     int n_structures = 0;        // structures in the library
     int n_cells      = 0;        // cell rows written
     int n_components = 0;        // component rows written (elaborated)
-    int n_texts      = 0;        // TEXT records seen (consumed in Phase G2)
+    int n_texts      = 0;        // TEXT records seen
+    int n_nets       = 0;        // nets recovered from TEXT labels (Phase G2)
+    int n_pins       = 0;        // label pins attached to components
+    int n_labels_skipped = 0;    // labels outside every component / filtered
     std::vector<std::string> tops;   // unreferenced structures (roots)
     std::vector<std::string> warnings;
 };
 
 // Import a GDSII stream file into the BDB: structures -> cell rows (footprint
 // = recursive geometry bbox), SREF/AREF placements -> component hierarchy
-// (absolute µm bboxes, dotted paths, growing depth). Fresh load: clears
-// pin/net_props/net/component/cell first, like import_def_lef. Throws
+// (absolute µm bboxes, dotted paths, growing depth), and TEXT labels ->
+// net/pin rows (Phase G2: each label string is a net; the pin lands on the
+// DEEPEST component containing the label's elaborated position; labels flow
+// through the hierarchy transforms like geometry). `label_layers` filters
+// which GDS layers carry labels (empty = every TEXT record is a label).
+// Fresh load: clears the design tables first, like import_def_lef. Throws
 // std::runtime_error on malformed input.
-GdsImportStats import_gds(BDB& db, const std::string& path);
+GdsImportStats import_gds(BDB& db, const std::string& path,
+                          const std::vector<int>& label_layers = {});
 
 }  // namespace buda
