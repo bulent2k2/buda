@@ -61,17 +61,31 @@ alternate candidate, re-runs the pipeline, and keeps moves that reduce the
 metric. Validated on big2 (stage a 9→0, stage b 60→0). The following were
 explicitly out of scope for v1.
 
-1. **C++ band-injection rip-up (principled engine version).** Instead of the
-   Python loop re-running the whole pipeline per trial, drive the planner's
-   existing escalation ladder (STRICT → rip-up → ALLOW_OVERFLOW → BEST_EFFORT,
-   `src/congestion_planner.cpp:~914-1022`) directly from the *measured*
-   NUTS/DNUTS overlaps — inject the real contention as demand on the failing
-   bands so `commit_plan(bw, plan, -1.0)` rips up the actual blocker. Needs a
-   public band-injection / overlap-feedback hook on `CongestionPlanner` (none
-   exists today; the planner is rebuilt each `run_planner`). *Why deferred:* the
-   Python path is validated and additive; the C++ version is a larger
-   re-architecture. *Where to start:* `congestion_planner.{h,cpp}` escalation
-   ladder + `plan_band_overlap` victim ranking; feed it `nuts_result.overlap_details`.
+1. **C++ band-injection rip-up (principled engine version). — ✅ v1 SHIPPED
+   (`negotiate_congestion`, stage-a).** The feedback hook exists:
+   `CongestionPlanner::inject_band_demand(layer, span, perp, amount)` maps a
+   measured overlap rectangle onto the exact (cut, band) pairs via
+   `for_each_band` and charges it as extra demand (records re-applied by every
+   `replan_bundle` after its usage recharge; `clear_injected_demand()` resets).
+   The `negotiate_congestion [max_iter]` command (run after `run_nuts`) drives
+   the loop: inject each measured `nuts_result.overlap_details` rectangle with
+   PathFinder-style history pressure (the same rectangle prices up each
+   iteration it survives), re-plan BOTH bundles of every overlap UNPINNED via
+   `replan_bundle` — the corrected cost model chooses among ALL candidates in
+   one pass, no per-candidate NUTS trial — re-run NUTS, and accept only
+   strictly-improving iterations (snapshot/restore otherwise).
+   `ripup_reroute` remains the finisher for the residual.  Measured: big2
+   9→2 overlaps in 0.25s (then ripup 2→0 in 0.4s / 9 trials); the mix hier
+   repro 22→8 in 2.7s (then ripup 8→0 in 1.9s / 24 trials — the hill-climb
+   alone plateaued at 2), lifting the flows' final DNUTS state to 16
+   violations with a fully clean NUTS.  Tests:
+   `test_ripup_reroute.py::test_negotiate_*` (canned overlap re-routes by
+   cost with changed selections; big2 negotiate+ripup → 0; no-op when clean).
+   **Still deferred for v2:** DNUTS-open injection (map bit-level opens to
+   signal-track shortfall on bands — stage-b negotiation), and moving the
+   victim-rip-up stage of the ladder into `replan_bundle` so a single
+   negotiation step can also displace a third-party blocker the way
+   `optimize_topologies`' internal rip-up does.
 
 2. **Planner capacity-model fix (count signal tracks).** The deeper root cause —
    the planner's band model is layout-width based and reports `overflow=0` for

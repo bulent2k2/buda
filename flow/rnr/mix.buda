@@ -13,7 +13,10 @@ generate_hier_topologies
 run_planner hier 5 signal_tracks
 run_nuts
 check_connectivity nuts
-# improvement (2) (rnr stage a) to reduce number of bus seg overlaps:
+# improvement (2) negotiated congestion: feed the measured NUTS overlaps
+# back into the planner as band demand (bundles re-route by cost, no
+# trial-and-error), then the rnr stage-a hill-climb finishes the residual:
+negotiate_congestion
 ripup_reroute
 run_detailed_nuts
 check_connectivity dnuts

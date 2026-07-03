@@ -1143,6 +1143,10 @@ std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
         commit_plan(bw, fixed);
     }
 
+    // Measured-congestion feedback rides on top of the committed demand: the
+    // usage reset above wiped any injected bands, so re-apply them here.
+    apply_injected_(+1.0);
+
     // Escalation ladder for the target, minus rip-up (stage 2): a trial may
     // not move other bundles, and the caller's hill-climb IS the outer rip-up.
     PlanResult plan = plan_bundle(*target, PlanMode::STRICT);
@@ -1151,6 +1155,45 @@ std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
     if (!plan.found) return std::nullopt;
     commit_plan(*target, plan);
     return make_assignment(*target, plan);
+}
+
+void CongestionPlanner::inject_band_demand(int layer_id,
+                                           double span_lo, double span_hi,
+                                           double perp_lo, double perp_hi,
+                                           double amount) {
+    if (cuts_.empty() || amount <= 0.0) return;
+    const Layer* layer = layers_.get_layer(layer_id);
+    if (!layer) return;
+    // A synthetic segment along the layer's routing direction at the overlap
+    // rectangle's perpendicular centre reuses the exact geometry->band rule
+    // every real charge goes through (for_each_band).
+    const int perp_c = (int)std::llround(0.5 * (perp_lo + perp_hi));
+    const int s_lo   = (int)std::llround(span_lo);
+    const int s_hi   = (int)std::llround(span_hi);
+    Segment seg;
+    if (layer->dir == LayerDir::HORIZONTAL) {
+        seg.start = Point{s_lo, perp_c};
+        seg.end   = Point{s_hi, perp_c};
+    } else {
+        seg.start = Point{perp_c, s_lo};
+        seg.end   = Point{perp_c, s_hi};
+    }
+    seg.layer_hint = layer_id;
+    for_each_band(seg, layer_id, perp_c, [&](int ci, int b) {
+        injected_.emplace_back(ci, b, amount);
+        cuts_[ci].add_usage(b, amount);       // visible to direct cost queries
+    });
+}
+
+void CongestionPlanner::clear_injected_demand() {
+    apply_injected_(-1.0);
+    injected_.clear();
+}
+
+void CongestionPlanner::apply_injected_(double sign) {
+    for (const auto& [ci, b, amount] : injected_)
+        if (ci >= 0 && ci < (int)cuts_.size())
+            cuts_[ci].add_usage(b, sign * amount);
 }
 
 } // namespace buda

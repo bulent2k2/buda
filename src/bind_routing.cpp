@@ -455,6 +455,10 @@ void bind_routing(py::module_& m) {
         .def("optimize_topologies",  &CongestionPlanner::optimize_topologies)
         .def("replan_bundle",        &CongestionPlanner::replan_bundle,
              py::arg("bundles"), py::arg("target_bundle_id"))
+        .def("inject_band_demand",   &CongestionPlanner::inject_band_demand,
+             py::arg("layer_id"), py::arg("span_lo"), py::arg("span_hi"),
+             py::arg("perp_lo"), py::arg("perp_hi"), py::arg("amount"))
+        .def("clear_injected_demand", &CongestionPlanner::clear_injected_demand)
         .def("get_cuts",             &CongestionPlanner::get_cuts)
         .def("get_x_grid",           &CongestionPlanner::get_x_grid)
         .def("get_y_grid",           &CongestionPlanner::get_y_grid);
