@@ -353,24 +353,47 @@ static void do_span_adjustments(
             else other->span_hi = std::max(other->span_hi, max_hi);
         }
 
-        // Coverage guarantee: a segment must physically reach every segment
-        // connected to it.  The lo_end/hi_end split above is keyed on NOMINAL
-        // geometry, so when placement moves a tap across the trunk (e.g. a
-        // keepout or congestion pushes a stub past the far end) its stale label
-        // routes it to the wrong end and the trunk stops short — a real open.
-        // Extend the geometric extent to include any out-of-range connection
-        // center, mapping back to span_lo/span_hi by their current ordering so
-        // endpoint identity (possibly span_lo > span_hi) is preserved.  This
-        // only ever extends, so it cannot undo a legitimate jog contraction.
-        for (const auto& req : reqs) {
+        // Coverage guarantee — a maintained INVARIANT, not a per-call repair
+        // (seg_junction_coplacement.md Part B): a segment must physically reach
+        // EVERY placed junction partner, wherever placement put it.  Two ways
+        // the old reqs-only loop broke this:
+        //   1. The lo_end/hi_end split above is keyed on NOMINAL geometry, so a
+        //      tap that placement moved across the trunk had a stale label and
+        //      the trunk stopped short.
+        //   2. `reqs` only carries partners from THIS call's layer slice, so a
+        //      per-layer call could SET a trunk end from one tap while
+        //      contracting past a cross-layer tap not in the slice (the
+        //      tc3a_flat bundle-48 machine-dependent open: an H tap on another
+        //      layer landed below the V trunk's endpoint-set span_lo and was
+        //      never re-covered).
+        // Fix: consult ALL of `other`'s junction partners via rev_conn_map (it
+        // records both directions) against the global ts_ptr_map, extending the
+        // geometric extent to include every placed partner's track.  Mapping
+        // back through the current span ordering preserves endpoint identity
+        // (possibly span_lo > span_hi); extend-only, so a legitimate jog
+        // contraction is never undone.  Because this stays inside
+        // do_span_adjustments, every revert-guarded pass (tighten_pulls,
+        // repair_overlaps, resolve_corner_overlaps) re-establishes it after
+        // moving any track — a partner's flip can open nothing.
+        auto cover = [&](double center) {
             const double lo = std::min(other->span_lo, other->span_hi);
             const double hi = std::max(other->span_lo, other->span_hi);
             const bool ordered = (other->span_lo <= other->span_hi);
-            if (req.center < lo) {
-                (ordered ? other->span_lo : other->span_hi) = req.center;
-            } else if (req.center > hi) {
-                (ordered ? other->span_hi : other->span_lo) = req.center;
+            if (center < lo) {
+                (ordered ? other->span_lo : other->span_hi) = center;
+            } else if (center > hi) {
+                (ordered ? other->span_hi : other->span_lo) = center;
             }
+        };
+        auto pit = rev_conn_map.find(key);
+        if (pit != rev_conn_map.end()) {
+            for (const auto& sc : pit->second) {
+                auto pj = ts_ptr_map.find({sc.src_bid, sc.src_si});
+                if (pj == ts_ptr_map.end() || !pj->second->placed) continue;
+                cover(pj->second->track_position);
+            }
+        } else {
+            for (const auto& req : reqs) cover(req.center);   // no partner map: old behavior
         }
 
         // BUSTERM face coverage: a segment that taps a block face must always
@@ -1235,12 +1258,28 @@ double NUTSEngine::preferred_fit(
             if (c - half < occ_hi && c + half > occ_lo) return false;
         return true;
     };
+    // Deterministic selection (FP-determinism stopgap, see
+    // seg_junction_coplacement.md Phase 0): under -O3 -march=native the same
+    // solve can produce distances differing by ~1e-12 across CPUs (FMA
+    // contraction on ARM vs SSE on x86), and a strict `<` over the candidate
+    // list then picks different tracks per machine.  Epsilon-hysteresis,
+    // first-candidate-wins: a later candidate replaces the incumbent only when
+    // strictly better by more than kFpTieTol.  Exact ties keep today's
+    // first-in-list winner (byte-identical behavior on any one machine — a
+    // "prefer lower coordinate" tie key was tried and shifted real placements,
+    // mix.buda DNUTS 60->138 unplaced), while sub-epsilon FP noise can no
+    // longer flip the choice across machines: the candidate LIST order is
+    // deterministic; only the distances wobble.
+    constexpr double kFpTieTol = 1e-6;
     double best      = std::numeric_limits<double>::quiet_NaN();
     double best_dist = std::numeric_limits<double>::max();
     for (double c : candidates) {
         if (!valid(c)) continue;
         double dist = std::abs(c - preferred);
-        if (dist < best_dist) { best_dist = dist; best = c; }
+        if (std::isnan(best) || dist < best_dist - kFpTieTol) {
+            best_dist = dist;
+            best = c;
+        }
     }
     return best;
 }
@@ -1596,12 +1635,17 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         if (constrained.count({ts->bundle_id, ts->seg_idx})) continue;  // placed in phase 0
         (ts->net_pull != 0 ? pulled : free_segs).push_back(ts);
     }
+    // FP-determinism: window widths are FP-derived and can differ by ~1e-12
+    // across CPUs; a strict `<` there flips near-ties per machine.  Compare
+    // with a tolerance; a near-tie compares "equal" so stable_sort keeps the
+    // deterministic input order — today's exact-tie behavior, on every machine.
     std::stable_sort(pulled.begin(), pulled.end(),
         [](const TrackSegment* a, const TrackSegment* b) {
+            constexpr double kFpTieTol = 1e-6;
             int pa = std::abs(a->net_pull), pb = std::abs(b->net_pull);
             if (pa != pb) return pa > pb;                       // strongest pull first
             return (a->interval_hi - a->interval_lo)
-                 < (b->interval_hi - b->interval_lo);           // tightest window first
+                 < (b->interval_hi - b->interval_lo) - kFpTieTol; // tightest window first
         });
     for (TrackSegment* ts : pulled) place_seg(ts);
 
@@ -1610,7 +1654,9 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // nearest free track.
     std::stable_sort(free_segs.begin(), free_segs.end(),
         [](const TrackSegment* a, const TrackSegment* b) {
-            return sp_lo(*a) < sp_lo(*b);   // ordered: span_lo may be reversed
+            constexpr double kFpTieTol = 1e-6;   // FP-determinism (see pulled sort)
+            // ordered: span_lo may be reversed; near-tie -> stable input order
+            return sp_lo(*a) < sp_lo(*b) - kFpTieTol;
         });
     for (TrackSegment* ts : free_segs) place_seg(ts);
 }
