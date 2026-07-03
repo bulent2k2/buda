@@ -247,6 +247,15 @@ void bind_db(py::module_& m) {
         .def_readonly("tops",         &GdsImportStats::tops)
         .def_readonly("warnings",     &GdsImportStats::warnings);
 
+    py::class_<GdsExportStats>(m, "GdsExportStats")
+        .def_readonly("n_structures",  &GdsExportStats::n_structures)
+        .def_readonly("n_placements",  &GdsExportStats::n_placements)
+        .def_readonly("n_wire_shapes", &GdsExportStats::n_wire_shapes)
+        .def_readonly("n_via_shapes",  &GdsExportStats::n_via_shapes)
+        .def_readonly("n_labels",      &GdsExportStats::n_labels)
+        .def_readonly("stage",         &GdsExportStats::stage)
+        .def_readonly("warnings",      &GdsExportStats::warnings);
+
     py::class_<BDB>(m, "BDB")
         .def(py::init<const std::string&>())
         .def("import_def_lef",  &BDB::import_def_lef,
@@ -259,6 +268,18 @@ void bind_db(py::module_& m) {
              }, py::arg("path"),
              py::arg("label_layers") = std::vector<int>{},
              py::arg("routing_layers") = std::vector<std::pair<int,int>>{})
+        .def("export_gds", [](BDB& db, const std::string& path,
+                              const std::vector<std::tuple<int,int,int>>& layer_map,
+                              int outline_layer, int label_layer,
+                              bool write_labels, double via_size) {
+                 return export_gds(db, path, layer_map, outline_layer,
+                                   label_layer, write_labels, via_size);
+             }, py::arg("path"),
+             py::arg("layer_map") = std::vector<std::tuple<int,int,int>>{},
+             py::arg("outline_layer") = 10,
+             py::arg("label_layer") = 63,
+             py::arg("write_labels") = true,
+             py::arg("via_size") = 1.0)
         .def("compute_hpwl",    &BDB::compute_hpwl)
         .def("compute_fanout",  &BDB::compute_fanout)
         .def("compute_all",     &BDB::compute_all)

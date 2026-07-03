@@ -15,12 +15,15 @@
  */
 
 #pragma once
-// gds_io.h — GDSII stream import (Phase G1 of docs/internal/gds_oa_interchange.md).
-// A self-contained, hand-written binary reader in its own translation unit
-// (the repo's importer pattern — no external EDA library), populating the same
-// BDB tables as import_def_lef/import_verilog, coordinates normalized to µm.
+// gds_io.h — GDSII stream import + export
+// (Phases G1-G4 of docs/internal/gds_oa_interchange.md).
+// Self-contained, hand-written binary reader/writer in its own translation
+// unit (the repo's importer pattern — no external EDA library), populating /
+// streaming the same BDB tables as import_def_lef/import_verilog,
+// coordinates normalized to µm.
 
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -58,5 +61,45 @@ struct GdsImportStats {
 GdsImportStats import_gds(BDB& db, const std::string& path,
                           const std::vector<int>& label_layers = {},
                           const std::vector<std::pair<int,int>>& routing_layers = {});
+
+struct GdsExportStats {
+    int n_structures = 0;        // structures written (cells + top)
+    int n_placements = 0;        // SREF placements written
+    int n_wire_shapes = 0;       // routing rectangles (net_segment / bus_segment)
+    int n_via_shapes = 0;        // via squares (net_via / bus_via)
+    int n_labels = 0;            // TEXT labels (one per pin row)
+    std::string stage;           // "detailed_nuts", "abstract_nuts", "" = no routing
+    std::vector<std::string> warnings;
+};
+
+// Export the BDB as a GDSII stream file (Phase G4) — the reverse of
+// import_gds, streaming from the persisted tables so it works on a reopened
+// checkpoint with no live pipeline. Deterministic output (zeroed timestamps,
+// sorted iteration): identical DBs give identical bytes.
+//
+// - Each `cell` row becomes a structure: outline BOUNDARY (0,0,w,h) on
+//   (outline_layer, 0) + SREF children reconstructed from its first component
+//   instance (relative offsets; PROPVALUE carries the child instance name).
+// - A synthetic top structure places every root component via SREF, draws the
+//   die extent on the outline layer, and carries the routing + labels:
+//   `net_segment` bit-wire rectangles as BOUNDARY on each layer's mapped
+//   (gds_layer, datatype) pair — falling back to abstract `bus_segment`
+//   rectangles when detailed rows are absent — `net_via`/`bus_via` rows as
+//   via_size squares on the upper layer's pair, and one TEXT label per `pin`
+//   row (net name at the pin position) on (label_layer, 0) unless
+//   write_labels is false.
+// - layer_map entries are (buda_layer, gds_layer, gds_datatype) — the
+//   LayerStack's def_gds_layer bindings. An unmapped routing layer falls back
+//   to (buda_layer, 0) with a warning.
+//
+// Re-importing the file with the same def_gds_layer map recovers the design:
+// wires are excluded from footprints (Phase G3), labels recover nets/pins
+// (Phase G2; pin direction is not representable — dirs come back UNKNOWN).
+GdsExportStats export_gds(BDB& db, const std::string& path,
+                          const std::vector<std::tuple<int,int,int>>& layer_map = {},
+                          int outline_layer = 10,
+                          int label_layer = 63,
+                          bool write_labels = true,
+                          double via_size = 1.0);
 
 }  // namespace buda

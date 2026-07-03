@@ -502,6 +502,42 @@ Tests generate their GDS inputs deterministically with `tools/gds_build.py`
 
 ---
 
+### `export_gds`
+
+```
+export_gds <file.gds> [outline <gds_layer>] [labels <gds_layer>|off] [via_size <um>]
+```
+
+The reverse of `import_gds` (Phase G4): stream the open BDB out as a
+**deterministic** GDSII file (zeroed timestamps — identical DBs give
+identical bytes), reading the **persisted tables**, so it works on a
+reopened checkpoint with no live pipeline. Each `cell` row becomes a
+structure (outline rectangle on `(outline_layer, 0)`, default 10, plus child
+`SREF`s reconstructed from the cell's first component instance, instance
+names as `PROPVALUE`); a top structure carries the die extent, root
+placements, the routing — `net_segment` bit-wires as rectangles on each
+layer's `def_gds_layer`-mapped pair (abstract `bus_segment` fallback;
+`net_via`/`bus_via` rows as `via_size` squares, default 1 µm; unmapped
+layers default to `(buda_layer, 0)` with a warning) — and one net-name
+`TEXT` label per `pin` row (`labels off` disables; default label layer =
+first `def_gds_layer labels` entry, else 63).
+
+**Round-trip:** re-importing with the same `def_gds_layer` map recovers the
+identical design — components, cell footprints, die, and (labeled mode)
+nets/pins — with every routing shape excluded from footprints. Caveats: pin
+directions come back `UNKNOWN` (GDS has no pin-dir concept) and placements
+export unrotated (BDB bboxes carry no orientation; a bbox≠footprint instance
+warns). See `test/tests/test_gds_export.py` and
+[`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md).
+
+Python: `BDB.export_gds(path, layer_map=[], outline_layer=10,
+label_layer=63, write_labels=True, via_size=1.0)` — `layer_map` entries are
+`(buda_layer, gds_layer, gds_datatype)` — returns a `GdsExportStats`
+(`n_structures`, `n_placements`, `n_wire_shapes`, `n_via_shapes`,
+`n_labels`, `stage`, `warnings`).
+
+---
+
 ### `bdb_net_mode`
 
 ```
@@ -1359,13 +1395,14 @@ depth-0 with no parent until Verilog overlays the hierarchy.
 > bit-blasting beyond simple base-name extraction. These are intentionally
 > out of scope for an interconnect-*planning* tool.
 
-### Planned: GDSII import/export
+### GDSII import/export
 
-**Status: import (Phases G1–G3) IMPLEMENTED** — see [`import_gds`](#import_gds)
-and the phased plan in
+**Status: IMPLEMENTED (Phases G0–G4)** — see [`import_gds`](#import_gds),
+[`export_gds`](#export_gds), and the phased plan in
 [`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md):
-geometry/hierarchy (G1), label-based net recovery (G2), and layer mapping
-with routing-shape exclusion (G3). Export (G4) follows.
+geometry/hierarchy (G1), label-based net recovery (G2), layer mapping with
+routing-shape exclusion (G3), and export with a tested import↔export
+round-trip (G4). The OA bridge remains spec-only (gated on the Si2 SDK).
 
 Intended capability: round-trip a **GDSII** layout against BDB — export the
 placed-and-routed result for sign-off/viewing (KLayout, etc.) and import an

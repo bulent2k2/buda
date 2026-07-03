@@ -55,7 +55,8 @@ KNOWN_COMMANDS = frozenset({
     "add_comp", "add_grid_override", "add_inst", "add_inst_to_cell", "add_keepout",
     "add_net", "bdb_net_mode", "check_connectivity", "corner_margin",
     "def_gds_layer", "def_layer", "def_track_pattern", "derive_busterms", "detour_channel",
-    "dump_hbundles", "dump_topologies", "exit", "flip_comp", "generate_hier_topologies", "generate_topologies",
+    "dump_hbundles", "dump_topologies", "exit", "export_gds", "flip_comp",
+    "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
     "import_def_lef", "import_gds", "import_verilog", "load_pipeline",
     "move_comp", "open_bdb", "refine_busterms",
@@ -4270,6 +4271,51 @@ class BudaSession:
             print(f"[import_gds] {st.n_structures} structure(s) -> "
                   f"{st.n_cells} cell(s), {st.n_components} component(s); "
                   f"top(s): {tops}; {lbl}.{rt}")
+        elif cmd == "export_gds":
+            # export_gds <file.gds> [outline <gds_layer>] [labels <gds_layer>|off]
+            #            [via_size <um>]
+            # GDSII export (Phase G4): stream the BDB — cells as structures
+            # with outline rects, components as SREFs, persisted net_segment
+            # wires (bus_segment fallback) on their def_gds_layer-mapped pairs,
+            # vias as squares, one TEXT label per pin. Re-importable with the
+            # same map (see docs/internal/gds_oa_interchange.md).
+            if not args:
+                print("Error: export_gds requires a file path"); return
+            if self.bdb is None:
+                print("Error: open_bdb first"); return
+            outline = 10
+            label_layer = (self._gds_label_layers[0]
+                           if self._gds_label_layers else 63)
+            write_labels = True
+            via_size = 1.0
+            i = 1
+            while i < len(args):
+                kw = args[i]
+                if kw == "outline" and i + 1 < len(args):
+                    outline = int(args[i+1]); i += 2
+                elif kw == "labels" and i + 1 < len(args):
+                    if args[i+1] == "off":
+                        write_labels = False
+                    else:
+                        label_layer = int(args[i+1])
+                    i += 2
+                elif kw == "via_size" and i + 1 < len(args):
+                    via_size = float(args[i+1]); i += 2
+                else:
+                    print(f"Error: export_gds: unknown option {kw!r}"); return
+            layer_map = [(lid, self.layers.get_gds_layer(lid),
+                          self.layers.get_gds_datatype(lid))
+                         for lid in sorted(set(self._layer_name_map.values()))
+                         if self.layers.get_gds_layer(lid) >= 0]
+            st = self.bdb.export_gds(args[0], layer_map, outline, label_layer,
+                                     write_labels, via_size)
+            for wmsg in st.warnings:
+                print(f"[export_gds] Warning: {wmsg}")
+            print(f"[export_gds] wrote {args[0]}: {st.n_structures} "
+                  f"structure(s), {st.n_placements} placement(s), "
+                  f"{st.n_wire_shapes} wire shape(s) "
+                  f"({st.stage or 'no routing'}), {st.n_via_shapes} via(s), "
+                  f"{st.n_labels} label(s).")
         elif cmd == "add_blocks_from_bdb":
             # add_blocks_from_bdb <depth> [deepest|skip|error]
             if not args:

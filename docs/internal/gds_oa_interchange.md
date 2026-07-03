@@ -106,15 +106,47 @@ Unmapped GDS layers keep the G1 behavior (all geometry is outline). The
 mapping is session state like `def_layer` itself (scripts re-declare it),
 not persisted in the BDB.
 
-## Phase G4 — GDS export — ⬜
+## Phase G4 — GDS export — ✅ IMPLEMENTED
 
-`export_gds <file.gds>` streaming from the persisted BDB tables the
-v1–v11 series built: `component` bboxes as structure placements,
-`net_segment` bit-wires as `PATH`/`BOUNDARY` per mapped layer, `net_via` as
-via squares, optional net-name `TEXT` labels — making BUDA's own output
-re-importable in labeled mode (the round-trip test). Falls back to
-`bus_segment` rectangles when only abstract routing exists. Reuses/extends
-the G0 record emitters (ported to C++ or kept in tools/, decided then).
+`export_gds <file.gds> [outline <gds_layer>] [labels <gds_layer>|off]
+[via_size <um>]` — a C++ `GdsWriter` in `gds_io.cpp` (the port of the G0
+record emitters: 1 nm dbu, zeroed timestamps, `PROPATTR 61` instance names —
+identical DBs give identical bytes), **streaming from the persisted BDB
+tables** the v1–v11 series built, so it works on a reopened checkpoint with
+no live pipeline:
+
+- **Cells → structures**: outline `BOUNDARY` (0,0,w,h) on `(outline_layer,
+  0)` (default 10) + child `SREF`s reconstructed from the cell's first
+  component instance at relative offsets, each carrying the child instance
+  name as `PROPVALUE`. Placements have no orientation (BDB bboxes lose
+  mirror/rotation) — a bbox≠cell-footprint instance exports unrotated with a
+  warning.
+- **Top structure**: die-extent rectangle (anchored at the roots' min corner
+  — the die is an extent, so `bbox_of(top)` round-trips), root `SREF`s, the
+  routing, and the labels. Import materializes a `cell` row for the top it
+  reads (footprint = die) but no component; export detects that "orphan"
+  cell (no instances, size == die) and re-emits it AS the top — not orphan +
+  synthetic top, which would re-import as two tops.
+- **Routing**: `net_segment` bit-wire rectangles as `BOUNDARY` on each
+  layer's `def_gds_layer`-mapped (layer, datatype) pair, `net_via` rows as
+  `via_size` squares (default 1 µm) on the upper layer's pair; falls back to
+  the abstract `bus_segment`/`bus_via` rows when no detailed rows exist
+  (`GdsExportStats.stage` = `detailed_nuts` / `abstract_nuts` / `""`).
+  Unmapped layers default to `(buda_layer, 0)` with a warning.
+- **Labels**: one net-name `TEXT` per `pin` row at the pin position on
+  `(label_layer, 0)` (default = first `def_gds_layer labels` layer, else
+  63), so the file re-imports in labeled mode; `labels off` disables. Pin
+  direction is not representable — dirs come back `UNKNOWN`.
+
+**Round-trip (tested, `test/tests/test_gds_export.py`)**: import → export →
+re-import is **identical** (components, cell footprints, die, nets, pins);
+the full-pipeline fingerprint routes a labeled GDS through detailed NUTS,
+exports, re-imports with the same `def_gds_layer` map, and gets the same
+design back with every routing shape excluded from footprints (G3).
+`tools/gds_demo.py` finishes with exactly this round-trip.
+Python: `BDB.export_gds(path, layer_map=[], outline_layer=10,
+label_layer=63, write_labels=True, via_size=1.0)` with `layer_map` entries
+`(buda_layer, gds_layer, gds_datatype)`; returns `GdsExportStats`.
 
 ## Phase OA — OpenAccess import/export — ⬜ SPEC-ONLY (gated on Si2 OA SDK)
 
@@ -128,7 +160,9 @@ enabling OA later is translation-unit work only.
 
 ## Verification strategy (all phases)
 
-Round-trips: G0-writer→G1-reader→BDB→`.bdb.sql` diff-stable;
-G4-export→G1-import→identical BDB; full-pipeline fingerprint (import a
-generated GDS, route to detailed NUTS, export, re-import, compare). Plus
-visual smoke via the topology explorer / `bin/viz`.
+Round-trips (all now tested): G0-writer→G1-reader→BDB→`.bdb.sql`
+diff-stable; G4-export→G1-import→identical BDB
+(`test_export_reimport_is_identical`); full-pipeline fingerprint — import a
+generated GDS, route to detailed NUTS, export, re-import, compare
+(`test_routed_roundtrip_through_cli`, and `tools/gds_demo.py` end-to-end).
+Plus visual smoke via the topology explorer / `bin/viz`.

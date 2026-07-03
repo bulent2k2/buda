@@ -97,6 +97,11 @@ def main(argv=None) -> int:
     s.no_viz = headless
     cmds = [
         f"source {os.path.join(_ROOT, 'flow', 'rnr', 'mix_tracks.buda')}",
+        # Phase G3 layer map: metals M2..M7 -> GDS layers 32..37. Export
+        # writes the routed wires to these pairs; re-import excludes them
+        # from cell footprints.
+        *[f"def_gds_layer {lid} {30 + lid} 0" for lid in range(2, 8)],
+        "def_gds_layer labels 63",
         f"open_bdb {os.path.join(work, 'chip.bdb')}",
         f"import_gds {gds}",
         "add_blocks_from_bdb 0",            # imported roots -> floorplan blocks
@@ -123,6 +128,24 @@ def main(argv=None) -> int:
           f"(overlaps={n_over}, unplaced bits={n_unpl})")
     print(f"[gds_demo] BDB checkpoint: {os.path.join(work, 'chip.bdb')} "
           f"(route_snapshot stage: {s.bdb.route_snapshot().stage})")
+
+    # Phase G4: export the routed chip back to GDSII — bit-wires + vias on
+    # the mapped layers, one TEXT label per pin — and prove the round-trip
+    # by re-importing it into a fresh BDB with the same layer map.
+    out_gds = os.path.join(work, "chip_routed.gds")
+    s.do_command(f"export_gds {out_gds}")
+    import buda
+    rt = buda.BDB(os.path.join(work, "chip_rt.bdb"))
+    st = rt.import_gds(out_gds, [63],
+                       [(30 + lid, 0) for lid in range(2, 8)])
+    same = (sorted((c.name, c.cell, c.x1, c.y1, c.x2, c.y2)
+                   for c in rt.all_components()) ==
+            sorted((c.name, c.cell, c.x1, c.y1, c.x2, c.y2)
+                   for c in s.bdb.all_components()))
+    print(f"[gds_demo] round-trip: re-imported {out_gds} -> "
+          f"{st.n_components} component(s), {st.n_nets} net(s), "
+          f"{st.n_routing_shapes} routing shape(s) excluded; "
+          f"placement identical: {same}")
 
     if args.png:
         import buda_viz
