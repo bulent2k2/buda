@@ -509,3 +509,20 @@ def test_canned_stage_b_negotiate_clears_open():
     assert s.detailed_result.num_unplaced == 0, out
     assert s.nuts_result.num_overlaps == 0, out
     assert "stage b" in out, out
+
+
+def test_rerun_nuts_invalidates_stale_detailed_result():
+    """Re-running run_nuts after a detailed solve must drop the (now stale)
+    detailed result, so stage detection (ripup_reroute / negotiate_congestion)
+    returns to stage a instead of negotiating against a detailed route of the
+    PREVIOUS abstract solve (Codex review, PR #161)."""
+    s = _build_dnuts_open_session()
+    assert s.detailed_result is not None
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_nuts")               # fresh abstract solve
+    assert s.detailed_result is None, \
+        "stale detailed result survived a re-run run_nuts"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    assert "stage a" in buf.getvalue()         # back to abstract negotiation

@@ -4297,6 +4297,15 @@ class BudaSession:
             with buda.ostream_redirect():
                 self.nuts_result = nuts.run(self.bundles)
             self._adopt_doglegs()
+            # A fresh abstract solve invalidates any prior detailed result:
+            # ripup_reroute / negotiate_congestion key their stage off
+            # detailed_result, and hill-climbing against a detailed route of
+            # the PREVIOUS abstract solve would mix two states (a re-run
+            # run_nuts could even no-op stage b off stale zero opens).
+            # run_detailed_nuts re-derives it from this solve.  The internal
+            # trial rerun (_run_nuts_internal) deliberately does NOT clear it —
+            # trials re-run DNUTS themselves and restore refs via snapshot.
+            self.detailed_result = None
             layer_names = self._make_layer_names()
             diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
             self._write_nuts_log(layer_names, extra_lines=diag)
