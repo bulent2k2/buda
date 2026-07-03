@@ -420,3 +420,25 @@ def test_negotiate_big2_then_ripup_clears_overlaps():
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("ripup_reroute")
     assert s.nuts_result.num_overlaps == 0     # combined pipeline: fully clean
+
+
+@pytest.mark.mid
+def test_negotiate_clears_stale_seg_layer_pins():
+    """A sidecar/visualizer selection can leave per-segment layer pins
+    (input.pinned_seg_layers) that plan_bundle applies to EVERY candidate
+    regardless of topology_pinned — a stale pin would force layers onto
+    whatever topology negotiation picks (even H/V mismatches that charge no
+    cuts).  Negotiation must drop the layer pins along with the topology pin
+    for every bundle it re-plans (Codex review, PR #160)."""
+    s = _build_session(narrow=True)            # forced single NUTS overlap
+    assert s.nuts_result.num_overlaps > 0
+    for w in s.bundles:                        # simulate sidecar layer pins on
+        w.input.pinned_seg_layers = [4]        # the pinned I_H candidates
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    out = buf.getvalue()
+    assert s.nuts_result.num_overlaps == 0, out
+    for w in s.bundles:                        # both sides were re-planned:
+        assert list(w.input.pinned_seg_layers) == [], \
+            "stale per-segment layer pin survived negotiation"

@@ -2777,7 +2777,8 @@ class BudaSession:
                       list(w.plan.seg_layers), list(w.plan.seg_perp),
                       list(w.plan.seg_net_pull),
                       list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi),
-                      w.input.assigned_v_layer, w.input.assigned_h_layer)
+                      w.input.assigned_v_layer, w.input.assigned_h_layer,
+                      list(w.input.pinned_seg_layers))
                      for w in self.bundles},
             'nuts': self.nuts_result,
             'dnuts': self.detailed_result,
@@ -2804,7 +2805,8 @@ class BudaSession:
             if cap is None:
                 continue
             (sel, pinned, ncand, seg_layers, seg_perp,
-             seg_net_pull, seg_slide_lo, seg_slide_hi, av, ah) = cap
+             seg_net_pull, seg_slide_lo, seg_slide_hi, av, ah,
+             pinned_layers) = cap
             cands = w.input.candidates
             while len(cands) > ncand:        # drop dogleg-appended candidates
                 del cands[len(cands) - 1]
@@ -2818,6 +2820,7 @@ class BudaSession:
             w.plan.seg_slide_hi = seg_slide_hi
             w.input.assigned_v_layer = av
             w.input.assigned_h_layer = ah
+            w.input.pinned_seg_layers = pinned_layers
         # Put back the committed split geometry where a trial's re-solve
         # overwrote an adopted dogleg's slot in place (same count, new content
         # — the ncand trim above cannot see it).
@@ -3009,8 +3012,14 @@ class BudaSession:
                     if w is None:
                         continue
                     # Unpin: the corrected prices, not a pinned index, choose
-                    # the topology (snapshot restores the pin on rejection).
+                    # the topology (snapshot restores the pins on rejection).
+                    # Per-segment layer pins must go too — plan_bundle applies
+                    # pinned_seg_layers[si] to EVERY candidate regardless of
+                    # topology_pinned, so a stale sidecar pin would force
+                    # layers onto whatever topology negotiation picks
+                    # (including H/V mismatches that charge no cuts).
                     w.input.topology_pinned = False
+                    w.input.pinned_seg_layers = []
                     asn = self.planner.replan_bundle(self.bundles, bid)
                     if asn is None:
                         continue
