@@ -28,13 +28,19 @@ cover its pull/centre preference moves the preference to the nearest covered
 point, clamped into its own centre range (restricted to single-junction
 segments — the corner-stub / bundle-48 class — because applying it to
 multi-junction spines clustered placements and regressed mix.buda DNUTS 60→74
-unplaced); (2) **junction infeasibility as a first-class signal** — when a
-placed perpendicular partner's span is DISJOINT from the landing segment's
-entire feasible centre range, a structured
+unplaced); (2) **junction infeasibility as a first-class signal** — when the
+landing segment's entire feasible centre range (slide window) is DISJOINT from
+the spanning partner's NOMINAL span, the junction closes only by stretching
+the partner beyond what the topology intended; a structured
 `NUTSResult::junction_infeasibilities` entry `{bundle_id, seg_a, seg_b}` is
 recorded (deduped, one `[NUTS] junction infeasible` line printed) and
 `_rr_contenders` feeds those bundles to `ripup_reroute` as stage-a re-pin
-contenders. Full B2 (junction-seeded spans) was **not needed**: the quality
+contenders. The signal is **derived from the final accepted state** (the
+selected topologies' `seg_conns` against the result's placed segments, in both
+`run()` and `rerun_layer`) rather than collected during placement — solve
+passes also run in tentative paths (fixpoint sweeps that are restored, dogleg
+trials, repair attempts), and a placement-time collector would report
+compromises the accepted placement no longer has (Codex review, PR #154). Full B2 (junction-seeded spans) was **not needed**: the quality
 table (mix/dogleg/big2 corpus) is clean without it — the coverage invariant +
 anchored preference suffice; it remains an option if a future corpus
 regresses. Tests: `test/tests/test_junction_coplacement.py` (forced-far

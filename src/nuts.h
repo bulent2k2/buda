@@ -67,10 +67,12 @@ struct OverlapDetail {
 };
 
 // One junction edge the solver could not honor by placement (Part B): the
-// landing segment's entire feasible centre range lies OUTSIDE the spanning
-// partner's current span, so the junction closes only by a large partner
-// stretch.  Structured like OverlapDetail so ripup_reroute can re-pin the
-// offending bundle to an alternate topology.
+// landing segment's entire feasible centre range (slide window) lies OUTSIDE
+// the spanning partner's NOMINAL span, so the junction closes only by
+// stretching the partner beyond what the topology intended.  Derived from the
+// final accepted state (never from tentative solve passes).  Structured like
+// OverlapDetail so ripup_reroute can re-pin the offending bundle to an
+// alternate topology.
 struct JunctionInfeasibility { int bundle_id; int seg_a; int seg_b; };
 
 struct NUTSResult {
@@ -155,12 +157,6 @@ private:
     const LayerStack& layers_;
     double track_pitch_ = 1.0;
     std::vector<int> extra_x_, extra_y_;   // additional grid points from CongestionPlanner
-
-    // Junction-infeasibility collector (Part B): place_seg records an entry
-    // when a placed perpendicular junction partner's span is disjoint from the
-    // segment's entire feasible centre range.  Cleared per run/rerun, deduped
-    // into NUTSResult::junction_infeasibilities.  mutable: solve_layer is const.
-    mutable std::vector<JunctionInfeasibility> jn_infeas_;
 
     // User keepouts plus implicit solid-leaf-cell keepouts on every non-TOP
     // layer (Gap 2): a LOW segment may not route over a leaf cell, so the cell

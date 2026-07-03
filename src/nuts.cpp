@@ -1543,28 +1543,6 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             // anyway, so the value is irrelevant — just avoid the UB.
             if (c_lo <= c_hi) preferred = std::clamp(preferred, c_lo, c_hi);
             pos = preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
-            // Junction infeasibility (Part B): if a placed perpendicular
-            // junction partner's span is DISJOINT from this segment's entire
-            // feasible centre range, no track of ours can honor the junction —
-            // it will close only by a large partner stretch (the bundle-48
-            // class).  Record it so ripup_reroute can re-pin the bundle to an
-            // alternate topology; placement itself proceeds unchanged.
-            {
-                auto jit = jn_map.find(key);
-                if (jit != jn_map.end() && c_lo <= c_hi) {
-                    for (const auto& sc : jit->second) {
-                        auto pj = jn_segs.find({sc.src_bid, sc.src_si});
-                        if (pj == jn_segs.end() || !pj->second->placed) continue;
-                        const TrackSegment* pt = pj->second;
-                        if (pt->horiz == ts->horiz) continue;
-                        const double plo = std::min(pt->span_lo, pt->span_hi);
-                        const double phi = std::max(pt->span_lo, pt->span_hi);
-                        if (c_hi < plo || c_lo > phi)
-                            jn_infeas_.push_back({ts->bundle_id, ts->seg_idx,
-                                                  sc.src_si});
-                    }
-                }
-            }
         }
         // try_repack re-places members with first_fit over their FULL intervals,
         // ignoring lb/ub — so it must not run for a phase-0 constrained placement
@@ -2165,8 +2143,62 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     return DoglegResult{ true, jog_idx, trunk_si, piece_r_idx, jog_x, (yL > yR) };
 }
 
+// Junction infeasibility (Part B): a junction edge is infeasible when the
+// landing segment's entire feasible centre range (its hard interval, i.e. the
+// slide window) is DISJOINT from the spanning partner's NOMINAL span — the
+// junction then closes only by stretching the partner beyond what the topology
+// intended (the bundle-48 class).  Derived from the FINAL accepted state (the
+// selected topologies' seg_conns — the one-true-source junction records — and
+// the result's placed segments), never collected during placement: solve_layer
+// also runs in tentative paths (orientation_fixpoint sweeps that are restored,
+// dogleg trials, repair passes), and a signal gathered there would report
+// compromises that the accepted placement no longer has.  Rewrites
+// result.junction_infeasibilities, so rerun_layer refreshes stale entries too.
+static void derive_junction_infeasibilities(
+        const std::vector<BundleWrapper>& bundles, NUTSResult& result) {
+    result.junction_infeasibilities.clear();
+    std::map<std::pair<int,int>, const TrackSegment*> ts_map;
+    for (const auto& ts : result.segments)
+        ts_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+    std::set<std::tuple<int,int,int>> seen;   // dedup the two edge directions
+    for (const auto& bw : bundles) {
+        const int sel = bw.plan.selected_topology_index;
+        if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
+        const Topology& topo = bw.input.candidates[sel];
+        const int bid = bw.input.original_bundle.id;
+        for (const auto& [key, partners] : topo.seg_conns) {
+            const int a_si = key.first;
+            auto at = ts_map.find({bid, a_si});
+            if (at == ts_map.end() || !at->second->placed) continue;
+            const TrackSegment* a = at->second;
+            const double c_lo = a->interval_lo + a->width / 2.0;
+            const double c_hi = a->interval_hi - a->width / 2.0;
+            if (c_lo > c_hi) continue;   // bus wider than interval: no window
+            for (int b_si : partners) {
+                if (b_si < 0 || b_si >= (int)topo.segments.size()) continue;
+                auto bt = ts_map.find({bid, b_si});
+                if (bt == ts_map.end() || !bt->second->placed) continue;
+                const TrackSegment* b = bt->second;
+                if (a->horiz == b->horiz) continue;   // junctions are perpendicular
+                const Segment& bs = topo.segments[b_si];
+                const double n1 = b->horiz ? bs.start.x : bs.start.y;
+                const double n2 = b->horiz ? bs.end.x   : bs.end.y;
+                if (c_hi >= std::min(n1, n2) && c_lo <= std::max(n1, n2))
+                    continue;   // window reaches the partner's nominal span
+                auto k = std::make_tuple(bid, std::min(a_si, b_si),
+                                         std::max(a_si, b_si));
+                if (!seen.insert(k).second) continue;
+                result.junction_infeasibilities.push_back({bid, a_si, b_si});
+                std::cout << "[NUTS] junction infeasible: bundle " << bid
+                          << " seg " << a_si << " cannot reach seg " << b_si
+                          << " within its slide window (closed by partner"
+                          << " stretch; ripup may re-pin).\n";
+            }
+        }
+    }
+}
+
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
-    jn_infeas_.clear();
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
@@ -2415,22 +2447,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                 out.result.dogleg_seg_slide_hi[bid]  = bw.plan.seg_slide_hi;
             }
 
-    // Junction infeasibilities: dedup (repair passes re-run solve_layer and
-    // dogleg trials accumulate) and report — one line per distinct edge, like
-    // planner overflow, so a compromised junction is never silent.
-    {
-        std::set<std::tuple<int,int,int>> seen;
-        for (const auto& ji : jn_infeas_) {
-            auto k = std::make_tuple(ji.bundle_id, std::min(ji.seg_a, ji.seg_b),
-                                     std::max(ji.seg_a, ji.seg_b));
-            if (!seen.insert(k).second) continue;
-            out.result.junction_infeasibilities.push_back(ji);
-            std::cout << "[NUTS] junction infeasible: bundle " << ji.bundle_id
-                      << " seg " << ji.seg_a << " cannot reach seg " << ji.seg_b
-                      << " within its slide window (closed by partner stretch;"
-                      << " ripup may re-pin).\n";
-        }
-    }
+    // Junction infeasibilities: derived from the FINAL accepted state (the
+    // adopted bundle list — dogleg-split topologies included — against the
+    // winning result), one line per distinct edge, like planner overflow, so
+    // a compromised junction is never silent.
+    derive_junction_infeasibilities(bundles, out.result);
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "
               << "Interval violations: " << out.result.num_violations << ", "
               << "Track overlaps: " << out.result.num_overlaps << ".\n";
@@ -2442,7 +2463,6 @@ NUTSResult NUTSEngine::rerun_layer(
     const std::vector<BundleWrapper>&  bundles,
     int                                layer_id) const
 {
-    jn_infeas_.clear();
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
@@ -2496,6 +2516,10 @@ NUTSResult NUTSEngine::rerun_layer(
     // — keeps the single-layer contract while still recovering wirelength.
     tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map, layer_id);
     compute_metrics(result);
+    // Refresh the junction-infeasibility signal from the re-solved state: the
+    // copy from prev may hold edges the rerun just fixed (stale) or miss ones
+    // it introduced (dropped) — derive, don't inherit.
+    derive_junction_infeasibilities(bundles, result);
     std::cout << "[NUTS] rerun_layer(" << layer_id << "): "
               << layer_segs.size() << " segment(s) re-placed. "
               << "Violations: " << result.num_violations << ", "
