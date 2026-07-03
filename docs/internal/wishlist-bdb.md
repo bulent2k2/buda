@@ -3,6 +3,41 @@
 Deferred follow-ups for the BDB layer (`src/bdb.cpp`), its test-data management,
 and the planned OA/GDS interchange. Index: [`wishlist.md`](wishlist.md).
 
+## Persist-time write batching — ✅ IMPLEMENTED
+
+**Symptom.** `generate_hier_topologies` on `flow/rnr/slowdown.buda` (100
+bundles, 1236 candidates) took ~8s on a MacBook / ~24s in cloud, up from
+~0.13s before candidate-topology persistence was added — a ~60× regression at
+zero algorithmic change (`generate_candidates` itself profiled at 0.14s; all
+the rest was the BDB write).
+
+**Root cause.** Every `add_topology` / `add_topology_segment` /
+`persist_seg_busterms` / `persist_seg_conns` / `add_bundle_net` runs as its own
+autocommit statement, so each of the ~10 000 inserts commits the WAL — one
+fsync per row (~1–6ms each). Nothing wrapped the burst in a transaction, even
+though the importers already batch their bulk inserts with raw
+`_exec("BEGIN")`/`_exec("COMMIT")`.
+
+**Fix.** Depth-counted transaction batching: `BDB::begin_batch` /
+`commit_batch` / `rollback_batch` (`src/bdb.cpp`, bound in `bind_db.cpp`) issue
+one real `BEGIN`/`COMMIT` at the outermost nesting level so composing persist
+helpers each guard their own body safely; a `_batched` decorator + `_bdb_batch`
+context manager (`src/buda_cli.py`) wrap every persist entry point
+(`_persist_topologies`, `_persist_bundles`, `_persist_nuts`,
+`_persist_detailed_nuts`, `_persist_planner_output`). Measured: slowdown.buda
+generate 23.8s → 1.6s in cloud. Tests: `test/tests/test_bdb_batch.py`
+(commit/rollback atomicity + nesting no-op) plus the unchanged persist
+round-trip suite (batching is transparent to output).
+
+**Residual follow-up (not yet done).** The remaining ~1.6s is dominated by
+`persist_seg_busterms` (1.1s / 1236 calls) — it re-inserts a heavy
+JSON-rects `tb:<block>` busterm row via `add_busterm` for *every candidate*
+that touches a block, even though the same block busterm is identical across
+candidates. Deduping the busterm rows (insert each `tb:<name>` once per persist,
+then only the seg→busterm links per candidate) would cut most of the residual;
+`add_topology_segment`'s per-call statement re-prepare (0.08s / 5990) is a
+smaller second target (cache the prepared insert like the hot read paths do).
+
 ## `open_bdb <file>.sql` write-back mode — ✅ IMPLEMENTED
 
 **Shipped.** `open_bdb <file>.sql writeback` arms the materialized temp binary to
