@@ -1636,16 +1636,20 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         (ts->net_pull != 0 ? pulled : free_segs).push_back(ts);
     }
     // FP-determinism: window widths are FP-derived and can differ by ~1e-12
-    // across CPUs; a strict `<` there flips near-ties per machine.  Compare
-    // with a tolerance; a near-tie compares "equal" so stable_sort keeps the
-    // deterministic input order — today's exact-tie behavior, on every machine.
+    // across CPUs; a strict `<` on the raw doubles flips near-ties per machine.
+    // Sort on a QUANTIZED integer key (1e-6 quantum) instead — a strict weak
+    // ordering by construction (a raw epsilon comparator is not: sub-tolerance
+    // deltas chain non-transitively, which is UB for stable_sort — Codex #152).
+    // BUDA keys are integer/half-integer-valued reals, so ~1e-12 noise can never
+    // move llround across a rounding boundary; equal keys keep the deterministic
+    // input order via stable_sort — today's exact-tie behavior, on every machine.
+    auto q = [](double v) { return std::llround(v * 1e6); };
     std::stable_sort(pulled.begin(), pulled.end(),
-        [](const TrackSegment* a, const TrackSegment* b) {
-            constexpr double kFpTieTol = 1e-6;
+        [&q](const TrackSegment* a, const TrackSegment* b) {
             int pa = std::abs(a->net_pull), pb = std::abs(b->net_pull);
             if (pa != pb) return pa > pb;                       // strongest pull first
-            return (a->interval_hi - a->interval_lo)
-                 < (b->interval_hi - b->interval_lo) - kFpTieTol; // tightest window first
+            return q(a->interval_hi - a->interval_lo)
+                 < q(b->interval_hi - b->interval_lo);          // tightest window first
         });
     for (TrackSegment* ts : pulled) place_seg(ts);
 
@@ -1653,10 +1657,10 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // anchors and earlier free segments via build_occupied and slides to the
     // nearest free track.
     std::stable_sort(free_segs.begin(), free_segs.end(),
-        [](const TrackSegment* a, const TrackSegment* b) {
-            constexpr double kFpTieTol = 1e-6;   // FP-determinism (see pulled sort)
-            // ordered: span_lo may be reversed; near-tie -> stable input order
-            return sp_lo(*a) < sp_lo(*b) - kFpTieTol;
+        [&q](const TrackSegment* a, const TrackSegment* b) {
+            // Quantized integer key (see pulled sort); ordered: span_lo may be
+            // reversed.  Equal keys keep the deterministic input order.
+            return q(sp_lo(*a)) < q(sp_lo(*b));
         });
     for (TrackSegment* ts : free_segs) place_seg(ts);
 }
