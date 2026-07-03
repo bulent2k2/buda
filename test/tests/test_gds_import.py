@@ -521,13 +521,21 @@ def test_cli_def_gds_layer_file_and_labels(tmp_path):
     assert [n.name for n in s.bdb.all_nets()] == ["n_real"]
 
 
-def test_cli_def_gds_layer_errors_and_warnings(capsys):
+def test_cli_def_gds_layer_errors_and_warnings(capsys, tmp_path):
     s = buda_cli.BudaSession()
     s.no_viz = True
     s.do_command("def_layer 3 M3 V LOW 0")
     s.do_command("def_layer 4 M4 H TOP 0")
     # Unknown BUDA layer id: rejected, nothing mapped.
     s.do_command("def_gds_layer 99 8 0")
+    assert "unknown layer id 99" in capsys.readouterr().out
+    assert s.layers.gds_mapped_pairs() == []
+    # Map-file install is ATOMIC: a bad line anywhere rejects the whole file
+    # (sourced scripts continue past the error — a partial map would make a
+    # following import_gds exclude only some of the mapped wires).
+    bad = tmp_path / "bad.map"
+    bad.write_text("3 8 0\n99 9 0\n")
+    s.do_command(f"def_gds_layer file {bad}")
     assert "unknown layer id 99" in capsys.readouterr().out
     assert s.layers.gds_mapped_pairs() == []
     # Duplicate GDS pair across two layers: warned, both still map (first

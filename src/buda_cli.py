@@ -3387,12 +3387,19 @@ class BudaSession:
                     print(f"Error: def_gds_layer file: {e}"); return
             else:
                 entries.append(args[:3])
+            # Validate the whole map before installing any entry: sourced
+            # scripts continue past a returned error, and a partially
+            # installed map would let a following import_gds exclude only
+            # SOME of the mapped wires from footprints.
+            parsed = []
             for parts in entries:
                 lid, gl = int(parts[0]), int(parts[1])
                 dt = int(parts[2]) if len(parts) > 2 else 0
                 if not self.layers.has_layer(lid):
                     print(f"Error: unknown layer id {lid} — define it with "
-                          f"def_layer first"); return
+                          f"def_layer first (no mappings installed)"); return
+                parsed.append((lid, gl, dt))
+            for lid, gl, dt in parsed:
                 other = self.layers.layer_for_gds(gl, dt)
                 if other >= 0 and other != lid:
                     print(f"Warning: GDS ({gl},{dt}) already mapped to layer "
