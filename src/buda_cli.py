@@ -2930,6 +2930,61 @@ class BudaSession:
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
         return exact
 
+    def _rr_contention_centres(self, stage, bid):
+        """(is_horiz, perp_centre) of every measured contention site involving
+        bundle `bid`: stage a = its NUTS overlap rectangles, stage b = its
+        DNUTS-open segments' placed windows."""
+        sites = []
+        if stage == 'a' and self.nuts_result is not None:
+            h_layers = set(self.layers.get_layer_ids_by_dir(
+                buda.LayerDir.HORIZONTAL))
+            for od in self.nuts_result.overlap_details:
+                if bid in (od.bid_a, od.bid_b):
+                    sites.append((od.layer in h_layers,
+                                  0.5 * (od.perp_lo + od.perp_hi)))
+        elif stage == 'b' and self.nuts_result is not None:
+            ts_map = {(t.bundle_id, t.seg_idx): t
+                      for t in self.nuts_result.segments}
+            for b2, si, _missing, _exp in self._open_segments():
+                if b2 != bid:
+                    continue
+                ts = ts_map.get((b2, si))
+                if ts is not None:
+                    sites.append((ts.horiz,
+                                  0.5 * (ts.interval_lo + ts.interval_hi)))
+        return sites
+
+    def _rr_candidate_order(self, w, old_tidx, stage):
+        """Alternate-candidate trial order for one contender (wishlist-ripup
+        item 4): candidates whose same-orientation segments sit FARTHEST from
+        the bundle's measured contention sites are tried first — they are the
+        likeliest to move the offending wire out of the congested window, so
+        the first-improving scan usually stops after one or two trials instead
+        of walking all eight.  Pure reordering (same candidate set, same cap):
+        the reachable moves are unchanged, only found sooner."""
+        n = min(len(w.input.candidates), _RR_MAX_CANDIDATES_PER_BUNDLE)
+        idxs = [i for i in range(n) if i != old_tidx]
+        sites = self._rr_contention_centres(stage, w.input.original_bundle.id)
+        if not sites:
+            return idxs
+        def farness(i):
+            cand = w.input.candidates[i]
+            worst = None
+            for horiz, centre in sites:
+                best = None   # this candidate's closest same-orientation wire
+                for seg in cand.segments:
+                    seg_h = (seg.start.y == seg.end.y)
+                    if seg_h != horiz:
+                        continue
+                    perp = seg.start.y if seg_h else seg.start.x
+                    d = abs(perp - centre)
+                    if best is None or d < best:
+                        best = d
+                if best is not None and (worst is None or best < worst):
+                    worst = best
+            return worst if worst is not None else 0.0
+        return sorted(idxs, key=farness, reverse=True)
+
     def _rr_trial(self, w, tidx, stage, metric):
         """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
         w.plan.selected_topology_index = tidx
@@ -2947,19 +3002,58 @@ class BudaSession:
         self._rr_rerun(stage, target_bid=bid)
         return metric()
 
+    def _open_segments(self):
+        """(bundle_id, seg_idx, missing_bits, expected_bits) for every
+        under-placed segment of the current detailed result (the per-bundle
+        rollup of the same walk is _rr_open_bundles)."""
+        if self.detailed_result is None:
+            return []
+        per_seg = {}
+        for ns in self.detailed_result.net_segments:
+            per_seg.setdefault(ns.bundle_id, {})
+            per_seg[ns.bundle_id][ns.seg_idx] = \
+                per_seg[ns.bundle_id].get(ns.seg_idx, 0) + 1
+        out = []
+        for w in self.bundles:
+            bid = w.input.original_bundle.id
+            exp = len(w.input.original_bundle.get_net_names())
+            if not exp:
+                continue
+            sel = w.plan.selected_topology_index
+            cands = w.input.candidates
+            if sel < 0 or sel >= len(cands):
+                continue
+            segs = per_seg.get(bid, {})
+            for si in range(len(cands[sel].segments)):
+                missing = exp - segs.get(si, 0)
+                if missing > 0:
+                    out.append((bid, si, missing, exp))
+        return out
+
     def _negotiate_congestion(self, max_iter=5):
-        """Measured-congestion negotiation (wishlist-ripup item 1, v1: NUTS
-        overlaps).  Instead of guess-and-test over topology candidates, feed
-        the ACTUAL overlaps back into the planner: each overlap rectangle is
-        injected as extra demand on the exact bands where it happened
-        (inject_band_demand), then both bundles of every overlap are re-planned
-        UNPINNED against those corrected prices (replan_bundle) — the cost
-        model itself now steers them off the contended bands, choosing among
-        ALL their candidates in one pass, no per-candidate NUTS trial.
+        """Measured-congestion negotiation (wishlist-ripup item 1).  Instead of
+        guess-and-test over topology candidates, feed the ACTUAL failures back
+        into the planner as demand on the exact bands where they happened
+        (inject_band_demand), then re-plan the offending bundles UNPINNED
+        against those corrected prices (replan_bundle) — the cost model itself
+        steers them off the contended bands, choosing among ALL their
+        candidates in one pass, no per-candidate NUTS trial.
+
+        Stage auto-detected like ripup_reroute:
+          a (after run_nuts) — each NUTS overlap rectangle is injected on its
+            layer; both bundles of every overlap are re-planned; metric =
+            overlap count.
+          b (after run_detailed_nuts, v2) — each DNUTS-open segment marks a
+            band whose REAL signal-track supply fell short of what the
+            (track-blind) width model promised; its whole placed window is
+            injected, scaled by the missing-bit fraction, and the open bundles
+            are re-planned; metric = lexicographic (opens, overlaps) so
+            clearing opens cannot silently trade abstract packing away.
+
         Re-injection pressure grows each time the same rectangle re-appears
         (PathFinder-style history), so persistent contention gets progressively
-        more expensive.  Iterations are accepted only if the overlap count
-        strictly drops (snapshot/restore otherwise) — a safe hill-climb;
+        more expensive.  Iterations are accepted only on strict metric
+        improvement (snapshot/restore otherwise) — a safe hill-climb;
         ripup_reroute remains the finisher for whatever negotiation leaves."""
         if not self.bundles:
             print("Error: negotiate_congestion has no bundles.")
@@ -2970,35 +3064,66 @@ class BudaSession:
         if self.nuts_result is None:
             print("Error: negotiate_congestion needs run_nuts to have run first.")
             return
-        m0 = self.nuts_result.num_overlaps
-        if m0 == 0:
-            print("[negotiate] metric already 0 — nothing to do.")
+        stage = 'b' if self.detailed_result is not None else 'a'
+        if stage == 'b':
+            metric = lambda: (self.detailed_result.num_unplaced,   # noqa: E731
+                              self.nuts_result.num_overlaps)
+        else:
+            metric = lambda: self.nuts_result.num_overlaps         # noqa: E731
+        m0 = metric()
+        if self._rr_m_primary(m0) == 0:
+            print(f"[negotiate] stage {stage}: metric already 0 — nothing to do.")
             return
-        print(f"[negotiate] start: {m0} NUTS overlap(s), max_iter={max_iter}",
-              flush=True)
-        history = {}          # overlap rectangle -> times seen (pressure)
+        what = "DNUTS opens" if stage == 'b' else "NUTS overlaps"
+        print(f"[negotiate] stage {stage} ({what}): start "
+              f"metric={self._rr_m_str(m0)}, max_iter={max_iter}", flush=True)
+        history = {}          # contention rectangle -> times seen (pressure)
         accepted = 0
         for it in range(1, max_iter + 1):
-            cur = self.nuts_result.num_overlaps
-            if cur == 0:
+            cur = metric()
+            if cur == ((0, 0) if isinstance(cur, tuple) else 0):
                 break
-            overlaps = list(self.nuts_result.overlap_details)
             snap = self._rr_snapshot()
             self.planner.clear_injected_demand()
             affected = []
-            for od in overlaps:
-                key = (od.layer, round(od.span_lo), round(od.span_hi),
-                       round(od.perp_lo), round(od.perp_hi))
-                history[key] = history.get(key, 0) + 1
-                # Pressure = the physical over-subscription (the overlap's
-                # perpendicular extent + one pitch), scaled by how often this
-                # rectangle has resisted (history) so repeat offenders price up.
-                amount = ((od.perp_hi - od.perp_lo) + self._nuts_pitch) \
-                    * history[key]
-                self.planner.inject_band_demand(
-                    od.layer, od.span_lo, od.span_hi,
-                    od.perp_lo, od.perp_hi, amount)
-                for bid in (od.bid_a, od.bid_b):
+            n_sites = 0
+            if stage == 'a':
+                for od in self.nuts_result.overlap_details:
+                    key = (od.layer, round(od.span_lo), round(od.span_hi),
+                           round(od.perp_lo), round(od.perp_hi))
+                    history[key] = history.get(key, 0) + 1
+                    # Pressure = the physical over-subscription (the overlap's
+                    # perpendicular extent + one pitch), scaled by how often
+                    # this rectangle has resisted (history).
+                    amount = ((od.perp_hi - od.perp_lo) + self._nuts_pitch) \
+                        * history[key]
+                    self.planner.inject_band_demand(
+                        od.layer, od.span_lo, od.span_hi,
+                        od.perp_lo, od.perp_hi, amount)
+                    n_sites += 1
+                    for bid in (od.bid_a, od.bid_b):
+                        if bid not in affected:
+                            affected.append(bid)
+            else:
+                ts_map = {(ts.bundle_id, ts.seg_idx): ts
+                          for ts in self.nuts_result.segments}
+                for bid, si, missing, exp in self._open_segments():
+                    ts = ts_map.get((bid, si))
+                    if ts is None:
+                        continue
+                    s_lo = min(ts.span_lo, ts.span_hi)
+                    s_hi = max(ts.span_lo, ts.span_hi)
+                    key = ('open', ts.layer, round(ts.interval_lo),
+                           round(ts.interval_hi), round(s_lo), round(s_hi))
+                    history[key] = history.get(key, 0) + 1
+                    # The whole placed window is short of tracks; charge it in
+                    # proportion to how much of the bus failed to land there.
+                    amount = (ts.interval_hi - ts.interval_lo) \
+                        * (missing / exp) * history[key]
+                    self.planner.inject_band_demand(
+                        ts.layer, s_lo, s_hi,
+                        ts.interval_lo, ts.interval_hi, amount)
+                    n_sites += 1
                     if bid not in affected:
                         affected.append(bid)
             # Planner convention: widest first.
@@ -3029,21 +3154,25 @@ class BudaSession:
                     w.plan.seg_layers = list(asn.seg_layers)
                     w.plan.seg_perp = list(asn.seg_perp)
                 self._run_nuts_internal()
-            new = self.nuts_result.num_overlaps
+                if stage == 'b':
+                    self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            new = metric()
             if new < cur:
                 accepted += 1
-                print(f"[negotiate] iter {it}: {len(overlaps)} overlap(s) -> "
-                      f"replanned {len(affected)} bundle(s), metric {cur}->{new}",
-                      flush=True)
+                print(f"[negotiate] iter {it}: {n_sites} contention site(s) -> "
+                      f"replanned {len(affected)} bundle(s), metric "
+                      f"{self._rr_m_str(cur)}->{self._rr_m_str(new)}", flush=True)
             else:
                 self._rr_restore(snap)
                 print(f"[negotiate] iter {it}: no improvement "
-                      f"(metric {cur}->{new}) — restored, stop.", flush=True)
+                      f"(metric {self._rr_m_str(cur)}->{self._rr_m_str(new)}) "
+                      f"— restored, stop.", flush=True)
                 break
         # Never leak injected demand into later commands: ripup_reroute's
         # replan_bundle trials would silently re-apply it.
         self.planner.clear_injected_demand()
-        print(f"[negotiate] done: metric {m0}->{self.nuts_result.num_overlaps} "
+        print(f"[negotiate] done: metric {self._rr_m_str(m0)}->"
+              f"{self._rr_m_str(metric())} "
               f"after {accepted} accepted iteration(s).", flush=True)
         if self.bdb is not None and accepted:
             self._checkpoint_routing()
@@ -3123,10 +3252,10 @@ class BudaSession:
                     continue
                 old_tidx = snap['wrap'][bid][0]
                 cand_best = None
-                for tidx in range(min(len(w.input.candidates),
-                                      _RR_MAX_CANDIDATES_PER_BUNDLE)):
-                    if tidx == old_tidx:
-                        continue
+                # Relevance-first order (item 4): candidates farthest from the
+                # measured contention are the likeliest fixes — the
+                # first-improving scan usually stops after 1-2 trials.
+                for tidx in self._rr_candidate_order(w, old_tidx, stage):
                     m = self._rr_trial(w, tidx, stage, metric)
                     self._rr_restore(snap)
                     n_trials += 1
