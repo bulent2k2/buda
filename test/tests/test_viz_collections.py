@@ -506,3 +506,26 @@ def test_right_click_does_not_deselect(monkeypatch):
     xl, yl = viz.ax.get_xlim(), viz.ax.get_ylim()
     _fire(viz.fig, viz.ax, "button_press_event", _frac(0.5, *xl), _frac(0.5, *yl))
     assert viz._highlighted == bid, "right-click deselected the bundle"
+
+
+def test_box_zoom_yields_to_active_toolbar_mode(monkeypatch):
+    """While a matplotlib toolbar tool (pan/zoom) is active, a right-drag must
+    NOT start BUDA's box zoom — otherwise it runs on top of the toolbar gesture
+    (Codex #159)."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    ax, fig = viz.ax, viz.fig
+    fig.canvas.draw()
+
+    class _FakeToolbar:
+        mode = "zoom rect"        # non-empty ⇒ a toolbar tool is active
+    monkeypatch.setattr(fig.canvas, "toolbar", _FakeToolbar(), raising=False)
+
+    before = (ax.get_xlim(), ax.get_ylim())
+    xl, yl = before
+    _fire(fig, ax, "button_press_event", _frac(0.35, *xl), _frac(0.35, *yl))
+    _fire(fig, ax, "motion_notify_event", _frac(0.65, *xl), _frac(0.65, *yl))
+    _fire(fig, ax, "button_release_event", _frac(0.65, *xl), _frac(0.65, *yl))
+    assert (ax.get_xlim(), ax.get_ylim()) == before, \
+        "box zoom ran despite an active toolbar mode"
+    assert not any(getattr(p, "get_linestyle", lambda: None)() == "--"
+                   for p in ax.patches), "rubber-band drawn despite toolbar mode"

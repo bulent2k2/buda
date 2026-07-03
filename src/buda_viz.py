@@ -299,6 +299,11 @@ def _install_bbox_zoom(viz):
     def _press(event):
         if event.button != 3 or event.inaxes != viz.ax:
             return
+        # Don't hijack the gesture while a matplotlib toolbar tool (pan/zoom) is
+        # active — same guard as _on_click and the Floorplanner press handler.
+        toolbar = getattr(viz.fig.canvas, 'toolbar', None)
+        if toolbar is not None and getattr(toolbar, 'mode', '') != '':
+            return
         if event.xdata is None or event.ydata is None:
             return
         st["x0"], st["y0"] = event.xdata, event.ydata
