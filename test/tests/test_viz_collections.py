@@ -423,3 +423,86 @@ def test_ctrl_z_with_no_selection_keeps_maximal_view(monkeypatch):
     viz.fig.canvas.callbacks.process(
         "resize_event", ResizeEvent("resize_event", viz.fig.canvas))
     assert abs(_axes_aspect(viz.ax) - _box_aspect(viz.ax)) < 1e-6
+
+
+# ── right-click-drag zoom-to-box (adopted from the Floorplanner) ──────────────
+
+def _fire(fig, ax, name, xd, yd):
+    from matplotlib.backend_bases import MouseEvent, MouseButton
+    x, y = ax.transData.transform((xd, yd))
+    fig.canvas.callbacks.process(
+        name, MouseEvent(name, fig.canvas, x, y, button=MouseButton.RIGHT))
+
+
+def _frac(t, lo, hi):
+    return lo + (hi - lo) * t
+
+
+def test_right_drag_zoom_in_frames_the_box(monkeypatch):
+    """Right-drag left→right zooms INTO the drawn box: smaller view area,
+    centred on the box, and the box expanded to fill the window (aspect ==
+    axes-box aspect).  A live dashed rubber-band shows during the drag and is
+    removed on release."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    ax, fig = viz.ax, viz.fig
+    fig.canvas.draw()
+    xl, yl = ax.get_xlim(), ax.get_ylim()
+    a0 = (xl[1] - xl[0]) * (yl[1] - yl[0])
+    n_static = len(ax.patches)              # block/keepout patches already there
+    bx0, bx1 = _frac(0.35, *xl), _frac(0.65, *xl)
+    by0, by1 = _frac(0.35, *yl), _frac(0.65, *yl)
+
+    _fire(fig, ax, "button_press_event", bx0, by0)
+    _fire(fig, ax, "motion_notify_event", bx1, by1)
+    assert len(ax.patches) == n_static + 1, "rubber-band not shown during drag"
+    _fire(fig, ax, "button_release_event", bx1, by1)
+
+    assert len(ax.patches) == n_static, "rubber-band not cleared on release"
+    nxl, nyl = ax.get_xlim(), ax.get_ylim()
+    assert (nxl[1] - nxl[0]) * (nyl[1] - nyl[0]) < a0, "did not zoom in"
+    assert abs((nxl[0] + nxl[1]) / 2 - (bx0 + bx1) / 2) < 1e-6
+    assert abs((nyl[0] + nyl[1]) / 2 - (by0 + by1) / 2) < 1e-6
+    assert abs(_axes_aspect(ax) - _box_aspect(ax)) < 1e-9, "box did not fill window"
+
+
+def test_right_drag_zoom_out_expands_view(monkeypatch):
+    """Right-drag right→left zooms OUT: the view area grows."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    ax, fig = viz.ax, viz.fig
+    fig.canvas.draw()
+    xl, yl = ax.get_xlim(), ax.get_ylim()
+    a0 = (xl[1] - xl[0]) * (yl[1] - yl[0])
+    # RL drag: press at the upper-right of a sub-box, release at the lower-left.
+    _fire(fig, ax, "button_press_event", _frac(0.65, *xl), _frac(0.65, *yl))
+    _fire(fig, ax, "motion_notify_event", _frac(0.35, *xl), _frac(0.35, *yl))
+    _fire(fig, ax, "button_release_event", _frac(0.35, *xl), _frac(0.35, *yl))
+    nxl, nyl = ax.get_xlim(), ax.get_ylim()
+    assert (nxl[1] - nxl[0]) * (nyl[1] - nyl[0]) > a0, "did not zoom out"
+
+
+def test_tiny_right_drag_is_ignored(monkeypatch):
+    """A barely-moved right-drag (a stray right-click) must not change the view."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    ax, fig = viz.ax, viz.fig
+    fig.canvas.draw()
+    xl, yl = ax.get_xlim(), ax.get_ylim()
+    before = (xl, yl)
+    cx, cy = _frac(0.5, *xl), _frac(0.5, *yl)
+    _fire(fig, ax, "button_press_event", cx, cy)
+    _fire(fig, ax, "motion_notify_event", cx + (xl[1] - xl[0]) * 0.003, cy)
+    _fire(fig, ax, "button_release_event", cx + (xl[1] - xl[0]) * 0.003, cy)
+    assert (ax.get_xlim(), ax.get_ylim()) == before, "tiny drag changed the view"
+
+
+def test_right_click_does_not_deselect(monkeypatch):
+    """A right-click (zoom-box gesture) must not clear the bundle selection."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    bid = next(iter(viz._bundle_artists), None)
+    if bid is None:
+        import pytest
+        pytest.skip("no registered bundle to select")
+    viz._set_highlight(bid)
+    viz.fig.canvas.draw()
+    xl, yl = viz.ax.get_xlim(), viz.ax.get_ylim()
+    _fire(viz.fig, viz.ax, "button_press_event", _frac(0.5, *xl), _frac(0.5, *yl))
+    assert viz._highlighted == bid, "right-click deselected the bundle"
