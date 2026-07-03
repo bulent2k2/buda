@@ -20,6 +20,7 @@ cell/component tables. GDS is binary, so no blobs are checked in.
 
 import contextlib
 import io
+import sqlite3
 
 import pytest
 
@@ -97,15 +98,122 @@ def test_units_scale_to_um(tmp_path):
 
 
 def test_texts_counted_not_footprinted(tmp_path):
-    # A far-away label must not grow the cell footprint (G2 consumes labels).
+    # A far-away label must not grow the cell footprint — and since it lands
+    # outside every component, net recovery skips it with a warning.
     b = GdsBuilder()
     b.structure("leaf") \
      .boundary(10, 0, [(0, 0), (5, 0), (5, 3), (0, 3)]) \
      .text(63, 0, (500, 500), "net_far")
     db, st = _import(tmp_path, b.write(tmp_path / "t.gds"))
     assert st.n_texts == 1
+    assert st.n_labels_skipped == 1 and st.n_nets == 0
+    assert any("outside every component" in w for w in st.warnings)
     assert {c.name: (c.width, c.height)
             for c in db.all_cells()} == {"leaf": (5.0, 3.0)}
+
+
+def test_labels_recover_nets_and_pins(tmp_path):
+    # Phase G2: each TEXT string is a net; the pin lands on the component
+    # containing the label. The `label_layers` filter restricts which GDS
+    # layers carry labels (layer 9 below is excluded).
+    b = GdsBuilder()
+    b.structure("blkA").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("blkB").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("chip") \
+     .sref("blkA", (0, 0), inst_name="A") \
+     .sref("blkB", (600, 800), inst_name="B") \
+     .text(63, 0, (100, 200), "n_data") \
+     .text(63, 0, (700, 1000), "n_data") \
+     .text(9, 0, (100, 100), "not_a_label")
+    gds = b.write(tmp_path / "c.gds")
+    db = buda.BDB(str(tmp_path / "c.bdb"))
+    st = db.import_gds(str(gds), [63])
+    assert (st.n_nets, st.n_pins, st.n_labels_skipped) == (1, 2, 0)
+    comps = {c.name: c for c in db.all_components()}
+    for name, (px, py) in (("A", (100.0, 200.0)), ("B", (700.0, 1000.0))):
+        pins = db.pins_by_comp(comps[name].id)
+        assert [(p.pin_name, p.px, p.py, p.dir) for p in pins] == \
+            [("n_data", px, py, "UNKNOWN")]
+    # Label nets get net_props rows too, so HPWL/fanout queries see them
+    # (Codex #148 P2): the recovered 2-pin net has a real HPWL after compute.
+    db.compute_all()
+    assert db.nets_by_hpwl(1.0, 1e12) == ["n_data"]   # hpwl = 600 + 800
+    with sqlite3.connect(str(tmp_path / "c.bdb")) as con:
+        hpwl, fanout = con.execute(
+            "SELECT p.hpwl, p.fanout FROM net_props p"
+            " JOIN net n ON n.id = p.net_id WHERE n.name='n_data'").fetchone()
+    # fanout counts INPUT/INOUT pins only; label pins are UNKNOWN → 0.
+    assert (hpwl, fanout) == (1400.0, 0)
+
+
+def test_label_lands_on_deepest_component(tmp_path):
+    # Containment picks the DEEPEST component under the label, not a parent:
+    # the label at (45,45) sits inside BOTH o0 (100x100) and o0/i0 (10x10 at
+    # 40,40) — the pin must land on the nested instance.
+    b = GdsBuilder()
+    b.structure("inner").boundary(10, 0, [(0, 0), (10, 0), (10, 10), (0, 10)])
+    b.structure("outer") \
+     .boundary(10, 0, [(0, 0), (100, 0), (100, 100), (0, 100)]) \
+     .sref("inner", (40, 40), inst_name="i0")
+    b.structure("top") \
+     .sref("outer", (0, 0), inst_name="o0") \
+     .text(63, 0, (45, 45), "deep_net")
+    db, st = _import(tmp_path, b.write(tmp_path / "t.gds"))
+    assert (st.n_nets, st.n_pins) == (1, 1)
+    comps = {c.name: c for c in db.all_components()}
+    assert db.pins_by_comp(comps["o0/i0"].id)           # deepest wins
+    assert not db.pins_by_comp(comps["o0"].id)
+
+
+def test_labels_in_referenced_structs_repeat_per_instance(tmp_path):
+    # A label INSIDE a referenced structure elaborates per instance (standard
+    # GDS flattening): every instance gets a pin on the SAME net — the short
+    # this creates is the semantic the file encodes.
+    b = GdsBuilder()
+    b.structure("core") \
+     .boundary(10, 0, [(0, 0), (50, 0), (50, 50), (0, 50)]) \
+     .text(63, 0, (25, 25), "clk")
+    b.structure("top") \
+     .aref("core", (0, 0), cols=2, rows=1, col_pitch=(100, 0),
+           row_pitch=(0, 100))
+    db, st = _import(tmp_path, b.write(tmp_path / "t.gds"))
+    assert (st.n_nets, st.n_pins) == (1, 2)
+    positions = sorted((p.px, p.py) for c in db.all_components()
+                       for p in db.pins_by_comp(c.id))
+    assert positions == [(25.0, 25.0), (125.0, 25.0)]   # transformed per instance
+
+
+def test_hier_flow_from_labeled_gds_no_verilog(tmp_path):
+    # The Phase-G2 payoff: a LABELED GDS runs the hierarchy-aware flow with
+    # zero Verilog — labels -> net/pin rows -> derive_busterms ->
+    # run_hier_bundler -> routed through detailed NUTS.
+    b = GdsBuilder()
+    b.structure("blkA").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    b.structure("blkB").boundary(10, 0, [(0, 0), (200, 0), (200, 400), (0, 400)])
+    ch = b.structure("chip") \
+        .sref("blkA", (0, 0), inst_name="A") \
+        .sref("blkB", (600, 800), inst_name="B")
+    for i in range(4):                          # a 4-bit labeled bus
+        ch.text(63, 0, (100, 100 + 10 * i), f"d_{i}")
+        ch.text(63, 0, (700, 900 + 10 * i), f"d_{i}")
+    gds = b.write(tmp_path / "c.gds")
+
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()) as buf:
+        for c in ["source flow/rnr/mix_tracks.buda",
+                  f"open_bdb {tmp_path / 'c.bdb'}",
+                  f"import_gds {gds} labels 63",
+                  "derive_busterms 1",
+                  "run_hier_bundler depth 1",
+                  "generate_hier_topologies",
+                  "run_planner hier 3",
+                  "run_nuts", "run_detailed_nuts"]:
+            s.do_command(c)
+    assert "4 net(s) / 8 pin(s) recovered" in buf.getvalue()
+    assert len(s.bundles) == 1                  # the 4 labeled bits bundled
+    assert s.nuts_result.num_overlaps == 0
+    assert s.detailed_result.num_unplaced == 0
 
 
 def test_path_width_grows_footprint(tmp_path):

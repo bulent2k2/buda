@@ -59,13 +59,26 @@ generates a small SoC as GDSII (2×2 core AREF + L2 + IO), imports it, routes
 it through detailed NUTS, and opens the interactive visualizer; `--png <file>`
 renders headlessly, `--no-viz` just prints the summary.
 
-## Phase G2 — net/pin recovery via TEXT labels — ⬜ NEXT
+## Phase G2 — net/pin recovery via TEXT labels — ✅ IMPLEMENTED
 
-Auto-detect: `TEXT` on configured label layer(s) → `net` + `pin` rows (name
-from the string, position from `XY`, owning component by containment); absent
-→ geometry-only + `import_verilog` pairing. Caveat to resolve: Verilog pairing
-needs instance-name correspondence, which GDS only provides via ref
-properties — flows that strip them fall back to labels or synthesized names.
+`import_gds <file.gds> [labels <layer_csv>]`: each `TEXT` label is a net (name
+= the string); its pin lands on the **deepest** component containing the
+label's elaborated position, with dir `UNKNOWN` (the hier bundler's positional
+fallback handles direction). Labels flow through the hierarchy transforms like
+geometry — a label inside a referenced structure repeats per instance (the
+standard GDS flattening semantic, shorting those instances onto the label's
+net). `labels 63,64` restricts the label layers; default = every `TEXT` is a
+label. Labels outside every component are skipped with a warning. Auto-detect
+holds: no labels → geometry-only + `import_verilog` pairing, as before.
+
+**Payoff (tested):** a labeled GDS runs the hierarchy-aware flow with ZERO
+Verilog — labels → `net`/`pin` rows → `derive_busterms` → `run_hier_bundler`
+→ routed through detailed NUTS (`test_hier_flow_from_labeled_gds_no_verilog`).
+BDB API: `add_label_pin(net_name, comp_id, pin_name, px, py)`
+(`_ensure_net` + `INSERT OR IGNORE`).
+
+Verilog-pairing caveat (stands): name correspondence needs ref properties;
+flows that strip them fall back to labels or synthesized names.
 
 ## Phase G3 — layer mapping — ⬜
 

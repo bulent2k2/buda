@@ -4188,20 +4188,31 @@ class BudaSession:
                 print("Error: open_bdb first"); return
             self.bdb.import_verilog(args[0])
         elif cmd == "import_gds":
-            # import_gds <file.gds> — GDSII stream -> BDB placement/hierarchy
-            # (fresh load; see docs/internal/gds_oa_interchange.md Phase G1).
+            # Usage: import_gds <file.gds> [labels <layer_csv>]
+            # GDSII stream -> BDB placement/hierarchy + TEXT-label net recovery
+            # (fresh load; see docs/internal/gds_oa_interchange.md, Phases G1-G2).
+            # `labels 63,64` restricts which GDS layers carry net labels;
+            # default = every TEXT record is a label.
             if not args:
                 print("Error: import_gds requires a file path"); return
             if self.bdb is None:
                 print("Error: open_bdb first"); return
-            st = self.bdb.import_gds(args[0])
+            label_layers = []
+            if len(args) >= 3 and args[1] == "labels":
+                label_layers = [int(x) for x in args[2].split(",") if x]
+            st = self.bdb.import_gds(args[0], label_layers)
             for wmsg in st.warnings:
                 print(f"[import_gds] Warning: {wmsg}")
             tops = ", ".join(st.tops) if st.tops else "(none)"
+            lbl = (f"{st.n_nets} net(s) / {st.n_pins} pin(s) recovered from "
+                   f"{st.n_texts} TEXT label(s)"
+                   + (f" ({st.n_labels_skipped} skipped)"
+                      if st.n_labels_skipped else "")
+                   if st.n_texts else "no TEXT labels (pair with "
+                   "import_verilog for connectivity)")
             print(f"[import_gds] {st.n_structures} structure(s) -> "
                   f"{st.n_cells} cell(s), {st.n_components} component(s); "
-                  f"top(s): {tops}; {st.n_texts} TEXT label(s) "
-                  f"(labels are consumed in Phase G2).")
+                  f"top(s): {tops}; {lbl}.")
         elif cmd == "add_blocks_from_bdb":
             # add_blocks_from_bdb <depth> [deepest|skip|error]
             if not args:

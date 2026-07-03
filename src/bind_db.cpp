@@ -240,6 +240,9 @@ void bind_db(py::module_& m) {
         .def_readonly("n_cells",      &GdsImportStats::n_cells)
         .def_readonly("n_components", &GdsImportStats::n_components)
         .def_readonly("n_texts",      &GdsImportStats::n_texts)
+        .def_readonly("n_nets",       &GdsImportStats::n_nets)
+        .def_readonly("n_pins",       &GdsImportStats::n_pins)
+        .def_readonly("n_labels_skipped", &GdsImportStats::n_labels_skipped)
         .def_readonly("tops",         &GdsImportStats::tops)
         .def_readonly("warnings",     &GdsImportStats::warnings);
 
@@ -248,9 +251,11 @@ void bind_db(py::module_& m) {
         .def("import_def_lef",  &BDB::import_def_lef,
              py::arg("def_path"), py::arg("lef_path"))
         .def("import_verilog",  &BDB::import_verilog, py::arg("v_path"))
-        .def("import_gds", [](BDB& db, const std::string& path) {
-                 return import_gds(db, path);
-             }, py::arg("path"))
+        .def("import_gds", [](BDB& db, const std::string& path,
+                              const std::vector<int>& label_layers) {
+                 return import_gds(db, path, label_layers);
+             }, py::arg("path"),
+             py::arg("label_layers") = std::vector<int>{})
         .def("compute_hpwl",    &BDB::compute_hpwl)
         .def("compute_fanout",  &BDB::compute_fanout)
         .def("compute_all",     &BDB::compute_all)
