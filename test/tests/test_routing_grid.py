@@ -228,6 +228,23 @@ def test_routing_grid_signal_tracks_two_units():
     assert len(tracks) == 8  # 4 signal per unit × 2 units
 
 
+def test_count_signal_tracks_in_matches_size():
+    """count_signal_tracks_in (the allocation-free hot-path twin used by the
+    congestion planner's signal-track capacity) must return exactly
+    len(signal_tracks_in(...)) for every interval — including keepout-blocked
+    tracks and multi-unit ranges."""
+    stack = buda.RoutingGridStack()
+    stack.define_layer(4, make_standard_pattern(origin=0.0), True)
+    # Block one signal track band with a keepout (H layer: y=track coord).
+    stack.add_keepout(4, x1=-1000, y1=5, x2=1000, y2=6)   # covers SIG@5.5
+    grid = stack.get_layer_grid(4)
+    for lo, hi in [(0.0, 14.0), (0.0, 7.0), (0.0, 28.0), (3.0, 11.0),
+                   (5.4, 5.6), (100.0, 100.0), (-5.0, 3.6)]:
+        want = len(grid.signal_tracks_in(x=0.0, lo=lo, hi=hi))
+        got = grid.count_signal_tracks_in(x=0.0, lo=lo, hi=hi)
+        assert got == want, f"[{lo},{hi}]: count={got} vs size={want}"
+
+
 def test_get_undefined_layer_raises():
     stack = buda.RoutingGridStack()
     with pytest.raises(Exception):

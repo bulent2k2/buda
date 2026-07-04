@@ -150,6 +150,11 @@ void CongestionPlanner::rebuild_cuts_() {
             c.init_bands(n_ybands, [&](int b) {
                 return band_available_length(x_mid, true, keepouts, lid, y_grid_[b], y_grid_[b+1]);
             });
+            if (track_mode_for(lid))
+                c.init_sig_ntrk([&](int b) {
+                    return grid_->get_layer_grid(lid).count_signal_tracks_in(
+                        (double)x_mid, (double)y_grid_[b], (double)y_grid_[b+1]);
+                });
             cuts_.push_back(std::move(c));
         }
     }
@@ -169,6 +174,11 @@ void CongestionPlanner::rebuild_cuts_() {
             c.init_bands(n_xbands, [&](int b) {
                 return band_available_length(y_mid, false, keepouts, lid, x_grid_[b], x_grid_[b+1]);
             });
+            if (track_mode_for(lid))
+                c.init_sig_ntrk([&](int b) {
+                    return grid_->get_layer_grid(lid).count_signal_tracks_in(
+                        (double)y_mid, (double)x_grid_[b], (double)x_grid_[b+1]);
+                });
             cuts_.push_back(std::move(c));
         }
     }
@@ -416,15 +426,19 @@ double CongestionPlanner::usable_band_cap(const GlobalCut& c, int b, bool is_vcu
     if (track_mode_for(c.layer_id)) {
         const auto& tgrid = is_vcut ? y_grid_ : x_grid_;
         if (b + 1 >= (int)tgrid.size()) return 0.0;
-        int lo = tgrid[b], hi = tgrid[b + 1];
+        const int blo = tgrid[b], bhi = tgrid[b + 1];
+        int lo = blo, hi = bhi;
         if (slide_lo != INT_MIN) {
             lo = std::max(lo, slide_lo);
             hi = std::min(hi, slide_hi);
         }
         if (lo >= hi) return 0.0;
-        int ntrk = (int)grid_->get_layer_grid(c.layer_id)
-                       .signal_tracks_in((double)c.cut_coord,
-                                         (double)lo, (double)hi).size();
+        // Full-band (slide window does not narrow it): use the count cached once in
+        // rebuild_cuts_.  Only a genuinely narrowed window walks the pattern.
+        int ntrk = (lo <= blo && hi >= bhi && c.has_sig_ntrk())
+            ? c.sig_ntrk(b)
+            : grid_->get_layer_grid(c.layer_id)
+                  .count_signal_tracks_in((double)c.cut_coord, (double)lo, (double)hi);
         double cap = ((double)ntrk + track_cap_slack_) *
                      layers_.eff_bus_width(1, 1.0, c.layer_id);   // * bit pitch
         if (cap <= 0.0) return 0.0;
