@@ -234,17 +234,25 @@ re-solve). Since `flip_mst_edge` is an **involution**, the clean move is:
    MST type, map each `overlap_details` entry touching this bundle → its
    `seg_idx` → `candidates[sel].segments[seg_idx].edge_id` (keep `>= 0`, dedup).
 2. **Trial (per contended edge):** `flip_mst_edge(cands[sel], eid, h, v, fp)` in
-   place → `annotate_topology(cands[sel], fp)` → `_rr_rerun(stage, target_bid=bid)`
-   → read `metric()`. Because snapshot does **not** capture candidate geometry, a
-   rejected flip is undone by flipping the SAME edge again (involution) +
-   re-annotate + `_rr_rerun` to restore — *not* by `_rr_restore` alone.
+   place → `annotate_topology(cands[sel], fp)` → **`_rr_trial(w, sel, stage,
+   metric)`** → read the returned metric. Use `_rr_trial(w, sel, …)`, NOT a bare
+   `_rr_rerun`: in the usual post-`run_planner` state the wrapper is *not*
+   `topology_pinned`, and `CongestionPlanner::replan_bundle` → `plan_bundle`
+   restricts the scored candidate range only when `topology_pinned` is true — so a
+   bare rerun would let the planner re-score ALL candidates and a "flip improvement"
+   could actually be a re-selection of a *different* topology (Codex #170 P2).
+   `_rr_trial` pins `sel` (`topology_pinned=True`, `selected_topology_index=sel`)
+   before the rerun, so the metric measures the flipped `sel` specifically. Because
+   `_rr_snapshot` does **not** capture candidate geometry, a rejected flip is undone
+   by flipping the SAME edge again (involution) + re-annotate; `_rr_restore(snap)`
+   then restores selection/pin/plan arrays around it.
 3. **Accept** the first flip with a strict metric improvement (keep it flipped in
    place — that IS the committed better route); the outer loop's next iteration
-   then sees the flipped candidate as the new baseline. Fold this into the
-   existing per-contender scan as an extra move source (try index alternates AND
-   edge flips; commit whichever wins), so the loop's snapshot/commit structure is
-   reused. A committed flip needs no index change, so record it as a no-op
-   `_rr_trial` re-pin to the same `sel` after the geometry is already flipped.
+   then sees the flipped candidate as the new baseline. Fold this into the existing
+   per-contender scan as an extra move source (try index alternates AND edge flips;
+   commit whichever wins), so the loop's snapshot/commit structure is reused. A
+   committed flip needs no index change — the commit is just `_rr_trial(w, sel, …)`
+   with the geometry already flipped (re-pinning the same `sel`).
 4. **Persistence (Codex #168 P2):** add the `topology_segment.edge_id` column
    (schema + INSERT/SELECT + `TopoSegRow` + binding + `buda_cli` persist/reload) so
    a resumed pipeline can still flip; regenerate the `*.bdb.sql` fixtures; add a
