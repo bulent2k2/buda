@@ -3,7 +3,7 @@
 # from pull2.buda which is 
 # from hbundles/08_cross_level.buda but running flat pipeline
 
-source tracks2top.buda
+source tracks/tracks2top.buda
 
 add_block left          0    0 400 500
 add_block right_bot_hi  550 60 620 190

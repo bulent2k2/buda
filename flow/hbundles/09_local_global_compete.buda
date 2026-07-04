@@ -21,7 +21,7 @@
 # no rip-up, everything overflow-free in one pass.
 # ============================================================
 
-source ../tracks.buda
+source ../tracks/tracks.buda
 
 # ── BDB: cells and hierarchy ───────────────────────────────
 open_bdb :memory:

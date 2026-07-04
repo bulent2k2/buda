@@ -13,7 +13,7 @@
 #def_layer 6 M6 H TOP 20.0
 #def_layer 7 M7 V TOP 20.0
 #def_layer 8 M8 H     40.0
-source tracks.buda
+source tracks/tracks.buda
 
 # Floorplan blocks
 add_block u_cpu0 200 200 1000 1600

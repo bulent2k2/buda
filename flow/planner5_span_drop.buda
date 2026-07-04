@@ -15,7 +15,7 @@
 # With base_span_ref 1 the penalty is effectively flat (legacy) -> the
 # M6 detour is cheaper -> expect t on a multi-segment detour via M6.
 
-source tracks.buda
+source tracks/tracks.buda
 
 add_block c     0 300   50 500
 add_block a   100 300  200 500

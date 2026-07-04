@@ -1,4 +1,4 @@
-source tracks_flip_orient.buda
+source tracks/tracks_flip_orient.buda
 add_block b1   0   0  50  50
 add_block b2 250 200 300 250
 add_bus v[16] b1.o b2.i

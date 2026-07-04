@@ -4,7 +4,7 @@
 import sqlite3
 
 DB = '/tmp/ariane136_flow.bdb'
-OUT = '/Users/ben/src/buda/flow/ariane136.buda'
+OUT = '/Users/ben/src/buda/demo/ariane136.buda'
 
 db = sqlite3.connect(DB)
 

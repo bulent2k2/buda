@@ -1,4 +1,4 @@
-python3 tools/def_viz_o3.py flow/ariane/ariane.def flow/ariane/ariane.lef
+python3 tools/def_viz_o3.py demo/ariane/ariane.def demo/ariane/ariane.lef
 
 Main
 ==
@@ -7,8 +7,8 @@ Main
   
 Buda files work
 ==
-python3 src/buda_cli.py flow/ariane/ariane.buda &
-python3 src/buda_cli.py flow/ariane/ariane_core.buda &
+python3 src/buda_cli.py demo/ariane/ariane.buda &
+python3 src/buda_cli.py demo/ariane/ariane_core.buda &
 
 A synth placement by Claude
 ==
@@ -16,7 +16,7 @@ BDB=chip_designs/ariane136/ariane_buda5.bdb; python3 tools/def_viz_o3.py $BDB
 
 Works without a LEF (auto synthesize size based on placement and minimum gaps)
 ==
-python3 tools/def_viz_o3.py flow/ariane/ariane.def &
+python3 tools/def_viz_o3.py demo/ariane/ariane.def &
 
 LEF file
 ==

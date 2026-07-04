@@ -13,7 +13,7 @@
 #def_layer 6 M6 H TOP 20.0
 #def_layer 7 M7 V TOP 20.0
 #def_layer 8 M8 H     40.0
-source tracks.buda
+source ../flow/tracks/tracks.buda
 
 # Floorplan blocks
 add_block u_cpu0 200 200 1000 1600
@@ -31,7 +31,7 @@ add_block u_pcie 2400 9000 5000 10200
 add_block u_usb 5600 9000 8400 10200
 add_block u_sec 8800 9000 10400 10200
 
-source large_scale_demo_buses.buda
+source ../flow/large_scale_demo_buses.buda
 
 # Stage 1 — bundle nets by driver+receiver instance
 run_bundler strict

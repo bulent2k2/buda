@@ -33,6 +33,7 @@ pytestmark = pytest.mark.mid
 
 _ROOT   = Path(__file__).parents[2]
 FLOW    = _ROOT / "flow"
+DEMO    = _ROOT / "demo"          # user/designer-facing demo scripts
 CLI     = _ROOT / "src" / "buda_cli.py"
 SRC_DIR = CLI.parent
 
@@ -174,7 +175,7 @@ def test_two_rotated():
 # ---------------------------------------------------------------------------
 
 def test_comprehensive_demo():
-    out, rc = run_script("comprehensive_demo.buda")
+    out, rc = _run_path(DEMO / "comprehensive_demo.buda")   # moved to demo/
     assert_clean(out, rc, "comprehensive_demo.buda")
     assert "Bundler created 3 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)

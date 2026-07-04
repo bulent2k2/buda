@@ -463,7 +463,7 @@ For a new developer, the shortest path through the codebase is:
 
 1. Read `docs/USER_GUIDE.md` for the pipeline.
 2. Read `docs/BUDA_SCRIPT_REFERENCE.md` for command syntax.
-3. Run or inspect `flow/quickstart.buda`.
+3. Run or inspect `demo/quickstart.buda`.
 4. Read `src/buda_cli.py` to understand orchestration.
 5. Read the C++ headers in this order:
    `bdb.h`, `bundler.h`, `topology.h`, `conn_topology.h`, `layering.h`,

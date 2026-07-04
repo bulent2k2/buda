@@ -1,7 +1,7 @@
 # From: hbundles/08_cross_level.buda
 
 #source tracks.buda
-source tracks2topM4M5.buda
+source tracks/tracks2topM4M5.buda
 corner_margin dx 5 dy 5
 set_min_stub_length 2
 

@@ -33,7 +33,7 @@
 # the priority sort in CongestionPlanner itself is always active.
 # ============================================================
 
-source ../tracks.buda
+source ../tracks/tracks.buda
 
 corner_margin dx 3 dy 3
 set_min_stub_length 1

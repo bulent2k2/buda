@@ -13,7 +13,7 @@
 # ============================================================
 
 # ── Layers ────────────────────────────────────────────────
-source tracks.buda
+source tracks/tracks.buda
 
 corner_margin 1 1
 set_min_stub_length 1

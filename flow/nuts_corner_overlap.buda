@@ -1,5 +1,5 @@
 # From four.buda
-source tracks2top.buda
+source tracks/tracks2top.buda
 
 # ── Floorplan ────────────────────────────────────────────────
 add_block u1    80   50   100 100

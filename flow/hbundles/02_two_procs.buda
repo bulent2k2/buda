@@ -38,7 +38,7 @@
 #     · Total bundles after expansion: 8 (4 cross-block + 4 expanded).
 # ============================================================
 
-source ../tracks.buda
+source ../tracks/tracks.buda
 
 corner_margin dx 5 dy 5
 set_min_stub_length 2

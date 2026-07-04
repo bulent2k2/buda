@@ -2,7 +2,7 @@
 # From planner1_simple_I_topo_congestion.buda
 # ============================================================
 
-source tracks2top.buda
+source tracks/tracks2top.buda
 
 corner_margin dx 5 dy 5
 

@@ -2,7 +2,7 @@
 # two stubs connecting to a trunk
 # some of the bits of the trunk got overstretched beyond the far stub they connect to
 
-source tracks2top.buda
+source tracks/tracks2top.buda
 add_block drv1    50  380  230  620
 add_block rcv1   680  120  880  500
 add_block rcv2   350   50  550  230

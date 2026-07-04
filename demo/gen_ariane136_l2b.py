@@ -5,7 +5,7 @@ CONVERGENT bundling, aggregated rdata buses, hybrid non-overlapping blocks."""
 import sqlite3, re
 
 DB  = '/tmp/ariane136_flow.bdb'
-OUT = '/Users/ben/src/buda/flow/ariane136_l2b.buda'
+OUT = '/Users/ben/src/buda/demo/ariane136_l2b.buda'
 
 db = sqlite3.connect(DB)
 

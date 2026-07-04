@@ -914,9 +914,9 @@ def export_hbundle_script(state: FloorplannerAppState, path: str,
     The full hierarchy is loaded into the floorplan: `add_blocks_from_bdb` is
     emitted for every level 0..max_depth so NUTS / topology gen build their
     Hanan grid from real block edges at all depths.  A self-contained sidecar
-    `<name>_tracks.buda` (copied from flow/tracks4top.buda) defines the layers
-    AND track patterns and is sourced relatively, so the script can run the full
-    flow through detailed NUTS without external tech files.
+    `<name>_tracks.buda` (copied from flow/tracks/tracks4top.buda) defines the
+    layers AND track patterns and is sourced relatively, so the script can run the
+    full flow through detailed NUTS without external tech files.
     """
     bdb_path = state.bdb_path or "floorplan.bdb"
     max_depth = design_max_depth(state)
@@ -925,7 +925,7 @@ def export_hbundle_script(state: FloorplannerAppState, path: str,
 
     # Self-contained tech sidecar next to the script (layers + track patterns).
     sidecar = os.path.splitext(path)[0] + "_tracks.buda"
-    shutil.copyfile(os.path.join(_ROOT, "flow", "tracks4top.buda"), sidecar)
+    shutil.copyfile(os.path.join(_ROOT, "flow", "tracks", "tracks4top.buda"), sidecar)
 
     lines = [
         f"source {os.path.basename(sidecar)}",   # resolved relative to this script
