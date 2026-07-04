@@ -135,10 +135,19 @@ selects them and QoR improves substantially (col 3×5×6 WL −7.5 %, ov 3→1; 
 [`mst_edge_realization.md`](mst_edge_realization.md)). Question: flip it on by
 default?
 
-**Measured (on vs off, every flat corpus flow + demos + comprehensive_demo).**
+**Measured (default off vs on, over flows that do NOT already opt in).** The
+corpus is every flat flow + non-datapath demo + comprehensive_demo, each run with
+its `generate_topologies` line as written (no keyword) vs with `multi_trunk`
+forced on — so the comparison actually isolates the *default*.
 - **QoR-neutral everywhere on the corpus** — identical abstract WL, overlaps and
   unplaced on tc3a_flat, channel_stress, four_blocks(+_3_bundles), dogleg1/2,
-  b4_bus_077, comprehensive_demo, and the datapath demos. **Zero regressions.**
+  b4_bus_077, and comprehensive_demo. **Zero regressions.**
+- **The two datapath demos are excluded from this on/off measurement**: they
+  hardcode `generate_topologies multi_trunk` (`flow/datapath_multi_trunk.buda`,
+  `flow/datapath_row_vhv.buda`), so they run multi_trunk in *both* configs and
+  measure nothing about the default. They are the *win* case (their headers
+  document the plain-vs-multi improvement), not a neutral data point — see the
+  substantial QoR gains quoted under **What** above.
 - **Runtime cost negligible** on tc3a (`generate_topologies` 0.16 s both ways).
 - **But zero corpus BENEFIT** (none of these are datapaths) and a real
   **candidate-count cost**: tc3a_flat 2571 → 2797 candidates (+8.8 %), b4 17 → 20,
