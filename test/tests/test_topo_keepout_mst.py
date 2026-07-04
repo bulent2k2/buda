@@ -376,6 +376,71 @@ def test_smart_default_flips_blocked_edge_to_clear_L():
                 f"{(s.start.x, s.start.y, s.end.x, s.end.y)}"
 
 
+# ── Per-edge L/Z flip primitive (step 4a: flip_mst_edge) ─────────────────────
+
+def _edge_groups(topo):
+    groups = {}
+    for i, s in enumerate(topo.segments):
+        if s.edge_id >= 0:
+            groups.setdefault(s.edge_id, []).append(i)
+    return groups
+
+
+def _edge_far_and_bend(topo, i, j):
+    a, b = topo.segments[i], topo.segments[j]
+    pa = {(a.start.x, a.start.y), (a.end.x, a.end.y)}
+    pb = {(b.start.x, b.start.y), (b.end.x, b.end.y)}
+    bend = (pa & pb).pop()           # shared endpoint = the bend
+    far = frozenset(pa ^ pb)         # the two non-shared endpoints = p1, p2
+    return far, bend
+
+
+def test_flip_mst_edge_moves_bend_and_preserves_endpoints():
+    """Flipping a 2-leg diagonal MST edge moves the bend to the opposite corner,
+    keeps the edge's two endpoints (so connectivity is preserved), reuses the same
+    segment slots + edge_id, and is an involution."""
+    fp = _diag_4block_fp()
+    gen = _make_gen(fp)
+    mst = _mst_hv(gen.generate_candidates("A", ["B", "C", "D"]))
+    assert mst is not None
+    groups = _edge_groups(mst)
+    eid = next((e for e, idx in groups.items() if len(idx) == 2), None)
+    assert eid is not None, "expected a 2-leg diagonal MST edge"
+    i, j = groups[eid]
+
+    far0, bend0 = _edge_far_and_bend(mst, i, j)
+    assert buda.flip_mst_edge(mst, eid, 4, 5) is True
+    far1, bend1 = _edge_far_and_bend(mst, i, j)
+    assert far1 == far0, "flip must preserve the edge's two endpoints"
+    assert bend1 != bend0, "flip must move the bend to the other corner"
+    # Same slots + identity; legs are still one H + one V (a valid L).
+    assert mst.segments[i].edge_id == eid and mst.segments[j].edge_id == eid
+    dirs = {(mst.segments[k].start.y == mst.segments[k].end.y) for k in (i, j)}
+    assert dirs == {True, False}, "flipped legs must be one horizontal + one vertical"
+    # Re-annotates cleanly (junction geometry moved).
+    buda.annotate_topology(mst, fp)
+
+    # Involution: flipping again restores the original bend.
+    assert buda.flip_mst_edge(mst, eid, 4, 5) is True
+    far2, bend2 = _edge_far_and_bend(mst, i, j)
+    assert far2 == far0 and bend2 == bend0
+
+
+def test_flip_mst_edge_noop_for_unknown_or_non_diagonal():
+    """flip_mst_edge returns False (no change) for an unknown edge id and for a
+    non-MST candidate whose segments carry no edge identity."""
+    fp = _diag_4block_fp()
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C", "D"])
+    mst = _mst_hv(cands)
+    assert mst is not None
+    assert buda.flip_mst_edge(mst, 99999, 4, 5) is False   # unknown id
+    # A non-MST candidate: no edge_id >= 0, so any flip is a no-op.
+    nonmst = next((c for c in cands if "MST" not in c.type), None)
+    if nonmst is not None:
+        assert buda.flip_mst_edge(nonmst, 0, 4, 5) is False
+
+
 def test_trunk_mst_has_more_segments_than_trunk():
     """TRUNK+MST has more segments than its corresponding plain TRUNK."""
     fp = buda.Floorplan()
