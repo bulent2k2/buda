@@ -118,9 +118,17 @@ no live pipeline:
 - **Cells → structures**: outline `BOUNDARY` (0,0,w,h) on `(outline_layer,
   0)` (default 10) + child `SREF`s reconstructed from the cell's first
   component instance at relative offsets, each carrying the child instance
-  name as `PROPVALUE`. Placements have no orientation (BDB bboxes lose
-  mirror/rotation) — a bbox≠cell-footprint instance exports unrotated with a
-  warning.
+  name as `PROPVALUE`.
+- **Orientation (v13)**: each placement re-emits its `component.orient` token
+  as `STRANS` (mirror) + `ANGLE`, computing the SREF origin (via `XForm`) so
+  the oriented cell reproduces the stored bbox — so a rotated/mirrored
+  instance now round-trips (previously it exported unrotated with a warning).
+  The `n_dim_mismatch` warning now fires only for a genuine resize (bbox dims
+  matching neither the cell nor the oriented cell), not a representable
+  rotation. Non-unit `MAG` is still not captured (it stays baked into the
+  bbox); deeply-nested oriented instances remain best-effort (the same caveat
+  the template-instance reconstruction already carries) — top-level oriented
+  placements round-trip exactly.
 - **Top structure**: die-extent rectangle (anchored at the roots' min corner
   — the die is an extent, so `bbox_of(top)` round-trips), root `SREF`s, the
   routing, and the labels. Import materializes a `cell` row for the top it
@@ -139,7 +147,8 @@ no live pipeline:
   direction is not representable — dirs come back `UNKNOWN`.
 
 **Round-trip (tested, `test/tests/test_gds_export.py`)**: import → export →
-re-import is **identical** (components, cell footprints, die, nets, pins);
+re-import is **identical** (components incl. `orient`, cell footprints, die,
+nets, pins);
 the full-pipeline fingerprint routes a labeled GDS through detailed NUTS,
 exports, re-imports with the same `def_gds_layer` map, and gets the same
 design back with every routing shape excluded from footprints (G3).
@@ -147,6 +156,60 @@ design back with every routing shape excluded from footprints (G3).
 Python: `BDB.export_gds(path, layer_map=[], outline_layer=10,
 label_layer=63, write_labels=True, via_size=1.0)` with `layer_map` entries
 `(buda_layer, gds_layer, gds_datatype)`; returns `GdsExportStats`.
+
+## Deferred export niceties — PATH wires & AREF arrays — ⬜
+
+Both are **export-side compaction niceties, not correctness gaps**: import
+handles both fully, and export already round-trips both *losslessly*, just
+verbosely. Captured here so the trade-offs don't have to be re-derived.
+
+### PATH wires
+
+- **What it is.** A GDSII `PATH` is a stroked centerline — a polyline + a
+  `WIDTH`, with an optional `PATHTYPE` end cap (0 butt, 1 round, 2 square /
+  half-width extension); the reader offsets the centerline by ±`WIDTH`/2 to get
+  the filled shape. One path with N vertices replaces N−1 rectangles and
+  carries the routing intent (a connected run), not just filled area.
+- **What BUDA does today.** Export writes every routing segment (and via) as an
+  axis-aligned **`BOUNDARY`** rectangle (`GdsWriter::boundary_rect`), so a
+  bus of 8 bits over 3 segments is 24 rectangles, not 8 paths. Import, by
+  contrast, *already* reads `PATH` fully (strokes ±`WIDTH`/2, applies
+  `PATHTYPE` 1/2 end extension), so the round-trip is asymmetric: we read
+  paths, we write rectangles.
+- **What adding it means.** A `GdsWriter::path` emitter
+  (`PATH`/`WIDTH`/`PATHTYPE`/`XY`) and an `emit_rect` that chooses path vs
+  rectangle. Payoff: smaller files, more wire-like output in layout viewers.
+- **Why deferred.** (1) Marginal value — our segments are already simple
+  axis-aligned rectangles that round-trip perfectly as `BOUNDARY`. (2) Real
+  round-trip risk — a wire's stored geometry is a **bbox** (two corners), not a
+  centerline+width, so export would have to *infer* the centerline and width
+  (which axis is the run, which the width); degenerate cases (a near-square
+  via, a zero-length stub, even vs odd width in DB units) can stroke back to a
+  slightly different rectangle. `BOUNDARY` has no such ambiguity — what you
+  write is exactly what you read. It trades a guaranteed-exact round-trip for a
+  file-size win the checkpoint/interchange goal doesn't need.
+
+### AREF arrays
+
+- **What it is.** An `AREF` places one structure on a regular grid in a single
+  record: structure name + `COLROW` (cols × rows) + three points (origin,
+  column-pitch endpoint, row-pitch endpoint). One `AREF COLROW 8 8` stands in
+  for 64 placements — the compact way to express a memory array, pad ring, or
+  systolic grid.
+- **What BUDA does today.** Import **expands** an AREF into one `component` row
+  per element, synthesizing names `<struct>_<0..N-1>` (a GDS array has no
+  per-element instance names). Export emits an individual **`SREF`** per
+  component, so a 2×2 AREF re-exports as 4 SREFs. The round-trip is *correct*
+  (same N components, names, positions) — only the array-ness (compaction) is
+  lost; a `COLROW 16 16` leaves as 256 SREFs.
+- **What adding it means.** Export would **detect** a regular grid among
+  sibling components sharing a cell (constant pitch, complete rectangle,
+  consistent orientation) and collapse it back to an `AREF`.
+- **Why deferred.** Purely cosmetic / size benefit, and the grid detection is
+  easy to get subtly wrong (partial arrays, one displaced element, mixed
+  orientations). Of the two, AREF is the *safer* to add later — it needs no
+  geometric inference, just grid detection — whereas PATH carries the
+  bbox→centerline+width inference risk above.
 
 ## Phase OA — OpenAccess import/export — ⬜ SPEC-ONLY (gated on Si2 OA SDK)
 

@@ -20,10 +20,44 @@ the same def_gds_layer map) routing shapes excluded from footprints.
 
 import contextlib
 import io
+import sqlite3
 
 import buda
 import buda_cli
 from gds_build import GdsBuilder
+
+
+def test_v11_db_migrates_to_current_orient(tmp_path):
+    # A v11 component table (no orient column) migrates forward: the column is
+    # added and existing rows read as identity ('N').
+    p = str(tmp_path / "v11.bdb")
+    con = sqlite3.connect(p)
+    con.executescript(
+        """
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES('schema_version','11');
+        CREATE TABLE component (
+            id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, cell TEXT,
+            parent_id INTEGER REFERENCES component(id), depth INTEGER DEFAULT 0,
+            x1 REAL, y1 REAL, x2 REAL, y2 REAL,
+            is_leaf INTEGER DEFAULT 1, is_replicated INTEGER DEFAULT 0);
+        INSERT INTO component VALUES(1,'i0','c',NULL,0,0,0,10,5,1,0);
+        PRAGMA user_version = 11;
+        """
+    )
+    con.commit()
+    con.close()
+
+    db = buda.BDB(p)                              # opening migrates forward
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    assert db.meta_get("schema_version") == str(buda.BDB.SCHEMA_VERSION)
+    (c,) = db.all_components()
+    assert c.name == "i0" and c.orient == "N"     # pre-existing row defaults 'N'
+    del db
+    con = sqlite3.connect(p)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(component)")}
+    con.close()
+    assert "orient" in cols
 
 
 def _hier_lib(path):
@@ -41,7 +75,7 @@ def _hier_lib(path):
 
 
 def _snapshot(db):
-    return (sorted((c.name, c.cell, c.depth, c.x1, c.y1, c.x2, c.y2)
+    return (sorted((c.name, c.cell, c.depth, c.x1, c.y1, c.x2, c.y2, c.orient)
                    for c in db.all_components()),
             sorted((c.name, c.width, c.height) for c in db.all_cells()),
             sorted(n.name for n in db.all_nets()),
@@ -209,13 +243,81 @@ def test_unused_library_cell_keeps_its_structure(tmp_path):
     assert cells["used"] == (10.0, 5.0)
 
 
-def test_dim_mismatch_placement_warns(tmp_path):
-    # A component whose bbox differs from its cell footprint (rotated/resized
-    # instance) cannot be represented — exported unrotated with a warning.
+def test_dim_mismatch_warns_only_for_genuine_resize(tmp_path):
+    # A rotation is now representable (orient=W swaps the exported extent), so a
+    # correctly-rotated instance does NOT warn; only a bbox that matches neither
+    # the cell nor the oriented cell (a genuine resize) does. (v13)
     db = buda.BDB(str(tmp_path / "a.bdb"))
     db.add_cell("c", 10, 5)
-    db.add_comp("i0", "c", "", 0, 0, 10, 5, True)
-    db.add_comp("i1", "c", "", 20, 0, 25, 10, True)     # swapped dims
+    db.add_comp("i0", "c", "", 0, 0, 10, 5, True)               # N, matches
+    db.add_comp("i1", "c", "", 20, 0, 25, 10, True, "W")        # 90°: 5x10 == W(10x5)
+    db.add_comp("i2", "c", "", 40, 0, 45, 10, True)             # 5x10, orient N: RESIZE
     st = db.export_gds(str(tmp_path / "out.gds"))
-    assert any("differs from the cell footprint" in w for w in st.warnings)
-    assert st.n_placements == 2
+    mism = [w for w in st.warnings if "ORIENTED cell footprint" in w]
+    assert len(mism) == 1 and mism[0].startswith("1 placement")   # only i2
+    assert st.n_placements == 3
+
+
+def test_orientation_round_trips(tmp_path):
+    # v13: a rotated (90°) and a mirrored top-level instance survive
+    # export -> re-import with matching bbox AND orient token — the round-trip
+    # bug the n_dim_mismatch warning used to only flag.
+    b = GdsBuilder(dbu_um=0.001)
+    b.structure("leaf").boundary(10, 0, [(0, 0), (5, 0), (5, 3), (0, 3)])
+    b.structure("mid").boundary(10, 0, [(0, 0), (20, 0), (20, 12), (0, 12)])
+    b.structure("top") \
+     .sref("mid", (10, 10), inst_name="m0") \
+     .sref("mid", (10, 40), angle=90, inst_name="m1") \
+     .sref("leaf", (100, 0), mirror=True, inst_name="lm")
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.import_gds(str(b.write(tmp_path / "in.gds")))
+    orient = {c.name: c.orient for c in db.all_components()}
+    assert orient["m0"] == "N" and orient["m1"] == "W" and orient["lm"] == "FN"
+    before = _snapshot(db)
+    st = db.export_gds(str(tmp_path / "out.gds"))
+    assert not any("footprint" in w for w in st.warnings)   # rotation now clean
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    db2.import_gds(str(tmp_path / "out.gds"))
+    assert _snapshot(db2) == before
+
+
+def test_rotate_comp_then_export_is_consistent(tmp_path):
+    # rotate_comp/flip_comp compose the orient token for a CHILDLESS subtree
+    # (rows.size()==1) so a mutated instance exports faithfully (bbox and orient
+    # stay consistent). (v13)
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.set_die(200, 200)
+    db.add_cell("blk", 20, 12)
+    db.add_comp("i0", "blk", "", 0, 0, 20, 12, False)
+    db.rotate_comp("i0", 90)
+    c = db.all_components()[0]
+    assert c.orient == "W" and (c.x2 - c.x1, c.y2 - c.y1) == (12.0, 20.0)
+    st = db.export_gds(str(tmp_path / "out.gds"))
+    assert not any("footprint" in w for w in st.warnings)
+    db2 = buda.BDB(str(tmp_path / "b.bdb"))
+    db2.import_gds(str(tmp_path / "out.gds"))
+    c2 = [x for x in db2.all_components() if x.cell == "blk"][0]
+    assert (c2.orient, c2.x1, c2.y1, c2.x2, c2.y2) == \
+           (c.orient, c.x1, c.y1, c.x2, c.y2)
+
+
+def test_rotate_comp_with_children_does_not_compose_orient(tmp_path):
+    # A rotated block WITH descendants keeps orient='N': the loop already
+    # rewrote the children's absolute bboxes to carry the rotation, so setting
+    # the root orient too would make export re-apply it (a double transform on
+    # the reconstructed cell). Guard = rows.size()==1. (Codex #163 P2)
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.set_die(400, 400)
+    db.add_cell("blk", 40, 20)
+    db.add_cell("sub", 10, 6)
+    db.add_comp("i0", "blk", "", 0, 0, 40, 20, False)
+    db.add_comp("i0/c", "sub", "i0", 5, 5, 15, 11, True)
+    child_before = [c for c in db.all_components() if c.name == "i0/c"][0]
+    db.rotate_comp("i0", 90)
+    root = [c for c in db.all_components() if c.name == "i0"][0]
+    child = [c for c in db.all_components() if c.name == "i0/c"][0]
+    assert root.orient == "N"                       # composition skipped
+    # The child's absolute bbox WAS rigidly rotated (that carries the rotation);
+    # orient stays 'N', so export won't double-transform it.
+    assert (child.x1, child.y1) != (child_before.x1, child_before.y1)
+    assert child.orient == "N"

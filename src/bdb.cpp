@@ -295,7 +295,8 @@ void BDB::_create_schema() {
             depth        INTEGER DEFAULT 0,
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             is_leaf      INTEGER DEFAULT 1,
-            is_replicated INTEGER DEFAULT 0
+            is_replicated INTEGER DEFAULT 0,
+            orient       TEXT DEFAULT 'N'
         );
         CREATE TABLE IF NOT EXISTS net (
             id   INTEGER PRIMARY KEY,
@@ -573,6 +574,13 @@ void BDB::_migrate() {
         // v11 -> v12: seg-to-seg junction links (topology_seg_conn — brand new
         // table, created via TOPOLOGY_DDL; IF NOT EXISTS no-ops the rest).
         _exec(TOPOLOGY_DDL);
+    }
+    if (v < 13) {
+        // v12 -> v13: per-instance orientation token (GDS round-trip).
+        // Ignored if the column already exists (v6-style idempotent ALTER).
+        sqlite3_exec(_db,
+            "ALTER TABLE component ADD COLUMN orient TEXT DEFAULT 'N'",
+            nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -941,6 +949,24 @@ static std::string normalize_def_name(const std::string& s) {
     return out;
 }
 
+// Map a DEF/LEF orientation token to BDB's component.orient token and whether
+// the placed bbox dims swap vs the LEF SIZE. BDB's orient convention is
+// (mirror-about-X-first, CCW angle); DEF's pure rotations N/W/S/E coincide,
+// but DEF's flip tokens mirror about the Y axis (FN = MY), so they permute
+// under BDB's mirror-about-X form: DEF FN<->BDB FS, DEF FS<->BDB FN,
+// DEF FE<->BDB FW, DEF FW<->BDB FE. swap_wh is set for the 90/270 rotations.
+static std::pair<std::string,bool> def_orient_to_bdb(const std::string& o) {
+    if (o == "N")  return {"N",  false};
+    if (o == "S")  return {"S",  false};
+    if (o == "W")  return {"W",  true};
+    if (o == "E")  return {"E",  true};
+    if (o == "FN") return {"FS", false};   // DEF FN (MY) == BDB FS (mirrorX,180)
+    if (o == "FS") return {"FN", false};   // DEF FS (MX) == BDB FN (mirrorX,0)
+    if (o == "FE") return {"FW", true};    // DEF FE == BDB FW (mirrorX,90)
+    if (o == "FW") return {"FE", true};    // DEF FW == BDB FE (mirrorX,270)
+    return {"N", false};                   // unknown -> identity
+}
+
 static std::vector<std::string> split_ws(const std::string& s) {
     std::istringstream ss(s);
     return {std::istream_iterator<std::string>(ss), {}};
@@ -1083,8 +1109,8 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     State state = State::IDLE;
 
     Stmt s_comp(_db,
-        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf)"
-        " VALUES(?,?,0,?,?,?,?,1)");
+        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf,orient)"
+        " VALUES(?,?,0,?,?,?,?,1,?)");
     Stmt s_net (_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
     Stmt s_pin (_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
@@ -1181,12 +1207,21 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
             double w=0.5, h=0.5;
             auto cs = lef_sizes.find(cell);
             if (cs != lef_sizes.end()) { w=cs->second.w; h=cs->second.h; }
+            // Orientation: record the BDB token and swap the placed bbox dims
+            // for 90/270 rotations (lower-left kept at the DEF placement point,
+            // the same convention as rotate_comp). Strip a trailing ';' in case
+            // the token abuts it (no space before the statement terminator).
+            std::string otok = m[5];
+            if (!otok.empty() && otok.back() == ';') otok.pop_back();
+            auto [orient, swap_wh] = def_orient_to_bdb(otok);
+            if (swap_wh) std::swap(w, h);
             sqlite3_bind_text  (s_comp,1,inst.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_bind_text  (s_comp,2,cell.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_bind_double(s_comp,3,x1);
             sqlite3_bind_double(s_comp,4,y1);
             sqlite3_bind_double(s_comp,5,x1+w);
             sqlite3_bind_double(s_comp,6,y1+h);
+            sqlite3_bind_text  (s_comp,7,orient.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_step(s_comp); sqlite3_reset(s_comp);
         }
 
@@ -1293,7 +1328,8 @@ void BDB::compute_all() { compute_hpwl(); compute_fanout(); }
 std::vector<ComponentRow> BDB::all_components() const {
     if (!_q_all_components)
         sqlite3_prepare_v2(_db,
-            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
+            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
+            "COALESCE(orient,'N')"
             " FROM component ORDER BY id",
             -1, &_q_all_components, nullptr);
     sqlite3_reset(_q_all_components);
@@ -1312,6 +1348,7 @@ std::vector<ComponentRow> BDB::all_components() const {
         r.y2           = sqlite3_column_double(q,8);
         r.is_leaf      = sqlite3_column_int(q,9);
         r.is_replicated= sqlite3_column_int(q,10);
+        r.orient       = (const char*)sqlite3_column_text(q,11);
         rows.push_back(r);
     }
     return rows;
@@ -1884,7 +1921,8 @@ void BDB::set_comp_cell(const std::string& comp_name, const std::string& new_cel
 
 int BDB::add_comp(const std::string& name, const std::string& cell,
                   const std::string& parent_name,
-                  double x1, double y1, double x2, double y2, bool is_leaf) {
+                  double x1, double y1, double x2, double y2, bool is_leaf,
+                  const std::string& orient) {
     int par_id = -1, depth = 0;
     if (!parent_name.empty()) {
         Stmt qp(_db, "SELECT id, depth FROM component WHERE name=?");
@@ -1895,8 +1933,8 @@ int BDB::add_comp(const std::string& name, const std::string& cell,
         depth  = sqlite3_column_int(qp, 1) + 1;
     }
     Stmt ins(_db, R"(
-        INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf)
-        VALUES(?,?,?,?,?,?,?,?,?)
+        INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf,orient)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
     )");
     sqlite3_bind_text  (ins, 1, name.c_str(),   -1, SQLITE_TRANSIENT);
     sqlite3_bind_text  (ins, 2, cell.c_str(),   -1, SQLITE_TRANSIENT);
@@ -1908,6 +1946,7 @@ int BDB::add_comp(const std::string& name, const std::string& cell,
     sqlite3_bind_double(ins, 7, x2);
     sqlite3_bind_double(ins, 8, y2);
     sqlite3_bind_int   (ins, 9, is_leaf ? 1 : 0);
+    sqlite3_bind_text  (ins, 10, orient.c_str(), -1, SQLITE_TRANSIENT);
     if (sqlite3_step(ins) != SQLITE_DONE)
         throw std::runtime_error("add_comp: insert failed (name exists?): " + name);
     int id = (int)sqlite3_last_insert_rowid(_db);
@@ -2092,6 +2131,51 @@ void BDB::_expand_cell_children(int parent_comp_id,
 namespace {
 struct BBoxRow { int id; double x1,y1,x2,y2; };
 
+// ── Orientation tokens (component.orient, v12) ───────────────────────────────
+// Must match gds_io.cpp's transform_to_orient/orient_angle: an 8-orientation
+// token is (mirror-about-X-first, CCW angle). N/W/S/E = 0/90/180/270, F* =
+// mirrored. rotate_comp/flip_comp compose the applied transform onto the ROOT
+// instance's orient so bbox and orient stay consistent (a faithful GDS SREF
+// re-emit needs both). Descendants rotate rigidly with the root, so their
+// orientation relative to their own parent is unchanged.
+void orient_parse(const std::string& o, bool& mirror, int& angle) {
+    mirror = (!o.empty() && o[0] == 'F');
+    const std::string t = mirror ? o.substr(1) : o;
+    angle = (t == "W") ? 90 : (t == "S") ? 180 : (t == "E") ? 270 : 0;
+}
+std::string orient_format(bool mirror, int angle) {
+    int a = ((angle % 360) + 360) % 360;
+    static const char* rot[4]  = {"N",  "W",  "S",  "E"};
+    static const char* frot[4] = {"FN", "FW", "FS", "FE"};
+    return mirror ? frot[a / 90] : rot[a / 90];
+}
+// Left-compose a CCW rotation (parent frame) onto an existing orientation:
+// Rot(d) ∘ [Rot(a) ∘ MirrorX^m] = Rot(a+d) ∘ MirrorX^m.
+std::string orient_rotate(const std::string& o, int degrees) {
+    bool m; int a; orient_parse(o, m, a);
+    return orient_format(m, a + degrees);
+}
+// Left-compose a mirror. flip_x = mirror about the vertical centre (Y axis),
+// flip_y (!flip_x) = mirror about the horizontal centre (X axis):
+//   MirrorX ∘ Rot(a) ∘ MirrorX^m = Rot(-a)     ∘ MirrorX^(1+m)   (flip_y)
+//   MirrorY ∘ Rot(a) ∘ MirrorX^m = Rot(180-a)  ∘ MirrorX^(1+m)   (flip_x)
+std::string orient_flip(const std::string& o, bool flip_x) {
+    bool m; int a; orient_parse(o, m, a);
+    return orient_format(!m, (flip_x ? 180 - a : -a));
+}
+std::string comp_orient(sqlite3* db, int id) {
+    Stmt q(db, "SELECT COALESCE(orient,'N') FROM component WHERE id=?");
+    sqlite3_bind_int(q, 1, id);
+    return (sqlite3_step(q) == SQLITE_ROW)
+        ? (const char*)sqlite3_column_text(q, 0) : std::string("N");
+}
+void set_comp_orient(sqlite3* db, int id, const std::string& o) {
+    Stmt u(db, "UPDATE component SET orient=? WHERE id=?");
+    sqlite3_bind_text(u, 1, o.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(u, 2, id);
+    sqlite3_step(u);
+}
+
 void gather_subtree(sqlite3* db, const std::string& name,
                     std::vector<BBoxRow>& rows) {
     // Root
@@ -2151,6 +2235,14 @@ void BDB::flip_comp(const std::string& name, bool flip_x) {
         sqlite3_bind_int   (upd,5,d.id);
         sqlite3_step(upd);
     }
+    // Compose the flip onto the root's orientation ONLY when the subtree has
+    // no descendants (a leaf or childless block). With descendants, the loop
+    // above already rewrote their absolute bboxes — GDS export reconstructs
+    // the cell from those and would re-apply the orient via the root SREF, so
+    // setting orient too would double-transform. A childless root has no such
+    // baked geometry, so orient faithfully carries the flip.
+    if (rows.size() == 1)
+        set_comp_orient(_db, root.id, orient_flip(comp_orient(_db, root.id), flip_x));
     compute_hpwl();
 }
 
@@ -2200,6 +2292,12 @@ void BDB::rotate_comp(const std::string& name, int degrees) {
         }
         do_upd(d.id, nx1, ny1, nx2, ny2);
     }
+    // Compose the rotation onto the root's orientation ONLY for a childless
+    // subtree — see flip_comp for why (descendant rewrites already carry the
+    // rotation for a hierarchical block; setting orient too would make GDS
+    // export double-transform).
+    if (rows.size() == 1)
+        set_comp_orient(_db, root.id, orient_rotate(comp_orient(_db, root.id), degrees));
     compute_hpwl();
 }
 
@@ -2245,7 +2343,8 @@ void BDB::clear_busterms() {
 std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
     if (!_q_components_at_depth)
         sqlite3_prepare_v2(_db,
-            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
+            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
+            "COALESCE(orient,'N')"
             " FROM component WHERE depth=? ORDER BY id",
             -1, &_q_components_at_depth, nullptr);
     sqlite3_reset(_q_components_at_depth);
@@ -2265,6 +2364,7 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
         r.y2           = sqlite3_column_double(q, 8);
         r.is_leaf      = sqlite3_column_int(q, 9);
         r.is_replicated= sqlite3_column_int(q, 10);
+        r.orient       = (const char*)sqlite3_column_text(q, 11);
         rows.push_back(r);
     }
     return rows;

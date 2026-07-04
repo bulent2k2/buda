@@ -66,7 +66,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("x2",            &ComponentRow::x2)
         .def_readwrite("y2",            &ComponentRow::y2)
         .def_readwrite("is_leaf",       &ComponentRow::is_leaf)
-        .def_readwrite("is_replicated", &ComponentRow::is_replicated);
+        .def_readwrite("is_replicated", &ComponentRow::is_replicated)
+        .def_readwrite("orient",        &ComponentRow::orient);
 
     py::class_<NetRow>(m, "NetRow")
         .def_readwrite("id",   &NetRow::id)
@@ -388,7 +389,7 @@ void bind_db(py::module_& m) {
         .def("add_comp",        &BDB::add_comp,
              py::arg("name"), py::arg("cell"), py::arg("parent_name"),
              py::arg("x1"), py::arg("y1"), py::arg("x2"), py::arg("y2"),
-             py::arg("is_leaf") = true)
+             py::arg("is_leaf") = true, py::arg("orient") = "N")
         .def("add_cell",        &BDB::add_cell,
              py::arg("name"), py::arg("w"), py::arg("h"))
         .def("all_cells",       &BDB::all_cells)

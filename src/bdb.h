@@ -39,6 +39,11 @@ struct ComponentRow {
     double      x1, y1, x2, y2;
     bool        is_leaf;      // true = STDCELL, false = hierarchical block
     bool        is_replicated;
+    // Instance orientation relative to its parent, one of the 8 orthogonal
+    // LEF/DEF/OA tokens (N/S/E/W/FN/FS/FE/FW). The bbox above is the resulting
+    // axis-aligned extent (so downstream stays bbox-only); orient is the extra
+    // fact a faithful GDS SREF re-emit needs. Default 'N' (identity). (v12)
+    std::string orient = "N";
 };
 
 struct NetRow {
@@ -274,7 +279,10 @@ public:
     //       topology.is_pinned (pre-plan pin survives a checkpoint);
     // v11 = topology_bridge_segment (TEG-over bridges), closing the last
     //       un-persisted Topology field so TEG-over designs resume losslessly.
-    static constexpr int SCHEMA_VERSION = 12;
+    // v12 = topology_seg_conn (seg-to-seg junction links persisted logically);
+    // v13 = component.orient (instance rotation/mirror as an 8-orientation
+    //       token) so GDS import->export->re-import preserves orientation.
+    static constexpr int SCHEMA_VERSION = 13;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -354,7 +362,7 @@ public:
     int  add_comp(const std::string& name, const std::string& cell,
                   const std::string& parent_name,
                   double x1, double y1, double x2, double y2,
-                  bool is_leaf = true);
+                  bool is_leaf = true, const std::string& orient = "N");
     // Place a named instance of a defined cell at (x,y) relative to the
     // parent's origin (absolute when parent_name="").  Cell size comes from
     // the cell table; parent is automatically marked non-leaf.
