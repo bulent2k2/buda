@@ -38,12 +38,21 @@ generate_topologies_for_bundle b1_ u_cpu u_mem
 generate_topologies_for_bundle b2_ u_gpu u_disp
 generate_topologies_for_bundle b3_ u_io_src u_io_dst
 
+# Declare the inter-bus track pitch BEFORE planning so the planner reserves its
+# congestion bands at the same pitch that run_nuts will pack at.  Without this,
+# the planner assumes the default pitch (1.0) while run_nuts below packs at 2.0,
+# and run_nuts prints a "pitch differs from the pitch run_planner reserved for"
+# warning (the band reservations would be too tight for the wider spacing).
+set_track_pitch 2.0
+
 # Run the planner (uses mock selection based on 'b2_'/'b3_' hints)
 run_planner 5
 
 # Non-Uniform Track Sharing: assign actual perpendicular track positions
 # per layer so that no two buses with overlapping spans collide.
-# Argument is the minimum spacing (track pitch) between placed buses.
+# Argument is the minimum spacing (track pitch) between placed buses; it matches
+# the set_track_pitch above so the planner and NUTS agree (run_nuts with no arg
+# would also reuse that pitch).
 run_nuts 2.0
 
 visualize

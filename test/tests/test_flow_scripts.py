@@ -76,10 +76,12 @@ def nuts_summary(out: str):
     """Return (segments, interval_violations, track_overlaps) from NUTS summary line."""
     m = re.search(
         r"\[NUTS\] (\d+) segments placed.*"
-        r"Interval violations: (\d+), Track overlaps: (\d+)", out
+        r"Track overlaps: (\d+), Interval violations: (\d+)", out
     )
     assert m, "NUTS summary line not found in output"
-    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+    # Return (segments, interval_violations, track_overlaps) — the line now
+    # prints overlaps before violations, so map the groups back.
+    return int(m.group(1)), int(m.group(3)), int(m.group(2))
 
 
 # ---------------------------------------------------------------------------
@@ -352,13 +354,13 @@ def test_channel_stress_packs_clean():
     # summaries appear once per run_nuts; the FIRST (pre-redistribution) packs
     # clean, the LAST (post_nuts spread) leaves a single residual corner overlap.
     full = re.findall(
-        r"\[NUTS\] \d+ segments placed[^\n]*Interval violations: (\d+), "
-        r"Track overlaps: (\d+)", out)
+        r"\[NUTS\] \d+ segments placed[^\n]*Track overlaps: (\d+), "
+        r"Interval violations: (\d+)", out)
     assert full, "no full NUTS summary found"
-    first_viol, first_ovlp = full[0]
+    first_ovlp, first_viol = full[0]
     assert int(first_ovlp) == 0, \
         f"pre-redistribution run_nuts not clean: overlaps {first_ovlp}"
-    last_viol, last_ovlp = full[-1]
+    last_ovlp, last_viol = full[-1]
     # Channel is at its packing limit on three V layers; one residual corner
     # overlap is expected, never more, and never any interval violation.
     assert int(last_ovlp) <= 1, f"channel_stress final overlaps {last_ovlp} (expected <=1)"

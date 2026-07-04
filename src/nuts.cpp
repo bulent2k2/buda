@@ -2452,9 +2452,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // winning result), one line per distinct edge, like planner overflow, so
     // a compromised junction is never silent.
     derive_junction_infeasibilities(bundles, out.result);
+    // Track overlaps first: it is the headline health metric, so it stays
+    // visible even when a terminal/summary truncates the tail of this line.
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "
-              << "Interval violations: " << out.result.num_violations << ", "
-              << "Track overlaps: " << out.result.num_overlaps << ".\n";
+              << "Track overlaps: " << out.result.num_overlaps << ", "
+              << "Interval violations: " << out.result.num_violations << ".\n";
     return out.result;
 }
 

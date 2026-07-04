@@ -1796,8 +1796,8 @@ class BudaSession:
             total = self.nuts_result.num_overlaps
             f.write(f"[NUTS] {len(self.nuts_result.segments)} segments placed across "
                     f"{n_layers} layer(s). "
-                    f"Interval violations: {self.nuts_result.num_violations}, "
-                    f"Track overlaps: {total}.\n")
+                    f"Track overlaps: {total}, "
+                    f"Interval violations: {self.nuts_result.num_violations}.\n")
 
             layer_summary = '  '.join(
                 f"{layer_names.get(lid, f'L{lid}')}={cnt}"

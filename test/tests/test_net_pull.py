@@ -262,10 +262,10 @@ def test_pull1_flow_placement_clean_and_compact():
     out = _run_flow("pull1.buda")
     m = re.search(
         r"\[NUTS\] (\d+) segments placed.*"
-        r"Interval violations: (\d+), Track overlaps: (\d+)", out)
+        r"Track overlaps: (\d+), Interval violations: (\d+)", out)
     assert m, "NUTS summary line not found"
-    assert int(m.group(2)) == 0, "interval violations"
-    assert int(m.group(3)) == 0, "track overlaps"
+    assert int(m.group(2)) == 0, "track overlaps"
+    assert int(m.group(3)) == 0, "interval violations"
     lo, hi = _layer_interval(out, "M4")
     assert lo >= 8.0 - 1e-6
     assert hi <= 292.0 + 1e-6
