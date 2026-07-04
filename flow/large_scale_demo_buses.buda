@@ -1,144 +1,144 @@
 # Buses (vector syntax: add_bus prefix[N] drv rcv)
-add_bus c0l3d0[4] u_cpu0.c0l3d0.tx u_l3.c0l3d0.rx
-add_bus c0l3d1[4] u_cpu0.c0l3d1.tx u_l3.c0l3d1.rx
+add_bus c0l3d0[4] u_cpu0.c0l3d0_tx u_l3.c0l3d0_rx
+add_bus c0l3d1[4] u_cpu0.c0l3d1_tx u_l3.c0l3d1_rx
 
-add_bus c0l3t0[64] u_cpu0.c0l3t0.tx u_l3.c0l3t0.rx
+add_bus c0l3t0[64] u_cpu0.c0l3t0_tx u_l3.c0l3t0_rx
 
-add_bus c0l3c0[32] u_cpu0.c0l3c0.tx u_l3.c0l3c0.rx
+add_bus c0l3c0[32] u_cpu0.c0l3c0_tx u_l3.c0l3c0_rx
 
-add_bus c1l3d0[4] u_cpu1.c1l3d0.tx u_l3.c1l3d0.rx
-add_bus c1l3d1[4] u_cpu1.c1l3d1.tx u_l3.c1l3d1.rx
+add_bus c1l3d0[4] u_cpu1.c1l3d0_tx u_l3.c1l3d0_rx
+add_bus c1l3d1[4] u_cpu1.c1l3d1_tx u_l3.c1l3d1_rx
 
-add_bus c1l3t0[64] u_cpu1.c1l3t0.tx u_l3.c1l3t0.rx
+add_bus c1l3t0[64] u_cpu1.c1l3t0_tx u_l3.c1l3t0_rx
 
-add_bus c1l3c0[32] u_cpu1.c1l3c0.tx u_l3.c1l3c0.rx
+add_bus c1l3c0[32] u_cpu1.c1l3c0_tx u_l3.c1l3c0_rx
 
-add_bus c0ncp0[64] u_cpu0.c0ncp0.tx u_noc.c0ncp0.rx
-add_bus c0ncp1[64] u_cpu0.c0ncp1.tx u_noc.c0ncp1.rx
-add_bus c0ncp2[64] u_cpu0.c0ncp2.tx u_noc.c0ncp2.rx
-add_bus c0ncp3[64] u_cpu0.c0ncp3.tx u_noc.c0ncp3.rx
+add_bus c0ncp0[64] u_cpu0.c0ncp0_tx u_noc.c0ncp0_rx
+add_bus c0ncp1[64] u_cpu0.c0ncp1_tx u_noc.c0ncp1_rx
+add_bus c0ncp2[64] u_cpu0.c0ncp2_tx u_noc.c0ncp2_rx
+add_bus c0ncp3[64] u_cpu0.c0ncp3_tx u_noc.c0ncp3_rx
 
-add_bus c0ncm0[32] u_cpu0.c0ncm0.tx u_noc.c0ncm0.rx
-add_bus c0ncm1[32] u_cpu0.c0ncm1.tx u_noc.c0ncm1.rx
+add_bus c0ncm0[32] u_cpu0.c0ncm0_tx u_noc.c0ncm0_rx
+add_bus c0ncm1[32] u_cpu0.c0ncm1_tx u_noc.c0ncm1_rx
 
-add_bus c1ncp0[64] u_cpu1.c1ncp0.tx u_noc.c1ncp0.rx
-add_bus c1ncp1[64] u_cpu1.c1ncp1.tx u_noc.c1ncp1.rx
-add_bus c1ncp2[64] u_cpu1.c1ncp2.tx u_noc.c1ncp2.rx
-add_bus c1ncp3[64] u_cpu1.c1ncp3.tx u_noc.c1ncp3.rx
+add_bus c1ncp0[64] u_cpu1.c1ncp0_tx u_noc.c1ncp0_rx
+add_bus c1ncp1[64] u_cpu1.c1ncp1_tx u_noc.c1ncp1_rx
+add_bus c1ncp2[64] u_cpu1.c1ncp2_tx u_noc.c1ncp2_rx
+add_bus c1ncp3[64] u_cpu1.c1ncp3_tx u_noc.c1ncp3_rx
 
-add_bus c1ncm0[32] u_cpu1.c1ncm0.tx u_noc.c1ncm0.rx
-add_bus c1ncm1[32] u_cpu1.c1ncm1.tx u_noc.c1ncm1.rx
+add_bus c1ncm0[32] u_cpu1.c1ncm0_tx u_noc.c1ncm0_rx
+add_bus c1ncm1[32] u_cpu1.c1ncm1_tx u_noc.c1ncm1_rx
 
-add_bus gpncp0[4] u_gpu.gpncp0.tx u_noc.gpncp0.rx
-add_bus gpncp1[4] u_gpu.gpncp1.tx u_noc.gpncp1.rx
-add_bus gpncp2[4] u_gpu.gpncp2.tx u_noc.gpncp2.rx
-add_bus gpncp3[4] u_gpu.gpncp3.tx u_noc.gpncp3.rx
-add_bus gpncp4[4] u_gpu.gpncp4.tx u_noc.gpncp4.rx
-add_bus gpncp5[4] u_gpu.gpncp5.tx u_noc.gpncp5.rx
+add_bus gpncp0[4] u_gpu.gpncp0_tx u_noc.gpncp0_rx
+add_bus gpncp1[4] u_gpu.gpncp1_tx u_noc.gpncp1_rx
+add_bus gpncp2[4] u_gpu.gpncp2_tx u_noc.gpncp2_rx
+add_bus gpncp3[4] u_gpu.gpncp3_tx u_noc.gpncp3_rx
+add_bus gpncp4[4] u_gpu.gpncp4_tx u_noc.gpncp4_rx
+add_bus gpncp5[4] u_gpu.gpncp5_tx u_noc.gpncp5_rx
 
-add_bus gpncc0[32] u_gpu.gpncc0.tx u_noc.gpncc0.rx
-add_bus gpncc1[32] u_gpu.gpncc1.tx u_noc.gpncc1.rx
+add_bus gpncc0[32] u_gpu.gpncc0_tx u_noc.gpncc0_rx
+add_bus gpncc1[32] u_gpu.gpncc1_tx u_noc.gpncc1_rx
 
-add_bus gpl3p0[4] u_gpu.gpl3p0.tx u_l3.gpl3p0.rx
-add_bus gpl3p1[4] u_gpu.gpl3p1.tx u_l3.gpl3p1.rx
-add_bus gpl3p2[4] u_gpu.gpl3p2.tx u_l3.gpl3p2.rx
-add_bus gpl3p3[4] u_gpu.gpl3p3.tx u_l3.gpl3p3.rx
+add_bus gpl3p0[4] u_gpu.gpl3p0_tx u_l3.gpl3p0_rx
+add_bus gpl3p1[4] u_gpu.gpl3p1_tx u_l3.gpl3p1_rx
+add_bus gpl3p2[4] u_gpu.gpl3p2_tx u_l3.gpl3p2_rx
+add_bus gpl3p3[4] u_gpu.gpl3p3_tx u_l3.gpl3p3_rx
 
-add_bus npncp0[64] u_npu.npncp0.tx u_noc.npncp0.rx
-add_bus npncp1[64] u_npu.npncp1.tx u_noc.npncp1.rx
-add_bus npncp2[64] u_npu.npncp2.tx u_noc.npncp2.rx
-add_bus npncp3[64] u_npu.npncp3.tx u_noc.npncp3.rx
+add_bus npncp0[64] u_npu.npncp0_tx u_noc.npncp0_rx
+add_bus npncp1[64] u_npu.npncp1_tx u_noc.npncp1_rx
+add_bus npncp2[64] u_npu.npncp2_tx u_noc.npncp2_rx
+add_bus npncp3[64] u_npu.npncp3_tx u_noc.npncp3_rx
 
-add_bus npncc0[32] u_npu.npncc0.tx u_noc.npncc0.rx
-add_bus npncc1[32] u_npu.npncc1.tx u_noc.npncc1.rx
+add_bus npncc0[32] u_npu.npncc0_tx u_noc.npncc0_rx
+add_bus npncc1[32] u_npu.npncc1_tx u_noc.npncc1_rx
 
-add_bus npl3p0[64] u_npu.npl3p0.tx u_l3.npl3p0.rx
-add_bus npl3p1[64] u_npu.npl3p1.tx u_l3.npl3p1.rx
+add_bus npl3p0[64] u_npu.npl3p0_tx u_l3.npl3p0_rx
+add_bus npl3p1[64] u_npu.npl3p1_tx u_l3.npl3p1_rx
 
-add_bus l3ncp0[4] u_l3.l3ncp0.tx u_noc.l3ncp0.rx
-add_bus l3ncp1[4] u_l3.l3ncp1.tx u_noc.l3ncp1.rx
-add_bus l3ncp2[4] u_l3.l3ncp2.tx u_noc.l3ncp2.rx
-add_bus l3ncp3[4] u_l3.l3ncp3.tx u_noc.l3ncp3.rx
-add_bus l3ncp4[4] u_l3.l3ncp4.tx u_noc.l3ncp4.rx
-add_bus l3ncp5[4] u_l3.l3ncp5.tx u_noc.l3ncp5.rx
-add_bus l3ncp6[4] u_l3.l3ncp6.tx u_noc.l3ncp6.rx
-add_bus l3ncp7[4] u_l3.l3ncp7.tx u_noc.l3ncp7.rx
+add_bus l3ncp0[4] u_l3.l3ncp0_tx u_noc.l3ncp0_rx
+add_bus l3ncp1[4] u_l3.l3ncp1_tx u_noc.l3ncp1_rx
+add_bus l3ncp2[4] u_l3.l3ncp2_tx u_noc.l3ncp2_rx
+add_bus l3ncp3[4] u_l3.l3ncp3_tx u_noc.l3ncp3_rx
+add_bus l3ncp4[4] u_l3.l3ncp4_tx u_noc.l3ncp4_rx
+add_bus l3ncp5[4] u_l3.l3ncp5_tx u_noc.l3ncp5_rx
+add_bus l3ncp6[4] u_l3.l3ncp6_tx u_noc.l3ncp6_rx
+add_bus l3ncp7[4] u_l3.l3ncp7_tx u_noc.l3ncp7_rx
 
-add_bus l3ncc0[32] u_l3.l3ncc0.tx u_noc.l3ncc0.rx
-add_bus l3ncc1[32] u_l3.l3ncc1.tx u_noc.l3ncc1.rx
+add_bus l3ncc0[32] u_l3.l3ncc0_tx u_noc.l3ncc0_rx
+add_bus l3ncc1[32] u_l3.l3ncc1_tx u_noc.l3ncc1_rx
 
-add_bus nh0_p0[4] u_noc.nh0_p0.tx u_hbm0.nh0_p0.rx
-add_bus nh0_p1[4] u_noc.nh0_p1.tx u_hbm0.nh0_p1.rx
-add_bus nh0_p2[4] u_noc.nh0_p2.tx u_hbm0.nh0_p2.rx
-add_bus nh0_p3[4] u_noc.nh0_p3.tx u_hbm0.nh0_p3.rx
+add_bus nh0_p0[4] u_noc.nh0_p0_tx u_hbm0.nh0_p0_rx
+add_bus nh0_p1[4] u_noc.nh0_p1_tx u_hbm0.nh0_p1_rx
+add_bus nh0_p2[4] u_noc.nh0_p2_tx u_hbm0.nh0_p2_rx
+add_bus nh0_p3[4] u_noc.nh0_p3_tx u_hbm0.nh0_p3_rx
 
-add_bus nh1_p0[4] u_noc.nh1_p0.tx u_hbm1.nh1_p0.rx
-add_bus nh1_p1[4] u_noc.nh1_p1.tx u_hbm1.nh1_p1.rx
-add_bus nh1_p2[4] u_noc.nh1_p2.tx u_hbm1.nh1_p2.rx
-add_bus nh1_p3[4] u_noc.nh1_p3.tx u_hbm1.nh1_p3.rx
+add_bus nh1_p0[4] u_noc.nh1_p0_tx u_hbm1.nh1_p0_rx
+add_bus nh1_p1[4] u_noc.nh1_p1_tx u_hbm1.nh1_p1_rx
+add_bus nh1_p2[4] u_noc.nh1_p2_tx u_hbm1.nh1_p2_rx
+add_bus nh1_p3[4] u_noc.nh1_p3_tx u_hbm1.nh1_p3_rx
 
-add_bus ndr_p0[64] u_noc.ndr_p0.tx u_ddr.ndr_p0.rx
-add_bus ndr_p1[64] u_noc.ndr_p1.tx u_ddr.ndr_p1.rx
-add_bus ndr_p2[64] u_noc.ndr_p2.tx u_ddr.ndr_p2.rx
-add_bus ndr_p3[64] u_noc.ndr_p3.tx u_ddr.ndr_p3.rx
+add_bus ndr_p0[64] u_noc.ndr_p0_tx u_ddr.ndr_p0_rx
+add_bus ndr_p1[64] u_noc.ndr_p1_tx u_ddr.ndr_p1_rx
+add_bus ndr_p2[64] u_noc.ndr_p2_tx u_ddr.ndr_p2_rx
+add_bus ndr_p3[64] u_noc.ndr_p3_tx u_ddr.ndr_p3_rx
 
-add_bus ndsp_0[4] u_noc.ndsp_0.tx u_disp.ndsp_0.rx
-add_bus ndsp_1[4] u_noc.ndsp_1.tx u_disp.ndsp_1.rx
-add_bus ndsp_2[4] u_noc.ndsp_2.tx u_disp.ndsp_2.rx
-add_bus ndsp_3[4] u_noc.ndsp_3.tx u_disp.ndsp_3.rx
+add_bus ndsp_0[4] u_noc.ndsp_0_tx u_disp.ndsp_0_rx
+add_bus ndsp_1[4] u_noc.ndsp_1_tx u_disp.ndsp_1_rx
+add_bus ndsp_2[4] u_noc.ndsp_2_tx u_disp.ndsp_2_rx
+add_bus ndsp_3[4] u_noc.ndsp_3_tx u_disp.ndsp_3_rx
 
-add_bus ndsc_0[32] u_noc.ndsc_0.tx u_disp.ndsc_0.rx
-add_bus ndsc_1[32] u_noc.ndsc_1.tx u_disp.ndsc_1.rx
+add_bus ndsc_0[32] u_noc.ndsc_0_tx u_disp.ndsc_0_rx
+add_bus ndsc_1[32] u_noc.ndsc_1_tx u_disp.ndsc_1_rx
 
-add_bus nisp_0[64] u_noc.nisp_0.tx u_isp.nisp_0.rx
-add_bus nisp_1[64] u_noc.nisp_1.tx u_isp.nisp_1.rx
-add_bus nisp_2[64] u_noc.nisp_2.tx u_isp.nisp_2.rx
-add_bus nisp_3[64] u_noc.nisp_3.tx u_isp.nisp_3.rx
+add_bus nisp_0[64] u_noc.nisp_0_tx u_isp.nisp_0_rx
+add_bus nisp_1[64] u_noc.nisp_1_tx u_isp.nisp_1_rx
+add_bus nisp_2[64] u_noc.nisp_2_tx u_isp.nisp_2_rx
+add_bus nisp_3[64] u_noc.nisp_3_tx u_isp.nisp_3_rx
 
-add_bus npc__0[32] u_noc.npc__0.tx u_pcie.npc__0.rx
-add_bus npc__1[32] u_noc.npc__1.tx u_pcie.npc__1.rx
-add_bus npc__2[32] u_noc.npc__2.tx u_pcie.npc__2.rx
-add_bus npc__3[32] u_noc.npc__3.tx u_pcie.npc__3.rx
-add_bus npc__4[32] u_noc.npc__4.tx u_pcie.npc__4.rx
-add_bus npc__5[32] u_noc.npc__5.tx u_pcie.npc__5.rx
+add_bus npc__0[32] u_noc.npc__0_tx u_pcie.npc__0_rx
+add_bus npc__1[32] u_noc.npc__1_tx u_pcie.npc__1_rx
+add_bus npc__2[32] u_noc.npc__2_tx u_pcie.npc__2_rx
+add_bus npc__3[32] u_noc.npc__3_tx u_pcie.npc__3_rx
+add_bus npc__4[32] u_noc.npc__4_tx u_pcie.npc__4_rx
+add_bus npc__5[32] u_noc.npc__5_tx u_pcie.npc__5_rx
 
-add_bus nusb_0[16] u_noc.nusb_0.tx u_usb.nusb_0.rx
-add_bus nusb_1[16] u_noc.nusb_1.tx u_usb.nusb_1.rx
-add_bus nusb_2[16] u_noc.nusb_2.tx u_usb.nusb_2.rx
-add_bus nusb_3[16] u_noc.nusb_3.tx u_usb.nusb_3.rx
+add_bus nusb_0[16] u_noc.nusb_0_tx u_usb.nusb_0_rx
+add_bus nusb_1[16] u_noc.nusb_1_tx u_usb.nusb_1_rx
+add_bus nusb_2[16] u_noc.nusb_2_tx u_usb.nusb_2_rx
+add_bus nusb_3[16] u_noc.nusb_3_tx u_usb.nusb_3_rx
 
-add_bus nsec_0[32] u_noc.nsec_0.tx u_sec.nsec_0.rx
-add_bus nsec_1[32] u_noc.nsec_1.tx u_sec.nsec_1.rx
-add_bus nsec_2[32] u_noc.nsec_2.tx u_sec.nsec_2.rx
-add_bus nsec_3[32] u_noc.nsec_3.tx u_sec.nsec_3.rx
+add_bus nsec_0[32] u_noc.nsec_0_tx u_sec.nsec_0_rx
+add_bus nsec_1[32] u_noc.nsec_1_tx u_sec.nsec_1_rx
+add_bus nsec_2[32] u_noc.nsec_2_tx u_sec.nsec_2_rx
+add_bus nsec_3[32] u_noc.nsec_3_tx u_sec.nsec_3_rx
 
-add_bus sc0_p0[64] u_sec.sc0_p0.tx u_cpu0.sc0_p0.rx
-add_bus sc0_p1[64] u_sec.sc0_p1.tx u_cpu0.sc0_p1.rx
+add_bus sc0_p0[64] u_sec.sc0_p0_tx u_cpu0.sc0_p0_rx
+add_bus sc0_p1[64] u_sec.sc0_p1_tx u_cpu0.sc0_p1_rx
 
-add_bus sc1_p0[64] u_sec.sc1_p0.tx u_cpu1.sc1_p0.rx
-add_bus sc1_p1[64] u_sec.sc1_p1.tx u_cpu1.sc1_p1.rx
+add_bus sc1_p0[64] u_sec.sc1_p0_tx u_cpu1.sc1_p0_rx
+add_bus sc1_p1[64] u_sec.sc1_p1_tx u_cpu1.sc1_p1_rx
 
-add_bus isn_p0[32] u_isp.isn_p0.tx u_noc.isn_p0.rx
-add_bus isn_p1[32] u_isp.isn_p1.tx u_noc.isn_p1.rx
-add_bus isn_p2[32] u_isp.isn_p2.tx u_noc.isn_p2.rx
-add_bus isn_p3[32] u_isp.isn_p3.tx u_noc.isn_p3.rx
+add_bus isn_p0[32] u_isp.isn_p0_tx u_noc.isn_p0_rx
+add_bus isn_p1[32] u_isp.isn_p1_tx u_noc.isn_p1_rx
+add_bus isn_p2[32] u_isp.isn_p2_tx u_noc.isn_p2_rx
+add_bus isn_p3[32] u_isp.isn_p3_tx u_noc.isn_p3_rx
 
-add_bus gdsp_0[4] u_gpu.gdsp_0.tx u_disp.gdsp_0.rx
-add_bus gdsp_1[4] u_gpu.gdsp_1.tx u_disp.gdsp_1.rx
-add_bus gdsp_2[4] u_gpu.gdsp_2.tx u_disp.gdsp_2.rx
-add_bus gdsp_3[4] u_gpu.gdsp_3.tx u_disp.gdsp_3.rx
+add_bus gdsp_0[4] u_gpu.gdsp_0_tx u_disp.gdsp_0_rx
+add_bus gdsp_1[4] u_gpu.gdsp_1_tx u_disp.gdsp_1_rx
+add_bus gdsp_2[4] u_gpu.gdsp_2_tx u_disp.gdsp_2_rx
+add_bus gdsp_3[4] u_gpu.gdsp_3_tx u_disp.gdsp_3_rx
 
-add_bus pcn_p0[32] u_pcie.pcn_p0.tx u_noc.pcn_p0.rx
-add_bus pcn_p1[32] u_pcie.pcn_p1.tx u_noc.pcn_p1.rx
-add_bus pcn_p2[32] u_pcie.pcn_p2.tx u_noc.pcn_p2.rx
-add_bus pcn_p3[32] u_pcie.pcn_p3.tx u_noc.pcn_p3.rx
+add_bus pcn_p0[32] u_pcie.pcn_p0_tx u_noc.pcn_p0_rx
+add_bus pcn_p1[32] u_pcie.pcn_p1_tx u_noc.pcn_p1_rx
+add_bus pcn_p2[32] u_pcie.pcn_p2_tx u_noc.pcn_p2_rx
+add_bus pcn_p3[32] u_pcie.pcn_p3_tx u_noc.pcn_p3_rx
 
-add_bus c0sm_0[8] u_cpu0.c0sm_0.tx u_sec.c0sm_0.rx
-add_bus c0sm_1[8] u_cpu0.c0sm_1.tx u_sec.c0sm_1.rx
+add_bus c0sm_0[8] u_cpu0.c0sm_0_tx u_sec.c0sm_0_rx
+add_bus c0sm_1[8] u_cpu0.c0sm_1_tx u_sec.c0sm_1_rx
 
-add_bus c1sm_0[8] u_cpu1.c1sm_0.tx u_sec.c1sm_0.rx
-add_bus c1sm_1[8] u_cpu1.c1sm_1.tx u_sec.c1sm_1.rx
+add_bus c1sm_0[8] u_cpu1.c1sm_0_tx u_sec.c1sm_0_rx
+add_bus c1sm_1[8] u_cpu1.c1sm_1_tx u_sec.c1sm_1_rx
 
-add_bus c0pm_0[8] u_cpu0.c0pm_0.tx u_pcie.c0pm_0.rx
+add_bus c0pm_0[8] u_cpu0.c0pm_0_tx u_pcie.c0pm_0_rx
 
-add_bus c0um_0[8] u_cpu0.c0um_0.tx u_usb.c0um_0.rx
+add_bus c0um_0[8] u_cpu0.c0um_0_tx u_usb.c0um_0_rx

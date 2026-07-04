@@ -1,7 +1,7 @@
 # ==================================================================
-# BUDA Large-Scale Stress-Test Demo
-# 14 blocks · 116 bundles · 8–128-bit buses · M4/M5/M6 layers
-# 10% power+clock overhead per layer
+# BUDA Large-Scale Stress-Test Demo (R&D vehicle; mirrors demo/large_scale_demo.buda)
+# 14 top blocks · 26 bundles · 4–64-bit buses · M4/M5/M6 layers
+# 2-part pins → STRICT bundler collapses ports by src+dst block pair.
 # ==================================================================
 
 # Layers: M4 horizontal, M5 vertical, M6 long-haul horizontal
