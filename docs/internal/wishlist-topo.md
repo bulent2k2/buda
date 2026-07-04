@@ -126,26 +126,31 @@ corpus harness (`tools/wl_corpus.py`) and the dead-wire probe
 (`tools/along_dof_probe.py`, selected + all-candidate scopes) are all in place so that
 larger effort can be measured from its first commit.
 
-## `multi_trunk` as a default (measured candidate) — OPEN
+## `multi_trunk` as a default — MEASURED, keep opt-in
 
 **What.** `generate_topologies multi_trunk` (opt-in) emits two-level
-`BITRUNK_HVH/VHV` datapath trees. Measured (see
-[`mst_edge_realization.md`](mst_edge_realization.md), datapath section): on
-column/row-aligned datapaths the planner selects them and QoR improves
-substantially (col 3×5×6 WL −7.5 %, ov 3→1; col 4×5×8 WL −31.9 %, ov 11→1; row
-3×5×6 WL −17.7 %, ov 1→0), while on the trunk-dominated tc3 corpus it is a QoR
-no-op (trunks already win). That asymmetry — real upside on datapaths, neutral
-elsewhere — makes it a candidate for **default-on**.
+`BITRUNK_HVH/VHV` datapath trees. On column/row-aligned datapaths the planner
+selects them and QoR improves substantially (col 3×5×6 WL −7.5 %, ov 3→1; col
+4×5×8 WL −31.9 %, ov 11→1; row 3×5×6 WL −17.7 %, ov 1→0; see
+[`mst_edge_realization.md`](mst_edge_realization.md)). Question: flip it on by
+default?
 
-**Why not already.** Two costs to measure before flipping the default: (a) the
-sweep found a couple of *losses* on awkward shapes (a sparse `row 4×5×8` +7.7 %
-WL, a saturated `col 2×6×6` +3.2 % WL for fewer overlaps) — default-on must not
-regress those; (b) `multi_trunk` generates extra `BITRUNK` candidates, so
-generation + planning pay a runtime cost even on designs that never select them.
+**Measured (on vs off, every flat corpus flow + demos + comprehensive_demo).**
+- **QoR-neutral everywhere on the corpus** — identical abstract WL, overlaps and
+  unplaced on tc3a_flat, channel_stress, four_blocks(+_3_bundles), dogleg1/2,
+  b4_bus_077, comprehensive_demo, and the datapath demos. **Zero regressions.**
+- **Runtime cost negligible** on tc3a (`generate_topologies` 0.16 s both ways).
+- **But zero corpus BENEFIT** (none of these are datapaths) and a real
+  **candidate-count cost**: tc3a_flat 2571 → 2797 candidates (+8.8 %), b4 17 → 20,
+  four_blocks 60 → 64. That compounds with the BDB candidate-topology persist
+  path (see [`wishlist-bdb.md`](wishlist-bdb.md) — persistence, not generation,
+  is the large-design bottleneck), so default-on taxes every big hier design for
+  benefit only datapaths see.
+- The earlier size sweep also found a couple of datapath shapes where multi_trunk
+  *loses* (sparse `row 4×5×8` +7.7 % WL; saturated `col 2×6×6` +3.2 % WL) — so
+  default-on is not universally safe even on its target class.
 
-**Gate.** Run the full WL corpus (`tools/wl_corpus.py`) + the demo flows with
-`multi_trunk` forced on vs off; require equal-or-better abstract/detailed WL and
-overlaps on every flow, and quantify the candidate-count / runtime delta. If
-clean, flip the `generate_topologies` default to emit BITRUNK trees (keeping an
-opt-*out* keyword) and re-baseline the candidate-count goldens. Otherwise keep it
-opt-in and document the boundary.
+**Decision: keep it opt-in.** The benefit is real but confined to datapaths,
+where the flag is the right mechanism; default-on would add candidate-count /
+persist cost to every design for no corpus gain, with residual loss risk on some
+datapath shapes. Revisit only if a datapath becomes a common default workload.
