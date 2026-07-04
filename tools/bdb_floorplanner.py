@@ -157,6 +157,7 @@ class BdbFloorplanner:
         self.root.title(f"BUDA Floorplanner — {base}{suffix}")
         s = "disabled" if ro else "normal"
         self._write_btn.config(state=s)
+        self._saveas_btn.config(state=s)
         self._add_btn.config(state=s)
         self._align_mb.config(state=s)
         self._opt_btn.config(state=s)
@@ -176,9 +177,11 @@ class BdbFloorplanner:
         ttk.Button(top, text="Import Verilog", command=self._import_verilog).grid(row=0, column=4, padx=2)
         self._write_btn = ttk.Button(top, text="Write", command=self._write_bdb)
         self._write_btn.grid(row=0, column=5, padx=2)
-        ttk.Button(top, text="Export Flow", command=self._export_flow).grid(row=0, column=6, padx=2)
+        self._saveas_btn = ttk.Button(top, text="Save As…", command=self._save_as)
+        self._saveas_btn.grid(row=0, column=6, padx=2)
+        ttk.Button(top, text="Export Flow", command=self._export_flow).grid(row=0, column=7, padx=2)
         self._run_flow_btn = ttk.Button(top, text="Run Flow", command=self._run_flow)
-        self._run_flow_btn.grid(row=0, column=7, padx=2)
+        self._run_flow_btn.grid(row=0, column=8, padx=2)
         top.columnconfigure(1, weight=1)
 
         # Breadcrumb bar
@@ -472,14 +475,23 @@ class BdbFloorplanner:
     # ------------------------------------------------------------------
 
     def _open_bdb(self):
-        path = filedialog.askopenfilename(filetypes=[("BDB", "*.bdb"), ("All", "*")])
+        path = filedialog.askopenfilename(
+            filetypes=[("BDB", "*.bdb"), ("BDB text", "*.bdb.sql *.sql"),
+                       ("All", "*")])
         if not path:
             return
+        # A *.bdb.sql opens by materializing a throwaway binary; the .sql is
+        # remembered as the Save target (parity with the `fp foo.bdb.sql` path).
+        sql_source = ""
+        if path.endswith(".sql"):
+            import bdb_serialize
+            sql_source = os.path.abspath(path)
+            path = bdb_serialize.materialize_if_sql(path)
         fpc.release_bdb_lock(self.state)
-        self.state = fpc.load_bdb(path)
+        self.state = fpc.load_bdb(path, sql_source=sql_source)
         self._path = []
         self._zoom_limits = None
-        self._bdb_var.set(path)
+        self._bdb_var.set(sql_source or path)
         self._sync_canvas_vars()
         self._refresh_breadcrumbs()
         self._refresh_tree()
@@ -743,12 +755,55 @@ class BdbFloorplanner:
                 return
             self.state.bdb_path = path
         try:
-            fpc.write_bdb(self.state)
-            self._status.set(f"Placements written to {self.state.bdb_path}.")
+            if self.state.sql_source:
+                # Opened from a *.bdb.sql — Write re-serializes back to it, so
+                # the diffable text fixture reflects the edited placement.
+                target = fpc.save_sql(self.state)
+                self._status.set(f"Saved to {target}.")
+            else:
+                fpc.write_bdb(self.state)
+                self._status.set(f"Placements written to {self.state.bdb_path}.")
         except Exception as exc:
             messagebox.showerror("Write Failed",
                                  f"Could not write BDB:\n{exc}")
             self._status.set(f"Write failed: {exc}")
+
+    def _save_as(self):
+        """Save the design to a chosen path. A *.bdb.sql target writes the
+        diffable text form (and becomes the new Save target); a *.bdb target
+        writes a standalone binary the session switches to."""
+        if self.state is None or self.state.bdb is None:
+            self._status.set("Open or create a BDB before Save As.")
+            return
+        if getattr(self.state, "is_read_only", False):
+            messagebox.showerror("Read-only",
+                                 "This session is read-only — another fp "
+                                 "session holds the write lock.")
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".bdb.sql",
+            filetypes=[("BDB text", "*.bdb.sql"), ("BDB binary", "*.bdb"),
+                       ("All", "*")])
+        if not path:
+            return
+        try:
+            if path.endswith(".sql"):
+                target = fpc.save_sql(self.state, path)
+                self._bdb_var.set(target)
+                self._status.set(f"Saved to {target}.")
+            else:
+                fpc.release_bdb_lock(self.state)
+                self.state = fpc.save_bdb_as_binary(self.state, path)
+                self._path = []
+                self._bdb_var.set(path)
+                self._refresh_breadcrumbs()
+                self._refresh_tree()
+                self._draw()
+                self._apply_ro_state()
+                self._status.set(f"Saved binary BDB to {path}.")
+        except Exception as exc:
+            messagebox.showerror("Save As Failed", f"Could not save:\n{exc}")
+            self._status.set(f"Save As failed: {exc}")
 
     def _export_flow(self):
         path = filedialog.asksaveasfilename(defaultextension=".buda",
@@ -2157,19 +2212,20 @@ def main():
 
     # A serialized BDB (*.bdb.sql / *.b_db.sql) is materialized into a throwaway
     # temp binary so `fp foo.b_db.sql` and `bfp <script opening a .sql>` work.
-    # The floorplanner opens it read-only w.r.t. the .sql — edits are not written
-    # back here. (The CLI has `open_bdb … writeback`; wiring the GUI Save to
-    # re-serialize a .sql could follow — see docs/internal/wishlist-bdb.md.)
+    # The original .sql is remembered as the Save target — Write / Save As
+    # re-serialize the working binary back to it (reusing bdb_serialize.dump).
+    sql_source = ""
     if path is not None and path.endswith('.sql'):
         import bdb_serialize
-        print(f"fp: materializing {path} -> temp binary (edits not written back)")
+        sql_source = os.path.abspath(path)
+        print(f"fp: materializing {path} -> temp binary (Save writes back to the .sql)")
         path = bdb_serialize.materialize_if_sql(path)
 
     root = tk.Tk()
     app = BdbFloorplanner(root)
     if path is not None:
         try:
-            app.state = fpc.load_bdb(path)
+            app.state = fpc.load_bdb(path, sql_source=sql_source)
         except Exception as exc:
             # Existing path but not a readable BDB — report cleanly and exit
             # rather than leaving a half-initialized window open.
@@ -2178,7 +2234,7 @@ def main():
             sys.exit(2)
         app._path = []
         app._zoom_limits = None
-        app._bdb_var.set(path)
+        app._bdb_var.set(sql_source or path)
         app._sync_canvas_vars()
         app._refresh_breadcrumbs()
         app._refresh_tree()

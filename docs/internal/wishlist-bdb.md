@@ -70,10 +70,17 @@ write-back — a wall-clock timestamp would make repeated write-backs a noisy,
 non-deterministic diff. Add it with the same normalization that gates
 provenance timestamps generally.
 
-**Minor follow-up:** the Floorplanner GUI (`tools/bdb_floorplanner.py`) opens a
-`*.bdb.sql` read-only (materializes to a temp binary); wiring its **Save** to
-re-serialize back to the `.sql` (reusing `tools/bdb_serialize.dump`) would give
-the GUI the same opt-in write-back the CLI now has.
+**Minor follow-up — ✅ IMPLEMENTED.** The Floorplanner GUI
+(`tools/bdb_floorplanner.py`) now writes back to the `.bdb.sql` it was opened
+from: opening a `*.bdb.sql` (via `fp foo.bdb.sql` or File→Open) materializes a
+temp binary AND remembers the source (`FloorplannerAppState.sql_source`), so
+**Write** re-serializes the working binary back to the `.sql`
+(`fpc.save_sql` → `bdb_serialize.dump`). A new **Save As…** button targets a
+chosen `*.bdb.sql` (remembered as the new Save target) or a fresh `*.bdb`
+binary the session switches to (`fpc.save_bdb_as_binary`, via a clean
+dump→load round-trip). Read-only sessions are guarded exactly as `write_bdb`.
+Tests: `test/tests/test_floorplanner_save.py` (Save As to .sql, write-back
+round-trip, Save As to binary, no-target + read-only guards).
 
 ## BDB schema versioning (replace the ad-hoc ALTER TABLE) — ✅ IMPLEMENTED
 
