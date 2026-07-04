@@ -209,6 +209,62 @@ and can ship first on its own (measured against the corpus). (1) edge identity i
 prerequisite for (3). (3) is the largest piece and reuses the most existing
 machinery. Each stage gates on the WL corpus + tiers.
 
+### Shipped so far
+- **Step 1** (`Segment.edge_id` identity) — PR #168.
+- **Step 2** (keepout-aware per-edge default, `choose_edge_h_first`) — PR #168.
+- **Step 4a** (`flip_mst_edge` primitive) — PR #169. Floorplan-validated: rejects a
+  flip whose opposite bend lands inside a block or on a block corner (the
+  `corner_diagonal_L` case). Involution; no-op for `edge_id < 0` / non-2-leg edges.
+- **Part 1** (trunk-tail tightening) — measured **not worthwhile**, deferred (above).
+
+### Step 4b implementation recipe (the ripup consumer — READY TO EXECUTE)
+
+The hooks (`src/buda_cli.py`, verified): `_ripup_reroute` (loop, ~:3282) tries, per
+contender, `_rr_candidate_order` (:3050) alternates via `_rr_trial` (:3081, pins an
+index + `_rr_rerun`), keeping the first strict improvement; `_rr_snapshot`/
+`_rr_restore` (:2856/:2894) capture **candidate COUNT + plan arrays, not candidate
+geometry**, and trim appended candidates on restore (`while len(cands) > ncand`).
+
+Key design decision — **flip in place, don't append a candidate.** An appended
+flip-variant would be trimmed by `_rr_restore` (count-based) and its index would be
+invalid at commit time (unlike a dogleg, which `_adopt_doglegs` *regenerates* every
+re-solve). Since `flip_mst_edge` is an **involution**, the clean move is:
+
+1. **Contended-edge detection.** For a contender whose selected candidate is an
+   MST type, map each `overlap_details` entry touching this bundle → its
+   `seg_idx` → `candidates[sel].segments[seg_idx].edge_id` (keep `>= 0`, dedup).
+2. **Trial (per contended edge):** `flip_mst_edge(cands[sel], eid, h, v, fp)` in
+   place → `annotate_topology(cands[sel], fp)` → **`_rr_trial(w, sel, stage,
+   metric)`** → read the returned metric. Use `_rr_trial(w, sel, …)`, NOT a bare
+   `_rr_rerun`: in the usual post-`run_planner` state the wrapper is *not*
+   `topology_pinned`, and `CongestionPlanner::replan_bundle` → `plan_bundle`
+   restricts the scored candidate range only when `topology_pinned` is true — so a
+   bare rerun would let the planner re-score ALL candidates and a "flip improvement"
+   could actually be a re-selection of a *different* topology (Codex #170 P2).
+   `_rr_trial` pins `sel` (`topology_pinned=True`, `selected_topology_index=sel`)
+   before the rerun, so the metric measures the flipped `sel` specifically. Because
+   `_rr_snapshot` does **not** capture candidate geometry, a rejected flip is undone
+   by flipping the SAME edge again (involution) + re-annotate; `_rr_restore(snap)`
+   then restores selection/pin/plan arrays around it.
+3. **Accept** the first flip with a strict metric improvement (keep it flipped in
+   place — that IS the committed better route); the outer loop's next iteration
+   then sees the flipped candidate as the new baseline. Fold this into the existing
+   per-contender scan as an extra move source (try index alternates AND edge flips;
+   commit whichever wins), so the loop's snapshot/commit structure is reused. A
+   committed flip needs no index change — the commit is just `_rr_trial(w, sel, …)`
+   with the geometry already flipped (re-pinning the same `sel`).
+4. **Persistence (Codex #168 P2):** add the `topology_segment.edge_id` column
+   (schema + INSERT/SELECT + `TopoSegRow` + binding + `buda_cli` persist/reload) so
+   a resumed pipeline can still flip; regenerate the `*.bdb.sql` fixtures; add a
+   resume-then-flip round-trip test.
+5. **Measure** (the gate): `mix.buda` + big2 ripup — overlaps must be equal-or-
+   **better** (this is where step 3 regressed 1→3, so watch it), no new opens,
+   ripup runtime not blown up (each flip trial is ~one NUTS solve). Fast+mid green;
+   a targeted test where an edge flip demonstrably clears an overlap.
+
+This is a behavior-changing change to the ripup engine (the codebase's most
+delicate module) and must be built + measured as its own focused PR, not rushed.
+
 ---
 
 ## Measurement harness (already in place)
