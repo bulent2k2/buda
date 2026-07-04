@@ -172,6 +172,8 @@ void bind_nuts(py::module_& m) {
             return g.effective_pattern_at(x, y);
         }, py::arg("x"), py::arg("y"))
         .def("signal_tracks_in",      &RoutingGrid::signal_tracks_in,
+             py::arg("x"), py::arg("lo"), py::arg("hi"))
+        .def("count_signal_tracks_in", &RoutingGrid::count_signal_tracks_in,
              py::arg("x"), py::arg("lo"), py::arg("hi"));
 
     py::class_<RoutingGridStack>(m, "RoutingGridStack")

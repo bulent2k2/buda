@@ -88,6 +88,12 @@ public:
     std::vector<std::pair<double, TrackSlot>>
     signal_tracks_in(double x, double lo, double hi) const;
 
+    // COUNT of the same SIGNAL tracks, computed without materializing any vector
+    // (hot path: the congestion planner's signal-track band capacity calls this
+    // once per candidate segment per band per iteration and only needs the count).
+    // Identical result to signal_tracks_in(...).size(), no heap allocation.
+    int count_signal_tracks_in(double x, double lo, double hi) const;
+
     bool is_horizontal() const { return is_horizontal_; }
 
 private:

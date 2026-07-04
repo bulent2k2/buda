@@ -112,6 +112,37 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
     return result;
 }
 
+int RoutingGrid::count_signal_tracks_in(double x, double lo, double hi) const {
+    // Count-only twin of signal_tracks_in: same tiling walk + SIGNAL/keepout
+    // filter, but never allocates (returns the count directly).  Kept in lockstep
+    // with tracks_in_range's loop and signal_tracks_in's filter above.
+    const TrackPattern& pat = effective_pattern_at(x, lo);
+    const double up = pat.unit_pitch();
+    if (up <= 0.0 || pat.slots.empty() || lo > hi) return 0;
+    int n_start = static_cast<int>(std::floor((lo - pat.origin) / up)) - 1;
+    int cnt = 0;
+    for (int n = n_start; ; ++n) {
+        double unit_start = pat.origin + static_cast<double>(n) * up;
+        if (unit_start > hi) break;
+        double pos = unit_start;
+        for (const auto& slot : pat.slots) {
+            double centre = pos + slot.width / 2.0;
+            if (centre >= lo && centre <= hi && slot.type == "SIGNAL") {
+                bool blocked = false;
+                for (const auto& koz : keepouts_) {
+                    double px = is_horizontal_ ? x : centre;
+                    double py = is_horizontal_ ? centre : x;
+                    if (px >= koz.x1 && px <= koz.x2 &&
+                        py >= koz.y1 && py <= koz.y2) { blocked = true; break; }
+                }
+                if (!blocked) ++cnt;
+            }
+            pos += slot.width + slot.space_after;
+        }
+    }
+    return cnt;
+}
+
 // ---------------------------------------------------------------------------
 // RoutingGridStack
 // ---------------------------------------------------------------------------

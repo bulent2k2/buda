@@ -56,9 +56,20 @@ struct GlobalCut {
     void reset_usage() { std::fill(band_usage_.begin(), band_usage_.end(), 0.0); }
     void add_usage(int b, double delta) { band_usage_[b] += delta; }
 
+    // Signal-track count per FULL band, precomputed once in SIGNAL_TRACKS mode so
+    // usable_band_cap can skip the per-call pattern walk when the slide window does
+    // not narrow the band (the dominant case).  Empty in width mode.
+    void init_sig_ntrk(const std::function<int(int)>& fn) {
+        band_sig_ntrk_.resize(num_bands());
+        for (int b = 0; b < num_bands(); ++b) band_sig_ntrk_[b] = fn(b);
+    }
+    bool has_sig_ntrk() const { return !band_sig_ntrk_.empty(); }
+    int  sig_ntrk(int b) const { return band_sig_ntrk_[b]; }
+
 private:
     std::vector<double> band_cap_;    // capacity per perpendicular Hanan band
     std::vector<double> band_usage_;  // accumulated demand per band
+    std::vector<int>    band_sig_ntrk_;  // cached full-band SIGNAL-track count (track mode)
 };
 
 struct BundleInput {
