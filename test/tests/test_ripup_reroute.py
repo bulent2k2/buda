@@ -205,6 +205,25 @@ def test_big2_stage_a_reduces_overlaps():
 
 
 @pytest.mark.mid
+def test_big2_ripup_flip_move_never_regresses():
+    """The flip move source (step 4b) is an ADD-ON to the existing index-alternate
+    ripup: it must never make big2 worse.  It IS exercised on this design — a
+    selected MST candidate's edge leg contends and _rr_flip_edges surfaces it — but
+    WHICH segment contends is FP/CPU/environment-sensitive (the same reason the
+    tests above assert 'reduced', not an exact count), so we cannot deterministically
+    assert a flip is tried.  Instead assert the invariant that always holds: ripup
+    still drives the overlaps down, whether the winning moves are index or flip.
+    (The flip's involution + no-false-flip gating are pinned deterministically by
+    the fast-tier _mst_session tests.)"""
+    s = _big2_to_stage("a")
+    base = s.nuts_result.num_overlaps
+    assert base > 0
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute 40")
+    assert s.nuts_result.num_overlaps < base
+
+
+@pytest.mark.mid
 def test_big2_stage_b_preserves_hi_lo_bit_order():
     """ripup_reroute's stage-b replay must keep a HI_LO bit-order selection.
 
@@ -526,3 +545,144 @@ def test_rerun_nuts_invalidates_stale_detailed_result():
     with contextlib.redirect_stdout(buf):
         s.do_command("negotiate_congestion")
     assert "stage a" in buf.getvalue()         # back to abstract negotiation
+
+
+# ── Step 4b: per-edge MST L/Z flip as a ripup move source ────────────────────
+#
+# The ripup loop now tries, per contended bundle, its index-alternate candidates
+# AND per-edge L/Z flips of a SELECTED MST candidate's *contended* edges
+# (_rr_flip_edges -> _rr_apply_move('flip', ...)).  These tests pin the detection
+# gate (no false flips), the involution-based undo, and — crucially — that an
+# in-place flip PERSISTS to the wrapper's candidate so the replan measures it
+# (w.input.candidates returns a list of *references* to the C++ Topology objects;
+# only structural changes like dogleg append/delete need a write-back).
+
+def _mst_session():
+    """A 4-block fan-out bus whose candidate list includes edge-tagged MST
+    shapes, planned + NUTS-solved (roomy bands -> 0 overlaps)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = [
+        "def_layer 4 M4 H TOP 50",
+        "def_layer 5 M5 V TOP 50",
+        "add_block A 0 0 100 100",
+        "add_block B 800 0 900 100",
+        "add_block C 800 800 900 900",
+        "add_block D 0 800 100 900",
+        "add_bus n[8] A.p B.p,C.p,D.p",
+        "run_bundler", "generate_topologies",
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    return s
+
+
+def _pin(s, want_type):
+    """Pin bundle 0 to the first candidate whose type matches want_type (exact
+    for non-MST, substring for MST families); return (wrapper, sel)."""
+    w = s.bundles[0]
+    for i, c in enumerate(w.input.candidates):
+        if c.type == want_type or (want_type == "MST" and "MST" in c.type):
+            w.plan.selected_topology_index = i
+            w.input.topology_pinned = True
+            return w, i
+    raise AssertionError(f"no {want_type} candidate; got "
+                         f"{[c.type for c in w.input.candidates]}")
+
+
+def test_rr_flip_edges_empty_for_non_mst_selection():
+    """A non-MST selected candidate exposes no flip edges (only MST shapes carry
+    edge tags), so the flip move source never fires for it."""
+    s = _mst_session()
+    # An L_HV / I_H style 2-pin-ish candidate has no '+MST' / MST_ type.
+    w = s.bundles[0]
+    non_mst = next((i for i, c in enumerate(w.input.candidates)
+                    if "MST" not in c.type), None)
+    assert non_mst is not None
+    w.plan.selected_topology_index = non_mst
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_planner")
+        s.do_command("run_nuts")
+    # force the selection back (planner may have moved it)
+    w.plan.selected_topology_index = non_mst
+    assert s._rr_flip_edges(w, 'a') == []
+
+
+def test_rr_flip_edges_empty_without_contention():
+    """An MST selection with NO overlap touching it yields no flip edges — flips
+    are attempted only for edges an actual overlap/open lands on."""
+    s = _mst_session()
+    w, sel = _pin(s, "MST")
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_planner")
+        s.do_command("run_nuts")
+    w.plan.selected_topology_index = sel      # keep the MST pin
+    # Roomy bands -> the selected candidate carries no overlap, so no edge is
+    # contended even though the candidate is edge-tagged.
+    contended = s._rr_flip_edges(w, 'a')
+    mine = [od for od in s.nuts_result.overlap_details
+            if od.bid_a == w.input.original_bundle.id
+            or od.bid_b == w.input.original_bundle.id]
+    if not mine:
+        assert contended == []
+
+
+def test_rr_flip_move_is_an_involution():
+    """_rr_apply_move('flip', e) mutates the selected candidate's geometry in
+    place; _rr_undo_move flips the same edge back (involution), leaving the
+    candidate byte-identical — the property the ripup loop relies on to restore a
+    rejected flip (since _rr_snapshot does not capture candidate geometry)."""
+    s = _mst_session()
+    w, sel = _pin(s, "MST")
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_planner")
+        s.do_command("run_nuts")
+    w.plan.selected_topology_index = sel
+    topo = w.input.candidates[sel]
+    eids = sorted({sg.edge_id for sg in topo.segments if sg.edge_id >= 0})
+    assert eids, "MST candidate should carry edge tags"
+
+    def geom():
+        return [(sg.start.x, sg.start.y, sg.end.x, sg.end.y, sg.edge_id)
+                for sg in w.input.candidates[sel].segments]
+
+    metric = lambda: s.nuts_result.num_overlaps           # noqa: E731
+    for eid in eids:
+        before = geom()
+        move = ('flip', eid)
+        m = s._rr_apply_move(w, move, sel, 'a', metric)
+        if m is None:
+            # flip rejected (alt bend on an obstacle): geometry unchanged
+            assert geom() == before
+            continue
+        assert geom() != before, "an accepted flip must change the geometry"
+        s._rr_undo_move(w, move, sel)
+        assert geom() == before, "undo (re-flip) must restore the geometry exactly"
+
+
+def test_flip_persists_to_wrapper_candidate():
+    """An in-place mutation of `w.input.candidates[sel]` PERSISTS to the wrapper
+    (the property the flip move relies on): `_rr_apply_move`'s flip mutates the
+    candidate in place and then `_rr_trial` replans reading `w.input.candidates`,
+    so the mutation must be visible on a FRESH read — not lost to a pybind11 STL
+    copy.  `candidates` returns a list of references to the underlying C++
+    Topology objects, so field-level edits (start/end/layer_hint — exactly what
+    flip_mst_edge writes) round-trip; only structural edits (append/delete, e.g.
+    doglegs) need `w.input.candidates = cands` write-back.  Deterministic guard
+    against a future binding change that would silently make flip trials measure
+    the un-flipped route (Codex #176 P2)."""
+    s = _mst_session()
+    w = s.bundles[0]
+    sel = 0
+    # Read via one access, then mutate a segment coord; a FRESH access must see it.
+    orig = w.input.candidates[sel].segments[0].start.x
+    w.input.candidates[sel].segments[0].start.x = orig + 4242
+    assert w.input.candidates[sel].segments[0].start.x == orig + 4242, (
+        "in-place edit of w.input.candidates was lost to a copy — flip trials "
+        "would measure the un-flipped route"
+    )
+    # The var-held pattern _rr_apply_move uses ("cands = w.input.candidates").
+    cands = w.input.candidates
+    cands[sel].segments[0].start.x = orig + 99
+    assert w.input.candidates[sel].segments[0].start.x == orig + 99

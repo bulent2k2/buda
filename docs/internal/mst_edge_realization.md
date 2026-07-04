@@ -243,9 +243,36 @@ machinery. Each stage gates on the WL corpus + tiers.
 - **Step 4a** (`flip_mst_edge` primitive) — PR #169. Floorplan-validated: rejects a
   flip whose opposite bend lands inside a block or on a block corner (the
   `corner_diagonal_L` case). Involution; no-op for `edge_id < 0` / non-2-leg edges.
+- **Step 4b** (the ripup consumer) — **shipped; live but not yet decisive.** The
+  ripup loop now offers each contended bundle two move sources — its index
+  alternates AND per-edge L/Z flips of a SELECTED MST candidate's contended edges
+  (`_rr_flip_edges` → `_rr_apply_move('flip', …)`, undone by the involution) —
+  committing whichever wins. Built per the recipe below (pins `sel` via
+  `_rr_trial`, uses fp-free `annotate_seg_conns` since the flip preserves segment
+  slots + far-endpoint taps and only the internal bend moves, so it is hier-safe).
+  Applies to **all** MST candidate types, standalone and hybrid: `_rr_flip_edges`
+  gates on `"MST" in topo.type` (matches `MST_HV/VH`, `TRUNK_H/V+MST`,
+  `TRUNK_*_OOB+MST`) and `add_trunk_mst_candidates`'s `realize_edges` tags hybrid
+  legs with `edge_id` exactly like the standalone path — so **TRUNK+MST is a
+  first-class MST candidate here**, not a special case left out.
+  **Measured: the flip is exercised but has not yet won a commit.** Running ripup
+  directly after `run_nuts` on `big2` (`tc3b_flat_x5`), `_rr_flip_edges` detects a
+  real contended edge (bundle 24, `MST_VH`, edge 1) and a flip trial runs (43 → 44
+  trials vs main) — but an *index* move wins that bundle's commit, so the final
+  route is byte-identical. (In `mix`/`slowdown_rnr` the `negotiate_congestion`
+  pass ahead of ripup clears the MST-edge overlaps first, so no flip is even
+  reached there.) So the mechanism is correct, tested (involution + no-false-flip
+  gating + the big2 ripup regressions), and **actively competing** — it just does
+  not yet beat the index alternates on the corpus. A flip *winning* a commit is
+  contingent on either an overlap only a flip can clear, or MST candidates
+  becoming more competitive (the Part 1/Part 2 blocker). No further ripup change
+  is needed for it to win once such a case appears.
+  - **Deferred:** the `topology_segment.edge_id` BDB column (recipe item 4). A
+    resumed candidate's `edge_id = -1` simply yields no flip (safe), so
+    persistence only matters once flips win commits; revisit then.
 - **Part 1** (trunk-tail tightening) — measured **not worthwhile**, deferred (above).
 
-### Step 4b implementation recipe (the ripup consumer — READY TO EXECUTE)
+### Step 4b implementation recipe (the ripup consumer — SHIPPED, see above)
 
 The hooks (`src/buda_cli.py`, verified): `_ripup_reroute` (loop, ~:3282) tries, per
 contender, `_rr_candidate_order` (:3050) alternates via `_rr_trial` (:3081, pins an
