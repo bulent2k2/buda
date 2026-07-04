@@ -144,12 +144,28 @@ unrelated `BITRUNK_H` family). But it broke two ways:
    candidate indices and the planner's tie-breaks even when the dropped candidate
    was never selected.
 
-Conclusion: there is **no** quick, side-effect-free Part-1 change. Tail tightening
-is genuinely behavior-changing (the same churn class as the always-on span flip)
-and must be a deliberate, measurement-gated PR that (a) trims rather than drops,
-(b) respects the `<4`-block "only MST coverage" rule, and (c) re-baselines the
-candidate-count/type goldens it moves after confirming each moved route is
-equal-or-better. It should not be attempted as an incidental cleanup.
+**Second prototype (measured — the ≥4-gated drop STILL regresses).** The refined
+prototype gated the degenerate drop on `blocks.size() >= 4` (so the 3-block
+coverage is kept) and returned a "degenerate" flag from `clip_spine_to_landings`.
+This fixed the stranding — but the corpus still regressed: **`mix.buda` overlaps
+1 → 3** (two new NUTS overlaps) even though its abstract WL *dropped* 66 656 →
+64 947. Root cause: `mix.buda` runs `negotiate_congestion` + `ripup_reroute`, both
+of which try alternate candidates **by index**, so removing a candidate perturbs
+their search and lands on a worse final route. So even the coverage-safe drop is
+not clean — the sensitivity is the ripup/negotiate candidate-index dependence, not
+just tie-breaks.
+
+**Conclusion: Part 1 is deferred as measured-not-worthwhile for now.** The dead
+wire is confined to *never-selected* candidates (`selDEAD = 0`), and every
+mechanism that removes it (drop, or trim that lowers the candidate's WL) perturbs
+the index-sensitive ripup/negotiate search into a worse route on `mix.buda`. The
+only genuinely side-effect-free option left is a topology **restructure** — delete
+the vestigial single-tap spine segment and re-index (so the candidate stays,
+tighter, without changing the candidate *count*) — which is substantially more
+work than the payoff (honest WL on candidates that already correctly lose)
+justifies, and its value is only realized once Part 2 lets good MST candidates win.
+Revisit Part 1 **after** Part 2, if at all, with a restructure (not a drop/trim)
+and the same overlap-and-ripup gate. Not pursued further in this pass.
 
 ---
 
