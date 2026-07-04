@@ -125,3 +125,41 @@ guard, not an accident.  Stage A's data model, the ConnSeg python bindings, the 
 corpus harness (`tools/wl_corpus.py`) and the dead-wire probe
 (`tools/along_dof_probe.py`, selected + all-candidate scopes) are all in place so that
 larger effort can be measured from its first commit.
+
+## `multi_trunk` as a default — MEASURED, keep opt-in
+
+**What.** `generate_topologies multi_trunk` (opt-in) emits two-level
+`BITRUNK_HVH/VHV` datapath trees. On column/row-aligned datapaths the planner
+selects them and QoR improves substantially (col 3×5×6 WL −7.5 %, ov 3→1; col
+4×5×8 WL −31.9 %, ov 11→1; row 3×5×6 WL −17.7 %, ov 1→0; see
+[`mst_edge_realization.md`](mst_edge_realization.md)). Question: flip it on by
+default?
+
+**Measured (default off vs on, over flows that do NOT already opt in).** The
+corpus is every flat flow + non-datapath demo + comprehensive_demo, each run with
+its `generate_topologies` line as written (no keyword) vs with `multi_trunk`
+forced on — so the comparison actually isolates the *default*.
+- **QoR-neutral everywhere on the corpus** — identical abstract WL, overlaps and
+  unplaced on tc3a_flat, channel_stress, four_blocks(+_3_bundles), dogleg1/2,
+  b4_bus_077, and comprehensive_demo. **Zero regressions.**
+- **The two datapath demos are excluded from this on/off measurement**: they
+  hardcode `generate_topologies multi_trunk` (`flow/datapath_multi_trunk.buda`,
+  `flow/datapath_row_vhv.buda`), so they run multi_trunk in *both* configs and
+  measure nothing about the default. They are the *win* case (their headers
+  document the plain-vs-multi improvement), not a neutral data point — see the
+  substantial QoR gains quoted under **What** above.
+- **Runtime cost negligible** on tc3a (`generate_topologies` 0.16 s both ways).
+- **But zero corpus BENEFIT** (none of these are datapaths) and a real
+  **candidate-count cost**: tc3a_flat 2571 → 2797 candidates (+8.8 %), b4 17 → 20,
+  four_blocks 60 → 64. That compounds with the BDB candidate-topology persist
+  path (see [`wishlist-bdb.md`](wishlist-bdb.md) — persistence, not generation,
+  is the large-design bottleneck), so default-on taxes every big hier design for
+  benefit only datapaths see.
+- The earlier size sweep also found a couple of datapath shapes where multi_trunk
+  *loses* (sparse `row 4×5×8` +7.7 % WL; saturated `col 2×6×6` +3.2 % WL) — so
+  default-on is not universally safe even on its target class.
+
+**Decision: keep it opt-in.** The benefit is real but confined to datapaths,
+where the flag is the right mechanism; default-on would add candidate-count /
+persist cost to every design for no corpus gain, with residual loss risk on some
+datapath shapes. Revisit only if a datapath becomes a common default workload.
