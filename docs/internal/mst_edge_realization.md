@@ -376,3 +376,37 @@ The tc3 corpus is ~96 % trunks by construction; a datapath workload (aligned
 column/row blocks, the `multi_trunk` BITRUNK target) is the likelier place for MST
 / multi-trunk shapes to win, and is where this line should be re-measured before
 any further planner work.
+
+## Datapath re-measurement — MST/multi-trunk DOES win (measured)
+
+Re-measured on the workload class the machinery targets: a **column-aligned
+datapath** (`flow/datapath_multi_trunk.buda` — a source column fanning six 8-bit
+buses across 3 receiver columns × 5 rows). Here MST candidates are no longer
+uncompetitive — they are the *right* shape, and the planner selects them:
+
+| generation | selected topologies | abstract WL | NUTS overlaps |
+|---|---|---|---|
+| `generate_topologies` (plain) | 3× `TRUNK_V`, 3× `TRUNK_H+MST` | 18 191 | 3 |
+| `generate_topologies multi_trunk` | **4× `BITRUNK_HVH`**, 2× `TRUNK_H+MST` | **16 834** (−7.5 %) | **1** |
+
+So `multi_trunk` selects two-level BITRUNK_HVH trees for most buses and improves
+**both** wirelength (−7.5 %) and congestion (3 → 1 overlap), deterministically
+(3/3 runs identical). Guarded by `test_datapath_multi_trunk_qor.py` (`@mid`:
+multi_trunk selects ≥3 BITRUNK and is equal-or-better on WL AND overlaps).
+
+Two honest caveats from the size sweep:
+- The benefit is **workload-shape-sensitive**, not a blanket win: on a few
+  configs (`3×4×5`, `4×4×6`) plain and multi_trunk tie; on a heavily-congested
+  `2×6×6` multi_trunk trades +3 % WL for 40 → 30 overlaps. It helps where the
+  column structure is pronounced and the design is moderately congested.
+- The **step-4b flip still does not win a commit** even here — on the datapath's
+  residual overlap, ripup clears it with an index move (`topo 3→1`), not a flip.
+  The flip remains correct-and-competing infrastructure whose activation still
+  awaits a case where only a flip clears an overlap.
+
+**Bottom line for the line.** The generation-side MST/multi-trunk work (candidate
+shapes, edge identity, smart per-edge default, BITRUNK trees) has a real,
+measured QoR payoff — on datapaths. Part 1 (tail-tightening) stays inert
+(dead wire changes no selection), and step-4b's flip stays latent-but-correct.
+The productive next direction, if pursued, is more/better datapath coverage
+(demos + a small corpus), not further trunk-tail or flip work.
