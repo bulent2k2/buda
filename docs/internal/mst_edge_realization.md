@@ -173,7 +173,15 @@ actually contend.
    `Topology`), and record, per edge, its alternate realization (the other L, or a
    Z at a Hanan line). `MSTEdge` (or a parallel per-edge struct) gains the chosen
    orientation + the alternate's leg geometry. Without this, no per-edge flip is
-   representable (the core gap from B4).
+   representable (the core gap from B4). **Shipped** as `Segment.edge_id` (PR #168).
+   **Persistence prerequisite for step 4:** the BDB `topology_segment` path
+   (`TopoSegRow` / `add_topology_segment` / `topology_segments` / `load_pipeline`)
+   currently stores only x/y/layer/is_jog, so a candidate checkpointed to a BDB and
+   reloaded loses `edge_id` (comes back `-1`). Harmless while the field is inert,
+   but the flip needs it on resumed pipelines — so step 4's PR must add the
+   `topology_segment.edge_id` column (schema + INSERT/SELECT + `TopoSegRow` +
+   binding + `buda_cli` persist/reload) and a resume-then-flip round-trip test,
+   regenerating the `*.bdb.sql` fixtures (Codex #168 P2).
 
 2. **Smart generation default.** Instead of a single global `strategy`, pick each
    edge's L independently at emit time by a cheap local heuristic: layer-direction

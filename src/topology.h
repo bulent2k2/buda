@@ -63,6 +63,11 @@ struct Segment {
     // later stage identify all legs of one edge to flip its L/Z realization
     // in place without disturbing the rest of the tree.  Pure annotation until a
     // consumer exists (per-edge flip); carried through offset_topology.
+    // NOT YET PERSISTED: the BDB topology_segment path (TopoSegRow / load_pipeline)
+    // stores only x/y/layer/is_jog, so a candidate checkpointed to a BDB and
+    // reloaded comes back with edge_id == -1.  Harmless while inert; the per-edge
+    // flip (step 4, docs/internal/mst_edge_realization.md) is the consumer that
+    // makes it load-bearing, so that PR must add the column + round-trip test.
     int edge_id = -1;
 };
 // A busterm is a connection point on a block face.  Currently represented by
