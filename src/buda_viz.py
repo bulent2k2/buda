@@ -2198,7 +2198,6 @@ class BudaVisualizer:
             # For ref: old title had f"BUDA — Overlap: {msg}  (click row to cycle, All Overlaps to clear)"
             self.ax.set_title(f"BUDA — Overlap: {msg}", fontsize=13)
         elif bundle_id is not None:
-            solo_hint = "  [Solo ON]" if self.ui_state.solo else ""
             bname = self._bundle_name(bundle_id)
             nbits = self._bundle_bits(bundle_id)
 
@@ -2207,10 +2206,21 @@ class BudaVisualizer:
             # Get busterm count from the bundle metadata.
             nterms = wrapper.input.original_bundle.num_terminals
 
-            bits_str = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
+            # Segment count of the bundle's selected topology — handy when
+            # cycling bundles with `n` to gauge each topology's complexity.
+            cands = wrapper.input.candidates
+            sel   = wrapper.plan.selected_topology_index
+            nsegs = len(cands[sel].segments) if cands and 0 <= sel < len(cands) else 0
+
+            info = []
+            if nbits > 0:
+                info.append(f"{nbits} bits/{nterms} bterms")
+            info.append(f"{nsegs} segs")
+            info_str = f" ({', '.join(info)})"
             # For ref, old title had: f"(click again or click background to deselect)"
+            # and a trailing "  [Solo ON]" hint (dropped — the Solo button shows state).
             self.ax.set_title(
-                f"BUDA — B{bundle_id} {bname}{bits_str} selected{solo_hint}",
+                f"BUDA — B{bundle_id} {bname}{info_str} selected",
                 fontsize=13)
         else:
             self.ax.set_title(stat_title, fontsize=13)

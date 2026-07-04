@@ -167,6 +167,36 @@ def test_s_key_toggles_solo(monkeypatch):
     assert viz.ui_state.solo == before
 
 
+def test_selected_title_shows_segment_count_no_solo_hint(monkeypatch):
+    """Cycling bundles with `n` shows the selected topology's segment count in
+    the title (to gauge complexity), and no '[Solo ON]' hint even in Solo mode."""
+    import re as _re
+    import types
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+
+    viz._on_key(types.SimpleNamespace(key="n"))     # step to a bundle
+    bid = viz._highlighted
+    assert bid is not None
+    title = viz.ax.get_title()
+
+    # Segment count is present and matches the selected topology's segment count.
+    wrapper = next(w for w in viz.bundles
+                   if w.input.original_bundle.id == bid)
+    nsegs = len(wrapper.input.candidates[
+        wrapper.plan.selected_topology_index].segments)
+    m = _re.search(r"(\d+)\s+segs", title)
+    assert m, f"title should report a segment count: {title!r}"
+    assert int(m.group(1)) == nsegs, \
+        f"title segs {m.group(1)} != selected topology segs {nsegs}: {title!r}"
+    assert "Solo" not in title, f"'[Solo ON]' hint should be gone: {title!r}"
+
+    # Turning Solo ON must not reintroduce the hint.
+    viz._on_key(types.SimpleNamespace(key="s"))     # solo on
+    viz._on_key(types.SimpleNamespace(key="n"))     # re-render title
+    assert "Solo" not in viz.ax.get_title(), \
+        f"Solo mode must not add a title hint: {viz.ax.get_title()!r}"
+
+
 def test_arrow_keys_pan_the_view(monkeypatch):
     import types
     viz = _build_viz("dnuts1.buda", monkeypatch)
