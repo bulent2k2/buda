@@ -96,10 +96,12 @@ void annotate_topology(Topology& topo, const Floorplan& fp) {
     annotate_seg_conns(topo);
 }
 
-bool flip_mst_edge(Topology& topo, int edge_id, int h_layer, int v_layer) {
+bool flip_mst_edge(Topology& topo, int edge_id, int h_layer, int v_layer,
+                   const Floorplan& fp) {
+    if (edge_id < 0) return false;           // -1 = "not an MST-edge leg" sentinel
     // Collect this edge's leg slots.  Only a clean 2-leg diagonal L is flippable;
-    // a straight edge (1 leg), a shared-edge / corner realization, or an unknown
-    // id has no bend to move, so leave it untouched.
+    // a straight edge (1 leg), a shared-edge realization, or an unknown id has no
+    // bend to move, so leave it untouched.
     std::vector<int> legs;
     for (int i = 0; i < (int)topo.segments.size(); ++i)
         if (topo.segments[i].edge_id == edge_id) legs.push_back(i);
@@ -119,6 +121,19 @@ bool flip_mst_edge(Topology& topo, int edge_id, int h_layer, int v_layer) {
     // Rectangle (p1,p2) has two corners; the alternate bend is the opposite one.
     Point alt{ p1.x + p2.x - bend.x, p1.y + p2.y - bend.y };
     if (eq(alt, bend)) return false;         // collinear legs: no alternate
+
+    // Reject a flip that would route onto an obstacle: the corner_diagonal_L
+    // realization deliberately routed its two legs AROUND a shared block corner,
+    // so the opposite bend IS that corner.  More generally, an alternate bend that
+    // lands strictly inside a block, or exactly on a block corner, is not a valid
+    // routing vertex -- leave such an edge untouched.
+    for (const auto& [name, r] : fp.get_all_blocks()) {
+        (void)name;
+        bool inside = alt.x > r.x1 && alt.x < r.x2 && alt.y > r.y1 && alt.y < r.y2;
+        bool corner = (alt.x == r.x1 || alt.x == r.x2) &&
+                      (alt.y == r.y1 || alt.y == r.y2);
+        if (inside || corner) return false;
+    }
 
     // Rewrite in place: leg a = p1->alt, leg b = alt->p2, layer by direction.  The
     // two slots are preserved, so seg_busterms stays valid; the junction geometry

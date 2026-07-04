@@ -242,10 +242,11 @@ void bind_routing(py::module_& m) {
         annotate_seg_conns(topo);
     }, py::arg("topo"));
 
-    // Per-edge L/Z flip: swap one MST edge's bend to the opposite corner in place.
+    // Per-edge L/Z flip: swap one MST edge's bend to the opposite corner in place
+    // (floorplan-validated: rejects a bend onto a block interior/corner).
     m.def("flip_mst_edge", &flip_mst_edge,
           py::arg("topo"), py::arg("edge_id"),
-          py::arg("h_layer"), py::arg("v_layer"));
+          py::arg("h_layer"), py::arg("v_layer"), py::arg("fp"));
 
     // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables
