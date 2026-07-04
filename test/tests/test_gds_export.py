@@ -282,8 +282,9 @@ def test_orientation_round_trips(tmp_path):
 
 
 def test_rotate_comp_then_export_is_consistent(tmp_path):
-    # rotate_comp/flip_comp compose the orient token so a mutated instance also
-    # exports faithfully (bbox and orient stay consistent). (v12)
+    # rotate_comp/flip_comp compose the orient token for a CHILDLESS subtree
+    # (rows.size()==1) so a mutated instance exports faithfully (bbox and orient
+    # stay consistent). (v12)
     db = buda.BDB(str(tmp_path / "a.bdb"))
     db.set_die(200, 200)
     db.add_cell("blk", 20, 12)
@@ -298,3 +299,25 @@ def test_rotate_comp_then_export_is_consistent(tmp_path):
     c2 = [x for x in db2.all_components() if x.cell == "blk"][0]
     assert (c2.orient, c2.x1, c2.y1, c2.x2, c2.y2) == \
            (c.orient, c.x1, c.y1, c.x2, c.y2)
+
+
+def test_rotate_comp_with_children_does_not_compose_orient(tmp_path):
+    # A rotated block WITH descendants keeps orient='N': the loop already
+    # rewrote the children's absolute bboxes to carry the rotation, so setting
+    # the root orient too would make export re-apply it (a double transform on
+    # the reconstructed cell). Guard = rows.size()==1. (Codex #163 P2)
+    db = buda.BDB(str(tmp_path / "a.bdb"))
+    db.set_die(400, 400)
+    db.add_cell("blk", 40, 20)
+    db.add_cell("sub", 10, 6)
+    db.add_comp("i0", "blk", "", 0, 0, 40, 20, False)
+    db.add_comp("i0/c", "sub", "i0", 5, 5, 15, 11, True)
+    child_before = [c for c in db.all_components() if c.name == "i0/c"][0]
+    db.rotate_comp("i0", 90)
+    root = [c for c in db.all_components() if c.name == "i0"][0]
+    child = [c for c in db.all_components() if c.name == "i0/c"][0]
+    assert root.orient == "N"                       # composition skipped
+    # The child's absolute bbox WAS rigidly rotated (that carries the rotation);
+    # orient stays 'N', so export won't double-transform it.
+    assert (child.x1, child.y1) != (child_before.x1, child_before.y1)
+    assert child.orient == "N"

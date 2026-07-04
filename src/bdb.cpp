@@ -2136,6 +2136,18 @@ std::string orient_flip(const std::string& o, bool flip_x) {
     bool m; int a; orient_parse(o, m, a);
     return orient_format(!m, (flip_x ? 180 - a : -a));
 }
+std::string comp_orient(sqlite3* db, int id) {
+    Stmt q(db, "SELECT COALESCE(orient,'N') FROM component WHERE id=?");
+    sqlite3_bind_int(q, 1, id);
+    return (sqlite3_step(q) == SQLITE_ROW)
+        ? (const char*)sqlite3_column_text(q, 0) : std::string("N");
+}
+void set_comp_orient(sqlite3* db, int id, const std::string& o) {
+    Stmt u(db, "UPDATE component SET orient=? WHERE id=?");
+    sqlite3_bind_text(u, 1, o.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(u, 2, id);
+    sqlite3_step(u);
+}
 
 void gather_subtree(sqlite3* db, const std::string& name,
                     std::vector<BBoxRow>& rows) {
@@ -2196,19 +2208,14 @@ void BDB::flip_comp(const std::string& name, bool flip_x) {
         sqlite3_bind_int   (upd,5,d.id);
         sqlite3_step(upd);
     }
-    // Compose the flip onto the root's orientation (root bbox is unchanged,
-    // but its orientation relative to its parent flips).
-    {
-        Stmt qo(_db, "SELECT COALESCE(orient,'N') FROM component WHERE id=?");
-        sqlite3_bind_int(qo, 1, root.id);
-        std::string cur = (sqlite3_step(qo) == SQLITE_ROW)
-            ? (const char*)sqlite3_column_text(qo, 0) : "N";
-        std::string no = orient_flip(cur, flip_x);
-        Stmt uo(_db, "UPDATE component SET orient=? WHERE id=?");
-        sqlite3_bind_text(uo, 1, no.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(uo, 2, root.id);
-        sqlite3_step(uo);
-    }
+    // Compose the flip onto the root's orientation ONLY when the subtree has
+    // no descendants (a leaf or childless block). With descendants, the loop
+    // above already rewrote their absolute bboxes — GDS export reconstructs
+    // the cell from those and would re-apply the orient via the root SREF, so
+    // setting orient too would double-transform. A childless root has no such
+    // baked geometry, so orient faithfully carries the flip.
+    if (rows.size() == 1)
+        set_comp_orient(_db, root.id, orient_flip(comp_orient(_db, root.id), flip_x));
     compute_hpwl();
 }
 
@@ -2258,19 +2265,12 @@ void BDB::rotate_comp(const std::string& name, int degrees) {
         }
         do_upd(d.id, nx1, ny1, nx2, ny2);
     }
-    // Compose the rotation onto the root's orientation so bbox + orient stay
-    // consistent (export reconstructs the SREF from both).
-    {
-        Stmt qo(_db, "SELECT COALESCE(orient,'N') FROM component WHERE id=?");
-        sqlite3_bind_int(qo, 1, root.id);
-        std::string cur = (sqlite3_step(qo) == SQLITE_ROW)
-            ? (const char*)sqlite3_column_text(qo, 0) : "N";
-        std::string no = orient_rotate(cur, degrees);
-        Stmt uo(_db, "UPDATE component SET orient=? WHERE id=?");
-        sqlite3_bind_text(uo, 1, no.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(uo, 2, root.id);
-        sqlite3_step(uo);
-    }
+    // Compose the rotation onto the root's orientation ONLY for a childless
+    // subtree — see flip_comp for why (descendant rewrites already carry the
+    // rotation for a hierarchical block; setting orient too would make GDS
+    // export double-transform).
+    if (rows.size() == 1)
+        set_comp_orient(_db, root.id, orient_rotate(comp_orient(_db, root.id), degrees));
     compute_hpwl();
 }
 
