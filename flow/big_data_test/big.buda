@@ -3,6 +3,8 @@ source tc3a_flat_x10.buda
 run_bundler
 generate_topologies
 check_connectivity topo all
+# track level detail has no impact on QoR in this design. But takes 30seconds!
+# run_planner signal_tracks
 run_planner
 run_nuts
 check_connectivity nuts
