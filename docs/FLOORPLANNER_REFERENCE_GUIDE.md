@@ -76,7 +76,8 @@ Located along the top of the window.
 | **Open** | Open an existing `.bdb` file and load all placed components |
 | **New** | Create a new empty `.bdb` with the current die/grid settings |
 | **Import Verilog** | Parse a `.v`/`.sv` file, create a BDB, seed placeholder blocks |
-| **Write** | Save current engine positions to the open BDB |
+| **Write** | Save current engine positions to the open BDB; also re-serializes back to the source `*.bdb.sql` when the design was opened from one |
+| **Save As…** | Write the design to a chosen `*.bdb.sql` (diffable text, remembered as the Write target) or `*.bdb` (binary the session switches to) |
 | **Export Flow** | Write a `.buda` HBundle flow script for the current layout |
 | **Run Flow** | Write BDB, generate and execute the HBundle script, report result |
 
@@ -354,6 +355,8 @@ block is applied as a resize.
 |---|---|
 | `validate(state)` | Return list of `ValidationIssue` objects |
 | `write_bdb(state)` | Persist engine positions to `state.bdb_path` |
+| `save_sql(state, sql_path=None)` | Flush placements, then serialize the binary to a `*.bdb.sql`; defaults to `state.sql_source` (write-back), remembers a given path |
+| `save_bdb_as_binary(state, target)` | Save to a new binary BDB (clean dump→load); returns a fresh state re-locked on `target` |
 | `export_hbundle_script(state, path, depth)` | Write `.buda` script |
 | `run_hbundle_flow(state, depth)` | Write BDB + script, run `buda_cli.py`, return `CompletedProcess` |
 

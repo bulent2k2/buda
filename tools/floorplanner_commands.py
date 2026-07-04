@@ -243,6 +243,9 @@ class FloorplannerAppState:
     engine: object = field(default_factory=buda.FloorplannerEngine)
     bdb: object | None = None
     bdb_path: str = ""
+    # Diffable *.bdb.sql this design should write back to (empty = binary-only).
+    # Set when a *.bdb.sql is opened; Save re-serializes the working binary here.
+    sql_source: str = ""
     verilog_path: str = ""
     block_names: list[str] = field(default_factory=list)
     unplaced_names: list[str] = field(default_factory=list)
@@ -280,15 +283,23 @@ def new_state() -> FloorplannerAppState:
     return FloorplannerAppState()
 
 
-def load_bdb(path: str) -> FloorplannerAppState:
+def load_bdb(path: str, sql_source: str = "") -> FloorplannerAppState:
     state = new_state()
     state.bdb = buda.BDB(path)
     state.bdb_path = path
+    # `path` is the working binary (a temp materialization when opened from a
+    # *.bdb.sql); sql_source names the .sql to write back to on Save.
+    state.sql_source = os.path.abspath(sql_source) if sql_source else ""
 
-    fd = _try_acquire_write_lock(path)
+    # Single-writer lock: key on the WRITE-BACK SOURCE when one is set (the
+    # shared .sql), not the per-session throwaway temp binary — otherwise two
+    # `fp foo.bdb.sql` windows each lock a distinct temp, both stay writable,
+    # and their Write/Save silently clobber the same source .sql.
+    lock_key = state.sql_source or path
+    fd = _try_acquire_write_lock(lock_key)
     if fd is not None:
         state._lock_fd = fd
-        state._lock_path = _lock_path_for(path)
+        state._lock_path = _lock_path_for(lock_key)
         state.is_read_only = False
     else:
         state.is_read_only = True
@@ -822,6 +833,69 @@ def write_bdb(state: FloorplannerAppState):
     # Update cell_children so the template is consistent with the written
     # component positions for shared-cell hierarchies.
     _sync_cell_children(state)
+
+
+def save_sql(state: FloorplannerAppState, sql_path: str | None = None) -> str:
+    """Flush placements to the working binary, then serialize it to a diffable
+    ``*.bdb.sql`` (the same text form `tools/bdb_serialize.dump` produces and
+    the CLI's `open_bdb … writeback` writes).
+
+    The target defaults to ``state.sql_source`` — i.e. write back to the .sql the
+    design was opened from. Passing ``sql_path`` (Save As) writes there and
+    remembers it as the new source. Read-only sessions raise, exactly as
+    ``write_bdb``. Returns the absolute target path.
+    """
+    target = os.path.abspath(sql_path) if sql_path else state.sql_source
+    if not target:
+        raise RuntimeError(
+            "No .sql target — open a *.bdb.sql or use Save As to choose one.")
+    write_bdb(state)                       # commit placements to the binary
+    import bdb_serialize
+    bdb_serialize.dump(state.bdb_path, target)
+    state.sql_source = target
+    return target
+
+
+def save_bdb_as_binary(state: FloorplannerAppState, target: str) -> "FloorplannerAppState":
+    """Write the design to a new *binary* BDB at ``target`` and return a fresh
+    state the caller switches to (re-locked on ``target``).
+
+    Goes through a serialize round-trip (`dump` → `load`) rather than a raw file
+    copy so no committed-but-unwritten WAL data is missed and the result is a
+    clean, standalone binary. Not a .sql write-back — ``sql_source`` is cleared.
+    """
+    target = os.path.abspath(target)
+    # Save As onto the currently-open binary is just an in-place Write — no
+    # destructive reload (and no self-lock conflict).
+    if state.bdb_path and os.path.realpath(target) == os.path.realpath(state.bdb_path):
+        write_bdb(state)
+        return state
+    # Guard the target's single-writer lock BEFORE the destructive dump→load:
+    # never clobber a BDB another floorplanner session is editing. Hold it
+    # across the rewrite, then release so load_bdb below takes the real
+    # session lock.
+    guard_fd = _try_acquire_write_lock(target)
+    if guard_fd is None:
+        raise PermissionError(
+            "Save As target is open in another floorplanner session: " + target)
+    try:
+        write_bdb(state)                   # commit placements to the binary
+        import bdb_serialize
+        tmp_sql = target + ".saveas.tmp.sql"
+        bdb_serialize.dump(state.bdb_path, tmp_sql)
+        try:
+            bdb_serialize.load(tmp_sql, target)
+        finally:
+            if os.path.exists(tmp_sql):
+                os.unlink(tmp_sql)
+    finally:
+        try:
+            fcntl.flock(guard_fd, fcntl.LOCK_UN)
+            os.close(guard_fd)
+        except Exception:
+            pass
+    release_bdb_lock(state)
+    return load_bdb(target)
 
 
 def design_max_depth(state: FloorplannerAppState) -> int:

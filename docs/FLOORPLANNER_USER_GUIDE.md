@@ -297,7 +297,21 @@ Up to five issues are shown; the status bar reports the total count.
 
 ### Write to BDB
 
-Click **Write** to persist current block positions to the open BDB.
+Click **Write** to persist current block positions to the open BDB. If the
+design was opened from a diffable **`*.bdb.sql`** text file (via
+`fp foo.bdb.sql` or File→**Open**), **Write** also re-serializes it back to
+that `.sql` — so the checked-in text fixture reflects your edited placement.
+
+### Save As…
+
+Click **Save As…** to write the design to a chosen path:
+
+- a **`*.bdb.sql`** — the diffable text form (and it becomes the new **Write**
+  target), or
+- a **`*.bdb`** — a standalone binary the session switches to.
+
+Read-only sessions (a second Floorplanner holding the write lock) disable
+**Write** and **Save As…**.
 
 ### Export HBundle Flow Script
 
