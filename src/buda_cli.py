@@ -61,7 +61,8 @@ KNOWN_COMMANDS = frozenset({
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
     "import_def_lef", "import_gds", "import_verilog", "load_pipeline",
     "move_comp", "negotiate_congestion", "open_bdb", "refine_busterms",
-    "report_overhead", "resize_cell", "ripup_reroute", "rotate_comp", "run_bundler",
+    "report_overhead", "report_wirelength", "report_wl", "resize_cell",
+    "ripup_reroute", "rotate_comp", "run_bundler",
     "run_detailed_nuts", "run_hier_bundler", "run_nuts", "run_nuts_on_layer",
     "run_planner", "save_bdb", "select_topologies", "select_topology", "set_die",
     "set_feedthru",
@@ -1636,6 +1637,73 @@ class BudaSession:
         for name, lid in self._layer_name_map.items():
             names[lid] = name
         return names
+
+    @staticmethod
+    def _wirelength_by_bundle(segments):
+        """Sum routing-direction length |span_hi - span_lo| per bundle and per
+        layer over a placed-segment list (TrackSegment for abstract NUTS, or
+        NetSegment for detailed).  Unplaced abstract segments (a TrackSegment
+        with placed=False) contribute no wire; NetSegments are always placed
+        bit-wires.  Returns (per_bundle: {bid: WL}, per_layer: {layer: WL},
+        total: WL)."""
+        per_bundle, per_layer, total = {}, {}, 0.0
+        for s in segments:
+            if getattr(s, 'placed', True) is False:
+                continue
+            length = abs(s.span_hi - s.span_lo)
+            per_bundle[s.bundle_id] = per_bundle.get(s.bundle_id, 0.0) + length
+            per_layer[s.layer] = per_layer.get(s.layer, 0.0) + length
+            total += length
+        return per_bundle, per_layer, total
+
+    def _report_wirelength(self):
+        """Report routed wirelength per bundle + total, for comparing how a
+        change affects interconnect quality.  Prints (and thus logs, via the
+        command-capture wrapper) the ABSTRACT bus-level WL whenever run_nuts has
+        run — one length per placed bus segment, the metric topology decisions
+        move — and additionally the DETAILED bit-level WL (every bit-wire) once
+        run_detailed_nuts has run.  A per-layer breakdown shows metal
+        distribution (cheap LOW vs premium TOP)."""
+        if self.nuts_result is None:
+            print("[report_wirelength] no NUTS result — run run_nuts first.")
+            return
+        layer_names = self._make_layer_names()
+        bid_to_wrap = {w.input.original_bundle.id: w for w in self.bundles}
+
+        def bits(bid):
+            w = bid_to_wrap.get(bid)
+            return len(w.input.original_bundle.get_net_names()) if w else 0
+
+        def layer_line(per_layer):
+            return "  by layer: " + "  ".join(
+                f"{layer_names.get(l, 'L' + str(l))}={per_layer[l]:.0f}"
+                for l in sorted(per_layer)) if per_layer else "  by layer: (none)"
+
+        def emit(title, per_bundle, per_layer, total, unit_hdr):
+            print(f"[report_wirelength] {title}:")
+            print(f"  {'bundle':>8} {unit_hdr:>6} {'WL':>12}")
+            print(f"  {'-'*8} {'-'*6} {'-'*12}")
+            for bid in sorted(per_bundle):
+                print(f"  {bid:>8} {bits(bid):>6} {per_bundle[bid]:>12.0f}")
+            print(f"  {'-'*8} {'-'*6} {'-'*12}")
+            print(f"  {'TOTAL':>8} {'':>6} {total:>12.0f}")
+            print(layer_line(per_layer))
+
+        ab_b, ab_l, ab_t = self._wirelength_by_bundle(self.nuts_result.segments)
+        emit("Abstract bus-level wirelength (after run_nuts)",
+             ab_b, ab_l, ab_t, "bits")
+        # Final, greppable summary line (matches the terminal-headline markers).
+        print(f"[report_wirelength] total abstract WL = {ab_t:.0f} "
+              f"over {len(ab_b)} bundle(s)")
+
+        if self.detailed_result is not None:
+            de_b, de_l, de_t = self._wirelength_by_bundle(
+                self.detailed_result.net_segments)
+            n_wires = len(self.detailed_result.net_segments)
+            emit("Detailed bit-level wirelength (after run_detailed_nuts)",
+                 de_b, de_l, de_t, "bits")
+            print(f"[report_wirelength] total detailed WL = {de_t:.0f} "
+                  f"over {len(de_b)} bundle(s) / {n_wires} bit-wire(s)")
 
     def _write_nuts_log(self, layer_names=None, append=False, rerun_layer_name=None,
                         extra_lines: list[str] | None = None):
@@ -4363,6 +4431,12 @@ class BudaSession:
                   f"unit_pitch={pat.unit_pitch():.3f}, "
                   f"signal_density={pat.signal_density():.3f}, dilution={pat.dilution_factor():.3f}")
 
+        elif cmd == "report_wirelength" or cmd == "report_wl":
+            # Usage: report_wirelength   (alias: report_wl)
+            # Report routed wirelength per bundle + total (abstract after
+            # run_nuts, detailed too after run_detailed_nuts).  Full per-bundle
+            # table lands in the flow log; the terminal shows the total.
+            self._report_wirelength()
         elif cmd == "report_overhead":
             # Usage: report_overhead
             # For each layer, compare the overhead% set in def_layer against the

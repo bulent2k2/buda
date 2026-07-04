@@ -18,6 +18,7 @@ check_connectivity nuts
 # trial-and-error), then the rnr stage-a hill-climb finishes the residual:
 negotiate_congestion
 ripup_reroute
+report_wirelength
 run_detailed_nuts
 check_connectivity dnuts
 # improvement (3) (rnr stage b) to reduce number of bit seg opens — negotiate
@@ -26,4 +27,5 @@ check_connectivity dnuts
 negotiate_congestion
 ripup_reroute
 check_connectivity dnuts
+report_wirelength
 visualize
