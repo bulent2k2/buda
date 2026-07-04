@@ -1,0 +1,59 @@
+# Datapath demo — where the multi-trunk / MST machinery pays off.
+#
+# A source column on the left fans 8-bit buses across aligned receiver COLUMNS
+# (3 columns x 5 rows).  With `generate_topologies multi_trunk` the planner
+# selects two-level BITRUNK_HVH trees (a root H spine feeding V column-trunks)
+# for most buses, over plain trunks — LOWER wirelength AND fewer overlaps:
+#
+#   generate_topologies            (plain)  -> abstract WL 18191, 3 NUTS overlaps
+#   generate_topologies multi_trunk         -> abstract WL 16834, 1 NUTS overlap
+#                                              (4 of 6 buses pick BITRUNK_HVH)
+#
+# This is the workload class the MST / multi-trunk work targets — column/row
+# aligned datapaths — as opposed to the trunk-dominated tc3 flats, where trunks
+# are already WL-competitive and MST candidates lose (see
+# docs/internal/mst_edge_realization.md).  Drop the `multi_trunk` keyword below
+# to route the same design with plain trunks and compare.
+
+def_layer 6 M6 H TOP 50
+def_layer 7 M7 V TOP 50
+def_layer 4 M4 H 50
+def_layer 5 M5 V 50
+
+add_block S0 0 100 80 180
+add_block S1 0 220 80 300
+add_block S2 0 340 80 420
+add_block S3 0 460 80 540
+add_block S4 0 580 80 660
+add_block S5 0 700 80 780
+
+add_block D0_0 500 60 580 140
+add_block D0_1 500 240 580 320
+add_block D0_2 500 420 580 500
+add_block D0_3 500 600 580 680
+add_block D0_4 500 780 580 860
+add_block D1_0 850 60 930 140
+add_block D1_1 850 240 930 320
+add_block D1_2 850 420 930 500
+add_block D1_3 850 600 930 680
+add_block D1_4 850 780 930 860
+add_block D2_0 1200 60 1280 140
+add_block D2_1 1200 240 1280 320
+add_block D2_2 1200 420 1280 500
+add_block D2_3 1200 600 1280 680
+add_block D2_4 1200 780 1280 860
+
+add_bus bus0[8] S0.p D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p,D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p
+add_bus bus1[8] S1.p D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p,D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p
+add_bus bus2[8] S2.p D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p,D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p
+add_bus bus3[8] S3.p D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p,D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p
+add_bus bus4[8] S4.p D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p,D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p
+add_bus bus5[8] S5.p D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p,D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p
+
+run_bundler
+generate_topologies multi_trunk
+run_planner
+run_nuts
+ripup_reroute
+report_wirelength
+visualize
