@@ -925,3 +925,106 @@ def test_2pin_u_shape_clears_keepout_when_blocks_at_same_y_level():
         f"Expected at least one U_VHV candidate detour above/below keepout, "
         f"got types: {[c.type for c in cands]}"
     )
+
+
+# ── Collinear MST-relay merge (big.buda bundle 13 regression) ─────────────────
+
+def test_collinear_mst_relay_merges_into_passthrough():
+    """A pass-through relay entered by two collinear bus stubs (opposite faces,
+    SAME row/column) is wired by a SINGLE straight pass-through wire, not a jog.
+
+    Regression for the big.buda / tc3a_flat bundle-13 DetailedNUTS strand: when an
+    MST branch relays through a mid block by landing on its two opposite faces at
+    the same row, the two stubs are collinear and cannot be joined by a
+    perpendicular connector (ConnTopology infers only perpendicular junctions).
+    complete_relay_junctions used to bridge them with a trivial 2-unit jog, which
+    the planner offloaded to a zero-signal-track layer -> 32 bits unplaced at
+    DetailedNUTS.  The fix MERGES the two collinear stubs into one wire spanning
+    the block face-to-face (pass-through coverage, no busterm tap).
+
+    Geometry mirrors bundle 13 (blk_05 -> [blk_16, blk_13, blk_00, blk_09]): the
+    mid receiver blk_13 sits on the relay row; its stubs' far ends are pure
+    junctions (the trunk on one side, a bend to blk_09 on the other), so the merge
+    guard (both far endpoints off any block face) fires.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("blk_05", 3300, 3000, 3520, 7900)   # source (tall -> V trunk)
+    fp.add_block("blk_16", 2100, 3030, 2290, 3230)   # left receiver
+    fp.add_block("blk_13", 5850, 3510, 7050, 3710)   # MID relay (collinear row)
+    fp.add_block("blk_00", 3300, 7660, 3520, 7860)   # up the trunk
+    fp.add_block("blk_09", 7700, 5420, 7900, 5620)   # up-right (bend target)
+
+    gen = buda.TopologyGenerator(fp)
+    gen.set_layer_ids(6, 7)
+    cands = gen.generate_candidates("blk_05", ["blk_16", "blk_13", "blk_00", "blk_09"])
+
+    def spans_blk13(c):
+        # A single H segment crossing blk_13 from face (x=5850) to face (x=7050)
+        # at a row inside blk_13 -> the merged pass-through wire.
+        for s in c.segments:
+            if s.start.y != s.end.y:
+                continue
+            lo, hi = min(s.start.x, s.end.x), max(s.start.x, s.end.x)
+            if lo <= 5850 and hi >= 7050 and 3510 <= s.start.y <= 3710:
+                return True
+        return False
+
+    def has_trivial_jog(c):
+        # The old fallback's 2-unit bridge legs.  A legitimate stub is never this
+        # short (min-stub is far larger), so any (0, 6]-length segment is a jog.
+        return any(0 < abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y) <= 6
+                   for s in c.segments)
+
+    merged = [c for c in cands if "MST" in c.type and spans_blk13(c)]
+    assert merged, (
+        "expected at least one MST candidate to span blk_13 face-to-face with a "
+        f"single pass-through wire (the collinear-relay merge); got types "
+        f"{sorted({c.type for c in cands if 'MST' in c.type})}"
+    )
+    for c in merged:
+        assert not has_trivial_jog(c), (
+            f"{c.type} spans blk_13 but still carries a trivial jog "
+            "(collinear stubs were not merged)"
+        )
+        ct = buda.ConnTopology()
+        ct.build(c, fp)
+        res = buda.check_topo(ct, c, fp, 0)
+        assert not res.violations, (
+            f"{c.type} merged relay fails check_topo: "
+            f"{[str(v.kind).split('.')[-1] for v in res.violations]}"
+        )
+
+
+def test_feedthru_relay_not_merged_by_collinear_pass():
+    """The collinear-relay merge must NOT collapse a declared feedthru split.
+
+    A feedthru block keeps its two BUSTERM landings (the block bridges the split
+    via its own routing); merging them into a straight crossing would silently
+    turn an opt-in feedthru into a pass-through.  Complements the merge test above
+    by pinning the feedthru guard.
+    """
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100)
+    fp.add_block("mid", 300, 0, 400, 100)
+    fp.add_block("B", 600, 0, 700, 100)
+    fp.add_block("C", 300, 400, 400, 500)   # off-spine -> forces a +MST hybrid
+    fp.set_feedthru(True)                    # global opt-in
+
+    gen = buda.TopologyGenerator(fp)
+    gen.set_layer_ids(4, 5)
+    cands = gen.generate_candidates("A", ["mid", "B", "C"])
+
+    ft = [c for c in cands if "TRUNK_H" in c.type and "mid" in c.feedthru_blocks]
+    assert ft, "expected a TRUNK_H feedthru candidate through 'mid'"
+    for c in ft:
+        # A declared feedthru must NOT be crossed by one continuous wire spanning
+        # both faces (x=300..400) at the trunk row -- the split must survive.
+        crossing = [s for s in c.segments
+                    if s.start.y == s.end.y
+                    and min(s.start.x, s.end.x) <= 300
+                    and max(s.start.x, s.end.x) >= 400
+                    and 0 <= s.start.y <= 100]
+        assert not crossing, (
+            f"feedthru block 'mid' was collapsed into a straight crossing by "
+            f"{c.type} (merge should skip declared feedthru blocks)"
+        )

@@ -1127,6 +1127,7 @@ static void complete_relay_junctions(Topology& topo,
     //     perpendicular slides overlap, the jog shrinks to zero and they merge
     //     into one straight wire through the block.
     std::set<int> otc_handled;
+    std::set<int> to_erase;   // stubs merged away by the collinear-relay case below
     for (auto& [bi, pts] : incident) {
         if (pts.size() != 2 || all_land[bi].size() != 2) continue;  // clean 2-stub only
         const Inc& A = pts[0];
@@ -1170,7 +1171,38 @@ static void complete_relay_junctions(Topology& topo,
             { Segment& s = topo.segments[B.seg_idx]; ((B.ep == 0) ? s.start : s.end).y = yj; }
             emit(A.p.x, yj, B.p.x, yj, h_layer);
         } else {
-            handled = false;   // degenerate same-perp parallel: leave to chaining
+            // DEGENERATE COLLINEAR PARALLEL: both stubs share orientation AND
+            // perpendicular coordinate -- they enter opposite faces of the block on
+            // the SAME row (H stubs) or column (V stubs).  A perpendicular connector
+            // between them would be zero-length, so the branches above punt here.
+            // The block is spanned by ONE straight pass-through wire: MERGE the two
+            // collinear stubs into a single segment (extend A across the block to B's
+            // far endpoint, then drop B).  Two collinear segments cannot be
+            // wire-joined by ConnTopology, so the old chaining fallback bridged them
+            // with a trivial 2-unit jog that the planner offloaded to a zero-track
+            // layer -- a guaranteed detailed-NUTS open (big.buda bundle 13).  Guard:
+            // only when BOTH far endpoints are pure junctions (not block-face
+            // landings), so no other block's coverage depends on the dropped stub;
+            // otherwise leave it to the general chaining.
+            Segment& sA = topo.segments[A.seg_idx];
+            Segment& sB = topo.segments[B.seg_idx];
+            const Point A_far = (A.ep == 0) ? sA.end : sA.start;
+            const Point B_far = (B.ep == 0) ? sB.end : sB.start;
+            const bool is_feedthru =
+                std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
+                          blocks[bi].block_name) != topo.feedthru_blocks.end();
+            if (is_feedthru || on_other_boundary(A_far) || on_other_boundary(B_far)) {
+                // A declared feedthru MUST keep its two BUSTERM landings (the block
+                // bridges the split via its own routing, not a straight crossing); a
+                // far endpoint that taps another block might strand it.  Either way,
+                // leave this relay to the general chaining below.
+                handled = false;
+            } else {
+                // Extend A's landing endpoint across the block to B's far endpoint so
+                // A spans [A_far .. B_far] as one straight wire through the block.
+                ((A.ep == 0) ? sA.start : sA.end) = B_far;
+                to_erase.insert(B.seg_idx);
+            }
         }
         if (!handled) continue;
         // Drop the block's busterm on both stubs: it is covered by the crossing
@@ -1230,6 +1262,17 @@ static void complete_relay_junctions(Topology& topo,
             if (k == best) slot = blocks[bi];    // the single busterm tap
             else           slot = std::nullopt;  // demote to an internal SEG junction
         }
+    }
+
+    // Erase stubs merged away by the degenerate-collinear relay case above.
+    // Deferred to here so the incident/all_land maps (keyed by the ORIGINAL segment
+    // indices) stayed valid through chaining and tap assignment.  Erase descending
+    // so lower indices remain stable; erase_segment reindexes seg_busterms/seg_conns.
+    // Decrement n_seg per erased ORIGINAL so the connector boundary below (segments
+    // >= n_seg are appended connectors) stays correct after the shift.
+    for (auto it = to_erase.rbegin(); it != to_erase.rend(); ++it) {
+        erase_segment(topo, *it);
+        if (*it < n_seg) --n_seg;
     }
 
     // Every connector segment appended above is internal wire: annotate both its

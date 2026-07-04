@@ -99,11 +99,18 @@ def test_tc3a_flat_no_perp_range_inversion():
 
     The regression is a *topo-stage* issue, so the CPU-invariant guards are that
     the flow completes (rc == 0) and topo-level connectivity verifies clean.
-    tc3a is a packing-limit stress design — even the reference host leaves ~32
-    bits unplaced at DetailedNUTS, and NUTS-stage cleanliness is FP/CPU-sensitive
-    under -march=native (a bundle can tip into a NUTS open on some hosts), so we
-    don't require every stage to be clean.  See test_planner_signal_tracks /
-    test_ripup_reroute for the same -ffp-contract=off portability story."""
+    NUTS-stage cleanliness is FP/CPU-sensitive under -march=native (a bundle can
+    tip into a NUTS open on some hosts), so we don't require every stage to be
+    clean.  See test_planner_signal_tracks / test_ripup_reroute for the same
+    -ffp-contract=off portability story.
+
+    DetailedNUTS unplaced == 0 IS asserted, though: this design used to strand ~32
+    bits at DetailedNUTS because a collinear MST relay (two bus stubs entering
+    opposite faces of a pass-through block on the SAME row) was bridged by a
+    trivial 2-unit jog that the planner offloaded to a zero-signal-track layer.
+    complete_relay_junctions now MERGES such collinear stubs into one straight
+    pass-through wire (topology-stage, deterministic — no FP), so the strand is
+    gone on every host."""
     out, rc = run_script("big_data_test/tc3a_flat.buda")
     assert rc == 0, f"tc3a_flat aborted (rc={rc}) — perp-range inversion?\n{out[-3000:]}"
     # Anchor to the TOPO-stage check section specifically — a bare
@@ -116,6 +123,12 @@ def test_tc3a_flat_no_perp_range_inversion():
     assert topo, f"topo-stage connectivity section not found\n{out[-2000:]}"
     assert "Success: no opens found." in topo.group(1), \
         f"topo-stage connectivity not clean (perp-range inversion?):\n{topo.group(1)}"
+    # The collinear-relay merge closes the DetailedNUTS strand deterministically.
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
+    assert dm, f"DetailedNUTS summary not found\n{out[-2000:]}"
+    assert int(dm.group(2)) == 0, \
+        f"expected 0 unplaced after collinear-relay merge, got {dm.group(2)}"
 
 
 def test_pinless_buses_stay_separate():
