@@ -328,6 +328,54 @@ def test_non_mst_candidates_have_no_edge_tags():
             f"{c.type}: non-MST candidate has edge-tagged segment(s)"
 
 
+# ── Smart per-edge default: dodge a keepout-blocked leg (step 2) ─────────────
+
+def _mst_hv(cands):
+    for c in cands:
+        if c.type.split("@")[0] == "MST_HV":
+            return c
+    return None
+
+
+def _seg_set(c):
+    return {(s.start.x, s.start.y, s.end.x, s.end.y) for s in c.segments}
+
+
+def test_smart_default_flips_blocked_edge_to_clear_L():
+    """When the default (H-first) L of an MST edge is keepout-blocked on all H
+    layers, the smart per-edge default realizes that edge with the alternate
+    (V-first) L instead, so no H leg still crosses the blockage — while an
+    unblocked run keeps the default orientation."""
+    # Baseline: no keepout — record MST_HV geometry (default orientation).
+    # (Hold fp in a named var: TopologyGenerator keeps a reference to it, so a
+    # temporary Floorplan would be GC'd out from under generate_candidates.)
+    fp0 = _diag_4block_fp()
+    base = _mst_hv(_make_gen(fp0).generate_candidates("A", ["B", "C", "D"]))
+    assert base is not None, "expected an MST_HV candidate"
+    # The A->B edge's default H-first H-leg runs at y≈A-face across x∈[100,300].
+    # Block it on the H layer (M4) so the smart default must flip that edge.
+    fp = _diag_4block_fp()
+    fp.add_keepout_zone(110, 40, 290, 120, [4])   # covers the H-first H-leg band
+    kept = _mst_hv(_make_gen(fp).generate_candidates("A", ["B", "C", "D"]))
+    assert kept is not None
+
+    # The blockage must actually change the realization (non-vacuous).
+    assert _seg_set(base) != _seg_set(kept), \
+        "keepout on the default L-leg should flip an edge's orientation"
+
+    # After flipping, no H leg (layer M4) may still run through the keepout band.
+    kx1, ky1, kx2, ky2 = 110, 40, 290, 120
+    for s in kept.segments:
+        is_h = (s.start.y == s.end.y)
+        if is_h and s.layer_hint == 4:
+            y = s.start.y
+            x1, x2 = sorted((s.start.x, s.end.x))
+            crosses = (ky1 <= y <= ky2) and not (x2 < kx1 or x1 > kx2)
+            assert not crosses, \
+                f"H leg still crosses keepout after smart flip: " \
+                f"{(s.start.x, s.start.y, s.end.x, s.end.y)}"
+
+
 def test_trunk_mst_has_more_segments_than_trunk():
     """TRUNK+MST has more segments than its corresponding plain TRUNK."""
     fp = buda.Floorplan()

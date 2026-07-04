@@ -366,5 +366,13 @@ private:
     void add_multi_trunk_candidates(const std::vector<Point>& pins, const std::vector<Busterm>& blocks, std::vector<Topology>& results);
     // Keepout helpers (used by generate_2pin and generate_npin)
     bool segment_blocked_on_all_layers(const Segment& seg) const;
+    // Smart per-edge MST realization: an axis-diagonal edge p1->p2 has two L's
+    // (H-leg first vs V-leg first) of IDENTICAL Manhattan length, so the choice is
+    // a routability decision, not a wirelength one.  Return the H-first flag to
+    // use: keep `default_h_first` unless one of its legs is fully keepout-blocked
+    // while the alternate is clear (then flip).  Both blocked / both clear -> keep
+    // the default (preserves MST_HV/MST_VH candidate diversity).
+    bool choose_edge_h_first(const Point& p1, const Point& p2,
+                             bool default_h_first) const;
 };
 }
