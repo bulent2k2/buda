@@ -949,6 +949,24 @@ static std::string normalize_def_name(const std::string& s) {
     return out;
 }
 
+// Map a DEF/LEF orientation token to BDB's component.orient token and whether
+// the placed bbox dims swap vs the LEF SIZE. BDB's orient convention is
+// (mirror-about-X-first, CCW angle); DEF's pure rotations N/W/S/E coincide,
+// but DEF's flip tokens mirror about the Y axis (FN = MY), so they permute
+// under BDB's mirror-about-X form: DEF FN<->BDB FS, DEF FS<->BDB FN,
+// DEF FE<->BDB FW, DEF FW<->BDB FE. swap_wh is set for the 90/270 rotations.
+static std::pair<std::string,bool> def_orient_to_bdb(const std::string& o) {
+    if (o == "N")  return {"N",  false};
+    if (o == "S")  return {"S",  false};
+    if (o == "W")  return {"W",  true};
+    if (o == "E")  return {"E",  true};
+    if (o == "FN") return {"FS", false};   // DEF FN (MY) == BDB FS (mirrorX,180)
+    if (o == "FS") return {"FN", false};   // DEF FS (MX) == BDB FN (mirrorX,0)
+    if (o == "FE") return {"FW", true};    // DEF FE == BDB FW (mirrorX,90)
+    if (o == "FW") return {"FE", true};    // DEF FW == BDB FE (mirrorX,270)
+    return {"N", false};                   // unknown -> identity
+}
+
 static std::vector<std::string> split_ws(const std::string& s) {
     std::istringstream ss(s);
     return {std::istream_iterator<std::string>(ss), {}};
@@ -1091,8 +1109,8 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
     State state = State::IDLE;
 
     Stmt s_comp(_db,
-        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf)"
-        " VALUES(?,?,0,?,?,?,?,1)");
+        "INSERT OR IGNORE INTO component(name,cell,depth,x1,y1,x2,y2,is_leaf,orient)"
+        " VALUES(?,?,0,?,?,?,?,1,?)");
     Stmt s_net (_db, "INSERT OR IGNORE INTO net(name) VALUES(?)");
     Stmt s_pin (_db,
         "INSERT OR IGNORE INTO pin(net_id,comp_id,pin_name,dir,px,py)"
@@ -1189,12 +1207,21 @@ void BDB::import_def_lef(const std::string& def_path, const std::string& lef_pat
             double w=0.5, h=0.5;
             auto cs = lef_sizes.find(cell);
             if (cs != lef_sizes.end()) { w=cs->second.w; h=cs->second.h; }
+            // Orientation: record the BDB token and swap the placed bbox dims
+            // for 90/270 rotations (lower-left kept at the DEF placement point,
+            // the same convention as rotate_comp). Strip a trailing ';' in case
+            // the token abuts it (no space before the statement terminator).
+            std::string otok = m[5];
+            if (!otok.empty() && otok.back() == ';') otok.pop_back();
+            auto [orient, swap_wh] = def_orient_to_bdb(otok);
+            if (swap_wh) std::swap(w, h);
             sqlite3_bind_text  (s_comp,1,inst.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_bind_text  (s_comp,2,cell.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_bind_double(s_comp,3,x1);
             sqlite3_bind_double(s_comp,4,y1);
             sqlite3_bind_double(s_comp,5,x1+w);
             sqlite3_bind_double(s_comp,6,y1+h);
+            sqlite3_bind_text  (s_comp,7,orient.c_str(),-1,SQLITE_TRANSIENT);
             sqlite3_step(s_comp); sqlite3_reset(s_comp);
         }
 

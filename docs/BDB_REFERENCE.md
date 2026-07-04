@@ -1378,15 +1378,20 @@ ignored. The LEF supplies cell *sizes* and *pin offsets/directions* only.
 |---|---|
 | `UNITS DISTANCE MICRONS <n> ;` | integer→µm divisor (`units()`); everything stored as µm |
 | `DIEAREA ( 0 0 ) ( x y ) ;` | `die_w` / `die_h` |
-| `- <inst> <cell> + PLACED\|FIXED ( x y ) <orient>` | depth-0 leaf `component`; bbox = DEF origin + LEF `SIZE` (fallback `0.5×0.5` if the cell is missing from the LEF) |
+| `- <inst> <cell> + PLACED\|FIXED ( x y ) <orient>` | depth-0 leaf `component`; bbox = DEF origin + LEF `SIZE` (fallback `0.5×0.5` if the cell is missing from the LEF); `<orient>` recorded in `component.orient` (dims swapped for 90/270) |
 | `- <net> … ( <inst> <pin> ) …` | `net` + `net_props` row, and one `pin` row per connection with absolute position + direction resolved from the LEF |
 
 DEF name escaping (`\[`, `\]`) is stripped so instance names match the
-Verilog-elaborated paths. Component **orientation is parsed but only the
-origin is used** — bounding boxes are axis-aligned `SIZE` boxes, not rotated
-geometry. `import_def_lef` **clears** the `pin`/`net_props`/`net`/`component`/
-`cell` tables first: it is a fresh load, and the produced components are all
-depth-0 with no parent until Verilog overlays the hierarchy.
+Verilog-elaborated paths. Component **orientation is recorded** in
+`component.orient` (v12): the DEF token maps to BDB's orient convention (DEF's
+pure rotations N/W/S/E coincide; the flip tokens permute because DEF mirrors
+about the Y axis while BDB mirrors about X — DEF `FN`↔BDB `FS`, `FS`↔`FN`,
+`FE`↔`FW`, `FW`↔`FE`) and the placed bbox dims swap for the 90/270
+orientations. Bounding boxes are still axis-aligned (the box's extent, not
+rotated interior geometry), so the placement round-trips through GDS export.
+`import_def_lef` **clears** the `pin`/`net_props`/`net`/`component`/`cell`
+tables first: it is a fresh load, and the produced components are all depth-0
+with no parent until Verilog overlays the hierarchy.
 
 **Verilog (`import_verilog`)** — structural netlist elaboration:
 
