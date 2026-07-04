@@ -87,7 +87,7 @@ def generate_realistic_large_chip():
     lines.append("run_nuts 1.0")
     lines.append("visualize")
 
-    out_path = "buda_system_v2/flow/realistic_large_chip.buda"
+    out_path = "buda_system_v2/demo/realistic_large_chip.buda"
     with open(out_path, "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"Generated {out_path} with {len(blocks)} blocks.")

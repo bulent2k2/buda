@@ -46,7 +46,7 @@ def generate_large_fanout_buda():
     content.append("run_nuts 1.0")
     content.append("visualize")
     
-    with open("buda_system_v2/flow/large_fanout.buda", "w") as f:
+    with open("buda_system_v2/demo/large_fanout.buda", "w") as f:
         f.write("\n".join(content))
 
 if __name__ == "__main__":

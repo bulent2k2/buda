@@ -404,7 +404,7 @@ Default filters: --min-fanout 5, --max-fanout 256, --min-hpwl 20 µm, --src-marg
 
 DEF→BUDA end-to-end pipeline — tools/def_cluster.py --bipartite --grid N --high-fanout --out
 ====
-Complete .buda scripts are now generated automatically and stored in flow/ispd19_test*.buda.
+Complete .buda scripts are now generated automatically and stored in demo/ispd19_test*.buda.
 Command: python3 def_cluster.py <DEF> <LEF> --bipartite --grid 10 --min 5 --high-fanout --min-fanout 5 --min-hpwl 20 --out <file>
 
 Script structure:
