@@ -130,6 +130,19 @@ _SUMMARY_MARKERS = [re.compile(p, re.I) for p in (
 _PASSTHROUGH_CMDS = frozenset({"source", "visualize", "visualize_topologies"})
 
 
+def _strip_inline_comment(line):
+    """Strip a `#` comment from a script line: everything from the first `#`
+    that begins a token (start of line, or preceded by whitespace) to the end
+    of the line is removed. This lets a command be commented out partially —
+    `run_bundler # strict` runs `run_bundler`, `def_layer … 0.0 # note` drops
+    the note. A `#` embedded in a token (no preceding whitespace, e.g. a path
+    fragment) is left intact so it can't silently swallow real arguments."""
+    for i, ch in enumerate(line):
+        if ch == '#' and (i == 0 or line[i - 1].isspace()):
+            return line[:i]
+    return line
+
+
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).
 
@@ -3452,8 +3465,8 @@ class BudaSession:
         this wrapper is what the CLI flow drives so the terminal is not flooded
         with the same lines the log already captures.
         """
-        stripped = cmd_line.strip()
-        if not stripped or stripped.startswith('#'):
+        stripped = _strip_inline_comment(cmd_line).strip()
+        if not stripped:
             return
         cmd = stripped.split()[0].lower()
 
@@ -3567,8 +3580,8 @@ class BudaSession:
             self._flow_log.flush()
 
     def do_command(self, cmd_line):
-        parts = cmd_line.strip().split()
-        if not parts or parts[0].startswith('#'): return
+        parts = _strip_inline_comment(cmd_line).strip().split()
+        if not parts: return
         cmd = parts[0].lower()
         args = parts[1:]
 
