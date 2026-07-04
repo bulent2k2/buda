@@ -81,11 +81,24 @@ explicitly out of scope for v1.
    violations with a fully clean NUTS.  Tests:
    `test_ripup_reroute.py::test_negotiate_*` (canned overlap re-routes by
    cost with changed selections; big2 negotiate+ripup → 0; no-op when clean).
-   **Still deferred for v2:** DNUTS-open injection (map bit-level opens to
-   signal-track shortfall on bands — stage-b negotiation), and moving the
-   victim-rip-up stage of the ladder into `replan_bundle` so a single
-   negotiation step can also displace a third-party blocker the way
-   `optimize_topologies`' internal rip-up does.
+   **v2 SHIPPED too:** (a) *DNUTS-open injection* — `negotiate_congestion`
+   auto-detects stage b (after `run_detailed_nuts`): each open segment's whole
+   placed window is injected, scaled by the missing-bit fraction (an open marks
+   a band whose REAL signal-track supply fell short of what the track-blind
+   width model promised), metric = lexicographic (opens, overlaps).  Validated
+   deterministically on the item-5 canned fixture (8→0 opens in ONE cost-driven
+   iteration — the injection teaches the width model about the dead band) and
+   on the hier repro (stage-b 88→6 before the ripup finisher).
+   (b) *Ladder victim rip-up in the replan* — `replan_bundle_ripup`: when the
+   target has no overflow-free candidate under committed+injected demand, rip
+   up the committed bundle holding the most demand on the contended bands
+   (`plan_band_overlap` ranking), replan the pair, accept only if both end up
+   overflow-free — the `optimize_topologies` stage-2 dance in a single
+   negotiation step.  negotiate applies both returned assignments; ripup
+   TRIALS keep plain `replan_bundle` (a trial must not move others).
+   Deepened the hier repro's negotiation: stage-a 22→5 (was 22→8), stage-b
+   88→6 (was 64→14); big2 with stage-a negotiation is fully clean end-to-end
+   (0 opens / 0 overlaps).
 
 2. **Planner capacity-model fix (count signal tracks).** The deeper root cause —
    the planner's band model is layout-width based and reports `overflow=0` for
@@ -109,17 +122,23 @@ explicitly out of scope for v1.
    congestion relief. Validated on `flow/hbundles/06_multipin_stress.buda`
    (stage b 8→0, stage a 2→1) and `01_pipeline_hier.buda` (clean no-op).
 
-4. **"Only-try-relevant-candidates" speedup.** v1 trials every alternate
-   candidate (capped at `_RR_MAX_CANDIDATES_PER_BUNDLE`), each a full pipeline
-   re-run — O(candidates × contenders × iters). A filter that only trials
-   candidates which move the contended segment off the congested layer/band would
-   prune most trials. *Where to start:* `_rr_contenders` / `_rr_trial` in
-   `src/buda_cli.py`; use the overlap's `layer`/`perp` to pre-filter candidates.
+4. **"Only-try-relevant-candidates" speedup. — ✅ RESOLVED (as relevance
+   ORDERING).** `_rr_candidate_order` scans a contender's alternates with the
+   candidates whose same-orientation segments sit FARTHEST from the bundle's
+   measured contention sites (overlap rects / open windows) first — the
+   likeliest fixes, so the first-improving scan usually stops after 1-2 trials
+   (hier stage-b finisher: 6 moves → 3 to the same 0-open endpoint).
+   Deliberately a pure REORDERING rather than the filter originally sketched:
+   same candidate set and cap, so no reachable fix can be pruned away — and
+   the residual cost is the terminal no-improvement sweep, which a filter
+   could cut only by risking exactly that.  With negotiation now clearing the
+   bulk before ripup runs, the remaining sweep is small.
 
-5. **Tiny synthetic stage-b (DNUTS-open) canned fixture.** Stage b is currently
-   covered only by the big2 `@mid` integration test (60→0); a deterministic tiny
-   floorplan that forces a DNUTS open (insufficient signal tracks in a shared
-   band via `def_track_pattern`) would give a fast-tier unit test. The canned
-   fixture proved hard to make deterministic for stage b in v1. *Where to start:*
-   `test/tests/test_ripup_reroute.py` `_build_session`; model the track-pattern /
-   unplaced setup on `test/tests/test_detailed_nuts.py`.
+5. **Tiny synthetic stage-b (DNUTS-open) canned fixture. — ✅ RESOLVED.**
+   `_build_dnuts_open_session` (`test/tests/test_ripup_reroute.py`): an
+   all-POWER `add_grid_override` corridor kills M4's signal tracks exactly
+   under the pinned `L_HV` trunk's Hanan window, so DetailedNUTS
+   deterministically opens all 8 bits (pattern arithmetic, no packing ties —
+   CPU-invariant) while the alternate `L_VH` trunk runs through healthy
+   pattern.  Fast-tier tests cover the fixture itself, stage-b ripup clearing
+   it (one trial), and stage-b negotiation clearing it by pure cost.

@@ -442,3 +442,87 @@ def test_negotiate_clears_stale_seg_layer_pins():
     for w in s.bundles:                        # both sides were re-planned:
         assert list(w.input.pinned_seg_layers) == [], \
             "stale per-segment layer pin survived negotiation"
+
+
+# ---- item 5: deterministic tiny stage-b (DNUTS-open) canned fixture ---------
+
+def _build_dnuts_open_session():
+    """Deterministic stage-b fixture (wishlist-ripup item 5): an all-POWER
+    add_grid_override kills M4's signal tracks exactly under the pinned L_HV
+    trunk's Hanan window (x[600,2600] y[900,1550]), so DetailedNUTS finds 0
+    tracks and all 8 bits open — while the alternate L_VH's trunk (y>=1600)
+    runs through healthy pattern.  The planner is width-based here (no
+    signal_tracks mode), so it CANNOT see the dead corridor — precisely the
+    Gap-A blindness ripup/negotiation exist to repair.  Fast tier: no big2."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = [
+        "def_layer 4 M4 H TOP 50",
+        "def_layer 5 M5 V TOP 50",
+        "def_track_pattern 4 0 SIGNAL 1 4",
+        "def_track_pattern 5 0 SIGNAL 1 4",
+        "add_grid_override 4 600 900 2600 1550 0 POWER 2 3",
+        "add_block D1 0 1000 200 1400",
+        "add_block R 2400 1600 2600 2000",
+        "add_bus a[8] D1.p R.p",
+        "run_bundler", "generate_topologies",
+        "select_topology 1 1",                 # pin L_HV through the dead corridor
+        "run_planner", "run_nuts", "run_detailed_nuts",
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    return s
+
+
+def test_canned_stage_b_open_is_deterministic():
+    """The fixture itself: 8 bits open (0 signal tracks in the dead window),
+    zero NUTS overlaps — a pure stage-b case, CPU-invariant by construction
+    (pattern arithmetic, no packing ties)."""
+    s = _build_dnuts_open_session()
+    assert s.detailed_result.num_unplaced == 8
+    assert s.nuts_result.num_overlaps == 0
+
+
+def test_canned_stage_b_ripup_clears_open():
+    """Stage-b ripup on the canned fixture: one alternate-candidate trial
+    (L_VH, healthy tracks) clears all 8 opens — fast-tier coverage of the
+    stage-b loop that previously only big2 (@mid) exercised."""
+    s = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute")
+    assert s.detailed_result.num_unplaced == 0
+    assert s.nuts_result.num_overlaps == 0
+
+
+def test_canned_stage_b_negotiate_clears_open():
+    """Stage-b negotiation on the canned fixture (item 1 v2a): injecting the
+    open segment's window teaches the width-blind planner about the dead band,
+    and ONE cost-driven iteration re-routes the bundle — no per-candidate
+    trials.  The deterministic counterpart of the big2/hier measurements."""
+    s = _build_dnuts_open_session()
+    assert s.detailed_result.num_unplaced == 8
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    out = buf.getvalue()
+    assert s.detailed_result.num_unplaced == 0, out
+    assert s.nuts_result.num_overlaps == 0, out
+    assert "stage b" in out, out
+
+
+def test_rerun_nuts_invalidates_stale_detailed_result():
+    """Re-running run_nuts after a detailed solve must drop the (now stale)
+    detailed result, so stage detection (ripup_reroute / negotiate_congestion)
+    returns to stage a instead of negotiating against a detailed route of the
+    PREVIOUS abstract solve (Codex review, PR #161)."""
+    s = _build_dnuts_open_session()
+    assert s.detailed_result is not None
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("run_nuts")               # fresh abstract solve
+    assert s.detailed_result is None, \
+        "stale detailed result survived a re-run run_nuts"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("negotiate_congestion")
+    assert "stage a" in buf.getvalue()         # back to abstract negotiation

@@ -179,6 +179,16 @@ public:
     // callers fall back to a full replan.
     std::optional<BundleAssignment> replan_bundle(
             std::vector<BundleWrapper>& bundles, int target_bundle_id);
+    // replan_bundle WITH the ladder's victim rip-up stage (wishlist-ripup item
+    // 1 v2b): if the target has no overflow-free candidate, rip up the
+    // committed bundle holding the most demand on the contended bands and
+    // replan the pair (accepted only if both end up overflow-free).  Returns
+    // the target's assignment first, then the moved victim's (if any); empty =
+    // unplannable.  Used by negotiate_congestion, whose acceptance guard owns
+    // the outer safety; ripup TRIALS keep plain replan_bundle (a trial must
+    // not move other bundles).
+    std::vector<BundleAssignment> replan_bundle_ripup(
+            std::vector<BundleWrapper>& bundles, int target_bundle_id);
     // Measured-congestion feedback (negotiate_congestion, wishlist-ripup item
     // 1): map a REAL NUTS overlap rectangle back onto the planner's bands and
     // charge it as extra demand, so the next replan_bundle prices the actual
@@ -200,6 +210,12 @@ private:
     // on top of the recharged committed assignments in replan_bundle.
     std::vector<std::tuple<int, int, double>> injected_;
     void apply_injected_(double sign);
+    // Shared by replan_bundle / replan_bundle_ripup: reset band usage and
+    // recharge every committed assignment except `exclude`, then re-apply
+    // injected measured-congestion demand.
+    void recharge_committed_(const std::vector<BundleWrapper>& bundles,
+                             const BundleWrapper* exclude);
+
     void rebuild_cuts_();
     // Overflow congestion cost: kCong * max(0, (usage+eff-cap)/cap).  Zero below capacity.
     // perp_pos_override: if != INT_MIN, replaces seg.start.x/y for the perpendicular band
@@ -268,6 +284,10 @@ private:
     // Used to rank rip-up victims by how much relief ripping them offers.
     double plan_band_overlap(const BundleWrapper& bw, const PlanResult& plan,
                              const std::set<std::pair<int,int>>& contended) const;
+    // Synthetic committed-assignment PlanResult / chargeability check, shared
+    // by recharge_committed_ and the ripup victim ranking.
+    static PlanResult fixed_plan_of_(const BundleWrapper& bw);
+    static bool has_committed_plan_(const BundleWrapper& bw);
     // Park (sign=+1) or release (sign=-1) the bundle's reserved demand as
     // virtual usage on TOP-layer bands inside its reservation region.
     void apply_reservation(const BundleWrapper& bw, double sign);

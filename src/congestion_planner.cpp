@@ -1111,6 +1111,39 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     return assignments;
 }
 
+// Synthetic PlanResult for a wrapper's COMMITTED assignment — the form
+// commit_plan/plan_band_overlap consume for charging/ranking without scoring.
+CongestionPlanner::PlanResult CongestionPlanner::fixed_plan_of_(const BundleWrapper& bw) {
+    PlanResult fixed;
+    fixed.found      = true;
+    fixed.best_topo  = bw.plan.selected_topology_index;
+    fixed.seg_layers = bw.plan.seg_layers;
+    fixed.seg_perp   = bw.plan.seg_perp;
+    return fixed;
+}
+
+// True when the wrapper carries a committed, chargeable assignment.
+bool CongestionPlanner::has_committed_plan_(const BundleWrapper& bw) {
+    const int sel = bw.plan.selected_topology_index;
+    return sel >= 0 && sel < (int)bw.input.candidates.size() &&
+           !bw.plan.seg_layers.empty();
+}
+
+void CongestionPlanner::recharge_committed_(
+        const std::vector<BundleWrapper>& bundles, const BundleWrapper* exclude) {
+    // Rebuild band usage from every OTHER bundle's committed assignment —
+    // charging only, no scoring.  This is what makes a ripup/negotiation step
+    // O(one bundle's candidates) instead of a full-design optimize_topologies.
+    // No reservations: every bundle is already planned, so all demand is real.
+    // Injected measured-congestion demand rides on top (the reset wiped it).
+    for (auto& cut : cuts_) cut.reset_usage();
+    for (const auto& bw : bundles) {
+        if (&bw == exclude || !has_committed_plan_(bw)) continue;
+        commit_plan(bw, fixed_plan_of_(bw));
+    }
+    apply_injected_(+1.0);
+}
+
 std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
         std::vector<BundleWrapper>& bundles, int target_bundle_id) {
     // Needs the state a prior optimize_topologies established on this instance:
@@ -1124,37 +1157,81 @@ std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
     const int tsel = target->plan.selected_topology_index;
     if (tsel < 0 || tsel >= (int)target->input.candidates.size()) return std::nullopt;
 
-    // Rebuild band usage from every OTHER bundle's committed assignment —
-    // charging only, no scoring.  This is what makes a ripup trial O(one
-    // bundle's candidates) instead of a full-design optimize_topologies (the
-    // ~90% of ripup_reroute runtime on large hier designs).  No reservations:
-    // every bundle is already planned, so all demand is real.
-    for (auto& cut : cuts_) cut.reset_usage();
-    for (const auto& bw : bundles) {
-        if (&bw == target) continue;
-        const int sel = bw.plan.selected_topology_index;
-        if (sel < 0 || sel >= (int)bw.input.candidates.size()) continue;
-        if (bw.plan.seg_layers.empty()) continue;   // never planned — no demand
-        PlanResult fixed;
-        fixed.found      = true;
-        fixed.best_topo  = sel;
-        fixed.seg_layers = bw.plan.seg_layers;
-        fixed.seg_perp   = bw.plan.seg_perp;
-        commit_plan(bw, fixed);
-    }
+    recharge_committed_(bundles, target);
 
-    // Measured-congestion feedback rides on top of the committed demand: the
-    // usage reset above wiped any injected bands, so re-apply them here.
-    apply_injected_(+1.0);
-
-    // Escalation ladder for the target, minus rip-up (stage 2): a trial may
-    // not move other bundles, and the caller's hill-climb IS the outer rip-up.
+    // Escalation ladder for the target, minus rip-up (stage 2): a ripup TRIAL
+    // may not move other bundles, and its hill-climb IS the outer rip-up.
+    // (Negotiation, which owns its acceptance guard, uses replan_bundle_ripup.)
     PlanResult plan = plan_bundle(*target, PlanMode::STRICT);
     if (!plan.found) plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW);
     if (!plan.found) plan = plan_bundle(*target, PlanMode::BEST_EFFORT);
     if (!plan.found) return std::nullopt;
     commit_plan(*target, plan);
     return make_assignment(*target, plan);
+}
+
+std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
+        std::vector<BundleWrapper>& bundles, int target_bundle_id) {
+    // replan_bundle WITH the ladder's victim rip-up stage (wishlist-ripup item
+    // 1 v2b): when the target has no overflow-free candidate against the
+    // committed+injected demand, rip up the committed bundle holding the most
+    // demand on the contended bands, replan the pair, and accept only if BOTH
+    // end up overflow-free — the same dance optimize_topologies runs, applied
+    // to a single negotiation step.  Returns the target's assignment first,
+    // then the moved victim's (if any); empty = unplannable (caller skips).
+    std::vector<BundleAssignment> out;
+    if (x_grid_.empty() || cuts_.empty() || span_ref_eff_ <= 0.0) return out;
+
+    BundleWrapper* target = nullptr;
+    for (auto& bw : bundles)
+        if (bw.input.original_bundle.id == target_bundle_id) { target = &bw; break; }
+    if (!target || target->input.candidates.empty()) return out;
+    const int tsel = target->plan.selected_topology_index;
+    if (tsel < 0 || tsel >= (int)target->input.candidates.size()) return out;
+
+    recharge_committed_(bundles, target);
+
+    std::set<std::pair<int,int>> contended;
+    PlanResult plan = plan_bundle(*target, PlanMode::STRICT, &contended);
+    bool committed = false;
+    BundleAssignment victim_asn;
+    bool moved_victim = false;
+    if (!plan.found && !contended.empty()) {
+        std::vector<std::pair<double, BundleWrapper*>> ranked;
+        for (auto& bw : bundles) {
+            if (&bw == target || !has_committed_plan_(bw)) continue;
+            double ovl = plan_band_overlap(bw, fixed_plan_of_(bw), contended);
+            if (ovl > 0.0) ranked.push_back({ovl, &bw});
+        }
+        std::sort(ranked.begin(), ranked.end(),
+                  [](const auto& a, const auto& b) { return a.first > b.first; });
+        for (auto& [ovl, pw] : ranked) {
+            const PlanResult fixed = fixed_plan_of_(*pw);
+            commit_plan(*pw, fixed, -1.0);              // rip up the blocker
+            PlanResult mine = plan_bundle(*target, PlanMode::STRICT);
+            if (mine.found) {
+                commit_plan(*target, mine);
+                PlanResult theirs = plan_bundle(*pw, PlanMode::STRICT);
+                if (theirs.found) {                     // both overflow-free
+                    commit_plan(*pw, theirs);
+                    victim_asn   = make_assignment(*pw, theirs);
+                    moved_victim = true;
+                    plan         = mine;
+                    committed    = true;
+                    break;
+                }
+                commit_plan(*target, mine, -1.0);       // victim can't recover
+            }
+            commit_plan(*pw, fixed);                    // restore and try next
+        }
+    }
+    if (!plan.found) plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW);
+    if (!plan.found) plan = plan_bundle(*target, PlanMode::BEST_EFFORT);
+    if (!plan.found) return out;
+    if (!committed) commit_plan(*target, plan);
+    out.push_back(make_assignment(*target, plan));
+    if (moved_victim) out.push_back(victim_asn);
+    return out;
 }
 
 void CongestionPlanner::inject_band_demand(int layer_id,
