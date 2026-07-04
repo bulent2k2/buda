@@ -552,9 +552,10 @@ def test_rerun_nuts_invalidates_stale_detailed_result():
 # The ripup loop now tries, per contended bundle, its index-alternate candidates
 # AND per-edge L/Z flips of a SELECTED MST candidate's *contended* edges
 # (_rr_flip_edges -> _rr_apply_move('flip', ...)).  These tests pin the detection
-# gate (no false flips) and the involution-based undo; the flip's end-to-end
-# integration is exercised by the big2 ripup tests above (which stay green — the
-# flip is a safe no-op there: no contended bundle has an MST-type selection).
+# gate (no false flips), the involution-based undo, and — crucially — that an
+# in-place flip PERSISTS to the wrapper's candidate so the replan measures it
+# (w.input.candidates returns a list of *references* to the C++ Topology objects;
+# only structural changes like dogleg append/delete need a write-back).
 
 def _mst_session():
     """A 4-block fan-out bus whose candidate list includes edge-tagged MST
@@ -658,3 +659,30 @@ def test_rr_flip_move_is_an_involution():
         assert geom() != before, "an accepted flip must change the geometry"
         s._rr_undo_move(w, move, sel)
         assert geom() == before, "undo (re-flip) must restore the geometry exactly"
+
+
+def test_flip_persists_to_wrapper_candidate():
+    """An in-place mutation of `w.input.candidates[sel]` PERSISTS to the wrapper
+    (the property the flip move relies on): `_rr_apply_move`'s flip mutates the
+    candidate in place and then `_rr_trial` replans reading `w.input.candidates`,
+    so the mutation must be visible on a FRESH read — not lost to a pybind11 STL
+    copy.  `candidates` returns a list of references to the underlying C++
+    Topology objects, so field-level edits (start/end/layer_hint — exactly what
+    flip_mst_edge writes) round-trip; only structural edits (append/delete, e.g.
+    doglegs) need `w.input.candidates = cands` write-back.  Deterministic guard
+    against a future binding change that would silently make flip trials measure
+    the un-flipped route (Codex #176 P2)."""
+    s = _mst_session()
+    w = s.bundles[0]
+    sel = 0
+    # Read via one access, then mutate a segment coord; a FRESH access must see it.
+    orig = w.input.candidates[sel].segments[0].start.x
+    w.input.candidates[sel].segments[0].start.x = orig + 4242
+    assert w.input.candidates[sel].segments[0].start.x == orig + 4242, (
+        "in-place edit of w.input.candidates was lost to a copy — flip trials "
+        "would measure the un-flipped route"
+    )
+    # The var-held pattern _rr_apply_move uses ("cands = w.input.candidates").
+    cands = w.input.candidates
+    cands[sel].segments[0].start.x = orig + 99
+    assert w.input.candidates[sel].segments[0].start.x == orig + 99
