@@ -1,0 +1,375 @@
+# ==================================================================
+# BUDA Large-Scale Stress-Test Demo — PSEUDO-HIER variant
+# 14 container blocks · 108 bundles · tiled leaf sub-blocks
+# Fakes a hierarchy: each top block is a transparent `container`
+# envelope; every bus port gets its own leaf sub-block so 3-part
+# pins route to a distinct point inside the envelope (per-port
+# bundling), the way a real hier flow would.
+# Per-port bus width capped at 8 bits so each narrow
+# leaf landing site is routable (real hier uses shared busterms).
+# ==================================================================
+
+# Layers: M4 horizontal, M5 vertical, M6 long-haul horizontal
+source ../flow/tracks/tracks.buda
+
+# Top blocks as transparent container envelopes
+add_block u_cpu0 200 200 1000 1600 container
+add_block u_cpu1 200 2000 1000 3400 container
+add_block u_gpu 200 3800 2000 6600 container
+add_block u_npu 200 7000 2000 8400 container
+add_block u_l3 2400 200 6000 3400 container
+add_block u_noc 2400 3800 8400 6600 container
+add_block u_hbm0 8800 200 10400 3400 container
+add_block u_hbm1 8800 3800 10400 6600 container
+add_block u_ddr 8800 7000 10400 8400 container
+add_block u_disp 2400 7000 5000 8400 container
+add_block u_isp 5600 7000 8400 8400 container
+add_block u_pcie 2400 9000 5000 10200 container
+add_block u_usb 5600 9000 8400 10200 container
+add_block u_sec 8800 9000 10400 10200 container
+
+# Leaf sub-blocks (one per bus port, tiled inside its envelope)
+add_block u_cpu0.c0l3c0 247 269 463 458
+add_block u_cpu0.c0l3d0 492 269 708 458
+add_block u_cpu0.c0l3d1 737 269 953 458
+add_block u_cpu0.c0l3t0 247 484 463 672
+add_block u_cpu0.c0ncm0 492 484 708 672
+add_block u_cpu0.c0ncm1 737 484 953 672
+add_block u_cpu0.c0ncp0 247 698 463 887
+add_block u_cpu0.c0ncp1 492 698 708 887
+add_block u_cpu0.c0ncp2 737 698 953 887
+add_block u_cpu0.c0ncp3 247 913 463 1102
+add_block u_cpu0.c0pm_0 492 913 708 1102
+add_block u_cpu0.c0sm_0 737 913 953 1102
+add_block u_cpu0.c0sm_1 247 1128 463 1316
+add_block u_cpu0.c0um_0 492 1128 708 1316
+add_block u_cpu0.sc0_p0 737 1128 953 1316
+add_block u_cpu0.sc0_p1 247 1342 463 1531
+add_block u_cpu1.c1l3c0 247 2071 463 2298
+add_block u_cpu1.c1l3d0 492 2071 708 2298
+add_block u_cpu1.c1l3d1 737 2071 953 2298
+add_block u_cpu1.c1l3t0 247 2329 463 2556
+add_block u_cpu1.c1ncm0 492 2329 708 2556
+add_block u_cpu1.c1ncm1 737 2329 953 2556
+add_block u_cpu1.c1ncp0 247 2587 463 2813
+add_block u_cpu1.c1ncp1 492 2587 708 2813
+add_block u_cpu1.c1ncp2 737 2587 953 2813
+add_block u_cpu1.c1ncp3 247 2844 463 3071
+add_block u_cpu1.c1sm_0 492 2844 708 3071
+add_block u_cpu1.c1sm_1 737 2844 953 3071
+add_block u_cpu1.sc1_p0 247 3102 463 3329
+add_block u_cpu1.sc1_p1 492 3102 708 3329
+add_block u_gpu.gdsp_0 305 3938 791 4316
+add_block u_gpu.gdsp_1 857 3938 1343 4316
+add_block u_gpu.gdsp_2 1409 3938 1895 4316
+add_block u_gpu.gdsp_3 305 4367 791 4745
+add_block u_gpu.gpl3p0 857 4367 1343 4745
+add_block u_gpu.gpl3p1 1409 4367 1895 4745
+add_block u_gpu.gpl3p2 305 4796 791 5174
+add_block u_gpu.gpl3p3 857 4796 1343 5174
+add_block u_gpu.gpncc0 1409 4796 1895 5174
+add_block u_gpu.gpncc1 305 5226 791 5604
+add_block u_gpu.gpncp0 857 5226 1343 5604
+add_block u_gpu.gpncp1 1409 5226 1895 5604
+add_block u_gpu.gpncp2 305 5655 791 6033
+add_block u_gpu.gpncp3 857 5655 1343 6033
+add_block u_gpu.gpncp4 1409 5655 1895 6033
+add_block u_gpu.gpncp5 305 6084 791 6462
+add_block u_npu.npl3p0 305 7082 791 7460
+add_block u_npu.npl3p1 857 7082 1343 7460
+add_block u_npu.npncc0 1409 7082 1895 7460
+add_block u_npu.npncc1 305 7511 791 7889
+add_block u_npu.npncp0 857 7511 1343 7889
+add_block u_npu.npncp1 1409 7511 1895 7889
+add_block u_npu.npncp2 305 7940 791 8318
+add_block u_npu.npncp3 857 7940 1343 8318
+add_block u_l3.c0l3c0 2584 363 3167 881
+add_block u_l3.c0l3d0 3246 363 3829 881
+add_block u_l3.c0l3d1 3909 363 4491 881
+add_block u_l3.c0l3t0 4571 363 5154 881
+add_block u_l3.c1l3c0 5233 363 5816 881
+add_block u_l3.c1l3d0 2584 952 3167 1470
+add_block u_l3.c1l3d1 3246 952 3829 1470
+add_block u_l3.c1l3t0 3909 952 4491 1470
+add_block u_l3.gpl3p0 4571 952 5154 1470
+add_block u_l3.gpl3p1 5233 952 5816 1470
+add_block u_l3.gpl3p2 2584 1541 3167 2059
+add_block u_l3.gpl3p3 3246 1541 3829 2059
+add_block u_l3.l3ncc0 3909 1541 4491 2059
+add_block u_l3.l3ncc1 4571 1541 5154 2059
+add_block u_l3.l3ncp0 5233 1541 5816 2059
+add_block u_l3.l3ncp1 2584 2130 3167 2648
+add_block u_l3.l3ncp2 3246 2130 3829 2648
+add_block u_l3.l3ncp3 3909 2130 4491 2648
+add_block u_l3.l3ncp4 4571 2130 5154 2648
+add_block u_l3.l3ncp5 5233 2130 5816 2648
+add_block u_l3.l3ncp6 2584 2719 3167 3237
+add_block u_l3.l3ncp7 3246 2719 3829 3237
+add_block u_l3.npl3p0 3909 2719 4491 3237
+add_block u_l3.npl3p1 4571 2719 5154 3237
+add_block u_noc.c0ncm0 2664 3938 3011 4316
+add_block u_noc.c0ncm1 3058 3938 3405 4316
+add_block u_noc.c0ncp0 3452 3938 3799 4316
+add_block u_noc.c0ncp1 3847 3938 4193 4316
+add_block u_noc.c0ncp2 4241 3938 4588 4316
+add_block u_noc.c0ncp3 4635 3938 4982 4316
+add_block u_noc.c1ncm0 5029 3938 5376 4316
+add_block u_noc.c1ncm1 5424 3938 5771 4316
+add_block u_noc.c1ncp0 5818 3938 6165 4316
+add_block u_noc.c1ncp1 6212 3938 6559 4316
+add_block u_noc.c1ncp2 6607 3938 6953 4316
+add_block u_noc.c1ncp3 7001 3938 7348 4316
+add_block u_noc.gpncc0 7395 3938 7742 4316
+add_block u_noc.gpncc1 7789 3938 8136 4316
+add_block u_noc.gpncp0 2664 4367 3011 4745
+add_block u_noc.gpncp1 3058 4367 3405 4745
+add_block u_noc.gpncp2 3452 4367 3799 4745
+add_block u_noc.gpncp3 3847 4367 4193 4745
+add_block u_noc.gpncp4 4241 4367 4588 4745
+add_block u_noc.gpncp5 4635 4367 4982 4745
+add_block u_noc.isn_p0 5029 4367 5376 4745
+add_block u_noc.isn_p1 5424 4367 5771 4745
+add_block u_noc.isn_p2 5818 4367 6165 4745
+add_block u_noc.isn_p3 6212 4367 6559 4745
+add_block u_noc.l3ncc0 6607 4367 6953 4745
+add_block u_noc.l3ncc1 7001 4367 7348 4745
+add_block u_noc.l3ncp0 7395 4367 7742 4745
+add_block u_noc.l3ncp1 7789 4367 8136 4745
+add_block u_noc.l3ncp2 2664 4796 3011 5174
+add_block u_noc.l3ncp3 3058 4796 3405 5174
+add_block u_noc.l3ncp4 3452 4796 3799 5174
+add_block u_noc.l3ncp5 3847 4796 4193 5174
+add_block u_noc.l3ncp6 4241 4796 4588 5174
+add_block u_noc.l3ncp7 4635 4796 4982 5174
+add_block u_noc.ndr_p0 5029 4796 5376 5174
+add_block u_noc.ndr_p1 5424 4796 5771 5174
+add_block u_noc.ndr_p2 5818 4796 6165 5174
+add_block u_noc.ndr_p3 6212 4796 6559 5174
+add_block u_noc.ndsc_0 6607 4796 6953 5174
+add_block u_noc.ndsc_1 7001 4796 7348 5174
+add_block u_noc.ndsp_0 7395 4796 7742 5174
+add_block u_noc.ndsp_1 7789 4796 8136 5174
+add_block u_noc.ndsp_2 2664 5226 3011 5604
+add_block u_noc.ndsp_3 3058 5226 3405 5604
+add_block u_noc.nh0_p0 3452 5226 3799 5604
+add_block u_noc.nh0_p1 3847 5226 4193 5604
+add_block u_noc.nh0_p2 4241 5226 4588 5604
+add_block u_noc.nh0_p3 4635 5226 4982 5604
+add_block u_noc.nh1_p0 5029 5226 5376 5604
+add_block u_noc.nh1_p1 5424 5226 5771 5604
+add_block u_noc.nh1_p2 5818 5226 6165 5604
+add_block u_noc.nh1_p3 6212 5226 6559 5604
+add_block u_noc.nisp_0 6607 5226 6953 5604
+add_block u_noc.nisp_1 7001 5226 7348 5604
+add_block u_noc.nisp_2 7395 5226 7742 5604
+add_block u_noc.nisp_3 7789 5226 8136 5604
+add_block u_noc.npc__0 2664 5655 3011 6033
+add_block u_noc.npc__1 3058 5655 3405 6033
+add_block u_noc.npc__2 3452 5655 3799 6033
+add_block u_noc.npc__3 3847 5655 4193 6033
+add_block u_noc.npc__4 4241 5655 4588 6033
+add_block u_noc.npc__5 4635 5655 4982 6033
+add_block u_noc.npncc0 5029 5655 5376 6033
+add_block u_noc.npncc1 5424 5655 5771 6033
+add_block u_noc.npncp0 5818 5655 6165 6033
+add_block u_noc.npncp1 6212 5655 6559 6033
+add_block u_noc.npncp2 6607 5655 6953 6033
+add_block u_noc.npncp3 7001 5655 7348 6033
+add_block u_noc.nsec_0 7395 5655 7742 6033
+add_block u_noc.nsec_1 7789 5655 8136 6033
+add_block u_noc.nsec_2 2664 6084 3011 6462
+add_block u_noc.nsec_3 3058 6084 3405 6462
+add_block u_noc.nusb_0 3452 6084 3799 6462
+add_block u_noc.nusb_1 3847 6084 4193 6462
+add_block u_noc.nusb_2 4241 6084 4588 6462
+add_block u_noc.nusb_3 4635 6084 4982 6462
+add_block u_noc.pcn_p0 5029 6084 5376 6462
+add_block u_noc.pcn_p1 5424 6084 5771 6462
+add_block u_noc.pcn_p2 5818 6084 6165 6462
+add_block u_noc.pcn_p3 6212 6084 6559 6462
+add_block u_hbm0.nh0_p0 8952 372 10248 1020
+add_block u_hbm0.nh0_p1 8952 1108 10248 1756
+add_block u_hbm0.nh0_p2 8952 1844 10248 2492
+add_block u_hbm0.nh0_p3 8952 2580 10248 3228
+add_block u_hbm1.nh1_p0 8908 3989 9556 5123
+add_block u_hbm1.nh1_p1 9644 3989 10292 5123
+add_block u_hbm1.nh1_p2 8908 5277 9556 6411
+add_block u_hbm1.nh1_p3 9644 5277 10292 6411
+add_block u_ddr.ndr_p0 8908 7095 9556 7661
+add_block u_ddr.ndr_p1 9644 7095 10292 7661
+add_block u_ddr.ndr_p2 8908 7739 9556 8305
+add_block u_ddr.ndr_p3 9644 7739 10292 8305
+add_block u_disp.gdsp_0 2533 7095 2954 7661
+add_block u_disp.gdsp_1 3011 7095 3432 7661
+add_block u_disp.gdsp_2 3490 7095 3910 7661
+add_block u_disp.gdsp_3 3968 7095 4389 7661
+add_block u_disp.ndsc_0 4446 7095 4867 7661
+add_block u_disp.ndsc_1 2533 7739 2954 8305
+add_block u_disp.ndsp_0 3011 7739 3432 8305
+add_block u_disp.ndsp_1 3490 7739 3910 8305
+add_block u_disp.ndsp_2 3968 7739 4389 8305
+add_block u_disp.ndsp_3 4446 7739 4867 8305
+add_block u_isp.isn_p0 5751 7095 6317 7661
+add_block u_isp.isn_p1 6395 7095 6961 7661
+add_block u_isp.isn_p2 7039 7095 7605 7661
+add_block u_isp.isn_p3 7683 7095 8249 7661
+add_block u_isp.nisp_0 5751 7739 6317 8305
+add_block u_isp.nisp_1 6395 7739 6961 8305
+add_block u_isp.nisp_2 7039 7739 7605 8305
+add_block u_isp.nisp_3 7683 7739 8249 8305
+add_block u_pcie.c0pm_0 2528 9081 2879 9567
+add_block u_pcie.npc__0 2927 9081 3277 9567
+add_block u_pcie.npc__1 3325 9081 3676 9567
+add_block u_pcie.npc__2 3724 9081 4075 9567
+add_block u_pcie.npc__3 4123 9081 4473 9567
+add_block u_pcie.npc__4 4521 9081 4872 9567
+add_block u_pcie.npc__5 2528 9633 2879 10119
+add_block u_pcie.pcn_p0 2927 9633 3277 10119
+add_block u_pcie.pcn_p1 3325 9633 3676 10119
+add_block u_pcie.pcn_p2 3724 9633 4075 10119
+add_block u_pcie.pcn_p3 4123 9633 4473 10119
+add_block u_usb.c0um_0 5764 9081 6519 9567
+add_block u_usb.nusb_0 6622 9081 7378 9567
+add_block u_usb.nusb_1 7481 9081 8236 9567
+add_block u_usb.nusb_2 5764 9633 6519 10119
+add_block u_usb.nusb_3 6622 9633 7378 10119
+add_block u_sec.c0sm_0 8886 9070 9210 9394
+add_block u_sec.c0sm_1 9254 9070 9578 9394
+add_block u_sec.c1sm_0 9622 9070 9946 9394
+add_block u_sec.c1sm_1 9990 9070 10314 9394
+add_block u_sec.nsec_0 8886 9438 9210 9762
+add_block u_sec.nsec_1 9254 9438 9578 9762
+add_block u_sec.nsec_2 9622 9438 9946 9762
+add_block u_sec.nsec_3 9990 9438 10314 9762
+add_block u_sec.sc0_p0 8886 9806 9210 10130
+add_block u_sec.sc0_p1 9254 9806 9578 10130
+add_block u_sec.sc1_p0 9622 9806 9946 10130
+add_block u_sec.sc1_p1 9990 9806 10314 10130
+
+# Buses (3-part pins → endpoint resolves to leaf sub-block)
+add_bus c0l3d0[4] u_cpu0.c0l3d0.tx u_l3.c0l3d0.rx
+add_bus c0l3d1[4] u_cpu0.c0l3d1.tx u_l3.c0l3d1.rx
+add_bus c0l3t0[8] u_cpu0.c0l3t0.tx u_l3.c0l3t0.rx
+add_bus c0l3c0[8] u_cpu0.c0l3c0.tx u_l3.c0l3c0.rx
+add_bus c1l3d0[4] u_cpu1.c1l3d0.tx u_l3.c1l3d0.rx
+add_bus c1l3d1[4] u_cpu1.c1l3d1.tx u_l3.c1l3d1.rx
+add_bus c1l3t0[8] u_cpu1.c1l3t0.tx u_l3.c1l3t0.rx
+add_bus c1l3c0[8] u_cpu1.c1l3c0.tx u_l3.c1l3c0.rx
+add_bus c0ncp0[8] u_cpu0.c0ncp0.tx u_noc.c0ncp0.rx
+add_bus c0ncp1[8] u_cpu0.c0ncp1.tx u_noc.c0ncp1.rx
+add_bus c0ncp2[8] u_cpu0.c0ncp2.tx u_noc.c0ncp2.rx
+add_bus c0ncp3[8] u_cpu0.c0ncp3.tx u_noc.c0ncp3.rx
+add_bus c0ncm0[8] u_cpu0.c0ncm0.tx u_noc.c0ncm0.rx
+add_bus c0ncm1[8] u_cpu0.c0ncm1.tx u_noc.c0ncm1.rx
+add_bus c1ncp0[8] u_cpu1.c1ncp0.tx u_noc.c1ncp0.rx
+add_bus c1ncp1[8] u_cpu1.c1ncp1.tx u_noc.c1ncp1.rx
+add_bus c1ncp2[8] u_cpu1.c1ncp2.tx u_noc.c1ncp2.rx
+add_bus c1ncp3[8] u_cpu1.c1ncp3.tx u_noc.c1ncp3.rx
+add_bus c1ncm0[8] u_cpu1.c1ncm0.tx u_noc.c1ncm0.rx
+add_bus c1ncm1[8] u_cpu1.c1ncm1.tx u_noc.c1ncm1.rx
+add_bus gpncp0[4] u_gpu.gpncp0.tx u_noc.gpncp0.rx
+add_bus gpncp1[4] u_gpu.gpncp1.tx u_noc.gpncp1.rx
+add_bus gpncp2[4] u_gpu.gpncp2.tx u_noc.gpncp2.rx
+add_bus gpncp3[4] u_gpu.gpncp3.tx u_noc.gpncp3.rx
+add_bus gpncp4[4] u_gpu.gpncp4.tx u_noc.gpncp4.rx
+add_bus gpncp5[4] u_gpu.gpncp5.tx u_noc.gpncp5.rx
+add_bus gpncc0[8] u_gpu.gpncc0.tx u_noc.gpncc0.rx
+add_bus gpncc1[8] u_gpu.gpncc1.tx u_noc.gpncc1.rx
+add_bus gpl3p0[4] u_gpu.gpl3p0.tx u_l3.gpl3p0.rx
+add_bus gpl3p1[4] u_gpu.gpl3p1.tx u_l3.gpl3p1.rx
+add_bus gpl3p2[4] u_gpu.gpl3p2.tx u_l3.gpl3p2.rx
+add_bus gpl3p3[4] u_gpu.gpl3p3.tx u_l3.gpl3p3.rx
+add_bus npncp0[8] u_npu.npncp0.tx u_noc.npncp0.rx
+add_bus npncp1[8] u_npu.npncp1.tx u_noc.npncp1.rx
+add_bus npncp2[8] u_npu.npncp2.tx u_noc.npncp2.rx
+add_bus npncp3[8] u_npu.npncp3.tx u_noc.npncp3.rx
+add_bus npncc0[8] u_npu.npncc0.tx u_noc.npncc0.rx
+add_bus npncc1[8] u_npu.npncc1.tx u_noc.npncc1.rx
+add_bus npl3p0[8] u_npu.npl3p0.tx u_l3.npl3p0.rx
+add_bus npl3p1[8] u_npu.npl3p1.tx u_l3.npl3p1.rx
+add_bus l3ncp0[4] u_l3.l3ncp0.tx u_noc.l3ncp0.rx
+add_bus l3ncp1[4] u_l3.l3ncp1.tx u_noc.l3ncp1.rx
+add_bus l3ncp2[4] u_l3.l3ncp2.tx u_noc.l3ncp2.rx
+add_bus l3ncp3[4] u_l3.l3ncp3.tx u_noc.l3ncp3.rx
+add_bus l3ncp4[4] u_l3.l3ncp4.tx u_noc.l3ncp4.rx
+add_bus l3ncp5[4] u_l3.l3ncp5.tx u_noc.l3ncp5.rx
+add_bus l3ncp6[4] u_l3.l3ncp6.tx u_noc.l3ncp6.rx
+add_bus l3ncp7[4] u_l3.l3ncp7.tx u_noc.l3ncp7.rx
+add_bus l3ncc0[8] u_l3.l3ncc0.tx u_noc.l3ncc0.rx
+add_bus l3ncc1[8] u_l3.l3ncc1.tx u_noc.l3ncc1.rx
+add_bus nh0_p0[4] u_noc.nh0_p0.tx u_hbm0.nh0_p0.rx
+add_bus nh0_p1[4] u_noc.nh0_p1.tx u_hbm0.nh0_p1.rx
+add_bus nh0_p2[4] u_noc.nh0_p2.tx u_hbm0.nh0_p2.rx
+add_bus nh0_p3[4] u_noc.nh0_p3.tx u_hbm0.nh0_p3.rx
+add_bus nh1_p0[4] u_noc.nh1_p0.tx u_hbm1.nh1_p0.rx
+add_bus nh1_p1[4] u_noc.nh1_p1.tx u_hbm1.nh1_p1.rx
+add_bus nh1_p2[4] u_noc.nh1_p2.tx u_hbm1.nh1_p2.rx
+add_bus nh1_p3[4] u_noc.nh1_p3.tx u_hbm1.nh1_p3.rx
+add_bus ndr_p0[8] u_noc.ndr_p0.tx u_ddr.ndr_p0.rx
+add_bus ndr_p1[8] u_noc.ndr_p1.tx u_ddr.ndr_p1.rx
+add_bus ndr_p2[8] u_noc.ndr_p2.tx u_ddr.ndr_p2.rx
+add_bus ndr_p3[8] u_noc.ndr_p3.tx u_ddr.ndr_p3.rx
+add_bus ndsp_0[4] u_noc.ndsp_0.tx u_disp.ndsp_0.rx
+add_bus ndsp_1[4] u_noc.ndsp_1.tx u_disp.ndsp_1.rx
+add_bus ndsp_2[4] u_noc.ndsp_2.tx u_disp.ndsp_2.rx
+add_bus ndsp_3[4] u_noc.ndsp_3.tx u_disp.ndsp_3.rx
+add_bus ndsc_0[8] u_noc.ndsc_0.tx u_disp.ndsc_0.rx
+add_bus ndsc_1[8] u_noc.ndsc_1.tx u_disp.ndsc_1.rx
+add_bus nisp_0[8] u_noc.nisp_0.tx u_isp.nisp_0.rx
+add_bus nisp_1[8] u_noc.nisp_1.tx u_isp.nisp_1.rx
+add_bus nisp_2[8] u_noc.nisp_2.tx u_isp.nisp_2.rx
+add_bus nisp_3[8] u_noc.nisp_3.tx u_isp.nisp_3.rx
+add_bus npc__0[8] u_noc.npc__0.tx u_pcie.npc__0.rx
+add_bus npc__1[8] u_noc.npc__1.tx u_pcie.npc__1.rx
+add_bus npc__2[8] u_noc.npc__2.tx u_pcie.npc__2.rx
+add_bus npc__3[8] u_noc.npc__3.tx u_pcie.npc__3.rx
+add_bus npc__4[8] u_noc.npc__4.tx u_pcie.npc__4.rx
+add_bus npc__5[8] u_noc.npc__5.tx u_pcie.npc__5.rx
+add_bus nusb_0[8] u_noc.nusb_0.tx u_usb.nusb_0.rx
+add_bus nusb_1[8] u_noc.nusb_1.tx u_usb.nusb_1.rx
+add_bus nusb_2[8] u_noc.nusb_2.tx u_usb.nusb_2.rx
+add_bus nusb_3[8] u_noc.nusb_3.tx u_usb.nusb_3.rx
+add_bus nsec_0[8] u_noc.nsec_0.tx u_sec.nsec_0.rx
+add_bus nsec_1[8] u_noc.nsec_1.tx u_sec.nsec_1.rx
+add_bus nsec_2[8] u_noc.nsec_2.tx u_sec.nsec_2.rx
+add_bus nsec_3[8] u_noc.nsec_3.tx u_sec.nsec_3.rx
+add_bus sc0_p0[8] u_sec.sc0_p0.tx u_cpu0.sc0_p0.rx
+add_bus sc0_p1[8] u_sec.sc0_p1.tx u_cpu0.sc0_p1.rx
+add_bus sc1_p0[8] u_sec.sc1_p0.tx u_cpu1.sc1_p0.rx
+add_bus sc1_p1[8] u_sec.sc1_p1.tx u_cpu1.sc1_p1.rx
+add_bus isn_p0[8] u_isp.isn_p0.tx u_noc.isn_p0.rx
+add_bus isn_p1[8] u_isp.isn_p1.tx u_noc.isn_p1.rx
+add_bus isn_p2[8] u_isp.isn_p2.tx u_noc.isn_p2.rx
+add_bus isn_p3[8] u_isp.isn_p3.tx u_noc.isn_p3.rx
+add_bus gdsp_0[4] u_gpu.gdsp_0.tx u_disp.gdsp_0.rx
+add_bus gdsp_1[4] u_gpu.gdsp_1.tx u_disp.gdsp_1.rx
+add_bus gdsp_2[4] u_gpu.gdsp_2.tx u_disp.gdsp_2.rx
+add_bus gdsp_3[4] u_gpu.gdsp_3.tx u_disp.gdsp_3.rx
+add_bus pcn_p0[8] u_pcie.pcn_p0.tx u_noc.pcn_p0.rx
+add_bus pcn_p1[8] u_pcie.pcn_p1.tx u_noc.pcn_p1.rx
+add_bus pcn_p2[8] u_pcie.pcn_p2.tx u_noc.pcn_p2.rx
+add_bus pcn_p3[8] u_pcie.pcn_p3.tx u_noc.pcn_p3.rx
+add_bus c0sm_0[8] u_cpu0.c0sm_0.tx u_sec.c0sm_0.rx
+add_bus c0sm_1[8] u_cpu0.c0sm_1.tx u_sec.c0sm_1.rx
+add_bus c1sm_0[8] u_cpu1.c1sm_0.tx u_sec.c1sm_0.rx
+add_bus c1sm_1[8] u_cpu1.c1sm_1.tx u_sec.c1sm_1.rx
+add_bus c0pm_0[8] u_cpu0.c0pm_0.tx u_pcie.c0pm_0.rx
+add_bus c0um_0[8] u_cpu0.c0um_0.tx u_usb.c0um_0.rx
+
+# Stage 1 — bundle nets by driver+receiver instance (per-port)
+run_bundler strict
+
+# Stage 2 — generate L/Z/U topology candidates (src/dst auto-derived)
+generate_topologies
+
+# Stage 3 — congestion-aware topology selection
+run_planner 5
+
+# Stage 4 — NUTS abstract track placement
+run_nuts
+
+# Stage 9 — detailed per-bit track placement
+run_detailed_nuts
+
+# Visualize
+visualize

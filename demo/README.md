@@ -19,7 +19,7 @@ The **R&D / regression vehicles** used by the test suite live under
 | `comprehensive_demo.buda`, `comprehensive_demo_viz_topo.buda` | End-to-end flow (bundler → topology → planner → NUTS → detailed NUTS) + the topology explorer. |
 | `quickstart.buda`, `user_guide.buda` | Minimal getting-started flows that pair with the [User Guide](../docs/USER_GUIDE.md). |
 | `congestion_demo.buda`, `keepout_demo.buda`, `large_fanout.buda` | Congestion planning, keep-out zones, and large-fan-out datapath trunks. |
-| `large_scale_demo.buda`, `large_scale_demo_gen_topo.buda`, `realistic_large_chip.buda` | Larger synthetic chips (with `generate_large_demo.py` / `gen_realistic_large_chip.py` generators). |
+| `large_scale_demo.buda`, `large_scale_demo_pseudo_hier.buda`, `large_scale_demo_gen_topo.buda`, `realistic_large_chip.buda` | Larger synthetic chips (with `generate_large_demo.py` / `gen_realistic_large_chip.py` generators). The **flat** and **pseudo-hier** large-scale variants share one floorplan — see below. |
 | `talk1.buda`, `talk2.buda` | Small presentation/walkthrough scripts. |
 | `ariane*.buda` + `ariane/` | The Ariane core (with `gen_ariane136*.py` generators and a DEF/LEF import in `ariane/`). |
 | `mempool_{cluster,group,tile}.buda`, `nvdla_cbuf.buda`, `bp_tile.buda` | Realistic block/cluster designs. |
@@ -34,3 +34,21 @@ between these demos and the `flow/` test vehicles, so they live once in
 `tracks_ariane136.buda` here. `large_scale_demo.buda` also sources
 `../flow/large_scale_demo_buses.buda` (kept in `flow/` because a `flow/` test
 vehicle uses it too).
+
+## Flat vs. pseudo-hier large-scale demo
+
+Both large-scale variants come from one generator (`generate_large_demo.py`) on
+the same 14-block SoC floorplan, and differ only in how ports map to endpoints:
+
+- **`large_scale_demo.buda` (flat)** — buses use 2-part pins
+  (`u_cpu0.tag_tx`). The CLI splits an endpoint pin at its **last** dot, so
+  every port resolves to its top block; the STRICT bundler then collapses ports
+  that share a src+dst block pair into 26 fatter bundles. Uses the shared
+  `../flow/large_scale_demo_buses.buda`.
+- **`large_scale_demo_pseudo_hier.buda` (pseudo-hier)** — "fakes" a hierarchy:
+  each top block becomes a transparent `container` envelope holding one tiled
+  leaf sub-block per port, and buses use 3-part pins (`u_cpu0.tag.tx`) that
+  resolve to those sub-blocks — so all 108 ports stay separate bundles and route
+  to distinct interior points, as a real hier flow would. Per-port widths are
+  capped (a narrow leaf can host only so many tracks; real hierarchy uses shared
+  busterms). Regenerate with `python3 demo/generate_large_demo.py`.
