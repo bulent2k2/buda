@@ -3374,7 +3374,8 @@ class BudaSession:
             print(f"[BDB] re-persisted post-negotiate routing "
                   f"({accepted} iteration(s) accepted).")
 
-    def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER):
+    def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
+                       use_edge_candidates=False):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -3457,7 +3458,14 @@ class BudaSession:
                 # the measured contention are the likeliest fixes.
                 moves = [('idx', t)
                          for t in self._rr_candidate_order(w, old_tidx, stage)]
-                moves += [('flip', e) for e in self._rr_flip_edges(w, stage)]
+                # The per-edge MST L/Z flip move-source is opt-in
+                # (`use_edge_candidates`): on the current corpus a flip is only
+                # ever *tried* on real contended MST edges — an index alternate
+                # always wins the commit — so it is off by default (routes
+                # unchanged) and enabled only when asked to explore edge flips.
+                if use_edge_candidates:
+                    moves += [('flip', e)
+                              for e in self._rr_flip_edges(w, stage)]
                 zero = (0, 0) if isinstance(cur, tuple) else 0
                 for move in moves:
                     m = self._rr_apply_move(w, move, old_tidx, stage, metric)
@@ -4668,11 +4676,16 @@ class BudaSession:
                 print(f"[BDB] persisted {n_ns} net segment(s) and {n_nv} "
                       f"net via(s) to the open BDB.")
         elif cmd == "ripup_reroute":
-            # Usage: ripup_reroute [max_iter]
+            # Usage: ripup_reroute [max_iter] [use_edge_candidates]
             # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;
             # else after run_nuts ⇒ drive down NUTS overlaps.
-            max_iter = int(args[0]) if args else _RR_DEFAULT_MAX_ITER
-            self._ripup_reroute(max_iter=max_iter)
+            # `use_edge_candidates` (off by default) toggles the per-edge MST L/Z
+            # flip move-source; the numeric token (any order) is max_iter.
+            use_edge_candidates = "use_edge_candidates" in args
+            nums = [a for a in args if a != "use_edge_candidates"]
+            max_iter = int(nums[0]) if nums else _RR_DEFAULT_MAX_ITER
+            self._ripup_reroute(max_iter=max_iter,
+                                use_edge_candidates=use_edge_candidates)
         elif cmd == "negotiate_congestion":
             # Usage: negotiate_congestion [max_iter]
             # Measured-congestion feedback (run after run_nuts): inject the

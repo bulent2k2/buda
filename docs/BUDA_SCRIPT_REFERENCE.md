@@ -1498,7 +1498,7 @@ run_detailed_nuts hi_lo
 ### `ripup_reroute`
 
 ```
-ripup_reroute [max_iter]
+ripup_reroute [max_iter] [use_edge_candidates]
 ```
 
 Feedback-driven rip-up & re-route. The congestion planner's band-capacity model is
@@ -1511,6 +1511,7 @@ the pipeline, and keeps only moves that reduce the metric.
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `max_iter` | int | `10` | Maximum number of outer hill-climb iterations (each commits at most one re-route). |
+| `use_edge_candidates` | flag | off | Also try the per-edge MST L/Z **flip** move-source (below) on contended MST candidates. Off by default. The two tokens are order-independent — `ripup_reroute 20 use_edge_candidates` and `ripup_reroute use_edge_candidates 20` are equivalent. |
 
 **Two stages, auto-detected from pipeline state:**
 
@@ -1551,6 +1552,21 @@ hier flow `self.bundles` is the expanded per-instance list, so a re-route re-pin
 single **instance** wrapper and re-plans the expanded set in place — the right
 granularity for relieving a local congestion hot-spot without disturbing the cell's
 other instances.
+
+**Move sources (what a contender is allowed to try):**
+- **Index alternates (always on).** Re-pin the bundle to one of its *other*
+  candidate topologies, tried relevance-first (candidates farthest from the
+  measured contention first).
+- **Per-edge MST L/Z flip (`use_edge_candidates`, off by default).** When the
+  bundle's *selected* candidate is an MST type (incl. `TRUNK+MST` hybrids, whose
+  legs are edge-tagged), also flip the L/Z bend of that candidate's **contended**
+  edges in place — a targeted local change that keeps the same candidate index.
+  Only contended edges are tried, so the cost stays ~linear in the number of
+  overflows rather than exploding to `2ᴺ`. This source is **opt-in** because on
+  the current corpus a flip is only ever *tried* on real contended MST edges — an
+  index alternate always wins the commit — so leaving it off changes no routes.
+  Enable it only when you want to explore edge flips. See
+  [MST edge realization](internal/mst_edge_realization.md).
 
 **Notes:**
 - It is an explicit congestion-fix pass, so it may re-route any contended bundle —
