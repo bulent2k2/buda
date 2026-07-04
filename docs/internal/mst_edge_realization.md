@@ -327,3 +327,52 @@ delicate module) and must be built + measured as its own focused PR, not rushed.
 - `tools/along_dof_probe.py` — per-candidate removable dead wire (selected vs
   all-candidate scopes). `allDEAD` is the direct metric for Part-1 progress; a
   Part-2 smart default should also lower per-candidate WL without raising overlaps.
+
+---
+
+## Why the planner does not pick MST candidates — measured (big2 + big)
+
+The whole line above assumes honest MST candidates would win once their WL is
+tidied. A direct measurement (`scratchpad/mst_select.py` + `mst_honest.py`, over
+`big2`/`tc3b_flat_x5` and `big`/`tc3a_flat_x10`) says otherwise. The planner's
+per-candidate score is `max(worst-segment soft cost) + kWL·estimated_wirelength`
+(`congestion_planner.cpp:783,789`), so wirelength is the dominant ranking term.
+
+**Finding 1 — the planner already selects MST where it wins.** On `big2`, 8/80
+bundles select an MST-type candidate (standalone `MST_*` **and** `TRUNK+MST`
+hybrids). It is not categorically excluding them.
+
+**Finding 2 — dead-wire removal (Part 1) would change ZERO selections.** For
+every non-MST-selected bundle, compare the selected trunk's WL against the best
+MST candidate's WL, both *inflated* (as-generated) and *honest* (minus the
+`along_dof_probe` dead wire). The counts are identical: big2 `2 == 2`, big
+`4 == 4`. The handful of MST candidates that come close carry **no** dead wire;
+the dead-wire-heavy ones lose by margins far larger than the dead wire. So
+tail-tightening cannot flip a selection — it only makes already-losing candidates
+lose by less. This upgrades Part 1's `selDEAD = 0` from "no WL win on the selected
+route" to "**no selection change**", i.e. Part 1 is inert for QoR, confirmed.
+
+**Finding 3 — the few WL-shorter MST candidates lose to the WINDOW-FEASIBILITY
+gate, not to cost.** Only ~2–5 % of non-MST bundles have any WL-shorter MST
+candidate; those lose because the MST edge's slide window is **narrower than the
+bus width**, so `plan_bundle`'s feasibility check (`perp_hi − perp_lo < eff`,
+`congestion_planner.cpp:769`) marks the candidate infeasible under STRICT and the
+planner takes a wider-window trunk. Example — big2 bundle 61: `TRUNK_H+MST@y2875`
+(WL 7857) is rejected for a narrow window and loses to `TRUNK_H@y3505` (WL 8600);
+yet pinning b61 to that MST candidate routes the **whole design** at **8 overlaps
+instead of 10**. The greedy planner cannot see that global win, and ripup can't
+reach it either: b61 is not itself contended, and ripup only re-routes bundles
+that appear in an overlap.
+
+**Consequence for the MST-DOF line.** The payoff blocker is neither dead wire
+(Part 1, inert) nor the flip losing commits (step 4b is correct and competing) —
+it is that (a) trunks are genuinely WL-competitive for the tc3 corpus, and (b) the
+rare beneficial MST candidate is window-infeasible and only helps *globally*, a
+gain the greedy planner + contended-only ripup cannot capture. Realizing it would
+need a bigger, riskier change — e.g. letting ripup try window-infeasible MST
+candidates on **non-contended** bundles when a best-effort commit lowers the total
+overlap count — with an uncertain, small payoff (b61 is 2 overlaps on one design).
+The tc3 corpus is ~96 % trunks by construction; a datapath workload (aligned
+column/row blocks, the `multi_trunk` BITRUNK target) is the likelier place for MST
+/ multi-trunk shapes to win, and is where this line should be re-measured before
+any further planner work.
