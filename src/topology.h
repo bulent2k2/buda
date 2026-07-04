@@ -57,6 +57,18 @@ struct Segment {
     // nuts_maps excludes it from same-bundle alignment (it must stay on its own
     // column, not snap onto a sibling stub's track).
     bool is_jog = false;
+    // Identity of the MST edge this segment realizes, when it is a leg of an MST
+    // candidate (MST_HV/MST_VH, TRUNK_*+MST).  -1 = not an MST-edge leg (trunk
+    // spine, plain stub, jog, …).  Set at generation by the MST realizers; lets a
+    // later stage identify all legs of one edge to flip its L/Z realization
+    // in place without disturbing the rest of the tree.  Pure annotation until a
+    // consumer exists (per-edge flip); carried through offset_topology.
+    // NOT YET PERSISTED: the BDB topology_segment path (TopoSegRow / load_pipeline)
+    // stores only x/y/layer/is_jog, so a candidate checkpointed to a BDB and
+    // reloaded comes back with edge_id == -1.  Harmless while inert; the per-edge
+    // flip (step 4, docs/internal/mst_edge_realization.md) is the consumer that
+    // makes it load-bearing, so that PR must add the column + round-trip test.
+    int edge_id = -1;
 };
 // A busterm is a connection point on a block face.  Currently represented by
 // the block name and its bounding box; can be refined to a pin location later.
@@ -359,5 +371,13 @@ private:
     void add_multi_trunk_candidates(const std::vector<Point>& pins, const std::vector<Busterm>& blocks, std::vector<Topology>& results);
     // Keepout helpers (used by generate_2pin and generate_npin)
     bool segment_blocked_on_all_layers(const Segment& seg) const;
+    // Smart per-edge MST realization: an axis-diagonal edge p1->p2 has two L's
+    // (H-leg first vs V-leg first) of IDENTICAL Manhattan length, so the choice is
+    // a routability decision, not a wirelength one.  Return the H-first flag to
+    // use: keep `default_h_first` unless one of its legs is fully keepout-blocked
+    // while the alternate is clear (then flip).  Both blocked / both clear -> keep
+    // the default (preserves MST_HV/MST_VH candidate diversity).
+    bool choose_edge_h_first(const Point& p1, const Point& p2,
+                             bool default_h_first) const;
 };
 }

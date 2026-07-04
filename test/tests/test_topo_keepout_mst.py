@@ -259,6 +259,123 @@ def test_trunk_mst_type_string_contains_mst():
         assert "+MST" in c.type, f"Type should contain '+MST': {c.type}"
 
 
+# ── MST edge-identity tagging (Segment.edge_id) ──────────────────────────────
+#
+# Each MST-realized leg is stamped with the index of the MST edge it belongs to,
+# so a later stage can flip one edge's L/Z realization in place.  Non-MST
+# segments (trunk spines, plain stubs) stay edge_id == -1.
+
+def _diag_4block_fp():
+    """Four blocks in a staggered/diagonal layout so MST edges are true
+    diagonals (two-leg L's), giving edges with 2 tagged segments each."""
+    fp = buda.Floorplan()
+    fp.add_block("A",   0,   0, 100, 100)
+    fp.add_block("B", 300, 150, 400, 250)
+    fp.add_block("C", 600, 350, 700, 450)
+    fp.add_block("D", 900, 550, 1000, 650)
+    return fp
+
+
+def test_standalone_mst_legs_are_edge_tagged():
+    """Every segment of an MST_HV / MST_VH candidate carries a non-negative
+    edge_id, and the ids partition the legs into per-edge groups of 1-2 (a
+    straight edge = 1 leg, a diagonal L = 2 legs)."""
+    fp = _diag_4block_fp()
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C", "D"])
+    mst = [c for c in cands if c.type.split("@")[0] in ("MST_HV", "MST_VH")]
+    assert mst, f"Expected standalone MST candidates, got {_type_set(cands)}"
+    for c in mst:
+        assert c.segments, c.type
+        # Standalone MST is pure edge legs — every segment is tagged.
+        assert all(s.edge_id >= 0 for s in c.segments), \
+            f"{c.type}: untagged leg(s): {[s.edge_id for s in c.segments]}"
+        groups = {}
+        for s in c.segments:
+            groups.setdefault(s.edge_id, []).append(s)
+        # 4 blocks → MST has exactly 3 edges → at most 3 distinct ids.
+        assert len(groups) <= 3, f"{c.type}: {len(groups)} edge groups > 3"
+        for eid, segs in groups.items():
+            assert 1 <= len(segs) <= 2, \
+                f"{c.type}: edge {eid} has {len(segs)} legs (want 1-2)"
+
+
+def test_trunk_mst_hybrid_spine_untagged_legs_tagged():
+    """In a TRUNK+MST hybrid the MST-edge legs are tagged while the trunk spine
+    (and plain stubs) stay edge_id == -1."""
+    fp = _diag_4block_fp()
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C", "D"])
+    hybrids = [c for c in cands if "+MST" in c.type]
+    assert hybrids, f"Expected TRUNK+MST candidates, got {_type_set(cands)}"
+    for c in hybrids:
+        tagged   = [s for s in c.segments if s.edge_id >= 0]
+        untagged = [s for s in c.segments if s.edge_id < 0]
+        # A hybrid has at least one MST leg (tagged) and a trunk spine (untagged).
+        assert tagged,   f"{c.type}: no tagged MST legs"
+        assert untagged, f"{c.type}: no untagged trunk/stub segments"
+
+
+def test_non_mst_candidates_have_no_edge_tags():
+    """Plain L/Z/U/TRUNK candidates carry no edge identity — every segment is -1."""
+    fp = _diag_4block_fp()
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C", "D"])
+    for c in cands:
+        if "MST" in c.type:
+            continue
+        assert all(s.edge_id == -1 for s in c.segments), \
+            f"{c.type}: non-MST candidate has edge-tagged segment(s)"
+
+
+# ── Smart per-edge default: dodge a keepout-blocked leg (step 2) ─────────────
+
+def _mst_hv(cands):
+    for c in cands:
+        if c.type.split("@")[0] == "MST_HV":
+            return c
+    return None
+
+
+def _seg_set(c):
+    return {(s.start.x, s.start.y, s.end.x, s.end.y) for s in c.segments}
+
+
+def test_smart_default_flips_blocked_edge_to_clear_L():
+    """When the default (H-first) L of an MST edge is keepout-blocked on all H
+    layers, the smart per-edge default realizes that edge with the alternate
+    (V-first) L instead, so no H leg still crosses the blockage — while an
+    unblocked run keeps the default orientation."""
+    # Baseline: no keepout — record MST_HV geometry (default orientation).
+    # (Hold fp in a named var: TopologyGenerator keeps a reference to it, so a
+    # temporary Floorplan would be GC'd out from under generate_candidates.)
+    fp0 = _diag_4block_fp()
+    base = _mst_hv(_make_gen(fp0).generate_candidates("A", ["B", "C", "D"]))
+    assert base is not None, "expected an MST_HV candidate"
+    # The A->B edge's default H-first H-leg runs at y≈A-face across x∈[100,300].
+    # Block it on the H layer (M4) so the smart default must flip that edge.
+    fp = _diag_4block_fp()
+    fp.add_keepout_zone(110, 40, 290, 120, [4])   # covers the H-first H-leg band
+    kept = _mst_hv(_make_gen(fp).generate_candidates("A", ["B", "C", "D"]))
+    assert kept is not None
+
+    # The blockage must actually change the realization (non-vacuous).
+    assert _seg_set(base) != _seg_set(kept), \
+        "keepout on the default L-leg should flip an edge's orientation"
+
+    # After flipping, no H leg (layer M4) may still run through the keepout band.
+    kx1, ky1, kx2, ky2 = 110, 40, 290, 120
+    for s in kept.segments:
+        is_h = (s.start.y == s.end.y)
+        if is_h and s.layer_hint == 4:
+            y = s.start.y
+            x1, x2 = sorted((s.start.x, s.end.x))
+            crosses = (ky1 <= y <= ky2) and not (x2 < kx1 or x1 > kx2)
+            assert not crosses, \
+                f"H leg still crosses keepout after smart flip: " \
+                f"{(s.start.x, s.start.y, s.end.x, s.end.y)}"
+
+
 def test_trunk_mst_has_more_segments_than_trunk():
     """TRUNK+MST has more segments than its corresponding plain TRUNK."""
     fp = buda.Floorplan()

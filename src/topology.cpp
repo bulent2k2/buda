@@ -2073,6 +2073,27 @@ bool TopologyGenerator::segment_blocked_on_all_layers(const Segment& seg) const 
     return all_layers_blocked_by_keepouts(seg, layers, floorplan_.get_keepout_zones());
 }
 
+bool TopologyGenerator::choose_edge_h_first(const Point& p1, const Point& p2,
+                                            bool default_h_first) const {
+    // Legs of the H-first L: H from p1 across to p2.x, then V up/down to p2.
+    // Legs of the V-first L: V from p1 up/down to p2.y, then H across to p2.
+    // (Same two lengths either way; only the routing layers/bend differ.)
+    auto legs_blocked = [&](bool h_first) {
+        Segment a, b;
+        if (h_first) {
+            a = make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_);
+            b = make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_);
+        } else {
+            a = make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_);
+            b = make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_);
+        }
+        return segment_blocked_on_all_layers(a) || segment_blocked_on_all_layers(b);
+    };
+    if (!legs_blocked(default_h_first))  return default_h_first;   // default routes: keep it
+    if (!legs_blocked(!default_h_first)) return !default_h_first;  // alternate rescues a block
+    return default_h_first;                                        // both blocked: keep default
+}
+
 // ---------------------------------------------------------------------------
 // Multi-pin topology generation
 // ---------------------------------------------------------------------------
@@ -2345,7 +2366,13 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         Topology mst;
         mst.type = (strategy == 0) ? "MST_HV" : "MST_VH";
         bool valid = true;
-        for (const auto& [eu, ev] : mst_edges) {
+        for (int ei = 0; ei < (int)mst_edges.size(); ++ei) {
+            const auto& [eu, ev] = mst_edges[ei];
+            const size_t before = mst.segments.size();   // tag this edge's legs
+            auto tag_edge = [&] {
+                for (size_t k = before; k < mst.segments.size(); ++k)
+                    mst.segments[k].edge_id = ei;
+            };
             Point p1, p2;
             Rect  br_u, br_v;
             closest_block_points(eu, ev, p1, p2, br_u, br_v);
@@ -2355,6 +2382,7 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                 Segment es;
                 if (shared_edge_segment(br_u, br_v, h_layer_, v_layer_, es))
                     mst.segments.push_back(es);
+                tag_edge();
                 continue;
             }
             // Corner-diagonal? A straight edge whose shared projection is a single
@@ -2372,22 +2400,23 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
             } else if (p1.y == p2.y) {
                 mst.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
             } else {
-                if (strategy == 0) {
-                    // H then V
-                    if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v) {
-                        valid = false; break;
-                    }
+                // Both L's have the same two leg lengths, so the min-stub gate is
+                // orientation-independent; check once.
+                if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v) {
+                    valid = false; break;
+                }
+                // Smart per-edge default: keep the candidate's strategy orientation
+                // (0 = H-first, 1 = V-first) unless it is keepout-blocked and the
+                // other L is clear.
+                if (choose_edge_h_first(p1, p2, /*default_h_first=*/strategy == 0)) {
                     mst.segments.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
                     mst.segments.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
                 } else {
-                    // V then H
-                    if (std::abs(p2.y - p1.y) < m_v || std::abs(p2.x - p1.x) < m_h) {
-                        valid = false; break;
-                    }
                     mst.segments.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
                     mst.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
                 }
             }
+            tag_edge();
         }
         if (valid) {
             // Annotate the raw stubs first, then complete: completion rewrites the
@@ -2724,6 +2753,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
                                  std::vector<Segment>& out) -> bool {
             for (int e = 0; e < (int)mst_edges.size(); ++e) {
                 if (!take[e]) continue;
+                const size_t before = out.size();   // tag this edge's legs below
                 const Rect& r_u = nodes[mst_edges[e].u].second;
                 const Rect& r_v = nodes[mst_edges[e].v].second;
                 Point p1, p2;
@@ -2734,6 +2764,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
                     Segment es;
                     if (shared_edge_segment(r_u, r_v, h_layer_, v_layer_, es))
                         out.push_back(es);
+                    for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
                     continue;
                 }
                 // Corner-diagonal shortcut: faces meet at a single point, so a
@@ -2745,6 +2776,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 const int coy_lo = std::max(r_u.y1, r_v.y1), coy_hi = std::min(r_u.y2, r_v.y2);
                 if ((p1.x == p2.x && cox_lo == cox_hi) || (p1.y == p2.y && coy_lo == coy_hi)) {
                     corner_diagonal_L(r_u, r_v, is_h ? 1 : 0, h_layer_, v_layer_, out);
+                    for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
                     continue;
                 }
                 if (p1.x == p2.x) {
@@ -2757,14 +2789,17 @@ void TopologyGenerator::add_trunk_mst_candidates(
                     // Diagonal L-shape: both legs must meet their minimum length.
                     if (std::abs(p2.x - p1.x) < m_h || std::abs(p2.y - p1.y) < m_v)
                         return false;
-                    if (is_h) {
-                        out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
-                        out.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
-                    } else {
+                    // Default orientation follows the trunk (H-trunk hybrid -> V-leg
+                    // first, i.e. !h_first); flip only to dodge a keepout-blocked leg.
+                    if (choose_edge_h_first(p1, p2, /*default_h_first=*/!is_h)) {
                         out.push_back(make_seg(p1.x, p1.y, p2.x, p1.y, h_layer_));
                         out.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
+                    } else {
+                        out.push_back(make_seg(p1.x, p1.y, p1.x, p2.y, v_layer_));
+                        out.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
                     }
                 }
+                for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
             }
             return true;
         };
