@@ -113,3 +113,51 @@ def test_save_sql_read_only_raises(tmp_path):
         fpc.save_sql(ro, str(tmp_path / "ro.bdb.sql"))
     fpc.release_bdb_lock(ro)
     fpc.release_bdb_lock(holder)
+
+
+def test_two_sql_windows_lock_the_source_not_the_temp(tmp_path):
+    # Two sessions opening the SAME *.bdb.sql must not both stay writable — the
+    # write lock keys on the shared source, not each session's throwaway temp
+    # binary — else both Save back to it and silently clobber (Codex #166 P1).
+    fpc.release_bdb_lock(_design_and_dump(tmp_path))
+    sql = str(tmp_path / "fix.bdb.sql")
+
+    bin1 = bdb_serialize.materialize_if_sql(sql)
+    s1 = fpc.load_bdb(bin1, sql_source=sql)
+    bin2 = bdb_serialize.materialize_if_sql(sql)          # a DIFFERENT temp
+    s2 = fpc.load_bdb(bin2, sql_source=sql)
+    assert bin1 != bin2
+    assert not s1.is_read_only                            # first writer
+    assert s2.is_read_only                                # source already locked
+    with pytest.raises(PermissionError):
+        fpc.save_sql(s2)
+    fpc.release_bdb_lock(s2)
+    fpc.release_bdb_lock(s1)
+
+
+def test_save_as_binary_refuses_locked_target(tmp_path):
+    # Save As to an existing binary another session is editing must FAIL before
+    # the destructive dump->load, not clobber the live DB (Codex #166 P1).
+    holder = _design(tmp_path, "target.bdb")             # holds target's lock
+    holder_names = {c.name for c in holder.bdb.all_components()}
+    src = _design(tmp_path, "src.bdb")
+    fpc.add_block(src, "u_extra", 700, 500, 100, 100)    # distinct content
+    with pytest.raises(PermissionError, match="another floorplanner session"):
+        fpc.save_bdb_as_binary(src, str(tmp_path / "target.bdb"))
+    # Target untouched: still the holder's design, not src's.
+    assert {c.name for c in holder.bdb.all_components()} == holder_names
+    assert "u_extra" not in holder_names
+    fpc.release_bdb_lock(src)
+    fpc.release_bdb_lock(holder)
+
+
+def test_save_as_binary_onto_self_is_in_place_write(tmp_path):
+    # Save As onto the currently-open binary is a plain Write (no self-lock
+    # conflict, same state returned).
+    state = _design(tmp_path, "self.bdb")
+    fpc.move_block(state, "u_cpu", 500, 300)
+    same = fpc.save_bdb_as_binary(state, state.bdb_path)
+    assert same is state
+    comps = {c.name: (c.x1, c.y1) for c in state.bdb.all_components()}
+    assert comps["u_cpu"] == (500, 300)
+    fpc.release_bdb_lock(state)

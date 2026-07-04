@@ -291,10 +291,15 @@ def load_bdb(path: str, sql_source: str = "") -> FloorplannerAppState:
     # *.bdb.sql); sql_source names the .sql to write back to on Save.
     state.sql_source = os.path.abspath(sql_source) if sql_source else ""
 
-    fd = _try_acquire_write_lock(path)
+    # Single-writer lock: key on the WRITE-BACK SOURCE when one is set (the
+    # shared .sql), not the per-session throwaway temp binary — otherwise two
+    # `fp foo.bdb.sql` windows each lock a distinct temp, both stay writable,
+    # and their Write/Save silently clobber the same source .sql.
+    lock_key = state.sql_source or path
+    fd = _try_acquire_write_lock(lock_key)
     if fd is not None:
         state._lock_fd = fd
-        state._lock_path = _lock_path_for(path)
+        state._lock_path = _lock_path_for(lock_key)
         state.is_read_only = False
     else:
         state.is_read_only = True
@@ -860,15 +865,35 @@ def save_bdb_as_binary(state: FloorplannerAppState, target: str) -> "Floorplanne
     clean, standalone binary. Not a .sql write-back — ``sql_source`` is cleared.
     """
     target = os.path.abspath(target)
-    write_bdb(state)                       # commit placements to the binary
-    import bdb_serialize
-    tmp_sql = target + ".saveas.tmp.sql"
-    bdb_serialize.dump(state.bdb_path, tmp_sql)
+    # Save As onto the currently-open binary is just an in-place Write — no
+    # destructive reload (and no self-lock conflict).
+    if state.bdb_path and os.path.realpath(target) == os.path.realpath(state.bdb_path):
+        write_bdb(state)
+        return state
+    # Guard the target's single-writer lock BEFORE the destructive dump→load:
+    # never clobber a BDB another floorplanner session is editing. Hold it
+    # across the rewrite, then release so load_bdb below takes the real
+    # session lock.
+    guard_fd = _try_acquire_write_lock(target)
+    if guard_fd is None:
+        raise PermissionError(
+            "Save As target is open in another floorplanner session: " + target)
     try:
-        bdb_serialize.load(tmp_sql, target)
+        write_bdb(state)                   # commit placements to the binary
+        import bdb_serialize
+        tmp_sql = target + ".saveas.tmp.sql"
+        bdb_serialize.dump(state.bdb_path, tmp_sql)
+        try:
+            bdb_serialize.load(tmp_sql, target)
+        finally:
+            if os.path.exists(tmp_sql):
+                os.unlink(tmp_sql)
     finally:
-        if os.path.exists(tmp_sql):
-            os.unlink(tmp_sql)
+        try:
+            fcntl.flock(guard_fd, fcntl.LOCK_UN)
+            os.close(guard_fd)
+        except Exception:
+            pass
     release_bdb_lock(state)
     return load_bdb(target)
 
