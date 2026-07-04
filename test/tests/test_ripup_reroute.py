@@ -686,3 +686,53 @@ def test_flip_persists_to_wrapper_candidate():
     cands = w.input.candidates
     cands[sel].segments[0].start.x = orig + 99
     assert w.input.candidates[sel].segments[0].start.x == orig + 99
+
+
+# ── use_edge_candidates: the flip move-source is opt-in ──────────────────────
+#
+# The per-edge MST L/Z flip is measured-redundant on the corpus (an index
+# alternate always wins the commit), so `ripup_reroute` only consults
+# `_rr_flip_edges` when `use_edge_candidates` is passed.  These pin the gate:
+# default OFF ⇒ the flip source is never queried (routes unchanged); ON ⇒ it is.
+
+def _flip_edges_call_count(s, arg):
+    """Run ripup on the congested canned fixture, counting how many times the
+    flip move-source (`_rr_flip_edges`) is consulted.  It is only called from
+    inside the `if use_edge_candidates:` branch, so the count is 0 with the
+    flag off and >0 with it on (there is a real contended bundle to scan)."""
+    calls = [0]
+    orig = s._rr_flip_edges
+
+    def spy(w, stage):
+        calls[0] += 1
+        return orig(w, stage)
+
+    s._rr_flip_edges = spy
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command(f"ripup_reroute {arg}".strip())
+    return calls[0]
+
+
+def test_use_edge_candidates_off_by_default_skips_flip_source():
+    """Without the keyword, ripup_reroute never queries the flip move-source —
+    the flip is off by default, so routes match the pre-flip behavior."""
+    s = _build_session(narrow=True)
+    assert s.nuts_result.num_overlaps > 0, "fixture should start congested"
+    assert _flip_edges_call_count(s, "") == 0
+
+
+def test_use_edge_candidates_enables_flip_source():
+    """With `use_edge_candidates`, ripup_reroute consults the flip move-source
+    for each contended bundle (order-independent with the numeric max_iter)."""
+    s = _build_session(narrow=True)
+    assert s.nuts_result.num_overlaps > 0, "fixture should start congested"
+    assert _flip_edges_call_count(s, "use_edge_candidates") > 0
+
+
+def test_use_edge_candidates_keyword_order_independent():
+    """`use_edge_candidates` and the numeric max_iter may appear in any order;
+    both are parsed and the flip source is enabled either way."""
+    s = _build_session(narrow=True)
+    assert _flip_edges_call_count(s, "3 use_edge_candidates") > 0
+    s2 = _build_session(narrow=True)
+    assert _flip_edges_call_count(s2, "use_edge_candidates 3") > 0
