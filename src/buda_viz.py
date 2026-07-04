@@ -2622,17 +2622,21 @@ class BudaVisualizer:
         return n_bundles, len(buses), n_nets
 
     def _redraw_design_stats(self):
-        """Draw the always-on 'N bundles · M buses · K nets' header line."""
+        """Draw the always-on design-size header as three stacked lines
+        (bundles / buses / nets) so large counts don't overflow the narrow
+        panel and get clipped on both sides."""
         ax = self._ax_design_stats
         if ax is None:
             return
         ax.clear()
         ax.set_axis_off()
         nb, nbus, nn = self._design_counts()
-        ax.text(0.5, 0.5,
-                f"{nb} bundles · {nbus} buses · {nn} nets",
-                transform=ax.transAxes, ha='center', va='center',
-                fontsize=8.5, color='#333333', fontweight='bold', clip_on=True)
+        rows = [f"{nb} bundles", f"{nbus} buses", f"{nn} nets"]
+        for i, txt in enumerate(rows):
+            y = 1.0 - (i + 0.5) / len(rows)
+            ax.text(0.5, y, txt,
+                    transform=ax.transAxes, ha='center', va='center',
+                    fontsize=9, color='#333333', fontweight='bold', clip_on=True)
 
     def _redraw_bundle_list(self):
         """Clear and redraw all rows in the bundle checkbox list."""
@@ -3999,14 +4003,21 @@ class BudaVisualizer:
         BTN_H    = 0.044
         SCROLL_H = 0.033
         GAP      = 0.012
-        STAT_H   = 0.030   # design-stats header line above the bundle list
+        STAT_H   = 0.075   # design-stats header: three stacked count lines
         TOP_Y    = 0.95
         BOT_Y    = 0.09   # bottom margin
 
-        # Fixed overhead consumed by buttons, scroll arrows, the stats line, and
-        # gaps: (3 header btns) + (4 scroll arrows) + stats line + (6 gaps)
+        # Fixed overhead consumed by buttons, scroll arrows, the stats block, and
+        # gaps: (3 header btns) + (4 scroll arrows) + stats block + (6 gaps)
         fixed_h  = 3 * BTN_H + 4 * SCROLL_H + STAT_H + 6 * GAP
-        list_h   = max((TOP_Y - BOT_Y - fixed_h) / 3, 0.05)
+        avail    = max(TOP_Y - BOT_Y - fixed_h, 0.15)
+        # Split the list space unevenly: the bundle list is the one worth
+        # scanning, so give it the most; the layer list rides up a little and
+        # the overlap list is pushed down more, making room for the taller
+        # three-line stats header without squeezing the bundle list.
+        layer_list_h   = max(avail * 0.28, 0.05)
+        bundle_list_h  = max(avail * 0.44, 0.05)
+        overlap_list_h = max(avail * 0.28, 0.05)
 
         # Top-down allocation.  y tracks the top edge of the next widget.
         y = TOP_Y
@@ -4023,7 +4034,7 @@ class BudaVisualizer:
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
 
         # ── Per-layer custom panel ───────────────────────────────────────
-        self._ax_layers = self.fig.add_axes(_rect(list_h, GAP))
+        self._ax_layers = self.fig.add_axes(_rect(layer_list_h, GAP))
         self._ax_layers.set_facecolor('#f8f8f8')
         self._redraw_layer_list()
 
@@ -4043,7 +4054,7 @@ class BudaVisualizer:
         btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
         btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles(-5))
 
-        self._ax_bundles = self.fig.add_axes(_rect(list_h))
+        self._ax_bundles = self.fig.add_axes(_rect(bundle_list_h))
         self._ax_bundles.set_facecolor('#fafafa')
         self._redraw_bundle_list()
 
@@ -4063,7 +4074,7 @@ class BudaVisualizer:
         btn_oscroll_up = Button(ax_oscroll_up, '▲', color='#f0f0f0')
         btn_oscroll_up.on_clicked(lambda _: self._scroll_overlaps(-5))
 
-        self._ax_overlaps = self.fig.add_axes(_rect(list_h))
+        self._ax_overlaps = self.fig.add_axes(_rect(overlap_list_h))
         self._ax_overlaps.set_facecolor('#fff8f8')
         self._redraw_overlap_list()
 
