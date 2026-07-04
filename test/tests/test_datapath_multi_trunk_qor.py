@@ -38,36 +38,41 @@ import buda_cli  # noqa: E402
 
 pytestmark = pytest.mark.mid
 
-# The flow/datapath_multi_trunk.buda geometry, built in-process so the plain vs
-# multi_trunk comparison shares everything but the one generate flag.
+# The two committed datapath demos, built in-process so the plain vs multi_trunk
+# comparison shares everything but the one generate flag:
+#   'col' -> flow/datapath_multi_trunk.buda  (columns -> BITRUNK_HVH)
+#   'row' -> flow/datapath_row_vhv.buda       (rows    -> BITRUNK_VHV)
 _LAYERS = ["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
            "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
-_NCOLS, _NROWS, _NBUS, _BITS = 3, 5, 6, 8
+_NGROUP, _NPER, _NBUS, _BITS = 3, 5, 6, 8
 
 
-def _blocks_and_buses():
+def _blocks_and_buses(orient):
     cmds = []
     for b in range(_NBUS):
-        y = 100 + b * 120
-        cmds.append(f"add_block S{b} 0 {y} 80 {y + 80}")
-    for c in range(_NCOLS):
-        x = 500 + c * 350
-        for r in range(_NROWS):
-            y = 60 + r * 180
-            cmds.append(f"add_block D{c}_{r} {x} {y} {x + 80} {y + 80}")
+        p = 100 + b * 120
+        cmds.append(f"add_block S{b} 0 {p} 80 {p + 80}" if orient == "col"
+                    else f"add_block S{b} {p} 0 {p + 80} 80")
+    for g in range(_NGROUP):
+        for i in range(_NPER):
+            if orient == "col":            # groups are COLUMNS (aligned in x)
+                x, y = 500 + g * 350, 60 + i * 180
+            else:                          # groups are ROWS (aligned in y)
+                x, y = 60 + i * 180, 500 + g * 350
+            cmds.append(f"add_block D{g}_{i} {x} {y} {x + 80} {y + 80}")
     for b in range(_NBUS):
-        c0, c1 = b % _NCOLS, (b + 1) % _NCOLS
-        dsts = [f"D{c}_{r}.p" for c in (c0, c1) for r in range(_NROWS)]
+        g0, g1 = b % _NGROUP, (b + 1) % _NGROUP
+        dsts = [f"D{g}_{i}.p" for g in (g0, g1) for i in range(_NPER)]
         cmds.append(f"add_bus bus{b}[{_BITS}] S{b}.p " + ",".join(dsts))
     return cmds
 
 
-def _route(multi_trunk: bool):
+def _route(orient, multi_trunk: bool):
     s = buda_cli.BudaSession()
     s.no_viz = True
     gen = "generate_topologies multi_trunk" if multi_trunk else "generate_topologies"
-    cmds = _LAYERS + _blocks_and_buses() + ["run_bundler", gen,
-                                            "run_planner", "run_nuts"]
+    cmds = _LAYERS + _blocks_and_buses(orient) + ["run_bundler", gen,
+                                                  "run_planner", "run_nuts"]
     with contextlib.redirect_stdout(io.StringIO()):
         for c in cmds:
             s.do_command(c)
@@ -101,15 +106,20 @@ def _selected_types(s):
         for w in s.bundles)
 
 
-def test_multi_trunk_selects_bitrunk_and_improves_qor():
-    plain = _route(False)
-    multi = _route(True)
+@pytest.mark.parametrize(
+    "orient, tree, min_trees",
+    [("col", "BITRUNK_HVH", 3),   # columns -> root-H / branch-V trees
+     ("row", "BITRUNK_VHV", 2)],  # rows    -> root-V / branch-H trees
+    ids=["column_hvh", "row_vhv"])
+def test_multi_trunk_selects_bitrunk_and_improves_qor(orient, tree, min_trees):
+    plain = _route(orient, False)
+    multi = _route(orient, True)
 
     sel = _selected_types(multi)
-    n_two_level = sum(v for k, v in sel.items() if k in _TWO_LEVEL)
-    assert n_two_level >= 3, (
-        f"expected multi_trunk to select several two-level BITRUNK_HVH/VHV trees "
-        f"on this datapath, got {dict(sel)}"
+    n_trees = sel.get(tree, 0)
+    assert n_trees >= min_trees, (
+        f"expected multi_trunk to select >= {min_trees} {tree} trees on this "
+        f"{orient} datapath, got {dict(sel)}"
     )
     # Plain trunks pick NO two-level tree (they are gated behind multi_trunk).
     plain_sel = _selected_types(plain)

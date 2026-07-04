@@ -1,0 +1,56 @@
+# Datapath demo (row orientation) — the BITRUNK_VHV mirror of
+# datapath_multi_trunk.buda.  A source ROW along the top fans six 8-bit buses
+# DOWN across aligned receiver ROWS (3 rows x 5 columns).  With
+# `generate_topologies multi_trunk` the planner selects two-level BITRUNK_VHV
+# trees (a root V spine feeding H row-trunks) for the datapath buses — lower
+# wirelength AND fewer overlaps:
+#
+#   generate_topologies            (plain)  -> abstract WL 20020, 1 NUTS overlap
+#   generate_topologies multi_trunk         -> abstract WL 16479, 0 NUTS overlaps
+#                                              (2 buses pick BITRUNK_VHV)
+#
+# See datapath_multi_trunk.buda (columns / HVH) and
+# docs/internal/mst_edge_realization.md for the measured coverage across shapes.
+
+def_layer 6 M6 H TOP 50
+def_layer 7 M7 V TOP 50
+def_layer 4 M4 H 50
+def_layer 5 M5 V 50
+
+add_block S0 100 0 180 80
+add_block S1 220 0 300 80
+add_block S2 340 0 420 80
+add_block S3 460 0 540 80
+add_block S4 580 0 660 80
+add_block S5 700 0 780 80
+
+add_block D0_0 60 500 140 580
+add_block D0_1 240 500 320 580
+add_block D0_2 420 500 500 580
+add_block D0_3 600 500 680 580
+add_block D0_4 780 500 860 580
+add_block D1_0 60 850 140 930
+add_block D1_1 240 850 320 930
+add_block D1_2 420 850 500 930
+add_block D1_3 600 850 680 930
+add_block D1_4 780 850 860 930
+add_block D2_0 60 1200 140 1280
+add_block D2_1 240 1200 320 1280
+add_block D2_2 420 1200 500 1280
+add_block D2_3 600 1200 680 1280
+add_block D2_4 780 1200 860 1280
+
+add_bus bus0[8] S0.p D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p,D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p
+add_bus bus1[8] S1.p D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p,D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p
+add_bus bus2[8] S2.p D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p,D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p
+add_bus bus3[8] S3.p D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p,D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p
+add_bus bus4[8] S4.p D1_0.p,D1_1.p,D1_2.p,D1_3.p,D1_4.p,D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p
+add_bus bus5[8] S5.p D2_0.p,D2_1.p,D2_2.p,D2_3.p,D2_4.p,D0_0.p,D0_1.p,D0_2.p,D0_3.p,D0_4.p
+
+run_bundler
+generate_topologies multi_trunk
+run_planner
+run_nuts
+ripup_reroute
+report_wirelength
+visualize
