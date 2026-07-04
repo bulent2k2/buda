@@ -57,6 +57,13 @@ struct Segment {
     // nuts_maps excludes it from same-bundle alignment (it must stay on its own
     // column, not snap onto a sibling stub's track).
     bool is_jog = false;
+    // Identity of the MST edge this segment realizes, when it is a leg of an MST
+    // candidate (MST_HV/MST_VH, TRUNK_*+MST).  -1 = not an MST-edge leg (trunk
+    // spine, plain stub, jog, …).  Set at generation by the MST realizers; lets a
+    // later stage identify all legs of one edge to flip its L/Z realization
+    // in place without disturbing the rest of the tree.  Pure annotation until a
+    // consumer exists (per-edge flip); carried through offset_topology.
+    int edge_id = -1;
 };
 // A busterm is a connection point on a block face.  Currently represented by
 // the block name and its bounding box; can be refined to a pin location later.

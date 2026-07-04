@@ -2345,7 +2345,13 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
         Topology mst;
         mst.type = (strategy == 0) ? "MST_HV" : "MST_VH";
         bool valid = true;
-        for (const auto& [eu, ev] : mst_edges) {
+        for (int ei = 0; ei < (int)mst_edges.size(); ++ei) {
+            const auto& [eu, ev] = mst_edges[ei];
+            const size_t before = mst.segments.size();   // tag this edge's legs
+            auto tag_edge = [&] {
+                for (size_t k = before; k < mst.segments.size(); ++k)
+                    mst.segments[k].edge_id = ei;
+            };
             Point p1, p2;
             Rect  br_u, br_v;
             closest_block_points(eu, ev, p1, p2, br_u, br_v);
@@ -2355,6 +2361,7 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                 Segment es;
                 if (shared_edge_segment(br_u, br_v, h_layer_, v_layer_, es))
                     mst.segments.push_back(es);
+                tag_edge();
                 continue;
             }
             // Corner-diagonal? A straight edge whose shared projection is a single
@@ -2388,6 +2395,7 @@ void TopologyGenerator::add_mst_candidates(const std::vector<Busterm>& blocks,
                     mst.segments.push_back(make_seg(p1.x, p2.y, p2.x, p2.y, h_layer_));
                 }
             }
+            tag_edge();
         }
         if (valid) {
             // Annotate the raw stubs first, then complete: completion rewrites the
@@ -2724,6 +2732,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
                                  std::vector<Segment>& out) -> bool {
             for (int e = 0; e < (int)mst_edges.size(); ++e) {
                 if (!take[e]) continue;
+                const size_t before = out.size();   // tag this edge's legs below
                 const Rect& r_u = nodes[mst_edges[e].u].second;
                 const Rect& r_v = nodes[mst_edges[e].v].second;
                 Point p1, p2;
@@ -2734,6 +2743,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
                     Segment es;
                     if (shared_edge_segment(r_u, r_v, h_layer_, v_layer_, es))
                         out.push_back(es);
+                    for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
                     continue;
                 }
                 // Corner-diagonal shortcut: faces meet at a single point, so a
@@ -2745,6 +2755,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
                 const int coy_lo = std::max(r_u.y1, r_v.y1), coy_hi = std::min(r_u.y2, r_v.y2);
                 if ((p1.x == p2.x && cox_lo == cox_hi) || (p1.y == p2.y && coy_lo == coy_hi)) {
                     corner_diagonal_L(r_u, r_v, is_h ? 1 : 0, h_layer_, v_layer_, out);
+                    for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
                     continue;
                 }
                 if (p1.x == p2.x) {
@@ -2765,6 +2776,7 @@ void TopologyGenerator::add_trunk_mst_candidates(
                         out.push_back(make_seg(p2.x, p1.y, p2.x, p2.y, v_layer_));
                     }
                 }
+                for (size_t k = before; k < out.size(); ++k) out[k].edge_id = e;
             }
             return true;
         };
