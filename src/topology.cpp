@@ -1191,7 +1191,21 @@ static void complete_relay_junctions(Topology& topo,
             const bool is_feedthru =
                 std::find(topo.feedthru_blocks.begin(), topo.feedthru_blocks.end(),
                           blocks[bi].block_name) != topo.feedthru_blocks.end();
-            if (is_feedthru || on_other_boundary(A_far) || on_other_boundary(B_far)) {
+            // Rect-aware far-endpoint face test: mirror the landing collection
+            // (on_face), which treats every Busterm::rects face as a real block
+            // face.  on_other_boundary sees only orig_bbox, so for a multi-rect /
+            // TEG block it would MISS a far endpoint tapping an interior rect --
+            // and erasing B would then drop that block's only busterm annotation,
+            // opening it.  Check both orientations across all other blocks' rects.
+            auto far_taps_block = [&](const Point& P) -> bool {
+                for (int bj = 0; bj < (int)blocks.size(); ++bj) {
+                    if (bj == bi) continue;
+                    if (on_face(P, true, blocks[bj]) || on_face(P, false, blocks[bj]))
+                        return true;
+                }
+                return false;
+            };
+            if (is_feedthru || far_taps_block(A_far) || far_taps_block(B_far)) {
                 // A declared feedthru MUST keep its two BUSTERM landings (the block
                 // bridges the split via its own routing, not a straight crossing); a
                 // far endpoint that taps another block might strand it.  Either way,
