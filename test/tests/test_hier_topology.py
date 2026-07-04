@@ -20,9 +20,17 @@ Verifies that topology candidates are generated for all three bundle kinds:
   (b) depth-1 cross-block     src_i/buf_i → proc_i/pa_i
   (c) depth-1 cell-level      pa_i → pb_i  (cell-local coords)
 """
+import io
+import contextlib
+import sys
+from pathlib import Path
+
 import pytest
 from pytest_bdd import scenarios, given, when, then, parsers
 import buda
+
+sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
+import buda_cli  # noqa: E402
 
 scenarios('features/hier_topology.feature')
 
@@ -325,6 +333,89 @@ def test_all_bundles_get_candidates():
             f"Bundle {b.id} level={b.level} ctx={b.cell_context!r} "
             f"reason={b.reason!r}: 0 candidates"
         )
+
+
+# ── multi_trunk opt-in in the hier flow ───────────────────────────────────────
+#
+# `generate_hier_topologies multi_trunk` must thread the flag through to the
+# TopologyGenerator exactly like the flat `generate_topologies multi_trunk`, so
+# the two-level BITRUNK_HVH/VHV datapath trees are generated for hier bundles.
+# Before this was wired, the hier path built the generator without the flag and
+# the keyword was silently ignored.
+
+def _datapath_hier_db():
+    """A depth-0 datapath: source S0 on the left fanning an 8-bit bus to two
+    columns × five rows of receivers (aligned in x) — the column-aligned shape
+    the BITRUNK_HVH two-level tree targets."""
+    db = buda.BDB(":memory:")
+    db.add_cell("s_cell", 80, 80)
+    db.add_cell("d_cell", 80, 80)
+    db.add_inst("S0", "s_cell", "", 0, 100)
+    for g in range(2):
+        for i in range(5):
+            db.add_inst(f"D{g}_{i}", "d_cell", "", 500 + g * 350, 60 + i * 180)
+    dsts = [f"D{g}_{i}.p" for g in range(2) for i in range(5)]
+    for bit in range(8):
+        db.add_net_pins(f"bus_{bit}", "S0.p", dsts)
+    buda.BustermGen(db).derive(1)
+    return db
+
+
+def _run_hier_gen(multi_trunk: bool):
+    """Drive a BudaSession through the hier flow (run_hier_bundler →
+    generate_hier_topologies[ multi_trunk]) and return the per-bundle candidate
+    type sets."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = _datapath_hier_db()
+    gen = ("generate_hier_topologies multi_trunk" if multi_trunk
+           else "generate_hier_topologies")
+    cmds = ["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+            "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+            "run_hier_bundler", gen]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    return s
+
+
+# Only the two-level trees are gated behind the flag; legacy BITRUNK_H exists on
+# the default path too (Codex #179 P2), so key on the two-level types exactly.
+_TWO_LEVEL = ("BITRUNK_HVH", "BITRUNK_VHV")
+
+
+def _types(s):
+    return {c.type.split("@")[0] for w in s.bundles for c in w.input.candidates}
+
+
+def _total(s):
+    return sum(len(w.input.candidates) for w in s.bundles)
+
+
+def test_generate_hier_topologies_multi_trunk_adds_two_level_trees():
+    """generate_hier_topologies multi_trunk generates the two-level BITRUNK_HVH
+    tree that the plain hier generate does not — proving the flag threads through
+    the hier path (previously it was silently dropped)."""
+    plain = _run_hier_gen(multi_trunk=False)
+    multi = _run_hier_gen(multi_trunk=True)
+
+    plain_types, multi_types = _types(plain), _types(multi)
+    # The default hier path never emits a two-level tree.
+    assert not (set(_TWO_LEVEL) & plain_types), (
+        f"plain generate_hier_topologies should not emit two-level trees, "
+        f"got {sorted(plain_types)}")
+    # multi_trunk does — specifically BITRUNK_HVH for this column datapath.
+    assert "BITRUNK_HVH" in multi_types, (
+        f"expected BITRUNK_HVH under multi_trunk, got {sorted(multi_types)}")
+    # And it only adds candidates (never drops the plain ones).
+    assert _total(multi) >= _total(plain)
+
+
+def test_generate_hier_topologies_default_no_multi_trunk():
+    """Without the keyword the hier flow is unchanged — the default remains
+    opt-out of the two-level trees (regression guard on the flag's default)."""
+    plain = _run_hier_gen(multi_trunk=False)
+    assert not (set(_TWO_LEVEL) & _types(plain))
 
 
 def test_template_sharing_two_proc_instances():

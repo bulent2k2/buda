@@ -1340,12 +1340,14 @@ class BudaSession:
                 f"{self._bundle_net_summary(nets)}")
 
     def _generate_hier_topo_one(self, w, use_center, use_double_detour,
-                                fp_cache, comps_by_name):
+                                fp_cache, comps_by_name, use_multi_trunk=False):
         """Generate topology candidates for a single HBundle wrapper.
 
         Updates w.input.candidates in place. Returns candidate count.
         fp_cache is a dict shared across calls; pass {} for a fresh cache.
         comps_by_name is {name: ComponentRow} from bdb.all_components().
+        use_multi_trunk adds two-level BITRUNK_HVH/VHV datapath trees (opt-in),
+        as in the flat generate_topologies.
         """
         b = w.input.original_bundle
         nets_suffix = self._bundle_nets_suffix(w)   # rides on each per-bundle log line
@@ -1362,7 +1364,8 @@ class BudaSession:
             if cell_fp is None:
                 print(f"  Warning: could not build cell-local fp for {parent_name!r} — skipping")
                 return 0
-            tg = self._make_topo_gen(cell_fp, use_center, use_double_detour)
+            tg = self._make_topo_gen(cell_fp, use_center, use_double_detour,
+                                     use_multi_trunk)
             src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
             dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
             w.input.candidates = tg.generate_candidates(src_local, dsts_local)
@@ -1403,7 +1406,8 @@ class BudaSession:
                              int(round(rc.x2)), int(round(rc.y2)))
             if not ok:
                 return 0
-            tg = self._make_topo_gen(fp, use_center, use_double_detour)
+            tg = self._make_topo_gen(fp, use_center, use_double_detour,
+                                     use_multi_trunk)
             w.input.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
             self._reset_plan_for_regen(w)
             label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
@@ -1430,7 +1434,8 @@ class BudaSession:
             if cache_key not in fp_cache:
                 fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
             depth_fp = fp_cache[cache_key]
-            tg = self._make_topo_gen(depth_fp, use_center, use_double_detour)
+            tg = self._make_topo_gen(depth_fp, use_center, use_double_detour,
+                                     use_multi_trunk)
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
@@ -4202,19 +4207,23 @@ class BudaSession:
                     print(f"hb-{b.id:<3}  D{b.level}  {kind:<24}  \"{short_reason}\"  "
                           f"nets={len(b.get_net_names())}  cands={cands}{inst_str}")
         elif cmd == "generate_topologies_for_bundle":
-            # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour]
+            # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk]
             # Single dst  → 2-pin L/Z/U candidates
             # Multiple dst → multicast trunk+branch candidates
             # Append "center_mode"    to use block centres instead of busterm faces.
             # Append "double_detour"  to include UU_VHV / UU_HVH high-congestion variants.
+            # Append "multi_trunk"    to add two-level BITRUNK_HVH/VHV datapath trees.
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
-            pos_args = [a for a in args if a not in ("center_mode", "double_detour")]
+            use_multi_trunk   = "multi_trunk"   in args
+            pos_args = [a for a in args
+                        if a not in ("center_mode", "double_detour", "multi_trunk")]
             if not pos_args:
                 print("Error: generate_topologies_for_bundle requires a hint")
                 return
             hint = pos_args[0]
-            topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour)
+            topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour,
+                                           use_multi_trunk)
             found = False
             for w in self.bundles:
                 net_name = w.input.original_bundle.get_net_names()[0]
@@ -4277,7 +4286,7 @@ class BudaSession:
                       f"{'y' if nt == 1 else 'ies'} to the open BDB.")
 
         elif cmd == "generate_hier_topologies":
-            # generate_hier_topologies [center_mode] [double_detour]
+            # generate_hier_topologies [center_mode] [double_detour] [multi_trunk]
             # Generates topology candidates for all HBundles produced by
             # run_hier_bundler.  Three cases per bundle:
             #   (a) cell-level (cell_context set)     → cell-local floorplan
@@ -4291,6 +4300,7 @@ class BudaSession:
                 return
             use_center        = "center_mode"   in args
             use_double_detour = "double_detour" in args
+            use_multi_trunk   = "multi_trunk"   in args
 
             # Cache floorplans keyed by (depth, is_cell_local, instance_or_empty)
             fp_cache = {}
@@ -4299,7 +4309,8 @@ class BudaSession:
 
             for w in self.bundles:
                 n = self._generate_hier_topo_one(w, use_center, use_double_detour,
-                                                  fp_cache, comps_by_name)
+                                                  fp_cache, comps_by_name,
+                                                  use_multi_trunk)
                 total_candidates += n
             print(f"generate_hier_topologies: {len(self.bundles)} bundles, "
                   f"{total_candidates} total candidates")
@@ -4312,7 +4323,7 @@ class BudaSession:
                       f"{'y' if nt == 1 else 'ies'} to the open BDB.")
 
         elif cmd == "generate_topologies_for_hbundle":
-            # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour]
+            # Usage: generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk]
             if not args:
                 print("Error: generate_topologies_for_hbundle requires a bundle_id"); return
             if self.bdb is None:
@@ -4323,6 +4334,7 @@ class BudaSession:
                 print(f"Error: invalid bundle_id {args[0]!r}"); return
             use_center        = "center_mode"   in args[1:]
             use_double_detour = "double_detour" in args[1:]
+            use_multi_trunk   = "multi_trunk"   in args[1:]
             target_w = next((w for w in self.bundles if w.input.original_bundle.id == bid), None)
             if target_w is None:
                 orig_w = next((w for w in self._hier_bundles_orig
@@ -4336,7 +4348,7 @@ class BudaSession:
             fp_cache = {}
             comps_by_name = {c.name: c for c in self.bdb.all_components()}
             n = self._generate_hier_topo_one(target_w, use_center, use_double_detour,
-                                              fp_cache, comps_by_name)
+                                              fp_cache, comps_by_name, use_multi_trunk)
             print(f"generate_topologies_for_hbundle: bundle {bid} — {n} candidates")
             if self._persist_topologies():
                 print("[BDB] re-persisted candidate topologies to the open BDB.")
