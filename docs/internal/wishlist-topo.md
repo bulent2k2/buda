@@ -3,6 +3,10 @@
 Deferred follow-ups for topology generation (`src/topology.cpp`) and the
 connectivity model (`src/conn_topology.cpp`). Index: [`wishlist.md`](wishlist.md).
 
+See also [`mst_edge_realization.md`](mst_edge_realization.md) — trunk-tail
+tightening and the per-edge MST L/Z DOF (avoiding the 2ᴺ candidate explosion),
+grounded in the current generator code with a measured prototype result.
+
 ## True along-flex trunk DOF (Stage C of the flexible-root re-arch)
 
 **Context.** The coverage-driven flexible trunk span (PR on `claude/topo-gen-b4`)
