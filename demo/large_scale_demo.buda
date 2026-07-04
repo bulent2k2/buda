@@ -42,12 +42,12 @@ run_bundler strict
 # source large_scale_demo_gen_topo.buda
 generate_topologies
 
-# Stage 3 — congestion-aware topology selection (fattest-bus-first)
+# Stage 3 — congestion-aware topology selection (fattest-bus-first?)
+set_track_pitch 2.0  # to match run_nuts below
 run_planner 5
 
 # Stage 4 — NUTS abstract track placement (pitch=2.0)
-#run_nuts 1.0
-run_nuts
+run_nuts 2.0
 
 # After improvements to layer assignment in run_planner, this makes overlaps worse because many more short segs go down to M2
 # V 100 280 H 150 400
