@@ -149,6 +149,28 @@ void annotate_topology(Topology& topo, const Floorplan& fp);
 // deliberate geometry mutation such as a NUTS dogleg split), so every stage
 // reads identical connectivity.  Clears and rebuilds the field (idempotent).
 void annotate_seg_conns(Topology& topo);
+
+// Flip one MST edge's L realization in place (per-edge L/Z DOF).  An axis-diagonal
+// edge is realized as two `edge_id`-tagged legs meeting at a bend; this re-routes
+// them with the bend at the OPPOSITE corner and swaps the legs' routing layers
+// (H-first <-> V-first) — the same Manhattan length, a different congestion
+// footprint.  The two Segment slots are reused (indices unchanged, so seg_busterms
+// stays valid), but the junction geometry moves, so the caller must re-derive
+// connectivity afterwards (annotate_seg_conns / annotate_topology).  It is an
+// involution (flipping the same edge twice restores it).
+//
+// Returns false (no change) when the flip is not valid:
+//   • `edge_id < 0` (the "not an MST-edge leg" sentinel) or an unknown id;
+//   • the edge is not a clean 2-leg diagonal L (straight/shared realization, or
+//     collinear legs with no alternate);
+//   • the alternate bend lands INSIDE a block or on a block CORNER — this is
+//     exactly the `corner_diagonal_L` case, whose two legs were deliberately
+//     routed AROUND a shared block corner; the opposite bend is that corner, so
+//     flipping it would route onto the obstacle the generator avoided.  The
+//     Floorplan is consulted for this check.
+bool flip_mst_edge(Topology& topo, int edge_id, int h_layer, int v_layer,
+                   const Floorplan& fp);
+
 // Per-block corner margin: keeps trunk/stub connections away from block corners.
 // dx: margin along the horizontal direction (applied to top/bottom faces, extent in X).
 // dy: margin along the vertical direction   (applied to left/right  faces, extent in Y).

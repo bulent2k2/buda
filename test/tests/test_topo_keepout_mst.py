@@ -376,6 +376,115 @@ def test_smart_default_flips_blocked_edge_to_clear_L():
                 f"{(s.start.x, s.start.y, s.end.x, s.end.y)}"
 
 
+# ── Per-edge L/Z flip primitive (step 4a: flip_mst_edge) ─────────────────────
+
+def _edge_groups(topo):
+    groups = {}
+    for i, s in enumerate(topo.segments):
+        if s.edge_id >= 0:
+            groups.setdefault(s.edge_id, []).append(i)
+    return groups
+
+
+def _edge_far_and_bend(topo, i, j):
+    a, b = topo.segments[i], topo.segments[j]
+    pa = {(a.start.x, a.start.y), (a.end.x, a.end.y)}
+    pb = {(b.start.x, b.start.y), (b.end.x, b.end.y)}
+    bend = (pa & pb).pop()           # shared endpoint = the bend
+    far = frozenset(pa ^ pb)         # the two non-shared endpoints = p1, p2
+    return far, bend
+
+
+def test_flip_mst_edge_moves_bend_and_preserves_endpoints():
+    """Flipping a 2-leg diagonal MST edge moves the bend to the opposite corner,
+    keeps the edge's two endpoints (so connectivity is preserved), reuses the same
+    segment slots + edge_id, and is an involution."""
+    fp = _diag_4block_fp()
+    gen = _make_gen(fp)
+    mst = _mst_hv(gen.generate_candidates("A", ["B", "C", "D"]))
+    assert mst is not None
+    groups = _edge_groups(mst)
+    eid = next((e for e, idx in groups.items() if len(idx) == 2), None)
+    assert eid is not None, "expected a 2-leg diagonal MST edge"
+    i, j = groups[eid]
+
+    far0, bend0 = _edge_far_and_bend(mst, i, j)
+    assert buda.flip_mst_edge(mst, eid, 4, 5, fp) is True
+    far1, bend1 = _edge_far_and_bend(mst, i, j)
+    assert far1 == far0, "flip must preserve the edge's two endpoints"
+    assert bend1 != bend0, "flip must move the bend to the other corner"
+    # Same slots + identity; legs are still one H + one V (a valid L).
+    assert mst.segments[i].edge_id == eid and mst.segments[j].edge_id == eid
+    dirs = {(mst.segments[k].start.y == mst.segments[k].end.y) for k in (i, j)}
+    assert dirs == {True, False}, "flipped legs must be one horizontal + one vertical"
+    # Re-annotates cleanly (junction geometry moved).
+    buda.annotate_topology(mst, fp)
+
+    # Involution: flipping again restores the original bend.
+    assert buda.flip_mst_edge(mst, eid, 4, 5, fp) is True
+    far2, bend2 = _edge_far_and_bend(mst, i, j)
+    assert far2 == far0 and bend2 == bend0
+
+
+def test_flip_mst_edge_noop_for_unknown_or_untagged():
+    """flip_mst_edge returns False (no change) for an unknown edge id, the -1
+    "not an MST leg" sentinel (must not collect untagged segments), and a non-MST
+    candidate whose segments carry no edge identity."""
+    fp = _diag_4block_fp()
+    gen = _make_gen(fp)
+    cands = gen.generate_candidates("A", ["B", "C", "D"])
+    mst = _mst_hv(cands)
+    assert mst is not None
+    assert buda.flip_mst_edge(mst, 99999, 4, 5, fp) is False   # unknown id
+    assert buda.flip_mst_edge(mst, -1, 4, 5, fp) is False       # sentinel guard
+    # A non-MST candidate: no edge_id >= 0, so any flip is a no-op (incl. the -1
+    # sentinel, which must NOT collect its untagged segments).
+    nonmst = next((c for c in cands if "MST" not in c.type), None)
+    if nonmst is not None:
+        assert buda.flip_mst_edge(nonmst, -1, 4, 5, fp) is False
+
+
+def _seg(x1, y1, x2, y2, layer, edge_id):
+    s = buda.Segment()
+    s.start = buda.Point(x1, y1)
+    s.end = buda.Point(x2, y2)
+    s.layer_hint = layer
+    s.edge_id = edge_id
+    return s
+
+
+def test_flip_mst_edge_rejects_bend_on_block_corner():
+    """The alternate bend of a corner-diagonal edge IS the block corner the
+    generator routed around, so flip_mst_edge must reject a flip whose opposite
+    bend lands on (or inside) a block — leaving the geometry untouched — while the
+    same edge in open space flips normally."""
+    # Edge (100,50)->(250,150), currently bent at (250,50).  Opposite bend =
+    # (100,50)+(250,150)-(250,50) = (100,150).
+    def make_topo():
+        t = buda.Topology()
+        t.type = "MST_HV"
+        t.segments = [_seg(100, 50, 250, 50, 4, 0),    # H leg to the current bend
+                      _seg(250, 50, 250, 150, 5, 0)]   # V leg to p2
+        return t
+
+    # A block whose CORNER is exactly the opposite bend (100,150) -> reject.
+    fp_corner = buda.Floorplan()
+    fp_corner.add_block("K", 100, 150, 200, 250)
+    t1 = make_topo()
+    before = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t1.segments]
+    assert buda.flip_mst_edge(t1, 0, 4, 5, fp_corner) is False, \
+        "flip onto a block corner must be rejected"
+    after = [(s.start.x, s.start.y, s.end.x, s.end.y) for s in t1.segments]
+    assert before == after, "a rejected flip must not mutate the geometry"
+
+    # Same edge, empty floorplan: the flip is allowed (bend moves to (100,150)).
+    t2 = make_topo()
+    assert buda.flip_mst_edge(t2, 0, 4, 5, buda.Floorplan()) is True
+    bends = {(s.end.x, s.end.y) for s in t2.segments} | \
+            {(s.start.x, s.start.y) for s in t2.segments}
+    assert (100, 150) in bends, "unobstructed flip should reach the opposite bend"
+
+
 def test_trunk_mst_has_more_segments_than_trunk():
     """TRUNK+MST has more segments than its corresponding plain TRUNK."""
     fp = buda.Floorplan()
