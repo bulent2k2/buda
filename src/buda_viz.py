@@ -15,6 +15,7 @@
 import json
 import math
 import os
+import re
 import sys
 import types
 from datetime import datetime
@@ -1813,6 +1814,7 @@ class BudaVisualizer:
         self._btn_all_bundles= None
         self._btn_all_overlaps = None
         self._ax_layers      = None   # custom layer panel (replaces CheckButtons)
+        self._ax_design_stats = None  # bundles·buses·nets header above the list
         self._ax_bundles     = None
         self._ax_overlaps    = None
         self._rerun_layer_fn = rerun_layer_fn   # (layer_id: int) -> NUTSResult | None
@@ -2600,6 +2602,37 @@ class BudaVisualizer:
         ax_h_in   = fig_h_in * ax_h_frac
         row_h_in  = 0.145   # ~10 pt rows at standard DPI
         return max(1, int(ax_h_in / row_h_in))
+
+    def _design_counts(self):
+        """Return (n_bundles, n_buses, n_nets) for the whole design.
+
+        A *net* is one wire; a *bus* is the `add_bus` grouping it belongs to
+        (`<bus>_<idx>` / `<bus>_b<idx>` — same convention the CLI's bus summary
+        uses), and a bare net with no numeric suffix counts as its own bus.
+        Bundles/buses/nets are fixed once the pipeline has run, so this is
+        computed from the bundle wrappers with no extra plumbing."""
+        n_bundles = len(self.bundles)
+        n_nets = 0
+        buses = set()
+        for w in self.bundles:
+            for nm in w.input.original_bundle.get_net_names():
+                n_nets += 1
+                m = re.match(r'^(.*?)_([A-Za-z]*)(\d+)$', nm)
+                buses.add((m.group(1), m.group(2)) if m else ('', nm))
+        return n_bundles, len(buses), n_nets
+
+    def _redraw_design_stats(self):
+        """Draw the always-on 'N bundles · M buses · K nets' header line."""
+        ax = self._ax_design_stats
+        if ax is None:
+            return
+        ax.clear()
+        ax.set_axis_off()
+        nb, nbus, nn = self._design_counts()
+        ax.text(0.5, 0.5,
+                f"{nb} bundles · {nbus} buses · {nn} nets",
+                transform=ax.transAxes, ha='center', va='center',
+                fontsize=8.5, color='#333333', fontweight='bold', clip_on=True)
 
     def _redraw_bundle_list(self):
         """Clear and redraw all rows in the bundle checkbox list."""
@@ -3966,12 +3999,13 @@ class BudaVisualizer:
         BTN_H    = 0.044
         SCROLL_H = 0.033
         GAP      = 0.012
+        STAT_H   = 0.030   # design-stats header line above the bundle list
         TOP_Y    = 0.95
         BOT_Y    = 0.09   # bottom margin
 
-        # Fixed overhead consumed by buttons, scroll arrows, and gaps
-        # (3 header btns) + (4 scroll arrows for bundles+overlaps) + (5 gaps)
-        fixed_h  = 3 * BTN_H + 4 * SCROLL_H + 5 * GAP
+        # Fixed overhead consumed by buttons, scroll arrows, the stats line, and
+        # gaps: (3 header btns) + (4 scroll arrows) + stats line + (6 gaps)
+        fixed_h  = 3 * BTN_H + 4 * SCROLL_H + STAT_H + 6 * GAP
         list_h   = max((TOP_Y - BOT_Y - fixed_h) / 3, 0.05)
 
         # Top-down allocation.  y tracks the top edge of the next widget.
@@ -3992,6 +4026,11 @@ class BudaVisualizer:
         self._ax_layers = self.fig.add_axes(_rect(list_h, GAP))
         self._ax_layers.set_facecolor('#f8f8f8')
         self._redraw_layer_list()
+
+        # ── Design stats: bundles · buses · nets (always-on header) ──────
+        self._ax_design_stats = self.fig.add_axes(_rect(STAT_H, GAP))
+        self._ax_design_stats.set_axis_off()
+        self._redraw_design_stats()
 
         # ── All Bundles ──────────────────────────────────────────────────
         ax_all_bundles = self.fig.add_axes(_rect(BTN_H, GAP))

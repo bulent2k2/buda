@@ -167,6 +167,24 @@ def test_s_key_toggles_solo(monkeypatch):
     assert viz.ui_state.solo == before
 
 
+def test_design_stats_header_counts(monkeypatch):
+    """The bundle-panel header reports design-wide bundles/buses/nets. dnuts1 has
+    5 add_bus lines (n11[32] n12[32] bv1[16] bv2[16] r12[32]) → 5 buses / 128
+    nets, bundled into 5 bundles."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    n_bundles, n_buses, n_nets = viz._design_counts()
+    assert n_bundles == len(viz.bundles)
+    assert n_buses == 5, f"expected 5 buses, got {n_buses}"
+    assert n_nets == 128, f"expected 128 nets, got {n_nets}"
+    # nets == sum of each bundle's net names (every wire counted once).
+    assert n_nets == sum(len(w.input.original_bundle.get_net_names())
+                         for w in viz.bundles)
+    # The always-on header axes carries the rendered stats line.
+    assert viz._ax_design_stats is not None
+    texts = [t.get_text() for t in viz._ax_design_stats.texts]
+    assert texts == [f"{n_bundles} bundles · {n_buses} buses · {n_nets} nets"], texts
+
+
 def test_selected_title_shows_segment_count_no_solo_hint(monkeypatch):
     """Cycling bundles with `n` shows the selected topology's segment count in
     the title (to gauge complexity), and no '[Solo ON]' hint even in Solo mode."""
