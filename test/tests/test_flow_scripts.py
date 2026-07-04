@@ -669,3 +669,51 @@ def test_empty_layer_stack_warns(tmp_path):
     out, rc = _run_path(script)
     assert rc == 0, f"flow should still complete, got {rc}\n{out}"
     assert "WARNING: no" in out and "layers defined" in out, out
+
+
+# ---------------------------------------------------------------------------
+# dsl/comments.buda — inline `#` comments: everything from the first token-
+# starting `#` to end of line is stripped, so a command can be commented out
+# partially (`run_bundler # strict` runs `run_bundler`).
+# ---------------------------------------------------------------------------
+
+def test_dsl_inline_comments_repro():
+    """The checked-in repro runs clean: inline comments after commands and args
+    are stripped, so run_bundler/run_planner run with default (uncommented)
+    behaviour rather than choking on the `#` token."""
+    out, rc = run_script("dsl/comments.buda")
+    assert_clean(out, rc, "dsl/comments.buda")
+    # The comment `# strict` after run_bundler must have been dropped, not
+    # parsed as a strategy — the pre-fix failure printed this error.
+    assert "strategy must be" not in out, out
+    # The pipeline actually ran end-to-end with the comments removed.
+    assert "Bundler created 1 hbundles" in out, out
+    segs, viol, over = nuts_summary(out)
+    assert (viol, over) == (0, 0), f"expected clean NUTS, got viol={viol} over={over}\n{out}"
+
+
+def test_inline_comment_boundary_rules(tmp_path):
+    """A `#` only starts a comment at a token boundary (start of line or after
+    whitespace). A `#` embedded in a token is preserved, so it can't silently
+    swallow real arguments; a full-line comment and a trailing comment both
+    strip cleanly without dropping the command's earlier args."""
+    script = tmp_path / "inline.buda"
+    script.write_text(
+        "# a full-line comment\n"
+        "def_layer 4 M4 H TOP 0.0   # trailing comment after all args\n"
+        "add_block a 0 0 100 100     # place block a\n"
+        "add_block b 400 0 500 100\n"
+        "add_bus x[4] a b\n"
+        "run_bundler # strict\n"
+        "generate_topologies\n"
+        "run_planner # signal_tracks\n"
+        "run_nuts\n"
+    )
+    out, rc = _run_path(script)
+    assert rc == 0, f"inline comments should not break the flow, got {rc}\n{out}"
+    bad = [l for l in out.splitlines() if l.startswith("Error:")]
+    assert not bad, "unexpected errors:\n" + "\n".join(bad)
+    # def_layer kept its 5 real args despite the trailing comment.
+    assert "strategy must be" not in out, out
+    segs, viol, over = nuts_summary(out)
+    assert (viol, over) == (0, 0), f"expected clean NUTS, got viol={viol} over={over}\n{out}"

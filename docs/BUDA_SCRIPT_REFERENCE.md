@@ -1793,12 +1793,17 @@ run_bundler strict
 ### Comments
 
 ```
-# this is a comment
+# this is a full-line comment
+run_bundler # inline comment: everything from `#` to end of line is dropped
+def_layer 4 M4 H TOP 0.0 # a trailing note after the command's args
 ```
 
-Lines beginning with `#` (after optional leading whitespace) are ignored.
-Inline comments (after a command on the same line) are **not** supported —
-the `#` must be the first non-whitespace character.
+Everything from the first **token-starting** `#` (the start of the line, or a
+`#` preceded by whitespace) to the end of the line is stripped before the
+command is parsed. So a whole line can be a comment, or a command can be
+commented partially — `run_bundler # strict` runs `run_bundler`. A `#`
+embedded in a token (no preceding whitespace, e.g. inside a path) is **kept**,
+so an inline comment cannot silently swallow a real argument.
 
 ---
 
