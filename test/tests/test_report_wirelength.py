@@ -122,3 +122,56 @@ def test_per_layer_breakdown_present():
     # Both buses route on M4 here, so the by-layer line names M4 with the total.
     assert "by layer:" in out
     assert "M4=" in out
+
+
+def _dnuts_open_session():
+    """A bus pinned through an all-POWER corridor: DetailedNUTS finds zero
+    signal tracks under its trunk, so all 8 bits go unplaced (deterministic)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = [
+        "def_layer 4 M4 H TOP 50",
+        "def_layer 5 M5 V TOP 50",
+        "def_track_pattern 4 0 SIGNAL 1 4",
+        "def_track_pattern 5 0 SIGNAL 1 4",
+        "add_grid_override 4 600 900 2600 1550 0 POWER 2 3",
+        "add_block D1 0 1000 200 1400",
+        "add_block R 2400 1600 2600 2000",
+        "add_bus a[8] D1.p R.p",
+        "run_bundler", "generate_topologies",
+        "select_topology 1 1",                 # pin L_HV through the dead band
+        "run_planner", "run_nuts", "run_detailed_nuts",
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    return s
+
+
+def test_unplaced_bits_surfaced_in_detailed_total():
+    """Codex P2: a WL comparison must not be fooled by incomplete routing.
+    When bits are unplaced, the detailed total line carries the unplaced count
+    and a NOTE says the WL excludes them — so a lower number is never mistaken
+    for a tighter route."""
+    s = _dnuts_open_session()
+    assert s.detailed_result.num_unplaced == 8
+    out = _run(s)
+    assert "8 unplaced bit(s)" in out, out
+    assert "NOT comparable to a complete route" in out, out
+
+
+def test_all_ids_listed_even_at_zero_wl():
+    """An all-unplaced bundle must still appear (as a 0-WL row), not vanish."""
+    s = _dnuts_open_session()
+    out = _run(s)
+    bid = s.bundles[0].input.original_bundle.id
+    # The bundle has zero placed detailed wires but must be in the table.
+    assert any(line.split()[:1] == [str(bid)] for line in out.splitlines()), out
+
+
+def test_clean_route_reports_zero_unplaced():
+    """The count is always present (0 when complete), so every run is diffable
+    on the same field."""
+    s = _two_bus_session()
+    out = _run(s)
+    assert "0 unplaced segment(s)" in out, out
