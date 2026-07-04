@@ -74,9 +74,25 @@ def _route(multi_trunk: bool):
     return s
 
 
-def _wl(s):
-    return sum(abs(t.span_hi - t.span_lo)
-               for t in s.nuts_result.segments if getattr(t, "placed", True))
+# Only the two-level trees (BITRUNK_HVH / BITRUNK_VHV) are gated behind the
+# multi_trunk flag; the legacy BITRUNK_H exists on the default path too, so
+# `startswith("BITRUNK")` would also count it (Codex #179 P2).  The win is
+# specifically about the two-level trees, so key on those exactly.
+_TWO_LEVEL = ("BITRUNK_HVH", "BITRUNK_VHV")
+
+
+def _wl_and_unplaced(s):
+    """Total abstract wirelength over PLACED segments, plus the unplaced count.
+    WL is only comparable when nothing is unplaced — an unplaced segment silently
+    dropped from the sum would let an incomplete route look 'shorter' (Codex
+    #179 P2)."""
+    total, unplaced = 0.0, 0
+    for t in s.nuts_result.segments:
+        if getattr(t, "placed", True):
+            total += abs(t.span_hi - t.span_lo)
+        else:
+            unplaced += 1
+    return total, unplaced
 
 
 def _selected_types(s):
@@ -90,18 +106,26 @@ def test_multi_trunk_selects_bitrunk_and_improves_qor():
     multi = _route(True)
 
     sel = _selected_types(multi)
-    n_bitrunk = sum(v for k, v in sel.items() if k.startswith("BITRUNK"))
-    assert n_bitrunk >= 3, (
-        f"expected multi_trunk to select several BITRUNK trees on this datapath, "
-        f"got {dict(sel)}"
+    n_two_level = sum(v for k, v in sel.items() if k in _TWO_LEVEL)
+    assert n_two_level >= 3, (
+        f"expected multi_trunk to select several two-level BITRUNK_HVH/VHV trees "
+        f"on this datapath, got {dict(sel)}"
     )
-    # Plain trunks pick NO BITRUNK (they aren't generated without the flag).
+    # Plain trunks pick NO two-level tree (they are gated behind multi_trunk).
     plain_sel = _selected_types(plain)
-    assert not any(k.startswith("BITRUNK") for k in plain_sel), dict(plain_sel)
+    assert not any(k in _TWO_LEVEL for k in plain_sel), dict(plain_sel)
+
+    # WL is only a valid comparison when both routes place every segment.
+    plain_wl, plain_unpl = _wl_and_unplaced(plain)
+    multi_wl, multi_unpl = _wl_and_unplaced(multi)
+    assert plain_unpl == 0 and multi_unpl == 0, (
+        f"NUTS left segments unplaced (WL not comparable): "
+        f"plain={plain_unpl}, multi={multi_unpl}"
+    )
 
     # The win: equal-or-better wirelength AND overlaps.
-    assert _wl(multi) <= _wl(plain) + 1e-6, (
-        f"multi_trunk WL {_wl(multi)} worse than plain {_wl(plain)}"
+    assert multi_wl <= plain_wl + 1e-6, (
+        f"multi_trunk WL {multi_wl} worse than plain {plain_wl}"
     )
     assert multi.nuts_result.num_overlaps <= plain.nuts_result.num_overlaps, (
         f"multi_trunk overlaps {multi.nuts_result.num_overlaps} worse than "
