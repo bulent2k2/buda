@@ -3091,6 +3091,88 @@ class BudaSession:
             return worst if worst is not None else 0.0
         return sorted(idxs, key=farness, reverse=True)
 
+    def _gen_hv(self):
+        """The generator's top H / top V layer ids (used to hint flipped MST legs
+        by direction, mirroring _make_topo_gen)."""
+        return (self.layers.get_top_layer(buda.LayerDir.HORIZONTAL),
+                self.layers.get_top_layer(buda.LayerDir.VERTICAL))
+
+    def _rr_flip_edges(self, w, stage):
+        """MST edge_ids of w's SELECTED candidate that a current contention touches
+        (step 4b).  A per-edge L/Z flip is an alternate move alongside the index
+        alternates: map each overlap/open segment of this bundle -> its seg's
+        edge_id (>= 0, deduped).  Empty unless the selected candidate is an MST
+        type carrying edge tags, so non-MST bundles pay nothing."""
+        sel = w.plan.selected_topology_index
+        cands = w.input.candidates
+        if sel < 0 or sel >= len(cands):
+            return []
+        topo = cands[sel]
+        if "MST" not in topo.type:
+            return []
+        segs = topo.segments
+        bid = w.input.original_bundle.id
+        eids, seen = [], set()
+
+        def add_seg(si):
+            if 0 <= si < len(segs):
+                eid = segs[si].edge_id
+                if eid >= 0 and eid not in seen:
+                    seen.add(eid)
+                    eids.append(eid)
+
+        if self.nuts_result is not None:
+            for od in self.nuts_result.overlap_details:
+                if od.bid_a == bid:
+                    add_seg(od.seg_a)
+                if od.bid_b == bid:
+                    add_seg(od.seg_b)
+        # Stage b (DNUTS opens) may have 0 NUTS overlaps: also flip edges whose
+        # segments failed to place all their bits.
+        if stage == 'b':
+            for b2, si, _missing, _exp in self._open_segments():
+                if b2 == bid:
+                    add_seg(si)
+        return eids
+
+    def _rr_apply_move(self, w, move, sel, stage, metric):
+        """Apply a ripup move + re-run the pipeline; return the metric (or None
+        if the move is an invalid flip that changed nothing).  Two kinds:
+          ('idx', tidx) — pin candidate tidx (the wrapper's index alternate).
+          ('flip', eid) — flip edge eid's L/Z bend on the SELECTED candidate in
+            place, then re-pin that same index.  The flip preserves segment slots
+            and far-endpoint taps (only the internal bend moves), so only
+            seg_conns needs re-deriving (annotate_seg_conns — no fp, hier-safe)."""
+        if move[0] == 'idx':
+            return self._rr_trial(w, move[1], stage, metric)
+        cands = w.input.candidates
+        if not (0 <= sel < len(cands)):
+            return None
+        h, v = self._gen_hv()
+        if not buda.flip_mst_edge(cands[sel], move[1], h, v, self.fp):
+            return None                          # alt bend on an obstacle: no move
+        buda.annotate_seg_conns(cands[sel])
+        return self._rr_trial(w, sel, stage, metric)
+
+    def _rr_undo_move(self, w, move, sel):
+        """Undo a rejected flip trial's in-place geometry change (flip_mst_edge is
+        an involution).  Index moves need no geometry undo — _rr_restore already
+        restores selection/pin/plan arrays."""
+        if move[0] != 'flip':
+            return
+        cands = w.input.candidates
+        if not (0 <= sel < len(cands)):
+            return
+        h, v = self._gen_hv()
+        buda.flip_mst_edge(cands[sel], move[1], h, v, self.fp)
+        buda.annotate_seg_conns(cands[sel])
+
+    @staticmethod
+    def _rr_move_str(old_tidx, move):
+        if move[0] == 'idx':
+            return f"topo {old_tidx + 1}->{move[1] + 1}"
+        return f"flip edge {move[1]} (topo {old_tidx + 1})"
+
     def _rr_trial(self, w, tidx, stage, metric):
         """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
         w.plan.selected_topology_index = tidx
@@ -3364,29 +3446,42 @@ class BudaSession:
                 if w is None:
                     continue
                 old_tidx = snap['wrap'][bid][0]
-                cand_best = None
-                # Relevance-first order (item 4): candidates farthest from the
-                # measured contention are the likeliest fixes — the
-                # first-improving scan usually stops after 1-2 trials.
-                for tidx in self._rr_candidate_order(w, old_tidx, stage):
-                    m = self._rr_trial(w, tidx, stage, metric)
+                cand_best = None                 # (metric, bid, old_tidx, move)
+                # Two move sources for this contender:
+                #   ('idx', t)  — pin an alternate candidate index (existing).
+                #   ('flip', e) — flip one contended MST edge's L/Z bend on the
+                #                 SELECTED candidate in place (step 4b), keeping
+                #                 the index.  Only contended edges are tried, so
+                #                 cost stays ~linear in overflows, not 2^N.
+                # Relevance-first index order (item 4): candidates farthest from
+                # the measured contention are the likeliest fixes.
+                moves = [('idx', t)
+                         for t in self._rr_candidate_order(w, old_tidx, stage)]
+                moves += [('flip', e) for e in self._rr_flip_edges(w, stage)]
+                zero = (0, 0) if isinstance(cur, tuple) else 0
+                for move in moves:
+                    m = self._rr_apply_move(w, move, old_tidx, stage, metric)
+                    if m is None:
+                        continue                 # invalid flip (bend on obstacle)
+                    self._rr_undo_move(w, move, old_tidx)
                     self._rr_restore(snap)
                     n_trials += 1
                     if m < cur and (cand_best is None or m < cand_best[0]):
-                        cand_best = (m, bid, old_tidx, tidx)
+                        cand_best = (m, bid, old_tidx, move)
                     # Absolute best (stage b: 0 opens AND 0 overlaps) — take it
                     # now.  A merely-primary zero keeps scanning: among moves
                     # that clear the opens, the lexicographic metric still
                     # prefers the one with the least collateral overlap.
-                    if m == ((0, 0) if isinstance(m, tuple) else 0):
-                        cand_best = (m, bid, old_tidx, tidx)
+                    if m == zero:
+                        cand_best = (m, bid, old_tidx, move)
                         break
                 if cand_best is not None:
                     best = cand_best
                     print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
                           f"bundle {bid} improves {self._rr_m_str(cur)}->"
                           f"{self._rr_m_str(cand_best[0])} "
-                          f"(topo {old_tidx + 1}->{cand_best[3] + 1})", flush=True)
+                          f"({self._rr_move_str(old_tidx, cand_best[3])})",
+                          flush=True)
                     break
                 print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
                       f"bundle {bid} — no improvement", flush=True)
@@ -3395,11 +3490,13 @@ class BudaSession:
                       f"(metric={self._rr_m_str(cur)}) — stop.")
                 stopped_early = True
                 break
-            m_new, bid, old_t, new_t = best
-            self._rr_trial(self._rr_wrapper(bid), new_t, stage, metric)  # commit
+            m_new, bid, old_t, move = best
+            # Commit: re-apply the winning move (geometry already restored to
+            # baseline by the last _rr_restore, so re-flip if it was a flip).
+            self._rr_apply_move(self._rr_wrapper(bid), move, old_t, stage, metric)
             committed += 1
-            print(f"[ripup_reroute] iter {it}: COMMIT bundle {bid} topo {old_t + 1}"
-                  f"->{new_t + 1}, metric {self._rr_m_str(cur)}->"
+            print(f"[ripup_reroute] iter {it}: COMMIT bundle {bid} "
+                  f"{self._rr_move_str(old_t, move)}, metric {self._rr_m_str(cur)}->"
                   f"{self._rr_m_str(metric())}", flush=True)
 
         if not stopped_early and self._rr_m_primary(metric()) > 0:

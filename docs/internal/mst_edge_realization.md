@@ -243,9 +243,30 @@ machinery. Each stage gates on the WL corpus + tiers.
 - **Step 4a** (`flip_mst_edge` primitive) — PR #169. Floorplan-validated: rejects a
   flip whose opposite bend lands inside a block or on a block corner (the
   `corner_diagonal_L` case). Involution; no-op for `edge_id < 0` / non-2-leg edges.
+- **Step 4b** (the ripup consumer) — **shipped as latent infrastructure.** The
+  ripup loop now offers each contended bundle two move sources — its index
+  alternates AND per-edge L/Z flips of a SELECTED MST candidate's contended edges
+  (`_rr_flip_edges` → `_rr_apply_move('flip', …)`, undone by the involution) —
+  committing whichever wins. Built per the recipe below (pins `sel` via
+  `_rr_trial`, uses fp-free `annotate_seg_conns` since the flip preserves segment
+  slots + far-endpoint taps and only the internal bend moves, so it is hier-safe).
+  **Measured: it never activates on the corpus.** Across every available ripup
+  flow (`mix`, `slowdown_rnr`, and `big2` with ripup appended) the flip is
+  attempted **zero** times and the routed result is **byte-identical** to before
+  — no contended bundle has an MST-*type* selected candidate with edge-tagged
+  contended segments, because the planner does not route MST candidates into
+  contention (the same root cause behind Part 1's `selDEAD = 0`). So step 4b is
+  correct, tested (involution + no-false-flip gating + the big2 ripup regressions),
+  and safe, but its payoff is **contingent on MST candidates first becoming
+  competitive** — exactly the blocker Part 1/Part 2 identify. It activates
+  automatically once they are, with no further ripup change.
+  - **Deferred:** the `topology_segment.edge_id` BDB column (recipe item 4). While
+    flips are latent a resumed candidate's `edge_id = -1` simply yields no flip
+    (safe), so persistence buys nothing yet; revisit together with whatever makes
+    MST candidates win.
 - **Part 1** (trunk-tail tightening) — measured **not worthwhile**, deferred (above).
 
-### Step 4b implementation recipe (the ripup consumer — READY TO EXECUTE)
+### Step 4b implementation recipe (the ripup consumer — SHIPPED, see above)
 
 The hooks (`src/buda_cli.py`, verified): `_ripup_reroute` (loop, ~:3282) tries, per
 contender, `_rr_candidate_order` (:3050) alternates via `_rr_trial` (:3081, pins an
