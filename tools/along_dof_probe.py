@@ -26,8 +26,10 @@ Usage: PYTHONPATH=build:tools python3 tools/along_dof_probe.py [--verbose]
 """
 import contextlib, io, os, sys
 
-ROOT = "/home/user/buda"
-sys.path.insert(0, ROOT + "/src")
+# Repo root derived from this file's location (tools/ is one level under root),
+# so the probe works in any checkout, not just /home/user/buda.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src"))
 import buda_cli
 import buda
 

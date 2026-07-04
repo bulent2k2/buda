@@ -2,13 +2,15 @@
 corpus of flows, for before/after comparison of a routing change.  Sources each
 flow in-process (viz stripped) and reads the final routed state.
 
-Usage: PYTHONPATH=build:tools python3 tools/wl_corpus.py <label>
-Writes /tmp/.../wl_<label>.txt with one line per flow.
+Usage: PYTHONPATH=build:tools python3 tools/wl_corpus.py [label] [out_path]
+Writes <out_path> (default: $TMPDIR/wl_<label>.txt) with one line per flow.
 """
-import contextlib, io, os, sys
+import contextlib, io, os, sys, tempfile
 
-ROOT = "/home/user/buda"
-sys.path.insert(0, ROOT + "/src")
+# Repo root derived from this file's location (tools/ is one level under root),
+# so the harness works in any checkout, not just /home/user/buda.
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src"))
 import buda_cli
 
 CORPUS = [
@@ -62,7 +64,10 @@ def run_flow(path):
 
 def main():
     label = sys.argv[1] if len(sys.argv) > 1 else "baseline"
-    outp = f"/tmp/claude-0/-home-user-buda/41a72a56-e697-5600-865f-69909d761fed/scratchpad/wl_{label}.txt"
+    # Output path: 2nd arg if given, else a portable temp file (dir always exists).
+    outp = sys.argv[2] if len(sys.argv) > 2 \
+        else os.path.join(tempfile.gettempdir(), f"wl_{label}.txt")
+    os.makedirs(os.path.dirname(os.path.abspath(outp)), exist_ok=True)
     lines = []
     for path in CORPUS:
         if not os.path.exists(os.path.join(ROOT, path)):
