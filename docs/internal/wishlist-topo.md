@@ -81,12 +81,28 @@ result contradicts the premise that the flip is a clean, DOF-fixable win:
   starved band.  Contracting the placed span at NUTS does not make the *generated*
   tight span fit the planner in the first place.
 
-**Re-scoped blocker.**  Making the flexible span always-on safely needs a
-**planner-aware** flex span, not a NUTS-only one: the congestion planner must
-reserve the trunk's **minimal/contracted** extent (treating the endpoints as a
-range) rather than the wide generated span, so a flex trunk stops overflowing bands
-it does not actually need.  That touches `CongestionPlanner`'s band reservation
-(`rebuild_cuts_` / demand charging), well beyond the ConnSeg+NUTS scope the original
-wish assumed.  Until that exists the `double_detour` gate stays — it is a correct
-guard, not an accident.  Stage A's data model + the WL corpus harness are in place
-so that larger effort can be measured from its first commit.
+**The DOF itself is a structural no-op (the deeper finding).**  Using the Stage-A
+fields we probed every bundle's *selected* topology across the corpus
+(`tools/along_dof_probe.py`) for a flex end whose along-coverage floor
+(`along_cover_lo/hi`) sits strictly INSIDE the segment's generated extent — i.e.
+genuinely removable "dead wire" (excluding pass-through coverage).  The answer is
+**0 across the whole corpus, both gated and under the always-on experiment.**
+Reason: generation already lands every spine endpoint exactly on its extreme
+stub/coverage — a topology's span never exceeds *its own* coverage floor — so a DOF
+that contracts a span *to its own coverage* has nothing to remove in any topology
+BUDA emits.  The WL difference the wish imagined (far-face vs. centerline) is a
+**stub perp-position** matter already handled by `net_pull`, not a **spine-endpoint
+along-extent** one.  So the along-flex DOF as scoped would **save wirelength in zero
+unit tests / flows**.
+
+**Re-scoped blocker.**  Making the flexible span always-on safely is therefore not
+about a NUTS along-contraction at all — it needs a **planner-aware** flex span: the
+congestion planner must reserve the trunk's **minimal/contracted** extent (treating
+the endpoints as a range) rather than the wide generated span, so a flex trunk stops
+overflowing bands it does not actually need.  That touches `CongestionPlanner`'s band
+reservation (`rebuild_cuts_` / demand charging), well beyond the ConnSeg+NUTS scope
+the original wish assumed.  Until that exists the `double_detour` gate stays — it is a
+correct guard, not an accident.  Stage A's data model, the ConnSeg python bindings,
+the WL corpus harness (`tools/wl_corpus.py`) and the dead-wire probe
+(`tools/along_dof_probe.py`) are all in place so that larger effort can be measured
+from its first commit.
