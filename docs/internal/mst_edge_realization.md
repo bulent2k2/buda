@@ -394,15 +394,38 @@ So `multi_trunk` selects two-level BITRUNK_HVH trees for most buses and improves
 (3/3 runs identical). Guarded by `test_datapath_multi_trunk_qor.py` (`@mid`:
 multi_trunk selects ≥3 BITRUNK and is equal-or-better on WL AND overlaps).
 
-Two honest caveats from the size sweep:
-- The benefit is **workload-shape-sensitive**, not a blanket win: on a few
-  configs (`3×4×5`, `4×4×6`) plain and multi_trunk tie; on a heavily-congested
-  `2×6×6` multi_trunk trades +3 % WL for 40 → 30 overlaps. It helps where the
-  column structure is pronounced and the design is moderately congested.
-- The **step-4b flip still does not win a commit** even here — on the datapath's
-  residual overlap, ripup clears it with an index move (`topo 3→1`), not a flip.
-  The flip remains correct-and-competing infrastructure whose activation still
-  awaits a case where only a flip clears an overlap.
+### Coverage sweep — both orientations, where it wins and where it doesn't
+
+Both orientations win, and the win **grows with size/density**. `group` is the
+number of aligned columns (HVH) or rows (VHV); `per` the receivers per group;
+`bus` the number of buses. `2lvl` = two-level trees the planner selected under
+`multi_trunk`. (`tools`-free; from the in-process sweep.)
+
+| shape | plain WL / ov | multi WL / ov | 2lvl | ΔWL | verdict |
+|---|---|---|---|---|---|
+| col 4×5×8 | 33 766 / 11 | **23 010 / 1** | 3 | **−31.9 %** | **WIN** |
+| col 3×5×6 | 18 191 / 3 | **16 834 / 1** | 4 | **−7.5 %** | **WIN** |
+| row 3×5×6 | 20 020 / 1 | **16 479 / 0** | 2 | **−17.7 %** | **WIN** |
+| col 3×4×6 | 16 367 / 3 | 16 367 / 3 | 0 | 0 | tie |
+| col 4×4×6 | 15 948 / 0 | 15 948 / 0 | 0 | 0 | tie |
+| row 4×4×6 | 14 168 / 0 | 14 168 / 0 | 0 | 0 | tie |
+| col 2×6×6 | 23 911 / 40 | 24 672 / 30 | 1 | +3.2 % | mixed (WL up, ov down) |
+| row 4×5×8 | 26 329 / 0 | 28 349 / 0 | 1 | +7.7 % | loss |
+
+Reading: `multi_trunk` **wins clearly where the group structure is pronounced and
+the design is congested** (the 4×5×8 column is the headline: WL −31.9 %, overlaps
+11 → 1), is a **safe no-op where the planner picks no two-level tree** (small /
+sparse shapes), and can **lose or trade** on a couple of awkward configs (a
+sparse `row 4×5×8`, a saturated `col 2×6×6`). So it is a genuine, sizeable win on
+its target workload — not a universal one. Two committed demos anchor both
+orientations: `flow/datapath_multi_trunk.buda` (col/HVH) and
+`flow/datapath_row_vhv.buda` (row/VHV); `test_datapath_multi_trunk_qor.py`
+guards both (`@mid`, parametrized).
+
+One caveat carries over: the **step-4b flip still does not win a commit** even on
+these datapaths — ripup clears the residual overlap with an index move, not a
+flip. The flip remains correct-and-competing infrastructure awaiting a case where
+only a flip clears an overlap.
 
 **Bottom line for the line.** The generation-side MST/multi-trunk work (candidate
 shapes, edge identity, smart per-edge default, BITRUNK trees) has a real,
