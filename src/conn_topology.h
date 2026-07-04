@@ -72,6 +72,29 @@ struct ConnSeg {
     // net_pull < 0: more anchors lie below → prefer sliding down/left.
     // net_pull == 0: balanced or no stub connections → no preferred direction.
     int  net_pull  = 0;
+
+    // ── Along-flex DOF (Stage C of the flexible-root re-arch) ─────────────────
+    // The perp slide above moves the whole segment rigidly.  A trunk spine has a
+    // SECOND degree of freedom the perp slide cannot express: its two along
+    // ENDPOINTS move INDEPENDENTLY — the spine length is a range, not a fixed
+    // generated coordinate.  An end is "flex" (contractible toward the interior)
+    // when NO busterm tap anchors the segment at that endpoint; the end is then
+    // defined purely by the extreme junction/coverage it must reach, which NUTS
+    // resolves at placement time.  [along_cover_lo, along_cover_hi] is the
+    // NOMINAL along-coverage floor (min/max over junction at_pos + busterm
+    // face_coord); the spine may contract a flex end down to that floor but never
+    // past it.  Pass-through-block along coverage is protected separately by
+    // tighten_passthrough_ranges' perp constraints on the endpoint stub, so it is
+    // deliberately NOT folded into the cover floor here.
+    // along_pull is a signed WL-gradient hint: >0 → contracting the hi end shortens
+    // wire; <0 → the lo end; magnitude = number of ends with slack.  Computed by
+    // compute_along_pull(); consumed by NUTS do_span_adjustments (Stage B).
+    bool along_flex_lo  = false;   // lo endpoint may contract up (toward along_hi)
+    bool along_flex_hi  = false;   // hi endpoint may contract down (toward along_lo)
+    int  along_cover_lo = 0;       // smallest along-coord the segment must reach
+    int  along_cover_hi = 0;       // largest along-coord it must reach
+    int  along_pull     = 0;
+
     std::vector<SegConn> conns;
 };
 
@@ -134,6 +157,9 @@ private:
     // NUTS span adjustment preserves the tap's along-reach to a relay block face.
     void pin_relay_tap_connectors(const Floorplan& fp);
     void compute_net_pull();
+    // Along-flex DOF (Stage C): mark each segment end contractible-or-anchored and
+    // compute its nominal along-coverage floor + a signed along-pull WL hint.
+    void compute_along_pull();
 };
 
 } // namespace buda

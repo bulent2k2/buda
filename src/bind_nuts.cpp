@@ -58,6 +58,11 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("perp_lo",  &ConnSeg::perp_lo)
         .def_readwrite("perp_hi",  &ConnSeg::perp_hi)
         .def_readwrite("net_pull", &ConnSeg::net_pull)
+        .def_readwrite("along_flex_lo",  &ConnSeg::along_flex_lo)
+        .def_readwrite("along_flex_hi",  &ConnSeg::along_flex_hi)
+        .def_readwrite("along_cover_lo", &ConnSeg::along_cover_lo)
+        .def_readwrite("along_cover_hi", &ConnSeg::along_cover_hi)
+        .def_readwrite("along_pull",     &ConnSeg::along_pull)
         .def_readwrite("conns",    &ConnSeg::conns);
 
     py::class_<MSTEdge>(m, "MSTEdge")

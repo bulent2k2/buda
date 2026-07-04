@@ -56,6 +56,7 @@ void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
     tighten_passthrough_ranges(topo, fp);
     pin_relay_tap_connectors(fp);
     compute_net_pull();
+    compute_along_pull();
 
     for (const auto& cs : segs_) {
         assert(cs.along_lo <= cs.along_hi);
@@ -704,6 +705,60 @@ void ConnTopology::compute_net_pull() {
             else if (far_lo > 0 && far_hi == 0) ++neg;   // cs is the high endpoint → pull toward lo
         }
         cs.net_pull = pos - neg;
+    }
+}
+
+// ── ConnTopology::compute_along_pull ──────────────────────────────────────────
+//
+// The SECOND trunk DOF (Stage C of the flexible-root re-arch): a spine's two
+// ALONG endpoints move independently, so its length is a range resolved by pull
+// at NUTS time rather than a fixed generated coordinate.  For each segment mark
+// whether each end is contractible (no busterm tap anchors it there), record the
+// nominal along-coverage floor it must always reach, and emit a signed WL hint.
+//
+// This is pure ANNOTATION — it reads the already-inferred conns and extents and
+// writes only the along_* fields.  NUTS (do_span_adjustments, Stage B) is the
+// sole consumer; until then it is provably inert (no existing field is touched).
+void ConnTopology::compute_along_pull() {
+    for (auto& cs : segs_) {
+        // A busterm tap sits at one of the segment's along endpoints (check_topo
+        // invariant).  An end carrying a tap is ANCHORED to that block face and
+        // must not contract; an end with no tap is flex — free to contract toward
+        // the interior down to the coverage floor.
+        bool bt_at_lo = false, bt_at_hi = false;
+        // Coverage floor: the smallest / largest along-coord the segment must
+        // reach so every junction and busterm face it carries stays connected.
+        // Seed with the current extent so a segment with no conns keeps its span.
+        int cover_lo = cs.along_hi, cover_hi = cs.along_lo;
+        for (const auto& c : cs.conns) {
+            if (c.kind == SegConn::BUSTERM) {
+                if (c.face_coord <= cs.along_lo) bt_at_lo = true;
+                if (c.face_coord >= cs.along_hi) bt_at_hi = true;
+                cover_lo = std::min(cover_lo, c.face_coord);
+                cover_hi = std::max(cover_hi, c.face_coord);
+            } else { // SEG junction: the along-coord where the partner attaches
+                cover_lo = std::min(cover_lo, c.at_pos);
+                cover_hi = std::max(cover_hi, c.at_pos);
+            }
+        }
+        // No conns at all: nothing to contract to — pin the floor to the extent.
+        if (cover_lo > cover_hi) { cover_lo = cs.along_lo; cover_hi = cs.along_hi; }
+        // Never claim a floor outside the generated extent (defensive; keeps the
+        // contraction target inside the segment NUTS actually places).
+        cover_lo = std::max(cover_lo, cs.along_lo);
+        cover_hi = std::min(cover_hi, cs.along_hi);
+
+        cs.along_flex_lo  = !bt_at_lo;
+        cs.along_flex_hi  = !bt_at_hi;
+        cs.along_cover_lo = cover_lo;
+        cs.along_cover_hi = cover_hi;
+
+        // Signed WL hint: a flex end with dead wire between the extreme coverage
+        // and the generated endpoint can be contracted for a WL gain.
+        int pull = 0;
+        if (cs.along_flex_hi && cover_hi < cs.along_hi) ++pull;   // shrink hi end
+        if (cs.along_flex_lo && cover_lo > cs.along_lo) --pull;   // shrink lo end
+        cs.along_pull = pull;
     }
 }
 
