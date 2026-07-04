@@ -118,9 +118,17 @@ no live pipeline:
 - **Cells → structures**: outline `BOUNDARY` (0,0,w,h) on `(outline_layer,
   0)` (default 10) + child `SREF`s reconstructed from the cell's first
   component instance at relative offsets, each carrying the child instance
-  name as `PROPVALUE`. Placements have no orientation (BDB bboxes lose
-  mirror/rotation) — a bbox≠cell-footprint instance exports unrotated with a
-  warning.
+  name as `PROPVALUE`.
+- **Orientation (v12)**: each placement re-emits its `component.orient` token
+  as `STRANS` (mirror) + `ANGLE`, computing the SREF origin (via `XForm`) so
+  the oriented cell reproduces the stored bbox — so a rotated/mirrored
+  instance now round-trips (previously it exported unrotated with a warning).
+  The `n_dim_mismatch` warning now fires only for a genuine resize (bbox dims
+  matching neither the cell nor the oriented cell), not a representable
+  rotation. Non-unit `MAG` is still not captured (it stays baked into the
+  bbox); deeply-nested oriented instances remain best-effort (the same caveat
+  the template-instance reconstruction already carries) — top-level oriented
+  placements round-trip exactly.
 - **Top structure**: die-extent rectangle (anchored at the roots' min corner
   — the die is an extent, so `bbox_of(top)` round-trips), root `SREF`s, the
   routing, and the labels. Import materializes a `cell` row for the top it
@@ -139,7 +147,8 @@ no live pipeline:
   direction is not representable — dirs come back `UNKNOWN`.
 
 **Round-trip (tested, `test/tests/test_gds_export.py`)**: import → export →
-re-import is **identical** (components, cell footprints, die, nets, pins);
+re-import is **identical** (components incl. `orient`, cell footprints, die,
+nets, pins);
 the full-pipeline fingerprint routes a labeled GDS through detailed NUTS,
 exports, re-imports with the same `def_gds_layer` map, and gets the same
 design back with every routing shape excluded from footprints (G3).

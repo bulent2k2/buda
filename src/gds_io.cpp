@@ -177,6 +177,31 @@ int snap_angle(double deg, std::vector<std::string>& warnings,
     return ((a % 360) + 360) % 360;
 }
 
+// Canonical 8-orientation token <-> GDS placement transform. The transform is
+// "reflect about the X axis FIRST (STRANS mirror bit), THEN rotate CCW by
+// `angle`" — exactly XForm::place / the GDS STRANS+ANGLE convention. N/W/S/E
+// are the pure 0/90/180/270 rotations; F* are the mirrored variants. Tokens
+// are DEFINED by this (mirror, angle) pair (BDB's component.orient, v12), not
+// by DEF's letter semantics. Non-unit MAG is not captured here (it stays baked
+// into the bbox, as before).
+std::string transform_to_orient(bool mirror, int angle) {
+    int a = ((angle % 360) + 360) % 360;
+    static const char* rot[4]  = {"N",  "W",  "S",  "E"};   // 0, 90, 180, 270
+    static const char* frot[4] = {"FN", "FW", "FS", "FE"};
+    int idx = a / 90;
+    return mirror ? frot[idx] : rot[idx];
+}
+bool orient_is_mirror(const std::string& o) {
+    return !o.empty() && o[0] == 'F';
+}
+int orient_angle(const std::string& o) {
+    const std::string t = orient_is_mirror(o) ? o.substr(1) : o;
+    if (t == "W") return 90;
+    if (t == "S") return 180;
+    if (t == "E") return 270;
+    return 0;   // "N" or unknown -> identity
+}
+
 }  // namespace
 
 GdsImportStats import_gds(BDB& db, const std::string& path,
@@ -462,13 +487,16 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
     };
 
     std::function<void(const GStruct&, const XForm&, const std::string&,
-                       const std::string&, int)> elaborate =
+                       const std::string&, int, const std::string&)> elaborate =
         [&](const GStruct& s, const XForm& xf, const std::string& comp_path,
-            const std::string& parent_path, int depth) {
+            const std::string& parent_path, int depth,
+            const std::string& orient) {
         BBox bb = xf.apply(bbox_of(s.name));
         if (bb.empty()) bb = BBox{0, 0, 0, 0};
+        // orient = this instance's LOCAL orientation (relative to its parent);
+        // the bbox above is still the absolute axis-aligned extent.
         int cid = db.add_comp(comp_path, s.name, parent_path,
-                              bb.x1, bb.y1, bb.x2, bb.y2, s.refs.empty());
+                              bb.x1, bb.y1, bb.x2, bb.y2, s.refs.empty(), orient);
         placed.push_back({cid, depth, bb});
         emit_labels(s, xf);
         ++stats.n_components;
@@ -494,7 +522,8 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
                         ordinal[nm] = 1;        // reserve the property name
                     }
                     elaborate(child, t, comp_path + "/" + nm, comp_path,
-                              depth + 1);
+                              depth + 1,
+                              transform_to_orient(ref.mirror, ref.angle));
                 }
         }
     };
@@ -509,7 +538,7 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
         if (referenced.count(s.name)) continue;
         stats.tops.push_back(s.name);
         if (s.refs.empty()) {
-            elaborate(s, XForm{}, s.name, "", 0);
+            elaborate(s, XForm{}, s.name, "", 0, "N");
             continue;
         }
         emit_labels(s, XForm{});   // the top's own labels (identity transform)
@@ -540,7 +569,8 @@ GdsImportStats import_gds(BDB& db, const std::string& path,
                             "root instance name collision across tops; using '" +
                             nm + "'");
                     }
-                    elaborate(child, t, nm, "", 0);
+                    elaborate(child, t, nm, "", 0,
+                              transform_to_orient(ref.mirror, ref.angle));
                 }
         }
     }
@@ -626,9 +656,18 @@ public:
         rec(R_ENDEL, 0, {});
     }
     void sref(const std::string& sname, double x, double y,
-              const std::string& inst_name) {
+              bool mirror, int angle, const std::string& inst_name) {
         rec(R_SREF, 0, {});
         rec(R_SNAME, 6, str_pl(sname));
+        int a = ((angle % 360) + 360) % 360;
+        // STRANS (mirror bit) + ANGLE precede XY, mirroring gds_build.py's
+        // _trans helper. STRANS emitted whenever the placement is non-identity.
+        if (mirror || a) {
+            std::vector<uint8_t> st;
+            put_i16(st, mirror ? 0x8000 : 0);
+            rec(R_STRANS, 1, st);
+        }
+        if (a) rec(R_ANGLE, 5, real8((double)a));
         std::vector<uint8_t> xy;
         put_i32(xy, to_dbu(x));
         put_i32(xy, to_dbu(y));
@@ -778,19 +817,35 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
         if (it == tmpl.end() || c.id < it->second->id) tmpl[c.cell] = &c;
     }
 
-    // Placements carry no orientation: BDB bboxes lose mirror/rotation, so an
-    // instance whose bbox dims differ from its cell is exported unrotated.
+    // Emit an oriented SREF that reproduces the component's stored bbox: place
+    // the cell's local (0,0,w,h) box under the instance's orientation, then
+    // shift so its min corner lands at the bbox origin (ox/oy = the enclosing
+    // frame's origin — the template parent for cell-internal children, 0 for
+    // roots). For an unoriented instance this reduces to (c->x1 - ox, ...),
+    // matching the pre-v12 behavior. n_dim_mismatch now flags only a genuine
+    // resize (bbox dims != the ORIENTED cell extent), not a representable
+    // rotation.
     int n_dim_mismatch = 0;
     auto place = [&](GdsWriter& w, const ComponentRow* c, double ox, double oy,
                      const std::string& inst_name) {
+        const bool mir = orient_is_mirror(c->orient);
+        const int  ang = orient_angle(c->orient);
+        double cw = c->x2 - c->x1, ch = c->y2 - c->y1;   // fallback = bbox dims
         auto ci = cell_by_name.find(c->cell);
         if (ci != cell_by_name.end()) {
+            cw = ci->second->width;
+            ch = ci->second->height;
+        }
+        XForm t0 = XForm::place(0, 0, mir, ang, 1.0);
+        BBox lb = t0.apply(BBox{0, 0, cw, ch});
+        if (ci != cell_by_name.end()) {
             const double bw = c->x2 - c->x1, bh = c->y2 - c->y1;
-            if (std::fabs(bw - ci->second->width) > 1e-9 ||
-                std::fabs(bh - ci->second->height) > 1e-9)
+            if (std::fabs((lb.x2 - lb.x1) - bw) > 1e-9 ||
+                std::fabs((lb.y2 - lb.y1) - bh) > 1e-9)
                 ++n_dim_mismatch;
         }
-        w.sref(c->cell, c->x1 - ox, c->y1 - oy, inst_name);
+        w.sref(c->cell, (c->x1 - lb.x1) - ox, (c->y1 - lb.y1) - oy,
+               mir, ang, inst_name);
         ++stats.n_placements;
     };
 
@@ -860,8 +915,8 @@ GdsExportStats export_gds(BDB& db, const std::string& path,
     if (n_dim_mismatch > 0)
         stats.warnings.push_back(
             std::to_string(n_dim_mismatch) + " placement(s) have a bbox that "
-            "differs from the cell footprint (rotated/resized instances) — "
-            "exported unrotated at the bbox origin");
+            "differs from the ORIENTED cell footprint (resized instances, not "
+            "a representable rotation) — exported at the bbox origin");
 
     // Routing from the persisted tables: detailed bit-wires when present,
     // else the abstract bus rectangles.

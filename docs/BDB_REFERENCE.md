@@ -37,7 +37,7 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 
 ```
 component        id, name, cell, parent_id→component, depth,
-                 x1, y1, x2, y2, is_leaf, is_replicated
+                 x1, y1, x2, y2, is_leaf, is_replicated, orient
 
 cell             name (PK), width, height
 
@@ -141,10 +141,14 @@ routing-time busterm attributes (`busterm.teg_mode` + `orig_x1..y2`) and the
 columns on `bus_segment` (perpendicular interval + corner-split track bounds),
 `bundle_net.ord` (the bundle's bit order), and `topology.is_pinned` (a pre-plan
 pin survives a checkpoint); v11 added **`topology_bridge_segment`** (TEG-over
-bridges); v12 added **`topology_seg_conn`** — the seg-to-seg junction links
-(`Topology::seg_conns`, topo-truth Phase 5), so a reload restores BOTH halves of
-a topology's connectivity logically.
-`tools/bdb_serialize.py` preserves the version across the `*.bdb.sql` round-trip.
+bridges), closing the last un-persisted `Topology` field; v12 added
+**`topology_seg_conn`** — the seg-to-seg junction links (`Topology::seg_conns`,
+topo-truth Phase 5), so a reload restores BOTH halves of a topology's
+connectivity logically; v13 added **`component.orient`** (instance
+rotation/mirror as an 8-orientation token `N/S/E/W/FN/FS/FE/FW`, default `'N'`)
+so GDS import→export→re-import preserves orientation.
+`tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
+round-trip.
 
 **Bundle persistence.** `run_bundler` (flat) and `run_hier_bundler` (hier) write
 their Stage-1 bundles into `bundle` / `bundle_net` / `bundle_busterm` whenever a
@@ -532,11 +536,15 @@ layers default to `(buda_layer, 0)` with a warning) — and one net-name
 first `def_gds_layer labels` entry, else 63).
 
 **Round-trip:** re-importing with the same `def_gds_layer` map recovers the
-identical design — components, cell footprints, die, and (labeled mode)
-nets/pins — with every routing shape excluded from footprints. Caveats: pin
-directions come back `UNKNOWN` (GDS has no pin-dir concept) and placements
-export unrotated (BDB bboxes carry no orientation; a bbox≠footprint instance
-warns). See `test/tests/test_gds_export.py` and
+identical design — components (including instance **orientation**, v12), cell
+footprints, die, and (labeled mode) nets/pins — with every routing shape
+excluded from footprints. Rotated/mirrored placements re-emit their
+`component.orient` token as `STRANS`/`ANGLE` and round-trip exactly (top-level
+instances; deeply-nested oriented instances are best-effort). Caveats: pin
+directions come back `UNKNOWN` (GDS has no pin-dir concept); non-unit `MAG` is
+not represented (stays in the bbox); a genuinely *resized* instance (bbox
+matching neither the cell nor its oriented extent) still warns. See
+`test/tests/test_gds_export.py` and
 [`docs/internal/gds_oa_interchange.md`](internal/gds_oa_interchange.md).
 
 Python: `BDB.export_gds(path, layer_map=[], outline_layer=10,
@@ -913,6 +921,7 @@ All query methods return lists of typed row objects with read-write attributes.
 | `x2, y2` | float | Upper-right corner (µm) |
 | `is_leaf` | bool | True if no children (stdcell) |
 | `is_replicated` | bool | True if part of a replicated group |
+| `orient` | str | Instance orientation, one of `N/S/E/W/FN/FS/FE/FW` (default `'N'`); the bbox is the resulting axis-aligned extent (v12) |
 
 **`NetRow`**
 

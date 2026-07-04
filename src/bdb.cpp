@@ -295,7 +295,8 @@ void BDB::_create_schema() {
             depth        INTEGER DEFAULT 0,
             x1 REAL, y1 REAL, x2 REAL, y2 REAL,
             is_leaf      INTEGER DEFAULT 1,
-            is_replicated INTEGER DEFAULT 0
+            is_replicated INTEGER DEFAULT 0,
+            orient       TEXT DEFAULT 'N'
         );
         CREATE TABLE IF NOT EXISTS net (
             id   INTEGER PRIMARY KEY,
@@ -573,6 +574,13 @@ void BDB::_migrate() {
         // v11 -> v12: seg-to-seg junction links (topology_seg_conn — brand new
         // table, created via TOPOLOGY_DDL; IF NOT EXISTS no-ops the rest).
         _exec(TOPOLOGY_DDL);
+    }
+    if (v < 13) {
+        // v12 -> v13: per-instance orientation token (GDS round-trip).
+        // Ignored if the column already exists (v6-style idempotent ALTER).
+        sqlite3_exec(_db,
+            "ALTER TABLE component ADD COLUMN orient TEXT DEFAULT 'N'",
+            nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
         // Refresh provenance (incl. the meta.schema_version mirror) on EVERY
@@ -1293,7 +1301,8 @@ void BDB::compute_all() { compute_hpwl(); compute_fanout(); }
 std::vector<ComponentRow> BDB::all_components() const {
     if (!_q_all_components)
         sqlite3_prepare_v2(_db,
-            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
+            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
+            "COALESCE(orient,'N')"
             " FROM component ORDER BY id",
             -1, &_q_all_components, nullptr);
     sqlite3_reset(_q_all_components);
@@ -1312,6 +1321,7 @@ std::vector<ComponentRow> BDB::all_components() const {
         r.y2           = sqlite3_column_double(q,8);
         r.is_leaf      = sqlite3_column_int(q,9);
         r.is_replicated= sqlite3_column_int(q,10);
+        r.orient       = (const char*)sqlite3_column_text(q,11);
         rows.push_back(r);
     }
     return rows;
@@ -1884,7 +1894,8 @@ void BDB::set_comp_cell(const std::string& comp_name, const std::string& new_cel
 
 int BDB::add_comp(const std::string& name, const std::string& cell,
                   const std::string& parent_name,
-                  double x1, double y1, double x2, double y2, bool is_leaf) {
+                  double x1, double y1, double x2, double y2, bool is_leaf,
+                  const std::string& orient) {
     int par_id = -1, depth = 0;
     if (!parent_name.empty()) {
         Stmt qp(_db, "SELECT id, depth FROM component WHERE name=?");
@@ -1895,8 +1906,8 @@ int BDB::add_comp(const std::string& name, const std::string& cell,
         depth  = sqlite3_column_int(qp, 1) + 1;
     }
     Stmt ins(_db, R"(
-        INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf)
-        VALUES(?,?,?,?,?,?,?,?,?)
+        INSERT INTO component(name,cell,parent_id,depth,x1,y1,x2,y2,is_leaf,orient)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
     )");
     sqlite3_bind_text  (ins, 1, name.c_str(),   -1, SQLITE_TRANSIENT);
     sqlite3_bind_text  (ins, 2, cell.c_str(),   -1, SQLITE_TRANSIENT);
@@ -1908,6 +1919,7 @@ int BDB::add_comp(const std::string& name, const std::string& cell,
     sqlite3_bind_double(ins, 7, x2);
     sqlite3_bind_double(ins, 8, y2);
     sqlite3_bind_int   (ins, 9, is_leaf ? 1 : 0);
+    sqlite3_bind_text  (ins, 10, orient.c_str(), -1, SQLITE_TRANSIENT);
     if (sqlite3_step(ins) != SQLITE_DONE)
         throw std::runtime_error("add_comp: insert failed (name exists?): " + name);
     int id = (int)sqlite3_last_insert_rowid(_db);
@@ -2092,6 +2104,39 @@ void BDB::_expand_cell_children(int parent_comp_id,
 namespace {
 struct BBoxRow { int id; double x1,y1,x2,y2; };
 
+// ── Orientation tokens (component.orient, v12) ───────────────────────────────
+// Must match gds_io.cpp's transform_to_orient/orient_angle: an 8-orientation
+// token is (mirror-about-X-first, CCW angle). N/W/S/E = 0/90/180/270, F* =
+// mirrored. rotate_comp/flip_comp compose the applied transform onto the ROOT
+// instance's orient so bbox and orient stay consistent (a faithful GDS SREF
+// re-emit needs both). Descendants rotate rigidly with the root, so their
+// orientation relative to their own parent is unchanged.
+void orient_parse(const std::string& o, bool& mirror, int& angle) {
+    mirror = (!o.empty() && o[0] == 'F');
+    const std::string t = mirror ? o.substr(1) : o;
+    angle = (t == "W") ? 90 : (t == "S") ? 180 : (t == "E") ? 270 : 0;
+}
+std::string orient_format(bool mirror, int angle) {
+    int a = ((angle % 360) + 360) % 360;
+    static const char* rot[4]  = {"N",  "W",  "S",  "E"};
+    static const char* frot[4] = {"FN", "FW", "FS", "FE"};
+    return mirror ? frot[a / 90] : rot[a / 90];
+}
+// Left-compose a CCW rotation (parent frame) onto an existing orientation:
+// Rot(d) ∘ [Rot(a) ∘ MirrorX^m] = Rot(a+d) ∘ MirrorX^m.
+std::string orient_rotate(const std::string& o, int degrees) {
+    bool m; int a; orient_parse(o, m, a);
+    return orient_format(m, a + degrees);
+}
+// Left-compose a mirror. flip_x = mirror about the vertical centre (Y axis),
+// flip_y (!flip_x) = mirror about the horizontal centre (X axis):
+//   MirrorX ∘ Rot(a) ∘ MirrorX^m = Rot(-a)     ∘ MirrorX^(1+m)   (flip_y)
+//   MirrorY ∘ Rot(a) ∘ MirrorX^m = Rot(180-a)  ∘ MirrorX^(1+m)   (flip_x)
+std::string orient_flip(const std::string& o, bool flip_x) {
+    bool m; int a; orient_parse(o, m, a);
+    return orient_format(!m, (flip_x ? 180 - a : -a));
+}
+
 void gather_subtree(sqlite3* db, const std::string& name,
                     std::vector<BBoxRow>& rows) {
     // Root
@@ -2151,6 +2196,19 @@ void BDB::flip_comp(const std::string& name, bool flip_x) {
         sqlite3_bind_int   (upd,5,d.id);
         sqlite3_step(upd);
     }
+    // Compose the flip onto the root's orientation (root bbox is unchanged,
+    // but its orientation relative to its parent flips).
+    {
+        Stmt qo(_db, "SELECT COALESCE(orient,'N') FROM component WHERE id=?");
+        sqlite3_bind_int(qo, 1, root.id);
+        std::string cur = (sqlite3_step(qo) == SQLITE_ROW)
+            ? (const char*)sqlite3_column_text(qo, 0) : "N";
+        std::string no = orient_flip(cur, flip_x);
+        Stmt uo(_db, "UPDATE component SET orient=? WHERE id=?");
+        sqlite3_bind_text(uo, 1, no.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(uo, 2, root.id);
+        sqlite3_step(uo);
+    }
     compute_hpwl();
 }
 
@@ -2200,6 +2258,19 @@ void BDB::rotate_comp(const std::string& name, int degrees) {
         }
         do_upd(d.id, nx1, ny1, nx2, ny2);
     }
+    // Compose the rotation onto the root's orientation so bbox + orient stay
+    // consistent (export reconstructs the SREF from both).
+    {
+        Stmt qo(_db, "SELECT COALESCE(orient,'N') FROM component WHERE id=?");
+        sqlite3_bind_int(qo, 1, root.id);
+        std::string cur = (sqlite3_step(qo) == SQLITE_ROW)
+            ? (const char*)sqlite3_column_text(qo, 0) : "N";
+        std::string no = orient_rotate(cur, degrees);
+        Stmt uo(_db, "UPDATE component SET orient=? WHERE id=?");
+        sqlite3_bind_text(uo, 1, no.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(uo, 2, root.id);
+        sqlite3_step(uo);
+    }
     compute_hpwl();
 }
 
@@ -2245,7 +2316,8 @@ void BDB::clear_busterms() {
 std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
     if (!_q_components_at_depth)
         sqlite3_prepare_v2(_db,
-            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated"
+            "SELECT id,name,cell,COALESCE(parent_id,-1),depth,x1,y1,x2,y2,is_leaf,is_replicated,"
+            "COALESCE(orient,'N')"
             " FROM component WHERE depth=? ORDER BY id",
             -1, &_q_components_at_depth, nullptr);
     sqlite3_reset(_q_components_at_depth);
@@ -2265,6 +2337,7 @@ std::vector<ComponentRow> BDB::components_at_depth(int depth) const {
         r.y2           = sqlite3_column_double(q, 8);
         r.is_leaf      = sqlite3_column_int(q, 9);
         r.is_replicated= sqlite3_column_int(q, 10);
+        r.orient       = (const char*)sqlite3_column_text(q, 11);
         rows.push_back(r);
     }
     return rows;
