@@ -142,3 +142,40 @@ explicitly out of scope for v1.
    CPU-invariant) while the alternate `L_VH` trunk runs through healthy
    pattern.  Fast-tier tests cover the fixture itself, stage-b ripup clearing
    it (one trial), and stage-b negotiation clearing it by pure cost.
+
+## Remove the per-edge MST flip move-source (measured redundant) — OPEN
+
+**What.** Step 4b added a per-edge L/Z flip as a ripup move source alongside the
+index alternates (`_rr_flip_edges` / `_rr_apply_move('flip', …)`). Measured
+([`mst_edge_realization.md`](mst_edge_realization.md), step-4b section): the flip
+is **correct but redundant** — across the corpus and constructed scenarios no
+flip ever clears an overlap, because (a) the datapath winners `BITRUNK_HVH/VHV`
+are not flippable (no `edge_id`, multi-tap legs) and (b) a flip only moves an
+edge's bend to the opposite corner of its own bounding box — a strictly weaker
+move than an index alternate, which swaps the whole topology.
+
+**Proposed.** Remove the flip branch from `_ripup_reroute`'s move construction
+(drop the `('flip', …)` moves; keep `_rr_apply_move`/`_rr_undo_move` unused-path
+free), keeping `flip_mst_edge` + `Segment.edge_id` as primitives for a possible
+future *stronger* per-edge move (a Z/dogleg that genuinely changes the
+footprint). Saves ~1 trial per contended MST edge and simplifies the delicate
+ripup scan. Small, safe; gated on the ripup suite + big2 staying green (routes
+are byte-identical — the flip never committed anyway).
+
+## Global-overlap re-route of NON-contended bundles — OPEN (bigger, riskier)
+
+**What.** ripup only re-routes bundles that appear in an overlap; negotiate only
+re-plans the bundles of measured overlaps. But a *non-contended* bundle can hold
+bands whose re-route lowers the **total** overlap count. Measured example
+([`mst_edge_realization.md`](mst_edge_realization.md), #178): big2 bundle 61 is
+not itself contended, yet pinning it to its (window-infeasible, STRICT-rejected)
+`TRUNK_H+MST` candidate routes the whole design at **8 overlaps instead of 10** —
+a global win the greedy planner + contended-only ripup cannot see.
+
+**Proposed (sketch).** After ripup/negotiate stall, add a bounded pass that, for
+each overlap's *band occupants* (not just the overlap's two bundles), trials a
+best-effort re-route (including window-infeasible MST candidates) and commits any
+that strictly lowers the global overlap count. High risk — it enlarges the ripup
+search and can churn — so it needs the full must-not-regress gate
+(test_flow_scripts goldens, big2 ≤ current, mix/tc3a clean) and careful cost
+control. Only worth it if the corpus shows several b61-class cases.

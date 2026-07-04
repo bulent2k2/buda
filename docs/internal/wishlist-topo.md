@@ -125,3 +125,27 @@ guard, not an accident.  Stage A's data model, the ConnSeg python bindings, the 
 corpus harness (`tools/wl_corpus.py`) and the dead-wire probe
 (`tools/along_dof_probe.py`, selected + all-candidate scopes) are all in place so that
 larger effort can be measured from its first commit.
+
+## `multi_trunk` as a default (measured candidate) — OPEN
+
+**What.** `generate_topologies multi_trunk` (opt-in) emits two-level
+`BITRUNK_HVH/VHV` datapath trees. Measured (see
+[`mst_edge_realization.md`](mst_edge_realization.md), datapath section): on
+column/row-aligned datapaths the planner selects them and QoR improves
+substantially (col 3×5×6 WL −7.5 %, ov 3→1; col 4×5×8 WL −31.9 %, ov 11→1; row
+3×5×6 WL −17.7 %, ov 1→0), while on the trunk-dominated tc3 corpus it is a QoR
+no-op (trunks already win). That asymmetry — real upside on datapaths, neutral
+elsewhere — makes it a candidate for **default-on**.
+
+**Why not already.** Two costs to measure before flipping the default: (a) the
+sweep found a couple of *losses* on awkward shapes (a sparse `row 4×5×8` +7.7 %
+WL, a saturated `col 2×6×6` +3.2 % WL for fewer overlaps) — default-on must not
+regress those; (b) `multi_trunk` generates extra `BITRUNK` candidates, so
+generation + planning pay a runtime cost even on designs that never select them.
+
+**Gate.** Run the full WL corpus (`tools/wl_corpus.py`) + the demo flows with
+`multi_trunk` forced on vs off; require equal-or-better abstract/detailed WL and
+overlaps on every flow, and quantify the candidate-count / runtime delta. If
+clean, flip the `generate_topologies` default to emit BITRUNK trees (keeping an
+opt-*out* keyword) and re-baseline the candidate-count goldens. Otherwise keep it
+opt-in and document the boundary.
