@@ -78,7 +78,7 @@ def test_hierarchy_elaborates_with_transforms(tmp_path):
     l3 = comps["m0/leaf_3"]
     assert (l3.x1, l3.y1, l3.x2, l3.y2) == (18.0, 19.0, 23.0, 22.0)
     # 90-degree rotation swaps the placed bbox dims (20x12 -> 12x20) AND records
-    # the orientation token (v12) so export can re-emit it faithfully.
+    # the orientation token (v13) so export can re-emit it faithfully.
     m2 = comps["mid_0"]
     assert (m2.x2 - m2.x1, m2.y2 - m2.y1) == (12.0, 20.0)
     assert m2.orient == "W"                       # 90 deg CCW

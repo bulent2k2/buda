@@ -27,7 +27,7 @@ import buda_cli
 from gds_build import GdsBuilder
 
 
-def test_v11_db_migrates_to_v12_orient(tmp_path):
+def test_v11_db_migrates_to_current_orient(tmp_path):
     # A v11 component table (no orient column) migrates forward: the column is
     # added and existing rows read as identity ('N').
     p = str(tmp_path / "v11.bdb")
@@ -246,7 +246,7 @@ def test_unused_library_cell_keeps_its_structure(tmp_path):
 def test_dim_mismatch_warns_only_for_genuine_resize(tmp_path):
     # A rotation is now representable (orient=W swaps the exported extent), so a
     # correctly-rotated instance does NOT warn; only a bbox that matches neither
-    # the cell nor the oriented cell (a genuine resize) does. (v12)
+    # the cell nor the oriented cell (a genuine resize) does. (v13)
     db = buda.BDB(str(tmp_path / "a.bdb"))
     db.add_cell("c", 10, 5)
     db.add_comp("i0", "c", "", 0, 0, 10, 5, True)               # N, matches
@@ -259,7 +259,7 @@ def test_dim_mismatch_warns_only_for_genuine_resize(tmp_path):
 
 
 def test_orientation_round_trips(tmp_path):
-    # v12: a rotated (90°) and a mirrored top-level instance survive
+    # v13: a rotated (90°) and a mirrored top-level instance survive
     # export -> re-import with matching bbox AND orient token — the round-trip
     # bug the n_dim_mismatch warning used to only flag.
     b = GdsBuilder(dbu_um=0.001)
@@ -284,7 +284,7 @@ def test_orientation_round_trips(tmp_path):
 def test_rotate_comp_then_export_is_consistent(tmp_path):
     # rotate_comp/flip_comp compose the orient token for a CHILDLESS subtree
     # (rows.size()==1) so a mutated instance exports faithfully (bbox and orient
-    # stay consistent). (v12)
+    # stay consistent). (v13)
     db = buda.BDB(str(tmp_path / "a.bdb"))
     db.set_die(200, 200)
     db.add_cell("blk", 20, 12)

@@ -536,7 +536,7 @@ layers default to `(buda_layer, 0)` with a warning) — and one net-name
 first `def_gds_layer labels` entry, else 63).
 
 **Round-trip:** re-importing with the same `def_gds_layer` map recovers the
-identical design — components (including instance **orientation**, v12), cell
+identical design — components (including instance **orientation**, v13), cell
 footprints, die, and (labeled mode) nets/pins — with every routing shape
 excluded from footprints. Rotated/mirrored placements re-emit their
 `component.orient` token as `STRANS`/`ANGLE` and round-trip exactly (top-level
@@ -921,7 +921,7 @@ All query methods return lists of typed row objects with read-write attributes.
 | `x2, y2` | float | Upper-right corner (µm) |
 | `is_leaf` | bool | True if no children (stdcell) |
 | `is_replicated` | bool | True if part of a replicated group |
-| `orient` | str | Instance orientation, one of `N/S/E/W/FN/FS/FE/FW` (default `'N'`); the bbox is the resulting axis-aligned extent (v12) |
+| `orient` | str | Instance orientation, one of `N/S/E/W/FN/FS/FE/FW` (default `'N'`); the bbox is the resulting axis-aligned extent (v13) |
 
 **`NetRow`**
 
@@ -1383,7 +1383,7 @@ ignored. The LEF supplies cell *sizes* and *pin offsets/directions* only.
 
 DEF name escaping (`\[`, `\]`) is stripped so instance names match the
 Verilog-elaborated paths. Component **orientation is recorded** in
-`component.orient` (v12): the DEF token maps to BDB's orient convention (DEF's
+`component.orient` (v13): the DEF token maps to BDB's orient convention (DEF's
 pure rotations N/W/S/E coincide; the flip tokens permute because DEF mirrors
 about the Y axis while BDB mirrors about X — DEF `FN`↔BDB `FS`, `FS`↔`FN`,
 `FE`↔`FW`, `FW`↔`FE`) and the placed bbox dims swap for the 90/270

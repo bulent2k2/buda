@@ -10,7 +10,7 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 
-"""DEF/LEF import records instance orientation (component.orient, v12).
+"""DEF/LEF import records instance orientation (component.orient, v13).
 
 `import_def_lef` used to discard the DEF `COMPONENTS` orientation token and
 apply the LEF `SIZE` axis-aligned regardless — so a rotated macro got the

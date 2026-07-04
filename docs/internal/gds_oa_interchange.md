@@ -119,7 +119,7 @@ no live pipeline:
   0)` (default 10) + child `SREF`s reconstructed from the cell's first
   component instance at relative offsets, each carrying the child instance
   name as `PROPVALUE`.
-- **Orientation (v12)**: each placement re-emits its `component.orient` token
+- **Orientation (v13)**: each placement re-emits its `component.orient` token
   as `STRANS` (mirror) + `ANGLE`, computing the SREF origin (via `XForm`) so
   the oriented cell reproduces the stored bbox — so a rotated/mirrored
   instance now round-trips (previously it exported unrotated with a warning).
