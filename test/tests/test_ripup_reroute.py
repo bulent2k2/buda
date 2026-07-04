@@ -205,6 +205,25 @@ def test_big2_stage_a_reduces_overlaps():
 
 
 @pytest.mark.mid
+def test_big2_ripup_flip_move_never_regresses():
+    """The flip move source (step 4b) is an ADD-ON to the existing index-alternate
+    ripup: it must never make big2 worse.  It IS exercised on this design — a
+    selected MST candidate's edge leg contends and _rr_flip_edges surfaces it — but
+    WHICH segment contends is FP/CPU/environment-sensitive (the same reason the
+    tests above assert 'reduced', not an exact count), so we cannot deterministically
+    assert a flip is tried.  Instead assert the invariant that always holds: ripup
+    still drives the overlaps down, whether the winning moves are index or flip.
+    (The flip's involution + no-false-flip gating are pinned deterministically by
+    the fast-tier _mst_session tests.)"""
+    s = _big2_to_stage("a")
+    base = s.nuts_result.num_overlaps
+    assert base > 0
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute 40")
+    assert s.nuts_result.num_overlaps < base
+
+
+@pytest.mark.mid
 def test_big2_stage_b_preserves_hi_lo_bit_order():
     """ripup_reroute's stage-b replay must keep a HI_LO bit-order selection.
 
