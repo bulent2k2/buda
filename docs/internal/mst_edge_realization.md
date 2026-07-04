@@ -422,14 +422,41 @@ orientations: `flow/datapath_multi_trunk.buda` (col/HVH) and
 `flow/datapath_row_vhv.buda` (row/VHV); `test_datapath_multi_trunk_qor.py`
 guards both (`@mid`, parametrized).
 
-One caveat carries over: the **step-4b flip still does not win a commit** even on
-these datapaths — ripup clears the residual overlap with an index move, not a
-flip. The flip remains correct-and-competing infrastructure awaiting a case where
-only a flip clears an overlap.
+### Step-4b flip — measured redundant (why it never wins)
+
+A focused hunt for *any* case where the per-edge flip clears an overlap came up
+empty: across the tc3/big2 corpus and a battery of constructed scenarios
+(congested column/row datapaths at several sizes; keepout-narrowed 2-bundle MST
+fans), **no flip was found that reduces the overlap count.** Two structural
+reasons, now understood:
+
+1. **The datapath winners are not flippable.** `BITRUNK_HVH/VHV` trees carry no
+   `edge_id` tags (they come from the BITRUNK generator, not `realize_edges`), so
+   `_rr_flip_edges` returns `[]` for them — and their branch legs are multi-tap
+   column/row trunks, not the clean 2-leg diagonal `flip_mst_edge` handles. On the
+   workload where MST-shapes actually win, the flip does not apply at all.
+2. **A flip is a strictly weaker move than an index alternate.** `flip_mst_edge`
+   only moves one edge's bend to the *opposite corner of its own bounding box* —
+   same endpoints, same Manhattan length, a marginal same-region reshuffle of
+   which H/V band each leg sits on. The index alternates it competes against in the
+   ripup scan swap to an *entirely different topology* (different trunk position,
+   different tree), a far larger change in congestion footprint. So whenever a
+   contended MST edge exists (e.g. big2 bundle 24, run-sensitive), an index move
+   both reaches and beats it.
+
+So step 4b's flip is **correct but redundant**: it competes (adds ~1 trial per
+contended MST edge — negligible cost, measured 43→44 on big2) and never wins.
+Its only untested surface is the flip-commit branch itself. Recommendation:
+either leave it as harmless dead-weight, or remove the flip move-source from
+`_ripup_reroute` (keeping `flip_mst_edge` as a primitive) to simplify the ripup
+scan — a small, safe cleanup, deferred to the user's call. The edge-identity data
+model (`Segment.edge_id`) remains useful groundwork if a *stronger* per-edge move
+(e.g. a Z/dogleg realization that genuinely changes the footprint) is ever built.
 
 **Bottom line for the line.** The generation-side MST/multi-trunk work (candidate
 shapes, edge identity, smart per-edge default, BITRUNK trees) has a real,
 measured QoR payoff — on datapaths. Part 1 (tail-tightening) stays inert
-(dead wire changes no selection), and step-4b's flip stays latent-but-correct.
+(dead wire changes no selection), and step-4b's flip is **correct but measured
+redundant** (dominated by index moves; N/A to the BITRUNK datapath winners).
 The productive next direction, if pursued, is more/better datapath coverage
 (demos + a small corpus), not further trunk-tail or flip work.
