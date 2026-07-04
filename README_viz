@@ -1,2 +1,2 @@
 > cd buda_system_v2
-> python3 src/buda_cli.py flow/comprehensive_demo.buda
+> python3 src/buda_cli.py demo/comprehensive_demo.buda

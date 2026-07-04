@@ -56,7 +56,7 @@
 # Expanded wrappers after run_planner hier: ~154
 # ============================================================
 
-source ../tracks.buda
+source ../tracks/tracks.buda
 
 corner_margin dx 5 dy 5
 set_min_stub_length 2

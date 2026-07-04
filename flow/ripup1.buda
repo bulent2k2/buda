@@ -4,7 +4,7 @@
 # b is pinned to its straight I_H topology so it cannot detour, so the
 # planner must rip up a and replan it into band y[160,300] to make room.
 
-source tracks2top.buda
+source tracks/tracks2top.buda
 
 add_block asrc    0   0  100 300
 add_block adst  900   0 1000 300

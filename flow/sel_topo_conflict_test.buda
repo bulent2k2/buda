@@ -3,7 +3,7 @@
 #  2) .json sidecar.
 # Only the latter can override segment layer assignments (from UI).
 # Internally, run_planner does auto layer assignment.
-source tracks4top.buda
+source tracks/tracks4top.buda
 add_block b1 0 0 100 100
 add_block b2 200 200 300 300
 add_bus v[4] b1.o b2.i

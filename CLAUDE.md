@@ -101,7 +101,7 @@ Both extension modules link the same `buda_core`, giving pybind11 one `std::type
 Prefer the `bin/` wrapper scripts (they set `PYTHONPATH=build:tools`):
 
 ```bash
-bin/buda flow/comprehensive_demo.buda   # routing CLI (src/buda_cli.py)
+bin/buda demo/comprehensive_demo.buda   # routing CLI (src/buda_cli.py)
 bin/fp  [file.bdb]                       # interactive Floorplanner GUI (tools/bdb_floorplanner.py)
 bin/bfp tc1                              # Floorplanner with a built-in demo scenario
 bin/bfp flow/some.buda                   # run a .buda flow, then open its BDB in the Floorplanner
@@ -116,7 +116,7 @@ a one-shot way to eyeball a test's input floorplan and generated candidates.
 Or run the CLI directly:
 
 ```bash
-PYTHONPATH=build python3 src/buda_cli.py flow/comprehensive_demo.buda
+PYTHONPATH=build python3 src/buda_cli.py demo/comprehensive_demo.buda
 ```
 
 Set `export PYTHONPATH=build` once per shell session if invoking Python directly.
@@ -589,7 +589,8 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 | Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
 | Python | `src/buda_cli.py` (CLI), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
-| Flows / tests | `flow/*.buda`, `test/tests/*.py`, `test/tests/features/*.feature` |
+| Demos | `demo/*.buda` — user/designer-facing demo vehicles (comprehensive_demo, quickstart, ariane/mempool/nvdla/ispd19 showcases, …); see `demo/README.md` |
+| Flows / tests | `flow/*.buda` — R&D / regression vehicles; shared track fixtures in `flow/tracks/`; `test/tests/*.py`, `test/tests/features/*.feature` |
 
 ---
 

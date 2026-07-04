@@ -3,7 +3,7 @@
 # on top to open things up
 # ============================================================
 
-source tracks2top.buda
+source tracks/tracks2top.buda
 
 add_block u1    50   50   100 100
 add_block u2    150  50   200 100

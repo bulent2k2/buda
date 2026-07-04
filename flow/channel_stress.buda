@@ -3,7 +3,7 @@
 # 200 nets randomly paired (fixed seed=42) — stress-tests NUTS channel packing.
 # Results in 62 bundles.
 
-source tracks_for_channel_stress.buda
+source tracks/tracks_for_channel_stress.buda
 
 add_block u_b0    20   20   80   80
 add_block u_b1   100   20  160   80

@@ -1,7 +1,7 @@
 # Three rectilinear blocks from the slides
 # Has .json picked topo which shows the need to refine pull preference
 
-source tracks.buda
+source ../flow/tracks/tracks.buda
 
 add_block blk1 rect 100 0 700 100
 add_block blk2 rect 0 300   200 700  rect 0   600 300 700

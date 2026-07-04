@@ -33,7 +33,7 @@ py $VIZ lefdef/four_blocks/four_blocks.def lefdef/four_blocks/four_blocks.lef &
 
 cd ~/src/buda/flow/lefdef/ispd19_test1
 py $VIZ ispd19_test1.input.def ispd19_test1.input.lef &
-py $BUDA ~/src/buda/flow/ispd19_test1.buda
+py $BUDA ~/src/buda/demo/ispd19_test1.buda
 
 # Interactive IPC Test Sequence
 
@@ -59,7 +59,7 @@ Terminal 1 — buda_viz:
 
   Terminal 1 (buda_viz):
   cd ~/src/buda/buda_system_v2/src
-  python3 buda_cli.py ../flow/ispd19_test1.buda
+  python3 buda_cli.py ../demo/ispd19_test1.buda
   This runs bundler → planner → NUTS → detailed NUTS, then opens buda_viz. The session name will be ispd19_test1 so the socket will be /tmp/buda_ipc_ispd19_test1.sock.
 
   Terminal 2 (def_viz):

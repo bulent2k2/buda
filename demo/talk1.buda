@@ -1,4 +1,4 @@
-source tracks.buda
+source ../flow/tracks/tracks.buda
 
 add_block blk1  0    200  300 600
 add_block blk2  700  500  900 700

@@ -37,7 +37,7 @@ buda_system/
 ```bash
 source bin/activate                   # per shell: puts bin/ on PATH, sets PYTHONPATH
 bb                                    # build the C++/pybind11 engine into build/
-buda flow/comprehensive_demo.buda     # run a routing flow
+buda demo/comprehensive_demo.buda     # run a routing flow
 u2b test_column_datapath_hvh          # convert a topology unit test to .buda + visualize
 ```
 

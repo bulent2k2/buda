@@ -3,7 +3,7 @@
 # Full floorplan kept so topology generation (Hanan grid / pass-through) matches the full run.
 # Renumbered in source order: bundle 1 = bus_030, bundle 2 = bus_047, bundle 3 = bus_069.
 
-source ../tracks4top.buda
+source ../tracks/tracks4top.buda
 
 set_die 30000 24000
 add_block blk_00 2960 7760 4560 9160

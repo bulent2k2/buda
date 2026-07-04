@@ -16,7 +16,7 @@
 error: generate_topologies must quit (sys.exit) rather than silently route from
 the chip origin.
 
-Regression (flow/quickstart.buda): the `dft` bus drove from `IOPAD.io` while the
+Regression (demo/quickstart.buda): the `dft` bus drove from `IOPAD.io` while the
 block was defined as `IO_PAD`.  Floorplan::get_block_bounds returns a degenerate
 {0,0,0,0} for an unknown name, so the bundle routed from (0,0) far from IO_PAD
 with no error.  generate_topologies now validates every endpoint via

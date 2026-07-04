@@ -1,5 +1,5 @@
 # From hier_four_blocks_cell.buda
-source tracks.buda
+source tracks/tracks.buda
 
 open_bdb :memory:
 #open_bdb hier_bundle2.bdb

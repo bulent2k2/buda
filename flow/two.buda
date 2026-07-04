@@ -1,6 +1,6 @@
 # TODO: rotate x<->y
 
-source tracks2topM4M5.buda
+source tracks/tracks2topM4M5.buda
 
 corner_margin dx 1 dy 2
 

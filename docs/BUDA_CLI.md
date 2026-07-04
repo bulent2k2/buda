@@ -22,8 +22,8 @@ The CLI itself is `src/buda_cli.py`; you normally invoke it through the `bin/bud
 wrapper, which sets `PYTHONPATH` for you.
 
 ```bash
-bin/buda flow/comprehensive_demo.buda            # from the repo root
-buda flow/comprehensive_demo.buda                # if bin/ is on your PATH
+bin/buda demo/comprehensive_demo.buda            # from the repo root
+buda demo/comprehensive_demo.buda                # if bin/ is on your PATH
 PYTHONPATH=build python3 src/buda_cli.py flow/x.buda   # direct invocation
 ```
 
@@ -103,7 +103,7 @@ leave the design half-configured (e.g. no layers loaded).
 
 ```bash
 # Full interactive run (opens the visualizer at the script's `visualize` line)
-bin/buda flow/comprehensive_demo.buda
+bin/buda demo/comprehensive_demo.buda
 
 # Batch run, no GUI — useful in CI; inspect the flow log afterwards
 bin/buda --no-viz flow/rnr/mix.buda
@@ -113,7 +113,7 @@ cat flow/rnr/log/mix_flow.log
 bin/buda --no-viz --verbose-conn flow/rnr/mix.buda
 
 # Debug the buda_viz ↔ def_viz IPC link (show the socket status lines)
-bin/buda --ipc-verbose flow/comprehensive_demo.buda
+bin/buda --ipc-verbose demo/comprehensive_demo.buda
 ```
 
 ---
