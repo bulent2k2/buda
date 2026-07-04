@@ -1,7 +1,7 @@
 """Probe: where would the along-flex trunk DOF actually save wirelength?
 
-For each corpus flow, after routing, rebuild ConnTopology on every bundle's
-SELECTED topology and inspect each segment's flex ends (Stage-A along-flex
+For each corpus flow, after routing, rebuild ConnTopology on each bundle's
+candidate topologies and inspect every segment's flex ends (Stage-A along-flex
 fields).  A flex end whose along-coverage floor sits strictly INSIDE the
 segment's generated extent carries "dead wire" the DOF could contract away.
 
@@ -14,7 +14,15 @@ probe therefore splits each flex-end gap into:
 
 Only DEAD wire is a WL saving the DOF could realize with no new open.
 
-Usage: PYTHONPATH=build:tools python3 tools/along_dof_probe.py
+Two scopes are reported per flow so the finding is double-checked against every
+candidate the planner *could* have picked, not just the one it did:
+  - SELECTED: dead wire in each bundle's selected topology only.
+  - ALL:      dead wire summed over ALL candidate topologies of every bundle
+              (the planner's whole search space).
+If ALL is 0 the DOF is a no-op for the entire candidate set, not merely the
+chosen routes.
+
+Usage: PYTHONPATH=build:tools python3 tools/along_dof_probe.py [--verbose]
 """
 import contextlib, io, os, sys
 
@@ -89,52 +97,77 @@ def probe_flow(path):
     except BaseException as e:
         return f"ERROR {type(e).__name__}: {e}", []
 
-    dead_total, cover_total, hits = 0, 0, []
+    # Two scopes: SELECTED = each bundle's chosen topology; ALL = every candidate.
+    sel_dead = sel_cover = 0
+    all_dead = all_cover = 0
+    n_cands = 0
+    hits = []            # (bid, si, end, gap, type, is_selected) for ALL-scope dead
+
+    def scan(topo, cs, si, bid, selected):
+        nonlocal sel_dead, sel_cover, all_dead, all_cover
+        for end, flex, cov, ext in (
+            ('hi', cs.along_flex_hi, cs.along_cover_hi, cs.along_hi),
+            ('lo', cs.along_flex_lo, cs.along_cover_lo, cs.along_lo),
+        ):
+            if not flex:
+                continue
+            gap = (ext - cov) if end == 'hi' else (cov - ext)
+            if gap <= 0:
+                continue
+            glo, ghi = (cov, ext) if end == 'hi' else (ext, cov)
+            is_cover = gap_has_block(cs, topo, s.fp, glo, ghi)
+            if is_cover:
+                all_cover += gap
+                if selected:
+                    sel_cover += gap
+            else:
+                all_dead += gap
+                hits.append((bid, si, end, gap, topo.type, selected))
+                if selected:
+                    sel_dead += gap
+
     for w in s.bundles:
         sel = w.plan.selected_topology_index
-        if sel is None or sel < 0 or sel >= len(w.input.candidates):
-            continue
-        topo = w.input.candidates[sel]
-        ct = buda.ConnTopology()
-        try:
-            ct.build(topo, s.fp)
-        except Exception:
-            continue
         bid = w.input.original_bundle.id
-        for si, cs in enumerate(ct.segs()):
-            for end, flex, cov, ext in (
-                ('hi', cs.along_flex_hi, cs.along_cover_hi, cs.along_hi),
-                ('lo', cs.along_flex_lo, cs.along_cover_lo, cs.along_lo),
-            ):
-                if not flex:
-                    continue
-                gap = (ext - cov) if end == 'hi' else (cov - ext)
-                if gap <= 0:
-                    continue
-                glo, ghi = (cov, ext) if end == 'hi' else (ext, cov)
-                if gap_has_block(cs, topo, s.fp, glo, ghi):
-                    cover_total += gap
-                else:
-                    dead_total += gap
-                    hits.append((bid, si, end, gap, topo.type))
-    return None, (dead_total, cover_total, hits)
+        cands = list(w.input.candidates)
+        for ci, topo in enumerate(cands):
+            ct = buda.ConnTopology()
+            try:
+                ct.build(topo, s.fp)
+            except Exception:
+                continue
+            n_cands += 1
+            selected = (ci == sel)
+            for si, cs in enumerate(ct.segs()):
+                scan(topo, cs, si, bid, selected)
+    return None, (sel_dead, sel_cover, all_dead, all_cover, n_cands, hits)
 
 
 def main():
-    print(f"{'flow':<48} {'DEAD':>8} {'COVER':>8}  top DEAD segments")
-    grand_dead = 0
+    verbose = "--verbose" in sys.argv
+    print(f"{'flow':<40} {'selDEAD':>7} {'selCOV':>7} {'allDEAD':>7} "
+          f"{'allCOV':>7} {'#cand':>6}  top DEAD (all candidates)")
+    g_sel_dead = g_all_dead = g_cands = 0
     for path in CORPUS:
         if not os.path.exists(os.path.join(ROOT, path)):
-            print(f"{path:<48} MISSING"); continue
+            print(f"{path:<40} MISSING"); continue
         err, res = probe_flow(path)
         if err:
-            print(f"{path:<48} {err}"); continue
-        dead, cover, hits = res
-        grand_dead += dead
+            print(f"{os.path.basename(path):<40} {err}"); continue
+        sd, sc, ad, ac, nc, hits = res
+        g_sel_dead += sd; g_all_dead += ad; g_cands += nc
         hits.sort(key=lambda h: -h[3])
-        top = "; ".join(f"b{b}s{s}.{e}={g}({t})" for b, s, e, g, t in hits[:3])
-        print(f"{os.path.basename(path):<48} {dead:>8} {cover:>8}  {top}")
-    print(f"\nGRAND TOTAL contractible DEAD wire across corpus: {grand_dead}")
+        top = "; ".join(f"b{b}s{s}.{e}={g}({t}{'*' if sel else ''})"
+                        for b, s, e, g, t, sel in hits[:3])
+        print(f"{os.path.basename(path):<40} {sd:>7} {sc:>7} {ad:>7} "
+              f"{ac:>7} {nc:>6}  {top}")
+        if verbose and hits:
+            for b, si, e, g, t, sel in hits:
+                print(f"      b{b} seg{si} {e} gap={g} type={t} "
+                      f"{'SELECTED' if sel else 'candidate'}")
+    print(f"\nGRAND TOTAL removable DEAD wire — selected topos: {g_sel_dead}"
+          f" | ALL {g_cands} candidate topos: {g_all_dead}")
+    print("(* = the hit is in the planner-selected candidate)")
 
 
 if __name__ == "__main__":

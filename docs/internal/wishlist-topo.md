@@ -81,28 +81,43 @@ result contradicts the premise that the flip is a clean, DOF-fixable win:
   starved band.  Contracting the placed span at NUTS does not make the *generated*
   tight span fit the planner in the first place.
 
-**The DOF itself is a structural no-op (the deeper finding).**  Using the Stage-A
-fields we probed every bundle's *selected* topology across the corpus
-(`tools/along_dof_probe.py`) for a flex end whose along-coverage floor
-(`along_cover_lo/hi`) sits strictly INSIDE the segment's generated extent — i.e.
-genuinely removable "dead wire" (excluding pass-through coverage).  The answer is
-**0 across the whole corpus, both gated and under the always-on experiment.**
-Reason: generation already lands every spine endpoint exactly on its extreme
-stub/coverage — a topology's span never exceeds *its own* coverage floor — so a DOF
-that contracts a span *to its own coverage* has nothing to remove in any topology
-BUDA emits.  The WL difference the wish imagined (far-face vs. centerline) is a
-**stub perp-position** matter already handled by `net_pull`, not a **spine-endpoint
-along-extent** one.  So the along-flex DOF as scoped would **save wirelength in zero
-unit tests / flows**.
+**The DOF saves 0 WL on any *selected* route — the removable dead wire lives only in
+never-selected candidates.**  Using the Stage-A fields we probed every bundle's
+topologies across the corpus (`tools/along_dof_probe.py`, `--verbose` for per-hit
+detail) for a flex end whose along-coverage floor (`along_cover_lo/hi`) sits strictly
+INSIDE the generated extent — i.e. genuinely removable "dead wire" (pass-through
+coverage excluded).  Two scopes:
+- **Selected topologies: 0 dead wire, every flow, gated and under the always-on
+  experiment.**  Generation already lands the *winning* candidate's spine endpoints
+  exactly on their extreme stub/coverage, so a NUTS-time DOF that contracts a span to
+  its own coverage has nothing to remove on what actually routes.
+- **All 4539 candidate topologies: ~790 k units of dead wire — concentrated entirely
+  in `TRUNK+MST` / `TRUNK_OOB+MST` hybrids.**  These carry a genuine dangling trunk
+  overshoot (e.g. `four_blocks` b2 `TRUNK_H+MST@y125` seg0 spans x=[99,151] but
+  connects only at x=99 — 52 units of tail attached to nothing).  It is connected at
+  one end (not an open), just wasteful — and that waste inflates the candidate's
+  wirelength, which is precisely *why* the planner ranks these hybrids below the tight
+  candidates and never selects them.
+
+So the DOF's real leverage is **not** "save WL on the committed route" (there is none
+to save) but "de-inflate loose MST-hybrid candidates so they could compete" — a
+**ranking / selection** effect (the churn risk), not a wirelength saving on committed
+routes.  And a NUTS-time DOF cannot even do that: ranking uses the *generation-time*
+WL estimate, before NUTS runs.  A simpler, safer alternative surfaced by the probe is
+to **tighten the MST-hybrid trunk endpoints at generation** (drop the dangling
+overshoot at emit time) — independent of any DOF — which would make their WL honest
+without a NUTS mechanism.  That is a scoped follow-up, noted here, not taken in this PR
+(it touches exactly the candidates the always-on experiment showed cause selection
+churn, so it needs the same WL-corpus gate).
 
 **Re-scoped blocker.**  Making the flexible span always-on safely is therefore not
-about a NUTS along-contraction at all — it needs a **planner-aware** flex span: the
-congestion planner must reserve the trunk's **minimal/contracted** extent (treating
-the endpoints as a range) rather than the wide generated span, so a flex trunk stops
-overflowing bands it does not actually need.  That touches `CongestionPlanner`'s band
-reservation (`rebuild_cuts_` / demand charging), well beyond the ConnSeg+NUTS scope
-the original wish assumed.  Until that exists the `double_detour` gate stays — it is a
-correct guard, not an accident.  Stage A's data model, the ConnSeg python bindings,
-the WL corpus harness (`tools/wl_corpus.py`) and the dead-wire probe
-(`tools/along_dof_probe.py`) are all in place so that larger effort can be measured
-from its first commit.
+about a NUTS along-contraction — it needs either (a) honest generation-time trunk-tail
+tightening (above), and/or (b) a **planner-aware** flex span: the congestion planner
+reserving the trunk's minimal/contracted extent (endpoints as a range) rather than the
+wide generated span, so a flex trunk stops overflowing bands it does not need
+(`rebuild_cuts_` / demand charging).  Both are well beyond the ConnSeg+NUTS scope the
+original wish assumed.  Until then the `double_detour` gate stays — it is a correct
+guard, not an accident.  Stage A's data model, the ConnSeg python bindings, the WL
+corpus harness (`tools/wl_corpus.py`) and the dead-wire probe
+(`tools/along_dof_probe.py`, selected + all-candidate scopes) are all in place so that
+larger effort can be measured from its first commit.
