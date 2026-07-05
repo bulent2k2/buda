@@ -90,6 +90,9 @@ struct Axis {
     int along_hi(const Rect& r) const { return along_horiz ? r.x2 : r.y2; }
     int perp_lo (const Rect& r) const { return along_horiz ? r.y1 : r.x1; }
     int perp_hi (const Rect& r) const { return along_horiz ? r.y2 : r.x2; }
+    // Along / perpendicular coordinate of a Point.
+    int along(const Point& p) const { return along_horiz ? p.x : p.y; }
+    int perp (const Point& p) const { return along_horiz ? p.y : p.x; }
     // Nearest along-axis face of r in the direction of `toward`.
     int along_face(const Rect& r, int toward) const { return along_horiz ? r.face_x(toward) : r.face_y(toward); }
     int perp_face (const Rect& r, int toward) const { return along_horiz ? r.face_y(toward) : r.face_x(toward); }
@@ -454,6 +457,12 @@ private:
     void add_z_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_u_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_uu_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
+    // Axis-parameterized trunk generator; add_trunk_h/add_trunk_v are thin
+    // forwarders (H = along-x spine, no stub suppression; V = along-y spine, with
+    // same-side stub suppression).
+    void add_trunk(const Axis& axis, bool suppress_stubs,
+                   const std::vector<Point>& pins, const std::vector<Busterm>& blocks,
+                   int locus, bool out_of_bbox, std::vector<Topology>& results);
     void add_trunk_h(const std::vector<Point>& pins, const std::vector<Busterm>& blocks,
                      int y_trunk, bool out_of_bbox, std::vector<Topology>& results);
     void add_trunk_v(const std::vector<Point>& pins, const std::vector<Busterm>& blocks,

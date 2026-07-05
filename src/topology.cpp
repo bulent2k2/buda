@@ -1435,343 +1435,43 @@ static void corner_diagonal_L(const Rect& u, const Rect& v, int strategy,
     }
 }
 
-void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
-                                     const std::vector<Busterm>& blocks,
-                                     int y_trunk, bool out_of_bbox,
-                                     std::vector<Topology>& results)
+// Axis-parameterized trunk generator.  add_trunk_v was a strict superset of
+// add_trunk_h (it threads a stub_suppressed vector through the span gather,
+// touches-block pullback, degenerate-spine block and double_detour that the H
+// path lacked); this unifies both by adopting the V structure and gating the
+// suppression PASS on `suppress_stubs`.  With suppress_stubs=false (the H
+// forwarder) stub_suppressed stays all-false, so every V-only guard goes inert
+// and the H output is reproduced byte-for-byte.
+//   axis.along_horiz==true  → H spine (runs along x); stub is V (v_layer_).
+//   axis.along_horiz==false → V spine (runs along y); stub is H (h_layer_).
+void TopologyGenerator::add_trunk(const Axis& axis, bool suppress_stubs,
+                                   const std::vector<Point>& pins,
+                                   const std::vector<Busterm>& blocks,
+                                   int locus, bool out_of_bbox,
+                                   std::vector<Topology>& results)
 {
     int n = (int)pins.size();
-    std::vector<int>  conn_y(n), att_x(n);
+    const int spine_layer = axis.along_horiz ? h_layer_ : v_layer_;
+    const int stub_layer  = axis.along_horiz ? v_layer_ : h_layer_;
+    std::vector<int>  conn(n), att(n);
     std::vector<bool> has_stub(n);
-    std::vector<Rect> best_r(n);   // best rect per block for this trunk y
+    std::vector<Rect> best_r(n);   // best rect per block for this trunk locus
     for (int i = 0; i < n; ++i) {
-        best_r[i]   = best_rect(Axis{true}, blocks[i], y_trunk);
-        conn_y[i]   = use_busterm_ ? best_r[i].face_y(y_trunk) : pins[i].y;
-        has_stub[i] = (conn_y[i] != y_trunk);
+        best_r[i]   = best_rect(axis, blocks[i], locus);
+        conn[i]     = use_busterm_ ? axis.perp_face(best_r[i], locus) : axis.perp(pins[i]);
+        has_stub[i] = (conn[i] != locus);
         // For multi-rect blocks use the best rect's centre; single-rect uses pin.
-        att_x[i]    = blocks[i].rects.empty() ? pins[i].x : best_r[i].center().x;
-    }
-
-    if (use_busterm_) {
-        // Enforce vertical stub length for multicast stubs.
-        int m_v = floorplan_.get_min_stub_length(1 /*VERTICAL*/, v_layer_);
-        for (int i = 0; i < n; ++i) {
-            if (has_stub[i]) {
-                if (std::abs(y_trunk - conn_y[i]) < m_v) return; // skip this trunk
-            }
-        }
-
-        if (!out_of_bbox) {
-            int pt_lo = INT_MIN / 2, pt_hi = INT_MAX / 2;
-            bool any_pt = false;
-            bool trunk_inside_direct = false;
-            for (int i = 0; i < n; ++i) {
-                if (!has_stub[i]) {
-                    any_pt = true;
-                    if (y_trunk >= best_r[i].y1 && y_trunk <= best_r[i].y2)
-                        trunk_inside_direct = true;
-                    pt_lo = std::max(pt_lo, best_r[i].y1);
-                    pt_hi = std::min(pt_hi, best_r[i].y2);
-                }
-            }
-            if (any_pt && pt_lo <= pt_hi && !trunk_inside_direct) {
-                int n_above = 0, n_below = 0;
-                for (int i = 0; i < n; ++i) {
-                    if (has_stub[i]) {
-                        if (conn_y[i] > y_trunk) ++n_above;
-                        else                      ++n_below;
-                    }
-                }
-                if      (n_above > 0 && n_below == 0) y_trunk = pt_hi;
-                else if (n_below > 0 && n_above == 0) y_trunk = pt_lo;
-                for (int i = 0; i < n; ++i) {
-                    best_r[i]  = best_rect(Axis{true}, blocks[i], y_trunk);
-                    conn_y[i]  = best_r[i].face_y(y_trunk);
-                    has_stub[i] = (conn_y[i] != y_trunk);
-                }
-            }
-        }
-        // Helper: x-face of best rect (or shrunk union for single-rect w/ margin).
-        auto x2_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.x2 : best_r[i].x2; };
-        auto x1_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.x1 : best_r[i].x1; };
-        auto x2_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.x2 : best_r[i].x2; };
-        auto x1_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.x1 : best_r[i].x1; };
-        {
-            int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
-            int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
-            if (!has_stub[lo]) att_x[lo] = x2_of(lo);
-            if (!has_stub[hi]) att_x[hi] = x1_of(hi);
-        }
-        for (int iter = 0; iter < n; ++iter) {
-            int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
-            int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
-            bool changed = false;
-            if (has_stub[lo]) {
-                int target = x2_shrunk(lo);
-                if (target > att_x[lo]) { att_x[lo] = target; changed = true; }
-            }
-            if (has_stub[hi]) {
-                int target = x1_shrunk(hi);
-                if (target < att_x[hi]) { att_x[hi] = target; changed = true; }
-            }
-            if (!changed) break;
-        }
-        for (int iter2 = 0; iter2 < n; ++iter2) {
-            int lo = std::min_element(att_x.begin(), att_x.end()) - att_x.begin();
-            int hi = std::max_element(att_x.begin(), att_x.end()) - att_x.begin();
-            bool changed = false;
-            if (!has_stub[lo] && att_x[lo] != x2_of(lo)) {
-                att_x[lo] = x2_of(lo); changed = true;
-            }
-            if (!has_stub[hi] && att_x[hi] != x1_of(hi)) {
-                att_x[hi] = x1_of(hi); changed = true;
-            }
-            if (!changed) break;
-        }
-    }
-
-    // Trunk-touches-block, no artificial far-edge tap (mirror of add_trunk_v; #84).
-    // A no-stub block whose extent the STUB span already overlaps is touched by
-    // the trunk by overlap; pull its face-pushed att_x back into the stub span so
-    // the spine is not extended to manufacture an edge tap.  A block the stub span
-    // is OFF (one-directional pull) keeps its near-face att_x and is tapped there.
-    if (use_busterm_) {
-        int stub_lo = INT_MAX, stub_hi = INT_MIN;
-        for (int i = 0; i < n; ++i)
-            if (has_stub[i]) {
-                stub_lo = std::min(stub_lo, att_x[i]);
-                stub_hi = std::max(stub_hi, att_x[i]);
-            }
-        if (stub_lo <= stub_hi) {
-            for (int i = 0; i < n; ++i) {
-                if (has_stub[i]) continue;
-                if (!blocks[i].rects.empty()) continue;        // single-rect only
-                int b1 = blocks[i].orig_bbox.x1, b2 = blocks[i].orig_bbox.x2;
-                if (b1 <= stub_hi && b2 >= stub_lo)            // stub span overlaps block
-                    att_x[i] = std::clamp(att_x[i], stub_lo, stub_hi);
-            }
-        }
-    }
-
-    int x_lo = INT_MAX, x_hi = INT_MIN;
-    for (int i = 0; i < n; ++i) {
-        x_lo = std::min(x_lo, att_x[i]); x_hi = std::max(x_hi, att_x[i]);
-    }
-
-    // ── Flexible "root" trunk under double_detour (mirror of add_trunk_v) ────
-    // Minimal connecting span: each stub sits at its NATURAL centerline (block/
-    // rect centre, not the wire-min face), and the spine spans from there out to
-    // the NEAR x-face of every pass-through block it does not yet overlap — no
-    // beyond-bbox margin.  Gives purely-pass-through trunks a valid span, keeps
-    // extreme-endpoint stubs slideable, and stays tight; left unchanged without
-    // double_detour.  See the add_trunk_v counterpart for the rationale.
-    if (use_busterm_ && allow_double_detour_) {
-        auto ctr_x = [&](int i) {
-            return blocks[i].rects.empty() ? blocks[i].orig_bbox.center().x
-                                           : best_r[i].center().x;
-        };
-        int lo = INT_MAX, hi = INT_MIN;
-        for (int i = 0; i < n; ++i) {
-            if (!has_stub[i]) continue;                        // stubs only
-            att_x[i] = ctr_x(i);                               // place stub at its centerline
-            lo = std::min(lo, att_x[i]); hi = std::max(hi, att_x[i]);
-        }
-        bool seeded = (lo <= hi);
-        for (int i = 0; i < n; ++i) {
-            if (has_stub[i]) continue;                         // pass-through/contained
-            int b1 = blocks[i].orig_bbox.x1, b2 = blocks[i].orig_bbox.x2;
-            if (!seeded) { lo = b1; hi = b2; seeded = true; continue; }
-            if (b1 > hi) hi = b1;   // block right of the span: reach its near (left)  face
-            if (b2 < lo) lo = b2;   // block left  of the span: reach its near (right) face
-        }
-        if (seeded && lo < hi) { x_lo = lo; x_hi = hi; }
-    }
-    // Degenerate spine (all real attachments share one x == the junction).  Mirror
-    // of add_trunk_v (#84 refine): rather than a junction-less spine-less collapse
-    // (parallel stubs separate, a silent open — Codex P1) or a block-centre anchor
-    // (which dangles the far spine endpoint), SPREAD the stubs to opposite interior
-    // sides of the junction — each toward its own block's side, to the midpoint
-    // between the junction and the contained block's near face — and span the spine
-    // between them, so both spine endpoints connect to a stub and the trunk pulls
-    // inward.  Only when a contained block straddles the junction; else drop.
-    if (x_lo >= x_hi) {
-        const int junction = x_lo;        // == x_hi
-        int n_stubs = 0, side = 0;
-        bool same_side = true, ok = true, have_B = false;
-        int B_x1 = INT_MIN, B_x2 = INT_MAX;   // intersection of contained blocks' extents
-        for (int i = 0; i < n; ++i) {
-            if (has_stub[i]) {
-                ++n_stubs;
-                int s = (conn_y[i] > y_trunk) ? 1 : (conn_y[i] < y_trunk ? -1 : 0);
-                if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
-                continue;
-            }
-            const Rect& bb = blocks[i].orig_bbox;
-            if (!blocks[i].rects.empty() || !(bb.x1 <= junction && junction <= bb.x2)) {
-                ok = false; continue;
-            }
-            have_B = true;
-            B_x1 = std::max(B_x1, bb.x1);
-            B_x2 = std::min(B_x2, bb.x2);
-        }
-        if (!(n_stubs >= 2 && same_side && ok && have_B &&
-              B_x1 < junction && junction < B_x2))
-            return;
-        int new_lo = INT_MAX, new_hi = INT_MIN;
-        for (int i = 0; i < n; ++i) {
-            if (!has_stub[i]) continue;
-            // Spread to the midpoint of the stub's OWN face ∩ B's interior (mirror
-            // of add_trunk_v) — keeps the stub on its own face even when B is much
-            // larger than the stub block (Codex P1), and strictly inside B.
-            int fx1 = blocks[i].rects.empty() ? blocks[i].orig_bbox.x1 : best_r[i].x1;
-            int fx2 = blocks[i].rects.empty() ? blocks[i].orig_bbox.x2 : best_r[i].x2;
-            int lo = std::max(fx1, B_x1), hi = std::min(fx2, B_x2);
-            if (lo < hi) att_x[i] = (lo + hi) / 2;     // else keep att_x (the junction)
-            new_lo = std::min(new_lo, att_x[i]);
-            new_hi = std::max(new_hi, att_x[i]);
-        }
-        if (new_lo >= new_hi) return;                  // stubs did not spread (no interior room)
-        x_lo = new_lo; x_hi = new_hi;                  // spine spans between the spread stubs
-    }
-
-    Topology t;
-    t.type               = std::string(out_of_bbox ? "TRUNK_H_OOB" : "TRUNK_H")
-                           + "@y" + std::to_string(y_trunk);
-    t.trunk_location     = y_trunk;
-
-    // Opt-in feedthru: a bundle block the trunk passes straight through (a
-    // busterm of THIS bundle that gets no stub) may relay the bus across its
-    // interior via its own lower-level routing -- the trunk is split at the
-    // block's two faces and the block's internal route bridges the gap.  Only
-    // blocks this topology actually connects to are eligible: an unrelated
-    // block the trunk merely crosses is a pass-through, never a feedthru.
-    // Because the block is a busterm, ConnTopology infers a BUSTERM conn at
-    // each face, so the two half-spines are anchored to the block's faces (they
-    // cannot slide off it or onto separate tracks) and the lower-level bridge
-    // keeps two valid landings -- no separate downstream slide-clamp needed.
-    // Gated on feedthru_active() (default off); single-rect blocks only (MVP).
-    std::vector<std::pair<int,int>> ft_gaps;   // (x1,x2) faces of feedthru blocks
-    std::vector<bool> is_feedthru(n, false);
-    if (floorplan_.feedthru_active()) {
-        for (int i = 0; i < n; ++i) {
-            if (has_stub[i]) continue;                 // trunk doesn't pass through it
-            if (!floorplan_.get_feedthru(blocks[i].block_name, h_layer_)) continue;
-            if (blocks[i].rects.size() > 1) continue;  // MVP: single-rect only
-            // A feedthru relay needs the trunk to PASS THROUGH the block (enter one
-            // face, exit the other).  A spine fully contained in the block (the
-            // bounded interior spine, #84) does not pass through, so it must not be
-            // split out — that would delete the only junction (Codex P1).
-            if (x_lo >= blocks[i].orig_bbox.x1 && x_hi <= blocks[i].orig_bbox.x2)
-                continue;
-            int fx1 = std::max(x_lo, blocks[i].orig_bbox.x1);
-            int fx2 = std::min(x_hi, blocks[i].orig_bbox.x2);
-            if (fx1 < fx2) {
-                ft_gaps.push_back({fx1, fx2});
-                is_feedthru[i] = true;
-                t.feedthru_blocks.push_back(blocks[i].block_name);
-            }
-        }
-        std::sort(t.feedthru_blocks.begin(), t.feedthru_blocks.end());
-    }
-
-    // Pass-through count excludes feedthru blocks (those are explicit splits).
-    t.pass_through_count = 0;
-    for (int i = 0; i < n; ++i)
-        if (!has_stub[i] && !is_feedthru[i] && att_x[i] != x_lo && att_x[i] != x_hi)
-            ++t.pass_through_count;
-
-    // Spine along x at y=y_trunk, split around any feedthru gaps (see emit_spine).
-    emit_spine(t, Axis{true}, y_trunk, x_lo, x_hi, ft_gaps, h_layer_);
-
-    for (int i = 0; i < n; ++i) {
-        if (!has_stub[i]) {
-            // Direct: trunk is inside the best rect. For OVER mode on a rectilinear
-            // block (rects with overlapping interiors, e.g. L-shape), check if ALL
-            // rects span y_trunk. If not, emit a bridge over the top so the parts
-            // of the block that are outside the trunk's y-range are also connected.
-            // Pure TEG blocks (disjoint rects) are exempt — for them, "trunk inside
-            // one rect" is normal direct-connection behaviour with no bridge.
-            if (blocks[i].teg_mode == TegMode::OVER && !blocks[i].rects.empty()
-                    && rects_are_rectilinear(blocks[i].rects)) {
-                bool all_span = true;
-                for (const auto& r : blocks[i].rects)
-                    if (y_trunk < r.y1 || y_trunk > r.y2) { all_span = false; break; }
-                if (!all_span) {
-                    const Rect& ub = blocks[i].orig_bbox;
-                    t.bridge_segments[blocks[i].block_name] =
-                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
-                }
-            }
-            continue;
-        }
-
-        // Over-the-block: if trunk is in the gap between rects on both sides,
-        // emit two V stubs (one per side) and a horizontal bridge over the block top.
-        if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
-            const auto& rects = blocks[i].rects;
-            bool trunk_inside_any = false;
-            for (const auto& r : rects)
-                if (y_trunk >= r.y1 && y_trunk <= r.y2) { trunk_inside_any = true; break; }
-
-            if (!trunk_inside_any) {
-                // Partition rects into those fully below and fully above trunk.
-                Rect best_below = rects[0]; bool has_below = false;
-                Rect best_above = rects[0]; bool has_above = false;
-                for (const auto& r : rects) {
-                    if (r.y2 <= y_trunk) {
-                        if (!has_below || r.y2 > best_below.y2) { best_below = r; has_below = true; }
-                    } else if (r.y1 >= y_trunk) {
-                        if (!has_above || r.y1 < best_above.y1) { best_above = r; has_above = true; }
-                    }
-                }
-                if (has_below && has_above) {
-                    int cx_below = best_below.center().x;
-                    int cx_above = best_above.center().x;
-
-                    // V stub down: trunk → top face of lower rect
-                    emit_tap_segment(t, make_seg(cx_below, best_below.y2, cx_below, y_trunk, v_layer_), &blocks[i]);
-                    // V stub up: trunk → bottom face of upper rect
-                    emit_tap_segment(t, make_seg(cx_above, y_trunk, cx_above, best_above.y1, v_layer_), &blocks[i]);
-
-                    // Bridge H segment at union_bbox.y2 (over the block top)
-                    const Rect& ub = blocks[i].orig_bbox;
-                    t.bridge_segments[blocks[i].block_name] =
-                        make_seg(ub.x1, ub.y2, ub.x2, ub.y2, h_layer_);
-                    continue;
-                }
-            }
-        }
-
-        // Normal single stub
-        emit_tap_segment(t, make_seg(att_x[i], conn_y[i], att_x[i], y_trunk, v_layer_), &blocks[i]);
-    }
-    if (!t.segments.empty()) results.push_back(std::move(t));
-}
-
-void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
-                                     const std::vector<Busterm>& blocks,
-                                     int x_trunk, bool out_of_bbox,
-                                     std::vector<Topology>& results)
-{
-    int n = (int)pins.size();
-    std::vector<int>  conn_x(n), att_y(n);
-    std::vector<bool> has_stub(n);
-    std::vector<Rect> best_r(n);   // best rect per block for this trunk x
-    for (int i = 0; i < n; ++i) {
-        best_r[i]   = best_rect(Axis{false}, blocks[i], x_trunk);
-        conn_x[i]   = use_busterm_ ? best_r[i].face_x(x_trunk) : pins[i].x;
-        has_stub[i] = (conn_x[i] != x_trunk);
-        // For multi-rect blocks use the best rect's centre; single-rect uses pin.
-        att_y[i]    = blocks[i].rects.empty() ? pins[i].y : best_r[i].center().y;
+        att[i]      = blocks[i].rects.empty() ? axis.along(pins[i]) : axis.along_center(best_r[i]);
     }
     std::vector<bool> stub_suppressed(n, false);
 
     if (use_busterm_) {
-        // Enforce horizontal stub length for multicast stubs.
-        int m_h = floorplan_.get_min_stub_length(0 /*HORIZONTAL*/, h_layer_);
+        // Enforce stub length for multicast stubs (stub is perpendicular to spine).
+        int m = floorplan_.get_min_stub_length(axis.along_horiz ? 1 /*VERTICAL*/ : 0 /*HORIZONTAL*/,
+                                                stub_layer);
         for (int i = 0; i < n; ++i) {
             if (has_stub[i]) {
-                if (std::abs(x_trunk - conn_x[i]) < m_h) return; // skip this trunk
+                if (std::abs(locus - conn[i]) < m) return; // skip this trunk
             }
         }
 
@@ -1782,101 +1482,103 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             for (int i = 0; i < n; ++i) {
                 if (!has_stub[i]) {
                     any_pt = true;
-                    if (x_trunk >= best_r[i].x1 && x_trunk <= best_r[i].x2)
+                    if (locus >= axis.perp_lo(best_r[i]) && locus <= axis.perp_hi(best_r[i]))
                         trunk_inside_direct = true;
-                    pt_lo = std::max(pt_lo, best_r[i].x1);
-                    pt_hi = std::min(pt_hi, best_r[i].x2);
+                    pt_lo = std::max(pt_lo, axis.perp_lo(best_r[i]));
+                    pt_hi = std::min(pt_hi, axis.perp_hi(best_r[i]));
                 }
             }
             if (any_pt && pt_lo <= pt_hi && !trunk_inside_direct) {
-                int n_right = 0, n_left = 0;
+                int n_hi = 0, n_lo = 0;
                 for (int i = 0; i < n; ++i) {
                     if (has_stub[i]) {
-                        if (conn_x[i] > x_trunk) ++n_right;
-                        else                      ++n_left;
+                        if (conn[i] > locus) ++n_hi;
+                        else                 ++n_lo;
                     }
                 }
-                if      (n_right > 0 && n_left == 0) x_trunk = pt_hi;
-                else if (n_left  > 0 && n_right == 0) x_trunk = pt_lo;
+                if      (n_hi > 0 && n_lo == 0) locus = pt_hi;
+                else if (n_lo > 0 && n_hi == 0) locus = pt_lo;
                 for (int i = 0; i < n; ++i) {
-                    best_r[i]  = best_rect(Axis{false}, blocks[i], x_trunk);
-                    conn_x[i]  = best_r[i].face_x(x_trunk);
-                    has_stub[i] = (conn_x[i] != x_trunk);
+                    best_r[i]  = best_rect(axis, blocks[i], locus);
+                    conn[i]    = axis.perp_face(best_r[i], locus);
+                    has_stub[i] = (conn[i] != locus);
                 }
             }
         }
-        // Helper: y-face of best rect (or shrunk union for single-rect w/ margin).
-        auto y2_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.y2 : best_r[i].y2; };
-        auto y1_of = [&](int i) { return blocks[i].rects.empty() ? blocks[i].orig_bbox.y1 : best_r[i].y1; };
-        auto y2_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.y2 : best_r[i].y2; };
-        auto y1_shrunk = [&](int i) { return blocks[i].rects.empty() ? blocks[i].bbox.y1 : best_r[i].y1; };
+        // Helper: far/near along-face of best rect (or shrunk union for single-rect w/ margin).
+        auto along_hi_of = [&](int i) { return blocks[i].rects.empty() ? axis.along_hi(blocks[i].orig_bbox) : axis.along_hi(best_r[i]); };
+        auto along_lo_of = [&](int i) { return blocks[i].rects.empty() ? axis.along_lo(blocks[i].orig_bbox) : axis.along_lo(best_r[i]); };
+        auto along_hi_shrunk = [&](int i) { return blocks[i].rects.empty() ? axis.along_hi(blocks[i].bbox) : axis.along_hi(best_r[i]); };
+        auto along_lo_shrunk = [&](int i) { return blocks[i].rects.empty() ? axis.along_lo(blocks[i].bbox) : axis.along_lo(best_r[i]); };
         {
-            int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
-            int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
-            if (!has_stub[lo]) att_y[lo] = y2_of(lo);
-            if (!has_stub[hi]) att_y[hi] = y1_of(hi);
+            int lo = std::min_element(att.begin(), att.end()) - att.begin();
+            int hi = std::max_element(att.begin(), att.end()) - att.begin();
+            if (!has_stub[lo]) att[lo] = along_hi_of(lo);
+            if (!has_stub[hi]) att[hi] = along_lo_of(hi);
         }
         for (int iter = 0; iter < n; ++iter) {
-            int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
-            int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
+            int lo = std::min_element(att.begin(), att.end()) - att.begin();
+            int hi = std::max_element(att.begin(), att.end()) - att.begin();
             bool changed = false;
             if (has_stub[lo]) {
-                int target = y2_shrunk(lo);
-                if (target > att_y[lo]) { att_y[lo] = target; changed = true; }
+                int target = along_hi_shrunk(lo);
+                if (target > att[lo]) { att[lo] = target; changed = true; }
             }
             if (has_stub[hi]) {
-                int target = y1_shrunk(hi);
-                if (target < att_y[hi]) { att_y[hi] = target; changed = true; }
+                int target = along_lo_shrunk(hi);
+                if (target < att[hi]) { att[hi] = target; changed = true; }
             }
             if (!changed) break;
         }
         for (int iter2 = 0; iter2 < n; ++iter2) {
-            int lo = std::min_element(att_y.begin(), att_y.end()) - att_y.begin();
-            int hi = std::max_element(att_y.begin(), att_y.end()) - att_y.begin();
+            int lo = std::min_element(att.begin(), att.end()) - att.begin();
+            int hi = std::max_element(att.begin(), att.end()) - att.begin();
             bool changed = false;
-            if (!has_stub[lo] && att_y[lo] != y2_of(lo)) {
-                att_y[lo] = y2_of(lo); changed = true;
+            if (!has_stub[lo] && att[lo] != along_hi_of(lo)) {
+                att[lo] = along_hi_of(lo); changed = true;
             }
-            if (!has_stub[hi] && att_y[hi] != y1_of(hi)) {
-                att_y[hi] = y1_of(hi); changed = true;
+            if (!has_stub[hi] && att[hi] != along_lo_of(hi)) {
+                att[hi] = along_lo_of(hi); changed = true;
             }
             if (!changed) break;
         }
 
-        // Suppress stubs made redundant by a longer same-side stub whose att_y
-        // already passes through the shorter stub's block.
+        // Suppress stubs made redundant by a longer same-side stub whose att
+        // already passes through the shorter stub's block.  V-only pass, gated on
+        // suppress_stubs (the H forwarder passes false, keeping stub_suppressed
+        // all-false so every downstream guard reduces to the H behaviour).
         //
         // Coverage-safety: a stub i may only be suppressed by a stub j that
         // ACTUALLY SURVIVES (is not itself suppressed) — otherwise i is left with
         // no covering wire (a silent open).  The original loop tested has_stub[j]
         // only, so a chain A←B←C could suppress B believing C covers it while C's
-        // surviving wire sits at a different att_y that misses B (the
+        // surviving wire sits at a different att that misses B (the
         // big2 bus_056 / blk_09 bug).  Decide survivors farthest-first per side:
         // the farthest stub always survives, and a nearer stub is suppressed only
-        // when an already-confirmed survivor's att_y lies within its block's
-        // y-extent (the same pass-through coverage verify.cpp checks).
-        {
+        // when an already-confirmed survivor's att lies within its block's
+        // along-extent (the same pass-through coverage verify.cpp checks).
+        if (suppress_stubs) {
             std::vector<int> order(n);
             for (int i = 0; i < n; ++i) order[i] = i;
             // Farthest from trunk first; stubs only.
             std::sort(order.begin(), order.end(), [&](int a, int b) {
-                return std::abs(conn_x[a] - x_trunk) > std::abs(conn_x[b] - x_trunk);
+                return std::abs(conn[a] - locus) > std::abs(conn[b] - locus);
             });
             for (int idx = 0; idx < n; ++idx) {
                 int i = order[idx];
                 if (!has_stub[i]) continue;
-                int di = conn_x[i] - x_trunk;
+                int di = conn[i] - locus;
                 if (di == 0) continue;
                 for (int jdx = 0; jdx < idx; ++jdx) {   // only farther-or-equal blocks seen so far
                     int j = order[jdx];
                     if (!has_stub[j] || stub_suppressed[j]) continue;  // j must survive
-                    int dj = conn_x[j] - x_trunk;
+                    int dj = conn[j] - locus;
                     if (dj == 0) continue;
                     if ((di > 0) != (dj > 0)) continue;          // opposite sides of trunk
                     if (std::abs(dj) <= std::abs(di)) continue;  // j not strictly farther
-                    // Surviving stub j's att_y lies within block i's original y-extent?
-                    if (att_y[j] >= blocks[i].orig_bbox.y1 &&
-                        att_y[j] <= blocks[i].orig_bbox.y2) {
+                    // Surviving stub j's att lies within block i's original along-extent?
+                    if (att[j] >= axis.along_lo(blocks[i].orig_bbox) &&
+                        att[j] <= axis.along_hi(blocks[i].orig_bbox)) {
                         stub_suppressed[i] = true; break;
                     }
                 }
@@ -1889,143 +1591,120 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     // spine must extend to one of its faces to *tap* it is decided by the conn-seg
     // (stub) span, not by feedthru:
     //   - the STUB span already OVERLAPS the block (straddle) → the trunk touches
-    //     it by overlap; pull the face-pushed att_y back into the stub span so the
+    //     it by overlap; pull the face-pushed att back into the stub span so the
     //     spine is NOT extended to manufacture an edge tap (b34_bus_028 blk_00).
     //   - the stub span is OFF the block (one-directional pull) → the overlap test
-    //     below is false, so att_y keeps its near-face value and the spine extends
+    //     below is false, so att keeps its near-face value and the spine extends
     //     to that NEAR edge and taps it (pull-up/pull-down).
-    // The degenerate sub-case (stubs collapse to one y, so the pulled-back block
-    // would leave the spine zero-length) is given a bounded interior spine further
-    // below — never a face tap and never a junction-less collapse.
-    //
-    // Busterm mode only (mirror of add_trunk_h): with busterm mode off (center_mode)
-    // att_y is the point pin's y, and clamping a pin that lies outside the stub span
-    // into it would drop the pin connection (Codex P2 on #88).
+    // Busterm mode only: with busterm mode off (center_mode) att is the point
+    // pin's along-coord, and clamping a pin that lies outside the stub span into
+    // it would drop the pin connection (Codex P2 on #88).
     if (use_busterm_) {
         int stub_lo = INT_MAX, stub_hi = INT_MIN;
         for (int i = 0; i < n; ++i)
             if (has_stub[i] && !stub_suppressed[i]) {
-                stub_lo = std::min(stub_lo, att_y[i]);
-                stub_hi = std::max(stub_hi, att_y[i]);
+                stub_lo = std::min(stub_lo, att[i]);
+                stub_hi = std::max(stub_hi, att[i]);
             }
         if (stub_lo <= stub_hi) {
             for (int i = 0; i < n; ++i) {
                 if (has_stub[i] || stub_suppressed[i]) continue;   // stubbed/suppressed
                 if (!blocks[i].rects.empty()) continue;            // single-rect only (TEG owns multi-rect)
-                int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
+                int b1 = axis.along_lo(blocks[i].orig_bbox), b2 = axis.along_hi(blocks[i].orig_bbox);
                 if (b1 <= stub_hi && b2 >= stub_lo)                // stub span overlaps block
-                    att_y[i] = std::clamp(att_y[i], stub_lo, stub_hi);
+                    att[i] = std::clamp(att[i], stub_lo, stub_hi);
             }
         }
     }
 
-    int y_lo = INT_MAX, y_hi = INT_MIN;
+    int a_lo = INT_MAX, a_hi = INT_MIN;
     for (int i = 0; i < n; ++i) {
         if (stub_suppressed[i]) continue;
-        y_lo = std::min(y_lo, att_y[i]); y_hi = std::max(y_hi, att_y[i]);
+        a_lo = std::min(a_lo, att[i]); a_hi = std::max(a_hi, att[i]);
     }
 
     // ── Flexible "root" trunk under double_detour ───────────────────────────
     // A trunk is the bundle's root: its endpoints are flexible and span exactly
     // from the lowest busterm it taps to the topmost stub/connection it carries —
     // no more (minimise wirelength) and no less (stay connected).  Opt-in via
-    // double_detour.  Two pieces:
-    //   1. Each stub sits at its NATURAL centerline (block/rect centre), not the
-    //      wire-min face the earlier refinement may have pulled an extreme stub
-    //      to.  A stub pinned to the block's near face that also bounds the spine
-    //      end has zero slide (the blk_02 driver stub at x5772 → filter_pinched
-    //      dropped the candidate); placing it at the centre keeps the spine end
-    //      strictly inside the block's face extent so the stub stays slideable.
-    //   2. The span = [min,max] of those stub centerlines, then extended to the
-    //      NEAR face of every pass-through block it does not yet overlap (so it
-    //      still crosses every receiver it connects by containment) — e.g. down
-    //      to blk_29's upper edge, up to the driver-stub centerline.  No
-    //      beyond-bbox margin: the generator is honest and tight, and NUTS
-    //      endpoint-following resolves the rest.
-    // Without double_detour the span is left tight (unchanged behaviour), so
-    // normal flows and their candidate rankings are not disturbed.
+    // double_detour.  Each stub sits at its NATURAL centerline (block/rect
+    // centre), and the span = [min,max] of those centerlines extended to the NEAR
+    // along-face of every pass-through block it does not yet overlap.  Without
+    // double_detour the span is left tight (unchanged behaviour).
     if (use_busterm_ && allow_double_detour_) {
-        auto ctr_y = [&](int i) {
-            return blocks[i].rects.empty() ? blocks[i].orig_bbox.center().y
-                                           : best_r[i].center().y;
+        auto ctr = [&](int i) {
+            return blocks[i].rects.empty() ? axis.along_center(blocks[i].orig_bbox)
+                                           : axis.along_center(best_r[i]);
         };
         // Place every surviving stub at its natural centerline.
         for (int i = 0; i < n; ++i)
-            if (has_stub[i] && !stub_suppressed[i]) att_y[i] = ctr_y(i);
+            if (has_stub[i] && !stub_suppressed[i]) att[i] = ctr(i);
         // Recentering can move a farther same-side stub off a nearer block it was
-        // suppressing (that block was suppressed precisely because the farther
-        // stub's pre-recenter att_y crossed its y-extent).  A suppressed block is
-        // stubbed — the trunk does NOT pass through it — so if no SURVIVING farther
-        // same-side stub still crosses it at the new att_y, un-suppress it and emit
-        // its own centerline stub.  Monotonic: only ever re-adds coverage, so it
-        // cannot strand a block (the Codex P1 on this PR).
+        // suppressing; a suppressed block is stubbed — the trunk does NOT pass
+        // through it — so if no SURVIVING farther same-side stub still crosses it
+        // at the new att, un-suppress it and emit its own centerline stub.
+        // Monotonic: only ever re-adds coverage, so it cannot strand a block.
         for (int i = 0; i < n; ++i) {
             if (!stub_suppressed[i]) continue;
-            int di = conn_x[i] - x_trunk;
+            int di = conn[i] - locus;
             bool covered = false;
             for (int j = 0; j < n && !covered; ++j) {
                 if (j == i || !has_stub[j] || stub_suppressed[j]) continue;
-                int dj = conn_x[j] - x_trunk;
+                int dj = conn[j] - locus;
                 if (di == 0 || dj == 0 || (di > 0) != (dj > 0)) continue; // same side
                 if (std::abs(dj) <= std::abs(di)) continue;               // strictly farther
-                covered = (att_y[j] >= blocks[i].orig_bbox.y1 &&
-                           att_y[j] <= blocks[i].orig_bbox.y2);
+                covered = (att[j] >= axis.along_lo(blocks[i].orig_bbox) &&
+                           att[j] <= axis.along_hi(blocks[i].orig_bbox));
             }
-            if (!covered) { stub_suppressed[i] = false; att_y[i] = ctr_y(i); }
+            if (!covered) { stub_suppressed[i] = false; att[i] = ctr(i); }
         }
         int lo = INT_MAX, hi = INT_MIN;
         for (int i = 0; i < n; ++i) {
             if (stub_suppressed[i] || !has_stub[i]) continue;  // surviving stubs
-            lo = std::min(lo, att_y[i]); hi = std::max(hi, att_y[i]);
+            lo = std::min(lo, att[i]); hi = std::max(hi, att[i]);
         }
         bool seeded = (lo <= hi);
         for (int i = 0; i < n; ++i) {
             if (stub_suppressed[i] || has_stub[i]) continue;   // pass-through/contained
-            int b1 = blocks[i].orig_bbox.y1, b2 = blocks[i].orig_bbox.y2;
+            int b1 = axis.along_lo(blocks[i].orig_bbox), b2 = axis.along_hi(blocks[i].orig_bbox);
             if (!seeded) { lo = b1; hi = b2; seeded = true; continue; }
-            if (b1 > hi) hi = b1;   // block above the span: reach its near (bottom) face
-            if (b2 < lo) lo = b2;   // block below the span: reach its near (top)    face
+            if (b1 > hi) hi = b1;   // block beyond the span: reach its near (lo) face
+            if (b2 < lo) lo = b2;   // block below the span: reach its near (hi) face
         }
-        if (seeded && lo < hi) { y_lo = lo; y_hi = hi; }
+        if (seeded && lo < hi) { a_lo = lo; a_hi = hi; }
     }
-    // Degenerate spine (all real attachments share one y == the junction).  A
-    // spine-less topology would leave the same-side collinear stubs joined only by
+    // Degenerate spine (all real attachments share one along == the junction).  A
+    // spine-less topology would leave same-side collinear stubs joined only by
     // nominally overlapping at the junction — ConnTopology infers a SEG link only
     // for *perpendicular* pairs, so two parallel stubs carry no junction constraint
     // and NUTS could place them on different tracks → a silent open (issue #84,
     // Codex P1).  Instead, when a contained endpoint block straddles the junction,
     // SPREAD the stubs to opposite interior sides of it and span the spine between
-    // them: each stub moves toward its own block's side of the junction, to the
-    // midpoint between the junction and the contained block's near face on that
-    // side — strictly interior (no face tap).  seg0 then runs from the low stub to
-    // the high stub, so BOTH its endpoints connect to a stub (no dead wire — the
-    // earlier block-centre anchor left the far endpoint dangling), and the trunk's
-    // endpoints pull inward (the opposing straddle pulls, low=+1 / high=-1).  The
-    // block is connected by containment (the spine lies inside it).  Otherwise drop.
-    if (y_lo >= y_hi) {
-        const int junction = y_lo;        // == y_hi
+    // them.  Otherwise drop.
+    if (a_lo >= a_hi) {
+        const int junction = a_lo;        // == a_hi
         int n_stubs = 0, side = 0;
         bool same_side = true, ok = true, have_B = false;
-        int B_y1 = INT_MIN, B_y2 = INT_MAX;   // intersection of contained blocks' extents
+        int B_lo = INT_MIN, B_hi = INT_MAX;   // intersection of contained blocks' extents
         for (int i = 0; i < n; ++i) {
             if (has_stub[i] && !stub_suppressed[i]) {
                 ++n_stubs;
-                int s = (conn_x[i] > x_trunk) ? 1 : (conn_x[i] < x_trunk ? -1 : 0);
+                int s = (conn[i] > locus) ? 1 : (conn[i] < locus ? -1 : 0);
                 if (s != 0) { if (side == 0) side = s; else if (s != side) same_side = false; }
                 continue;
             }
             if (has_stub[i]) continue;                 // suppressed stub: covered by a survivor
             // no-stub (contained) block: single-rect, must straddle the junction.
             const Rect& bb = blocks[i].orig_bbox;
-            if (!blocks[i].rects.empty() || !(bb.y1 <= junction && junction <= bb.y2)) {
+            if (!blocks[i].rects.empty() || !(axis.along_lo(bb) <= junction && junction <= axis.along_hi(bb))) {
                 ok = false; continue;
             }
             have_B = true;
-            B_y1 = std::max(B_y1, bb.y1);
-            B_y2 = std::min(B_y2, bb.y2);
+            B_lo = std::max(B_lo, axis.along_lo(bb));
+            B_hi = std::min(B_hi, axis.along_hi(bb));
         }
         if (!(n_stubs >= 2 && same_side && ok && have_B &&
-              B_y1 < junction && junction < B_y2))
+              B_lo < junction && junction < B_hi))
             return;
         int new_lo = INT_MAX, new_hi = INT_MIN;
         for (int i = 0; i < n; ++i) {
@@ -2035,45 +1714,44 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
             // stub block) could place the stub off its own face → an off-face
             // BUSTERM (Codex P1).  The intersection naturally lands on the block's
             // side of the junction and stays strictly inside B (no face tap).
-            int fy1 = blocks[i].rects.empty() ? blocks[i].orig_bbox.y1 : best_r[i].y1;
-            int fy2 = blocks[i].rects.empty() ? blocks[i].orig_bbox.y2 : best_r[i].y2;
-            int lo = std::max(fy1, B_y1), hi = std::min(fy2, B_y2);
-            if (lo < hi) att_y[i] = (lo + hi) / 2;     // else keep att_y (the junction)
-            new_lo = std::min(new_lo, att_y[i]);
-            new_hi = std::max(new_hi, att_y[i]);
+            int f1 = blocks[i].rects.empty() ? axis.along_lo(blocks[i].orig_bbox) : axis.along_lo(best_r[i]);
+            int f2 = blocks[i].rects.empty() ? axis.along_hi(blocks[i].orig_bbox) : axis.along_hi(best_r[i]);
+            int lo = std::max(f1, B_lo), hi = std::min(f2, B_hi);
+            if (lo < hi) att[i] = (lo + hi) / 2;     // else keep att (the junction)
+            new_lo = std::min(new_lo, att[i]);
+            new_hi = std::max(new_hi, att[i]);
         }
         if (new_lo >= new_hi) return;                  // stubs did not spread (no interior room)
-        y_lo = new_lo; y_hi = new_hi;                  // spine spans between the spread stubs
-        // falls through: the spine block emits the V segment [y_lo,y_hi]; the stub
-        // loop wires blk_15/blk_32; the contained block is covered by the spine.
+        a_lo = new_lo; a_hi = new_hi;                  // spine spans between the spread stubs
     }
 
     Topology t;
-    t.type               = std::string(out_of_bbox ? "TRUNK_V_OOB" : "TRUNK_V")
-                           + "@x" + std::to_string(x_trunk);
-    t.trunk_location     = x_trunk;
+    std::string letter = axis.along_horiz ? "H" : "V";
+    t.type               = std::string("TRUNK_") + letter + (out_of_bbox ? "_OOB" : "")
+                           + (axis.along_horiz ? "@y" : "@x") + std::to_string(locus);
+    t.trunk_location     = locus;
 
-    // Opt-in feedthru (mirror of add_trunk_h): a bundle block the trunk passes
-    // straight through (a busterm of THIS bundle with no stub) may relay the bus
-    // across its interior; split the trunk at the block's y-faces.  Only blocks
-    // this topology connects to are eligible.  Single-rect MVP.
-    std::vector<std::pair<int,int>> ft_gaps;   // (y1,y2) faces of feedthru blocks
+    // Opt-in feedthru: a bundle block the trunk passes straight through (a busterm
+    // of THIS bundle with no stub) may relay the bus across its interior; split the
+    // trunk at the block's along-faces.  Only blocks this topology connects to are
+    // eligible.  Single-rect MVP.  Gated on feedthru_active() (default off).
+    std::vector<std::pair<int,int>> ft_gaps;   // (lo,hi) along-faces of feedthru blocks
     std::vector<bool> is_feedthru(n, false);
     if (floorplan_.feedthru_active()) {
         for (int i = 0; i < n; ++i) {
             if (has_stub[i] || stub_suppressed[i]) continue;  // not passed through
-            if (!floorplan_.get_feedthru(blocks[i].block_name, v_layer_)) continue;
+            if (!floorplan_.get_feedthru(blocks[i].block_name, spine_layer)) continue;
             if (blocks[i].rects.size() > 1) continue;         // MVP: single-rect only
             // A feedthru relay needs the trunk to PASS THROUGH the block (enter one
             // face, exit the other).  A spine fully contained in the block (the
             // bounded interior spine, #84) does not pass through, so it must not be
             // split out — that would delete the only junction (Codex P1).
-            if (y_lo >= blocks[i].orig_bbox.y1 && y_hi <= blocks[i].orig_bbox.y2)
+            if (a_lo >= axis.along_lo(blocks[i].orig_bbox) && a_hi <= axis.along_hi(blocks[i].orig_bbox))
                 continue;
-            int fy1 = std::max(y_lo, blocks[i].orig_bbox.y1);
-            int fy2 = std::min(y_hi, blocks[i].orig_bbox.y2);
-            if (fy1 < fy2) {
-                ft_gaps.push_back({fy1, fy2});
+            int f1 = std::max(a_lo, axis.along_lo(blocks[i].orig_bbox));
+            int f2 = std::min(a_hi, axis.along_hi(blocks[i].orig_bbox));
+            if (f1 < f2) {
+                ft_gaps.push_back({f1, f2});
                 is_feedthru[i] = true;
                 t.feedthru_blocks.push_back(blocks[i].block_name);
             }
@@ -2084,72 +1762,91 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     // Pass-through count excludes feedthru blocks (those are explicit splits).
     t.pass_through_count = 0;
     for (int i = 0; i < n; ++i)
-        if (!has_stub[i] && !is_feedthru[i] && att_y[i] != y_lo && att_y[i] != y_hi)
+        if (!has_stub[i] && !is_feedthru[i] && att[i] != a_lo && att[i] != a_hi)
             ++t.pass_through_count;
 
-    // Spine along y at x=x_trunk, split around any feedthru gaps (see emit_spine).
-    emit_spine(t, Axis{false}, x_trunk, y_lo, y_hi, ft_gaps, v_layer_);
+    // Spine along `axis` at perp=locus, split around any feedthru gaps.
+    emit_spine(t, axis, locus, a_lo, a_hi, ft_gaps, spine_layer);
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {
             // Direct: trunk is inside the best rect. For OVER mode on a rectilinear
             // block (rects with overlapping interiors, e.g. L-shape), check if ALL
-            // rects span x_trunk. If not, emit a bridge over the top.
-            // Pure TEG blocks (disjoint rects) are exempt.
+            // rects span the trunk locus. If not, emit a bridge over the outer face
+            // so the parts of the block outside the trunk's perp-range are also
+            // connected.  Pure TEG blocks (disjoint rects) are exempt.
             if (blocks[i].teg_mode == TegMode::OVER && !blocks[i].rects.empty()
                     && rects_are_rectilinear(blocks[i].rects)) {
                 bool all_span = true;
                 for (const auto& r : blocks[i].rects)
-                    if (x_trunk < r.x1 || x_trunk > r.x2) { all_span = false; break; }
+                    if (locus < axis.perp_lo(r) || locus > axis.perp_hi(r)) { all_span = false; break; }
                 if (!all_span) {
                     const Rect& ub = blocks[i].orig_bbox;
                     t.bridge_segments[blocks[i].block_name] =
-                        make_seg(ub.x2, ub.y1, ub.x2, ub.y2, v_layer_);
+                        axis.mkseg(axis.along_lo(ub), axis.perp_hi(ub), axis.along_hi(ub), axis.perp_hi(ub), spine_layer);
                 }
             }
             continue;
         }
 
-        // Over-the-block for V trunk: trunk in horizontal gap between rects
+        // Over-the-block: if trunk is in the gap between rects on both sides,
+        // emit two stubs (one per side) and a bridge over the outer face.
         if (blocks[i].teg_mode == TegMode::OVER && blocks[i].rects.size() >= 2) {
             const auto& rects = blocks[i].rects;
             bool trunk_inside_any = false;
             for (const auto& r : rects)
-                if (x_trunk >= r.x1 && x_trunk <= r.x2) { trunk_inside_any = true; break; }
+                if (locus >= axis.perp_lo(r) && locus <= axis.perp_hi(r)) { trunk_inside_any = true; break; }
 
             if (!trunk_inside_any) {
-                Rect best_left = rects[0]; bool has_left = false;
-                Rect best_right = rects[0]; bool has_right = false;
+                // Partition rects into those perp-below and perp-above the trunk.
+                Rect best_near = rects[0]; bool has_near = false;
+                Rect best_far  = rects[0]; bool has_far  = false;
                 for (const auto& r : rects) {
-                    if (r.x2 <= x_trunk) {
-                        if (!has_left || r.x2 > best_left.x2) { best_left = r; has_left = true; }
-                    } else if (r.x1 >= x_trunk) {
-                        if (!has_right || r.x1 < best_right.x1) { best_right = r; has_right = true; }
+                    if (axis.perp_hi(r) <= locus) {
+                        if (!has_near || axis.perp_hi(r) > axis.perp_hi(best_near)) { best_near = r; has_near = true; }
+                    } else if (axis.perp_lo(r) >= locus) {
+                        if (!has_far || axis.perp_lo(r) < axis.perp_lo(best_far)) { best_far = r; has_far = true; }
                     }
                 }
-                if (has_left && has_right) {
-                    int cy_left  = best_left.center().y;
-                    int cy_right = best_right.center().y;
+                if (has_near && has_far) {
+                    int a_near = axis.along_center(best_near);
+                    int a_far  = axis.along_center(best_far);
 
-                    // H stub left: trunk → right face of left rect
-                    emit_tap_segment(t, make_seg(best_left.x2, cy_left, x_trunk, cy_left, h_layer_), &blocks[i]);
-                    // H stub right: trunk → left face of right rect
-                    emit_tap_segment(t, make_seg(x_trunk, cy_right, best_right.x1, cy_right, h_layer_), &blocks[i]);
+                    // Stub from near rect's far face → trunk.
+                    emit_tap_segment(t, axis.mkseg(a_near, axis.perp_hi(best_near), a_near, locus, stub_layer), &blocks[i]);
+                    // Stub from trunk → far rect's near face.
+                    emit_tap_segment(t, axis.mkseg(a_far, locus, a_far, axis.perp_lo(best_far), stub_layer), &blocks[i]);
 
-                    // Bridge V segment at union_bbox.x2 (right outer face)
+                    // Bridge segment at union_bbox outer (perp-hi) face.
                     const Rect& ub = blocks[i].orig_bbox;
                     t.bridge_segments[blocks[i].block_name] =
-                        make_seg(ub.x2, ub.y1, ub.x2, ub.y2, v_layer_);
+                        axis.mkseg(axis.along_lo(ub), axis.perp_hi(ub), axis.along_hi(ub), axis.perp_hi(ub), spine_layer);
                     continue;
                 }
             }
         }
 
-        // Normal single stub — skip if made redundant by a longer stub's pass-through
+        // Normal single stub — skip if made redundant by a longer stub's pass-through.
         if (stub_suppressed[i]) continue;
-        emit_tap_segment(t, make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], h_layer_), &blocks[i]);
+        emit_tap_segment(t, axis.mkseg(att[i], conn[i], att[i], locus, stub_layer), &blocks[i]);
     }
     if (!t.segments.empty()) results.push_back(std::move(t));
+}
+
+void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
+                                     const std::vector<Busterm>& blocks,
+                                     int y_trunk, bool out_of_bbox,
+                                     std::vector<Topology>& results)
+{
+    add_trunk(Axis{true}, /*suppress_stubs=*/false, pins, blocks, y_trunk, out_of_bbox, results);
+}
+
+void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
+                                     const std::vector<Busterm>& blocks,
+                                     int x_trunk, bool out_of_bbox,
+                                     std::vector<Topology>& results)
+{
+    add_trunk(Axis{false}, /*suppress_stubs=*/true, pins, blocks, x_trunk, out_of_bbox, results);
 }
 
 bool TopologyGenerator::segment_blocked_on_all_layers(const Segment& seg) const {
