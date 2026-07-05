@@ -6,10 +6,6 @@ def_layer 6 M6 H TOP 50
 def_layer 7 M7 V TOP 50
 def_layer 4 M4 H 50
 def_layer 5 M5 V 50
-def_track_pattern 4 -200  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 5    0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 6 -400  POWER 3 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1  GROUND 3 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1
-def_track_pattern 7 -600  POWER 6 2  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  GROUND 6 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
 add_block S 0 460 80 540
 add_block R0 400 280 480 360
 add_block R1 640 280 720 360
@@ -22,5 +18,6 @@ run_bundler
 generate_topologies multi_trunk
 run_planner
 run_nuts
-run_detailed_nuts
+ripup_reroute
+report_wirelength
 visualize

@@ -1,17 +1,13 @@
-# Synthetic case 1 — HV-BiTrunk (BITRUNK_HVH).
-# A source column (left) fans 8-bit buses to receivers in three x-aligned COLUMNS
-# (separated in x, stacked in y).  A root H spine (M6) feeds V branch-trunks (M7/M5)
-# down each column — BITRUNK_HVH — which beats plain trunks once several buses share
-# the columns.  OFF sits off-grid (the "one-off that doesn't fit the datapath").
-# Inline M4/M5/M6/M7 track patterns so DetailedNUTS (per-bit) can place + render.
+# Synthetic case 1 — T-bone HV-BiTrunk (BITRUNK_HVH) + stubs.
+# A source column (left) fans 8-bit buses to receivers in three x-aligned COLUMNS.
+# The ideal topology is a T-bone: a root H spine (M6) crossing V branch-trunks (M7)
+# down each column, with short stubs to the aligned receivers.  OFF sits off-grid
+# (the one-off reached by a stub).  Abstract level (no track pattern) — render with
+# `tools/render.py ... --no-dnuts` for the TOPOLOGY + NUTS view.
 def_layer 6 M6 H TOP 50
 def_layer 7 M7 V TOP 50
 def_layer 4 M4 H 50
 def_layer 5 M5 V 50
-def_track_pattern 4 -200  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 5    0  POWER 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  GROUND 2 1  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5  SIGNAL 1 0.5
-def_track_pattern 6 -400  POWER 3 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1  GROUND 3 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1  SIGNAL 1 1
-def_track_pattern 7 -600  POWER 6 2  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  GROUND 6 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1
 
 add_block S0 0 100 80 180
 add_block S1 0 220 80 300
@@ -49,5 +45,6 @@ run_bundler
 generate_topologies multi_trunk
 run_planner
 run_nuts
-run_detailed_nuts
+ripup_reroute
+report_wirelength
 visualize
