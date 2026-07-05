@@ -855,6 +855,31 @@ static Rect best_rect(const Axis& axis, const Busterm& bt, int trunk_locus) {
     return best;
 }
 
+// Emit the trunk spine along `axis` at perpendicular coordinate `locus`, over the
+// along-axis span [lo, hi], split around each feedthru gap (a [gap_lo, gap_hi]
+// interval along the spine the trunk skips because the block's own router bridges
+// it).  Reproduces the add_trunk_h/v emission exactly: emits nothing when lo>=hi
+// (preserving conn_topology's non-inverting invariant) and one segment when there
+// are no gaps.  `gaps` is taken by value so the internal sort never touches the
+// caller's vector.
+static void emit_spine(Topology& t, const Axis& axis, int locus, int lo, int hi,
+                       std::vector<std::pair<int,int>> gaps, int layer) {
+    if (lo >= hi) return;
+    if (gaps.empty()) {
+        t.segments.push_back(axis.mkseg(lo, locus, hi, locus, layer));
+        return;
+    }
+    std::sort(gaps.begin(), gaps.end());
+    int cur = lo;
+    for (const auto& g : gaps) {
+        if (cur < g.first)
+            t.segments.push_back(axis.mkseg(cur, locus, g.first, locus, layer));
+        cur = std::max(cur, g.second);
+    }
+    if (cur < hi)
+        t.segments.push_back(axis.mkseg(cur, locus, hi, locus, layer));
+}
+
 static void annotate_endpoints(Topology& topo,
                                 const std::vector<Busterm>& blocks) {
     for (int i = 0; i < (int)topo.segments.size(); ++i) {
@@ -1655,22 +1680,8 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         if (!has_stub[i] && !is_feedthru[i] && att_x[i] != x_lo && att_x[i] != x_hi)
             ++t.pass_through_count;
 
-    if (x_lo < x_hi) {
-        if (ft_gaps.empty()) {
-            t.segments.push_back(make_seg(x_lo, y_trunk, x_hi, y_trunk, h_layer_));
-        } else {
-            // Split the spine, skipping each feedthru block's x-extent.
-            std::sort(ft_gaps.begin(), ft_gaps.end());
-            int cur = x_lo;
-            for (const auto& g : ft_gaps) {
-                if (cur < g.first)
-                    t.segments.push_back(make_seg(cur, y_trunk, g.first, y_trunk, h_layer_));
-                cur = std::max(cur, g.second);
-            }
-            if (cur < x_hi)
-                t.segments.push_back(make_seg(cur, y_trunk, x_hi, y_trunk, h_layer_));
-        }
-    }
+    // Spine along x at y=y_trunk, split around any feedthru gaps (see emit_spine).
+    emit_spine(t, Axis{true}, y_trunk, x_lo, x_hi, ft_gaps, h_layer_);
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {
@@ -2076,21 +2087,8 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
         if (!has_stub[i] && !is_feedthru[i] && att_y[i] != y_lo && att_y[i] != y_hi)
             ++t.pass_through_count;
 
-    if (y_lo < y_hi) {
-        if (ft_gaps.empty()) {
-            t.segments.push_back(make_seg(x_trunk, y_lo, x_trunk, y_hi, v_layer_));
-        } else {
-            std::sort(ft_gaps.begin(), ft_gaps.end());
-            int cur = y_lo;
-            for (const auto& g : ft_gaps) {
-                if (cur < g.first)
-                    t.segments.push_back(make_seg(x_trunk, cur, x_trunk, g.first, v_layer_));
-                cur = std::max(cur, g.second);
-            }
-            if (cur < y_hi)
-                t.segments.push_back(make_seg(x_trunk, cur, x_trunk, y_hi, v_layer_));
-        }
-    }
+    // Spine along y at x=x_trunk, split around any feedthru gaps (see emit_spine).
+    emit_spine(t, Axis{false}, x_trunk, y_lo, y_hi, ft_gaps, v_layer_);
 
     for (int i = 0; i < n; ++i) {
         if (!has_stub[i]) {
