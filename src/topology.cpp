@@ -839,24 +839,17 @@ static bool rects_are_rectilinear(const std::vector<Rect>& rects) {
 }
 
 // Best rect for connecting bt to an H trunk at y_trunk: minimises stub length.
-static Rect best_rect_for_h(const Busterm& bt, int y_trunk) {
+// Best rect for connecting bt to a spine at perpendicular coordinate `trunk_locus`
+// (the shortest stub): pick the candidate rect whose perp-axis face is nearest the
+// spine.  Axis-parameterized — `axis.perp_face` selects face_y for an H spine
+// (along_horiz=true, the old best_rect_for_h) and face_x for a V spine (the old
+// best_rect_for_v), so the two transposed helpers collapse into one.
+static Rect best_rect(const Axis& axis, const Busterm& bt, int trunk_locus) {
     auto rects = bt_all_rects(bt);
     Rect best = rects[0];
-    int  best_cost = std::abs(best.face_y(y_trunk) - y_trunk);
+    int  best_cost = std::abs(axis.perp_face(best, trunk_locus) - trunk_locus);
     for (size_t k = 1; k < rects.size(); ++k) {
-        int cost = std::abs(rects[k].face_y(y_trunk) - y_trunk);
-        if (cost < best_cost) { best_cost = cost; best = rects[k]; }
-    }
-    return best;
-}
-
-// Best rect for connecting bt to a V trunk at x_trunk.
-static Rect best_rect_for_v(const Busterm& bt, int x_trunk) {
-    auto rects = bt_all_rects(bt);
-    Rect best = rects[0];
-    int  best_cost = std::abs(best.face_x(x_trunk) - x_trunk);
-    for (size_t k = 1; k < rects.size(); ++k) {
-        int cost = std::abs(rects[k].face_x(x_trunk) - x_trunk);
+        int cost = std::abs(axis.perp_face(rects[k], trunk_locus) - trunk_locus);
         if (cost < best_cost) { best_cost = cost; best = rects[k]; }
     }
     return best;
@@ -1427,7 +1420,7 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
     std::vector<bool> has_stub(n);
     std::vector<Rect> best_r(n);   // best rect per block for this trunk y
     for (int i = 0; i < n; ++i) {
-        best_r[i]   = best_rect_for_h(blocks[i], y_trunk);
+        best_r[i]   = best_rect(Axis{true}, blocks[i], y_trunk);
         conn_y[i]   = use_busterm_ ? best_r[i].face_y(y_trunk) : pins[i].y;
         has_stub[i] = (conn_y[i] != y_trunk);
         // For multi-rect blocks use the best rect's centre; single-rect uses pin.
@@ -1467,7 +1460,7 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                 if      (n_above > 0 && n_below == 0) y_trunk = pt_hi;
                 else if (n_below > 0 && n_above == 0) y_trunk = pt_lo;
                 for (int i = 0; i < n; ++i) {
-                    best_r[i]  = best_rect_for_h(blocks[i], y_trunk);
+                    best_r[i]  = best_rect(Axis{true}, blocks[i], y_trunk);
                     conn_y[i]  = best_r[i].face_y(y_trunk);
                     has_stub[i] = (conn_y[i] != y_trunk);
                 }
@@ -1754,7 +1747,7 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
     std::vector<bool> has_stub(n);
     std::vector<Rect> best_r(n);   // best rect per block for this trunk x
     for (int i = 0; i < n; ++i) {
-        best_r[i]   = best_rect_for_v(blocks[i], x_trunk);
+        best_r[i]   = best_rect(Axis{false}, blocks[i], x_trunk);
         conn_x[i]   = use_busterm_ ? best_r[i].face_x(x_trunk) : pins[i].x;
         has_stub[i] = (conn_x[i] != x_trunk);
         // For multi-rect blocks use the best rect's centre; single-rect uses pin.
@@ -1795,7 +1788,7 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                 if      (n_right > 0 && n_left == 0) x_trunk = pt_hi;
                 else if (n_left  > 0 && n_right == 0) x_trunk = pt_lo;
                 for (int i = 0; i < n; ++i) {
-                    best_r[i]  = best_rect_for_v(blocks[i], x_trunk);
+                    best_r[i]  = best_rect(Axis{false}, blocks[i], x_trunk);
                     conn_x[i]  = best_r[i].face_x(x_trunk);
                     has_stub[i] = (conn_x[i] != x_trunk);
                 }
