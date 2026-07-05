@@ -1725,14 +1725,9 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
                     int cx_above = best_above.center().x;
 
                     // V stub down: trunk → top face of lower rect
-                    int idx = (int)t.segments.size();
-                    t.segments.push_back(make_seg(cx_below, best_below.y2, cx_below, y_trunk, v_layer_));
-                    t.seg_busterms[idx].first = blocks[i];
-
+                    emit_tap_segment(t, make_seg(cx_below, best_below.y2, cx_below, y_trunk, v_layer_), &blocks[i]);
                     // V stub up: trunk → bottom face of upper rect
-                    idx = (int)t.segments.size();
-                    t.segments.push_back(make_seg(cx_above, y_trunk, cx_above, best_above.y1, v_layer_));
-                    t.seg_busterms[idx].first = blocks[i];
+                    emit_tap_segment(t, make_seg(cx_above, y_trunk, cx_above, best_above.y1, v_layer_), &blocks[i]);
 
                     // Bridge H segment at union_bbox.y2 (over the block top)
                     const Rect& ub = blocks[i].orig_bbox;
@@ -1744,9 +1739,7 @@ void TopologyGenerator::add_trunk_h(const std::vector<Point>& pins,
         }
 
         // Normal single stub
-        int seg_idx = (int)t.segments.size();
-        t.segments.push_back(make_seg(att_x[i], conn_y[i], att_x[i], y_trunk, v_layer_));
-        t.seg_busterms[seg_idx].first = blocks[i];
+        emit_tap_segment(t, make_seg(att_x[i], conn_y[i], att_x[i], y_trunk, v_layer_), &blocks[i]);
     }
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
@@ -2148,14 +2141,9 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
                     int cy_right = best_right.center().y;
 
                     // H stub left: trunk → right face of left rect
-                    int idx = (int)t.segments.size();
-                    t.segments.push_back(make_seg(best_left.x2, cy_left, x_trunk, cy_left, h_layer_));
-                    t.seg_busterms[idx].first = blocks[i];
-
+                    emit_tap_segment(t, make_seg(best_left.x2, cy_left, x_trunk, cy_left, h_layer_), &blocks[i]);
                     // H stub right: trunk → left face of right rect
-                    idx = (int)t.segments.size();
-                    t.segments.push_back(make_seg(x_trunk, cy_right, best_right.x1, cy_right, h_layer_));
-                    t.seg_busterms[idx].first = blocks[i];
+                    emit_tap_segment(t, make_seg(x_trunk, cy_right, best_right.x1, cy_right, h_layer_), &blocks[i]);
 
                     // Bridge V segment at union_bbox.x2 (right outer face)
                     const Rect& ub = blocks[i].orig_bbox;
@@ -2168,9 +2156,7 @@ void TopologyGenerator::add_trunk_v(const std::vector<Point>& pins,
 
         // Normal single stub — skip if made redundant by a longer stub's pass-through
         if (stub_suppressed[i]) continue;
-        int seg_idx = (int)t.segments.size();
-        t.segments.push_back(make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], h_layer_));
-        t.seg_busterms[seg_idx].first = blocks[i];
+        emit_tap_segment(t, make_seg(conn_x[i], att_y[i], x_trunk, att_y[i], h_layer_), &blocks[i]);
     }
     if (!t.segments.empty()) results.push_back(std::move(t));
 }
