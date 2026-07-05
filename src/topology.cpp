@@ -3065,9 +3065,8 @@ void TopologyGenerator::add_multi_trunk_candidates(
             int yt = (pins[i].y <= y_mid) ? y_t1 : y_t2;
             int src_y = blocks[i].orig_bbox.face_y(yt);
             if (std::abs(yt - src_y) >= m_v) {
-                int si = (int)t.segments.size();
-                t.segments.push_back(make_seg(pins[i].x, src_y, pins[i].x, yt, v_layer_));
-                t.seg_busterms[si].first = blocks[i];
+                emit_tap_segment(t, make_seg(pins[i].x, src_y, pins[i].x, yt, v_layer_),
+                                 &blocks[i]);
             } else if (yt != src_y) {
                 return;   // a stub too short → legacy BITRUNK_H is not viable
             }
@@ -3117,21 +3116,19 @@ void TopologyGenerator::add_multi_trunk_candidates(
     // the branches and leaf stubs are then the opposite orientation.  Coordinate
     // helpers read the "root axis" (RA: x if root_horiz) and "perp axis" (PA).
     auto emit = [&](bool root_horiz, int K) {
-        auto RA  = [&](const Busterm& b){ return root_horiz ? (b.orig_bbox.x1 + b.orig_bbox.x2) / 2
-                                                            : (b.orig_bbox.y1 + b.orig_bbox.y2) / 2; };
-        auto PA  = [&](const Busterm& b){ return root_horiz ? (b.orig_bbox.y1 + b.orig_bbox.y2) / 2
-                                                            : (b.orig_bbox.x1 + b.orig_bbox.x2) / 2; };
-        auto RA1 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.x1 : b.orig_bbox.y1; };
-        auto RA2 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.x2 : b.orig_bbox.y2; };
-        auto PA1 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.y1 : b.orig_bbox.x1; };
-        auto PA2 = [&](const Busterm& b){ return root_horiz ? b.orig_bbox.y2 : b.orig_bbox.x2; };
-        auto RAface = [&](const Busterm& b, int toward){
-            return root_horiz ? b.orig_bbox.face_x(toward) : b.orig_bbox.face_y(toward); };
-        // Build a Point from (root-axis coord, perp-axis coord).
-        auto mkpt = [&](int ra, int pa){ return root_horiz ? Point{ra, pa} : Point{pa, ra}; };
+        // The root-axis (RA) / perp-axis (PA) coordinate helpers now delegate to
+        // the shared Axis abstraction (topology.h) — same orig_bbox arithmetic,
+        // one definition.  root_horiz==true ⇒ root spine runs along x.
+        const Axis axis{root_horiz};
+        auto RA  = [&](const Busterm& b){ return axis.along_center(b.orig_bbox); };
+        auto PA  = [&](const Busterm& b){ return axis.perp_center(b.orig_bbox); };
+        auto RA1 = [&](const Busterm& b){ return axis.along_lo(b.orig_bbox); };
+        auto RA2 = [&](const Busterm& b){ return axis.along_hi(b.orig_bbox); };
+        auto PA1 = [&](const Busterm& b){ return axis.perp_lo(b.orig_bbox); };
+        auto PA2 = [&](const Busterm& b){ return axis.perp_hi(b.orig_bbox); };
+        auto RAface = [&](const Busterm& b, int toward){ return axis.along_face(b.orig_bbox, toward); };
         auto mkseg = [&](int ra1, int pa1, int ra2, int pa2, int layer){
-            Point a = mkpt(ra1, pa1), c = mkpt(ra2, pa2);
-            return make_seg(a.x, a.y, c.x, c.y, layer); };
+            return axis.mkseg(ra1, pa1, ra2, pa2, layer); };
 
         std::vector<int> key(n);
         for (int i = 0; i < n; ++i) key[i] = RA(blocks[i]);
@@ -3176,9 +3173,7 @@ void TopologyGenerator::add_multi_trunk_candidates(
                 int face = RAface(b, b_ra);
                 if (std::abs(face - b_ra) < stub_root) return;   // stub too short → drop
                 int lp = PA(b);            // leaf connects at its perp centre
-                int si = (int)t.segments.size();
-                t.segments.push_back(mkseg(face, lp, b_ra, lp, root_layer));
-                t.seg_busterms[si].first = b;   // busterm at the leaf-face endpoint
+                emit_tap_segment(t, mkseg(face, lp, b_ra, lp, root_layer), &b);
                 (void)branch_idx;
             }
         }
@@ -3186,12 +3181,9 @@ void TopologyGenerator::add_multi_trunk_candidates(
         int r_lo = *std::min_element(branch_ra.begin(), branch_ra.end());
         int r_hi = *std::max_element(branch_ra.begin(), branch_ra.end());
         if (r_hi - r_lo < stub_root) return;
-        t.segments.insert(t.segments.begin(),
-                          mkseg(r_lo, root_perp, r_hi, root_perp, root_layer));
-        // seg_busterms indices shifted by the inserted root at index 0.
-        std::map<int, SegEndpoints> shifted;
-        for (auto& [k, v] : t.seg_busterms) shifted[k + 1] = v;
-        t.seg_busterms = std::move(shifted);
+        // Prepend the root spine at index 0, shifting the leaf-stub seg_busterms
+        // keys up by one (see prepend_segment in topology.h).
+        prepend_segment(t, mkseg(r_lo, root_perp, r_hi, root_perp, root_layer));
 
         for (const auto& b : blocks) t.connected_block_names.push_back(b.block_name);
         // Give the root spine + branch trunks a seg_busterms entry (leaf stubs are

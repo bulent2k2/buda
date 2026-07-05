@@ -70,6 +70,37 @@ struct Segment {
     // makes it load-bearing, so that PR must add the column + round-trip test.
     int edge_id = -1;
 };
+
+// Orientation abstraction for topology generation.  A spine runs ALONG one axis
+// and its perpendicular stubs run along the other; `along_horiz` picks which.
+// Every generator that comes in an H and a V flavour (trunks, BITRUNK, and — as
+// the centralization proceeds — L/Z/U) can be written ONCE against an Axis
+// instead of copy-pasting an x<->y transpose.  The methods only extract
+// coordinates from a *caller-chosen* Rect (orig_bbox / bbox / a best rect) —
+// Axis deliberately does NOT decide which Rect, because that shrunk-vs-full face
+// choice is each generator's margin/slide policy, not an orientation concern.
+// This generalizes the ad-hoc RA/PA/RAface/mkpt/mkseg lambdas that used to live
+// inside add_multi_trunk_candidates.
+struct Axis {
+    bool along_horiz;
+    // Centre / extent along and perpendicular to the spine axis.
+    int along_center(const Rect& r) const { return along_horiz ? (r.x1 + r.x2) / 2 : (r.y1 + r.y2) / 2; }
+    int perp_center (const Rect& r) const { return along_horiz ? (r.y1 + r.y2) / 2 : (r.x1 + r.x2) / 2; }
+    int along_lo(const Rect& r) const { return along_horiz ? r.x1 : r.y1; }
+    int along_hi(const Rect& r) const { return along_horiz ? r.x2 : r.y2; }
+    int perp_lo (const Rect& r) const { return along_horiz ? r.y1 : r.x1; }
+    int perp_hi (const Rect& r) const { return along_horiz ? r.y2 : r.x2; }
+    // Nearest along-axis face of r in the direction of `toward`.
+    int along_face(const Rect& r, int toward) const { return along_horiz ? r.face_x(toward) : r.face_y(toward); }
+    int perp_face (const Rect& r, int toward) const { return along_horiz ? r.face_y(toward) : r.face_x(toward); }
+    // Build a Point / Segment in (along, perp) space.  mkseg mirrors make_seg's
+    // output exactly (start/end/layer_hint, default is_jog=false, edge_id=-1).
+    Point mkpt(int along, int perp) const { return along_horiz ? Point{along, perp} : Point{perp, along}; }
+    Segment mkseg(int a1, int p1, int a2, int p2, int layer) const {
+        Segment s; s.start = mkpt(a1, p1); s.end = mkpt(a2, p2); s.layer_hint = layer; return s;
+    }
+};
+
 // A busterm is a connection point on a block face.  Currently represented by
 // the block name and its bounding box; can be refined to a pin location later.
 struct Busterm {
@@ -118,6 +149,33 @@ struct Topology {
     // block was marked feedthru for the trunk layer (Floorplan::get_feedthru).
     std::vector<std::string> feedthru_blocks;
 };
+
+// ── Segment-index discipline helpers ────────────────────────────────────────
+// The seg_busterms / seg_conns maps are keyed by segment index, so every
+// generator must keep those keys consistent when it appends or front-inserts a
+// segment.  These centralize that bookkeeping so no generator hand-rolls it
+// (erase_segment is the removal counterpart in topology.cpp).
+
+// Append `seg`, capturing its index BEFORE the push; seed the start-endpoint
+// busterm when `seed` is non-null (the trunk/BITRUNK inline-seed flavour) and
+// leave it null for the 2-pin flavour where annotate_endpoints fills it later.
+// Returns the new segment's index.
+inline int emit_tap_segment(Topology& t, const Segment& seg, const Busterm* seed) {
+    int si = (int)t.segments.size();
+    t.segments.push_back(seg);
+    if (seed) t.seg_busterms[si].first = *seed;
+    return si;
+}
+
+// Insert `spine` at index 0 and shift every seg_busterms key up by one, so the
+// already-seeded stub annotations stay attached to their segments (mechanizes
+// the BITRUNK root-prepend).  seg_conns is derived later and needs no shift.
+inline void prepend_segment(Topology& t, const Segment& spine) {
+    t.segments.insert(t.segments.begin(), spine);
+    std::map<int, SegEndpoints> shifted;
+    for (auto& kv : t.seg_busterms) shifted[kv.first + 1] = kv.second;
+    t.seg_busterms = std::move(shifted);
+}
 
 // Return a deep copy of `t` with all geometry shifted by (dx, dy): every
 // segment, every seg_busterms Busterm bbox (and orig_bbox / rects), and every
