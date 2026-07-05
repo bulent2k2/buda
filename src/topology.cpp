@@ -3063,6 +3063,30 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     add_u_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
     if (allow_double_detour_)
         add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
+
+    // Abutment fallback: two blocks that share a FULL edge have coinciding facing
+    // faces, so the direct I-shape collapses to zero length (src face == dst face)
+    // and every L/Z/U stub is sub-min-length — leaving NO candidate and a silently
+    // unrouted bus (common for adjacent macros).  Emit one segment running ALONG
+    // the shared edge over the face overlap: it lies on both blocks' facing faces,
+    // so both are covered (pass-through) — a valid single-segment connection.
+    // Detected on orig_bbox (physical touch), independent of corner margins.
+    // (Point-touch corners and fully-coincident blocks stay uncovered — those are
+    // degenerate placements, not routable buses.)
+    if (use_busterm_ && candidates.empty()) {
+        int xo_lo = std::max(s_orig.x1, d_orig.x1), xo_hi = std::min(s_orig.x2, d_orig.x2);
+        int yo_lo = std::max(s_orig.y1, d_orig.y1), yo_hi = std::min(s_orig.y2, d_orig.y2);
+        if (xo_lo < xo_hi && yo_lo == yo_hi) {          // share a horizontal edge
+            Topology t; t.type = "I_H@y" + std::to_string(yo_lo);
+            t.segments.push_back(make_seg(xo_lo, yo_lo, xo_hi, yo_lo, h_layer_));
+            candidates.push_back(std::move(t));
+        } else if (yo_lo < yo_hi && xo_lo == xo_hi) {   // share a vertical edge
+            Topology t; t.type = "I_V@x" + std::to_string(xo_lo);
+            t.segments.push_back(make_seg(xo_lo, yo_lo, xo_lo, yo_hi, v_layer_));
+            candidates.push_back(std::move(t));
+        }
+    }
+
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
     // One-time seg-to-seg annotation (topo-truth Phase 4) — see generate_npin.
     for (auto& t : candidates) annotate_seg_conns(t);
