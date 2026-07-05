@@ -26,12 +26,14 @@ image:
   busterm vs containment
 
 Usage:
-  tools/render.py <flow.buda> --bundle <id> --topo <id> [--out PREFIX] [--zoom]
+  tools/render.py <flow.buda> --bundle <id> --topo <id> [--out PREFIX] [--zoom] [--no-dnuts]
 
-  <id>   bundle hint (the first arg you'd pass to select_topology / dump_topologies)
-  --topo 1-based candidate index (as shown by dump_topologies)
-  --out  output image path (default: <flow stem>_b<bundle>_t<topo>.png)
-  --zoom fit the view to the bundle's routing extent instead of the whole die
+  <id>       bundle hint (the first arg you'd pass to select_topology / dump_topologies)
+  --topo     1-based candidate index (as shown by dump_topologies)
+  --out      output image path (default: <flow stem>_b<bundle>_t<topo>.png)
+  --zoom     fit the view to the bundle's routing extent instead of the whole die
+  --no-dnuts render only TOPOLOGY + NUTS (skip DetailedNUTS) — no track pattern
+             (def_track_pattern) needed in the flow, and a cleaner 2-panel image
 
 Example:
   PYTHONPATH=build:tools tools/render.py flow/big_data_test/big2/b34_bus_028.buda \
@@ -71,8 +73,8 @@ _PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b",
             "#17becf", "#bcbd22", "#e377c2", "#7f7f7f"]
 
 
-def _run_flow(flow_path, bundle, topo):
-    """Replay the flow's setup, pin (bundle, topo), then plan + NUTS + DNUTS."""
+def _run_flow(flow_path, bundle, topo, no_dnuts=False):
+    """Replay the flow's setup, pin (bundle, topo), then plan + NUTS (+ DNUTS)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     with open(flow_path) as f:
@@ -92,7 +94,8 @@ def _run_flow(flow_path, bundle, topo):
             s.do_command(f"select_topology {bundle} {topo}")
             s.do_command("run_planner")
             s.do_command("run_nuts")
-            s.do_command("run_detailed_nuts")
+            if not no_dnuts:
+                s.do_command("run_detailed_nuts")
     finally:
         os.chdir(cwd)
     return s
@@ -287,9 +290,11 @@ def main():
     ap.add_argument("--topo", required=True, help="1-based candidate index to pin")
     ap.add_argument("--out", default=None, help="output PNG path")
     ap.add_argument("--zoom", action="store_true", help="fit view to the bundle's routing extent")
+    ap.add_argument("--no-dnuts", action="store_true",
+                    help="render only TOPOLOGY + NUTS (skip DetailedNUTS; no track pattern needed)")
     args = ap.parse_args()
 
-    s = _run_flow(args.flow, args.bundle, args.topo)
+    s = _run_flow(args.flow, args.bundle, args.topo, no_dnuts=args.no_dnuts)
     w = _find_wrapper(s, args.bundle)
     if w is None:
         sys.exit("error: no bundles produced by the flow")
@@ -298,10 +303,12 @@ def main():
     bid = w.input.original_bundle.id
     blocks = list(s.fp.get_all_blocks())
 
-    fig, axes = plt.subplots(1, 3, figsize=(20, 7))
+    n_panels = 2 if args.no_dnuts else 3
+    fig, axes = plt.subplots(1, n_panels, figsize=(7 * n_panels, 7))
     contained = _draw_topology(axes[0], s, w, blocks)
     _draw_nuts(axes[1], s, bid, blocks, contained)
-    _draw_dnuts(axes[2], s, bid, blocks, contained)
+    if not args.no_dnuts:
+        _draw_dnuts(axes[2], s, bid, blocks, contained)
 
     # Shared view extent (zoom to the bundle's NUTS segments when --zoom).
     segs_xy = []
