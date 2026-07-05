@@ -2920,32 +2920,52 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     if (candidates.empty()) return;
     // Pass 1: mark. (No moves here — the common case is zero drops and the
     // list must come back untouched.)
-    std::vector<char> drop(candidates.size(), 0);
-    int dropped = 0;
+    //
+    // Two silent-open risks the planner must not be able to pick when a
+    // buildable alternative exists:
+    //   * BUSTERM_OPEN   — an uncovered block (a silent open).  Always dropped.
+    //   * FEEDTHRU_RELAY — the legacy multi-rect / rootless trunk+MST fallback
+    //     whose incident wires do not physically touch (a silent feedthru relay
+    //     no downstream stage catches).  Dropped too — BUT only when at least
+    //     one clean candidate (neither open nor relay) survives, so a bundle
+    //     whose ONLY options are relays is never stranded: it stays flagged for
+    //     check_connectivity / dump_topologies, exactly as before.
+    std::vector<char> is_open(candidates.size(), 0), is_relay(candidates.size(), 0);
+    int n_clean = 0;
     std::string first_block, first_type;
     for (size_t i = 0; i < candidates.size(); ++i) {
         ConnTopology ct;
         ct.build(candidates[i], floorplan_);
-        // Drop ONLY on BUSTERM_OPEN (an uncovered block — a silent open).  Other
-        // kinds are deliberate or diagnostic: FEEDTHRU_RELAY marks the legacy
-        // multi-rect fallback candidates that are intentionally kept flagged,
-        // and the rest stay visible to check_connectivity / dump_topologies.
         for (const auto& v : check_topo(ct, candidates[i], floorplan_, -1).violations) {
             if (v.kind == ViolationKind::BUSTERM_OPEN) {
-                drop[i] = 1;
-                if (dropped++ == 0) {
+                if (!is_open[i] && first_type.empty()) {
                     first_block = v.block_name;
                     first_type  = candidates[i].type;
                 }
-                break;
+                is_open[i] = 1;
+            } else if (v.kind == ViolationKind::FEEDTHRU_RELAY) {
+                is_relay[i] = 1;
             }
+        }
+        if (!is_open[i] && !is_relay[i]) ++n_clean;
+    }
+    // Relays are only droppable when a buildable alternative remains.
+    const bool drop_relays = (n_clean > 0);
+    std::vector<char> drop(candidates.size(), 0);
+    int dropped = 0, dropped_relay = 0;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (is_open[i] || (is_relay[i] && drop_relays)) {
+            drop[i] = 1;
+            ++dropped;
+            if (is_relay[i] && !is_open[i]) ++dropped_relay;
         }
     }
     if (dropped == 0) return;
     if (dropped == (int)candidates.size()) {
         // Never strand a bundle: keep the (all-uncovered) list and let the
         // planner's ALLOW_OVERFLOW/BEST_EFFORT ladder commit one with a WARNING;
-        // check_connectivity will report the open.
+        // check_connectivity will report the open.  (Reachable only for the
+        // all-open case — relays are dropped solely when a clean one survives.)
         std::cerr << "[TopoGen] WARNING: all " << candidates.size()
                   << " candidate(s) leave block '" << first_block
                   << "' unconnected; keeping them (check_connectivity will "
@@ -2957,9 +2977,12 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     kept.reserve(candidates.size() - dropped);
     for (size_t i = 0; i < candidates.size(); ++i)
         if (!drop[i]) kept.push_back(std::move(candidates[i]));
-    std::cerr << "[TopoGen] dropped " << dropped << " uncovered candidate(s) "
-              << "(first: " << first_type << " missing block '" << first_block
-              << "'); " << kept.size() << " remain.\n";
+    std::cerr << "[TopoGen] dropped " << dropped << " candidate(s) "
+              << "(" << dropped_relay << " feedthru-relay";
+    if (!first_type.empty())
+        std::cerr << ", first open: " << first_type << " missing block '"
+                  << first_block << "'";
+    std::cerr << "); " << kept.size() << " remain.\n";
     candidates = std::move(kept);
 }
 

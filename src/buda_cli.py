@@ -4275,6 +4275,19 @@ class BudaSession:
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.input.candidates)} topologies for bundle "
                       f"{w.input.original_bundle.id} ({label}) {self._bundle_nets_suffix(w)}")
+                if not w.input.candidates:
+                    # A zero-candidate bundle is a guaranteed unrouted bus (the
+                    # planner has nothing to select and run_nuts places nothing).
+                    # Surface it loudly here — naming the blocks — rather than
+                    # leaving only the late, generic run_nuts "no selected
+                    # topology" warning.  Usually a degenerate placement: the two
+                    # endpoint blocks coincide, touch only at a corner, or one
+                    # fully contains the other (no routable channel between them).
+                    print(f"Warning: bundle {w.input.original_bundle.id} ({label}) "
+                          f"produced NO candidate topology — this bus will be "
+                          f"unrouted. Check the placement of blocks {src} and "
+                          f"{dsts if len(dsts) > 1 else dsts[0]} "
+                          f"(coincident / corner-touch / one contained in the other?).")
             # Restore the sidecar baseline (pins + per-segment layer overrides) onto
             # the freshly generated candidates, so the live state matches the GUI
             # even before run_planner. A later select_topology overrides it; the
