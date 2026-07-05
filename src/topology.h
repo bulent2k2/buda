@@ -167,14 +167,26 @@ inline int emit_tap_segment(Topology& t, const Segment& seg, const Busterm* seed
     return si;
 }
 
-// Insert `spine` at index 0 and shift every seg_busterms key up by one, so the
-// already-seeded stub annotations stay attached to their segments (mechanizes
-// the BITRUNK root-prepend).  seg_conns is derived later and needs no shift.
+// Insert `spine` at index 0 and shift every index-keyed record up by one, so the
+// already-seeded annotations stay attached to their segments (mechanizes the
+// BITRUNK root-prepend).  Re-keys BOTH maps, mirroring erase_segment's discipline:
+// today's caller prepends before seg_conns is derived (so that loop is a no-op),
+// but as a shared helper it must also fix seg_conns — which is index-keyed on both
+// sides (the (seg_idx,endpoint) key AND the partner-segment values) — so a caller
+// that front-inserts after annotate_seg_conns cannot silently mis-wire junctions.
 inline void prepend_segment(Topology& t, const Segment& spine) {
     t.segments.insert(t.segments.begin(), spine);
-    std::map<int, SegEndpoints> shifted;
-    for (auto& kv : t.seg_busterms) shifted[kv.first + 1] = kv.second;
-    t.seg_busterms = std::move(shifted);
+    std::map<int, SegEndpoints> shifted_bt;
+    for (auto& kv : t.seg_busterms) shifted_bt[kv.first + 1] = kv.second;
+    t.seg_busterms = std::move(shifted_bt);
+    std::map<std::pair<int,int>, std::vector<int>> shifted_conns;
+    for (auto& kv : t.seg_conns) {
+        std::vector<int> partners;
+        partners.reserve(kv.second.size());
+        for (int p : kv.second) partners.push_back(p + 1);
+        shifted_conns[{kv.first.first + 1, kv.first.second}] = std::move(partners);
+    }
+    t.seg_conns = std::move(shifted_conns);
 }
 
 // Return a deep copy of `t` with all geometry shifted by (dx, dy): every
