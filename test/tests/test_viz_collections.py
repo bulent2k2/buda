@@ -179,10 +179,12 @@ def test_design_stats_header_counts(monkeypatch):
     # nets == sum of each bundle's net names (every wire counted once).
     assert n_nets == sum(len(w.input.original_bundle.get_net_names())
                          for w in viz.bundles)
-    # The always-on header axes carries the rendered stats line.
+    # The always-on header axes carries the stats as three stacked lines
+    # (so large counts don't overflow the narrow panel).
     assert viz._ax_design_stats is not None
     texts = [t.get_text() for t in viz._ax_design_stats.texts]
-    assert texts == [f"{n_bundles} bundles · {n_buses} buses · {n_nets} nets"], texts
+    assert texts == [f"{n_bundles} bundles", f"{n_buses} buses",
+                     f"{n_nets} nets"], texts
 
 
 def test_selected_title_shows_segment_count_no_solo_hint(monkeypatch):
