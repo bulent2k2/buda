@@ -279,7 +279,89 @@ Update `CLAUDE.md` (Stage 2 + connectivity sections) and
 "Phase 6: derived analysis unified"; delete the migration-era pinned copy of
 the old `build()` from the test tree.
 
-## 10. Risks and mitigations
+## 10. Impact on BDB persistence and resume/rehydrate (`load_pipeline`)
+
+The persistence baseline this plan builds on: `_persist_topologies`
+(buda_cli.py:346) is a **wipe-and-rewrite** — `clear_topologies()` then
+re-insert keyed by `(bundle_id, cand_index)` with `is_selected`/`is_pinned`
+columns; connectivity persists logically (`topology_seg_busterm` v9,
+`topology_seg_conn` v12, `topology_bridge_segment` v11); and
+`_load_pipeline_from_bdb` (buda_cli.py:660) rehydrates candidates with
+`load_seg_busterms` while **slide ranges and net_pull are deliberately
+recomputed** ("the planner/NUTS/ConnTopology re-derive slide ranges and
+net_pull from geometry + Floorplan — those are recomputed, by design",
+:672-675). Not restored: `seg_perp`, planner band state, doglegs.
+
+### Phases A–D: no schema change, three obligations
+
+1. **The analysis cache is transient — never persisted.** It is a derived
+   view, excluded from the BDB for the same reason slide ranges are excluded
+   today (the one-true-source principle: persisting a derivation invites
+   divergence). `route_snapshot` hashes are unaffected because persisted bytes
+   don't change.
+2. **Reload must participate in the revision discipline.** The load path
+   mutates topologies through the pybind setters (`t.segments = segs`,
+   `t.connected_block_names = …` — buda_cli.py:744/:756) which bump `rev_`
+   after Phase B, but `load_seg_busterms` (bind_routing.cpp:130) mutates from
+   C++ — it gets its own bump. A freshly rehydrated topology therefore always
+   computes its analysis on first `build()`, exactly like a freshly generated
+   one.
+3. **The Phase 0 harness gains a resume leg.** For each corpus flow:
+   checkpoint after `generate_topologies` / `run_planner` / `run_nuts`, reopen,
+   `load_pipeline`, continue — assert identical `route_snapshot` hashes and,
+   via the equivalence property test, that a **reloaded** candidate's analysis
+   equals its in-memory twin (extending the existing
+   `test_seg_busterm_persist.py` "reloaded topology drives
+   ConnTopology/check_topo identically" assertion to the cached path).
+   Phase D's incremental mode must likewise leave persisted rows identical to
+   a full rebuild — covered by the fuzz gate plus the `apply_dogleg` →
+   re-persist path.
+
+### Phase E: the schema-bearing changes (one version bump, ~v13)
+
+- **E1 uid round-trip.** `topology.topo_uid` column + `topology_segment.edge_id`
+  column (closing the documented round-trip gap, topology.h:66-71). The uid
+  hash covers exactly the **persisted** load-bearing fields (§8/E1) — a
+  deliberate constraint, because it makes the uid *recomputable from a
+  checkpoint alone*: pre-v13 BDBs need no migration — `load_pipeline` backfills
+  the uid deterministically from rehydrated content, announcing itself like the
+  pre-v12 `seg_conns` fallback does (bind_routing.cpp:156). Hash the canonical
+  persisted-row encoding (not in-memory iteration state) and add a round-trip
+  regression: `uid(generated) == uid(reloaded)`, sibling of
+  `test_seg_busterm_persist.py`, including the diffable `*.bdb.sql` round-trip.
+  New columns must also flow through `tools/bdb_serialize.py` and the
+  `test/tests/data/build_fixtures.py` regeneration per `bdb_test_data.md`.
+- **E1 pins.** `is_selected`/`is_pinned` stay as-is (persisted rows always
+  describe the current list); uid reattachment happens in memory at
+  regeneration time. The sidecar gains a uid field, and `_apply_selections`'
+  matching chain becomes uid → type+WL (today's primary) → warned index hint.
+- **E2 ends wipe-and-rewrite.** Additive generation and user candidates are
+  incompatible with `clear_topologies()`: persistence moves to a per-bundle
+  **upsert keyed by uid** — regeneration deletes only rows absent from the new
+  list *and* whose `source` is `generated`. New `topology.source` column
+  (`generated` | `user` | `dogleg`): bulk regeneration can never delete a
+  user-authored candidate (E4), and `_adopt_doglegs`' appended split candidate
+  — today transient — persists honestly as `dogleg`. Per-bundle generation
+  knobs persist in a `bundle.gen_knobs` JSON column so a resumed session's bulk
+  `generate_topologies` honors them.
+- **E3 edits.** An edit changes content ⇒ a **new uid** (uid is content
+  identity, not lineage). The edit transaction re-persists the candidate row +
+  annotations through the existing `_persist_topology_annotations` choke point,
+  carries the pin to the new uid, and rewrites the sidecar. A `parent_uid`
+  lineage column (undo/history across sessions) is a possible later extension,
+  deliberately deferred.
+- **Hier.** Expanded instances persist only their selected topology at the
+  template `cand_index` (load remaps to the compact in-memory index,
+  buda_cli.py:728-731) — unchanged. An instance copy's uid differs from its
+  template's (offset coordinates), which is correct: uid reattachment operates
+  at **template** level, where sidecar pins already live; instance rows keep
+  their existing `parent_id` linkage.
+- **`load_pipeline` extension checklist**: rehydrate `topo_uid` (or backfill),
+  `source`, `gen_knobs`, `edge_id`; everything else is unchanged. The "not
+  restored: doglegs" note stays true — doglegs remain recomputed; E1 merely
+  lets their bookkeeping re-attach when the same candidate reappears.
+
+## 11. Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
@@ -289,7 +371,7 @@ the old `build()` from the test tree.
 | Hidden ordering dependencies (conn order, sort ties) | Frozen explicitly in Phase 0 items 4–5; the conn-order contract is already documented at conn_topology.cpp:144-146 |
 | Log-string diffs breaking flow tests | Strings frozen in Phase 0; any wording change is its own commit with test updates |
 
-## 11. Sequencing and size
+## 12. Sequencing and size
 
 Phases 0→A→B→C are strictly ordered, each independently shippable and
 byte-identical (small/medium each). D is medium and flag-gated. E splits into
