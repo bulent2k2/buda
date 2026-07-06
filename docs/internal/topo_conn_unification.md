@@ -344,8 +344,15 @@ candidate pool across sessions.
 > `edit_status`, `edit_commit [pin]` appends as a uid-deduped `USER` candidate
 > — the E4 entry point — and `edit_abort` discards; gated by
 > `test_edit_commands.py` incl. a scripted hand topology routed end-to-end
-> through planner+NUTS with zero violations).  REMAINING (E3c): explorer GUI
-> wiring (edit mode driving these same ops interactively).
+> through planner+NUTS with zero violations).  The explorer GUI wiring is IN
+> too: 'e'/'E' open a session on a working copy (deep-copied — pybind
+> candidate elements alias pool storage) or an empty topology; T/Y add an
+> H/V trunk at the cursor's Hanan line (full span), S stubs the block under
+> the cursor to the selected segment, C/D pair-connect/-disconnect, X
+> removes, enter commits as a pinned uid-deduped USER candidate (sidecar
+> saved), escape aborts; a banner renders each op's verdict and navigation
+> is parked mid-session.  Headless key-event tests:
+> `test_topo_explorer_edit_mode.py`; key table in docs/KEY_BINDINGS.md.
 
 A small C++ API (bound to Python, driven from the topology explorer) wrapping
 each supported edit — move a segment within its slide window, move a trunk

@@ -744,6 +744,14 @@ class TopologyExplorer:
         self.bidx     = start_bidx if 0 <= start_bidx < len(self.wrappers) else 0
         self.idx      = 0
         self.sidx     = -1  # current selected segment index within current topology
+        # TopoEdit mode (Phase E3b GUI): a working COPY being edited in place of
+        # the shown candidate.  Opened with 'e' (copy) / 'E' (empty), committed
+        # with enter (appended to the pool as a USER candidate + pinned),
+        # discarded with escape.  _edit_pending marks the first segment of a
+        # two-step connect/disconnect pair.
+        self._edit_topo    = None
+        self._edit_pending = -1
+        self._edit_msg     = ""
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}
@@ -884,6 +892,161 @@ class TopologyExplorer:
     @property
     def topos(self):
         return self.wrapper.input.candidates
+
+    def _shown_topo(self):
+        """The topology on screen: the edit-mode working copy when a session
+        is open, else the current candidate."""
+        return self._edit_topo if self._edit_topo is not None \
+            else self.topos[self.idx]
+
+    # ── TopoEdit mode (Phase E3b) ─────────────────────────────────────
+    def _edit_default_layers(self):
+        h = v_ = -1
+        if self.layer_stack is not None:
+            h  = self.layer_stack.get_top_layer(ic.LayerDir.HORIZONTAL)
+            v_ = self.layer_stack.get_top_layer(ic.LayerDir.VERTICAL)
+        return (h if h != -1 else 4), (v_ if v_ != -1 else 5)
+
+    def _edit_open(self, empty):
+        if self._edit_topo is not None:
+            self._edit_msg = "edit session already open — enter commits, esc aborts"
+        elif empty:
+            self._edit_topo = ic.Topology()
+            self._edit_topo.type = "USER"
+            self._edit_msg = "EDIT: empty topology — T/Y add a trunk at the cursor"
+        else:
+            if not (0 <= self.idx < len(self.topos)):
+                return
+            # candidates[] elements alias pool storage; deep-copy explicitly.
+            self._edit_topo = ic.offset_topology(self.topos[self.idx], 0, 0)
+            self._edit_msg = f"EDIT: copy of topo {self.idx + 1} ({self._edit_topo.type})"
+        self._edit_pending = -1
+        self._draw()
+
+    def _edit_close(self, msg):
+        self._edit_topo    = None
+        self._edit_pending = -1
+        self._edit_msg     = msg
+        self._draw()
+
+    def _edit_apply(self, verdict):
+        """Render one op's verdict into the edit banner (and the console)."""
+        if not verdict.applied:
+            self._edit_msg = f"EDIT rejected: {verdict.note}"
+        else:
+            kinds = {}
+            for viol in verdict.conn.violations:
+                k = str(viol.kind).split('.')[-1]
+                kinds[k] = kinds.get(k, 0) + 1
+            issues = ", ".join(f"{k}x{n}" for k, n in sorted(kinds.items())) or "none"
+            state = "clean" if verdict.ok() else \
+                f"violations: {issues}; comps={verdict.components}" \
+                + ("; PINCHED" if verdict.pinched else "")
+            self._edit_msg = f"EDIT: {verdict.note} — {state}"
+        print(f"[edit] {self._edit_msg}")
+        self._draw()
+
+    @staticmethod
+    def _snap(val, coords):
+        """Snap a cursor coordinate to the nearest Hanan line (or round)."""
+        iv = int(round(val))
+        return min(coords, key=lambda c: abs(c - iv)) if coords else iv
+
+    def _block_at(self, x, y):
+        for name, r in self.fp.get_all_blocks():
+            if r.x1 <= x <= r.x2 and r.y1 <= y <= r.y2:
+                return name
+        return None
+
+    def _edit_add_trunk_at(self, event, horiz):
+        if event.xdata is None or event.ydata is None:
+            self._edit_msg = "EDIT: put the cursor on the canvas first"
+            self._draw(); return
+        xs, ys = self.fp.get_hanan_grid()
+        perp = self._snap(event.ydata if horiz else event.xdata,
+                          ys if horiz else xs)
+        h, v_ = self._edit_default_layers()
+        self._edit_apply(ic.edit_add_trunk(
+            self._edit_topo, self.fp, horiz, perp, 1, 0,   # lo>hi = full span
+            h if horiz else v_))
+
+    def _edit_add_stub_at(self, event):
+        if event.xdata is None or event.ydata is None:
+            self._edit_msg = "EDIT: put the cursor over a block"
+            self._draw(); return
+        block = self._block_at(event.xdata, event.ydata)
+        if block is None:
+            self._edit_msg = "EDIT: no block under the cursor"
+            self._draw(); return
+        if not (0 <= self.sidx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: select the target segment first (j/k)"
+            self._draw(); return
+        tgt = self._edit_topo.segments[self.sidx]
+        h, v_ = self._edit_default_layers()
+        layer = v_ if tgt.start.y == tgt.end.y else h    # stub ⟂ target
+        self._edit_apply(ic.edit_add_stub(
+            self._edit_topo, self.fp, block, self.sidx, layer))
+
+    def _edit_pair_op(self, event, connect):
+        """Two-step connect/disconnect: first press marks the current segment,
+        second press pairs it with the (newly j/k-selected) current one."""
+        if not (0 <= self.sidx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: select a segment first (j/k)"
+            self._draw(); return
+        if self._edit_pending < 0:
+            self._edit_pending = self.sidx
+            self._edit_msg = (f"EDIT: seg {self.sidx} marked — select the "
+                              f"partner (j/k) and press the key again")
+            self._draw(); return
+        i, j = self._edit_pending, self.sidx
+        self._edit_pending = -1
+        if i == j:
+            self._edit_msg = "EDIT: same segment twice — pair cancelled"
+            self._draw(); return
+        if connect:
+            self._edit_apply(ic.edit_connect(self._edit_topo, self.fp, i, j))
+        else:
+            si = self._edit_topo.segments[i]
+            horiz = si.start.y == si.end.y
+            coord = event.xdata if horiz else event.ydata
+            if coord is None:
+                self._edit_msg = "EDIT: cursor sets the retract position"
+                self._draw(); return
+            self._edit_apply(ic.edit_disconnect(
+                self._edit_topo, self.fp, i, j, int(round(coord))))
+
+    def _edit_commit(self):
+        topo = self._edit_topo
+        if topo is None or not topo.segments:
+            self._edit_close("EDIT: nothing to commit")
+            return
+        topo.type = "USER"
+        topo.estimated_wirelength = (
+            sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
+                for s in topo.segments)
+            + sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
+                  for s in topo.bridge_segments.values()))
+        w = self.wrapper
+        uid = ic.topo_uid(topo)
+        pool = list(w.input.candidates)
+        existing = next((k for k, c in enumerate(pool)
+                         if ic.topo_uid(c) == uid), None)
+        if existing is not None:
+            idx = existing
+            note = f"identical candidate already at topo {idx + 1}"
+        else:
+            pool.append(topo)
+            idx = len(pool) - 1
+            w.input.candidates = pool
+            note = f"committed as topo {idx + 1} (USER)"
+        self._edit_topo    = None
+        self._edit_pending = -1
+        self.idx  = idx
+        self.sidx = -1
+        self._select_current()          # pin + sidecar (uid-carrying) + redraw
+        self._edit_msg = f"EDIT: {note}, pinned"
+        print(f"[edit] {self._edit_msg}")
+        self._draw()
 
     # ------------------------------------------------------------------
 
@@ -1253,6 +1416,35 @@ class TopologyExplorer:
         self.fig_redraw()
 
     def _on_key(self, event):
+        # ── TopoEdit mode (Phase E3b): e/E open a session (copy/empty); while
+        # open, T/Y add an H/V trunk at the cursor's Hanan line, S stubs the
+        # block under the cursor to the selected segment, C/D pair-connect/
+        # -disconnect, X removes, enter commits (+pin), escape aborts.
+        # Candidate/bundle navigation is parked while editing.
+        if event.key == 'e':                    self._edit_open(empty=False); return
+        if event.key == 'E':                    self._edit_open(empty=True); return
+        if self._edit_topo is not None:
+            if event.key == 'T':                self._edit_add_trunk_at(event, horiz=True); return
+            if event.key == 'Y':                self._edit_add_trunk_at(event, horiz=False); return
+            if event.key == 'S':                self._edit_add_stub_at(event); return
+            if event.key == 'C':                self._edit_pair_op(event, connect=True); return
+            if event.key == 'D':                self._edit_pair_op(event, connect=False); return
+            if event.key == 'X':
+                if 0 <= self.sidx < len(self._edit_topo.segments):
+                    si = self.sidx
+                    self.sidx = -1
+                    self._edit_apply(ic.edit_remove_segment(
+                        self._edit_topo, self.fp, si))
+                else:
+                    self._edit_msg = "EDIT: select a segment first (j/k)"
+                    self._draw()
+                return
+            if event.key == 'enter':            self._edit_commit(); return
+            if event.key == 'escape':           self._edit_close("EDIT: aborted"); return
+            if event.key in ('a', 'd', 'n', 'p', '[', ']', 'pageup', 'pagedown',
+                             'cmd+n', 'ctrl+n', 'cmd+p', 'ctrl+p'):
+                self._edit_msg = "EDIT: finish the session first (enter/esc)"
+                self._draw(); return
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         if event.key in ('cmd+1', 'ctrl+1'):
@@ -1291,7 +1483,7 @@ class TopologyExplorer:
         if event.key == 'r':                    self._rerun_and_refresh()
 
     def _step_segment(self, delta):
-        topo = self.topos[self.idx]
+        topo = self._shown_topo()
         n = len(topo.segments)
         if n == 0: return
         self.sidx = (self.sidx + delta) % n
@@ -1412,7 +1604,7 @@ class TopologyExplorer:
         else:
             bus_label = ""
 
-        topo = self.topos[self.idx]
+        topo = self._shown_topo()
         wl   = topo.estimated_wirelength
 
         # Use centralized selection check
@@ -1470,6 +1662,14 @@ class TopologyExplorer:
         for spine in ax.spines.values():
             spine.set_edgecolor(border_col)
             spine.set_linewidth(border_lw)
+
+        if self._edit_topo is not None or self._edit_msg:
+            ax.text(0.01, 1.01,
+                    self._edit_msg or "EDIT",
+                    transform=ax.transAxes, fontsize=9, color='#b03030',
+                    va='bottom', ha='left', clip_on=False)
+            if self._edit_topo is None:
+                self._edit_msg = ""     # one-shot after the session closes
 
         ct = self._build_conn_topo(topo)
         cs_list = list(ct.segs())
