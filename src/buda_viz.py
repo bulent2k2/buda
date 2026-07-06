@@ -2670,21 +2670,37 @@ class BudaVisualizer:
             # y coordinate: top row at y≈1, bottom row at y≈0.
             y = 1.0 - (row + 0.5) / n_vis
 
-            # Build label: "B{bid} {name} (N bits/M bterms)", truncated to fit.
+            w = next(w for w in self.bundles if w.input.original_bundle.id == bid)
+
+            # Right-aligned [unplaced/total] stats column (detailed mode only).
+            # Computed first so the label budget below can reserve room for it
+            # and never run into it.
+            stats_part = ""
+            stats_color = '#111111'
+            if self._detailed_result:
+                sel = w.plan.selected_topology_index
+                if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+                    stats_part = '[no topo]'; stats_color = '#888888'
+                else:
+                    n_expected = len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[sel].segments)
+                    n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
+                    n_unp = n_expected - n_placed
+                    stats_part = f"[{n_unp}/{n_expected}]"
+                    stats_color = '#CC0000' if n_unp > 0 else '#008800'
+
+            # Build label: "B{bid} {name} [bits]", truncated so it stops short of
+            # the stats column. In detailed mode the stats' total already conveys
+            # the bit count, so drop the redundant [bits] suffix for extra room.
             name  = self._bundle_name(bid)
             nbits = self._bundle_bits(bid)
-
-            # Get busterm count from metadata
-            w = next(w for w in self.bundles if w.input.original_bundle.id == bid)
-            nterms = w.input.original_bundle.num_terminals
-
-            #bits_suffix = f" ({nbits} bits/{nterms} bterms)" if nbits > 0 else ""
-            bits_suffix = f" [{nbits}]" if nbits > 0 else ""
             prefix = f"B{bid} "
-            # Char budget for "{prefix}{name}{suffix}".  Leave room for the
-            # right-aligned [unplaced/total] stats column when it is shown.
-            budget = 20 if self._detailed_result else 26
-            max_name = max(3, budget - len(prefix) - len(bits_suffix))
+            bits_suffix = "" if stats_part else (f" [{nbits}]" if nbits > 0 else "")
+            # ~25 chars span the row at fontsize 7; reserve the stats width (+1
+            # gap) on the right, and 2 chars for the "☑ " marker on the left.
+            ROW_CHARS = 25
+            reserve   = (len(stats_part) + 1) if stats_part else 0
+            full_budget = max(4, ROW_CHARS - 2 - reserve)
+            max_name = max(3, full_budget - len(prefix) - len(bits_suffix))
             name_part = name if len(name) <= max_name else name[:max_name - 1] + "…"
             full  = f"{prefix}{name_part}{bits_suffix}"
 
@@ -2698,22 +2714,6 @@ class BudaVisualizer:
                     transform=ax.transAxes,
                     fontsize=7, color=sel_color,
                     va='center', clip_on=True)
-            
-            # Bit stats for this bundle: [unplaced/total]
-            stats_part = ""
-            stats_color = '#111111'
-            if self._detailed_result:
-                # DetailedNUTSResult doesn't easily provide per-bundle unplaced count.
-                # Let's count how many net_segments we have vs how many we expect.
-                w = next(w for w in self.bundles if w.input.original_bundle.id == bid)
-                if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
-                    stats_part = ' [no topo]'; stats_color = '#888888'
-                    continue
-                n_expected = len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[w.plan.selected_topology_index].segments)
-                n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
-                n_unp = n_expected - n_placed
-                stats_part = f" [{n_unp}/{n_expected}]"
-                stats_color = '#CC0000' if n_unp > 0 else '#008800'
 
             ax.text(0.11, y, f"{vis_char} {full}",
                     transform=ax.transAxes,

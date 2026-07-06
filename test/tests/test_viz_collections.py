@@ -188,6 +188,27 @@ def test_design_stats_header_counts(monkeypatch):
         viz._btn_all_bundles.label.get_text()
 
 
+def test_bundle_rows_drop_bits_suffix_when_detailed(monkeypatch):
+    """In detailed mode each row shows a right-aligned [unplaced/total] column.
+    The redundant '[bits]' suffix is dropped from the row label so it can't
+    crowd/overlap that column, and the full bus name still shows."""
+    import re as _re
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._detailed_result is not None      # dnuts1 runs detailed NUTS
+    viz._redraw_bundle_list()
+
+    texts  = [t.get_text() for t in viz._ax_bundles.texts]
+    labels = [t for t in texts if t.startswith(('☑', '☐'))]
+    stats  = [t for t in texts if _re.fullmatch(r'\[\d+/\d+\]', t)]
+    assert labels and stats, (labels, stats)
+
+    # No row label keeps a trailing "[bits]" suffix in detailed mode...
+    for lbl in labels:
+        assert not _re.search(r'\[\d+\]$', lbl), f"label kept a [bits] suffix: {lbl!r}"
+    # ...and the bus name is not over-truncated (dnuts1 names are short).
+    assert any('n11_0' in lbl for lbl in labels), labels
+
+
 def test_selected_title_shows_segment_count_no_solo_hint(monkeypatch):
     """Cycling bundles with `n` shows the selected topology's segment count in
     the title (to gauge complexity), and no '[Solo ON]' hint even in Solo mode."""
