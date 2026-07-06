@@ -128,7 +128,7 @@ Stage 9 calls `signal_tracks_in(x, interval_lo, interval_hi)` on each bus segmen
 
 ## `.buda` Commands
 
-See [BUDA_SCRIPT_REFERENCE.md](BUDA_SCRIPT_REFERENCE.md#stage-8--routing-grid) for full syntax.
+See the [Script Reference — Routing grid](script_reference/routing_grid.md#stage-8--routing-grid) for full syntax.
 
 ```buda
 # Define a layer's repeating track pattern
