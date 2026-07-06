@@ -147,19 +147,9 @@ public:
     std::vector<MSTEdge> trunk_mst(int trunk_idx, const Floorplan& fp) const;
 
 private:
+    // The derivation itself lives in topology_analysis.h — six named passes
+    // build() drives in a frozen order.  This class is the consumer facade.
     std::vector<ConnSeg> segs_;
-    void infer_connections(const Topology& topo, const Floorplan& fp);
-    void compute_slide_ranges(const Floorplan& fp);
-    // Tighten perp_lo/perp_hi for segments that pass through connected blocks
-    // with no explicit BUSTERM endpoint, ensuring NUTS keeps them spanned.
-    void tighten_passthrough_ranges(const Topology& topo, const Floorplan& fp);
-    // Pin the connector attached at a busterm tap's face endpoint to face_coord so
-    // NUTS span adjustment preserves the tap's along-reach to a relay block face.
-    void pin_relay_tap_connectors(const Floorplan& fp);
-    void compute_net_pull();
-    // Along-flex DOF (Stage C): mark each segment end contractible-or-anchored and
-    // compute its nominal along-coverage floor + a signed along-pull WL hint.
-    void compute_along_pull();
 };
 
 } // namespace buda
