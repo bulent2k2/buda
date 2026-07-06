@@ -410,6 +410,16 @@ net_pull from geometry + Floorplan — those are recomputed, by design",
   describe the current list); uid reattachment happens in memory at
   regeneration time. The sidecar gains a uid field, and `_apply_selections`'
   matching chain becomes uid → type+WL (today's primary) → warned index hint.
+- **E2 additive generation — IMPLEMENTED** (`generate_more_topologies
+  <hint> [knobs]`): appends knob-produced candidates deduplicated by uid,
+  leaving indices/pin/plan untouched; idempotent per knob set; re-persisted
+  through the existing path (the in-memory pool is the full truth, so the
+  rewrite stays correct). Landing this surfaced a uid refinement: `type` /
+  `trunk_location` / `pass_through_count` joined the fingerprint — distinct
+  shapes can realize identical segments, and persisted identity must tell
+  them apart (for the cache this only makes validation finer-grained).
+  REMAINING of E2: uid-keyed upsert persistence + `topology.source` column
+  (needed by E4's user candidates) and per-bundle `gen_knobs` persistence.
 - **E2 ends wipe-and-rewrite.** Additive generation and user candidates are
   incompatible with `clear_topologies()`: persistence moves to a per-bundle
   **upsert keyed by uid** — regeneration deletes only rows absent from the new

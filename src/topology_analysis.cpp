@@ -69,6 +69,15 @@ std::atomic<uint64_t> g_computes{0}, g_hits{0};
 
 uint64_t topology_fingerprint(const Topology& topo) {
     uint64_t h = 1469598103934665603ULL;      // FNV offset basis
+    // type / trunk_location / pass_through_count are not analysis inputs, but
+    // they ARE persisted candidate identity: two shapes can realize identical
+    // segments under different type labels (e.g. distinct trunk loci collapsing
+    // to the same clipped spine), and the uid built on this fingerprint must
+    // tell them apart.  For the cache they only make validation finer-grained
+    // (never stale).
+    h_str(h, topo.type);
+    h_i64(h, topo.trunk_location);
+    h_i64(h, topo.pass_through_count);
     h_i64(h, (int64_t)topo.segments.size());
     for (const Segment& s : topo.segments) h_seg(h, s);
     // std::map iteration is key-ordered — deterministic.  seg_busterms is

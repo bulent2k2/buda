@@ -785,6 +785,28 @@ generate_topologies_for_bundle bus_rsp  # multicast
 
 ---
 
+### `generate_more_topologies`
+
+```
+generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]
+```
+
+**Additive** sibling of `generate_topologies_for_bundle`: runs the generator
+with the given knobs and **appends** the resulting candidates to the bundle's
+existing pool instead of replacing it, deduplicated by stable content identity
+(`topo_uid`).  Append-only means existing candidate indices — and therefore the
+bundle's pin (`select_topology` / sidecar) and plan state — are untouched, so
+an expert can accrete a candidate pool across knob experiments without losing
+selections.  Re-running with the same knobs adds nothing (all duplicates
+skipped, reported).  The enlarged pool is re-persisted to the open BDB.
+
+```
+generate_more_topologies bus_rsp multi_trunk    # add BITRUNK trees to the pool
+generate_more_topologies t0_b3 double_detour    # add UU variants
+```
+
+---
+
 ### `generate_topologies`
 
 ```

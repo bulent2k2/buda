@@ -59,6 +59,7 @@ KNOWN_COMMANDS = frozenset({
     "dump_hbundles", "dump_topologies", "exit", "export_gds", "flip_comp",
     "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
+    "generate_more_topologies",
     "import_def_lef", "import_gds", "import_verilog", "load_pipeline",
     "move_comp", "negotiate_congestion", "open_bdb", "refine_busterms",
     "report_overhead", "report_wirelength", "report_wl", "resize_cell",
@@ -4306,6 +4307,59 @@ class BudaSession:
                               f"(coincident / corner-touch / one contained in the other?).")
                     found = True
             if not found: print(f"Warning: Could not find bundle matching hint {hint}")
+            elif self._persist_topologies():
+                print("[BDB] re-persisted candidate topologies to the open BDB.")
+
+        elif cmd == "generate_more_topologies":
+            # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]
+            # ADDITIVE variant of generate_topologies_for_bundle (Phase E2 of
+            # topo_conn_unification.md): run the generator with the given knobs
+            # and APPEND the new candidates to the bundle's existing list,
+            # deduplicated by stable content uid — instead of replacing it.
+            # Append-only means existing candidate indices (and therefore the
+            # bundle's pin and plan state) are untouched: the expert accretes a
+            # candidate pool across knob experiments without losing selections.
+            use_center        = "center_mode"   in args
+            use_double_detour = "double_detour" in args
+            use_multi_trunk   = "multi_trunk"   in args
+            pos_args = [a for a in args
+                        if a not in ("center_mode", "double_detour", "multi_trunk")]
+            if not pos_args:
+                print("Error: generate_more_topologies requires a hint")
+                return
+            hint = pos_args[0]
+            topo_gen = self._make_topo_gen(self.fp, use_center, use_double_detour,
+                                           use_multi_trunk)
+            found = False
+            for w in self.bundles:
+                net_name = w.input.original_bundle.get_net_names()[0]
+                if net_name.startswith(hint):
+                    ep = self._net_endpoints.get(net_name)
+                    if ep is None:
+                        print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
+                        continue
+                    src, dsts = ep
+                    self._validate_endpoint_blocks(net_name, src, dsts)
+                    fresh = topo_gen.generate_candidates(src, dsts)
+                    existing = list(w.input.candidates)
+                    seen = {buda.topo_uid(c) for c in existing}
+                    added = 0
+                    for c in fresh:
+                        uid = buda.topo_uid(c)
+                        if uid in seen:
+                            continue
+                        seen.add(uid)
+                        existing.append(c)
+                        added += 1
+                    w.input.candidates = existing
+                    label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
+                    print(f"Added {added} new topolog{'y' if added == 1 else 'ies'} "
+                          f"for bundle {w.input.original_bundle.id} ({label}) — "
+                          f"{len(fresh) - added} duplicate(s) skipped, pool now "
+                          f"{len(existing)}.")
+                    found = True
+            if not found:
+                print(f"Warning: Could not find bundle matching hint {hint}")
             elif self._persist_topologies():
                 print("[BDB] re-persisted candidate topologies to the open BDB.")
 
