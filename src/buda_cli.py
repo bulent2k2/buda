@@ -1069,13 +1069,22 @@ class BudaSession:
             first_w = matching[0]
             bid = first_w.input.original_bundle.id
 
-            # 1. Resolve which topology the sidecar points to
+            # 1. Resolve which topology the sidecar points to.  Chain
+            #    (Phase E1b): stable content uid (survives regeneration and
+            #    list reordering) -> type+WL -> warned index hint.
             resolved_sidecar_idx = None
-            for i, cand in enumerate(first_w.input.candidates):
-                if (cand.type == sel['topo_type'] and
-                        cand.estimated_wirelength == sel['topo_wl']):
-                    resolved_sidecar_idx = i
-                    break
+            sc_uid = sel.get('topo_uid')
+            if sc_uid:
+                for i, cand in enumerate(first_w.input.candidates):
+                    if buda.topo_uid(cand) == sc_uid:
+                        resolved_sidecar_idx = i
+                        break
+            if resolved_sidecar_idx is None:
+                for i, cand in enumerate(first_w.input.candidates):
+                    if (cand.type == sel['topo_type'] and
+                            cand.estimated_wirelength == sel['topo_wl']):
+                        resolved_sidecar_idx = i
+                        break
             
             if resolved_sidecar_idx is None:
                 idx_hint = sel.get('topo_index_hint', -1)
@@ -1386,8 +1395,9 @@ class BudaSession:
                                      use_multi_trunk)
             src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
             dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
+            old_pin_uid = self._pinned_uid(w)
             w.input.candidates = tg.generate_candidates(src_local, dsts_local)
-            self._reset_plan_for_regen(w)
+            self._reset_plan_for_regen(w, old_pin_uid)
             label = f"{src_local}→{dsts_local[0]}"
             n = len(w.input.candidates)
             if n == 0:
@@ -1426,8 +1436,9 @@ class BudaSession:
                 return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
                                      use_multi_trunk)
+            old_pin_uid = self._pinned_uid(w)
             w.input.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
-            self._reset_plan_for_regen(w)
+            self._reset_plan_for_regen(w, old_pin_uid)
             label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
                      if len(b.rcv_spec_paths) == 1
                      else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
@@ -1457,8 +1468,9 @@ class BudaSession:
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
+            old_pin_uid = self._pinned_uid(w)
             w.input.candidates = tg.generate_candidates(src, dsts)
-            self._reset_plan_for_regen(w)
+            self._reset_plan_for_regen(w, old_pin_uid)
             label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
             n = len(w.input.candidates)
             if n == 0:
@@ -2367,7 +2379,18 @@ class BudaSession:
         self._dogleg_originals = {}
         self._dogleg_slot = {}
 
-    def _reset_plan_for_regen(self, w):
+    def _pinned_uid(self, w):
+        """The stable content uid (buda.topo_uid) of w's pinned candidate, or
+        None when unpinned/out of range.  Captured BEFORE a regeneration
+        replaces the candidate list, so _reset_plan_for_regen can re-attach
+        the pin by identity (Phase E1b of topo_conn_unification.md)."""
+        sel = w.plan.selected_topology_index
+        if (getattr(w.input, 'topology_pinned', False)
+                and 0 <= sel < len(w.input.candidates)):
+            return buda.topo_uid(w.input.candidates[sel])
+        return None
+
+    def _reset_plan_for_regen(self, w, old_pin_uid=None):
         """Reset one wrapper to the pristine 'candidates generated, not yet planned'
         state after its candidate list was regenerated.  A prior plan's
         selected_topology_index and per-segment overrides are indexed into the OLD
@@ -2375,8 +2398,14 @@ class BudaSession:
         selected_topology_index pointing at an appended split the fresh list no longer
         has — optimize_topologies would then dereference an out-of-range candidate
         (ValueError: vector).  Also drop this bundle's dogleg bookkeeping so a later
-        _adopt_doglegs cannot overwrite/restore a slot that no longer exists.  The
-        user must re-pin/re-plan after regenerating, so dropping the pin is correct."""
+        _adopt_doglegs cannot overwrite/restore a slot that no longer exists.
+
+        Pin survival (Phase E1b): indices are meaningless across lists, but
+        IDENTITY is not — when the regenerated list contains a candidate with
+        the same stable content uid as the previously pinned one (captured by
+        _pinned_uid before the swap), the pin re-attaches to it, so a user's
+        selection survives a knob-tweaked regeneration.  Per-segment overrides
+        stay dropped either way (they may reference the old plan's layers)."""
         w.plan.selected_topology_index = -1
         w.input.topology_pinned = False
         w.plan.seg_layers     = []
@@ -2387,6 +2416,14 @@ class BudaSession:
         bid = w.input.original_bundle.id
         self._dogleg_slot.pop(bid, None)
         self._dogleg_originals.pop(bid, None)
+        if old_pin_uid:
+            for i, c in enumerate(w.input.candidates):
+                if buda.topo_uid(c) == old_pin_uid:
+                    w.plan.selected_topology_index = i
+                    w.input.topology_pinned = True
+                    print(f"  Pin re-attached by topo_uid: bundle {bid} -> "
+                          f"topology {i + 1} ({c.type})")
+                    break
 
     # ── topology inspection (dump_topologies) ──────────────────────────────
     @staticmethod
@@ -4252,8 +4289,9 @@ class BudaSession:
                         continue
                     src, dsts = ep
                     self._validate_endpoint_blocks(net_name, src, dsts)
+                    old_pin_uid = self._pinned_uid(w)
                     w.input.candidates = topo_gen.generate_candidates(src, dsts)
-                    self._reset_plan_for_regen(w)
+                    self._reset_plan_for_regen(w, old_pin_uid)
                     label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                     print(f"Generated {len(w.input.candidates)} topologies for bundle "
                           f"{w.input.original_bundle.id} ({label})")
@@ -4297,8 +4335,9 @@ class BudaSession:
                     continue
                 src, dsts = ep
                 self._validate_endpoint_blocks(net_name, src, dsts)
+                old_pin_uid = self._pinned_uid(w)
                 w.input.candidates = topo_gen.generate_candidates(src, dsts)
-                self._reset_plan_for_regen(w)
+                self._reset_plan_for_regen(w, old_pin_uid)
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.input.candidates)} topologies for bundle "
                       f"{w.input.original_bundle.id} ({label}) {self._bundle_nets_suffix(w)}")

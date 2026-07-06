@@ -1097,6 +1097,11 @@ class TopologyExplorer:
 
         sel = self._find_selection()
         if sel is not None:
+            uid = sel.get('topo_uid')   # stable identity first (E1b)
+            if uid:
+                for i, topo in enumerate(self.topos):
+                    if ic.topo_uid(topo) == uid:
+                        return i
             hint = sel.get('topo_index_hint', -1)
             if 0 <= hint < len(self.topos):
                 return hint
@@ -1138,6 +1143,7 @@ class TopologyExplorer:
             'bundle_id':       wrapper.input.original_bundle.id,
             'topo_type':       topo.type,
             'topo_wl':         topo.estimated_wirelength,
+            'topo_uid':        ic.topo_uid(topo),   # stable identity (E1b)
             'topo_index_hint': self.idx,
             'note':            '',
             'selected_at':     datetime.now().isoformat(timespec='seconds'),
@@ -1185,6 +1191,8 @@ class TopologyExplorer:
                     ('bundle_id', 'topo_type', 'topo_wl',
                      'topo_index_hint', 'note', 'selected_at')
                 }
+                if 'topo_uid' in entry:   # stable identity (E1b; older sidecars lack it)
+                    self._selections[entry['bundle_hint']]['topo_uid'] = entry['topo_uid']
                 if 'seg_layers' in entry:
                     self._selections[entry['bundle_hint']]['seg_layers'] = entry['seg_layers']
 

@@ -284,9 +284,12 @@ dependency order; each is usable on its own.
 > mismatch prints a lossy-checkpoint warning). Round-trip gated by
 > `test_topo_uid_roundtrip` + the resume test now comparing at full fidelity
 > including edge_id (multicast trunk+MST coverage). Fixtures regenerated
-> (schema-bump-only diff). REMAINING (E1b, with E2): sidecar uid field +
-> `_apply_selections` uid→type+WL→index chain, and pin reattachment by uid in
-> `generate_topologies_for_bundle`.
+> (schema-bump-only diff). E1b is also in: the sidecar carries
+> `topo_uid` (explorer writes it; older sidecars without it keep resolving via
+> type+WL → index hint), `_apply_selections` and the explorer resolve
+> uid-first, and `_reset_plan_for_regen` re-attaches a pin by uid across all
+> five regeneration paths (flat + hier) — a user's selection now survives a
+> knob-tweaked regeneration (`test_topo_uid_pins.py`).
 
 Today pins die on regeneration because identity is a list index:
 `_reset_plan_for_regen` (buda_cli.py:2352) nukes pin/plan state, and sidecars
