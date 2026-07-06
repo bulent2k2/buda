@@ -13,14 +13,19 @@
 """Generation-time coverage gate (`TopologyGenerator.filter_uncovered`).
 
 `generate_candidates` now runs a uniform coverage post-filter over every
-generation path: a candidate that leaves a `connected_block_names` block with
-no busterm tap and no pass-through segment (verify's `BUSTERM_OPEN` — a silent
-open the planner cannot detect) is dropped with a one-line note.  Two guards:
+generation path.  It drops two silent-open risks the planner cannot detect and
+no downstream stage catches:
 
-  * never-strand — if EVERY candidate is uncovered, the list is kept unchanged
-    (with a warning) so the planner's escalation ladder still commits one;
-  * drop on `BUSTERM_OPEN` only — `FEEDTHRU_RELAY`-flagged candidates (the
-    legacy multi-rect fallback, deliberately kept) and other kinds survive.
+  * `BUSTERM_OPEN` — a candidate that leaves a `connected_block_names` block with
+    no busterm tap and no pass-through segment (an uncovered block).  ALWAYS
+    dropped.
+  * `FEEDTHRU_RELAY` — the legacy multi-rect / rootless trunk+MST fallback whose
+    incident wires do not physically touch (a silent feedthru relay).  Dropped
+    too, but ONLY when a clean (neither open nor relay) candidate survives.
+
+Never-strand guard: if EVERY candidate is uncovered — or a bundle's ONLY options
+are relays — the list is kept unchanged (with a warning) so the planner's
+escalation ladder still commits one, and check_connectivity reports the issue.
 
 This supersedes the "planner coverage gate" wishlist item: the planner stays
 focused on capacity/congestion, and bad candidates never reach it.
@@ -63,7 +68,7 @@ def test_filter_drops_uncovered_candidate(capfd):
     assert len(kept) == len(cands)                       # exactly the bad one dropped
     assert all(not t.type.endswith("_broken") for t in kept)
     err = capfd.readouterr().err
-    assert "dropped 1 uncovered candidate" in err        # flagged, not silent
+    assert "dropped 1 candidate" in err                  # flagged, not silent
     assert "block 'c'" in err
 
 
@@ -105,3 +110,30 @@ def test_feedthru_candidates_survive_the_gate(capfd):
     assert any("mid" in list(c.feedthru_blocks) for c in cands), \
         "expected at least one candidate using the declared feedthru relay"
     assert "WARNING: all" not in capfd.readouterr().err
+
+
+def _relay_kinds(cand, fp):
+    ct = buda.ConnTopology()
+    ct.build(cand, fp)
+    return {v.kind for v in buda.check_topo(ct, cand, fp, -1).violations}
+
+
+def test_undeclared_feedthru_relay_dropped_when_clean_alternative_exists(capfd):
+    """A multi-rect (notched) destination yields a TRUNK+MST hybrid that cannot be
+    cleanly completed — check_topo flags it FEEDTHRU_RELAY (a silent feedthru no
+    downstream stage catches).  With clean trunk alternatives present, the gate
+    must drop it so the planner can never select an unbuildable relay."""
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 400)
+    fp.add_block_rects("B", [(300, 0, 400, 150), (300, 250, 400, 400)])  # notch at y in [150,250]
+    tg = buda.TopologyGenerator(fp)
+    tg.set_layer_ids(4, 5)
+    cands = tg.generate_candidates("A", ["B"])
+    assert cands, "multi-rect flow lost all its candidates"
+    # No surviving candidate carries an (undeclared) feedthru relay.
+    survivors_with_relay = [c.type for c in cands
+                            if buda.ViolationKind.FEEDTHRU_RELAY in _relay_kinds(c, fp)]
+    assert not survivors_with_relay, f"relay candidate survived the gate: {survivors_with_relay}"
+    # ...and clean trunk candidates remain (the bundle is not stranded).
+    assert any(buda.ViolationKind.BUSTERM_OPEN not in _relay_kinds(c, fp) for c in cands)
+    assert "feedthru-relay" in capfd.readouterr().err   # the drop was logged

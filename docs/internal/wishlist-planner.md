@@ -11,16 +11,19 @@ keeping `run_planner` focused on capacity/congestion.
 `TopologyGenerator::filter_uncovered` (`src/topology.cpp`) runs at the tail of
 `generate_candidates` — one uniform gate over every generation path (2-pin,
 trunk, MST, BITRUNK) and every caller (flat/hier CLI, direct API). Per
-candidate it runs verify's `check_topo` and drops the candidate iff it has a
-`BUSTERM_OPEN` (a `connected_block_names` block with no busterm tap and no
-pass-through — the silent open the planner cannot detect). Drops are printed,
-never silent. Conservatism preserved exactly as this item asked: drop on
-`BUSTERM_OPEN` **only** (`FEEDTHRU_RELAY`-flagged legacy multi-rect fallback
-candidates are deliberately kept), and a **never-strand** fallback keeps the
-whole list (with a WARNING) when *every* candidate is uncovered, so the
-planner's `ALLOW_OVERFLOW`/`BEST_EFFORT` ladder still commits one. Tests:
-`test/tests/test_topo_coverage_filter.py`; regression: full fast + mid tiers
-with zero drops (the gate is a no-op on today's generator, per PR #65).
+candidate it runs verify's `check_topo` and drops two silent-open risks the
+planner cannot detect: `BUSTERM_OPEN` (a `connected_block_names` block with no
+busterm tap and no pass-through) is **always** dropped; `FEEDTHRU_RELAY` (the
+legacy multi-rect / rootless trunk+MST fallback whose incident wires do not
+physically touch — a silent feedthru no downstream stage catches, PR #194) is
+dropped **only when a clean candidate — neither open nor relay — survives**.
+Drops are printed, never silent. A **never-strand** fallback keeps the whole
+list (with a WARNING) when *every* candidate is uncovered, or when a bundle's
+only options are relays, so the planner's `ALLOW_OVERFLOW`/`BEST_EFFORT` ladder
+still commits one (relay-only bundles stay flagged for `check_connectivity`).
+Tests: `test/tests/test_topo_coverage_filter.py`; regression: full fast + mid
+tiers, wl_corpus byte-identical (relays are not selected in the corpus, so the
+drop changes no route).
 
 **Residual gaps (tracked elsewhere, not planner concerns):** a block missing
 from `topo.connected_block_names` is invisible to any coverage check — that is

@@ -2920,32 +2920,57 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     if (candidates.empty()) return;
     // Pass 1: mark. (No moves here — the common case is zero drops and the
     // list must come back untouched.)
-    std::vector<char> drop(candidates.size(), 0);
-    int dropped = 0;
+    //
+    // Two silent-open risks the planner must not be able to pick when a
+    // buildable alternative exists:
+    //   * BUSTERM_OPEN   — an uncovered block (a silent open).  Always dropped.
+    //   * FEEDTHRU_RELAY — the legacy multi-rect / rootless trunk+MST fallback
+    //     whose incident wires do not physically touch (a silent feedthru relay
+    //     no downstream stage catches).  Dropped too — BUT only when at least
+    //     one clean candidate (neither open nor relay) survives, so a bundle
+    //     whose ONLY options are relays is never stranded: it stays flagged for
+    //     check_connectivity / dump_topologies, exactly as before.
+    std::vector<char> is_open(candidates.size(), 0), is_relay(candidates.size(), 0);
+    int n_clean = 0;
     std::string first_block, first_type;
     for (size_t i = 0; i < candidates.size(); ++i) {
         ConnTopology ct;
         ct.build(candidates[i], floorplan_);
-        // Drop ONLY on BUSTERM_OPEN (an uncovered block — a silent open).  Other
-        // kinds are deliberate or diagnostic: FEEDTHRU_RELAY marks the legacy
-        // multi-rect fallback candidates that are intentionally kept flagged,
-        // and the rest stay visible to check_connectivity / dump_topologies.
+        bool any_viol = false;
         for (const auto& v : check_topo(ct, candidates[i], floorplan_, -1).violations) {
+            any_viol = true;
             if (v.kind == ViolationKind::BUSTERM_OPEN) {
-                drop[i] = 1;
-                if (dropped++ == 0) {
+                if (!is_open[i] && first_type.empty()) {
                     first_block = v.block_name;
                     first_type  = candidates[i].type;
                 }
-                break;
+                is_open[i] = 1;
+            } else if (v.kind == ViolationKind::FEEDTHRU_RELAY) {
+                is_relay[i] = 1;
             }
+        }
+        // "Clean" = NO violation of any kind — a candidate carrying only
+        // SEG_OPEN / BUSTERM_FACE (differently broken) must not count as the
+        // buildable alternative that justifies dropping every relay.
+        if (!any_viol) ++n_clean;
+    }
+    // Relays are only droppable when a buildable alternative remains.
+    const bool drop_relays = (n_clean > 0);
+    std::vector<char> drop(candidates.size(), 0);
+    int dropped = 0, dropped_relay = 0;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (is_open[i] || (is_relay[i] && drop_relays)) {
+            drop[i] = 1;
+            ++dropped;
+            if (is_relay[i] && !is_open[i]) ++dropped_relay;
         }
     }
     if (dropped == 0) return;
     if (dropped == (int)candidates.size()) {
         // Never strand a bundle: keep the (all-uncovered) list and let the
         // planner's ALLOW_OVERFLOW/BEST_EFFORT ladder commit one with a WARNING;
-        // check_connectivity will report the open.
+        // check_connectivity will report the open.  (Reachable only for the
+        // all-open case — relays are dropped solely when a clean one survives.)
         std::cerr << "[TopoGen] WARNING: all " << candidates.size()
                   << " candidate(s) leave block '" << first_block
                   << "' unconnected; keeping them (check_connectivity will "
@@ -2957,9 +2982,12 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     kept.reserve(candidates.size() - dropped);
     for (size_t i = 0; i < candidates.size(); ++i)
         if (!drop[i]) kept.push_back(std::move(candidates[i]));
-    std::cerr << "[TopoGen] dropped " << dropped << " uncovered candidate(s) "
-              << "(first: " << first_type << " missing block '" << first_block
-              << "'); " << kept.size() << " remain.\n";
+    std::cerr << "[TopoGen] dropped " << dropped << " candidate(s) "
+              << "(" << dropped_relay << " feedthru-relay";
+    if (!first_type.empty())
+        std::cerr << ", first open: " << first_type << " missing block '"
+                  << first_block << "'";
+    std::cerr << "); " << kept.size() << " remain.\n";
     candidates = std::move(kept);
 }
 
@@ -3063,6 +3091,7 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     add_u_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
     if (allow_double_detour_)
         add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
+
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
     // One-time seg-to-seg annotation (topo-truth Phase 4) — see generate_npin.
     for (auto& t : candidates) annotate_seg_conns(t);
@@ -3094,6 +3123,49 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     for (auto& t : candidates)
         if (t.connected_block_names.empty())
             t.connected_block_names = {src_name, dst_name};
+
+    // Abutment fallback: two blocks sharing a FULL edge have coinciding facing
+    // faces, so the direct I collapses to zero length and every L/Z/U stub is
+    // sub-min-length (and any that survive can be culled by keepouts above),
+    // leaving NO candidate and a silently unrouted bus (common for adjacent
+    // macros).  When nothing else survives, realize the shared edge with
+    // shared_edge_segment — a wire CROSSING the edge at the overlap centre (the
+    // same routable form the MST edge realizers use): its NUTS slide window spans
+    // the full face overlap, so the bus actually places.  An ALONG-edge wire (an
+    // earlier attempt) is clamped to ZERO slide by the pass-through tighten once
+    // connected_block_names is set, and strands every bit in DetailedNUTS — see
+    // the PR #194 review.  Evaluated AFTER the keepout cull + filter_pinched so it
+    // also rescues abutments whose only other candidates those filters removed;
+    // the fallback itself is kept only when genuinely routable (not fully keepout-
+    // blocked, not pinched).  Detected on orig_bbox (physical touch); corner-touch
+    // and coincident blocks share no edge, so shared_edge_segment returns false
+    // and the list stays empty (the zero-candidate warning then fires).
+    if (use_busterm_ && candidates.empty()) {
+        Segment es;
+        if (shared_edge_segment(s_orig, d_orig, h_layer_, v_layer_, es)) {
+            const bool horiz = (es.start.y == es.end.y);
+            Topology t;
+            t.type = horiz ? ("ABUT_H@y" + std::to_string(es.start.y))
+                           : ("ABUT_V@x" + std::to_string(es.start.x));
+            t.segments.push_back(es);
+            annotate_endpoints(t, {src_bt, dst_bt});
+            annotate_seg_conns(t);
+            t.connected_block_names = {src_name, dst_name};
+            const auto& kos = floorplan_.get_keepout_zones();
+            const std::vector<int>& layers = horiz ? all_h_layers_ : all_v_layers_;
+            bool blocked = !kos.empty() &&
+                           all_layers_blocked_by_keepouts(es, layers, kos);
+            bool pinched = false;
+            if (!blocked) {
+                ConnTopology ct;
+                ct.build(t, floorplan_);
+                for (const auto& cs : ct.segs())
+                    if (cs.perp_lo == cs.perp_hi) { pinched = true; break; }
+            }
+            if (!blocked && !pinched)
+                candidates.push_back(std::move(t));
+        }
+    }
     return candidates;
 }
 

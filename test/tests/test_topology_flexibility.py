@@ -298,13 +298,16 @@ def find_zero_slide_candidate(ctx):
 
 
 @then("that candidate's adjusted_wl equals estimated_wl")
-@pytest.mark.xfail(strict=False, reason='adjusted_wl not yet in C++ API')
 def zero_slide_adjusted_eq_estimated(ctx):
     c = ctx.get('zero_slide_cand')
     if c is None:
         pytest.skip('No zero-slide candidate')
     actual = getattr(c, 'adjusted_wl', None)
-    assert actual is not None, 'adjusted_wl not set'
+    if actual is None:
+        # A @pytest.mark.xfail decorator is inert on a pytest-bdd step function,
+        # so signal the not-yet-implemented API the same way the other steps in
+        # this file do — an in-body pytest.xfail (see i_h_adjusted_wl_factor).
+        pytest.xfail('adjusted_wl not yet in C++ API')
     assert math.isclose(actual, c.estimated_wirelength, rel_tol=1e-6)
 
 
