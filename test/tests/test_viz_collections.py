@@ -179,12 +179,34 @@ def test_design_stats_header_counts(monkeypatch):
     # nets == sum of each bundle's net names (every wire counted once).
     assert n_nets == sum(len(w.input.original_bundle.get_net_names())
                          for w in viz.bundles)
-    # The always-on header axes carries the stats as three stacked lines
-    # (so large counts don't overflow the narrow panel).
+    # The always-on header is one compact 'buses · nets' line; the bundle
+    # count lives on the All Bundles toggle label instead.
     assert viz._ax_design_stats is not None
     texts = [t.get_text() for t in viz._ax_design_stats.texts]
-    assert texts == [f"{n_bundles} bundles", f"{n_buses} buses",
-                     f"{n_nets} nets"], texts
+    assert texts == [f"{n_buses} buses · {n_nets} nets"], texts
+    assert f"{n_bundles} Bundles" in viz._btn_all_bundles.label.get_text(), \
+        viz._btn_all_bundles.label.get_text()
+
+
+def test_bundle_rows_drop_bits_suffix_when_detailed(monkeypatch):
+    """In detailed mode each row shows a right-aligned [unplaced/total] column.
+    The redundant '[bits]' suffix is dropped from the row label so it can't
+    crowd/overlap that column, and the full bus name still shows."""
+    import re as _re
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._detailed_result is not None      # dnuts1 runs detailed NUTS
+    viz._redraw_bundle_list()
+
+    texts  = [t.get_text() for t in viz._ax_bundles.texts]
+    labels = [t for t in texts if t.startswith(('☑', '☐'))]
+    stats  = [t for t in texts if _re.fullmatch(r'\[\d+/\d+\]', t)]
+    assert labels and stats, (labels, stats)
+
+    # No row label keeps a trailing "[bits]" suffix in detailed mode...
+    for lbl in labels:
+        assert not _re.search(r'\[\d+\]$', lbl), f"label kept a [bits] suffix: {lbl!r}"
+    # ...and the bus name is not over-truncated (dnuts1 names are short).
+    assert any('n11_0' in lbl for lbl in labels), labels
 
 
 def test_selected_title_shows_segment_count_no_solo_hint(monkeypatch):
