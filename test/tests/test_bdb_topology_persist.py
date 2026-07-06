@@ -18,6 +18,13 @@ candidate topologies — before run_planner — into the `topology` /
 front. Candidates round-trip through the diffable *.bdb.sql serialization.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import contextlib
 import io
 import sqlite3

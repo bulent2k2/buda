@@ -22,6 +22,13 @@ result as a uid-deduped USER candidate (pinned + sidecar'd), escape aborts.
 Navigation is parked while a session is open.  Driven headlessly through
 _on_key with synthesized events.
 """
+
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
 import os
 import sys
 from types import SimpleNamespace
