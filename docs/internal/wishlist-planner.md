@@ -121,3 +121,52 @@ the same prefix file *in* `flow/big_data_test/` (where the source resolves) give
 missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
+
+## Selection basis: rank on measured routability, not the generation-time WL estimate — DEFERRED
+
+**What.** The planner selects one candidate per bundle by a cost model
+(`kCong·congestion + kSpan·span + base_cost_non_top + kWL·wirelength`, see
+`set_planner_param`) whose wirelength term is the candidate's **generation-time
+`estimated_wirelength`** — computed before NUTS runs. So a candidate whose honest
+estimate is *longer* but whose **routed** QoR (track usage, overlaps, DNUTS opens)
+is *better* structurally loses. The clearest instance is the two-level datapath
+tree (`BITRUNK_HVH/VHV`, opt-in `multi_trunk`): on a two-column fan-out it costs
+~two branch trunks + a root spine, so its estimate legitimately exceeds a single
+`TRUNK+MST`, and the planner ranks it below and won't pick it even where the tree
+would relieve the column congestion that a trunk+MST piles onto one band.
+
+**Measured (this session, BITRUNK margin/slide investigation — no code kept).**
+The suspected levers were *not* the cause: corner margins are inert on the corpus
+(no `corner_margin` is set), the branch/leaf slide window already exists
+(`min_slide≈80`), and a rendered DNUTS-unplaced case traced to **signal-track
+supply**, not candidate flexibility. The selection loss is **structural in the
+cost model**, not a margin/slide bug — which is exactly why `multi_trunk` remains
+a correct narrow opt-in (see [`wishlist-topo.md`](wishlist-topo.md) →
+"`multi_trunk` as a default — keep opt-in") rather than a default.
+
+**The lever (deferred).** Bias selection by *routed* quality, not just estimated
+WL, for the candidate classes that route better than they estimate:
+- a **congestion-/track-aware selection term** — e.g. weight a candidate by the
+  peak band demand it induces (the planner already knows per-band load), so a tree
+  that spreads a column across branch trunks scores better than a spine that
+  saturates one band; or
+- a **QoR-measured re-rank** — the `ripup_reroute` / `negotiate_congestion`
+  machinery already re-plans against *actual* NUTS overlaps and DNUTS opens; let it
+  promote a datapath tree when the committed trunk+MST leaves residual column
+  contention (it currently only re-pins index alternates, never up-ranks a
+  higher-estimate class).
+
+**Related, tracked in [`wishlist-topo.md`](wishlist-topo.md):** honest
+generation-time **trunk-tail tightening** of `TRUNK+MST` hybrids (their dangling
+overshoot inflates the estimate and is a *second* reason the estimate misranks
+them), and a **planner-aware flex span** (reserve the contracted trunk extent, not
+the wide generated span). Both attack the same "estimate ≠ routed cost" gap from
+the generation/NUTS side; this item is the planner-selection side.
+
+**Why deferred / gate.** Any change here flips planner selections, so it ships
+only behind the `tools/wl_corpus.py` diff (neutral-or-better on the 10-flow
+corpus) **plus** the datapath-QoR flows (`flow/datapath_multi_trunk.buda`,
+`flow/datapath_row_vhv.buda`) — a selection bias that helps datapaths must not
+regress the neutral corpus. Start at the layer/topology cost compare in
+`CongestionPlanner::plan_bundle` (`src/congestion_planner.cpp`) and the
+`estimated_wirelength` term feeding it.
