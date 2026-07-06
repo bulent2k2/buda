@@ -380,13 +380,15 @@ It selects the candidate topology and layer assignments that minimize total cost
 
 ---
 
-### Stage 6 — CLI (`buda_cli.py`)
+### Stage 6 — CLI (`buda_cli.py`, `buda_cmds/`, `buda_session/`)
 
 **Responsibility:** Parse `.buda` script files line-by-line and drive the C++ engine via the pybind11 `buda` module (which re-exposes `buda_db` types).
 
 `BudaSession` holds all live objects: an optional `BDB`, the `Floorplan`, `Netlist`, `LayerStack`, `Bundler` / `HierarchicalBundler`, `bundles` list, `nuts_result`, `routing_grid`, and detailed-NUTS result. Each CLI command maps to one or more method calls on these objects. Unknown commands raise an error.
 
-Adding a new command/stage means: (1) implement the C++ class; (2) expose it via the relevant binding file — `bind_db.cpp` (BDB layer, registered in `buda_db`), `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp` (NUTS / DetailedNUTS / RoutingGrid / ConnTopology / verify), or `bind_optimizer.cpp` (floorplanner); (3) add an `elif cmd == "..."` branch in `BudaSession.do_command()`.
+The CLI is split across three units: `src/buda_cli.py` keeps the session core (init, `run_command`/`do_command` dispatch, flow-log capture + one-line summaries, `main`); `src/buda_cmds/` is the **command registry** — each submodule owns one stage's `cmd_*(session, cmd, args, cmd_line)` handlers and exports a `COMMANDS` dict, assembled by the package into the single registry `do_command` dispatches through (`KNOWN_COMMANDS` is derived from it, and a duplicate registration is a hard import error); `src/buda_session/` holds BudaSession's helper methods as six **mixin classes** (persist, hier, nutsflow, edit, reports, ripup — composed into `BudaSession`, member sets disjoint by construction) plus `util.py` for shared module-level helpers (`_batched`, `_RR_*`).
+
+Adding a new command/stage means: (1) implement the C++ class; (2) expose it via the relevant binding file — `bind_db.cpp` (BDB layer, registered in `buda_db`), `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp` (NUTS / DetailedNUTS / RoutingGrid / ConnTopology / verify), or `bind_optimizer.cpp` (floorplanner); (3) add a `cmd_<name>` handler in the matching `src/buda_cmds/` stage module and register it in that module's `COMMANDS` dict (session-state helpers go in the matching `src/buda_session/` mixin).
 
 ---
 
@@ -599,7 +601,7 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 | DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `gds_io.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
 | Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `topology_analysis.h/cpp`, `topo_edit.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
-| Python | `src/buda_cli.py` (CLI), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
+| Python | `src/buda_cli.py` (CLI core), `src/buda_cmds/` (command registry, one module per stage), `src/buda_session/` (BudaSession helper mixins + `util.py`), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
 | Demos | `demo/*.buda` — user/designer-facing demo vehicles (comprehensive_demo, quickstart, ariane/mempool/nvdla/ispd19 showcases, …); see `demo/README.md` |
 | Flows / tests | `flow/*.buda` — R&D / regression vehicles; shared track fixtures in `flow/tracks/`; `test/tests/*.py`, `test/tests/features/*.feature` |
 

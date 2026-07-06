@@ -22,6 +22,8 @@ full registry that buda_cli.do_command dispatches through.
 """
 import buda
 
+from buda_session.util import _RR_DEFAULT_MAX_ITER
+
 
 def cmd_run_nuts(session, cmd, args, cmd_line):
     # Usage: run_nuts [track_pitch]
@@ -102,7 +104,6 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
 
 
 def cmd_ripup_reroute(session, cmd, args, cmd_line):
-    from buda_cli import _RR_DEFAULT_MAX_ITER  # cycle-safe: resolved at call time
     # Usage: ripup_reroute [max_iter] [use_edge_candidates]
     # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;
     # else after run_nuts ⇒ drive down NUTS overlaps.
