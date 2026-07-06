@@ -2622,21 +2622,17 @@ class BudaVisualizer:
         return n_bundles, len(buses), n_nets
 
     def _redraw_design_stats(self):
-        """Draw the always-on design-size header as three stacked lines
-        (bundles / buses / nets) so large counts don't overflow the narrow
-        panel and get clipped on both sides."""
+        """Draw the always-on 'M buses · K nets' design-size line. The bundle
+        count lives on the All Bundles button, so this stays one compact line."""
         ax = self._ax_design_stats
         if ax is None:
             return
         ax.clear()
         ax.set_axis_off()
-        nb, nbus, nn = self._design_counts()
-        rows = [f"{nb} bundles", f"{nbus} buses", f"{nn} nets"]
-        for i, txt in enumerate(rows):
-            y = 1.0 - (i + 0.5) / len(rows)
-            ax.text(0.5, y, txt,
-                    transform=ax.transAxes, ha='center', va='center',
-                    fontsize=9, color='#333333', fontweight='bold', clip_on=True)
+        _nb, nbus, nn = self._design_counts()
+        ax.text(0.5, 0.5, f"{nbus} buses · {nn} nets",
+                transform=ax.transAxes, ha='center', va='center',
+                fontsize=8.5, color='#333333', fontweight='bold', clip_on=True)
 
     def _redraw_bundle_list(self):
         """Clear and redraw all rows in the bundle checkbox list."""
@@ -2651,7 +2647,9 @@ class BudaVisualizer:
         # Update the header button label with global stats if available.
         if self._btn_all_bundles is not None:
             all_on = all(self._bundle_visible.values())
-            all_lbl = '☑ All Bundles' if all_on else '☐ All Bundles'
+            # Fold the design-wide bundle count into the toggle label
+            # ("☑ 80 Bundles") so the stats line can stay a single row.
+            all_lbl = f"{'☑' if all_on else '☐'} {len(self.bundles)} Bundles"
             if self._detailed_result:
                 n_total = sum(len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[w.plan.selected_topology_index].segments)
                               for w in self.bundles if w.input.candidates and 0 <= w.plan.selected_topology_index < len(w.input.candidates))
@@ -4000,24 +3998,25 @@ class BudaVisualizer:
         self._redraw_colorbar()
 
         RX, RW   = 0.83, 0.15
-        BTN_H    = 0.044
+        BTN_H    = 0.044   # All Bundles header (now carries the bundle count)
+        BTN_H_SM = 0.034   # slimmer All Layers / All Overlaps headers
         SCROLL_H = 0.033
         GAP      = 0.012
-        STAT_H   = 0.075   # design-stats header: three stacked count lines
+        STAT_H   = 0.028   # design-stats: one compact 'buses · nets' line
         TOP_Y    = 0.95
         BOT_Y    = 0.09   # bottom margin
 
-        # Fixed overhead consumed by buttons, scroll arrows, the stats block, and
-        # gaps: (3 header btns) + (4 scroll arrows) + stats block + (6 gaps)
-        fixed_h  = 3 * BTN_H + 4 * SCROLL_H + STAT_H + 6 * GAP
+        # Fixed overhead consumed by buttons, scroll arrows, the stats line, and
+        # gaps: All Bundles btn + 2 slim btns + (4 scroll arrows) + stats + (6 gaps)
+        fixed_h  = BTN_H + 2 * BTN_H_SM + 4 * SCROLL_H + STAT_H + 6 * GAP
         avail    = max(TOP_Y - BOT_Y - fixed_h, 0.15)
         # Split the list space unevenly: the bundle list is the one worth
-        # scanning, so give it the most; the layer list rides up a little and
-        # the overlap list is pushed down more, making room for the taller
-        # three-line stats header without squeezing the bundle list.
-        layer_list_h   = max(avail * 0.28, 0.05)
-        bundle_list_h  = max(avail * 0.44, 0.05)
-        overlap_list_h = max(avail * 0.28, 0.05)
+        # scanning, so give it the most; the layer list gets a slightly larger
+        # slice than before (a bit more breathing room between layers) and the
+        # overlap list is the most compact.
+        layer_list_h   = max(avail * 0.31, 0.05)
+        bundle_list_h  = max(avail * 0.43, 0.05)
+        overlap_list_h = max(avail * 0.26, 0.05)
 
         # Top-down allocation.  y tracks the top edge of the next widget.
         y = TOP_Y
@@ -4028,7 +4027,7 @@ class BudaVisualizer:
             return [RX, y, RW, h]
 
         # ── All Layers ──────────────────────────────────────────────────
-        ax_all_layers = self.fig.add_axes(_rect(BTN_H))
+        ax_all_layers = self.fig.add_axes(_rect(BTN_H_SM))
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
         self._btn_all_layers.label.set_fontsize(8.5)
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
@@ -4045,7 +4044,7 @@ class BudaVisualizer:
 
         # ── All Bundles ──────────────────────────────────────────────────
         ax_all_bundles = self.fig.add_axes(_rect(BTN_H, GAP))
-        self._btn_all_bundles = Button(ax_all_bundles, '☑ All Bundles', color='#e8e8e8')
+        self._btn_all_bundles = Button(ax_all_bundles, f'☑ {len(self.bundles)} Bundles', color='#e8e8e8')
         self._btn_all_bundles.label.set_fontsize(8.5)
         self._btn_all_bundles.on_clicked(lambda _: self._on_bundle_toggle_all())
 
@@ -4065,7 +4064,7 @@ class BudaVisualizer:
         # ── All Overlaps ─────────────────────────────────────────────────
         n_ov = len(self._overlap_entries)
         ov_label = f'Overlaps ({n_ov})' if n_ov else 'No Overlaps'
-        ax_all_overlaps = self.fig.add_axes(_rect(BTN_H, GAP))
+        ax_all_overlaps = self.fig.add_axes(_rect(BTN_H_SM, GAP))
         self._btn_all_overlaps = Button(ax_all_overlaps, ov_label, color='#e8e8e8')
         self._btn_all_overlaps.on_clicked(lambda _: self._on_overlap_toggle_all())
 
