@@ -98,14 +98,24 @@ baseline:
    the `[TopoGen]` / warning strings (any wording change is its own commit).
 3. **route_snapshot hashes** — the per-stage content hashes persisted to the
    BDB (`_persist_route_snapshot`, buda_cli.py:491) for the corpus flows.
-4. **New: candidate-list golden snapshot** — a `dump_topologies`-based dump
-   (type strings, WL, segment coords, `min_slide`, `--conn` detail) for every
-   bundle of every corpus flow, committed as a golden file. This is the surface
-   the refactor touches most directly; the existing gates only sample it.
-5. **New: analysis-equivalence property test** — for every corpus candidate,
-   assert the new-path `ConnSeg` vector is field-for-field identical to a
-   pinned copy of the old `build()` (kept in the test tree during the
-   migration, deleted in Phase F).
+4. **New: candidate-list golden snapshot — IMPLEMENTED**
+   (`tools/topo_snapshot.py` + `test/tests/data/topo_golden/` +
+   `test_topo_analysis_golden.py`): a canonical generation-stage dump of every
+   corpus bundle's full candidate list — topology (type, WL, segments,
+   seg_busterms, seg_conns, bridges) **and** its complete derived analysis
+   (all 14 `ConnSeg` fields incl. raw slide sentinels, plus the ordered conns
+   list), so items 4 and 5 gate through one file. Large flows (tc3a_flat,
+   rnr/mix) commit per-bundle sha256 digests instead of multi-MB text — the
+   gate is equally hard, mismatches localize to a bundle, and the reviewable
+   diff comes from regenerating the full snapshot on the baseline tree.
+   Generation stage only, deliberately: candidate geometry + analysis are pure
+   integer arithmetic (machine-stable), while post-NUTS dogleg mutations ride
+   on float placements documented to diverge across CPUs.
+5. **New: analysis-equivalence property test — IMPLEMENTED** as part of item 4
+   (the `ana` lines of the golden are the pinned `ConnSeg` output; any refactor
+   that changes one derived value or one ordering fails with a line diff).
+   Later phases add the cache-hit == recompute and incremental == full-rebuild
+   properties on top of the same serializer.
 
 Two latent nondeterminisms to document, not fix (fixing changes bytes):
 `annotate_and_sort` uses `std::sort` keyed `(estimated_wirelength, type)` —
@@ -306,13 +316,18 @@ net_pull from geometry + Floorplan — those are recomputed, by design",
    C++ — it gets its own bump. A freshly rehydrated topology therefore always
    computes its analysis on first `build()`, exactly like a freshly generated
    one.
-3. **The Phase 0 harness gains a resume leg.** For each corpus flow:
-   checkpoint after `generate_topologies` / `run_planner` / `run_nuts`, reopen,
-   `load_pipeline`, continue — assert identical `route_snapshot` hashes and,
-   via the equivalence property test, that a **reloaded** candidate's analysis
-   equals its in-memory twin (extending the existing
-   `test_seg_busterm_persist.py` "reloaded topology drives
-   ConnTopology/check_topo identically" assertion to the cached path).
+3. **The Phase 0 harness gains a resume leg — IMPLEMENTED**
+   (`test_topo_resume_analysis.py`): checkpoint, reopen, `load_pipeline`,
+   continue. Asserts (a) a **reloaded** candidate's full analysis is
+   byte-identical to its in-memory twin (the golden serializer's bytes,
+   extending `test_seg_busterm_persist.py`'s check_topo-equivalence to the
+   complete `ConnSeg` set; `edge_id` excluded until E1 persists it), and
+   (b) **resume determinism**: two independent resumes continuing with the
+   same `run_nuts` produce identical `route_snapshot` fingerprints and route
+   the same segment/via population as the original session. Note the original
+   session's fingerprint may legitimately differ from a resumed one — the
+   planner's `seg_perp` placement preference is deliberately not persisted —
+   so determinism-of-resume, not original==resumed, is the invariant.
    Phase D's incremental mode must likewise leave persisted rows identical to
    a full rebuild — covered by the fuzz gate plus the `apply_dogleg` →
    re-persist path.

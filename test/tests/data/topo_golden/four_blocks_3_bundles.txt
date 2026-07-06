@@ -1,0 +1,554 @@
+bundle 1 nets=4 candidates=5
+ cand type=I_H wl=50 trunk=0 passthru=0
+  blocks=u1,u2 feedthru=
+  seg 0 (100,75)-(150,75) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] u2:THRU:(150,50,200,100):(150,50,200,100):[]
+  ana 0 horiz=1 layer=6 along=[100,150] perp=75 slide=[50,100] pull=0 aflex=00 acover=[100,150] apull=0
+  ana 0 conns BT:u1@100 ; BT:u2@150
+ cand type=U_VHV@y120 wl=90 trunk=0 passthru=0
+  blocks=u1,u2 feedthru=
+  seg 0 (100,100)-(100,120) L5 jog=0 edge=-1
+  seg 1 (100,120)-(150,120) L6 jog=0 edge=-1
+  seg 2 (150,120)-(150,100) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u2:THRU:(150,50,200,100):(150,50,200,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,120] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,120] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@120e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=120 slide=[120,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=0 layer=5 along=[100,120] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[100,120] apull=0
+  ana 2 conns SEG:1@120e ; BT:u2@100
+ cand type=U_VHV@y30 wl=90 trunk=0 passthru=0
+  blocks=u1,u2 feedthru=
+  seg 0 (100,50)-(100,30) L5 jog=0 edge=-1
+  seg 1 (100,30)-(150,30) L6 jog=0 edge=-1
+  seg 2 (150,30)-(150,50) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u2:THRU:(150,50,200,100):(150,50,200,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 0 conns BT:u1@50 ; SEG:1@30e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=0 layer=5 along=[30,50] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,50] apull=0
+  ana 2 conns SEG:1@30e ; BT:u2@50
+ cand type=Z_HVH@x125@y100 wl=100 trunk=0 passthru=0
+  blocks=u1,u2 feedthru=
+  seg 0 (100,100)-(125,100) L6 jog=0 edge=-1
+  seg 1 (125,100)-(125,50) L5 jog=0 edge=-1
+  seg 2 (125,50)-(150,50) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u2:THRU:(150,50,200,100):(150,50,200,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@50e
+  ana 2 horiz=1 layer=6 along=[125,150] perp=50 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u2@150
+ cand type=Z_HVH@x125@y50 wl=100 trunk=0 passthru=0
+  blocks=u1,u2 feedthru=
+  seg 0 (100,50)-(125,50) L6 jog=0 edge=-1
+  seg 1 (125,50)-(125,100) L5 jog=0 edge=-1
+  seg 2 (125,100)-(150,100) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u2:THRU:(150,50,200,100):(150,50,200,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[100,125] perp=50 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@50e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[125,150] perp=100 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u2@150
+bundle 2 nets=8 candidates=5
+ cand type=I_V wl=50 trunk=0 passthru=0
+  blocks=u1,u3 feedthru=
+  seg 0 (75,100)-(75,150) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] u3:THRU:(50,150,100,200):(50,150,100,200):[]
+  ana 0 horiz=0 layer=5 along=[100,150] perp=75 slide=[50,100] pull=0 aflex=00 acover=[100,150] apull=0
+  ana 0 conns BT:u1@100 ; BT:u3@150
+ cand type=U_HVH@x120 wl=90 trunk=0 passthru=0
+  blocks=u1,u3 feedthru=
+  seg 0 (100,100)-(120,100) L6 jog=0 edge=-1
+  seg 1 (120,100)-(120,150) L5 jog=0 edge=-1
+  seg 2 (120,150)-(100,150) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u3:THRU:(50,150,100,200):(50,150,100,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[100,120] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,120] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@120e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=120 slide=[120,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=1 layer=6 along=[100,120] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[100,120] apull=0
+  ana 2 conns SEG:1@120e ; BT:u3@100
+ cand type=U_HVH@x30 wl=90 trunk=0 passthru=0
+  blocks=u1,u3 feedthru=
+  seg 0 (50,100)-(30,100) L6 jog=0 edge=-1
+  seg 1 (30,100)-(30,150) L5 jog=0 edge=-1
+  seg 2 (30,150)-(50,150) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u3:THRU:(50,150,100,200):(50,150,100,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 0 conns BT:u1@50 ; SEG:1@30e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=1 layer=6 along=[30,50] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,50] apull=0
+  ana 2 conns SEG:1@30e ; BT:u3@50
+ cand type=Z_VHV@y125@x100 wl=100 trunk=0 passthru=0
+  blocks=u1,u3 feedthru=
+  seg 0 (100,100)-(100,125) L5 jog=0 edge=-1
+  seg 1 (100,125)-(50,125) L6 jog=0 edge=-1
+  seg 2 (50,125)-(50,150) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u3:THRU:(50,150,100,200):(50,150,100,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@50e
+  ana 2 horiz=0 layer=5 along=[125,150] perp=50 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u3@150
+ cand type=Z_VHV@y125@x50 wl=100 trunk=0 passthru=0
+  blocks=u1,u3 feedthru=
+  seg 0 (50,100)-(50,125) L5 jog=0 edge=-1
+  seg 1 (50,125)-(100,125) L6 jog=0 edge=-1
+  seg 2 (100,125)-(100,150) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u3:THRU:(50,150,100,200):(50,150,100,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,125] perp=50 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@50e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[125,150] perp=100 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u3@150
+bundle 3 nets=16 candidates=8
+ cand type=L_HV@x150@y100 wl=100 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(150,100) L6 jog=0 edge=-1
+  seg 1 (150,100)-(150,150) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 1 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=1 layer=6 along=[100,150] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,150] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@150e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; BT:u4@150
+ cand type=L_VH@y150@x100 wl=100 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(100,150) L5 jog=0 edge=-1
+  seg 1 (100,150)-(150,150) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 1 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=0 layer=5 along=[100,150] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,150] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@150e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; BT:u4@150
+ cand type=Z_HVH@x125@y100 wl=100 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(125,100) L6 jog=0 edge=-1
+  seg 1 (125,100)-(125,150) L5 jog=0 edge=-1
+  seg 2 (125,150)-(150,150) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=1 layer=6 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u4@150
+ cand type=Z_VHV@y125@x100 wl=100 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(100,125) L5 jog=0 edge=-1
+  seg 1 (100,125)-(150,125) L6 jog=0 edge=-1
+  seg 2 (150,125)-(150,150) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=0 layer=5 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 2 conns SEG:1@125e ; BT:u4@150
+ cand type=U_HVH@x220 wl=190 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(220,100) L6 jog=0 edge=-1
+  seg 1 (220,100)-(220,150) L5 jog=0 edge=-1
+  seg 2 (220,150)-(200,150) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[100,220] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,220] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@220e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=220 slide=[220,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=1 layer=6 along=[200,220] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[200,220] apull=0
+  ana 2 conns SEG:1@220e ; BT:u4@200
+ cand type=U_HVH@x30 wl=190 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (50,100)-(30,100) L6 jog=0 edge=-1
+  seg 1 (30,100)-(30,150) L5 jog=0 edge=-1
+  seg 2 (30,150)-(150,150) L6 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 0 conns BT:u1@50 ; SEG:1@30e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=1 layer=6 along=[30,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,150] apull=0
+  ana 2 conns SEG:1@30e ; BT:u4@150
+ cand type=U_VHV@y220 wl=190 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,100)-(100,220) L5 jog=0 edge=-1
+  seg 1 (100,220)-(150,220) L6 jog=0 edge=-1
+  seg 2 (150,220)-(150,200) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,220] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,220] apull=0
+  ana 0 conns BT:u1@100 ; SEG:1@220e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=220 slide=[220,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=0 layer=5 along=[200,220] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[200,220] apull=0
+  ana 2 conns SEG:1@220e ; BT:u4@200
+ cand type=U_VHV@y30 wl=190 trunk=0 passthru=0
+  blocks=u1,u4 feedthru=
+  seg 0 (100,50)-(100,30) L5 jog=0 edge=-1
+  seg 1 (100,30)-(150,30) L6 jog=0 edge=-1
+  seg 2 (150,30)-(150,150) L5 jog=0 edge=-1
+  bt 0 u1:THRU:(50,50,100,100):(50,50,100,100):[] -
+  bt 2 - u4:THRU:(150,150,200,200):(150,150,200,200):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 0 conns BT:u1@50 ; SEG:1@30e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@150e
+  ana 2 horiz=0 layer=5 along=[30,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,150] apull=0
+  ana 2 conns SEG:1@30e ; BT:u4@150
+bundle 4 nets=16 candidates=5
+ cand type=I_H wl=50 trunk=0 passthru=0
+  blocks=u2,u1 feedthru=
+  seg 0 (150,75)-(100,75) L6 jog=0 edge=-1
+  bt 0 u2:THRU:(150,50,200,100):(150,50,200,100):[] u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  ana 0 horiz=1 layer=6 along=[100,150] perp=75 slide=[50,100] pull=0 aflex=00 acover=[100,150] apull=0
+  ana 0 conns BT:u2@150 ; BT:u1@100
+ cand type=U_VHV@y120 wl=90 trunk=0 passthru=0
+  blocks=u2,u1 feedthru=
+  seg 0 (150,100)-(150,120) L5 jog=0 edge=-1
+  seg 1 (150,120)-(100,120) L6 jog=0 edge=-1
+  seg 2 (100,120)-(100,100) L5 jog=0 edge=-1
+  bt 0 u2:THRU:(150,50,200,100):(150,50,200,100):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[100,120] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[100,120] apull=0
+  ana 0 conns BT:u2@100 ; SEG:1@120e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=120 slide=[120,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[100,120] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,120] apull=0
+  ana 2 conns SEG:1@120e ; BT:u1@100
+ cand type=U_VHV@y30 wl=90 trunk=0 passthru=0
+  blocks=u2,u1 feedthru=
+  seg 0 (150,50)-(150,30) L5 jog=0 edge=-1
+  seg 1 (150,30)-(100,30) L6 jog=0 edge=-1
+  seg 2 (100,30)-(100,50) L5 jog=0 edge=-1
+  bt 0 u2:THRU:(150,50,200,100):(150,50,200,100):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[30,50] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,50] apull=0
+  ana 0 conns BT:u2@50 ; SEG:1@30e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 2 conns SEG:1@30e ; BT:u1@50
+ cand type=Z_HVH@x125@y100 wl=100 trunk=0 passthru=0
+  blocks=u2,u1 feedthru=
+  seg 0 (150,100)-(125,100) L6 jog=0 edge=-1
+  seg 1 (125,100)-(125,50) L5 jog=0 edge=-1
+  seg 2 (125,50)-(100,50) L6 jog=0 edge=-1
+  bt 0 u2:THRU:(150,50,200,100):(150,50,200,100):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[125,150] perp=100 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u2@150 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@50e
+  ana 2 horiz=1 layer=6 along=[100,125] perp=50 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100
+ cand type=Z_HVH@x125@y50 wl=100 trunk=0 passthru=0
+  blocks=u2,u1 feedthru=
+  seg 0 (150,50)-(125,50) L6 jog=0 edge=-1
+  seg 1 (125,50)-(125,100) L5 jog=0 edge=-1
+  seg 2 (125,100)-(100,100) L6 jog=0 edge=-1
+  bt 0 u2:THRU:(150,50,200,100):(150,50,200,100):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[125,150] perp=50 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u2@150 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@50e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100
+bundle 5 nets=8 candidates=5
+ cand type=I_V wl=50 trunk=0 passthru=0
+  blocks=u3,u1 feedthru=
+  seg 0 (75,150)-(75,100) L5 jog=0 edge=-1
+  bt 0 u3:THRU:(50,150,100,200):(50,150,100,200):[] u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  ana 0 horiz=0 layer=5 along=[100,150] perp=75 slide=[50,100] pull=0 aflex=00 acover=[100,150] apull=0
+  ana 0 conns BT:u3@150 ; BT:u1@100
+ cand type=U_HVH@x120 wl=90 trunk=0 passthru=0
+  blocks=u3,u1 feedthru=
+  seg 0 (100,150)-(120,150) L6 jog=0 edge=-1
+  seg 1 (120,150)-(120,100) L5 jog=0 edge=-1
+  seg 2 (120,100)-(100,100) L6 jog=0 edge=-1
+  bt 0 u3:THRU:(50,150,100,200):(50,150,100,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[100,120] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[100,120] apull=0
+  ana 0 conns BT:u3@100 ; SEG:1@120e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=120 slide=[120,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[100,120] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,120] apull=0
+  ana 2 conns SEG:1@120e ; BT:u1@100
+ cand type=U_HVH@x30 wl=90 trunk=0 passthru=0
+  blocks=u3,u1 feedthru=
+  seg 0 (50,150)-(30,150) L6 jog=0 edge=-1
+  seg 1 (30,150)-(30,100) L5 jog=0 edge=-1
+  seg 2 (30,100)-(50,100) L6 jog=0 edge=-1
+  bt 0 u3:THRU:(50,150,100,200):(50,150,100,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[30,50] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,50] apull=0
+  ana 0 conns BT:u3@50 ; SEG:1@30e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 2 conns SEG:1@30e ; BT:u1@50
+ cand type=Z_VHV@y125@x100 wl=100 trunk=0 passthru=0
+  blocks=u3,u1 feedthru=
+  seg 0 (100,150)-(100,125) L5 jog=0 edge=-1
+  seg 1 (100,125)-(50,125) L6 jog=0 edge=-1
+  seg 2 (50,125)-(50,100) L5 jog=0 edge=-1
+  bt 0 u3:THRU:(50,150,100,200):(50,150,100,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[125,150] perp=100 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u3@150 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@100e ; SEG:2@50e
+  ana 2 horiz=0 layer=5 along=[100,125] perp=50 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100
+ cand type=Z_VHV@y125@x50 wl=100 trunk=0 passthru=0
+  blocks=u3,u1 feedthru=
+  seg 0 (50,150)-(50,125) L5 jog=0 edge=-1
+  seg 1 (50,125)-(100,125) L6 jog=0 edge=-1
+  seg 2 (100,125)-(100,100) L5 jog=0 edge=-1
+  bt 0 u3:THRU:(50,150,100,200):(50,150,100,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[125,150] perp=50 slide=[50,100] pull=0 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u3@150 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[50,100] perp=125 slide=[120,130] pull=0 aflex=11 acover=[50,100] apull=0
+  ana 1 conns SEG:0@50e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=0 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100
+bundle 6 nets=4 candidates=8
+ cand type=L_HV@x100@y150 wl=100 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(100,150) L6 jog=0 edge=-1
+  seg 1 (100,150)-(100,100) L5 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 1 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=1 layer=6 along=[100,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[100,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@100e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; BT:u1@100
+ cand type=L_VH@y100@x150 wl=100 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(150,100) L5 jog=0 edge=-1
+  seg 1 (150,100)-(100,100) L6 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 1 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=0 layer=5 along=[100,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[100,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@100e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; BT:u1@100
+ cand type=Z_HVH@x125@y150 wl=100 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(125,150) L6 jog=0 edge=-1
+  seg 1 (125,150)-(125,100) L5 jog=0 edge=-1
+  seg 2 (125,100)-(100,100) L6 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@125e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100
+ cand type=Z_VHV@y125@x150 wl=100 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(150,125) L5 jog=0 edge=-1
+  seg 1 (150,125)-(100,125) L6 jog=0 edge=-1
+  seg 2 (100,125)-(100,100) L5 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[125,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[125,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@125e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=125 slide=[120,130] pull=0 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[100,125] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,125] apull=0
+  ana 2 conns SEG:1@125e ; BT:u1@100
+ cand type=U_HVH@x220 wl=190 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (200,150)-(220,150) L6 jog=0 edge=-1
+  seg 1 (220,150)-(220,100) L5 jog=0 edge=-1
+  seg 2 (220,100)-(100,100) L6 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[200,220] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[200,220] apull=0
+  ana 0 conns BT:u4@200 ; SEG:1@220e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=220 slide=[220,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[100,220] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,220] apull=0
+  ana 2 conns SEG:1@220e ; BT:u1@100
+ cand type=U_HVH@x30 wl=190 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(30,150) L6 jog=0 edge=-1
+  seg 1 (30,150)-(30,100) L5 jog=0 edge=-1
+  seg 2 (30,100)-(50,100) L6 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[30,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@30e
+  ana 1 horiz=0 layer=5 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=1 layer=6 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 2 conns SEG:1@30e ; BT:u1@50
+ cand type=U_VHV@y220 wl=190 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,200)-(150,220) L5 jog=0 edge=-1
+  seg 1 (150,220)-(100,220) L6 jog=0 edge=-1
+  seg 2 (100,220)-(100,100) L5 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[200,220] perp=150 slide=[150,200] pull=-1 aflex=01 acover=[200,220] apull=0
+  ana 0 conns BT:u4@200 ; SEG:1@220e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=220 slide=[220,1073741823] pull=-2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[100,220] perp=100 slide=[50,100] pull=1 aflex=01 acover=[100,220] apull=0
+  ana 2 conns SEG:1@220e ; BT:u1@100
+ cand type=U_VHV@y30 wl=190 trunk=0 passthru=0
+  blocks=u4,u1 feedthru=
+  seg 0 (150,150)-(150,30) L5 jog=0 edge=-1
+  seg 1 (150,30)-(100,30) L6 jog=0 edge=-1
+  seg 2 (100,30)-(100,50) L5 jog=0 edge=-1
+  bt 0 u4:THRU:(150,150,200,200):(150,150,200,200):[] -
+  bt 2 - u1:THRU:(50,50,100,100):(50,50,100,100):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[30,150] perp=150 slide=[150,200] pull=-1 aflex=10 acover=[30,150] apull=0
+  ana 0 conns BT:u4@150 ; SEG:1@30e
+  ana 1 horiz=1 layer=6 along=[100,150] perp=30 slide=[-1073741824,30] pull=2 aflex=11 acover=[100,150] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@100e
+  ana 2 horiz=0 layer=5 along=[30,50] perp=100 slide=[50,100] pull=1 aflex=10 acover=[30,50] apull=0
+  ana 2 conns SEG:1@30e ; BT:u1@50
