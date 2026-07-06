@@ -2706,14 +2706,39 @@ void BDB::clear_topologies(bool keep_user) {
 }
 
 void BDB::renumber_topology(const std::string& bundle_id, int old_ci, int new_ci) {
-    for (const char* tbl : {"topology", "topology_segment",
-                            "topology_seg_busterm", "topology_seg_conn",
-                            "topology_bridge_segment"}) {
+    // FK discipline (Codex #198 P1): the four child tables have IMMEDIATE FKs
+    // to topology(bundle_id, cand_index) with no ON UPDATE CASCADE, so neither
+    // parent-first nor child-first UPDATEs pass enforcement (foreign_keys=ON).
+    // Move in three FK-clean steps instead: copy the parent row to the new
+    // index, re-point the children (their parent now exists), then delete the
+    // old parent (no children reference it anymore).
+    {
+        Stmt s(_db,
+            "INSERT INTO topology(bundle_id,cand_index,type,wirelength,"
+            "trunk_location,pass_through_count,connected_blocks,feedthru_blocks,"
+            "is_selected,is_pinned,topo_uid,source)"
+            " SELECT bundle_id,?,type,wirelength,trunk_location,"
+            "pass_through_count,connected_blocks,feedthru_blocks,"
+            "is_selected,is_pinned,topo_uid,source"
+            " FROM topology WHERE bundle_id=? AND cand_index=?");
+        sqlite3_bind_int (s, 1, new_ci);
+        sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (s, 3, old_ci);
+        sqlite3_step(s);
+    }
+    for (const char* tbl : {"topology_segment", "topology_seg_busterm",
+                            "topology_seg_conn", "topology_bridge_segment"}) {
         Stmt s(_db, ("UPDATE " + std::string(tbl) +
                      " SET cand_index=? WHERE bundle_id=? AND cand_index=?").c_str());
         sqlite3_bind_int (s, 1, new_ci);
         sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int (s, 3, old_ci);
+        sqlite3_step(s);
+    }
+    {
+        Stmt s(_db, "DELETE FROM topology WHERE bundle_id=? AND cand_index=?");
+        sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (s, 2, old_ci);
         sqlite3_step(s);
     }
 }

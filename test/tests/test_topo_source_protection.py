@@ -157,3 +157,69 @@ def test_gen_knob_memo_survives_bulk_regeneration(tmp_path):
     assert "Re-applied knob memo 'multi_trunk'" in out, out
     assert sorted(buda.topo_uid(c) for c in w.input.candidates) == sorted(accreted), \
         "the accreted pool silently reverted"
+
+
+def test_renumber_topology_moves_parent_and_children(tmp_path):
+    """Regression (PR #198 review, P1): topology's child tables have IMMEDIATE
+    FKs with no ON UPDATE CASCADE, so the original single-UPDATE-per-table
+    renumber was silently rejected (step result ignored) and the kept user row
+    stayed at the colliding index — to be overwritten by the fresh block.  The
+    copy-move-delete sequence must move the parent row AND its children."""
+    db = buda.BDB(str(tmp_path / "r.bdb"))
+    br = buda.BundleRow()
+    br.id = "1"
+    db.add_bundle(br)
+    for ci in range(2):
+        tr = buda.TopoRow()
+        tr.id = "1"
+        tr.cand_index = ci
+        tr.type = f"T{ci}"
+        tr.source = "user" if ci == 1 else "generated"
+        db.add_topology(tr)
+        sr = buda.TopoSegRow()
+        sr.id = "1"
+        sr.cand_index = ci
+        sr.seg_index = 0
+        sr.x1, sr.y1, sr.x2, sr.y2 = 0, ci, 10, ci
+        db.add_topology_segment(sr)
+    db.renumber_topology("1", 1, 5)
+    rows = {(r.cand_index, r.source) for r in db.topologies("1")}
+    assert rows == {(0, "generated"), (5, "user")}, rows
+    assert len(db.topology_segments("1", 5)) == 1
+    assert len(db.topology_segments("1", 1)) == 0
+
+
+def test_cross_session_keep_survives_index_collision(tmp_path):
+    """The kept user row's index falls INSIDE session 2's fresh block (more
+    generated candidates than session 1 had): the renumber path must move it
+    out of the way, or the add_topology upsert overwrites the hand-committed
+    candidate — exactly the P1 the plain-keep test could not catch (its user
+    row sat past the fresh block)."""
+    path = str(tmp_path / "c.bdb")
+    s1 = _session(path)
+    bid = s1.bundles[0].input.original_bundle.id
+    n1 = len(s1.bundles[0].input.candidates)
+    _commit_user(s1, bid)
+    user_uid = buda.topo_uid(s1.bundles[0].input.candidates[-1])
+    user_ci = n1                                     # tail of session 1's pool
+    del s1
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    # double_detour adds UU candidates (8 -> 13 here), pushing session 2's
+    # fresh block past the kept user row's index (8) — the collision case.
+    out = _out(s2, f"open_bdb {path}", *_SETUP,
+               "detour_channel A 60",
+               "add_bus d[8] A.p B.q", "run_bundler",
+               "generate_topologies double_detour")
+    rows = s2.bdb.topologies(str(bid))
+    gen_n = sum(1 for r in rows if r.source != "user")
+    assert gen_n > user_ci,         f"test premise broken: fresh block ({gen_n}) must cover index {user_ci}"
+    assert "kept user candidate" in out, out
+    user_rows = [r for r in rows if r.source == "user"]
+    assert len(user_rows) == 1 and user_rows[0].topo_uid == user_uid
+    assert user_rows[0].cand_index >= gen_n
+    # The moved row's SEGMENTS moved with it (the P1 failure mode left them
+    # behind to be overwritten).
+    segs = s2.bdb.topology_segments(str(bid), user_rows[0].cand_index)
+    assert len(segs) == 3, f"user candidate lost its segments: {len(segs)}"
