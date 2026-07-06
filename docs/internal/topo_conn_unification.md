@@ -10,6 +10,13 @@ Grounded in a full call-site audit of both modules (consumer map + generation
 seams), summarized in §1–§2. Line numbers are from the tree at the time of
 writing; treat them as anchors, not gospel.
 
+**STATUS: implemented** — Phase 0 (harness), A (pass extraction), B (content-
+fingerprint cache), C (one analysis everywhere), E1/E1b (`topo_uid` identity +
+pin/sidecar survival), E2 (additive generation + knob memo), E3 (TopoEdit
+engine + `.buda` commands + explorer edit mode), E4 (user-candidate
+protection, schema v15), F (docs). Phase D (incremental re-analysis) is
+deferred by measurement — see §7. Per-phase notes are inline below.
+
 ## 1. Diagnosis — what the two modules actually are today
 
 | | `Topology` (topology.h/cpp) | `ConnTopology` (conn_topology.h/cpp) |

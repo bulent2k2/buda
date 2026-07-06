@@ -15,7 +15,7 @@ import buda_cli
 
 CORPUS = [
     "flow/big_data_test/tc3a_flat.buda",    # 80 bundles, ~96% trunks — primary target
-    "flow/comprehensive_demo.buda",
+    "demo/comprehensive_demo.buda",
     "flow/channel_stress.buda",
     "flow/four_blocks.buda",
     "flow/four_blocks_3_bundles.buda",
