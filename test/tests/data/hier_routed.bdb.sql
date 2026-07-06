@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=14;
+PRAGMA user_version=15;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -14,7 +14,8 @@ CREATE TABLE bundle (
         drv_spec_depth INTEGER DEFAULT -1,  -- cross-level driver depth (-1 = same-level)
         rcv_spec_depth INTEGER DEFAULT -1,
         drv_spec_path  TEXT,
-        rcv_spec_paths TEXT                 -- JSON array
+        rcv_spec_paths TEXT,                -- JSON array
+        gen_knobs      TEXT DEFAULT ''      -- additive-generation knob memo (v15)
     );
 CREATE TABLE bundle_busterm (
         bundle_id  TEXT REFERENCES bundle(id),
@@ -171,7 +172,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','14');
+INSERT INTO "meta" VALUES('schema_version','15');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -307,6 +308,7 @@ CREATE TABLE topology (
         is_selected        INTEGER DEFAULT 0,
         is_pinned          INTEGER DEFAULT 0,  -- pre-plan select_topology pin (v10)
         topo_uid           TEXT DEFAULT '',    -- stable content identity (v14)
+        source             TEXT DEFAULT 'generated',  -- generated|user|dogleg (v15)
         PRIMARY KEY (bundle_id, cand_index)
     );
 CREATE TABLE topology_bridge_segment (

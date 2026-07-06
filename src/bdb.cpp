@@ -112,7 +112,8 @@ static const char* BUNDLE_DDL = R"(
         drv_spec_depth INTEGER DEFAULT -1,  -- cross-level driver depth (-1 = same-level)
         rcv_spec_depth INTEGER DEFAULT -1,
         drv_spec_path  TEXT,
-        rcv_spec_paths TEXT                 -- JSON array
+        rcv_spec_paths TEXT,                -- JSON array
+        gen_knobs      TEXT DEFAULT ''      -- additive-generation knob memo (v15)
     );
     CREATE TABLE IF NOT EXISTS bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
@@ -143,6 +144,7 @@ static const char* TOPOLOGY_DDL = R"(
         is_selected        INTEGER DEFAULT 0,
         is_pinned          INTEGER DEFAULT 0,  -- pre-plan select_topology pin (v10)
         topo_uid           TEXT DEFAULT '',    -- stable content identity (v14)
+        source             TEXT DEFAULT 'generated',  -- generated|user|dogleg (v15)
         PRIMARY KEY (bundle_id, cand_index)
     );
     CREATE TABLE IF NOT EXISTS topology_segment (
@@ -595,6 +597,18 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);
         sqlite3_exec(_db,
             "ALTER TABLE topology_segment ADD COLUMN edge_id INTEGER DEFAULT -1",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 15) {
+        // v14 -> v15: candidate provenance + per-bundle generation-knob memo
+        // (topo_conn_unification Phases E2b/E4).  Idempotent ALTERs; existing
+        // rows default to source='generated' (correct: user candidates did not
+        // exist before v15).
+        sqlite3_exec(_db,
+            "ALTER TABLE topology ADD COLUMN source TEXT DEFAULT 'generated'",
+            nullptr, nullptr, nullptr);
+        sqlite3_exec(_db,
+            "ALTER TABLE bundle ADD COLUMN gen_knobs TEXT DEFAULT ''",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -2532,20 +2546,26 @@ void BDB::add_bundle_busterm(const std::string& bundle_id,
     sqlite3_step(s);
 }
 
-void BDB::clear_bundles() {
+void BDB::clear_bundles(bool keep_user) {
     // Topology and bus/net routing all FK to bundle, so clear them first
     // (children before parents) or the FK constraint would reject the bundle
     // delete. The route_snapshot fingerprint describes the routed rows, so it
     // is invalidated too.
     _exec("DELETE FROM route_snapshot;"
           "DELETE FROM net_via; DELETE FROM net_segment;"
-          "DELETE FROM bus_via; DELETE FROM bus_segment;"
-          "DELETE FROM topology_seg_busterm;"
-          "DELETE FROM topology_seg_conn;"
-          "DELETE FROM topology_bridge_segment;"
-          "DELETE FROM topology_segment; DELETE FROM topology;"
-          "DELETE FROM busterm WHERE id LIKE 'tb:%';"
-          "DELETE FROM bundle_busterm; DELETE FROM bundle_net; DELETE FROM bundle;");
+          "DELETE FROM bus_via; DELETE FROM bus_segment;");
+    // Topology tables: with keep_user, user-sourced candidates survive
+    // (Phase E4 — a re-bundle must not delete a hand-committed route).
+    clear_topologies(keep_user);
+    _exec("DELETE FROM bundle_busterm; DELETE FROM bundle_net;");
+    if (keep_user) {
+        // Keep the bundle rows still referenced by kept topology rows (FK);
+        // the re-add upserts them in place.
+        _exec("DELETE FROM bundle WHERE id NOT IN"
+              " (SELECT DISTINCT bundle_id FROM topology);");
+    } else {
+        _exec("DELETE FROM bundle;");
+    }
 }
 
 std::vector<BundleRow> BDB::all_bundles() const {
@@ -2611,14 +2631,15 @@ void BDB::add_topology(const TopoRow& tr) {
     Stmt s(_db,
         "INSERT INTO topology(bundle_id,cand_index,type,wirelength,trunk_location,"
         "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned,"
-        "topo_uid)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+        "topo_uid,source)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(bundle_id,cand_index) DO UPDATE SET type=excluded.type,"
         " wirelength=excluded.wirelength, trunk_location=excluded.trunk_location,"
         " pass_through_count=excluded.pass_through_count,"
         " connected_blocks=excluded.connected_blocks,"
         " feedthru_blocks=excluded.feedthru_blocks, is_selected=excluded.is_selected,"
-        " is_pinned=excluded.is_pinned, topo_uid=excluded.topo_uid");
+        " is_pinned=excluded.is_pinned, topo_uid=excluded.topo_uid,"
+        " source=excluded.source");
     sqlite3_bind_text  (s, 1, tr.id.c_str(),               -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, tr.cand_index);
     sqlite3_bind_text  (s, 3, tr.type.c_str(),             -1, SQLITE_TRANSIENT);
@@ -2630,6 +2651,7 @@ void BDB::add_topology(const TopoRow& tr) {
     sqlite3_bind_int   (s, 9, tr.is_selected ? 1 : 0);
     sqlite3_bind_int   (s, 10, tr.is_pinned ? 1 : 0);
     sqlite3_bind_text  (s, 11, tr.topo_uid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text  (s, 12, tr.source.c_str(),   -1, SQLITE_TRANSIENT);
     sqlite3_step(s);
 }
 
@@ -2652,23 +2674,83 @@ void BDB::add_topology_segment(const TopoSegRow& sr) {
     sqlite3_step(s);
 }
 
-void BDB::clear_topologies() {
+void BDB::clear_topologies(bool keep_user) {
     // Children before parents (FK): the seg-busterm links reference both topology
     // and busterm.  The routing-time 'tb:' busterm rows exist only to back those
     // links, so drop them too (hier-derived 'bt:' rows are untouched); re-persist
     // recreates them idempotently, keeping the *.bdb.sql dump deterministic.
-    _exec("DELETE FROM topology_seg_busterm;"
-          "DELETE FROM topology_seg_conn;"
-          "DELETE FROM topology_bridge_segment;"
-          "DELETE FROM topology_segment; DELETE FROM topology;"
-          "DELETE FROM busterm WHERE id LIKE 'tb:%';");
+    if (!keep_user) {
+        _exec("DELETE FROM topology_seg_busterm;"
+              "DELETE FROM topology_seg_conn;"
+              "DELETE FROM topology_bridge_segment;"
+              "DELETE FROM topology_segment; DELETE FROM topology;"
+              "DELETE FROM busterm WHERE id LIKE 'tb:%';");
+        return;
+    }
+    // keep_user (v15, Phase E4): a hand-committed candidate must survive a bulk
+    // re-persist even when it is absent from the in-memory pool (a checkpoint
+    // from an earlier session).  Delete only non-user rows — and only the
+    // annotation rows backing them — then garbage-collect unreferenced 'tb:'
+    // busterms.
+    static const char* kKeep =
+        " NOT EXISTS (SELECT 1 FROM topology t WHERE t.bundle_id = x.bundle_id"
+        "  AND t.cand_index = x.cand_index AND t.source = 'user')";
+    std::string sql;
+    for (const char* tbl : {"topology_seg_busterm", "topology_seg_conn",
+                            "topology_bridge_segment", "topology_segment"})
+        sql += "DELETE FROM " + std::string(tbl) + " AS x WHERE" + kKeep + ";";
+    sql += "DELETE FROM topology WHERE source IS NULL OR source != 'user';";
+    sql += "DELETE FROM busterm WHERE id LIKE 'tb:%' AND id NOT IN"
+           " (SELECT busterm_id FROM topology_seg_busterm);";
+    _exec(sql.c_str());
+}
+
+void BDB::renumber_topology(const std::string& bundle_id, int old_ci, int new_ci) {
+    for (const char* tbl : {"topology", "topology_segment",
+                            "topology_seg_busterm", "topology_seg_conn",
+                            "topology_bridge_segment"}) {
+        Stmt s(_db, ("UPDATE " + std::string(tbl) +
+                     " SET cand_index=? WHERE bundle_id=? AND cand_index=?").c_str());
+        sqlite3_bind_int (s, 1, new_ci);
+        sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (s, 3, old_ci);
+        sqlite3_step(s);
+    }
+}
+
+void BDB::delete_topology(const std::string& bundle_id, int ci) {
+    for (const char* tbl : {"topology_seg_busterm", "topology_seg_conn",
+                            "topology_bridge_segment", "topology_segment",
+                            "topology"}) {
+        Stmt s(_db, ("DELETE FROM " + std::string(tbl) +
+                     " WHERE bundle_id=? AND cand_index=?").c_str());
+        sqlite3_bind_text(s, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (s, 2, ci);
+        sqlite3_step(s);
+    }
+}
+
+void BDB::set_bundle_gen_knobs(const std::string& bundle_id,
+                               const std::string& knobs) {
+    Stmt s(_db, "UPDATE bundle SET gen_knobs=? WHERE id=?");
+    sqlite3_bind_text(s, 1, knobs.c_str(),     -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(s, 2, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s);
+}
+
+std::string BDB::bundle_gen_knobs(const std::string& bundle_id) const {
+    Stmt q(_db, "SELECT gen_knobs FROM bundle WHERE id=?");
+    sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(q) == SQLITE_ROW && sqlite3_column_text(q, 0))
+        return reinterpret_cast<const char*>(sqlite3_column_text(q, 0));
+    return "";
 }
 
 std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
     Stmt q(_db,
         "SELECT bundle_id,cand_index,type,wirelength,trunk_location,"
         "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned,"
-        "topo_uid FROM topology WHERE bundle_id=? ORDER BY cand_index");
+        "topo_uid,source FROM topology WHERE bundle_id=? ORDER BY cand_index");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
@@ -2688,6 +2770,8 @@ std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
         t.is_selected        = sqlite3_column_int(q, 8) != 0;
         t.is_pinned          = sqlite3_column_int(q, 9) != 0;
         t.topo_uid           = txt(q, 10);
+        t.source             = txt(q, 11);
+        if (t.source.empty()) t.source = "generated";
         out.push_back(std::move(t));
     }
     return out;

@@ -115,7 +115,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("feedthru_blocks",    &TopoRow::feedthru_blocks)
         .def_readwrite("is_selected",        &TopoRow::is_selected)
         .def_readwrite("is_pinned",          &TopoRow::is_pinned)
-        .def_readwrite("topo_uid",           &TopoRow::topo_uid);
+        .def_readwrite("topo_uid",           &TopoRow::topo_uid)
+        .def_readwrite("source",             &TopoRow::source);
 
     py::class_<TopoSegRow>(m, "TopoSegRow")
         .def(py::init<>())
@@ -311,7 +312,8 @@ void bind_db(py::module_& m) {
              py::arg("bundle_id"), py::arg("net_name"))
         .def("add_bundle_busterm", &BDB::add_bundle_busterm,
              py::arg("bundle_id"), py::arg("busterm_id"), py::arg("role") = "")
-        .def("clear_bundles",   &BDB::clear_bundles)
+        .def("clear_bundles",        &BDB::clear_bundles,
+             py::arg("keep_user") = false)
         .def("bundle_nets",     &BDB::bundle_nets, py::arg("bundle_id"))
         .def("bundle_busterms", &BDB::bundle_busterms, py::arg("bundle_id"))
         .def("begin_batch",          &BDB::begin_batch)
@@ -319,7 +321,15 @@ void bind_db(py::module_& m) {
         .def("rollback_batch",       &BDB::rollback_batch)
         .def("add_topology",         &BDB::add_topology, py::arg("tr"))
         .def("add_topology_segment", &BDB::add_topology_segment, py::arg("sr"))
-        .def("clear_topologies",     &BDB::clear_topologies)
+        .def("clear_topologies",     &BDB::clear_topologies,
+             py::arg("keep_user") = false)
+        .def("renumber_topology",    &BDB::renumber_topology,
+             py::arg("bundle_id"), py::arg("old_ci"), py::arg("new_ci"))
+        .def("delete_topology",      &BDB::delete_topology,
+             py::arg("bundle_id"), py::arg("ci"))
+        .def("set_bundle_gen_knobs", &BDB::set_bundle_gen_knobs,
+             py::arg("bundle_id"), py::arg("knobs"))
+        .def("bundle_gen_knobs",     &BDB::bundle_gen_knobs, py::arg("bundle_id"))
         .def("topologies",           &BDB::topologies, py::arg("bundle_id"))
         .def("topology_segments",    &BDB::topology_segments,
              py::arg("bundle_id"), py::arg("cand_index"))

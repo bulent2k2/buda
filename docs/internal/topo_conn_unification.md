@@ -453,8 +453,18 @@ net_pull from geometry + Floorplan — those are recomputed, by design",
   `trunk_location` / `pass_through_count` joined the fingerprint — distinct
   shapes can realize identical segments, and persisted identity must tell
   them apart (for the cache this only makes validation finer-grained).
-  REMAINING of E2: uid-keyed upsert persistence + `topology.source` column
-  (needed by E4's user candidates) and per-bundle `gen_knobs` persistence.
+  The rest of E2/E4 is now IN (schema v15): `topology.source`
+  (generated|user|dogleg, derived at persist), `clear_topologies(keep_user)` /
+  `clear_bundles(keep_user)` spare user rows — including their bundle FK
+  parents — so neither a bulk re-persist nor a re-bundle from a session that
+  never loaded them can delete a hand-committed candidate (orphans renumber
+  past the fresh index block and `load_pipeline` restores them); USER
+  candidates also survive regeneration **in memory** at all five regen sites
+  (deep-copied before the vector swap, re-appended uid-deduped, pin
+  re-attachable); and `bundle.gen_knobs` memoizes `generate_more_topologies`'
+  knob set (surviving the bundle clear-and-rewrite), which bulk
+  `generate_topologies` re-applies additively so an accreted pool never
+  silently reverts. Gated by `test_topo_source_protection.py`.
 - **E2 ends wipe-and-rewrite.** Additive generation and user candidates are
   incompatible with `clear_topologies()`: persistence moves to a per-bundle
   **upsert keyed by uid** — regeneration deletes only rows absent from the new

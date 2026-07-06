@@ -299,7 +299,16 @@ class BudaSession:
         if self.bdb is None:
             return 0
         import json
-        self.bdb.clear_bundles()
+        # The per-bundle generation-knob memo (v15) must survive this
+        # clear-and-rewrite — it is written OUTSIDE this path (generate_more)
+        # and would otherwise be wiped by every re-persist.
+        knob_memo = {}
+        for _w in self.bundles:
+            _bid = str(_w.input.original_bundle.id)
+            _k = self.bdb.bundle_gen_knobs(_bid)
+            if _k:
+                knob_memo[_bid] = _k
+        self.bdb.clear_bundles(keep_user=True)
         for w in self.bundles:
             hb = w.input.original_bundle
             row = buda.BundleRow()
@@ -322,6 +331,8 @@ class BudaSession:
                 self.bdb.add_bundle_busterm(row.id, bt, "entry")
             for bt in hb.exit_busterm_ids:
                 self.bdb.add_bundle_busterm(row.id, bt, "exit")
+        for _bid, _k in knob_memo.items():
+            self.bdb.set_bundle_gen_knobs(_bid, _k)
         return len(self.bundles)
 
     @contextlib.contextmanager
@@ -371,7 +382,34 @@ class BudaSession:
         # were never persisted; without this the topology.bundle_id FK would reject
         # every insert.) Re-persisting is idempotent and keeps the two in sync.
         self._persist_bundles(self._bundler_strategy)
-        self.bdb.clear_topologies()
+        # v15 (Phase E4): the wipe spares source='user' rows, so a hand-
+        # committed candidate from an EARLIER session (not in this pool)
+        # cannot be deleted by a bulk re-persist.  Kept rows are then moved
+        # out of the fresh 0..n-1 index block (or dropped if the pool itself
+        # carries the same uid — the pool write recreates them).
+        self.bdb.clear_topologies(keep_user=True)
+        for w in self.bundles:
+            bid = str(w.input.original_bundle.id)
+            kept = self.bdb.topologies(bid)
+            if not kept:
+                continue
+            pool_uids = {buda.topo_uid(t) for t in w.input.candidates}
+            n_new = len(w.input.candidates)
+            next_ci = n_new
+            for tr in kept:
+                if tr.topo_uid in pool_uids:
+                    self.bdb.delete_topology(bid, tr.cand_index)
+                    continue
+                ci = tr.cand_index
+                if ci < n_new:
+                    while any(k.cand_index == next_ci for k in kept):
+                        next_ci += 1
+                    self.bdb.renumber_topology(bid, ci, next_ci)
+                    ci = next_ci
+                    next_ci += 1
+                print(f"  [BDB] kept user candidate {tr.topo_uid} of bundle "
+                      f"{bid} (not in this session's pool) at index "
+                      f"{ci + 1} — load_pipeline restores it.")
         n_cands = 0
         # clear_topologies wiped the 'tb:' busterm rows, so this pass rewrites
         # them; dedup so each block's (identical, JSON-rects-heavy) busterm row
@@ -397,6 +435,12 @@ class BudaSession:
                 # Stable content identity (v14, Phase E1): recomputable from the
                 # persisted rows alone, so uid(generated) == uid(reloaded).
                 tr.topo_uid = buda.topo_uid(topo)
+                # Provenance (v15, Phase E4): protects user candidates from the
+                # keep_user wipe above; dogleg = the adopted split slot.
+                tr.source = ("user" if topo.type == "USER" else
+                             "dogleg" if self._dogleg_slot.get(
+                                 w.input.original_bundle.id) == ci else
+                             "generated")
                 self.bdb.add_topology(tr)
                 for si, seg in enumerate(topo.segments):
                     sr = buda.TopoSegRow()
@@ -1407,8 +1451,9 @@ class BudaSession:
             src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
             dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
             old_pin_uid = self._pinned_uid(w)
+            kept_user = self._user_candidates(w)
             w.input.candidates = tg.generate_candidates(src_local, dsts_local)
-            self._reset_plan_for_regen(w, old_pin_uid)
+            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
             label = f"{src_local}→{dsts_local[0]}"
             n = len(w.input.candidates)
             if n == 0:
@@ -1448,8 +1493,9 @@ class BudaSession:
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
                                      use_multi_trunk)
             old_pin_uid = self._pinned_uid(w)
+            kept_user = self._user_candidates(w)
             w.input.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
-            self._reset_plan_for_regen(w, old_pin_uid)
+            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
             label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
                      if len(b.rcv_spec_paths) == 1
                      else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
@@ -1480,8 +1526,9 @@ class BudaSession:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
             old_pin_uid = self._pinned_uid(w)
+            kept_user = self._user_candidates(w)
             w.input.candidates = tg.generate_candidates(src, dsts)
-            self._reset_plan_for_regen(w, old_pin_uid)
+            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
             label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
             n = len(w.input.candidates)
             if n == 0:
@@ -2419,6 +2466,48 @@ class BudaSession:
             return None
         return self._edit_w, self._edit_topo
 
+    def _apply_gen_knobs(self, w, src, dsts, old_pin_uid=None):
+        """Honor the bundle's persisted generation-knob memo (v15): re-run the
+        knob-configured generator additively after a bulk regeneration, so a
+        pool accreted with generate_more_topologies does not silently revert.
+        Re-attempts the uid pin reattach among the appended extras."""
+        if self.bdb is None:
+            return
+        knobs = self.bdb.bundle_gen_knobs(str(w.input.original_bundle.id))
+        if not knobs:
+            return
+        ks = set(knobs.split())
+        tg = self._make_topo_gen(self.fp, "center_mode" in ks,
+                                 "double_detour" in ks, "multi_trunk" in ks)
+        pool = list(w.input.candidates)
+        seen = {buda.topo_uid(c) for c in pool}
+        added = 0
+        for c in tg.generate_candidates(src, dsts):
+            uid = buda.topo_uid(c)
+            if uid not in seen:
+                seen.add(uid)
+                pool.append(c)
+                added += 1
+        if added:
+            w.input.candidates = pool
+            print(f"  Re-applied knob memo '{knobs}' for bundle "
+                  f"{w.input.original_bundle.id}: +{added} candidate(s).")
+            if old_pin_uid and not w.input.topology_pinned:
+                for i, c in enumerate(pool):
+                    if buda.topo_uid(c) == old_pin_uid:
+                        w.plan.selected_topology_index = i
+                        w.input.topology_pinned = True
+                        print(f"  Pin re-attached by topo_uid to candidate {i + 1}.")
+                        break
+
+    def _user_candidates(self, w):
+        """Deep copies of w's hand-committed (type USER) candidates, captured
+        BEFORE a regeneration replaces the candidate vector — the pybind list
+        elements alias the vector's storage, so the copies must be taken while
+        it is still alive (Phase E4: user candidates survive regeneration)."""
+        return [buda.offset_topology(c, 0, 0)
+                for c in w.input.candidates if c.type == "USER"]
+
     def _pinned_uid(self, w):
         """The stable content uid (buda.topo_uid) of w's pinned candidate, or
         None when unpinned/out of range.  Captured BEFORE a regeneration
@@ -2430,7 +2519,7 @@ class BudaSession:
             return buda.topo_uid(w.input.candidates[sel])
         return None
 
-    def _reset_plan_for_regen(self, w, old_pin_uid=None):
+    def _reset_plan_for_regen(self, w, old_pin_uid=None, kept_user=None):
         """Reset one wrapper to the pristine 'candidates generated, not yet planned'
         state after its candidate list was regenerated.  A prior plan's
         selected_topology_index and per-segment overrides are indexed into the OLD
@@ -2456,6 +2545,21 @@ class BudaSession:
         bid = w.input.original_bundle.id
         self._dogleg_slot.pop(bid, None)
         self._dogleg_originals.pop(bid, None)
+        # Phase E4: hand-committed candidates survive the regeneration —
+        # re-append them (uid-deduped against the fresh list) BEFORE the pin
+        # reattach below, so a pin on a user candidate re-attaches too.
+        if kept_user:
+            pool = list(w.input.candidates)
+            seen = {buda.topo_uid(c) for c in pool}
+            readded = 0
+            for c in kept_user:
+                if buda.topo_uid(c) not in seen:
+                    pool.append(c)
+                    readded += 1
+            if readded:
+                w.input.candidates = pool
+                print(f"  Kept {readded} user candidate(s) of bundle {bid} "
+                      f"across the regeneration.")
         if old_pin_uid:
             for i, c in enumerate(w.input.candidates):
                 if buda.topo_uid(c) == old_pin_uid:
@@ -4330,8 +4434,9 @@ class BudaSession:
                     src, dsts = ep
                     self._validate_endpoint_blocks(net_name, src, dsts)
                     old_pin_uid = self._pinned_uid(w)
+                    kept_user = self._user_candidates(w)
                     w.input.candidates = topo_gen.generate_candidates(src, dsts)
-                    self._reset_plan_for_regen(w, old_pin_uid)
+                    self._reset_plan_for_regen(w, old_pin_uid, kept_user)
                     label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                     print(f"Generated {len(w.input.candidates)} topologies for bundle "
                           f"{w.input.original_bundle.id} ({label})")
@@ -4399,8 +4504,24 @@ class BudaSession:
                     found = True
             if not found:
                 print(f"Warning: Could not find bundle matching hint {hint}")
-            elif self._persist_topologies():
-                print("[BDB] re-persisted candidate topologies to the open BDB.")
+            else:
+                # Per-bundle knob memo (v15): a resumed bulk generate_topologies
+                # re-applies these knobs additively, so the accreted pool does
+                # not silently revert (Phase E2b).
+                knobs = " ".join(k for k, on in (
+                    ("center_mode", use_center),
+                    ("double_detour", use_double_detour),
+                    ("multi_trunk", use_multi_trunk)) if on)
+                if self.bdb is not None and knobs:
+                    for w in self.bundles:
+                        nn = w.input.original_bundle.get_net_names()[0]
+                        if nn.startswith(hint):
+                            bid = str(w.input.original_bundle.id)
+                            prev = set(self.bdb.bundle_gen_knobs(bid).split())
+                            self.bdb.set_bundle_gen_knobs(
+                                bid, " ".join(sorted(prev | set(knobs.split()))))
+                if self._persist_topologies():
+                    print("[BDB] re-persisted candidate topologies to the open BDB.")
 
         elif cmd == "edit_topology":
             # Usage: edit_topology <bundle_id> [<cand#>|new]
@@ -4612,8 +4733,10 @@ class BudaSession:
                 src, dsts = ep
                 self._validate_endpoint_blocks(net_name, src, dsts)
                 old_pin_uid = self._pinned_uid(w)
+                kept_user = self._user_candidates(w)
                 w.input.candidates = topo_gen.generate_candidates(src, dsts)
-                self._reset_plan_for_regen(w, old_pin_uid)
+                self._reset_plan_for_regen(w, old_pin_uid, kept_user)
+                self._apply_gen_knobs(w, src, dsts, old_pin_uid)
                 label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                 print(f"Generated {len(w.input.candidates)} topologies for bundle "
                       f"{w.input.original_bundle.id} ({label}) {self._bundle_nets_suffix(w)}")
