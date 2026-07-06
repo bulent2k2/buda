@@ -163,3 +163,51 @@ forced on — so the comparison actually isolates the *default*.
 where the flag is the right mechanism; default-on would add candidate-count /
 persist cost to every design for no corpus gain, with residual loss risk on some
 datapath shapes. Revisit only if a datapath becomes a common default workload.
+
+## Incremental re-analysis (topo/conn unification Phase D) — DEFERRED BY MEASUREMENT
+
+**Context.**  The topo/conn unification
+([`topo_conn_unification.md`](topo_conn_unification.md), all other phases
+implemented) cached the six-pass derived analysis on the `Topology` itself,
+validated by content fingerprint.  A mutation therefore costs exactly ONE full
+recompute of ONE candidate on its next build — measured at ~10µs for small
+topologies — and interactive editing (the TopoEdit ops) performs one mutation
+at a time, so the planned dirty-set machinery would optimize a cost that is
+already negligible.
+
+**Wish.**  Scoped re-analysis on top of the cache: mutators report a dirty set
+of segment indices; the per-neighborhood passes (`derive_conn_segs`,
+`derive_net_pull`, `derive_along_flex`) re-run on the dirty closure and the
+fixpoint slide passes on the dirty segments' connected component, gated by a
+fuzz property test (incremental == full rebuild, field-for-field) and shipped
+behind a flag.  Full design: `topo_conn_unification.md` §7.
+
+**Trigger.**  Revisit only if TopoEdit profiling on very large candidates
+(hundreds of segments) shows the recompute in an interactive loop; the Phase 0
+byte-identity harness (`tools/topo_snapshot.py` goldens +
+`test_topo_analysis_golden.py`) is the acceptance gate.
+
+## Unify the 2-pin vs n-pin filter ordering
+
+**Context.**  The two generation paths order their post-emission stages
+differently (mapped in [`topo_conn_unification.md`](topo_conn_unification.md)
+§1 and called out as a deliberate non-goal in its §12): `generate_2pin` culls
+keepout-blocked candidates POST-emission (after sorting, before
+`filter_pinched`), while `generate_npin` pre-filters trunk LOCI and has no
+post-emission cull at all — MST/BITRUNK segments see keepouts only via the
+per-edge `choose_edge_h_first`.  Annotation timing is split the same way
+(batch `annotate_endpoints` for trunk/L/Z/U vs self-seeding inside the MST/
+hybrid/BITRUNK builders), and `connected_block_names` fills at different
+points relative to `filter_pinched` — the ordering accident the PR #194
+review traced through the abutment fallback.
+
+**Wish.**  One shared post-emission pipeline (emit → annotate → keepout cull →
+pinch → coverage) both paths flow through, so a filter fix or a new gate lands
+once instead of per-path.
+
+**Cost/risk.**  This CHANGES ROUTING BYTES (candidates culled at different
+stages survive differently), so unlike the unification's phases it needs its
+own deliberate before/after review — the corpus diff is mechanical now:
+re-baseline `tools/topo_snapshot.py` + `tools/wl_corpus.py` and review the
+golden diff bundle by bundle.
+
