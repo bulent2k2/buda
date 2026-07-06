@@ -26,6 +26,14 @@ namespace buda {
 
 class Floorplan;   // defined below; needed by free-function decls before it
 
+// Project-level floor (epsilon) on the along-length of a STANDALONE abutment
+// crossing segment — the single-segment ABUT_H/ABUT_V candidate that rescues two
+// full-edge-abutting blocks.  Its length is minimized to the min-stub-length
+// setting to save routing channel, but never zero: a zero-length wire has no
+// conn-segs to pin it, carries no bus, and cannot be placed by NUTS.  See
+// TopologyGenerator::generate_2pin's abutment fallback.
+inline constexpr int kAbutmentSpanEpsilon = 2;
+
 // How a multi-rect block handles a trunk that falls in the gap between its rects.
 enum class TegMode {
     THRU,  // default: connect only the nearest rect; block's internal routing joins sides

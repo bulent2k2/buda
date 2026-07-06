@@ -35,6 +35,10 @@ track axis = y); a shared HORIZONTAL edge by a VERTICAL wire (`ABUT_V`, track ax
 pass-through tighten once connected_block_names is set and strands every bit in
 DetailedNUTS — the whole point of the crossing realization is a non-zero window.
 
+The crossing wire is centred on the shared edge and only min-stub-length long (not
+the full block width — coverage is by overlap, so a short straddling wire covers
+both blocks), floored at a project-level epsilon so it is never zero-length.
+
 Point-touch corners and fully-coincident blocks are DEGENERATE placements (no
 shared edge, no routable channel) and deliberately stay candidate-free.
 
@@ -78,8 +82,12 @@ def test_vertical_edge_abutment_crossed_by_horizontal_wire():
     assert c.type.startswith("ABUT_H"), f"expected a horizontal crossing wire, got {c.type}"
     assert len(c.segments) == 1
     seg = c.segments[0]
+    lo, hi = sorted((seg.start.x, seg.end.x))
     assert seg.start.y == seg.end.y, "crossing wire must be horizontal (constant y)"
-    assert (seg.start.x, seg.end.x) == (0, 200), "wire must span both blocks (tap both far faces)"
+    # Minimized: the wire straddles the shared edge x=100 but does NOT span the
+    # full 200-wide block pair — it is only the min-stub length (saves channel).
+    assert lo < 100 < hi, f"wire must straddle the shared edge x=100, got [{lo},{hi}]"
+    assert (hi - lo) < 200, f"wire must be minimized, not full-width, got len {hi - lo}"
     assert "BUSTERM_OPEN" not in _violations(c, fp), _violations(c, fp)
     # The crossing wire has a real perpendicular slide window (not zero-slide).
     ct = buda.ConnTopology()
@@ -97,8 +105,10 @@ def test_horizontal_edge_abutment_crossed_by_vertical_wire():
     assert c.type.startswith("ABUT_V"), f"expected a vertical crossing wire, got {c.type}"
     assert len(c.segments) == 1
     seg = c.segments[0]
+    lo, hi = sorted((seg.start.y, seg.end.y))
     assert seg.start.x == seg.end.x, "crossing wire must be vertical (constant x)"
-    assert (seg.start.y, seg.end.y) == (0, 200), "wire must span both blocks (tap both far faces)"
+    assert lo < 100 < hi, f"wire must straddle the shared edge y=100, got [{lo},{hi}]"
+    assert (hi - lo) < 200, f"wire must be minimized, not full-width, got len {hi - lo}"
     assert "BUSTERM_OPEN" not in _violations(c, fp), _violations(c, fp)
     ct = buda.ConnTopology()
     ct.build(c, fp)
@@ -123,6 +133,37 @@ def test_abutting_bus_routes_to_completion():
     assert s.nuts_result.num_violations == 0, "abutment bus left a NUTS interval violation"
     assert s.detailed_result.num_unplaced == 0, \
         f"{s.detailed_result.num_unplaced}/8 bits unplaced — abutment bus did not route"
+
+
+def _abut_candidate_with_min_stub(min_stub):
+    """Generate the abutment candidate for A|B (shared vertical edge x=100) with a
+    given global min-stub-length, via the CLI so set_min_stub_length is exercised."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  f"set_min_stub_length {min_stub}",
+                  "add_block A 0 0 100 100", "add_block B 100 0 200 100",
+                  "add_bus n[8] A.p B.p", "run_bundler", "generate_topologies"):
+            s.do_command(c)
+    seg = s.bundles[0].input.candidates[0].segments[0]
+    return abs(seg.end.x - seg.start.x)
+
+
+def test_abutment_wire_length_tracks_min_stub_setting():
+    """The crossing wire's along-length is the min-stub-length setting — so the bus
+    occupies the minimum channel rather than the full block width."""
+    assert _abut_candidate_with_min_stub(40) == 40
+    assert _abut_candidate_with_min_stub(10) == 10
+
+
+def test_abutment_wire_never_zero_length_epsilon_floor():
+    """min-stub 0 must NOT produce a zero-length wire (no conn-segs to pin it, and
+    NUTS cannot place a point) — it is floored at the project-level epsilon."""
+    length = _abut_candidate_with_min_stub(0)
+    assert length >= 2, f"expected epsilon-floored length, got {length}"
+    assert length < 100, "epsilon floor must still be minimal, not a block width"
 
 
 def test_abutment_fallback_fires_after_keepout_cull():
