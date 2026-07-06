@@ -4239,6 +4239,15 @@ class BudaSession:
                     label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
                     print(f"Generated {len(w.input.candidates)} topologies for bundle "
                           f"{w.input.original_bundle.id} ({label})")
+                    if not w.input.candidates:
+                        # Match the bulk generate_topologies diagnostic — this
+                        # per-bundle command is documented for debugging exactly
+                        # these zero-candidate cases, so it should be as loud.
+                        print(f"Warning: bundle {w.input.original_bundle.id} ({label}) "
+                              f"produced NO candidate topology — this bus will be "
+                              f"unrouted. Check the placement of blocks {src} and "
+                              f"{', '.join(dsts)} "
+                              f"(coincident / corner-touch / one contained in the other?).")
                     found = True
             if not found: print(f"Warning: Could not find bundle matching hint {hint}")
             elif self._persist_topologies():
@@ -4286,7 +4295,7 @@ class BudaSession:
                     print(f"Warning: bundle {w.input.original_bundle.id} ({label}) "
                           f"produced NO candidate topology — this bus will be "
                           f"unrouted. Check the placement of blocks {src} and "
-                          f"{dsts if len(dsts) > 1 else dsts[0]} "
+                          f"{', '.join(dsts)} "
                           f"(coincident / corner-touch / one contained in the other?).")
             # Restore the sidecar baseline (pins + per-segment layer overrides) onto
             # the freshly generated candidates, so the live state matches the GUI

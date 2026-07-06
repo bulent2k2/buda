@@ -810,16 +810,23 @@ Source and destination block names are derived automatically from the netlist
 - Bundles with no registered endpoint info emit a warning and are skipped.
 
 **Coverage gate.** Every generation path ends in an automatic coverage filter:
-each candidate is verified with `check_topo`, and a candidate that leaves one of
-the bundle's blocks with **no busterm tap and no pass-through segment**
-(`BUSTERM_OPEN` — a silent open the planner cannot detect) is **dropped**, with a
-one-line `[TopoGen] dropped …` note naming the first missing block. Only
-`BUSTERM_OPEN` drops a candidate — `FEEDTHRU_RELAY`-flagged candidates (the
-legacy multi-rect fallback) and other diagnostics are kept and stay visible to
-`check_connectivity` / `dump_topologies --problems`. If **every** candidate is
-uncovered, the list is kept unchanged with a `[TopoGen] WARNING` so the bundle
-is never stranded (the planner's escalation ladder still commits one). This
-keeps `run_planner` focused on capacity/congestion: it never sees an uncovered
+each candidate is verified with `check_topo`, and two silent-open risks the
+planner cannot detect are **dropped** (with a one-line `[TopoGen] dropped …`
+note):
+- `BUSTERM_OPEN` — a candidate that leaves one of the bundle's blocks with **no
+  busterm tap and no pass-through segment** (an uncovered block). **Always
+  dropped.**
+- `FEEDTHRU_RELAY` — the legacy multi-rect / rootless trunk+MST fallback whose
+  incident wires do not physically touch (a silent feedthru relay no downstream
+  stage catches). **Dropped too, but only when a clean candidate — neither open
+  nor relay — survives**, so a bundle whose only options are relays is never
+  stranded (those stay visible to `check_connectivity` / `dump_topologies
+  --problems`).
+
+If **every** candidate is uncovered — or a bundle's only options are relays —
+the list is kept unchanged with a `[TopoGen] WARNING` so the bundle is never
+stranded (the planner's escalation ladder still commits one). This keeps
+`run_planner` focused on capacity/congestion: it never sees an uncovered
 candidate.
 
 **Example:**

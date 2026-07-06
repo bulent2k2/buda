@@ -2936,7 +2936,9 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
     for (size_t i = 0; i < candidates.size(); ++i) {
         ConnTopology ct;
         ct.build(candidates[i], floorplan_);
+        bool any_viol = false;
         for (const auto& v : check_topo(ct, candidates[i], floorplan_, -1).violations) {
+            any_viol = true;
             if (v.kind == ViolationKind::BUSTERM_OPEN) {
                 if (!is_open[i] && first_type.empty()) {
                     first_block = v.block_name;
@@ -2947,7 +2949,10 @@ void TopologyGenerator::filter_uncovered(std::vector<Topology>& candidates) cons
                 is_relay[i] = 1;
             }
         }
-        if (!is_open[i] && !is_relay[i]) ++n_clean;
+        // "Clean" = NO violation of any kind — a candidate carrying only
+        // SEG_OPEN / BUSTERM_FACE (differently broken) must not count as the
+        // buildable alternative that justifies dropping every relay.
+        if (!any_viol) ++n_clean;
     }
     // Relays are only droppable when a buildable alternative remains.
     const bool drop_relays = (n_clean > 0);
@@ -3087,29 +3092,6 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     if (allow_double_detour_)
         add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
 
-    // Abutment fallback: two blocks that share a FULL edge have coinciding facing
-    // faces, so the direct I-shape collapses to zero length (src face == dst face)
-    // and every L/Z/U stub is sub-min-length — leaving NO candidate and a silently
-    // unrouted bus (common for adjacent macros).  Emit one segment running ALONG
-    // the shared edge over the face overlap: it lies on both blocks' facing faces,
-    // so both are covered (pass-through) — a valid single-segment connection.
-    // Detected on orig_bbox (physical touch), independent of corner margins.
-    // (Point-touch corners and fully-coincident blocks stay uncovered — those are
-    // degenerate placements, not routable buses.)
-    if (use_busterm_ && candidates.empty()) {
-        int xo_lo = std::max(s_orig.x1, d_orig.x1), xo_hi = std::min(s_orig.x2, d_orig.x2);
-        int yo_lo = std::max(s_orig.y1, d_orig.y1), yo_hi = std::min(s_orig.y2, d_orig.y2);
-        if (xo_lo < xo_hi && yo_lo == yo_hi) {          // share a horizontal edge
-            Topology t; t.type = "I_H@y" + std::to_string(yo_lo);
-            t.segments.push_back(make_seg(xo_lo, yo_lo, xo_hi, yo_lo, h_layer_));
-            candidates.push_back(std::move(t));
-        } else if (yo_lo < yo_hi && xo_lo == xo_hi) {   // share a vertical edge
-            Topology t; t.type = "I_V@x" + std::to_string(xo_lo);
-            t.segments.push_back(make_seg(xo_lo, yo_lo, xo_lo, yo_hi, v_layer_));
-            candidates.push_back(std::move(t));
-        }
-    }
-
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
     // One-time seg-to-seg annotation (topo-truth Phase 4) — see generate_npin.
     for (auto& t : candidates) annotate_seg_conns(t);
@@ -3141,6 +3123,49 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     for (auto& t : candidates)
         if (t.connected_block_names.empty())
             t.connected_block_names = {src_name, dst_name};
+
+    // Abutment fallback: two blocks sharing a FULL edge have coinciding facing
+    // faces, so the direct I collapses to zero length and every L/Z/U stub is
+    // sub-min-length (and any that survive can be culled by keepouts above),
+    // leaving NO candidate and a silently unrouted bus (common for adjacent
+    // macros).  When nothing else survives, realize the shared edge with
+    // shared_edge_segment — a wire CROSSING the edge at the overlap centre (the
+    // same routable form the MST edge realizers use): its NUTS slide window spans
+    // the full face overlap, so the bus actually places.  An ALONG-edge wire (an
+    // earlier attempt) is clamped to ZERO slide by the pass-through tighten once
+    // connected_block_names is set, and strands every bit in DetailedNUTS — see
+    // the PR #194 review.  Evaluated AFTER the keepout cull + filter_pinched so it
+    // also rescues abutments whose only other candidates those filters removed;
+    // the fallback itself is kept only when genuinely routable (not fully keepout-
+    // blocked, not pinched).  Detected on orig_bbox (physical touch); corner-touch
+    // and coincident blocks share no edge, so shared_edge_segment returns false
+    // and the list stays empty (the zero-candidate warning then fires).
+    if (use_busterm_ && candidates.empty()) {
+        Segment es;
+        if (shared_edge_segment(s_orig, d_orig, h_layer_, v_layer_, es)) {
+            const bool horiz = (es.start.y == es.end.y);
+            Topology t;
+            t.type = horiz ? ("ABUT_H@y" + std::to_string(es.start.y))
+                           : ("ABUT_V@x" + std::to_string(es.start.x));
+            t.segments.push_back(es);
+            annotate_endpoints(t, {src_bt, dst_bt});
+            annotate_seg_conns(t);
+            t.connected_block_names = {src_name, dst_name};
+            const auto& kos = floorplan_.get_keepout_zones();
+            const std::vector<int>& layers = horiz ? all_h_layers_ : all_v_layers_;
+            bool blocked = !kos.empty() &&
+                           all_layers_blocked_by_keepouts(es, layers, kos);
+            bool pinched = false;
+            if (!blocked) {
+                ConnTopology ct;
+                ct.build(t, floorplan_);
+                for (const auto& cs : ct.segs())
+                    if (cs.perp_lo == cs.perp_hi) { pinched = true; break; }
+            }
+            if (!blocked && !pinched)
+                candidates.push_back(std::move(t));
+        }
+    }
     return candidates;
 }
 
