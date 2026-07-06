@@ -155,10 +155,16 @@ uint64_t rev_ = 0;           // bumped by every mutator
   `annotate_endpoints`, `annotate_seg_conns`, `annotate_topology`,
   `complete_relay_junctions`, `flip_mst_edge`, `offset_topology` (fresh copy ⇒
   fresh rev), NUTS `apply_dogleg` (nuts.cpp:2139 already re-annotates — the
-  bump rides the same call), and the **pybind setters** for
-  `segments`/`seg_busterms`/`seg_conns` (bind_routing.cpp:208-219). The setter
-  bump closes today's silent-stale-annotation hazard: a Python field assignment
-  invalidates the analysis instead of silently serving stale slides.
+  bump rides the same call), and the **pybind setters** for *every `Topology`
+  field the analysis reads* — not just `segments`/`seg_busterms`/`seg_conns`
+  but also `connected_block_names` (consumed by `tighten_passthrough_ranges`,
+  conn_topology.cpp:397/:411) and, defensively, the remaining readwrite fields
+  (`bridge_segments`, `feedthru_blocks`) so a future analysis pass reading them
+  can never be served a stale cache (bind_routing.cpp:208-219). The rule is
+  "any setter bumps", enforced by a unit test that mutates each bound field and
+  asserts invalidation. The setter bump closes today's silent-stale-annotation
+  hazard: a Python field assignment invalidates the analysis instead of
+  silently serving stale slides.
 - `Floorplan` gets the same one-line `rev_` bump in its mutators (blocks,
   keepouts, margins, min-stub, feedthru, detour channel).
 - `ConnTopology::build` first checks the cache: hit ⇒ share `segs`; miss ⇒ run
@@ -218,12 +224,19 @@ dependency order; each is usable on its own.
 Today pins die on regeneration because identity is a list index:
 `_reset_plan_for_regen` (buda_cli.py:2352) nukes pin/plan state, and sidecars
 fall back to a warned `topo_index_hint` (:1063). Introduce a content key — the
-type string already embeds coordinates; add a short hash over
-`(segments, seg_busterms)` — carried in the BDB `topology` table and the
-sidecar. Pins, per-segment layer overrides, and dogleg bookkeeping re-attach by
-uid after any regeneration; the index becomes display-only. While touching that
-schema, also persist `Segment.edge_id` (the documented round-trip gap,
-topology.h:66-71), so a reloaded candidate keeps per-edge flip identity.
+type string already embeds coordinates; add a short hash over **all
+load-bearing persisted topology state**: `segments` (coords + layer_hint +
+is_jog + edge_id), `seg_busterms`, `seg_conns` (the authoritative junction
+oracle — two candidates can share geometry/taps but differ in routed
+connectivity), `bridge_segments` (real routed metal, counted in wirelength,
+topology.cpp:797-803), `feedthru_blocks`, and `connected_block_names` — carried
+in the BDB `topology` table and the sidecar. Anything less risks a uid
+collision where `generate_more_topologies` dedup drops a distinct candidate or
+pins re-attach to the wrong topology. Pins, per-segment layer overrides, and
+dogleg bookkeeping re-attach by uid after any regeneration; the index becomes
+display-only. While touching that schema, also persist `Segment.edge_id` (the
+documented round-trip gap, topology.h:66-71), so a reloaded candidate keeps
+per-edge flip identity.
 
 ### E2 — additive generation (`generate_more_topologies <hint> [knobs…]`)
 
