@@ -20,7 +20,7 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 ## Useful Docs
 - [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
 - [BUDA CLI Reference](docs/BUDA_CLI.md) — `buda` command-line invocation and flags (`--no-viz`, `--verbose-conn`, `--ipc-verbose`).
-- [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation.
+- [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation (index + pipeline overview; per-stage command pages live under `docs/script_reference/`).
 - [BDB Reference](docs/BDB_REFERENCE.md) — Physical design database: schema, `.buda` commands, Python API.
 - [BDB Test-Data Management](docs/internal/bdb_test_data.md) — Diffable `*.bdb.sql` fixtures, the copy-to-temp `bdb_input` test fixture, and the write-back/OA versioning roadmap.
 - [Floorplanner User Guide](docs/FLOORPLANNER_USER_GUIDE.md) / [Reference](docs/FLOORPLANNER_REFERENCE_GUIDE.md) — Interactive placement GUI and engine API.

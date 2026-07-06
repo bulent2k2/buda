@@ -130,6 +130,27 @@ You can prohibit routing in specific rectangular regions for one or more layers:
 *   **Detailed Routing**: `run_detailed_nuts` will skip any tracks that pass through a keepout zone for the assigned layer.
 *   **Visualization**: Keepout zones appear as red hatched rectangles in the visualizer.
 
+### Hand-Editing a Topology
+When none of the generated candidates is quite what you want, you can draw your
+own route and drop it into the pool — every edit is checked immediately, so you
+cannot silently break connectivity:
+
+```python
+edit_topology 1 new        # open an empty working topology for bundle 1
+edit_add_trunk V 450       # vertical trunk on the Hanan column x=450, full span
+edit_add_stub CPU 0        # stub block CPU to segment 0
+edit_add_stub MEM 0
+edit_commit pin            # add it as a USER candidate and pin it
+run_planner 5              # the planner honors your pin; run_nuts routes it
+```
+
+Each command prints a verdict (opens, pinches, disconnected pieces). The same
+editing works interactively in the topology explorer — press `e` on a candidate
+(see [Key Bindings → TopoEdit mode](KEY_BINDINGS.md#topoedit-mode-expert-hand-editing)).
+Hand-committed candidates are protected: they survive regeneration and
+re-persist, and your pin follows them by content identity. Full command
+documentation: [Script Reference → Topology generator](script_reference/topologies.md).
+
 ---
 
 ## 6. Advanced: Hierarchical BDB / HBundle Flow
