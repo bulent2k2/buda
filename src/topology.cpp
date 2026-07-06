@@ -198,6 +198,7 @@ void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y
     int ny1 = std::min(y1, y2);
     int ny2 = std::max(y1, y2);
     blocks_[name] = Rect{nx1, ny1, nx2, ny2};
+    ++rev_;
 }
 void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>& rects,
                                  TegMode mode) {
@@ -216,9 +217,11 @@ void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>
     blocks_[name]      = u;
     block_rects_[name] = norm_rects;
     teg_modes_[name]   = mode;
+    ++rev_;
 }
 void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
     teg_modes_[name] = mode;
+    ++rev_;
 }
 TegMode Floorplan::get_block_teg_mode(const std::string& name) const {
     auto it = teg_modes_.find(name);
@@ -230,9 +233,11 @@ std::vector<Rect> Floorplan::get_block_rects(const std::string& name) const {
 }
 void Floorplan::set_block_corner_margin(const std::string& name, int dx, int dy) {
     corner_margins_[name] = BlockCornerMargin{dx, dy};
+    ++rev_;
 }
 void Floorplan::set_global_corner_margin(int dx, int dy) {
     global_corner_margin_ = BlockCornerMargin{dx, dy};
+    ++rev_;
 }
 BlockCornerMargin Floorplan::get_block_corner_margin(const std::string& name) const {
     auto it = corner_margins_.find(name);
@@ -259,16 +264,19 @@ void Floorplan::set_detour_channel(const std::string& dirs, int size) {
             default: break;
         }
     }
+    ++rev_;
 }
 void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids) {
     KeepoutZone koz;
     koz.bbox = Rect{x1, y1, x2, y2};
     for (int lid : layer_ids) koz.layer_ids.insert(lid);
     keepouts_.push_back(std::move(koz));
+    ++rev_;
 }
 void Floorplan::set_container(const std::string& name, bool is_container) {
     if (is_container) containers_.insert(name);
     else              containers_.erase(name);
+    ++rev_;
 }
 bool Floorplan::is_container(const std::string& name) const {
     return containers_.count(name) > 0;

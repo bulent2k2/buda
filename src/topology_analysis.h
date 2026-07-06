@@ -16,6 +16,9 @@
 
 #pragma once
 #include "conn_topology.h"
+#include <cstdint>
+#include <memory>
+#include <utility>
 #include <vector>
 
 // ── Topology analysis passes ─────────────────────────────────────────────────
@@ -41,6 +44,42 @@
 // facade; nothing outside it needs to call these directly today.
 
 namespace buda {
+
+// ── Cached analysis (Phase B) ────────────────────────────────────────────────
+//
+// The result of the six passes, cached on the Topology itself
+// (Topology::analysis_cache_).  Validation is by CONTENT: `topo_fp` is a
+// fingerprint of every Topology field the passes read (segments, seg_busterms,
+// seg_conns, connected_block_names — plus feedthru/bridges for future passes),
+// and (fp_uid, fp_rev) names the exact Floorplan state (identity + revision;
+// all Floorplan mutation is behind methods, so its revision is airtight).
+// analyze() re-fingerprints on every call and recomputes on any mismatch —
+// a stale cache is structurally impossible no matter who mutates what, from
+// C++ or Python.  The result is immutable and shared (consumers hold a
+// shared_ptr snapshot, preserving today's "built ct survives later topology
+// mutation" semantics).
+struct TopoAnalysis {
+    std::vector<ConnSeg> segs;
+    uint64_t topo_fp = 0;
+    uint64_t fp_uid  = 0;
+    uint64_t fp_rev  = 0;
+};
+
+// The one entry point consumers need: return the cached analysis if it is
+// current, else run the six passes and cache.  ConnTopology::build is a thin
+// wrapper over this.
+std::shared_ptr<const TopoAnalysis> analyze(const Topology& topo,
+                                            const Floorplan& fp);
+
+// Content fingerprint of the analysis inputs (FNV-1a over the fields named
+// above).  Also the natural precursor of Phase E1's persisted topo_uid.
+uint64_t topology_fingerprint(const Topology& topo);
+
+// Instrumentation for the Phase B/C tests and perf smokes: cumulative
+// (computes, hits) across the process, and a reset.  Not part of the routing
+// API — a cache with different counters is still byte-identical routing.
+std::pair<uint64_t, uint64_t> analysis_cache_counters();
+void analysis_cache_reset_counters();
 
 void derive_conn_segs   (const Topology& topo, const Floorplan& fp,
                          std::vector<ConnSeg>& segs);

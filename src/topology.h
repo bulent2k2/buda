@@ -18,13 +18,17 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <optional>
 #include "bundler.h"
 namespace buda {
 
 class Floorplan;   // defined below; needed by free-function decls before it
+struct TopoAnalysis;  // topology_analysis.h — cached derived analysis (Phase B)
 
 // How a multi-rect block handles a trunk that falls in the gap between its rects.
 enum class TegMode {
@@ -151,6 +155,18 @@ struct Topology {
     // block's own lower-level router bridges the gap.  Empty unless a straddling
     // block was marked feedthru for the trunk layer (Floorplan::get_feedthru).
     std::vector<std::string> feedthru_blocks;
+
+    // ── Derived-analysis cache (Phase B, docs/internal/topo_conn_unification.md).
+    // Filled by topology_analysis.cpp's analyze(); validated by CONTENT
+    // fingerprint, not by mutation discipline — Topology is an open struct
+    // (its fields are freely assigned in C++ generators and via the pybind
+    // setters), so a rev-counter protocol would silently break on any missed
+    // bump.  analyze() instead re-fingerprints the analysis inputs on every
+    // call and recomputes on mismatch: a stale cache is structurally
+    // impossible, and no mutator anywhere needs to know this cache exists.
+    // Copies share the (immutable) analysis — correct, since a copy has the
+    // same content until mutated, at which point its fingerprint diverges.
+    mutable std::shared_ptr<const TopoAnalysis> analysis_cache_;
 };
 
 // ── Segment-index discipline helpers ────────────────────────────────────────
@@ -288,8 +304,31 @@ struct KeepoutZone {
     std::set<int> layer_ids;
 };
 
+// Floorplan identity for the analysis cache (Phase B): every Floorplan carries
+// a process-unique uid and a revision bumped by each mutator, so a cached
+// analysis can name exactly which floorplan STATE it was computed against.
+// Copy/assign takes a FRESH uid — two Floorplans that diverge after a copy
+// must never alias each other's cache entries (same-uid + same-rev would).
+struct FpUid {
+    uint64_t v;
+    FpUid() : v(next()) {}
+    FpUid(const FpUid&) : v(next()) {}
+    FpUid& operator=(const FpUid&) { v = next(); return *this; }
+private:
+    static uint64_t next() {
+        static std::atomic<uint64_t> c{0};
+        return ++c;
+    }
+};
+
 class Floorplan {
 public:
+    // Cache key: which floorplan (uid) in which state (rev).  rev is bumped by
+    // EVERY mutator below — all Floorplan state is behind methods, so unlike
+    // the open Topology struct the revision discipline is airtight here.
+    uint64_t uid() const { return uid_.v; }
+    uint64_t rev() const { return rev_; }
+
     void add_block(const std::string& name, int x1, int y1, int x2, int y2);
     void add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids);
     const std::vector<KeepoutZone>& get_keepout_zones() const { return keepouts_; }
@@ -321,9 +360,9 @@ public:
     void set_global_corner_margin(int dx, int dy);
 
     // Minimum stub length configuration (global, per-direction, per-layer).
-    void set_min_stub_length(int val) { min_stub_len_.global = val; }
-    void set_min_stub_length_dir(int dir, int val) { min_stub_len_.per_dir[dir] = val; }
-    void set_min_stub_length_layer(int layer_id, int val) { min_stub_len_.per_layer[layer_id] = val; }
+    void set_min_stub_length(int val) { min_stub_len_.global = val; ++rev_; }
+    void set_min_stub_length_dir(int dir, int val) { min_stub_len_.per_dir[dir] = val; ++rev_; }
+    void set_min_stub_length_layer(int layer_id, int val) { min_stub_len_.per_layer[layer_id] = val; ++rev_; }
 
     int get_min_stub_length(int dir, int layer_id) const {
         if (min_stub_len_.per_layer.count(layer_id)) return min_stub_len_.per_layer.at(layer_id);
@@ -332,11 +371,11 @@ public:
     }
 
     // Feedthru config (global / per-block / per-layer / per-(block,layer)).
-    void set_feedthru(bool v)                                  { feedthru_.global = v; }
-    void set_feedthru_block(const std::string& name, bool v)   { feedthru_.per_block[name] = v; }
-    void set_feedthru_layer(int layer_id, bool v)              { feedthru_.per_layer[layer_id] = v; }
+    void set_feedthru(bool v)                                  { feedthru_.global = v; ++rev_; }
+    void set_feedthru_block(const std::string& name, bool v)   { feedthru_.per_block[name] = v; ++rev_; }
+    void set_feedthru_layer(int layer_id, bool v)              { feedthru_.per_layer[layer_id] = v; ++rev_; }
     void set_feedthru_block_layer(const std::string& name, int layer_id, bool v) {
-        feedthru_.per_block_layer[{name, layer_id}] = v;
+        feedthru_.per_block_layer[{name, layer_id}] = v; ++rev_;
     }
     // Resolve feedthru for a block on a trunk layer, most-specific-first.
     bool get_feedthru(const std::string& name, int layer_id) const {
@@ -373,6 +412,8 @@ public:
         return res;
     }
 private:
+    FpUid uid_;
+    uint64_t rev_ = 0;
     std::map<std::string, Rect>          blocks_;
     std::map<std::string, std::vector<Rect>> block_rects_;  // only for multi-rect blocks
     std::set<std::string>                containers_;       // hierarchy envelopes (not leaf cells)

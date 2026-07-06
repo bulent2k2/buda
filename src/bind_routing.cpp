@@ -22,6 +22,7 @@
 #include <pybind11/stl.h>
 #include <iostream>
 #include "topology.h"
+#include "topology_analysis.h"
 #include "layering.h"
 #include "congestion_planner.h"
 #include "floorplanner.h"
@@ -247,6 +248,12 @@ void bind_routing(py::module_& m) {
     m.def("flip_mst_edge", &flip_mst_edge,
           py::arg("topo"), py::arg("edge_id"),
           py::arg("h_layer"), py::arg("v_layer"), py::arg("fp"));
+
+    // Analysis-cache instrumentation (Phase B, topo_conn_unification.md):
+    // cumulative (computes, hits) of the content-fingerprint-validated
+    // ConnTopology analysis cache, plus a reset.  Test/diagnostic only.
+    m.def("analysis_cache_counters", &analysis_cache_counters);
+    m.def("analysis_cache_reset_counters", &analysis_cache_reset_counters);
 
     // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables

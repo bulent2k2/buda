@@ -27,22 +27,24 @@ namespace buda {
 // ── ConnTopology::build ───────────────────────────────────────────────────────
 //
 // The facade over the six analysis passes (topology_analysis.h) — the frozen
-// consumer API.  Pass ORDER is part of the byte-identity contract; see
-// docs/internal/topo_conn_unification.md.
+// consumer API.  build() delegates to analyze(), which serves the cached
+// result when the topology content + floorplan state are unchanged and runs
+// the passes (in their frozen order) otherwise.  See
+// docs/internal/topo_conn_unification.md, Phases A-B.
 
 void ConnTopology::build(const Topology& topo, const Floorplan& fp) {
-    derive_conn_segs   (topo, fp, segs_);
-    derive_slide_ranges(topo, fp, segs_);
-    tighten_passthrough(topo, fp, segs_);
-    pin_relay_taps     (topo, fp, segs_);
-    derive_net_pull    (topo, fp, segs_);
-    derive_along_flex  (topo, fp, segs_);
+    a_ = analyze(topo, fp);
 
-    for (const auto& cs : segs_) {
+    for (const auto& cs : a_->segs) {
         assert(cs.along_lo <= cs.along_hi);
         assert(cs.perp_lo  <= cs.perp_hi);
         (void)cs;
     }
+}
+
+const std::vector<ConnSeg>& ConnTopology::segs() const {
+    static const std::vector<ConnSeg> kEmpty;
+    return a_ ? a_->segs : kEmpty;
 }
 
 int manhattan_nearest(const Rect& a, const Rect& b) {
@@ -96,7 +98,7 @@ std::vector<MSTEdge> compute_mst(
 std::vector<MSTEdge> ConnTopology::trunk_mst(int trunk_idx,
                                               const Floorplan& fp) const
 {
-    const ConnSeg& trunk = segs_[trunk_idx];
+    const ConnSeg& trunk = segs()[trunk_idx];
     std::set<std::string> connected;
     for (const auto& c : trunk.conns)
         if (c.kind == SegConn::BUSTERM) connected.insert(c.block_name);

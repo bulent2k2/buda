@@ -16,10 +16,12 @@
 
 #include "topology_analysis.h"
 #include <algorithm>
+#include <atomic>
 #include <climits>
 #include <cmath>
 #include <map>
 #include <set>
+#include <string>
 
 // The six derivation passes behind ConnTopology::build (see topology_analysis.h
 // for the pass order and contract).  Bodies moved verbatim from the former
@@ -27,6 +29,110 @@
 // are unchanged (byte-identity gated by test_topo_analysis_golden.py).
 
 namespace buda {
+
+// ── Content fingerprint + cached analyze() (Phase B) ─────────────────────────
+
+namespace {
+
+inline void h_bytes(uint64_t& h, const void* p, size_t n) {
+    const unsigned char* b = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < n; ++i) {          // FNV-1a 64
+        h ^= b[i];
+        h *= 1099511628211ULL;
+    }
+}
+inline void h_i64(uint64_t& h, int64_t v)      { h_bytes(h, &v, sizeof v); }
+inline void h_str(uint64_t& h, const std::string& s) {
+    h_i64(h, (int64_t)s.size());
+    h_bytes(h, s.data(), s.size());
+}
+inline void h_rect(uint64_t& h, const Rect& r) {
+    h_i64(h, r.x1); h_i64(h, r.y1); h_i64(h, r.x2); h_i64(h, r.y2);
+}
+inline void h_seg(uint64_t& h, const Segment& s) {
+    h_i64(h, s.start.x); h_i64(h, s.start.y);
+    h_i64(h, s.end.x);   h_i64(h, s.end.y);
+    h_i64(h, s.layer_hint); h_i64(h, s.is_jog); h_i64(h, s.edge_id);
+}
+inline void h_busterm(uint64_t& h, const Busterm& bt) {
+    h_str(h, bt.block_name);
+    h_rect(h, bt.bbox);
+    h_rect(h, bt.orig_bbox);
+    h_i64(h, (int64_t)bt.rects.size());
+    for (const Rect& r : bt.rects) h_rect(h, r);
+    h_i64(h, (int64_t)bt.teg_mode);
+}
+
+std::atomic<uint64_t> g_computes{0}, g_hits{0};
+
+} // namespace
+
+uint64_t topology_fingerprint(const Topology& topo) {
+    uint64_t h = 1469598103934665603ULL;      // FNV offset basis
+    h_i64(h, (int64_t)topo.segments.size());
+    for (const Segment& s : topo.segments) h_seg(h, s);
+    // std::map iteration is key-ordered — deterministic.
+    h_i64(h, (int64_t)topo.seg_busterms.size());
+    for (const auto& [si, eps] : topo.seg_busterms) {
+        h_i64(h, si);
+        for (const auto* opt : {&eps.first, &eps.second}) {
+            h_i64(h, opt->has_value());
+            if (opt->has_value()) h_busterm(h, **opt);
+        }
+    }
+    h_i64(h, (int64_t)topo.seg_conns.size());
+    for (const auto& [key, partners] : topo.seg_conns) {
+        h_i64(h, key.first); h_i64(h, key.second);
+        h_i64(h, (int64_t)partners.size());
+        for (int p : partners) h_i64(h, p);
+    }
+    h_i64(h, (int64_t)topo.connected_block_names.size());
+    for (const auto& n : topo.connected_block_names) h_str(h, n);
+    // Not read by today's passes, but part of the topology's routed content;
+    // hashing them is trivial and future-proofs a pass that starts reading
+    // them (a stale cache must be impossible by construction, not by audit).
+    h_i64(h, (int64_t)topo.feedthru_blocks.size());
+    for (const auto& n : topo.feedthru_blocks) h_str(h, n);
+    h_i64(h, (int64_t)topo.bridge_segments.size());
+    for (const auto& [name, seg] : topo.bridge_segments) {
+        h_str(h, name);
+        h_seg(h, seg);
+    }
+    return h;
+}
+
+std::shared_ptr<const TopoAnalysis> analyze(const Topology& topo,
+                                            const Floorplan& fp) {
+    const uint64_t tfp = topology_fingerprint(topo);
+    if (auto c = topo.analysis_cache_;
+        c && c->topo_fp == tfp && c->fp_uid == fp.uid()
+          && c->fp_rev == fp.rev()) {
+        ++g_hits;
+        return c;
+    }
+    auto a = std::make_shared<TopoAnalysis>();
+    a->topo_fp = tfp;
+    a->fp_uid  = fp.uid();
+    a->fp_rev  = fp.rev();
+    derive_conn_segs   (topo, fp, a->segs);
+    derive_slide_ranges(topo, fp, a->segs);
+    tighten_passthrough(topo, fp, a->segs);
+    pin_relay_taps     (topo, fp, a->segs);
+    derive_net_pull    (topo, fp, a->segs);
+    derive_along_flex  (topo, fp, a->segs);
+    ++g_computes;
+    topo.analysis_cache_ = a;
+    return a;
+}
+
+std::pair<uint64_t, uint64_t> analysis_cache_counters() {
+    return {g_computes.load(), g_hits.load()};
+}
+
+void analysis_cache_reset_counters() {
+    g_computes = 0;
+    g_hits = 0;
+}
 
 // ── derive_conn_segs (geometry re-encode + connection inference) ─────────────
 //

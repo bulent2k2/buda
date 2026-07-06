@@ -16,6 +16,7 @@
 
 #pragma once
 #include "topology.h"
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -137,7 +138,7 @@ std::vector<MSTEdge> compute_mst(
 class ConnTopology {
 public:
     void build(const Topology& topo, const Floorplan& fp);
-    const std::vector<ConnSeg>& segs() const { return segs_; }
+    const std::vector<ConnSeg>& segs() const;
 
     // For the trunk segment at segs()[trunk_idx], gather all blocks in fp that
     // are NOT yet directly connected (no BUSTERM conn on that segment), then
@@ -147,9 +148,13 @@ public:
     std::vector<MSTEdge> trunk_mst(int trunk_idx, const Floorplan& fp) const;
 
 private:
-    // The derivation itself lives in topology_analysis.h — six named passes
-    // build() drives in a frozen order.  This class is the consumer facade.
-    std::vector<ConnSeg> segs_;
+    // The derivation lives in topology_analysis.h (six named passes; Phase A)
+    // and is CACHED on the Topology itself, validated by content fingerprint
+    // (Phase B) — build() is a thin wrapper over analyze().  This class is the
+    // frozen consumer facade; it holds an immutable shared snapshot, so a ct
+    // built before a topology mutation keeps serving the state it was built
+    // from, exactly as the old owned-vector did.
+    std::shared_ptr<const struct TopoAnalysis> a_;
 };
 
 } // namespace buda
