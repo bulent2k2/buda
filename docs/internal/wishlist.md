@@ -32,7 +32,9 @@ per-subsystem files so each area stays scannable.
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.
   Coverage gate (✅ resolved — superseded by the generation-time
   `filter_uncovered` gate); signal-track band capacity (Gap A part 2, ✅
-  implemented); layer-assignment "instability" (✅ resolved, not a bug).
+  implemented); layer-assignment "instability" (✅ resolved, not a bug);
+  selection basis — rank on measured routability, not the generation-time WL
+  estimate (deferred; the planner-side of the BITRUNK/datapath-tree under-selection).
 - **[wishlist-nuts.md](wishlist-nuts.md)** — Abstract & Detailed NUTS.
   Band-level repack for spread-fit overlap clusters; pull-repack test failure (✅
   resolved, PR #69).
