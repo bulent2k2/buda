@@ -1,0 +1,228 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Stage 3 — planner / selection commands.
+
+Command handlers extracted verbatim from BudaSession.do_command
+(the CLI registry split; self -> session was the only body change).
+Each handler takes (session, cmd, args, cmd_line) and is registered
+in this module's COMMANDS dict; the buda_cmds package assembles the
+full registry that buda_cli.do_command dispatches through.
+"""
+import buda
+
+
+def cmd_set_planner_param(session, cmd, args, cmd_line):
+    name_p, value_p = args[0], float(args[1])
+    # Always record in the stash: run_planner builds a fresh
+    # CongestionPlanner seeded from _planner_params, so a value set
+    # between runs must survive until the next run.
+    session._planner_params[name_p] = value_p
+    if session.planner is not None:
+        session.planner.set_planner_param(name_p, value_p)
+
+
+def cmd_run_planner(session, cmd, args, cmd_line):
+    if args and args[0] == "post_nuts":
+        # Stage 4c: post-NUTS stub layer reassignment.
+        # Syntax: post_nuts [V [short [long]]] [H [short [long]]]
+        # Bare "post_nuts" (no letter) → V with defaults (backward compat).
+        _V_DEFAULTS = (80.0, 200.0)
+        _H_DEFAULTS = (150.0, 400.0)
+        rest = args[1:]
+        # Optional leading 'top' keyword: reassign within TOP layers only
+        # (short → next-highest TOP, long → highest TOP), leaving the LOW
+        # escape layers out of the spread.
+        top_only = False
+        if rest and rest[0].lower() == "top":
+            top_only = True
+            rest = rest[1:]
+        v_thresholds = None
+        h_thresholds = None
+        i = 0
+        while i < len(rest):
+            tok = rest[i].upper()
+            if tok in ("V", "H"):
+                # Consume up to two following numeric tokens as thresholds.
+                defaults = _V_DEFAULTS if tok == "V" else _H_DEFAULTS
+                s = float(rest[i + 1]) if i + 1 < len(rest) and rest[i + 1].replace('.','',1).isdigit() else defaults[0]
+                l = float(rest[i + 2]) if i + 2 < len(rest) and rest[i + 2].replace('.','',1).isdigit() else defaults[1]
+                # Advance past any numeric tokens we consumed.
+                i += 1
+                if i < len(rest) and rest[i].replace('.','',1).isdigit():
+                    i += 1
+                    if i < len(rest) and rest[i].replace('.','',1).isdigit():
+                        i += 1
+                if tok == "V":
+                    v_thresholds = (s, l)
+                else:
+                    h_thresholds = (s, l)
+            else:
+                print(f"Warning: run_planner post_nuts — unexpected token '{rest[i]}', ignored")
+                i += 1
+        # Bare "post_nuts" with no direction letters → V with defaults.
+        if v_thresholds is None and h_thresholds is None:
+            v_thresholds = _V_DEFAULTS
+        session._run_post_nuts_planner(v_thresholds, h_thresholds, top_only=top_only)
+    elif args and args[0] == "hier":
+        # run_planner hier [N]
+        # Hierarchy-aware planning: expand cell-level bundles to per-instance
+        # absolute-coord wrappers, assign priorities, then run the flat planner.
+        if session.bdb is None:
+            print("Error: run_planner hier requires an open BDB"); return
+        iterations = session._planner_iters(args)
+        # Re-planning invalidates any adopted dogleg (and its pins).
+        session._reset_doglegs()
+        # Apply user-pinned selections to template wrappers BEFORE expansion
+        # so topology_pinned + pinned_seg_layers propagate to all instances.
+        session._apply_selections()
+        # Expand cell-level bundles → per-instance absolute-coord wrappers.
+        # Each expanded wrapper gets a unique HBundle ID.
+        expanded, session._hier_expansion_map = session._expand_hier_bundles(session.bundles)
+        # priority = -(level * 10000 + n_candidates): higher routes first.
+        # Depth-0 before depth-1; fewer candidates (less flexibility) first.
+        for w in expanded:
+            b = w.input.original_bundle
+            w.hier.priority = -(b.level * 10_000 + len(w.input.candidates))
+            w.hier.level    = b.level   # for the per-level planning summary
+        session.planner = buda.CongestionPlanner(session.fp, session.layers)
+        for pname, pval in session._planner_params.items():
+            session.planner.set_planner_param(pname, pval)
+        # Mirror NUTS inter-bus pitch so the band books reserve the
+        # spacing NUTS enforces (Gap 1).  Use set_track_pitch before
+        # run_planner to plan a non-default pitch; run_nuts warns if its
+        # pitch ends up differing from the one planned here.
+        session.planner.set_track_pitch(session._nuts_pitch)
+        session._planner_pitch = session._nuts_pitch
+        session._configure_capacity_mode(args)   # opt-in signal_tracks (Gap A part 2)
+        session.planner.build_congestion_map()
+        session._planner_iterations = iterations
+        with buda.ostream_redirect():
+            assignments = session.planner.optimize_topologies(expanded, iterations)
+        # Apply assignments.  Each expanded wrapper has a unique HBundle ID so
+        # this lookup is unambiguous even for multiple cell instances.
+        bid_to_wrapper = {w.input.original_bundle.id: w for w in expanded}
+        for asn in assignments:
+            w = bid_to_wrapper.get(asn.bundle_id)
+            if w is not None:
+                w.plan.selected_topology_index = asn.topo_index
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.plan.seg_perp = list(asn.seg_perp)
+        session.bundles = expanded
+        session._planner_is_hier = True
+        print(f"run_planner hier: {len(session.bundles)} wrappers after expansion")
+    else:
+        # Re-planning invalidates any adopted dogleg (and its pins): the
+        # planner may move neighbors, so cycles are re-detected next NUTS.
+        session._reset_doglegs()
+        session.planner = buda.CongestionPlanner(session.fp, session.layers)
+        for pname, pval in session._planner_params.items():
+            session.planner.set_planner_param(pname, pval)
+        # Mirror NUTS inter-bus pitch so the band books reserve the
+        # spacing NUTS enforces (Gap 1).  Use set_track_pitch before
+        # run_planner to plan a non-default pitch; run_nuts warns if its
+        # pitch ends up differing from the one planned here.
+        session.planner.set_track_pitch(session._nuts_pitch)
+        session._planner_pitch = session._nuts_pitch
+        session._configure_capacity_mode(args)   # opt-in signal_tracks (Gap A part 2)
+        session.planner.build_congestion_map()
+        # Apply architect-pinned selections BEFORE optimizing so the
+        # planner scores the correct topology and assigns layers for it.
+        session._apply_selections()
+        session._planner_is_hier = False
+        session._planner_iterations = session._planner_iters(args)
+        with buda.ostream_redirect():
+            assignments = session.planner.optimize_topologies(session.bundles, session._planner_iterations)
+        # Apply planner layer decisions (vector copy in C++ means we must apply here).
+        bid_to_wrapper = {w.input.original_bundle.id: w for w in session.bundles}
+        for asn in assignments:
+            w = bid_to_wrapper.get(asn.bundle_id)
+            if w is not None:
+                w.plan.selected_topology_index = asn.topo_index
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.plan.seg_perp = list(asn.seg_perp)
+    # Persist the planner's decision into the BDB: expanded per-instance
+    # bundles (hier), the selected topology, and per-segment assigned
+    # layers — for both flows.
+    session._persist_planner_output()
+
+
+def cmd_select_topology(session, cmd, args, cmd_line):
+    # Usage: select_topology <bundle_id> <topo_id>
+    if len(args) < 2:
+        print("Error: select_topology requires bundle_id and topo_id (1-based)")
+        return
+    bid = int(args[0])
+    tid = int(args[1])
+    if session._select_single_topology_internal(bid, tid):
+        session._replan_layers()
+        session._persist_topologies()   # refresh is_selected in the BDB
+
+
+def cmd_select_topologies(session, cmd, args, cmd_line):
+    # Usage: select_topologies <bundle_ids> <topo_id> [<bundle_ids> <topo_id> ...]
+    # bundle_ids can be comma-separated or ranges, e.g. "1,5-9,11"
+    if len(args) < 2 or len(args) % 2 != 0:
+        print("Error: select_topologies requires (bundle_ids, topo_id) pairs")
+        return
+    any_found = False
+    for i in range(0, len(args), 2):
+        bid_str = args[i]
+        try:
+            tid = int(args[i+1])
+        except ValueError:
+            print(f"Error: invalid topology ID '{args[i+1]}'")
+            continue
+
+        # Parse comma-separated IDs and ranges (e.g. "1,5-9,11")
+        bids = []
+        for chunk in bid_str.split(','):
+            chunk = chunk.strip()
+            if not chunk: continue
+            if '-' in chunk:
+                try:
+                    s_start, s_end = chunk.split('-', 1)
+                    b_start, b_end = int(s_start), int(s_end)
+                    if b_start <= b_end:
+                        bids.extend(range(b_start, b_end + 1))
+                    else:
+                        bids.extend(range(b_start, b_end - 1, -1))
+                except ValueError:
+                    print(f"Error: invalid range '{chunk}' in bundle ID list")
+                    continue
+            else:
+                try:
+                    bids.append(int(chunk))
+                except ValueError:
+                    print(f"Error: invalid bundle ID '{chunk}' in list")
+                    continue
+        
+        for bid in bids:
+            if session._select_single_topology_internal(bid, tid):
+                any_found = True
+    if any_found:
+        session._replan_layers()
+        session._persist_topologies()   # refresh is_selected in the BDB
+
+
+COMMANDS = {
+    "set_planner_param": cmd_set_planner_param,
+    "run_planner": cmd_run_planner,
+    "select_topology": cmd_select_topology,
+    "select_topologies": cmd_select_topologies,
+}
