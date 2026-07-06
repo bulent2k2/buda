@@ -502,6 +502,22 @@ Set the minimum stub length for a specific metal layer.
 set_min_stub_length_layer M3 10
 ```
 
+**Min stub length vs. the abutment epsilon.** The three `set_min_stub_length*`
+commands are a *design* knob — a floor on stub segment length, resolved
+most-specific-first (`layer > dir > global`), and legitimately settable to `0`
+("no stub floor here"). Two full-edge-abutting blocks are rescued by a single
+short wire *crossing* the shared edge (an `ABUT_H`/`ABUT_V` candidate); its
+length is minimized to the applicable min-stub-length so the bus takes the
+smallest channel. But that wire must never be zero-length — a zero-length segment
+carries no bit-wires and cannot be placed by NUTS — so it is floored at a fixed
+router constant, `kAbutmentSpanEpsilon` (2 layout units, `src/topology.h`):
+effective length = `max(min_stub_length, epsilon)`. The epsilon is a
+**non-degeneracy invariant, not a DRC parameter**, so it is intentionally *not*
+scriptable: when the min stub floor is non-zero it already dominates, and when it
+is `0` the epsilon is only the smallest length that still straddles the edge and
+covers both blocks. There is no design case for the two differing beyond this, so
+there is deliberately no `set_abutment_epsilon` command.
+
 ---
 
 ### `set_feedthru`
