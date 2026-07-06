@@ -337,8 +337,15 @@ candidate pool across sessions.
 > connectivity, so a span retraction that splits the tree would otherwise
 > pass).  A failed op leaves the topology untouched; undo = value snapshot
 > (uid-verified).  Gated by `test_topo_edit.py` incl. a from-scratch
-> trunk+stubs build reaching `ok()`.  REMAINING (E3b): explorer GUI wiring
-> (edit mode driving these ops) + optional `.buda` edit commands.
+> trunk+stubs build reaching `ok()`.  E3b `.buda` commands are IN
+> (`edit_topology` opens a transactional working copy — deep-copied, since
+> pybind candidate elements alias pool storage — `edit_add_trunk/add_stub/
+> set_span/connect/disconnect/remove_segment` apply with printed verdicts,
+> `edit_status`, `edit_commit [pin]` appends as a uid-deduped `USER` candidate
+> — the E4 entry point — and `edit_abort` discards; gated by
+> `test_edit_commands.py` incl. a scripted hand topology routed end-to-end
+> through planner+NUTS with zero violations).  REMAINING (E3c): explorer GUI
+> wiring (edit mode driving these same ops interactively).
 
 A small C++ API (bound to Python, driven from the topology explorer) wrapping
 each supported edit — move a segment within its slide window, move a trunk

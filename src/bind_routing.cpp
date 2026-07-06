@@ -297,6 +297,7 @@ void bind_routing(py::module_& m) {
     m.def("edit_disconnect", &edit_disconnect,
           py::arg("topo"), py::arg("fp"), py::arg("i"), py::arg("j"),
           py::arg("retract_to"));
+    m.def("edit_verdict", &edit_verdict, py::arg("topo"), py::arg("fp"));
 
     // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables

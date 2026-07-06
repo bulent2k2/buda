@@ -807,6 +807,58 @@ generate_more_topologies t0_b3 double_detour    # add UU variants
 
 ---
 
+### TopoEdit session — `edit_topology` … `edit_commit`
+
+```
+edit_topology <bundle_id> [<cand#>|new]
+edit_add_trunk <H|V> <perp_pos> [<along_lo> <along_hi>] [layer <id>]
+edit_add_stub <block> <seg#> [layer <id>]
+edit_set_span <seg#> <along_lo> <along_hi>
+edit_connect <seg_i> <seg_j>
+edit_disconnect <seg_i> <seg_j> <retract_to>
+edit_remove_segment <seg#>
+edit_status
+edit_commit [pin]
+edit_abort
+```
+
+Expert hand-editing as a **transactional session** (topo_conn_unification
+Phase E3b).  `edit_topology` opens a working **copy** of the given candidate
+(1-based; default = the selected one) — or an empty topology with `new`.  Each
+`edit_*` op mutates the copy, maintains the authoritative annotations
+(`seg_busterms` seeding, junction re-derivation), and prints a verdict:
+`check_topo` violations, zero-slide pinch, and the wire-graph component count
+(a split tree is caught even though every tap still looks fine).
+
+* `edit_add_trunk` — pick an axis and a Hanan line; without an explicit span
+  the trunk gets the **full Hanan extent** on that axis.  Layer defaults to
+  the stack's TOP layer for the direction.
+* `edit_add_stub` — drops a perpendicular stub from the block's nearest face
+  to segment `<seg#>` (0-based, as printed by `edit_status`), seeding the
+  busterm tap exactly like the generators (margin bbox, multi-rect, TEG).
+* `edit_set_span` — override a segment's along-span.  (A *slide* override is
+  per-plan state, not topology content: use the `plan.seg_slide_lo/hi`
+  NUTS hatch.)
+* `edit_connect` / `edit_disconnect` — junction editing on a perpendicular
+  pair: connect moves the nearest free endpoint to the crossing (extending
+  the partner if it falls short; a busterm-tapped endpoint is refused),
+  disconnect retracts the landing endpoint to `<retract_to>`.
+* `edit_commit` — appends the result to the bundle's pool as a `USER`
+  candidate, deduplicated by `topo_uid` (an identical topology is reported,
+  not duplicated); `pin` also selects it.  A not-clean topology commits with
+  a WARNING (visible to `check_connectivity`), mirroring generation's
+  never-strand rule.  The pool is re-persisted to the open BDB.
+
+```
+edit_topology 1 new
+edit_add_trunk V 450          # full-span column trunk at x=450
+edit_add_stub A 0
+edit_add_stub B 0
+edit_commit pin               # pin the hand-built route; then run_planner…
+```
+
+---
+
 ### `generate_topologies`
 
 ```

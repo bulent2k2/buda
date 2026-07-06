@@ -259,4 +259,8 @@ EditVerdict edit_disconnect(Topology& topo, const Floorplan& fp, int i, int j,
     return finish(topo, fp, "disconnected", i);
 }
 
+EditVerdict edit_verdict(Topology& topo, const Floorplan& fp) {
+    return finish(topo, fp, "status", -1);
+}
+
 } // namespace buda

@@ -97,4 +97,9 @@ EditVerdict edit_connect(Topology& topo, const Floorplan& fp, int i, int j);
 EditVerdict edit_disconnect(Topology& topo, const Floorplan& fp, int i, int j,
                             int retract_to);
 
+// Re-judge the topology without mutating geometry (re-derives junction
+// records, which is idempotent on agreed geometry).  For status displays and
+// pre-commit checks.
+EditVerdict edit_verdict(Topology& topo, const Floorplan& fp);
+
 } // namespace buda

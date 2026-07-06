@@ -60,6 +60,9 @@ KNOWN_COMMANDS = frozenset({
     "generate_hier_topologies", "generate_topologies",
     "generate_topologies_for_bundle", "generate_topologies_for_hbundle",
     "generate_more_topologies",
+    "edit_topology", "edit_add_trunk", "edit_add_stub",
+    "edit_remove_segment", "edit_set_span", "edit_connect",
+    "edit_disconnect", "edit_status", "edit_commit", "edit_abort",
     "import_def_lef", "import_gds", "import_verilog", "load_pipeline",
     "move_comp", "negotiate_congestion", "open_bdb", "refine_busterms",
     "report_overhead", "report_wirelength", "report_wl", "resize_cell",
@@ -199,6 +202,13 @@ class BudaSession:
         self.detailed_result = None  # DetailedNUTSResult (stage 9)
         self._dogleg_originals = {}  # bid -> pre-split selected_topology_index (restored on re-plan)
         self._dogleg_slot = {}       # bid -> appended candidate index holding the split topology
+        # TopoEdit session (Phase E3b): edit_topology opens a working COPY of a
+        # candidate (or an empty one); edit_* ops mutate it transactionally;
+        # edit_commit appends it to the bundle's pool (uid-deduped, source
+        # 'user'); edit_abort discards.  One session at a time.
+        self._edit_w = None          # BundleWrapper being edited
+        self._edit_topo = None       # the working Topology copy
+        self._edit_src = ""          # description of what was opened
         self.no_viz = False          # set by --no-viz CLI flag
         self.verbose_conn = False    # set by --verbose-conn: print every per-bit violation
         self.ipc_verbose = False     # set by --ipc-verbose: surface buda_viz/def_viz IPC chatter
@@ -2380,6 +2390,35 @@ class BudaSession:
         self._dogleg_originals = {}
         self._dogleg_slot = {}
 
+    def _edit_layers(self):
+        """Default H/V layer ids for TopoEdit ops (same resolution as
+        _make_topo_gen: the stack's TOP layers, falling back to M4/M5)."""
+        h = self.layers.get_top_layer(buda.LayerDir.HORIZONTAL)
+        v = self.layers.get_top_layer(buda.LayerDir.VERTICAL)
+        return (h if h != -1 else 4), (v if v != -1 else 5)
+
+    def _edit_report(self, v):
+        """Print one edit op's verdict (the transaction's immediate feedback)."""
+        if not v.applied:
+            print(f"  [edit] REJECTED: {v.note}")
+            return
+        kinds = {}
+        for viol in v.conn.violations:
+            k = str(viol.kind).split('.')[-1]
+            kinds[k] = kinds.get(k, 0) + 1
+        issues = ", ".join(f"{k}x{n}" for k, n in sorted(kinds.items())) or "none"
+        tag = "  << clean" if v.ok() else ""
+        seg = f" (seg {v.seg_idx})" if v.seg_idx >= 0 else ""
+        print(f"  [edit] {v.note}{seg} — violations: {issues}; "
+              f"components={v.components}; pinched={'yes' if v.pinched else 'no'}{tag}")
+
+    def _edit_session(self):
+        """The open edit session's (wrapper, topo), or None with an error."""
+        if self._edit_topo is None:
+            print("Error: no edit session — run edit_topology <bundle_id> [<cand#>|new] first")
+            return None
+        return self._edit_w, self._edit_topo
+
     def _pinned_uid(self, w):
         """The stable content uid (buda.topo_uid) of w's pinned candidate, or
         None when unpinned/out of range.  Captured BEFORE a regeneration
@@ -4361,6 +4400,189 @@ class BudaSession:
             if not found:
                 print(f"Warning: Could not find bundle matching hint {hint}")
             elif self._persist_topologies():
+                print("[BDB] re-persisted candidate topologies to the open BDB.")
+
+        elif cmd == "edit_topology":
+            # Usage: edit_topology <bundle_id> [<cand#>|new]
+            # Open a TopoEdit session (Phase E3b): a working COPY of the given
+            # candidate (1-based; default = the selected candidate, else 'new')
+            # — or an empty topology with 'new'.  Subsequent edit_* commands
+            # mutate the copy transactionally (each prints its verdict);
+            # edit_commit appends it to the bundle's pool; edit_abort discards.
+            if self._edit_topo is not None:
+                print("Error: an edit session is already open — edit_commit or edit_abort first")
+                return
+            if not args:
+                print("Error: edit_topology requires a bundle id")
+                return
+            bid = int(args[0])
+            w = next((x for x in self.bundles
+                      if x.input.original_bundle.id == bid), None)
+            if w is None:
+                print(f"Error: no bundle with id {bid}")
+                return
+            spec = args[1] if len(args) > 1 else None
+            if spec is None:
+                sel = w.plan.selected_topology_index
+                spec = str(sel + 1) if 0 <= sel < len(w.input.candidates) else "new"
+            if spec == "new":
+                topo = buda.Topology()
+                topo.type = "USER"
+                src_desc = "empty topology"
+            else:
+                ci = int(spec) - 1
+                if not (0 <= ci < len(w.input.candidates)):
+                    print(f"Error: candidate {spec} out of range (bundle has "
+                          f"{len(w.input.candidates)})")
+                    return
+                # candidates[] elements ALIAS the pool storage (pybind
+                # reference_internal — ripup's in-place flips rely on it), so
+                # the session must take an explicit deep copy: offset by (0,0)
+                # clones geometry + annotations + bridges.
+                topo = buda.offset_topology(w.input.candidates[ci], 0, 0)
+                src_desc = f"copy of candidate {ci + 1} ({topo.type})"
+            self._edit_w, self._edit_topo, self._edit_src = w, topo, src_desc
+            print(f"[edit] session opened on bundle {bid}: {src_desc} "
+                  f"({len(topo.segments)} segment(s)). "
+                  f"edit_status shows the verdict; edit_commit / edit_abort ends.")
+
+        elif cmd == "edit_add_trunk":
+            # Usage: edit_add_trunk <H|V> <perp_pos> [<along_lo> <along_hi>] [layer <id>]
+            # Pick axis + a Hanan line; default span = the full Hanan extent.
+            if self._edit_session() is None: return
+            pos = list(args)
+            layer = None
+            if "layer" in pos:
+                li = pos.index("layer")
+                layer = int(pos[li + 1]); del pos[li:li + 2]
+            if len(pos) < 2 or pos[0].upper() not in ("H", "V"):
+                print("Error: edit_add_trunk <H|V> <perp_pos> [<lo> <hi>] [layer <id>]")
+                return
+            horiz = pos[0].upper() == "H"
+            perp = int(pos[1])
+            lo, hi = (int(pos[2]), int(pos[3])) if len(pos) >= 4 else (1, 0)
+            h_def, v_def = self._edit_layers()
+            v = buda.edit_add_trunk(self._edit_topo, self.fp, horiz, perp,
+                                    lo, hi, layer if layer is not None
+                                    else (h_def if horiz else v_def))
+            self._edit_report(v)
+
+        elif cmd == "edit_add_stub":
+            # Usage: edit_add_stub <block> <seg#> [layer <id>]  (seg# 0-based,
+            # as printed by edit_status / dump_topologies --conn)
+            if self._edit_session() is None: return
+            pos = list(args)
+            layer = None
+            if "layer" in pos:
+                li = pos.index("layer")
+                layer = int(pos[li + 1]); del pos[li:li + 2]
+            if len(pos) < 2:
+                print("Error: edit_add_stub <block> <seg#> [layer <id>]")
+                return
+            to_seg = int(pos[1])
+            if layer is None:
+                h_def, v_def = self._edit_layers()
+                # The stub is perpendicular to its target.
+                tgt_h = (0 <= to_seg < len(self._edit_topo.segments)
+                         and self._edit_topo.segments[to_seg].start.y
+                             == self._edit_topo.segments[to_seg].end.y)
+                layer = v_def if tgt_h else h_def
+            v = buda.edit_add_stub(self._edit_topo, self.fp, pos[0], to_seg, layer)
+            self._edit_report(v)
+
+        elif cmd == "edit_remove_segment":
+            # Usage: edit_remove_segment <seg#>
+            if self._edit_session() is None: return
+            v = buda.edit_remove_segment(self._edit_topo, self.fp, int(args[0]))
+            self._edit_report(v)
+
+        elif cmd == "edit_set_span":
+            # Usage: edit_set_span <seg#> <along_lo> <along_hi>
+            if self._edit_session() is None: return
+            v = buda.edit_set_span(self._edit_topo, self.fp,
+                                   int(args[0]), int(args[1]), int(args[2]))
+            self._edit_report(v)
+
+        elif cmd == "edit_connect":
+            # Usage: edit_connect <seg_i> <seg_j>   (perpendicular pair)
+            if self._edit_session() is None: return
+            v = buda.edit_connect(self._edit_topo, self.fp,
+                                  int(args[0]), int(args[1]))
+            self._edit_report(v)
+
+        elif cmd == "edit_disconnect":
+            # Usage: edit_disconnect <seg_i> <seg_j> <retract_to>
+            if self._edit_session() is None: return
+            v = buda.edit_disconnect(self._edit_topo, self.fp,
+                                     int(args[0]), int(args[1]), int(args[2]))
+            self._edit_report(v)
+
+        elif cmd == "edit_status":
+            # Print the working topology's segments and current verdict.
+            if self._edit_session() is None: return
+            topo = self._edit_topo
+            print(f"[edit] bundle {self._edit_w.input.original_bundle.id}: "
+                  f"{self._edit_src}, {len(topo.segments)} segment(s), "
+                  f"blocks={','.join(topo.connected_block_names) or '-'}")
+            for i, sg in enumerate(topo.segments):
+                d = "H" if sg.start.y == sg.end.y else "V"
+                print(f"  seg {i} {d} ({sg.start.x},{sg.start.y})-"
+                      f"({sg.end.x},{sg.end.y}) L{sg.layer_hint}")
+            if topo.segments:
+                self._edit_report(buda.edit_verdict(topo, self.fp))
+
+        elif cmd == "edit_abort":
+            if self._edit_session() is None: return
+            print(f"[edit] session on bundle "
+                  f"{self._edit_w.input.original_bundle.id} discarded.")
+            self._edit_w = self._edit_topo = None
+            self._edit_src = ""
+
+        elif cmd == "edit_commit":
+            # Usage: edit_commit [pin]
+            # Append the working topology to the bundle's candidate pool
+            # (uid-deduped, like generate_more_topologies) and close the
+            # session; 'pin' also selects it.  A not-ok verdict is a WARNING,
+            # not a rejection: the user candidate stays visible to
+            # check_connectivity, exactly like generation's never-strand rule.
+            if self._edit_session() is None: return
+            w, topo = self._edit_w, self._edit_topo
+            if not topo.segments:
+                print("Error: nothing to commit (no segments) — edit_abort to discard")
+                return
+            topo.type = "USER"
+            topo.estimated_wirelength = (
+                sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
+                    for s in topo.segments)
+                + sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y)
+                      for s in topo.bridge_segments.values()))
+            v = buda.edit_verdict(topo, self.fp)
+            if not v.ok():
+                self._edit_report(v)
+                print("  Warning: committing a not-clean topology — "
+                      "check_connectivity will report it.")
+            uid = buda.topo_uid(topo)
+            pool = list(w.input.candidates)
+            existing = next((i for i, c in enumerate(pool)
+                             if buda.topo_uid(c) == uid), None)
+            if existing is not None:
+                idx = existing
+                print(f"[edit] identical candidate already in the pool at "
+                      f"index {idx + 1} — nothing appended.")
+            else:
+                pool.append(topo)
+                idx = len(pool) - 1
+                w.input.candidates = pool
+                print(f"[edit] committed as candidate {idx + 1} of bundle "
+                      f"{w.input.original_bundle.id} (type USER, WL="
+                      f"{topo.estimated_wirelength}, uid {uid}).")
+            if "pin" in args:
+                w.plan.selected_topology_index = idx
+                w.input.topology_pinned = True
+                print(f"  Pinned bundle {w.input.original_bundle.id} to it.")
+            self._edit_w = self._edit_topo = None
+            self._edit_src = ""
+            if self._persist_topologies():
                 print("[BDB] re-persisted candidate topologies to the open BDB.")
 
         elif cmd == "generate_topologies":
