@@ -1,7 +1,7 @@
-Buda is an open-source system to plan interconnect for hierarchical chip designs. It has three major components:
-1- bundling of nets into buses
-2- generating a set of optimal bus topologies
-3- layer assignment and track assignment that supports non-uniform width wires/buses
+Buda is an open-source system to help plan interconnect for hierarchical chip designs. It has three major components:
+1. bundling of nets into buses
+2. generating a set of optimal bus topologies
+3. layer assignment and track assignment that supports non-uniform width wires/buses
 
 Here is the [complete conversation of origin](https://gemini.google.com/share/293d9e6c10a4) that expands on that brief abstract.
 
@@ -17,7 +17,7 @@ buda/
 │   ├── bundler.h / .cpp        # Engine A
 │   ├── topology.h / .cpp       # Engine B
 │   ├── layering.h / .cpp       # Engine C
-│   ├── global_planner.h / .cpp # Engine 4a
+│   ├── planner.h / .cpp        # Engine 4a
 │   ├── nuts.h / .cpp           # Engine 4b
 │   ├── buda_cli.py             # CLI Tool
 │   └── buda_viz.py             # Visualization
