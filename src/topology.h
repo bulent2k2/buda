@@ -231,6 +231,12 @@ Topology offset_topology(const Topology& t, int dx, int dy,
 // docs/internal/single_source_topo_truth.md.)
 void annotate_topology(Topology& topo, const Floorplan& fp);
 
+// Remove segment `idx`, re-keying seg_busterms and seg_conns on both the key
+// and the partner side (the removal counterpart of emit_tap_segment /
+// prepend_segment's index discipline).  Shared by complete_relay_junctions and
+// the TopoEdit operations (topo_edit.h).
+void erase_segment(Topology& topo, int idx);
+
 // Explicitly (re)derive a topology's seg_conns from its segments: for each
 // endpoint that is not a busterm tap (per seg_busterms), record which
 // perpendicular segments it lands on.  The SAME zero-tolerance predicate

@@ -917,7 +917,7 @@ static void annotate_endpoints(Topology& topo,
 
 // Remove segment `idx` from a topology, re-keying seg_busterms to the compacted
 // indices (entries below idx unchanged, entries above shifted down by one).
-static void erase_segment(Topology& topo, int idx) {
+void erase_segment(Topology& topo, int idx) {
     topo.segments.erase(topo.segments.begin() + idx);
     std::map<int, SegEndpoints> nb;
     for (auto& [k, v] : topo.seg_busterms) {

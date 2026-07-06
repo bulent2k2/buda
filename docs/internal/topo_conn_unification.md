@@ -317,7 +317,28 @@ knobs persist in the BDB so the next bulk `generate_topologies` doesn't
 silently revert them. Existing pins survive by uid — the expert accretes a
 candidate pool across sessions.
 
-### E3 — first-class edit transactions (`TopoEdit`)
+### E3 — first-class edit transactions (`TopoEdit`) — ENGINE IMPLEMENTED
+
+> Shipped as `src/topo_edit.{h,cpp}` + bindings, with the operation set
+> specified by the user: **pick axis + pick Hanan line + add trunk**
+> (`edit_add_trunk(horiz, perp_pos, …)` — default span = the Hanan extent on
+> that axis), **override span** (`edit_set_span`; slide override is the
+> existing `plan.seg_slide_lo/hi` NUTS hatch — per-plan state, deliberately
+> not topology content), **add/remove stub** (`edit_add_stub` seeds the tap
+> exactly like the generators — margin-inset bbox, multi-rect, TEG — and
+> claims the block; `edit_remove_segment` rides the erase_segment re-key
+> discipline), and **connect/disconnect perpendicular segments**
+> (`edit_connect` moves the nearest free endpoint to the crossing and extends
+> the partner when needed, refusing to move busterm taps; `edit_disconnect`
+> retracts the landing endpoint to a given coordinate, so geometry and
+> junction records always agree).  Every op returns an `EditVerdict`
+> (check_topo violations + zero-slide pinch + **SEG-graph component count** —
+> added because check_topo audits taps/faces/touch but not whole-graph
+> connectivity, so a span retraction that splits the tree would otherwise
+> pass).  A failed op leaves the topology untouched; undo = value snapshot
+> (uid-verified).  Gated by `test_topo_edit.py` incl. a from-scratch
+> trunk+stubs build reaching `ok()`.  REMAINING (E3b): explorer GUI wiring
+> (edit mode driving these ops) + optional `.buda` edit commands.
 
 A small C++ API (bound to Python, driven from the topology explorer) wrapping
 each supported edit — move a segment within its slide window, move a trunk

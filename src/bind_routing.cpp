@@ -24,6 +24,7 @@
 #include <iostream>
 #include "topology.h"
 #include "topology_analysis.h"
+#include "topo_edit.h"
 #include "layering.h"
 #include "congestion_planner.h"
 #include "floorplanner.h"
@@ -267,6 +268,35 @@ void bind_routing(py::module_& m) {
                       (unsigned long long)topology_fingerprint(t));
         return std::string(buf);
     }, py::arg("topo"));
+
+    // ── TopoEdit (Phase E3): transactional expert edits, each returning an
+    // EditVerdict (check_topo violations + pinch) so a hand edit can never
+    // silently corrupt annotations.  Undo = snapshot/restore the Topology.
+    py::class_<EditVerdict>(m, "EditVerdict")
+        .def_readonly("applied", &EditVerdict::applied)
+        .def_readonly("note",    &EditVerdict::note)
+        .def_readonly("seg_idx", &EditVerdict::seg_idx)
+        .def_readonly("conn",    &EditVerdict::conn)
+        .def_readonly("pinched", &EditVerdict::pinched)
+        .def_readonly("components", &EditVerdict::components)
+        .def("ok", &EditVerdict::ok);
+    m.def("edit_add_trunk", &edit_add_trunk,
+          py::arg("topo"), py::arg("fp"), py::arg("horiz"), py::arg("perp_pos"),
+          py::arg("along_lo") = 1, py::arg("along_hi") = 0,   // lo>hi = full span
+          py::arg("layer"));
+    m.def("edit_remove_segment", &edit_remove_segment,
+          py::arg("topo"), py::arg("fp"), py::arg("seg_idx"));
+    m.def("edit_add_stub", &edit_add_stub,
+          py::arg("topo"), py::arg("fp"), py::arg("block"), py::arg("to_seg"),
+          py::arg("layer"));
+    m.def("edit_set_span", &edit_set_span,
+          py::arg("topo"), py::arg("fp"), py::arg("seg_idx"),
+          py::arg("along_lo"), py::arg("along_hi"));
+    m.def("edit_connect", &edit_connect,
+          py::arg("topo"), py::arg("fp"), py::arg("i"), py::arg("j"));
+    m.def("edit_disconnect", &edit_disconnect,
+          py::arg("topo"), py::arg("fp"), py::arg("i"), py::arg("j"),
+          py::arg("retract_to"));
 
     // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables
