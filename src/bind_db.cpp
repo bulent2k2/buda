@@ -114,7 +114,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("connected_blocks",   &TopoRow::connected_blocks)
         .def_readwrite("feedthru_blocks",    &TopoRow::feedthru_blocks)
         .def_readwrite("is_selected",        &TopoRow::is_selected)
-        .def_readwrite("is_pinned",          &TopoRow::is_pinned);
+        .def_readwrite("is_pinned",          &TopoRow::is_pinned)
+        .def_readwrite("topo_uid",           &TopoRow::topo_uid);
 
     py::class_<TopoSegRow>(m, "TopoSegRow")
         .def(py::init<>())
@@ -127,7 +128,8 @@ void bind_db(py::module_& m) {
         .def_readwrite("y2",         &TopoSegRow::y2)
         .def_readwrite("layer_hint", &TopoSegRow::layer_hint)
         .def_readwrite("is_jog",     &TopoSegRow::is_jog)
-        .def_readwrite("assigned_layer", &TopoSegRow::assigned_layer);
+        .def_readwrite("assigned_layer", &TopoSegRow::assigned_layer)
+        .def_readwrite("edge_id",    &TopoSegRow::edge_id);
 
     py::class_<TopoBridgeRow>(m, "TopoBridgeRow")
         .def(py::init<>())

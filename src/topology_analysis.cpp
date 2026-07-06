@@ -71,9 +71,20 @@ uint64_t topology_fingerprint(const Topology& topo) {
     uint64_t h = 1469598103934665603ULL;      // FNV offset basis
     h_i64(h, (int64_t)topo.segments.size());
     for (const Segment& s : topo.segments) h_seg(h, s);
-    // std::map iteration is key-ordered — deterministic.
-    h_i64(h, (int64_t)topo.seg_busterms.size());
+    // std::map iteration is key-ordered — deterministic.  seg_busterms is
+    // hashed in its CANONICAL form: an all-junction (nullopt, nullopt) entry is
+    // semantically identical to a missing entry (infer_connections treats both
+    // as "no tap") and is exactly what the BDB persistence omits (zero rows for
+    // an all-junction segment — see single_source_topo_truth.md Phase 3), so
+    // skipping it makes the fingerprint reload-stable: uid(generated) ==
+    // uid(reloaded) even though annotate_endpoints default-inserts an entry
+    // for every segment in memory.
+    int64_t n_taps = 0;
+    for (const auto& [si, eps] : topo.seg_busterms)
+        if (eps.first.has_value() || eps.second.has_value()) ++n_taps;
+    h_i64(h, n_taps);
     for (const auto& [si, eps] : topo.seg_busterms) {
+        if (!eps.first.has_value() && !eps.second.has_value()) continue;
         h_i64(h, si);
         for (const auto* opt : {&eps.first, &eps.second}) {
             h_i64(h, opt->has_value());

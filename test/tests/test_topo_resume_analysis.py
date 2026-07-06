@@ -25,9 +25,14 @@ Checkpoint -> reopen -> load_pipeline -> continue, asserting:
    the invariant the unification's cache (Phase B) must keep intact: a
    rehydrated topology computes its analysis exactly like a fresh one.
 
-   edge_id is excluded from the comparison: it is documented as not persisted
-   (topology.h — TopoSegRow stores only x/y/layer/is_jog), the round-trip gap
-   Phase E1 closes.  When E1 lands, drop include_edge_id=False here.
+   The comparison includes edge_id (persisted since v14 — Phase E1 closed the
+   documented round-trip gap), exercised by the multicast bundle's trunk+MST
+   candidates whose legs are edge_id-tagged.
+
+3. **uid round-trip (Phase E1)**: every persisted topology row carries a
+   topo_uid recomputable from the persisted rows alone, so
+   uid(generated) == uid(reloaded) for every candidate, uids are unique
+   within a bundle, and the reload path prints no lossy-checkpoint warning.
 
 2. **Resume determinism**: two independent resumed sessions continuing with the
    same run_nuts produce identical route_snapshot fingerprints and row counts.
@@ -61,12 +66,15 @@ _SETUP = (
 
 
 def _fresh_session(bdb_path):
-    """Original session: bundle + generate (checkpointing to the BDB)."""
+    """Original session: bundle + generate (checkpointing to the BDB).
+    The multicast bus f produces trunk+MST candidates with edge_id-tagged
+    legs, so the round-trip exercises the v14 edge_id column."""
     s = buda_cli.BudaSession()
     s.no_viz = True
     _quiet(s, f"open_bdb {bdb_path}", *_SETUP,
            "add_bus d[8] A.p M.p",
            "add_bus e[4] A.q B.r",
+           "add_bus f[4] A.s B.t,M.u",
            "run_bundler",
            "generate_topologies")
     return s
@@ -82,8 +90,8 @@ def _resumed_session(bdb_path):
 
 
 def _snap(s):
-    # edge_id excluded: documented round-trip gap (see module docstring).
-    return ts.snapshot_session(s, include_edge_id=False)
+    # Full fidelity incl. edge_id (persisted since v14 — Phase E1).
+    return ts.snapshot_session(s)
 
 
 def _route_row(s):
@@ -96,12 +104,43 @@ def test_reloaded_analysis_matches_in_memory(tmp_path):
     path = str(tmp_path / "resume.bdb")
     s1 = _fresh_session(path)
     baseline = _snap(s1)         # post-generation, pre-planner: pure checkpoint
-    assert baseline.count("bundle ") >= 2
+    assert baseline.count("bundle ") >= 3
+    # The multicast bundle must contribute edge_id-tagged MST legs, or this
+    # test has silently stopped covering the v14 edge_id round-trip.
+    assert any(f" edge={e}" in baseline for e in ("0", "1")), \
+        "no edge_id-tagged candidate in the corpus — edge_id round-trip untested"
     del s1
 
     s2 = _resumed_session(path)
     assert _snap(s2) == baseline, \
         "reloaded candidates' analysis deviates from the in-memory original"
+
+
+def test_topo_uid_roundtrip(tmp_path, capsys):
+    """Phase E1: uid(generated) == uid(reloaded) for every candidate, uids are
+    unique within each bundle, and the reload prints no integrity warning."""
+    path = str(tmp_path / "resume.bdb")
+    s1 = _fresh_session(path)
+    persisted = {}                       # bundle id -> [uid per cand_index]
+    for w in s1.bundles:
+        bid = str(w.input.original_bundle.id)
+        uids = [buda_cli.buda.topo_uid(t) for t in w.input.candidates]
+        assert len(set(uids)) == len(uids), \
+            f"bundle {bid}: duplicate topo_uid within the candidate list"
+        persisted[bid] = uids
+        rows = s1.bdb.topologies(bid)
+        assert [r.topo_uid for r in rows] == uids, \
+            f"bundle {bid}: persisted topo_uid rows do not match in-memory uids"
+    del s1
+
+    s2 = _resumed_session(path)
+    out = capsys.readouterr().out
+    assert "lossy checkpoint" not in out, out
+    for w in s2.bundles:
+        bid = str(w.input.original_bundle.id)
+        reloaded = [buda_cli.buda.topo_uid(t) for t in w.input.candidates]
+        assert reloaded == persisted[bid], \
+            f"bundle {bid}: uid(reloaded) != uid(generated)"
 
 
 def test_resume_continue_is_deterministic(tmp_path):

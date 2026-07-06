@@ -383,6 +383,9 @@ class BudaSession:
                 # A pre-plan select_topology pin must survive a checkpoint so a
                 # resumed run_planner still honors it (v10).
                 tr.is_pinned = bool(w.input.topology_pinned and ci == selected)
+                # Stable content identity (v14, Phase E1): recomputable from the
+                # persisted rows alone, so uid(generated) == uid(reloaded).
+                tr.topo_uid = buda.topo_uid(topo)
                 self.bdb.add_topology(tr)
                 for si, seg in enumerate(topo.segments):
                     sr = buda.TopoSegRow()
@@ -393,6 +396,7 @@ class BudaSession:
                     sr.x2, sr.y2 = seg.end.x, seg.end.y
                     sr.layer_hint = seg.layer_hint
                     sr.is_jog = seg.is_jog
+                    sr.edge_id = seg.edge_id
                     self.bdb.add_topology_segment(sr)
                 self._persist_topology_annotations(bid, ci, topo, seen_busterms)
                 n_cands += 1
@@ -752,6 +756,7 @@ class BudaSession:
                     sg.end = buda.Point(int(sr.x2), int(sr.y2))
                     sg.layer_hint = sr.layer_hint
                     sg.is_jog = sr.is_jog
+                    sg.edge_id = sr.edge_id       # MST-edge identity (v14)
                     segs.append(sg)
                 t.segments = segs        # reassign whole vector (pybind copies)
                 bad = [n for n in t.connected_block_names
@@ -781,6 +786,15 @@ class BudaSession:
                     bridges[brg.block_name] = sg
                 if bridges:
                     t.bridge_segments = bridges
+                # v14 uid integrity: topo_uid is recomputable from the persisted
+                # rows alone, so a reloaded candidate must reproduce it exactly
+                # (uid(generated) == uid(reloaded) — Phase E1's round-trip
+                # contract). Pre-v14 checkpoints carry no uid and backfill
+                # silently; a mismatch on a v14 checkpoint flags a lossy reload.
+                if tr.topo_uid and not bad and buda.topo_uid(t) != tr.topo_uid:
+                    print(f"  Warning: bundle {br.id} cand {tr.cand_index}: "
+                          f"reloaded topo_uid {buda.topo_uid(t)} != persisted "
+                          f"{tr.topo_uid} (lossy checkpoint?)")
                 if tr.is_selected:
                     sel = len(cands)     # compact index of this candidate
                     sel_ci = tr.cand_index
@@ -940,6 +954,7 @@ class BudaSession:
             tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
             tr.is_selected = (ci == sel)
             tr.is_pinned = bool(w.input.topology_pinned and ci == sel)
+            tr.topo_uid = buda.topo_uid(topo)
             self.bdb.add_topology(tr)
             for si, seg in enumerate(topo.segments):
                 sr = buda.TopoSegRow()
@@ -950,6 +965,7 @@ class BudaSession:
                 sr.x2, sr.y2 = seg.end.x, seg.end.y
                 sr.layer_hint = seg.layer_hint
                 sr.is_jog = seg.is_jog
+                sr.edge_id = seg.edge_id
                 self.bdb.add_topology_segment(sr)
             # Logical seg-busterm links + TEG-over bridges (load_pipeline
             # restores both; never re-derived from geometry).
@@ -1005,6 +1021,7 @@ class BudaSession:
         tr.connected_blocks = json.dumps(list(topo.connected_block_names))
         tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
         tr.is_selected = True
+        tr.topo_uid = buda.topo_uid(topo)
         self.bdb.add_topology(tr)
         seg_layers = list(w.plan.seg_layers)
         for si, seg in enumerate(topo.segments):
@@ -1016,6 +1033,7 @@ class BudaSession:
             sr.x2, sr.y2 = seg.end.x, seg.end.y
             sr.layer_hint = seg.layer_hint
             sr.is_jog = seg.is_jog
+            sr.edge_id = seg.edge_id
             sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
             self.bdb.add_topology_segment(sr)
         # Logical seg-busterm links + TEG-over bridges for the instance's

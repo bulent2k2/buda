@@ -145,6 +145,10 @@ struct TopoRow {
     bool        is_selected = false;// pinned/selected candidate (post-plan; pre-plan pin)
     bool        is_pinned = false;  // pre-plan select_topology pin (v10; load_pipeline
                                     // restores it so a resumed run_planner honors it)
+    std::string topo_uid;           // stable content identity (v14, hex fingerprint over
+                                    // all load-bearing persisted state; Phase E1 of
+                                    // topo_conn_unification.md) — recomputable from a
+                                    // checkpoint alone, so pre-v14 rows backfill on load
 };
 
 // One segment of a candidate topology.
@@ -156,6 +160,8 @@ struct TopoSegRow {
     int         layer_hint = 0;     // generation-time hint
     bool        is_jog = false;
     int         assigned_layer = -1;// planner's per-segment layer (-1 = unassigned)
+    int         edge_id = -1;       // MST-edge identity (v14; closes the documented
+                                    // round-trip gap in topology.h Segment::edge_id)
 };
 
 // One TEG-over bridge segment of a candidate topology (Topology::bridge_segments:
@@ -282,7 +288,7 @@ public:
     // v12 = topology_seg_conn (seg-to-seg junction links persisted logically);
     // v13 = component.orient (instance rotation/mirror as an 8-orientation
     //       token) so GDS import->export->re-import preserves orientation.
-    static constexpr int SCHEMA_VERSION = 13;
+    static constexpr int SCHEMA_VERSION = 14;
 
     explicit BDB(const std::string& db_path);
     ~BDB();

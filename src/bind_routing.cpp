@@ -20,6 +20,7 @@
 // bind_db(m) and bind_bundler(m) must be called before this.
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <cstdio>
 #include <iostream>
 #include "topology.h"
 #include "topology_analysis.h"
@@ -254,6 +255,18 @@ void bind_routing(py::module_& m) {
     // ConnTopology analysis cache, plus a reset.  Test/diagnostic only.
     m.def("analysis_cache_counters", &analysis_cache_counters);
     m.def("analysis_cache_reset_counters", &analysis_cache_reset_counters);
+
+    // Stable candidate identity (Phase E1): a hex content key over all
+    // load-bearing persisted topology state (segments incl. edge_id,
+    // canonical seg_busterms, seg_conns, bridges, feedthru/connected blocks).
+    // Recomputable from a checkpoint alone — uid(generated) == uid(reloaded);
+    // pins and sidecar selections re-attach by this key across regenerations.
+    m.def("topo_uid", [](const Topology& t) {
+        char buf[17];
+        std::snprintf(buf, sizeof buf, "%016llx",
+                      (unsigned long long)topology_fingerprint(t));
+        return std::string(buf);
+    }, py::arg("topo"));
 
     // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables

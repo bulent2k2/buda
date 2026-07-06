@@ -241,7 +241,16 @@ signature changes:
 *Acceptance: harness green; a perf smoke (time `ripup_reroute` on big2) shows
 the expected drop; no Python-visible behavior change.*
 
-## 7. Phase D — incremental re-analysis (byte-identical by property, flag-gated)
+## 7. Phase D — incremental re-analysis (byte-identical by property, flag-gated) — DEFERRED BY MEASUREMENT
+
+> With Phase B in place, a mutation costs exactly ONE full recompute of ONE
+> candidate on its next build — measured at ~10µs for small topologies (the
+> whole six-pass run), and interactive editing (E3) performs one mutation at a
+> time. The dirty-set machinery below would optimize a cost that is already
+> negligible, at the price of a fuzz-gated parallel implementation of the
+> fixpoint passes. Revisit only if E3 profiling on very large candidates
+> (hundreds of segments) shows the recompute in an interactive loop; the
+> design below stands ready.
 
 Localized mutations shouldn't invalidate the whole analysis:
 
@@ -263,7 +272,21 @@ Localized mutations shouldn't invalidate the whole analysis:
 The feature layer the re-arch exists to unlock. Four building blocks, in
 dependency order; each is usable on its own.
 
-### E1 — stable candidate identity (`topo_uid`)
+### E1 — stable candidate identity (`topo_uid`) — CORE IMPLEMENTED
+
+> Shipped (schema v14): `topology.topo_uid` (hex of the Phase B content
+> fingerprint, canonicalized over seg_busterms so an in-memory all-junction
+> `(nullopt, nullopt)` entry — semantically identical to a missing one —
+> fingerprints like the persisted form) + `topology_segment.edge_id` (the
+> documented round-trip gap, closed). `buda.topo_uid(topo)` is bound; all
+> three persist sites write the uid; `load_pipeline` restores `edge_id` and
+> verifies uid integrity (pre-v14 checkpoints backfill silently, a v14
+> mismatch prints a lossy-checkpoint warning). Round-trip gated by
+> `test_topo_uid_roundtrip` + the resume test now comparing at full fidelity
+> including edge_id (multicast trunk+MST coverage). Fixtures regenerated
+> (schema-bump-only diff). REMAINING (E1b, with E2): sidecar uid field +
+> `_apply_selections` uid→type+WL→index chain, and pin reattachment by uid in
+> `generate_topologies_for_bundle`.
 
 Today pins die on regeneration because identity is a list index:
 `_reset_plan_for_regen` (buda_cli.py:2352) nukes pin/plan state, and sidecars

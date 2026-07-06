@@ -142,6 +142,7 @@ static const char* TOPOLOGY_DDL = R"(
         feedthru_blocks    TEXT,    -- JSON array
         is_selected        INTEGER DEFAULT 0,
         is_pinned          INTEGER DEFAULT 0,  -- pre-plan select_topology pin (v10)
+        topo_uid           TEXT DEFAULT '',    -- stable content identity (v14)
         PRIMARY KEY (bundle_id, cand_index)
     );
     CREATE TABLE IF NOT EXISTS topology_segment (
@@ -152,6 +153,7 @@ static const char* TOPOLOGY_DDL = R"(
         layer_hint INTEGER DEFAULT 0,
         is_jog     INTEGER DEFAULT 0,
         assigned_layer INTEGER DEFAULT -1,  -- planner's per-segment layer (-1 = unassigned)
+        edge_id    INTEGER DEFAULT -1,      -- MST-edge identity (v14)
         PRIMARY KEY (bundle_id, cand_index, seg_index),
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)
@@ -580,6 +582,19 @@ void BDB::_migrate() {
         // Ignored if the column already exists (v6-style idempotent ALTER).
         sqlite3_exec(_db,
             "ALTER TABLE component ADD COLUMN orient TEXT DEFAULT 'N'",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 14) {
+        // v13 -> v14: stable candidate identity (topo_conn_unification Phase E1).
+        // topo_uid is recomputable from persisted content alone, so pre-v14 rows
+        // need no data migration — load_pipeline backfills silently on reload,
+        // mirroring the pre-v12 seg_conns fallback.  edge_id closes the documented
+        // Segment::edge_id round-trip gap (topology.h).  Idempotent ALTERs.
+        sqlite3_exec(_db,
+            "ALTER TABLE topology ADD COLUMN topo_uid TEXT DEFAULT ''",
+            nullptr, nullptr, nullptr);
+        sqlite3_exec(_db,
+            "ALTER TABLE topology_segment ADD COLUMN edge_id INTEGER DEFAULT -1",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -2595,14 +2610,15 @@ BDB::bundle_busterms(const std::string& bundle_id) const {
 void BDB::add_topology(const TopoRow& tr) {
     Stmt s(_db,
         "INSERT INTO topology(bundle_id,cand_index,type,wirelength,trunk_location,"
-        "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?)"
+        "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned,"
+        "topo_uid)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(bundle_id,cand_index) DO UPDATE SET type=excluded.type,"
         " wirelength=excluded.wirelength, trunk_location=excluded.trunk_location,"
         " pass_through_count=excluded.pass_through_count,"
         " connected_blocks=excluded.connected_blocks,"
         " feedthru_blocks=excluded.feedthru_blocks, is_selected=excluded.is_selected,"
-        " is_pinned=excluded.is_pinned");
+        " is_pinned=excluded.is_pinned, topo_uid=excluded.topo_uid");
     sqlite3_bind_text  (s, 1, tr.id.c_str(),               -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, tr.cand_index);
     sqlite3_bind_text  (s, 3, tr.type.c_str(),             -1, SQLITE_TRANSIENT);
@@ -2613,13 +2629,15 @@ void BDB::add_topology(const TopoRow& tr) {
     sqlite3_bind_text  (s, 8, tr.feedthru_blocks.c_str(),  -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 9, tr.is_selected ? 1 : 0);
     sqlite3_bind_int   (s, 10, tr.is_pinned ? 1 : 0);
+    sqlite3_bind_text  (s, 11, tr.topo_uid.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(s);
 }
 
 void BDB::add_topology_segment(const TopoSegRow& sr) {
     Stmt s(_db,
         "INSERT OR REPLACE INTO topology_segment(bundle_id,cand_index,seg_index,"
-        "x1,y1,x2,y2,layer_hint,is_jog,assigned_layer) VALUES(?,?,?,?,?,?,?,?,?,?)");
+        "x1,y1,x2,y2,layer_hint,is_jog,assigned_layer,edge_id)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?)");
     sqlite3_bind_text  (s, 1, sr.id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, sr.cand_index);
     sqlite3_bind_int   (s, 3, sr.seg_index);
@@ -2630,6 +2648,7 @@ void BDB::add_topology_segment(const TopoSegRow& sr) {
     sqlite3_bind_int   (s, 8, sr.layer_hint);
     sqlite3_bind_int   (s, 9, sr.is_jog ? 1 : 0);
     sqlite3_bind_int   (s, 10, sr.assigned_layer);
+    sqlite3_bind_int   (s, 11, sr.edge_id);
     sqlite3_step(s);
 }
 
@@ -2648,8 +2667,8 @@ void BDB::clear_topologies() {
 std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
     Stmt q(_db,
         "SELECT bundle_id,cand_index,type,wirelength,trunk_location,"
-        "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned"
-        " FROM topology WHERE bundle_id=? ORDER BY cand_index");
+        "pass_through_count,connected_blocks,feedthru_blocks,is_selected,is_pinned,"
+        "topo_uid FROM topology WHERE bundle_id=? ORDER BY cand_index");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
@@ -2668,6 +2687,7 @@ std::vector<TopoRow> BDB::topologies(const std::string& bundle_id) const {
         t.feedthru_blocks    = txt(q, 7);
         t.is_selected        = sqlite3_column_int(q, 8) != 0;
         t.is_pinned          = sqlite3_column_int(q, 9) != 0;
+        t.topo_uid           = txt(q, 10);
         out.push_back(std::move(t));
     }
     return out;
@@ -2677,8 +2697,8 @@ std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
                                                int cand_index) const {
     Stmt q(_db,
         "SELECT bundle_id,cand_index,seg_index,x1,y1,x2,y2,layer_hint,is_jog,"
-        "assigned_layer FROM topology_segment WHERE bundle_id=? AND cand_index=?"
-        " ORDER BY seg_index");
+        "assigned_layer,edge_id FROM topology_segment"
+        " WHERE bundle_id=? AND cand_index=? ORDER BY seg_index");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (q, 2, cand_index);
     std::vector<TopoSegRow> out;
@@ -2694,6 +2714,7 @@ std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
         s.layer_hint = sqlite3_column_int(q, 7);
         s.is_jog     = sqlite3_column_int(q, 8) != 0;
         s.assigned_layer = sqlite3_column_int(q, 9);
+        s.edge_id        = sqlite3_column_int(q, 10);
         out.push_back(std::move(s));
     }
     return out;
