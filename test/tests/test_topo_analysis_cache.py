@@ -173,3 +173,46 @@ def test_built_ct_survives_topology_mutation():
     segs[0].start = buda.Point(segs[0].start.x + 7, segs[0].start.y)
     t.segments = segs
     assert _snap(ct) == before
+
+
+def test_flow_level_cross_stage_reuse():
+    """Phase C: one analysis, everywhere.  Across a full flow (generation ->
+    planner -> NUTS -> DetailedNUTS -> persist paths), each candidate's
+    analysis is computed at most TWICE — once by filter_pinched and once by
+    filter_uncovered after generate_2pin/npin's deliberate post-filter
+    connected_block_names assignment (an ordering that cannot move without
+    changing routing bytes) — and every downstream stage is a cache hit:
+    the planner's per-candidate builds, NUTS's build_nuts_maps, the CLI's
+    Python-side DetailedNUTS prep, and viz/persist all reuse the same
+    TopoAnalysis.  Empirically this flow shows ~2*ncand computes and >= ncand
+    hits; the bounds below are the structural claims, with slack for dogleg
+    re-annotation extras."""
+    import contextlib, io, os
+    import buda_cli
+    buda.analysis_cache_reset_counters()
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cwd = os.getcwd()
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    os.chdir(os.path.join(root, "flow"))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            for line in open("four_blocks_3_bundles.buda"):
+                c = line.strip()
+                if not c or c.startswith("#"):
+                    continue
+                if c.split()[0] in ("visualize", "visualize_topologies",
+                                    "exit", "report_wirelength", "report_wl"):
+                    continue
+                s.do_command(c)
+    finally:
+        os.chdir(cwd)
+    ncand = sum(len(w.input.candidates) for w in s.bundles)
+    computes, hits = _counters()
+    assert ncand > 0
+    assert computes <= 2 * ncand + 4, \
+        f"more computes than the two generation-stage builds allow: " \
+        f"{computes=} for {ncand=} candidates (a downstream stage stopped hitting)"
+    assert hits >= ncand, \
+        f"downstream stages are not reusing the cache: {hits=} for {ncand=}"

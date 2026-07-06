@@ -123,7 +123,10 @@ ties are effectively impossible because type strings embed coordinates, but it
 is not `stable_sort`; MST edge sort ties (equal `dist`) break by generation
 order (topology.cpp:2128).
 
-## 4. Phase A — re-house the analysis as named passes (byte-identical, mechanical)
+## 4. Phase A — re-house the analysis as named passes (byte-identical, mechanical) — IMPLEMENTED
+
+> Shipped as `src/topology_analysis.{h,cpp}`; verified byte-identical
+> (topo_golden fast+mid, wl_corpus A/B vs the pre-change tree, full fast tier).
 
 Move the six passes out of `ConnTopology`'s private methods into free functions
 in a new `topology_analysis.{h,cpp}` (topology.cpp is already ~3.1k lines;
@@ -145,7 +148,25 @@ order (conn_topology.cpp:54-59). `conn_topology.h` keeps the class + structs
 
 *Acceptance: harness green; no caller changes anywhere.*
 
-## 5. Phase B — cache the analysis on the Topology (byte-identical, the performance payoff)
+## 5. Phase B — cache the analysis on the Topology (byte-identical, the performance payoff) — IMPLEMENTED
+
+> Shipped with one deliberate strengthening over the design below: the cache
+> validates by **content fingerprint**, not revision discipline. Topology is an
+> open struct — its fields are assigned freely in C++ generators (e.g.
+> `generate_2pin` assigns `connected_block_names` *after* `filter_pinched` has
+> already built an analysis) and via the pybind setters, so a bump protocol
+> would silently break on any missed site. `analyze()`
+> (topology_analysis.h) re-fingerprints the analysis inputs (FNV-1a over
+> segments, seg_busterms, seg_conns, connected_block_names, feedthru, bridges)
+> on every call and recomputes on mismatch: a stale cache is structurally
+> impossible, no mutator or binding needs changes, and the §11 pybind-bypass
+> risk is retired by construction. The Floorplan side kept the rev design
+> (uid fresh on copy + rev bumped by every mutator — all its state is behind
+> methods, so the discipline is airtight there). The fingerprint is also the
+> natural precursor of E1's persisted `topo_uid`. ConnTopology holds an
+> immutable shared snapshot (built-before-mutation semantics preserved).
+> Gated by `test_topo_analysis_cache.py` + the full Phase 0 harness +
+> wl_corpus A/B.
 
 Add to `Topology` a copyable analysis cache plus a revision counter:
 
@@ -191,7 +212,20 @@ mutated one recomputes); NUTS dogleg trials and the Python DetailedNUTS prep
 become cache hits. Roughly a 3-6× reduction in analysis work per pipeline pass
 and per ripup trial.*
 
-## 6. Phase C — one analysis, everywhere (byte-identical, deletion of duplicates)
+## 6. Phase C — one analysis, everywhere (byte-identical, deletion of duplicates) — IMPLEMENTED
+
+> With the Phase B cache validating by content, every consumer's existing
+> `ConnTopology().build(...)` call became the shared path with **zero call-site
+> changes** — the planner's per-candidate builds, NUTS `build_nuts_maps`, the
+> CLI's Python-side DetailedNUTS prep, persist, check, and viz all hit the
+> same `TopoAnalysis`. Measured on full flows: computes ≈ 2×candidates (the
+> `filter_pinched` build plus one recompute after the deliberate post-filter
+> `connected_block_names` assignment — moving that assignment would change
+> routing bytes, so it stays), everything else hits — e.g. channel_stress 928
+> computes / 814 hits, dogleg1 51/50; a cache-hit build is ~4× cheaper than a
+> recompute even on a 9-segment candidate (hit cost = the fingerprint scan).
+> The structural invariants (computes ≤ 2×ncand + slack, hits ≥ ncand across a
+> full flow) are pinned by `test_flow_level_cross_stage_reuse`.
 
 With the cache in place, retire the structural duplications — no consumer
 signature changes:
