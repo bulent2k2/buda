@@ -145,6 +145,12 @@ struct TopoRow {
     bool        is_selected = false;// pinned/selected candidate (post-plan; pre-plan pin)
     bool        is_pinned = false;  // pre-plan select_topology pin (v10; load_pipeline
                                     // restores it so a resumed run_planner honors it)
+    std::string topo_uid;           // stable content identity (v14, hex fingerprint over
+                                    // all load-bearing persisted state; Phase E1 of
+                                    // topo_conn_unification.md) — recomputable from a
+                                    // checkpoint alone, so pre-v14 rows backfill on load
+    std::string source = "generated"; // 'generated' | 'user' | 'dogleg' (v15, Phase E4):
+                                    // bulk regeneration may only delete 'generated' rows
 };
 
 // One segment of a candidate topology.
@@ -156,6 +162,8 @@ struct TopoSegRow {
     int         layer_hint = 0;     // generation-time hint
     bool        is_jog = false;
     int         assigned_layer = -1;// planner's per-segment layer (-1 = unassigned)
+    int         edge_id = -1;       // MST-edge identity (v14; closes the documented
+                                    // round-trip gap in topology.h Segment::edge_id)
 };
 
 // One TEG-over bridge segment of a candidate topology (Topology::bridge_segments:
@@ -282,7 +290,7 @@ public:
     // v12 = topology_seg_conn (seg-to-seg junction links persisted logically);
     // v13 = component.orient (instance rotation/mirror as an 8-orientation
     //       token) so GDS import->export->re-import preserves orientation.
-    static constexpr int SCHEMA_VERSION = 13;
+    static constexpr int SCHEMA_VERSION = 15;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -422,7 +430,10 @@ public:
     void add_bundle_busterm(const std::string& bundle_id,
                             const std::string& busterm_id,
                             const std::string& role = "");
-    void clear_bundles();                   // wipe bundle + topology tables
+    // keep_user=true (v15): user-sourced topology rows — and the bundle
+    // rows they FK to — survive the wipe (the re-add upserts those bundle
+    // rows in place).  Routing rows are always cleared (invalidated).
+    void clear_bundles(bool keep_user = false);                   // wipe bundle + topology tables
     std::vector<std::string> bundle_nets(const std::string& bundle_id) const;
     // (busterm_id, role) pairs for a bundle.
     std::vector<std::pair<std::string, std::string>>
@@ -445,7 +456,23 @@ public:
     // ── Candidate topology persistence (Stage-2 output) ────────────────────
     void add_topology(const TopoRow& tr);           // INSERT OR REPLACE
     void add_topology_segment(const TopoSegRow& sr);
-    void clear_topologies();                        // wipe topology + segments
+    // keep_user=true (Phase E4): rows with source='user' — and the busterm/
+    // segment/link/bridge rows backing them — survive the wipe, so a bulk
+    // re-persist can never delete a hand-committed candidate from an earlier
+    // session.  Callers then renumber_topology() any kept row whose cand_index
+    // would collide with the fresh 0..n-1 block.
+    void clear_topologies(bool keep_user = false);
+    // Move one candidate's rows (topology + segments + busterm links +
+    // seg-conn links + bridges) to a new cand_index (v15 orphan renumbering).
+    void renumber_topology(const std::string& bundle_id, int old_ci, int new_ci);
+    // Delete one candidate's rows across all five topology tables (v15; used
+    // when a kept user row is about to be rewritten from the in-memory pool
+    // at a different index — the pool write recreates it with fresh rows).
+    void delete_topology(const std::string& bundle_id, int ci);
+    // Per-bundle generation-knob memo (v15): the additive-generation knob set
+    // last used for this bundle, honored by a resumed bulk generation.
+    void set_bundle_gen_knobs(const std::string& bundle_id, const std::string& knobs);
+    std::string bundle_gen_knobs(const std::string& bundle_id) const;                        // wipe topology + segments
     std::vector<TopoRow> topologies(const std::string& bundle_id) const;
     std::vector<TopoSegRow> topology_segments(const std::string& bundle_id,
                                               int cand_index) const;

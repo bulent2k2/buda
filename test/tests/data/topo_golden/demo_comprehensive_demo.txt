@@ -1,0 +1,318 @@
+bundle 1 nets=3 candidates=8
+ cand type=L_HV@x750@y250 wl=1000 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (250,250)-(750,250) L6 jog=0 edge=-1
+  seg 1 (750,250)-(750,750) L5 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 1 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=1 layer=6 along=[250,750] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,750] apull=0
+  ana 0 conns BT:u_cpu@250 ; SEG:1@750e
+  ana 1 horiz=0 layer=5 along=[250,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; BT:u_mem@750
+ cand type=L_VH@y750@x250 wl=1000 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (250,250)-(250,750) L5 jog=0 edge=-1
+  seg 1 (250,750)-(750,750) L6 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 1 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=0 layer=5 along=[250,750] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,750] apull=0
+  ana 0 conns BT:u_cpu@250 ; SEG:1@750e
+  ana 1 horiz=1 layer=6 along=[250,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; BT:u_mem@750
+ cand type=Z_HVH@x500@y250 wl=1000 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (250,250)-(500,250) L6 jog=0 edge=-1
+  seg 1 (500,250)-(500,750) L5 jog=0 edge=-1
+  seg 2 (500,750)-(750,750) L6 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 2 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[250,500] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,500] apull=0
+  ana 0 conns BT:u_cpu@250 ; SEG:1@500e
+  ana 1 horiz=0 layer=5 along=[250,750] perp=500 slide=[270,730] pull=0 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=1 layer=6 along=[500,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[500,750] apull=0
+  ana 2 conns SEG:1@500e ; BT:u_mem@750
+ cand type=Z_VHV@y500@x250 wl=1000 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (250,250)-(250,500) L5 jog=0 edge=-1
+  seg 1 (250,500)-(750,500) L6 jog=0 edge=-1
+  seg 2 (750,500)-(750,750) L5 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 2 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[250,500] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,500] apull=0
+  ana 0 conns BT:u_cpu@250 ; SEG:1@500e
+  ana 1 horiz=1 layer=6 along=[250,750] perp=500 slide=[270,730] pull=0 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=0 layer=5 along=[500,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[500,750] apull=0
+  ana 2 conns SEG:1@500e ; BT:u_mem@750
+ cand type=U_HVH@x20 wl=1310 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (100,250)-(20,250) L6 jog=0 edge=-1
+  seg 1 (20,250)-(20,750) L5 jog=0 edge=-1
+  seg 2 (20,750)-(750,750) L6 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 2 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[20,100] perp=250 slide=[100,250] pull=1 aflex=10 acover=[20,100] apull=0
+  ana 0 conns BT:u_cpu@100 ; SEG:1@20e
+  ana 1 horiz=0 layer=5 along=[250,750] perp=20 slide=[-1073741824,80] pull=2 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=1 layer=6 along=[20,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[20,750] apull=0
+  ana 2 conns SEG:1@20e ; BT:u_mem@750
+ cand type=U_HVH@x980 wl=1310 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (250,250)-(980,250) L6 jog=0 edge=-1
+  seg 1 (980,250)-(980,750) L5 jog=0 edge=-1
+  seg 2 (980,750)-(900,750) L6 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 2 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[250,980] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,980] apull=0
+  ana 0 conns BT:u_cpu@250 ; SEG:1@980e
+  ana 1 horiz=0 layer=5 along=[250,750] perp=980 slide=[920,1073741823] pull=-2 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=1 layer=6 along=[900,980] perp=750 slide=[750,900] pull=-1 aflex=01 acover=[900,980] apull=0
+  ana 2 conns SEG:1@980e ; BT:u_mem@900
+ cand type=U_VHV@y20 wl=1310 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (250,100)-(250,20) L5 jog=0 edge=-1
+  seg 1 (250,20)-(750,20) L6 jog=0 edge=-1
+  seg 2 (750,20)-(750,750) L5 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 2 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[20,100] perp=250 slide=[100,250] pull=1 aflex=10 acover=[20,100] apull=0
+  ana 0 conns BT:u_cpu@100 ; SEG:1@20e
+  ana 1 horiz=1 layer=6 along=[250,750] perp=20 slide=[-1073741824,80] pull=2 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=0 layer=5 along=[20,750] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[20,750] apull=0
+  ana 2 conns SEG:1@20e ; BT:u_mem@750
+ cand type=U_VHV@y980 wl=1310 trunk=0 passthru=0
+  blocks=u_cpu,u_mem feedthru=
+  seg 0 (250,250)-(250,980) L5 jog=0 edge=-1
+  seg 1 (250,980)-(750,980) L6 jog=0 edge=-1
+  seg 2 (750,980)-(750,900) L5 jog=0 edge=-1
+  bt 0 u_cpu:THRU:(100,100,250,250):(100,100,250,250):[] -
+  bt 2 - u_mem:THRU:(750,750,900,900):(750,750,900,900):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[250,980] perp=250 slide=[100,250] pull=1 aflex=01 acover=[250,980] apull=0
+  ana 0 conns BT:u_cpu@250 ; SEG:1@980e
+  ana 1 horiz=1 layer=6 along=[250,750] perp=980 slide=[920,1073741823] pull=-2 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=0 layer=5 along=[900,980] perp=750 slide=[750,900] pull=-1 aflex=01 acover=[900,980] apull=0
+  ana 2 conns SEG:1@980e ; BT:u_mem@900
+bundle 2 nets=2 candidates=8
+ cand type=I_H wl=500 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (250,525)-(750,525) L6 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  ana 0 horiz=1 layer=6 along=[250,750] perp=525 slide=[500,550] pull=0 aflex=00 acover=[250,750] apull=0
+  ana 0 conns BT:u_gpu@250 ; BT:u_disp@750
+ cand type=L_HV@x750@y480 wl=520 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (250,480)-(750,480) L6 jog=0 edge=-1
+  seg 1 (750,480)-(750,500) L5 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] -
+  bt 1 - u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=1 layer=6 along=[250,750] perp=480 slide=[450,480] pull=1 aflex=01 acover=[250,750] apull=0
+  ana 0 conns BT:u_gpu@250 ; SEG:1@750e
+  ana 1 horiz=0 layer=5 along=[480,500] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[480,500] apull=0
+  ana 1 conns SEG:0@480e ; BT:u_disp@500
+ cand type=L_VH@y570@x250 wl=520 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (250,550)-(250,570) L5 jog=0 edge=-1
+  seg 1 (250,570)-(750,570) L6 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] -
+  bt 1 - u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  ana 0 horiz=0 layer=5 along=[550,570] perp=250 slide=[100,250] pull=1 aflex=01 acover=[550,570] apull=0
+  ana 0 conns BT:u_gpu@550 ; SEG:1@570e
+  ana 1 horiz=1 layer=6 along=[250,750] perp=570 slide=[570,600] pull=-1 aflex=10 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; BT:u_disp@750
+ cand type=Z_HVH@x500@y550 wl=550 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (250,550)-(500,550) L6 jog=0 edge=-1
+  seg 1 (500,550)-(500,500) L5 jog=0 edge=-1
+  seg 2 (500,500)-(750,500) L6 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] -
+  bt 2 - u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[250,500] perp=550 slide=[450,550] pull=0 aflex=01 acover=[250,500] apull=0
+  ana 0 conns BT:u_gpu@250 ; SEG:1@500e
+  ana 1 horiz=0 layer=5 along=[500,550] perp=500 slide=[270,730] pull=0 aflex=11 acover=[500,550] apull=0
+  ana 1 conns SEG:0@550e ; SEG:2@500e
+  ana 2 horiz=1 layer=6 along=[500,750] perp=500 slide=[500,600] pull=0 aflex=10 acover=[500,750] apull=0
+  ana 2 conns SEG:1@500e ; BT:u_disp@750
+ cand type=U_VHV@y430 wl=590 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (250,450)-(250,430) L5 jog=0 edge=-1
+  seg 1 (250,430)-(750,430) L6 jog=0 edge=-1
+  seg 2 (750,430)-(750,500) L5 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] -
+  bt 2 - u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[430,450] perp=250 slide=[100,250] pull=1 aflex=10 acover=[430,450] apull=0
+  ana 0 conns BT:u_gpu@450 ; SEG:1@430e
+  ana 1 horiz=1 layer=6 along=[250,750] perp=430 slide=[-1073741824,430] pull=2 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=0 layer=5 along=[430,500] perp=750 slide=[750,900] pull=-1 aflex=10 acover=[430,500] apull=0
+  ana 2 conns SEG:1@430e ; BT:u_disp@500
+ cand type=U_VHV@y620 wl=590 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (250,550)-(250,620) L5 jog=0 edge=-1
+  seg 1 (250,620)-(750,620) L6 jog=0 edge=-1
+  seg 2 (750,620)-(750,600) L5 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] -
+  bt 2 - u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[550,620] perp=250 slide=[100,250] pull=1 aflex=01 acover=[550,620] apull=0
+  ana 0 conns BT:u_gpu@550 ; SEG:1@620e
+  ana 1 horiz=1 layer=6 along=[250,750] perp=620 slide=[620,1073741823] pull=-2 aflex=11 acover=[250,750] apull=0
+  ana 1 conns SEG:0@250e ; SEG:2@750e
+  ana 2 horiz=0 layer=5 along=[600,620] perp=750 slide=[750,900] pull=-1 aflex=01 acover=[600,620] apull=0
+  ana 2 conns SEG:1@620e ; BT:u_disp@600
+ cand type=U_HVH@x20 wl=860 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (100,550)-(20,550) L6 jog=0 edge=-1
+  seg 1 (20,550)-(20,500) L5 jog=0 edge=-1
+  seg 2 (20,500)-(750,500) L6 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] -
+  bt 2 - u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[20,100] perp=550 slide=[450,550] pull=0 aflex=10 acover=[20,100] apull=0
+  ana 0 conns BT:u_gpu@100 ; SEG:1@20e
+  ana 1 horiz=0 layer=5 along=[500,550] perp=20 slide=[-1073741824,80] pull=2 aflex=11 acover=[500,550] apull=0
+  ana 1 conns SEG:0@550e ; SEG:2@500e
+  ana 2 horiz=1 layer=6 along=[20,750] perp=500 slide=[500,600] pull=0 aflex=10 acover=[20,750] apull=0
+  ana 2 conns SEG:1@20e ; BT:u_disp@750
+ cand type=U_HVH@x980 wl=860 trunk=0 passthru=0
+  blocks=u_gpu,u_disp feedthru=
+  seg 0 (250,550)-(980,550) L6 jog=0 edge=-1
+  seg 1 (980,550)-(980,500) L5 jog=0 edge=-1
+  seg 2 (980,500)-(900,500) L6 jog=0 edge=-1
+  bt 0 u_gpu:THRU:(100,450,250,550):(100,450,250,550):[] -
+  bt 2 - u_disp:THRU:(750,500,900,600):(750,500,900,600):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[250,980] perp=550 slide=[450,550] pull=0 aflex=01 acover=[250,980] apull=0
+  ana 0 conns BT:u_gpu@250 ; SEG:1@980e
+  ana 1 horiz=0 layer=5 along=[500,550] perp=980 slide=[920,1073741823] pull=-2 aflex=11 acover=[500,550] apull=0
+  ana 1 conns SEG:0@550e ; SEG:2@500e
+  ana 2 horiz=1 layer=6 along=[900,980] perp=500 slide=[500,600] pull=0 aflex=01 acover=[900,980] apull=0
+  ana 2 conns SEG:1@980e ; BT:u_disp@900
+bundle 3 nets=2 candidates=5
+ cand type=I_V wl=700 trunk=0 passthru=0
+  blocks=u_io_src,u_io_dst feedthru=
+  seg 0 (500,150)-(500,850) L5 jog=0 edge=-1
+  bt 0 u_io_src:THRU:(450,50,550,150):(450,50,550,150):[] u_io_dst:THRU:(450,850,550,950):(450,850,550,950):[]
+  ana 0 horiz=0 layer=5 along=[150,850] perp=500 slide=[450,550] pull=0 aflex=00 acover=[150,850] apull=0
+  ana 0 conns BT:u_io_src@150 ; BT:u_io_dst@850
+ cand type=U_HVH@x430 wl=740 trunk=0 passthru=0
+  blocks=u_io_src,u_io_dst feedthru=
+  seg 0 (450,150)-(430,150) L6 jog=0 edge=-1
+  seg 1 (430,150)-(430,850) L5 jog=0 edge=-1
+  seg 2 (430,850)-(450,850) L6 jog=0 edge=-1
+  bt 0 u_io_src:THRU:(450,50,550,150):(450,50,550,150):[] -
+  bt 2 - u_io_dst:THRU:(450,850,550,950):(450,850,550,950):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[430,450] perp=150 slide=[50,150] pull=1 aflex=10 acover=[430,450] apull=0
+  ana 0 conns BT:u_io_src@450 ; SEG:1@430e
+  ana 1 horiz=0 layer=5 along=[150,850] perp=430 slide=[-1073741824,430] pull=2 aflex=11 acover=[150,850] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@850e
+  ana 2 horiz=1 layer=6 along=[430,450] perp=850 slide=[850,950] pull=-1 aflex=10 acover=[430,450] apull=0
+  ana 2 conns SEG:1@430e ; BT:u_io_dst@450
+ cand type=U_HVH@x570 wl=740 trunk=0 passthru=0
+  blocks=u_io_src,u_io_dst feedthru=
+  seg 0 (550,150)-(570,150) L6 jog=0 edge=-1
+  seg 1 (570,150)-(570,850) L5 jog=0 edge=-1
+  seg 2 (570,850)-(550,850) L6 jog=0 edge=-1
+  bt 0 u_io_src:THRU:(450,50,550,150):(450,50,550,150):[] -
+  bt 2 - u_io_dst:THRU:(450,850,550,950):(450,850,550,950):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=1 layer=6 along=[550,570] perp=150 slide=[50,150] pull=1 aflex=01 acover=[550,570] apull=0
+  ana 0 conns BT:u_io_src@550 ; SEG:1@570e
+  ana 1 horiz=0 layer=5 along=[150,850] perp=570 slide=[570,1073741823] pull=-2 aflex=11 acover=[150,850] apull=0
+  ana 1 conns SEG:0@150e ; SEG:2@850e
+  ana 2 horiz=1 layer=6 along=[550,570] perp=850 slide=[850,950] pull=-1 aflex=01 acover=[550,570] apull=0
+  ana 2 conns SEG:1@570e ; BT:u_io_dst@550
+ cand type=Z_VHV@y500@x450 wl=800 trunk=0 passthru=0
+  blocks=u_io_src,u_io_dst feedthru=
+  seg 0 (450,150)-(450,500) L5 jog=0 edge=-1
+  seg 1 (450,500)-(550,500) L6 jog=0 edge=-1
+  seg 2 (550,500)-(550,850) L5 jog=0 edge=-1
+  bt 0 u_io_src:THRU:(450,50,550,150):(450,50,550,150):[] -
+  bt 2 - u_io_dst:THRU:(450,850,550,950):(450,850,550,950):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[150,500] perp=450 slide=[450,550] pull=0 aflex=01 acover=[150,500] apull=0
+  ana 0 conns BT:u_io_src@150 ; SEG:1@500e
+  ana 1 horiz=1 layer=6 along=[450,550] perp=500 slide=[170,830] pull=0 aflex=11 acover=[450,550] apull=0
+  ana 1 conns SEG:0@450e ; SEG:2@550e
+  ana 2 horiz=0 layer=5 along=[500,850] perp=550 slide=[450,550] pull=0 aflex=10 acover=[500,850] apull=0
+  ana 2 conns SEG:1@500e ; BT:u_io_dst@850
+ cand type=Z_VHV@y500@x550 wl=800 trunk=0 passthru=0
+  blocks=u_io_src,u_io_dst feedthru=
+  seg 0 (550,150)-(550,500) L5 jog=0 edge=-1
+  seg 1 (550,500)-(450,500) L6 jog=0 edge=-1
+  seg 2 (450,500)-(450,850) L5 jog=0 edge=-1
+  bt 0 u_io_src:THRU:(450,50,550,150):(450,50,550,150):[] -
+  bt 2 - u_io_dst:THRU:(450,850,550,950):(450,850,550,950):[]
+  sconn (0,1)->[1]
+  sconn (1,0)->[0]
+  sconn (1,1)->[2]
+  sconn (2,0)->[1]
+  ana 0 horiz=0 layer=5 along=[150,500] perp=550 slide=[450,550] pull=0 aflex=01 acover=[150,500] apull=0
+  ana 0 conns BT:u_io_src@150 ; SEG:1@500e
+  ana 1 horiz=1 layer=6 along=[450,550] perp=500 slide=[170,830] pull=0 aflex=11 acover=[450,550] apull=0
+  ana 1 conns SEG:0@550e ; SEG:2@450e
+  ana 2 horiz=0 layer=5 along=[500,850] perp=450 slide=[450,550] pull=0 aflex=10 acover=[500,850] apull=0
+  ana 2 conns SEG:1@500e ; BT:u_io_dst@850

@@ -163,6 +163,8 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `generate_topologies_for_bundle <hint> <src> <dst...> [center_mode] [double_detour]` | 2 | Generate candidates for a specific bundle; multiple dst → multicast trunk+branch shapes |
 | `generate_hier_topologies [center_mode] [double_detour] [multi_trunk]` | 2 | Generate candidates for all HBundles (3-case: cell-local / cross-level / cross-block). `multi_trunk` adds two-level **BITRUNK_HVH/VHV** datapath trees, exactly as in the flat `generate_topologies` (opt-in). Both `generate_[hier_]topologies` **persist** all candidate topologies into the BDB `topology`/`topology_segment` tables (before `run_planner`) when a BDB is open; see [BDB Reference](docs/BDB_REFERENCE.md) |
 | `generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk]` | 2 | Re-generate candidates for a single HBundle by ID (`multi_trunk` as above); useful for debugging zero-candidate bundles |
+| `generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]` | 2 | **Additive** per-bundle generation: run the generator with the given knobs and APPEND the new candidates to the bundle's existing pool, deduplicated by stable content uid (`topo_uid`) — existing indices, the pin, and plan state are untouched, so an expert accretes candidates across knob experiments without losing selections |
+| `edit_topology <bundle_id> [<cand#>\|new]` + `edit_add_trunk <H\|V> <perp> [<lo> <hi>] [layer <id>]` / `edit_add_stub <block> <seg#>` / `edit_set_span <seg#> <lo> <hi>` / `edit_connect <i> <j>` / `edit_disconnect <i> <j> <retract_to>` / `edit_remove_segment <seg#>` / `edit_status` / `edit_commit [pin]` / `edit_abort` | 2 | **TopoEdit session**: open a working copy of a candidate (or an empty topology), apply transactional edits — pick an axis + Hanan line and add a (default full-span) trunk, stub blocks to it, override spans, connect/disconnect perpendicular segments — each printing a verdict (check_topo violations + zero-slide pinch + wire-graph components); `edit_commit` appends the result to the bundle's pool as a `USER` candidate (uid-deduped; `pin` selects it), `edit_abort` discards. Slide overrides ride the existing `plan.seg_slide_lo/hi` NUTS hatch |
 | `set_planner_param <name> <value>` | 3 | Set a planner tuning knob; takes effect at the next `run_planner` (knobs may be changed between runs to re-plan). Known params: `kCong` (congestion weight), `kSpan` (span-length weight), `base_cost_non_top` (penalty for non-TOP layers), `kWL` (wirelength weight), `kBalance` (TOP-layer load balancing), `track_cap_slack` (extra signal tracks/band in `signal_tracks` mode) |
 | `select_topology <hint> <id>` / `select_topologies <hint> <ids>` | 3 | Pin one/many bundles to a specific candidate topology (1-based; ranges like `1,5-9,11`) before planning |
 | `run_planner <iterations> [signal_tracks]` | 3 | Layer assign + topology select. `signal_tracks` (opt-in) charges band capacity in discrete SIGNAL-track count (× bit pitch) instead of layout width, so a band short of tracks surfaces as planner overflow instead of a silent DNUTS open; needs `def_track_pattern`. See [Signal-Track Capacity plan](docs/internal/planner_signal_track_capacity.md). **Persists** its decision when a BDB is open: `topology.is_selected` + `topology_segment.assigned_layer`, and (hier) expanded per-instance `bundle` rows; see [BDB Reference](docs/BDB_REFERENCE.md) |
@@ -501,7 +503,14 @@ run_detailed_nuts [lo_hi|hi_lo]
 
 These cross-cutting modules sit beside stages 2–9 and guard correctness.
 
-**`ConnTopology`** augments a raw `Topology` with explicit connectivity and slide ranges:
+**`ConnTopology`** augments a raw `Topology` with explicit connectivity and slide ranges.
+Since the topo/conn unification ([plan + status](docs/internal/topo_conn_unification.md))
+the six derivation passes live in `topology_analysis.h/cpp` and their result is
+**cached on the Topology** (content-fingerprint-validated — the fingerprint is
+also the persisted `topo_uid` candidate identity), so every stage's
+`ConnTopology::build` serves the shared cached analysis; `topo_edit.h/cpp`
+provides the transactional expert-edit operations (engine for the `edit_*`
+CLI commands and the explorer's edit mode):
 - Infers connections geometrically — busterm-face membership, shared endpoints, and T-junctions — producing a `ConnSeg` per segment with a `perp_slide` range (`perp_lo`/`perp_hi`) over which the segment can move while every connection stays valid.
 - Computes `net_pull` (which way a segment "wants" to slide to shorten connected stubs) used as a NUTS placement preference.
 - `trunk_mst(...)` builds a Kruskal MST (`compute_mst` over `manhattan_nearest` distances) connecting a trunk to any blocks not yet directly attached — drives large-fanout / multi-block topologies.
@@ -588,7 +597,7 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 |---|---|
 | Build / wrappers | `CMakeLists.txt`, `bin/bb` (build), `bin/buda` / `bin/fp` / `bin/bfp` / `bin/viz` / `bin/u2b` (run), `bin/activate` (source: PATH+PYTHONPATH), `pytest.ini` |
 | DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `gds_io.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
-| Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
+| Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `topology_analysis.h/cpp`, `topo_edit.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
 | Python | `src/buda_cli.py` (CLI), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
 | Demos | `demo/*.buda` — user/designer-facing demo vehicles (comprehensive_demo, quickstart, ariane/mempool/nvdla/ispd19 showcases, …); see `demo/README.md` |

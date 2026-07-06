@@ -10,6 +10,13 @@ Grounded in a full call-site audit of both modules (consumer map + generation
 seams), summarized in §1–§2. Line numbers are from the tree at the time of
 writing; treat them as anchors, not gospel.
 
+**STATUS: implemented** — Phase 0 (harness), A (pass extraction), B (content-
+fingerprint cache), C (one analysis everywhere), E1/E1b (`topo_uid` identity +
+pin/sidecar survival), E2 (additive generation + knob memo), E3 (TopoEdit
+engine + `.buda` commands + explorer edit mode), E4 (user-candidate
+protection, schema v15), F (docs). Phase D (incremental re-analysis) is
+deferred by measurement — see §7. Per-phase notes are inline below.
+
 ## 1. Diagnosis — what the two modules actually are today
 
 | | `Topology` (topology.h/cpp) | `ConnTopology` (conn_topology.h/cpp) |
@@ -98,14 +105,24 @@ baseline:
    the `[TopoGen]` / warning strings (any wording change is its own commit).
 3. **route_snapshot hashes** — the per-stage content hashes persisted to the
    BDB (`_persist_route_snapshot`, buda_cli.py:491) for the corpus flows.
-4. **New: candidate-list golden snapshot** — a `dump_topologies`-based dump
-   (type strings, WL, segment coords, `min_slide`, `--conn` detail) for every
-   bundle of every corpus flow, committed as a golden file. This is the surface
-   the refactor touches most directly; the existing gates only sample it.
-5. **New: analysis-equivalence property test** — for every corpus candidate,
-   assert the new-path `ConnSeg` vector is field-for-field identical to a
-   pinned copy of the old `build()` (kept in the test tree during the
-   migration, deleted in Phase F).
+4. **New: candidate-list golden snapshot — IMPLEMENTED**
+   (`tools/topo_snapshot.py` + `test/tests/data/topo_golden/` +
+   `test_topo_analysis_golden.py`): a canonical generation-stage dump of every
+   corpus bundle's full candidate list — topology (type, WL, segments,
+   seg_busterms, seg_conns, bridges) **and** its complete derived analysis
+   (all 14 `ConnSeg` fields incl. raw slide sentinels, plus the ordered conns
+   list), so items 4 and 5 gate through one file. Large flows (tc3a_flat,
+   rnr/mix) commit per-bundle sha256 digests instead of multi-MB text — the
+   gate is equally hard, mismatches localize to a bundle, and the reviewable
+   diff comes from regenerating the full snapshot on the baseline tree.
+   Generation stage only, deliberately: candidate geometry + analysis are pure
+   integer arithmetic (machine-stable), while post-NUTS dogleg mutations ride
+   on float placements documented to diverge across CPUs.
+5. **New: analysis-equivalence property test — IMPLEMENTED** as part of item 4
+   (the `ana` lines of the golden are the pinned `ConnSeg` output; any refactor
+   that changes one derived value or one ordering fails with a line diff).
+   Later phases add the cache-hit == recompute and incremental == full-rebuild
+   properties on top of the same serializer.
 
 Two latent nondeterminisms to document, not fix (fixing changes bytes):
 `annotate_and_sort` uses `std::sort` keyed `(estimated_wirelength, type)` —
@@ -113,7 +130,10 @@ ties are effectively impossible because type strings embed coordinates, but it
 is not `stable_sort`; MST edge sort ties (equal `dist`) break by generation
 order (topology.cpp:2128).
 
-## 4. Phase A — re-house the analysis as named passes (byte-identical, mechanical)
+## 4. Phase A — re-house the analysis as named passes (byte-identical, mechanical) — IMPLEMENTED
+
+> Shipped as `src/topology_analysis.{h,cpp}`; verified byte-identical
+> (topo_golden fast+mid, wl_corpus A/B vs the pre-change tree, full fast tier).
 
 Move the six passes out of `ConnTopology`'s private methods into free functions
 in a new `topology_analysis.{h,cpp}` (topology.cpp is already ~3.1k lines;
@@ -135,7 +155,25 @@ order (conn_topology.cpp:54-59). `conn_topology.h` keeps the class + structs
 
 *Acceptance: harness green; no caller changes anywhere.*
 
-## 5. Phase B — cache the analysis on the Topology (byte-identical, the performance payoff)
+## 5. Phase B — cache the analysis on the Topology (byte-identical, the performance payoff) — IMPLEMENTED
+
+> Shipped with one deliberate strengthening over the design below: the cache
+> validates by **content fingerprint**, not revision discipline. Topology is an
+> open struct — its fields are assigned freely in C++ generators (e.g.
+> `generate_2pin` assigns `connected_block_names` *after* `filter_pinched` has
+> already built an analysis) and via the pybind setters, so a bump protocol
+> would silently break on any missed site. `analyze()`
+> (topology_analysis.h) re-fingerprints the analysis inputs (FNV-1a over
+> segments, seg_busterms, seg_conns, connected_block_names, feedthru, bridges)
+> on every call and recomputes on mismatch: a stale cache is structurally
+> impossible, no mutator or binding needs changes, and the §11 pybind-bypass
+> risk is retired by construction. The Floorplan side kept the rev design
+> (uid fresh on copy + rev bumped by every mutator — all its state is behind
+> methods, so the discipline is airtight there). The fingerprint is also the
+> natural precursor of E1's persisted `topo_uid`. ConnTopology holds an
+> immutable shared snapshot (built-before-mutation semantics preserved).
+> Gated by `test_topo_analysis_cache.py` + the full Phase 0 harness +
+> wl_corpus A/B.
 
 Add to `Topology` a copyable analysis cache plus a revision counter:
 
@@ -181,7 +219,20 @@ mutated one recomputes); NUTS dogleg trials and the Python DetailedNUTS prep
 become cache hits. Roughly a 3-6× reduction in analysis work per pipeline pass
 and per ripup trial.*
 
-## 6. Phase C — one analysis, everywhere (byte-identical, deletion of duplicates)
+## 6. Phase C — one analysis, everywhere (byte-identical, deletion of duplicates) — IMPLEMENTED
+
+> With the Phase B cache validating by content, every consumer's existing
+> `ConnTopology().build(...)` call became the shared path with **zero call-site
+> changes** — the planner's per-candidate builds, NUTS `build_nuts_maps`, the
+> CLI's Python-side DetailedNUTS prep, persist, check, and viz all hit the
+> same `TopoAnalysis`. Measured on full flows: computes ≈ 2×candidates (the
+> `filter_pinched` build plus one recompute after the deliberate post-filter
+> `connected_block_names` assignment — moving that assignment would change
+> routing bytes, so it stays), everything else hits — e.g. channel_stress 928
+> computes / 814 hits, dogleg1 51/50; a cache-hit build is ~4× cheaper than a
+> recompute even on a 9-segment candidate (hit cost = the fingerprint scan).
+> The structural invariants (computes ≤ 2×ncand + slack, hits ≥ ncand across a
+> full flow) are pinned by `test_flow_level_cross_stage_reuse`.
 
 With the cache in place, retire the structural duplications — no consumer
 signature changes:
@@ -197,7 +248,16 @@ signature changes:
 *Acceptance: harness green; a perf smoke (time `ripup_reroute` on big2) shows
 the expected drop; no Python-visible behavior change.*
 
-## 7. Phase D — incremental re-analysis (byte-identical by property, flag-gated)
+## 7. Phase D — incremental re-analysis (byte-identical by property, flag-gated) — DEFERRED BY MEASUREMENT
+
+> With Phase B in place, a mutation costs exactly ONE full recompute of ONE
+> candidate on its next build — measured at ~10µs for small topologies (the
+> whole six-pass run), and interactive editing (E3) performs one mutation at a
+> time. The dirty-set machinery below would optimize a cost that is already
+> negligible, at the price of a fuzz-gated parallel implementation of the
+> fixpoint passes. Revisit only if E3 profiling on very large candidates
+> (hundreds of segments) shows the recompute in an interactive loop; the
+> design below stands ready.
 
 Localized mutations shouldn't invalidate the whole analysis:
 
@@ -219,7 +279,24 @@ Localized mutations shouldn't invalidate the whole analysis:
 The feature layer the re-arch exists to unlock. Four building blocks, in
 dependency order; each is usable on its own.
 
-### E1 — stable candidate identity (`topo_uid`)
+### E1 — stable candidate identity (`topo_uid`) — CORE IMPLEMENTED
+
+> Shipped (schema v14): `topology.topo_uid` (hex of the Phase B content
+> fingerprint, canonicalized over seg_busterms so an in-memory all-junction
+> `(nullopt, nullopt)` entry — semantically identical to a missing one —
+> fingerprints like the persisted form) + `topology_segment.edge_id` (the
+> documented round-trip gap, closed). `buda.topo_uid(topo)` is bound; all
+> three persist sites write the uid; `load_pipeline` restores `edge_id` and
+> verifies uid integrity (pre-v14 checkpoints backfill silently, a v14
+> mismatch prints a lossy-checkpoint warning). Round-trip gated by
+> `test_topo_uid_roundtrip` + the resume test now comparing at full fidelity
+> including edge_id (multicast trunk+MST coverage). Fixtures regenerated
+> (schema-bump-only diff). E1b is also in: the sidecar carries
+> `topo_uid` (explorer writes it; older sidecars without it keep resolving via
+> type+WL → index hint), `_apply_selections` and the explorer resolve
+> uid-first, and `_reset_plan_for_regen` re-attaches a pin by uid across all
+> five regeneration paths (flat + hier) — a user's selection now survives a
+> knob-tweaked regeneration (`test_topo_uid_pins.py`).
 
 Today pins die on regeneration because identity is a list index:
 `_reset_plan_for_regen` (buda_cli.py:2352) nukes pin/plan state, and sidecars
@@ -247,7 +324,42 @@ knobs persist in the BDB so the next bulk `generate_topologies` doesn't
 silently revert them. Existing pins survive by uid — the expert accretes a
 candidate pool across sessions.
 
-### E3 — first-class edit transactions (`TopoEdit`)
+### E3 — first-class edit transactions (`TopoEdit`) — ENGINE IMPLEMENTED
+
+> Shipped as `src/topo_edit.{h,cpp}` + bindings, with the operation set
+> specified by the user: **pick axis + pick Hanan line + add trunk**
+> (`edit_add_trunk(horiz, perp_pos, …)` — default span = the Hanan extent on
+> that axis), **override span** (`edit_set_span`; slide override is the
+> existing `plan.seg_slide_lo/hi` NUTS hatch — per-plan state, deliberately
+> not topology content), **add/remove stub** (`edit_add_stub` seeds the tap
+> exactly like the generators — margin-inset bbox, multi-rect, TEG — and
+> claims the block; `edit_remove_segment` rides the erase_segment re-key
+> discipline), and **connect/disconnect perpendicular segments**
+> (`edit_connect` moves the nearest free endpoint to the crossing and extends
+> the partner when needed, refusing to move busterm taps; `edit_disconnect`
+> retracts the landing endpoint to a given coordinate, so geometry and
+> junction records always agree).  Every op returns an `EditVerdict`
+> (check_topo violations + zero-slide pinch + **SEG-graph component count** —
+> added because check_topo audits taps/faces/touch but not whole-graph
+> connectivity, so a span retraction that splits the tree would otherwise
+> pass).  A failed op leaves the topology untouched; undo = value snapshot
+> (uid-verified).  Gated by `test_topo_edit.py` incl. a from-scratch
+> trunk+stubs build reaching `ok()`.  E3b `.buda` commands are IN
+> (`edit_topology` opens a transactional working copy — deep-copied, since
+> pybind candidate elements alias pool storage — `edit_add_trunk/add_stub/
+> set_span/connect/disconnect/remove_segment` apply with printed verdicts,
+> `edit_status`, `edit_commit [pin]` appends as a uid-deduped `USER` candidate
+> — the E4 entry point — and `edit_abort` discards; gated by
+> `test_edit_commands.py` incl. a scripted hand topology routed end-to-end
+> through planner+NUTS with zero violations).  The explorer GUI wiring is IN
+> too: 'e'/'E' open a session on a working copy (deep-copied — pybind
+> candidate elements alias pool storage) or an empty topology; T/Y add an
+> H/V trunk at the cursor's Hanan line (full span), S stubs the block under
+> the cursor to the selected segment, C/D pair-connect/-disconnect, X
+> removes, enter commits as a pinned uid-deduped USER candidate (sidecar
+> saved), escape aborts; a banner renders each op's verdict and navigation
+> is parked mid-session.  Headless key-event tests:
+> `test_topo_explorer_edit_mode.py`; key table in docs/KEY_BINDINGS.md.
 
 A small C++ API (bound to Python, driven from the topology explorer) wrapping
 each supported edit — move a segment within its slide window, move a trunk
@@ -306,13 +418,18 @@ net_pull from geometry + Floorplan — those are recomputed, by design",
    C++ — it gets its own bump. A freshly rehydrated topology therefore always
    computes its analysis on first `build()`, exactly like a freshly generated
    one.
-3. **The Phase 0 harness gains a resume leg.** For each corpus flow:
-   checkpoint after `generate_topologies` / `run_planner` / `run_nuts`, reopen,
-   `load_pipeline`, continue — assert identical `route_snapshot` hashes and,
-   via the equivalence property test, that a **reloaded** candidate's analysis
-   equals its in-memory twin (extending the existing
-   `test_seg_busterm_persist.py` "reloaded topology drives
-   ConnTopology/check_topo identically" assertion to the cached path).
+3. **The Phase 0 harness gains a resume leg — IMPLEMENTED**
+   (`test_topo_resume_analysis.py`): checkpoint, reopen, `load_pipeline`,
+   continue. Asserts (a) a **reloaded** candidate's full analysis is
+   byte-identical to its in-memory twin (the golden serializer's bytes,
+   extending `test_seg_busterm_persist.py`'s check_topo-equivalence to the
+   complete `ConnSeg` set; `edge_id` excluded until E1 persists it), and
+   (b) **resume determinism**: two independent resumes continuing with the
+   same `run_nuts` produce identical `route_snapshot` fingerprints and route
+   the same segment/via population as the original session. Note the original
+   session's fingerprint may legitimately differ from a resumed one — the
+   planner's `seg_perp` placement preference is deliberately not persisted —
+   so determinism-of-resume, not original==resumed, is the invariant.
    Phase D's incremental mode must likewise leave persisted rows identical to
    a full rebuild — covered by the fuzz gate plus the `apply_dogleg` →
    re-persist path.
@@ -335,6 +452,26 @@ net_pull from geometry + Floorplan — those are recomputed, by design",
   describe the current list); uid reattachment happens in memory at
   regeneration time. The sidecar gains a uid field, and `_apply_selections`'
   matching chain becomes uid → type+WL (today's primary) → warned index hint.
+- **E2 additive generation — IMPLEMENTED** (`generate_more_topologies
+  <hint> [knobs]`): appends knob-produced candidates deduplicated by uid,
+  leaving indices/pin/plan untouched; idempotent per knob set; re-persisted
+  through the existing path (the in-memory pool is the full truth, so the
+  rewrite stays correct). Landing this surfaced a uid refinement: `type` /
+  `trunk_location` / `pass_through_count` joined the fingerprint — distinct
+  shapes can realize identical segments, and persisted identity must tell
+  them apart (for the cache this only makes validation finer-grained).
+  The rest of E2/E4 is now IN (schema v15): `topology.source`
+  (generated|user|dogleg, derived at persist), `clear_topologies(keep_user)` /
+  `clear_bundles(keep_user)` spare user rows — including their bundle FK
+  parents — so neither a bulk re-persist nor a re-bundle from a session that
+  never loaded them can delete a hand-committed candidate (orphans renumber
+  past the fresh index block and `load_pipeline` restores them); USER
+  candidates also survive regeneration **in memory** at all five regen sites
+  (deep-copied before the vector swap, re-appended uid-deduped, pin
+  re-attachable); and `bundle.gen_knobs` memoizes `generate_more_topologies`'
+  knob set (surviving the bundle clear-and-rewrite), which bulk
+  `generate_topologies` re-applies additively so an accreted pool never
+  silently reverts. Gated by `test_topo_source_protection.py`.
 - **E2 ends wipe-and-rewrite.** Additive generation and user candidates are
   incompatible with `clear_topologies()`: persistence moves to a per-bundle
   **upsert keyed by uid** — regeneration deletes only rows absent from the new

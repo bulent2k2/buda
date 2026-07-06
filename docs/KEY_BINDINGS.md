@@ -65,6 +65,27 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `f`, `cmd+f`, `ctrl+f` | Toggle Fullscreen mode. |
 | `cmd+q`, `ctrl+q` | Close all visualizer windows. |
 
+### TopoEdit mode (expert hand-editing)
+
+Press `e` to open an **edit session** on a working *copy* of the shown
+candidate (`E` starts from an empty topology).  While a session is open the
+copy replaces the candidate on screen, a red banner shows each operation's
+verdict (violations, wire-graph components, pinch), and candidate/bundle
+navigation is parked.  The same operations are scriptable as `.buda`
+commands (`edit_topology` … `edit_commit` — see the Script Reference).
+
+| Key(s) | Action |
+| :--- | :--- |
+| `e` / `E` | Open an edit session: copy of the shown candidate / empty topology. |
+| `T` (Shift+t) | Add a **horizontal trunk** at the cursor's nearest Hanan row, full Hanan span. |
+| `Y` (Shift+y) | Add a **vertical trunk** at the cursor's nearest Hanan column, full Hanan span. |
+| `S` (Shift+s) | Add a **stub** from the block under the cursor to the selected segment (`j`/`k`). |
+| `C` (Shift+c) | **Connect** two perpendicular segments: press once to mark the selected segment, re-select (`j`/`k`), press again. |
+| `D` (Shift+d) | **Disconnect** a junction pair (same two-step marking); the cursor position sets where the retracted endpoint lands. |
+| `X` (Shift+x) | **Remove** the selected segment (annotations re-keyed). |
+| `enter` | **Commit**: append the copy to the bundle's pool as a `USER` candidate (uid-deduped), pin it, and save the sidecar. |
+| `escape` | **Abort**: discard the working copy. |
+
 ### Mouse
 
 | Interaction | Action |

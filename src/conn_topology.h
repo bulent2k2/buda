@@ -16,6 +16,7 @@
 
 #pragma once
 #include "topology.h"
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -137,7 +138,7 @@ std::vector<MSTEdge> compute_mst(
 class ConnTopology {
 public:
     void build(const Topology& topo, const Floorplan& fp);
-    const std::vector<ConnSeg>& segs() const { return segs_; }
+    const std::vector<ConnSeg>& segs() const;
 
     // For the trunk segment at segs()[trunk_idx], gather all blocks in fp that
     // are NOT yet directly connected (no BUSTERM conn on that segment), then
@@ -147,19 +148,13 @@ public:
     std::vector<MSTEdge> trunk_mst(int trunk_idx, const Floorplan& fp) const;
 
 private:
-    std::vector<ConnSeg> segs_;
-    void infer_connections(const Topology& topo, const Floorplan& fp);
-    void compute_slide_ranges(const Floorplan& fp);
-    // Tighten perp_lo/perp_hi for segments that pass through connected blocks
-    // with no explicit BUSTERM endpoint, ensuring NUTS keeps them spanned.
-    void tighten_passthrough_ranges(const Topology& topo, const Floorplan& fp);
-    // Pin the connector attached at a busterm tap's face endpoint to face_coord so
-    // NUTS span adjustment preserves the tap's along-reach to a relay block face.
-    void pin_relay_tap_connectors(const Floorplan& fp);
-    void compute_net_pull();
-    // Along-flex DOF (Stage C): mark each segment end contractible-or-anchored and
-    // compute its nominal along-coverage floor + a signed along-pull WL hint.
-    void compute_along_pull();
+    // The derivation lives in topology_analysis.h (six named passes; Phase A)
+    // and is CACHED on the Topology itself, validated by content fingerprint
+    // (Phase B) — build() is a thin wrapper over analyze().  This class is the
+    // frozen consumer facade; it holds an immutable shared snapshot, so a ct
+    // built before a topology mutation keeps serving the state it was built
+    // from, exactly as the old owned-vector did.
+    std::shared_ptr<const struct TopoAnalysis> a_;
 };
 
 } // namespace buda
