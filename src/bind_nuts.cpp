@@ -83,8 +83,30 @@ void bind_nuts(py::module_& m) {
     m.def("compute_mst",       &compute_mst);
 
     // ── Abstract NUTS ─────────────────────────────────────────────────────
+    // Placed-segment hierarchy (Phase G, docs/internal/placed_segment_preroutes.md).
+    // Additive: SegKind + read-only `kind` tags + the new PreRoutedSegment type;
+    // every pre-existing binding below is unchanged.
+    py::enum_<SegKind>(m, "SegKind")
+        .value("BUS",      SegKind::BUS)
+        .value("NET",      SegKind::NET)
+        .value("PREROUTE", SegKind::PREROUTE);
+
+    py::class_<PreRoutedSegment>(m, "PreRoutedSegment")
+        .def(py::init<>())
+        .def_readonly ("kind",           &PreRoutedSegment::kind)
+        .def_readwrite("layer",          &PreRoutedSegment::layer)
+        .def_readwrite("span_lo",        &PreRoutedSegment::span_lo)
+        .def_readwrite("span_hi",        &PreRoutedSegment::span_hi)
+        .def_readwrite("track_position", &PreRoutedSegment::track_position)
+        .def_readwrite("width",          &PreRoutedSegment::width)
+        .def_readwrite("placed",         &PreRoutedSegment::placed)
+        .def_readwrite("label",          &PreRoutedSegment::label)
+        .def_readwrite("slot_type",      &PreRoutedSegment::slot_type)
+        .def_readwrite("track_index",    &PreRoutedSegment::track_index);
+
     py::class_<TrackSegment>(m, "TrackSegment")
         .def(py::init<>())
+        .def_readonly ("kind",      &TrackSegment::kind)
         .def_readwrite("bundle_id",      &TrackSegment::bundle_id)
         .def_readwrite("seg_idx",        &TrackSegment::seg_idx)
         .def_readwrite("layer",          &TrackSegment::layer)
@@ -189,6 +211,12 @@ void bind_nuts(py::module_& m) {
         .def("get_layer_grid", [](RoutingGridStack& s, int id) -> RoutingGrid& {
             return s.get_layer_grid(id);
         }, py::arg("layer_id"), py::return_value_policy::reference_internal)
+        .def("preroutes",      &RoutingGridStack::preroutes,
+             py::arg("layer_id"), py::arg("perp_lo"), py::arg("perp_hi"),
+             py::arg("along_lo"), py::arg("along_hi"),
+             "Non-SIGNAL track slots of one layer as PreRoutedSegments "
+             "(global pattern over the along window + overrides clipped "
+             "to their regions)")
         .def("has_layer",      &RoutingGridStack::has_layer, py::arg("layer_id"));
 
     py::class_<BusSegmentConn>(m, "BusSegmentConn")
@@ -218,6 +246,7 @@ void bind_nuts(py::module_& m) {
 
     py::class_<NetSegment>(m, "NetSegment")
         .def(py::init<>())
+        .def_readonly ("kind",      &NetSegment::kind)
         .def_readwrite("bundle_id",      &NetSegment::bundle_id)
         .def_readwrite("seg_idx",        &NetSegment::seg_idx)
         .def_readwrite("bit_index",      &NetSegment::bit_index)

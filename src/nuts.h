@@ -16,6 +16,7 @@
 
 #pragma once
 #include "congestion_planner.h"
+#include "placed_segment.h"
 #include <limits>
 #include <map>
 #include <string>
@@ -24,20 +25,23 @@
 
 namespace buda {
 
-// One bus segment after track assignment.
+// One bus segment after track assignment (kind BUS in the placed-segment
+// hierarchy — see placed_segment.h; layer/span/track_position/width/placed
+// live on the base with the same names, so every consumer and binding is
+// unchanged).
 // span_lo/span_hi  = extent along the routing direction (x for H, y for V)
 // interval_lo/hi   = hard constraint on perpendicular position from the Hanan cell
 // track_position   = assigned perpendicular position (y for H, x for V) — output
-struct TrackSegment {
+struct TrackSegment : PlacedSegmentBase {
+    TrackSegment() : PlacedSegmentBase(SegKind::BUS) {
+        // Assigned output; NaN = unplaced (the base defaults to 0.0 — the
+        // pre-route convention — so the abstract stage overrides it here).
+        track_position = std::numeric_limits<double>::quiet_NaN();
+    }
     int  bundle_id  = -1;
     int  seg_idx    = -1;
-    int  layer      = 0;
     bool horiz      = false;
-    double span_lo  = 0, span_hi   = 0;   // routing-direction extent
     double interval_lo = 0, interval_hi = 0; // perpendicular placement range (hard)
-    double width    = 1.0;                 // bus width in perpendicular direction
-    double track_position = std::numeric_limits<double>::quiet_NaN(); // assigned output; NaN = unplaced
-    bool   placed   = false;
     int    net_pull = 0;                  // from ConnSeg: >0 prefer hi, <0 prefer lo
     // Resolved pull target: the coordinate this segment wants to reach (the
     // clamped pull_bound — the slide-window bound, or the nominal position when

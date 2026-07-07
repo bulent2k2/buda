@@ -249,7 +249,10 @@ annotators it already calls (`annotate_seg_conns`).
    `BusSegment` construction path stays bound and working (tests use it).
    Gate: detailed goldens byte-identical.
 
-### Phase G — `PlacedSegmentBase` (DEFERRED, unchanged)
+### Phase G — `PlacedSegmentBase` — ✅ DONE (follow-up PR)
+*(implemented per [`placed_segment_preroutes.md`](placed_segment_preroutes.md):
+base + PreRoutedSegment + `RoutingGridStack::preroutes()` + the
+`draw_preroutes` viz layer; BusSegment stays the stage-9 input descriptor.)*
 Introduce the CLAUDE.md target base struct + `PreRoutedSegment` only when
 pre-routes become first-class (draw_preroutes / explicit pre-route rows).
 Prereqs are done by then: geometry helpers shared (A), handoff single-sourced

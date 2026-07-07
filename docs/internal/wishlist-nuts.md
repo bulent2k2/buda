@@ -28,15 +28,37 @@ big2 from 43 -> 9 overlaps; the residual needs a genuinely different (cluster)
 algorithm. Out of scope for the current planner-fidelity branch, which is
 planner-only.
 
-**Where to start:** `src/nuts.cpp` `repair_overlaps` (~:529) and the dense
-`try_repack` lambda (~:1306); `find_overlaps`/`segs_overlap` for cluster
-discovery. Verify on `flow/big_data_test/big2/big2.buda`: the 9 residual overlaps
+**Where to start:** the detailed, implementable design now lives in
+[`nuts_band_repack.md`](nuts_band_repack.md) — cluster discovery over the
+residual overlap graph, a `LayerSolver::repack_cluster` entry point over the
+existing `try_repack` body (reachable since the PR #205 LayerSolver
+extraction), guards, determinism, and the bounds-based gate plan.  In code:
+`src/nuts.cpp` `repair_overlaps` + `LayerSolver::try_repack`;
+`find_overlaps`/`segs_overlap` (`nuts_geom.h`) for cluster discovery. Verify
+on `flow/big_data_test/big2/big2.buda`: the 9 residual overlaps
 (M4×1, M6×4, M7×3, M2×1 — all spread-fit) should drop toward 0 with no new DNUTS
 opens. NOTE: do NOT try to "balance" this away in the planner — evening the V
 load (M5 9117 vs M7 5752) was measured to be counter-productive: it pushes load
 toward M7 where the overlaps already sit and regressed DNUTS 60 -> 132 with the
 overlap count unchanged. The residual is a packer problem, not a load problem.
 See `docs/internal/planner_low_layer_over_cell.md`.
+
+## PlacedSegmentBase + first-class pre-routes (Phase G) — ✅ IMPLEMENTED
+
+**What:** The CLAUDE.md "Segment Type Hierarchy (target state)" unification:
+a shared `PlacedSegmentBase{kind, layer, span, track_position, width, placed}`
+under `TrackSegment` / `NetSegment` / the NEW `PreRoutedSegment` (label +
+track_index), plus `RoutingGridStack::preroutes()` enumerating the non-SIGNAL
+track slots as explicit objects and the stage-7 `draw_preroutes` visualizer
+layer (per-type cycling toggle, works in the abstract view).  `BusSegment`
+deliberately stays the stage-9 input descriptor — merging it with
+TrackSegment would break bound names for zero behavior gain.
+
+**Design + as-built resolution:**
+[`placed_segment_preroutes.md`](placed_segment_preroutes.md).  Deferred
+follow-ups tracked there: BDB pre-route rows / GDS rail export, exact
+global-band splitting at pattern-override regions, a per-type button row,
+and the binding-breaking Track/BusSegment merge.
 
 ## Pre-existing failure: `test_tighten_does_not_trade_pull_for_overlaps` — ✅ RESOLVED (PR #69)
 

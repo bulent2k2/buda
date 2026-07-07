@@ -39,7 +39,9 @@ per-subsystem files so each area stays scannable.
   selection basis — rank on measured routability, not the generation-time WL
   estimate (deferred; the planner-side of the BITRUNK/datapath-tree under-selection).
 - **[wishlist-nuts.md](wishlist-nuts.md)** — Abstract & Detailed NUTS.
-  Band-level repack for spread-fit overlap clusters; pull-repack test failure (✅
+  Band-level repack for spread-fit overlap clusters (detailed design:
+  `nuts_band_repack.md`); PlacedSegmentBase + first-class pre-routes (✅
+  implemented — `placed_segment_preroutes.md`); pull-repack test failure (✅
   resolved, PR #69).
 - **[wishlist-bundler.md](wishlist-bundler.md)** — Bundler.
   Multi-source (fan-in) topology to make CONVERGENT bundling sound.

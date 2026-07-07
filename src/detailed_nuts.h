@@ -21,6 +21,7 @@
 #include <tuple>
 #include <vector>
 #include "nuts.h"          // BundleWrapper / NUTSResult (make_bus_segments)
+#include "placed_segment.h"
 #include "routing_grid.h"
 
 namespace buda {
@@ -64,15 +65,16 @@ struct BusSegment {
     double      track_hi_bound    =  std::numeric_limits<double>::infinity();
 };
 
-struct NetSegment {
+// One bit-wire; output of stage 9 (kind NET in the placed-segment hierarchy
+// — see placed_segment.h; layer/span/track_position/width live on the base
+// with the same names).  Rows are emitted only for bits that actually got a
+// track (unplaced bits are counted in num_unplaced, not materialized), so
+// `placed` is true on every emitted row.
+struct NetSegment : PlacedSegmentBase {
+    NetSegment() : PlacedSegmentBase(SegKind::NET) { placed = true; }
     int    bundle_id      = 0;
     int    seg_idx        = 0;
     int    bit_index      = 0;
-    double track_position = 0.0;
-    double width          = 1.0;
-    int    layer          = 0;
-    double span_lo        = 0.0;
-    double span_hi        = 0.0;
 };
 
 // One per-bit layer transition between two connected segments' bit-wires.

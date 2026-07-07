@@ -404,7 +404,7 @@ Adding a new command/stage means: (1) implement the C++ class; (2) expose it via
 - `draw_buses()` — topology segments at nominal coordinates (no NUTS)
 - `draw_nuts_tracks(nuts_result)` — segments at NUTS-assigned track positions; faint interval-constraint bands behind each segment (registered as `is_band=True`)
 - `draw_detailed_tracks(detailed_result)` — individual bit-wire lines at concrete track positions (per-type visibility toggles); see [Detailed Viz](docs/detailed_viz.md)
-- `draw_preroutes(...)` *(planned)* — VDD/GND/CLK/SHIELD bands; per-type visibility toggle
+- `draw_preroutes(routing_grid, layer_stack)` — VDD/GND/CLK/SHIELD pre-route bands from the first-class `PreRoutedSegment` objects (`RoutingGridStack.preroutes`); works in the abstract view too; the `[Preroutes]` button cycles per-type visibility (off → ALL → POWER → GROUND → CLOCK → SHIELD)
 
 ---
 
@@ -580,16 +580,18 @@ Only the OA bridge remains roadmap; when implementing, follow the existing patte
 
 ---
 
-## Segment Type Hierarchy (target state)
+## Segment Type Hierarchy (as built — `placed_segment.h`)
 
 ```
-PlacedSegmentBase          kind, layer, span, track_position, width, placed
-├── BusSegment             bundle_id, seg_idx, bit_width, interval, bit_order, timing_critical
-├── NetSegment             bundle_id, seg_idx, bit_index, net_name, track_index
-└── PreRoutedSegment       label, track_index
+PlacedSegmentBase          kind, layer, span_lo/hi, track_position, width, placed
+├── TrackSegment (BUS)     stage-4 placed bus segment: bundle_id, seg_idx, horiz,
+│                          interval, net_pull, pull_target, is_jog, corner bounds
+├── NetSegment (NET)       stage-9 placed bit-wire: bundle_id, seg_idx, bit_index
+└── PreRoutedSegment       a POWER/GROUND/CLOCK/SHIELD track: label, slot_type,
+    (PREROUTE)             track_index — enumerated by RoutingGridStack.preroutes()
 ```
 
-This is the **intended unification**, not the current shape: as built, stage 4 emits `TrackSegment` (in `nuts.h`) and stage 9 uses standalone `BusSegment` / `NetSegment` structs (in `detailed_nuts.h`) — there is no shared `PlacedSegmentBase` base class and `PreRoutedSegment` is not yet a type (pre-routes are modelled implicitly as non-SIGNAL track slots). The raw geometry type `Segment` in `topology.h` (start/end points + layer_hint) is a **pre-placement** concept and remains separate.
+Realized by Phase G of the NUTS/DNUTS refactor ([plan + as-built resolution](docs/internal/placed_segment_preroutes.md)). `BusSegment` (in `detailed_nuts.h`) deliberately stays OUTSIDE the hierarchy: it is the stage-9 *input descriptor* (intervals, bit_width, bit_order, connections) with no placement of its own — merging it with `TrackSegment` would rename bound pybind fields for zero behavior gain and is deferred to a binding-breaking version. The raw geometry type `Segment` in `topology.h` (start/end points + layer_hint) is a **pre-placement** concept and remains separate. Pre-routes remain non-SIGNAL track slots at solve time (blockage semantics unchanged); `preroutes()` materializes them as objects for viz/reporting/export.
 
 ---
 
@@ -599,7 +601,7 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 |---|---|
 | Build / wrappers | `CMakeLists.txt`, `bin/bb` (build), `bin/buda` / `bin/fp` / `bin/bfp` / `bin/viz` / `bin/u2b` (run), `bin/activate` (source: PATH+PYTHONPATH), `pytest.ini` |
 | DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `gds_io.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
-| Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `topology_analysis.h/cpp`, `topo_edit.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `nuts_geom.h`, `nuts_dogleg.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
+| Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `topology_analysis.h/cpp`, `topo_edit.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `nuts_geom.h`, `nuts_dogleg.h/cpp`, `placed_segment.h`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
 | Python | `src/buda_cli.py` (CLI core), `src/buda_cmds/` (command registry, one module per stage), `src/buda_session/` (BudaSession helper mixins + `util.py`), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
 | Demos | `demo/*.buda` — user/designer-facing demo vehicles (comprehensive_demo, quickstart, ariane/mempool/nvdla/ispd19 showcases, …); see `demo/README.md` |
