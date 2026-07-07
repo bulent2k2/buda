@@ -75,7 +75,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
 | [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_connectivity` · `dump_topologies` · `visualize` · `visualize_topologies` |
 
-Script control (`source`, comments), the output-files table, the typical
+Script control (`source`, `exit`, comments), the output-files table, the typical
 script skeleton, and the BDB command quick reference stay on this page, below.
 
 ## Script control
@@ -99,6 +99,26 @@ Only the outermost script's path is used for sidecar (`.json`) and log
 source ../common/base_layers.buda
 source my_floorplan.buda
 run_bundler strict
+```
+
+### `exit`
+
+```
+exit [<code>]
+```
+
+Stop the run immediately, before the rest of the script (or any including
+script) runs — handy for bisecting a flow incrementally. The optional integer
+`<code>` becomes the process exit status (default `0`, a clean stop; a
+non-integer argument is an error and exits `1`). Any armed BDB writeback is
+flushed first, so an `open_bdb … writeback` still persists on the way out.
+
+**Example:**
+```
+run_planner 5
+run_nuts
+exit             # stop here to inspect the NUTS result; skip detailed NUTS
+run_detailed_nuts
 ```
 
 ---
