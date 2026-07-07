@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include "placed_segment.h"  // PreRoutedSegment
 #include "topology.h"  // Rect
 
 namespace buda {
@@ -94,6 +95,20 @@ public:
     // Identical result to signal_tracks_in(...).size(), no heap allocation.
     int count_signal_tracks_in(double x, double lo, double hi) const;
 
+    // The layer's NON-SIGNAL track slots (POWER / GROUND / CLOCK / SHIELD /
+    // CUSTOM) materialized as first-class PreRoutedSegments — Phase G of
+    // docs/internal/placed_segment_preroutes.md.  Global-pattern slots whose
+    // centre lies in [perp_lo, perp_hi] span the full [along_lo, along_hi]
+    // window; each PatternOverride's local pattern is enumerated within
+    // (region ∩ perp window) with the span clipped to (region ∩ along window)
+    // — pre-routes break at region boundaries.  v1 approximation: global
+    // bands are NOT split where an override shadows them (the same sampling
+    // approximation signal_tracks_in makes).  track_index is a running index
+    // per enumeration; `layer` is stamped by RoutingGridStack::preroutes.
+    std::vector<PreRoutedSegment> preroutes_in(
+        double perp_lo, double perp_hi,
+        double along_lo, double along_hi) const;
+
     bool is_horizontal() const { return is_horizontal_; }
 
 private:
@@ -121,6 +136,12 @@ public:
     // Throws std::out_of_range if layer_id is not defined.
     RoutingGrid&       get_layer_grid(int layer_id);
     const RoutingGrid& get_layer_grid(int layer_id) const;
+
+    // Pre-routes of one layer within the given windows (see
+    // RoutingGrid::preroutes_in), with each segment's `layer` stamped.
+    std::vector<PreRoutedSegment> preroutes(
+        int layer_id, double perp_lo, double perp_hi,
+        double along_lo, double along_hi) const;
 
     bool has_layer(int layer_id) const;
 
