@@ -40,7 +40,13 @@ class ReportsMixin:
         """Minimum perpendicular slide (perp_hi - perp_lo) across the candidate's
         ConnSegs, via the same ConnTopology API the flexibility tests use. A value
         of 0 means a pinched/zero-freedom candidate. Returns None if connectivity
-        can't be built (e.g. a hier candidate in a non-self.fp floorplan)."""
+        can't be built.
+
+        A sentinel-scale return (>= `_SLIDE_SENTINEL`) means every segment's slide
+        is *unbounded* — the candidate references block faces ConnTopology can't
+        resolve against `self.fp` (e.g. a cell-level hier template before
+        `run_planner hier` expands it into absolute coordinates). The caller
+        displays that as `free`, mirroring the `--conn` detail."""
         try:
             ct = buda.ConnTopology()
             ct.build(topo, self.fp)
@@ -230,7 +236,9 @@ class ReportsMixin:
                 if i == sel:      marks.append("*SEL")
                 if i in dup_idx:  marks.append("dup")
                 if i in pinch_idx: marks.append("pinch")
-                ms_s = "-" if ms is None else str(ms)
+                ms_s = ("-" if ms is None
+                        else "free" if ms >= self._SLIDE_SENTINEL
+                        else str(ms))
                 env = f"[{lo:.0f}..{hi:.0f}]" if lo is not None else "-"
                 print(f"   {i:>3} {typ:<{type_w}} {wl:>8} {env:>17} {nsegs:>4} "
                       f"{pt:>4} {ms_s:>7}  {','.join(marks)}")

@@ -181,3 +181,35 @@ def test_dump_topologies_shows_wl_envelope_per_candidate():
         nominal = sum(abs(cs.along_hi - cs.along_lo) for cs in ct.segs())
         assert 0 <= lo <= hi, (c.type, lo, hi)
         assert lo <= nominal + 0.5, (c.type, lo, nominal)   # tight floor <= as-generated
+
+
+def test_mslide_unbounded_prints_free_not_sentinel():
+    """A cell-level HBundle template is still in cell-local coordinates before
+    `run_planner hier`, so ConnTopology can't resolve its block faces against the
+    absolute floorplan and every segment reads as unbounded.  The `mslide` column
+    must print `free` (mirroring `--conn`), never the raw ~2e9 slide sentinel."""
+    s = _run([
+        "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+        "open_bdb :memory:",
+        "add_cell proc_cell 420 200", "add_cell pipe_cell 110 80",
+        "add_inst_to_cell proc_cell pa_i pipe_cell 20 60",
+        "add_inst_to_cell proc_cell pb_i pipe_cell 155 60",
+        "add_inst proc_i proc_cell - 350 50",
+        "derive_busterms 1",
+        "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+        "bdb_net_mode on",
+        "add_bus pa_pb[8] proc_i/pa_i.out proc_i/pb_i.in",
+        "run_hier_bundler depth 1", "generate_hier_topologies",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies")          # BEFORE run_planner hier
+    out = buf.getvalue()
+    assert "mslide" in out, out
+    # At least one candidate has an unresolved (unbounded) slide, shown as `free`.
+    assert "free" in out, out
+    # And the raw sentinel integer never leaks into any column.
+    sess = s.__class__
+    sentinel = sess._SLIDE_SENTINEL
+    assert not any(tok.lstrip("-").isdigit() and abs(int(tok)) >= sentinel
+                   for tok in out.split()), out
