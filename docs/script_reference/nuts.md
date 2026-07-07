@@ -276,10 +276,12 @@ end contracts toward its coverage floor. Per bundle the table shows:
 | `jog` | NUTS-inserted dogleg-jog wire (extra metal *outside* the topology; excluded from `WL`) |
 | `fill` | Where `WL` sits in `[lo..hi]` — 0 % at `lo`, so **lower = tighter**, i.e. more of the topology's slide freedom was spent shortening the route |
 
-`lo` is the minimum for the topology **as generated**: NUTS can occasionally
-route a hair below it by inserting a dogleg JOG that restructures the tree, in
-which case the row is flagged with `*` and carries a non-zero `jog` — the
-envelope is a routing metric, not a hard proof. `hi` stays a loose outer bound.
+`lo` is the minimum for the topology as routed: when a dogleg was adopted the
+envelope uses the plan's per-segment slide overrides (the windows NUTS placed
+within) and excludes the jog's own span, so a doglegged bundle stays inside. A
+rare residual multi-trunk slide-model gap can still put the routed WL just outside
+the envelope (flagged `*`) — it is a routing metric, not a hard proof. `hi` stays
+a loose outer bound.
 The detailed section brackets the bit-level total against the **bit-scaled**
 envelope (`[lo..hi] × bit count`); per-bit jogs/vias add wire beyond a flat
 scale, so the detailed WL can ride high in — or slightly above — that scaled

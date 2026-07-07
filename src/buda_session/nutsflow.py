@@ -118,10 +118,10 @@ class NutsFlowMixin:
           lo (tight lower): the total span MINIMIZED jointly over the slide box by
               convex coordinate descent (a ternary search per coordinate; the
               objective is a sum of |affine| terms and converges to the box
-              optimum).  Far tighter than the per-segment sum.  It is the minimum
-              for the topology AS GENERATED — NUTS can occasionally route a hair
-              below it by inserting a dogleg JOG that restructures the tree (the
-              report's `jog` column flags those bundles).
+              optimum).  Far tighter than the per-segment sum.  When a dogleg was
+              adopted the plan's per-segment slide overrides define the box and the
+              jog's own span is excluded (see `_seg_slide_box` / the jog mask), so
+              a doglegged bundle stays inside its envelope.
 
         Returns (lo, hi); (0, 0) for an empty topology.  NUTS jogs are extra wire
         outside the topology and are reported separately, not bracketed here."""
@@ -356,8 +356,8 @@ class NutsFlowMixin:
         print("  ('WL' = topology-segment wire the envelope brackets; 'lo' = "
               "tightest routing the DOF allow (joint slide minimum), 'hi' = loose "
               "outer bound; 'fill' = where WL sits in [lo..hi], lower = tighter; "
-              "'*' below lo (usually with jog>0) = NUTS beat the as-generated "
-              "envelope via a dogleg.)")
+              "'*' = routed WL outside the envelope, a rare residual slide-model "
+              "gap.)")
         if ab_unpl:
             print(f"  NOTE: {ab_unpl} abstract segment(s) unplaced — this WL "
                   f"excludes them and is NOT comparable to a complete route.")
