@@ -64,51 +64,145 @@ class NutsFlowMixin:
         dy = (My - my) or 1
         return (mx - dx, Mx + dx, my - dy, My + dy)
 
-    def _topology_wl_interval(self, topo):
-        """[lo, hi] abstract wirelength the topology's slide + span DOF permits.
+    _WL_SENT = 10 ** 8   # ConnTopology marks an unbounded slide with ~5e8
 
-        For each ConnTopology segment, its along-length is bounded by its two
-        endpoints: a SEG-junction endpoint rides the CONNECTED segment's
-        [perp_lo, perp_hi] slide range; a busterm / free endpoint is fixed at its
-        face.  Summing each segment's independent [min, max] is a valid OUTER
-        bracket — the routed (non-jog) abstract WL always lands inside — but a
-        LOOSE one: the per-segment extremes are not simultaneously realizable (a
-        shared trunk cannot sit at both ends of its slide at once), so `lo` is a
-        true lower bound, `hi` a true upper bound, and the width is the DOF
-        envelope, not a tight prediction.  Untightened slide ranges (INT
-        sentinels) are clamped to the floorplan extent.  Returns (lo, hi); (0, 0)
-        for an empty topology.  NUTS-inserted dogleg JOGs are extra wire outside
-        the topology and are reported separately, not bracketed here."""
-        SENT = 10 ** 8
+    def _seg_slide_box(self, segs):
+        """Per-segment perpendicular slide box [lo, hi], with untightened
+        (INT-sentinel) ranges clamped to the floorplan extent (then perp_pos)."""
+        ext = self._fp_extent()
+        SENT = self._WL_SENT
+        box = []
+        for cs in segs:
+            lo = min(cs.perp_lo, cs.perp_hi)
+            hi = max(cs.perp_lo, cs.perp_hi)
+            if ext is not None:
+                axlo, axhi = (ext[2], ext[3]) if cs.horiz else (ext[0], ext[1])
+                if lo < -SENT:
+                    lo = axlo
+                if hi > SENT:
+                    hi = axhi
+            if lo < -SENT:
+                lo = cs.perp_pos
+            if hi > SENT:
+                hi = cs.perp_pos
+            box.append((lo, hi))
+        return box
+
+    def _topology_wl_interval(self, topo):
+        """[lo, hi] abstract wirelength envelope from the topology's slide + span
+        DOF.  Model: each ConnTopology segment's along-span = max − min over its
+        junction / busterm coordinates; a busterm coordinate is fixed at its face,
+        a SEG-junction coordinate rides the CONNECTED segment's perpendicular
+        slide.  The free variable is each segment's perpendicular position within
+        [perp_lo, perp_hi] (INT-sentinel ranges clamped to the floorplan extent).
+
+          hi (loose upper): each segment independently stretched to its max span —
+              a valid but loose OUTER upper bound.
+          lo (tight lower): the total span MINIMIZED jointly over the slide box by
+              convex coordinate descent (a ternary search per coordinate; the
+              objective is a sum of |affine| terms and converges to the box
+              optimum).  Far tighter than the per-segment sum.  It is the minimum
+              for the topology AS GENERATED — NUTS can occasionally route a hair
+              below it by inserting a dogleg JOG that restructures the tree (the
+              report's `jog` column flags those bundles).
+
+        Returns (lo, hi); (0, 0) for an empty topology.  NUTS jogs are extra wire
+        outside the topology and are reported separately, not bracketed here."""
         ct = buda.ConnTopology()
         ct.build(topo, self.fp)
         segs = ct.segs()
-        ext = self._fp_extent()
+        n = len(segs)
+        if n == 0:
+            return (0, 0)
+        box = self._seg_slide_box(segs)
 
-        def end_range(cs, coord):
+        # Per-segment along-coordinate sources: (fixed_value, -1) for a busterm,
+        # (None, seg_idx) for a junction riding segment seg_idx's perp position.
+        src = []
+        for cs in segs:
+            lst = []
+            for cn in cs.conns:
+                if (str(cn.kind).rsplit('.', 1)[-1] == "SEG"
+                        and 0 <= cn.seg_idx < n):
+                    lst.append((None, cn.seg_idx))
+                else:
+                    lst.append((cn.at_pos, -1))
+            src.append(lst)
+
+        # hi — per-segment independent max span (endpoints ride neighbour slide
+        # extremes): a valid, loose OUTER upper bound.
+        def end_box(cs, coord):
             for cn in cs.conns:
                 if (cn.at_pos == coord and cn.is_endpoint
                         and str(cn.kind).rsplit('.', 1)[-1] == "SEG"
-                        and 0 <= cn.seg_idx < len(segs)):
-                    nb = segs[cn.seg_idx]
-                    lo = min(nb.perp_lo, nb.perp_hi)
-                    hi = max(nb.perp_lo, nb.perp_hi)
-                    if ext is not None:
-                        axlo, axhi = (ext[2], ext[3]) if nb.horiz else (ext[0], ext[1])
-                        if lo < -SENT:
-                            lo = axlo
-                        if hi > SENT:
-                            hi = axhi
-                    return (lo, hi)
-            return (coord, coord)  # busterm-anchored or free end: fixed
-
-        lo = hi = 0
+                        and 0 <= cn.seg_idx < n):
+                    return box[cn.seg_idx]
+            return (coord, coord)
+        hi = 0
         for cs in segs:
-            lr = end_range(cs, cs.along_lo)
-            hr = end_range(cs, cs.along_hi)
-            lo += max(0, hr[0] - lr[1])
+            lr = end_box(cs, cs.along_lo)
+            hr = end_box(cs, cs.along_hi)
             hi += max(0, hr[1] - lr[0])
-        return lo, hi
+
+        # lo — joint minimum span over the slide box by convex coordinate descent.
+        p = [max(box[i][0], min(box[i][1], segs[i].perp_pos)) for i in range(n)]
+        neigh = [[] for _ in range(n)]
+        for t, lst in enumerate(src):
+            for fx, j in lst:
+                if fx is None:
+                    neigh[j].append(t)
+
+        def span(t):
+            cs = [(p[j] if fx is None else fx) for fx, j in src[t]]
+            return (max(cs) - min(cs)) if cs else 0
+
+        def local(s):
+            return sum(span(t) for t in neigh[s])
+
+        prev = None
+        for _ in range(12):
+            for s in range(n):
+                a, b = box[s]
+                if b <= a:
+                    continue
+                # The convex objective's minimum is a breakpoint within the
+                # neighbours' OTHER coordinates; restrict the search there so the
+                # ternary loop is O(log spread), not O(log extent).
+                others = []
+                for t in neigh[s]:
+                    for fx, j in src[t]:
+                        if j != s:
+                            others.append(p[j] if fx is None else fx)
+                if others:
+                    a = max(a, min(others))
+                    b = min(b, max(others))
+                if b <= a:
+                    p[s] = max(box[s][0], min(box[s][1], a))
+                    continue
+                while b - a > 2:
+                    m1 = a + (b - a) // 3
+                    m2 = b - (b - a) // 3
+                    p[s] = m1
+                    v1 = local(s)
+                    p[s] = m2
+                    v2 = local(s)
+                    if v1 < v2:
+                        b = m2
+                    else:
+                        a = m1
+                best, bv = a, None
+                for c in range(a, b + 1):
+                    p[s] = c
+                    v = local(s)
+                    if bv is None or v < bv:
+                        bv, best = v, c
+                p[s] = best
+            tot = sum(span(t) for t in range(n))
+            if prev is not None and abs(prev - tot) < 1e-6:
+                break
+            prev = tot
+        lo = min(sum(span(t) for t in range(n)), hi)
+        return (lo, hi)
 
     def _selected_wl_intervals(self):
         """Per-bundle [lo, hi] WL interval for each bundle's SELECTED topology.
@@ -223,9 +317,11 @@ class NutsFlowMixin:
               f"(seg {tseg:.0f} + jog {tjog:.0f}) over {len(all_ids)} bundle(s), "
               f"{ab_unpl} unplaced segment(s); DOF envelope [{tlo:.0f}..{thi:.0f}], "
               f"{inside}/{graded} bundle(s) inside")
-        print("  ('WL' = topology-segment wire the envelope brackets; 'fill' = "
-              "where WL sits in [lo..hi], lower = tighter; '*' = outside the "
-              "loose bracket. Envelope is an OUTER bound, not a tight target.)")
+        print("  ('WL' = topology-segment wire the envelope brackets; 'lo' = "
+              "tightest routing the DOF allow (joint slide minimum), 'hi' = loose "
+              "outer bound; 'fill' = where WL sits in [lo..hi], lower = tighter; "
+              "'*' below lo (usually with jog>0) = NUTS beat the as-generated "
+              "envelope via a dogleg.)")
         if ab_unpl:
             print(f"  NOTE: {ab_unpl} abstract segment(s) unplaced — this WL "
                   f"excludes them and is NOT comparable to a complete route.")

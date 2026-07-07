@@ -270,18 +270,25 @@ end contracts toward its coverage floor. Per bundle the table shows:
 
 | Column | Meaning |
 |---|---|
-| `lo` / `hi` | Lower / upper bound of the WL the topology's DOF permit |
+| `lo` | **Tightest** routing the DOF allow — the total span *minimized jointly* over the slide box by convex coordinate descent (respects the coupling that one trunk cannot sit at both ends of its slide at once) |
+| `hi` | Loose **outer** upper bound (each segment independently stretched to its max span) |
 | `WL` | Routed **topology-segment** wire (the portion the envelope brackets) |
 | `jog` | NUTS-inserted dogleg-jog wire (extra metal *outside* the topology; excluded from `WL`) |
-| `fill` | Where `WL` sits in `[lo..hi]` — 0 % at the lower bound, so **lower = tighter**, i.e. more of the topology's slide freedom was spent shortening the route |
+| `fill` | Where `WL` sits in `[lo..hi]` — 0 % at `lo`, so **lower = tighter**, i.e. more of the topology's slide freedom was spent shortening the route |
 
-The envelope is a **valid OUTER bracket** — the routed non-jog WL always lands
-inside — but a **loose** one: the per-segment extremes are not simultaneously
-realizable (a shared trunk cannot sit at both ends of its slide at once), so `lo`
-is a true lower bound and `hi` a true upper bound, not a tight prediction. The
-detailed section brackets the bit-level total against the **bit-scaled** envelope
-(`[lo..hi] × bit count`); per-bit jogs/vias add wire beyond a flat scale, so the
-detailed WL can ride high in — or slightly above — that scaled envelope.
+`lo` is the minimum for the topology **as generated**: NUTS can occasionally
+route a hair below it by inserting a dogleg JOG that restructures the tree, in
+which case the row is flagged with `*` and carries a non-zero `jog` — the
+envelope is a routing metric, not a hard proof. `hi` stays a loose outer bound.
+The detailed section brackets the bit-level total against the **bit-scaled**
+envelope (`[lo..hi] × bit count`); per-bit jogs/vias add wire beyond a flat
+scale, so the detailed WL can ride high in — or slightly above — that scaled
+envelope.
+
+The same `[lo..hi]` envelope is shown per **candidate** in
+[`dump_topologies`](verify_viz.md) (the `wl[lo..hi]` column), so candidates can be
+compared by their routing freedom *before* planning — a wide envelope means the
+candidate gives NUTS a lot of room to shorten.
 
 Every total carries its **unplaced** count on the same line: WL sums only placed
 wire, so a lower number that comes from dropped segments/bits is flagged rather

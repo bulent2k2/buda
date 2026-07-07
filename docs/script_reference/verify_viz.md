@@ -96,10 +96,15 @@ generation.
 | `--problems` | Only bundles with a flagged candidate (see below), plus the summary. |
 | `--conn` | After each shown bundle's table, print a per-segment connectivity detail for the selected candidate (see below). |
 
-Each candidate row prints: `idx`, `type`, `wl` (estimated wirelength), `segs`
-(segment count), `pass` (`pass_through_count` — blocks the trunk crosses with no
-stub), `mslide` (minimum perpendicular slide freedom across the candidate's
-ConnSegs, via `ConnTopology`; `0` = pinched, `-` = not computable), and notes
+Each candidate row prints: `idx`, `type`, `wl` (estimated / as-generated
+wirelength), `wl[lo..hi]` (the routing **WL envelope** the candidate's slide/span
+DOF permit — `lo` is the tightest routing, i.e. the total span minimized jointly
+over the slide box; `hi` a loose outer bound — a wide envelope means the candidate
+gives NUTS a lot of freedom to shorten; see
+[`report_wirelength`](nuts.md)), `segs` (segment count), `pass`
+(`pass_through_count` — blocks the trunk crosses with no stub), `mslide` (minimum
+perpendicular slide freedom across the candidate's ConnSegs, via `ConnTopology`;
+`0` = pinched, `-` = not computable), and notes
 (`*SEL` selected, `dup`, `pinch`). Per-bundle flags: `DUP(n)` geometric duplicates,
 `PINCH(n)` zero-slide candidates, `SINGLE` only one candidate, `PASSTHRU(n)`
 pass-through candidates. The summary reports the candidate-count distribution,
