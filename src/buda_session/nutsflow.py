@@ -66,13 +66,30 @@ class NutsFlowMixin:
 
     _WL_SENT = 10 ** 8   # ConnTopology marks an unbounded slide with ~5e8
 
-    def _seg_slide_box(self, segs):
+    def _seg_slide_box(self, segs, slide_lo=None, slide_hi=None):
         """Per-segment perpendicular slide box [lo, hi], with untightened
-        (INT-sentinel) ranges clamped to the floorplan extent (then perp_pos)."""
+        (INT-sentinel) ranges clamped to the floorplan extent (then perp_pos).
+
+        `slide_lo`/`slide_hi` (a bundle plan's `seg_slide_lo`/`seg_slide_hi`,
+        indexed by ConnSeg) override ConnTopology's window for a segment when set
+        (non-NaN) — this is what NUTS honours when a dogleg was adopted
+        (`nuts.cpp` slide_map; `_adopt_doglegs`), so the envelope must use the same
+        window or a doglegged bundle reads as false out-of-envelope."""
         ext = self._fp_extent()
         SENT = self._WL_SENT
+        use_ovr = (slide_lo is not None and slide_hi is not None
+                   and len(slide_lo) == len(segs) and len(slide_hi) == len(segs))
         box = []
-        for cs in segs:
+        for i, cs in enumerate(segs):
+            if use_ovr:
+                olo, ohi = slide_lo[i], slide_hi[i]
+                if olo == olo and ohi == ohi:          # both non-NaN
+                    # Overrides are floats; round to int so the integer coordinate
+                    # descent below stays integer (sub-unit precision is irrelevant
+                    # for a WL diagnostic).
+                    box.append((int(round(min(olo, ohi))),
+                                int(round(max(olo, ohi)))))
+                    continue
             lo = min(cs.perp_lo, cs.perp_hi)
             hi = max(cs.perp_lo, cs.perp_hi)
             if ext is not None:
@@ -88,7 +105,7 @@ class NutsFlowMixin:
             box.append((lo, hi))
         return box
 
-    def _topology_wl_interval(self, topo):
+    def _topology_wl_interval(self, topo, slide_lo=None, slide_hi=None):
         """[lo, hi] abstract wirelength envelope from the topology's slide + span
         DOF.  Model: each ConnTopology segment's along-span = max − min over its
         junction / busterm coordinates; a busterm coordinate is fixed at its face,
@@ -114,7 +131,7 @@ class NutsFlowMixin:
         n = len(segs)
         if n == 0:
             return (0, 0)
-        box = self._seg_slide_box(segs)
+        box = self._seg_slide_box(segs, slide_lo, slide_hi)
 
         # Per-segment along-coordinate sources: (fixed_value, -1) for a busterm,
         # (None, seg_idx) for a junction riding segment seg_idx's perp position.
@@ -129,6 +146,16 @@ class NutsFlowMixin:
                     lst.append((cn.at_pos, -1))
             src.append(lst)
 
+        # A NUTS-adopted dogleg leaves a JOG segment in the candidate topology; the
+        # report compares the envelope against the NON-jog routed WL, so exclude a
+        # jog's OWN span from the sums — but keep it as a coordinate provider (its
+        # position still constrains the trunk pieces it bridges).  ct.segs() is
+        # built 1:1 from topo.segments, so is_jog maps by index.
+        jog = [False] * n
+        if len(topo.segments) == n:
+            jog = [bool(getattr(topo.segments[i], 'is_jog', False))
+                   for i in range(n)]
+
         # hi — per-segment independent max span (endpoints ride neighbour slide
         # extremes): a valid, loose OUTER upper bound.
         def end_box(cs, coord):
@@ -139,13 +166,16 @@ class NutsFlowMixin:
                     return box[cn.seg_idx]
             return (coord, coord)
         hi = 0
-        for cs in segs:
+        for i, cs in enumerate(segs):
+            if jog[i]:
+                continue
             lr = end_box(cs, cs.along_lo)
             hr = end_box(cs, cs.along_hi)
             hi += max(0, hr[1] - lr[0])
 
         # lo — joint minimum span over the slide box by convex coordinate descent.
-        p = [max(box[i][0], min(box[i][1], segs[i].perp_pos)) for i in range(n)]
+        p = [max(box[i][0], min(box[i][1], int(round(segs[i].perp_pos))))
+             for i in range(n)]
         neigh = [[] for _ in range(n)]
         for t, lst in enumerate(src):
             for fx, j in lst:
@@ -153,6 +183,8 @@ class NutsFlowMixin:
                     neigh[j].append(t)
 
         def span(t):
+            if jog[t]:
+                return 0                      # jog wire excluded from the sum
             cs = [(p[j] if fx is None else fx) for fx, j in src[t]]
             return (max(cs) - min(cs)) if cs else 0
 
@@ -211,8 +243,12 @@ class NutsFlowMixin:
         for w in self.bundles:
             sel = w.plan.selected_topology_index
             if 0 <= sel < len(w.input.candidates):
+                # Pass the plan's per-segment slide overrides (set by
+                # _adopt_doglegs) so a doglegged bundle's envelope uses the SAME
+                # windows NUTS placed within, not ConnTopology's recomputed ones.
                 out[w.input.original_bundle.id] = self._topology_wl_interval(
-                    w.input.candidates[sel])
+                    w.input.candidates[sel],
+                    list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi))
         return out
 
     def _report_wirelength(self):

@@ -237,3 +237,46 @@ def test_clean_route_reports_zero_unplaced():
     s = _two_bus_session()
     out = _run(s)
     assert "0 unplaced segment(s)" in out, out
+
+
+def _dogleg_adopt_session():
+    """flow/dogleg1.buda: three buses in a cycle whose NUTS solve adopts a dogleg,
+    pinning per-segment slide overrides that differ from ConnTopology's recomputed
+    windows and leaving a jog segment in the topology."""
+    from pathlib import Path
+    flow = Path(__file__).parents[2] / "flow" / "dogleg1.buda"
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for line in flow.read_text().splitlines():
+            c = line.strip()
+            if not c or c.startswith("#"):
+                continue
+            if c.split()[0] in ("visualize", "visualize_topologies", "exit"):
+                continue
+            s.do_command(c)
+    return s
+
+
+def test_doglegged_bundle_envelope_uses_plan_slide_overrides():
+    """Regression (PR #208 Codex P2): when NUTS adopts a dogleg it pins
+    plan.seg_slide_lo/hi that it — not ConnTopology — places within, and leaves a
+    jog segment in the topology.  The WL envelope must honour those overrides and
+    exclude the jog's own span, or the doglegged bundle reads as a false
+    out-of-envelope '*'."""
+    import math
+    s = _dogleg_adopt_session()
+    # At least one bundle actually adopted a dogleg (has a non-NaN slide override).
+    adopted = [w.input.original_bundle.id for w in s.bundles
+               if any(not math.isnan(v) for v in list(w.plan.seg_slide_lo))]
+    assert adopted, "scenario did not adopt a dogleg — override path not exercised"
+
+    seg = {}
+    for ts in s.nuts_result.segments:
+        if getattr(ts, "placed", True) is False or getattr(ts, "is_jog", False):
+            continue
+        seg[ts.bundle_id] = seg.get(ts.bundle_id, 0.0) + abs(ts.span_hi - ts.span_lo)
+    for bid, (lo, hi) in s._selected_wl_intervals().items():
+        assert lo - 0.5 <= seg.get(bid, 0.0) <= hi + 0.5, (
+            f"bundle {bid} (dogleg-adopted={bid in adopted}) non-jog WL "
+            f"{seg.get(bid, 0.0)} outside envelope [{lo},{hi}]")
