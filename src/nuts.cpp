@@ -415,6 +415,16 @@ static void do_span_adjustments(
     }
 }
 
+// Re-adjust every placed segment's span to its partners' current tracks — the
+// universal "settle" step after any track mutation (each guarded move, a group
+// re-solve, a layer rerun).
+static void settle_spans(std::vector<TrackSegment>& segments, NutsContext& ctx)
+{
+    std::vector<TrackSegment*> all_placed;
+    for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
+    do_span_adjustments(all_placed, ctx.rev_conn_map, ctx.ts_ptr_map);
+}
+
 void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
                                  NutsContext& ctx) const
 {
@@ -428,11 +438,8 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
 
     // Snapshot for the non-regression guard: a move re-adjusts follower
     // spans, which can surface new overlaps elsewhere.
-    struct Snap { double pos, lo, hi; };
-    std::vector<Snap> snapshot;
-    snapshot.reserve(segments.size());
-    for (const auto& ts : segments)
-        snapshot.push_back({ts.track_position, ts.span_lo, ts.span_hi});
+    PlacementSnapshot snapshot;
+    snapshot.take(segments);
 
     const auto kozs = low_keepouts();
     auto pull_of = [&](const TrackSegment& ts) {
@@ -444,22 +451,8 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     // locally good move can surface overlaps elsewhere.  Each move is
     // accepted only if the global overlap count strictly drops; otherwise
     // just that move is rolled back — earlier accepted moves are kept.
-    auto take_snap = [&](std::vector<Snap>& s) {
-        s.clear();
-        s.reserve(segments.size());
-        for (const auto& ts : segments)
-            s.push_back({ts.track_position, ts.span_lo, ts.span_hi});
-    };
-    auto restore_snap = [&](const std::vector<Snap>& s) {
-        for (size_t k = 0; k < segments.size(); ++k) {
-            segments[k].track_position = s[k].pos;
-            segments[k].span_lo        = s[k].lo;
-            segments[k].span_hi        = s[k].hi;
-        }
-    };
-
     int moved = 0;
-    std::vector<Snap> pre_move;
+    PlacementSnapshot pre_move;
     for (int iter = 0; iter < 8; ++iter) {
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
@@ -491,13 +484,8 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
             std::vector<std::pair<double,double>> occ;
             keepout_occupied(kozs, victim, occ);
             for (const auto& o : segments) {
-                if (&o == victim || !o.placed) continue;
-                if (o.layer != victim->layer) continue;
-                if (o.bundle_id == victim->bundle_id) continue;
-                if (sp_lo(o) <= sp_hi(*victim) && sp_lo(*victim) <= sp_hi(o)) {  // closed: touch = occupied
-                    const double h = o.width / 2.0;
-                    occ.push_back({o.track_position - h, o.track_position + h});
-                }
+                if (&o == victim) continue;
+                occupancy_from(*victim, o, occ);
             }
             std::sort(occ.begin(), occ.end());
 
@@ -528,14 +516,12 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
             if (std::isnan(pos) || pos == victim->track_position) continue;
 
             const size_t before = find_overlaps(segments).size();
-            take_snap(pre_move);
+            pre_move.take(segments);
             victim->track_position = pos;
             // Settle followers of the moved segment (and theirs, cheaply).
-            std::vector<TrackSegment*> all_placed;
-            for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
-            do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+            settle_spans(segments, ctx);
             if (find_overlaps(segments).size() >= before) {
-                restore_snap(pre_move);   // this move made things no better
+                pre_move.restore(segments);   // this move made things no better
                 continue;
             }
             ++moved;
@@ -547,7 +533,7 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     auto remaining = find_overlaps(segments);
     if (remaining.size() >= initial.size()) {
         // No strict improvement: restore the pre-repair state.
-        restore_snap(snapshot);
+        snapshot.restore(segments);
         return;
     }
     if (moved > 0)
@@ -626,20 +612,7 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
     auto&       ts_ptr_map   = ctx.ts_ptr_map;
     const auto kozs = low_keepouts();
 
-    struct Snap { double pos, lo, hi; };
-    std::vector<Snap> pre_move;
-    auto take_snap = [&](std::vector<Snap>& s) {
-        s.clear(); s.reserve(segments.size());
-        for (const auto& ts : segments)
-            s.push_back({ts.track_position, ts.span_lo, ts.span_hi});
-    };
-    auto restore_snap = [&](const std::vector<Snap>& s) {
-        for (size_t k = 0; k < segments.size(); ++k) {
-            segments[k].track_position = s[k].pos;
-            segments[k].span_lo        = s[k].lo;
-            segments[k].span_hi        = s[k].hi;
-        }
-    };
+    PlacementSnapshot pre_move;
     // True routed length = sum of every placed segment's span extent.  Sliding a
     // segment toward its pull contracts the follower spans connected to it, so
     // this is the quantity the pass minimises.
@@ -661,12 +634,8 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
                          std::vector<std::pair<double,double>>& occ) {
         keepout_occupied(kozs, &ts, occ);
         for (const auto& o : segments) {
-            if (&o == &ts || !o.placed || o.layer != ts.layer) continue;
-            if (o.bundle_id == ts.bundle_id) continue;
-            if (sp_lo(o) <= sp_hi(ts) && sp_lo(ts) <= sp_hi(o)) {  // closed: touch = occupied
-                const double h = o.width / 2.0;
-                occ.push_back({o.track_position - h, o.track_position + h});
-            }
+            if (&o == &ts) continue;
+            occupancy_from(ts, o, occ);
         }
         std::sort(occ.begin(), occ.end());
     };
@@ -731,14 +700,12 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
         const size_t ov_before = find_overlaps(segments).size();
         const int    vi_before = count_violations(segments);
         const double wl_before = total_wl();
-        take_snap(pre_move);
+        pre_move.take(segments);
         ts.track_position = pos;
-        std::vector<TrackSegment*> all_placed;
-        for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        settle_spans(segments, ctx);
         if (find_overlaps(segments).size() > ov_before ||
             count_violations(segments)    > vi_before ||
-            total_wl() + 0.5 >= wl_before) { restore_snap(pre_move); return false; }
+            total_wl() + 0.5 >= wl_before) { pre_move.restore(segments); return false; }
         return true;
     };
 
@@ -821,16 +788,14 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
         const size_t ov_before = find_overlaps(segments).size();
         const int    vi_before = count_violations(segments);
         const double wl_before = total_wl();
-        take_snap(pre_move);
+        pre_move.take(segments);
         for (size_t mi = 0; mi < members.size(); ++mi)
             segments[members[mi]].track_position = tgtpos[mi];
-        std::vector<TrackSegment*> all_placed;
-        for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        settle_spans(segments, ctx);
         if (find_overlaps(segments).size() > ov_before ||
             count_violations(segments)    > vi_before ||
             total_wl() + 0.5 >= wl_before) {
-            restore_snap(pre_move);
+            pre_move.restore(segments);
             return false;
         }
         return true;
@@ -972,10 +937,8 @@ void NUTSEngine::resolve_corner_overlaps(std::vector<TrackSegment>& segments,
         if (!new_edge) break;     // no resolvable corner overlap (or a cycle)
 
         // Snapshot for the stop-&-reverse guard.
-        struct Snap { double pos, lo, hi; bool placed; };
-        std::vector<Snap> snap; snap.reserve(segments.size());
-        for (const auto& ts : segments)
-            snap.push_back({ts.track_position, ts.span_lo, ts.span_hi, ts.placed});
+        PlacementSnapshot snap(/*with_placed=*/true);
+        snap.take(segments);
         const size_t before      = pairs.size();
         const int    before_viol = count_violations(segments);
 
@@ -991,9 +954,7 @@ void NUTSEngine::resolve_corner_overlaps(std::vector<TrackSegment>& segments,
             solve_layer(layer_segs, ctx, by_layer_cons[layer]);
         }
         // Re-fit connected spans to the new trunk positions and repair residue.
-        std::vector<TrackSegment*> all_placed;
-        for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
-        do_span_adjustments(all_placed, rev_conn_map, ctx.ts_ptr_map);
+        settle_spans(segments, ctx);
         repair_overlaps(segments, ctx);
 
         const size_t after = find_overlaps(segments).size();
@@ -1001,12 +962,7 @@ void NUTSEngine::resolve_corner_overlaps(std::vector<TrackSegment>& segments,
         // interval violation (an infeasible ordering must not trade a legal
         // overlap for a violation) — otherwise stop & reverse.
         if (after >= before || count_violations(segments) > before_viol) {
-            for (size_t k = 0; k < segments.size(); ++k) {
-                segments[k].track_position = snap[k].pos;
-                segments[k].span_lo        = snap[k].lo;
-                segments[k].span_hi        = snap[k].hi;
-                segments[k].placed         = snap[k].placed;
-            }
+            snap.restore(segments);
             by_layer_cons = cons_before;   // this iteration's edges/bounds are reverted
             break;
         }
@@ -1223,15 +1179,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     auto build_occupied = [&](const TrackSegment* ts,
                               std::vector<std::pair<double,double>>& occ) {
         for (const TrackSegment* o : segs) {
-            if (o == ts || !o->placed || o->bundle_id == ts->bundle_id) continue;
-            // Closed-span (<=) to match segs_overlap: a span that merely TOUCHES
-            // ts is occupancy too, so ts is kept off o's track and the two don't
-            // end up collinear (an end-to-end DRC).  Spans that are truly
-            // disjoint (gap > 0) still don't block.
-            if (sp_lo(*o) <= sp_hi(*ts) && sp_lo(*ts) <= sp_hi(*o)) {
-                const double h = o->width / 2.0;
-                occ.push_back({o->track_position - h, o->track_position + h});
-            }
+            if (o == ts) continue;
+            occupancy_from(*ts, *o, occ);   // closed-span predicate, see nuts_geom.h
         }
         add_keepout_occ(ts, occ);
     };
@@ -1291,12 +1240,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                 // sweep interval already ended) that overlap m's span.
                 // Same-bundle segments never conflict (bits may share tracks).
                 for (const TrackSegment* o : segs) {
-                    if (!o->placed || member_set.count(o)) continue;
-                    if (o->bundle_id == m->bundle_id) continue;
-                    if (sp_lo(*o) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*o)) {  // closed: touch = occupied
-                        const double h = o->width / 2.0;
-                        occ.push_back({o->track_position - h, o->track_position + h});
-                    }
+                    if (member_set.count(o)) continue;
+                    occupancy_from(*m, *o, occ);
                 }
                 for (const auto& [pm, ppos] : repacked) {
                     if (pm->bundle_id == m->bundle_id) continue;
@@ -1649,26 +1594,15 @@ void NUTSEngine::orientation_fixpoint(
             }
             solve_layer(by_layer[lid], ctx, cons_for(lid));
         }
-        std::vector<TrackSegment*> all_placed;
-        for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        settle_spans(segments, ctx);
     };
 
-    struct Snap { double pos, lo, hi; bool placed; };
     auto take = [&]() {
-        std::vector<Snap> s; s.reserve(segments.size());
-        for (const auto& ts : segments)
-            s.push_back({ts.track_position, ts.span_lo, ts.span_hi, ts.placed});
+        PlacementSnapshot s(/*with_placed=*/true);
+        s.take(segments);
         return s;
     };
-    auto restore = [&](const std::vector<Snap>& s) {
-        for (size_t k = 0; k < segments.size(); ++k) {
-            segments[k].track_position = s[k].pos;
-            segments[k].span_lo        = s[k].lo;
-            segments[k].span_hi        = s[k].hi;
-            segments[k].placed         = s[k].placed;
-        }
-    };
+    auto restore = [&](const PlacementSnapshot& s) { s.restore(segments); };
     // Legacy per-layer order (ascending id, per-layer span adjustment, then a
     // final all-layer pass) — today's solve, honouring any seed constraints.
     auto legacy_solve = [&]() {
@@ -1723,7 +1657,7 @@ void NUTSEngine::orientation_fixpoint(
     legacy_solve();
     size_t            best_ov    = find_overlaps(segments).size();
     const double      legacy_dev = pull_deviation();
-    std::vector<Snap> best_snap  = take();
+    PlacementSnapshot best_snap  = take();
     std::set<size_t>  seen{state_hash()};
 
     if (!lead_group.empty() && !perp_group.empty()) {
@@ -2355,9 +2289,7 @@ NUTSResult NUTSEngine::rerun_layer(
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
     solve_layer(layer_segs, ctx, {});
     // Final pass for all layers to catch cross-layer adjustments from the re-solved layer.
-    std::vector<TrackSegment*> all_placed;
-    for (auto& ts : result.segments) if (ts.placed) all_placed.push_back(&ts);
-    do_span_adjustments(all_placed, ctx.rev_conn_map, ctx.ts_ptr_map);
+    settle_spans(result.segments, ctx);
     repair_overlaps(result.segments, ctx);
     // Note: resolve_corner_overlaps is NOT run here.  It re-solves whole trunk
     // layers, which may differ from layer_id — that would violate rerun_layer's

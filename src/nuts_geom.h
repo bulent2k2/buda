@@ -50,6 +50,57 @@ inline void span_cover(double& span_lo, double& span_hi, double c) {
     else if (c > hi) (ordered ? span_hi : span_lo) = c;
 }
 
+// Track/span (+ optionally placed-flag) state of every segment — the one
+// snapshot type behind every "snapshot → mutate → accept-or-revert" guard in
+// the repair/tighten/corner/fixpoint passes (formerly four hand-rolled Snap
+// structs).  Row k belongs to segments[k]; take() and restore() must see the
+// same vector.
+class PlacementSnapshot {
+public:
+    explicit PlacementSnapshot(bool with_placed = false)
+        : with_placed_(with_placed) {}
+
+    void take(const std::vector<TrackSegment>& segments) {
+        rows_.clear();
+        rows_.reserve(segments.size());
+        for (const auto& ts : segments)
+            rows_.push_back({ts.track_position, ts.span_lo, ts.span_hi, ts.placed});
+    }
+
+    void restore(std::vector<TrackSegment>& segments) const {
+        for (size_t k = 0; k < segments.size(); ++k) {
+            segments[k].track_position = rows_[k].pos;
+            segments[k].span_lo        = rows_[k].lo;
+            segments[k].span_hi        = rows_[k].hi;
+            if (with_placed_) segments[k].placed = rows_[k].placed;
+        }
+    }
+
+private:
+    struct Row { double pos, lo, hi; bool placed; };
+    bool             with_placed_;
+    std::vector<Row> rows_;
+};
+
+// Append `o`'s occupied perpendicular interval to `occ` iff it constrains a
+// candidate track for `ts` — the one definition of the occupancy predicate
+// (formerly four copies across solve_layer, try_repack, repair_overlaps and
+// tighten_pulls).  Placed, same layer, OTHER bundle (same-bundle bits may
+// share tracks), and closed-span overlap: a span that merely TOUCHES ts is
+// occupancy too, matching segs_overlap — end-to-end collinear bits are a DRC.
+// Spans truly disjoint (gap > 0) don't block.  Callers exclude `ts` itself
+// (and, for a repack, the member set being re-placed together) and sort.
+inline void occupancy_from(const TrackSegment& ts, const TrackSegment& o,
+                           std::vector<std::pair<double,double>>& occ)
+{
+    if (!o.placed || o.layer != ts.layer) return;
+    if (o.bundle_id == ts.bundle_id) return;
+    if (sp_lo(o) <= sp_hi(ts) && sp_lo(ts) <= sp_hi(o)) {
+        const double h = o.width / 2.0;
+        occ.push_back({o.track_position - h, o.track_position + h});
+    }
+}
+
 // KeepoutZones on the segment's layer that intersect its span, as occupied
 // perpendicular intervals.
 inline void keepout_occupied(const std::vector<KeepoutZone>& kozs,
