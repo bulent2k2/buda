@@ -25,6 +25,31 @@ pytestmark = pytest.mark.mid
 _ROOT = Path(__file__).parents[2]
 
 
+def test_collect_candidate_bundles_keeps_distinct_hier_instances():
+    """Per-instance hier bundles that share a cell template (same cell_context/
+    reason) but route independently must each appear in the explorer list — not
+    be collapsed to one representative — so selecting bundle N opens bundle N and
+    the count matches the main viz. Exact-id duplicates are still removed."""
+    from types import SimpleNamespace as NS
+    from buda_viz import collect_candidate_bundles
+
+    def mk(bid, cell, reason, ncand=2):
+        return NS(input=NS(candidates=list(range(ncand)),
+                           original_bundle=NS(id=bid, cell_context=cell,
+                                              reason=reason)))
+
+    bundles = [
+        mk(167, "dogleg2", "r"), mk(168, "dogleg2", "r"),   # 4 instances of one
+        mk(169, "dogleg2", "r"), mk(170, "dogleg2", "r"),   # cell template
+        mk(5, "", ""), mk(5, "", ""),                       # exact-id dup of 5
+        mk(9, "", "", ncand=0),                             # no candidates → skip
+    ]
+    wrappers, cell_seen = collect_candidate_bundles(bundles)
+    ids = [w.input.original_bundle.id for w in wrappers]
+    assert ids == [167, 168, 169, 170, 5], ids   # all 4 kept; id-dup + no-cand gone
+    assert cell_seen[("dogleg2", "r")][1] == 4    # annotation still counts instances
+
+
 def _build_viz(flow_name, monkeypatch):
     """Run a .buda flow through the CLI and return the BudaVisualizer it builds,
     with plt.show() neutralized so nothing blocks or opens a window."""
