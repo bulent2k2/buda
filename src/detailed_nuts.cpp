@@ -15,6 +15,7 @@
  */
 
 #include "detailed_nuts.h"
+#include "nuts_geom.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -337,11 +338,7 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             // (e.g. ends 80/20 + a tap at 90 -> [80,90], dropping the 20 end).
             // Mirrors the abstract-NUTS coverage pass in nuts.cpp.
             auto cover = [&](double c) {
-                const double lo = std::min(ns.span_lo, ns.span_hi);
-                const double hi = std::max(ns.span_lo, ns.span_hi);
-                const bool ordered = (ns.span_lo <= ns.span_hi);
-                if (c < lo)      (ordered ? ns.span_lo : ns.span_hi) = c;
-                else if (c > hi) (ordered ? ns.span_hi : ns.span_lo) = c;
+                span_cover(ns.span_lo, ns.span_hi, c);
             };
             if (cover_lo !=  std::numeric_limits<double>::infinity()) cover(cover_lo);
             if (cover_hi != -std::numeric_limits<double>::infinity()) cover(cover_hi);
