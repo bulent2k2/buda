@@ -1,0 +1,413 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""BDB — physical-design-database commands (ingest, hierarchy, mutate).
+
+Command handlers extracted verbatim from BudaSession.do_command
+(the CLI registry split; self -> session was the only body change).
+Each handler takes (session, cmd, args, cmd_line) and is registered
+in this module's COMMANDS dict; the buda_cmds package assembles the
+full registry that buda_cli.do_command dispatches through.
+"""
+import buda
+import os
+
+
+def cmd_bdb_net_mode(session, cmd, args, cmd_line):
+    # bdb_net_mode on|off
+    if len(args) < 1 or args[0].lower() not in ('on', 'off'):
+        print("Error: bdb_net_mode requires on|off"); return
+    session.bdb_net_mode = (args[0].lower() == 'on')
+    print(f"[BDB] net mode {'enabled' if session.bdb_net_mode else 'disabled'}")
+
+
+def cmd_add_cell_pin(session, cmd, args, cmd_line):
+    # add_cell_pin <cell> <pin_name> [INPUT|OUTPUT|INOUT] [<px> <py>]
+    if session.bdb is None:
+        print("Error: add_cell_pin requires an open BDB (use open_bdb first)"); return
+    if len(args) < 2:
+        print("Error: add_cell_pin requires <cell> <pin_name> [dir] [px py]"); return
+    cell_name = args[0]; pin_name = args[1]
+    direction = args[2].upper() if len(args) > 2 else "INOUT"
+    px = float(args[3]) if len(args) > 3 else -1.0
+    py = float(args[4]) if len(args) > 4 else -1.0
+    session.bdb.add_cell_pin(cell_name, pin_name, direction, px, py)
+
+
+def cmd_def_gds_layer(session, cmd, args, cmd_line):
+    # def_gds_layer <buda_layer_id> <gds_layer> [<gds_datatype>]
+    # def_gds_layer file <path>      (lines: <id> <gds_layer> [<dt>], # comments)
+    # def_gds_layer labels <csv>     (default TEXT label layers for import_gds)
+    # GDSII layer mapping (Phase G3): binds a def_layer metal layer to a
+    # GDS (layer, datatype) pair. import_gds excludes shapes on mapped
+    # pairs from cell footprints (they are wires, not macro outlines);
+    # export (Phase G4) writes each metal layer to its mapped pair.
+    if len(args) < 2:
+        print("Error: def_gds_layer requires <buda_layer_id> <gds_layer> "
+              "[<gds_datatype>], 'file <path>', or 'labels <csv>'"); return
+    if args[0] == "labels":
+        session._gds_label_layers = [int(x) for x in args[1].split(",") if x]
+        return
+    entries = []
+    if args[0] == "file":
+        try:
+            with open(args[1]) as f:
+                for ln, line in enumerate(f, 1):
+                    line = line.split("#", 1)[0].strip()
+                    if not line:
+                        continue
+                    parts = line.split()
+                    if len(parts) not in (2, 3):
+                        print(f"Error: {args[1]}:{ln}: expected "
+                              f"<buda_layer_id> <gds_layer> [<gds_datatype>]")
+                        return
+                    entries.append(parts)
+        except OSError as e:
+            print(f"Error: def_gds_layer file: {e}"); return
+    else:
+        entries.append(args[:3])
+    # Validate the whole map before installing any entry: sourced
+    # scripts continue past a returned error, and a partially
+    # installed map would let a following import_gds exclude only
+    # SOME of the mapped wires from footprints.
+    parsed = []
+    for parts in entries:
+        lid, gl = int(parts[0]), int(parts[1])
+        dt = int(parts[2]) if len(parts) > 2 else 0
+        if not session.layers.has_layer(lid):
+            print(f"Error: unknown layer id {lid} — define it with "
+                  f"def_layer first (no mappings installed)"); return
+        parsed.append((lid, gl, dt))
+    for lid, gl, dt in parsed:
+        other = session.layers.layer_for_gds(gl, dt)
+        if other >= 0 and other != lid:
+            print(f"Warning: GDS ({gl},{dt}) already mapped to layer "
+                  f"{other}; layer {lid} also maps it")
+        session.layers.set_gds_mapping(lid, gl, dt)
+
+
+def cmd_open_bdb(session, cmd, args, cmd_line):
+    # open_bdb <path> [writeback]
+    if not args:
+        print("Error: open_bdb requires a file path"); return
+    # Persist any fixture armed by a previous open_bdb before switching.
+    session._flush_bdb_writeback()
+    # `writeback` must be the explicit optional argument immediately after
+    # the path. A membership test (`in args[1:]`) would also match the word
+    # inside a trailing comment — do_command only strips full-line comments,
+    # so `open_bdb foo.sql # no writeback` keeps 'writeback' as a token —
+    # silently arming write-back on a fixture from a read-looking line.
+    writeback = len(args) >= 2 and args[1] == "writeback"
+    bdb_path = args[0]
+    if (session._script_stack
+            and not os.path.isabs(bdb_path)
+            and bdb_path != ':memory:'):
+        parent_dir = os.path.dirname(session._script_stack[-1])
+        bdb_path = os.path.normpath(os.path.join(parent_dir, bdb_path))
+    # A serialized text BDB (e.g. mix.bdb.sql) is materialized into a
+    # throwaway temp binary so the pipeline never dirties the checked-in
+    # text fixture. With `writeback`, changes are dumped back to the .sql on
+    # save_bdb/exit. See docs/internal/bdb_test_data.md.
+    if bdb_path != ':memory:' and bdb_path.endswith('.sql'):
+        bdb_path = session._materialize_bdb_sql(bdb_path, writeback=writeback)
+    elif writeback:
+        print("open_bdb: 'writeback' applies only to a serialized *.sql "
+              "fixture; a binary BDB is opened read-write and persists "
+              "directly — ignoring.")
+    session.bdb = buda.BDB(bdb_path)
+
+
+def cmd_import_def_lef(session, cmd, args, cmd_line):
+    # import_def_lef <def_path> <lef_path>
+    if len(args) < 2:
+        print("Error: import_def_lef requires <def_path> <lef_path>"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    session.bdb.import_def_lef(args[0], args[1])
+
+
+def cmd_import_verilog(session, cmd, args, cmd_line):
+    # import_verilog <v_path>
+    if not args:
+        print("Error: import_verilog requires a file path"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    session.bdb.import_verilog(args[0])
+
+
+def cmd_import_gds(session, cmd, args, cmd_line):
+    # Usage: import_gds <file.gds> [labels <layer_csv>]
+    # GDSII stream -> BDB placement/hierarchy + TEXT-label net recovery
+    # (fresh load; see docs/internal/gds_oa_interchange.md, Phases G1-G3).
+    # `labels 63,64` restricts which GDS layers carry net labels;
+    # default = layers from `def_gds_layer labels`, else every TEXT
+    # record is a label. Shapes on def_gds_layer-mapped routing pairs
+    # are excluded from cell footprints (wires, not macro outlines).
+    if not args:
+        print("Error: import_gds requires a file path"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    label_layers = list(session._gds_label_layers)
+    if len(args) >= 3 and args[1] == "labels":
+        label_layers = [int(x) for x in args[2].split(",") if x]
+    st = session.bdb.import_gds(args[0], label_layers,
+                             session.layers.gds_mapped_pairs())
+    for wmsg in st.warnings:
+        print(f"[import_gds] Warning: {wmsg}")
+    tops = ", ".join(st.tops) if st.tops else "(none)"
+    lbl = (f"{st.n_nets} net(s) / {st.n_pins} pin(s) recovered from "
+           f"{st.n_texts} TEXT label(s)"
+           + (f" ({st.n_labels_skipped} skipped)"
+              if st.n_labels_skipped else "")
+           if st.n_texts else "no TEXT labels (pair with "
+           "import_verilog for connectivity)")
+    rt = (f" {st.n_routing_shapes} routing shape(s) excluded from "
+          f"footprints." if st.n_routing_shapes else "")
+    print(f"[import_gds] {st.n_structures} structure(s) -> "
+          f"{st.n_cells} cell(s), {st.n_components} component(s); "
+          f"top(s): {tops}; {lbl}.{rt}")
+
+
+def cmd_export_gds(session, cmd, args, cmd_line):
+    # export_gds <file.gds> [outline <gds_layer>] [labels <gds_layer>|off]
+    #            [via_size <um>]
+    # GDSII export (Phase G4): stream the BDB — cells as structures
+    # with outline rects, components as SREFs, persisted net_segment
+    # wires (bus_segment fallback) on their def_gds_layer-mapped pairs,
+    # vias as squares, one TEXT label per pin. Re-importable with the
+    # same map (see docs/internal/gds_oa_interchange.md).
+    if not args:
+        print("Error: export_gds requires a file path"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    outline = 10
+    label_layer = (session._gds_label_layers[0]
+                   if session._gds_label_layers else 63)
+    write_labels = True
+    via_size = 1.0
+    i = 1
+    while i < len(args):
+        kw = args[i]
+        if kw == "outline" and i + 1 < len(args):
+            outline = int(args[i+1]); i += 2
+        elif kw == "labels" and i + 1 < len(args):
+            if args[i+1] == "off":
+                write_labels = False
+            else:
+                label_layer = int(args[i+1])
+            i += 2
+        elif kw == "via_size" and i + 1 < len(args):
+            via_size = float(args[i+1]); i += 2
+        else:
+            print(f"Error: export_gds: unknown option {kw!r}"); return
+    layer_map = [(lid, session.layers.get_gds_layer(lid),
+                  session.layers.get_gds_datatype(lid))
+                 for lid in sorted(set(session._layer_name_map.values()))
+                 if session.layers.get_gds_layer(lid) >= 0]
+    st = session.bdb.export_gds(args[0], layer_map, outline, label_layer,
+                             write_labels, via_size)
+    for wmsg in st.warnings:
+        print(f"[export_gds] Warning: {wmsg}")
+    print(f"[export_gds] wrote {args[0]}: {st.n_structures} "
+          f"structure(s), {st.n_placements} placement(s), "
+          f"{st.n_wire_shapes} wire shape(s) "
+          f"({st.stage or 'no routing'}), {st.n_via_shapes} via(s), "
+          f"{st.n_labels} label(s).")
+
+
+def cmd_add_blocks_from_bdb(session, cmd, args, cmd_line):
+    # add_blocks_from_bdb <depth> [deepest|skip|error]
+    if not args:
+        print("Error: add_blocks_from_bdb requires <depth>"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    depth    = int(args[0])
+    mode     = args[1].lower() if len(args) > 1 else "deepest"
+    if mode not in ("deepest", "skip", "error"):
+        print(f"Error: unknown mode {mode!r}; use deepest|skip|error"); return
+    session._add_blocks_from_bdb(depth, mode)
+
+
+def cmd_set_die(session, cmd, args, cmd_line):
+    # set_die <w> <h>
+    if len(args) < 2:
+        print("Error: set_die requires <w> <h>"); return
+    w, h = float(args[0]), float(args[1])
+    if session.bdb is not None:
+        session.bdb.set_die(w, h)
+    else:
+        session._die_w, session._die_h = w, h
+
+
+def cmd_move_comp(session, cmd, args, cmd_line):
+    # move_comp <name> <x> <y>
+    if len(args) < 3:
+        print("Error: move_comp requires <name> <x> <y>"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    session.bdb.move_comp(args[0], float(args[1]), float(args[2]))
+
+
+def cmd_resize_cell(session, cmd, args, cmd_line):
+    # resize_cell <cell> <w> <h>
+    if len(args) < 3:
+        print("Error: resize_cell requires <cell> <w> <h>"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    session.bdb.resize_cell(args[0], float(args[1]), float(args[2]))
+
+
+def cmd_add_cell(session, cmd, args, cmd_line):
+    # add_cell <name> <width> <height>
+    if len(args) < 3:
+        print("Error: add_cell requires <name> <width> <height>"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    session.bdb.add_cell(args[0], float(args[1]), float(args[2]))
+
+
+def cmd_add_inst(session, cmd, args, cmd_line):
+    # add_inst <inst_name> <cell_name> <parent|-> <x> <y>
+    # x,y are relative to parent's origin; absolute when parent is "-"
+    if len(args) < 5:
+        print("Error: add_inst requires <inst_name> <cell_name> "
+              "<parent|-> <x> <y>"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    parent = "" if args[2] == "-" else args[2]
+    session.bdb.add_inst(args[0], args[1], parent,
+                      float(args[3]), float(args[4]))
+
+
+def cmd_add_inst_to_cell(session, cmd, args, cmd_line):
+    # add_inst_to_cell <parent_cell> <inst_name> <child_cell> <x> <y>
+    # Defines the structural contents of parent_cell; no component rows
+    # are created until add_inst places an occurrence of parent_cell.
+    if len(args) < 5:
+        print("Error: add_inst_to_cell requires <parent_cell> <inst_name> "
+              "<child_cell> <x> <y>"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    session.bdb.add_inst_to_cell(args[0], args[1], args[2],
+                              float(args[3]), float(args[4]))
+
+
+def cmd_flip_comp(session, cmd, args, cmd_line):
+    # flip_comp <name> x|y
+    if len(args) < 2:
+        print("Error: flip_comp requires <name> x|y"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    axis = args[1].lower()
+    if axis not in ('x', 'y'):
+        print(f"Error: flip_comp axis must be 'x' or 'y', got {args[1]!r}"); return
+    session.bdb.flip_comp(args[0], axis == 'x')
+
+
+def cmd_rotate_comp(session, cmd, args, cmd_line):
+    # rotate_comp <name> 90|180|270
+    if len(args) < 2:
+        print("Error: rotate_comp requires <name> 90|180|270"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    try:
+        degrees = int(args[1])
+    except ValueError:
+        print("Error: rotate_comp degrees must be 90, 180, or 270"); return
+    session.bdb.rotate_comp(args[0], degrees)
+
+
+def cmd_add_comp(session, cmd, args, cmd_line):
+    # add_comp <name> <cell> <parent|-> <x1> <y1> <x2> <y2> [leaf]
+    # Use "-" for parent to create a root instance.
+    if len(args) < 7:
+        print("Error: add_comp requires <name> <cell> <parent|-> "
+              "<x1> <y1> <x2> <y2> [leaf]"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    parent = "" if args[2] == "-" else args[2]
+    is_leaf = True
+    if len(args) >= 8:
+        is_leaf = args[7].lower() not in ("0", "false", "no", "nonleaf")
+    session.bdb.add_comp(args[0], args[1], parent,
+                      float(args[3]), float(args[4]),
+                      float(args[5]), float(args[6]), is_leaf)
+
+
+def cmd_derive_busterms(session, cmd, args, cmd_line):
+    # derive_busterms [max_depth]
+    # Populate BDB busterm table from the component hierarchy.
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    max_depth = int(args[0]) if args else 1
+    session._busterm_gen = buda.BustermGen(session.bdb)
+    session._busterm_gen.derive(max_depth)
+    bts = session.bdb.all_busterms()
+    print(f"derive_busterms: {len(bts)} busterms written (depth 0..{max_depth}).")
+
+
+def cmd_refine_busterms(session, cmd, args, cmd_line):
+    # refine_busterms — re-derive busterms using the same max_depth as
+    # the last derive_busterms call (clears and rewrites the busterm table).
+    if session._busterm_gen is None:
+        print("Error: run derive_busterms first"); return
+    session._busterm_gen.refine()
+    bts = session.bdb.all_busterms()
+    print(f"refine_busterms: {len(bts)} busterms written.")
+
+
+def cmd_load_pipeline(session, cmd, args, cmd_line):
+    # Usage: load_pipeline [expanded]
+    # Rehydrate bundles + candidate topologies (+ plan + NUTS result, as
+    # deep as was persisted) from the open BDB, so the pipeline resumes
+    # where a previous session stopped. Requires the Floorplan/LayerStack
+    # setup to be re-declared first (see docs/BDB_REFERENCE.md).
+    session._load_pipeline_from_bdb(
+        expanded=bool(args) and args[0] == "expanded")
+
+
+def cmd_save_bdb(session, cmd, args, cmd_line):
+    # Serialize the working BDB back to its writeback source .sql now.
+    # Only meaningful after `open_bdb <file>.sql writeback`.
+    if session._write_bdb_sql():
+        print(f"save_bdb: wrote {session._bdb_writeback_src}")
+    else:
+        print("save_bdb: nothing to write — open the BDB with "
+              "`open_bdb <file>.sql writeback` to enable write-back.")
+
+
+COMMANDS = {
+    "bdb_net_mode": cmd_bdb_net_mode,
+    "add_cell_pin": cmd_add_cell_pin,
+    "def_gds_layer": cmd_def_gds_layer,
+    "open_bdb": cmd_open_bdb,
+    "import_def_lef": cmd_import_def_lef,
+    "import_verilog": cmd_import_verilog,
+    "import_gds": cmd_import_gds,
+    "export_gds": cmd_export_gds,
+    "add_blocks_from_bdb": cmd_add_blocks_from_bdb,
+    "set_die": cmd_set_die,
+    "move_comp": cmd_move_comp,
+    "resize_cell": cmd_resize_cell,
+    "add_cell": cmd_add_cell,
+    "add_inst": cmd_add_inst,
+    "add_inst_to_cell": cmd_add_inst_to_cell,
+    "flip_comp": cmd_flip_comp,
+    "rotate_comp": cmd_rotate_comp,
+    "add_comp": cmd_add_comp,
+    "derive_busterms": cmd_derive_busterms,
+    "refine_busterms": cmd_refine_busterms,
+    "load_pipeline": cmd_load_pipeline,
+    "save_bdb": cmd_save_bdb,
+}
