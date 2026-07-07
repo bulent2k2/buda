@@ -46,6 +46,7 @@ Commands run in the following order. Later stages depend on earlier ones.
 | 8 | `report_overhead` | Compare `def_layer` overhead% against the track pattern; print corrected `def_layer` commands for any mismatch |
 | 9 | `run_detailed_nuts` | Snap each bus segment's bits to concrete signal-track positions |
 | 3↔4/9 | `ripup_reroute` | Feedback-driven rip-up & re-route: read the **actual** NUTS overlaps / DNUTS opens and re-route contending bundles to clear them |
+| 3↔4/9 | `negotiate_congestion` | Measured-congestion negotiation: inject the **actual** overlaps/opens as band demand and re-plan the offending bundles unpinned against the corrected prices (the cheaper first pass; `ripup_reroute` finishes the residual) |
 | Verify | `check_connectivity` | Verify connectivity at topo, nuts, or dnuts stages and detect opens |
 | — | `dump_topologies` | Text dump of per-bundle candidate topologies (inspection) |
 | — | `visualize` | Open interactive NUTS result viewer |
@@ -70,7 +71,7 @@ The per-command documentation lives in one page per pipeline stage under
 | [Bundler](script_reference/bundling.md) | 1 | `run_bundler` · `run_hier_bundler` · `dump_hbundles` |
 | [Topology generator](script_reference/topologies.md) | 2 | `generate_topologies[_for_bundle]` · `generate_more_topologies` · TopoEdit session (`edit_topology` … `edit_commit`) · `generate_hier_topologies` · `generate_topologies_for_hbundle` |
 | [Planner](script_reference/planner.md) | 3, 4c | `set_planner_param` · `run_planner` (+ `hier`, `post_nuts`) · `select_topology` · `select_topologies` |
-| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `ripup_reroute` |
+| [Track assignment (NUTS)](script_reference/nuts.md) | 4, 9 | `run_nuts` · `run_nuts_on_layer` · `run_detailed_nuts` · `ripup_reroute` · `negotiate_congestion` |
 | [Routing grid](script_reference/routing_grid.md) | 8 | `def_track_pattern` · `add_grid_override` · `report_overhead` |
 | [Verification & visualisation](script_reference/verify_viz.md) | verify / — | `check_connectivity` · `dump_topologies` · `visualize` · `visualize_topologies` |
 
