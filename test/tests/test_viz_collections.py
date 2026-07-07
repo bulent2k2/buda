@@ -64,12 +64,22 @@ def test_topo_explorer_carries_over_layer_visibility(monkeypatch):
     exp = viz._topo_explorer
     assert exp is not None and exp._layer_visible is viz._layer_visible
 
-    n_all = len(exp.ax.get_lines())
+    # Count segment lines AND the layer-colored helper artifacts — slide-span
+    # bands (patches) and busterm markers (scatter collections + labels) — so
+    # this also guards that _draw_slide_spans / _draw_busterm_markers honour
+    # the hidden-layer set, not just the main segment loop.
+    def _artist_count():
+        return (len(exp.ax.get_lines()) + len(exp.ax.patches)
+                + len(exp.ax.texts) + len(exp.ax.collections))
+
+    n_all = _artist_count()
     for lid in viz._layer_visible:          # hide every layer
         viz._layer_visible[lid] = False
     viz._refresh_topo_explorer()
-    n_off = len(exp.ax.get_lines())
-    assert n_off < n_all, (n_all, n_off)   # the bundle's segments are gone
+    n_off = _artist_count()
+    assert n_off < n_all, (n_all, n_off)   # the bundle's segments AND their
+    #                                        slide spans / busterm markers gone
+    assert exp._hidden_seg, "every segment should be marked hidden"
 
 
 def _build_viz(flow_name, monkeypatch):
