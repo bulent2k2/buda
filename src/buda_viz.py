@@ -633,7 +633,13 @@ def set_app_name(name, fig=None):
     """Best-effort relabel of the app from 'python3'/'Python' to `name` in OS
     chrome (macOS dock / menu bar, `ps`). Every hook is optional and fully
     guarded, so this is a no-op where the mechanism isn't available (e.g. a
-    plain Linux run) and never raises."""
+    plain Linux run) and never raises.
+
+    IMPORTANT (macOS): the AppKit CFBundleName write (step 3) only takes
+    effect if it runs BEFORE the first Tk window is realized — AppKit caches
+    the app name when NSApplication is created. Call this once at process
+    startup (see buda_cli.main) for the dock / menu-bar / Cmd-Tab name; the
+    per-figure call here still sets the Tk appname and is otherwise a no-op."""
     if not name:
         return
     # 1. Process title — `ps`/`top` and some Linux docks. Optional dependency.
