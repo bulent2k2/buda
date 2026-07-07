@@ -248,6 +248,16 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const RoutingGridStack&>())
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
 
+    // Stage-4 -> stage-9 handoff, single-sourced in C++: every TrackSegment
+    // of the NUTS result becomes a BusSegment (track_position -> abstract_pos,
+    // corner bounds carried, bit_width = the bundle's net count) with its SEG
+    // connections + BUSTERM faces derived from the selected topology's cached
+    // analysis — the derivation the abstract solve placed with, existing once.
+    m.def("make_bus_segments", &make_bus_segments,
+          py::arg("bundles"), py::arg("nuts_result"), py::arg("floorplan"),
+          py::arg("bit_order") = "LO_HI",
+          "Build DetailedNUTSEngine.run() input from the placed NUTS result");
+
     // ── Verify ────────────────────────────────────────────────────────────
     py::enum_<ViolationKind>(m, "ViolationKind")
         .value("SEG_OPEN",     ViolationKind::SEG_OPEN)
