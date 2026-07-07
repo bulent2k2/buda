@@ -628,6 +628,38 @@ def set_icon(win_or_fig, icon_name="buda_icon.png"):
     except Exception:
         pass
 
+
+def set_app_name(name, fig=None):
+    """Best-effort relabel of the app from 'python3'/'Python' to `name` in OS
+    chrome (macOS dock / menu bar, `ps`). Every hook is optional and fully
+    guarded, so this is a no-op where the mechanism isn't available (e.g. a
+    plain Linux run) and never raises."""
+    if not name:
+        return
+    # 1. Process title — `ps`/`top` and some Linux docks. Optional dependency.
+    try:
+        import setproctitle
+        setproctitle.setproctitle(name)
+    except Exception:
+        pass
+    # 2. Tk application name — the TkAgg menu-bar title on macOS.
+    if fig is not None:
+        try:
+            fig.canvas.manager.window.tk.call('tk', 'appname', name)
+        except Exception:
+            pass
+    # 3. macOS bundle name — the AppKit menu/dock label for the MacOSX backend.
+    if sys.platform == "darwin":
+        try:
+            from Foundation import NSBundle
+            info = (NSBundle.mainBundle().localizedInfoDictionary()
+                    or NSBundle.mainBundle().infoDictionary())
+            if info is not None:
+                info["CFBundleName"] = name
+        except Exception:
+            pass
+
+
 def _disable_default_keymaps():
     """Remove default matplotlib keybindings that interfere with BUDA shortcuts."""
     keys_to_clear = (
@@ -706,6 +738,10 @@ def collect_candidate_bundles(bundles):
         if cell_key is not None:
             rep, cnt = cell_seen.get(cell_key, (w, 0))
             cell_seen[cell_key] = (rep, cnt + 1)
+    # Order by bundle id so the explorer's "bundle i/N" index matches the main
+    # viz bundle panel (which is sorted by id) — selecting the first listed
+    # bundle opens it at position 1, not wherever it sat in self.bundles.
+    wrappers.sort(key=lambda w: w.input.original_bundle.id)
     return wrappers, cell_seen
 
 
@@ -725,10 +761,14 @@ class TopologyExplorer:
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
-                 ui_state: ViewState = None, start_bidx=0):
+                 ui_state: ViewState = None, start_bidx=0, layer_visible=None):
         self.fp          = fp
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
+        # Live reference to the main viz's {layer_id: visible} map so a layer
+        # toggled off there is hidden here too (None = show every layer).
+        self._layer_visible = layer_visible
+        self._hidden_seg = set()       # seg indices hidden by main-viz layer toggles (rebuilt per _draw)
         self._main_fig   = main_fig    # back-reference to main viz figure for cmd-1
         self._rerun_fn   = rerun_fn    # () -> NUTSResult | None
         self._refresh_fn = refresh_fn  # (NUTSResult) -> None
@@ -1111,7 +1151,9 @@ class TopologyExplorer:
         ax = self.ax
         msz = viz_lw * 1.1 + 3
 
-        for raw_seg, cs in zip(topo.segments, ct.segs()):
+        for ci, (raw_seg, cs) in enumerate(zip(topo.segments, ct.segs())):
+            if ci in getattr(self, '_hidden_seg', ()):   # layer hidden in main viz
+                continue
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
             display_perp = self._centered_perp(cs)
             for conn in cs.conns:
@@ -1171,6 +1213,8 @@ class TopologyExplorer:
         cs_map  = {j: cs_list[j] for j in range(len(cs_list))}
 
         for ci, (raw_seg, cs) in enumerate(zip(topo.segments, cs_list)):
+            if ci in getattr(self, '_hidden_seg', ()):   # layer hidden in main viz
+                continue
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
             slide_lo, slide_hi = self._seg_slide(cs, ci)   # NUTS override if any
 
@@ -1743,22 +1787,32 @@ class TopologyExplorer:
                     _draw_hi[i] = adj
         # ──────────────────────────────────────────────────────────────────
 
-        for i, seg in enumerate(topo.segments):
-            lid = -1
-            # 1. Pinned layers (from sidecar/active tuning)
+        # Resolve each segment's layer once (pinned → planned → hint) and note
+        # which are hidden by the main viz's layer toggles, so EVERY drawing
+        # pass below — segments, slide spans, busterm markers — skips the same
+        # set (a layer turned off in the main viz shows no artifacts here).
+        def _resolved_lid(i):
             if is_current_selection and sel and 'seg_layers' in sel:
                 pinned = sel['seg_layers']
                 if len(pinned) == len(topo.segments):
-                    lid = pinned[i]
+                    return pinned[i]
+            if (is_planner_active
+                    and len(self.wrapper.plan.seg_layers) == len(topo.segments)):
+                return self.wrapper.plan.seg_layers[i]
+            return topo.segments[i].layer_hint
 
-            # 2. Planned layers (from CongestionPlanner result)
-            if lid == -1 and is_planner_active:
-                if len(self.wrapper.plan.seg_layers) == len(topo.segments):
-                    lid = self.wrapper.plan.seg_layers[i]
+        self._hidden_seg = {
+            i for i in range(len(topo.segments))
+            if self._layer_visible is not None
+            and not self._layer_visible.get(_resolved_lid(i), True)
+        }
 
-            # 3. Default from topology generator
-            if lid == -1:
-                lid = seg.layer_hint
+        for i, seg in enumerate(topo.segments):
+            lid = _resolved_lid(i)
+
+            # Layer hidden in the main viz → skip it (and its legend entry).
+            if i in self._hidden_seg:
+                continue
             actual_lids.append(lid)
 
             col      = _LAYER_COLOR.get(lid, '#888888')
@@ -2004,9 +2058,10 @@ class BudaVisualizer:
         raise_window(self.fig)
 
         if sidecar_path and self.fig.canvas.manager:
-            self.fig.canvas.manager.set_window_title(
-                os.path.splitext(os.path.basename(sidecar_path))[0]
-            )
+            stem = os.path.splitext(os.path.basename(sidecar_path))[0]
+            self.fig.canvas.manager.set_window_title(stem)
+            # Relabel the OS app/dock name from 'python3' to the design's name.
+            set_app_name(stem, self.fig)
 
         self.ui_state = ViewState()
         self.ui_state.add_listener(self.fig_redraw)
@@ -2594,6 +2649,7 @@ class BudaVisualizer:
         self._redraw_layer_list()
         self._redraw_bundle_list()
         self._refresh_highlight()
+        self._refresh_topo_explorer()   # layers reset to all-visible
         self.fig.canvas.draw_idle()
 
     def _toggle_all(self):
@@ -2616,6 +2672,9 @@ class BudaVisualizer:
         self._redraw_bundle_list()
 
         self._refresh_highlight()
+        # ui_state.toggle_all() above redrew the explorer BEFORE _layer_visible
+        # was rewritten, so refresh it again now that the layer set is current.
+        self._refresh_topo_explorer()
         self.fig.canvas.draw_idle()
 
     def _toggle_bustermss(self):
@@ -2668,10 +2727,18 @@ class BudaVisualizer:
             if lid not in self._layer_visible:
                 self._layer_visible[lid] = True
 
+    def _refresh_topo_explorer(self):
+        """Redraw the topology explorer, if open, so it picks up shared state
+        (e.g. layer visibility) that isn't routed through ui_state.notify()."""
+        exp = self._topo_explorer
+        if exp is not None and plt.fignum_exists(exp.fig.number):
+            exp.fig_redraw()
+
     def _on_layer_toggle(self, lid):
         self._layer_visible[lid] = not self._layer_visible.get(lid, True)
         self._redraw_layer_list()
         self._refresh_highlight()
+        self._refresh_topo_explorer()
 
     def _on_layer_toggle_all(self):
         """Toggle all layers on (if any are off) or off (if all are on)."""
@@ -2686,6 +2753,7 @@ class BudaVisualizer:
                 '#e8e8e8' if new_state else '#cccccc')
         self._redraw_layer_list()
         self._refresh_highlight()
+        self._refresh_topo_explorer()
 
     def _redraw_layer_list(self):
         ax = self._ax_layers
@@ -3208,7 +3276,8 @@ class BudaVisualizer:
             refresh_fn=refresh_fn,
             layer_stack=self.layer_stack,
             ui_state=self.ui_state,
-            start_bidx=start)
+            start_bidx=start,
+            layer_visible=self._layer_visible)
         self._topo_explorer.fig.show()
         install_tk_geometry_resync(self._topo_explorer.fig)
         extract_from_fullscreen_tab(self._topo_explorer.fig)

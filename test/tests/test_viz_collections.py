@@ -46,8 +46,40 @@ def test_collect_candidate_bundles_keeps_distinct_hier_instances():
     ]
     wrappers, cell_seen = collect_candidate_bundles(bundles)
     ids = [w.input.original_bundle.id for w in wrappers]
-    assert ids == [167, 168, 169, 170, 5], ids   # all 4 kept; id-dup + no-cand gone
+    # All 4 instances kept (id-dup + no-cand gone), and sorted by id so the
+    # explorer's "bundle i/N" index matches the id-sorted main viz panel.
+    assert ids == [5, 167, 168, 169, 170], ids
+    assert ids == sorted(ids)
     assert cell_seen[("dogleg2", "r")][1] == 4    # annotation still counts instances
+
+
+def test_topo_explorer_carries_over_layer_visibility(monkeypatch):
+    """A layer toggled off in the main viz is hidden in the topology explorer
+    too: the explorer holds a live reference to the main viz's _layer_visible
+    map, and toggling a layer refreshes the open explorer."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    bid = next(iter(viz._bundle_artists))
+    viz._highlighted = bid
+    viz._open_topo_explorer()
+    exp = viz._topo_explorer
+    assert exp is not None and exp._layer_visible is viz._layer_visible
+
+    # Count segment lines AND the layer-colored helper artifacts — slide-span
+    # bands (patches) and busterm markers (scatter collections + labels) — so
+    # this also guards that _draw_slide_spans / _draw_busterm_markers honour
+    # the hidden-layer set, not just the main segment loop.
+    def _artist_count():
+        return (len(exp.ax.get_lines()) + len(exp.ax.patches)
+                + len(exp.ax.texts) + len(exp.ax.collections))
+
+    n_all = _artist_count()
+    for lid in viz._layer_visible:          # hide every layer
+        viz._layer_visible[lid] = False
+    viz._refresh_topo_explorer()
+    n_off = _artist_count()
+    assert n_off < n_all, (n_all, n_off)   # the bundle's segments AND their
+    #                                        slide spans / busterm markers gone
+    assert exp._hidden_seg, "every segment should be marked hidden"
 
 
 def _build_viz(flow_name, monkeypatch):
