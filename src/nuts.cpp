@@ -428,12 +428,15 @@ static void settle_spans(std::vector<TrackSegment>& segments, NutsContext& ctx)
 
 // Band-level repack of spread-fit overlap clusters — defined after LayerSolver
 // (whose repack machinery it drives); see docs/internal/nuts_band_repack.md.
+// seed_cons: active corner constraints (see repair_overlaps), may be null.
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                    std::vector<TrackSegment>& segments,
-                                   NutsContext& ctx);
+                                   NutsContext& ctx,
+                                   const std::map<int, LayerConstraints>* seed_cons);
 
 void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
-                                 NutsContext& ctx) const
+                                 NutsContext& ctx,
+                                 const std::map<int, LayerConstraints>* seed_cons) const
 {
     const auto& pull_map     = ctx.pull_map;
     const auto& net_pull_map = ctx.net_pull_map;
@@ -544,7 +547,7 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
         // single-victim sweep of this loop.
         if (!progress) {
             const int m = repack_overlap_clusters(*this, track_pitch_,
-                                                  segments, ctx);
+                                                  segments, ctx, seed_cons);
             if (m > 0) { moved += m; progress = true; }
         }
         if (!progress) break;
@@ -971,9 +974,11 @@ void NUTSEngine::resolve_corner_overlaps(std::vector<TrackSegment>& segments,
                 }
             solve_layer(layer_segs, ctx, by_layer_cons[layer]);
         }
-        // Re-fit connected spans to the new trunk positions and repair residue.
+        // Re-fit connected spans to the new trunk positions and repair residue
+        // (the cluster repack sees the ACTIVE constraints so it cannot move a
+        // just-constrained trunk — they are not yet on the track bounds here).
         settle_spans(segments, ctx);
-        repair_overlaps(segments, ctx);
+        repair_overlaps(segments, ctx, &by_layer_cons);
 
         const size_t after = find_overlaps(segments).size();
         // Accept only a strict overlap improvement that does not introduce a new
@@ -1200,6 +1205,13 @@ public:
     // earliest-deadline-first ordering, same pull-aware -> dense two-phase
     // pack, same all-or-nothing commit as the placement-time try_repack.
     bool repack_cluster(std::vector<TrackSegment*> members) {
+        // Corner-constrained phase-0 trunks stay FIXED, exactly as in
+        // try_repack's member gathering: drop them from the repack set (they
+        // remain obstacles via the non-member occupancy loop).
+        members.erase(std::remove_if(members.begin(), members.end(),
+            [&](TrackSegment* m) {
+                return constrained.count({m->bundle_id, m->seg_idx}) != 0;
+            }), members.end());
         if (members.size() < 2) return false;
         // Best-effort: a stuck member keeps its current track instead of
         // aborting the whole pack (one wedged neighbour must not veto the
@@ -1665,7 +1677,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
 // accepted repacks (for the caller's summary line).
 static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
                                    std::vector<TrackSegment>& segments,
-                                   NutsContext& ctx)
+                                   NutsContext& ctx,
+                                   const std::map<int, LayerConstraints>* seed_cons)
 {
     auto pairs = find_overlaps(segments);
     if (pairs.empty()) return 0;
@@ -1757,13 +1770,21 @@ static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
             return n;
         };
 
+        // Active corner constraints for this layer (empty when none): the
+        // solver's `constrained` set makes phase-0 trunks fixed obstacles.
+        const LayerConstraints* cons = &no_cons;
+        if (seed_cons) {
+            auto cit = seed_cons->find(layer);
+            if (cit != seed_cons->end()) cons = &cit->second;
+        }
+
         for (const auto& members : {narrow, wide}) {
             const size_t ov_before = find_overlaps(segments).size();
             const size_t ic_before = in_cluster_ov();
             const int    vi_before = count_violations(segments);
             PlacementSnapshot snap;
             snap.take(segments);
-            LayerSolver solver(eng, layer_segs, ctx, no_cons);
+            LayerSolver solver(eng, layer_segs, ctx, *cons);
             if (!solver.repack_cluster(members))
                 continue;                   // nothing would move: state untouched
             settle_spans(segments, ctx);

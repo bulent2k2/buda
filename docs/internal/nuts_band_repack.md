@@ -204,7 +204,14 @@ measurement on the way to green gates:
    *inside* `repair_overlaps`' iteration (single-victim sweep first; when it
    plateaus, one cluster round; collateral cleaned next iteration), and the
    pass-level non-regression snapshot backstops the total.
-4. **Charged-band placement preference (the critical one).**  A pull-free
+4. **Corner constraints honored (PR #210 review).**  When
+   `resolve_corner_overlaps` invokes `repair_overlaps` its `by_layer_cons`
+   is not yet persisted onto the segments' track bounds, so the cluster
+   pass receives the ACTIVE constraint map: constrained phase-0 trunks are
+   dropped from the repack set (try_repack's gathering rule — they stay
+   obstacles), preventing a commit that violates the derived ordering/split
+   and then carries inconsistent bounds into DetailedNUTS.
+5. **Charged-band placement preference (the critical one).**  A pull-free
    member's repack preference is its `pull_map` entry — for planner-managed
    segments the CHARGED band centre (`seg_perp`), the band whose
    signal-track supply the planner verified — falling back to its current
@@ -222,7 +229,7 @@ measurement on the way to green gates:
 | big2 pre-negotiation | NUTS overlaps | 8 (3 clusters) | **5** (B79 star + 2 pairs) |
 | big2 full flow | NUTS overlaps / DNUTS opens | 0 / 72 | 0 / 72 (unchanged) |
 | big2 full flow | negotiate+ripup runtime | the flow's dominant cost | **~1.4s total** (residue mostly pre-cleared) |
-| rnr/mix full flow | DNUTS opens / NUTS overlaps | 0 / 1 | **0** / 2 |
+| rnr/mix full flow | DNUTS opens / NUTS overlaps | 0 / 1 | **0** / 3 |
 | rest of the golden corpus | placements | — | byte-identical (pass no-ops without residue) |
 
 The B79 star (a 292-wide trunk whose window is genuinely full given

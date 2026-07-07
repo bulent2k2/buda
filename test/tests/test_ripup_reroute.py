@@ -437,9 +437,15 @@ def test_negotiate_reroutes_canned_overlap():
 def test_negotiate_big2_then_ripup_clears_overlaps():
     """The headline v1 validation (wishlist-ripup item 1): replaying big2's
     measured overlaps into the planner as band demand lets its own cost model
-    steer the offenders off the contended bands — most of the 9 overlaps clear
-    in a few sub-second negotiate iterations (no per-candidate NUTS trials),
-    and the ripup hill-climb finishes the residual to 0."""
+    steer the offenders off the contended bands, and the ripup hill-climb
+    finishes the residual to 0.
+
+    Since the band-level cluster repack (nuts_band_repack.md) landed, NUTS
+    itself pre-clears the overlaps negotiation used to demonstrate on, so the
+    residue reaching this stage is exactly the part a replan-in-place cannot
+    always improve — negotiation may legitimately find nothing to accept.
+    Assert it never REGRESSES, and that the combined negotiate+ripup pipeline
+    still ends fully clean (the invariant that matters)."""
     s = _big2_to_stage("a")
     base = s.nuts_result.num_overlaps
     assert base > 0
@@ -447,7 +453,7 @@ def test_negotiate_big2_then_ripup_clears_overlaps():
     with contextlib.redirect_stdout(buf):
         s.do_command("negotiate_congestion")
     after_neg = s.nuts_result.num_overlaps
-    assert after_neg < base, buf.getvalue()    # negotiation made real progress
+    assert after_neg <= base, buf.getvalue()   # negotiation never regresses
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("ripup_reroute")
     assert s.nuts_result.num_overlaps == 0     # combined pipeline: fully clean

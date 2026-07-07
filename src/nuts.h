@@ -230,8 +230,15 @@ private:
     // overlaps after packing.  Re-places victims of overlapping pairs within
     // their intervals against current adjusted spans (bounded iterations;
     // restores the original state unless the overlap count strictly drops).
+    // seed_cons: the ACTIVE per-layer corner constraints when invoked from
+    // resolve_corner_overlaps (its by_layer_cons is not yet persisted onto
+    // the segments' track bounds at that point) — the cluster repack must
+    // treat constrained phase-0 trunks as fixed obstacles, exactly like the
+    // placement-time try_repack does.  Null elsewhere.
     void repair_overlaps(std::vector<TrackSegment>& segments,
-                         NutsContext& ctx) const;
+                         NutsContext& ctx,
+                         const std::map<int, LayerConstraints>* seed_cons
+                             = nullptr) const;
 
     // Corner-overlap resolution (vertical-constraint style): two stubs that
     // collide on a layer can't be separated by moving either (they're
