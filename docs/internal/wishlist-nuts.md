@@ -3,7 +3,7 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
-## Band-level repack for spread-fit overlap clusters
+## Band-level repack for spread-fit overlap clusters — ✅ IMPLEMENTED
 
 **What:** (Baseline updated 2026-07 — see `nuts_band_repack.md` §1: with
 big2's new `signal_tracks` + negotiation flow the target is the

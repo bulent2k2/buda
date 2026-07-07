@@ -1,6 +1,7 @@
 # Band-Level Repack for Spread-Fit Overlap Clusters — Plan
 
-Status: **PLANNED** (not started).  Expands the
+Status: **IMPLEMENTED** (this branch/PR; see §6 for the as-built
+resolution and measurements).  Expands the
 [`wishlist-nuts.md`](wishlist-nuts.md) item of the same name into an
 implementable design.  Prerequisite work — the `LayerSolver` extraction that
 makes the dense repack machinery reachable from the repair pass — landed in
@@ -178,3 +179,55 @@ gate discipline flips accordingly:
 - No change to the overflow ladder, `ALLOW_OVERFLOW`/`BEST_EFFORT` semantics,
   or `overlap_details` reporting.
 - No cross-layer cluster moves (that is `resolve_corner_overlaps`' domain).
+
+## 6. As-built resolution & measurements (implemented)
+
+The landed implementation follows §2 with four deviations, each forced by a
+measurement on the way to green gates:
+
+1. **Best-effort pack for the cluster entry.**  The all-or-nothing contract
+   was kept for the placement-time `try_repack`, but a repair-time cluster
+   pack aborts far too often under it — one wedged neighbour vetoed whole
+   clusters.  `repack_cluster` therefore packs best-effort (a member that
+   cannot fit keeps its current track and becomes an obstacle), safe because
+   every commit is guarded.
+2. **Narrow → wide attempt ladder.**  Each cluster is tried members-only
+   first (least collateral), then with try_repack's full contention sweep
+   (every placed same-layer segment whose interval overlaps the union
+   window) — the members' windows can be full *given* the neighbours'
+   positions, so the neighbours must move with them.
+3. **Guard: no global rise + STRICT in-cluster drop, integrated with the
+   single-victim loop.**  Demanding a strict *global* drop per commit
+   rejected every big-cluster repack: separating a cluster stretches
+   follower spans, surfacing collateral overlaps elsewhere that the
+   single-victim sweep can fix — so the cluster round is a fallback stage
+   *inside* `repair_overlaps`' iteration (single-victim sweep first; when it
+   plateaus, one cluster round; collateral cleaned next iteration), and the
+   pass-level non-regression snapshot backstops the total.
+4. **Charged-band placement preference (the critical one).**  A pull-free
+   member's repack preference is its `pull_map` entry — for planner-managed
+   segments the CHARGED band centre (`seg_perp`), the band whose
+   signal-track supply the planner verified — falling back to its current
+   position.  The first (minimal-movement) variant separated more abstract
+   overlaps (big2 8 → 3) but drifted members onto bands without detailed
+   supply: `rnr/mix` went from 0 to 16 DNUTS-open bits that stage-b ripup
+   could not recover.  With the charged-band preference big2 lands at
+   8 → 5 and mix keeps **0 opens** — the correct trade under the pipeline's
+   lexicographic (opens, overlaps) metric.
+
+**Measured outcomes (x86-64):**
+
+| Flow | Metric | Before | After |
+|---|---|---|---|
+| big2 pre-negotiation | NUTS overlaps | 8 (3 clusters) | **5** (B79 star + 2 pairs) |
+| big2 full flow | NUTS overlaps / DNUTS opens | 0 / 72 | 0 / 72 (unchanged) |
+| big2 full flow | negotiate+ripup runtime | the flow's dominant cost | **~1.4s total** (residue mostly pre-cleared) |
+| rnr/mix full flow | DNUTS opens / NUTS overlaps | 0 / 1 | **0** / 2 |
+| rest of the golden corpus | placements | — | byte-identical (pass no-ops without residue) |
+
+The B79 star (a 292-wide trunk whose window is genuinely full given
+immovable neighbours) is re-pin territory — exactly what the flow's
+negotiation clears — and the two remaining pairs are guard-rejected
+(separating them costs more elsewhere).  Gate:
+`test_big2_residuals.py::test_big2_prenegotiation_spreadfit_residue`
+(bounds `<= 6`, tighten toward 0 with future improvements).
