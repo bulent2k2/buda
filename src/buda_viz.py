@@ -2500,7 +2500,25 @@ class BudaVisualizer:
     def _toggle_heatmap(self):
         self.ui_state.toggle_heatmap()
 
+    def _set_button_enabled(self, btn, enabled, on_color='#e8f4e8'):
+        """Keep a panel button always visible, but grey it out (dimmed) when
+        `enabled` is False so it reads as inactive instead of vanishing. Each
+        button's slot is pre-reserved by `_lrect`, so an always-visible button
+        does not shift the panel. Toggle handlers check `_buda_enabled` and
+        no-op while dimmed."""
+        if btn is None:
+            return
+        btn.ax.set_visible(True)
+        btn._buda_enabled = bool(enabled)
+        face = on_color if enabled else '#f0f0f0'
+        btn.color = face                 # resting colour (hover-out restores it)
+        btn.hovercolor = '0.95' if enabled else face   # no hover glow when dimmed
+        btn.ax.set_facecolor(face)
+        btn.label.set_color('#111111' if enabled else '#b0b0b0')
+
     def _toggle_keepouts(self):
+        if not getattr(self._btn_keepouts, '_buda_enabled', True):
+            return                       # dimmed: no keepouts in the design
         self.ui_state.toggle_keepouts()
 
     def _toggle_hanan(self):
@@ -3326,8 +3344,8 @@ class BudaVisualizer:
             self._keepout_artists.append(txt)
 
         if self._btn_keepouts is not None:
-             # Only show button if there are keepouts
-             self._btn_keepouts.ax.set_visible(bool(self._keepout_artists))
+             # Always visible; dimmed (inactive) when there are no keepouts.
+             self._set_button_enabled(self._btn_keepouts, bool(self._keepout_artists))
 
     # At most this many overflow cells get a text label (the worst by ratio).
     # Text+bbox is matplotlib's most expensive artist; on large congested
@@ -4037,15 +4055,19 @@ class BudaVisualizer:
             self._btn_detailed.ax.set_facecolor('#ffe8cc' if active else '#e8f4e8')
 
         if self._btn_tracks is not None:
+            # Always visible; dimmed (inactive) until Detailed is on with rails.
             # Gate on rail-layer availability (cheap) — not on built artifacts —
-            # so the button appears before the rails are lazily built.
-            self._btn_tracks.ax.set_visible(active and self._has_rail_layers())
+            # so the button activates before the rails are lazily built.
+            self._set_button_enabled(
+                self._btn_tracks, active and self._has_rail_layers())
 
         # Re-apply highlight/layer/bundle visibility to the now-active set.
         self._refresh_highlight()
         self.fig.canvas.draw_idle()
 
     def _toggle_tracks(self):
+        if not getattr(self._btn_tracks, '_buda_enabled', True):
+            return                       # dimmed: Detailed off or no rail layers
         self.ui_state.toggle_tracks()
         vis = self.ui_state.tracks
 
@@ -4317,9 +4339,8 @@ class BudaVisualizer:
         self._btn_keepouts = Button(ax_keepouts, '☑ Keepouts', color='#e8f4e8')
         self._btn_keepouts.label.set_fontsize(7.5)
         self._btn_keepouts.on_clicked(lambda _: self._toggle_keepouts())
-        # Only visible if there are keepouts
-        if not self.fp.get_keepout_zones():
-            self._btn_keepouts.ax.set_visible(False)
+        # Always visible; dimmed (inactive) when the design has no keepouts.
+        self._set_button_enabled(self._btn_keepouts, bool(self.fp.get_keepout_zones()))
 
         ax_detailed = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_detailed = Button(ax_detailed, '☐ Detailed', color='#e8f4e8')
@@ -4333,11 +4354,12 @@ class BudaVisualizer:
         self._btn_tracks = Button(ax_tracks, '☐ Tracks', color='#e8f4e8')
         self._btn_tracks.label.set_fontsize(7.5)
         self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
-        # Only visible when detailed mode is active and rails are possible.
-        # Gate on rail-layer availability (cheap), not on built artifacts —
-        # rails are built lazily on the first [Tracks] enable.
-        if not self.ui_state.detailed_mode or not self._has_rail_layers():
-            self._btn_tracks.ax.set_visible(False)
+        # Always visible; dimmed (inactive) until Detailed mode is on and rail
+        # layers exist.  Gate on rail-layer availability (cheap), not on built
+        # artifacts — rails are built lazily on the first [Tracks] enable.
+        self._set_button_enabled(
+            self._btn_tracks,
+            self.ui_state.detailed_mode and self._has_rail_layers())
 
         ax_preroutes = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_preroutes = Button(ax_preroutes, '☐ Preroutes', color='#f4ece8')

@@ -157,6 +157,62 @@ def test_step_bundle_reveals_selected_when_all_bundles_off(monkeypatch):
         "previously selected bundle returns to hidden when the spotlight moves"
 
 
+def test_keepouts_tracks_buttons_always_visible_but_dimmed(monkeypatch):
+    """Keepouts (when the design has none) and Tracks (until Detailed is on)
+    stay visible but dimmed/inactive, and clicking a dimmed button is a no-op.
+    Both activate when their condition is met."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)   # no keepouts, Detailed off
+
+    # Both buttons are shown but dimmed (inactive).
+    assert viz._btn_keepouts.ax.get_visible() and viz._btn_keepouts._buda_enabled is False
+    assert viz._btn_tracks.ax.get_visible() and viz._btn_tracks._buda_enabled is False
+
+    # Clicking a dimmed button does nothing.
+    kbefore = viz.ui_state.keepouts
+    viz._toggle_keepouts()
+    assert viz.ui_state.keepouts == kbefore, "dimmed Keepouts must be a no-op"
+    tbefore = viz.ui_state.tracks
+    viz._toggle_tracks()
+    assert viz.ui_state.tracks == tbefore, "dimmed Tracks must be a no-op"
+
+    # Turning Detailed on activates Tracks (dnuts1 has track patterns → rails).
+    viz._toggle_detailed()
+    assert viz._btn_tracks.ax.get_visible() and viz._btn_tracks._buda_enabled is True
+
+
+def test_keepouts_button_active_when_design_has_keepouts(monkeypatch, tmp_path):
+    """A design with a floorplan keepout zone shows the Keepouts button active."""
+    import buda_cli
+    import buda_viz
+    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
+    captured = {}
+    orig_show = buda_viz.BudaVisualizer.show
+
+    def cap_show(self):
+        self._ipc_session = None
+        orig_show(self)
+        captured["viz"] = self
+
+    monkeypatch.setattr(buda_viz.BudaVisualizer, "show", cap_show)
+
+    flow = tmp_path / "kp.buda"
+    flow.write_text(
+        "def_layer 4 M4 H TOP 0.0\n"
+        "def_layer 5 M5 V TOP 0.0\n"
+        "add_block a 0 0 100 100\n"
+        "add_block b 400 0 500 100\n"
+        "add_keepout 150 0 250 100 M4\n"
+        "add_bus x[4] a.tx b.rx\n"
+        "run_bundler\ngenerate_topologies\nrun_planner\nrun_nuts\nvisualize\n"
+    )
+    sess = buda_cli.BudaSession()
+    sess.do_command(f"source {flow}")
+    viz = captured["viz"]
+    assert viz.fp.get_keepout_zones(), "precondition: design has a keepout"
+    assert viz._btn_keepouts.ax.get_visible()
+    assert viz._btn_keepouts._buda_enabled is True
+
+
 def test_s_key_toggles_solo(monkeypatch):
     import types
     viz = _build_viz("dnuts1.buda", monkeypatch)
