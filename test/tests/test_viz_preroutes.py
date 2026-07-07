@@ -91,6 +91,23 @@ def test_preroutes_cycle_builds_and_filters(monkeypatch):
     assert not any(e["artist"].get_visible() for e in viz._preroute_artists)
 
 
+def test_layer_panel_hides_preroute_bands(monkeypatch):
+    """Codex P2 (PR #207): unchecking a metal layer in the layer panel must
+    hide that layer's pre-route bands too, not just bundle/rail artists."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._cycle_preroutes()                    # off -> ALL
+    layers = {e["layer"] for e in viz._preroute_artists}
+    assert layers, "no pre-route layers built"
+    lid = sorted(layers)[0]
+    viz._on_layer_toggle(lid)                 # uncheck one layer
+    for e in viz._preroute_artists:
+        expected = e["layer"] != lid
+        assert e["artist"].get_visible() == expected, (
+            f"layer {e['layer']} band visibility wrong with layer {lid} off")
+    viz._on_layer_toggle(lid)                 # re-check: all visible again
+    assert all(e["artist"].get_visible() for e in viz._preroute_artists)
+
+
 def test_all_toggle_builds_and_shows_preroutes(monkeypatch):
     viz = _build_viz("dnuts1.buda", monkeypatch)
     viz._toggle_all()                         # all off

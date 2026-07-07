@@ -2399,6 +2399,9 @@ class BudaVisualizer:
                 else:
                     a.set_alpha(0.0 if self.ui_state.solo else (0.03 if e['is_band'] else 0.1))
 
+        # Layer visibility also gates the pre-route bands (any view mode).
+        self._apply_preroute_visibility()
+
         # Apply layer visibility to non-bundle detailed artists (grid rails).
         # These are only shown when detailed_mode is active.
         if self.ui_state.detailed_mode:
@@ -3812,11 +3815,15 @@ class BudaVisualizer:
                 {'artist': pc, 'layer': lid, 'slot_type': stype})
 
     def _apply_preroute_visibility(self):
-        """Visibility from the cycling mode: 'off' hides all, 'ALL' shows
-        every type, a slot-type name shows just that type."""
+        """Visibility from the cycling mode ('off' hides all, 'ALL' shows
+        every type, a slot-type name shows just that type) AND the layer
+        panel — a metal layer unchecked there hides its pre-route bands too,
+        exactly like bundle artists and the detailed grid rails."""
         mode = self.ui_state.preroutes_mode
         for e in self._preroute_artists:
-            e['artist'].set_visible(mode == 'ALL' or e['slot_type'] == mode)
+            type_on  = (mode == 'ALL' or e['slot_type'] == mode)
+            layer_on = self._layer_visible.get(e['layer'], True)
+            e['artist'].set_visible(type_on and layer_on)
 
     def _cycle_preroutes(self):
         # Peek the next mode so the lazy build happens BEFORE the
