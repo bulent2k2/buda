@@ -721,56 +721,13 @@ class NutsFlowMixin:
         # leaf cells on LOW layers before the solve.
         self._install_leaf_keepouts()
 
-        bid_to_nbits = {w.input.original_bundle.id: len(w.input.original_bundle.get_net_names())
-                        for w in self.bundles}
-        # Build ConnTopology per bundle for endpoint adj info.
-        bid_to_cs = {}
-        for w in self.bundles:
-            if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
-                bid_to_cs[w.input.original_bundle.id] = []
-                continue
-            ct = buda.ConnTopology()
-            ct.build(w.input.candidates[w.plan.selected_topology_index], self.fp)
-            bid_to_cs[w.input.original_bundle.id] = list(ct.segs())
-
-        bus_segs = []
-        for ts in self.nuts_result.segments:
-            bs = buda.BusSegment()
-            bs.bundle_id   = ts.bundle_id
-            bs.seg_idx     = ts.seg_idx
-            bs.layer       = ts.layer
-            bs.span_lo     = ts.span_lo
-            bs.span_hi     = ts.span_hi
-            bs.interval_lo = ts.interval_lo
-            bs.interval_hi = ts.interval_hi
-            bs.bit_width   = bid_to_nbits.get(ts.bundle_id, 1)
-            bs.bit_order   = bit_order
-            bs.abstract_pos = ts.track_position
-            # Cross-layer corner split bounds (carried into detailed NUTS so the
-            # trunk's bits snap to its committed side on real signal tracks).
-            bs.track_lo_bound = ts.track_lo_bound
-            bs.track_hi_bound = ts.track_hi_bound
-
-            # Populate connections from ConnTopology.
-            cs_list = bid_to_cs.get(ts.bundle_id, [])
-            if ts.seg_idx < len(cs_list):
-                cs = cs_list[ts.seg_idx]
-                faces = []
-                for conn in cs.conns:
-                    if conn.kind == buda.SegConnKind.SEG:
-                        c = buda.BusSegmentConn()
-                        c.seg_idx     = conn.seg_idx
-                        c.at_pos      = float(conn.at_pos)
-                        c.is_endpoint = conn.is_endpoint
-                        mid = 0.5 * (cs.along_lo + cs.along_hi)
-                        c.lo_end      = (c.at_pos <= mid)
-                        bs.connections.append(c)
-                    else:  # BUSTERM: keep the block-face tap reachable per-bit
-                        faces.append(float(conn.face_coord))
-                bs.busterm_faces = faces
-
-            bus_segs.append(bs)
-
+        # Stage-4 -> stage-9 handoff, single-sourced in C++ (make_bus_segments,
+        # detailed_nuts.cpp): every TrackSegment becomes a BusSegment, with the
+        # per-segment SEG connections / BUSTERM faces derived from the selected
+        # topology's cached analysis — the same derivation the abstract solve
+        # placed with, so the two stages can never drift.
+        bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
+                                          self.fp, bit_order)
         engine = buda.DetailedNUTSEngine(self.routing_grid)
         with buda.ostream_redirect():
             self.detailed_result = engine.run(bus_segs)
