@@ -52,6 +52,75 @@ class NutsFlowMixin:
             total += length
         return per_bundle, per_layer, total, n_unplaced
 
+    def _fp_extent(self):
+        """Floorplan coordinate extent (block edges) grown by one span each side.
+        Used to clamp an untightened (INT-sentinel) slide range so the WL interval
+        stays finite.  None when the floorplan is empty."""
+        xs, ys = self.fp.get_hanan_grid()
+        if not xs or not ys:
+            return None
+        mx, Mx, my, My = min(xs), max(xs), min(ys), max(ys)
+        dx = (Mx - mx) or 1
+        dy = (My - my) or 1
+        return (mx - dx, Mx + dx, my - dy, My + dy)
+
+    def _topology_wl_interval(self, topo):
+        """[lo, hi] abstract wirelength the topology's slide + span DOF permits.
+
+        For each ConnTopology segment, its along-length is bounded by its two
+        endpoints: a SEG-junction endpoint rides the CONNECTED segment's
+        [perp_lo, perp_hi] slide range; a busterm / free endpoint is fixed at its
+        face.  Summing each segment's independent [min, max] is a valid OUTER
+        bracket — the routed (non-jog) abstract WL always lands inside — but a
+        LOOSE one: the per-segment extremes are not simultaneously realizable (a
+        shared trunk cannot sit at both ends of its slide at once), so `lo` is a
+        true lower bound, `hi` a true upper bound, and the width is the DOF
+        envelope, not a tight prediction.  Untightened slide ranges (INT
+        sentinels) are clamped to the floorplan extent.  Returns (lo, hi); (0, 0)
+        for an empty topology.  NUTS-inserted dogleg JOGs are extra wire outside
+        the topology and are reported separately, not bracketed here."""
+        SENT = 10 ** 8
+        ct = buda.ConnTopology()
+        ct.build(topo, self.fp)
+        segs = ct.segs()
+        ext = self._fp_extent()
+
+        def end_range(cs, coord):
+            for cn in cs.conns:
+                if (cn.at_pos == coord and cn.is_endpoint
+                        and str(cn.kind).rsplit('.', 1)[-1] == "SEG"
+                        and 0 <= cn.seg_idx < len(segs)):
+                    nb = segs[cn.seg_idx]
+                    lo = min(nb.perp_lo, nb.perp_hi)
+                    hi = max(nb.perp_lo, nb.perp_hi)
+                    if ext is not None:
+                        axlo, axhi = (ext[2], ext[3]) if nb.horiz else (ext[0], ext[1])
+                        if lo < -SENT:
+                            lo = axlo
+                        if hi > SENT:
+                            hi = axhi
+                    return (lo, hi)
+            return (coord, coord)  # busterm-anchored or free end: fixed
+
+        lo = hi = 0
+        for cs in segs:
+            lr = end_range(cs, cs.along_lo)
+            hr = end_range(cs, cs.along_hi)
+            lo += max(0, hr[0] - lr[1])
+            hi += max(0, hr[1] - lr[0])
+        return lo, hi
+
+    def _selected_wl_intervals(self):
+        """Per-bundle [lo, hi] WL interval for each bundle's SELECTED topology.
+        {bundle_id: (lo, hi)} — bundles without a selection are omitted."""
+        out = {}
+        for w in self.bundles:
+            sel = w.plan.selected_topology_index
+            if 0 <= sel < len(w.input.candidates):
+                out[w.input.original_bundle.id] = self._topology_wl_interval(
+                    w.input.candidates[sel])
+        return out
+
     def _report_wirelength(self):
         """Report routed wirelength per bundle + total, for comparing how a
         change affects interconnect quality.  Prints (and thus logs, via the
@@ -99,13 +168,64 @@ class NutsFlowMixin:
 
         ab_b, ab_l, ab_t, ab_unpl = self._wirelength_by_bundle(
             self.nuts_result.segments)
-        emit("Abstract bus-level wirelength (after run_nuts)",
-             ab_b, ab_l, ab_t, "bits")
+        # Per-bundle interval + jog split.  The interval brackets the topology's
+        # own segments; NUTS-inserted dogleg jogs are extra wire outside the
+        # topology, so they are shown in their own column and excluded from the
+        # bracketed WL (else a jog-heavy bundle would read as "above envelope").
+        intervals = self._selected_wl_intervals()
+        jog_b = {}
+        for ts in self.nuts_result.segments:
+            if getattr(ts, 'placed', True) is False:
+                continue
+            if getattr(ts, 'is_jog', False):
+                jog_b[ts.bundle_id] = jog_b.get(ts.bundle_id, 0.0) \
+                    + abs(ts.span_hi - ts.span_lo)
+        for bid in all_ids:
+            ab_b.setdefault(bid, 0.0)
+
+        print("[report_wirelength] Abstract bus-level wirelength (after run_nuts) "
+              "vs the topology's slide/span DOF envelope [lo..hi]:")
+        print(f"  {'bundle':>8} {'bits':>5} {'lo':>9} {'WL':>9} {'hi':>9} "
+              f"{'jog':>6} {'fill':>6}")
+        dsh = f"  {'-'*8} {'-'*5} {'-'*9} {'-'*9} {'-'*9} {'-'*6} {'-'*6}"
+        print(dsh)
+        tlo = thi = tseg = tjog = 0.0
+        inside = graded = 0
+        for bid in sorted(ab_b):
+            jog = jog_b.get(bid, 0.0)
+            seg_wl = ab_b[bid] - jog          # non-jog topology WL (bracketed)
+            tseg += seg_wl
+            tjog += jog
+            lohi = intervals.get(bid)
+            if lohi is None:                  # no selection (unrouted bundle)
+                print(f"  {bid:>8} {bits(bid):>5} {'—':>9} {seg_wl:>9.0f} "
+                      f"{'—':>9} {jog:>6.0f} {'—':>6}")
+                continue
+            lo, hi = lohi
+            tlo += lo
+            thi += hi
+            in_env = (lo - 0.5 <= seg_wl <= hi + 0.5)
+            inside += in_env
+            graded += 1
+            width = hi - lo
+            fill = f"{100*(seg_wl-lo)/width:>4.0f}%" if width > 0 else " flat"
+            mark = "" if in_env else " *"
+            print(f"  {bid:>8} {bits(bid):>5} {lo:>9.0f} {seg_wl:>9.0f} "
+                  f"{hi:>9.0f} {jog:>6.0f} {fill}{mark}")
+        print(dsh)
+        print(f"  {'TOTAL':>8} {'':>5} {tlo:>9.0f} {tseg:>9.0f} {thi:>9.0f} "
+              f"{tjog:>6.0f}")
+        print(layer_line(ab_l))
         # Final, greppable summary line (matches the terminal-headline markers).
         # The unplaced count rides the same line so a WL comparison always sees
         # whether a lower number means "tighter" or merely "incomplete".
         print(f"[report_wirelength] total abstract WL = {ab_t:.0f} "
-              f"over {len(all_ids)} bundle(s), {ab_unpl} unplaced segment(s)")
+              f"(seg {tseg:.0f} + jog {tjog:.0f}) over {len(all_ids)} bundle(s), "
+              f"{ab_unpl} unplaced segment(s); DOF envelope [{tlo:.0f}..{thi:.0f}], "
+              f"{inside}/{graded} bundle(s) inside")
+        print("  ('WL' = topology-segment wire the envelope brackets; 'fill' = "
+              "where WL sits in [lo..hi], lower = tighter; '*' = outside the "
+              "loose bracket. Envelope is an OUTER bound, not a tight target.)")
         if ab_unpl:
             print(f"  NOTE: {ab_unpl} abstract segment(s) unplaced — this WL "
                   f"excludes them and is NOT comparable to a complete route.")
@@ -117,9 +237,17 @@ class NutsFlowMixin:
             n_unpl = self.detailed_result.num_unplaced   # authoritative bit count
             emit("Detailed bit-level wirelength (after run_detailed_nuts)",
                  de_b, de_l, de_t, "bits")
+            # Bit-scaled envelope: the abstract interval is a per-bus (one-wire)
+            # bound, so multiply each bundle's [lo, hi] by its bit count for a
+            # bit-level envelope to bracket the detailed WL against.  Per-bit
+            # jogs/vias add wire beyond a flat scale, so detailed WL can ride
+            # higher in — or slightly above — this scaled envelope.
+            dlo = sum(intervals[bid][0] * bits(bid) for bid in intervals)
+            dhi = sum(intervals[bid][1] * bits(bid) for bid in intervals)
             print(f"[report_wirelength] total detailed WL = {de_t:.0f} "
                   f"over {len(all_ids)} bundle(s) / {n_wires} bit-wire(s), "
-                  f"{n_unpl} unplaced bit(s)")
+                  f"{n_unpl} unplaced bit(s); bit-scaled envelope "
+                  f"[{dlo:.0f}..{dhi:.0f}]")
             if n_unpl:
                 print(f"  NOTE: {n_unpl} bit(s) unplaced — this WL excludes "
                       f"them and is NOT comparable to a complete route.")

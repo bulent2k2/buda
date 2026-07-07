@@ -245,3 +245,46 @@ stage b alone.
 > *Gap A part 2* in `docs/internal/wishlist-planner.md`.
 
 ---
+
+## Wirelength reporting
+
+### `report_wirelength` (alias `report_wl`)
+
+```
+report_wirelength
+```
+
+Report routed wirelength per bundle + a design total, so a change to topology
+generation / planning / NUTS can be compared for interconnect quality. Prints the
+**abstract** bus-level WL (one length per placed bus segment — the metric topology
+decisions move) once `run_nuts` has run, and adds the **detailed** bit-level WL
+(every bit-wire) once `run_detailed_nuts` has run, each with a per-layer metal
+breakdown. The full per-bundle table is captured to the flow log; the terminal
+shows the totals.
+
+**DOF envelope `[lo..hi]`.** Each bundle's routed WL is shown against the interval
+its selected topology's *degrees of freedom* permit — computed from the segments'
+slide ranges and min/max span (`ConnTopology`): a segment joined to a trunk at a
+junction can slide over that trunk's `[perp_lo, perp_hi]`, and a flexible trunk
+end contracts toward its coverage floor. Per bundle the table shows:
+
+| Column | Meaning |
+|---|---|
+| `lo` / `hi` | Lower / upper bound of the WL the topology's DOF permit |
+| `WL` | Routed **topology-segment** wire (the portion the envelope brackets) |
+| `jog` | NUTS-inserted dogleg-jog wire (extra metal *outside* the topology; excluded from `WL`) |
+| `fill` | Where `WL` sits in `[lo..hi]` — 0 % at the lower bound, so **lower = tighter**, i.e. more of the topology's slide freedom was spent shortening the route |
+
+The envelope is a **valid OUTER bracket** — the routed non-jog WL always lands
+inside — but a **loose** one: the per-segment extremes are not simultaneously
+realizable (a shared trunk cannot sit at both ends of its slide at once), so `lo`
+is a true lower bound and `hi` a true upper bound, not a tight prediction. The
+detailed section brackets the bit-level total against the **bit-scaled** envelope
+(`[lo..hi] × bit count`); per-bit jogs/vias add wire beyond a flat scale, so the
+detailed WL can ride high in — or slightly above — that scaled envelope.
+
+Every total carries its **unplaced** count on the same line: WL sums only placed
+wire, so a lower number that comes from dropped segments/bits is flagged rather
+than silently rewarded.
+
+---
