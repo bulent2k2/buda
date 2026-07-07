@@ -1,6 +1,8 @@
 # NUTS / DetailedNUTS Refactor Plan
 
-Status: **PROPOSED** (no code changed yet).
+Status: **IMPLEMENTED** (Phases 0, A-F; G deferred as planned).  Every phase
+landed as one commit on the PR branch, gated byte-identical by the Phase 0
+placement goldens (plus fast+mid tiers).
 Scope: `src/nuts.{h,cpp}` (stage 4, 2,801 lines), `src/detailed_nuts.{h,cpp}`
 (stage 9, 527 lines), their pybind surface (`src/bind_nuts.cpp`), and the
 Python handoff (`src/buda_session/nutsflow.py::_run_detailed_nuts`).
@@ -119,18 +121,18 @@ A full sweep of C++, Python, tools and tests established the frozen surface:
 ## 2. Target architecture
 
 ```
-src/nuts_geom.h            span/overlap/occupancy primitives (header-only)
-                           ordered_lo/hi, span_cover, segs_overlap,
-                           find_overlaps, count_violations, keepout_occupied,
+src/nuts_geom.h            span/overlap/occupancy primitives (header-only):
+                           sp_lo/sp_hi, span_cover, segs_overlap,
+                           find_overlaps, count_violations, compute_metrics,
+                           keepout_occupied, occupancy_from,
                            PlacementSnapshot (take/restore, ±placed flag)
-src/nuts_context.{h,cpp}   NutsContext: the eight maps + ts_ptr_map + by_layer,
-                           built once (build_nuts_maps + interval prep +
-                           set_pull_targets); shared by run()/rerun_layer()
-src/nuts.{h,cpp}           NUTSEngine: LayerSolver (solve_layer phases as
-                           methods), repair ladder, orientation fixpoint,
-                           run()/rerun_layer() drivers — packing only
+src/nuts.{h,cpp}           NutsContext (struct in nuts.h; build_context() +
+                           settle_spans() in nuts.cpp), LayerSolver
+                           (solve_layer phases as methods), repair ladder,
+                           orientation fixpoint, run()/rerun_layer() drivers
+                           — packing only
 src/nuts_dogleg.{h,cpp}    cycle detection + topology split + trial loop,
-                           behind one entry point called from run()
+                           behind run_dogleg_fallback() called from run()
 src/detailed_nuts.{h,cpp}  DetailedNUTSEngine: place_by_layer /
                            adjust_bit_spans / emit_bit_vias methods +
                            make_bus_segments() bridge (single-sourced handoff)
@@ -155,7 +157,7 @@ behavior (ordered spans, cover) without the type merge.
 Ordering follows risk: pure motion first, structural change later. Every
 phase ends with the full gate set (§4) green.
 
-### Phase 0 — NUTS placement goldens (new gate)
+### Phase 0 — NUTS placement goldens (new gate) — ✅ DONE
 `tools/wl_corpus.py` compares WL totals, overlap counts and unplaced bits —
 strong but not airtight (two placement swaps can preserve all three). Add
 `tools/nuts_snapshot.py` (sibling of `topo_snapshot.py`): run the corpus
@@ -166,7 +168,9 @@ tuples of `detailed_result.net_segments` (+ `net_vias`), and check
 per-flow digests into `test/tests/data/nuts_golden_*.json` with a fast+mid
 golden test. This is the byte-identity oracle for every later phase.
 
-### Phase A — Geometry & metrics core (`nuts_geom.h`)
+### Phase A — Geometry & metrics core (`nuts_geom.h`) — ✅ DONE
+*(as landed: the `sp_lo`/`sp_hi` names were kept — they are established in
+comments/docs — rather than renamed to `ordered_lo/hi`.)*
 Pure motion, header-only where possible:
 - `sp_lo/sp_hi` → `ordered_lo/ordered_hi` inline helpers (old names kept as
   aliases inside `nuts.cpp` to keep the diff reviewable).
@@ -177,7 +181,10 @@ Pure motion, header-only where possible:
   `keepout_occupied` move from file-static to the shared header/TU, same
   bodies. `verify.cpp` may adopt `ordered_lo/hi` (cosmetic, optional).
 
-### Phase B — `NutsContext` (kill the map ceremony)
+### Phase B — `NutsContext` (kill the map ceremony) — ✅ DONE
+*(as landed: `NutsContext` lives in `nuts.h` + `build_context()` in
+`nuts.cpp` — no separate `nuts_context.{h,cpp}` TU was needed, the struct is
+declaration-only and the builder is one static function.)*
 `struct NutsContext` owning the eight maps, `ts_ptr_map`, `by_layer`;
 `NutsContext::build(bundles, floorplan, segments, only_layer)` wraps
 `build_nuts_maps` + `apply_interval_constraints` + `relax_boundary_intervals`
@@ -186,7 +193,11 @@ Pure motion, header-only where possible:
 `(segments, ctx)`; `run()`'s `solve` lambda and `rerun_layer()` share one
 prep path. All private — zero API impact.
 
-### Phase C — Snapshot / occupancy / guarded-move helpers
+### Phase C — Snapshot / occupancy / guarded-move helpers — ✅ DONE
+*(as landed: `PlacementSnapshot` + per-pair `occupancy_from()` in
+`nuts_geom.h`, plus `settle_spans()` in `nuts.cpp`; a full `guarded_move()`
+wrapper was skipped — with snapshot/settle factored out, each pass's
+three-line guard with its own metric is clearer than a callback.)*
 - `PlacementSnapshot` (3- and 4-field variants) replaces the four hand-rolled
   Snap structs.
 - `build_occupancy(seg, segments|layer_view, kozs)` replaces the four
@@ -197,7 +208,7 @@ prep path. All private — zero API impact.
   each pass's exact existing metric expression inline** — the guards stay
   semantically untouched, only the scaffolding unifies.
 
-### Phase D — `solve_layer` → `LayerSolver`
+### Phase D — `solve_layer` → `LayerSolver` — ✅ DONE
 A private `LayerSolver` struct holds what the nested lambdas close over
 (`layer_map`, keepouts, constraints, the maps via `NutsContext`); `place_seg`,
 `try_repack`, `pack`, `place_phase0` and phases 0/1/2 become methods with
@@ -206,7 +217,7 @@ wishlist item "band-level repack for spread-fit overlap clusters"
 ([`wishlist-nuts.md`](wishlist-nuts.md)): it explicitly wants `try_repack`
 lifted into `repair_overlaps`, which requires exactly this extraction.
 
-### Phase E — Dogleg extraction (`nuts_dogleg.{h,cpp}`)
+### Phase E — Dogleg extraction (`nuts_dogleg.{h,cpp}`) — ✅ DONE
 Move `CycleEdge`, `DoglegPlan`, `DoglegResult`, `detect_dogleg_plans`,
 `apply_dogleg`, and lift `run()`'s trial loop into
 `run_dogleg_fallback(bundles, out, solve_fn, track_pitch)` where `solve_fn`
@@ -215,7 +226,7 @@ six `dogleg_*` maps on `NUTSResult` and `_adopt_doglegs` are untouched.
 Topology surgery gets its own reviewable home next to the analysis
 annotators it already calls (`annotate_seg_conns`).
 
-### Phase F — DNUTS decomposition + single-sourced handoff
+### Phase F — DNUTS decomposition + single-sourced handoff — ✅ DONE
 1. Split `DetailedNUTSEngine::run` into `place_by_layer`,
    `adjust_bit_spans`, `emit_bit_vias` private methods (verbatim motion).
 2. Add C++ `make_bus_segments(const std::vector<BundleWrapper>&,
@@ -229,7 +240,7 @@ annotators it already calls (`annotate_seg_conns`).
    `BusSegment` construction path stays bound and working (tests use it).
    Gate: detailed goldens byte-identical.
 
-### Phase G — `PlacedSegmentBase` (DEFERRED)
+### Phase G — `PlacedSegmentBase` (DEFERRED, unchanged)
 Introduce the CLAUDE.md target base struct + `PreRoutedSegment` only when
 pre-routes become first-class (draw_preroutes / explicit pre-route rows).
 Prereqs are done by then: geometry helpers shared (A), handoff single-sourced
@@ -264,13 +275,14 @@ Prereqs are done by then: geometry helpers shared (A), handoff single-sourced
 - CMake: new TUs join `buda` target (routing pipeline), not `buda_core` —
   no DB-layer registration involved.
 
-## 6. Estimated shape after
+## 6. Shape after (as landed)
 
-| File | Before | After (est.) |
+| File | Before | After |
 |---|---|---|
-| `nuts.cpp` | 2,532 | ~1,350 (context/prep, LayerSolver, repair ladder, drivers) |
-| `nuts_geom.h` (+small .cpp) | — | ~250 |
-| `nuts_context.{h,cpp}` | — | ~300 |
-| `nuts_dogleg.{h,cpp}` | — | ~550 |
-| `detailed_nuts.cpp` | 415 | ~480 (3 methods + `make_bus_segments`) |
-| `nutsflow.py::_run_detailed_nuts` | 68 | ~25 |
+| `nuts.cpp` | 2,532 | 1,930 (context/prep, LayerSolver, repair ladder, drivers) |
+| `nuts_geom.h` | — | 233 (header-only) |
+| `nuts_dogleg.{h,cpp}` | — | 87 + 451 |
+| `detailed_nuts.cpp` | 415 | 511 (3 methods + `make_bus_segments`) |
+| `detailed_nuts.h` | 112 | 139 |
+| `nutsflow.py::_run_detailed_nuts` | 68 | 25 |
+| goldens gate | — | `tools/nuts_snapshot.py` + `test_nuts_placement_golden.py` + 9 goldens |
