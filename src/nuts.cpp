@@ -426,8 +426,17 @@ static void settle_spans(std::vector<TrackSegment>& segments, NutsContext& ctx)
     do_span_adjustments(all_placed, ctx.rev_conn_map, ctx.ts_ptr_map);
 }
 
+// Band-level repack of spread-fit overlap clusters — defined after LayerSolver
+// (whose repack machinery it drives); see docs/internal/nuts_band_repack.md.
+// seed_cons: active corner constraints (see repair_overlaps), may be null.
+static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
+                                   std::vector<TrackSegment>& segments,
+                                   NutsContext& ctx,
+                                   const std::map<int, LayerConstraints>* seed_cons);
+
 void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
-                                 NutsContext& ctx) const
+                                 NutsContext& ctx,
+                                 const std::map<int, LayerConstraints>* seed_cons) const
 {
     const auto& pull_map     = ctx.pull_map;
     const auto& net_pull_map = ctx.net_pull_map;
@@ -526,6 +535,20 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
             }
             ++moved;
             progress = true;
+        }
+        // Band-level cluster round (nuts_band_repack.md): whatever the
+        // per-pair loop could not separate is, by construction, a set of
+        // mutually-wedged segments — single-victim moves fail because every
+        // gap a victim could take is blocked by another cluster member.
+        // Re-place each residual overlap cluster AS A SET through
+        // LayerSolver's repack machinery (each cluster individually guarded:
+        // no global rise, strict in-cluster drop); collateral overlaps a
+        // committed repack surfaces elsewhere are cleaned by the next
+        // single-victim sweep of this loop.
+        if (!progress) {
+            const int m = repack_overlap_clusters(*this, track_pitch_,
+                                                  segments, ctx, seed_cons);
+            if (m > 0) { moved += m; progress = true; }
         }
         if (!progress) break;
     }
@@ -951,9 +974,11 @@ void NUTSEngine::resolve_corner_overlaps(std::vector<TrackSegment>& segments,
                 }
             solve_layer(layer_segs, ctx, by_layer_cons[layer]);
         }
-        // Re-fit connected spans to the new trunk positions and repair residue.
+        // Re-fit connected spans to the new trunk positions and repair residue
+        // (the cluster repack sees the ACTIVE constraints so it cannot move a
+        // just-constrained trunk — they are not yet on the track bounds here).
         settle_spans(segments, ctx);
-        repair_overlaps(segments, ctx);
+        repair_overlaps(segments, ctx, &by_layer_cons);
 
         const size_t after = find_overlaps(segments).size();
         // Accept only a strict overlap improvement that does not introduce a new
@@ -1174,6 +1199,27 @@ public:
         run_phases12();
     }
 
+    // Band-level cluster entry (docs/internal/nuts_band_repack.md): repack a
+    // caller-supplied member set — the connected component of an overlap
+    // cluster — instead of deriving the set from one wedged segment.  Same
+    // earliest-deadline-first ordering, same pull-aware -> dense two-phase
+    // pack, same all-or-nothing commit as the placement-time try_repack.
+    bool repack_cluster(std::vector<TrackSegment*> members) {
+        // Corner-constrained phase-0 trunks stay FIXED, exactly as in
+        // try_repack's member gathering: drop them from the repack set (they
+        // remain obstacles via the non-member occupancy loop).
+        members.erase(std::remove_if(members.begin(), members.end(),
+            [&](TrackSegment* m) {
+                return constrained.count({m->bundle_id, m->seg_idx}) != 0;
+            }), members.end());
+        if (members.size() < 2) return false;
+        // Best-effort: a stuck member keeps its current track instead of
+        // aborting the whole pack (one wedged neighbour must not veto the
+        // cluster) — safe because the caller guards the commit on a strict
+        // GLOBAL overlap drop and restores otherwise.
+        return repack_members(std::move(members), /*best_effort=*/true);
+    }
+
 private:
     const NUTSEngine&                  eng_;
     std::vector<TrackSegment*>&        segs;
@@ -1234,6 +1280,15 @@ private:
                 members.push_back(o);
         }
         if (members.size() < 2) return false;
+        return repack_members(std::move(members));
+    }
+
+    // The shared repack body behind try_repack (placement-time, member set
+    // derived from one wedged segment; all-or-nothing) and repack_cluster
+    // (repair-time, member set = an overlap cluster + its contention sweep;
+    // best_effort — see repack_cluster).
+    bool repack_members(std::vector<TrackSegment*> members,
+                        bool best_effort = false) {
         std::set<const TrackSegment*> member_set(members.begin(), members.end());
 
         // Earliest deadline first: the member whose window ENDS soonest gets
@@ -1258,6 +1313,15 @@ private:
                     -> std::vector<std::pair<TrackSegment*,double>> {
             std::vector<std::pair<TrackSegment*,double>> repacked;
             for (TrackSegment* m : members) {
+                // Committed cross-layer split bounds (corner resolution) are
+                // hard CENTER bounds — clamp the member's window so a repair-
+                // time repack can never move a bounded trunk across its split.
+                // Defaults are ±inf, so placement-time behavior is unchanged.
+                double w_lo = m->interval_lo, w_hi = m->interval_hi;
+                if (m->track_lo_bound > -kInf)
+                    w_lo = std::max(w_lo, m->track_lo_bound - m->width / 2.0);
+                if (m->track_hi_bound < kInf)
+                    w_hi = std::min(w_hi, m->track_hi_bound + m->width / 2.0);
                 std::vector<std::pair<double,double>> occ;
                 add_keepout_occ(m, occ);
                 // Placed segments outside the repack set (including ones whose
@@ -1284,9 +1348,22 @@ private:
                 double p;
                 if (pull_aware) {
                     auto pit = pull_map.find({m->bundle_id, m->seg_idx});
-                    double pref = (m->net_pull != 0 && pit != pull_map.end())
-                                  ? pit->second           // anchor: keep its pull
-                                  : m->interval_lo;        // free: pack low
+                    // Anchors keep their pull.  In the repair-time (best_effort)
+                    // pack a pull-free member aims at its pull_map entry too:
+                    // for planner-managed segments that is the CHARGED band
+                    // centre (seg_perp) — the band whose signal-track supply
+                    // the planner verified — so a cluster repack separates
+                    // buses without drifting them onto bands DetailedNUTS
+                    // cannot honor.  Placement-time behavior is unchanged
+                    // (pull-free members pack low, as before).
+                    double pref;
+                    if (m->net_pull != 0 && pit != pull_map.end())
+                        pref = pit->second;               // anchor: keep its pull
+                    else if (best_effort)
+                        pref = (pit != pull_map.end()) ? pit->second
+                                                       : m->track_position;
+                    else
+                        pref = m->interval_lo;            // placement: pack low
                     // The pull target is an interval EDGE (interval_hi for an
                     // upward pull), which lies outside preferred_fit's valid centre
                     // range [c_lo, c_hi] and is not one of its baseline candidates —
@@ -1294,14 +1371,20 @@ private:
                     // edge falls back to c_lo and is bottom-packed.  Clamp into the
                     // centre range first, exactly as place_seg does.
                     const double half = m->width / 2.0;
-                    const double c_lo = m->interval_lo + half;
-                    const double c_hi = m->interval_hi - half;
+                    const double c_lo = w_lo + half;
+                    const double c_hi = w_hi - half;
                     if (c_lo <= c_hi) pref = std::clamp(pref, c_lo, c_hi);
-                    p = eng_.preferred_fit(m->interval_lo, m->interval_hi, m->width, occ, pref);
+                    p = eng_.preferred_fit(w_lo, w_hi, m->width, occ, pref);
                 } else {
-                    p = eng_.first_fit(m->interval_lo, m->interval_hi, m->width, occ);
+                    p = eng_.first_fit(w_lo, w_hi, m->width, occ);
                 }
-                if (std::isnan(p)) return {};   // this member can't fit: pack failed
+                if (std::isnan(p)) {
+                    if (!best_effort) return {};   // all-or-nothing: pack failed
+                    // Best-effort: the member stays where it is and becomes an
+                    // obstacle for the rest of the pack.  Earlier members may
+                    // have taken its spot — the caller's guard arbitrates.
+                    p = m->track_position;
+                }
                 repacked.push_back({m, p});
             }
             return repacked;
@@ -1310,9 +1393,17 @@ private:
         // Honor pulls when the window has room for everyone at their pull; else
         // fall back to the dense low-edge pack (the proven feasibility path) so a
         // tight window still resolves its overlap rather than dropping ts.
+        auto changed = [](const std::vector<std::pair<TrackSegment*,double>>& r) {
+            for (const auto& [pm, ppos] : r)
+                if (std::abs(ppos - pm->track_position) > 0.5) return true;
+            return false;
+        };
         auto repacked = pack(/*pull_aware=*/true);
-        if (repacked.empty()) repacked = pack(/*pull_aware=*/false);
+        if (repacked.empty() || (best_effort && !changed(repacked)))
+            repacked = pack(/*pull_aware=*/false);
         if (repacked.empty()) return false;   // window truly full: keep old state
+        if (best_effort && !changed(repacked))
+            return false;                     // nothing would move: keep old state
         for (const auto& [pm, ppos] : repacked) pm->track_position = ppos;
         return true;
     }
@@ -1571,6 +1662,151 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                               const LayerConstraints& constraints) const {
     if (segs.empty()) return;
     LayerSolver(*this, segs, ctx, constraints).run();
+}
+
+// Band-level repack of spread-fit overlap clusters (nuts_band_repack.md).
+// Discover the residual overlap graph's connected components (edges are
+// same-layer by segs_overlap construction), skip clusters the union window
+// provably cannot host (over-capacity: the planner's problem, warned as
+// ALLOW_OVERFLOW), and re-place each surviving cluster AS A SET through
+// LayerSolver::repack_cluster — earliest-deadline-first, pull-aware with a
+// dense fallback, non-members as obstacles, committed cross-layer track
+// bounds respected.  Every cluster is individually guarded: accepted only
+// when the GLOBAL overlap count strictly drops without new interval
+// violations, else restored.  Returns the number of member segments of the
+// accepted repacks (for the caller's summary line).
+static int repack_overlap_clusters(const NUTSEngine& eng, double track_pitch,
+                                   std::vector<TrackSegment>& segments,
+                                   NutsContext& ctx,
+                                   const std::map<int, LayerConstraints>* seed_cons)
+{
+    auto pairs = find_overlaps(segments);
+    if (pairs.empty()) return 0;
+
+    // Connected components over segment indices (union-find).
+    std::vector<int> parent(segments.size());
+    for (int i = 0; i < (int)parent.size(); ++i) parent[i] = i;
+    std::function<int(int)> find = [&](int x) {
+        while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+    };
+    for (auto [i, j] : pairs) parent[find(i)] = find(j);
+    std::map<int, std::vector<int>> comps;
+    std::set<int> in_overlap;
+    for (auto [i, j] : pairs) { in_overlap.insert(i); in_overlap.insert(j); }
+    for (int i : in_overlap) comps[find(i)].push_back(i);
+
+    // Deterministic processing order: largest cluster first (big clusters
+    // constrain small ones), ties by lowest member (bundle_id, seg_idx).
+    std::vector<std::vector<int>> clusters;
+    for (auto& [root, idx] : comps) {
+        (void)root;
+        std::sort(idx.begin(), idx.end(), [&](int a, int b) {
+            return std::make_pair(segments[a].bundle_id, segments[a].seg_idx)
+                 < std::make_pair(segments[b].bundle_id, segments[b].seg_idx);
+        });
+        clusters.push_back(idx);
+    }
+    std::sort(clusters.begin(), clusters.end(),
+        [&](const std::vector<int>& a, const std::vector<int>& b) {
+            if (a.size() != b.size()) return a.size() > b.size();
+            const auto& sa = segments[a[0]];
+            const auto& sb = segments[b[0]];
+            return std::make_pair(sa.bundle_id, sa.seg_idx)
+                 < std::make_pair(sb.bundle_id, sb.seg_idx);
+        });
+
+    const LayerConstraints no_cons;   // named: LayerSolver stores references
+    int moved = 0;
+    for (const auto& cluster : clusters) {
+        const int layer = segments[cluster[0]].layer;
+
+        // Spread-fit precheck: the members' union window must be able to host
+        // every member stacked (Σwidth + inter-bus pitch).  A conservative
+        // necessary condition — clusters whose members' spans merely touch
+        // can exceed it yet still admit a span-aware pack (v1 skips those;
+        // the repack itself would also fail safely, this just saves work).
+        double lo = kInf, hi = -kInf, sumw = 0.0;
+        for (int i : cluster) {
+            lo = std::min(lo, segments[i].interval_lo);
+            hi = std::max(hi, segments[i].interval_hi);
+            sumw += segments[i].width;
+        }
+        if (sumw + (double)(cluster.size() - 1) * track_pitch > hi - lo)
+            continue;   // over-capacity: not a packing problem
+
+        std::vector<TrackSegment*> layer_segs;
+        for (auto& ts : segments)
+            if (ts.layer == layer) layer_segs.push_back(&ts);
+
+        // Two attempts per cluster, each individually guarded:
+        //   narrow — the cluster members only (least collateral: neighbours
+        //            stay put as obstacles);
+        //   wide   — the cluster PLUS every placed same-layer segment whose
+        //            interval overlaps the union window (try_repack's
+        //            contention sweep, seeded by all members: the members'
+        //            windows may be full GIVEN the neighbours' positions, so
+        //            the neighbours must move with them).
+        std::vector<TrackSegment*> narrow;
+        std::set<const TrackSegment*> in_members;
+        for (int i : cluster) {
+            narrow.push_back(&segments[i]);
+            in_members.insert(&segments[i]);
+        }
+        std::vector<TrackSegment*> wide = narrow;
+        for (TrackSegment* o : layer_segs) {
+            if (!o->placed || in_members.count(o)) continue;
+            if (o->interval_lo < hi && lo < o->interval_hi)
+                wide.push_back(o);
+        }
+
+        // In-cluster overlap count: pairs whose BOTH endpoints are cluster
+        // members (indexes into `segments` are stable across the repack).
+        std::set<int> cset(cluster.begin(), cluster.end());
+        auto in_cluster_ov = [&]() {
+            size_t n = 0;
+            for (auto [i, j] : find_overlaps(segments))
+                if (cset.count(i) && cset.count(j)) ++n;
+            return n;
+        };
+
+        // Active corner constraints for this layer (empty when none): the
+        // solver's `constrained` set makes phase-0 trunks fixed obstacles.
+        const LayerConstraints* cons = &no_cons;
+        if (seed_cons) {
+            auto cit = seed_cons->find(layer);
+            if (cit != seed_cons->end()) cons = &cit->second;
+        }
+
+        for (const auto& members : {narrow, wide}) {
+            const size_t ov_before = find_overlaps(segments).size();
+            const size_t ic_before = in_cluster_ov();
+            const int    vi_before = count_violations(segments);
+            PlacementSnapshot snap;
+            snap.take(segments);
+            LayerSolver solver(eng, layer_segs, ctx, *cons);
+            if (!solver.repack_cluster(members))
+                continue;                   // nothing would move: state untouched
+            settle_spans(segments, ctx);
+            // Accept when the cluster itself strictly improves and the world
+            // does not get worse — a committed repack may trade an in-cluster
+            // overlap for collateral elsewhere (follower spans stretch), which
+            // the caller's next single-victim sweep cleans up; the pass-level
+            // non-regression snapshot in repair_overlaps backstops the total.
+            if (find_overlaps(segments).size() > ov_before ||
+                in_cluster_ov() >= ic_before ||
+                count_violations(segments) > vi_before) {
+                snap.restore(segments);     // repack made things no better
+                continue;
+            }
+            moved += (int)members.size();
+            std::cout << "[NUTS] cluster repack: separated a "
+                      << cluster.size() << "-segment overlap cluster on layer "
+                      << layer << ".\n";
+            break;                          // this cluster is done
+        }
+    }
+    return moved;
 }
 
 void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys) {

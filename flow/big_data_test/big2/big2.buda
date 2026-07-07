@@ -1,1 +1,21 @@
-tc3b_flat.buda
+# copied over from tc3b_flat.buda (used to be a soft-link)
+source tracks4top.buda
+source tc3b_flat_x5.buda
+run_bundler
+# nuts: 10 overlaps, dnuts: 168 opens
+#generate_topologies double_detour
+# nuts: 6 overlaps,  dnuts: 52
+generate_topologies
+check_connectivity topo all
+run_planner signal_tracks
+run_nuts
+negotiate_congestion
+# overlaps 2->0, but has no impact on DNUTS
+ripup_reroute
+check_connectivity nuts
+run_detailed_nuts
+negotiate_congestion
+# no help:
+# ripup_reroute
+check_connectivity
+visualize

@@ -33,6 +33,11 @@ _LAYER_COLOR = {1: '#000075', 2: '#a9a9a9', 3: '#FF8800', 4: '#007ACC', 5: '#CC0
 # _layer_label() (def_layer can override these, e.g. M4 V instead of M4 H).
 _LAYER_LABEL = {1: 'M1 V', 2: 'M2 H', 3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V', 8: 'M8 H', 9: 'M9 V', 10: 'M10 H'}
 
+# Pre-route band colours by TrackSlot type (draw_preroutes; the [Tracks] rail
+# view keeps its own local copy because it also colours SIGNAL stripes).
+_PREROUTE_COLOR = {'POWER': '#ffcccc', 'GROUND': '#cce0ff',
+                   'CLOCK': '#fffacc', 'SHIELD': '#e0d4f7'}
+
 
 def _layer_label(lid, layer_stack=None):
     """'M<id> <H|V>' using the actual orientation from the layer stack when
@@ -2053,6 +2058,7 @@ class BudaVisualizer:
         self._btn_all        = None
         self._btn_detailed   = None
         self._btn_tracks     = None
+        self._btn_preroutes  = None
         self._btn_hanan      = None
 
         # Layout constants for the left panel (view toggles + heatmap)
@@ -2076,6 +2082,16 @@ class BudaVisualizer:
         self._detailed_result        = None
         self._detailed_grid_stack    = None
         self._detailed_layer_stack   = None
+
+        # Pre-route layer (draw_preroutes — first-class PreRoutedSegments from
+        # RoutingGridStack.preroutes; see docs/internal/placed_segment_preroutes.md).
+        # Unlike the [Tracks] rails view this works in the ABSTRACT view too.
+        # Lazy build on the first [Preroutes] cycle away from 'off'.
+        self._has_preroute_data = False
+        self._preroutes_built   = False
+        self._preroute_grid_stack  = None
+        self._preroute_layer_stack = None
+        self._preroute_artists  = []   # [{artist, layer, slot_type}] (not per-bundle)
 
         # IPC: bundle_id -> set of instance names (driver + receivers, 'top' excluded)
         self._bundle_insts: dict = {}
@@ -2266,6 +2282,10 @@ class BudaVisualizer:
             self._btn_detailed.label.set_text('☑ Detailed' if self.ui_state.detailed_mode else '☐ Detailed')
         if self._btn_tracks:
             self._btn_tracks.label.set_text('☑ Tracks' if self.ui_state.tracks else '☐ Tracks')
+        if self._btn_preroutes:
+            mode = self.ui_state.preroutes_mode
+            self._btn_preroutes.label.set_text(
+                '☐ Preroutes' if mode == 'off' else f'☑ Prer:{mode}')
         if self._btn_hanan:
             self._btn_hanan.label.set_text('☑ Hanan' if self.ui_state.hanan_grid else '☐ Hanan')
 
@@ -2281,6 +2301,8 @@ class BudaVisualizer:
         for a in self._busterm_artists:
             a.set_visible(self.ui_state.busterms)
             
+        self._apply_preroute_visibility()
+
         for a in self._vias_conns_artists:
             a.set_visible(self.ui_state.vias_conns)
         self._apply_detailed_via_visibility()
@@ -2304,6 +2326,15 @@ class BudaVisualizer:
         # Re-apply the set_visible gate (alpha is handled by _refresh_highlight).
         for e in self._grid_rail_artists:
             e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
+
+        # Pre-routes can likewise be turned on without _cycle_preroutes()
+        # (the All toggle sets preroutes_mode='ALL' and only notifies) —
+        # build the lazy artists here if they're now needed, then re-apply
+        # visibility (the earlier apply ran before these artists existed).
+        if (self.ui_state.preroutes_mode != 'off'
+                and not self._preroutes_built and self._has_preroute_data):
+            self._build_preroute_artists()
+            self._apply_preroute_visibility()
 
         # 3. Complex redraws (blocks, highlights)
         self._refresh_highlight()
@@ -2367,6 +2398,9 @@ class BudaVisualizer:
                     a.set_alpha(0.2 if e['is_band'] else 1.0)
                 else:
                     a.set_alpha(0.0 if self.ui_state.solo else (0.03 if e['is_band'] else 0.1))
+
+        # Layer visibility also gates the pre-route bands (any view mode).
+        self._apply_preroute_visibility()
 
         # Apply layer visibility to non-bundle detailed artists (grid rails).
         # These are only shown when detailed_mode is active.
@@ -2464,9 +2498,29 @@ class BudaVisualizer:
         self._bundle_scroll = max(0, min(max_scroll, self._bundle_scroll))
 
     def _toggle_heatmap(self):
+        if not getattr(self._btn_heatmap, '_buda_enabled', True):
+            return                       # dimmed: no congestion heatmap drawn
         self.ui_state.toggle_heatmap()
 
+    def _set_button_enabled(self, btn, enabled, on_color='#e8f4e8'):
+        """Keep a panel button always visible, but grey it out (dimmed) when
+        `enabled` is False so it reads as inactive instead of vanishing. Each
+        button's slot is pre-reserved by `_lrect`, so an always-visible button
+        does not shift the panel. Toggle handlers check `_buda_enabled` and
+        no-op while dimmed."""
+        if btn is None:
+            return
+        btn.ax.set_visible(True)
+        btn._buda_enabled = bool(enabled)
+        face = on_color if enabled else '#f0f0f0'
+        btn.color = face                 # resting colour (hover-out restores it)
+        btn.hovercolor = '0.95' if enabled else face   # no hover glow when dimmed
+        btn.ax.set_facecolor(face)
+        btn.label.set_color('#111111' if enabled else '#b0b0b0')
+
     def _toggle_keepouts(self):
+        if not getattr(self._btn_keepouts, '_buda_enabled', True):
+            return                       # dimmed: no keepouts in the design
         self.ui_state.toggle_keepouts()
 
     def _toggle_hanan(self):
@@ -3292,8 +3346,8 @@ class BudaVisualizer:
             self._keepout_artists.append(txt)
 
         if self._btn_keepouts is not None:
-             # Only show button if there are keepouts
-             self._btn_keepouts.ax.set_visible(bool(self._keepout_artists))
+             # Always visible; dimmed (inactive) when there are no keepouts.
+             self._set_button_enabled(self._btn_keepouts, bool(self._keepout_artists))
 
     # At most this many overflow cells get a text label (the worst by ratio).
     # Text+bbox is matplotlib's most expensive artist; on large congested
@@ -3698,6 +3752,112 @@ class BudaVisualizer:
             'layer':   layer,
         })
 
+    # ── Pre-routes (Phase G: first-class PreRoutedSegments) ────────────────
+    def draw_preroutes(self, routing_grid_stack, layer_stack):
+        """Register the pre-route layer (no artists yet — lazy build on the
+        first [Preroutes] cycle away from 'off').
+
+        Unlike the [Tracks] rail stripes (detailed-mode only, re-derived ad
+        hoc from the raw pattern), this draws the first-class PreRoutedSegment
+        objects from RoutingGridStack.preroutes() and works in the ABSTRACT
+        view too — the pre-route context exists before any detailed routing
+        does.  See docs/internal/placed_segment_preroutes.md.
+        """
+        if routing_grid_stack is None or layer_stack is None:
+            return
+        self._preroute_grid_stack  = routing_grid_stack
+        self._preroute_layer_stack = layer_stack
+        self._has_preroute_data    = True
+        if self._btn_preroutes is not None:
+            self._set_button_enabled(self._btn_preroutes, True, on_color='#f4ece8')
+
+    def _build_preroute_artists(self):
+        """Create the pre-route band artists (once, lazily): one
+        PatchCollection per (layer, slot type) from the enumerated
+        PreRoutedSegments over the floorplan bbox, so per-type visibility
+        is a collection flip."""
+        if self._preroutes_built or not self._has_preroute_data:
+            return
+        self._preroutes_built = True
+        import buda as ic_mod
+
+        stack = self._preroute_grid_stack
+        layer_is_h = {}
+        for lid in self._preroute_layer_stack.get_layer_ids_by_dir(
+                ic_mod.LayerDir.HORIZONTAL):
+            layer_is_h[lid] = True
+        for lid in self._preroute_layer_stack.get_layer_ids_by_dir(
+                ic_mod.LayerDir.VERTICAL):
+            layer_is_h[lid] = False
+
+        # Layout bounding box (the rails-view extent idiom).
+        all_blocks = list(self.fp.get_all_blocks())
+        if all_blocks:
+            x_min = min(r.x1 for _, r in all_blocks)
+            x_max = max(r.x2 for _, r in all_blocks)
+            y_min = min(r.y1 for _, r in all_blocks)
+            y_max = max(r.y2 for _, r in all_blocks)
+        else:
+            x_min, x_max, y_min, y_max = 0, 1000, 0, 1000
+
+        groups = {}   # (layer, slot_type) -> [Rectangle, ...]
+        for lid, is_h in layer_is_h.items():
+            if not stack.has_layer(lid):
+                continue
+            if is_h:
+                perp_lo, perp_hi   = y_min, y_max
+                along_lo, along_hi = x_min, x_max
+            else:
+                perp_lo, perp_hi   = x_min, x_max
+                along_lo, along_hi = y_min, y_max
+            for pr in stack.preroutes(lid, perp_lo, perp_hi,
+                                      along_lo, along_hi):
+                col  = _PREROUTE_COLOR.get(pr.slot_type, '#f0f0f0')
+                half = pr.width / 2.0
+                if is_h:
+                    rect = patches.Rectangle(
+                        (pr.span_lo, pr.track_position - half),
+                        pr.span_hi - pr.span_lo, pr.width,
+                        linewidth=0, facecolor=col)
+                else:
+                    rect = patches.Rectangle(
+                        (pr.track_position - half, pr.span_lo),
+                        pr.width, pr.span_hi - pr.span_lo,
+                        linewidth=0, facecolor=col)
+                groups.setdefault((lid, pr.slot_type), []).append(rect)
+
+        for (lid, stype), rects in sorted(groups.items()):
+            pc = PatchCollection(rects, match_original=True, zorder=3)
+            pc.set_alpha(0.35)
+            pc.set_visible(False)
+            self.ax.add_collection(pc)
+            self._preroute_artists.append(
+                {'artist': pc, 'layer': lid, 'slot_type': stype})
+
+    def _apply_preroute_visibility(self):
+        """Visibility from the cycling mode ('off' hides all, 'ALL' shows
+        every type, a slot-type name shows just that type) AND the layer
+        panel — a metal layer unchecked there hides its pre-route bands too,
+        exactly like bundle artists and the detailed grid rails."""
+        mode = self.ui_state.preroutes_mode
+        for e in self._preroute_artists:
+            type_on  = (mode == 'ALL' or e['slot_type'] == mode)
+            layer_on = self._layer_visible.get(e['layer'], True)
+            e['artist'].set_visible(type_on and layer_on)
+
+    def _cycle_preroutes(self):
+        if not getattr(self._btn_preroutes, '_buda_enabled', True):
+            return                       # dimmed: no pre-route data in the design
+        # Peek the next mode so the lazy build happens BEFORE the
+        # notify-driven visibility sync in fig_redraw.
+        cyc = self.ui_state.preroute_cycle
+        cur = self.ui_state.preroutes_mode
+        i = cyc.index(cur) if cur in cyc else 0
+        if cyc[(i + 1) % len(cyc)] != 'off':
+            self._build_preroute_artists()
+        self.ui_state.cycle_preroutes()
+        self.fig.canvas.draw_idle()
+
     def draw_detailed_tracks(self, detailed_result, routing_grid_stack, layer_stack):
         """Register Stage-9 detailed-NUTS data for visualisation.
 
@@ -3899,15 +4059,19 @@ class BudaVisualizer:
             self._btn_detailed.ax.set_facecolor('#ffe8cc' if active else '#e8f4e8')
 
         if self._btn_tracks is not None:
+            # Always visible; dimmed (inactive) until Detailed is on with rails.
             # Gate on rail-layer availability (cheap) — not on built artifacts —
-            # so the button appears before the rails are lazily built.
-            self._btn_tracks.ax.set_visible(active and self._has_rail_layers())
+            # so the button activates before the rails are lazily built.
+            self._set_button_enabled(
+                self._btn_tracks, active and self._has_rail_layers())
 
         # Re-apply highlight/layer/bundle visibility to the now-active set.
         self._refresh_highlight()
         self.fig.canvas.draw_idle()
 
     def _toggle_tracks(self):
+        if not getattr(self._btn_tracks, '_buda_enabled', True):
+            return                       # dimmed: Detailed off or no rail layers
         self.ui_state.toggle_tracks()
         vis = self.ui_state.tracks
 
@@ -4171,17 +4335,17 @@ class BudaVisualizer:
             color='#e8f4e8')
         self._btn_heatmap.label.set_fontsize(7.5)
         self._btn_heatmap.on_clicked(lambda _: self._toggle_heatmap())
-        # Heatmap button is only meaningful when a congestion map was drawn.
-        if not self._heatmap_artists and self._cbar_ax is None:
-            self._btn_heatmap.ax.set_visible(False)
+        # Always visible; dimmed (inactive) unless a congestion map was drawn.
+        self._set_button_enabled(
+            self._btn_heatmap,
+            bool(self._heatmap_artists) or self._cbar_ax is not None)
 
         ax_keepouts = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_keepouts = Button(ax_keepouts, '☑ Keepouts', color='#e8f4e8')
         self._btn_keepouts.label.set_fontsize(7.5)
         self._btn_keepouts.on_clicked(lambda _: self._toggle_keepouts())
-        # Only visible if there are keepouts
-        if not self.fp.get_keepout_zones():
-            self._btn_keepouts.ax.set_visible(False)
+        # Always visible; dimmed (inactive) when the design has no keepouts.
+        self._set_button_enabled(self._btn_keepouts, bool(self.fp.get_keepout_zones()))
 
         ax_detailed = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_detailed = Button(ax_detailed, '☐ Detailed', color='#e8f4e8')
@@ -4195,11 +4359,21 @@ class BudaVisualizer:
         self._btn_tracks = Button(ax_tracks, '☐ Tracks', color='#e8f4e8')
         self._btn_tracks.label.set_fontsize(7.5)
         self._btn_tracks.on_clicked(lambda _: self._toggle_tracks())
-        # Only visible when detailed mode is active and rails are possible.
-        # Gate on rail-layer availability (cheap), not on built artifacts —
-        # rails are built lazily on the first [Tracks] enable.
-        if not self.ui_state.detailed_mode or not self._has_rail_layers():
-            self._btn_tracks.ax.set_visible(False)
+        # Always visible; dimmed (inactive) until Detailed mode is on and rail
+        # layers exist.  Gate on rail-layer availability (cheap), not on built
+        # artifacts — rails are built lazily on the first [Tracks] enable.
+        self._set_button_enabled(
+            self._btn_tracks,
+            self.ui_state.detailed_mode and self._has_rail_layers())
+
+        ax_preroutes = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
+        self._btn_preroutes = Button(ax_preroutes, '☐ Preroutes', color='#f4ece8')
+        self._btn_preroutes.label.set_fontsize(7.5)
+        self._btn_preroutes.on_clicked(lambda _: self._cycle_preroutes())
+        # Always visible; dimmed (inactive) until draw_preroutes() has
+        # registered a routing grid.
+        self._set_button_enabled(
+            self._btn_preroutes, self._has_preroute_data, on_color='#f4ece8')
 
         # Store the current packing position for the colorbar.
         self._ly_post_buttons = ly

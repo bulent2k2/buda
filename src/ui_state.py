@@ -36,6 +36,10 @@ class ViewState:
         self.vias_conns = True
         self.detailed_mode = False
         self.tracks = False
+        # Pre-route layer (draw_preroutes): a CYCLING mode rather than a
+        # boolean — 'off' -> 'ALL' -> one slot type at a time -> 'off'.
+        self.preroutes_mode = 'off'
+        self.preroute_cycle = ('off', 'ALL', 'POWER', 'GROUND', 'CLOCK', 'SHIELD')
         self.all_vis = True
         self.solo = False
 
@@ -95,6 +99,13 @@ class ViewState:
         self.tracks = not self.tracks
         self.notify()
 
+    def cycle_preroutes(self):
+        """Advance the pre-route display mode one step around the cycle."""
+        cyc = self.preroute_cycle
+        i = cyc.index(self.preroutes_mode) if self.preroutes_mode in cyc else 0
+        self.preroutes_mode = cyc[(i + 1) % len(cyc)]
+        self.notify()
+
     def toggle_all(self):
         self.all_vis = not self.all_vis
         # When toggling 'All', typically we want to align the main flags
@@ -106,6 +117,7 @@ class ViewState:
         self.vias_conns = self.all_vis
         self.hanan_grid = self.all_vis
         self.tracks = self.all_vis
+        self.preroutes_mode = 'ALL' if self.all_vis else 'off'
         self.notify()
 
     def toggle_solo(self):

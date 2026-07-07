@@ -112,6 +112,49 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
     return result;
 }
 
+std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
+    double perp_lo, double perp_hi, double along_lo, double along_hi) const
+{
+    std::vector<PreRoutedSegment> out;
+    int idx = 0;
+    auto emit = [&](double centre, const TrackSlot& slot,
+                    double a_lo, double a_hi) {
+        if (slot.type == "SIGNAL") return;
+        if (a_lo > a_hi) return;                 // empty along window
+        PreRoutedSegment pr;
+        pr.track_position = centre;
+        pr.width          = slot.width;
+        pr.span_lo        = a_lo;
+        pr.span_hi        = a_hi;
+        pr.label          = slot.label.empty() ? slot.type : slot.label;
+        pr.slot_type      = slot.type;
+        pr.track_index    = idx++;
+        out.push_back(std::move(pr));
+    };
+
+    // Global pattern: full along window.
+    for (const auto& [centre, slot] : global_pattern_.tracks_in_range(perp_lo, perp_hi))
+        emit(centre, slot, along_lo, along_hi);
+
+    // Overrides: local pattern within (region ∩ perp window), span clipped to
+    // (region ∩ along window).  Orientation decides which region coords are
+    // perpendicular vs along (H layer: perp = y, along = x).
+    for (const auto& ov : overrides_) {
+        const double r_perp_lo = is_horizontal_ ? ov.region.y1 : ov.region.x1;
+        const double r_perp_hi = is_horizontal_ ? ov.region.y2 : ov.region.x2;
+        const double r_along_lo = is_horizontal_ ? ov.region.x1 : ov.region.y1;
+        const double r_along_hi = is_horizontal_ ? ov.region.x2 : ov.region.y2;
+        const double p_lo = std::max(perp_lo,  r_perp_lo);
+        const double p_hi = std::min(perp_hi,  r_perp_hi);
+        const double a_lo = std::max(along_lo, r_along_lo);
+        const double a_hi = std::min(along_hi, r_along_hi);
+        if (p_lo > p_hi) continue;
+        for (const auto& [centre, slot] : ov.pattern.tracks_in_range(p_lo, p_hi))
+            emit(centre, slot, a_lo, a_hi);
+    }
+    return out;
+}
+
 int RoutingGrid::count_signal_tracks_in(double x, double lo, double hi) const {
     // Count-only twin of signal_tracks_in: same tiling walk + SIGNAL/keepout
     // filter, but never allocates (returns the count directly).  Kept in lockstep
@@ -175,6 +218,16 @@ const RoutingGrid& RoutingGridStack::get_layer_grid(int layer_id) const {
         throw std::out_of_range("RoutingGridStack: layer " +
                                 std::to_string(layer_id) + " not defined");
     return it->second;
+}
+
+std::vector<PreRoutedSegment> RoutingGridStack::preroutes(
+    int layer_id, double perp_lo, double perp_hi,
+    double along_lo, double along_hi) const
+{
+    auto out = get_layer_grid(layer_id).preroutes_in(perp_lo, perp_hi,
+                                                     along_lo, along_hi);
+    for (auto& pr : out) pr.layer = layer_id;
+    return out;
 }
 
 bool RoutingGridStack::has_layer(int layer_id) const {

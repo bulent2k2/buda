@@ -1,6 +1,6 @@
 # BUDA Script Reference — Stages 4 & 9 — Track assignment (NUTS)
 
-Abstract bus-level track placement and bit-level detailed placement, plus the feedback re-route: `run_nuts`, `run_nuts_on_layer`, `run_detailed_nuts`, `ripup_reroute`.
+Abstract bus-level track placement and bit-level detailed placement, plus the two feedback passes: `run_nuts`, `run_nuts_on_layer`, `run_detailed_nuts`, `ripup_reroute`, `negotiate_congestion`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -213,6 +213,9 @@ other instances.
 - The base flow is unchanged unless an improving move is found; the command is
   opt-in and additive.
 - A stage-b `hi_lo` bit-order selection is preserved across the re-route.
+- For a cheaper first pass that clears the bulk of the contention before rip-up
+  tries per-candidate alternates, run [`negotiate_congestion`](#negotiate_congestion)
+  first — the two compose (negotiate the broad contention, rip-up the residual).
 
 **Requires:** `run_planner` (or `run_planner hier`) and at least `run_nuts` to have
 run first.
@@ -243,6 +246,83 @@ stage b alone.
 > cases. Predicting them inside the planner (charging band capacity in
 > signal-track count rather than layout width) is a planned follow-on — see
 > *Gap A part 2* in `docs/internal/wishlist-planner.md`.
+
+---
+
+### `negotiate_congestion`
+
+```
+negotiate_congestion [max_iter]
+```
+
+Measured-congestion negotiation — a faster, complementary alternative to
+`ripup_reroute`'s guess-and-test. Instead of trying a contending bundle's
+alternate topology candidates one at a time (each a full NUTS solve),
+`negotiate_congestion` feeds the **actual** failures back into the planner as
+extra demand on the exact bands where they happened, then **re-plans the
+offending bundles _unpinned_** against those corrected prices — so the cost
+model itself steers them off the contended bands, choosing among **all** their
+candidates in a single planner pass with no per-candidate trial. It typically
+clears the bulk of the contention in seconds; `ripup_reroute` is then the
+finisher for whatever negotiation leaves.
+
+| Argument | Type | Default | Description |
+|---|---|---|---|
+| `max_iter` | int | `5` | Maximum number of negotiation rounds. Each round injects the current failures and re-plans; it is kept only if it strictly improves the metric, otherwise it is rolled back and the loop stops. |
+
+**Two stages, auto-detected from pipeline state** (same as `ripup_reroute`):
+
+| Run it after… | Stage | Metric driven down |
+|---|---|---|
+| `run_nuts` | a | NUTS abstract track overlaps (`num_overlaps`) |
+| `run_detailed_nuts` | b | DetailedNUTS opens / unplaced bits — lexicographic `(opens, overlaps)`, so clearing opens can't silently trade away abstract packing |
+
+**Algorithm (PathFinder-style negotiation):** each round
+
+1. injects each measured failure as band demand on its exact `(layer, span, perp)`
+   rectangle — a NUTS overlap in stage a, or an open segment's placed window
+   (scaled by the missing-bit fraction) in stage b — with **history pressure**
+   that grows each time the same rectangle re-appears, so a stubborn hot-spot
+   becomes progressively more expensive;
+2. re-plans the affected bundles **unpinned** (both bundles of every overlap in
+   stage a; the open bundles in stage b), widest-first, against the corrected
+   prices — and may even displace a committed bundle blocking the contended bands
+   (the planner's own rip-up ladder);
+3. accepts the round only on **strict metric improvement** (snapshot/restore
+   otherwise), so it is a safe hill-climb.
+
+It is a **no-op** when the metric is already 0 (`metric already 0 — nothing to
+do`). Injected demand is always cleared at the end, so it never leaks into later
+commands.
+
+Output logs the start metric and each round:
+
+```
+[negotiate] stage a (NUTS overlaps): start metric=10, max_iter=5
+[negotiate] iter 1: 10 contention site(s) -> replanned 13 bundle(s), metric 10->5
+[negotiate] iter 2: no improvement (metric 5->5) — restored, stop.
+[negotiate] done: metric 10->5 after 1 accepted iteration(s).
+```
+
+**Requires:** `run_planner` and at least `run_nuts` to have run first.
+
+**How it differs from `ripup_reroute`:** negotiation changes the planner's
+**cost model** and lets one replanning pass move *many* bundles at once, whereas
+`ripup_reroute` re-pins **one** bundle to an alternate **topology** per committed
+move. They compose — negotiate the broad, price-visible contention, then rip-up
+the stubborn residual:
+
+```buda
+run_nuts
+negotiate_congestion     # cheap: reprice the contended bands, replan in one pass
+ripup_reroute            # finish the residual NUTS overlaps
+run_detailed_nuts
+negotiate_congestion     # stage b: reprice the capacity-short bands
+ripup_reroute            # finish the residual DetailedNUTS opens
+```
+
+See [wishlist-ripup.md](../internal/wishlist-ripup.md) (item 1) for the design
+rationale and the measured negotiate-then-ripup results.
 
 ---
 
