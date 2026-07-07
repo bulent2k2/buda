@@ -24,6 +24,13 @@ fallback for pre-v12 checkpoints.
 
 See docs/internal/single_source_topo_truth.md (Phase 5).
 """
+
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
 import contextlib
 import io
 

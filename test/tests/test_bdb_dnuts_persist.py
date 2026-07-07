@@ -19,6 +19,13 @@ per-bit via into `net_via` (the symbolic `bus_via` fanned out per bit — same
 is rewritten with stage 'detailed_nuts', hashing the net rows too.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import contextlib
 import io
 import sqlite3

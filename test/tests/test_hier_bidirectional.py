@@ -26,6 +26,13 @@ separate unidirectional bundles.  Routing is block-to-block and
 direction-agnostic, so the whole pipeline runs clean.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import buda
 import buda_cli
 

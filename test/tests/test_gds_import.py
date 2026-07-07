@@ -18,6 +18,13 @@ writer (tools/gds_build.py; zeroed timestamps), then import via
 cell/component tables. GDS is binary, so no blobs are checked in.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import contextlib
 import io
 import sqlite3

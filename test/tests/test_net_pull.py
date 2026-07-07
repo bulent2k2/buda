@@ -28,6 +28,13 @@ flow/pull2.buda — regression: when the far stub's anchored interval CONTAINS
     slides the stub to its own range extreme, past the target).  The pull
     must be 0 so the stub stays at its nominal position.
 """
+
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
 import os
 import re
 import subprocess

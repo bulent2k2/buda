@@ -17,18 +17,19 @@ Tests are split into three cumulative tiers via pytest markers (registered in
 
 | Tier | Marker | What | Tests | Time | Run with |
 |---|---|---|---:|---:|---|
-| **fast** | *(none)* | unit / component tests | ~434 | **~8.5s** | `bb -t` / `pytest` |
-| **mid** | `mid` | full-pipeline `.buda` integration (`test_flow_scripts.py`) | 19 | **~19s** | `bb -m` |
+| **fast** | *(none)* | unit / component / logic tests | ~632 | **< 10s** | `bb -t` / `pytest` |
+| **mid** | `mid` | full-pipeline `.buda` scripts + BDB/interchange/floorplanner round-trips | ~360 | **~40s** | `bb -m` |
 | **slow** | `slow` | SA/GA placement-optimizer storms | 2 | **~19s** | `bb -s` |
 
-Cumulative wall-clock: fast ≈ 8.5s, fast+mid ≈ 27s, fast+mid+slow ≈ 47s.
-
-- The **fast** tier is the default inner-loop check — it skips both the 19s of
-  subprocess-spawning flow scripts and the 19s of optimizer convergence.
+- The **fast** tier is the default inner-loop check — it now targets **< 10s**
+  so the edit→test loop stays snappy. It skips every subprocess-spawning flow,
+  BDB/GDS round-trip, and optimizer storm.
 - The **mid** tier is marked at module level (`pytestmark = pytest.mark.mid`)
-  in `test_flow_scripts.py`.
+  in `test_flow_scripts.py` and the integration files listed in §2 below.
 - The **slow** tier is the two `test_optimize_demo_*` tests in
-  `test_floorplanner_commands.py`, each `@pytest.mark.slow`.
+  `test_floorplanner_commands.py`, each `@pytest.mark.slow`. (That file is now
+  module-level `mid` too, so those two carry both markers — `bb -m` excludes
+  `slow`, so they only run under `bb -s`.)
 
 `pytest.ini` sets `addopts = -m "not slow and not mid"`; `bb -m` overrides it to
 `-m "not slow"`, and `bb -s` clears it to run everything.
@@ -45,12 +46,27 @@ by ~8k iterations, so 12k keeps a ~1.5x margin; the prior 50k was ~41s apiece
 (77% of the full-suite runtime). They are deselected from every run except
 `bb -s`.
 
-### 2. End-to-end flow scripts (~19s, the `mid` tier)
-The 19 tests in `test_flow_scripts.py` each `subprocess.run` `buda_cli.py` on a
-`.buda` file, paying Python startup + module import + a full
-Bundling→Topology→Planner→NUTS pass (~1s each). They catch end-to-end
-regressions the fast unit tests miss, so they live in the `mid` tier rather
-than `slow`.
+### 2. Integration tests (the `mid` tier)
+Two kinds of integration test live in `mid`:
+
+- **Flow scripts** — `test_flow_scripts.py` each `subprocess.run` `buda_cli.py`
+  on a `.buda` file, paying Python startup + module import + a full
+  Bundling→Topology→Planner→NUTS pass (~1s each).
+- **Round-trip / pipeline / floorplanner integration** — tests that build a BDB
+  and round-trip it through SQLite (`test_bdb_*_persist`, `test_bdb_resume*`,
+  `test_bdb_route_snapshot`, `test_bdb_writeback`, `test_seg_*_persist`,
+  `test_bdb_bundle_persist`, `test_bdb_fixture`), the GDS / `buda2bdb`
+  interchange round-trips (`test_gds_import`, `test_gds_export`,
+  `test_buda2bdb`), full-flow logging / net-pull / hier-bidirectional flows,
+  the topology-explorer edit/pin sessions, and the floorplanner-command +
+  optimizer tests.
+
+These were **moved out of the fast tier (2026-07-06)** to keep the default
+inner-loop run **under 10s**: they each spawn a subprocess or run the full
+pipeline, so they are integration by nature and the pre-commit full run
+(`bb -m` / `bb -s`) still covers them. The fast tier keeps the genuine unit
+tests — topology/conn/verify/bundler/layering/NUTS logic, the `test_bdb.py`
+DB-CRUD units, viz-collection, routing-grid, etc.
 
 ---
 

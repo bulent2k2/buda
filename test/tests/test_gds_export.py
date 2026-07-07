@@ -18,6 +18,13 @@ identical BDB — cells, component hierarchy, die, labels-as-nets, and (with
 the same def_gds_layer map) routing shapes excluded from footprints.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import contextlib
 import io
 import sqlite3

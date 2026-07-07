@@ -23,6 +23,13 @@ Three gaps left after the load_pipeline series:
    detailed-routable) — the `hier_routed` fixture closes that.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import contextlib
 import io
 import sqlite3

@@ -20,6 +20,13 @@ Exercises the `bdb_input` conftest fixture and `tools/bdb_serialize`:
   * dump→load→dump is byte-stable (deterministic, so regeneration is a no-op diff).
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import os
 import filecmp
 
