@@ -628,6 +628,38 @@ def set_icon(win_or_fig, icon_name="buda_icon.png"):
     except Exception:
         pass
 
+
+def set_app_name(name, fig=None):
+    """Best-effort relabel of the app from 'python3'/'Python' to `name` in OS
+    chrome (macOS dock / menu bar, `ps`). Every hook is optional and fully
+    guarded, so this is a no-op where the mechanism isn't available (e.g. a
+    plain Linux run) and never raises."""
+    if not name:
+        return
+    # 1. Process title — `ps`/`top` and some Linux docks. Optional dependency.
+    try:
+        import setproctitle
+        setproctitle.setproctitle(name)
+    except Exception:
+        pass
+    # 2. Tk application name — the TkAgg menu-bar title on macOS.
+    if fig is not None:
+        try:
+            fig.canvas.manager.window.tk.call('tk', 'appname', name)
+        except Exception:
+            pass
+    # 3. macOS bundle name — the AppKit menu/dock label for the MacOSX backend.
+    if sys.platform == "darwin":
+        try:
+            from Foundation import NSBundle
+            info = (NSBundle.mainBundle().localizedInfoDictionary()
+                    or NSBundle.mainBundle().infoDictionary())
+            if info is not None:
+                info["CFBundleName"] = name
+        except Exception:
+            pass
+
+
 def _disable_default_keymaps():
     """Remove default matplotlib keybindings that interfere with BUDA shortcuts."""
     keys_to_clear = (
@@ -706,6 +738,10 @@ def collect_candidate_bundles(bundles):
         if cell_key is not None:
             rep, cnt = cell_seen.get(cell_key, (w, 0))
             cell_seen[cell_key] = (rep, cnt + 1)
+    # Order by bundle id so the explorer's "bundle i/N" index matches the main
+    # viz bundle panel (which is sorted by id) — selecting the first listed
+    # bundle opens it at position 1, not wherever it sat in self.bundles.
+    wrappers.sort(key=lambda w: w.input.original_bundle.id)
     return wrappers, cell_seen
 
 
@@ -725,10 +761,13 @@ class TopologyExplorer:
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
-                 ui_state: ViewState = None, start_bidx=0):
+                 ui_state: ViewState = None, start_bidx=0, layer_visible=None):
         self.fp          = fp
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
+        # Live reference to the main viz's {layer_id: visible} map so a layer
+        # toggled off there is hidden here too (None = show every layer).
+        self._layer_visible = layer_visible
         self._main_fig   = main_fig    # back-reference to main viz figure for cmd-1
         self._rerun_fn   = rerun_fn    # () -> NUTSResult | None
         self._refresh_fn = refresh_fn  # (NUTSResult) -> None
@@ -1759,6 +1798,11 @@ class TopologyExplorer:
             # 3. Default from topology generator
             if lid == -1:
                 lid = seg.layer_hint
+
+            # Respect the main viz's layer visibility: a layer toggled off there
+            # is hidden here too (and dropped from this bundle's legend).
+            if self._layer_visible is not None and not self._layer_visible.get(lid, True):
+                continue
             actual_lids.append(lid)
 
             col      = _LAYER_COLOR.get(lid, '#888888')
@@ -2004,9 +2048,10 @@ class BudaVisualizer:
         raise_window(self.fig)
 
         if sidecar_path and self.fig.canvas.manager:
-            self.fig.canvas.manager.set_window_title(
-                os.path.splitext(os.path.basename(sidecar_path))[0]
-            )
+            stem = os.path.splitext(os.path.basename(sidecar_path))[0]
+            self.fig.canvas.manager.set_window_title(stem)
+            # Relabel the OS app/dock name from 'python3' to the design's name.
+            set_app_name(stem, self.fig)
 
         self.ui_state = ViewState()
         self.ui_state.add_listener(self.fig_redraw)
@@ -2668,10 +2713,18 @@ class BudaVisualizer:
             if lid not in self._layer_visible:
                 self._layer_visible[lid] = True
 
+    def _refresh_topo_explorer(self):
+        """Redraw the topology explorer, if open, so it picks up shared state
+        (e.g. layer visibility) that isn't routed through ui_state.notify()."""
+        exp = self._topo_explorer
+        if exp is not None and plt.fignum_exists(exp.fig.number):
+            exp.fig_redraw()
+
     def _on_layer_toggle(self, lid):
         self._layer_visible[lid] = not self._layer_visible.get(lid, True)
         self._redraw_layer_list()
         self._refresh_highlight()
+        self._refresh_topo_explorer()
 
     def _on_layer_toggle_all(self):
         """Toggle all layers on (if any are off) or off (if all are on)."""
@@ -2686,6 +2739,7 @@ class BudaVisualizer:
                 '#e8e8e8' if new_state else '#cccccc')
         self._redraw_layer_list()
         self._refresh_highlight()
+        self._refresh_topo_explorer()
 
     def _redraw_layer_list(self):
         ax = self._ax_layers
@@ -3208,7 +3262,8 @@ class BudaVisualizer:
             refresh_fn=refresh_fn,
             layer_stack=self.layer_stack,
             ui_state=self.ui_state,
-            start_bidx=start)
+            start_bidx=start,
+            layer_visible=self._layer_visible)
         self._topo_explorer.fig.show()
         install_tk_geometry_resync(self._topo_explorer.fig)
         extract_from_fullscreen_tab(self._topo_explorer.fig)
