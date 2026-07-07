@@ -31,8 +31,10 @@ silent open.
 End-to-end repro: flow/big_data_test/big2/big2_noviz.buda (the channel-stress
 design).  Pre-fix it emitted 7 "insufficient signal tracks (0)" warnings and
 484 unplaced bits; ~228 of those were the LOW-over-cell dumping this fix
-removes.  Post-fix that symptom is gone (0 such warnings) and total unplaced
-drops well below the pre-fix figure.  (The residual unplaced are TOP-layer
+removes.  Post-fix that symptom is essentially gone — 0 such warnings on the
+ARM reference host, a couple on x86 (the escape-to-LOW decision is CPU-sensitive
+under -march=native; see the assertion note below) — and total unplaced drops
+well below the pre-fix figure.  (The residual unplaced are TOP-layer
 over-subscription — a separate gap, modelled in averaged width vs per-track.)
 """
 import os
@@ -83,8 +85,11 @@ def test_big2_no_low_layer_over_cell_dumping():
     # than require exactly 0 on every host.
     LOW_OVER_CELL_MAX = 3   # ref host: 0; x86: 2; pre-fix: 7
     low_over_cell = out.count("insufficient signal tracks (0)")
-    assert low_over_cell <= LOW_OVER_CELL_MAX, (
-        f"{low_over_cell} LOW-over-cell dumps (> {LOW_OVER_CELL_MAX}; Gap A regressed):\n"
+    # On the ARM reference host (set BUDA_REF_HOST in that machine's CI) recover
+    # the strong exact-zero guard; elsewhere allow the CPU-sensitive residual.
+    ref_bound = 0 if os.environ.get("BUDA_REF_HOST") else LOW_OVER_CELL_MAX
+    assert low_over_cell <= ref_bound, (
+        f"{low_over_cell} LOW-over-cell dumps (> {ref_bound}; Gap A regressed):\n"
         + "\n".join(l for l in out.splitlines()
                     if "insufficient signal tracks (0)" in l)
     )

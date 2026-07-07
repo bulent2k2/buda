@@ -194,6 +194,10 @@ def test_big2_stage_b_clears_opens():
         s.do_command("ripup_reroute")
     assert s.detailed_result.num_unplaced < base   # ripup makes real progress
     assert s.nuts_result.num_overlaps <= 9
+    # On the ARM reference host (set BUDA_REF_HOST in that machine's CI) recover
+    # the stronger clear-to-zero guarantee that `< base` alone doesn't pin.
+    if os.environ.get("BUDA_REF_HOST"):
+        assert s.detailed_result.num_unplaced == 0
 
 
 @pytest.mark.mid
