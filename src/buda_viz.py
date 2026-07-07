@@ -681,11 +681,16 @@ _UNCONSTRAINED = 1_000_000_000
 def collect_candidate_bundles(bundles):
     """Every candidate-bearing bundle once, in order, for the topology explorer.
 
-    Cell-level hier templates (expanded per instance by ``run_planner hier``) are
-    deduplicated by ``(cell_context, reason)`` so the same template is listed once.
+    In the hier flow ``run_planner hier`` expands each cell into per-instance
+    bundles that are routed **independently** — a different placement per
+    occurrence yields a different selected topology, index, and coordinates — so
+    they are NOT interchangeable replicas. Each is therefore listed separately,
+    matching the main viz's bundle panel: selecting bundle N in the viz and
+    hitting ``v`` opens *that* bundle, and the bundle count agrees. Only an
+    accidental exact-id duplicate is removed.
 
     Returns ``(wrappers, cell_seen)`` where ``cell_seen`` maps each cell key to
-    ``(representative_wrapper, instance_count)`` for annotation.
+    ``(representative_wrapper, instance_count)`` for optional annotation.
     """
     seen, wrappers = set(), []
     cell_seen = {}
@@ -695,15 +700,12 @@ def collect_candidate_bundles(bundles):
         b = w.input.original_bundle
         if b.id in seen:
             continue
-        cell_key = (b.cell_context, b.reason) if b.cell_context else None
-        if cell_key is not None:
-            if cell_key in cell_seen:
-                rep, cnt = cell_seen[cell_key]
-                cell_seen[cell_key] = (rep, cnt + 1)
-                continue
-            cell_seen[cell_key] = (w, 1)
         seen.add(b.id)
         wrappers.append(w)
+        cell_key = (b.cell_context, b.reason) if b.cell_context else None
+        if cell_key is not None:
+            rep, cnt = cell_seen.get(cell_key, (w, 0))
+            cell_seen[cell_key] = (rep, cnt + 1)
     return wrappers, cell_seen
 
 
@@ -3152,13 +3154,15 @@ class BudaVisualizer:
     # ------------------------------------------------------------------
 
     def _topo_start_index(self, wrappers, bid):
-        """Index in `wrappers` of bundle `bid`, falling back to its cell-level
-        template representative (collect_candidate_bundles dedups instances), else 0."""
+        """Index in `wrappers` of bundle `bid` (every candidate-bearing bundle
+        is listed, so this normally hits directly). Falls back to a same-cell
+        bundle, then 0, only if `bid` itself has no candidates."""
         idx = next((i for i, w in enumerate(wrappers)
                     if w.input.original_bundle.id == bid), None)
         if idx is not None:
             return idx
-        # Highlighted bundle may be a deduped cell instance — match its template.
+        # `bid` has no candidates of its own (not in `wrappers`) — land on a
+        # sibling in the same cell if there is one, else the first bundle.
         hl = next((w.input.original_bundle for w in self.bundles
                    if w.input.original_bundle.id == bid), None)
         if hl is not None and hl.cell_context:

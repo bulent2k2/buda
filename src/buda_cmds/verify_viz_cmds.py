@@ -58,8 +58,9 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
     all_mode = bool(args) and args[0] == '-all'
     hints    = args[1:] if all_mode else args[:1]
 
-    # Collect every candidate-bearing bundle once (cell-level hier
-    # templates deduplicated); shared with the GUI "View Topologies" path.
+    # Collect every candidate-bearing bundle once — including each hier
+    # per-instance bundle (they route independently); shared with the GUI
+    # "View Topologies" path.
     all_wrappers, cell_seen = collect_candidate_bundles(session.bundles)
 
     def _matches(w):
@@ -87,7 +88,7 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
             if cell_key is not None and cell_key in cell_seen:
                 cnt = cell_seen[cell_key][1]
                 if cnt > 1:
-                    inst_note = f" ({cnt} instances — showing first)"
+                    inst_note = f" (cell {b.cell_context}, 1 of {cnt} instances)"
             marker = "  ← opens here" if (not all_mode and i == start) else ""
             print(f"  bundle {b.id}: {len(w.input.candidates)} "
                   f"topologies{inst_note}{marker}")
