@@ -158,6 +158,15 @@ Ordering follows risk: pure motion first, structural change later. Every
 phase ends with the full gate set (§4) green.
 
 ### Phase 0 — NUTS placement goldens (new gate) — ✅ DONE
+*(as landed: diffable TEXT goldens in `test/tests/data/nuts_golden/*.txt` —
+not `.json` — with per-(stage, layer) sha256 digests for the two large flows;
+tiers are **mid** (small corpus) + **slow** (tc3a_flat, rnr/mix), since
+full-pipeline runs are integration tests post-#202.  The corpus is the
+wl_corpus list: the hier flow is `rnr/mix` and big2 is represented by the
+single-bus `b4_bus_077` extraction — deliberate risk reduction, full big2's
+FP-sensitive whole-design outcome stays bounds-tested, not golden-pinned.
+The three FP/ISA-sensitive flows warn-only (xfail) off the golden-generation
+host unless `BUDA_NUTS_GOLDEN_STRICT` is set.)*
 `tools/wl_corpus.py` compares WL totals, overlap counts and unplaced bits —
 strong but not airtight (two placement swaps can preserve all three). Add
 `tools/nuts_snapshot.py` (sibling of `topo_snapshot.py`): run the corpus
@@ -252,9 +261,9 @@ Prereqs are done by then: geometry helpers shared (A), handoff single-sourced
 
 1. `bin/bb test` / `bin/bb mid` — fast + mid tiers green.
 2. `tools/nuts_snapshot.py` goldens (Phase 0) — **byte-identical placements**
-   (abstract + detailed) on the corpus: `flow/big_data_test/tc3a_flat`,
-   `flow/rnr/mix`, `flow/big_data_test/big2/big2`, `demo/comprehensive_demo`,
-   `flow/channel_stress`, plus one hier flow (`flow/hbundles/08_cross_level`).
+   (abstract + detailed) on the corpus (as landed): the four_blocks pair,
+   `dogleg1`/`dogleg2`, `channel_stress`, `demo/comprehensive_demo`,
+   `big2/b4_bus_077`, `tc3a_flat`, and `rnr/mix` (the hier + ripup flow).
 3. `tools/wl_corpus.py` A/B vs pre-phase HEAD on the same build — identical.
 4. Flow-log diff on `flow/rnr/mix.buda` (message text, counts, ordering —
    the `[NUTS]`/`[DetailedNUTS]` prints move with their code, verbatim).

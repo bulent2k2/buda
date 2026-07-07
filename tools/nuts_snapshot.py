@@ -36,6 +36,18 @@ regenerating the full snapshot on the baseline tree (the wl_corpus workflow).
 Deliberate re-baseline: rerun `PYTHONPATH=build:tools python3
 tools/nuts_snapshot.py` and review the golden diff in the PR.
 
+Host portability: the checked-in goldens were generated on an x86-64 host
+(the Claude Code CI container, -O3 -march=native).  The six small flows are
+placement-stable across hosts; the three HOST_SENSITIVE_FLOWS below
+(b4_bus_077, tc3a_flat, rnr/mix) are the designs whose NUTS outcomes the
+big2/tc3a test notes (PR #203) document as FP/ISA-divergent — a different
+discrete track choice on another host is a hard mismatch that the 1e-6
+FORMATTING quantum cannot absorb (it is not a tolerance).  An off-host
+mismatch on those three therefore means "re-verify against the true baseline
+tree locally" (regenerate goldens on the baseline commit, diff on the same
+machine), NOT "code bug"; the golden test warns-only for them unless
+BUDA_NUTS_GOLDEN_STRICT is set (set it on the golden-generation host's CI).
+
 Usage:
   PYTHONPATH=build:tools python3 tools/nuts_snapshot.py            # rewrite goldens
   PYTHONPATH=build:tools python3 tools/nuts_snapshot.py <out_dir>  # write elsewhere
@@ -67,6 +79,19 @@ CORPUS_LARGE = [
     "flow/rnr/mix.buda",                       # hier + ripup_reroute
 ]
 CORPUS = CORPUS_SMALL + CORPUS_LARGE
+
+# The single-bus b4_bus_077 extraction stands in for full big2 DELIBERATELY:
+# it pins the x5772 placement shape without the multi-minute runtime or the
+# whole-design FP sensitivity big2's own tests handle with bounds, not goldens.
+#
+# Flows whose exact placements are FP/ISA-sensitive (see "Host portability"
+# above): a golden mismatch on a host other than the generation host is
+# environmental until proven otherwise.
+HOST_SENSITIVE_FLOWS = {
+    "flow/big_data_test/big2/b4_bus_077.buda",
+    "flow/big_data_test/tc3a_flat.buda",
+    "flow/rnr/mix.buda",
+}
 
 # Flows whose full snapshot is too large to commit as text: their golden is a
 # per-(stage, layer) sha256 digest instead — byte-identity is gated just as

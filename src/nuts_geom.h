@@ -17,6 +17,7 @@
 #pragma once
 #include "nuts.h"
 #include <algorithm>
+#include <cassert>
 #include <map>
 #include <utility>
 #include <vector>
@@ -68,6 +69,7 @@ public:
     }
 
     void restore(std::vector<TrackSegment>& segments) const {
+        assert(rows_.size() == segments.size());   // same vector as take()
         for (size_t k = 0; k < segments.size(); ++k) {
             segments[k].track_position = rows_[k].pos;
             segments[k].span_lo        = rows_[k].lo;

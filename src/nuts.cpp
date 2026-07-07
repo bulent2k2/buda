@@ -432,7 +432,6 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     const auto& pull_map     = ctx.pull_map;
     const auto& net_pull_map = ctx.net_pull_map;
     const auto& align_map    = ctx.align_map;
-    const auto& rev_conn_map = ctx.rev_conn_map;
     auto&       ts_ptr_map   = ctx.ts_ptr_map;
     auto initial = find_overlaps(segments);
     if (initial.empty()) return;
@@ -609,8 +608,6 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
 {
     const auto& net_pull_map = ctx.net_pull_map;
     const auto& align_map    = ctx.align_map;
-    const auto& rev_conn_map = ctx.rev_conn_map;
-    auto&       ts_ptr_map   = ctx.ts_ptr_map;
     const auto kozs = low_keepouts();
 
     PlacementSnapshot pre_move;
