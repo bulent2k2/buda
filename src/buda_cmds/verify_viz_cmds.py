@@ -136,6 +136,10 @@ def cmd_visualize(session, cmd, args, cmd_line):
         if cuts:
             viz.draw_congestion_map(cuts, session.planner.get_x_grid(), session.planner.get_y_grid())
     viz.draw_hanan_grid()
+    if session.routing_grid is not None:
+        # Pre-route layer (first-class PreRoutedSegments; works in the
+        # abstract view too — [Preroutes] cycles off/ALL/per-type).
+        viz.draw_preroutes(session.routing_grid, session.layers)
     if session.nuts_result is not None:
         viz.draw_nuts_tracks(session.nuts_result)
         if session.detailed_result is not None:

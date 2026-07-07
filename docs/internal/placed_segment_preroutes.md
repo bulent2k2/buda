@@ -1,6 +1,6 @@
 # PlacedSegmentBase + First-Class Pre-Routes (Phase G) — Plan
 
-Status: **PLANNED** → implemented on the branch this doc lands with.
+Status: **IMPLEMENTED** (this branch/PR; planned and landed together).
 This is Phase G of [`nuts_dnuts_refactor.md`](nuts_dnuts_refactor.md),
 deferred there until pre-routes became first-class — this plan makes them
 first-class, which is what unlocks the base type.  Same ground rules as the
