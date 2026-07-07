@@ -75,7 +75,11 @@ def test_abstract_total_matches_hand_sum():
     hand = sum(abs(t.span_hi - t.span_lo)
                for t in s.nuts_result.segments if t.placed)
     out = _run(s)
-    assert f"total abstract WL = {hand:.0f} over 2 bundle(s)" in out, out
+    # The greppable total is the full placed length (topology segments + jogs);
+    # the line now also breaks it into (seg + jog) and reports the DOF envelope.
+    assert f"total abstract WL = {hand:.0f} (seg " in out, out
+    assert "over 2 bundle(s)" in out, out
+    assert "DOF envelope" in out, out
     # Per-bundle lines: one per bundle id (sorted), plus a TOTAL row.
     assert "Abstract bus-level wirelength" in out
     assert "TOTAL" in out
@@ -87,15 +91,18 @@ def test_abstract_total_matches_hand_sum():
 
 
 def test_per_bundle_wl_sums_to_total():
+    """Abstract table columns: bundle | bits | lo | WL | hi | jog | fill.
+    The per-bundle WL (topology-segment wire, col 3) sums to the TOTAL row's WL
+    (col 2: TOTAL | lo | WL | hi | jog)."""
     s = _two_bus_session()
     out = _run(s)
     per_bundle, total = {}, None
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) == 3 and parts[0].isdigit():
-            per_bundle[int(parts[0])] = float(parts[2])
+        if len(parts) == 7 and parts[0].isdigit():          # a bundle data row
+            per_bundle[int(parts[0])] = float(parts[3])      # WL column
         if parts[:1] == ["TOTAL"]:
-            total = float(parts[1])
+            total = float(parts[2])                          # TOTAL's WL column
     assert per_bundle and total is not None, out
     assert abs(sum(per_bundle.values()) - total) < 1e-6, out
 
@@ -122,6 +129,61 @@ def test_per_layer_breakdown_present():
     # Both buses route on M4 here, so the by-layer line names M4 with the total.
     assert "by layer:" in out
     assert "M4=" in out
+
+
+def _dogleg_session():
+    """A bus whose only route is a Z (offset driver/receiver, blocker between) —
+    the selected topology has real slide DOF, so its WL interval is non-trivial."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = [
+        "def_layer 4 M4 H TOP 50",
+        "def_layer 5 M5 V TOP 50",
+        "add_block A 0 0 100 100",
+        "add_block B 400 300 500 400",
+        "add_bus n[8] A.p B.p",
+        "run_bundler", "generate_topologies", "run_planner", "run_nuts",
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    return s
+
+
+def test_wl_interval_brackets_nonjog_actual():
+    """The [lo, hi] envelope of each selected topology is a valid OUTER bracket:
+    the routed abstract WL, minus NUTS-inserted jogs, lands inside it."""
+    for s in (_two_bus_session(), _dogleg_session()):
+        intervals = s._selected_wl_intervals()
+        assert intervals, "no selected topologies to bracket"
+        # Per-bundle routed WL split into topology-segment vs jog.
+        seg, jog = {}, {}
+        for ts in s.nuts_result.segments:
+            if getattr(ts, "placed", True) is False:
+                continue
+            L = abs(ts.span_hi - ts.span_lo)
+            d = jog if getattr(ts, "is_jog", False) else seg
+            d[ts.bundle_id] = d.get(ts.bundle_id, 0.0) + L
+        for bid, (lo, hi) in intervals.items():
+            assert lo <= hi, f"bundle {bid}: inverted interval [{lo},{hi}]"
+            actual = seg.get(bid, 0.0)          # non-jog topology wire
+            assert lo - 0.5 <= actual <= hi + 0.5, (
+                f"bundle {bid}: non-jog WL {actual} outside [{lo},{hi}]")
+
+
+def test_report_shows_dof_envelope_and_all_inside():
+    """The abstract report gains lo/hi/jog/fill columns and an inside-count, and
+    the deterministic sessions route every bundle inside its envelope."""
+    for s in (_two_bus_session(), _dogleg_session()):
+        out = _run(s)
+        assert "DOF envelope" in out
+        assert "fill" in out and "jog" in out
+        # "N/M bundle(s) inside" with N == M (all inside), and no '*' flag rows.
+        import re
+        m = re.search(r"(\d+)/(\d+) bundle\(s\) inside", out)
+        assert m, out
+        assert m.group(1) == m.group(2), f"some bundle out of envelope: {out}"
+        assert " *" not in out, f"a bundle is flagged outside its bracket: {out}"
 
 
 def _dnuts_open_session():
@@ -175,3 +237,46 @@ def test_clean_route_reports_zero_unplaced():
     s = _two_bus_session()
     out = _run(s)
     assert "0 unplaced segment(s)" in out, out
+
+
+def _dogleg_adopt_session():
+    """flow/dogleg1.buda: three buses in a cycle whose NUTS solve adopts a dogleg,
+    pinning per-segment slide overrides that differ from ConnTopology's recomputed
+    windows and leaving a jog segment in the topology."""
+    from pathlib import Path
+    flow = Path(__file__).parents[2] / "flow" / "dogleg1.buda"
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for line in flow.read_text().splitlines():
+            c = line.strip()
+            if not c or c.startswith("#"):
+                continue
+            if c.split()[0] in ("visualize", "visualize_topologies", "exit"):
+                continue
+            s.do_command(c)
+    return s
+
+
+def test_doglegged_bundle_envelope_uses_plan_slide_overrides():
+    """Regression (PR #208 Codex P2): when NUTS adopts a dogleg it pins
+    plan.seg_slide_lo/hi that it — not ConnTopology — places within, and leaves a
+    jog segment in the topology.  The WL envelope must honour those overrides and
+    exclude the jog's own span, or the doglegged bundle reads as a false
+    out-of-envelope '*'."""
+    import math
+    s = _dogleg_adopt_session()
+    # At least one bundle actually adopted a dogleg (has a non-NaN slide override).
+    adopted = [w.input.original_bundle.id for w in s.bundles
+               if any(not math.isnan(v) for v in list(w.plan.seg_slide_lo))]
+    assert adopted, "scenario did not adopt a dogleg — override path not exercised"
+
+    seg = {}
+    for ts in s.nuts_result.segments:
+        if getattr(ts, "placed", True) is False or getattr(ts, "is_jog", False):
+            continue
+        seg[ts.bundle_id] = seg.get(ts.bundle_id, 0.0) + abs(ts.span_hi - ts.span_lo)
+    for bid, (lo, hi) in s._selected_wl_intervals().items():
+        assert lo - 0.5 <= seg.get(bid, 0.0) <= hi + 0.5, (
+            f"bundle {bid} (dogleg-adopted={bid in adopted}) non-jog WL "
+            f"{seg.get(bid, 0.0)} outside envelope [{lo},{hi}]")

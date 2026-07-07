@@ -141,3 +141,43 @@ def test_dump_passthrough_respects_multirect_notch():
         s2.do_command("dump_topologies --conn")
     pass_lines2 = [ln for ln in buf2.getvalue().splitlines() if "passthru:" in ln]
     assert any("notch" in ln for ln in pass_lines2), buf2.getvalue()
+
+
+def _re_env(line):
+    """Parse the `[lo..hi]` WL envelope out of a dump_topologies candidate row."""
+    import re
+    m = re.search(r"\[(\d+)\.\.(\d+)\]", line)
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def test_dump_topologies_shows_wl_envelope_per_candidate():
+    """Every candidate row carries a `wl[lo..hi]` DOF envelope: lo (tight joint
+    slide minimum) <= hi (loose outer bound), and lo <= the nominal estimate."""
+    import buda
+    s = _run([
+        "def_layer 4 M4 H TOP 0.0",
+        "def_layer 5 M5 V TOP 0.0",
+        "add_block A 0 0 100 100",
+        "add_block B 400 300 500 400",     # offset -> Z/U candidates with real slide
+        "add_bus a[4] A.p B.p",
+        "run_bundler", "generate_topologies", "run_planner",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies")
+    out = buf.getvalue()
+    assert "wl[lo..hi]" in out, out
+    envs = [_re_env(ln) for ln in out.splitlines() if _re_env(ln)]
+    assert envs, out
+    for lo, hi in envs:
+        assert 0 <= lo <= hi, (lo, hi)
+
+    # Cross-check the metric directly: lo is a real lower bound (<= the nominal
+    # as-generated length of the same ConnTopology), and lo <= hi.
+    w = s.bundles[0]
+    for c in w.input.candidates:
+        lo, hi = s._topology_wl_interval(c)
+        ct = buda.ConnTopology(); ct.build(c, s.fp)
+        nominal = sum(abs(cs.along_hi - cs.along_lo) for cs in ct.segs())
+        assert 0 <= lo <= hi, (c.type, lo, hi)
+        assert lo <= nominal + 0.5, (c.type, lo, nominal)   # tight floor <= as-generated

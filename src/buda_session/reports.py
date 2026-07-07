@@ -174,8 +174,12 @@ class ReportsMixin:
             sigs = {}          # geom signature -> [idx,...]
             for i, c in enumerate(cands):
                 ms = self._topo_min_slide(c)
+                try:
+                    lo, hi = self._topology_wl_interval(c)
+                except Exception:
+                    lo, hi = None, None
                 rows.append((i, c.type, c.estimated_wirelength,
-                             len(c.segments), c.pass_through_count, ms))
+                             len(c.segments), c.pass_through_count, ms, lo, hi))
                 sigs.setdefault(self._topo_geom_sig(c), []).append(i)
                 # Histogram on the shape *family* (strip the @coord suffix that
                 # makes every Hanan-line trunk a distinct string) so the report
@@ -185,8 +189,8 @@ class ReportsMixin:
 
             dup_groups = [idxs for idxs in sigs.values() if len(idxs) > 1]
             dup_idx = {i for idxs in dup_groups for i in idxs}
-            pinch_idx = {i for (i, _, _, _, _, ms) in rows if ms == 0}
-            passthru_idx = {i for (i, _, _, _, pt, _) in rows if pt > 0}
+            pinch_idx = {i for (i, _, _, _, _, ms, _, _) in rows if ms == 0}
+            passthru_idx = {i for (i, _, _, _, pt, _, _, _) in rows if pt > 0}
 
             has_dup = bool(dup_groups)
             has_pinch = bool(pinch_idx)
@@ -215,16 +219,21 @@ class ReportsMixin:
             # Size the type column to the widest type so every later column
             # stays aligned regardless of long names like TRUNK_V_OOB@x6282.
             type_w = max([len("type")] + [len(r[1]) for r in rows])
-            print(f"   {'idx':>3} {'type':<{type_w}} {'wl':>8} {'segs':>4} "
-                  f"{'pass':>4} {'mslide':>7}  notes")
-            for (i, typ, wl, nsegs, pt, ms) in rows:
+            # `wl` is the candidate's nominal (as-generated) estimate; `wl[lo..hi]`
+            # is the routing envelope its slide/span DOF permit — lo = tightest
+            # (joint slide minimum), hi = loose outer bound.  A wide envelope means
+            # the candidate has lots of routing freedom for NUTS to exploit.
+            print(f"   {'idx':>3} {'type':<{type_w}} {'wl':>8} {'wl[lo..hi]':>17} "
+                  f"{'segs':>4} {'pass':>4} {'mslide':>7}  notes")
+            for (i, typ, wl, nsegs, pt, ms, lo, hi) in rows:
                 marks = []
                 if i == sel:      marks.append("*SEL")
                 if i in dup_idx:  marks.append("dup")
                 if i in pinch_idx: marks.append("pinch")
                 ms_s = "-" if ms is None else str(ms)
-                print(f"   {i:>3} {typ:<{type_w}} {wl:>8} {nsegs:>4} {pt:>4} "
-                      f"{ms_s:>7}  {','.join(marks)}")
+                env = f"[{lo:.0f}..{hi:.0f}]" if lo is not None else "-"
+                print(f"   {i:>3} {typ:<{type_w}} {wl:>8} {env:>17} {nsegs:>4} "
+                      f"{pt:>4} {ms_s:>7}  {','.join(marks)}")
 
             # --conn: per-segment connectivity / pass-through / slide / pull for
             # the selected candidate (or candidate 0 if not yet planned).
