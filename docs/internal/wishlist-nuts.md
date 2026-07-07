@@ -5,8 +5,11 @@ Deferred follow-ups for track assignment (`src/nuts.cpp`,
 
 ## Band-level repack for spread-fit overlap clusters
 
-**What:** After Gap A part 1 + TOP-layer load balancing, big2 is down to 9 NUTS
-track overlaps. All 9 are **spread-fit** (the shared Hanan band has room for both
+**What:** (Baseline updated 2026-07 — see `nuts_band_repack.md` §1: with
+big2's new `signal_tracks` + negotiation flow the target is the
+PRE-NEGOTIATION residue, 8 overlaps in 3 spread-fit clusters; repro test in
+`test_big2_residuals.py`.)  After Gap A part 1 + TOP-layer load balancing,
+big2 was down to 9 NUTS track overlaps. All 9 are **spread-fit** (the shared Hanan band has room for both
 buses — sum of widths <= interval), i.e. pure placement clustering, not
 over-capacity. They survive because `NUTSEngine::repair_overlaps`
 (`src/nuts.cpp`) only relocates ONE victim per overlap into a gap its own
