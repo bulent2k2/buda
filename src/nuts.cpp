@@ -415,14 +415,14 @@ static void do_span_adjustments(
     }
 }
 
-void NUTSEngine::repair_overlaps(
-    std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, double>&                pull_map,
-    const std::map<std::pair<int,int>, int>&                   net_pull_map,
-    const AlignMap&                                            align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const
+void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
+                                 NutsContext& ctx) const
 {
+    const auto& pull_map     = ctx.pull_map;
+    const auto& net_pull_map = ctx.net_pull_map;
+    const auto& align_map    = ctx.align_map;
+    const auto& rev_conn_map = ctx.rev_conn_map;
+    auto&       ts_ptr_map   = ctx.ts_ptr_map;
     auto initial = find_overlaps(segments);
     if (initial.empty()) return;
 
@@ -587,14 +587,43 @@ static void set_pull_targets(
     }
 }
 
-void NUTSEngine::tighten_pulls(
-    std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, int>&                   net_pull_map,
-    const AlignMap&                                            align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
-    int only_layer) const
+// Build the per-solve NutsContext and apply the interval prep to `segments`,
+// exactly in the order run()/rerun_layer() did inline: build the maps, stamp
+// each segment's busterm faces, clamp intervals to slide windows (+ trunk
+// margin), relax boundary intervals, resolve pull targets, then index the
+// segments.  only_layer restricts the two interval passes to that layer
+// (rerun_layer's single-layer contract); -1 = all layers.
+static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
+                                 const Floorplan& floorplan,
+                                 std::vector<TrackSegment>& segments,
+                                 int only_layer = -1)
 {
+    NutsContext ctx;
+    build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
+                    ctx.trunk_set, ctx.busterm_set, ctx.rev_conn_map,
+                    ctx.net_pull_map, ctx.align_map, ctx.busterm_face_map);
+    for (auto& ts : segments) {
+        auto bf = ctx.busterm_face_map.find({ts.bundle_id, ts.seg_idx});
+        if (bf != ctx.busterm_face_map.end()) ts.busterm_faces = bf->second;
+    }
+    apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
+                               ctx.net_pull_map, only_layer);
+    relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
+                             ctx.busterm_set, only_layer);
+    set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
+    for (auto& ts : segments)
+        ctx.ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+    return ctx;
+}
+
+void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
+                               NutsContext& ctx,
+                               int only_layer) const
+{
+    const auto& net_pull_map = ctx.net_pull_map;
+    const auto& align_map    = ctx.align_map;
+    const auto& rev_conn_map = ctx.rev_conn_map;
+    auto&       ts_ptr_map   = ctx.ts_ptr_map;
     const auto kozs = low_keepouts();
 
     struct Snap { double pos, lo, hi; };
@@ -836,14 +865,10 @@ void NUTSEngine::tighten_pulls(
                   << " group(s) toward their pull bound.\n";
 }
 
-void NUTSEngine::resolve_corner_overlaps(
-    std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, double>&                pull_map,
-    const std::map<std::pair<int,int>, int>&                   net_pull_map,
-    const AlignMap&                                            align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const
+void NUTSEngine::resolve_corner_overlaps(std::vector<TrackSegment>& segments,
+                                         NutsContext& ctx) const
 {
+    const auto& rev_conn_map = ctx.rev_conn_map;
     using Key = std::pair<int,int>;
     // A corner overlap is geometric (two stubs hanging from distinct trunks); it
     // need not stem from a span change — aligned trunks can make stubs touch
@@ -963,14 +988,13 @@ void NUTSEngine::resolve_corner_overlaps(
                     ts.placed = false;
                     layer_segs.push_back(&ts);
                 }
-            solve_layer(layer_segs, pull_map, align_map, by_layer_cons[layer],
-                        rev_conn_map, ts_ptr_map);
+            solve_layer(layer_segs, ctx, by_layer_cons[layer]);
         }
         // Re-fit connected spans to the new trunk positions and repair residue.
         std::vector<TrackSegment*> all_placed;
         for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
-        repair_overlaps(segments, pull_map, net_pull_map, align_map, rev_conn_map, ts_ptr_map);
+        do_span_adjustments(all_placed, rev_conn_map, ctx.ts_ptr_map);
+        repair_overlaps(segments, ctx);
 
         const size_t after = find_overlaps(segments).size();
         // Accept only a strict overlap improvement that does not introduce a new
@@ -1152,12 +1176,13 @@ double NUTSEngine::preferred_fit(
 }
 
 void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
-                              const std::map<std::pair<int,int>, double>& pull_map,
-                              const AlignMap& align_map,
-                              const LayerConstraints& constraints,
-                              const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& jn_map,
-                              const std::map<std::pair<int,int>, TrackSegment*>& jn_segs) const {
+                              NutsContext& ctx,
+                              const LayerConstraints& constraints) const {
     if (segs.empty()) return;
+    const auto& pull_map = ctx.pull_map;
+    const auto& align_map = ctx.align_map;
+    const auto& jn_map = ctx.rev_conn_map;   // junction edges (Part B)
+    const auto& jn_segs = ctx.ts_ptr_map;    // global segment lookup
     const auto& order_preds = constraints.preds;
     const auto& order_bounds = constraints.bounds;
     // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
@@ -1577,12 +1602,12 @@ void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys)
 void NUTSEngine::orientation_fixpoint(
     std::vector<TrackSegment>& segments,
     std::map<int, std::vector<TrackSegment*>>& by_layer,
-    const std::map<std::pair<int,int>, double>& pull_map,
-    const AlignMap& align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map,
+    NutsContext& ctx,
     const std::map<int, LayerConstraints>& seed_cons) const
 {
+    const auto& pull_map     = ctx.pull_map;
+    const auto& rev_conn_map = ctx.rev_conn_map;
+    auto&       ts_ptr_map   = ctx.ts_ptr_map;
     if (by_layer.empty()) return;
     auto cons_for = [&](int lid) -> const LayerConstraints& {
         static const LayerConstraints kEmpty;
@@ -1622,8 +1647,7 @@ void NUTSEngine::orientation_fixpoint(
                 ts->track_position = std::numeric_limits<double>::quiet_NaN();
                 ts->placed = false;
             }
-            solve_layer(by_layer[lid], pull_map, align_map, cons_for(lid),
-                        rev_conn_map, ts_ptr_map);
+            solve_layer(by_layer[lid], ctx, cons_for(lid));
         }
         std::vector<TrackSegment*> all_placed;
         for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
@@ -1653,8 +1677,7 @@ void NUTSEngine::orientation_fixpoint(
                 ts->track_position = std::numeric_limits<double>::quiet_NaN();
                 ts->placed = false;
             }
-            solve_layer(segs, pull_map, align_map, cons_for(lid),
-                        rev_conn_map, ts_ptr_map);
+            solve_layer(segs, ctx, cons_for(lid));
             do_span_adjustments(segs, rev_conn_map, ts_ptr_map);
         }
         for (auto& [lid, segs] : by_layer) {
@@ -2099,25 +2122,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
                      const std::map<int, LayerConstraints>& seed_cons) -> SolveOut {
         NUTSResult result;
         result.segments = extract_segments(bs, x_grid, y_grid);
-        std::map<std::pair<int,int>, double>                         pull_map;
-        std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
-        std::set<std::pair<int,int>>                                 trunk_set;
-        std::set<std::pair<int,int>>                                 busterm_set;
-        std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
-        std::map<std::pair<int,int>, int>                            net_pull_map;
-        AlignMap                                                     align_map;
-        std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
-        build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
-        for (auto& ts : result.segments) {
-            auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
-            if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
-        }
-        apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
-        relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
-        set_pull_targets(result.segments, pull_map, net_pull_map);
-        std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
-        for (auto& ts : result.segments)
-            ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+        NutsContext ctx = build_context(bs, floorplan_, result.segments);
         std::map<int, std::vector<TrackSegment*>> by_layer;
         for (auto& ts : result.segments)
             by_layer[ts.layer].push_back(&ts);
@@ -2125,8 +2130,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // group, propagate spans to the perpendicular group, solve it, propagate
         // back, and iterate — so each group packs against the other's already-
         // stretched spans instead of stale ones.  Replaces the per-layer loop.
-        orientation_fixpoint(result.segments, by_layer, pull_map, align_map,
-                             rev_conn_map, ts_ptr_map, seed_cons);
+        orientation_fixpoint(result.segments, by_layer, ctx, seed_cons);
         // Classify any genuinely cyclic vertical constraint NOW, on the raw
         // post-fixpoint overlaps: a 2-cycle shows both contradictory column
         // overlaps at once.  The corner pass below would half-resolve it —
@@ -2134,20 +2138,18 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // mutual-edge structure.  The 2-cycle filter guarantees the safety-net
         // passes could not have fixed these anyway.
         SolveOut out;
-        out.plans = detect_dogleg_plans(result.segments, rev_conn_map, trunk_set);
+        out.plans = detect_dogleg_plans(result.segments, ctx.rev_conn_map, ctx.trunk_set);
         // The final adjustments can extend spans of layers packed earlier,
         // materialising overlaps after their solve — repair them in place.
-        repair_overlaps(result.segments, pull_map, net_pull_map, align_map,
-                        rev_conn_map, ts_ptr_map);
+        repair_overlaps(result.segments, ctx);
         // Corner overlaps (perp-locked stubs colliding) need trunk adjustment,
         // not victim moves — resolve via same-layer ordering or cross-layer
         // split bounds.
-        resolve_corner_overlaps(result.segments, pull_map, net_pull_map, align_map,
-                                rev_conn_map, ts_ptr_map);
+        resolve_corner_overlaps(result.segments, ctx);
         // Final opportunistic tighten: slide pulled segments toward their pull in
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
-        tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map);
+        tighten_pulls(result.segments, ctx);
         compute_metrics(result);
         out.result = std::move(result);
         return out;
@@ -2347,42 +2349,23 @@ NUTSResult NUTSEngine::rerun_layer(
         ts.track_lo_bound = -kInf;
         ts.track_hi_bound =  kInf;
     }
-    std::map<std::pair<int,int>, double>                         pull_map;
-    std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
-    std::set<std::pair<int,int>>                                 trunk_set;
-    std::set<std::pair<int,int>>                                 busterm_set;
-    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
-    std::map<std::pair<int,int>, int>                            net_pull_map;
-    AlignMap                                                     align_map;
-    std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
-    for (auto& ts : result.segments) {
-        auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
-        if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
-    }
-    apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
-    relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set, layer_id);
-    set_pull_targets(result.segments, pull_map, net_pull_map);
-    std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
-    for (auto& ts : result.segments)
-        ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+    NutsContext ctx = build_context(bundles, floorplan_, result.segments, layer_id);
     std::vector<TrackSegment*> layer_segs;
     for (auto& ts : result.segments)
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
-    solve_layer(layer_segs, pull_map, align_map, {}, rev_conn_map, ts_ptr_map);
+    solve_layer(layer_segs, ctx, {});
     // Final pass for all layers to catch cross-layer adjustments from the re-solved layer.
     std::vector<TrackSegment*> all_placed;
     for (auto& ts : result.segments) if (ts.placed) all_placed.push_back(&ts);
-    do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
-    repair_overlaps(result.segments, pull_map, net_pull_map, align_map,
-                    rev_conn_map, ts_ptr_map);
+    do_span_adjustments(all_placed, ctx.rev_conn_map, ctx.ts_ptr_map);
+    repair_overlaps(result.segments, ctx);
     // Note: resolve_corner_overlaps is NOT run here.  It re-solves whole trunk
     // layers, which may differ from layer_id — that would violate rerun_layer's
     // single-layer contract.  Corner overlaps are resolved by the full run().
     // Tighten only this layer's pulled segments toward their pull bound (the
     // overlap / wirelength guards stay global, so cross-layer spans are honoured)
     // — keeps the single-layer contract while still recovering wirelength.
-    tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map, layer_id);
+    tighten_pulls(result.segments, ctx, layer_id);
     compute_metrics(result);
     // Refresh the junction-infeasibility signal from the re-solved state: the
     // copy from prev may hold edges the rerun just fixed (stale) or miss ones
