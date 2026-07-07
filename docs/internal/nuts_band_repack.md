@@ -1,6 +1,7 @@
 # Band-Level Repack for Spread-Fit Overlap Clusters — Plan
 
-Status: **PLANNED** (not started).  Expands the
+Status: **IMPLEMENTED** (this branch/PR; see §6 for the as-built
+resolution and measurements).  Expands the
 [`wishlist-nuts.md`](wishlist-nuts.md) item of the same name into an
 implementable design.  Prerequisite work — the `LayerSolver` extraction that
 makes the dense repack machinery reachable from the repair pass — landed in
@@ -9,14 +10,25 @@ the NUTS/DNUTS refactor (PR #205,
 
 ## 1. Problem
 
-After the planner's hard-overflow ladder and TOP-layer load balancing, big2
-retains **9 abstract NUTS track overlaps** (M4×1, M6×4, M7×3, M2×1).  All 9
-are **spread-fit**: the shared Hanan band has room for every contender (sum
+**Baseline update (2026-07):** `big2.buda` moved from the plain pipeline to
+`run_planner signal_tracks` + `negotiate_congestion` + `ripup_reroute`,
+which clears every NUTS overlap on the full flow (the remaining DNUTS opens
+are a different, planner-side class — see the "LOW-layer abutment
+crossings" item in [`wishlist-planner.md`](wishlist-planner.md)).  The
+band-repack target is therefore the **pre-negotiation residue**: the same
+flow with the negotiation/ripup stages skipped leaves **8 overlaps in 3
+spread-fit clusters** (x86-64 measurement: sizes 3 + 2 on M6, 6 on M7 —
+the L7 cluster is B26/B45/B49/B79 + both segments of B22).  The value
+proposition sharpens accordingly: the cluster repack clears this residue
+deterministically *inside* `repair_overlaps`, so the expensive
+measured-congestion negotiation and ripup grind are only needed for what a
+correct packer genuinely cannot place.  All clusters below are
+**spread-fit**: the shared Hanan band has room for every contender (sum
 of widths ≤ interval), i.e. pure placement clustering, not over-capacity.
 They survive because `NUTSEngine::repair_overlaps` (`src/nuts.cpp`) moves
 **one victim per overlapping pair** into a gap that victim's own interval
-still has free.  When 3+ buses share a band (big2 M7: B79 collides with B65,
-B26 *and* B45), no single-victim move separates them — every gap a victim
+still has free.  When 3+ buses share a band (big2 M7: B79's trunk collides
+with B22, B26, B45 and B49), no single-victim move separates them — every gap a victim
 could take is blocked by another cluster member, and the strict-improvement
 guard (correctly) rejects each attempted move.  A plateau-move relaxation was
 tried and measured useless: the victims' intervals are already full *given
@@ -47,6 +59,11 @@ progress and overlaps remain:
    ≥ Σ(width) + (n−1)·track_pitch when stacked — a cheap necessary condition
    that skips genuinely over-capacity clusters (those are the planner's
    problem, not the packer's; ALLOW_OVERFLOW already warned).
+   *Measured nuance:* the precheck is deliberately conservative — a cluster
+   whose members' spans only TOUCH (closed-span conflict) can exceed the
+   union-interval budget yet still admit a span-aware pack (an L6 big2
+   cluster measured exactly this way).  v1 skips those; a span-aware
+   feasibility check is a possible v2 refinement.
 
 ### 2.2 Cluster repack
 
@@ -107,17 +124,38 @@ For each cluster (largest first — big clusters constrain small ones):
 
 No header/API change outside `nuts.cpp` internals; no binding change.
 
+## 3.5 Repro (in place — `test/tests/test_big2_residuals.py`)
+
+`test_big2_prenegotiation_spreadfit_residue` (mid tier, ~1s: big2 through
+`run_nuts` with negotiation skipped is sub-second; the flow's minutes live
+in negotiate/ripup/DNUTS) asserts the residue exists with ≥1 spread-fit
+cluster of ≥3 members — the class single-victim repair provably cannot fix.
+**When the cluster repack lands, flip this test to assert zero residue.**
+
+Two extraction experiments established that **no smaller repro exists**:
+re-running with only the involved buses (full floorplan kept, so the Hanan
+grid and planner band structure are identical) packs cleanly both
+*unpinned* (the planner spreads 10 bundles onto empty layers) and *pinned*
+(full-run candidate + `seg_layers` + `seg_perp` forced onto every wrapper) —
+the wedge comes from the other ~70 bundles' occupancy shaping every
+`preferred_fit` decision, so the full-design run IS the minimal repro.
+This also explains why a hand-crafted synthetic case is hard: placement-time
+`try_repack` already resolves simple window fragmentation, so the residue
+only materializes from post-placement span adjustments under real occupancy
+— and it is why the fix belongs in `repair_overlaps` (which today never
+repacks; it only moves single victims).
+
 ## 4. Gates & validation
 
 This is a **behavioral improvement**, not a byte-identical refactor — the
 gate discipline flips accordingly:
 
-1. **Target metric:** `flow/big_data_test/big2/big2.buda` NUTS overlaps
-   9 → 0 (or document the irreducible residue per cluster), with **no new
-   DNUTS opens** (`num_unplaced` not worse) and `ripup_reroute` still
-   converging.  Assert as bounds in a new mid/slow test (the #203 pattern:
-   `<= base` everywhere, exact-zero only under `BUDA_REF_HOST`-style gating
-   if host-sensitive).
+1. **Target metric:** the pre-negotiation residue (8 overlaps / 3 clusters
+   on x86-64) → 0, with **no new DNUTS opens** (`num_unplaced` not worse)
+   and the full flow (negotiate + ripup) still converging.  The gate test
+   already exists — `test_big2_residuals.py::
+   test_big2_prenegotiation_spreadfit_residue` — asserting today's failure;
+   flip it to assert the clean state (the #203 host-robust pattern).
 2. **No-regression corpus:** `tools/wl_corpus.py` A/B — wirelength within
    noise (a cluster repack can move WL slightly; assert overlaps/unplaced
    only, eyeball WL deltas), and the full fast+mid tiers.
@@ -141,3 +179,62 @@ gate discipline flips accordingly:
 - No change to the overflow ladder, `ALLOW_OVERFLOW`/`BEST_EFFORT` semantics,
   or `overlap_details` reporting.
 - No cross-layer cluster moves (that is `resolve_corner_overlaps`' domain).
+
+## 6. As-built resolution & measurements (implemented)
+
+The landed implementation follows §2 with four deviations, each forced by a
+measurement on the way to green gates:
+
+1. **Best-effort pack for the cluster entry.**  The all-or-nothing contract
+   was kept for the placement-time `try_repack`, but a repair-time cluster
+   pack aborts far too often under it — one wedged neighbour vetoed whole
+   clusters.  `repack_cluster` therefore packs best-effort (a member that
+   cannot fit keeps its current track and becomes an obstacle), safe because
+   every commit is guarded.
+2. **Narrow → wide attempt ladder.**  Each cluster is tried members-only
+   first (least collateral), then with try_repack's full contention sweep
+   (every placed same-layer segment whose interval overlaps the union
+   window) — the members' windows can be full *given* the neighbours'
+   positions, so the neighbours must move with them.
+3. **Guard: no global rise + STRICT in-cluster drop, integrated with the
+   single-victim loop.**  Demanding a strict *global* drop per commit
+   rejected every big-cluster repack: separating a cluster stretches
+   follower spans, surfacing collateral overlaps elsewhere that the
+   single-victim sweep can fix — so the cluster round is a fallback stage
+   *inside* `repair_overlaps`' iteration (single-victim sweep first; when it
+   plateaus, one cluster round; collateral cleaned next iteration), and the
+   pass-level non-regression snapshot backstops the total.
+4. **Corner constraints honored (PR #210 review).**  When
+   `resolve_corner_overlaps` invokes `repair_overlaps` its `by_layer_cons`
+   is not yet persisted onto the segments' track bounds, so the cluster
+   pass receives the ACTIVE constraint map: constrained phase-0 trunks are
+   dropped from the repack set (try_repack's gathering rule — they stay
+   obstacles), preventing a commit that violates the derived ordering/split
+   and then carries inconsistent bounds into DetailedNUTS.
+5. **Charged-band placement preference (the critical one).**  A pull-free
+   member's repack preference is its `pull_map` entry — for planner-managed
+   segments the CHARGED band centre (`seg_perp`), the band whose
+   signal-track supply the planner verified — falling back to its current
+   position.  The first (minimal-movement) variant separated more abstract
+   overlaps (big2 8 → 3) but drifted members onto bands without detailed
+   supply: `rnr/mix` went from 0 to 16 DNUTS-open bits that stage-b ripup
+   could not recover.  With the charged-band preference big2 lands at
+   8 → 5 and mix keeps **0 opens** — the correct trade under the pipeline's
+   lexicographic (opens, overlaps) metric.
+
+**Measured outcomes (x86-64):**
+
+| Flow | Metric | Before | After |
+|---|---|---|---|
+| big2 pre-negotiation | NUTS overlaps | 8 (3 clusters) | **5** (B79 star + 2 pairs) |
+| big2 full flow | NUTS overlaps / DNUTS opens | 0 / 72 | 0 / 72 (unchanged) |
+| big2 full flow | negotiate+ripup runtime | the flow's dominant cost | **~1.4s total** (residue mostly pre-cleared) |
+| rnr/mix full flow | DNUTS opens / NUTS overlaps | 0 / 1 | **0** / 3 |
+| rest of the golden corpus | placements | — | byte-identical (pass no-ops without residue) |
+
+The B79 star (a 292-wide trunk whose window is genuinely full given
+immovable neighbours) is re-pin territory — exactly what the flow's
+negotiation clears — and the two remaining pairs are guard-rejected
+(separating them costs more elsewhere).  Gate:
+`test_big2_residuals.py::test_big2_prenegotiation_spreadfit_residue`
+(bounds `<= 6`, tighten toward 0 with future improvements).
