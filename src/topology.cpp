@@ -198,6 +198,7 @@ void Floorplan::add_block(const std::string& name, int x1, int y1, int x2, int y
     int ny1 = std::min(y1, y2);
     int ny2 = std::max(y1, y2);
     blocks_[name] = Rect{nx1, ny1, nx2, ny2};
+    ++rev_;
 }
 void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>& rects,
                                  TegMode mode) {
@@ -216,9 +217,11 @@ void Floorplan::add_block_rects(const std::string& name, const std::vector<Rect>
     blocks_[name]      = u;
     block_rects_[name] = norm_rects;
     teg_modes_[name]   = mode;
+    ++rev_;
 }
 void Floorplan::set_block_teg_mode(const std::string& name, TegMode mode) {
     teg_modes_[name] = mode;
+    ++rev_;
 }
 TegMode Floorplan::get_block_teg_mode(const std::string& name) const {
     auto it = teg_modes_.find(name);
@@ -230,9 +233,11 @@ std::vector<Rect> Floorplan::get_block_rects(const std::string& name) const {
 }
 void Floorplan::set_block_corner_margin(const std::string& name, int dx, int dy) {
     corner_margins_[name] = BlockCornerMargin{dx, dy};
+    ++rev_;
 }
 void Floorplan::set_global_corner_margin(int dx, int dy) {
     global_corner_margin_ = BlockCornerMargin{dx, dy};
+    ++rev_;
 }
 BlockCornerMargin Floorplan::get_block_corner_margin(const std::string& name) const {
     auto it = corner_margins_.find(name);
@@ -259,16 +264,19 @@ void Floorplan::set_detour_channel(const std::string& dirs, int size) {
             default: break;
         }
     }
+    ++rev_;
 }
 void Floorplan::add_keepout_zone(int x1, int y1, int x2, int y2, const std::vector<int>& layer_ids) {
     KeepoutZone koz;
     koz.bbox = Rect{x1, y1, x2, y2};
     for (int lid : layer_ids) koz.layer_ids.insert(lid);
     keepouts_.push_back(std::move(koz));
+    ++rev_;
 }
 void Floorplan::set_container(const std::string& name, bool is_container) {
     if (is_container) containers_.insert(name);
     else              containers_.erase(name);
+    ++rev_;
 }
 bool Floorplan::is_container(const std::string& name) const {
     return containers_.count(name) > 0;
@@ -909,7 +917,7 @@ static void annotate_endpoints(Topology& topo,
 
 // Remove segment `idx` from a topology, re-keying seg_busterms to the compacted
 // indices (entries below idx unchanged, entries above shifted down by one).
-static void erase_segment(Topology& topo, int idx) {
+void erase_segment(Topology& topo, int idx) {
     topo.segments.erase(topo.segments.begin() + idx);
     std::map<int, SegEndpoints> nb;
     for (auto& [k, v] : topo.seg_busterms) {
@@ -3128,21 +3136,48 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     // faces, so the direct I collapses to zero length and every L/Z/U stub is
     // sub-min-length (and any that survive can be culled by keepouts above),
     // leaving NO candidate and a silently unrouted bus (common for adjacent
-    // macros).  When nothing else survives, realize the shared edge with
-    // shared_edge_segment — a wire CROSSING the edge at the overlap centre (the
-    // same routable form the MST edge realizers use): its NUTS slide window spans
-    // the full face overlap, so the bus actually places.  An ALONG-edge wire (an
-    // earlier attempt) is clamped to ZERO slide by the pass-through tighten once
-    // connected_block_names is set, and strands every bit in DetailedNUTS — see
-    // the PR #194 review.  Evaluated AFTER the keepout cull + filter_pinched so it
-    // also rescues abutments whose only other candidates those filters removed;
-    // the fallback itself is kept only when genuinely routable (not fully keepout-
-    // blocked, not pinched).  Detected on orig_bbox (physical touch); corner-touch
-    // and coincident blocks share no edge, so shared_edge_segment returns false
-    // and the list stays empty (the zero-candidate warning then fires).
+    // macros).  When nothing else survives, realize the shared edge as a SHORT
+    // wire CROSSING it, centred on the boundary — NOT the full block width.
+    // Coverage is by overlap (verify's seg_spans_rect is an overlap test, not a
+    // full-span test), so a short centred wire still covers both blocks, and its
+    // NUTS slide window still spans the full face overlap (real track room).  The
+    // along-length is the min-stub-length setting for the crossing axis — so the
+    // bus occupies the minimum channel — but never below kAbutmentSpanEpsilon: a
+    // zero-length wire (min-stub 0) has no conn-segs to pin it, carries no bus,
+    // and cannot be placed by NUTS.  (An ALONG-edge wire — an earlier attempt — is
+    // instead clamped to ZERO slide by the pass-through tighten and strands every
+    // bit; see the PR #194 review.)  Evaluated AFTER the keepout cull +
+    // filter_pinched so it also rescues abutments whose only other candidates
+    // those filters removed; kept only when genuinely routable.  Detected on
+    // orig_bbox; corner-touch / coincident share no edge → stays empty (the
+    // zero-candidate warning then fires).
     if (use_busterm_ && candidates.empty()) {
+        const int ox_lo = std::max(s_orig.x1, d_orig.x1), ox_hi = std::min(s_orig.x2, d_orig.x2);
+        const int oy_lo = std::max(s_orig.y1, d_orig.y1), oy_hi = std::min(s_orig.y2, d_orig.y2);
+        const bool vshared = (s_orig.x2 == d_orig.x1 || d_orig.x2 == s_orig.x1) && oy_hi > oy_lo;
+        const bool hshared = (s_orig.y2 == d_orig.y1 || d_orig.y2 == s_orig.y1) && ox_hi > ox_lo;
         Segment es;
-        if (shared_edge_segment(s_orig, d_orig, h_layer_, v_layer_, es)) {
+        bool ok = false;
+        if (vshared) {  // shared VERTICAL edge → HORIZONTAL crossing wire (track axis y)
+            const int E   = (s_orig.x2 == d_orig.x1) ? s_orig.x2 : d_orig.x2;
+            const int y0  = (oy_lo + oy_hi) / 2;
+            const int span = std::max(floorplan_.get_min_stub_length(0 /*H*/, h_layer_),
+                                      kAbutmentSpanEpsilon);
+            const int lo = std::max(std::min(s_orig.x1, d_orig.x1), E - span / 2);
+            const int hi = std::min(std::max(s_orig.x2, d_orig.x2), E + (span - span / 2));
+            es = make_seg(lo, y0, hi, y0, h_layer_);
+            ok = true;
+        } else if (hshared) {  // shared HORIZONTAL edge → VERTICAL crossing wire (track axis x)
+            const int E   = (s_orig.y2 == d_orig.y1) ? s_orig.y2 : d_orig.y2;
+            const int x0  = (ox_lo + ox_hi) / 2;
+            const int span = std::max(floorplan_.get_min_stub_length(1 /*V*/, v_layer_),
+                                      kAbutmentSpanEpsilon);
+            const int lo = std::max(std::min(s_orig.y1, d_orig.y1), E - span / 2);
+            const int hi = std::min(std::max(s_orig.y2, d_orig.y2), E + (span - span / 2));
+            es = make_seg(x0, lo, x0, hi, v_layer_);
+            ok = true;
+        }
+        if (ok) {
             const bool horiz = (es.start.y == es.end.y);
             Topology t;
             t.type = horiz ? ("ABUT_H@y" + std::to_string(es.start.y))

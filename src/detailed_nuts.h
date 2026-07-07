@@ -20,6 +20,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include "nuts.h"          // BundleWrapper / NUTSResult (make_bus_segments)
 #include "routing_grid.h"
 
 namespace buda {
@@ -102,11 +103,36 @@ public:
 private:
     const RoutingGridStack& stack_;
 
+    // The three stages of run(), in order (each mutates `result` in place):
+    // per-layer bit placement in abstract_pos order (Option B), the per-bit
+    // span-follow to connected bits' exact tracks (+ BUSTERM face re-extend),
+    // and the per-bit via fan-out of the bundle-level symbolic bus-vias.
+    void place_by_layer(const std::vector<BusSegment>& bus_segs,
+                        DetailedNUTSResult& result) const;
+    void adjust_bit_spans(const std::vector<BusSegment>& bus_segs,
+                          DetailedNUTSResult& result) const;
+    void emit_bit_vias(const std::vector<BusSegment>& bus_segs,
+                       DetailedNUTSResult& result) const;
+
     // Returns index into signal_tracks of the first contiguous window of size
     // bit_width, searching from lo to hi end.  Returns -1 if none found.
     static bool signals_contiguous(
         double pos_a, double pos_b,
         const std::vector<std::pair<double, TrackSlot>>& all_tracks);
 };
+
+// Build the stage-9 input from stage 4's output — the former Python handoff
+// (buda_session/nutsflow.py::_run_detailed_nuts built BusSegments field by
+// field and re-derived connectivity via a fresh ConnTopology), single-sourced
+// here so the SEG-connection / lo_end / BUSTERM-face derivation exists once:
+// every TrackSegment becomes a BusSegment (track_position -> abstract_pos,
+// corner bounds carried), bit_width from the bundle's net count, and the
+// per-segment connections/faces from the selected topology's cached analysis
+// (ConnTopology::build) — exactly the values the abstract solve placed with.
+std::vector<BusSegment> make_bus_segments(
+    const std::vector<BundleWrapper>& bundles,
+    const NUTSResult& nuts_result,
+    const Floorplan& floorplan,
+    const std::string& bit_order = "LO_HI");
 
 } // namespace buda

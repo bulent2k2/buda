@@ -20,7 +20,7 @@ The **Floorplanner** (`bin/fp`, `bin/bfp`) is a separate interactive GUI tool th
 ## Useful Docs
 - [User Guide](docs/USER_GUIDE.md) — Prerequisites and standard flow for novices.
 - [BUDA CLI Reference](docs/BUDA_CLI.md) — `buda` command-line invocation and flags (`--no-viz`, `--verbose-conn`, `--ipc-verbose`).
-- [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation.
+- [BUDA Script Reference](docs/BUDA_SCRIPT_REFERENCE.md) — Detailed command documentation (index + pipeline overview; per-stage command pages live under `docs/script_reference/`).
 - [BDB Reference](docs/BDB_REFERENCE.md) — Physical design database: schema, `.buda` commands, Python API.
 - [BDB Test-Data Management](docs/internal/bdb_test_data.md) — Diffable `*.bdb.sql` fixtures, the copy-to-temp `bdb_input` test fixture, and the write-back/OA versioning roadmap.
 - [Floorplanner User Guide](docs/FLOORPLANNER_USER_GUIDE.md) / [Reference](docs/FLOORPLANNER_REFERENCE_GUIDE.md) — Interactive placement GUI and engine API.
@@ -163,6 +163,8 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `generate_topologies_for_bundle <hint> <src> <dst...> [center_mode] [double_detour]` | 2 | Generate candidates for a specific bundle; multiple dst → multicast trunk+branch shapes |
 | `generate_hier_topologies [center_mode] [double_detour] [multi_trunk]` | 2 | Generate candidates for all HBundles (3-case: cell-local / cross-level / cross-block). `multi_trunk` adds two-level **BITRUNK_HVH/VHV** datapath trees, exactly as in the flat `generate_topologies` (opt-in). Both `generate_[hier_]topologies` **persist** all candidate topologies into the BDB `topology`/`topology_segment` tables (before `run_planner`) when a BDB is open; see [BDB Reference](docs/BDB_REFERENCE.md) |
 | `generate_topologies_for_hbundle <bundle_id> [center_mode] [double_detour] [multi_trunk]` | 2 | Re-generate candidates for a single HBundle by ID (`multi_trunk` as above); useful for debugging zero-candidate bundles |
+| `generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]` | 2 | **Additive** per-bundle generation: run the generator with the given knobs and APPEND the new candidates to the bundle's existing pool, deduplicated by stable content uid (`topo_uid`) — existing indices, the pin, and plan state are untouched, so an expert accretes candidates across knob experiments without losing selections |
+| `edit_topology <bundle_id> [<cand#>\|new]` + `edit_add_trunk <H\|V> <perp> [<lo> <hi>] [layer <id>]` / `edit_add_stub <block> <seg#>` / `edit_set_span <seg#> <lo> <hi>` / `edit_connect <i> <j>` / `edit_disconnect <i> <j> <retract_to>` / `edit_remove_segment <seg#>` / `edit_status` / `edit_commit [pin]` / `edit_abort` | 2 | **TopoEdit session**: open a working copy of a candidate (or an empty topology), apply transactional edits — pick an axis + Hanan line and add a (default full-span) trunk, stub blocks to it, override spans, connect/disconnect perpendicular segments — each printing a verdict (check_topo violations + zero-slide pinch + wire-graph components); `edit_commit` appends the result to the bundle's pool as a `USER` candidate (uid-deduped; `pin` selects it), `edit_abort` discards. Slide overrides ride the existing `plan.seg_slide_lo/hi` NUTS hatch |
 | `set_planner_param <name> <value>` | 3 | Set a planner tuning knob; takes effect at the next `run_planner` (knobs may be changed between runs to re-plan). Known params: `kCong` (congestion weight), `kSpan` (span-length weight), `base_cost_non_top` (penalty for non-TOP layers), `kWL` (wirelength weight), `kBalance` (TOP-layer load balancing), `track_cap_slack` (extra signal tracks/band in `signal_tracks` mode) |
 | `select_topology <hint> <id>` / `select_topologies <hint> <ids>` | 3 | Pin one/many bundles to a specific candidate topology (1-based; ranges like `1,5-9,11`) before planning |
 | `run_planner <iterations> [signal_tracks]` | 3 | Layer assign + topology select. `signal_tracks` (opt-in) charges band capacity in discrete SIGNAL-track count (× bit pitch) instead of layout width, so a band short of tracks surfaces as planner overflow instead of a silent DNUTS open; needs `def_track_pattern`. See [Signal-Track Capacity plan](docs/internal/planner_signal_track_capacity.md). **Persists** its decision when a BDB is open: `topology.is_selected` + `topology_segment.assigned_layer`, and (hier) expanded per-instance `bundle` rows; see [BDB Reference](docs/BDB_REFERENCE.md) |
@@ -378,13 +380,15 @@ It selects the candidate topology and layer assignments that minimize total cost
 
 ---
 
-### Stage 6 — CLI (`buda_cli.py`)
+### Stage 6 — CLI (`buda_cli.py`, `buda_cmds/`, `buda_session/`)
 
 **Responsibility:** Parse `.buda` script files line-by-line and drive the C++ engine via the pybind11 `buda` module (which re-exposes `buda_db` types).
 
 `BudaSession` holds all live objects: an optional `BDB`, the `Floorplan`, `Netlist`, `LayerStack`, `Bundler` / `HierarchicalBundler`, `bundles` list, `nuts_result`, `routing_grid`, and detailed-NUTS result. Each CLI command maps to one or more method calls on these objects. Unknown commands raise an error.
 
-Adding a new command/stage means: (1) implement the C++ class; (2) expose it via the relevant binding file — `bind_db.cpp` (BDB layer, registered in `buda_db`), `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp` (NUTS / DetailedNUTS / RoutingGrid / ConnTopology / verify), or `bind_optimizer.cpp` (floorplanner); (3) add an `elif cmd == "..."` branch in `BudaSession.do_command()`.
+The CLI is split across three units: `src/buda_cli.py` keeps the session core (init, `run_command`/`do_command` dispatch, flow-log capture + one-line summaries, `main`); `src/buda_cmds/` is the **command registry** — each submodule owns one stage's `cmd_*(session, cmd, args, cmd_line)` handlers and exports a `COMMANDS` dict, assembled by the package into the single registry `do_command` dispatches through (`KNOWN_COMMANDS` is derived from it, and a duplicate registration is a hard import error); `src/buda_session/` holds BudaSession's helper methods as six **mixin classes** (persist, hier, nutsflow, edit, reports, ripup — composed into `BudaSession`, member sets disjoint by construction) plus `util.py` for shared module-level helpers (`_batched`, `_RR_*`).
+
+Adding a new command/stage means: (1) implement the C++ class; (2) expose it via the relevant binding file — `bind_db.cpp` (BDB layer, registered in `buda_db`), `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp` (NUTS / DetailedNUTS / RoutingGrid / ConnTopology / verify), or `bind_optimizer.cpp` (floorplanner); (3) add a `cmd_<name>` handler in the matching `src/buda_cmds/` stage module and register it in that module's `COMMANDS` dict (session-state helpers go in the matching `src/buda_session/` mixin).
 
 ---
 
@@ -501,7 +505,14 @@ run_detailed_nuts [lo_hi|hi_lo]
 
 These cross-cutting modules sit beside stages 2–9 and guard correctness.
 
-**`ConnTopology`** augments a raw `Topology` with explicit connectivity and slide ranges:
+**`ConnTopology`** augments a raw `Topology` with explicit connectivity and slide ranges.
+Since the topo/conn unification ([plan + status](docs/internal/topo_conn_unification.md))
+the six derivation passes live in `topology_analysis.h/cpp` and their result is
+**cached on the Topology** (content-fingerprint-validated — the fingerprint is
+also the persisted `topo_uid` candidate identity), so every stage's
+`ConnTopology::build` serves the shared cached analysis; `topo_edit.h/cpp`
+provides the transactional expert-edit operations (engine for the `edit_*`
+CLI commands and the explorer's edit mode):
 - Infers connections geometrically — busterm-face membership, shared endpoints, and T-junctions — producing a `ConnSeg` per segment with a `perp_slide` range (`perp_lo`/`perp_hi`) over which the segment can move while every connection stays valid.
 - Computes `net_pull` (which way a segment "wants" to slide to shorten connected stubs) used as a NUTS placement preference.
 - `trunk_mst(...)` builds a Kruskal MST (`compute_mst` over `manhattan_nearest` distances) connecting a trunk to any blocks not yet directly attached — drives large-fanout / multi-block topologies.
@@ -588,9 +599,9 @@ This is the **intended unification**, not the current shape: as built, stage 4 e
 |---|---|
 | Build / wrappers | `CMakeLists.txt`, `bin/bb` (build), `bin/buda` / `bin/fp` / `bin/bfp` / `bin/viz` / `bin/u2b` (run), `bin/activate` (source: PATH+PYTHONPATH), `pytest.ini` |
 | DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `gds_io.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
-| Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
+| Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `topology_analysis.h/cpp`, `topo_edit.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `nuts_geom.h`, `nuts_dogleg.h/cpp`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
-| Python | `src/buda_cli.py` (CLI), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
+| Python | `src/buda_cli.py` (CLI core), `src/buda_cmds/` (command registry, one module per stage), `src/buda_session/` (BudaSession helper mixins + `util.py`), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
 | Demos | `demo/*.buda` — user/designer-facing demo vehicles (comprehensive_demo, quickstart, ariane/mempool/nvdla/ispd19 showcases, …); see `demo/README.md` |
 | Flows / tests | `flow/*.buda` — R&D / regression vehicles; shared track fixtures in `flow/tracks/`; `test/tests/*.py`, `test/tests/features/*.feature` |
 

@@ -101,9 +101,12 @@ set(SOURCE_FILES
     # ── as-is from v2 ─────────────────────────────────────────────
     src/topology.cpp
     src/conn_topology.cpp
+    src/topology_analysis.cpp
+    src/topo_edit.cpp
     src/layering.cpp
     src/congestion_planner.cpp
     src/nuts.cpp
+    src/nuts_dogleg.cpp
     src/routing_grid.cpp
     src/detailed_nuts.cpp
     src/floorplanner.cpp

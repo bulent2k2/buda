@@ -115,6 +115,8 @@ struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
 // multicast trunk's two opposite stubs onto one band.
 using AlignMap = std::map<std::pair<int,int>, std::vector<std::pair<int,int>>>;
 
+class LayerSolver;   // nuts.cpp: one layer's placement pass (befriended below)
+
 // Constraints for one layer's phase-0 corner-overlap resolution, fed back into
 // solve_layer.  Two kinds, both built lazily from detected corner overlaps:
 //   preds  — key → same-layer segments that must sit BELOW it (relative
@@ -126,6 +128,25 @@ struct LayerConstraints {
     std::map<std::pair<int,int>, std::set<std::pair<int,int>>> preds;
     std::map<std::pair<int,int>, std::pair<double,double>>     bounds;
     bool empty() const { return preds.empty() && bounds.empty(); }
+};
+
+// Everything the placement + repair passes derive from the selected topologies
+// before solving, built ONCE per solve by build_context() (which also applies
+// the interval prep to the segments): the former eight build_nuts_maps
+// out-params plus the (bundle_id, seg_idx) -> TrackSegment* lookup.  All maps
+// are keyed by (bundle_id, seg_idx).  Owned per solve — run()'s dogleg trials
+// and rerun_layer() each build their own against their own segment vector
+// (ts_ptr_map points into it).
+struct NutsContext {
+    std::map<std::pair<int,int>, double>                     pull_map;
+    std::map<std::pair<int,int>, std::pair<double,double>>   slide_map;
+    std::set<std::pair<int,int>>                             trunk_set;
+    std::set<std::pair<int,int>>                             busterm_set;
+    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>   rev_conn_map;
+    std::map<std::pair<int,int>, int>                        net_pull_map;
+    AlignMap                                                 align_map;
+    std::map<std::pair<int,int>, std::vector<double>>        busterm_face_map;
+    std::map<std::pair<int,int>, TrackSegment*>              ts_ptr_map;
 };
 
 class NUTSEngine {
@@ -153,6 +174,7 @@ public:
                            int layer_id) const;
 
 private:
+    friend class LayerSolver;   // placement pass: uses first_fit/preferred_fit/track_pitch_
     const Floorplan& floorplan_;
     const LayerStack& layers_;
     double track_pitch_ = 1.0;
@@ -180,11 +202,8 @@ private:
     // jn_map/jn_segs: the junction edges (rev_conn_map) + global segment lookup,
     // used for the junction-anchored preference (Part B) — empty maps disable it.
     void solve_layer(std::vector<TrackSegment*>& segs,
-                     const std::map<std::pair<int,int>, double>& pull_map,
-                     const AlignMap& align_map,
-                     const LayerConstraints& constraints = {},
-                     const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& jn_map = {},
-                     const std::map<std::pair<int,int>, TrackSegment*>& jn_segs = {}) const;
+                     NutsContext& ctx,
+                     const LayerConstraints& constraints = {}) const;
 
     // Alternating orientation-group fixpoint: solve a whole orientation group
     // (all H or all V) at once, propagate spans to the perpendicular group,
@@ -199,10 +218,7 @@ private:
     void orientation_fixpoint(
         std::vector<TrackSegment>& segments,
         std::map<int, std::vector<TrackSegment*>>& by_layer,
-        const std::map<std::pair<int,int>, double>& pull_map,
-        const AlignMap& align_map,
-        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-        std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map,
+        NutsContext& ctx,
         const std::map<int, LayerConstraints>& seed_cons = {}) const;
 
     // Post-span-adjustment overlap repair: the final cross-layer span
@@ -210,13 +226,8 @@ private:
     // overlaps after packing.  Re-places victims of overlapping pairs within
     // their intervals against current adjusted spans (bounded iterations;
     // restores the original state unless the overlap count strictly drops).
-    void repair_overlaps(
-        std::vector<TrackSegment>& segments,
-        const std::map<std::pair<int,int>, double>&                pull_map,
-        const std::map<std::pair<int,int>, int>&                   net_pull_map,
-        const AlignMap&                                            align_map,
-        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
+    void repair_overlaps(std::vector<TrackSegment>& segments,
+                         NutsContext& ctx) const;
 
     // Corner-overlap resolution (vertical-constraint style): two stubs that
     // collide on a layer can't be separated by moving either (they're
@@ -226,13 +237,8 @@ private:
     // a split.  Re-solve the affected trunk layer(s) under the accumulated
     // constraints; keep the result only while the total overlap count strictly
     // drops and no new interval violation appears (stop-&-reverse).
-    void resolve_corner_overlaps(
-        std::vector<TrackSegment>& segments,
-        const std::map<std::pair<int,int>, double>&                pull_map,
-        const std::map<std::pair<int,int>, int>&                   net_pull_map,
-        const AlignMap&                                            align_map,
-        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const;
+    void resolve_corner_overlaps(std::vector<TrackSegment>& segments,
+                                 NutsContext& ctx) const;
 
     // Final greedy wirelength-tightening pass.  The sweep/repack place segments
     // by LOCAL decisions made as the layer fills, so a segment parked away from
@@ -246,13 +252,9 @@ private:
     // rerun_layer to keep its single-layer contract); the overlap / wirelength
     // guards and follower-span adjustments stay global either way.  Default -1
     // tightens every layer.
-    void tighten_pulls(
-        std::vector<TrackSegment>& segments,
-        const std::map<std::pair<int,int>, int>&                   net_pull_map,
-        const AlignMap&                                            align_map,
-        const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-        std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
-        int only_layer = -1) const;
+    void tighten_pulls(std::vector<TrackSegment>& segments,
+                       NutsContext& ctx,
+                       int only_layer = -1) const;
 
     // First-fit: lowest valid placement position within [lo, hi].
     // Returns NaN if the interval is infeasible.

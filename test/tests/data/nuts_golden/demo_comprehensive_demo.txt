@@ -1,0 +1,6 @@
+abstract: 4 segments overlaps=0 violations=0
+a 1 0 L6 H P pos=247.750000 w=4.500000 span=[250.000000,752.250000] itvl=[100.000000,250.000000] bound=[-inf,inf]
+a 1 1 L5 V P pos=752.250000 w=4.500000 span=[247.750000,750.000000] itvl=[750.000000,900.000000] bound=[-inf,inf]
+a 2 0 L4 H P pos=525.000000 w=3.000000 span=[250.000000,750.000000] itvl=[500.000000,550.000000] bound=[-inf,inf]
+a 3 0 L5 V P pos=500.000000 w=3.000000 span=[150.000000,850.000000] itvl=[450.000000,550.000000] bound=[-inf,inf]
+detailed: none

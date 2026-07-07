@@ -91,10 +91,18 @@ def test_exit_command_with_bad_code_is_error():
 
 def test_known_commands_stay_in_sync_with_dispatch():
     """KNOWN_COMMANDS (used for the typo suggestion) must list exactly the
-    commands do_command actually dispatches, so suggestions never drift."""
-    src_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'buda_cli.py')
-    with open(src_path) as f:
-        src = f.read()
-    # Only scan the dispatch body, not the KNOWN_COMMANDS literal itself.
-    dispatch = set(re.findall(r'cmd == "([a-z_]+)"', src))
-    assert dispatch == set(buda_cli.KNOWN_COMMANDS)
+    commands do_command actually dispatches.  Since the registry split this
+    holds by construction (KNOWN_COMMANDS is derived from buda_cmds.COMMANDS);
+    what remains to pin is the construction itself: the derivation identity,
+    that every registered handler is callable with the dispatch signature,
+    and that no submodule registration was shadowed during assembly."""
+    import inspect
+    import buda_cmds
+    assert set(buda_cli.KNOWN_COMMANDS) == set(buda_cmds.COMMANDS)
+    per_module = sum(len(m.COMMANDS) for m in buda_cmds.MODULES)
+    assert per_module == len(buda_cmds.COMMANDS), \
+        "a submodule command registration was shadowed during assembly"
+    for name, handler in buda_cmds.COMMANDS.items():
+        assert name == name.lower(), name
+        params = list(inspect.signature(handler).parameters)
+        assert params == ["session", "cmd", "args", "cmd_line"], (name, params)

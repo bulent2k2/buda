@@ -1,0 +1,739 @@
+# Copyright 2026 Ben Bulent Basaran
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""NUTS execution, diagnostics, and post-NUTS reporting.
+
+The detailed-NUTS runner, per-layer NUTS re-solve, post-NUTS stub layer
+reassignment, NUTS log writing + diagnostics, wirelength reporting, the
+planner capacity-mode / iteration parsing, and the checkpoint/replan/rerun
+plumbing shared by the feedback loops.
+
+Methods extracted verbatim from buda_cli.BudaSession (the CLI mixin
+split); bodies unchanged — `self` is the composed BudaSession, so
+cross-mixin helper calls resolve through the class as before.
+"""
+import math
+import os
+import sys
+
+import buda
+
+
+class NutsFlowMixin:
+
+    @staticmethod
+    def _wirelength_by_bundle(segments):
+        """Sum routing-direction length |span_hi - span_lo| per bundle and per
+        layer over a placed-segment list (TrackSegment for abstract NUTS, or
+        NetSegment for detailed).  Unplaced abstract segments (a TrackSegment
+        with placed=False) contribute no wire and are counted; NetSegments are
+        always placed bit-wires (their unplaced count comes from
+        DetailedNUTSResult.num_unplaced).  Returns (per_bundle: {bid: WL},
+        per_layer: {layer: WL}, total: WL, n_unplaced_segs: int)."""
+        per_bundle, per_layer, total, n_unplaced = {}, {}, 0.0, 0
+        for s in segments:
+            if getattr(s, 'placed', True) is False:
+                n_unplaced += 1
+                continue
+            length = abs(s.span_hi - s.span_lo)
+            per_bundle[s.bundle_id] = per_bundle.get(s.bundle_id, 0.0) + length
+            per_layer[s.layer] = per_layer.get(s.layer, 0.0) + length
+            total += length
+        return per_bundle, per_layer, total, n_unplaced
+
+    def _report_wirelength(self):
+        """Report routed wirelength per bundle + total, for comparing how a
+        change affects interconnect quality.  Prints (and thus logs, via the
+        command-capture wrapper) the ABSTRACT bus-level WL whenever run_nuts has
+        run — one length per placed bus segment, the metric topology decisions
+        move — and additionally the DETAILED bit-level WL (every bit-wire) once
+        run_detailed_nuts has run.  A per-layer breakdown shows metal
+        distribution (cheap LOW vs premium TOP).
+
+        Every total carries its UNPLACED count: WL sums only placed wire, so a
+        lower total that comes from dropped (unplaced) segments/bits is NOT a
+        better route — the count sits on the same line so a WL comparison can
+        never silently reward incomplete routing.  Every current bundle is
+        listed even at 0 WL, so an all-unplaced bundle can't vanish from the
+        table."""
+        if self.nuts_result is None:
+            print("[report_wirelength] no NUTS result — run run_nuts first.")
+            return
+        layer_names = self._make_layer_names()
+        bid_to_wrap = {w.input.original_bundle.id: w for w in self.bundles}
+        all_ids = list(bid_to_wrap)
+
+        def bits(bid):
+            w = bid_to_wrap.get(bid)
+            return len(w.input.original_bundle.get_net_names()) if w else 0
+
+        def layer_line(per_layer):
+            return "  by layer: " + "  ".join(
+                f"{layer_names.get(l, 'L' + str(l))}={per_layer[l]:.0f}"
+                for l in sorted(per_layer)) if per_layer else "  by layer: (none)"
+
+        def emit(title, per_bundle, per_layer, total, unit_hdr):
+            # Seed every current bundle at 0 so an all-unplaced bundle shows as
+            # a 0-WL row rather than silently disappearing.
+            for bid in all_ids:
+                per_bundle.setdefault(bid, 0.0)
+            print(f"[report_wirelength] {title}:")
+            print(f"  {'bundle':>8} {unit_hdr:>6} {'WL':>12}")
+            print(f"  {'-'*8} {'-'*6} {'-'*12}")
+            for bid in sorted(per_bundle):
+                print(f"  {bid:>8} {bits(bid):>6} {per_bundle[bid]:>12.0f}")
+            print(f"  {'-'*8} {'-'*6} {'-'*12}")
+            print(f"  {'TOTAL':>8} {'':>6} {total:>12.0f}")
+            print(layer_line(per_layer))
+
+        ab_b, ab_l, ab_t, ab_unpl = self._wirelength_by_bundle(
+            self.nuts_result.segments)
+        emit("Abstract bus-level wirelength (after run_nuts)",
+             ab_b, ab_l, ab_t, "bits")
+        # Final, greppable summary line (matches the terminal-headline markers).
+        # The unplaced count rides the same line so a WL comparison always sees
+        # whether a lower number means "tighter" or merely "incomplete".
+        print(f"[report_wirelength] total abstract WL = {ab_t:.0f} "
+              f"over {len(all_ids)} bundle(s), {ab_unpl} unplaced segment(s)")
+        if ab_unpl:
+            print(f"  NOTE: {ab_unpl} abstract segment(s) unplaced — this WL "
+                  f"excludes them and is NOT comparable to a complete route.")
+
+        if self.detailed_result is not None:
+            de_b, de_l, de_t, _ = self._wirelength_by_bundle(
+                self.detailed_result.net_segments)
+            n_wires = len(self.detailed_result.net_segments)
+            n_unpl = self.detailed_result.num_unplaced   # authoritative bit count
+            emit("Detailed bit-level wirelength (after run_detailed_nuts)",
+                 de_b, de_l, de_t, "bits")
+            print(f"[report_wirelength] total detailed WL = {de_t:.0f} "
+                  f"over {len(all_ids)} bundle(s) / {n_wires} bit-wire(s), "
+                  f"{n_unpl} unplaced bit(s)")
+            if n_unpl:
+                print(f"  NOTE: {n_unpl} bit(s) unplaced — this WL excludes "
+                      f"them and is NOT comparable to a complete route.")
+
+    def _write_nuts_log(self, layer_names=None, append=False, rerun_layer_name=None,
+                        extra_lines: list[str] | None = None):
+        """Write (or append to) the per-overlap log file alongside the .buda script.
+
+        File: <script_stem>_nuts.log  (or nuts.log if no script path).
+        Mirrors key [NUTS] console messages then lists per-overlap detail.
+
+        append=True       — append a re-run section instead of overwriting.
+        rerun_layer_name  — label shown in the re-run header (append mode only).
+        extra_lines       — additional lines (e.g. [Planner] messages) written
+                            before the NUTS summary, so the log stays in the
+                            same order as the console output.
+        """
+        if self.nuts_result is None:
+            return
+        if layer_names is None:
+            layer_names = self._make_layer_names()
+
+        log_path = self._get_log_path('nuts.log')
+
+        details = self.nuts_result.overlap_details
+        per_layer = self.nuts_result.overlaps_per_layer
+
+        # Build a segment label map: (bundle_id, seg_idx) -> display name
+        seg_label = {}
+        for w in self.bundles:
+            bid   = w.input.original_bundle.id
+            nets  = w.input.original_bundle.get_net_names()
+            hint  = nets[0] if nets else f"B{bid}"
+            if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
+                continue  # bundle has no topology (e.g. src==dst or no candidates generated)
+            topo  = w.input.candidates[w.plan.selected_topology_index]
+            for si, seg in enumerate(topo.segments):
+                lname = layer_names.get(seg.layer_hint, f"L{seg.layer_hint}")
+                seg_label[(bid, si)] = f"B{bid}.{lname}[{si}]"
+
+        # Compute layer count from segments (mirrors C++ "[NUTS] N segments placed across K layer(s)")
+        layer_ids_used = {s.layer for s in self.nuts_result.segments}
+        n_layers = len(layer_ids_used)
+
+        from datetime import datetime
+        open_mode = 'a' if append else 'w'
+        with open(log_path, open_mode) as f:
+            script_name = os.path.basename(self.script_path) if self.script_path else '(interactive)'
+            if append:
+                f.write(f"\n{'='*60}\n")
+                if rerun_layer_name:
+                    f.write(f"  Re-run: {rerun_layer_name}  —  {script_name}\n")
+                else:
+                    f.write(f"  Re-run  —  {script_name}\n")
+                f.write(f"  At        : {datetime.now().isoformat(timespec='seconds')}\n")
+                f.write(f"{'='*60}\n\n")
+            else:
+                f.write(f"NUTS Overlap Report — {script_name}\n")
+                f.write(f"Generated : {datetime.now().isoformat(timespec='seconds')}\n\n")
+
+            # Mirror any Planner / caller messages that preceded this NUTS run.
+            if extra_lines:
+                for line in extra_lines:
+                    f.write(line + "\n")
+                f.write("\n")
+
+            # Mirror the C++ [NUTS] summary line.
+            total = self.nuts_result.num_overlaps
+            f.write(f"[NUTS] {len(self.nuts_result.segments)} segments placed across "
+                    f"{n_layers} layer(s). "
+                    f"Track overlaps: {total}, "
+                    f"Interval violations: {self.nuts_result.num_violations}.\n")
+
+            layer_summary = '  '.join(
+                f"{layer_names.get(lid, f'L{lid}')}={cnt}"
+                for lid, cnt in sorted(per_layer.items())
+            )
+            f.write(f"Overlaps  : {total}  ({layer_summary})\n")
+            f.write("\n")
+
+            # Build a placed-segment map for full coordinate lookup.
+            ts_map = {(ts.bundle_id, ts.seg_idx): ts for ts in self.nuts_result.segments}
+
+            def _seg_coords(bid, si):
+                ts = ts_map.get((bid, si))
+                if ts is None:
+                    return "    (segment not found)\n"
+                return (f"    span=[{ts.span_lo:.1f}, {ts.span_hi:.1f}]"
+                        f"  perp_center={ts.track_position:.2f}  width={ts.width:.2f}"
+                        f"  → perp=[{ts.track_position - ts.width/2:.2f},"
+                        f" {ts.track_position + ts.width/2:.2f}]"
+                        f"  interval=[{ts.interval_lo:.1f}, {ts.interval_hi:.1f}]\n")
+
+            if not details:
+                f.write("No overlaps.\n")
+            else:
+                # Group by layer
+                by_layer = {}
+                for od in details:
+                    by_layer.setdefault(od.layer, []).append(od)
+
+                for lid in sorted(by_layer):
+                    lname = layer_names.get(lid, f"L{lid}")
+                    entries = by_layer[lid]
+                    f.write(f"{'='*60}\n")
+                    f.write(f"  {lname}  —  {len(entries)} overlap(s)\n")
+                    f.write(f"{'='*60}\n")
+                    for n, od in enumerate(entries, 1):
+                        la = seg_label.get((od.bid_a, od.seg_a), f"B{od.bid_a}[{od.seg_a}]")
+                        lb = seg_label.get((od.bid_b, od.seg_b), f"B{od.bid_b}[{od.seg_b}]")
+                        span_len = od.span_hi - od.span_lo
+                        perp_dep = od.perp_hi - od.perp_lo
+                        area     = span_len * perp_dep
+                        f.write(
+                            f"  [{n:3d}]  {la}  ×  {lb}\n"
+                            f"         overlap span  [{od.span_lo:.1f}, {od.span_hi:.1f}]"
+                            f"  len={span_len:.1f}\n"
+                            f"         overlap perp  [{od.perp_lo:.2f}, {od.perp_hi:.2f}]"
+                            f"  depth={perp_dep:.2f}  area={area:.2f}\n"
+                        )
+                        f.write(f"         {la}:\n" + _seg_coords(od.bid_a, od.seg_a))
+                        f.write(f"         {lb}:\n" + _seg_coords(od.bid_b, od.seg_b))
+                    f.write("\n")
+
+        action = "appended to" if append else "→"
+        print(f"NUTS overlap log {action} {log_path}")
+
+    def extract_instances(self, bundle):
+        # Helper to find source/dest instances from a bundle's nets for Topology Generation
+        if not bundle.get_net_names(): return "top", "top"
+        # Hack: assume first net's driver/receiver pins follow instance.pin format
+        first_net_name = bundle.get_net_names()[0]
+        # Find this net in the netlist to get its pins. This is inefficient but works for prototype.
+        # A real implementation would store src/dst instance on the Bundle object itself.
+        driver_pin = ""
+        receiver_pin = ""
+        # C++ Netlist doesn't expose find_net yet, so we rely on the input script naming convention for the demo.
+        # Assuming net name is like 'b1_0' and driver is 'u_cpu.tx'
+        # Let's just pass the block names directly in the script for now to simplify the connection.
+        return "top", "top"
+
+    def _run_post_nuts_planner(self,
+                               v_thresholds: tuple[float, float] | None,
+                               h_thresholds: tuple[float, float] | None,
+                               top_only: bool = False):
+        """Stage 4c — Post-NUTS stub layer reassignment.
+
+        Classifies every bundle's V and/or H stub segments by max span length
+        and moves short stubs to the lowest layer and long stubs to the highest
+        layer for each direction.  After all reassignments a single full NUTS
+        solve is run so all layers are consistent with the new assignments.
+
+        v_thresholds : (short_thresh, long_thresh) for V segments, or None to skip.
+        h_thresholds : (short_thresh, long_thresh) for H segments, or None to skip.
+        """
+        if self.nuts_result is None:
+            print("Error: run_planner post_nuts requires run_nuts to have been called first")
+            return
+
+        layer_names = self._make_layer_names()
+        extra_lines: list[str] = []
+
+        def _reassign_dir(dir_enum, thresholds: tuple[float, float]):
+            short_thresh, long_thresh = thresholds
+            layers_sorted = sorted(self.layers.get_layer_ids_by_dir(dir_enum))
+            dir_label = "V" if dir_enum == buda.LayerDir.VERTICAL else "H"
+            is_v = (dir_enum == buda.LayerDir.VERTICAL)
+            # `top` mode: reassign within the TOP layers only, so short stubs land on
+            # the next-highest TOP layer (not the LOW escape layers) and long hauls on
+            # the highest.  E.g. V → {M5(short), M7(long)}, H → {M4(short), M6(long)} —
+            # keeping the over-subscribed top layers for long-haul and spreading short
+            # stubs onto the next TOP tier instead of the LOW (often track-starved) layers.
+            if top_only:
+                # Restrict to TOP layers — never fall back to the LOW escape
+                # layers, even when this direction has fewer than 2 TOP layers
+                # (the `< 2` guard below then no-ops the direction, rather than
+                # letting lo_layer become a LOW layer and reintroducing the
+                # track-starved LOW placement top-only mode exists to avoid).
+                layers_sorted = [l for l in layers_sorted if self.layers.is_top(l)]
+            if len(layers_sorted) < 2:
+                scope = "TOP " if top_only else ""
+                print(f"[Planner] post_nuts {dir_label}: fewer than 2 {scope}{dir_label} layers — nothing to reassign")
+                return
+            lo_layer = layers_sorted[0]
+            hi_layer = layers_sorted[-1]
+            layer_set = set(layers_sorted)
+
+            # Map bundle_id → max span length among segments on this direction's layers.
+            bid_max_span: dict[int, float] = {}
+            for seg in self.nuts_result.segments:
+                if seg.layer not in layer_set:
+                    continue
+                span_len = seg.span_hi - seg.span_lo
+                bid = seg.bundle_id
+                if bid not in bid_max_span or span_len > bid_max_span[bid]:
+                    bid_max_span[bid] = span_len
+
+            short_count = medium_count = long_count = 0
+            for w in self.bundles:
+                bid = w.input.original_bundle.id
+                if bid not in bid_max_span:
+                    continue
+                max_span = bid_max_span[bid]
+                if max_span < short_thresh:
+                    new_layer = lo_layer
+                    short_count += 1
+                elif max_span > long_thresh:
+                    new_layer = hi_layer
+                    long_count += 1
+                else:
+                    medium_count += 1
+                    continue
+
+                # Update per-segment layers for segments of this direction.
+                # If seg_layers is populated (from run_planner), update it directly;
+                # otherwise fall back to the legacy assigned_v/h_layer attribute.
+                if not w.input.candidates or w.plan.selected_topology_index < 0 or w.plan.selected_topology_index >= len(w.input.candidates):
+                    continue
+                topo = w.input.candidates[w.plan.selected_topology_index]
+                if w.plan.seg_layers:
+                    sl = list(w.plan.seg_layers)
+                    for si, seg in enumerate(topo.segments):
+                        seg_is_v = (seg.start.y != seg.end.y)
+                        if (is_v and seg_is_v) or (not is_v and not seg_is_v):
+                            if si < len(sl):
+                                sl[si] = new_layer
+                    w.plan.seg_layers = sl
+                else:
+                    if is_v:
+                        w.input.assigned_v_layer = new_layer
+                    else:
+                        w.input.assigned_h_layer = new_layer
+
+            lo_name = layer_names.get(lo_layer, f"L{lo_layer}")
+            hi_name = layer_names.get(hi_layer, f"L{hi_layer}")
+            msg = (f"[Planner] post_nuts {dir_label}: short<{short_thresh:.0f}→{lo_name} ({short_count}b), "
+                   f"medium ({medium_count}b), long>{long_thresh:.0f}→{hi_name} ({long_count}b)")
+            print(msg)
+            extra_lines.append(msg)
+
+        if v_thresholds is not None:
+            _reassign_dir(buda.LayerDir.VERTICAL, v_thresholds)
+        if h_thresholds is not None:
+            _reassign_dir(buda.LayerDir.HORIZONTAL, h_thresholds)
+
+        # Single NUTS re-run after all reassignments.
+        pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
+        nuts = buda.NUTSEngine(self.fp, self.layers)
+        nuts.set_track_pitch(pitch)
+        self.nuts_result = nuts.run(self.bundles)
+        self._adopt_doglegs()
+
+        layer_names = self._make_layer_names()
+        self._write_nuts_log(layer_names, append=True, rerun_layer_name="post_nuts",
+                             extra_lines=extra_lines)
+
+    def _segment_states_from_topology(self) -> dict:
+        """Build a 'before' snapshot from topology geometry (no track assignment yet).
+
+        track_position = NaN signals 'unplaced'; _nuts_diagnostics skips movement
+        stats for those segments so the same diagnostic code works for both the
+        initial run_nuts and per-layer rerun_layer calls.
+        """
+        states: dict[tuple, dict] = {}
+        for bw in self.bundles:
+            if not bw.input.candidates or bw.plan.selected_topology_index < 0 or bw.plan.selected_topology_index >= len(bw.input.candidates):
+                continue
+            topo = bw.input.candidates[bw.plan.selected_topology_index]
+            bid  = bw.input.original_bundle.id
+            for si, seg in enumerate(topo.segments):
+                is_h = (seg.start.y == seg.end.y)
+                if is_h:
+                    span_lo = float(min(seg.start.x, seg.end.x))
+                    span_hi = float(max(seg.start.x, seg.end.x))
+                    layer   = bw.input.assigned_h_layer if bw.input.assigned_h_layer >= 0 else seg.layer_hint
+                else:
+                    span_lo = float(min(seg.start.y, seg.end.y))
+                    span_hi = float(max(seg.start.y, seg.end.y))
+                    layer   = bw.input.assigned_v_layer if bw.input.assigned_v_layer >= 0 else seg.layer_hint
+                states[(bid, si)] = {
+                    'layer':          layer,
+                    'track_position': float('nan'),   # unplaced sentinel
+                    'span_lo':        span_lo,
+                    'span_hi':        span_hi,
+                }
+        return states
+
+    def _nuts_diagnostics(self, result, layer_names: dict,
+                          before: dict, target_layer: int | None = None) -> list[str]:
+        """Emit and collect NUTS diagnostic lines after a solve.
+
+        Shared by run_nuts (target_layer=None, all layers) and
+        _rerun_nuts_layer (target_layer=layer_id, focus on one layer).
+
+        before: (bid, seg_idx) -> {layer, track_position, span_lo, span_hi}
+            track_position == NaN  →  unplaced; movement stats suppressed.
+        target_layer: if set, only that layer is reported per-layer and other
+            layers are treated as 'connected' for span-adjustment analysis.
+            If None, all layers are reported; span adjustments shown across all.
+        """
+        diag: list[str] = []
+
+        def emit(msg: str):
+            print(msg)
+            diag.append(msg)
+
+        by_layer: dict[int, list] = {}
+        for s in result.segments:
+            by_layer.setdefault(s.layer, []).append(s)
+
+        report_layers = [target_layer] if target_layer is not None else sorted(by_layer.keys())
+
+        for lid in report_layers:
+            segs  = by_layer.get(lid, [])
+            lname = layer_names.get(lid, f'L{lid}')
+            n     = len(segs)
+
+            # Movement stats — only when segment was placed before (track_position not NaN).
+            moved_deltas: list[float] = []
+            for s in segs:
+                bef = before.get((s.bundle_id, s.seg_idx))
+                if bef and not math.isnan(bef['track_position']):
+                    delta = abs(s.track_position - bef['track_position'])
+                    if delta > 1e-6:
+                        moved_deltas.append(delta)
+            if moved_deltas:
+                avg_d = sum(moved_deltas) / len(moved_deltas)
+                max_d = max(moved_deltas)
+                emit(f"[NUTS] {lname}: {len(moved_deltas)}/{n} segments moved "
+                     f"(avg |Δperp|={avg_d:.1f}, max={max_d:.1f})")
+
+            # Report physical width used (helps diagnose dilution issues)
+            if segs:
+                total_w = sum(s.width for s in segs)
+                min_p = min(s.track_position - s.width/2.0 for s in segs)
+                max_p = max(s.track_position + s.width/2.0 for s in segs)
+                emit(f"[NUTS] {lname}: total bus width {total_w:.1f} units, "
+                     f"spanning perpendicular interval [{min_p:.1f}, {max_p:.1f}]")
+
+            # Local overlaps on this layer.
+            local_ov = [od for od in result.overlap_details if od.layer == lid]
+            if local_ov:
+                pairs_str = ', '.join(f"B{od.bid_a}×B{od.bid_b}" for od in local_ov)
+                emit(f"[NUTS] {lname} local overlaps: {len(local_ov)} → {pairs_str}")
+            else:
+                emit(f"[NUTS] {lname}: no local overlaps")
+
+        # Span adjustments: compare before vs after spans.
+        # For rerun: skip the target layer (it drove the adjustment).
+        # For full run: report all layers.
+        span_adj: dict[int, int] = {}
+        for s in result.segments:
+            if target_layer is not None and s.layer == target_layer:
+                continue
+            bef = before.get((s.bundle_id, s.seg_idx))
+            if bef and (abs(s.span_lo - bef['span_lo']) > 1e-6 or
+                        abs(s.span_hi - bef['span_hi']) > 1e-6):
+                span_adj[s.layer] = span_adj.get(s.layer, 0) + 1
+
+        if span_adj:
+            label   = "Connected span adjustments" if target_layer is not None else "Span adjustments"
+            adj_str = ', '.join(
+                f"{layer_names.get(lid, f'L{lid}')}:{cnt}"
+                for lid, cnt in sorted(span_adj.items())
+            )
+            emit(f"[NUTS] {label}: {adj_str}")
+
+            # Post-adjust overlaps on adjusted layers.
+            # For full run these equal the global overlap summary — skip to avoid noise.
+            if target_layer is not None:
+                adj_layer_ids = set(span_adj)
+                post_ov_by_layer: dict[int, list] = {}
+                for od in result.overlap_details:
+                    if od.layer in adj_layer_ids:
+                        post_ov_by_layer.setdefault(od.layer, []).append(od)
+                if post_ov_by_layer:
+                    summary = ', '.join(
+                        f"{layer_names.get(lid, f'L{lid}')}:{len(ods)}"
+                        for lid, ods in sorted(post_ov_by_layer.items())
+                    )
+                    all_pairs = ', '.join(
+                        f"B{od.bid_a}×B{od.bid_b}"
+                        for ods in post_ov_by_layer.values()
+                        for od in ods
+                    )
+                    emit(f"[NUTS] Post-adjust overlaps: {summary} → {all_pairs}")
+                else:
+                    adj_names = ', '.join(
+                        layer_names.get(lid, f'L{lid}') for lid in sorted(adj_layer_ids))
+                    emit(f"[NUTS] No overlaps on adjusted layers ({adj_names})")
+        elif target_layer is not None:
+            emit(f"[NUTS] No connected span adjustments")
+
+        return diag
+
+    def _rerun_nuts_layer(self, layer_id: int):
+        """Re-solve one layer with NUTS, emit diagnostics, and log.
+
+        Returns the updated NUTSResult (also stored in self.nuts_result).
+        Used by both the run_nuts_on_layer command and the visualizer ↺ button.
+        """
+        layer_names  = self._make_layer_names()
+        layer_name   = layer_names.get(layer_id, f"L{layer_id}")
+        nuts = buda.NUTSEngine(self.fp, self.layers)
+        nuts.set_track_pitch(self._nuts_pitch)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
+
+        # Snapshot full state before rerun.
+        before: dict[tuple, dict] = {
+            (s.bundle_id, s.seg_idx): {
+                'layer':          s.layer,
+                'track_position': s.track_position,
+                'span_lo':        s.span_lo,
+                'span_hi':        s.span_hi,
+            }
+            for s in self.nuts_result.segments
+        }
+        n_layer_segs = sum(1 for s in self.nuts_result.segments if s.layer == layer_id)
+
+        pre_msg = f"[NUTS] Running {layer_name}: {n_layer_segs} segment(s)"
+        print(pre_msg)
+
+        # C++ also prints its own [NUTS] rerun_layer(...) line here.
+        with buda.ostream_redirect():
+            self.nuts_result = nuts.rerun_layer(self.nuts_result, self.bundles, layer_id)
+
+        diag = self._nuts_diagnostics(self.nuts_result, layer_names, before,
+                                      target_layer=layer_id)
+
+        rerun_msg = (f"[NUTS] rerun_layer({layer_id}={layer_name}): "
+                     f"{n_layer_segs} segment(s) re-placed. "
+                     f"Violations: {self.nuts_result.num_violations}, "
+                     f"Overlaps: {self.nuts_result.num_overlaps}.")
+        print(rerun_msg)
+
+        self._write_nuts_log(layer_names, append=True, rerun_layer_name=layer_name,
+                             extra_lines=[pre_msg] + diag + [rerun_msg])
+
+        # Deliberately NO persist here: this helper is also the visualizer's
+        # interactive ↺ preview (rerun_layer_fn), and exploring an alternative
+        # solve must not overwrite the BDB checkpoint. Committing paths (the
+        # run_nuts_on_layer command, ripup_reroute) call _checkpoint_routing().
+        if self.detailed_result is not None:
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            return self.nuts_result, self.detailed_result
+
+        return self.nuts_result
+
+    def _checkpoint_routing(self):
+        """Persist the FULL current routing state to the open BDB: planner
+        selections/layers + abstract-NUTS bus rows (+ detailed rows when
+        present). The single commit choke point for engine-driven re-run paths
+        that bypass the stage command handlers (ripup_reroute, the
+        run_nuts_on_layer command). Interactive visualizer previews (↺ /
+        Re-run & Refresh) deliberately do NOT call this — a checkpoint changes
+        only on explicit commands, never while exploring. No-op without a BDB.
+        """
+        if self.bdb is None:
+            return
+        self._persist_planner_output()
+        self._persist_nuts()
+        if self.detailed_result is not None:
+            self._persist_detailed_nuts()
+
+    def _replan_layers(self):
+        """Re-run planner layer assignment on the live planner, honoring
+        topology_pinned wrappers, and copy the assignments back onto the
+        wrappers.  Band usage is reset first (build_congestion_map): the
+        previous run's demand is still recorded on the cuts, and re-planning
+        on top of it would double-count every bundle.
+
+        No-op when the planner has not run yet — the pinned selection is
+        then honored by the next run_planner.
+        """
+        if self.planner is None:
+            return
+        self.planner.build_congestion_map()
+        with buda.ostream_redirect():
+            assignments = self.planner.optimize_topologies(
+                self.bundles, self._planner_iterations)
+        bid_to_wrapper = {w.input.original_bundle.id: w for w in self.bundles}
+        for asn in assignments:
+            w = bid_to_wrapper.get(asn.bundle_id)
+            if w is not None:
+                w.plan.selected_topology_index = asn.topo_index
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.plan.seg_perp = list(asn.seg_perp)
+
+    def _rerun_all(self):
+        """Apply sidecar topology selections, re-run planner layer assignment,
+        then re-run full NUTS.
+
+        Called by the TopoExplorer "Re-run & Refresh" button.
+        Returns the updated NUTSResult (also stored in self.nuts_result).
+        """
+        # Pin topology indices from sidecar.
+        self._apply_selections()
+
+        # Re-run the planner so that assigned_h_layer / assigned_v_layer / seg_layers
+        # are updated to match the new topology's segment directions.  The planner
+        # respects topology_pinned=True set by _apply_selections() and will not
+        # override the user's topology choice.
+        self._replan_layers()
+
+        layer_names = self._make_layer_names()
+        nuts = buda.NUTSEngine(self.fp, self.layers)
+        nuts.set_track_pitch(self._nuts_pitch)
+        if self.planner is not None:
+            nuts.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
+        before = self._segment_states_from_topology()
+        self.nuts_result = nuts.run(self.bundles)
+        self._adopt_doglegs()
+        diag = self._nuts_diagnostics(self.nuts_result, layer_names, before)
+        self._write_nuts_log(layer_names, append=True,
+                             rerun_layer_name="topo-rerun", extra_lines=diag)
+
+        if self.detailed_result is not None:
+            self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+            return self.nuts_result, self.detailed_result
+
+        return self.nuts_result
+
+    def _install_leaf_keepouts(self):
+        """Install implicit solid-leaf-cell keepouts on every non-TOP layer grid
+        so signal tracks over cells are excluded — matching the planner and
+        abstract NUTS (Gap 2).  Independent of the order in which blocks,
+        containers, and track patterns were declared.  Guarded per grid object so
+        repeated calls (detailed re-runs, or a `signal_tracks` plan before DNUTS)
+        don't re-add duplicates.  No-op without a routing grid."""
+        if self.routing_grid is None:
+            return
+        if getattr(self, '_leaf_keepouts_grid', None) is self.routing_grid:
+            return
+        for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
+            for lid in self.layers.get_layer_ids_by_dir(d):
+                if self.layers.is_top(lid) or not self.routing_grid.has_layer(lid):
+                    continue
+                for koz in self.fp.low_layer_keepouts([lid]):
+                    if lid in koz.layer_ids:
+                        self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
+                                                      koz.bbox.x2, koz.bbox.y2)
+        self._leaf_keepouts_grid = self.routing_grid
+
+    @staticmethod
+    def _planner_iters(args, default=5):
+        """First numeric token in a run_planner arg list, skipping the `hier` and
+        `signal_tracks` keywords; `default` if none."""
+        for a in args:
+            if a in ("hier", "signal_tracks"):
+                continue
+            try:
+                return int(a)
+            except ValueError:
+                continue
+        return default
+
+    def _configure_capacity_mode(self, args):
+        """Enable the signal-track band-capacity model on self.planner when the
+        `signal_tracks` keyword is present (Gap A part 2).  Requires a routing grid
+        with `def_track_pattern` layers; installs the leaf-cell keepouts first so
+        the planner counts exactly the tracks DetailedNUTS will place.  Must be
+        called after the planner is constructed and before build_congestion_map.
+        No-op (width model) without the keyword.
+
+        Requesting `signal_tracks` with no `def_track_pattern` defined is a hard
+        error (exit 1), not a silent fall-back: the user asked for a specific
+        capacity model that cannot be honoured, and quietly planning with the
+        width model instead would hide that the signal-track accounting never
+        happened."""
+        if "signal_tracks" not in args:
+            return
+        has_pattern = self.routing_grid is not None and any(
+            self.routing_grid.has_layer(lid)
+            for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL)
+            for lid in self.layers.get_layer_ids_by_dir(d))
+        if not has_pattern:
+            print("Error: run_planner signal_tracks needs a routing grid to count "
+                  "signal tracks, but no def_track_pattern is defined. Add "
+                  "def_track_pattern for the routed layers, or drop the "
+                  "signal_tracks option to plan with the width model.")
+            sys.exit(1)
+        self._install_leaf_keepouts()
+        self.planner.set_routing_grid(self.routing_grid)
+        self.planner.set_capacity_mode(buda.CapacityMode.SIGNAL_TRACKS)
+
+    def _run_detailed_nuts(self, bit_order="LO_HI"):
+        """Execute bit-level track assignment using DetailedNUTSEngine."""
+        if self.nuts_result is None or self.routing_grid is None:
+            return None
+
+        # Match the planner / abstract NUTS by excluding signal tracks over solid
+        # leaf cells on LOW layers before the solve.
+        self._install_leaf_keepouts()
+
+        # Stage-4 -> stage-9 handoff, single-sourced in C++ (make_bus_segments,
+        # detailed_nuts.cpp): every TrackSegment becomes a BusSegment, with the
+        # per-segment SEG connections / BUSTERM faces derived from the selected
+        # topology's cached analysis — the same derivation the abstract solve
+        # placed with, so the two stages can never drift.
+        bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
+                                          self.fp, bit_order)
+        engine = buda.DetailedNUTSEngine(self.routing_grid)
+        with buda.ostream_redirect():
+            self.detailed_result = engine.run(bus_segs)
+
+        n_net = len(self.detailed_result.net_segments)
+        n_unplaced = self.detailed_result.num_unplaced
+        print(f"[DetailedNUTS] {n_net} net segments placed, "
+              f"{n_unplaced} bits unplaced.")
+        return self.detailed_result

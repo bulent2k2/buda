@@ -19,6 +19,13 @@ rely on: a batch commits atomically, rolls back atomically, and NESTS via a
 depth counter so composing persist helpers issue only one real BEGIN/COMMIT.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import contextlib
 import io
 

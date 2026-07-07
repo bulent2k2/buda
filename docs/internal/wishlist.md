@@ -28,11 +28,16 @@ per-subsystem files so each area stays scannable.
   abstract-NUTS bus-segments + bus-vias (✅); detailed-NUTS net-segments,
   route-snapshot hash, and BDB→OA/GDS export remain.
 - **[wishlist-topo.md](wishlist-topo.md)** — Topology generation & connectivity.
-  True along-flex trunk DOF (Stage C of the flexible-root re-arch).
+  True along-flex trunk DOF (Stage C of the flexible-root re-arch); incremental
+  re-analysis (topo/conn unification Phase D, deferred by measurement); unify
+  the 2-pin vs n-pin filter ordering (changes routing bytes — needs its own
+  corpus review). See [topo_conn_unification.md](topo_conn_unification.md).
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.
   Coverage gate (✅ resolved — superseded by the generation-time
   `filter_uncovered` gate); signal-track band capacity (Gap A part 2, ✅
-  implemented); layer-assignment "instability" (✅ resolved, not a bug).
+  implemented); layer-assignment "instability" (✅ resolved, not a bug);
+  selection basis — rank on measured routability, not the generation-time WL
+  estimate (deferred; the planner-side of the BITRUNK/datapath-tree under-selection).
 - **[wishlist-nuts.md](wishlist-nuts.md)** — Abstract & Detailed NUTS.
   Band-level repack for spread-fit overlap clusters; pull-repack test failure (✅
   resolved, PR #69).

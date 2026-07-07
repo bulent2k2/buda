@@ -19,6 +19,13 @@ so a flow can deliberately update its committed fixture. A read-only flow (no
 keyword) must never rewrite the fixture.
 """
 
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
+
 import contextlib
 import io
 

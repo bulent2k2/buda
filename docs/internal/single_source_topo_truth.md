@@ -212,6 +212,18 @@ for **every** segment, so the shape is fully covered):
   persisted logically: no stage, and no reload, ever re-derives connectivity
   from geometry.
 
+- **Phase 6 — derived analysis unified (done).** The completion of this
+  effort for the OTHER half of ConnTopology: the six derivation passes
+  (connection re-encode, slide ranges, pass-through tightening, relay-tap
+  pinning, net-pull, along-flex) moved to `topology_analysis.{h,cpp}` as named
+  re-runnable units, and their result is **cached on the Topology itself**,
+  validated by a content fingerprint over every field the passes read — so no
+  stage ever recomputes an unchanged candidate's analysis, and a stale cache
+  is structurally impossible no matter who mutates what.  The fingerprint
+  doubles as the persisted `topo_uid` (schema v14), giving candidates a stable
+  identity that pins/sidecars survive regeneration by.  Full plan, phases, and
+  gates: [`topo_conn_unification.md`](topo_conn_unification.md).
+
 ## Why not just make the fallback smarter?
 
 A bend-aware fallback (skip a BUSTERM at an endpoint shared with a perpendicular

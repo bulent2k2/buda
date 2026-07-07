@@ -15,6 +15,8 @@
  */
 
 #include "nuts.h"
+#include "nuts_geom.h"
+#include "nuts_dogleg.h"
 #include "conn_topology.h"
 #include <algorithm>
 #include <cmath>
@@ -376,14 +378,7 @@ static void do_span_adjustments(
         // repair_overlaps, resolve_corner_overlaps) re-establishes it after
         // moving any track — a partner's flip can open nothing.
         auto cover = [&](double center) {
-            const double lo = std::min(other->span_lo, other->span_hi);
-            const double hi = std::max(other->span_lo, other->span_hi);
-            const bool ordered = (other->span_lo <= other->span_hi);
-            if (center < lo) {
-                (ordered ? other->span_lo : other->span_hi) = center;
-            } else if (center > hi) {
-                (ordered ? other->span_hi : other->span_lo) = center;
-            }
+            span_cover(other->span_lo, other->span_hi, center);
         };
         auto pit = rev_conn_map.find(key);
         if (pit != rev_conn_map.end()) {
@@ -409,13 +404,8 @@ static void do_span_adjustments(
         // spans and repair any overlap the extension materialises, instead of a
         // late pass leaving a shorted layout.  Applied per mutated `other` so
         // per-layer calls also cover cross-layer followers not in layer_segs.
-        for (double fc : other->busterm_faces) {
-            const double lo = std::min(other->span_lo, other->span_hi);
-            const double hi = std::max(other->span_lo, other->span_hi);
-            const bool ordered = (other->span_lo <= other->span_hi);
-            if (fc < lo)      (ordered ? other->span_lo : other->span_hi) = fc;
-            else if (fc > hi) (ordered ? other->span_hi : other->span_lo) = fc;
-        }
+        for (double fc : other->busterm_faces)
+            span_cover(other->span_lo, other->span_hi, fc);
 
         // span_lo/span_hi intentionally keep NOMINAL endpoint identity (span_lo
         // is the lo_end coordinate, span_hi the hi_end) even when placement
@@ -426,147 +416,30 @@ static void do_span_adjustments(
     }
 }
 
-// KeepoutZones on the segment's layer that intersect its span, as occupied
-// perpendicular intervals.
-// span_lo/span_hi carry NOMINAL endpoint identity and may be stored with
-// span_lo > span_hi after placement (see do_span_adjustments).  Geometric tests
-// — overlap detection, keepout/occupancy, block coverage — need the ORDERED
-// extent, so they take these instead of reading span_lo/span_hi directly.
-static inline double sp_lo(const TrackSegment& s) { return std::min(s.span_lo, s.span_hi); }
-static inline double sp_hi(const TrackSegment& s) { return std::max(s.span_lo, s.span_hi); }
-
-static void keepout_occupied(const std::vector<KeepoutZone>& kozs,
-                             const TrackSegment* t,
-                             std::vector<std::pair<double,double>>& occ)
+// Re-adjust every placed segment's span to its partners' current tracks — the
+// universal "settle" step after any track mutation (each guarded move, a group
+// re-solve, a layer rerun).
+static void settle_spans(std::vector<TrackSegment>& segments, NutsContext& ctx)
 {
-    for (const auto& koz : kozs) {
-        if (!koz.layer_ids.count(t->layer)) continue;
-        if (t->horiz) {
-            // Horizontal segment: span in X, pos in Y.
-            if (sp_lo(*t) < koz.bbox.x2 && sp_hi(*t) > koz.bbox.x1)
-                occ.push_back({static_cast<double>(koz.bbox.y1),
-                               static_cast<double>(koz.bbox.y2)});
-        } else {
-            // Vertical segment: span in Y, pos in X.
-            if (sp_lo(*t) < koz.bbox.y2 && sp_hi(*t) > koz.bbox.y1)
-                occ.push_back({static_cast<double>(koz.bbox.x1),
-                               static_cast<double>(koz.bbox.x2)});
-        }
-    }
+    std::vector<TrackSegment*> all_placed;
+    for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
+    do_span_adjustments(all_placed, ctx.rev_conn_map, ctx.ts_ptr_map);
 }
 
-// Physical overlap test for two placed segments at their current (adjusted)
-// spans.  Same-bundle pairs never conflict: their bits are the same nets and
-// may share tracks (DetailedNUTS reservation exempts same-bundle segments).
-static bool segs_overlap(const TrackSegment& a, const TrackSegment& b)
+void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
+                                 NutsContext& ctx) const
 {
-    if (a.layer != b.layer || !a.placed || !b.placed) return false;
-    if (a.bundle_id == b.bundle_id) return false;
-    // Abstract segments are bit-bundles, not single wires, so the two touch axes
-    // differ.  ALONG the routing direction (span), an end-to-end touch means the
-    // bits butt up collinearly → a DRC: the span test is CLOSED (touch counts).
-    // PERPENDICULAR (track), a parallel touch just means two bundles sit edge to
-    // edge; intra-bundle spacing covers it → not a DRC: the perp test stays
-    // STRICT.  So: spans overlap-or-touch AND tracks strictly overlap.
-    if (sp_hi(a) < sp_lo(b) || sp_hi(b) < sp_lo(a)) return false;
-    return a.track_position + a.width / 2.0 > b.track_position - b.width / 2.0 &&
-           b.track_position + b.width / 2.0 > a.track_position - a.width / 2.0;
-}
-
-// All overlapping segment-index pairs {i<j}, via a per-layer span sweep-line:
-// segments conflict only within a layer and only where their spans overlap, so
-// sort each layer by span_lo and compare an entering segment against just the
-// still-active set (segments whose span has not yet ended).  O(n log n + k) vs
-// the former O(n^2); the emitted pair set is identical (segs_overlap stays the
-// pairwise predicate, so same-bundle / track-disjoint pairs are filtered out).
-static std::vector<std::pair<int,int>> find_overlaps(
-    const std::vector<TrackSegment>& segments)
-{
-    std::map<int, std::vector<int>> by_layer;
-    for (int i = 0; i < (int)segments.size(); ++i)
-        if (segments[i].placed) by_layer[segments[i].layer].push_back(i);
-
-    std::vector<std::pair<int,int>> pairs;
-    std::vector<int> active;
-    for (auto& [layer, idx] : by_layer) {
-        std::sort(idx.begin(), idx.end(), [&](int a, int b) {
-            return sp_lo(segments[a]) < sp_lo(segments[b]);
-        });
-        active.clear();
-        for (int i : idx) {
-            const double lo_i = sp_lo(segments[i]);
-            // Evict only segments whose span ended strictly before i starts —
-            // a segment ending exactly at lo_i still TOUCHES i and must be
-            // compared (segs_overlap treats touch as a conflict).  Ordered bounds:
-            // span_lo/span_hi may be stored reversed (nominal endpoint identity).
-            active.erase(std::remove_if(active.begin(), active.end(),
-                [&](int a) { return sp_hi(segments[a]) < lo_i; }), active.end());
-            for (int a : active)
-                if (segs_overlap(segments[i], segments[a]))
-                    pairs.push_back({std::min(i, a), std::max(i, a)});
-            active.push_back(i);
-        }
-    }
-    return pairs;
-}
-
-// Placed segments whose track (± half width) falls outside their hard interval.
-static int count_violations(const std::vector<TrackSegment>& segments)
-{
-    int v = 0;
-    for (const auto& ts : segments) {
-        if (!ts.placed) continue;
-        if (ts.track_position - ts.width / 2.0 < ts.interval_lo ||
-            ts.track_position + ts.width / 2.0 > ts.interval_hi)
-            ++v;
-    }
-    return v;
-}
-
-static void compute_metrics(NUTSResult& result)
-{
-    result.num_violations = count_violations(result.segments);
-    result.num_overlaps   = 0;
-    result.overlaps_per_layer.clear();
-    result.overlap_details.clear();
-
-    for (auto [i, j] : find_overlaps(result.segments)) {
-        const auto& a = result.segments[i];
-        const auto& b = result.segments[j];
-        ++result.num_overlaps;
-        ++result.overlaps_per_layer[a.layer];
-        OverlapDetail od;
-        od.layer   = a.layer;
-        od.bid_a   = a.bundle_id;  od.seg_a = a.seg_idx;
-        od.bid_b   = b.bundle_id;  od.seg_b = b.seg_idx;
-        od.span_lo = std::max(sp_lo(a), sp_lo(b));   // ordered: spans may be reversed
-        od.span_hi = std::min(sp_hi(a), sp_hi(b));
-        od.perp_lo = std::max(a.track_position - a.width / 2.0,
-                              b.track_position - b.width / 2.0);
-        od.perp_hi = std::min(a.track_position + a.width / 2.0,
-                              b.track_position + b.width / 2.0);
-        result.overlap_details.push_back(od);
-    }
-}
-
-void NUTSEngine::repair_overlaps(
-    std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, double>&                pull_map,
-    const std::map<std::pair<int,int>, int>&                   net_pull_map,
-    const AlignMap&                                            align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const
-{
+    const auto& pull_map     = ctx.pull_map;
+    const auto& net_pull_map = ctx.net_pull_map;
+    const auto& align_map    = ctx.align_map;
+    auto&       ts_ptr_map   = ctx.ts_ptr_map;
     auto initial = find_overlaps(segments);
     if (initial.empty()) return;
 
     // Snapshot for the non-regression guard: a move re-adjusts follower
     // spans, which can surface new overlaps elsewhere.
-    struct Snap { double pos, lo, hi; };
-    std::vector<Snap> snapshot;
-    snapshot.reserve(segments.size());
-    for (const auto& ts : segments)
-        snapshot.push_back({ts.track_position, ts.span_lo, ts.span_hi});
+    PlacementSnapshot snapshot;
+    snapshot.take(segments);
 
     const auto kozs = low_keepouts();
     auto pull_of = [&](const TrackSegment& ts) {
@@ -578,22 +451,8 @@ void NUTSEngine::repair_overlaps(
     // locally good move can surface overlaps elsewhere.  Each move is
     // accepted only if the global overlap count strictly drops; otherwise
     // just that move is rolled back — earlier accepted moves are kept.
-    auto take_snap = [&](std::vector<Snap>& s) {
-        s.clear();
-        s.reserve(segments.size());
-        for (const auto& ts : segments)
-            s.push_back({ts.track_position, ts.span_lo, ts.span_hi});
-    };
-    auto restore_snap = [&](const std::vector<Snap>& s) {
-        for (size_t k = 0; k < segments.size(); ++k) {
-            segments[k].track_position = s[k].pos;
-            segments[k].span_lo        = s[k].lo;
-            segments[k].span_hi        = s[k].hi;
-        }
-    };
-
     int moved = 0;
-    std::vector<Snap> pre_move;
+    PlacementSnapshot pre_move;
     for (int iter = 0; iter < 8; ++iter) {
         auto pairs = find_overlaps(segments);
         if (pairs.empty()) break;
@@ -625,13 +484,8 @@ void NUTSEngine::repair_overlaps(
             std::vector<std::pair<double,double>> occ;
             keepout_occupied(kozs, victim, occ);
             for (const auto& o : segments) {
-                if (&o == victim || !o.placed) continue;
-                if (o.layer != victim->layer) continue;
-                if (o.bundle_id == victim->bundle_id) continue;
-                if (sp_lo(o) <= sp_hi(*victim) && sp_lo(*victim) <= sp_hi(o)) {  // closed: touch = occupied
-                    const double h = o.width / 2.0;
-                    occ.push_back({o.track_position - h, o.track_position + h});
-                }
+                if (&o == victim) continue;
+                occupancy_from(*victim, o, occ);
             }
             std::sort(occ.begin(), occ.end());
 
@@ -662,14 +516,12 @@ void NUTSEngine::repair_overlaps(
             if (std::isnan(pos) || pos == victim->track_position) continue;
 
             const size_t before = find_overlaps(segments).size();
-            take_snap(pre_move);
+            pre_move.take(segments);
             victim->track_position = pos;
             // Settle followers of the moved segment (and theirs, cheaply).
-            std::vector<TrackSegment*> all_placed;
-            for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
-            do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+            settle_spans(segments, ctx);
             if (find_overlaps(segments).size() >= before) {
-                restore_snap(pre_move);   // this move made things no better
+                pre_move.restore(segments);   // this move made things no better
                 continue;
             }
             ++moved;
@@ -681,7 +533,7 @@ void NUTSEngine::repair_overlaps(
     auto remaining = find_overlaps(segments);
     if (remaining.size() >= initial.size()) {
         // No strict improvement: restore the pre-repair state.
-        restore_snap(snapshot);
+        snapshot.restore(segments);
         return;
     }
     if (moved > 0)
@@ -721,30 +573,44 @@ static void set_pull_targets(
     }
 }
 
-void NUTSEngine::tighten_pulls(
-    std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, int>&                   net_pull_map,
-    const AlignMap&                                            align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map,
-    int only_layer) const
+// Build the per-solve NutsContext and apply the interval prep to `segments`,
+// exactly in the order run()/rerun_layer() did inline: build the maps, stamp
+// each segment's busterm faces, clamp intervals to slide windows (+ trunk
+// margin), relax boundary intervals, resolve pull targets, then index the
+// segments.  only_layer restricts the two interval passes to that layer
+// (rerun_layer's single-layer contract); -1 = all layers.
+static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
+                                 const Floorplan& floorplan,
+                                 std::vector<TrackSegment>& segments,
+                                 int only_layer = -1)
 {
+    NutsContext ctx;
+    build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
+                    ctx.trunk_set, ctx.busterm_set, ctx.rev_conn_map,
+                    ctx.net_pull_map, ctx.align_map, ctx.busterm_face_map);
+    for (auto& ts : segments) {
+        auto bf = ctx.busterm_face_map.find({ts.bundle_id, ts.seg_idx});
+        if (bf != ctx.busterm_face_map.end()) ts.busterm_faces = bf->second;
+    }
+    apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
+                               ctx.net_pull_map, only_layer);
+    relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
+                             ctx.busterm_set, only_layer);
+    set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
+    for (auto& ts : segments)
+        ctx.ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+    return ctx;
+}
+
+void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
+                               NutsContext& ctx,
+                               int only_layer) const
+{
+    const auto& net_pull_map = ctx.net_pull_map;
+    const auto& align_map    = ctx.align_map;
     const auto kozs = low_keepouts();
 
-    struct Snap { double pos, lo, hi; };
-    std::vector<Snap> pre_move;
-    auto take_snap = [&](std::vector<Snap>& s) {
-        s.clear(); s.reserve(segments.size());
-        for (const auto& ts : segments)
-            s.push_back({ts.track_position, ts.span_lo, ts.span_hi});
-    };
-    auto restore_snap = [&](const std::vector<Snap>& s) {
-        for (size_t k = 0; k < segments.size(); ++k) {
-            segments[k].track_position = s[k].pos;
-            segments[k].span_lo        = s[k].lo;
-            segments[k].span_hi        = s[k].hi;
-        }
-    };
+    PlacementSnapshot pre_move;
     // True routed length = sum of every placed segment's span extent.  Sliding a
     // segment toward its pull contracts the follower spans connected to it, so
     // this is the quantity the pass minimises.
@@ -766,12 +632,8 @@ void NUTSEngine::tighten_pulls(
                          std::vector<std::pair<double,double>>& occ) {
         keepout_occupied(kozs, &ts, occ);
         for (const auto& o : segments) {
-            if (&o == &ts || !o.placed || o.layer != ts.layer) continue;
-            if (o.bundle_id == ts.bundle_id) continue;
-            if (sp_lo(o) <= sp_hi(ts) && sp_lo(ts) <= sp_hi(o)) {  // closed: touch = occupied
-                const double h = o.width / 2.0;
-                occ.push_back({o.track_position - h, o.track_position + h});
-            }
+            if (&o == &ts) continue;
+            occupancy_from(ts, o, occ);
         }
         std::sort(occ.begin(), occ.end());
     };
@@ -836,14 +698,12 @@ void NUTSEngine::tighten_pulls(
         const size_t ov_before = find_overlaps(segments).size();
         const int    vi_before = count_violations(segments);
         const double wl_before = total_wl();
-        take_snap(pre_move);
+        pre_move.take(segments);
         ts.track_position = pos;
-        std::vector<TrackSegment*> all_placed;
-        for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        settle_spans(segments, ctx);
         if (find_overlaps(segments).size() > ov_before ||
             count_violations(segments)    > vi_before ||
-            total_wl() + 0.5 >= wl_before) { restore_snap(pre_move); return false; }
+            total_wl() + 0.5 >= wl_before) { pre_move.restore(segments); return false; }
         return true;
     };
 
@@ -926,16 +786,14 @@ void NUTSEngine::tighten_pulls(
         const size_t ov_before = find_overlaps(segments).size();
         const int    vi_before = count_violations(segments);
         const double wl_before = total_wl();
-        take_snap(pre_move);
+        pre_move.take(segments);
         for (size_t mi = 0; mi < members.size(); ++mi)
             segments[members[mi]].track_position = tgtpos[mi];
-        std::vector<TrackSegment*> all_placed;
-        for (auto& s : segments) if (s.placed) all_placed.push_back(&s);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        settle_spans(segments, ctx);
         if (find_overlaps(segments).size() > ov_before ||
             count_violations(segments)    > vi_before ||
             total_wl() + 0.5 >= wl_before) {
-            restore_snap(pre_move);
+            pre_move.restore(segments);
             return false;
         }
         return true;
@@ -970,14 +828,10 @@ void NUTSEngine::tighten_pulls(
                   << " group(s) toward their pull bound.\n";
 }
 
-void NUTSEngine::resolve_corner_overlaps(
-    std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, double>&                pull_map,
-    const std::map<std::pair<int,int>, int>&                   net_pull_map,
-    const AlignMap&                                            align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>&               ts_ptr_map) const
+void NUTSEngine::resolve_corner_overlaps(std::vector<TrackSegment>& segments,
+                                         NutsContext& ctx) const
 {
+    const auto& rev_conn_map = ctx.rev_conn_map;
     using Key = std::pair<int,int>;
     // A corner overlap is geometric (two stubs hanging from distinct trunks); it
     // need not stem from a span change — aligned trunks can make stubs touch
@@ -1081,10 +935,8 @@ void NUTSEngine::resolve_corner_overlaps(
         if (!new_edge) break;     // no resolvable corner overlap (or a cycle)
 
         // Snapshot for the stop-&-reverse guard.
-        struct Snap { double pos, lo, hi; bool placed; };
-        std::vector<Snap> snap; snap.reserve(segments.size());
-        for (const auto& ts : segments)
-            snap.push_back({ts.track_position, ts.span_lo, ts.span_hi, ts.placed});
+        PlacementSnapshot snap(/*with_placed=*/true);
+        snap.take(segments);
         const size_t before      = pairs.size();
         const int    before_viol = count_violations(segments);
 
@@ -1097,26 +949,18 @@ void NUTSEngine::resolve_corner_overlaps(
                     ts.placed = false;
                     layer_segs.push_back(&ts);
                 }
-            solve_layer(layer_segs, pull_map, align_map, by_layer_cons[layer],
-                        rev_conn_map, ts_ptr_map);
+            solve_layer(layer_segs, ctx, by_layer_cons[layer]);
         }
         // Re-fit connected spans to the new trunk positions and repair residue.
-        std::vector<TrackSegment*> all_placed;
-        for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
-        repair_overlaps(segments, pull_map, net_pull_map, align_map, rev_conn_map, ts_ptr_map);
+        settle_spans(segments, ctx);
+        repair_overlaps(segments, ctx);
 
         const size_t after = find_overlaps(segments).size();
         // Accept only a strict overlap improvement that does not introduce a new
         // interval violation (an infeasible ordering must not trade a legal
         // overlap for a violation) — otherwise stop & reverse.
         if (after >= before || count_violations(segments) > before_viol) {
-            for (size_t k = 0; k < segments.size(); ++k) {
-                segments[k].track_position = snap[k].pos;
-                segments[k].span_lo        = snap[k].lo;
-                segments[k].span_hi        = snap[k].hi;
-                segments[k].placed         = snap[k].placed;
-            }
+            snap.restore(segments);
             by_layer_cons = cons_before;   // this iteration's edges/bounds are reverted
             break;
         }
@@ -1285,42 +1129,69 @@ double NUTSEngine::preferred_fit(
     return best;
 }
 
-void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
-                              const std::map<std::pair<int,int>, double>& pull_map,
-                              const AlignMap& align_map,
-                              const LayerConstraints& constraints,
-                              const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& jn_map,
-                              const std::map<std::pair<int,int>, TrackSegment*>& jn_segs) const {
-    if (segs.empty()) return;
-    const auto& order_preds = constraints.preds;
-    const auto& order_bounds = constraints.bounds;
-    // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
-    std::map<std::pair<int,int>, TrackSegment*> layer_map;
-    for (TrackSegment* ts : segs)
-        layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
+// ---------------------------------------------------------------------------
+// LayerSolver — one layer's placement pass (Phase D of the nuts/dnuts
+// refactor).  Exactly the former 400-line solve_layer: the nested lambdas
+// became methods, the closed-over locals became members; bodies verbatim.
+// Placement flow: run_phase0() places corner-ordering-constrained anchors in
+// dependency order, run_phases12() anchors pulled segments then sweeps the
+// pull-free ones — all three share place_seg() / try_repack().
+// ---------------------------------------------------------------------------
+class LayerSolver {
+public:
+    LayerSolver(const NUTSEngine& eng,
+                std::vector<TrackSegment*>& segs_in,
+                NutsContext& ctx,
+                const LayerConstraints& constraints)
+        : eng_(eng), segs(segs_in),
+          pull_map(ctx.pull_map), align_map(ctx.align_map),
+          jn_map(ctx.rev_conn_map),   // junction edges (Part B)
+          jn_segs(ctx.ts_ptr_map),    // global segment lookup
+          order_preds(constraints.preds), order_bounds(constraints.bounds),
+          // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
+          // zones on LOW layers; TOP segments are filtered out by layer_ids).
+          kozs(eng.low_keepouts())
+    {
+        // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
+        for (TrackSegment* ts : segs)
+            layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
 
-    // Segments placed by phase 0 to satisfy corner-ordering edges.  Built up
-    // front (before the lambdas) so try_repack can treat them as fixed: a later
-    // non-constrained repack must not relocate a constrained trunk and undo the
-    // vertical constraint it was placed to enforce.
+        // Segments placed by phase 0 to satisfy corner-ordering edges.  Built up
+        // front so try_repack can treat them as fixed: a later non-constrained
+        // repack must not relocate a constrained trunk and undo the vertical
+        // constraint it was placed to enforce.
+        for (const auto& [k, preds] : order_preds) {
+            if (layer_map.count(k)) constrained.insert(k);
+            for (const auto& p : preds)
+                if (layer_map.count(p)) { constrained.insert(p); has_successor.insert(p); }
+        }
+        for (const auto& [k, b] : order_bounds)
+            if (layer_map.count(k)) constrained.insert(k);
+    }
+
+    void run() {
+        run_phase0();
+        run_phases12();
+    }
+
+private:
+    const NUTSEngine&                  eng_;
+    std::vector<TrackSegment*>&        segs;
+    const std::map<std::pair<int,int>, double>&                    pull_map;
+    const AlignMap&                                                align_map;
+    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&  jn_map;
+    const std::map<std::pair<int,int>, TrackSegment*>&             jn_segs;
+    const std::map<std::pair<int,int>, std::set<std::pair<int,int>>>& order_preds;
+    const std::map<std::pair<int,int>, std::pair<double,double>>&  order_bounds;
+    const std::vector<KeepoutZone>     kozs;
+    std::map<std::pair<int,int>, TrackSegment*> layer_map;
     std::set<std::pair<int,int>> constrained;
     std::set<std::pair<int,int>> has_successor;   // something ordered above it
-    for (const auto& [k, preds] : order_preds) {
-        if (layer_map.count(k)) constrained.insert(k);
-        for (const auto& p : preds)
-            if (layer_map.count(p)) { constrained.insert(p); has_successor.insert(p); }
-    }
-    for (const auto& [k, b] : order_bounds)
-        if (layer_map.count(k)) constrained.insert(k);
 
-    // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
-    // zones on LOW layers; TOP segments are filtered out by layer_ids).
-    auto kozs = low_keepouts();
-
-    auto add_keepout_occ = [&](const TrackSegment* t,
-                               std::vector<std::pair<double,double>>& occ) {
+    void add_keepout_occ(const TrackSegment* t,
+                         std::vector<std::pair<double,double>>& occ) const {
         keepout_occupied(kozs, t, occ);
-    };
+    }
 
     // Occupancy a candidate placement must avoid: every already-placed segment
     // of another bundle whose span overlaps ts (same-bundle bits may share
@@ -1329,21 +1200,14 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // for a single pull-free pass this is equivalent to the old active-set
     // sweep, since in span order an overlapping earlier segment is exactly one
     // that has started and not yet ended.
-    auto build_occupied = [&](const TrackSegment* ts,
-                              std::vector<std::pair<double,double>>& occ) {
+    void build_occupied(const TrackSegment* ts,
+                        std::vector<std::pair<double,double>>& occ) const {
         for (const TrackSegment* o : segs) {
-            if (o == ts || !o->placed || o->bundle_id == ts->bundle_id) continue;
-            // Closed-span (<=) to match segs_overlap: a span that merely TOUCHES
-            // ts is occupancy too, so ts is kept off o's track and the two don't
-            // end up collinear (an end-to-end DRC).  Spans that are truly
-            // disjoint (gap > 0) still don't block.
-            if (sp_lo(*o) <= sp_hi(*ts) && sp_lo(*ts) <= sp_hi(*o)) {
-                const double h = o->width / 2.0;
-                occ.push_back({o->track_position - h, o->track_position + h});
-            }
+            if (o == ts) continue;
+            occupancy_from(*ts, *o, occ);   // closed-span predicate, see nuts_geom.h
         }
         add_keepout_occ(ts, occ);
-    };
+    }
 
     // Local repack: when no gap fits ts, earlier centre-seeking placements
     // may have fragmented a window that has room for everyone (two 51-wide
@@ -1351,7 +1215,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // leaves two 29.5 slivers).  Re-place ts together with the active
     // segments contending for its interval, packing from the low edge,
     // against everything else already placed.  Commits only on full success.
-    auto try_repack = [&](TrackSegment* ts) -> bool {
+    bool try_repack(TrackSegment* ts) {
         // Members: every placed segment contending for ts's window (interval
         // overlap) — including ones whose sweep span already ended.  An ended
         // segment doesn't conflict with ts directly, but it constrains other
@@ -1400,12 +1264,8 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                 // sweep interval already ended) that overlap m's span.
                 // Same-bundle segments never conflict (bits may share tracks).
                 for (const TrackSegment* o : segs) {
-                    if (!o->placed || member_set.count(o)) continue;
-                    if (o->bundle_id == m->bundle_id) continue;
-                    if (sp_lo(*o) <= sp_hi(*m) && sp_lo(*m) <= sp_hi(*o)) {  // closed: touch = occupied
-                        const double h = o->width / 2.0;
-                        occ.push_back({o->track_position - h, o->track_position + h});
-                    }
+                    if (member_set.count(o)) continue;
+                    occupancy_from(*m, *o, occ);
                 }
                 for (const auto& [pm, ppos] : repacked) {
                     if (pm->bundle_id == m->bundle_id) continue;
@@ -1437,9 +1297,9 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                     const double c_lo = m->interval_lo + half;
                     const double c_hi = m->interval_hi - half;
                     if (c_lo <= c_hi) pref = std::clamp(pref, c_lo, c_hi);
-                    p = preferred_fit(m->interval_lo, m->interval_hi, m->width, occ, pref);
+                    p = eng_.preferred_fit(m->interval_lo, m->interval_hi, m->width, occ, pref);
                 } else {
-                    p = first_fit(m->interval_lo, m->interval_hi, m->width, occ);
+                    p = eng_.first_fit(m->interval_lo, m->interval_hi, m->width, occ);
                 }
                 if (std::isnan(p)) return {};   // this member can't fit: pack failed
                 repacked.push_back({m, p});
@@ -1455,7 +1315,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         if (repacked.empty()) return false;   // window truly full: keep old state
         for (const auto& [pm, ppos] : repacked) pm->track_position = ppos;
         return true;
-    };
+    }
 
     // Place one segment at its preferred track, avoiding current occupancy.
     // lb/ub (optional) are hard bounds on the track CENTER — phase 0 uses them to
@@ -1463,10 +1323,10 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // of a cross-layer split (ub).  pack_low packs to the lowest feasible track
     // (same-layer ordering); otherwise placement seeks `target` if finite
     // (cross-layer: nudge toward the split bound), else the align/pull preference.
-    auto place_seg = [&](TrackSegment* ts,
-                         double lb = -kInf, double ub = kInf,
-                         bool pack_low = false,
-                         double target = std::numeric_limits<double>::quiet_NaN()) {
+    void place_seg(TrackSegment* ts,
+                   double lb = -kInf, double ub = kInf,
+                   bool pack_low = false,
+                   double target = std::numeric_limits<double>::quiet_NaN()) {
         std::vector<std::pair<double,double>> occupied;
         build_occupied(ts, occupied);
         std::sort(occupied.begin(), occupied.end());
@@ -1484,7 +1344,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         // std::clamp(preferred, c_lo, c_hi) would be undefined.
         double pos;
         if (pack_low) {
-            pos = first_fit(eff_lo, eff_hi, ts->width, occupied);
+            pos = eng_.first_fit(eff_lo, eff_hi, ts->width, occupied);
         } else {
             auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
             // Cross-layer bounded trunks aim straight at the split-side bound;
@@ -1542,7 +1402,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             // std::clamp requires lo <= hi.  preferred_fit returns NaN there
             // anyway, so the value is irrelevant — just avoid the UB.
             if (c_lo <= c_hi) preferred = std::clamp(preferred, c_lo, c_hi);
-            pos = preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
+            pos = eng_.preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
         }
         // try_repack re-places members with first_fit over their FULL intervals,
         // ignoring lb/ub — so it must not run for a phase-0 constrained placement
@@ -1567,45 +1427,50 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             ts->track_position = fb;
         }
         ts->placed = true;
-    };
+    }
+
+    // Lower bound from a phase-0 segment's placed predecessors: just above the
+    // highest one, one pitch clear.
+    double lb_of(const std::pair<int,int>& k, const TrackSegment* ts) const {
+        double lb = -std::numeric_limits<double>::infinity();
+        auto it = order_preds.find(k);
+        if (it != order_preds.end())
+            for (const auto& p : it->second) {
+                auto lit = layer_map.find(p);
+                if (lit == layer_map.end() || !lit->second->placed) continue;
+                lb = std::max(lb, lit->second->track_position
+                                  + lit->second->width / 2.0
+                                  + ts->width / 2.0 + eng_.track_pitch_);
+            }
+        return lb;
+    }
+
+    // Place one phase-0 segment honoring both its relative-pred lower bound
+    // and any fixed cross-layer bounds.  A bounded (cross-layer) trunk is
+    // nudged toward its split-side bound via preferred_fit; a relative-pred
+    // (same-layer) trunk packs to the bottom edge.
+    void place_phase0(const std::pair<int,int>& k, TrackSegment* ts) {
+        double lb = lb_of(k, ts);
+        double ub = kInf;
+        double target = std::numeric_limits<double>::quiet_NaN();
+        auto bit = order_bounds.find(k);
+        const bool bounded = (bit != order_bounds.end());
+        if (bounded) {
+            lb = std::max(lb, bit->second.first);
+            ub = bit->second.second;
+            // Aim at the finite (split-facing) bound for minimal movement.
+            target = (ub < kInf) ? ub : bit->second.first;
+        }
+        place_seg(ts, lb, ub, /*pack_low=*/!bounded, target);
+    }
 
     // Phase 0 — ordering-constrained segments (corner-overlap resolution): place
     // each in dependency order (after every segment that must sit below it),
     // clamped just above its placed predecessors.  They become placed anchors
-    // the normal anchor/sweep phases then avoid.  (`constrained` built above.)
-    if (!constrained.empty()) {
+    // the normal anchor/sweep phases then avoid.  (`constrained` built in ctor.)
+    void run_phase0() {
+        if (constrained.empty()) return;
         std::set<std::pair<int,int>> done;
-        auto lb_of = [&](const std::pair<int,int>& k, const TrackSegment* ts) {
-            double lb = -std::numeric_limits<double>::infinity();
-            auto it = order_preds.find(k);
-            if (it != order_preds.end())
-                for (const auto& p : it->second) {
-                    auto lit = layer_map.find(p);
-                    if (lit == layer_map.end() || !lit->second->placed) continue;
-                    lb = std::max(lb, lit->second->track_position
-                                      + lit->second->width / 2.0
-                                      + ts->width / 2.0 + track_pitch_);
-                }
-            return lb;
-        };
-        // Place one phase-0 segment honoring both its relative-pred lower bound
-        // and any fixed cross-layer bounds.  A bounded (cross-layer) trunk is
-        // nudged toward its split-side bound via preferred_fit; a relative-pred
-        // (same-layer) trunk packs to the bottom edge.
-        auto place_phase0 = [&](const std::pair<int,int>& k, TrackSegment* ts) {
-            double lb = lb_of(k, ts);
-            double ub = kInf;
-            double target = std::numeric_limits<double>::quiet_NaN();
-            auto bit = order_bounds.find(k);
-            const bool bounded = (bit != order_bounds.end());
-            if (bounded) {
-                lb = std::max(lb, bit->second.first);
-                ub = bit->second.second;
-                // Aim at the finite (split-facing) bound for minimal movement.
-                target = (ub < kInf) ? ub : bit->second.first;
-            }
-            place_seg(ts, lb, ub, /*pack_low=*/!bounded, target);
-        };
         std::vector<std::pair<int,int>> todo(constrained.begin(), constrained.end());
         bool progress = true;
         while (!todo.empty() && progress) {
@@ -1664,39 +1529,48 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // segments fill the residual gaps in phase 2.  A pull-free trunk then slides
     // off any track a pulled bus needs, instead of grabbing it by sweep order
     // and forcing the pulled bus to detour (item A: planner6 Bundle 3/4).
-    std::vector<TrackSegment*> pulled, free_segs;
-    for (TrackSegment* ts : segs) {
-        if (constrained.count({ts->bundle_id, ts->seg_idx})) continue;  // placed in phase 0
-        (ts->net_pull != 0 ? pulled : free_segs).push_back(ts);
-    }
-    // FP-determinism: window widths are FP-derived and can differ by ~1e-12
-    // across CPUs; a strict `<` on the raw doubles flips near-ties per machine.
-    // Sort on a QUANTIZED integer key (1e-6 quantum) instead — a strict weak
-    // ordering by construction (a raw epsilon comparator is not: sub-tolerance
-    // deltas chain non-transitively, which is UB for stable_sort — Codex #152).
-    // BUDA keys are integer/half-integer-valued reals, so ~1e-12 noise can never
-    // move llround across a rounding boundary; equal keys keep the deterministic
-    // input order via stable_sort — today's exact-tie behavior, on every machine.
-    auto q = [](double v) { return std::llround(v * 1e6); };
-    std::stable_sort(pulled.begin(), pulled.end(),
-        [&q](const TrackSegment* a, const TrackSegment* b) {
-            int pa = std::abs(a->net_pull), pb = std::abs(b->net_pull);
-            if (pa != pb) return pa > pb;                       // strongest pull first
-            return q(a->interval_hi - a->interval_lo)
-                 < q(b->interval_hi - b->interval_lo);          // tightest window first
-        });
-    for (TrackSegment* ts : pulled) place_seg(ts);
-
     // Phase 2 — sweep the pull-free segments in span order; each sees the
     // anchors and earlier free segments via build_occupied and slides to the
     // nearest free track.
-    std::stable_sort(free_segs.begin(), free_segs.end(),
-        [&q](const TrackSegment* a, const TrackSegment* b) {
-            // Quantized integer key (see pulled sort); ordered: span_lo may be
-            // reversed.  Equal keys keep the deterministic input order.
-            return q(sp_lo(*a)) < q(sp_lo(*b));
-        });
-    for (TrackSegment* ts : free_segs) place_seg(ts);
+    void run_phases12() {
+        std::vector<TrackSegment*> pulled, free_segs;
+        for (TrackSegment* ts : segs) {
+            if (constrained.count({ts->bundle_id, ts->seg_idx})) continue;  // placed in phase 0
+            (ts->net_pull != 0 ? pulled : free_segs).push_back(ts);
+        }
+        // FP-determinism: window widths are FP-derived and can differ by ~1e-12
+        // across CPUs; a strict `<` on the raw doubles flips near-ties per machine.
+        // Sort on a QUANTIZED integer key (1e-6 quantum) instead — a strict weak
+        // ordering by construction (a raw epsilon comparator is not: sub-tolerance
+        // deltas chain non-transitively, which is UB for stable_sort — Codex #152).
+        // BUDA keys are integer/half-integer-valued reals, so ~1e-12 noise can never
+        // move llround across a rounding boundary; equal keys keep the deterministic
+        // input order via stable_sort — today's exact-tie behavior, on every machine.
+        auto q = [](double v) { return std::llround(v * 1e6); };
+        std::stable_sort(pulled.begin(), pulled.end(),
+            [&q](const TrackSegment* a, const TrackSegment* b) {
+                int pa = std::abs(a->net_pull), pb = std::abs(b->net_pull);
+                if (pa != pb) return pa > pb;                       // strongest pull first
+                return q(a->interval_hi - a->interval_lo)
+                     < q(b->interval_hi - b->interval_lo);          // tightest window first
+            });
+        for (TrackSegment* ts : pulled) place_seg(ts);
+
+        std::stable_sort(free_segs.begin(), free_segs.end(),
+            [&q](const TrackSegment* a, const TrackSegment* b) {
+                // Quantized integer key (see pulled sort); ordered: span_lo may be
+                // reversed.  Equal keys keep the deterministic input order.
+                return q(sp_lo(*a)) < q(sp_lo(*b));
+            });
+        for (TrackSegment* ts : free_segs) place_seg(ts);
+    }
+};
+
+void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
+                              NutsContext& ctx,
+                              const LayerConstraints& constraints) const {
+    if (segs.empty()) return;
+    LayerSolver(*this, segs, ctx, constraints).run();
 }
 
 void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys) {
@@ -1711,12 +1585,12 @@ void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys)
 void NUTSEngine::orientation_fixpoint(
     std::vector<TrackSegment>& segments,
     std::map<int, std::vector<TrackSegment*>>& by_layer,
-    const std::map<std::pair<int,int>, double>& pull_map,
-    const AlignMap& align_map,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    std::map<std::pair<int,int>, TrackSegment*>& ts_ptr_map,
+    NutsContext& ctx,
     const std::map<int, LayerConstraints>& seed_cons) const
 {
+    const auto& pull_map     = ctx.pull_map;
+    const auto& rev_conn_map = ctx.rev_conn_map;
+    auto&       ts_ptr_map   = ctx.ts_ptr_map;
     if (by_layer.empty()) return;
     auto cons_for = [&](int lid) -> const LayerConstraints& {
         static const LayerConstraints kEmpty;
@@ -1756,29 +1630,17 @@ void NUTSEngine::orientation_fixpoint(
                 ts->track_position = std::numeric_limits<double>::quiet_NaN();
                 ts->placed = false;
             }
-            solve_layer(by_layer[lid], pull_map, align_map, cons_for(lid),
-                        rev_conn_map, ts_ptr_map);
+            solve_layer(by_layer[lid], ctx, cons_for(lid));
         }
-        std::vector<TrackSegment*> all_placed;
-        for (auto& ts : segments) if (ts.placed) all_placed.push_back(&ts);
-        do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
+        settle_spans(segments, ctx);
     };
 
-    struct Snap { double pos, lo, hi; bool placed; };
     auto take = [&]() {
-        std::vector<Snap> s; s.reserve(segments.size());
-        for (const auto& ts : segments)
-            s.push_back({ts.track_position, ts.span_lo, ts.span_hi, ts.placed});
+        PlacementSnapshot s(/*with_placed=*/true);
+        s.take(segments);
         return s;
     };
-    auto restore = [&](const std::vector<Snap>& s) {
-        for (size_t k = 0; k < segments.size(); ++k) {
-            segments[k].track_position = s[k].pos;
-            segments[k].span_lo        = s[k].lo;
-            segments[k].span_hi        = s[k].hi;
-            segments[k].placed         = s[k].placed;
-        }
-    };
+    auto restore = [&](const PlacementSnapshot& s) { s.restore(segments); };
     // Legacy per-layer order (ascending id, per-layer span adjustment, then a
     // final all-layer pass) — today's solve, honouring any seed constraints.
     auto legacy_solve = [&]() {
@@ -1787,8 +1649,7 @@ void NUTSEngine::orientation_fixpoint(
                 ts->track_position = std::numeric_limits<double>::quiet_NaN();
                 ts->placed = false;
             }
-            solve_layer(segs, pull_map, align_map, cons_for(lid),
-                        rev_conn_map, ts_ptr_map);
+            solve_layer(segs, ctx, cons_for(lid));
             do_span_adjustments(segs, rev_conn_map, ts_ptr_map);
         }
         for (auto& [lid, segs] : by_layer) {
@@ -1834,7 +1695,7 @@ void NUTSEngine::orientation_fixpoint(
     legacy_solve();
     size_t            best_ov    = find_overlaps(segments).size();
     const double      legacy_dev = pull_deviation();
-    std::vector<Snap> best_snap  = take();
+    PlacementSnapshot best_snap  = take();
     std::set<size_t>  seen{state_hash()};
 
     if (!lead_group.empty() && !perp_group.empty()) {
@@ -1851,297 +1712,7 @@ void NUTSEngine::orientation_fixpoint(
     restore(best_snap);
 }
 
-// A fully-specified plan to break a vertical-constraint cycle by doglegging one
-// trunk: split it at a column between col1 and col2 so its two pieces straddle
-// their respective neighbour trunks (high1 at col1 vs neighbor1, high2 at col2 vs
-// neighbor2).  high1 != high2 — that contradiction is why no single track for the
-// trunk works.  For a 2-cycle neighbor1 == neighbor2; for a longer cycle they
-// differ (each piece orders against a different trunk on the cycle).
-struct CycleEdge { std::pair<int,int> from, to; double col; };   // "from below to" at col
-struct DoglegPlan {
-    std::pair<int,int> split_trunk;
-    int    layer;
-    double col1; bool high1; std::pair<int,int> neighbor1;
-    double col2; bool high2; std::pair<int,int> neighbor2;
-    // The full cycle's ordering edges.  Seeding ALL of them (with the split
-    // trunk redirected to its covering piece) imposes the complete vertical
-    // order — not just the split trunk's two constraints — so the trunks the
-    // split does not touch (their mutual edge) are ordered too.
-    std::vector<CycleEdge> cycle_edges;
-};
 
-// Build the same-layer vertical-constraint graph from co-located stub pairs and
-// return, for the FIRST directed cycle found, one plan per trunk on the cycle
-// (so the caller can split whichever is cheapest).  The graph is built from
-// geometry, not from a single placement — a true cycle only ever exposes one
-// contradictory column at a time, so the structural view is necessary.
-static std::vector<DoglegPlan> detect_dogleg_plans(
-    const std::vector<TrackSegment>& segments,
-    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>& rev_conn_map,
-    const std::set<std::pair<int,int>>& trunk_set)
-{
-    using Key = std::pair<int,int>;
-    // rev_conn_map records connectivity BOTH ways (a trunk's endpoint also
-    // "follows" its end stub), so a trunk can appear as a follower of its own
-    // stub.  Only genuine stubs (not trunks) define columns where a corner
-    // overlap can occur, so skip any follower that is itself a trunk.
-    std::map<Key, std::pair<Key,bool>> trunk_of;
-    for (const auto& [tkey, conns] : rev_conn_map)
-        for (const auto& sc : conns) {
-            const Key fkey{sc.src_bid, sc.src_si};
-            if (trunk_set.count(fkey)) continue;       // a trunk is not a stub
-            trunk_of[fkey] = {tkey, sc.lo_end};
-        }
-    std::map<Key,int> idx_of;
-    for (int i = 0; i < (int)segments.size(); ++i)
-        idx_of[{segments[i].bundle_id, segments[i].seg_idx}] = i;
-    // The far (block-side) end of a stub, fixed by the floorplan: the trunk whose
-    // stub reaches LOWER must take the lower track.
-    auto anchored_coord = [](const TrackSegment& s, bool lo_end) {
-        return lo_end ? s.span_hi : s.span_lo;
-    };
-
-    // Co-locate stubs by their Hanan INTERVAL (the column they are constrained
-    // to), not by nominal or placed position: the interval is placement-
-    // independent, so it catches two wide (multi-bit) stubs that share a narrow
-    // column even when NUTS shifted them to different tracks (and it doesn't
-    // vanish once NUTS separates a conflicting pair).  The vertical constraint
-    // then follows from which stub reaches farther (anchored end).
-    struct Stub { Key key, trunk; double ilo, ihi, center, anchored; int trunk_layer; };
-    std::vector<Stub> stubs;
-    for (const auto& [k, tinfo] : trunk_of) {
-        auto sit = idx_of.find(k);
-        auto tit = idx_of.find(tinfo.first);
-        if (sit == idx_of.end() || tit == idx_of.end()) continue;
-        const TrackSegment& s = segments[sit->second];
-        stubs.push_back({k, tinfo.first, s.interval_lo, s.interval_hi,
-                         0.5 * (s.interval_lo + s.interval_hi),
-                         anchored_coord(s, tinfo.second), segments[tit->second].layer});
-    }
-
-    // Directed edge lo_trunk → hi_trunk ("lo below hi") at a column, from every
-    // co-located, distinct-bundle stub pair whose trunks share a layer.
-    constexpr double kColTol = 2.0;
-    std::map<Key, std::map<Key,double>> adj;   // from → {to → column}
-    for (size_t a = 0; a < stubs.size(); ++a)
-        for (size_t b = a + 1; b < stubs.size(); ++b) {
-            if (stubs[a].key.first == stubs[b].key.first) continue;   // same bundle
-            if (stubs[a].trunk == stubs[b].trunk) continue;
-            if (stubs[a].trunk_layer != stubs[b].trunk_layer) continue;
-            // Co-located: their Hanan intervals overlap (same column).
-            if (stubs[a].ihi <= stubs[b].ilo || stubs[b].ihi <= stubs[a].ilo) continue;
-            const bool a_lower = stubs[a].anchored < stubs[b].anchored;
-            Key lo = a_lower ? stubs[a].trunk : stubs[b].trunk;
-            Key hi = a_lower ? stubs[b].trunk : stubs[a].trunk;
-            adj[lo].emplace(hi, 0.5 * (stubs[a].center + stubs[b].center));  // keep first column
-        }
-
-    // DFS for one directed cycle; record it as the node sequence v→…→u (with the
-    // back edge u→v closing it).
-    std::map<Key,int> color;            // 0 white, 1 gray, 2 black
-    std::map<Key,Key> parent;
-    std::vector<Key> cyc;
-    std::function<bool(const Key&)> dfs = [&](const Key& u) -> bool {
-        color[u] = 1;
-        for (const auto& [v, col] : adj[u]) {
-            (void)col;
-            if (color[v] == 1) {            // back edge → cycle v…u
-                std::vector<Key> rev;
-                for (Key cur = u; cur != v; cur = parent[cur]) rev.push_back(cur);
-                cyc.push_back(v);
-                for (auto it = rev.rbegin(); it != rev.rend(); ++it) cyc.push_back(*it);
-                return true;
-            }
-            if (color[v] == 0) { parent[v] = u; if (dfs(v)) return true; }
-        }
-        color[u] = 2;
-        return false;
-    };
-    for (const auto& [n, _] : adj) {
-        (void)_;
-        if (color[n] == 0 && dfs(n)) break;
-    }
-    if (cyc.size() < 2) return {};
-    const int n = (int)cyc.size();
-
-    // The cycle's directed ordering edges (nodes[i] below nodes[i+1] at its col).
-    std::vector<CycleEdge> cycle_edges;
-    for (int i = 0; i < n; ++i)
-        cycle_edges.push_back({cyc[i], cyc[(i + 1) % n], adj[cyc[i]][cyc[(i + 1) % n]]});
-
-    // One plan per trunk on the cycle: its incoming edge (prev below it → it must
-    // be HIGH there) and outgoing edge (it below next → LOW there) give the two
-    // contradictory columns and the two neighbour trunks.
-    std::vector<DoglegPlan> plans;
-    for (int i = 0; i < n; ++i) {
-        const Key& ti   = cyc[i];
-        const Key& prev = cyc[(i - 1 + n) % n];
-        const Key& next = cyc[(i + 1) % n];
-        const double col_in  = adj[prev][ti];   // prev → ti
-        const double col_out = adj[ti][next];   // ti → next
-        if (std::abs(col_in - col_out) <= kColTol) continue;  // can't dogleg at one column
-        DoglegPlan p;
-        p.split_trunk = ti;
-        p.layer = segments[idx_of[ti]].layer;
-        p.col1 = col_in;  p.high1 = true;  p.neighbor1 = prev;  // ti above prev at col_in
-        p.col2 = col_out; p.high2 = false; p.neighbor2 = next;  // ti below next at col_out
-        p.cycle_edges = cycle_edges;
-        plans.push_back(p);
-    }
-    return plans;
-}
-
-// Split one trunk of a 2-cycle into two collinear pieces on different tracks,
-// joined by a perpendicular jog (the BITRUNK_H shape), so the two pieces become
-// INDEPENDENT trunks: each can be ordered against the other bundle's trunk on
-// its own, breaking the cycle.  The trunk's two stubs are extended to meet their
-// piece and the jog bridges the pieces; seg_layers is extended so the new
-// segments keep the trunk/stub layers.  Mutates the selected Topology in place;
-// returns the jog's new segment index, or -1 if the split is unsupported.
-//
-// (col1,high1)/(col2,high2) give, for THIS bundle's trunk, the two conflicting
-// columns and whether it must take the higher track there.  high1 != high2 — that
-// contradiction is the cycle, and it sets which piece jogs up vs down.
-struct DoglegResult {
-    bool ok = false;
-    int  jog_si = -1;
-    int  piece_l_si = -1;     // rewritten trunk segment, covers x <= jog_x
-    int  piece_r_si = -1;     // appended segment, covers x >  jog_x
-    int  jog_x = 0;           // split column: stubs left of it hang from piece_l, right from piece_r
-    bool piece_l_high = false;
-};
-static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
-                                 double col1, bool high1, double col2, bool high2,
-                                 int delta, const std::vector<int>& orig_net_pull,
-                                 double orig_slide_lo, double orig_slide_hi)
-{
-    if (bw.plan.selected_topology_index < 0) return {};
-    Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
-    if (trunk_si < 0 || trunk_si >= (int)topo.segments.size()) return {};
-    const Segment trunk = topo.segments[trunk_si];
-    if (trunk.start.y != trunk.end.y) return {};   // only horizontal trunks for now
-    const int y_t  = trunk.start.y;
-    const int x_lo = std::min(trunk.start.x, trunk.end.x);
-    const int x_hi = std::max(trunk.start.x, trunk.end.x);
-
-    // Order the columns left/right and carry their required high-sides along.
-    const bool col1_left = (col1 <= col2);
-    const double colL = col1_left ? col1 : col2;
-    const double colR = col1_left ? col2 : col1;
-    const bool highL = col1_left ? high1 : high2;
-    const bool highR = col1_left ? high2 : high1;
-    if (x_hi - x_lo < 2) return {};
-    int jog_x = (int)std::llround(0.5 * (colL + colR));
-    jog_x = std::clamp(jog_x, x_lo + 1, x_hi - 1);
-
-    const int yL = y_t + (highL ? delta : -delta);
-    const int yR = y_t + (highR ? delta : -delta);
-    // The two pieces must land on DIFFERENT tracks or the split separates nothing.
-    // detect_dogleg_plans always emits high1=true/high2=false, so highL != highR and
-    // yL != yR; guard anyway so a future change to that convention can't silently
-    // collapse the pieces onto one track.
-    if (yL == yR) return {};
-
-    int h_layer = trunk.layer_hint;
-    if (trunk_si < (int)bw.plan.seg_layers.size() && bw.plan.seg_layers[trunk_si] >= 0)
-        h_layer = bw.plan.seg_layers[trunk_si];
-    int v_layer = -1;                          // jog rides a perpendicular (stub) layer
-    for (int si = 0; si < (int)topo.segments.size(); ++si) {
-        const Segment& s = topo.segments[si];
-        if (s.start.x == s.end.x) {            // a vertical stub
-            v_layer = (si < (int)bw.plan.seg_layers.size() && bw.plan.seg_layers[si] >= 0)
-                          ? bw.plan.seg_layers[si] : s.layer_hint;
-            break;
-        }
-    }
-    if (v_layer < 0) return {};
-
-    // Rewrite the trunk as the left piece; append the right piece and the jog.
-    // The jog is marked so it is exempt from sibling alignment.
-    topo.segments[trunk_si] = Segment{ Point{x_lo, yL}, Point{jog_x, yL}, h_layer };
-    const int piece_r_idx = (int)topo.segments.size();
-    topo.segments.push_back(Segment{ Point{jog_x, yR}, Point{x_hi, yR}, h_layer });
-    const int jog_idx = (int)topo.segments.size();
-    Segment jog{ Point{jog_x, yL}, Point{jog_x, yR}, v_layer };
-    jog.is_jog = true;
-    topo.segments.push_back(jog);
-
-    auto set_layer = [&](int idx, int lid) {
-        if ((int)bw.plan.seg_layers.size() <= idx) bw.plan.seg_layers.resize(idx + 1, -1);
-        bw.plan.seg_layers[idx] = lid;
-    };
-    set_layer(trunk_si, h_layer);
-    set_layer(piece_r_idx, h_layer);
-    set_layer(jog_idx, v_layer);
-
-    // Pin net_pull (ConnTopology would recompute the split bundle's pulls wrongly):
-    // stubs keep their pre-split value, both sub-trunks inherit the trunk's, the
-    // jog is net-zero.  Sliding a sub-trunk toward a face only stretches the jog
-    // as much as it shortens the stub (net-zero wirelength), so the trunk pull is
-    // the right thing for both pieces.
-    const int INT_MIN_ = std::numeric_limits<int>::min();
-    const int trunk_pull = (trunk_si < (int)orig_net_pull.size()) ? orig_net_pull[trunk_si] : 0;
-    auto& snp = bw.plan.seg_net_pull;
-    snp.assign(topo.segments.size(), INT_MIN_);
-    for (int i = 0; i < (int)orig_net_pull.size() && i < (int)snp.size(); ++i)
-        if (i != trunk_si) snp[i] = orig_net_pull[i];   // stubs preserve their pull
-    snp[trunk_si]    = trunk_pull;                       // left piece inherits trunk
-    snp[piece_r_idx] = trunk_pull;                       // right piece inherits trunk
-    snp[jog_idx]     = 0;                                // jog is net-zero
-
-    // Pin slide windows: each sub-trunk inherits the ORIGINAL trunk's slide
-    // range (ConnTopology, seeing only a subset of stubs per piece, would give a
-    // narrower one), and the jog is clamped to the trunk's stub extent [x_lo,
-    // x_hi] so it cannot slide beyond any stub/busterm the trunk connected to.
-    const double kNaN = std::numeric_limits<double>::quiet_NaN();
-    auto& slo = bw.plan.seg_slide_lo;
-    auto& shi = bw.plan.seg_slide_hi;
-    slo.assign(topo.segments.size(), kNaN);
-    shi.assign(topo.segments.size(), kNaN);
-    slo[trunk_si]    = orig_slide_lo;  shi[trunk_si]    = orig_slide_hi;  // left piece
-    slo[piece_r_idx] = orig_slide_lo;  shi[piece_r_idx] = orig_slide_hi;  // right piece
-    slo[jog_idx]     = x_lo;           shi[jog_idx]     = x_hi;           // jog footprint
-
-    // Clear the rewritten piece's stale planner band: seg_perp[trunk_si] still
-    // names the ORIGINAL trunk's charged band (≈ the old single track), which
-    // build_nuts_maps would prefer over the new high/low nominal and undo the
-    // split.  INT_MIN ⇒ fall back to the segment's own (jogged) nominal.  The
-    // appended pieces have no seg_perp entry, so they already use their nominal.
-    if (trunk_si < (int)bw.plan.seg_perp.size())
-        bw.plan.seg_perp[trunk_si] = std::numeric_limits<int>::min();
-
-    // Extend each of the trunk's stubs (a vertical segment with an endpoint at
-    // the old trunk y) up/down to meet whichever piece now covers its column —
-    // left piece (yL) if it sits left of the jog, right piece (yR) otherwise —
-    // so the nominal topology stays connected.  (void)colL/colR: ordering is by
-    // jog_x, not exact column.
-    (void)colL; (void)colR;
-    for (auto& s : topo.segments) {
-        if (s.start.x != s.end.x) continue;                 // only vertical stubs
-        if (s.is_jog) continue;                             // skip the jog we appended
-        // Skip by the is_jog flag, NOT by x==jog_x: an ORIGINAL stub may also sit
-        // at the rounded jog column (multicast/odd-grid).  Such a stub still has an
-        // endpoint at y_t and must be extended to yL like any left-of-jog stub, so
-        // it touches the left piece's endpoint (jog_x, yL) and stays connected; the
-        // jog itself (endpoints yL/yR, never y_t) would be untouched regardless.
-        const int sx = s.start.x;
-        const int new_y = (sx <= jog_x) ? yL : yR;
-        if (s.start.y == y_t)      s.start.y = new_y;
-        else if (s.end.y == y_t)   s.end.y   = new_y;
-    }
-    // The split invalidated the generation-time seg_conns records (the trunk
-    // index is now the left piece; a right piece + jog were appended; stub
-    // endpoints moved).  Re-derive them ONCE on the post-split nominal geometry
-    // — the deliberate annotation point for this mutation, since ConnTopology no
-    // longer infers junctions geometrically (topo-truth Phase 4).  seg_busterms
-    // is untouched, exactly as before (the split never lands on a tapped
-    // endpoint).
-    annotate_seg_conns(topo);
-    // piece_l_high reports which piece sits on the higher track, derived from the
-    // EMITTED geometry (yL vs yR) — the single source of truth — rather than highL,
-    // so the no-swap seed edge can never disagree with the tracks actually placed.
-    return DoglegResult{ true, jog_idx, trunk_si, piece_r_idx, jog_x, (yL > yR) };
-}
 
 // Junction infeasibility (Part B): a junction edge is infeasible when the
 // landing segment's entire feasible centre range (its hard interval, i.e. the
@@ -2228,30 +1799,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // One full placement of a (possibly dogleg-mutated) bundle set: extract
     // segments, build maps, run the orientation fixpoint, classify cycles, then
     // the repair/corner safety net.  Returned so the dogleg pass can re-place.
-    struct SolveOut { NUTSResult result; std::vector<DoglegPlan> plans; };
     auto solve = [&](const std::vector<BundleWrapper>& bs,
-                     const std::map<int, LayerConstraints>& seed_cons) -> SolveOut {
+                     const std::map<int, LayerConstraints>& seed_cons) -> DoglegSolveOut {
         NUTSResult result;
         result.segments = extract_segments(bs, x_grid, y_grid);
-        std::map<std::pair<int,int>, double>                         pull_map;
-        std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
-        std::set<std::pair<int,int>>                                 trunk_set;
-        std::set<std::pair<int,int>>                                 busterm_set;
-        std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
-        std::map<std::pair<int,int>, int>                            net_pull_map;
-        AlignMap                                                     align_map;
-        std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
-        build_nuts_maps(bs, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
-        for (auto& ts : result.segments) {
-            auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
-            if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
-        }
-        apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, -1);
-        relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set);
-        set_pull_targets(result.segments, pull_map, net_pull_map);
-        std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
-        for (auto& ts : result.segments)
-            ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+        NutsContext ctx = build_context(bs, floorplan_, result.segments);
         std::map<int, std::vector<TrackSegment*>> by_layer;
         for (auto& ts : result.segments)
             by_layer[ts.layer].push_back(&ts);
@@ -2259,176 +1811,39 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // group, propagate spans to the perpendicular group, solve it, propagate
         // back, and iterate — so each group packs against the other's already-
         // stretched spans instead of stale ones.  Replaces the per-layer loop.
-        orientation_fixpoint(result.segments, by_layer, pull_map, align_map,
-                             rev_conn_map, ts_ptr_map, seed_cons);
+        orientation_fixpoint(result.segments, by_layer, ctx, seed_cons);
         // Classify any genuinely cyclic vertical constraint NOW, on the raw
         // post-fixpoint overlaps: a 2-cycle shows both contradictory column
         // overlaps at once.  The corner pass below would half-resolve it —
         // fixing one column and leaving a single residual — which hides the
         // mutual-edge structure.  The 2-cycle filter guarantees the safety-net
         // passes could not have fixed these anyway.
-        SolveOut out;
-        out.plans = detect_dogleg_plans(result.segments, rev_conn_map, trunk_set);
+        DoglegSolveOut out;
+        out.plans = detect_dogleg_plans(result.segments, ctx.rev_conn_map, ctx.trunk_set);
         // The final adjustments can extend spans of layers packed earlier,
         // materialising overlaps after their solve — repair them in place.
-        repair_overlaps(result.segments, pull_map, net_pull_map, align_map,
-                        rev_conn_map, ts_ptr_map);
+        repair_overlaps(result.segments, ctx);
         // Corner overlaps (perp-locked stubs colliding) need trunk adjustment,
         // not victim moves — resolve via same-layer ordering or cross-layer
         // split bounds.
-        resolve_corner_overlaps(result.segments, pull_map, net_pull_map, align_map,
-                                rev_conn_map, ts_ptr_map);
+        resolve_corner_overlaps(result.segments, ctx);
         // Final opportunistic tighten: slide pulled segments toward their pull in
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
-        tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map);
+        tighten_pulls(result.segments, ctx);
         compute_metrics(result);
         out.result = std::move(result);
         return out;
     };
 
     std::vector<BundleWrapper> bundles = bundles_in;   // mutable: doglegs edit topologies
-    SolveOut out = solve(bundles, {});
+    DoglegSolveOut out = solve(bundles, {});
 
-    // Dogleg fallback: a genuine vertical-constraint cycle survives the corner
-    // pass.  Split one trunk on the cycle across two tracks (joined by a jog) so
-    // its two pieces become INDEPENDENT trunks that straddle their neighbours —
-    // one piece above the neighbour at one column, one below the neighbour at the
-    // other — breaking the cycle.  We seed that straddle ordering directly as a
-    // same-layer constraint, since the corner pass would only discover one edge
-    // at a time and revert.  Each detected cycle yields one plan per trunk on it;
-    // try each and keep the cheapest (fewer overlaps, then shorter jog).
-    //
-    // Gate on a SMALL residual: the dogleg cleans up the few genuinely cyclic
-    // overlaps the corner pass can't, not heavy congestion.  When many overlaps
-    // remain the placement is still settling (e.g. an intermediate run_nuts a
-    // later post_nuts / re-pitch pass will resolve); doglegging there only
-    // perturbs a flow that otherwise converges to zero.
-    const int kMaxDoglegs  = 8;
-    const int kMaxResidual = 4;
-    std::set<int> doglegged_bids;   // bundles whose topology the dogleg mutated
-    for (int dl = 0; dl < kMaxDoglegs && !out.plans.empty()
-                     && out.result.num_overlaps <= kMaxResidual; ++dl) {
-        const std::vector<DoglegPlan> plans = out.plans;
-        auto find_bw = [&](int bid) -> int {
-            for (int i = 0; i < (int)bundles.size(); ++i)
-                if (bundles[i].input.original_bundle.id == bid) return i;
-            return -1;
-        };
-        bool applied = false;
-        std::vector<BundleWrapper> best_bundles;
-        SolveOut                   best_out;
-        double                     best_jog  = std::numeric_limits<double>::max();
-        double                     best_span = -1.0;
-        int                        best_bid  = -1;
-        for (const DoglegPlan& p : plans) {
-            int bw_idx = find_bw(p.split_trunk.first);
-            if (bw_idx < 0) continue;
-            // Don't split a bundle twice: apply_dogleg re-assigns (overwrites) the
-            // whole seg_net_pull / seg_slide_* arrays, which would wipe an earlier
-            // iteration's pins for this bundle.  A second cycle through it is left to
-            // a later iteration on a different bundle, or to the BEST_EFFORT residual.
-            if (doglegged_bids.count(p.split_trunk.first)) continue;
-            // Trunk geometry: its slide window (interval) must hold two sub-trunks,
-            // and a longer span gives the jog more room to slide — so among the
-            // cycle's trunks we prefer the one with the longest span (tie-broken on
-            // a shorter jog), skipping any whose slide window is too narrow.
-            double trunk_w = 1.0, trunk_span = 0.0, trunk_slide = 0.0;
-            double trunk_slide_lo = 0.0, trunk_slide_hi = 0.0;
-            for (const auto& ts : out.result.segments)
-                if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == p.split_trunk.second) {
-                    trunk_w        = ts.width;
-                    trunk_span     = sp_hi(ts) - sp_lo(ts);   // ordered length
-                    trunk_slide_lo = ts.interval_lo;
-                    trunk_slide_hi = ts.interval_hi;
-                    trunk_slide    = ts.interval_hi - ts.interval_lo;
-                }
-            if (trunk_slide < 2.0 * trunk_w + 2.0 * track_pitch_) continue;  // can't host two pieces
-            // Capture this bundle's pre-split net_pull per seg_idx, so apply_dogleg
-            // can pin stubs (preserve) and sub-trunks (inherit the trunk).
-            std::vector<int> orig_net_pull;
-            for (const auto& ts : out.result.segments)
-                if (ts.bundle_id == p.split_trunk.first) {
-                    if (ts.seg_idx >= (int)orig_net_pull.size())
-                        orig_net_pull.resize(ts.seg_idx + 1, 0);
-                    orig_net_pull[ts.seg_idx] = ts.net_pull;
-                }
-            // Seed the jog tall enough that the pieces clear the neighbour trunks
-            // between them: separation ≳ bus width + pitch each side.
-            const int delta = (int)std::ceil(trunk_w + track_pitch_ + 2.0);
-            std::vector<BundleWrapper> trial = bundles;
-            DoglegResult dr = apply_dogleg(trial[bw_idx], p.split_trunk.second,
-                                           p.col1, p.high1, p.col2, p.high2, delta,
-                                           orig_net_pull, trunk_slide_lo, trunk_slide_hi);
-            if (!dr.ok) continue;
-
-            // Seed the FULL cycle ordering (preds[X] = segments below X), with
-            // the split trunk redirected to whichever piece covers each edge's
-            // column (left of the jog → piece_l, right → piece_r).  This imposes
-            // the complete vertical order, including the edge between the two
-            // trunks the split does not touch, which the corner pass can't.
-            const std::pair<int,int> piece_l{p.split_trunk.first, dr.piece_l_si};
-            const std::pair<int,int> piece_r{p.split_trunk.first, dr.piece_r_si};
-            auto redirect = [&](const std::pair<int,int>& node, double col) {
-                if (node != p.split_trunk) return node;
-                return (col <= dr.jog_x) ? piece_l : piece_r;
-            };
-            // The split only breaks the cycle if the trunk's two contradictory edges
-            // (col1/col2) land on DIFFERENT pieces.  They are guaranteed > kColTol
-            // apart and jog_x is their midpoint, so this normally holds; reject the
-            // plan if it doesn't (an N>=3 cycle with both edges on one side of the
-            // jog, or a column near jog_x) rather than seed a cycle-preserving order.
-            if (redirect(p.split_trunk, p.col1) == redirect(p.split_trunk, p.col2))
-                continue;
-            std::map<int, LayerConstraints> seed;
-            for (const CycleEdge& e : p.cycle_edges) {
-                const auto a = redirect(e.from, e.col);   // a below b
-                const auto b = redirect(e.to,   e.col);
-                if (a != b) seed[p.layer].preds[b].insert(a);
-            }
-            // Pin the two sub-trunks' relative order so they can never swap: the
-            // high piece must sit above the low piece.  They don't overlap in the
-            // routing direction (they only touch at the jog), so nothing else
-            // enforces this — one explicit edge keeps the jog from inverting.
-            seed[p.layer].preds[dr.piece_l_high ? piece_l : piece_r]
-                         .insert(dr.piece_l_high ? piece_r : piece_l);
-            SolveOut t = solve(trial, seed);
-
-            // Jog length of the placed jog segment (tie-break; shorter is cheaper).
-            double jog_len = std::numeric_limits<double>::max();
-            for (const auto& ts : t.result.segments)
-                if (ts.bundle_id == p.split_trunk.first && ts.seg_idx == dr.jog_si)
-                    jog_len = sp_hi(ts) - sp_lo(ts);   // ordered length
-            // Prefer: fewer overlaps, then the LONGER trunk (more jog room), then
-            // the shorter jog.
-            const int ov = t.result.num_overlaps;
-            const bool better =
-                !applied ||
-                ov <  best_out.result.num_overlaps ||
-                (ov == best_out.result.num_overlaps && trunk_span > best_span + 1e-6) ||
-                (ov == best_out.result.num_overlaps && std::abs(trunk_span - best_span) <= 1e-6
-                                                    && jog_len < best_jog);
-            if (better) {
-                applied      = true;
-                best_bundles = std::move(trial);
-                best_out     = std::move(t);
-                best_jog     = jog_len;
-                best_span    = trunk_span;
-                best_bid     = p.split_trunk.first;
-            }
-        }
-        if (applied && best_out.result.num_overlaps < out.result.num_overlaps) {
-            std::cout << "[NUTS] dogleg: split a trunk to break a cyclic vertical "
-                         "constraint on layer " << plans.front().layer
-                      << " (overlaps " << out.result.num_overlaps
-                      << " -> " << best_out.result.num_overlaps << ").\n";
-            bundles = std::move(best_bundles);
-            out     = std::move(best_out);
-            if (best_bid >= 0) doglegged_bids.insert(best_bid);
-        } else {
-            break;   // no dogleg helped — leave the residual to BEST_EFFORT
-        }
-    }
+    // Dogleg fallback (nuts_dogleg.cpp): when a genuine vertical-constraint
+    // cycle survives the corner pass, split one trunk on the cycle across two
+    // tracks joined by a jog and re-solve; returns the mutated bundle ids.
+    const std::set<int> doglegged_bids =
+        run_dogleg_fallback(bundles, out, solve, track_pitch_);
 
     // Export the dogleg-mutated topologies so the CLI can adopt them before it
     // rebuilds ConnTopology for detailed NUTS — otherwise the split bundle's
@@ -2481,42 +1896,21 @@ NUTSResult NUTSEngine::rerun_layer(
         ts.track_lo_bound = -kInf;
         ts.track_hi_bound =  kInf;
     }
-    std::map<std::pair<int,int>, double>                         pull_map;
-    std::map<std::pair<int,int>, std::pair<double,double>>       slide_map;
-    std::set<std::pair<int,int>>                                 trunk_set;
-    std::set<std::pair<int,int>>                                 busterm_set;
-    std::map<std::pair<int,int>, std::vector<SpanAdjConn>>       rev_conn_map;
-    std::map<std::pair<int,int>, int>                            net_pull_map;
-    AlignMap                                                     align_map;
-    std::map<std::pair<int,int>, std::vector<double>>            busterm_face_map;
-    build_nuts_maps(bundles, floorplan_, pull_map, slide_map, trunk_set, busterm_set, rev_conn_map, net_pull_map, align_map, busterm_face_map);
-    for (auto& ts : result.segments) {
-        auto bf = busterm_face_map.find({ts.bundle_id, ts.seg_idx});
-        if (bf != busterm_face_map.end()) ts.busterm_faces = bf->second;
-    }
-    apply_interval_constraints(result.segments, slide_map, trunk_set, net_pull_map, layer_id);
-    relax_boundary_intervals(result.segments, pull_map, net_pull_map, busterm_set, layer_id);
-    set_pull_targets(result.segments, pull_map, net_pull_map);
-    std::map<std::pair<int,int>, TrackSegment*> ts_ptr_map;
-    for (auto& ts : result.segments)
-        ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
+    NutsContext ctx = build_context(bundles, floorplan_, result.segments, layer_id);
     std::vector<TrackSegment*> layer_segs;
     for (auto& ts : result.segments)
         if (ts.layer == layer_id) layer_segs.push_back(&ts);
-    solve_layer(layer_segs, pull_map, align_map, {}, rev_conn_map, ts_ptr_map);
+    solve_layer(layer_segs, ctx, {});
     // Final pass for all layers to catch cross-layer adjustments from the re-solved layer.
-    std::vector<TrackSegment*> all_placed;
-    for (auto& ts : result.segments) if (ts.placed) all_placed.push_back(&ts);
-    do_span_adjustments(all_placed, rev_conn_map, ts_ptr_map);
-    repair_overlaps(result.segments, pull_map, net_pull_map, align_map,
-                    rev_conn_map, ts_ptr_map);
+    settle_spans(result.segments, ctx);
+    repair_overlaps(result.segments, ctx);
     // Note: resolve_corner_overlaps is NOT run here.  It re-solves whole trunk
     // layers, which may differ from layer_id — that would violate rerun_layer's
     // single-layer contract.  Corner overlaps are resolved by the full run().
     // Tighten only this layer's pulled segments toward their pull bound (the
     // overlap / wirelength guards stay global, so cross-layer spans are honoured)
     // — keeps the single-layer contract while still recovering wirelength.
-    tighten_pulls(result.segments, net_pull_map, align_map, rev_conn_map, ts_ptr_map, layer_id);
+    tighten_pulls(result.segments, ctx, layer_id);
     compute_metrics(result);
     // Refresh the junction-infeasibility signal from the re-solved state: the
     // copy from prev may hold edges the rerun just fixed (stale) or miss ones

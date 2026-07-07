@@ -20,6 +20,13 @@ select_topologies (and no run_planner) were labelled "PLANNER SELECTED
 selected_topology_index — which select_topology(ies) also sets. The planner is
 "active" only once it has actually run (and assigned per-segment layers).
 """
+
+import pytest
+
+# Moved to the mid tier: full-pipeline / BDB round-trip / interchange
+# integration (keeps the fast tier < 10s). See
+# docs/internal/test_runtime_analysis.md.
+pytestmark = pytest.mark.mid
 import os
 import sys
 

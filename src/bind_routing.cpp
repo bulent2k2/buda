@@ -20,8 +20,11 @@
 // bind_db(m) and bind_bundler(m) must be called before this.
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <cstdio>
 #include <iostream>
 #include "topology.h"
+#include "topology_analysis.h"
+#include "topo_edit.h"
 #include "layering.h"
 #include "congestion_planner.h"
 #include "floorplanner.h"
@@ -247,6 +250,54 @@ void bind_routing(py::module_& m) {
     m.def("flip_mst_edge", &flip_mst_edge,
           py::arg("topo"), py::arg("edge_id"),
           py::arg("h_layer"), py::arg("v_layer"), py::arg("fp"));
+
+    // Analysis-cache instrumentation (Phase B, topo_conn_unification.md):
+    // cumulative (computes, hits) of the content-fingerprint-validated
+    // ConnTopology analysis cache, plus a reset.  Test/diagnostic only.
+    m.def("analysis_cache_counters", &analysis_cache_counters);
+    m.def("analysis_cache_reset_counters", &analysis_cache_reset_counters);
+
+    // Stable candidate identity (Phase E1): a hex content key over all
+    // load-bearing persisted topology state (segments incl. edge_id,
+    // canonical seg_busterms, seg_conns, bridges, feedthru/connected blocks).
+    // Recomputable from a checkpoint alone — uid(generated) == uid(reloaded);
+    // pins and sidecar selections re-attach by this key across regenerations.
+    m.def("topo_uid", [](const Topology& t) {
+        char buf[17];
+        std::snprintf(buf, sizeof buf, "%016llx",
+                      (unsigned long long)topology_fingerprint(t));
+        return std::string(buf);
+    }, py::arg("topo"));
+
+    // ── TopoEdit (Phase E3): transactional expert edits, each returning an
+    // EditVerdict (check_topo violations + pinch) so a hand edit can never
+    // silently corrupt annotations.  Undo = snapshot/restore the Topology.
+    py::class_<EditVerdict>(m, "EditVerdict")
+        .def_readonly("applied", &EditVerdict::applied)
+        .def_readonly("note",    &EditVerdict::note)
+        .def_readonly("seg_idx", &EditVerdict::seg_idx)
+        .def_readonly("conn",    &EditVerdict::conn)
+        .def_readonly("pinched", &EditVerdict::pinched)
+        .def_readonly("components", &EditVerdict::components)
+        .def("ok", &EditVerdict::ok);
+    m.def("edit_add_trunk", &edit_add_trunk,
+          py::arg("topo"), py::arg("fp"), py::arg("horiz"), py::arg("perp_pos"),
+          py::arg("along_lo") = 1, py::arg("along_hi") = 0,   // lo>hi = full span
+          py::arg("layer"));
+    m.def("edit_remove_segment", &edit_remove_segment,
+          py::arg("topo"), py::arg("fp"), py::arg("seg_idx"));
+    m.def("edit_add_stub", &edit_add_stub,
+          py::arg("topo"), py::arg("fp"), py::arg("block"), py::arg("to_seg"),
+          py::arg("layer"));
+    m.def("edit_set_span", &edit_set_span,
+          py::arg("topo"), py::arg("fp"), py::arg("seg_idx"),
+          py::arg("along_lo"), py::arg("along_hi"));
+    m.def("edit_connect", &edit_connect,
+          py::arg("topo"), py::arg("fp"), py::arg("i"), py::arg("j"));
+    m.def("edit_disconnect", &edit_disconnect,
+          py::arg("topo"), py::arg("fp"), py::arg("i"), py::arg("j"),
+          py::arg("retract_to"));
+    m.def("edit_verdict", &edit_verdict, py::arg("topo"), py::arg("fp"));
 
     // Persist / reload a topology's seg_busterms logically (Phase 3): the tap
     // annotation round-trips through the BDB busterm + topology_seg_busterm tables

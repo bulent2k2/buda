@@ -194,7 +194,7 @@ Interval [0, 28] with unit_pitch=14:
 
 ## `.buda` Command
 
-See [BUDA_SCRIPT_REFERENCE.md](BUDA_SCRIPT_REFERENCE.md#stage-9--detailed-nuts) for full syntax.
+See the [Script Reference — Track assignment](script_reference/nuts.md#stage-9--detailed-nuts) for full syntax.
 
 ```buda
 # Snap all bus segments to concrete signal tracks (LO_HI ordering by default)

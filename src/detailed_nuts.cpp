@@ -15,6 +15,8 @@
  */
 
 #include "detailed_nuts.h"
+#include "conn_topology.h"
+#include "nuts_geom.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -56,7 +58,15 @@ bool DetailedNUTSEngine::signals_contiguous(
 DetailedNUTSResult DetailedNUTSEngine::run(
         const std::vector<BusSegment>& bus_segs) const {
     DetailedNUTSResult result;
+    place_by_layer(bus_segs, result);
+    adjust_bit_spans(bus_segs, result);
+    emit_bit_vias(bus_segs, result);
+    return result;
+}
 
+void DetailedNUTSEngine::place_by_layer(
+        const std::vector<BusSegment>& bus_segs,
+        DetailedNUTSResult& result) const {
     // ------------------------------------------------------------------ //
     // 1. Group segment indices by layer; sort each layer by abstract_pos. //
     // ------------------------------------------------------------------ //
@@ -269,11 +279,15 @@ DetailedNUTSResult DetailedNUTSEngine::run(
                                      std::move(assigned)});
         }
     }
+}
 
-    // ------------------------------------------------------------------ //
-    // 4. Span-adjustment post-pass: extend bit-wire endpoints to reach    //
-    //    all connected perpendicular segments' exact track_positions.     //
-    // ------------------------------------------------------------------ //
+// ---------------------------------------------------------------------- //
+// 4. Span-adjustment post-pass: extend bit-wire endpoints to reach        //
+//    all connected perpendicular segments' exact track_positions.         //
+// ---------------------------------------------------------------------- //
+void DetailedNUTSEngine::adjust_bit_spans(
+        const std::vector<BusSegment>& bus_segs,
+        DetailedNUTSResult& result) const {
     {
         using Key = std::tuple<int,int,int>; // bundle_id, seg_idx, bit_index
         std::map<Key, int> idx_map;
@@ -337,11 +351,7 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             // (e.g. ends 80/20 + a tap at 90 -> [80,90], dropping the 20 end).
             // Mirrors the abstract-NUTS coverage pass in nuts.cpp.
             auto cover = [&](double c) {
-                const double lo = std::min(ns.span_lo, ns.span_hi);
-                const double hi = std::max(ns.span_lo, ns.span_hi);
-                const bool ordered = (ns.span_lo <= ns.span_hi);
-                if (c < lo)      (ordered ? ns.span_lo : ns.span_hi) = c;
-                else if (c > hi) (ordered ? ns.span_hi : ns.span_lo) = c;
+                span_cover(ns.span_lo, ns.span_hi, c);
             };
             if (cover_lo !=  std::numeric_limits<double>::infinity()) cover(cover_lo);
             if (cover_hi != -std::numeric_limits<double>::infinity()) cover(cover_hi);
@@ -353,15 +363,32 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             // block (big2 bus_077 / blk_12).
             for (double fc : bs_ptr->busterm_faces) cover(fc);
         }
+    }
+}
 
-        // -------------------------------------------------------------- //
-        // 5. Per-bit via emission: one NetVia wherever bit i of a segment //
-        //    meets bit i of a connected segment on a DIFFERENT layer.     //
-        //    Fans the symbolic bundle-level bus-via out to bit_width per- //
-        //    bit vias (same (bundle, from_seg, to_seg) key + bit_index).  //
-        //    Runs after the span adjustment, which never moves            //
-        //    track_position — so the crossings below are final geometry.  //
-        // -------------------------------------------------------------- //
+// ------------------------------------------------------------------ //
+// 5. Per-bit via emission: one NetVia wherever bit i of a segment     //
+//    meets bit i of a connected segment on a DIFFERENT layer.         //
+//    Fans the symbolic bundle-level bus-via out to bit_width per-     //
+//    bit vias (same (bundle, from_seg, to_seg) key + bit_index).      //
+//    Runs after the span adjustment, which never moves                //
+//    track_position — so the crossings below are final geometry.      //
+// ------------------------------------------------------------------ //
+void DetailedNUTSEngine::emit_bit_vias(
+        const std::vector<BusSegment>& bus_segs,
+        DetailedNUTSResult& result) const {
+    {
+        using Key = std::tuple<int,int,int>; // bundle_id, seg_idx, bit_index
+        std::map<Key, int> idx_map;
+        for (int i = 0; i < (int)result.net_segments.size(); ++i) {
+            const auto& ns = result.net_segments[i];
+            idx_map[{ns.bundle_id, ns.seg_idx, ns.bit_index}] = i;
+        }
+
+        std::map<std::pair<int,int>, const BusSegment*> bs_map;
+        for (const auto& bs : bus_segs)
+            bs_map[{bs.bundle_id, bs.seg_idx}] = &bs;
+
         std::set<std::tuple<int,int,int,int>> emitted; // (bid, lo_seg, hi_seg, bit)
         for (const auto& ns : result.net_segments) {
             auto bsit = bs_map.find({ns.bundle_id, ns.seg_idx});
@@ -408,8 +435,76 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             }
         }
     }
+}
 
-    return result;
+std::vector<BusSegment> make_bus_segments(
+    const std::vector<BundleWrapper>& bundles,
+    const NUTSResult& nuts_result,
+    const Floorplan& floorplan,
+    const std::string& bit_order)
+{
+    // Per-bundle bit width (net count) and per-segment connectivity from the
+    // SELECTED topology's cached analysis — the same derivation the abstract
+    // solve's build_nuts_maps used, so stage 9 sees the junctions stage 4
+    // placed with (this loop is the former Python handoff, verbatim).
+    std::map<int, int>                  bid_to_nbits;
+    std::map<int, std::vector<ConnSeg>> bid_to_cs;
+    for (const auto& w : bundles) {
+        const int bid = w.input.original_bundle.id;
+        bid_to_nbits[bid] =
+            (int)w.input.original_bundle.get_net_names().size();
+        const int sel = w.plan.selected_topology_index;
+        if (w.input.candidates.empty() || sel < 0 ||
+            sel >= (int)w.input.candidates.size()) {
+            bid_to_cs[bid] = {};
+            continue;
+        }
+        ConnTopology ct;
+        ct.build(w.input.candidates[sel], floorplan);
+        bid_to_cs[bid] = ct.segs();
+    }
+
+    std::vector<BusSegment> out;
+    out.reserve(nuts_result.segments.size());
+    for (const auto& ts : nuts_result.segments) {
+        BusSegment bs;
+        bs.bundle_id   = ts.bundle_id;
+        bs.seg_idx     = ts.seg_idx;
+        bs.layer       = ts.layer;
+        bs.span_lo     = ts.span_lo;
+        bs.span_hi     = ts.span_hi;
+        bs.interval_lo = ts.interval_lo;
+        bs.interval_hi = ts.interval_hi;
+        auto nb = bid_to_nbits.find(ts.bundle_id);
+        bs.bit_width   = (nb != bid_to_nbits.end()) ? nb->second : 1;
+        bs.bit_order   = bit_order;
+        bs.abstract_pos = ts.track_position;
+        // Cross-layer corner split bounds (carried into detailed NUTS so the
+        // trunk's bits snap to its committed side on real signal tracks).
+        bs.track_lo_bound = ts.track_lo_bound;
+        bs.track_hi_bound = ts.track_hi_bound;
+
+        auto csit = bid_to_cs.find(ts.bundle_id);
+        if (csit != bid_to_cs.end() &&
+            ts.seg_idx < (int)csit->second.size()) {
+            const ConnSeg& cs = csit->second[ts.seg_idx];
+            for (const auto& conn : cs.conns) {
+                if (conn.kind == SegConn::SEG) {
+                    BusSegmentConn c;
+                    c.seg_idx     = conn.seg_idx;
+                    c.at_pos      = (double)conn.at_pos;
+                    c.is_endpoint = conn.is_endpoint;
+                    const double mid = 0.5 * (cs.along_lo + cs.along_hi);
+                    c.lo_end      = (c.at_pos <= mid);
+                    bs.connections.push_back(c);
+                } else {  // BUSTERM: keep the block-face tap reachable per-bit
+                    bs.busterm_faces.push_back((double)conn.face_coord);
+                }
+            }
+        }
+        out.push_back(std::move(bs));
+    }
+    return out;
 }
 
 } // namespace buda
