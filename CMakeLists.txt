@@ -106,6 +106,7 @@ set(SOURCE_FILES
     src/layering.cpp
     src/congestion_planner.cpp
     src/nuts.cpp
+    src/nuts_dogleg.cpp
     src/routing_grid.cpp
     src/detailed_nuts.cpp
     src/floorplanner.cpp
