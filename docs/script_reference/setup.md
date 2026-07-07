@@ -46,8 +46,8 @@ def_layer 7 M7 V TOP 0.0  span_min 300              # long trunks only
 ### `add_block`
 
 ```
-add_block <name> <x1> <y1> <x2> <y2> [corner_margin dx <n> [dy <n>]]
-add_block <name> <x1> <y1> <x2> <y2> [corner_margin pct_h <p> [pct_v <p>]]
+add_block <name> <x1> <y1> <x2> <y2> [container] [corner_margin dx <n> [dy <n>]]
+add_block <name> <x1> <y1> <x2> <y2> [container] [corner_margin pct_h <p> [pct_v <p>]]
 add_block <name> rect <x1> <y1> <x2> <y2> [rect ...] [teg_mode thru|over] [corner_margin ...]
 ```
 
