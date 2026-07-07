@@ -41,7 +41,7 @@ set_planner_param kBalance 0.0       # disable TOP-layer load balancing
 ### `run_planner`
 
 ```
-run_planner [<iterations>]
+run_planner [<iterations>] [signal_tracks]
 ```
 
 Runs the global congestion-aware router. Bundles are processed widest-first
@@ -148,7 +148,7 @@ run_planner 5
 ### `run_planner hier`
 
 ```
-run_planner hier [<iterations>]
+run_planner hier [<iterations>] [signal_tracks]
 ```
 
 Hierarchy-aware variant of `run_planner` for the HBundle pipeline. Requires an
