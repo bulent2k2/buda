@@ -115,6 +115,8 @@ struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
 // multicast trunk's two opposite stubs onto one band.
 using AlignMap = std::map<std::pair<int,int>, std::vector<std::pair<int,int>>>;
 
+class LayerSolver;   // nuts.cpp: one layer's placement pass (befriended below)
+
 // Constraints for one layer's phase-0 corner-overlap resolution, fed back into
 // solve_layer.  Two kinds, both built lazily from detected corner overlaps:
 //   preds  — key → same-layer segments that must sit BELOW it (relative
@@ -172,6 +174,7 @@ public:
                            int layer_id) const;
 
 private:
+    friend class LayerSolver;   // placement pass: uses first_fit/preferred_fit/track_pitch_
     const Floorplan& floorplan_;
     const LayerStack& layers_;
     double track_pitch_ = 1.0;

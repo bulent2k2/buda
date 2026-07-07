@@ -1131,43 +1131,69 @@ double NUTSEngine::preferred_fit(
     return best;
 }
 
-void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
-                              NutsContext& ctx,
-                              const LayerConstraints& constraints) const {
-    if (segs.empty()) return;
-    const auto& pull_map = ctx.pull_map;
-    const auto& align_map = ctx.align_map;
-    const auto& jn_map = ctx.rev_conn_map;   // junction edges (Part B)
-    const auto& jn_segs = ctx.ts_ptr_map;    // global segment lookup
-    const auto& order_preds = constraints.preds;
-    const auto& order_bounds = constraints.bounds;
-    // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
-    std::map<std::pair<int,int>, TrackSegment*> layer_map;
-    for (TrackSegment* ts : segs)
-        layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
+// ---------------------------------------------------------------------------
+// LayerSolver — one layer's placement pass (Phase D of the nuts/dnuts
+// refactor).  Exactly the former 400-line solve_layer: the nested lambdas
+// became methods, the closed-over locals became members; bodies verbatim.
+// Placement flow: run_phase0() places corner-ordering-constrained anchors in
+// dependency order, run_phases12() anchors pulled segments then sweeps the
+// pull-free ones — all three share place_seg() / try_repack().
+// ---------------------------------------------------------------------------
+class LayerSolver {
+public:
+    LayerSolver(const NUTSEngine& eng,
+                std::vector<TrackSegment*>& segs_in,
+                NutsContext& ctx,
+                const LayerConstraints& constraints)
+        : eng_(eng), segs(segs_in),
+          pull_map(ctx.pull_map), align_map(ctx.align_map),
+          jn_map(ctx.rev_conn_map),   // junction edges (Part B)
+          jn_segs(ctx.ts_ptr_map),    // global segment lookup
+          order_preds(constraints.preds), order_bounds(constraints.bounds),
+          // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
+          // zones on LOW layers; TOP segments are filtered out by layer_ids).
+          kozs(eng.low_keepouts())
+    {
+        // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
+        for (TrackSegment* ts : segs)
+            layer_map[{ts->bundle_id, ts->seg_idx}] = ts;
 
-    // Segments placed by phase 0 to satisfy corner-ordering edges.  Built up
-    // front (before the lambdas) so try_repack can treat them as fixed: a later
-    // non-constrained repack must not relocate a constrained trunk and undo the
-    // vertical constraint it was placed to enforce.
+        // Segments placed by phase 0 to satisfy corner-ordering edges.  Built up
+        // front so try_repack can treat them as fixed: a later non-constrained
+        // repack must not relocate a constrained trunk and undo the vertical
+        // constraint it was placed to enforce.
+        for (const auto& [k, preds] : order_preds) {
+            if (layer_map.count(k)) constrained.insert(k);
+            for (const auto& p : preds)
+                if (layer_map.count(p)) { constrained.insert(p); has_successor.insert(p); }
+        }
+        for (const auto& [k, b] : order_bounds)
+            if (layer_map.count(k)) constrained.insert(k);
+    }
+
+    void run() {
+        run_phase0();
+        run_phases12();
+    }
+
+private:
+    const NUTSEngine&                  eng_;
+    std::vector<TrackSegment*>&        segs;
+    const std::map<std::pair<int,int>, double>&                    pull_map;
+    const AlignMap&                                                align_map;
+    const std::map<std::pair<int,int>, std::vector<SpanAdjConn>>&  jn_map;
+    const std::map<std::pair<int,int>, TrackSegment*>&             jn_segs;
+    const std::map<std::pair<int,int>, std::set<std::pair<int,int>>>& order_preds;
+    const std::map<std::pair<int,int>, std::pair<double,double>>&  order_bounds;
+    const std::vector<KeepoutZone>     kozs;
+    std::map<std::pair<int,int>, TrackSegment*> layer_map;
     std::set<std::pair<int,int>> constrained;
     std::set<std::pair<int,int>> has_successor;   // something ordered above it
-    for (const auto& [k, preds] : order_preds) {
-        if (layer_map.count(k)) constrained.insert(k);
-        for (const auto& p : preds)
-            if (layer_map.count(p)) { constrained.insert(p); has_successor.insert(p); }
-    }
-    for (const auto& [k, b] : order_bounds)
-        if (layer_map.count(k)) constrained.insert(k);
 
-    // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
-    // zones on LOW layers; TOP segments are filtered out by layer_ids).
-    auto kozs = low_keepouts();
-
-    auto add_keepout_occ = [&](const TrackSegment* t,
-                               std::vector<std::pair<double,double>>& occ) {
+    void add_keepout_occ(const TrackSegment* t,
+                         std::vector<std::pair<double,double>>& occ) const {
         keepout_occupied(kozs, t, occ);
-    };
+    }
 
     // Occupancy a candidate placement must avoid: every already-placed segment
     // of another bundle whose span overlaps ts (same-bundle bits may share
@@ -1176,14 +1202,14 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // for a single pull-free pass this is equivalent to the old active-set
     // sweep, since in span order an overlapping earlier segment is exactly one
     // that has started and not yet ended.
-    auto build_occupied = [&](const TrackSegment* ts,
-                              std::vector<std::pair<double,double>>& occ) {
+    void build_occupied(const TrackSegment* ts,
+                        std::vector<std::pair<double,double>>& occ) const {
         for (const TrackSegment* o : segs) {
             if (o == ts) continue;
             occupancy_from(*ts, *o, occ);   // closed-span predicate, see nuts_geom.h
         }
         add_keepout_occ(ts, occ);
-    };
+    }
 
     // Local repack: when no gap fits ts, earlier centre-seeking placements
     // may have fragmented a window that has room for everyone (two 51-wide
@@ -1191,7 +1217,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // leaves two 29.5 slivers).  Re-place ts together with the active
     // segments contending for its interval, packing from the low edge,
     // against everything else already placed.  Commits only on full success.
-    auto try_repack = [&](TrackSegment* ts) -> bool {
+    bool try_repack(TrackSegment* ts) {
         // Members: every placed segment contending for ts's window (interval
         // overlap) — including ones whose sweep span already ended.  An ended
         // segment doesn't conflict with ts directly, but it constrains other
@@ -1273,9 +1299,9 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
                     const double c_lo = m->interval_lo + half;
                     const double c_hi = m->interval_hi - half;
                     if (c_lo <= c_hi) pref = std::clamp(pref, c_lo, c_hi);
-                    p = preferred_fit(m->interval_lo, m->interval_hi, m->width, occ, pref);
+                    p = eng_.preferred_fit(m->interval_lo, m->interval_hi, m->width, occ, pref);
                 } else {
-                    p = first_fit(m->interval_lo, m->interval_hi, m->width, occ);
+                    p = eng_.first_fit(m->interval_lo, m->interval_hi, m->width, occ);
                 }
                 if (std::isnan(p)) return {};   // this member can't fit: pack failed
                 repacked.push_back({m, p});
@@ -1291,7 +1317,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         if (repacked.empty()) return false;   // window truly full: keep old state
         for (const auto& [pm, ppos] : repacked) pm->track_position = ppos;
         return true;
-    };
+    }
 
     // Place one segment at its preferred track, avoiding current occupancy.
     // lb/ub (optional) are hard bounds on the track CENTER — phase 0 uses them to
@@ -1299,10 +1325,10 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // of a cross-layer split (ub).  pack_low packs to the lowest feasible track
     // (same-layer ordering); otherwise placement seeks `target` if finite
     // (cross-layer: nudge toward the split bound), else the align/pull preference.
-    auto place_seg = [&](TrackSegment* ts,
-                         double lb = -kInf, double ub = kInf,
-                         bool pack_low = false,
-                         double target = std::numeric_limits<double>::quiet_NaN()) {
+    void place_seg(TrackSegment* ts,
+                   double lb = -kInf, double ub = kInf,
+                   bool pack_low = false,
+                   double target = std::numeric_limits<double>::quiet_NaN()) {
         std::vector<std::pair<double,double>> occupied;
         build_occupied(ts, occupied);
         std::sort(occupied.begin(), occupied.end());
@@ -1320,7 +1346,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
         // std::clamp(preferred, c_lo, c_hi) would be undefined.
         double pos;
         if (pack_low) {
-            pos = first_fit(eff_lo, eff_hi, ts->width, occupied);
+            pos = eng_.first_fit(eff_lo, eff_hi, ts->width, occupied);
         } else {
             auto key = std::make_pair(ts->bundle_id, ts->seg_idx);
             // Cross-layer bounded trunks aim straight at the split-side bound;
@@ -1378,7 +1404,7 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             // std::clamp requires lo <= hi.  preferred_fit returns NaN there
             // anyway, so the value is irrelevant — just avoid the UB.
             if (c_lo <= c_hi) preferred = std::clamp(preferred, c_lo, c_hi);
-            pos = preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
+            pos = eng_.preferred_fit(eff_lo, eff_hi, ts->width, occupied, preferred);
         }
         // try_repack re-places members with first_fit over their FULL intervals,
         // ignoring lb/ub — so it must not run for a phase-0 constrained placement
@@ -1403,45 +1429,50 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
             ts->track_position = fb;
         }
         ts->placed = true;
-    };
+    }
+
+    // Lower bound from a phase-0 segment's placed predecessors: just above the
+    // highest one, one pitch clear.
+    double lb_of(const std::pair<int,int>& k, const TrackSegment* ts) const {
+        double lb = -std::numeric_limits<double>::infinity();
+        auto it = order_preds.find(k);
+        if (it != order_preds.end())
+            for (const auto& p : it->second) {
+                auto lit = layer_map.find(p);
+                if (lit == layer_map.end() || !lit->second->placed) continue;
+                lb = std::max(lb, lit->second->track_position
+                                  + lit->second->width / 2.0
+                                  + ts->width / 2.0 + eng_.track_pitch_);
+            }
+        return lb;
+    }
+
+    // Place one phase-0 segment honoring both its relative-pred lower bound
+    // and any fixed cross-layer bounds.  A bounded (cross-layer) trunk is
+    // nudged toward its split-side bound via preferred_fit; a relative-pred
+    // (same-layer) trunk packs to the bottom edge.
+    void place_phase0(const std::pair<int,int>& k, TrackSegment* ts) {
+        double lb = lb_of(k, ts);
+        double ub = kInf;
+        double target = std::numeric_limits<double>::quiet_NaN();
+        auto bit = order_bounds.find(k);
+        const bool bounded = (bit != order_bounds.end());
+        if (bounded) {
+            lb = std::max(lb, bit->second.first);
+            ub = bit->second.second;
+            // Aim at the finite (split-facing) bound for minimal movement.
+            target = (ub < kInf) ? ub : bit->second.first;
+        }
+        place_seg(ts, lb, ub, /*pack_low=*/!bounded, target);
+    }
 
     // Phase 0 — ordering-constrained segments (corner-overlap resolution): place
     // each in dependency order (after every segment that must sit below it),
     // clamped just above its placed predecessors.  They become placed anchors
-    // the normal anchor/sweep phases then avoid.  (`constrained` built above.)
-    if (!constrained.empty()) {
+    // the normal anchor/sweep phases then avoid.  (`constrained` built in ctor.)
+    void run_phase0() {
+        if (constrained.empty()) return;
         std::set<std::pair<int,int>> done;
-        auto lb_of = [&](const std::pair<int,int>& k, const TrackSegment* ts) {
-            double lb = -std::numeric_limits<double>::infinity();
-            auto it = order_preds.find(k);
-            if (it != order_preds.end())
-                for (const auto& p : it->second) {
-                    auto lit = layer_map.find(p);
-                    if (lit == layer_map.end() || !lit->second->placed) continue;
-                    lb = std::max(lb, lit->second->track_position
-                                      + lit->second->width / 2.0
-                                      + ts->width / 2.0 + track_pitch_);
-                }
-            return lb;
-        };
-        // Place one phase-0 segment honoring both its relative-pred lower bound
-        // and any fixed cross-layer bounds.  A bounded (cross-layer) trunk is
-        // nudged toward its split-side bound via preferred_fit; a relative-pred
-        // (same-layer) trunk packs to the bottom edge.
-        auto place_phase0 = [&](const std::pair<int,int>& k, TrackSegment* ts) {
-            double lb = lb_of(k, ts);
-            double ub = kInf;
-            double target = std::numeric_limits<double>::quiet_NaN();
-            auto bit = order_bounds.find(k);
-            const bool bounded = (bit != order_bounds.end());
-            if (bounded) {
-                lb = std::max(lb, bit->second.first);
-                ub = bit->second.second;
-                // Aim at the finite (split-facing) bound for minimal movement.
-                target = (ub < kInf) ? ub : bit->second.first;
-            }
-            place_seg(ts, lb, ub, /*pack_low=*/!bounded, target);
-        };
         std::vector<std::pair<int,int>> todo(constrained.begin(), constrained.end());
         bool progress = true;
         while (!todo.empty() && progress) {
@@ -1500,39 +1531,48 @@ void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
     // segments fill the residual gaps in phase 2.  A pull-free trunk then slides
     // off any track a pulled bus needs, instead of grabbing it by sweep order
     // and forcing the pulled bus to detour (item A: planner6 Bundle 3/4).
-    std::vector<TrackSegment*> pulled, free_segs;
-    for (TrackSegment* ts : segs) {
-        if (constrained.count({ts->bundle_id, ts->seg_idx})) continue;  // placed in phase 0
-        (ts->net_pull != 0 ? pulled : free_segs).push_back(ts);
-    }
-    // FP-determinism: window widths are FP-derived and can differ by ~1e-12
-    // across CPUs; a strict `<` on the raw doubles flips near-ties per machine.
-    // Sort on a QUANTIZED integer key (1e-6 quantum) instead — a strict weak
-    // ordering by construction (a raw epsilon comparator is not: sub-tolerance
-    // deltas chain non-transitively, which is UB for stable_sort — Codex #152).
-    // BUDA keys are integer/half-integer-valued reals, so ~1e-12 noise can never
-    // move llround across a rounding boundary; equal keys keep the deterministic
-    // input order via stable_sort — today's exact-tie behavior, on every machine.
-    auto q = [](double v) { return std::llround(v * 1e6); };
-    std::stable_sort(pulled.begin(), pulled.end(),
-        [&q](const TrackSegment* a, const TrackSegment* b) {
-            int pa = std::abs(a->net_pull), pb = std::abs(b->net_pull);
-            if (pa != pb) return pa > pb;                       // strongest pull first
-            return q(a->interval_hi - a->interval_lo)
-                 < q(b->interval_hi - b->interval_lo);          // tightest window first
-        });
-    for (TrackSegment* ts : pulled) place_seg(ts);
-
     // Phase 2 — sweep the pull-free segments in span order; each sees the
     // anchors and earlier free segments via build_occupied and slides to the
     // nearest free track.
-    std::stable_sort(free_segs.begin(), free_segs.end(),
-        [&q](const TrackSegment* a, const TrackSegment* b) {
-            // Quantized integer key (see pulled sort); ordered: span_lo may be
-            // reversed.  Equal keys keep the deterministic input order.
-            return q(sp_lo(*a)) < q(sp_lo(*b));
-        });
-    for (TrackSegment* ts : free_segs) place_seg(ts);
+    void run_phases12() {
+        std::vector<TrackSegment*> pulled, free_segs;
+        for (TrackSegment* ts : segs) {
+            if (constrained.count({ts->bundle_id, ts->seg_idx})) continue;  // placed in phase 0
+            (ts->net_pull != 0 ? pulled : free_segs).push_back(ts);
+        }
+        // FP-determinism: window widths are FP-derived and can differ by ~1e-12
+        // across CPUs; a strict `<` on the raw doubles flips near-ties per machine.
+        // Sort on a QUANTIZED integer key (1e-6 quantum) instead — a strict weak
+        // ordering by construction (a raw epsilon comparator is not: sub-tolerance
+        // deltas chain non-transitively, which is UB for stable_sort — Codex #152).
+        // BUDA keys are integer/half-integer-valued reals, so ~1e-12 noise can never
+        // move llround across a rounding boundary; equal keys keep the deterministic
+        // input order via stable_sort — today's exact-tie behavior, on every machine.
+        auto q = [](double v) { return std::llround(v * 1e6); };
+        std::stable_sort(pulled.begin(), pulled.end(),
+            [&q](const TrackSegment* a, const TrackSegment* b) {
+                int pa = std::abs(a->net_pull), pb = std::abs(b->net_pull);
+                if (pa != pb) return pa > pb;                       // strongest pull first
+                return q(a->interval_hi - a->interval_lo)
+                     < q(b->interval_hi - b->interval_lo);          // tightest window first
+            });
+        for (TrackSegment* ts : pulled) place_seg(ts);
+
+        std::stable_sort(free_segs.begin(), free_segs.end(),
+            [&q](const TrackSegment* a, const TrackSegment* b) {
+                // Quantized integer key (see pulled sort); ordered: span_lo may be
+                // reversed.  Equal keys keep the deterministic input order.
+                return q(sp_lo(*a)) < q(sp_lo(*b));
+            });
+        for (TrackSegment* ts : free_segs) place_seg(ts);
+    }
+};
+
+void NUTSEngine::solve_layer(std::vector<TrackSegment*>& segs,
+                              NutsContext& ctx,
+                              const LayerConstraints& constraints) const {
+    if (segs.empty()) return;
+    LayerSolver(*this, segs, ctx, constraints).run();
 }
 
 void NUTSEngine::set_extra_grid_points(std::vector<int> xs, std::vector<int> ys) {
