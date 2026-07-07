@@ -51,6 +51,29 @@ def _build_viz(flow_name, monkeypatch):
     return captured["viz"]
 
 
+def _build_viz_from_text(monkeypatch, tmp_path, text, name="t.buda"):
+    """Build a BudaVisualizer from an inline .buda script (for panel-button
+    tests that need a design with/without keepouts, a routing grid, etc.)."""
+    import buda_cli
+    import buda_viz
+
+    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
+    captured = {}
+    orig_show = buda_viz.BudaVisualizer.show
+
+    def cap_show(self):
+        self._ipc_session = None
+        orig_show(self)
+        captured["viz"] = self
+
+    monkeypatch.setattr(buda_viz.BudaVisualizer, "show", cap_show)
+    flow = tmp_path / name
+    flow.write_text(text)
+    buda_cli.BudaSession().do_command(f"source {flow}")
+    assert "viz" in captured, "visualize did not build a BudaVisualizer"
+    return captured["viz"]
+
+
 def test_heatmap_off_by_default():
     from ui_state import ViewState
     assert ViewState().heatmap is False
@@ -182,35 +205,43 @@ def test_keepouts_tracks_buttons_always_visible_but_dimmed(monkeypatch):
 
 def test_keepouts_button_active_when_design_has_keepouts(monkeypatch, tmp_path):
     """A design with a floorplan keepout zone shows the Keepouts button active."""
-    import buda_cli
-    import buda_viz
-    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
-    captured = {}
-    orig_show = buda_viz.BudaVisualizer.show
-
-    def cap_show(self):
-        self._ipc_session = None
-        orig_show(self)
-        captured["viz"] = self
-
-    monkeypatch.setattr(buda_viz.BudaVisualizer, "show", cap_show)
-
-    flow = tmp_path / "kp.buda"
-    flow.write_text(
+    viz = _build_viz_from_text(
+        monkeypatch, tmp_path,
         "def_layer 4 M4 H TOP 0.0\n"
         "def_layer 5 M5 V TOP 0.0\n"
         "add_block a 0 0 100 100\n"
         "add_block b 400 0 500 100\n"
         "add_keepout 150 0 250 100 M4\n"
         "add_bus x[4] a.tx b.rx\n"
-        "run_bundler\ngenerate_topologies\nrun_planner\nrun_nuts\nvisualize\n"
-    )
-    sess = buda_cli.BudaSession()
-    sess.do_command(f"source {flow}")
-    viz = captured["viz"]
+        "run_bundler\ngenerate_topologies\nrun_planner\nrun_nuts\nvisualize\n")
     assert viz.fp.get_keepout_zones(), "precondition: design has a keepout"
     assert viz._btn_keepouts.ax.get_visible()
     assert viz._btn_keepouts._buda_enabled is True
+
+
+def test_preroutes_button_dimmed_without_routing_grid(monkeypatch, tmp_path):
+    """Preroutes stays visible but dimmed (and click-inert) when the design has
+    no routing grid (no def_track_pattern)."""
+    viz = _build_viz_from_text(
+        monkeypatch, tmp_path,
+        "def_layer 4 M4 H TOP 0.0\n"
+        "def_layer 5 M5 V TOP 0.0\n"
+        "add_block a 0 0 100 100\n"
+        "add_block b 400 0 500 100\n"
+        "add_bus x[4] a.tx b.rx\n"
+        "run_bundler\ngenerate_topologies\nrun_planner\nrun_nuts\nvisualize\n")
+    assert not viz._has_preroute_data
+    assert viz._btn_preroutes.ax.get_visible() and viz._btn_preroutes._buda_enabled is False
+    before = viz.ui_state.preroutes_mode
+    viz._cycle_preroutes()
+    assert viz.ui_state.preroutes_mode == before, "dimmed Preroutes must be a no-op"
+
+
+def test_preroutes_button_active_with_routing_grid(monkeypatch):
+    """dnuts1 defines track patterns → the Preroutes button is active."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._has_preroute_data
+    assert viz._btn_preroutes.ax.get_visible() and viz._btn_preroutes._buda_enabled is True
 
 
 def test_s_key_toggles_solo(monkeypatch):

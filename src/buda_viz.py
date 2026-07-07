@@ -2498,6 +2498,8 @@ class BudaVisualizer:
         self._bundle_scroll = max(0, min(max_scroll, self._bundle_scroll))
 
     def _toggle_heatmap(self):
+        if not getattr(self._btn_heatmap, '_buda_enabled', True):
+            return                       # dimmed: no congestion heatmap drawn
         self.ui_state.toggle_heatmap()
 
     def _set_button_enabled(self, btn, enabled, on_color='#e8f4e8'):
@@ -3767,7 +3769,7 @@ class BudaVisualizer:
         self._preroute_layer_stack = layer_stack
         self._has_preroute_data    = True
         if self._btn_preroutes is not None:
-            self._btn_preroutes.ax.set_visible(True)
+            self._set_button_enabled(self._btn_preroutes, True, on_color='#f4ece8')
 
     def _build_preroute_artists(self):
         """Create the pre-route band artists (once, lazily): one
@@ -3844,6 +3846,8 @@ class BudaVisualizer:
             e['artist'].set_visible(type_on and layer_on)
 
     def _cycle_preroutes(self):
+        if not getattr(self._btn_preroutes, '_buda_enabled', True):
+            return                       # dimmed: no pre-route data in the design
         # Peek the next mode so the lazy build happens BEFORE the
         # notify-driven visibility sync in fig_redraw.
         cyc = self.ui_state.preroute_cycle
@@ -4331,9 +4335,10 @@ class BudaVisualizer:
             color='#e8f4e8')
         self._btn_heatmap.label.set_fontsize(7.5)
         self._btn_heatmap.on_clicked(lambda _: self._toggle_heatmap())
-        # Heatmap button is only meaningful when a congestion map was drawn.
-        if not self._heatmap_artists and self._cbar_ax is None:
-            self._btn_heatmap.ax.set_visible(False)
+        # Always visible; dimmed (inactive) unless a congestion map was drawn.
+        self._set_button_enabled(
+            self._btn_heatmap,
+            bool(self._heatmap_artists) or self._cbar_ax is not None)
 
         ax_keepouts = self.fig.add_axes(_lrect(BTN_H_L, GAP_L))
         self._btn_keepouts = Button(ax_keepouts, '☑ Keepouts', color='#e8f4e8')
@@ -4365,9 +4370,10 @@ class BudaVisualizer:
         self._btn_preroutes = Button(ax_preroutes, '☐ Preroutes', color='#f4ece8')
         self._btn_preroutes.label.set_fontsize(7.5)
         self._btn_preroutes.on_clicked(lambda _: self._cycle_preroutes())
-        # Hidden until draw_preroutes() has registered a routing grid.
-        if not self._has_preroute_data:
-            self._btn_preroutes.ax.set_visible(False)
+        # Always visible; dimmed (inactive) until draw_preroutes() has
+        # registered a routing grid.
+        self._set_button_enabled(
+            self._btn_preroutes, self._has_preroute_data, on_color='#f4ece8')
 
         # Store the current packing position for the colorbar.
         self._ly_post_buttons = ly
