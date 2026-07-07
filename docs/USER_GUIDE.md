@@ -14,7 +14,7 @@ To successfully run a BUDA script, you should follow this sequence:
 4.  **Topology Generation**: Enumerate possible routing shapes for each bundle.
 5.  **Global Planning**: Choose the best topology for each bundle to minimize congestion.
 6.  **Track Assignment (NUTS)**: Solve for the specific track positions of every wire.
-7.  **(Optional) Feedback Re-route**: If NUTS or Detailed NUTS still report overlaps/opens, run `ripup_reroute` to re-route the contending bundles and clear them. For best results run it **twice** — once after `run_nuts` and once after `run_detailed_nuts` (see below).
+7.  **(Optional) Feedback passes**: If NUTS or Detailed NUTS still report overlaps/opens, clear them with the two feedback commands — `negotiate_congestion` (the cheap first pass: reprice the contended bands and re-plan) and then `ripup_reroute` (re-route the stubborn residual). For best results run them after **both** `run_nuts` and `run_detailed_nuts` (see below).
 
 ---
 
@@ -48,6 +48,21 @@ BUDA commands depend on each other. If you skip a setup step, the engine may use
     ```
     Stage a clears the opens that come from abstract track contention (cheaply — fewer, larger wins), giving DetailedNUTS a much better starting point; stage b then re-routes the bits that still don't fit because a band is short of *signal tracks*. On a congested design this two-pass order reaches far fewer opens than stage b alone.
 *   **Tip**: Optionally cap the effort with `ripup_reroute <max_iter>` (default 10 iterations, one re-route committed per iteration). On a large design the default may stop while still improving — it says so and you can re-run it or pass a larger `max_iter` to continue.
+
+### `negotiate_congestion`
+*   **Prerequisite**: Same as `ripup_reroute` — run `run_nuts` (and, for the open-clearing pass, `run_detailed_nuts`) first.
+*   **Why?**: It clears the same overlaps/opens, but it is usually the **cheaper first pass**. Rather than trying a bundle's alternate topologies one at a time (as `ripup_reroute` does), it injects the *actual* failures back into the planner as extra demand on the exact congested bands, then re-plans the offending bundles against those corrected prices — so one planner pass moves many bundles off the contention at once. Stubborn hot-spots get progressively more expensive (PathFinder-style), and each round is kept only if it strictly improves.
+*   **Which stage?** Auto-detected exactly like `ripup_reroute` (after `run_nuts` → NUTS overlaps; after `run_detailed_nuts` → DetailedNUTS opens); no-op when there is nothing left to fix.
+*   **Best practice — negotiate first, then rip-up.** Negotiation resolves the broad, price-visible contention cheaply; `ripup_reroute` mops up the residual by trying alternate candidates:
+    ```buda
+    run_nuts
+    negotiate_congestion     # reprice the contended bands, replan in one pass
+    ripup_reroute            # finish the residual NUTS overlaps
+    run_detailed_nuts
+    negotiate_congestion     # stage b: reprice the capacity-short bands
+    ripup_reroute            # finish the residual DetailedNUTS opens
+    ```
+*   **Tip**: Cap the effort with `negotiate_congestion <max_iter>` (default 5 rounds).
 
 ---
 
@@ -101,9 +116,11 @@ generate_topologies
 run_planner 5
 
 run_nuts
-ripup_reroute            # Optional pass 1: clear NUTS overlaps before bit placement
+negotiate_congestion     # Optional: cheap first pass — reprice contended bands
+ripup_reroute            # Optional: finish the residual NUTS overlaps
 run_detailed_nuts
-ripup_reroute            # Optional pass 2: clear residual DetailedNUTS opens
+negotiate_congestion     # Optional: reprice capacity-short bands
+ripup_reroute            # Optional: finish residual DetailedNUTS opens
 
 # ── Step 5: Visualize ──
 # Use the GUI to click on bundles and choose different topologies.
