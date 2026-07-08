@@ -57,12 +57,17 @@ For every layer that has a `TrackPattern` defined:
 
 | Layer direction | Stripe axis | Slot types rendered |
 |---|---|---|
-| H (M4 style) | Horizontal bands across full X extent | POWER (pale red), GROUND (pale blue), CLOCK (pale yellow) |
+| H (M4 style) | Horizontal bands across full X extent | POWER (pale red), GROUND (pale blue), CLOCK (pale yellow), SHIELD (pale lavender), SIGNAL (near-white) |
 | V (M5 style) | Vertical bands across full Y extent | same colours |
 
-Stripes are drawn with very low alpha (0.15) so the bit-wires remain legible on top.
-Signal slots are not rendered as stripes — they are implicitly the transparent gaps
-between power/ground rails.
+Stripes are drawn with very low alpha (0.15 for pre-route slots, 0.10 for the
+SIGNAL stripes) so the bit-wires remain legible on top.  The rails are built
+from the same enumeration as the abstract-view `[Preroutes]` bands
+(`RoutingGridStack.preroutes(..., include_signal=True)` through the shared
+`_track_band_rects` helper), so the two views share one palette and region
+overrides render their local patterns with spans broken at region boundaries
+— shadowed global bands split at those regions too, so the overlay never
+shows tracks the solver would not see there.
 
 **Bit-wire lines (`NetSegment`s)**
 
@@ -154,10 +159,12 @@ detailed artists cleanly.
 |---|---|---|
 | `_bundle_artists` | Abstract NUTS bus bars + interval bands | bundle_id (existing) |
 | `_detailed_bundle_artists` | Bit-wire `NetSegment` lines | bundle_id |
-| `_grid_rail_artists` | POWER/GROUND/CLOCK stripe patches | (none — not per-bundle) |
+| `_grid_rail_artists` | Track rail stripe `PatchCollection`s, one per (layer, kind) | (none — not per-bundle) |
 
 `_register_detailed(bid, artist, ...)` mirrors `_register` but populates
 `_detailed_bundle_artists` instead of `_bundle_artists`.
 
-Grid rail artists are plain `ax.add_patch` calls stored in `_grid_rail_artists`
-and toggled by `_toggle_detailed` directly, bypassing the highlight machinery.
+Grid rail artists are `PatchCollection`s stored in `_grid_rail_artists`, built
+lazily on the first `[Tracks]` enable and toggled by `_toggle_tracks` /
+`_toggle_detailed` directly, bypassing the per-bundle highlight machinery
+(layer visibility still dims them via `_refresh_highlight`'s alpha gate).

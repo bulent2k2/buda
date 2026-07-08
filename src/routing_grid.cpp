@@ -16,6 +16,7 @@
 
 #include "routing_grid.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -113,13 +114,14 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
 }
 
 std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
-    double perp_lo, double perp_hi, double along_lo, double along_hi) const
+    double perp_lo, double perp_hi, double along_lo, double along_hi,
+    bool include_signal) const
 {
     std::vector<PreRoutedSegment> out;
     int idx = 0;
     auto emit = [&](double centre, const TrackSlot& slot,
                     double a_lo, double a_hi) {
-        if (slot.type == "SIGNAL") return;
+        if (slot.type == "SIGNAL" && !include_signal) return;
         if (a_lo > a_hi) return;                 // empty along window
         PreRoutedSegment pr;
         pr.track_position = centre;
@@ -132,18 +134,44 @@ std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
         out.push_back(std::move(pr));
     };
 
-    // Global pattern: full along window.
-    for (const auto& [centre, slot] : global_pattern_.tracks_in_range(perp_lo, perp_hi))
-        emit(centre, slot, along_lo, along_hi);
+    // Region coords, orientation-resolved (H layer: perp = y, along = x):
+    // {perp_lo, perp_hi, along_lo, along_hi}.
+    auto ov_windows = [&](const PatternOverride& ov) {
+        return std::array<double, 4>{
+            is_horizontal_ ? (double)ov.region.y1 : (double)ov.region.x1,
+            is_horizontal_ ? (double)ov.region.y2 : (double)ov.region.x2,
+            is_horizontal_ ? (double)ov.region.x1 : (double)ov.region.y1,
+            is_horizontal_ ? (double)ov.region.x2 : (double)ov.region.y2};
+    };
+
+    // Global pattern: the along window MINUS every override shadow whose perp
+    // range contains the slot centre — inside an override region the effective
+    // pattern (what the solver samples) is the override's, so an unsplit
+    // global band there would advertise tracks that don't exist.
+    for (const auto& [centre, slot] : global_pattern_.tracks_in_range(perp_lo, perp_hi)) {
+        std::vector<std::pair<double, double>> pieces{{along_lo, along_hi}};
+        for (const auto& ov : overrides_) {
+            const auto [r_perp_lo, r_perp_hi, r_along_lo, r_along_hi] = ov_windows(ov);
+            if (centre < r_perp_lo || centre > r_perp_hi) continue;
+            std::vector<std::pair<double, double>> next;
+            for (const auto& [lo, hi] : pieces) {
+                if (r_along_hi <= lo || r_along_lo >= hi) {   // no overlap
+                    next.push_back({lo, hi});
+                    continue;
+                }
+                if (r_along_lo > lo) next.push_back({lo, r_along_lo});
+                if (r_along_hi < hi) next.push_back({r_along_hi, hi});
+            }
+            pieces = std::move(next);
+        }
+        for (const auto& [lo, hi] : pieces)
+            emit(centre, slot, lo, hi);
+    }
 
     // Overrides: local pattern within (region ∩ perp window), span clipped to
-    // (region ∩ along window).  Orientation decides which region coords are
-    // perpendicular vs along (H layer: perp = y, along = x).
+    // (region ∩ along window).
     for (const auto& ov : overrides_) {
-        const double r_perp_lo = is_horizontal_ ? ov.region.y1 : ov.region.x1;
-        const double r_perp_hi = is_horizontal_ ? ov.region.y2 : ov.region.x2;
-        const double r_along_lo = is_horizontal_ ? ov.region.x1 : ov.region.y1;
-        const double r_along_hi = is_horizontal_ ? ov.region.x2 : ov.region.y2;
+        const auto [r_perp_lo, r_perp_hi, r_along_lo, r_along_hi] = ov_windows(ov);
         const double p_lo = std::max(perp_lo,  r_perp_lo);
         const double p_hi = std::min(perp_hi,  r_perp_hi);
         const double a_lo = std::max(along_lo, r_along_lo);
@@ -222,10 +250,11 @@ const RoutingGrid& RoutingGridStack::get_layer_grid(int layer_id) const {
 
 std::vector<PreRoutedSegment> RoutingGridStack::preroutes(
     int layer_id, double perp_lo, double perp_hi,
-    double along_lo, double along_hi) const
+    double along_lo, double along_hi, bool include_signal) const
 {
     auto out = get_layer_grid(layer_id).preroutes_in(perp_lo, perp_hi,
-                                                     along_lo, along_hi);
+                                                     along_lo, along_hi,
+                                                     include_signal);
     for (auto& pr : out) pr.layer = layer_id;
     return out;
 }

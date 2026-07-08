@@ -108,6 +108,30 @@ def test_layer_panel_hides_preroute_bands(monkeypatch):
     assert all(e["artist"].get_visible() for e in viz._preroute_artists)
 
 
+def test_tracks_rails_share_preroute_band_source(monkeypatch):
+    """The [Tracks] rail stripes and the [Preroutes] bands build from the
+    same enumeration (_track_band_rects over RoutingGridStack.preroutes):
+    rails add SIGNAL stripes on top of the shared non-SIGNAL palette — no
+    more drifting local colour copy (the old _RAIL_COLOR lacked SHIELD)."""
+    from matplotlib.colors import to_hex
+    from buda_viz import _PREROUTE_COLOR, _SIGNAL_RAIL_COLOR
+
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._toggle_detailed()                    # rails need detailed mode
+    viz._toggle_tracks()                      # lazy rail build here
+    assert viz._rails_built and viz._grid_rail_artists
+    # Both rail kinds present: SIGNAL stripes (alpha 0.10) + pre-route
+    # stripes (alpha 0.15).
+    assert {e['alpha'] for e in viz._grid_rail_artists} == {0.10, 0.15}
+    # Every stripe colour comes from the shared table (or the SIGNAL/CUSTOM
+    # fallbacks) — a diverging local palette would fail here.
+    allowed = ({c.lower() for c in _PREROUTE_COLOR.values()}
+               | {_SIGNAL_RAIL_COLOR, '#f0f0f0'})
+    for e in viz._grid_rail_artists:
+        for fc in e['artist'].get_facecolor():
+            assert to_hex(fc).lower() in allowed
+
+
 def test_all_toggle_builds_and_shows_preroutes(monkeypatch):
     viz = _build_viz("dnuts1.buda", monkeypatch)
     viz._toggle_all()                         # all off
