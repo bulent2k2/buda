@@ -265,6 +265,37 @@ def test_nested_blocks_emit_no_corner_l():
     assert not any(t.startswith("L_OVL") for t in types), sorted(types)
 
 
+def test_overlap_corner_ls_set_wirelength():
+    """PR #221 review P2: the L_OVL candidates are emitted after the normal
+    annotate/sort pass, so their estimated_wirelength must be set explicitly (else
+    it stays 0 and the planner's WL term can't rank the two L's)."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (50, 50, 150, 150)})
+    ovl = [c for c in _gen(fp).generate_candidates("A", ["B"]) if c.type.startswith("L_OVL")]
+    assert ovl
+    for c in ovl:
+        want = sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y) for s in c.segments)
+        assert c.estimated_wirelength == want > 0, (c.type, c.estimated_wirelength, want)
+
+
+def test_overlap_corner_ls_respect_corner_margin():
+    """PR #221 review P2: L_OVL taps must land on the margin-inset bbox faces, not
+    the physical orig_bbox — otherwise a tap sits inside the corner_margin the
+    generator is meant to keep clear.  With a 20-unit margin on A(0,0,100,100),
+    A's tap faces move to the shrunk box [20,80]²; no L_OVL endpoint may touch A's
+    physical edge (x or y in {0,100})."""
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100); fp.set_block_corner_margin("A", 20, 20)
+    fp.add_block("B", 30, 50, 400, 400); fp.set_block_corner_margin("B", 20, 20)
+    g = buda.TopologyGenerator(fp); g.set_layer_ids(4, 5)
+    ovl = [c for c in g.generate_candidates("A", ["B"]) if c.type.startswith("L_OVL")]
+    assert ovl, "expected an L_OVL for the margined overlap"
+    for c in ovl:
+        for s in c.segments:
+            for (x, y) in ((s.start.x, s.start.y), (s.end.x, s.end.y)):
+                assert x not in (0, 100) and y not in (0, 100), (
+                    f"{c.type} taps A's unshrunk face at ({x},{y}) — ignores corner_margin")
+
+
 def test_corner_touch_rescued_by_diagonal_L():
     """A and B meet at exactly one corner (A's top-right == B's bottom-left, the
     point (100,100)).  Every direct/L/Z/U segment there is zero-slide and dropped,

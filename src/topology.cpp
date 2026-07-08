@@ -554,8 +554,13 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
 void TopologyGenerator::add_overlap_corner_ls(const Busterm& s_bt, const Busterm& d_bt,
                                               std::vector<Topology>& results) {
     if (!use_busterm_) return;
-    const Rect& A = s_bt.orig_bbox;
-    const Rect& B = d_bt.orig_bbox;
+    // Work on the margin-inset bbox (not orig_bbox): every tap must land within
+    // the block's corner_margin, and the whole generator routes on the shrunken
+    // boxes.  When no margin is set bbox == orig_bbox (unchanged); when a margin
+    // separates the two boxes on the routing grid they no longer form a cross, so
+    // no L_OVL is emitted and the ordinary L/U shapes handle them.
+    const Rect& A = s_bt.bbox;
+    const Rect& B = d_bt.bbox;
     const bool overlap = std::max(A.x1, B.x1) < std::min(A.x2, B.x2)
                       && std::max(A.y1, B.y1) < std::min(A.y2, B.y2);
     const bool x_stagger = (A.x1 < B.x1 && A.x2 < B.x2) || (B.x1 < A.x1 && B.x2 < A.x2);
@@ -582,6 +587,7 @@ void TopologyGenerator::add_overlap_corner_ls(const Busterm& s_bt, const Busterm
         const int min2 = (bx == bfx) ? m_v : m_h;
         if (l1 < min1 || l2 < min2) return;
         Topology t; t.type = tag;
+        t.estimated_wirelength = l1 + l2;   // real length so the planner's WL term ranks the two L's
         t.segments.push_back(make_seg(afx, afy, bx, by, (afx == bx) ? v_layer_ : h_layer_));
         t.segments.push_back(make_seg(bx, by, bfx, bfy, (bx == bfx) ? v_layer_ : h_layer_));
         results.push_back(std::move(t));
@@ -3237,6 +3243,14 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
             annotate_endpoints(t, {src_bt, dst_bt});
             annotate_seg_conns(t);
             t.connected_block_names = {src_name, dst_name};
+            // Score by real length — this fallback runs AFTER the normal
+            // annotate/sort pass, so without this the ABUT/CORNER candidates keep
+            // estimated_wirelength=0 and the planner's WL term cannot tell an
+            // asymmetric corner's two strategies apart.
+            t.estimated_wirelength = 0;
+            for (const auto& seg : t.segments)
+                t.estimated_wirelength += std::abs(seg.end.x - seg.start.x)
+                                        + std::abs(seg.end.y - seg.start.y);
             const auto& kos = floorplan_.get_keepout_zones();
             bool blocked = false;
             if (!kos.empty()) {
