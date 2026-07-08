@@ -211,3 +211,45 @@ own deliberate before/after review — the corpus diff is mechanical now:
 re-baseline `tools/topo_snapshot.py` + `tools/wl_corpus.py` and review the
 golden diff bundle by bundle.
 
+## Resolve pre-planner hier slide columns against the cell-local floorplan
+
+**Context.**  `dump_topologies` slide-derived columns — `mslide`
+(`_topo_min_slide`, `src/buda_session/reports.py`) and the `wl[lo..hi]`
+envelope's upper bound (`_topology_wl_interval`, `src/buda_session/nutsflow.py`)
+— build each candidate's `ConnTopology` against `self.fp`, the **absolute**
+floorplan.  A **cell-level HBundle template** dumped *before* `run_planner hier`
+is still in cell-local coordinates, so its block faces don't resolve against
+`self.fp`; ConnTopology leaves every segment's perpendicular slide unbounded
+(the ~2e9 sentinel).  PR #215 made that honest at the display layer — the column
+prints `free` instead of the raw sentinel, and the doc tells the reader to dump
+*after* `run_planner hier` for real slide/envelope numbers — but the underlying
+value is still unresolved until the planner expands the template into
+per-instance absolute wrappers.
+
+**Wish.**  Build the cell-level template's `ConnTopology` against its
+**cell-local floorplan** — the same floorplan `generate_hier_topologies` already
+constructs when it generates those candidates — rather than `self.fp`, so a
+pre-planner hier dump shows correct finite slides (and a real envelope `hi`)
+without needing to plan first.  `mslide` and `wl[lo..hi]` would then be
+meaningful the moment candidates exist, matching the flat flow.
+
+**Why deferred / cost.**  Read-only reporting affordance, not a routing
+correctness issue — the `free` display + doc note (PR #215) already prevent the
+misread, and the numbers are correct post-planner regardless.  The real work is
+plumbing the per-template cell-local floorplan (or a way to reconstruct it from
+the bundle's `cell_context`) out to the reporting path, which today only holds
+the absolute `self.fp`.  `generate_hier_topologies` builds that local floorplan
+transiently during generation; making it available at dump time means either
+persisting it per cell-level bundle or rebuilding it on demand from the BDB cell
+definition.
+
+**Where to start.**  `generate_hier_topologies` (the cell-local case, hier
+topology generation) is where the local floorplan is built — capture/rebuild it
+keyed by `cell_context`; then have `_topo_min_slide` / `_topology_wl_interval`
+pick the cell-local floorplan for a cell-level template and `self.fp` for an
+already-absolute bundle.  Gate: the flat flow and post-`run_planner hier`
+numbers must be byte-identical (this only *adds* resolution to the pre-planner
+hier case), plus a test that a pre-planner hier template dump now shows finite
+`mslide` instead of `free` (the inverse of
+`test_mslide_unbounded_prints_free_not_sentinel`).
+
