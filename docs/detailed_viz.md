@@ -69,8 +69,9 @@ double-drawn.  The rails are built from the same enumeration as the
 `[Preroutes]` bands (`RoutingGridStack.preroutes(..., include_signal=True)`
 through the shared `_track_band_rects` helper), so region overrides render
 their local patterns with spans broken at region boundaries — shadowed
-global bands split at those regions too, so the overlay never shows tracks
-the solver would not see there.
+global bands split at those regions too, and SIGNAL rails additionally
+break at keepouts (matching `signal_tracks_in`'s filter), so the overlay
+never shows a track the solver would not let a bit land on.
 
 **Bit-wire lines (`NetSegment`s)**
 

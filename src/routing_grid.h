@@ -105,6 +105,9 @@ public:
     // effective_pattern_at/signal_tracks_in sample); each PatternOverride's
     // local pattern is enumerated within (region ∩ perp window) with the span
     // clipped to (region ∩ along window) — bands break at region boundaries.
+    // SIGNAL slots (include_signal) additionally break at KEEPOUTS, matching
+    // signal_tracks_in's filter — a rail is never drawn where a bit cannot
+    // land; non-SIGNAL slots ignore keepouts (a pre-route is a physical rail).
     // track_index is a running index per enumeration; `layer` is stamped by
     // RoutingGridStack::preroutes.
     //
