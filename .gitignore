@@ -21,6 +21,9 @@
 **/__pycache__/
 **/*~
 .DS_Store
+# macOS launcher bundles are host-specific build products; regenerate with
+# tools/make_macos_apps.py (see docs/internal/macos_app_bundles.md).
+bin/*.app/
 flow/log/
 log/
 chip_designs

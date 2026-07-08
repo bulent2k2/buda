@@ -1,6 +1,6 @@
 # 0. Chip definition
 
-corner_margins 4.0 6.0
+corner_margin dx 4.0 dy 6.0
 
 add_block unit1      100 100  200 200
 add_block unit2      300 300  400 400

@@ -629,17 +629,42 @@ def set_icon(win_or_fig, icon_name="buda_icon.png"):
         pass
 
 
+def set_dock_icon(icon_name="buda_icon.png"):
+    """macOS only: replace the Dock tile's icon image (the default python3
+    rocket) with BUDA's icon via NSApplication.setApplicationIconImage_.
+    Needs the NSApp to exist, so call AFTER the first window is realized.
+    Fully guarded — a no-op off macOS, without pyobjc, or if the icon file
+    is missing. Note: this changes the Dock *icon*, not the Dock *text
+    label* (that is derived from the executable and needs a .app bundle)."""
+    if sys.platform != "darwin":
+        return
+    try:
+        _HERE = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(_HERE, "..", icon_name)   # project root
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(_HERE, icon_name)
+        if not os.path.exists(icon_path):
+            return
+        from AppKit import NSApplication, NSImage
+        img = NSImage.alloc().initByReferencingFile_(icon_path)
+        if img is not None:
+            NSApplication.sharedApplication().setApplicationIconImage_(img)
+    except Exception:
+        pass
+
+
 def set_app_name(name, fig=None):
     """Best-effort relabel of the app from 'python3'/'Python' to `name` in OS
     chrome (macOS dock / menu bar, `ps`). Every hook is optional and fully
     guarded, so this is a no-op where the mechanism isn't available (e.g. a
     plain Linux run) and never raises.
 
-    IMPORTANT (macOS): the AppKit CFBundleName write (step 3) only takes
-    effect if it runs BEFORE the first Tk window is realized — AppKit caches
-    the app name when NSApplication is created. Call this once at process
-    startup (see buda_cli.main) for the dock / menu-bar / Cmd-Tab name; the
-    per-figure call here still sets the Tk appname and is otherwise a no-op."""
+    IMPORTANT (macOS): the process-name / CFBundleName writes (step 3) only
+    take effect if they run BEFORE the first Tk window is realized — Tk's
+    Cocoa port caches the name when it builds the application menu. Call this
+    once at process startup (see buda_cli.main) for the dock / menu-bar /
+    Cmd-Tab name; the per-figure call here still sets the Tk appname and
+    window title and is otherwise a no-op."""
     if not name:
         return
     # 1. Process title — `ps`/`top` and some Linux docks. Optional dependency.
@@ -654,8 +679,18 @@ def set_app_name(name, fig=None):
             fig.canvas.manager.window.tk.call('tk', 'appname', name)
         except Exception:
             pass
-    # 3. macOS bundle name — the AppKit menu/dock label for the MacOSX backend.
+    # 3. macOS process name — the bold app-menu / Dock / Cmd-Tab label for a
+    #    Tk app comes from NSProcessInfo.processName (Tk's Cocoa port reads it
+    #    when it builds the application menu), NOT from CFBundleName. Set it
+    #    before the first Tk window is realized (see buda_cli.main).
     if sys.platform == "darwin":
+        try:
+            from Foundation import NSProcessInfo
+            NSProcessInfo.processInfo().setProcessName_(name)
+        except Exception:
+            pass
+        # 3b. CFBundleName too — belt-and-suspenders for the MacOSX/Cocoa
+        #     backend and the Dock tile; harmless if the dict is immutable.
         try:
             from Foundation import NSBundle
             info = (NSBundle.mainBundle().localizedInfoDictionary()
@@ -2061,6 +2096,7 @@ class BudaVisualizer:
         self.fig, self.ax = plt.subplots(figsize=(14, 12))
         self.fig.patch.set_facecolor('#f0f0f0')
         set_icon(self.fig)
+        set_dock_icon()          # macOS Dock tile icon (window now realized)
         raise_window(self.fig)
 
         if sidecar_path and self.fig.canvas.manager:

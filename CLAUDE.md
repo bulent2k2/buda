@@ -45,6 +45,16 @@ Each resolves the repo root as its parent dir, so it works from any CWD.
 flow/x.buda`, `u2b test_foo`); otherwise call them as `bin/bb`, `bin/buda …`, etc.
 The examples below use the `bin/…` form so they work without a PATH change.
 
+**macOS `.app` bundles (optional):** `python3 tools/make_macos_apps.py` builds
+`bin/Buda.app` and `bin/Floorplanner.app` — thin launchers that run the same
+python through a LaunchServices `.app` so the Dock tile shows "Buda" /
+"Floorplanner" (name **and** icon) instead of "python3". `bin/fp` and `bin/buda`
+auto-launch through their bundle on macOS when it exists (`bin/buda` routes
+through a throwaway per-cell bundle so the Dock tile shows the `.buda` basename,
+and keeps the terminal via `open --stdout` + `-W`; `BUDA_NO_APP=1` forces the
+in-terminal launch). The bundles are git-ignored build products. See
+[macOS app bundles](docs/internal/macos_app_bundles.md).
+
 The one-step way (per shell) is to **source** `bin/activate` — it prepends
 `bin/` to `PATH` and sets `PYTHONPATH=build:tools` (so `python3 src/buda_cli.py …`
 and ad-hoc `import buda` work too). It is idempotent and must be *sourced*, not

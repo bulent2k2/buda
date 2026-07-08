@@ -6,6 +6,91 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
+# macOS: relaunch through a per-cell .app so the Dock tile shows the CELL name
+# (the .buda basename) and icon — when you run many cells, that makes the right
+# window easy to pick out. LaunchServices sets that identity at launch, while
+# this terminal's stdio stays wired via `open --stdin/--stdout/--stderr`
+# (macOS 10.15+) and `-W` blocks until exit, so the per-command summary and
+# flow-log line still print here. The per-cell bundle is a throwaway written to
+# a temp cache; its icon is copied from bin/Buda.app (build it once with
+# `python3 tools/make_macos_apps.py`), else set_dock_icon() supplies it at
+# runtime. Guarded to an `open` with --stdout and to all THREE of stdin, stdout
+# and stderr being ttys — if any is redirected (`buda … >run.log`, `| tee`) we
+# fall through to the direct launch so the pipe/file is honored rather than
+# `open --stdout "$TTY"` shoving output back at the terminal. Opt out with
+# BUDA_NO_APP=1.
+if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
+   && [ -t 0 ] && [ -t 1 ] && [ -t 2 ] \
+   && open --help 2>&1 | grep -q -- '--stdout'; then
+  # First non-option arg is the script; skip the reroute for --no-viz batch runs
+  # (no window to name) and when no script is given (let the CLI print help).
+  SCRIPT_ARG=""; NOVIZ=""
+  for a in "$@"; do
+    case "$a" in
+      -nv|--no-viz) NOVIZ=1 ;;
+      -*) ;;
+      *) [ -z "$SCRIPT_ARG" ] && SCRIPT_ARG="$a" ;;
+    esac
+  done
+  if [ -n "$SCRIPT_ARG" ] && [ -z "$NOVIZ" ]; then
+    CELL="$( basename "$SCRIPT_ARG" )"; CELL="${CELL%.buda}"
+    CELL_APP="${TMPDIR:-/tmp}/buda_cellapps/${CELL}.app"
+    mkdir -p "$CELL_APP/Contents/MacOS" "$CELL_APP/Contents/Resources"
+    # Launcher (repo root baked in — the bundle lives outside the checkout).
+    # Body starts at column 0 so the generated shebang is the first two bytes.
+    cat > "$CELL_APP/Contents/MacOS/$CELL" <<LAUNCH
+#!/bin/bash
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:\$PYTHONPATH"
+exec /usr/bin/env python3 "$PROJECT_ROOT/src/buda_cli.py" "\$@"
+LAUNCH
+    chmod +x "$CELL_APP/Contents/MacOS/$CELL"
+    ICON_KEY=""
+    SRC_ICNS="$PROJECT_ROOT/bin/Buda.app/Contents/Resources/buda.icns"
+    if [ -f "$SRC_ICNS" ]; then
+      cp "$SRC_ICNS" "$CELL_APP/Contents/Resources/${CELL}.icns"
+      ICON_KEY="    <key>CFBundleIconFile</key><string>${CELL}</string>"
+    fi
+    cat > "$CELL_APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>$CELL</string>
+    <key>CFBundleDisplayName</key><string>$CELL</string>
+    <key>CFBundleExecutable</key><string>$CELL</string>
+    <key>CFBundleIdentifier</key><string>com.buda.cell.$CELL</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+$ICON_KEY
+    <key>NSHighResolutionCapable</key><true/>
+    <key>LSMinimumSystemVersion</key><string>10.13</string>
+</dict>
+</plist>
+PLIST
+    TTY="$( tty )"
+    # `open` launches from a different cwd, so anchor every relative path arg to
+    # THIS cwd — including the `.buda`-less script form the CLI would infer
+    # (`buda demo/foo` → demo/foo.buda). Absolute paths and options pass through.
+    ARGS=()
+    for a in "$@"; do
+      if [ -e "$a" ]; then
+        ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
+      elif [ -e "$a.buda" ]; then
+        ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" ).buda")
+      else
+        case "$a" in
+          -*|/*) ARGS+=("$a") ;;         # option or already-absolute
+          *)     ARGS+=("$PWD/$a") ;;     # relative (e.g. missing file): anchor
+        esac
+      fi
+    done
+    # -n: force a NEW instance even if this cell is already open, so you can run
+    # the same flow twice and inspect both windows side by side (without it,
+    # `open` just re-activates the running instance and can't rewire stdio).
+    exec open -n -W -a "$CELL_APP" --stdin "$TTY" --stdout "$TTY" --stderr "$TTY" \
+         --args "${ARGS[@]}"
+  fi
+fi
+
 # Add build and tools directories to PYTHONPATH
 export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"
 

@@ -3,20 +3,22 @@
     {
       "bundle_hint": "bus_0",
       "bundle_id": 2,
-      "topo_type": "Z_HVH@x250@y300",
-      "topo_wl": 200,
-      "topo_index_hint": 2,
+      "topo_type": "Z_HVH@x250@y306",
+      "topo_wl": 212,
+      "topo_uid": "66a07ddaeb9fab46",
+      "topo_index_hint": 3,
       "note": "",
-      "selected_at": "2026-05-20T16:05:10"
+      "selected_at": "2026-07-08T14:47:53"
     },
     {
       "bundle_hint": "cntr",
       "bundle_id": 1,
-      "topo_type": "Z_HVH@x250@y200",
-      "topo_wl": 200,
-      "topo_index_hint": 2,
+      "topo_type": "Z_HVH@x250@y194",
+      "topo_wl": 212,
+      "topo_uid": "f52e4400cdce3d4b",
+      "topo_index_hint": 3,
       "note": "",
-      "selected_at": "2026-05-20T16:04:41"
+      "selected_at": "2026-07-08T14:47:42"
     }
   ]
 }
