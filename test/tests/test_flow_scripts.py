@@ -183,17 +183,25 @@ def test_two_rotated():
 
 
 # ---------------------------------------------------------------------------
-# comprehensive_demo.buda — 3 bundles, 4 segments, 0 track overlaps
-# (1 interval violation is a known fixture; not checked here)
+# comprehensive_demo.buda — 5 bundles, 26 segments, 0 track overlaps
+# ("add to comprehensive demo flow" extended the demo: bundle 5 commits with
+# a planner overflow WARNING, but NUTS and DetailedNUTS still end fully
+# clean — 0 overlaps, 0 unplaced bits)
 # ---------------------------------------------------------------------------
 
 def test_comprehensive_demo():
     out, rc = _run_path(DEMO / "comprehensive_demo.buda")   # moved to demo/
     assert_clean(out, rc, "comprehensive_demo.buda")
-    assert "Bundler created 3 hbundles." in out
+    assert "Bundler created 5 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)
-    assert segs  == 4
+    assert segs  == 26
     assert ovlps == 0
+    dm = re.search(
+        r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out
+    )
+    assert dm, "DetailedNUTS summary not found"
+    assert int(dm.group(1)) == 153
+    assert int(dm.group(2)) == 0
 
 
 # ---------------------------------------------------------------------------
