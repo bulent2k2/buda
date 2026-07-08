@@ -629,6 +629,30 @@ def set_icon(win_or_fig, icon_name="buda_icon.png"):
         pass
 
 
+def set_dock_icon(icon_name="buda_icon.png"):
+    """macOS only: replace the Dock tile's icon image (the default python3
+    rocket) with BUDA's icon via NSApplication.setApplicationIconImage_.
+    Needs the NSApp to exist, so call AFTER the first window is realized.
+    Fully guarded — a no-op off macOS, without pyobjc, or if the icon file
+    is missing. Note: this changes the Dock *icon*, not the Dock *text
+    label* (that is derived from the executable and needs a .app bundle)."""
+    if sys.platform != "darwin":
+        return
+    try:
+        _HERE = os.path.dirname(os.path.abspath(__file__))
+        icon_path = os.path.join(_HERE, "..", icon_name)   # project root
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(_HERE, icon_name)
+        if not os.path.exists(icon_path):
+            return
+        from AppKit import NSApplication, NSImage
+        img = NSImage.alloc().initByReferencingFile_(icon_path)
+        if img is not None:
+            NSApplication.sharedApplication().setApplicationIconImage_(img)
+    except Exception:
+        pass
+
+
 def set_app_name(name, fig=None):
     """Best-effort relabel of the app from 'python3'/'Python' to `name` in OS
     chrome (macOS dock / menu bar, `ps`). Every hook is optional and fully
@@ -2072,6 +2096,7 @@ class BudaVisualizer:
         self.fig, self.ax = plt.subplots(figsize=(14, 12))
         self.fig.patch.set_facecolor('#f0f0f0')
         set_icon(self.fig)
+        set_dock_icon()          # macOS Dock tile icon (window now realized)
         raise_window(self.fig)
 
         if sidecar_path and self.fig.canvas.manager:
