@@ -225,6 +225,46 @@ def test_partial_overlap_keeps_i_and_u_candidates():
             assert cs.perp_hi > cs.perp_lo, f"{c.type}: zero-slide [{cs.perp_lo},{cs.perp_hi}]"
 
 
+def test_overlap_corner_ls_route_around_overlap():
+    """A partial overlap also admits two L's around the FREE outer corners of the
+    union — routes that avoid the shared band entirely (add_l_shapes' centre
+    projection degenerates them; add_overlap_corner_ls emits them).  For the "/"
+    stagger A(0,0,100,100), B(50,50,150,150) the free corners are top-left and
+    bottom-right: `L_OVL_TL` (V off A's top outside B, then H into B's left outside
+    A) and `L_OVL_BR` (H off A's right, then V into B's bottom)."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (50, 50, 150, 150)})
+    cands = _gen(fp).generate_candidates("A", ["B"])
+    types = {c.type for c in cands}
+    assert {"L_OVL_TL", "L_OVL_BR"} <= types, sorted(types)
+    for c in cands:
+        if not c.type.startswith("L_OVL"):
+            continue
+        assert len(c.segments) == 2, f"{c.type}: corner L has two legs"
+        # One horizontal + one vertical leg (a real L, not collinear).
+        horiz = [s.start.y == s.end.y for s in c.segments]
+        assert sorted(horiz) == [False, True], f"{c.type}: legs not perpendicular"
+        assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
+        ct = buda.ConnTopology(); ct.build(c, fp)
+        for cs in ct.segs():
+            assert cs.perp_hi > cs.perp_lo, f"{c.type}: zero-slide leg"
+
+
+def test_overlap_corner_ls_other_diagonal():
+    """The mirrored "\\" stagger A(0,50,100,150), B(50,0,150,100) frees the other
+    diagonal — bottom-left and top-right — so the corner L's are L_OVL_BL / L_OVL_TR."""
+    fp = _fp({"A": (0, 50, 100, 150), "B": (50, 0, 150, 100)})
+    types = {c.type for c in _gen(fp).generate_candidates("A", ["B"])}
+    assert {"L_OVL_BL", "L_OVL_TR"} <= types, sorted(types)
+
+
+def test_nested_blocks_emit_no_corner_l():
+    """One block fully containing the other is NOT a staggered cross — there are no
+    exclusive perpendicular faces, so no corner L is invented."""
+    fp = _fp({"A": (0, 0, 200, 200), "B": (50, 50, 150, 150)})   # B inside A
+    types = {c.type for c in _gen(fp).generate_candidates("A", ["B"])}
+    assert not any(t.startswith("L_OVL") for t in types), sorted(types)
+
+
 def test_corner_touch_rescued_by_diagonal_L():
     """A and B meet at exactly one corner (A's top-right == B's bottom-left, the
     point (100,100)).  Every direct/L/Z/U segment there is zero-slide and dropped,

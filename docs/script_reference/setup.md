@@ -97,8 +97,13 @@ Topology generation handles blocks that are *not* cleanly separated as follows:
   candidate**, and `generate_topologies` emits a **zero-candidate warning** for
   that bus. This is intended: a bus between blocks that occupy the same space has
   no meaningful geometry, so the warning flags a placement problem rather than
-  inventing a route. (A *partial* overlap that still leaves a channel keeps its
-  normal I/U candidates and routes as usual.)
+  inventing a route.
+- **Partial (staggered) overlap.** Two blocks that overlap but each stick out on
+  both axes route as usual — a straight `I_H`/`I_V` through the shared band, `U`
+  detours around the union, **and** two `L_OVL_*` L's that bend around the union's
+  two free outer corners (each leg taps an exclusive, non-overlapping face), giving
+  the planner a route that avoids the shared band. A block *nested* inside the
+  other has no exclusive faces, so no corner L is generated.
 
 #### TEG mode
 

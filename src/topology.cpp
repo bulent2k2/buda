@@ -539,6 +539,77 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
     }
 }
 
+// Two partially-overlapping blocks form a cross whose union bbox has exactly two
+// FREE (empty) outer corners, on one diagonal.  Each free corner admits an L route
+// that stays OUTSIDE the shared band: one leg taps a block's exclusive horizontal
+// face, the perpendicular leg taps the OTHER block's exclusive vertical face,
+// bending in the empty corner.  add_l_shapes (centre-projection) degenerates these
+// away — the projected faces land inside the overlap, so the stub collapses and the
+// min-stub gate drops it — leaving only I (through the overlap) and U (around the
+// bbox).  We emit the two free-corner L's here so the planner also has a route that
+// avoids a congested/blocked overlap band.  Requires a genuine STAGGERED cross on
+// both axes (each block sticks out on one side per axis; neither nested); each leg
+// is placed at the midpoint of its exclusive zone for real slide room, gated on the
+// per-direction min-stub length.
+void TopologyGenerator::add_overlap_corner_ls(const Busterm& s_bt, const Busterm& d_bt,
+                                              std::vector<Topology>& results) {
+    if (!use_busterm_) return;
+    const Rect& A = s_bt.orig_bbox;
+    const Rect& B = d_bt.orig_bbox;
+    const bool overlap = std::max(A.x1, B.x1) < std::min(A.x2, B.x2)
+                      && std::max(A.y1, B.y1) < std::min(A.y2, B.y2);
+    const bool x_stagger = (A.x1 < B.x1 && A.x2 < B.x2) || (B.x1 < A.x1 && B.x2 < A.x2);
+    const bool y_stagger = (A.y1 < B.y1 && A.y2 < B.y2) || (B.y1 < A.y1 && B.y2 < A.y2);
+    if (!(overlap && x_stagger && y_stagger)) return;
+
+    const int m_h = floorplan_.get_min_stub_length(0 /*H*/, h_layer_);
+    const int m_v = floorplan_.get_min_stub_length(1 /*V*/, v_layer_);
+
+    // Which block pokes out on each side.
+    const Rect& Lx = (A.x1 < B.x1) ? A : B;   // pokes left
+    const Rect& Rx = (A.x1 < B.x1) ? B : A;   // pokes right
+    const Rect& Bo = (A.y1 < B.y1) ? A : B;   // pokes below (bottom)
+    const Rect& To = (A.y1 < B.y1) ? B : A;   // pokes above (top)
+
+    // Emit one corner L: leg1 from face point (afx,afy) to the bend (bx,by), leg2
+    // from the bend to the other face point (bfx,bfy).  Each leg is purely H or V by
+    // construction; gate on the min-stub for its orientation.
+    auto emit = [&](const std::string& tag,
+                    int afx, int afy, int bx, int by, int bfx, int bfy) {
+        const int l1 = std::abs(bx - afx) + std::abs(by - afy);
+        const int l2 = std::abs(bfx - bx) + std::abs(bfy - by);
+        const int min1 = (afx == bx) ? m_v : m_h;   // vertical leg vs horizontal
+        const int min2 = (bx == bfx) ? m_v : m_h;
+        if (l1 < min1 || l2 < min2) return;
+        Topology t; t.type = tag;
+        t.segments.push_back(make_seg(afx, afy, bx, by, (afx == bx) ? v_layer_ : h_layer_));
+        t.segments.push_back(make_seg(bx, by, bfx, bfy, (bx == bfx) ? v_layer_ : h_layer_));
+        results.push_back(std::move(t));
+    };
+
+    if (&Lx == &Bo) {
+        // "/" diagonal (left block is also the bottom block) → free TOP-LEFT + BOTTOM-RIGHT.
+        // TL: left/bottom block's TOP face (exclusive left) + top block's LEFT face (exclusive top).
+        emit("L_OVL_TL", (Lx.x1 + Rx.x1) / 2, Lx.y2,
+                         (Lx.x1 + Rx.x1) / 2, (Bo.y2 + To.y2) / 2,
+                         To.x1, (Bo.y2 + To.y2) / 2);
+        // BR: bottom block's RIGHT face (exclusive bottom) + right block's BOTTOM face (exclusive right).
+        emit("L_OVL_BR", Bo.x2, (Bo.y1 + To.y1) / 2,
+                         (Lx.x2 + Rx.x2) / 2, (Bo.y1 + To.y1) / 2,
+                         (Lx.x2 + Rx.x2) / 2, Rx.y1);
+    } else {
+        // "\" diagonal (left block is the top block) → free BOTTOM-LEFT + TOP-RIGHT.
+        // BL: left/top block's BOTTOM face (exclusive left) + bottom block's LEFT face (exclusive bottom).
+        emit("L_OVL_BL", (Lx.x1 + Rx.x1) / 2, Lx.y1,
+                         (Lx.x1 + Rx.x1) / 2, (Bo.y1 + To.y1) / 2,
+                         Bo.x1, (Bo.y1 + To.y1) / 2);
+        // TR: top block's RIGHT face (exclusive top) + right block's TOP face (exclusive right).
+        emit("L_OVL_TR", To.x2, (Bo.y2 + To.y2) / 2,
+                         (Lx.x2 + Rx.x2) / 2, (Bo.y2 + To.y2) / 2,
+                         (Lx.x2 + Rx.x2) / 2, Rx.y2);
+    }
+}
+
 // Helper: H-stub y-level for HVH topologies.
 static int stub_y(bool use_busterm, bool has_stub,
                   const Rect& blk, int toward_y, int fallback_y) {
@@ -3045,6 +3116,9 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     }
 
     add_l_shapes(src_bt, dst_bt, candidates);
+    // Partially-overlapping endpoint blocks: add the two free-corner L's that route
+    // around the overlap (add_l_shapes' centre-projection degenerates these away).
+    add_overlap_corner_ls(src_bt, dst_bt, candidates);
     std::vector<int> hanan_x, hanan_y;
     {
         std::vector<Rect> hr;
