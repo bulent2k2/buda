@@ -183,16 +183,18 @@ def test_two_rotated():
 
 
 # ---------------------------------------------------------------------------
-# comprehensive_demo.buda — 3 bundles, 4 segments, 0 track overlaps
-# (1 interval violation is a known fixture; not checked here)
+# comprehensive_demo.buda — 5 bundles, 26 segments, 0 track overlaps
+# (the demo was expanded to 6 layers + wider multicast buses + extra nets; the
+# lone planner overflow warning is benign band-model conservatism that NUTS
+# resolves — the final route is clean: 0 overlaps, 0 unplaced.)
 # ---------------------------------------------------------------------------
 
 def test_comprehensive_demo():
     out, rc = _run_path(DEMO / "comprehensive_demo.buda")   # moved to demo/
     assert_clean(out, rc, "comprehensive_demo.buda")
-    assert "Bundler created 3 hbundles." in out
+    assert "Bundler created 5 hbundles." in out
     segs, _viols, ovlps = nuts_summary(out)
-    assert segs  == 4
+    assert segs  == 26
     assert ovlps == 0
 
 
