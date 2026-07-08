@@ -33,8 +33,10 @@ per-subsystem files so each area stays scannable.
   the 2-pin vs n-pin filter ordering (changes routing bytes — needs its own
   corpus review); resolve pre-planner hier slide columns (`mslide` / `wl[lo..hi]`)
   against the cell-local floorplan so a template dump shows finite slides without
-  planning first (PR #215 made the sentinel honest via a `free` display). See
-  [topo_conn_unification.md](topo_conn_unification.md).
+  planning first (PR #215 made the sentinel honest via a `free` display);
+  corner-margin default `dx=dy=0` (MEASURED — keep 0; but corner-only-touching
+  blocks generate zero candidates at 0, a generation gap to rescue like abutment).
+  See [topo_conn_unification.md](topo_conn_unification.md).
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.
   Coverage gate (✅ resolved — superseded by the generation-time
   `filter_uncovered` gate); signal-track band capacity (Gap A part 2, ✅
