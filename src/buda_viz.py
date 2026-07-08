@@ -635,11 +635,12 @@ def set_app_name(name, fig=None):
     guarded, so this is a no-op where the mechanism isn't available (e.g. a
     plain Linux run) and never raises.
 
-    IMPORTANT (macOS): the AppKit CFBundleName write (step 3) only takes
-    effect if it runs BEFORE the first Tk window is realized — AppKit caches
-    the app name when NSApplication is created. Call this once at process
-    startup (see buda_cli.main) for the dock / menu-bar / Cmd-Tab name; the
-    per-figure call here still sets the Tk appname and is otherwise a no-op."""
+    IMPORTANT (macOS): the process-name / CFBundleName writes (step 3) only
+    take effect if they run BEFORE the first Tk window is realized — Tk's
+    Cocoa port caches the name when it builds the application menu. Call this
+    once at process startup (see buda_cli.main) for the dock / menu-bar /
+    Cmd-Tab name; the per-figure call here still sets the Tk appname and
+    window title and is otherwise a no-op."""
     if not name:
         return
     # 1. Process title — `ps`/`top` and some Linux docks. Optional dependency.
@@ -654,8 +655,18 @@ def set_app_name(name, fig=None):
             fig.canvas.manager.window.tk.call('tk', 'appname', name)
         except Exception:
             pass
-    # 3. macOS bundle name — the AppKit menu/dock label for the MacOSX backend.
+    # 3. macOS process name — the bold app-menu / Dock / Cmd-Tab label for a
+    #    Tk app comes from NSProcessInfo.processName (Tk's Cocoa port reads it
+    #    when it builds the application menu), NOT from CFBundleName. Set it
+    #    before the first Tk window is realized (see buda_cli.main).
     if sys.platform == "darwin":
+        try:
+            from Foundation import NSProcessInfo
+            NSProcessInfo.processInfo().setProcessName_(name)
+        except Exception:
+            pass
+        # 3b. CFBundleName too — belt-and-suspenders for the MacOSX/Cocoa
+        #     backend and the Dock tile; harmless if the dict is immutable.
         try:
             from Foundation import NSBundle
             info = (NSBundle.mainBundle().localizedInfoDictionary()
