@@ -253,3 +253,81 @@ hier case), plus a test that a pre-planner hier template dump now shows finite
 `mslide` instead of `free` (the inverse of
 `test_mslide_unbounded_prints_free_not_sentinel`).
 
+
+## Corner-margin default `dx=dy=0` — MEASURED, keep 0 (but corner-touch is a gap)
+
+**Question.**  The global corner margin (`BlockCornerMargin`, `topology.h`)
+defaults to `{0,0}` — "no constraint beyond the face extent".  Nothing recorded
+*why* 0 is the default (only what it means).  Two experiments settle it.
+
+**Experiment 1 — global `corner_margin dx 1 dy 1` over the `wl_corpus` corpus.**
+Baseline = flows as written; experiment = strip any standalone `corner_margin`
+and force the global default to `1 1` (per-block `add_block … corner_margin`
+overrides kept).
+
+| Flow | abstract WL | detailed WL | overlaps | unplaced |
+|---|---|---|---|---|
+| tc3a_flat | +0.6% | +0.4% | 0→0 | 0→0 |
+| comprehensive_demo | +0.1% | — | 0→0 | — |
+| channel_stress | +0.3% | +0.3% | 0→0 | 0→0 |
+| four_blocks * | 0.0% | 0.0% | 0→0 | 0→0 |
+| four_blocks_3_bundles | +8.8% (430→468) | — | 0→0 | — |
+| dogleg1 ** | −0.5% | −0.7% | 0→0 | 0→0 |
+| dogleg2 ** | −0.5% | −0.3% | 0→0 | 0→0 |
+| double_detour | (flow runs no `run_nuts`) | — | — | — |
+| b4_bus_077 | +0.0% (3221→3222) | 0.0% | 0→0 | 0→0 |
+| mix (hier) | +1.6% | +2.6% | **3→2** | 0→0 |
+
+\* four_blocks already sets `corner_margin 1 1` — an identical control.
+\** dogleg1/2 baseline is `2 2`, so this row is a `2→1` *reduction* (less margin
+   → slightly shorter), not a clean `0→1` — not representative of the default.
+
+- **Safe:** no new overlaps and no new unplaced bits anywhere; the hier `mix`
+  flow even *improved* by one overlap (3→2) as the 1-unit inset nudged endpoints
+  off a contended band.
+- **But not free:** a small, consistent WL increase on the genuine `0→1` flows
+  (~+0.1 %..+0.6 % flat, +1.6 %/+2.6 % on hier `mix`) — endpoints pulled a unit
+  off block corners make stubs/trunks a hair longer.  (`four_blocks_3_bundles`
+  +8.8 % is 38 units on a 430-unit toy design — a small-design artifact.)
+- **No broad benefit:** the single `mix` overlap relief is the only upside, and
+  it came *with* a WL cost.  Everywhere else it is neutral-to-slightly-worse.
+
+**Decision: keep the default `0`.**  It is the permissive identity; a margin is
+an opt-in tightening for a *specific* design where corner congestion is real (as
+`dogleg1/2` do at `2 2`), not a global default worth a WL tax for no general win.
+
+**Experiment 2 — corner-only touching blocks are a real generation gap at `0`.**
+Two blocks that meet at a single corner:
+
+```
+source tracks/tracks.buda
+add_block u1   0   0 100 100
+add_block u2 100 100 200 200      # shares only the point (100,100) with u1
+add_bus b[8] u1 u2
+run_bundler
+generate_topologies               # dx=dy=0 → ZERO candidates (bus unrouted)
+# corner_margin dx 1 dy 1         # → 5 candidates, routes cleanly
+```
+
+- **`dx=dy=0` → 0 candidates.**  At margin 0 the busterm faces meet only at the
+  corner point, so every generated L/U segment is degenerate/pinched and dropped
+  by `filter_pinched` / the coverage gate — the bus is left unrouted.
+- **`dx=dy=1` → 5 candidates** (`L_HV`, four `U`), routing cleanly (0 overlaps,
+  16 bit-wires placed, 0 unplaced).  Shrinking the bboxes (u1→`[1,1,99,99]`,
+  u2→`[101,101,199,199]`) opens a 2-unit gap so the faces no longer share a
+  point and positive-length segments survive.
+
+So the margin knob is not merely cosmetic: a tiny inset *rescues* a degenerate
+placement the default cannot route.
+
+**Follow-up (candidate).**  Corner-only-touching blocks should be rescued at
+generation *independent of the `corner_margin` knob* — the same way a fully
+shared edge is rescued today (`ABUT_H`/`ABUT_V` + `kAbutmentSpanEpsilon`, PR #197)
+and a zero-candidate bundle already emits a loud warning (PR: "Warn loudly on
+zero-candidate bundles").  A diagonal corner-touch is the point-contact analogue
+of edge abutment; a `CORNER`/point-contact crossing candidate (or a generation-time
+epsilon inset applied only to the touching corner) would let it route at the
+default `0` without the user having to discover the `corner_margin` workaround.
+Gate: `wl_corpus` byte-identical elsewhere (this only *adds* candidates to the
+currently-zero corner-touch case) + a focused regression on the two-block scenario
+above.
