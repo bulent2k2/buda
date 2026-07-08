@@ -28,8 +28,13 @@ fi
 # name ("Floorplanner") and icon — LaunchServices establishes that identity at
 # launch, which no runtime API can do for a bare `python3` process. Opt out
 # with BUDA_NO_APP=1 (keeps output on this terminal, handy for debugging).
-# Build the bundle once with:  python3 tools/make_macos_apps.py
+# The bundle is a git-ignored build product, so self-bootstrap it on first use
+# (like bin/buda builds its per-cell bundle on the fly) — no manual step per
+# clone. If the build fails, fall through to the direct in-terminal launch.
 APP="$PROJECT_ROOT/bin/Floorplanner.app"
+if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ]; then
+  [ -d "$APP" ] || python3 "$PROJECT_ROOT/tools/make_macos_apps.py" >/dev/null 2>&1
+fi
 if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ]; then
   # `open` launches from a different cwd, so anchor every relative path arg to
   # THIS cwd; absolute paths and options pass through.

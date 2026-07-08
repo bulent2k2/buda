@@ -52,9 +52,12 @@ python3 tools/make_macos_apps.py          # once, or after changing buda_icon.pn
 ```
 
 The bundles are host-specific build products, so `bin/*.app/` is git-ignored.
-Off macOS the script still writes the `Info.plist` + launcher (for inspection);
-the `.icns` step is skipped (it needs Apple's `sips`/`iconutil`), and
-`set_dock_icon()` supplies the icon at runtime regardless.
+Running the generator by hand is optional: `bin/fp` self-bootstraps
+`Floorplanner.app` on its first macOS launch (and `bin/buda` builds its per-cell
+bundle on the fly), so a fresh clone needs no manual step. Off macOS the script
+still writes the `Info.plist` + launcher (for inspection); the `.icns` step is
+skipped (it needs Apple's `sips`/`iconutil`), and `set_dock_icon()` supplies the
+icon at runtime regardless.
 
 Launch options:
 
@@ -64,12 +67,11 @@ open -a bin/Buda.app --args flow/x.buda
 # …or double-click the bundle in Finder, or drag it onto the Dock.
 ```
 
-Both wrappers do this automatically on macOS when the bundle exists (opt out
-with `BUDA_NO_APP=1`), resolving any path arg to absolute since `open` runs from
-a different cwd:
+Both wrappers do this automatically on macOS (opt out with `BUDA_NO_APP=1`),
+resolving any path arg to absolute since `open` runs from a different cwd:
 
-- **`bin/fp`** → `exec open -a Floorplanner.app --args …`. It is a pure GUI, so
-  detaching stdout is fine.
+- **`bin/fp`** → builds `Floorplanner.app` if missing, then `exec open -n -a
+  Floorplanner.app --args …`. It is a pure GUI, so detaching stdout is fine.
 - **`bin/buda`** → routes through a **per-cell** bundle so the Dock tile shows
   the *cell name* (the `.buda` basename), not a generic "Buda" — running many
   cells, that makes the right window easy to pick out. It writes a throwaway
