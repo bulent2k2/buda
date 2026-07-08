@@ -44,7 +44,8 @@ if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ]; then
       esac
     fi
   done
-  exec open -a "$APP" --args "${ARGS[@]}"
+  # -n: new instance each time, so two floorplanners can run side by side.
+  exec open -n -a "$APP" --args "${ARGS[@]}"
 fi
 
 # Add build and tools directories to PYTHONPATH

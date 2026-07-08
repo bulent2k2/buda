@@ -79,7 +79,10 @@ PLIST
         esac
       fi
     done
-    exec open -W -a "$CELL_APP" --stdin "$TTY" --stdout "$TTY" --stderr "$TTY" \
+    # -n: force a NEW instance even if this cell is already open, so you can run
+    # the same flow twice and inspect both windows side by side (without it,
+    # `open` just re-activates the running instance and can't rewire stdio).
+    exec open -n -W -a "$CELL_APP" --stdin "$TTY" --stdout "$TTY" --stderr "$TTY" \
          --args "${ARGS[@]}"
   fi
 fi

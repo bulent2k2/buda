@@ -88,6 +88,12 @@ the cell name at runtime, but the Dock *text* is fixed to the launching bundle's
 `CFBundleName` and can't be changed after launch — so a distinct bundle per cell
 is the only way to vary it. `bin/fp` needs no such trick (one Floorplanner).
 
+Both wrappers pass `open -n` (new instance each launch), so you can run the same
+cell twice — e.g. `buda foo &` `buda foo &` — and get two windows side by side.
+Without `-n`, `open` re-activates the one running instance and reports
+`… was already running and so the redirected stdin/stdout/stderr … could not be
+set`, leaving a single window.
+
 Note: through `open -W` the wrapper does not propagate `buda`'s exit code (it
 reports `open`'s). Scripts that check `$?` should run with `BUDA_NO_APP=1`.
 
