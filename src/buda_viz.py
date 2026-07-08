@@ -33,11 +33,13 @@ _LAYER_COLOR = {1: '#000075', 2: '#a9a9a9', 3: '#FF8800', 4: '#007ACC', 5: '#CC0
 # _layer_label() (def_layer can override these, e.g. M4 V instead of M4 H).
 _LAYER_LABEL = {1: 'M1 V', 2: 'M2 H', 3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V', 8: 'M8 H', 9: 'M9 V', 10: 'M10 H'}
 
-# Track-band colours by TrackSlot type — shared by the [Preroutes] bands and
-# the [Tracks] rail stripes (which additionally colour SIGNAL slots).
+# Track-band colours by TrackSlot type, shared by the [Preroutes] bands and
+# the [Tracks] rail stripes.  SIGNAL rails (the [Tracks] view) are coloured
+# by their LAYER instead — a faint stripe of the same colour as the
+# bit-wires that land on it (the old near-white '#f9f9f9' was invisible on
+# the white canvas).
 _PREROUTE_COLOR = {'POWER': '#ffcccc', 'GROUND': '#cce0ff',
                    'CLOCK': '#fffacc', 'SHIELD': '#e0d4f7'}
-_SIGNAL_RAIL_COLOR = '#f9f9f9'
 
 
 def _layer_is_h_map(layer_stack):
@@ -3939,7 +3941,7 @@ class BudaVisualizer:
                                            along_lo, along_hi,
                                            include_signal):
                 if pr.slot_type == 'SIGNAL':
-                    col = _SIGNAL_RAIL_COLOR
+                    col = _LAYER_COLOR.get(lid, '#888888')
                 else:
                     col = _PREROUTE_COLOR.get(pr.slot_type, '#f0f0f0')
                 half = pr.width / 2.0
@@ -4045,25 +4047,30 @@ class BudaVisualizer:
         the layout and building a Rectangle each is the costly part of the
         detailed view, and Tracks is off by default, so most sessions never
         need it.  Same band enumeration as the [Preroutes] view
-        (_track_band_rects) with the SIGNAL stripes included and the
-        perpendicular window padded; rails are grouped into one
-        PatchCollection per (layer, kind); they start hidden and the toggle
-        reveals them.
+        (_track_band_rects) with the perpendicular window padded, but the
+        rails view keeps only the SIGNAL stripes ("where can bits land") —
+        the non-SIGNAL context is the [Preroutes] layer's job (it works in
+        detailed mode too), so the two buttons are orthogonal and nothing is
+        double-drawn.  Stripes are coloured by their layer (same colour as
+        the bit-wires that land on them), one PatchCollection per layer;
+        they start hidden and the toggle reveals them.
         """
         if self._rails_built or not self._has_detailed_data:
             return
         self._rails_built = True
 
-        # Collect rail rectangles per (layer, kind) so each resulting collection
-        # has a single base alpha (set_alpha in _refresh_highlight is uniform).
-        rail_groups = {}   # (layer_id, is_signal) -> [Rectangle, ...]
+        rail_groups = {}   # layer_id -> [Rectangle, ...]
         for lid, stype, rect in self._track_band_rects(
                 self._detailed_grid_stack, self._layer_is_h,
                 include_signal=True, pad_perp=True):
-            rail_groups.setdefault((lid, stype == 'SIGNAL'), []).append(rect)
+            if stype != 'SIGNAL':
+                continue   # power/clock context is the [Preroutes] layer
+            rail_groups.setdefault(lid, []).append(rect)
 
-        for (lid, is_signal), rects in rail_groups.items():
-            base_alpha = 0.10 if is_signal else 0.15
+        # One collection per layer so each has a single base alpha
+        # (set_alpha in _refresh_highlight is uniform per collection).
+        for lid, rects in rail_groups.items():
+            base_alpha = 0.20
             pc = PatchCollection(rects, match_original=True, zorder=4)
             pc.set_alpha(base_alpha)
             pc.set_visible(False)

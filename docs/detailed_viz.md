@@ -51,23 +51,26 @@ interval constraint.
 
 Two layers of geometry are drawn:
 
-**Routing-grid rail stripes**
+**Routing-grid rail stripes (`[Tracks]`)**
 
-For every layer that has a `TrackPattern` defined:
+For every layer that has a `TrackPattern` defined, the **SIGNAL** slots are
+drawn as faint stripes in that **layer's colour** — the same colour as the
+bit-wires that land on them ("where can bits land"):
 
-| Layer direction | Stripe axis | Slot types rendered |
+| Layer direction | Stripe axis | Rendered |
 |---|---|---|
-| H (M4 style) | Horizontal bands across full X extent | POWER (pale red), GROUND (pale blue), CLOCK (pale yellow), SHIELD (pale lavender), SIGNAL (near-white) |
-| V (M5 style) | Vertical bands across full Y extent | same colours |
+| H (M4 style) | Horizontal bands across full X extent | SIGNAL slots, layer colour, alpha 0.20 |
+| V (M5 style) | Vertical bands across full Y extent | same |
 
-Stripes are drawn with very low alpha (0.15 for pre-route slots, 0.10 for the
-SIGNAL stripes) so the bit-wires remain legible on top.  The rails are built
-from the same enumeration as the abstract-view `[Preroutes]` bands
-(`RoutingGridStack.preroutes(..., include_signal=True)` through the shared
-`_track_band_rects` helper), so the two views share one palette and region
-overrides render their local patterns with spans broken at region boundaries
-— shadowed global bands split at those regions too, so the overlay never
-shows tracks the solver would not see there.
+Non-SIGNAL slots (POWER/GROUND/CLOCK/SHIELD) are deliberately **not** part of
+the rails view — that context is the `[Preroutes]` layer's job (which works
+in detailed mode too), keeping the two buttons orthogonal with nothing
+double-drawn.  The rails are built from the same enumeration as the
+`[Preroutes]` bands (`RoutingGridStack.preroutes(..., include_signal=True)`
+through the shared `_track_band_rects` helper), so region overrides render
+their local patterns with spans broken at region boundaries — shadowed
+global bands split at those regions too, so the overlay never shows tracks
+the solver would not see there.
 
 **Bit-wire lines (`NetSegment`s)**
 
@@ -159,7 +162,7 @@ detailed artists cleanly.
 |---|---|---|
 | `_bundle_artists` | Abstract NUTS bus bars + interval bands | bundle_id (existing) |
 | `_detailed_bundle_artists` | Bit-wire `NetSegment` lines | bundle_id |
-| `_grid_rail_artists` | Track rail stripe `PatchCollection`s, one per (layer, kind) | (none — not per-bundle) |
+| `_grid_rail_artists` | SIGNAL rail stripe `PatchCollection`s, one per layer | (none — not per-bundle) |
 
 `_register_detailed(bid, artist, ...)` mirrors `_register` but populates
 `_detailed_bundle_artists` instead of `_bundle_artists`.
