@@ -49,9 +49,10 @@ The examples below use the `bin/…` form so they work without a PATH change.
 `bin/Buda.app` and `bin/Floorplanner.app` — thin launchers that run the same
 python through a LaunchServices `.app` so the Dock tile shows "Buda" /
 "Floorplanner" (name **and** icon) instead of "python3". `bin/fp` and `bin/buda`
-auto-launch through their bundle on macOS when it exists (`bin/buda` keeps the
-terminal via `open --stdout` + `-W`; `BUDA_NO_APP=1` forces the in-terminal
-launch). The bundles are git-ignored build products. See
+auto-launch through their bundle on macOS when it exists (`bin/buda` routes
+through a throwaway per-cell bundle so the Dock tile shows the `.buda` basename,
+and keeps the terminal via `open --stdout` + `-W`; `BUDA_NO_APP=1` forces the
+in-terminal launch). The bundles are git-ignored build products. See
 [macOS app bundles](docs/internal/macos_app_bundles.md).
 
 The one-step way (per shell) is to **source** `bin/activate` — it prepends

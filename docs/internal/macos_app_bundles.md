@@ -70,20 +70,32 @@ a different cwd:
 
 - **`bin/fp`** → `exec open -a Floorplanner.app --args …`. It is a pure GUI, so
   detaching stdout is fine.
-- **`bin/buda`** → `exec open -W -a Buda.app --stdin/--stdout/--stderr "$(tty)"
-  --args …`. `buda` is a CLI whose per-command summary and `flow.log` line must
-  stay on the terminal, so it wires stdio back to the controlling tty and `-W`
-  blocks until the run exits — you get the Dock identity **and** the terminal
-  output. This path is taken only when a tty is present and this `open` supports
-  the `--stdout` flag (macOS 10.15+); otherwise it falls through to the plain
-  in-terminal launch (no regression on older macOS or in pipes/CI).
+- **`bin/buda`** → routes through a **per-cell** bundle so the Dock tile shows
+  the *cell name* (the `.buda` basename), not a generic "Buda" — running many
+  cells, that makes the right window easy to pick out. It writes a throwaway
+  `<cellname>.app` (`CFBundleName=<cellname>`, repo root baked into its launcher,
+  icon copied from `bin/Buda.app`) under `${TMPDIR}/buda_cellapps/` and
+  `exec open -W -a <cellname>.app --stdin/--stdout/--stderr "$(tty)" --args …`.
+  `buda` is a CLI whose per-command summary and `flow.log` line must stay on the
+  terminal, so it wires stdio back to the controlling tty and `-W` blocks until
+  the run exits — you get the per-cell Dock identity **and** the terminal output.
+  Taken only with a tty present, an `open` that supports `--stdout` (macOS
+  10.15+), a script argument, and no `--no-viz` (a batch run has no window to
+  name); otherwise it falls through to the plain in-terminal launch.
+
+Why per-cell: the menu-bar name, window title, and Dock *icon* already follow
+the cell name at runtime, but the Dock *text* is fixed to the launching bundle's
+`CFBundleName` and can't be changed after launch — so a distinct bundle per cell
+is the only way to vary it. `bin/fp` needs no such trick (one Floorplanner).
 
 Note: through `open -W` the wrapper does not propagate `buda`'s exit code (it
 reports `open`'s). Scripts that check `$?` should run with `BUDA_NO_APP=1`.
 
 ## Trade-off recap
 
-- `BUDA_NO_APP=1` (or older macOS / no tty / non-macOS) → direct launch: correct
-  window title, menu-bar name, and Dock icon, but the Dock **text** is `python3`.
-- Default on macOS 10.15+ → routed through the `.app`: all four surfaces correct.
-  `fp` detaches stdout (GUI); `buda` keeps it via `open --stdout` + `-W`.
+- `BUDA_NO_APP=1` (or older macOS / no tty / `--no-viz` / non-macOS) → direct
+  launch: correct window title, menu-bar name, and Dock icon, but the Dock
+  **text** is `python3`.
+- Default on macOS 10.15+ → routed through a `.app`: all four surfaces correct.
+  `fp` detaches stdout (GUI); `buda` keeps it via `open --stdout` + `-W` and
+  names the tile after the cell.

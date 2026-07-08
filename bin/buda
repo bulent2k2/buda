@@ -6,29 +6,75 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
-# macOS: relaunch through Buda.app so the Dock tile shows "Buda" + icon
-# (LaunchServices identity), WHILE keeping this terminal's stdio wired via
-# `open --stdout/--stderr/--stdin` (macOS 10.15+) and `-W` (block until it
-# exits) — so the per-command summary and flow-log line still print here.
-# Guarded: only when a controlling tty is present AND this `open` supports the
-# stdio flags; otherwise fall through to the plain in-terminal launch below.
-# Opt out entirely with BUDA_NO_APP=1. Build the bundle once with:
-#   python3 tools/make_macos_apps.py
-APP="$PROJECT_ROOT/bin/Buda.app"
-if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ] \
+# macOS: relaunch through a per-cell .app so the Dock tile shows the CELL name
+# (the .buda basename) and icon — when you run many cells, that makes the right
+# window easy to pick out. LaunchServices sets that identity at launch, while
+# this terminal's stdio stays wired via `open --stdin/--stdout/--stderr`
+# (macOS 10.15+) and `-W` blocks until exit, so the per-command summary and
+# flow-log line still print here. The per-cell bundle is a throwaway written to
+# a temp cache; its icon is copied from bin/Buda.app (build it once with
+# `python3 tools/make_macos_apps.py`), else set_dock_icon() supplies it at
+# runtime. Guarded to a real tty + an `open` with --stdout; otherwise falls
+# through to the direct launch below. Opt out with BUDA_NO_APP=1.
+if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
    && tty -s && open --help 2>&1 | grep -q -- '--stdout'; then
-  TTY="$( tty )"
-  # `open` launches from a different cwd, so resolve any path arg to absolute.
-  ARGS=()
+  # First non-option arg is the script; skip the reroute for --no-viz batch runs
+  # (no window to name) and when no script is given (let the CLI print help).
+  SCRIPT_ARG=""; NOVIZ=""
   for a in "$@"; do
-    if [ -e "$a" ]; then
-      ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
-    else
-      ARGS+=("$a")
-    fi
+    case "$a" in
+      -nv|--no-viz) NOVIZ=1 ;;
+      -*) ;;
+      *) [ -z "$SCRIPT_ARG" ] && SCRIPT_ARG="$a" ;;
+    esac
   done
-  exec open -W -a "$APP" --stdin "$TTY" --stdout "$TTY" --stderr "$TTY" \
-       --args "${ARGS[@]}"
+  if [ -n "$SCRIPT_ARG" ] && [ -z "$NOVIZ" ]; then
+    CELL="$( basename "$SCRIPT_ARG" )"; CELL="${CELL%.buda}"
+    CELL_APP="${TMPDIR:-/tmp}/buda_cellapps/${CELL}.app"
+    mkdir -p "$CELL_APP/Contents/MacOS" "$CELL_APP/Contents/Resources"
+    # Launcher (repo root baked in — the bundle lives outside the checkout).
+    # Body starts at column 0 so the generated shebang is the first two bytes.
+    cat > "$CELL_APP/Contents/MacOS/$CELL" <<LAUNCH
+#!/bin/bash
+export PYTHONPATH="$PROJECT_ROOT/build:$PROJECT_ROOT/tools:\$PYTHONPATH"
+exec /usr/bin/env python3 "$PROJECT_ROOT/src/buda_cli.py" "\$@"
+LAUNCH
+    chmod +x "$CELL_APP/Contents/MacOS/$CELL"
+    ICON_KEY=""
+    SRC_ICNS="$PROJECT_ROOT/bin/Buda.app/Contents/Resources/buda.icns"
+    if [ -f "$SRC_ICNS" ]; then
+      cp "$SRC_ICNS" "$CELL_APP/Contents/Resources/${CELL}.icns"
+      ICON_KEY="    <key>CFBundleIconFile</key><string>${CELL}</string>"
+    fi
+    cat > "$CELL_APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>$CELL</string>
+    <key>CFBundleDisplayName</key><string>$CELL</string>
+    <key>CFBundleExecutable</key><string>$CELL</string>
+    <key>CFBundleIdentifier</key><string>com.buda.cell.$CELL</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+$ICON_KEY
+    <key>NSHighResolutionCapable</key><true/>
+    <key>LSMinimumSystemVersion</key><string>10.13</string>
+</dict>
+</plist>
+PLIST
+    TTY="$( tty )"
+    # `open` launches from a different cwd, so resolve path args to absolute.
+    ARGS=()
+    for a in "$@"; do
+      if [ -e "$a" ]; then
+        ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
+      else
+        ARGS+=("$a")
+      fi
+    done
+    exec open -W -a "$CELL_APP" --stdin "$TTY" --stdout "$TTY" --stderr "$TTY" \
+         --args "${ARGS[@]}"
+  fi
 fi
 
 # Add build and tools directories to PYTHONPATH

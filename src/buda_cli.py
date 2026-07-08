@@ -394,6 +394,12 @@ def main():
             if session._flow_log is not None:
                 print(f"Full per-command detail → {flow_log_path}")
                 session._flow_log.close()
+    else:
+        # No script: show usage and insist on one rather than quietly exiting.
+        parser.print_help(sys.stderr)
+        print("\nerror: a .buda script is required "
+              "(e.g. `buda flow/dnuts1.buda`).", file=sys.stderr)
+        sys.exit(2)
 
 if __name__ == "__main__":
     main()
