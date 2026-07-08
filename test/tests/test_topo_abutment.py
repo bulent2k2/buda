@@ -333,3 +333,130 @@ def test_corner_touch_bus_routes_to_completion():
     assert s.nuts_result.num_violations == 0, "corner-touch bus left a NUTS interval violation"
     assert s.detailed_result.num_unplaced == 0, \
         f"{s.detailed_result.num_unplaced}/8 bits unplaced — corner-touch bus did not route"
+
+
+# ── Overlap corner-wrapping U's (U_OVL_*) + exclusive-band perp clamp ─────────
+# For a staggered-cross block pair the generic U's cross a block and double back
+# to tap it; add_overlap_corner_us replaces them with corner-wrapping U's whose
+# face-tap arm carries a generation-supplied perp clamp pinning it to the tapped
+# block's EXCLUSIVE band.  Without the clamp NUTS slides that arm across the far
+# block and collapses the detour into a pass-through (bits then land inside the
+# far block → DetailedNUTS opens); the clamp makes that impossible by construction.
+
+def _ct(topo, fp):
+    ct = buda.ConnTopology(); ct.build(topo, fp)
+    return ct
+
+
+def test_overlap_corner_us_generated_slash():
+    """"/" stagger emits the corner-wrapping U's (and no generic pass-through U)."""
+    fp = _fp({"A": (0, 0, 400, 400), "B": (200, 200, 600, 600)})
+    types = {c.type for c in _gen(fp).generate_candidates("A", ["B"])}
+    assert {"U_OVL_HVH", "U_OVL_VHV"} <= types, sorted(types)
+    assert not any(t in ("U_top", "U_bot", "U_left", "U_right") for t in types), sorted(types)
+
+
+def test_overlap_corner_u_hvh_taparm_clamped_below_far_block():
+    """"/" U_OVL_HVH: the A-tap H arm (seg0) must be pinned to A's exclusive band
+    BELOW B (y ∈ [A.y1, B.y1]).  Pre-clamp its window was A's full face [0,400],
+    which lets NUTS slide it up into B's band [200,600] and collapse the detour."""
+    fp = _fp({"A": (0, 0, 400, 400), "B": (200, 200, 600, 600)})
+    hvh = next(c for c in _gen(fp).generate_candidates("A", ["B"]) if c.type == "U_OVL_HVH")
+    seg0 = _ct(hvh, fp).segs()[0]
+    assert seg0.perp_hi > seg0.perp_lo, f"tap arm went zero/negative slide [{seg0.perp_lo},{seg0.perp_hi}]"
+    assert seg0.perp_lo >= 0 and seg0.perp_hi <= 200, \
+        f"A-tap arm y-window [{seg0.perp_lo},{seg0.perp_hi}] escapes A's exclusive band [0,200] (into B)"
+
+
+def test_overlap_corner_u_vhv_taparm_clamped_left_of_far_block():
+    """"/" U_OVL_VHV: the A-tap V arm (seg0) must be pinned LEFT of B (x ∈ [A.x1,B.x1])."""
+    fp = _fp({"A": (0, 0, 400, 400), "B": (200, 200, 600, 600)})
+    vhv = next(c for c in _gen(fp).generate_candidates("A", ["B"]) if c.type == "U_OVL_VHV")
+    seg0 = _ct(vhv, fp).segs()[0]
+    assert seg0.perp_hi > seg0.perp_lo, f"tap arm went zero/negative slide [{seg0.perp_lo},{seg0.perp_hi}]"
+    assert seg0.perp_lo >= 0 and seg0.perp_hi <= 200, \
+        f"A-tap arm x-window [{seg0.perp_lo},{seg0.perp_hi}] escapes A's exclusive band [0,200] (into B)"
+
+
+def test_overlap_corner_u_hvh_taparm_clamped_above_far_block_backslash():
+    """"\\" stagger, U_OVL_HVH: A is the upper-left block, so its right-face tap arm
+    must stay ABOVE B (y ∈ [B.y2, A.y2]) — the mirror of the "/" case."""
+    fp = _fp({"A": (0, 200, 400, 600), "B": (200, 0, 600, 400)})
+    hvh = next(c for c in _gen(fp).generate_candidates("A", ["B"]) if c.type == "U_OVL_HVH")
+    seg0 = _ct(hvh, fp).segs()[0]
+    assert seg0.perp_hi > seg0.perp_lo, f"tap arm went zero/negative slide [{seg0.perp_lo},{seg0.perp_hi}]"
+    assert seg0.perp_lo >= 400 and seg0.perp_hi <= 600, \
+        f"A-tap arm y-window [{seg0.perp_lo},{seg0.perp_hi}] escapes A's exclusive band [400,600] (into B)"
+
+
+def test_overlap_corner_u_covers_both_blocks():
+    """Every U_OVL candidate must tap/cover both endpoint blocks (no BUSTERM_OPEN)."""
+    fp = _fp({"A": (0, 0, 400, 400), "B": (200, 200, 600, 600)})
+    us = [c for c in _gen(fp).generate_candidates("A", ["B"]) if c.type.startswith("U_OVL")]
+    assert us
+    for c in us:
+        assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
+
+
+_PATN = ("POWER 2 1 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 "
+         "GROUND 2 1 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5")
+
+
+def _route_pinned_overlap_u(kind, double_detour=False):
+    """Run an 8-bit bus over the '/' overlap A(0,0,400,400)/B(200,200,600,600),
+    pinned to the named corner-wrapping U.  Returns (session, selected_topology)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    gen = "generate_topologies double_detour" if double_detour else "generate_topologies"
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 4 M4 H TOP 55.56", "def_layer 5 M5 V TOP 55.56",
+                  f"def_track_pattern 4 0 {_PATN}", f"def_track_pattern 5 0 {_PATN}",
+                  "add_block A 0 0 400 400", "add_block B 200 200 600 600",
+                  "add_bus n[8] A.tx B.rx", "run_bundler strict", gen):
+            s.do_command(c)
+        idx = next(i for i, c in enumerate(s.bundles[0].input.candidates) if c.type == kind)
+        for c in (f"select_topology 1 {idx + 1}", "run_planner 1",
+                  "run_nuts", "run_detailed_nuts"):
+            s.do_command(c)
+    w = s.bundles[0]
+    sel = w.input.candidates[w.plan.selected_topology_index]
+    assert sel.type == kind, f"pin did not take: selected {sel.type}"
+    return s, sel
+
+
+def _bit_in_B_interior(detailed, sel, B, eps=1.0):
+    """First (seg_idx, bit_index) whose placed bit-wire rectangle penetrates B's
+    OPEN interior (B shrunk by eps), or None.  A leg crossing B — the collapse the
+    perp clamp prevents — shows up here; face taps (which only touch B's boundary
+    from outside) do not."""
+    bx1, by1, bx2, by2 = B
+    for ns in detailed.net_segments:
+        seg = sel.segments[ns.seg_idx]
+        horiz = seg.start.y == seg.end.y
+        half = ns.width / 2.0
+        if horiz:
+            rx1, ry1, rx2, ry2 = ns.span_lo, ns.track_position - half, ns.span_hi, ns.track_position + half
+        else:
+            rx1, ry1, rx2, ry2 = ns.track_position - half, ns.span_lo, ns.track_position + half, ns.span_hi
+        ox = min(rx2, bx2 - eps) - max(rx1, bx1 + eps)
+        oy = min(ry2, by2 - eps) - max(ry1, by1 + eps)
+        if ox > 0 and oy > 0:
+            return (ns.seg_idx, ns.bit_index, (rx1, ry1, rx2, ry2))
+    return None
+
+
+def test_overlap_corner_u_family_routes_clear_of_far_block():
+    """End-to-end: every corner-wrapping U/UU pinned on an 8-bit bus must place ALL
+    bits AND keep every bit-wire out of the far block B's interior.  The per-segment
+    perp clamps (face-tap arms in their exclusive band, detour arms outside the
+    union) are what prevent a leg collapsing THROUGH B — pre-clamp the UU detour arm
+    slid straight across B."""
+    B = (200, 200, 600, 600)
+    for kind, dd in (("U_OVL_HVH", False), ("U_OVL_VHV", False),
+                     ("UU_OVL_HVHV", True), ("UU_OVL_VHVH", True)):
+        s, sel = _route_pinned_overlap_u(kind, dd)
+        assert s.nuts_result.num_violations == 0, f"{kind}: NUTS interval violation"
+        assert s.detailed_result.num_unplaced == 0, \
+            f"{kind}: {s.detailed_result.num_unplaced}/8 bits unplaced"
+        hit = _bit_in_B_interior(s.detailed_result, sel, B)
+        assert hit is None, f"{kind}: bit-wire seg {hit[0]} bit {hit[1]} penetrates B at {hit[2]}"

@@ -35,6 +35,11 @@ Topology offset_topology(const Topology& t, int dx, int dy,
     auto shift_seg = [dx, dy](Segment& s) {
         s.start = Point{s.start.x + dx, s.start.y + dy};
         s.end   = Point{s.end.x   + dx, s.end.y   + dy};
+        // A perp clamp is an absolute coordinate on the segment's perp axis
+        // (y for H, x for V); shift it with the geometry, leaving sentinels alone.
+        const int d = (s.start.y == s.end.y) ? dy : dx;   // H → y-clamp, V → x-clamp
+        if (s.perp_clamp_lo != INT_MIN) s.perp_clamp_lo += d;
+        if (s.perp_clamp_hi != INT_MAX) s.perp_clamp_hi += d;
     };
     auto shift_busterm = [&](Busterm& b) {
         b.bbox      = shift_rect(b.bbox);
@@ -539,6 +544,19 @@ void TopologyGenerator::add_l_shapes(const Busterm& s_bt, const Busterm& d_bt, s
     }
 }
 
+// True when A and B form a genuine STAGGERED cross: they overlap in 2-D and each
+// sticks out on one side per axis (neither nested).  Such a pair has exactly two
+// free (empty) union corners on one diagonal — the basis for the overlap L's and
+// corner-wrapping U's.  Shared by add_overlap_corner_ls / _us and the U-shape
+// dispatch in generate_candidates.
+static bool overlap_cross(const Rect& A, const Rect& B) {
+    const bool overlap = std::max(A.x1, B.x1) < std::min(A.x2, B.x2)
+                      && std::max(A.y1, B.y1) < std::min(A.y2, B.y2);
+    const bool x_stagger = (A.x1 < B.x1 && A.x2 < B.x2) || (B.x1 < A.x1 && B.x2 < A.x2);
+    const bool y_stagger = (A.y1 < B.y1 && A.y2 < B.y2) || (B.y1 < A.y1 && B.y2 < A.y2);
+    return overlap && x_stagger && y_stagger;
+}
+
 // Two partially-overlapping blocks form a cross whose union bbox has exactly two
 // FREE (empty) outer corners, on one diagonal.  Each free corner admits an L route
 // that stays OUTSIDE the shared band: one leg taps a block's exclusive horizontal
@@ -561,11 +579,7 @@ void TopologyGenerator::add_overlap_corner_ls(const Busterm& s_bt, const Busterm
     // no L_OVL is emitted and the ordinary L/U shapes handle them.
     const Rect& A = s_bt.bbox;
     const Rect& B = d_bt.bbox;
-    const bool overlap = std::max(A.x1, B.x1) < std::min(A.x2, B.x2)
-                      && std::max(A.y1, B.y1) < std::min(A.y2, B.y2);
-    const bool x_stagger = (A.x1 < B.x1 && A.x2 < B.x2) || (B.x1 < A.x1 && B.x2 < A.x2);
-    const bool y_stagger = (A.y1 < B.y1 && A.y2 < B.y2) || (B.y1 < A.y1 && B.y2 < A.y2);
-    if (!(overlap && x_stagger && y_stagger)) return;
+    if (!overlap_cross(A, B)) return;
 
     const int m_h = floorplan_.get_min_stub_length(0 /*H*/, h_layer_);
     const int m_v = floorplan_.get_min_stub_length(1 /*V*/, v_layer_);
@@ -613,6 +627,124 @@ void TopologyGenerator::add_overlap_corner_ls(const Busterm& s_bt, const Busterm
         emit("L_OVL_TR", To.x2, (Bo.y2 + To.y2) / 2,
                          (Lx.x2 + Rx.x2) / 2, (Bo.y2 + To.y2) / 2,
                          (Lx.x2 + Rx.x2) / 2, Rx.y2);
+    }
+}
+
+// Corner-wrapping U's for a partially-overlapping (staggered-cross) block pair —
+// the desirable replacement for the generic pass-through U's, which for overlapping
+// endpoints cross a block and double back to tap it (never a useful route).  Each
+// U is the dual of a free-corner L (add_overlap_corner_ls): it keeps the L's A-leg
+// but, instead of tapping B on the overlap-adjacent face, detours one channel PAST
+// B (reusing the same beyond-bbox detour columns add_u_shapes uses, so
+// detour_channel is honoured) and wraps around B's corner to tap its next face.
+// So B is offered its OTHER two faces (right/top on "/", right/bottom on "\"),
+// giving the planner a route that never enters the shared band.  Under
+// double_detour the wrap continues one more channel to tap B's FAR face (the UU_*
+// variants).  The detour columns/rows come from x_grid/y_grid (channel midpoints,
+// incl. the beyond-union bands); each leg is min-stub gated.
+void TopologyGenerator::add_overlap_corner_us(const Busterm& s_bt, const Busterm& d_bt,
+                                              const std::vector<int>& x_grid,
+                                              const std::vector<int>& y_grid,
+                                              std::vector<Topology>& results) {
+    if (!use_busterm_) return;
+    // Margin-inset bbox, as add_overlap_corner_ls (keeps taps within corner_margin
+    // and consistent with the rest of the shrunk-box generator).
+    const Rect& A = s_bt.bbox;
+    const Rect& B = d_bt.bbox;
+    if (!overlap_cross(A, B)) return;
+
+    const int m_h = floorplan_.get_min_stub_length(0 /*H*/, h_layer_);
+    const int m_v = floorplan_.get_min_stub_length(1 /*V*/, v_layer_);
+    const int ux1 = std::min(A.x1, B.x1), ux2 = std::max(A.x2, B.x2);
+    const int uy1 = std::min(A.y1, B.y1), uy2 = std::max(A.y2, B.y2);
+
+    // Detour lines just beyond the union bbox (the channels add_u_shapes uses).
+    const int NONE = INT_MIN;
+    auto first_gt = [&](const std::vector<int>& g, int v) {
+        for (int x : g) if (x > v) return x; return NONE; };
+    auto last_lt = [&](const std::vector<int>& g, int v) {
+        int r = NONE; for (int x : g) if (x < v) r = x; return r; };
+    const int xd_r = first_gt(x_grid, ux2);   // detour column right of union
+    const int yd_t = first_gt(y_grid, uy2);   // detour row above union
+    const int yd_b = last_lt (y_grid, uy1);   // detour row below union
+
+    // Poly-line topology from consecutive points; leg orientation → layer; each leg
+    // min-stub gated; kept only if it is a full 3+ segment path.  `clamps[i]` is the
+    // per-segment perpendicular slide clamp (absolute perp-axis coords; sentinels =
+    // unclamped): the face-tap arms are pinned to the tapped block's EXCLUSIVE band
+    // and every detour arm is pinned OUTSIDE the union bbox.  Without these NUTS
+    // slides an arm across a block to shorten wire and collapses the wrap into a
+    // pass-through — the arm's bits then land inside the block → opens.
+    using Clamp = std::pair<int,int>;
+    auto emit = [&](const std::string& tag, std::vector<Clamp> clamps, std::vector<Point> p) {
+        for (int v : {p.front().x, p.front().y}) if (v == NONE) return;
+        for (const Point& pt : p) if (pt.x == NONE || pt.y == NONE) return;
+        Topology t; t.type = tag;
+        for (size_t i = 0; i + 1 < p.size(); ++i) {
+            const bool horiz = (p[i].y == p[i + 1].y);
+            const int len = std::abs(p[i + 1].x - p[i].x) + std::abs(p[i + 1].y - p[i].y);
+            if (len < (horiz ? m_h : m_v)) return;
+            t.segments.push_back(make_seg(p[i].x, p[i].y, p[i + 1].x, p[i + 1].y,
+                                          horiz ? h_layer_ : v_layer_));
+        }
+        if (t.segments.size() >= 3) {
+            for (size_t i = 0; i < t.segments.size() && i < clamps.size(); ++i) {
+                t.segments[i].perp_clamp_lo = clamps[i].first;
+                t.segments[i].perp_clamp_hi = clamps[i].second;
+            }
+            results.push_back(std::move(t));
+        }
+    };
+    // Reusable clamp bands: RIGHT/TOP/BOT keep a detour arm outside the union;
+    // NOCL leaves an arm free (the Q-tap arms already approach Q from outside).
+    const Clamp RIGHT{ux2, INT_MAX}, TOP{uy2, INT_MAX}, BOT{INT_MIN, uy1}, NOCL{INT_MIN, INT_MAX};
+
+    const Rect& Lx = (A.x1 < B.x1) ? A : B;   // pokes left
+    const Rect& Rx = (A.x1 < B.x1) ? B : A;   // pokes right
+    const Rect& Bo = (A.y1 < B.y1) ? A : B;   // pokes below
+    const Rect& To = (A.y1 < B.y1) ? B : A;   // pokes above
+    const bool dd = allow_double_detour_;
+
+    if (&Lx == &Bo) {
+        // "/" diagonal: P = lower-left block, Q = upper-right block.  L's tapped
+        // P-right/Q-bottom and P-top/Q-left; the U's wrap to Q-right and Q-top.
+        const Rect& P = Lx; const Rect& Q = Rx;
+        const int p_rt_y = (Bo.y1 + To.y1) / 2;    // P's right face, below Q
+        const int p_tp_x = (Lx.x1 + Rx.x1) / 2;    // P's top face, left of Q
+        const int q_rt_y = (Q.y1 + P.y2) / 2;      // Q's right face, near bottom-right corner
+        const int q_tp_x = (Q.x1 + P.x2) / 2;      // Q's top face, near top-left corner
+        const int q_tp_xR = (P.x2 + Q.x2) / 2;     // Q's top face, near top-right (UU far tap)
+        const int q_rt_yT = (P.y2 + Q.y2) / 2;     // Q's right face, near top-right (UU far tap)
+        // Exclusive bands for the P-tap arm: H arm stays BELOW Q (y∈[P.y1,Q.y1]);
+        // V arm stays LEFT of Q (x∈[P.x1,Q.x1]).  Detour arms clamped outside the
+        // union (RIGHT/TOP); the trailing Q-tap arm approaches Q from outside → NOCL.
+        const Clamp HTAP{P.y1, Q.y1}, VTAP{P.x1, Q.x1};
+        emit("U_OVL_HVH", {HTAP, RIGHT, NOCL}, {{P.x2, p_rt_y}, {xd_r, p_rt_y}, {xd_r, q_rt_y}, {Q.x2, q_rt_y}});
+        emit("U_OVL_VHV", {VTAP, TOP,   NOCL}, {{p_tp_x, P.y2}, {p_tp_x, yd_t}, {q_tp_x, yd_t}, {q_tp_x, Q.y2}});
+        if (dd) {
+            emit("UU_OVL_HVHV", {HTAP, RIGHT, TOP,   NOCL}, {{P.x2, p_rt_y}, {xd_r, p_rt_y}, {xd_r, yd_t}, {q_tp_xR, yd_t}, {q_tp_xR, Q.y2}});
+            emit("UU_OVL_VHVH", {VTAP, TOP,   RIGHT, NOCL}, {{p_tp_x, P.y2}, {p_tp_x, yd_t}, {xd_r, yd_t}, {xd_r, q_rt_yT}, {Q.x2, q_rt_yT}});
+        }
+    } else {
+        // "\" diagonal: P = upper-left block, Q = lower-right block.  L's tapped
+        // P-bottom/Q-left and P-right/Q-top; the U's wrap to Q-bottom and Q-right.
+        const Rect& P = Lx; const Rect& Q = Rx;
+        const int p_bt_x = (Lx.x1 + Rx.x1) / 2;    // P's bottom face, left of Q
+        const int p_rt_y = (Bo.y2 + To.y2) / 2;    // P's right face, above Q
+        const int q_bt_x = (Q.x1 + P.x2) / 2;      // Q's bottom face, near bottom-left corner
+        const int q_rt_y = (Q.y2 + P.y1) / 2;      // Q's right face, near top-right corner
+        const int q_bt_xR = (P.x2 + Q.x2) / 2;     // Q's bottom face, near bottom-right (UU far tap)
+        const int q_rt_yB = (Q.y1 + P.y1) / 2;     // Q's right face, near bottom-right (UU far tap)
+        // Exclusive bands for the P-tap arm: H arm stays ABOVE Q (y∈[Q.y2,P.y2]);
+        // V arm stays LEFT of Q (x∈[P.x1,Q.x1]).  Detour arms clamped outside the
+        // union (RIGHT/BOT); the trailing Q-tap arm approaches Q from outside → NOCL.
+        const Clamp HTAP{Q.y2, P.y2}, VTAP{P.x1, Q.x1};
+        emit("U_OVL_VHV", {VTAP, BOT,   NOCL}, {{p_bt_x, P.y1}, {p_bt_x, yd_b}, {q_bt_x, yd_b}, {q_bt_x, Q.y1}});
+        emit("U_OVL_HVH", {HTAP, RIGHT, NOCL}, {{P.x2, p_rt_y}, {xd_r, p_rt_y}, {xd_r, q_rt_y}, {Q.x2, q_rt_y}});
+        if (dd) {
+            emit("UU_OVL_VHVH", {VTAP, BOT,   RIGHT, NOCL}, {{p_bt_x, P.y1}, {p_bt_x, yd_b}, {xd_r, yd_b}, {xd_r, q_rt_yB}, {Q.x2, q_rt_yB}});
+            emit("UU_OVL_HVHV", {HTAP, RIGHT, BOT,   NOCL}, {{P.x2, p_rt_y}, {xd_r, p_rt_y}, {xd_r, yd_b}, {q_bt_xR, yd_b}, {q_bt_xR, Q.y1}});
+        }
     }
 }
 
@@ -3176,9 +3308,17 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     }
 
     add_z_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
-    add_u_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
-    if (allow_double_detour_)
-        add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
+    // Overlapping endpoint blocks: the generic U's cross a block and double back to
+    // tap it (a useless route), so replace them with corner-wrapping U_OVL's that
+    // detour around B (add_overlap_corner_us emits the UU_OVL's too under
+    // double_detour).  Disjoint blocks keep the ordinary U/UU detours.
+    if (overlap_cross(src_bt.orig_bbox, dst_bt.orig_bbox)) {
+        add_overlap_corner_us(src_bt, dst_bt, chan_x, chan_y, candidates);
+    } else {
+        add_u_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
+        if (allow_double_detour_)
+            add_uu_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);
+    }
 
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
     // One-time seg-to-seg annotation (topo-truth Phase 4) — see generate_npin.

@@ -310,7 +310,6 @@ void derive_conn_segs(const Topology& topo, const Floorplan& fp,
 
 void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
                          std::vector<ConnSeg>& segs) {
-    (void)topo;
     std::map<std::string, Rect> bmap;
     for (auto& [name, rect] : fp.get_all_blocks()) bmap[name] = rect;
 
@@ -448,6 +447,25 @@ void derive_slide_ranges(const Topology& topo, const Floorplan& fp,
                 }
             }
         }
+    }
+
+    // ── Pass 3 — generation-supplied perp clamp ──
+    // A segment may carry an explicit perpendicular slide clamp set at generation
+    // (Segment::perp_clamp_lo/hi, absolute coords on the perp axis; sentinels =
+    // unclamped).  Intersect it last so it is authoritative over the busterm-face
+    // window.  The overlap corner-wrapping U's use this to pin the face-tap arm to
+    // the tapped block's exclusive band, so NUTS cannot slide it across the far
+    // block and collapse the detour.  Only ever TIGHTENS (never inverts): if the
+    // clamp would empty the window it is skipped, so a stale/misplaced clamp
+    // degrades to the unclamped face window rather than breaking connectivity.
+    for (size_t i = 0; i < segs.size(); ++i) {
+        const Segment& s = topo.segments[i];
+        if (s.perp_clamp_lo == INT_MIN && s.perp_clamp_hi == INT_MAX) continue;
+        ConnSeg& cs = segs[i];
+        int nlo = cs.perp_lo, nhi = cs.perp_hi;
+        if (s.perp_clamp_lo != INT_MIN) nlo = std::max(nlo, s.perp_clamp_lo);
+        if (s.perp_clamp_hi != INT_MAX) nhi = std::min(nhi, s.perp_clamp_hi);
+        if (nlo <= nhi) { cs.perp_lo = nlo; cs.perp_hi = nhi; }
     }
 }
 
