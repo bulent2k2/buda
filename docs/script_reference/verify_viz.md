@@ -104,12 +104,26 @@ gives NUTS a lot of freedom to shorten; see
 [`report_wirelength`](nuts.md)), `segs` (segment count), `pass`
 (`pass_through_count` — blocks the trunk crosses with no stub), `mslide` (minimum
 perpendicular slide freedom across the candidate's ConnSegs, via `ConnTopology`;
-`0` = pinched, `-` = not computable), and notes
+`0` = pinched, `free` = unbounded/unresolved slide, `-` = not computable), and notes
 (`*SEL` selected, `dup`, `pinch`). Per-bundle flags: `DUP(n)` geometric duplicates,
 `PINCH(n)` zero-slide candidates, `SINGLE` only one candidate, `PASSTHRU(n)`
 pass-through candidates. The summary reports the candidate-count distribution,
 duplicate / pinched / single / pass-through bundle counts, and a shape-family
 histogram (trunk `@coord` suffixes collapsed).
+
+**Hierarchical flow — slide columns resolve after planning.** The slide-derived
+columns (`mslide` and the `wl[lo..hi]` envelope's upper bound) are computed by
+building each candidate's `ConnTopology` against the current floorplan. A
+**cell-level HBundle template** is still in cell-local coordinates before
+`run_planner hier`, so its candidates' block faces don't resolve against the
+absolute floorplan and every segment reads as unbounded — `mslide` prints `free`
+and the envelope `hi` is only a loose extent-clamped bound. `run_planner hier`
+expands each template into per-instance absolute-coordinate wrappers, after which
+these columns are finite and correct. So in the hier flow, dump **after**
+`run_planner hier` when you care about slide freedom or the WL envelope; a
+pre-planning dump is still fine for the candidate pool (types, counts, nominal
+`wl`, pass-through). In the flat flow every column is already correct right after
+`generate_topologies`.
 
 **`--conn` detail.** For the selected candidate of each shown bundle (candidate 0
 if not yet planned), `ConnTopology` is rebuilt and each segment is printed with:
