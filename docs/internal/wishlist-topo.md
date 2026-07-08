@@ -320,14 +320,16 @@ generate_topologies               # dx=dy=0 → ZERO candidates (bus unrouted)
 So the margin knob is not merely cosmetic: a tiny inset *rescues* a degenerate
 placement the default cannot route.
 
-**Follow-up (candidate).**  Corner-only-touching blocks should be rescued at
-generation *independent of the `corner_margin` knob* — the same way a fully
-shared edge is rescued today (`ABUT_H`/`ABUT_V` + `kAbutmentSpanEpsilon`, PR #197)
-and a zero-candidate bundle already emits a loud warning (PR: "Warn loudly on
-zero-candidate bundles").  A diagonal corner-touch is the point-contact analogue
-of edge abutment; a `CORNER`/point-contact crossing candidate (or a generation-time
-epsilon inset applied only to the touching corner) would let it route at the
-default `0` without the user having to discover the `corner_margin` workaround.
-Gate: `wl_corpus` byte-identical elsewhere (this only *adds* candidates to the
-currently-zero corner-touch case) + a focused regression on the two-block scenario
-above.
+**Follow-up — ✅ RESOLVED.**  Corner-only-touching blocks are now rescued at
+generation *independent of the `corner_margin` knob* — the same way a fully shared
+edge is (`ABUT_H`/`ABUT_V` + `kAbutmentSpanEpsilon`, PR #197).  The 2-pin fallback
+(`generate_candidates`, `topology.cpp`) now detects a single-corner touch and emits
+two `CORNER_HV`/`CORNER_VH` candidates by reusing the MST path's `corner_diagonal_L`
+(an L routed *around* the shared corner, each leg tapping a real face with slide
+room), so the bus routes at the default `corner_margin 0`.  Fully-coincident /
+overlapping-with-no-channel blocks correctly stay candidate-free (the zero-candidate
+warning fires — the intended flag for a degenerate placement).  Gated `wl_corpus`
+byte-identical across all 10 flows (the branch only fires when a bundle would
+otherwise have *zero* candidates) + regressions in `test_topo_abutment.py`
+(`test_corner_touch_rescued_by_diagonal_L`, `test_corner_touch_bus_routes_to_completion`,
+`test_fully_coincident_blocks_produce_no_candidate`).

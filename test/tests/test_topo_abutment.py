@@ -39,16 +39,21 @@ The crossing wire is centred on the shared edge and only min-stub-length long (n
 the full block width — coverage is by overlap, so a short straddling wire covers
 both blocks), floored at a project-level epsilon so it is never zero-length.
 
-Point-touch corners and fully-coincident blocks are DEGENERATE placements (no
-shared edge, no routable channel) and deliberately stay candidate-free.
+Corner point-touch is the point-contact analogue of edge abutment: the two blocks
+meet at exactly one corner, so every direct/L/Z/U segment is zero-slide and dropped
+— leaving no candidate.  The same fallback rescues it by routing an L AROUND the
+shared corner (`corner_diagonal_L`, two variants `CORNER_HV`/`CORNER_VH`), the way
+the MST path already does.  Fully-coincident (and partially overlapping blocks that
+end up with no survivor) stay candidate-free — a degenerate placement the
+zero-candidate warning is meant to flag, not silently route.
 
-Sibling of test_topo_mst_abutted.py, which covers the N>=4 MST-edge abutment.
+Sibling of test_topo_mst_abutted.py, which covers the N>=4 MST-edge abutment (and
+test_topo_mst_corner.py, the N>=4 corner-diagonal case).
 """
 import contextlib
 import io
 
 import buda
-import pytest
 
 import buda_cli
 
@@ -182,14 +187,51 @@ def test_abutment_fallback_fires_after_keepout_cull():
     assert "BUSTERM_OPEN" not in _violations(cands[0], fp), _violations(cands[0], fp)
 
 
-@pytest.mark.parametrize("coords, why", [
-    ({"A": (0, 0, 100, 100), "B": (100, 100, 200, 200)}, "corner point-touch"),
-    ({"A": (0, 0, 100, 100), "B": (0, 0, 100, 100)},     "fully coincident"),
-])
-def test_degenerate_placements_produce_no_candidate(coords, why):
-    """Point-touch and fully-coincident blocks share no edge: no routable channel,
-    so the fallback deliberately does NOT invent a candidate (the zero-candidate
-    warning then fires at generate_topologies)."""
-    fp = _fp(coords)
+def test_fully_coincident_blocks_produce_no_candidate():
+    """Two blocks occupying the SAME rectangle share no clean edge and no routable
+    channel, so the fallback deliberately does NOT invent a candidate (the
+    zero-candidate warning then fires at generate_topologies).  A corner point-touch
+    is NOT degenerate — it is rescued (see the corner tests below); a partial overlap
+    keeps its own I/U candidates and is likewise not the fallback's concern."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (0, 0, 100, 100)})
     cands = _gen(fp).generate_candidates("A", ["B"])
-    assert len(cands) == 0, f"{why}: expected no candidate, got {[c.type for c in cands]}"
+    assert len(cands) == 0, f"expected no candidate, got {[c.type for c in cands]}"
+
+
+def test_corner_touch_rescued_by_diagonal_L():
+    """A and B meet at exactly one corner (A's top-right == B's bottom-left, the
+    point (100,100)).  Every direct/L/Z/U segment there is zero-slide and dropped,
+    so without a rescue the bus is silently unrouted.  The fallback emits two L's
+    routed AROUND the corner (`CORNER_HV`/`CORNER_VH`), each a 2-segment L that taps
+    both faces and covers both blocks — the point-contact analogue of edge abutment."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (100, 100, 200, 200)})
+    cands = _gen(fp).generate_candidates("A", ["B"])
+    assert cands, "corner-touch 2-pin blocks produced NO candidate (silently unrouted)"
+    types = sorted(c.type for c in cands)
+    assert types == ["CORNER_HV", "CORNER_VH"], types
+    for c in cands:
+        assert len(c.segments) == 2, f"{c.type}: corner L must have two legs"
+        assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
+        # Every leg must have a real (non-zero) perpendicular slide window.
+        ct = buda.ConnTopology(); ct.build(c, fp)
+        for cs in ct.segs():
+            assert cs.perp_hi > cs.perp_lo, f"{c.type}: zero-slide leg [{cs.perp_lo},{cs.perp_hi}]"
+
+
+def test_corner_touch_bus_routes_to_completion():
+    """End-to-end: an 8-bit bus across a corner point-touch must place ALL bits in
+    DetailedNUTS (pre-fix it produced zero candidates and never routed)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "add_block A 0 0 100 100", "add_block B 100 100 200 200",
+                  "add_bus n[8] A.p B.p", "run_bundler", "generate_topologies",
+                  "def_track_pattern 4 0 SIGNAL 2 2", "def_track_pattern 5 0 SIGNAL 2 2",
+                  "def_track_pattern 6 0 SIGNAL 2 2", "def_track_pattern 7 0 SIGNAL 2 2",
+                  "run_planner 3", "run_nuts", "run_detailed_nuts"):
+            s.do_command(c)
+    assert s.nuts_result.num_violations == 0, "corner-touch bus left a NUTS interval violation"
+    assert s.detailed_result.num_unplaced == 0, \
+        f"{s.detailed_result.num_unplaced}/8 bits unplaced — corner-touch bus did not route"

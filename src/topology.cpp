@@ -3156,6 +3156,35 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
         const int oy_lo = std::max(s_orig.y1, d_orig.y1), oy_hi = std::min(s_orig.y2, d_orig.y2);
         const bool vshared = (s_orig.x2 == d_orig.x1 || d_orig.x2 == s_orig.x1) && oy_hi > oy_lo;
         const bool hshared = (s_orig.y2 == d_orig.y1 || d_orig.y2 == s_orig.y1) && ox_hi > ox_lo;
+        // Annotate a rescue candidate, run the keepout + pinch guards, and keep it
+        // only if genuinely routable.  Shared by the edge-abutment and corner-touch
+        // paths (a corner L has two legs, so the keepout check is per-segment).
+        auto accept_abut = [&](Topology&& t) {
+            annotate_endpoints(t, {src_bt, dst_bt});
+            annotate_seg_conns(t);
+            t.connected_block_names = {src_name, dst_name};
+            const auto& kos = floorplan_.get_keepout_zones();
+            bool blocked = false;
+            if (!kos.empty()) {
+                for (const auto& seg : t.segments) {
+                    const bool sh = (seg.start.y == seg.end.y);
+                    const std::vector<int>& layers = sh ? all_h_layers_ : all_v_layers_;
+                    if (all_layers_blocked_by_keepouts(seg, layers, kos)) {
+                        blocked = true; break;
+                    }
+                }
+            }
+            bool pinched = false;
+            if (!blocked) {
+                ConnTopology ct;
+                ct.build(t, floorplan_);
+                for (const auto& cs : ct.segs())
+                    if (cs.perp_lo == cs.perp_hi) { pinched = true; break; }
+            }
+            if (!blocked && !pinched)
+                candidates.push_back(std::move(t));
+        };
+
         Segment es;
         bool ok = false;
         if (vshared) {  // shared VERTICAL edge → HORIZONTAL crossing wire (track axis y)
@@ -3183,22 +3212,31 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
             t.type = horiz ? ("ABUT_H@y" + std::to_string(es.start.y))
                            : ("ABUT_V@x" + std::to_string(es.start.x));
             t.segments.push_back(es);
-            annotate_endpoints(t, {src_bt, dst_bt});
-            annotate_seg_conns(t);
-            t.connected_block_names = {src_name, dst_name};
-            const auto& kos = floorplan_.get_keepout_zones();
-            const std::vector<int>& layers = horiz ? all_h_layers_ : all_v_layers_;
-            bool blocked = !kos.empty() &&
-                           all_layers_blocked_by_keepouts(es, layers, kos);
-            bool pinched = false;
-            if (!blocked) {
-                ConnTopology ct;
-                ct.build(t, floorplan_);
-                for (const auto& cs : ct.segs())
-                    if (cs.perp_lo == cs.perp_hi) { pinched = true; break; }
+            accept_abut(std::move(t));
+        } else {
+            // CORNER-DIAGONAL touch: the two blocks meet at exactly ONE point (both
+            // facing projections coincide), so closest_points pins a zero-slide edge
+            // that filter_pinched drops — no candidate, silently unrouted.  This is
+            // the point-contact analogue of edge abutment; realize it the way the MST
+            // path already does (corner_diagonal_L): an L routed AROUND the shared
+            // corner, each leg tapping a real face with slide room.  Two L's (H-first /
+            // V-first) so the planner picks whichever fits.  The face-equality test
+            // implies zero overlap on that axis, so fully-coincident / partially
+            // OVERLAPPING blocks never satisfy it — they stay empty and the
+            // zero-candidate warning fires, which is the intended behaviour.
+            const bool corner = (s_orig.x2 == d_orig.x1 || d_orig.x2 == s_orig.x1)
+                             && (s_orig.y2 == d_orig.y1 || d_orig.y2 == s_orig.y1);
+            if (corner) {
+                for (int strategy = 0; strategy <= 1; ++strategy) {
+                    std::vector<Segment> ls;
+                    corner_diagonal_L(s_orig, d_orig, strategy, h_layer_, v_layer_, ls);
+                    if (ls.empty()) continue;
+                    Topology t;
+                    t.type = (strategy == 0) ? "CORNER_HV" : "CORNER_VH";
+                    for (const auto& g : ls) t.segments.push_back(g);
+                    accept_abut(std::move(t));
+                }
             }
-            if (!blocked && !pinched)
-                candidates.push_back(std::move(t));
         }
     }
     return candidates;
