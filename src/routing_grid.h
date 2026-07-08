@@ -98,13 +98,15 @@ public:
     // The layer's NON-SIGNAL track slots (POWER / GROUND / CLOCK / SHIELD /
     // CUSTOM) materialized as first-class PreRoutedSegments — Phase G of
     // docs/internal/placed_segment_preroutes.md.  Global-pattern slots whose
-    // centre lies in [perp_lo, perp_hi] span the full [along_lo, along_hi]
-    // window; each PatternOverride's local pattern is enumerated within
-    // (region ∩ perp window) with the span clipped to (region ∩ along window)
-    // — pre-routes break at region boundaries.  v1 approximation: global
-    // bands are NOT split where an override shadows them (the same sampling
-    // approximation signal_tracks_in makes).  track_index is a running index
-    // per enumeration; `layer` is stamped by RoutingGridStack::preroutes.
+    // centre lies in [perp_lo, perp_hi] span the [along_lo, along_hi] window
+    // MINUS every override shadow whose perp range contains the slot centre
+    // (a shadowed slot splits into the unshadowed pieces — inside an override
+    // region the effective pattern is the override's, matching what
+    // effective_pattern_at/signal_tracks_in sample); each PatternOverride's
+    // local pattern is enumerated within (region ∩ perp window) with the span
+    // clipped to (region ∩ along window) — bands break at region boundaries.
+    // track_index is a running index per enumeration; `layer` is stamped by
+    // RoutingGridStack::preroutes.
     //
     // include_signal additionally emits the SIGNAL slots (slot_type "SIGNAL")
     // — those are NOT pre-routes, but the same enumeration is what a track

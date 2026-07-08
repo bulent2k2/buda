@@ -80,8 +80,15 @@ def test_preroutes_override_clipped_to_region():
     rows = s.preroutes(4, 0.0, 20.0, 0.0, 100.0)
     glob = [r for r in rows if r.label != 'VDD2']
     ovr = [r for r in rows if r.label == 'VDD2']
-    # Global emission unchanged (v1: not split under the override).
-    assert [r.track_position for r in glob] == [1.0, 8.0, 11.0, 18.0]
+    # Global slots whose centre lies in the override's perp range [0, 10]
+    # (VDD@1, GND@8) SPLIT at the region's along shadow [20, 60] — inside the
+    # region the effective pattern is the override's, so an unsplit band
+    # would advertise tracks that don't exist there.  Slots outside the perp
+    # range (VDD@11, GND@18) keep the full along window.
+    assert [(r.track_position, r.span_lo, r.span_hi) for r in glob] == [
+        (1.0, 0.0, 20.0), (1.0, 60.0, 100.0),
+        (8.0, 0.0, 20.0), (8.0, 60.0, 100.0),
+        (11.0, 0.0, 100.0), (18.0, 0.0, 100.0)]
     # Override slots: centres 0.5, 5.5 (10.5 > region y2=10 excluded), spans
     # clipped to the region's along extent [20, 60].
     assert [r.track_position for r in ovr] == [0.5, 5.5]

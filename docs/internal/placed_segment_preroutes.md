@@ -96,10 +96,11 @@ std::vector<PreRoutedSegment> RoutingGridStack::preroutes(
 - `PatternOverride`s: each override's local pattern is enumerated within
   (region ∩ perp window) with span clipped to (region ∩ along window) —
   pre-routes break at region boundaries, as CLAUDE.md documents.
-  **v1 approximation:** the *global* pattern's bands are not split where an
-  override shadows them (the same approximation the rails view and
-  `signal_tracks_in`'s single-x sampling already make); exact
-  global-band splitting is wishlisted, not blocking.
+  ~~**v1 approximation:** the *global* pattern's bands are not split where
+  an override shadows them~~ — **resolved (PR #220 review)**: a global slot
+  whose centre lies in an override's perp range now splits at the region's
+  along shadow (interval subtraction, possibly multiple pieces), matching
+  what `effective_pattern_at`/`signal_tracks_in` sample inside the region.
 - Orientation from `is_horizontal_` decides which region coords are
   perp vs along (H layer: perp = y, along = x).
 
@@ -136,7 +137,9 @@ template exactly:
 ### 2.5 Follow-ups explicitly out of v1
 
 - BDB pre-route rows / GDS export of rails (needs schema thought).
-- Exact global-band splitting at override regions.
+- ~~Exact global-band splitting at override regions~~ — **DONE (PR #220
+  review)**: shadowed global slots split at override along-shadows in
+  `preroutes_in`, for both the Preroutes bands and the Tracks rails.
 - A dedicated per-type button row (the cycle button keeps the left panel
   compact; revisit if types multiply).
 - `TrackSegment`/`BusSegment` merge (binding-breaking; see §2.1).

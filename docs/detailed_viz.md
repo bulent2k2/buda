@@ -65,7 +65,9 @@ SIGNAL stripes) so the bit-wires remain legible on top.  The rails are built
 from the same enumeration as the abstract-view `[Preroutes]` bands
 (`RoutingGridStack.preroutes(..., include_signal=True)` through the shared
 `_track_band_rects` helper), so the two views share one palette and region
-overrides render their local patterns with spans broken at region boundaries.
+overrides render their local patterns with spans broken at region boundaries
+— shadowed global bands split at those regions too, so the overlay never
+shows tracks the solver would not see there.
 
 **Bit-wire lines (`NetSegment`s)**
 

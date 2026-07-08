@@ -216,9 +216,9 @@ void bind_nuts(py::module_& m) {
              py::arg("along_lo"), py::arg("along_hi"),
              py::arg("include_signal") = false,
              "Non-SIGNAL track slots of one layer as PreRoutedSegments "
-             "(global pattern over the along window + overrides clipped "
-             "to their regions); include_signal adds the SIGNAL slots "
-             "for track-rail display")
+             "(global pattern split at override shadows + overrides "
+             "clipped to their regions); include_signal adds the SIGNAL "
+             "slots for track-rail display")
         .def("has_layer",      &RoutingGridStack::has_layer, py::arg("layer_id"));
 
     py::class_<BusSegmentConn>(m, "BusSegmentConn")
