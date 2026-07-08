@@ -105,9 +105,15 @@ public:
     // bands are NOT split where an override shadows them (the same sampling
     // approximation signal_tracks_in makes).  track_index is a running index
     // per enumeration; `layer` is stamped by RoutingGridStack::preroutes.
+    //
+    // include_signal additionally emits the SIGNAL slots (slot_type "SIGNAL")
+    // — those are NOT pre-routes, but the same enumeration is what a track
+    // -rail display needs (the visualizer's [Tracks] view), and keeping one
+    // walker avoids a second global+override tiling implementation.
     std::vector<PreRoutedSegment> preroutes_in(
         double perp_lo, double perp_hi,
-        double along_lo, double along_hi) const;
+        double along_lo, double along_hi,
+        bool include_signal = false) const;
 
     bool is_horizontal() const { return is_horizontal_; }
 
@@ -138,10 +144,12 @@ public:
     const RoutingGrid& get_layer_grid(int layer_id) const;
 
     // Pre-routes of one layer within the given windows (see
-    // RoutingGrid::preroutes_in), with each segment's `layer` stamped.
+    // RoutingGrid::preroutes_in — include_signal adds the SIGNAL slots for
+    // track-rail display), with each segment's `layer` stamped.
     std::vector<PreRoutedSegment> preroutes(
         int layer_id, double perp_lo, double perp_hi,
-        double along_lo, double along_hi) const;
+        double along_lo, double along_hi,
+        bool include_signal = false) const;
 
     bool has_layer(int layer_id) const;
 

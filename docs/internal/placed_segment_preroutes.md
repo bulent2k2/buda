@@ -140,6 +140,15 @@ template exactly:
 - A dedicated per-type button row (the cycle button keeps the left panel
   compact; revisit if types multiply).
 - `TrackSegment`/`BusSegment` merge (binding-breaking; see §2.1).
+- ~~The `[Tracks]` rails view still re-derives its stripes ad hoc from
+  `tracks_in_range` beside the pre-route enumeration~~ — **DONE (follow-up
+  PR)**: `preroutes_in`/`preroutes` gained an `include_signal` flag (default
+  off, binding-compatible) and `_build_rail_artists` now consumes the same
+  shared band builder as `_build_preroute_artists` (`_track_band_rects`),
+  eliminating the duplicated colour table (the local `_RAIL_COLOR` had
+  already drifted — no SHIELD entry), bbox/orientation plumbing, and the
+  second tiling walk; rails thereby became override-aware (local patterns
+  render with spans broken at region boundaries, like the Preroutes bands).
 
 ## 3. Gates
 

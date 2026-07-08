@@ -113,13 +113,14 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
 }
 
 std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
-    double perp_lo, double perp_hi, double along_lo, double along_hi) const
+    double perp_lo, double perp_hi, double along_lo, double along_hi,
+    bool include_signal) const
 {
     std::vector<PreRoutedSegment> out;
     int idx = 0;
     auto emit = [&](double centre, const TrackSlot& slot,
                     double a_lo, double a_hi) {
-        if (slot.type == "SIGNAL") return;
+        if (slot.type == "SIGNAL" && !include_signal) return;
         if (a_lo > a_hi) return;                 // empty along window
         PreRoutedSegment pr;
         pr.track_position = centre;
@@ -222,10 +223,11 @@ const RoutingGrid& RoutingGridStack::get_layer_grid(int layer_id) const {
 
 std::vector<PreRoutedSegment> RoutingGridStack::preroutes(
     int layer_id, double perp_lo, double perp_hi,
-    double along_lo, double along_hi) const
+    double along_lo, double along_hi, bool include_signal) const
 {
     auto out = get_layer_grid(layer_id).preroutes_in(perp_lo, perp_hi,
-                                                     along_lo, along_hi);
+                                                     along_lo, along_hi,
+                                                     include_signal);
     for (auto& pr : out) pr.layer = layer_id;
     return out;
 }

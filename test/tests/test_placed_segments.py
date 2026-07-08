@@ -98,3 +98,20 @@ def test_preroutes_empty_cases():
     s2.define_layer(2, buda.TrackPattern(0.0, [
         buda.TrackSlot('SIGNAL', '', 1.0, 1.0)]), True)
     assert s2.preroutes(2, 0.0, 100.0, 0.0, 100.0) == []
+
+
+def test_preroutes_include_signal_adds_signal_rails():
+    """include_signal=True (the [Tracks] rail view's enumeration) adds the
+    SIGNAL slots to the same walk; the default keeps the pre-route contract
+    (non-SIGNAL only)."""
+    rows = _stack().preroutes(4, 0.0, 20.0, 0.0, 100.0, include_signal=True)
+    assert [(r.slot_type, r.track_position) for r in rows] == [
+        ('POWER', 1.0), ('SIGNAL', 3.5), ('SIGNAL', 5.5), ('GROUND', 8.0),
+        ('POWER', 11.0), ('SIGNAL', 13.5), ('SIGNAL', 15.5), ('GROUND', 18.0)]
+    assert [r.track_index for r in rows] == list(range(8))
+    # SIGNAL rails carry the slot geometry like any other band.
+    sig = [r for r in rows if r.slot_type == 'SIGNAL']
+    assert {r.width for r in sig} == {1.0}
+    assert all((r.span_lo, r.span_hi) == (0.0, 100.0) for r in sig)
+    # Default excludes them (same window: only the 4 non-SIGNAL slots).
+    assert len(_stack().preroutes(4, 0.0, 20.0, 0.0, 100.0)) == 4

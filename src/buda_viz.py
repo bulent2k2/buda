@@ -33,10 +33,22 @@ _LAYER_COLOR = {1: '#000075', 2: '#a9a9a9', 3: '#FF8800', 4: '#007ACC', 5: '#CC0
 # _layer_label() (def_layer can override these, e.g. M4 V instead of M4 H).
 _LAYER_LABEL = {1: 'M1 V', 2: 'M2 H', 3: 'M3 V', 4: 'M4 H', 5: 'M5 V', 6: 'M6 H', 7: 'M7 V', 8: 'M8 H', 9: 'M9 V', 10: 'M10 H'}
 
-# Pre-route band colours by TrackSlot type (draw_preroutes; the [Tracks] rail
-# view keeps its own local copy because it also colours SIGNAL stripes).
+# Track-band colours by TrackSlot type — shared by the [Preroutes] bands and
+# the [Tracks] rail stripes (which additionally colour SIGNAL slots).
 _PREROUTE_COLOR = {'POWER': '#ffcccc', 'GROUND': '#cce0ff',
                    'CLOCK': '#fffacc', 'SHIELD': '#e0d4f7'}
+_SIGNAL_RAIL_COLOR = '#f9f9f9'
+
+
+def _layer_is_h_map(layer_stack):
+    """{layer_id: is_horizontal} for every layer in a LayerStack."""
+    import buda as ic_mod
+    m = {}
+    for lid in layer_stack.get_layer_ids_by_dir(ic_mod.LayerDir.HORIZONTAL):
+        m[lid] = True
+    for lid in layer_stack.get_layer_ids_by_dir(ic_mod.LayerDir.VERTICAL):
+        m[lid] = False
+    return m
 
 
 def _layer_label(lid, layer_stack=None):
@@ -3872,11 +3884,12 @@ class BudaVisualizer:
         """Register the pre-route layer (no artists yet — lazy build on the
         first [Preroutes] cycle away from 'off').
 
-        Unlike the [Tracks] rail stripes (detailed-mode only, re-derived ad
-        hoc from the raw pattern), this draws the first-class PreRoutedSegment
-        objects from RoutingGridStack.preroutes() and works in the ABSTRACT
-        view too — the pre-route context exists before any detailed routing
-        does.  See docs/internal/placed_segment_preroutes.md.
+        Unlike the [Tracks] rail stripes (detailed-mode only, SIGNAL slots
+        included), this draws only the pre-route (non-SIGNAL) bands and works
+        in the ABSTRACT view too — the pre-route context exists before any
+        detailed routing does.  Both views build their bands from the same
+        enumeration (_track_band_rects over RoutingGridStack.preroutes).
+        See docs/internal/placed_segment_preroutes.md.
         """
         if routing_grid_stack is None or layer_stack is None:
             return
@@ -3886,48 +3899,49 @@ class BudaVisualizer:
         if self._btn_preroutes is not None:
             self._set_button_enabled(self._btn_preroutes, True, on_color='#f4ece8')
 
-    def _build_preroute_artists(self):
-        """Create the pre-route band artists (once, lazily): one
-        PatchCollection per (layer, slot type) from the enumerated
-        PreRoutedSegments over the floorplan bbox, so per-type visibility
-        is a collection flip."""
-        if self._preroutes_built or not self._has_preroute_data:
-            return
-        self._preroutes_built = True
-        import buda as ic_mod
-
-        stack = self._preroute_grid_stack
-        layer_is_h = {}
-        for lid in self._preroute_layer_stack.get_layer_ids_by_dir(
-                ic_mod.LayerDir.HORIZONTAL):
-            layer_is_h[lid] = True
-        for lid in self._preroute_layer_stack.get_layer_ids_by_dir(
-                ic_mod.LayerDir.VERTICAL):
-            layer_is_h[lid] = False
-
-        # Layout bounding box (the rails-view extent idiom).
+    def _layout_bbox(self):
+        """Floorplan bounding box (x_min, x_max, y_min, y_max) for full-extent
+        track bands, with a default extent when no blocks exist."""
         all_blocks = list(self.fp.get_all_blocks())
         if all_blocks:
-            x_min = min(r.x1 for _, r in all_blocks)
-            x_max = max(r.x2 for _, r in all_blocks)
-            y_min = min(r.y1 for _, r in all_blocks)
-            y_max = max(r.y2 for _, r in all_blocks)
-        else:
-            x_min, x_max, y_min, y_max = 0, 1000, 0, 1000
+            return (min(r.x1 for _, r in all_blocks),
+                    max(r.x2 for _, r in all_blocks),
+                    min(r.y1 for _, r in all_blocks),
+                    max(r.y2 for _, r in all_blocks))
+        return 0, 1000, 0, 1000
 
-        groups = {}   # (layer, slot_type) -> [Rectangle, ...]
+    def _track_band_rects(self, grid_stack, layer_is_h,
+                          include_signal=False, pad_perp=False):
+        """Enumerate a RoutingGridStack's track slots over the floorplan bbox
+        as (layer_id, slot_type, Rectangle) bands — the single geometry source
+        shared by the [Preroutes] bands and the [Tracks] rail stripes.
+
+        include_signal adds the SIGNAL stripes (the rails view); pad_perp
+        extends the perpendicular window by one unit pitch so the stripes run
+        past the outermost blocks (the rails view's extent idiom)."""
+        x_min, x_max, y_min, y_max = self._layout_bbox()
         for lid, is_h in layer_is_h.items():
-            if not stack.has_layer(lid):
+            if not grid_stack.has_layer(lid):
                 continue
+            pad = 0.0
+            if pad_perp:
+                grid = grid_stack.get_layer_grid(lid)
+                pad  = grid.effective_pattern_at(0.0, 0.0).unit_pitch()
+                if pad <= 0:
+                    continue
             if is_h:
-                perp_lo, perp_hi   = y_min, y_max
+                perp_lo, perp_hi   = y_min - pad, y_max + pad
                 along_lo, along_hi = x_min, x_max
             else:
-                perp_lo, perp_hi   = x_min, x_max
+                perp_lo, perp_hi   = x_min - pad, x_max + pad
                 along_lo, along_hi = y_min, y_max
-            for pr in stack.preroutes(lid, perp_lo, perp_hi,
-                                      along_lo, along_hi):
-                col  = _PREROUTE_COLOR.get(pr.slot_type, '#f0f0f0')
+            for pr in grid_stack.preroutes(lid, perp_lo, perp_hi,
+                                           along_lo, along_hi,
+                                           include_signal):
+                if pr.slot_type == 'SIGNAL':
+                    col = _SIGNAL_RAIL_COLOR
+                else:
+                    col = _PREROUTE_COLOR.get(pr.slot_type, '#f0f0f0')
                 half = pr.width / 2.0
                 if is_h:
                     rect = patches.Rectangle(
@@ -3939,7 +3953,22 @@ class BudaVisualizer:
                         (pr.track_position - half, pr.span_lo),
                         pr.width, pr.span_hi - pr.span_lo,
                         linewidth=0, facecolor=col)
-                groups.setdefault((lid, pr.slot_type), []).append(rect)
+                yield lid, pr.slot_type, rect
+
+    def _build_preroute_artists(self):
+        """Create the pre-route band artists (once, lazily): one
+        PatchCollection per (layer, slot type) from the enumerated
+        PreRoutedSegments over the floorplan bbox, so per-type visibility
+        is a collection flip."""
+        if self._preroutes_built or not self._has_preroute_data:
+            return
+        self._preroutes_built = True
+
+        groups = {}   # (layer, slot_type) -> [Rectangle, ...]
+        for lid, stype, rect in self._track_band_rects(
+                self._preroute_grid_stack,
+                _layer_is_h_map(self._preroute_layer_stack)):
+            groups.setdefault((lid, stype), []).append(rect)
 
         for (lid, stype), rects in sorted(groups.items()):
             pc = PatchCollection(rects, match_original=True, zorder=3)
@@ -3983,13 +4012,8 @@ class BudaVisualizer:
         deferring them keeps the initial load fast for the common case where the
         user never opens the detailed view.
         """
-        import buda as ic_mod
-
         # Build layer direction map from the LayerStack (cheap; needed for stats).
-        for lid in layer_stack.get_layer_ids_by_dir(ic_mod.LayerDir.HORIZONTAL):
-            self._layer_is_h[lid] = True
-        for lid in layer_stack.get_layer_ids_by_dir(ic_mod.LayerDir.VERTICAL):
-            self._layer_is_h[lid] = False
+        self._layer_is_h.update(_layer_is_h_map(layer_stack))
 
         self._detailed_result      = detailed_result
         self._detailed_grid_stack  = routing_grid_stack
@@ -4018,56 +4042,25 @@ class BudaVisualizer:
         """Create the background rail-stripe artists (once, lazily).
 
         Deferred to the first [Tracks] enable: enumerating every track across
-        the layout (tracks_in_range per layer) and building a Rectangle each is
-        the costly part of the detailed view, and Tracks is off by default, so
-        most sessions never need it.  Rails are grouped into one PatchCollection
-        per (layer, kind); they start hidden and the toggle reveals them.
+        the layout and building a Rectangle each is the costly part of the
+        detailed view, and Tracks is off by default, so most sessions never
+        need it.  Same band enumeration as the [Preroutes] view
+        (_track_band_rects) with the SIGNAL stripes included and the
+        perpendicular window padded; rails are grouped into one
+        PatchCollection per (layer, kind); they start hidden and the toggle
+        reveals them.
         """
         if self._rails_built or not self._has_detailed_data:
             return
         self._rails_built = True
 
-        routing_grid_stack = self._detailed_grid_stack
-
-        # Layout bounding box for grid-rail extent.
-        all_blocks = list(self.fp.get_all_blocks())
-        if all_blocks:
-            x_min = min(r.x1 for _, r in all_blocks)
-            x_max = max(r.x2 for _, r in all_blocks)
-            y_min = min(r.y1 for _, r in all_blocks)
-            y_max = max(r.y2 for _, r in all_blocks)
-        else:
-            x_min, x_max, y_min, y_max = 0, 1000, 0, 1000
-
-        # Rail stripe colours by slot type.
-        _RAIL_COLOR = {'POWER': '#ffcccc', 'GROUND': '#cce0ff', 'CLOCK': '#fffacc'}
-
         # Collect rail rectangles per (layer, kind) so each resulting collection
         # has a single base alpha (set_alpha in _refresh_highlight is uniform).
         rail_groups = {}   # (layer_id, is_signal) -> [Rectangle, ...]
-        for lid, is_h in self._layer_is_h.items():
-            if not routing_grid_stack.has_layer(lid):
-                continue
-            grid    = routing_grid_stack.get_layer_grid(lid)
-            pattern = grid.effective_pattern_at(0.0, 0.0)
-            up      = pattern.unit_pitch()
-            if up <= 0:
-                continue
-            if is_h:
-                lo, hi = y_min - up, y_max + up
-            else:
-                lo, hi = x_min - up, x_max + up
-            for centre, slot in pattern.tracks_in_range(lo, hi):
-                is_signal = (slot.type == 'SIGNAL')
-                col  = _RAIL_COLOR.get(slot.type, '#f9f9f9')
-                half = slot.width / 2.0
-                if is_h:
-                    rect = patches.Rectangle((x_min, centre - half), x_max - x_min,
-                                             slot.width, linewidth=0, facecolor=col)
-                else:
-                    rect = patches.Rectangle((centre - half, y_min), slot.width,
-                                             y_max - y_min, linewidth=0, facecolor=col)
-                rail_groups.setdefault((lid, is_signal), []).append(rect)
+        for lid, stype, rect in self._track_band_rects(
+                self._detailed_grid_stack, self._layer_is_h,
+                include_signal=True, pad_perp=True):
+            rail_groups.setdefault((lid, stype == 'SIGNAL'), []).append(rect)
 
         for (lid, is_signal), rects in rail_groups.items():
             base_alpha = 0.10 if is_signal else 0.15
