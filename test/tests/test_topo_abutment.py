@@ -198,6 +198,33 @@ def test_fully_coincident_blocks_produce_no_candidate():
     assert len(cands) == 0, f"expected no candidate, got {[c.type for c in cands]}"
 
 
+def test_partial_overlap_keeps_i_and_u_candidates():
+    """The other end of the adjacency spectrum: two blocks that partially OVERLAP
+    still leave a routable channel, so the ordinary generator handles them — the
+    abutment/corner fallback never fires.  A(0,0,100,100) and B(50,50,150,150) share
+    the band 50<=x<=100, 50<=y<=100, which gives a straight I-shape straight through
+    the overlap (I_H and I_V, the shortest routes) plus U detours around the pair.
+    So this is NOT a zero-candidate case (contrast the coincident / corner tests),
+    and the straight through-overlap wire is strictly shorter than any detour."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (50, 50, 150, 150)})
+    cands = _gen(fp).generate_candidates("A", ["B"])
+    assert cands, "partial-overlap blocks produced NO candidate"
+    types = {c.type for c in cands}
+    # Straight wires through the shared band exist BECAUSE the faces overlap.
+    assert "I_H" in types and "I_V" in types, sorted(types)
+    assert any(t.startswith("U_") for t in types), sorted(types)   # detours too
+    i_wl = [c.estimated_wirelength for c in cands if c.type in ("I_H", "I_V")]
+    u_wl = [c.estimated_wirelength for c in cands if c.type.startswith("U_")]
+    assert max(i_wl) < min(u_wl), (i_wl, u_wl)   # through-overlap beats the detour
+    for c in cands:
+        if c.type in ("I_H", "I_V"):
+            assert len(c.segments) == 1, f"{c.type}: I-shape is a single wire"
+            assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
+            ct = buda.ConnTopology(); ct.build(c, fp)
+            cs = ct.segs()[0]
+            assert cs.perp_hi > cs.perp_lo, f"{c.type}: zero-slide [{cs.perp_lo},{cs.perp_hi}]"
+
+
 def test_corner_touch_rescued_by_diagonal_L():
     """A and B meet at exactly one corner (A's top-right == B's bottom-left, the
     point (100,100)).  Every direct/L/Z/U segment there is zero-slide and dropped,
