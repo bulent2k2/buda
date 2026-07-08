@@ -107,6 +107,27 @@ def test_preroutes_empty_cases():
     assert s2.preroutes(2, 0.0, 100.0, 0.0, 100.0) == []
 
 
+def test_preroutes_signal_rails_split_at_keepouts():
+    """SIGNAL rails break at keepouts, matching signal_tracks_in's filter —
+    the [Tracks] overlay must not draw a rail where a bit cannot land.
+    Non-SIGNAL slots are untouched (a pre-route is a physical rail;
+    keepouts block signal placement, not the existing grid)."""
+    s = _stack()
+    # Keepout on layer 4 (horizontal): perp (y) [3, 6] covers the SIGNAL
+    # centres 3.5 and 5.5 but neither rail (VDD@1, GND@8); along (x) [30, 50].
+    s.add_keepout(4, 30, 3, 50, 6)
+    rows = s.preroutes(4, 0.0, 10.0, 0.0, 100.0, include_signal=True)
+    assert [(r.slot_type, r.track_position, r.span_lo, r.span_hi)
+            for r in rows] == [
+        ('POWER', 1.0, 0.0, 100.0),
+        ('SIGNAL', 3.5, 0.0, 30.0), ('SIGNAL', 3.5, 50.0, 100.0),
+        ('SIGNAL', 5.5, 0.0, 30.0), ('SIGNAL', 5.5, 50.0, 100.0),
+        ('GROUND', 8.0, 0.0, 100.0)]
+    assert [r.track_index for r in rows] == list(range(6))
+    # Pre-route enumeration (default) is unaffected by the keepout.
+    assert len(s.preroutes(4, 0.0, 10.0, 0.0, 100.0)) == 2
+
+
 def test_preroutes_include_signal_adds_signal_rails():
     """include_signal=True (the [Tracks] rail view's enumeration) adds the
     SIGNAL slots to the same walk; the default keeps the pre-route contract

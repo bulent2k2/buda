@@ -134,51 +134,81 @@ std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
         out.push_back(std::move(pr));
     };
 
-    // Region coords, orientation-resolved (H layer: perp = y, along = x):
+    // Rect coords, orientation-resolved (H layer: perp = y, along = x):
     // {perp_lo, perp_hi, along_lo, along_hi}.
-    auto ov_windows = [&](const PatternOverride& ov) {
+    auto rect_windows = [&](const Rect& r) {
         return std::array<double, 4>{
-            is_horizontal_ ? (double)ov.region.y1 : (double)ov.region.x1,
-            is_horizontal_ ? (double)ov.region.y2 : (double)ov.region.x2,
-            is_horizontal_ ? (double)ov.region.x1 : (double)ov.region.y1,
-            is_horizontal_ ? (double)ov.region.x2 : (double)ov.region.y2};
+            is_horizontal_ ? (double)r.y1 : (double)r.x1,
+            is_horizontal_ ? (double)r.y2 : (double)r.x2,
+            is_horizontal_ ? (double)r.x1 : (double)r.y1,
+            is_horizontal_ ? (double)r.x2 : (double)r.y2};
+    };
+
+    // Remove [s_lo, s_hi] from every piece (a piece may split in two).
+    auto subtract = [](std::vector<std::pair<double, double>>& pieces,
+                       double s_lo, double s_hi) {
+        std::vector<std::pair<double, double>> next;
+        for (const auto& [lo, hi] : pieces) {
+            if (s_hi <= lo || s_lo >= hi) {   // no overlap
+                next.push_back({lo, hi});
+                continue;
+            }
+            if (s_lo > lo) next.push_back({lo, s_lo});
+            if (s_hi < hi) next.push_back({s_hi, hi});
+        }
+        pieces = std::move(next);
+    };
+
+    // SIGNAL bands additionally break at keepouts: signal_tracks_in /
+    // count_signal_tracks_in reject a SIGNAL track point inside a keepout, so
+    // a rail drawn through one would show track a bit cannot land on.
+    // Non-SIGNAL slots are untouched — a pre-route is a physical rail, and
+    // keepouts block signal placement, not the existing grid.
+    auto subtract_keepouts = [&](double centre, const TrackSlot& slot,
+                                 std::vector<std::pair<double, double>>& pieces) {
+        if (slot.type != "SIGNAL") return;
+        for (const auto& koz : keepouts_) {
+            const auto [k_perp_lo, k_perp_hi, k_along_lo, k_along_hi] =
+                rect_windows(koz);
+            if (centre < k_perp_lo || centre > k_perp_hi) continue;
+            subtract(pieces, k_along_lo, k_along_hi);
+        }
     };
 
     // Global pattern: the along window MINUS every override shadow whose perp
     // range contains the slot centre — inside an override region the effective
     // pattern (what the solver samples) is the override's, so an unsplit
-    // global band there would advertise tracks that don't exist.
+    // global band there would advertise tracks that don't exist — MINUS the
+    // keepout shadows for SIGNAL slots.
     for (const auto& [centre, slot] : global_pattern_.tracks_in_range(perp_lo, perp_hi)) {
         std::vector<std::pair<double, double>> pieces{{along_lo, along_hi}};
         for (const auto& ov : overrides_) {
-            const auto [r_perp_lo, r_perp_hi, r_along_lo, r_along_hi] = ov_windows(ov);
+            const auto [r_perp_lo, r_perp_hi, r_along_lo, r_along_hi] =
+                rect_windows(ov.region);
             if (centre < r_perp_lo || centre > r_perp_hi) continue;
-            std::vector<std::pair<double, double>> next;
-            for (const auto& [lo, hi] : pieces) {
-                if (r_along_hi <= lo || r_along_lo >= hi) {   // no overlap
-                    next.push_back({lo, hi});
-                    continue;
-                }
-                if (r_along_lo > lo) next.push_back({lo, r_along_lo});
-                if (r_along_hi < hi) next.push_back({r_along_hi, hi});
-            }
-            pieces = std::move(next);
+            subtract(pieces, r_along_lo, r_along_hi);
         }
+        subtract_keepouts(centre, slot, pieces);
         for (const auto& [lo, hi] : pieces)
             emit(centre, slot, lo, hi);
     }
 
     // Overrides: local pattern within (region ∩ perp window), span clipped to
-    // (region ∩ along window).
+    // (region ∩ along window), keepout shadows subtracted for SIGNAL slots.
     for (const auto& ov : overrides_) {
-        const auto [r_perp_lo, r_perp_hi, r_along_lo, r_along_hi] = ov_windows(ov);
+        const auto [r_perp_lo, r_perp_hi, r_along_lo, r_along_hi] =
+            rect_windows(ov.region);
         const double p_lo = std::max(perp_lo,  r_perp_lo);
         const double p_hi = std::min(perp_hi,  r_perp_hi);
         const double a_lo = std::max(along_lo, r_along_lo);
         const double a_hi = std::min(along_hi, r_along_hi);
-        if (p_lo > p_hi) continue;
-        for (const auto& [centre, slot] : ov.pattern.tracks_in_range(p_lo, p_hi))
-            emit(centre, slot, a_lo, a_hi);
+        if (p_lo > p_hi || a_lo > a_hi) continue;
+        for (const auto& [centre, slot] : ov.pattern.tracks_in_range(p_lo, p_hi)) {
+            std::vector<std::pair<double, double>> pieces{{a_lo, a_hi}};
+            subtract_keepouts(centre, slot, pieces);
+            for (const auto& [lo, hi] : pieces)
+                emit(centre, slot, lo, hi);
+        }
     }
     return out;
 }

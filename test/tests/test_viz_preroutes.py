@@ -108,28 +108,30 @@ def test_layer_panel_hides_preroute_bands(monkeypatch):
     assert all(e["artist"].get_visible() for e in viz._preroute_artists)
 
 
-def test_tracks_rails_share_preroute_band_source(monkeypatch):
-    """The [Tracks] rail stripes and the [Preroutes] bands build from the
-    same enumeration (_track_band_rects over RoutingGridStack.preroutes):
-    rails add SIGNAL stripes on top of the shared non-SIGNAL palette — no
-    more drifting local colour copy (the old _RAIL_COLOR lacked SHIELD)."""
+def test_tracks_rails_signal_only_layer_colored(monkeypatch):
+    """The [Tracks] rail stripes build from the same enumeration as the
+    [Preroutes] bands (_track_band_rects over RoutingGridStack.preroutes)
+    but keep only the SIGNAL stripes — the non-SIGNAL context is the
+    [Preroutes] layer's job, so nothing is double-drawn when both are on.
+    Stripes are coloured by their LAYER (the colour of the bit-wires that
+    land on them) — the old near-white '#f9f9f9' was invisible."""
     from matplotlib.colors import to_hex
-    from buda_viz import _PREROUTE_COLOR, _SIGNAL_RAIL_COLOR
+    from buda_viz import _LAYER_COLOR
 
     viz = _build_viz("dnuts1.buda", monkeypatch)
     viz._toggle_detailed()                    # rails need detailed mode
     viz._toggle_tracks()                      # lazy rail build here
     assert viz._rails_built and viz._grid_rail_artists
-    # Both rail kinds present: SIGNAL stripes (alpha 0.10) + pre-route
-    # stripes (alpha 0.15).
-    assert {e['alpha'] for e in viz._grid_rail_artists} == {0.10, 0.15}
-    # Every stripe colour comes from the shared table (or the SIGNAL/CUSTOM
-    # fallbacks) — a diverging local palette would fail here.
-    allowed = ({c.lower() for c in _PREROUTE_COLOR.values()}
-               | {_SIGNAL_RAIL_COLOR, '#f0f0f0'})
+    # One collection per layer, all at the visible SIGNAL base alpha.
+    assert {e['alpha'] for e in viz._grid_rail_artists} == {0.20}
+    layers = [e['layer'] for e in viz._grid_rail_artists]
+    assert len(layers) == len(set(layers)), "expected one collection per layer"
+    # Every stripe carries its layer's colour (no pre-route palette entries
+    # remain in the rails view).
     for e in viz._grid_rail_artists:
+        expected = _LAYER_COLOR.get(e['layer'], '#888888').lower()
         for fc in e['artist'].get_facecolor():
-            assert to_hex(fc).lower() in allowed
+            assert to_hex(fc).lower() == expected
 
 
 def test_all_toggle_builds_and_shows_preroutes(monkeypatch):
