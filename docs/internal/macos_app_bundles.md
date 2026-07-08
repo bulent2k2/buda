@@ -79,9 +79,12 @@ a different cwd:
   `buda` is a CLI whose per-command summary and `flow.log` line must stay on the
   terminal, so it wires stdio back to the controlling tty and `-W` blocks until
   the run exits — you get the per-cell Dock identity **and** the terminal output.
-  Taken only with a tty present, an `open` that supports `--stdout` (macOS
-  10.15+), a script argument, and no `--no-viz` (a batch run has no window to
-  name); otherwise it falls through to the plain in-terminal launch.
+  Taken only when stdin, stdout **and** stderr are all ttys (so a redirected
+  `buda … >run.log` or `| tee` isn't clobbered by `open --stdout "$(tty)"` — it
+  falls through to the direct launch that honors the pipe/file), an `open` that
+  supports `--stdout` (macOS 10.15+), a script argument, and no `--no-viz` (a
+  batch run has no window to name); otherwise it uses the plain in-terminal
+  launch.
 
 Why per-cell: the menu-bar name, window title, and Dock *icon* already follow
 the cell name at runtime, but the Dock *text* is fixed to the launching bundle's

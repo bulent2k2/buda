@@ -14,10 +14,14 @@ BUILD_DIR="$PROJECT_ROOT/build"
 # flow-log line still print here. The per-cell bundle is a throwaway written to
 # a temp cache; its icon is copied from bin/Buda.app (build it once with
 # `python3 tools/make_macos_apps.py`), else set_dock_icon() supplies it at
-# runtime. Guarded to a real tty + an `open` with --stdout; otherwise falls
-# through to the direct launch below. Opt out with BUDA_NO_APP=1.
+# runtime. Guarded to an `open` with --stdout and to all THREE of stdin, stdout
+# and stderr being ttys — if any is redirected (`buda … >run.log`, `| tee`) we
+# fall through to the direct launch so the pipe/file is honored rather than
+# `open --stdout "$TTY"` shoving output back at the terminal. Opt out with
+# BUDA_NO_APP=1.
 if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] \
-   && tty -s && open --help 2>&1 | grep -q -- '--stdout'; then
+   && [ -t 0 ] && [ -t 1 ] && [ -t 2 ] \
+   && open --help 2>&1 | grep -q -- '--stdout'; then
   # First non-option arg is the script; skip the reroute for --no-viz batch runs
   # (no window to name) and when no script is given (let the CLI print help).
   SCRIPT_ARG=""; NOVIZ=""
