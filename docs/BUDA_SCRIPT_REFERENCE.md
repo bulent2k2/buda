@@ -5,7 +5,8 @@ command. Blank lines and lines beginning with `#` are ignored.
 
 ```
 python3 src/buda_cli.py flow/my_design.buda
-python3 src/buda_cli.py flow/my_design      # .buda extension inferred
+python3 src/buda_cli.py flow/my_design     # .buda extension inferred
+buda flow/my_design     # use wrapper under bin/
 ```
 
 For the `buda` command line itself — invocation, wrappers, and flags such as
