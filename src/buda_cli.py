@@ -361,6 +361,18 @@ def main():
             script = script + '.buda'
         session.script_path = os.path.abspath(script)
 
+        # Relabel the macOS app name (dock / menu bar / Cmd-Tab) from
+        # 'python3' to the design's name. This MUST run before matplotlib
+        # realizes the first Tk window — AppKit caches CFBundleName when
+        # NSApplication is created — so it lives here at startup, ahead of any
+        # `visualize` command, not in BudaVisualizer.__init__ (too late there).
+        if not session.no_viz:
+            try:
+                from buda_viz import set_app_name
+                set_app_name(os.path.splitext(os.path.basename(script))[0])
+            except Exception:
+                pass
+
         # Open a flow log that captures the FULL detail of every command
         # (Python prints + C++ output routed through sys.stdout via
         # buda.ostream_redirect).  run_command mirrors each command's detail
