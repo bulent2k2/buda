@@ -509,6 +509,11 @@ private:
     std::vector<int> all_v_layers_ = {5};
 
     void add_l_shapes(const Busterm& src, const Busterm& dst, std::vector<Topology>& results);
+    // Two blocks that partially OVERLAP admit L routes around their free outer
+    // corners (each leg tapping an exclusive, non-overlapping face) that the
+    // centre-projection add_l_shapes degenerates away.  Emits the two free-corner
+    // L's (L_OVL_*) so the planner has a route that avoids the shared band.
+    void add_overlap_corner_ls(const Busterm& src, const Busterm& dst, std::vector<Topology>& results);
     void add_z_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_u_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_uu_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);

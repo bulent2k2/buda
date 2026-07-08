@@ -39,16 +39,21 @@ The crossing wire is centred on the shared edge and only min-stub-length long (n
 the full block width — coverage is by overlap, so a short straddling wire covers
 both blocks), floored at a project-level epsilon so it is never zero-length.
 
-Point-touch corners and fully-coincident blocks are DEGENERATE placements (no
-shared edge, no routable channel) and deliberately stay candidate-free.
+Corner point-touch is the point-contact analogue of edge abutment: the two blocks
+meet at exactly one corner, so every direct/L/Z/U segment is zero-slide and dropped
+— leaving no candidate.  The same fallback rescues it by routing an L AROUND the
+shared corner (`corner_diagonal_L`, two variants `CORNER_HV`/`CORNER_VH`), the way
+the MST path already does.  Fully-coincident (and partially overlapping blocks that
+end up with no survivor) stay candidate-free — a degenerate placement the
+zero-candidate warning is meant to flag, not silently route.
 
-Sibling of test_topo_mst_abutted.py, which covers the N>=4 MST-edge abutment.
+Sibling of test_topo_mst_abutted.py, which covers the N>=4 MST-edge abutment (and
+test_topo_mst_corner.py, the N>=4 corner-diagonal case).
 """
 import contextlib
 import io
 
 import buda
-import pytest
 
 import buda_cli
 
@@ -182,14 +187,149 @@ def test_abutment_fallback_fires_after_keepout_cull():
     assert "BUSTERM_OPEN" not in _violations(cands[0], fp), _violations(cands[0], fp)
 
 
-@pytest.mark.parametrize("coords, why", [
-    ({"A": (0, 0, 100, 100), "B": (100, 100, 200, 200)}, "corner point-touch"),
-    ({"A": (0, 0, 100, 100), "B": (0, 0, 100, 100)},     "fully coincident"),
-])
-def test_degenerate_placements_produce_no_candidate(coords, why):
-    """Point-touch and fully-coincident blocks share no edge: no routable channel,
-    so the fallback deliberately does NOT invent a candidate (the zero-candidate
-    warning then fires at generate_topologies)."""
-    fp = _fp(coords)
+def test_fully_coincident_blocks_produce_no_candidate():
+    """Two blocks occupying the SAME rectangle share no clean edge and no routable
+    channel, so the fallback deliberately does NOT invent a candidate (the
+    zero-candidate warning then fires at generate_topologies).  A corner point-touch
+    is NOT degenerate — it is rescued (see the corner tests below); a partial overlap
+    keeps its own I/U candidates and is likewise not the fallback's concern."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (0, 0, 100, 100)})
     cands = _gen(fp).generate_candidates("A", ["B"])
-    assert len(cands) == 0, f"{why}: expected no candidate, got {[c.type for c in cands]}"
+    assert len(cands) == 0, f"expected no candidate, got {[c.type for c in cands]}"
+
+
+def test_partial_overlap_keeps_i_and_u_candidates():
+    """The other end of the adjacency spectrum: two blocks that partially OVERLAP
+    still leave a routable channel, so the ordinary generator handles them — the
+    abutment/corner fallback never fires.  A(0,0,100,100) and B(50,50,150,150) share
+    the band 50<=x<=100, 50<=y<=100, which gives a straight I-shape straight through
+    the overlap (I_H and I_V, the shortest routes) plus U detours around the pair.
+    So this is NOT a zero-candidate case (contrast the coincident / corner tests),
+    and the straight through-overlap wire is strictly shorter than any detour."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (50, 50, 150, 150)})
+    cands = _gen(fp).generate_candidates("A", ["B"])
+    assert cands, "partial-overlap blocks produced NO candidate"
+    types = {c.type for c in cands}
+    # Straight wires through the shared band exist BECAUSE the faces overlap.
+    assert "I_H" in types and "I_V" in types, sorted(types)
+    assert any(t.startswith("U_") for t in types), sorted(types)   # detours too
+    i_wl = [c.estimated_wirelength for c in cands if c.type in ("I_H", "I_V")]
+    u_wl = [c.estimated_wirelength for c in cands if c.type.startswith("U_")]
+    assert max(i_wl) < min(u_wl), (i_wl, u_wl)   # through-overlap beats the detour
+    for c in cands:
+        if c.type in ("I_H", "I_V"):
+            assert len(c.segments) == 1, f"{c.type}: I-shape is a single wire"
+            assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
+            ct = buda.ConnTopology(); ct.build(c, fp)
+            cs = ct.segs()[0]
+            assert cs.perp_hi > cs.perp_lo, f"{c.type}: zero-slide [{cs.perp_lo},{cs.perp_hi}]"
+
+
+def test_overlap_corner_ls_route_around_overlap():
+    """A partial overlap also admits two L's around the FREE outer corners of the
+    union — routes that avoid the shared band entirely (add_l_shapes' centre
+    projection degenerates them; add_overlap_corner_ls emits them).  For the "/"
+    stagger A(0,0,100,100), B(50,50,150,150) the free corners are top-left and
+    bottom-right: `L_OVL_TL` (V off A's top outside B, then H into B's left outside
+    A) and `L_OVL_BR` (H off A's right, then V into B's bottom)."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (50, 50, 150, 150)})
+    cands = _gen(fp).generate_candidates("A", ["B"])
+    types = {c.type for c in cands}
+    assert {"L_OVL_TL", "L_OVL_BR"} <= types, sorted(types)
+    for c in cands:
+        if not c.type.startswith("L_OVL"):
+            continue
+        assert len(c.segments) == 2, f"{c.type}: corner L has two legs"
+        # One horizontal + one vertical leg (a real L, not collinear).
+        horiz = [s.start.y == s.end.y for s in c.segments]
+        assert sorted(horiz) == [False, True], f"{c.type}: legs not perpendicular"
+        assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
+        ct = buda.ConnTopology(); ct.build(c, fp)
+        for cs in ct.segs():
+            assert cs.perp_hi > cs.perp_lo, f"{c.type}: zero-slide leg"
+
+
+def test_overlap_corner_ls_other_diagonal():
+    """The mirrored "\\" stagger A(0,50,100,150), B(50,0,150,100) frees the other
+    diagonal — bottom-left and top-right — so the corner L's are L_OVL_BL / L_OVL_TR."""
+    fp = _fp({"A": (0, 50, 100, 150), "B": (50, 0, 150, 100)})
+    types = {c.type for c in _gen(fp).generate_candidates("A", ["B"])}
+    assert {"L_OVL_BL", "L_OVL_TR"} <= types, sorted(types)
+
+
+def test_nested_blocks_emit_no_corner_l():
+    """One block fully containing the other is NOT a staggered cross — there are no
+    exclusive perpendicular faces, so no corner L is invented."""
+    fp = _fp({"A": (0, 0, 200, 200), "B": (50, 50, 150, 150)})   # B inside A
+    types = {c.type for c in _gen(fp).generate_candidates("A", ["B"])}
+    assert not any(t.startswith("L_OVL") for t in types), sorted(types)
+
+
+def test_overlap_corner_ls_set_wirelength():
+    """PR #221 review P2: the L_OVL candidates are emitted after the normal
+    annotate/sort pass, so their estimated_wirelength must be set explicitly (else
+    it stays 0 and the planner's WL term can't rank the two L's)."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (50, 50, 150, 150)})
+    ovl = [c for c in _gen(fp).generate_candidates("A", ["B"]) if c.type.startswith("L_OVL")]
+    assert ovl
+    for c in ovl:
+        want = sum(abs(s.end.x - s.start.x) + abs(s.end.y - s.start.y) for s in c.segments)
+        assert c.estimated_wirelength == want > 0, (c.type, c.estimated_wirelength, want)
+
+
+def test_overlap_corner_ls_respect_corner_margin():
+    """PR #221 review P2: L_OVL taps must land on the margin-inset bbox faces, not
+    the physical orig_bbox — otherwise a tap sits inside the corner_margin the
+    generator is meant to keep clear.  With a 20-unit margin on A(0,0,100,100),
+    A's tap faces move to the shrunk box [20,80]²; no L_OVL endpoint may touch A's
+    physical edge (x or y in {0,100})."""
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 100, 100); fp.set_block_corner_margin("A", 20, 20)
+    fp.add_block("B", 30, 50, 400, 400); fp.set_block_corner_margin("B", 20, 20)
+    g = buda.TopologyGenerator(fp); g.set_layer_ids(4, 5)
+    ovl = [c for c in g.generate_candidates("A", ["B"]) if c.type.startswith("L_OVL")]
+    assert ovl, "expected an L_OVL for the margined overlap"
+    for c in ovl:
+        for s in c.segments:
+            for (x, y) in ((s.start.x, s.start.y), (s.end.x, s.end.y)):
+                assert x not in (0, 100) and y not in (0, 100), (
+                    f"{c.type} taps A's unshrunk face at ({x},{y}) — ignores corner_margin")
+
+
+def test_corner_touch_rescued_by_diagonal_L():
+    """A and B meet at exactly one corner (A's top-right == B's bottom-left, the
+    point (100,100)).  Every direct/L/Z/U segment there is zero-slide and dropped,
+    so without a rescue the bus is silently unrouted.  The fallback emits two L's
+    routed AROUND the corner (`CORNER_HV`/`CORNER_VH`), each a 2-segment L that taps
+    both faces and covers both blocks — the point-contact analogue of edge abutment."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (100, 100, 200, 200)})
+    cands = _gen(fp).generate_candidates("A", ["B"])
+    assert cands, "corner-touch 2-pin blocks produced NO candidate (silently unrouted)"
+    types = sorted(c.type for c in cands)
+    assert types == ["CORNER_HV", "CORNER_VH"], types
+    for c in cands:
+        assert len(c.segments) == 2, f"{c.type}: corner L must have two legs"
+        assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
+        # Every leg must have a real (non-zero) perpendicular slide window.
+        ct = buda.ConnTopology(); ct.build(c, fp)
+        for cs in ct.segs():
+            assert cs.perp_hi > cs.perp_lo, f"{c.type}: zero-slide leg [{cs.perp_lo},{cs.perp_hi}]"
+
+
+def test_corner_touch_bus_routes_to_completion():
+    """End-to-end: an 8-bit bus across a corner point-touch must place ALL bits in
+    DetailedNUTS (pre-fix it produced zero candidates and never routed)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in ("def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+                  "def_layer 4 M4 H 50", "def_layer 5 M5 V 50",
+                  "add_block A 0 0 100 100", "add_block B 100 100 200 200",
+                  "add_bus n[8] A.p B.p", "run_bundler", "generate_topologies",
+                  "def_track_pattern 4 0 SIGNAL 2 2", "def_track_pattern 5 0 SIGNAL 2 2",
+                  "def_track_pattern 6 0 SIGNAL 2 2", "def_track_pattern 7 0 SIGNAL 2 2",
+                  "run_planner 3", "run_nuts", "run_detailed_nuts"):
+            s.do_command(c)
+    assert s.nuts_result.num_violations == 0, "corner-touch bus left a NUTS interval violation"
+    assert s.detailed_result.num_unplaced == 0, \
+        f"{s.detailed_result.num_unplaced}/8 bits unplaced — corner-touch bus did not route"

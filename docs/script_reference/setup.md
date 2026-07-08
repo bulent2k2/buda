@@ -80,6 +80,31 @@ A per-block `corner_margin` overrides the global `corner_margin` command for
 that block. The margin is baked into the block's `Busterm.bbox` at construction;
 topology generation and the Hanan grid use the shrunken bounding box directly.
 
+#### Adjacent, touching, and overlapping blocks
+
+Topology generation handles blocks that are *not* cleanly separated as follows:
+
+- **Shared full edge (abutment).** Two blocks sharing a face have coinciding
+  facing edges, so the ordinary L/Z/U candidates collapse. A dedicated fallback
+  realises the shared edge as a short crossing wire (`ABUT_H`/`ABUT_V`), so the
+  bus routes — no action needed.
+- **Single-corner touch.** Two blocks meeting at exactly one corner are rescued
+  the same way: the fallback routes an L *around* the shared corner
+  (`CORNER_HV`/`CORNER_VH`). This works at the default `corner_margin 0` — no
+  margin is required.
+- **Fully coincident or overlapping blocks.** Two blocks occupying the same
+  rectangle (or an overlap with no routable channel left) produce **no
+  candidate**, and `generate_topologies` emits a **zero-candidate warning** for
+  that bus. This is intended: a bus between blocks that occupy the same space has
+  no meaningful geometry, so the warning flags a placement problem rather than
+  inventing a route.
+- **Partial (staggered) overlap.** Two blocks that overlap but each stick out on
+  both axes route as usual — a straight `I_H`/`I_V` through the shared band, `U`
+  detours around the union, **and** two `L_OVL_*` L's that bend around the union's
+  two free outer corners (each leg taps an exclusive, non-overlapping face), giving
+  the planner a route that avoids the shared band. A block *nested* inside the
+  other has no exclusive faces, so no corner L is generated.
+
 #### TEG mode
 
 A multi-rect block models one of two physical situations:
