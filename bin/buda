@@ -6,6 +6,31 @@
 PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 BUILD_DIR="$PROJECT_ROOT/build"
 
+# macOS: relaunch through Buda.app so the Dock tile shows "Buda" + icon
+# (LaunchServices identity), WHILE keeping this terminal's stdio wired via
+# `open --stdout/--stderr/--stdin` (macOS 10.15+) and `-W` (block until it
+# exits) — so the per-command summary and flow-log line still print here.
+# Guarded: only when a controlling tty is present AND this `open` supports the
+# stdio flags; otherwise fall through to the plain in-terminal launch below.
+# Opt out entirely with BUDA_NO_APP=1. Build the bundle once with:
+#   python3 tools/make_macos_apps.py
+APP="$PROJECT_ROOT/bin/Buda.app"
+if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ] \
+   && tty -s && open --help 2>&1 | grep -q -- '--stdout'; then
+  TTY="$( tty )"
+  # `open` launches from a different cwd, so resolve any path arg to absolute.
+  ARGS=()
+  for a in "$@"; do
+    if [ -e "$a" ]; then
+      ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
+    else
+      ARGS+=("$a")
+    fi
+  done
+  exec open -W -a "$APP" --stdin "$TTY" --stdout "$TTY" --stderr "$TTY" \
+       --args "${ARGS[@]}"
+fi
+
 # Add build and tools directories to PYTHONPATH
 export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"
 

@@ -64,20 +64,26 @@ open -a bin/Buda.app --args flow/x.buda
 # …or double-click the bundle in Finder, or drag it onto the Dock.
 ```
 
-`bin/fp` does this automatically: on macOS, if `Floorplanner.app` exists, it
-`exec open -a …`s through the bundle (resolving any path arg to absolute, since
-`open` runs from a different cwd). Set `BUDA_NO_APP=1` to force the direct
-in-terminal launch (keeps stdout on your terminal — useful for debugging).
+Both wrappers do this automatically on macOS when the bundle exists (opt out
+with `BUDA_NO_APP=1`), resolving any path arg to absolute since `open` runs from
+a different cwd:
 
-`bin/buda` is **not** rerouted: it is a CLI whose per-command summary and flow
-log go to the terminal, and launching via `open` would detach that output. Use
-`bin/Buda.app` when you specifically want the Dock identity for a flow run; use
-`bin/buda` for normal terminal work (it still gets the menu-bar name, window
-title, and Dock icon from the runtime hooks).
+- **`bin/fp`** → `exec open -a Floorplanner.app --args …`. It is a pure GUI, so
+  detaching stdout is fine.
+- **`bin/buda`** → `exec open -W -a Buda.app --stdin/--stdout/--stderr "$(tty)"
+  --args …`. `buda` is a CLI whose per-command summary and `flow.log` line must
+  stay on the terminal, so it wires stdio back to the controlling tty and `-W`
+  blocks until the run exits — you get the Dock identity **and** the terminal
+  output. This path is taken only when a tty is present and this `open` supports
+  the `--stdout` flag (macOS 10.15+); otherwise it falls through to the plain
+  in-terminal launch (no regression on older macOS or in pipes/CI).
+
+Note: through `open -W` the wrapper does not propagate `buda`'s exit code (it
+reports `open`'s). Scripts that check `$?` should run with `BUDA_NO_APP=1`.
 
 ## Trade-off recap
 
-- `bin/buda` / `bin/fp` in a terminal → correct window title, menu-bar name, and
-  Dock icon; Dock **text** still `python3` (unless `fp` reroutes through the app).
-- Launch via the `.app` → all four correct, but stdout is detached (fine for the
-  GUI-centric Floorplanner; the flow log file still captures full detail).
+- `BUDA_NO_APP=1` (or older macOS / no tty / non-macOS) → direct launch: correct
+  window title, menu-bar name, and Dock icon, but the Dock **text** is `python3`.
+- Default on macOS 10.15+ → routed through the `.app`: all four surfaces correct.
+  `fp` detaches stdout (GUI); `buda` keeps it via `open --stdout` + `-W`.
