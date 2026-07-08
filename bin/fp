@@ -24,6 +24,25 @@ EOF
   exit 0
 fi
 
+# macOS: relaunch through Floorplanner.app so the Dock tile shows the app's
+# name ("Floorplanner") and icon — LaunchServices establishes that identity at
+# launch, which no runtime API can do for a bare `python3` process. Opt out
+# with BUDA_NO_APP=1 (keeps output on this terminal, handy for debugging).
+# Build the bundle once with:  python3 tools/make_macos_apps.py
+APP="$PROJECT_ROOT/bin/Floorplanner.app"
+if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ]; then
+  # `open` launches from a different cwd, so resolve any path arg to absolute.
+  ARGS=()
+  for a in "$@"; do
+    if [ -e "$a" ]; then
+      ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
+    else
+      ARGS+=("$a")
+    fi
+  done
+  exec open -a "$APP" --args "${ARGS[@]}"
+fi
+
 # Add build and tools directories to PYTHONPATH
 export PYTHONPATH="$BUILD_DIR:$PROJECT_ROOT/tools:$PYTHONPATH"
 
