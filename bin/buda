@@ -63,13 +63,20 @@ $ICON_KEY
 </plist>
 PLIST
     TTY="$( tty )"
-    # `open` launches from a different cwd, so resolve path args to absolute.
+    # `open` launches from a different cwd, so anchor every relative path arg to
+    # THIS cwd — including the `.buda`-less script form the CLI would infer
+    # (`buda demo/foo` → demo/foo.buda). Absolute paths and options pass through.
     ARGS=()
     for a in "$@"; do
       if [ -e "$a" ]; then
         ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
+      elif [ -e "$a.buda" ]; then
+        ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" ).buda")
       else
-        ARGS+=("$a")
+        case "$a" in
+          -*|/*) ARGS+=("$a") ;;         # option or already-absolute
+          *)     ARGS+=("$PWD/$a") ;;     # relative (e.g. missing file): anchor
+        esac
       fi
     done
     exec open -W -a "$CELL_APP" --stdin "$TTY" --stdout "$TTY" --stderr "$TTY" \

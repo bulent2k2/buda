@@ -31,13 +31,17 @@ fi
 # Build the bundle once with:  python3 tools/make_macos_apps.py
 APP="$PROJECT_ROOT/bin/Floorplanner.app"
 if [ "$(uname)" = "Darwin" ] && [ -z "$BUDA_NO_APP" ] && [ -d "$APP" ]; then
-  # `open` launches from a different cwd, so resolve any path arg to absolute.
+  # `open` launches from a different cwd, so anchor every relative path arg to
+  # THIS cwd; absolute paths and options pass through.
   ARGS=()
   for a in "$@"; do
     if [ -e "$a" ]; then
       ARGS+=("$( cd "$( dirname "$a" )" && pwd )/$( basename "$a" )")
     else
-      ARGS+=("$a")
+      case "$a" in
+        -*|/*) ARGS+=("$a") ;;
+        *)     ARGS+=("$PWD/$a") ;;
+      esac
     fi
   done
   exec open -a "$APP" --args "${ARGS[@]}"
