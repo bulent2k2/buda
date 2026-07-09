@@ -1,7 +1,7 @@
 # BUDA Script Reference
 
-`.buda` scripts are executed line-by-line by `buda_cli.py`. Each line is one
-command. Blank lines and lines beginning with `#` are ignored.
+`.buda` scripts are executed line-by-line by the `buda` wrapper which runs `buda_cli.py`. Each line is one
+command. Blank lines, lines beginning with `#` and any text after `#` are all ignored.
 
 ```
 python3 src/buda_cli.py flow/my_design.buda
