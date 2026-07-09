@@ -374,6 +374,51 @@ static bool all_layers_blocked_by_keepouts(
     return true;
 }
 
+// Does the keepout set block `seg` at EVERY perpendicular position of its
+// slide window [w_lo, w_hi] on EVERY candidate layer?  The nominal-position
+// test above is the w_lo == w_hi special case; a real window lets NUTS slide
+// a tap along its block face past a narrow keepout, so a candidate is only
+// dead when the coverage EXHAUSTS the window (Codex #234).  Per layer, the
+// free positions are the window minus the perp extents of the keepouts whose
+// along-range overlaps the segment's span; one surviving free interval on
+// any layer keeps the candidate.  (The along span is held at the segment's
+// generated extent — a slid tap keeps its span up to junction adjustments,
+// so this stays a conservative-but-honest generation-time test.)
+static bool all_layers_blocked_across_slide(
+    const Segment& seg, int w_lo, int w_hi,
+    const std::vector<int>& candidate_layers,
+    const std::vector<KeepoutZone>& keepouts)
+{
+    if (candidate_layers.empty() || keepouts.empty()) return false;
+    const bool is_h = (seg.start.y == seg.end.y);
+    const int a1 = is_h ? std::min(seg.start.x, seg.end.x)
+                        : std::min(seg.start.y, seg.end.y);
+    const int a2 = is_h ? std::max(seg.start.x, seg.end.x)
+                        : std::max(seg.start.y, seg.end.y);
+    if (w_lo > w_hi) std::swap(w_lo, w_hi);
+    for (int layer : candidate_layers) {
+        std::vector<std::pair<int, int>> free_iv{{w_lo, w_hi}};
+        for (const auto& koz : keepouts) {
+            if (!(koz.layer_ids.empty() || koz.layer_ids.count(layer))) continue;
+            const int k_a1 = is_h ? koz.bbox.x1 : koz.bbox.y1;
+            const int k_a2 = is_h ? koz.bbox.x2 : koz.bbox.y2;
+            if (a1 > k_a2 || a2 < k_a1) continue;   // no along overlap
+            const int k_p1 = is_h ? koz.bbox.y1 : koz.bbox.x1;
+            const int k_p2 = is_h ? koz.bbox.y2 : koz.bbox.x2;
+            std::vector<std::pair<int, int>> next;
+            for (const auto& [lo, hi] : free_iv) {
+                if (k_p2 < lo || k_p1 > hi) { next.emplace_back(lo, hi); continue; }
+                if (k_p1 > lo) next.emplace_back(lo, k_p1 - 1);
+                if (k_p2 < hi) next.emplace_back(k_p2 + 1, hi);
+            }
+            free_iv = std::move(next);
+            if (free_iv.empty()) break;
+        }
+        if (!free_iv.empty()) return false;  // a free position exists here
+    }
+    return true;
+}
+
 static int clamp(int value, int lo, int hi) {
     return std::max(lo, std::min(hi, value));
 }
@@ -3164,24 +3209,43 @@ void TopologyGenerator::finalize_candidates(std::vector<Topology>& candidates,
     for (auto& t : candidates) annotate_seg_conns(t);
     annotate_and_sort(candidates);
 
-    // Keepout cull: drop a candidate any of whose segments is blocked on all
-    // same-direction layers by an explicit keepout zone.  OOB/U segments
-    // outside the zones are unaffected; only fully-blocked segments cull.
+    // Keepout cull: drop a candidate any of whose segments has its WHOLE
+    // perpendicular slide window blocked on all same-direction layers by
+    // explicit keepout zones.  Slide-aware (Codex #234): a segment that
+    // merely grazes a narrow keepout at its nominal position can slide past
+    // it at NUTS time and must survive; only an EXHAUSTED window — no free
+    // position on any layer — kills the candidate.  OOB/U segments outside
+    // the zones are unaffected.
     const auto& kos = floorplan_.get_keepout_zones();
     if (!kos.empty()) {
-        candidates.erase(
-            std::remove_if(candidates.begin(), candidates.end(),
-                [&](const Topology& t) {
-                    for (const auto& seg : t.segments) {
-                        bool is_h = (seg.start.y == seg.end.y);
-                        const std::vector<int>& layers =
-                            is_h ? all_h_layers_ : all_v_layers_;
-                        if (all_layers_blocked_by_keepouts(seg, layers, kos))
-                            return true;
-                    }
-                    return false;
-                }),
-            candidates.end());
+        std::vector<Topology> kept;
+        kept.reserve(candidates.size());
+        for (auto& t : candidates) {
+            ConnTopology ct;
+            ct.build(t, floorplan_);   // cached analysis; filter_pinched reuses it
+            const auto& css = ct.segs();
+            bool dead = false;
+            for (size_t i = 0; i < t.segments.size(); ++i) {
+                const Segment& seg = t.segments[i];
+                const bool is_h = (seg.start.y == seg.end.y);
+                const std::vector<int>& layers = is_h ? all_h_layers_ : all_v_layers_;
+                // Slide window from the shared analysis; fall back to the
+                // nominal position (a zero-width window) if unavailable.
+                int w_lo, w_hi;
+                if (i < css.size()) {
+                    w_lo = css[i].perp_lo;
+                    w_hi = css[i].perp_hi;
+                } else {
+                    w_lo = w_hi = is_h ? seg.start.y : seg.start.x;
+                }
+                if (all_layers_blocked_across_slide(seg, w_lo, w_hi, layers, kos)) {
+                    dead = true;
+                    break;
+                }
+            }
+            if (!dead) kept.push_back(std::move(t));
+        }
+        candidates = std::move(kept);
     }
 
     filter_pinched(candidates);
