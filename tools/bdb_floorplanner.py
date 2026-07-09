@@ -66,6 +66,17 @@ import floorplanner_commands as fpc
 import buda_viz
 from ui_state import ViewState
 
+# Depth-overlay block fills (facecolor, edgecolor), indexed by how many levels
+# below the current view a block sits: 1 = immediate children, 2 = grandchildren,
+# … Deeper = darker blue. Orange is reserved for flylines so the two never clash
+# (the last entry is reused for anything deeper than the list).
+_OVERLAY_DEPTH_FILLS = [
+    ("#c3dcf2", "#3b82f6"),   # 1 level down — light-medium blue
+    ("#a3c6e8", "#2563eb"),   # 2
+    ("#83b0dd", "#1d4ed8"),   # 3
+    ("#639ad2", "#1e40af"),   # 4+
+]
+
 
 class BdbFloorplanner:
     def __init__(self, root):
@@ -1036,26 +1047,42 @@ class BdbFloorplanner:
                     ax.add_patch(diamond)
                     self._handle_patches.append((diamond, name, edge))
 
-        # Depth overlay: draw child blocks above parents so they are visible
+        # Depth overlay: draw child blocks above parents so they are visible.
+        # Each deeper level gets a darker blue fill (reserve orange for the
+        # flylines, which would otherwise be indistinguishable from the blocks).
         if extra_levels > 0:
-            def _draw_overlay(parent_name: str, remaining: int, alpha: float):
+            def _overlay_style(depth: int):
+                i = min(depth - 1, len(_OVERLAY_DEPTH_FILLS) - 1)
+                return _OVERLAY_DEPTH_FILLS[i]
+
+            def _draw_overlay(parent_name: str, remaining: int, alpha: float,
+                              depth: int):
+                fc, ec = _overlay_style(depth)
                 for child in self._children_of(parent_name):
                     try:
                         cb = self.state.block(child)
                     except Exception:
                         continue
+                    # The selected block (e.g. picked from the tree) may itself
+                    # be a deeper-level block — give it the normal selection
+                    # highlight so the flyline source stands out from its peers.
+                    is_sel = (child == self.state.selected)
                     ax.add_patch(mpatches.Rectangle(
                         (cb.x1, cb.y1), cb.x2 - cb.x1, cb.y2 - cb.y1,
-                        facecolor="#fed7aa", edgecolor="#ea580c",
-                        linewidth=1.8, alpha=alpha, picker=False, zorder=2.5))
+                        facecolor="#8ecae6" if is_sel else fc,
+                        edgecolor="#0f172a" if is_sel else ec,
+                        linewidth=2.4 if is_sel else 1.8,
+                        alpha=(min(1.0, alpha + 0.15) if is_sel else alpha),
+                        picker=False, zorder=2.7 if is_sel else 2.5))
                     if self.ui_state.block_names:
                         ax.text(cb.x1 + 2, cb.y1 + 2, child.split("/")[-1],
-                                fontsize=7, color="#7c2d12", alpha=alpha,
-                                clip_on=True, zorder=2.6)
+                                fontsize=7, color="#0f172a", alpha=alpha,
+                                clip_on=True, zorder=2.8)
                     if remaining > 1:
-                        _draw_overlay(child, remaining - 1, alpha * 0.72)
+                        _draw_overlay(child, remaining - 1, alpha * 0.72,
+                                      depth + 1)
             for name in visible:
-                _draw_overlay(name, extra_levels, 0.85)
+                _draw_overlay(name, extra_levels, 0.85, 1)
 
         self._draw_flylines(ax)
         self._update_selection_label()
