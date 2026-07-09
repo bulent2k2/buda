@@ -143,7 +143,7 @@ explicitly out of scope for v1.
    pattern.  Fast-tier tests cover the fixture itself, stage-b ripup clearing
    it (one trial), and stage-b negotiation clearing it by pure cost.
 
-## Remove the per-edge MST flip move-source (measured redundant) — OPEN
+## Per-edge MST flip move-source (measured redundant) — ✅ RESOLVED (opt-in toggle)
 
 **What.** Step 4b added a per-edge L/Z flip as a ripup move source alongside the
 index alternates (`_rr_flip_edges` / `_rr_apply_move('flip', …)`). Measured
@@ -154,13 +154,18 @@ are not flippable (no `edge_id`, multi-tap legs) and (b) a flip only moves an
 edge's bend to the opposite corner of its own bounding box — a strictly weaker
 move than an index alternate, which swaps the whole topology.
 
-**Proposed.** Remove the flip branch from `_ripup_reroute`'s move construction
-(drop the `('flip', …)` moves; keep `_rr_apply_move`/`_rr_undo_move` unused-path
-free), keeping `flip_mst_edge` + `Segment.edge_id` as primitives for a possible
-future *stronger* per-edge move (a Z/dogleg that genuinely changes the
-footprint). Saves ~1 trial per contended MST edge and simplifies the delicate
-ripup scan. Small, safe; gated on the ripup suite + big2 staying green (routes
-are byte-identical — the flip never committed anyway).
+**Resolution: kept behind an opt-in toggle rather than removed.**
+`ripup_reroute [max_iter] [use_edge_candidates]` — the flip source is **off by
+default** (the default scan builds index-alternate moves only, so no trial is
+spent on flips and default routes are unaffected) and enabled by passing
+`use_edge_candidates` when an expert wants to explore edge flips.  Gate:
+`src/buda_cmds/nuts_cmds.py` (flag parse) → `_ripup_reroute(…,
+use_edge_candidates=False)` → the `('flip', …)` move construction in
+`src/buda_session/ripup.py`.  `flip_mst_edge` + `Segment::edge_id` (persisted,
+BDB v14) stay first-class primitives for a possible future *stronger* per-edge
+move (a Z/dogleg that genuinely changes the footprint).  The original "remove
+the branch outright" proposal is superseded: the toggle preserves the
+exploration path at zero default cost.
 
 ## Global-overlap re-route of NON-contended bundles — OPEN (bigger, riskier)
 

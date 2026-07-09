@@ -254,7 +254,7 @@ hier case), plus a test that a pre-planner hier template dump now shows finite
 `test_mslide_unbounded_prints_free_not_sentinel`).
 
 
-## Corner-margin default `dx=dy=0` — MEASURED, keep 0 (but corner-touch is a gap)
+## Corner-margin default `dx=dy=0` — MEASURED, keep 0 (corner-touch gap ✅ resolved)
 
 **Question.**  The global corner margin (`BlockCornerMargin`, `topology.h`)
 defaults to `{0,0}` — "no constraint beyond the face extent".  Nothing recorded
