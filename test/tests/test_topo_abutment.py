@@ -415,6 +415,59 @@ def test_overlap_corner_u_covers_both_blocks():
         assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
 
 
+def test_corner_touch_keeps_corner_ls_under_double_detour():
+    """The corner L's are FIRST-CLASS candidates, not an empty-list rescue: with
+    double_detour the UU wraps clear the two blocks and survive the filters, and
+    pre-fix that non-empty list suppressed the CORNER_* emission — turning ON an
+    additive knob made the cheapest realization vanish.  Both families must
+    coexist."""
+    fp = _fp({"A": (0, 0, 100, 100), "B": (100, 100, 200, 200)})
+    g = _gen(fp)
+    g.set_double_detour(True)
+    types = {c.type for c in g.generate_candidates("A", ["B"])}
+    assert {"CORNER_HV", "CORNER_VH"} <= types, sorted(types)
+    assert any(t.startswith("UU_") for t in types), sorted(types)
+
+
+def test_overlap_corner_us_mirrors_generated():
+    """The 180° mirrors (`*_M`) wrap around the LEFT block (P=A on "/"), offering
+    A's far faces (left/bottom) — without them only the right block ever got its
+    far faces (the unused-`ux1` compiler warning was the breadcrumb).  Both
+    diagonals; UU mirrors appear under double_detour."""
+    fp = _fp({"A": (0, 0, 400, 400), "B": (200, 200, 600, 600)})
+    types = {c.type for c in _gen(fp).generate_candidates("A", ["B"])}
+    assert {"U_OVL_HVH_M", "U_OVL_VHV_M"} <= types, sorted(types)
+    g = _gen(fp)
+    g.set_double_detour(True)
+    types = {c.type for c in g.generate_candidates("A", ["B"])}
+    assert {"UU_OVL_HVHV_M", "UU_OVL_VHVH_M"} <= types, sorted(types)
+    # "\" diagonal too.
+    fp = _fp({"A": (0, 200, 400, 600), "B": (200, 0, 600, 400)})
+    types = {c.type for c in _gen(fp).generate_candidates("A", ["B"])}
+    assert {"U_OVL_HVH_M", "U_OVL_VHV_M"} <= types, sorted(types)
+
+
+def test_overlap_corner_u_mirror_taparm_clamped_outside_left_block():
+    """"/" mirrors: the B-tap arm (seg0) must stay in B's exclusive band — the
+    HVH_M H arm ABOVE A (y ∈ [A.y2, B.y2]), the VHV_M V arm RIGHT of A
+    (x ∈ [A.x2, B.x2]) — and the mirror detour arm must stay LEFT/BELOW the
+    union, so no leg can slide across A and collapse the wrap."""
+    fp = _fp({"A": (0, 0, 400, 400), "B": (200, 200, 600, 600)})
+    cands = _gen(fp).generate_candidates("A", ["B"])
+    hvh = next(c for c in cands if c.type == "U_OVL_HVH_M")
+    segs = _ct(hvh, fp).segs()
+    assert segs[0].perp_lo >= 400 and segs[0].perp_hi <= 600, \
+        f"B-tap arm y-window [{segs[0].perp_lo},{segs[0].perp_hi}] escapes B's band above A [400,600]"
+    assert segs[1].perp_hi <= 0, \
+        f"LEFT detour arm x-window [{segs[1].perp_lo},{segs[1].perp_hi}] enters the union (x>0)"
+    vhv = next(c for c in cands if c.type == "U_OVL_VHV_M")
+    segs = _ct(vhv, fp).segs()
+    assert segs[0].perp_lo >= 400 and segs[0].perp_hi <= 600, \
+        f"B-tap arm x-window [{segs[0].perp_lo},{segs[0].perp_hi}] escapes B's band right of A [400,600]"
+    assert segs[1].perp_hi <= 0, \
+        f"BOT detour arm y-window [{segs[1].perp_lo},{segs[1].perp_hi}] enters the union (y>0)"
+
+
 _PATN = ("POWER 2 1 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 "
          "GROUND 2 1 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5 SIGNAL 1 0.5")
 
@@ -464,16 +517,20 @@ def _bit_in_B_interior(detailed, sel, B, eps=1.0):
 
 def test_overlap_corner_u_family_routes_clear_of_far_block():
     """End-to-end: every corner-wrapping U/UU pinned on an 8-bit bus must place ALL
-    bits AND keep every bit-wire out of the far block B's interior.  The per-segment
-    perp clamps (face-tap arms in their exclusive band, detour arms outside the
-    union) are what prevent a leg collapsing THROUGH B — pre-clamp the UU detour arm
-    slid straight across B."""
+    bits AND keep every bit-wire out of the wrapped block's interior — B for the
+    base family (wraps around B), A for the 180° mirrors (wrap around A).  The
+    per-segment perp clamps (face-tap arms in their exclusive band, detour arms
+    outside the union) are what prevent a leg collapsing THROUGH the wrapped
+    block — pre-clamp the UU detour arm slid straight across it."""
+    A = (0, 0, 400, 400)
     B = (200, 200, 600, 600)
-    for kind, dd in (("U_OVL_HVH", False), ("U_OVL_VHV", False),
-                     ("UU_OVL_HVHV", True), ("UU_OVL_VHVH", True)):
+    for kind, dd, wrapped in (("U_OVL_HVH", False, B), ("U_OVL_VHV", False, B),
+                              ("UU_OVL_HVHV", True, B), ("UU_OVL_VHVH", True, B),
+                              ("U_OVL_HVH_M", False, A), ("U_OVL_VHV_M", False, A),
+                              ("UU_OVL_HVHV_M", True, A), ("UU_OVL_VHVH_M", True, A)):
         s, sel = _route_pinned_overlap_u(kind, dd)
         assert s.nuts_result.num_violations == 0, f"{kind}: NUTS interval violation"
         assert s.detailed_result.num_unplaced == 0, \
             f"{kind}: {s.detailed_result.num_unplaced}/8 bits unplaced"
-        hit = _bit_in_B_interior(s.detailed_result, sel, B)
-        assert hit is None, f"{kind}: bit-wire seg {hit[0]} bit {hit[1]} penetrates B at {hit[2]}"
+        hit = _bit_in_B_interior(s.detailed_result, sel, wrapped)
+        assert hit is None, f"{kind}: bit-wire seg {hit[0]} bit {hit[1]} penetrates the wrapped block at {hit[2]}"
