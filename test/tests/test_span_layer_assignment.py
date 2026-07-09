@@ -154,6 +154,38 @@ def test_top_layer_load_balancing():
 
 
 # ---------------------------------------------------------------------------
+# Scenario: kHeight — a short segment prefers the LOWEST same-direction TOP
+# layer by default (no span windows needed)
+# ---------------------------------------------------------------------------
+
+def test_kheight_short_seg_prefers_lowest_top():
+    """A pure tie among TOP H layers (no span windows, no congestion, no
+    committed load): legacy behavior resolved it to the HIGHEST metal (the
+    layers_rev iteration order).  The kHeight term charges a SHORT segment
+    kHeight*height_rank*(1 - span/span_ref) to climb the stack — each rank up
+    is a taller via stack for no benefit — so the lowest TOP H layer wins;
+    a LONG segment (span >= span_ref = 25% of the Hanan extent) pays nothing
+    and keeps the TOP-most trunk preference; kHeight=0 restores the legacy
+    tie-break."""
+    def assign(x_hi, kheight=None):
+        fp = open_channel_fp()               # Hanan extent 1000 -> span_ref 250
+        ls = make_ls_m4_m6()                 # M4, M6 (TOP H); M5 (TOP V)
+        router = buda.CongestionPlanner(fp, ls)
+        router.set_track_pitch(0.0)
+        router.set_planner_param("kBalance", 0.0)  # isolate height from load
+        if kheight is not None:
+            router.set_planner_param("kHeight", kheight)
+        router.build_congestion_map()
+        w = make_bundle_wrapper(bid=1, width=2.0,
+                                seg=make_h_segment(100, x_hi, y=100))
+        return router.optimize_topologies([w], 1)[0].seg_layers[0]
+
+    assert assign(240) == 4, "short span (140 < ref 250) must take lowest TOP"
+    assert assign(900) == 6, "long span (800 >= ref) keeps TOP-most preference"
+    assert assign(240, kheight=0.0) == 6, "kHeight=0 restores legacy tie-break"
+
+
+# ---------------------------------------------------------------------------
 # Scenario: Short segment prefers lower TOP-H layer (M4)
 # ---------------------------------------------------------------------------
 
@@ -373,12 +405,15 @@ def test_per_layer_kspan_zero_removes_span_penalty():
     Scenario: Per-layer kSpan override
     M6 kSpan=0 → span_cost=0 regardless of span.  M4 span_max=500, kSpan=default.
     Short seg span=100: M4 cost=0 (within window), M6 cost=0 (kSpan=0).
-    Tie → M6 wins (higher ID).
+    Tie → M6 wins (higher ID).  kHeight is zeroed to keep the tie observable —
+    by default it steers a short segment to the lower TOP layer, which would
+    mask whether the kSpan=0 override actually removed M6's span penalty.
     """
     fp = open_channel_fp()
     ls = make_ls_m4_m6(span_max_m4=500, span_min_m6=400, kspan_m6=0.0)
 
     router = buda.CongestionPlanner(fp, ls)
+    router.set_planner_param("kHeight", 0.0)
     router.build_congestion_map()
 
     seg = make_h_segment(100, 200, y=100)  # span=100, well below M6 span_min=400

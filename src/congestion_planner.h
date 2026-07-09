@@ -325,6 +325,13 @@ private:
     bool   low_seg_obstructed(const Segment& seg, int layer_id,
                               int perp_pos_override) const;
 
+    // Height rank of a TOP layer among the same-direction TOP layers,
+    // ascending by layer id (lowest TOP metal = 0).  Drives the kHeight_
+    // short-segment cost: via-stack depth grows with every metal above the
+    // lowest same-direction TOP layer, so short runs should not float to the
+    // top of the stack for free.  Non-TOP layers return 0 (they never pay).
+    int    top_height_rank(int layer_id) const;
+
     // Band capacity usable by a segment confined to [slide_lo, slide_hi]:
     // band_cap clamped by the window's overlap with the band.
     double usable_band_cap(const GlobalCut& c, int b, bool is_vcut,
@@ -371,6 +378,21 @@ private:
     // spreading TOP load; the plateau holds to ~0.015, then over-balancing starts
     // pushing buses onto LOW layers and the unplaced count climbs again.
     double kBalance_         = 0.01;
+    // Layer-height cost for SHORT segments on TOP layers — the mirror image
+    // of the span-scaled base_cost_non_top_ below.  Without it the equal-cost
+    // tie among TOP layers resolves to the HIGHEST metal (the layers_rev
+    // iteration order — right for long trunks, wasteful for a 20-unit stub
+    // that then needs the tallest via stack in the design).  Cost term, TOP
+    // layers only: kHeight_ * height_rank * max(0, 1 - span/span_ref_eff_),
+    // where height_rank is the layer's index among the same-direction TOP
+    // layers ascending (lowest TOP metal = 0).  Long trunks (span >= ref) pay
+    // 0 and keep their TOP-most preference; short stubs prefer the lowest
+    // feasible TOP layer.  0.05: decisively above the kBalance_ tie-noise
+    // (<= 0.01) so the steering wins ties, far below base_cost_non_top_ and
+    // any real congestion overflow (kCong_ * ov/cap), so it never overrides
+    // capacity.  Set to 0 via `set_planner_param kHeight 0` for the legacy
+    // highest-metal tie-break.
+    double kHeight_          = 0.05;
     // Span reference for scaling the non-TOP penalty: a segment of length
     // base_span_ref_ (or longer) pays the full base_cost_non_top_; shorter
     // segments pay proportionally less, so short local stubs offload to

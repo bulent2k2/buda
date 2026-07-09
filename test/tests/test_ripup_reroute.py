@@ -175,24 +175,26 @@ def _big2_to_stage(stage):
 
 @pytest.mark.mid
 def test_big2_stage_b_clears_opens():
-    """big2's DNUTS opens are driven down by ripup_reroute (validated 60 -> 0 on
-    the ARM reference host; 132 -> 72 on x86).
+    """big2's DNUTS opens are driven down by ripup_reroute (history: 60 -> 0 on
+    the ARM reference host; 132 -> 72 on x86 pre-fixes).
 
-    Both the starting count AND whether it reaches exactly 0 are machine-
-    sensitive: the double-based NUTS math rounds slightly differently across CPUs
-    under -march=native, so a design at the packing limit strands a few residual
-    TOP-layer-oversubscription opens on some hosts that the reference clears.
-    (See -ffp-contract=off in CMakeLists, and test_flow_scripts.py's tc3a note —
-    'a bundle can tip into a NUTS open on some hosts'.)  So the CPU-invariant
-    guard is that ripup makes real progress (strictly reduces the opens), the
-    same property test_big2_stage_a_reduces_overlaps and the hier stage-b test
-    assert — not an exact clear-to-zero.  On the reference host it does reach 0."""
+    Since the abutment-crossing Gap A fix and the kHeight short-stub layer
+    steering, the width-mode big2 baseline itself reaches 0 opens on x86 —
+    ripup then has nothing to do and the invariant is that it STAYS clean.
+    The starting count is machine-sensitive (double-based NUTS math rounds
+    differently across CPUs under -march=native; see -ffp-contract=off in
+    CMakeLists and test_flow_scripts.py's tc3a note), so on a host where
+    residual opens survive, the CPU-invariant guard remains that ripup makes
+    real progress (strictly reduces the opens), as in
+    test_big2_stage_a_reduces_overlaps and the hier stage-b test."""
     s = _big2_to_stage("b")
     base = s.detailed_result.num_unplaced
-    assert base > 0, f"expected a nonzero DNUTS-open baseline to reduce, got {base}"
     with contextlib.redirect_stdout(io.StringIO()):
         s.do_command("ripup_reroute")
-    assert s.detailed_result.num_unplaced < base   # ripup makes real progress
+    if base == 0:
+        assert s.detailed_result.num_unplaced == 0   # clean stays clean (no-op)
+    else:
+        assert s.detailed_result.num_unplaced < base  # ripup makes real progress
     assert s.nuts_result.num_overlaps <= 9
     # On the ARM reference host (set BUDA_REF_HOST in that machine's CI) recover
     # the stronger clear-to-zero guarantee that `< base` alone doesn't pin.
