@@ -4,34 +4,44 @@ Deferred follow-ups for the bundle / congestion planner
 (`src/congestion_planner.cpp`, `src/layering.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
-## LOW-layer abutment crossings are guaranteed DNUTS opens (big2's 72 open bits)
+## LOW-layer abutment crossings are guaranteed DNUTS opens (big2's 72 open bits) — ✅ RESOLVED
 
-**What:** big2's only remaining DNUTS opens (72 bits, 2026-07 baseline with
-`run_planner signal_tracks` + negotiation) are two single-segment
-**abutment-crossing** bundles (`bus_042`/32b, `bus_002`/40b): a ~20-unit V
-stub crossing a shared block edge, which the planner assigns to **LOW layer
-M3**.  On a LOW layer the two leaf blocks' footprints are keepouts, and an
-abutment crossing's slide window lies *entirely inside those footprints* by
-construction — so DetailedNUTS finds ZERO unblocked signal tracks and
-strands every bit, while abstract NUTS reports the placement clean
-(overlaps=0, violations=0; its keepout model found a gap the track-level
-keepout filter does not admit).  `negotiate_congestion` after DNUTS does not
-recover it (the band genuinely has no supply on any LOW layer).
+**What (history):** big2's only remaining DNUTS opens (72 bits, 2026-07
+baseline with `run_planner signal_tracks` + negotiation) were two
+single-segment **abutment-crossing** bundles (`bus_042`/32b, `bus_002`/40b):
+a ~20-unit V stub crossing a shared block edge, which the planner assigned
+to **LOW layer M3**.  On a LOW layer the two leaf blocks' footprints are
+keepouts, and an abutment crossing's slide window lies *entirely inside
+those footprints* by construction — so DetailedNUTS finds ZERO unblocked
+signal tracks and strands every bit, while abstract NUTS reports the
+placement clean (overlaps=0, violations=0).  `negotiate_congestion` after
+DNUTS does not recover it (the band genuinely has no supply on any LOW
+layer).
 
-**Fix directions (root cause is planner-side):** an abutment crossing —
-more generally any segment whose entire slide window lies within leaf
-footprints — must not be assigned a LOW layer: either (a) hard-filter LOW
-layers for segments with zero unblocked signal tracks across their whole
-window (the signal-track capacity model already has the count; charge
-keepout-blocked bands as capacity 0 at assignment time), or (b) teach the
-short-stub `base_cost_non_top` offload to respect track supply, not just
-span length.  Also worth checking why abstract NUTS's `keepout_occupied`
-admits a position DNUTS's per-track filter rejects (model mismatch).
+**Resolution (in `low_seg_obstructed`, the Gap A predicate):** the root
+cause was a blind spot in the existing obstruction test.  It trims the two
+endpoint pin-access tails back to their cell faces and treated an *empty
+open interior* (`tlo >= thi`) as "tails meet in a gap: nothing left to
+route" → routable.  For an abutment crossing the tails meet because the two
+cells **share an edge** — no gap, no open-channel point anywhere on the
+span.  The fix: an empty interior between two DISTINCT endpoint cells
+(their faces abut or overlap at this perp) is flagged obstructed, so
+`score_segment` returns the hard 9999 and STRICT layer selection routes the
+crossing over-the-cell on TOP.  A single endpoint tail meeting the far end,
+or tails meeting across a real gap, stay routable exactly as before.
+Measured: big2 full flow 0 overlaps / **0 DNUTS opens** (was 0/72), ~1 s
+total; both golden corpora byte-identical (no other corpus flow has an
+abutment LOW assignment).
 
-**Repro:** `test/tests/test_big2_residuals.py::
-test_low_layer_abutment_stub_dnuts_open_repro` — sub-second, isolated
-(full big2 floorplan, just the two buses, the M3 assignment pinned),
-asserts the exact silent-at-NUTS / 72-bits-open-at-DNUTS signature.
+**Tests:** `test/tests/test_big2_residuals.py::
+test_low_layer_abutment_stub_planner_avoids_low` (planner-side guarantee:
+TOP layer chosen, all 72 bits place) and `…_dnuts_open_repro` (the
+DNUTS-side mechanism, kept alive by pinning M3 manually).
+
+**Still open (tracked in wishlist-nuts.md territory):** the abstract/
+detailed keepout-model mismatch — abstract NUTS's `keepout_occupied`
+admits a position DNUTS's per-track filter rejects — is unchanged; the
+planner now simply never routes into it on this shape.
 
 ## Planner coverage gate (defense-in-depth) — ✅ RESOLVED (superseded by the generation-time gate)
 

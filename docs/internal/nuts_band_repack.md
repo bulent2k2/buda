@@ -227,7 +227,7 @@ measurement on the way to green gates:
 | Flow | Metric | Before | After |
 |---|---|---|---|
 | big2 pre-negotiation | NUTS overlaps | 8 (3 clusters) | **5** (B79 star + 2 pairs) |
-| big2 full flow | NUTS overlaps / DNUTS opens | 0 / 72 | 0 / 72 (unchanged) |
+| big2 full flow | NUTS overlaps / DNUTS opens | 0 / 72 | 0 / 72 (unchanged; the 72 opens were resolved separately afterwards — LOW-layer abutment fix, wishlist-planner.md → now 0 / 0) |
 | big2 full flow | negotiate+ripup runtime | the flow's dominant cost | **~1.4s total** (residue mostly pre-cleared) |
 | rnr/mix full flow | DNUTS opens / NUTS overlaps | 0 / 1 | **0** / 3 |
 | rest of the golden corpus | placements | — | byte-identical (pass no-ops without residue) |

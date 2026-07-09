@@ -345,7 +345,16 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
     int tlo = lo, thi = hi;
     if (lo_cell) tlo = std::min(is_h ? lo_cell->x2 : lo_cell->y2, hi);
     if (hi_cell) thi = std::max(is_h ? hi_cell->x1 : hi_cell->y1, tlo);
-    if (tlo >= thi) return false;   // tails meet in a gap: nothing left to route
+    if (tlo >= thi) {
+        // Empty open interior.  Two DISTINCT endpoint cells with no gap
+        // between their faces = an ABUTMENT CROSSING: the whole span lies
+        // inside the two cells' union footprint, so a LOW layer has zero
+        // unblocked signal tracks anywhere in the slide window — a
+        // guaranteed DetailedNUTS open (big2's 72 stranded bits).  A single
+        // endpoint tail meeting the far end, or tails meeting in a real gap,
+        // stay routable as before (pin access reaches an open channel).
+        return lo_cell && hi_cell && lo_cell != hi_cell;
+    }
 
     for (const auto& [name, r] : blocks_cache_) {
         if (floorplan_.is_container(name)) continue;
