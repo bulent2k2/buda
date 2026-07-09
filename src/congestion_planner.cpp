@@ -34,6 +34,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "base_cost_non_top") base_cost_non_top_ = value;
     else if (name == "kWL")               kWL_               = value;
     else if (name == "kBalance")          kBalance_          = value;
+    else if (name == "kHeight")           kHeight_           = value;
     else if (name == "base_span_ref")     base_span_ref_     = value;
     else if (name == "track_cap_slack")   track_cap_slack_   = value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
@@ -364,6 +365,17 @@ bool CongestionPlanner::low_seg_obstructed(const Segment& seg, int layer_id,
         if (rlo < thi && rhi > tlo) return true;   // overlaps interior → crossing
     }
     return false;
+}
+
+int CongestionPlanner::top_height_rank(int layer_id) const {
+    const Layer* L = layers_.get_layer(layer_id);
+    if (!L || !layers_.is_top(layer_id)) return 0;
+    std::vector<int> ids;
+    for (int lid : layers_.get_layer_ids_by_dir(L->dir))
+        if (layers_.is_top(lid)) ids.push_back(lid);
+    std::sort(ids.begin(), ids.end());
+    auto it = std::find(ids.begin(), ids.end(), layer_id);
+    return (it == ids.end()) ? 0 : (int)(it - ids.begin());
 }
 
 // Score the marginal peak overflow from adding one segment at a specific layer.
@@ -759,7 +771,16 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                         if (it != layer_load.end() && maxl > 0.0)
                             bal = kBalance_ * (it->second / maxl);
                     }
-                    double s    = cong + span + base + bal;
+                    // Layer-height cost, the mirror image of `base` above: a
+                    // SHORT segment pays kHeight_ per height rank to climb
+                    // above the lowest same-direction TOP layer (each rank is
+                    // a taller via stack), while a long trunk (span >= ref)
+                    // pays 0 and keeps the TOP-most trunk preference.
+                    double hgt = 0.0;
+                    if (layers_.is_top(lid) && span_ref_eff_ > 0.0)
+                        hgt = kHeight_ * top_height_rank(lid) *
+                              std::max(0.0, 1.0 - seg_span / span_ref_eff_);
+                    double s    = cong + span + base + bal + hgt;
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                 }
                 if (best_s == std::numeric_limits<double>::max())
