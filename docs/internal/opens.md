@@ -10,15 +10,7 @@ items this page doesn't see).
 
 ## Quick wins (small, low risk)
 
-1. **Remove the per-edge MST flip move-source** —
-   [`wishlist-ripup.md`](wishlist-ripup.md) → *"Remove the per-edge MST flip
-   move-source (measured redundant)"*. Measured: no flip ever clears an
-   overlap on the corpus (index alternates strictly dominate); dropping the
-   `('flip', …)` moves from `_ripup_reroute` saves ~1 trial per contended MST
-   edge and simplifies the scan. Routes byte-identical by construction (the
-   flip never committed). Keep `flip_mst_edge` + `Segment::edge_id` as
-   primitives for a future *stronger* per-edge move.
-2. **Resolve pre-planner hier slide columns against the cell-local
+1. **Resolve pre-planner hier slide columns against the cell-local
    floorplan** — [`wishlist-topo.md`](wishlist-topo.md) → *"Resolve
    pre-planner hier slide columns against the cell-local floorplan"*. A
    cell-level HBundle template dumped before `run_planner hier` shows
@@ -29,7 +21,7 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
-3. **CONVERGENT fan-in topology** —
+2. **CONVERGENT fan-in topology** —
    [`wishlist-bundler.md`](wishlist-bundler.md) → *"Multi-source (fan-in)
    topology support"*. The last whole-subsystem gap: a CONVERGENT bundle
    spanning several driver blocks routes from ONE arbitrary driver (the CLI
@@ -37,7 +29,7 @@ items this page doesn't see).
    (reuse `trunk_mst`/`compute_mst`) plus a net-driver fidelity check in
    `check_topo`. Full investigation: `convergent_bundling.md`. **Highest
    user-facing value** of the open items.
-4. **Selection basis: rank on measured routability** —
+3. **Selection basis: rank on measured routability** —
    [`wishlist-planner.md`](wishlist-planner.md) → *"Selection basis: rank on
    measured routability, not the generation-time WL estimate"*. The
    WL-estimate ranking structurally under-selects `BITRUNK` datapath trees
@@ -45,14 +37,14 @@ items this page doesn't see).
    selection term, or letting negotiate/ripup up-rank across candidate
    classes. The natural continuation of the 2026-07 planner work (signal
    tracks, abutment Gap A, `kHeight`); real golden churn to review.
-5. **Unify the 2-pin vs n-pin filter ordering** —
+4. **Unify the 2-pin vs n-pin filter ordering** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"Unify the 2-pin vs n-pin
    filter ordering"*. One shared emit → annotate → keepout cull → pinch →
    coverage pipeline so a filter fix lands once instead of per-path.
    Deliberately deferred: it CHANGES ROUTING BYTES and needs its own
    deliberate corpus review (mechanical now via `topo_snapshot` +
    `wl_corpus`).
-6. **Abstract-vs-detailed keepout model audit** —
+5. **Abstract-vs-detailed keepout model audit** —
    [`wishlist-planner.md`](wishlist-planner.md) → noted inside *"LOW-layer
    abutment crossings … ✅ RESOLVED"*: abstract NUTS's `keepout_occupied`
    admits positions DNUTS's per-track filter rejects. The planner no longer
@@ -62,19 +54,19 @@ items this page doesn't see).
 
 ## Big / blocked / conditional
 
-7. **Global-overlap re-route of NON-contended bundles** —
+6. **Global-overlap re-route of NON-contended bundles** —
    [`wishlist-ripup.md`](wishlist-ripup.md) → *"Global-overlap re-route of
    NON-contended bundles"*. The measured b61-class global win (10 → 8
    overlaps from re-routing a bundle that is not itself contended).
    Explicitly bigger/riskier — enlarges the ripup search, can churn; only
    worth it if the corpus shows several such cases.
-8. **True along-flex trunk DOF (Stage C)** —
+7. **True along-flex trunk DOF (Stage C)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"True along-flex trunk DOF"*.
    Stage A (ConnSeg `along_flex`/`along_pull`) landed; the always-on flip is
    **blocked** by regressions upstream of NUTS (far-face traversal inflates
    V-trunk WL and flips planner selections) — that investigation gates any
    NUTS-side work.
-9. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
+8. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
    *"Persist the routing pipeline into the BDB"* (the export consumer) and
    `gds_oa_interchange.md`. Everything BDB-side is ✅ (persist stages 1–5,
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
@@ -83,6 +75,12 @@ items this page doesn't see).
 
 ## Recently resolved (verified on main, 2026-07-09)
 
+- **Per-edge MST flip move-source** ✅ — already resolved as an **opt-in
+  toggle** rather than a removal: `ripup_reroute [max_iter]
+  [use_edge_candidates]` keeps the measured-redundant flip source off by
+  default (zero trial cost, routes unaffected) while preserving it for
+  exploration. See [`wishlist-ripup.md`](wishlist-ripup.md) → *"Per-edge MST
+  flip move-source … ✅ RESOLVED (opt-in toggle)"*.
 - **Corner-touch generation gap** ✅ — rescued at generation independent of
   `corner_margin` via `CORNER_HV`/`CORNER_VH` diagonal L's (reusing the MST
   path's `corner_diagonal_L`); fully-coincident blocks correctly stay
