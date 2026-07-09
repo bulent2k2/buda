@@ -4,7 +4,8 @@ add_block u1 0     0 100 100
 add_block u2 100 100 200 200
 add_bus b[8] u1 u2
 run_bundler
-# with the default (dx=dy=0), we now get only 2 L topos. With double_detour more. 
+# default (dx=dy=0): 6 candidates — 2 corner L's (CORNER_HV/VH) + 4 single-detour
+# corner U's (CORNER_U_*, one per side); double_detour ADDS the 4 UU's (10 total).
 # corner_margin dx 1 dy 1  # corner margin transforms it to a regular non-overlap case
 generate_topologies # double_detour
 run_planner
