@@ -18,6 +18,7 @@
 #include <vector>
 #include <string>
 #include <algorithm>
+#include <climits>
 #include <atomic>
 #include <cstdint>
 #include <map>
@@ -81,6 +82,22 @@ struct Segment {
     // flip (step 4, docs/internal/mst_edge_realization.md) is the consumer that
     // makes it load-bearing, so that PR must add the column + round-trip test.
     int edge_id = -1;
+    // Optional generation-supplied PERPENDICULAR slide clamp, in absolute layout
+    // coordinates on this segment's perpendicular axis (y for an H segment, x for
+    // a V segment).  INT_MIN/INT_MAX sentinels = unclamped (the default), so this
+    // is inert for every existing shape.  When set, derive_slide_ranges intersects
+    // it into the segment's [perp_lo, perp_hi], and hence into the NUTS interval
+    // constraint (nuts.cpp maps perp_lo/hi → interval_lo/hi).  Used by the overlap
+    // corner-wrapping U's (add_overlap_corner_us) to pin the face-tap arm inside
+    // the tapped block's EXCLUSIVE band so NUTS cannot slide it across the far
+    // block and collapse the detour into a pass-through.  Carried by
+    // offset_topology (shifted on the perp axis); NOT hashed into the topology
+    // fingerprint (it is a deterministic function of the segment geometry + block
+    // positions, so an identical-geometry cache hit already implies an identical
+    // clamp) and NOT persisted (a BDB reload comes back unclamped — acceptable
+    // while overlap-U's are a flat-flow, in-session shape).
+    int perp_clamp_lo = INT_MIN;
+    int perp_clamp_hi = INT_MAX;
 };
 
 // Orientation abstraction for topology generation.  A spine runs ALONG one axis
@@ -514,6 +531,13 @@ private:
     // centre-projection add_l_shapes degenerates away.  Emits the two free-corner
     // L's (L_OVL_*) so the planner has a route that avoids the shared band.
     void add_overlap_corner_ls(const Busterm& src, const Busterm& dst, std::vector<Topology>& results);
+    // Corner-wrapping U's (and, under double_detour, UU's) for a partially-
+    // overlapping block pair — the replacement for the generic pass-through U's,
+    // which for overlapping endpoints cross a block and double back.  Detour
+    // columns/rows come from the channel grids (as add_u_shapes).
+    void add_overlap_corner_us(const Busterm& src, const Busterm& dst,
+                               const std::vector<int>& x_grid, const std::vector<int>& y_grid,
+                               std::vector<Topology>& results);
     void add_z_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_u_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
     void add_uu_shapes(const Busterm& src, const Busterm& dst, const std::vector<int>& x_grid, const std::vector<int>& y_grid, std::vector<Topology>& results);
