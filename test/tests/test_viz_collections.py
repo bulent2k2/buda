@@ -520,6 +520,35 @@ def test_detailed_vias_gated_by_vias_conns_and_detailed(monkeypatch):
     assert not any(a.get_visible() for a in viz._detailed_via_artists)
 
 
+def test_abstract_vias_hidden_in_detailed_mode(monkeypatch):
+    # The abstract (bus-level) via/conn markers belong to the NUTS view; the
+    # per-bit vias replace them in Detailed mode. A stale fig_redraw while
+    # detailed was on used to re-reveal them (gated on vias_conns alone),
+    # leaving abstract markers on top of the detailed view.
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._vias_conns_artists                     # this design has some
+    assert viz.ui_state.vias_conns is True
+    n = lambda: sum(1 for a in viz._vias_conns_artists if a.get_visible())
+
+    assert n() > 0                                     # visible in abstract mode
+    viz._toggle_detailed()                             # enter detailed
+    assert n() == 0, "abstract vias must hide in detailed mode"
+
+    # Any ui_state change (layer/blocks/highlight/…) fires fig_redraw — it must
+    # not re-reveal the abstract markers while detailed is on.
+    viz.ui_state.notify()
+    assert n() == 0, "fig_redraw re-revealed abstract vias in detailed mode"
+
+    # Toggling off/on repeatedly (each firing a redraw) stays clean.
+    for _ in range(3):
+        viz._toggle_detailed(); viz.ui_state.notify()  # leave
+        viz._toggle_detailed(); viz.ui_state.notify()  # re-enter
+    assert n() == 0
+
+    viz._toggle_detailed()                             # back to abstract
+    assert n() > 0, "abstract vias must return when leaving detailed"
+
+
 def test_entering_detailed_respects_vias_conns_off(monkeypatch):
     # The detailed toggle's bulk reveal of _detailed_bundle_artists must not
     # leak the via scatters while Vias/Conns is off.

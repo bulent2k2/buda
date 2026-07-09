@@ -2416,9 +2416,9 @@ class BudaVisualizer:
             
         self._apply_preroute_visibility()
 
-        for a in self._vias_conns_artists:
-            a.set_visible(self.ui_state.vias_conns)
-        self._apply_detailed_via_visibility()
+        # Abstract via/conn markers hide in detailed mode (per-bit vias replace
+        # them); gate both sets together so neither is left behind.
+        self._apply_vias_conns_visibility()
 
         for a in self._hanan_artists:
             a.set_visible(self.ui_state.hanan_grid)
@@ -2686,8 +2686,7 @@ class BudaVisualizer:
         for a in self._keepout_artists: a.set_visible(True)
         self._redraw_blocks()   # restores default (all blocks equal) style
         for a in self._busterm_artists: a.set_visible(True)
-        for a in self._vias_conns_artists: a.set_visible(True)
-        self._apply_detailed_via_visibility()
+        self._apply_vias_conns_visibility()   # abstract vias hidden in detailed mode
         for e in self._grid_rail_artists:
              e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
 
@@ -4135,6 +4134,21 @@ class BudaVisualizer:
             self._register_detailed(bid, sc, alpha=0.95, lw=None, layer=up)
             self._detailed_via_artists.append(sc)
 
+    def _apply_vias_conns_visibility(self):
+        """Gate BOTH via/conn artist sets by mode so they never coexist.
+
+        The abstract (bus-level) via/conn markers belong to the NUTS view; the
+        per-bit vias replace them in Detailed mode. So the abstract set shows
+        only with Vias/Conns on AND NOT in detailed mode, and the per-bit set
+        only in detailed mode. Every place that changes vias_conns/detailed_mode
+        state must call this — otherwise a stale abstract marker is left behind
+        on top of the detailed view (e.g. any fig_redraw while detailed was on).
+        """
+        abstract_vis = self.ui_state.vias_conns and not self.ui_state.detailed_mode
+        for a in self._vias_conns_artists:
+            a.set_visible(abstract_vis)
+        self._apply_detailed_via_visibility()
+
     def _apply_detailed_via_visibility(self):
         """Per-bit vias show only in detailed mode AND with Vias/Conns on.
 
@@ -4161,7 +4175,10 @@ class BudaVisualizer:
         for entries in self._detailed_bundle_artists.values():
             for e in entries:
                 e['artist'].set_visible(active)
-        self._apply_detailed_via_visibility()
+        # Re-gate BOTH via sets: entering hides the abstract markers the bulk
+        # loop above just revealed, leaving respects Vias/Conns instead of the
+        # unconditional set_visible(True) the bulk loop applied.
+        self._apply_vias_conns_visibility()
         # If Tracks is already on when entering Detailed, build the rails now.
         if active and self.ui_state.tracks and not self._rails_built:
             self._build_rail_artists()
