@@ -3311,8 +3311,13 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     // Overlapping endpoint blocks: the generic U's cross a block and double back to
     // tap it (a useless route), so replace them with corner-wrapping U_OVL's that
     // detour around B (add_overlap_corner_us emits the UU_OVL's too under
-    // double_detour).  Disjoint blocks keep the ordinary U/UU detours.
-    if (overlap_cross(src_bt.orig_bbox, dst_bt.orig_bbox)) {
+    // double_detour).  Disjoint blocks keep the ordinary U/UU detours.  Test the
+    // margin-inset `bbox` (not orig_bbox), matching add_overlap_corner_us's own
+    // gate: when corner_margin shrinks the usable boxes so they no longer cross,
+    // they route as disjoint blocks and must keep the generic U's — otherwise the
+    // U_OVL branch fires but emits nothing (its bbox gate fails) and the bundle
+    // loses every U detour.
+    if (overlap_cross(src_bt.bbox, dst_bt.bbox)) {
         add_overlap_corner_us(src_bt, dst_bt, chan_x, chan_y, candidates);
     } else {
         add_u_shapes(src_bt, dst_bt, chan_x, chan_y, candidates);

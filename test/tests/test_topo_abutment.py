@@ -389,6 +389,23 @@ def test_overlap_corner_u_hvh_taparm_clamped_above_far_block_backslash():
         f"A-tap arm y-window [{seg0.perp_lo},{seg0.perp_hi}] escapes A's exclusive band [400,600] (into B)"
 
 
+def test_overlap_u_dispatch_uses_shrunken_bbox():
+    """Codex #224 P2: the U-vs-U_OVL dispatch must gate on the margin-inset `bbox`,
+    matching add_overlap_corner_us's own gate.  When corner_margin shrinks two
+    physically-overlapping blocks so their usable boxes are DISJOINT, they route as
+    disjoint blocks — the bundle must keep the generic U/UU detours and get NO
+    U_OVL.  (Testing orig_bbox instead fired the U_OVL branch, whose bbox gate then
+    emitted nothing, stranding the bundle with no U detour at all.)"""
+    fp = buda.Floorplan()
+    fp.add_block("A", 0, 0, 400, 400); fp.set_block_corner_margin("A", 150, 150)
+    fp.add_block("B", 200, 200, 600, 600); fp.set_block_corner_margin("B", 150, 150)
+    # bbox_A=[150,250]², bbox_B=[350,450]² → disjoint on both axes.
+    g = buda.TopologyGenerator(fp); g.set_layer_ids(4, 5); g.set_double_detour(True)
+    types = {c.type for c in g.generate_candidates("A", ["B"])}
+    assert any(t.startswith("U_") and not t.startswith("U_OVL") for t in types), sorted(types)
+    assert not any(t.startswith(("U_OVL", "UU_OVL")) for t in types), sorted(types)
+
+
 def test_overlap_corner_u_covers_both_blocks():
     """Every U_OVL candidate must tap/cover both endpoint blocks (no BUSTERM_OPEN)."""
     fp = _fp({"A": (0, 0, 400, 400), "B": (200, 200, 600, 600)})
