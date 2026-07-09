@@ -1054,7 +1054,8 @@ BDB::LefPins BDB::_parse_lef_pins(const std::string& lef_path) {
         }
         if (!xs.empty()) {
             double ox=0, oy=0;
-            for (auto x:xs) ox+=x; for (auto y:ys) oy+=y;
+            for (auto x:xs) ox+=x;
+            for (auto y:ys) oy+=y;
             ox/=xs.size(); oy/=ys.size();
             std::string dir = cur_dir.empty() ? "UNKNOWN" : cur_dir;
             result[cur_cell][cur_pin] = {ox, oy, dir};

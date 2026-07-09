@@ -633,15 +633,19 @@ void TopologyGenerator::add_overlap_corner_ls(const Busterm& s_bt, const Busterm
 // Corner-wrapping U's for a partially-overlapping (staggered-cross) block pair —
 // the desirable replacement for the generic pass-through U's, which for overlapping
 // endpoints cross a block and double back to tap it (never a useful route).  Each
-// U is the dual of a free-corner L (add_overlap_corner_ls): it keeps the L's A-leg
-// but, instead of tapping B on the overlap-adjacent face, detours one channel PAST
-// B (reusing the same beyond-bbox detour columns add_u_shapes uses, so
-// detour_channel is honoured) and wraps around B's corner to tap its next face.
-// So B is offered its OTHER two faces (right/top on "/", right/bottom on "\"),
-// giving the planner a route that never enters the shared band.  Under
-// double_detour the wrap continues one more channel to tap B's FAR face (the UU_*
-// variants).  The detour columns/rows come from x_grid/y_grid (channel midpoints,
-// incl. the beyond-union bands); each leg is min-stub gated.
+// U is the dual of a free-corner L (add_overlap_corner_ls): it keeps the L's tap
+// on one block's near face but, instead of tapping the other block on the
+// overlap-adjacent face, detours one channel PAST it (reusing the same
+// beyond-bbox detour columns add_u_shapes uses, so detour_channel is honoured)
+// and wraps around its corner to tap its next face.  Emitted for BOTH blocks —
+// the wraps around Q (the right block) offer Q's far faces, and their 180°
+// mirrors (`*_M`) wrap around P (the left block) to offer P's far faces — so
+// across L's + U's each block is offered all four faces and the planner always
+// has a route that never enters the shared band, whichever block's near faces
+// are congested.  Under double_detour each wrap continues one more channel to
+// tap the FAR face (the UU_* variants).  The detour columns/rows come from
+// x_grid/y_grid (channel midpoints, incl. the beyond-union bands); each leg is
+// min-stub gated.
 void TopologyGenerator::add_overlap_corner_us(const Busterm& s_bt, const Busterm& d_bt,
                                               const std::vector<int>& x_grid,
                                               const std::vector<int>& y_grid,
@@ -661,10 +665,16 @@ void TopologyGenerator::add_overlap_corner_us(const Busterm& s_bt, const Busterm
     // Detour lines just beyond the union bbox (the channels add_u_shapes uses).
     const int NONE = INT_MIN;
     auto first_gt = [&](const std::vector<int>& g, int v) {
-        for (int x : g) if (x > v) return x; return NONE; };
+        for (int x : g) if (x > v) return x;
+        return NONE;
+    };
     auto last_lt = [&](const std::vector<int>& g, int v) {
-        int r = NONE; for (int x : g) if (x < v) r = x; return r; };
+        int r = NONE;
+        for (int x : g) if (x < v) r = x;
+        return r;
+    };
     const int xd_r = first_gt(x_grid, ux2);   // detour column right of union
+    const int xd_l = last_lt (x_grid, ux1);   // detour column left of union
     const int yd_t = first_gt(y_grid, uy2);   // detour row above union
     const int yd_b = last_lt (y_grid, uy1);   // detour row below union
 
@@ -695,9 +705,11 @@ void TopologyGenerator::add_overlap_corner_us(const Busterm& s_bt, const Busterm
             results.push_back(std::move(t));
         }
     };
-    // Reusable clamp bands: RIGHT/TOP/BOT keep a detour arm outside the union;
-    // NOCL leaves an arm free (the Q-tap arms already approach Q from outside).
-    const Clamp RIGHT{ux2, INT_MAX}, TOP{uy2, INT_MAX}, BOT{INT_MIN, uy1}, NOCL{INT_MIN, INT_MAX};
+    // Reusable clamp bands: RIGHT/LEFT/TOP/BOT keep a detour arm outside the
+    // union; NOCL leaves an arm free (the trailing face-tap arms already
+    // approach their block from outside).
+    const Clamp RIGHT{ux2, INT_MAX}, LEFT{INT_MIN, ux1},
+                TOP{uy2, INT_MAX},   BOT{INT_MIN, uy1}, NOCL{INT_MIN, INT_MAX};
 
     const Rect& Lx = (A.x1 < B.x1) ? A : B;   // pokes left
     const Rect& Rx = (A.x1 < B.x1) ? B : A;   // pokes right
@@ -725,6 +737,24 @@ void TopologyGenerator::add_overlap_corner_us(const Busterm& s_bt, const Busterm
             emit("UU_OVL_HVHV", {HTAP, RIGHT, TOP,   NOCL}, {{P.x2, p_rt_y}, {xd_r, p_rt_y}, {xd_r, yd_t}, {q_tp_xR, yd_t}, {q_tp_xR, Q.y2}});
             emit("UU_OVL_VHVH", {VTAP, TOP,   RIGHT, NOCL}, {{p_tp_x, P.y2}, {p_tp_x, yd_t}, {xd_r, yd_t}, {xd_r, q_rt_yT}, {Q.x2, q_rt_yT}});
         }
+        // 180° mirrors (`*_M`): keep the L's Q-tap leg and wrap around P instead,
+        // offering P's OTHER two faces (left/bottom) via the LEFT/BOT detours —
+        // without these the left block only ever gets its two near faces.
+        const int q_lf_y  = (P.y2 + Q.y2) / 2;     // Q's left face, above P
+        const int q_bt_x  = (P.x2 + Q.x2) / 2;     // Q's bottom face, right of P
+        const int p_lf_y  = (Q.y1 + P.y2) / 2;     // P's left face, near top-left corner
+        const int p_bt_x  = (Q.x1 + P.x2) / 2;     // P's bottom face, near bottom-right corner
+        const int p_bt_xL = (P.x1 + Q.x1) / 2;     // P's bottom face, near bottom-left (UU far tap)
+        const int p_lf_yB = (P.y1 + Q.y1) / 2;     // P's left face, near bottom-left (UU far tap)
+        // Exclusive bands for the Q-tap arm: H arm stays ABOVE P (y∈[P.y2,Q.y2]);
+        // V arm stays RIGHT of P (x∈[P.x2,Q.x2]).
+        const Clamp QHTAP{P.y2, Q.y2}, QVTAP{P.x2, Q.x2};
+        emit("U_OVL_HVH_M", {QHTAP, LEFT, NOCL}, {{Q.x1, q_lf_y}, {xd_l, q_lf_y}, {xd_l, p_lf_y}, {P.x1, p_lf_y}});
+        emit("U_OVL_VHV_M", {QVTAP, BOT,  NOCL}, {{q_bt_x, Q.y1}, {q_bt_x, yd_b}, {p_bt_x, yd_b}, {p_bt_x, P.y1}});
+        if (dd) {
+            emit("UU_OVL_HVHV_M", {QHTAP, LEFT, BOT,  NOCL}, {{Q.x1, q_lf_y}, {xd_l, q_lf_y}, {xd_l, yd_b}, {p_bt_xL, yd_b}, {p_bt_xL, P.y1}});
+            emit("UU_OVL_VHVH_M", {QVTAP, BOT,  LEFT, NOCL}, {{q_bt_x, Q.y1}, {q_bt_x, yd_b}, {xd_l, yd_b}, {xd_l, p_lf_yB}, {P.x1, p_lf_yB}});
+        }
     } else {
         // "\" diagonal: P = upper-left block, Q = lower-right block.  L's tapped
         // P-bottom/Q-left and P-right/Q-top; the U's wrap to Q-bottom and Q-right.
@@ -744,6 +774,23 @@ void TopologyGenerator::add_overlap_corner_us(const Busterm& s_bt, const Busterm
         if (dd) {
             emit("UU_OVL_VHVH", {VTAP, BOT,   RIGHT, NOCL}, {{p_bt_x, P.y1}, {p_bt_x, yd_b}, {xd_r, yd_b}, {xd_r, q_rt_yB}, {Q.x2, q_rt_yB}});
             emit("UU_OVL_HVHV", {HTAP, RIGHT, BOT,   NOCL}, {{P.x2, p_rt_y}, {xd_r, p_rt_y}, {xd_r, yd_b}, {q_bt_xR, yd_b}, {q_bt_xR, Q.y1}});
+        }
+        // 180° mirrors (`*_M`): wrap around P (the upper-left block) instead,
+        // offering P's OTHER two faces (left/top) via the LEFT/TOP detours.
+        const int q_tp_x  = (P.x2 + Q.x2) / 2;     // Q's top face, right of P
+        const int q_lf_y  = (Q.y1 + P.y1) / 2;     // Q's left face, below P
+        const int p_tp_x  = (Q.x1 + P.x2) / 2;     // P's top face, near top-right corner
+        const int p_lf_y  = (Q.y2 + P.y1) / 2;     // P's left face, near bottom-left corner
+        const int p_tp_xL = (P.x1 + Q.x1) / 2;     // P's top face, near top-left (UU far tap)
+        const int p_lf_yT = (Q.y2 + P.y2) / 2;     // P's left face, near top-left (UU far tap)
+        // Exclusive bands for the Q-tap arm: V arm stays RIGHT of P (x∈[P.x2,Q.x2]);
+        // H arm stays BELOW P (y∈[Q.y1,P.y1]).
+        const Clamp QVTAP{P.x2, Q.x2}, QHTAP{Q.y1, P.y1};
+        emit("U_OVL_VHV_M", {QVTAP, TOP,  NOCL}, {{q_tp_x, Q.y2}, {q_tp_x, yd_t}, {p_tp_x, yd_t}, {p_tp_x, P.y2}});
+        emit("U_OVL_HVH_M", {QHTAP, LEFT, NOCL}, {{Q.x1, q_lf_y}, {xd_l, q_lf_y}, {xd_l, p_lf_y}, {P.x1, p_lf_y}});
+        if (dd) {
+            emit("UU_OVL_VHVH_M", {QVTAP, TOP,  LEFT, NOCL}, {{q_tp_x, Q.y2}, {q_tp_x, yd_t}, {xd_l, yd_t}, {xd_l, p_lf_yT}, {P.x1, p_lf_yT}});
+            emit("UU_OVL_HVHV_M", {QHTAP, LEFT, TOP,  NOCL}, {{Q.x1, q_lf_y}, {xd_l, q_lf_y}, {xd_l, yd_t}, {p_tp_xL, yd_t}, {p_tp_xL, P.y2}});
         }
     }
 }
@@ -3376,7 +3423,7 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     // those filters removed; kept only when genuinely routable.  Detected on
     // orig_bbox; corner-touch / coincident share no edge → stays empty (the
     // zero-candidate warning then fires).
-    if (use_busterm_ && candidates.empty()) {
+    if (use_busterm_) {
         const int ox_lo = std::max(s_orig.x1, d_orig.x1), ox_hi = std::min(s_orig.x2, d_orig.x2);
         const int oy_lo = std::max(s_orig.y1, d_orig.y1), oy_hi = std::min(s_orig.y2, d_orig.y2);
         const bool vshared = (s_orig.x2 == d_orig.x1 || d_orig.x2 == s_orig.x1) && oy_hi > oy_lo;
@@ -3418,9 +3465,11 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
                 candidates.push_back(std::move(t));
         };
 
+        // The edge-abutment crossing stays a LAST-RESORT realization, emitted
+        // only when nothing else survived (see the block comment above).
         Segment es;
         bool ok = false;
-        if (vshared) {  // shared VERTICAL edge → HORIZONTAL crossing wire (track axis y)
+        if (candidates.empty() && vshared) {  // shared VERTICAL edge → HORIZONTAL crossing wire (track axis y)
             const int E   = (s_orig.x2 == d_orig.x1) ? s_orig.x2 : d_orig.x2;
             const int y0  = (oy_lo + oy_hi) / 2;
             const int span = std::max(floorplan_.get_min_stub_length(0 /*H*/, h_layer_),
@@ -3429,7 +3478,7 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
             const int hi = std::min(std::max(s_orig.x2, d_orig.x2), E + (span - span / 2));
             es = make_seg(lo, y0, hi, y0, h_layer_);
             ok = true;
-        } else if (hshared) {  // shared HORIZONTAL edge → VERTICAL crossing wire (track axis x)
+        } else if (candidates.empty() && hshared) {  // shared HORIZONTAL edge → VERTICAL crossing wire (track axis x)
             const int E   = (s_orig.y2 == d_orig.y1) ? s_orig.y2 : d_orig.y2;
             const int x0  = (ox_lo + ox_hi) / 2;
             const int span = std::max(floorplan_.get_min_stub_length(1 /*V*/, v_layer_),
@@ -3446,29 +3495,88 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
                            : ("ABUT_V@x" + std::to_string(es.start.x));
             t.segments.push_back(es);
             accept_abut(std::move(t));
-        } else {
-            // CORNER-DIAGONAL touch: the two blocks meet at exactly ONE point (both
-            // facing projections coincide), so closest_points pins a zero-slide edge
-            // that filter_pinched drops — no candidate, silently unrouted.  This is
-            // the point-contact analogue of edge abutment; realize it the way the MST
-            // path already does (corner_diagonal_L): an L routed AROUND the shared
-            // corner, each leg tapping a real face with slide room.  Two L's (H-first /
-            // V-first) so the planner picks whichever fits.  The face-equality test
-            // implies zero overlap on that axis, so fully-coincident / partially
-            // OVERLAPPING blocks never satisfy it — they stay empty and the
-            // zero-candidate warning fires, which is the intended behaviour.
-            const bool corner = (s_orig.x2 == d_orig.x1 || d_orig.x2 == s_orig.x1)
-                             && (s_orig.y2 == d_orig.y1 || d_orig.y2 == s_orig.y1);
-            if (corner) {
-                for (int strategy = 0; strategy <= 1; ++strategy) {
-                    std::vector<Segment> ls;
-                    corner_diagonal_L(s_orig, d_orig, strategy, h_layer_, v_layer_, ls);
-                    if (ls.empty()) continue;
-                    Topology t;
-                    t.type = (strategy == 0) ? "CORNER_HV" : "CORNER_VH";
-                    for (const auto& g : ls) t.segments.push_back(g);
-                    accept_abut(std::move(t));
+        }
+
+        // CORNER-DIAGONAL touch: the two blocks meet at exactly ONE point (both
+        // facing projections coincide), so closest_points pins a zero-slide edge
+        // that filter_pinched drops.  This is the point-contact analogue of edge
+        // abutment; realize it the way the MST path already does
+        // (corner_diagonal_L): an L routed AROUND the shared corner, each leg
+        // tapping a real face with slide room.  Two L's (H-first / V-first) so
+        // the planner picks whichever fits.  Unlike the edge-abutment crossing,
+        // the corner L's are FIRST-CLASS candidates emitted whenever the corner
+        // condition holds — NOT gated on an otherwise-empty list — because an
+        // opt-in knob that lets other candidates survive (double_detour's UU
+        // wraps clear the two blocks and pass the filters) must never make the
+        // cheapest realization vanish.  The face-equality test implies zero
+        // overlap on that axis, so fully-coincident / partially OVERLAPPING
+        // blocks never satisfy it — with no other candidate they stay empty and
+        // the zero-candidate warning fires, which is the intended behaviour.
+        // (corner and vshared/hshared are mutually exclusive: an edge share
+        // needs positive overlap on the other axis, a corner needs equality.)
+        const bool corner = (s_orig.x2 == d_orig.x1 || d_orig.x2 == s_orig.x1)
+                         && (s_orig.y2 == d_orig.y1 || d_orig.y2 == s_orig.y1);
+        if (corner) {
+            for (int strategy = 0; strategy <= 1; ++strategy) {
+                std::vector<Segment> ls;
+                corner_diagonal_L(s_orig, d_orig, strategy, h_layer_, v_layer_, ls);
+                if (ls.empty()) continue;
+                Topology t;
+                t.type = (strategy == 0) ? "CORNER_HV" : "CORNER_VH";
+                for (const auto& g : ls) t.segments.push_back(g);
+                accept_abut(std::move(t));
+            }
+            // Corner U's: the generic add_u_shapes collapses for a corner touch
+            // (both stubs aim at the other block's centre and clamp onto the
+            // shared corner coordinate, so the detour trunk is zero-length and
+            // the 2-segment remnant is discarded) — so the single-detour U
+            // family would be missing entirely while double_detour's UU's
+            // survive.  Emit one U per detour side (left/right/bottom/top of
+            // the union, the same beyond-bbox channels add_u_shapes uses),
+            // tapping each block's face MID on that side for maximal slide.
+            const int NONE = INT_MIN;
+            auto first_gt = [&](const std::vector<int>& g, int v) {
+                for (int x : g) if (x > v) return x;
+                return NONE;
+            };
+            auto last_lt = [&](const std::vector<int>& g, int v) {
+                int r = NONE;
+                for (int x : g) if (x < v) r = x;
+                return r;
+            };
+            const int u_x1 = std::min(s_orig.x1, d_orig.x1), u_x2 = std::max(s_orig.x2, d_orig.x2);
+            const int u_y1 = std::min(s_orig.y1, d_orig.y1), u_y2 = std::max(s_orig.y2, d_orig.y2);
+            const int m_h = floorplan_.get_min_stub_length(0 /*H*/, h_layer_);
+            const int m_v = floorplan_.get_min_stub_length(1 /*V*/, v_layer_);
+            const int sy_mid = (s_orig.y1 + s_orig.y2) / 2, dy_mid = (d_orig.y1 + d_orig.y2) / 2;
+            const int sx_mid = (s_orig.x1 + s_orig.x2) / 2, dx_mid = (d_orig.x1 + d_orig.x2) / 2;
+            // (tag_prefix, detour coord, src face coord, dst face coord).
+            struct CU { const char* dir; int det, sf, df; bool horiz_stubs; };
+            const CU cus[] = {
+                {"x", last_lt (chan_x, u_x1), s_orig.x1, d_orig.x1, true},   // left
+                {"x", first_gt(chan_x, u_x2), s_orig.x2, d_orig.x2, true},   // right
+                {"y", last_lt (chan_y, u_y1), s_orig.y1, d_orig.y1, false},  // bottom
+                {"y", first_gt(chan_y, u_y2), s_orig.y2, d_orig.y2, false},  // top
+            };
+            for (const CU& c : cus) {
+                if (c.det == NONE) continue;
+                if (std::abs(c.det - c.sf) < (c.horiz_stubs ? m_h : m_v)) continue;
+                if (std::abs(c.det - c.df) < (c.horiz_stubs ? m_h : m_v)) continue;
+                Topology t;
+                t.type = std::string("CORNER_U_") + (c.horiz_stubs ? "HVH@x" : "VHV@y")
+                       + std::to_string(c.det);
+                if (c.horiz_stubs) {   // V trunk at x=det, H stubs at each block's y-mid
+                    if (std::abs(dy_mid - sy_mid) < m_v) continue;
+                    t.segments.push_back(make_seg(c.sf, sy_mid, c.det, sy_mid, h_layer_));
+                    t.segments.push_back(make_seg(c.det, sy_mid, c.det, dy_mid, v_layer_));
+                    t.segments.push_back(make_seg(c.det, dy_mid, c.df, dy_mid, h_layer_));
+                } else {               // H trunk at y=det, V stubs at each block's x-mid
+                    if (std::abs(dx_mid - sx_mid) < m_h) continue;
+                    t.segments.push_back(make_seg(sx_mid, c.sf, sx_mid, c.det, v_layer_));
+                    t.segments.push_back(make_seg(sx_mid, c.det, dx_mid, c.det, h_layer_));
+                    t.segments.push_back(make_seg(dx_mid, c.det, dx_mid, c.df, v_layer_));
                 }
+                accept_abut(std::move(t));
             }
         }
     }

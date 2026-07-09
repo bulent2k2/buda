@@ -1,0 +1,11 @@
+# from corner_touch_blocks.buda
+source tracks/tracks.buda
+add_block u1 0   0 100 100
+add_block u2 50 50 150 150
+add_bus b[8] u1 u2
+run_bundler
+generate_topologies # double_detour
+run_planner
+run_nuts
+run_detailed_nuts
+visualize
