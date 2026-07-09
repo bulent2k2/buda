@@ -334,29 +334,31 @@ otherwise have *zero* candidates) + regressions in `test_topo_abutment.py`
 (`test_corner_touch_rescued_by_diagonal_L`, `test_corner_touch_bus_routes_to_completion`,
 `test_fully_coincident_blocks_produce_no_candidate`).
 
-## Persist / re-derive the overlap-U perp clamps (`Segment::perp_clamp_lo/hi`)
+## Persist the overlap-U perp clamps (`Segment::perp_clamp_lo/hi`) — ✅ RESOLVED
 
 The corner-wrapping overlap U's (`U_OVL_*`/`UU_OVL_*`, PR #224) carry
 generation-supplied per-segment perpendicular slide clamps
 (`Segment::perp_clamp_lo/hi`) that pin each face-tap arm to its exclusive band and
 each detour arm outside the union bbox.  They are **load-bearing for correctness**
-(without them NUTS collapses a wrap through the overlapped block) but — like
-`edge_id` — are **left out of both the topology fingerprint and the BDB
-`topology_segment` round-trip**.  So a U_OVL candidate persisted to a BDB and
-resumed via `load_pipeline` **before** NUTS reloads unclamped and can collapse
-again (raised by Codex on #224).
+(without them NUTS collapses a wrap through the overlapped block); Codex on #224
+flagged that a U_OVL persisted to a BDB and resumed via `load_pipeline` **before**
+NUTS would reload unclamped and could collapse again.
 
-Exposure is narrow: it needs the *flat* `generate_2pin` path (not the hier
-`generate_npin`) run with an open BDB, overlapping endpoint blocks, a *pinned*
-U_OVL, checkpointed and resumed before NUTS; re-running `generate_topologies` after
-resume re-derives the clamp.
+**Resolved (option 1 — persist):** `perp_clamp_lo/hi` are now `topology_segment`
+columns (**BDB v16**), written by all three persist sites (flat + hier + regen) and
+restored by `load_pipeline`, mirroring the `edge_id` (v14) round-trip exactly.  They
+stay **out of the topology fingerprint** (deterministic from geometry, so an
+identical-geometry cache hit already implies an identical clamp — no uid churn), and
+pre-v16 rows migrate to the INT_MIN/INT_MAX unclamped sentinels (correct for every
+non-U_OVL segment).  Round-trip + resume-before-NUTS regressions live in
+`test_bdb_topology_persist.py`
+(`test_overlap_u_perp_clamp_persists_and_roundtrips`,
+`test_overlap_u_perp_clamp_survives_load_pipeline_resume`).
 
-Two ways to close it, to weigh in the follow-up (bundle with the `edge_id`
-persistence item — same deferred-round-trip pattern, see
-[`wishlist-bdb.md`](wishlist-bdb.md) and `mst_edge_realization.md` step 4):
-1. **Persist** `perp_clamp_lo/hi` as `topology_segment` columns + hash into the
-   fingerprint + round-trip test (mirrors the `edge_id` plan).
-2. **Re-derive** on load: the clamp is a deterministic function of the segment
-   geometry + block boxes, so `derive_slide_ranges` could recompute it for an
-   overlap-U pattern with no schema change.  Cleaner if the detection is cheap to
-   express in `topology_analysis`; avoids widening the persisted schema.
+While here, confirmed `edge_id` persistence (v14) was already complete end-to-end
+(schema + all persist sites + `load_pipeline` + `test_topo_resume_analysis.py`); the
+stale "NOT YET PERSISTED" note on `topology.h Segment::edge_id` was refreshed.
+
+Option 2 (re-derive on load, no schema change) was considered and set aside: the
+persist path is a direct mirror of the existing `edge_id` machinery, so it is the
+lower-risk, self-documenting choice.

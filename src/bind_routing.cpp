@@ -198,7 +198,9 @@ void bind_routing(py::module_& m) {
         .def_readwrite("end",        &Segment::end)
         .def_readwrite("layer_hint", &Segment::layer_hint)
         .def_readwrite("is_jog",     &Segment::is_jog)
-        .def_readwrite("edge_id",    &Segment::edge_id);
+        .def_readwrite("edge_id",    &Segment::edge_id)
+        .def_readwrite("perp_clamp_lo", &Segment::perp_clamp_lo)
+        .def_readwrite("perp_clamp_hi", &Segment::perp_clamp_hi);
 
     py::class_<Busterm>(m, "Busterm")
         .def(py::init<>())

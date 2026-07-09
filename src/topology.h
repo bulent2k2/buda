@@ -76,11 +76,11 @@ struct Segment {
     // later stage identify all legs of one edge to flip its L/Z realization
     // in place without disturbing the rest of the tree.  Pure annotation until a
     // consumer exists (per-edge flip); carried through offset_topology.
-    // NOT YET PERSISTED: the BDB topology_segment path (TopoSegRow / load_pipeline)
-    // stores only x/y/layer/is_jog, so a candidate checkpointed to a BDB and
-    // reloaded comes back with edge_id == -1.  Harmless while inert; the per-edge
-    // flip (step 4, docs/internal/mst_edge_realization.md) is the consumer that
-    // makes it load-bearing, so that PR must add the column + round-trip test.
+    // PERSISTED: topology_segment.edge_id (BDB v14); the persist path
+    // (buda_session) writes it and load_pipeline restores it, so a checkpointed
+    // MST candidate reloads with its edge identity intact.  NOT hashed into the
+    // topology fingerprint (inert w.r.t. candidate identity — a deterministic
+    // function of the tree geometry).
     int edge_id = -1;
     // Optional generation-supplied PERPENDICULAR slide clamp, in absolute layout
     // coordinates on this segment's perpendicular axis (y for an H segment, x for
@@ -94,8 +94,10 @@ struct Segment {
     // offset_topology (shifted on the perp axis); NOT hashed into the topology
     // fingerprint (it is a deterministic function of the segment geometry + block
     // positions, so an identical-geometry cache hit already implies an identical
-    // clamp) and NOT persisted (a BDB reload comes back unclamped — acceptable
-    // while overlap-U's are a flat-flow, in-session shape).
+    // clamp).  PERSISTED: topology_segment.perp_clamp_lo/hi (BDB v16); the persist
+    // path writes them and load_pipeline restores them, so a checkpointed U_OVL
+    // candidate reloads clamped (an earlier resume-before-NUTS could otherwise
+    // collapse it through the overlapped block).
     int perp_clamp_lo = INT_MIN;
     int perp_clamp_hi = INT_MAX;
 };

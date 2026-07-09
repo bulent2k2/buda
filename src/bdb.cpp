@@ -156,6 +156,8 @@ static const char* TOPOLOGY_DDL = R"(
         is_jog     INTEGER DEFAULT 0,
         assigned_layer INTEGER DEFAULT -1,  -- planner's per-segment layer (-1 = unassigned)
         edge_id    INTEGER DEFAULT -1,      -- MST-edge identity (v14)
+        perp_clamp_lo INTEGER DEFAULT (-2147483648), -- overlap-U perp slide clamp (v16;
+        perp_clamp_hi INTEGER DEFAULT ( 2147483647), -- INT_MIN/INT_MAX = unclamped)
         PRIMARY KEY (bundle_id, cand_index, seg_index),
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)
@@ -609,6 +611,19 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);
         sqlite3_exec(_db,
             "ALTER TABLE bundle ADD COLUMN gen_knobs TEXT DEFAULT ''",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 16) {
+        // v15 -> v16: overlap-U per-segment perp slide clamp
+        // (topology.h Segment::perp_clamp_lo/hi).  The clamp is a deterministic
+        // function of the segment geometry, so pre-v16 rows need no data
+        // migration — they default to the INT_MIN/INT_MAX unclamped sentinels,
+        // which is correct for every non-U_OVL segment.  Idempotent ALTERs.
+        sqlite3_exec(_db,
+            "ALTER TABLE topology_segment ADD COLUMN perp_clamp_lo INTEGER DEFAULT (-2147483648)",
+            nullptr, nullptr, nullptr);
+        sqlite3_exec(_db,
+            "ALTER TABLE topology_segment ADD COLUMN perp_clamp_hi INTEGER DEFAULT ( 2147483647)",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -2658,8 +2673,9 @@ void BDB::add_topology(const TopoRow& tr) {
 void BDB::add_topology_segment(const TopoSegRow& sr) {
     Stmt s(_db,
         "INSERT OR REPLACE INTO topology_segment(bundle_id,cand_index,seg_index,"
-        "x1,y1,x2,y2,layer_hint,is_jog,assigned_layer,edge_id)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+        "x1,y1,x2,y2,layer_hint,is_jog,assigned_layer,edge_id,"
+        "perp_clamp_lo,perp_clamp_hi)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)");
     sqlite3_bind_text  (s, 1, sr.id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, sr.cand_index);
     sqlite3_bind_int   (s, 3, sr.seg_index);
@@ -2671,6 +2687,8 @@ void BDB::add_topology_segment(const TopoSegRow& sr) {
     sqlite3_bind_int   (s, 9, sr.is_jog ? 1 : 0);
     sqlite3_bind_int   (s, 10, sr.assigned_layer);
     sqlite3_bind_int   (s, 11, sr.edge_id);
+    sqlite3_bind_int   (s, 12, sr.perp_clamp_lo);
+    sqlite3_bind_int   (s, 13, sr.perp_clamp_hi);
     sqlite3_step(s);
 }
 
@@ -2806,7 +2824,7 @@ std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
                                                int cand_index) const {
     Stmt q(_db,
         "SELECT bundle_id,cand_index,seg_index,x1,y1,x2,y2,layer_hint,is_jog,"
-        "assigned_layer,edge_id FROM topology_segment"
+        "assigned_layer,edge_id,perp_clamp_lo,perp_clamp_hi FROM topology_segment"
         " WHERE bundle_id=? AND cand_index=? ORDER BY seg_index");
     sqlite3_bind_text(q, 1, bundle_id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int (q, 2, cand_index);
@@ -2824,6 +2842,8 @@ std::vector<TopoSegRow> BDB::topology_segments(const std::string& bundle_id,
         s.is_jog     = sqlite3_column_int(q, 8) != 0;
         s.assigned_layer = sqlite3_column_int(q, 9);
         s.edge_id        = sqlite3_column_int(q, 10);
+        s.perp_clamp_lo  = sqlite3_column_int(q, 11);
+        s.perp_clamp_hi  = sqlite3_column_int(q, 12);
         out.push_back(std::move(s));
     }
     return out;

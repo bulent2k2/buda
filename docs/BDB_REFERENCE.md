@@ -74,7 +74,9 @@ topology         bundle_id→bundle, cand_index, type, wirelength,
                  feedthru_blocks (JSON), is_selected, is_pinned
                  PRIMARY KEY (bundle_id, cand_index)
 topology_segment bundle_id, cand_index, seg_index, x1,y1,x2,y2,
-                 layer_hint, is_jog, assigned_layer (planner's per-seg layer)
+                 layer_hint, is_jog, assigned_layer (planner's per-seg layer),
+                 edge_id (MST-edge identity, v14),
+                 perp_clamp_lo/hi (overlap-U perp slide clamp, v16)
                  PK (bundle_id, cand_index, seg_index)
                  FK (bundle_id, cand_index) → topology
 topology_seg_busterm

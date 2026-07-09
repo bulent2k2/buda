@@ -92,6 +92,8 @@ class HierMixin:
             sr.layer_hint = seg.layer_hint
             sr.is_jog = seg.is_jog
             sr.edge_id = seg.edge_id
+            sr.perp_clamp_lo = seg.perp_clamp_lo
+            sr.perp_clamp_hi = seg.perp_clamp_hi
             sr.assigned_layer = int(seg_layers[si]) if si < len(seg_layers) else -1
             self.bdb.add_topology_segment(sr)
         # Logical seg-busterm links + TEG-over bridges for the instance's

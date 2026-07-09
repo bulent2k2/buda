@@ -19,6 +19,7 @@
 // SQLite-backed store for components, nets, pins, busterms, bundles, and groups.
 // All other v3 modules access physical design data exclusively through BDB.
 
+#include <climits>
 #include <limits>
 #include <string>
 #include <vector>
@@ -164,6 +165,11 @@ struct TopoSegRow {
     int         assigned_layer = -1;// planner's per-segment layer (-1 = unassigned)
     int         edge_id = -1;       // MST-edge identity (v14; closes the documented
                                     // round-trip gap in topology.h Segment::edge_id)
+    // Overlap-U per-segment perpendicular slide clamp (v16; topology.h
+    // Segment::perp_clamp_lo/hi).  INT_MIN/INT_MAX = unclamped (every non-U_OVL
+    // segment); persisted so a resumed U_OVL candidate reloads clamped.
+    int         perp_clamp_lo = INT_MIN;
+    int         perp_clamp_hi = INT_MAX;
 };
 
 // One TEG-over bridge segment of a candidate topology (Topology::bridge_segments:
@@ -290,7 +296,13 @@ public:
     // v12 = topology_seg_conn (seg-to-seg junction links persisted logically);
     // v13 = component.orient (instance rotation/mirror as an 8-orientation
     //       token) so GDS import->export->re-import preserves orientation.
-    static constexpr int SCHEMA_VERSION = 15;
+    // v14 = topology.topo_uid (stable candidate identity) + topology_segment.edge_id
+    //       (MST-edge identity round-trip);
+    // v15 = topology.source (candidate provenance) + bundle.gen_knobs (per-bundle
+    //       generation-knob memo);
+    // v16 = topology_segment.perp_clamp_lo/hi (overlap-U per-segment perp slide
+    //       clamp) so a resumed U_OVL candidate reloads clamped.
+    static constexpr int SCHEMA_VERSION = 16;
 
     explicit BDB(const std::string& db_path);
     ~BDB();

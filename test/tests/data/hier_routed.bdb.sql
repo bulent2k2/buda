@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=15;
+PRAGMA user_version=16;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -172,7 +172,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','15');
+INSERT INTO "meta" VALUES('schema_version','16');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,
@@ -351,6 +351,8 @@ CREATE TABLE topology_segment (
         is_jog     INTEGER DEFAULT 0,
         assigned_layer INTEGER DEFAULT -1,  -- planner's per-segment layer (-1 = unassigned)
         edge_id    INTEGER DEFAULT -1,      -- MST-edge identity (v14)
+        perp_clamp_lo INTEGER DEFAULT (-2147483648), -- overlap-U perp slide clamp (v16;
+        perp_clamp_hi INTEGER DEFAULT ( 2147483647), -- INT_MIN/INT_MAX = unclamped)
         PRIMARY KEY (bundle_id, cand_index, seg_index),
         FOREIGN KEY (bundle_id, cand_index)
             REFERENCES topology(bundle_id, cand_index)
