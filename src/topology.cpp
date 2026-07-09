@@ -3526,6 +3526,58 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
                 for (const auto& g : ls) t.segments.push_back(g);
                 accept_abut(std::move(t));
             }
+            // Corner U's: the generic add_u_shapes collapses for a corner touch
+            // (both stubs aim at the other block's centre and clamp onto the
+            // shared corner coordinate, so the detour trunk is zero-length and
+            // the 2-segment remnant is discarded) — so the single-detour U
+            // family would be missing entirely while double_detour's UU's
+            // survive.  Emit one U per detour side (left/right/bottom/top of
+            // the union, the same beyond-bbox channels add_u_shapes uses),
+            // tapping each block's face MID on that side for maximal slide.
+            const int NONE = INT_MIN;
+            auto first_gt = [&](const std::vector<int>& g, int v) {
+                for (int x : g) if (x > v) return x;
+                return NONE;
+            };
+            auto last_lt = [&](const std::vector<int>& g, int v) {
+                int r = NONE;
+                for (int x : g) if (x < v) r = x;
+                return r;
+            };
+            const int u_x1 = std::min(s_orig.x1, d_orig.x1), u_x2 = std::max(s_orig.x2, d_orig.x2);
+            const int u_y1 = std::min(s_orig.y1, d_orig.y1), u_y2 = std::max(s_orig.y2, d_orig.y2);
+            const int m_h = floorplan_.get_min_stub_length(0 /*H*/, h_layer_);
+            const int m_v = floorplan_.get_min_stub_length(1 /*V*/, v_layer_);
+            const int sy_mid = (s_orig.y1 + s_orig.y2) / 2, dy_mid = (d_orig.y1 + d_orig.y2) / 2;
+            const int sx_mid = (s_orig.x1 + s_orig.x2) / 2, dx_mid = (d_orig.x1 + d_orig.x2) / 2;
+            // (tag_prefix, detour coord, src face coord, dst face coord).
+            struct CU { const char* dir; int det, sf, df; bool horiz_stubs; };
+            const CU cus[] = {
+                {"x", last_lt (chan_x, u_x1), s_orig.x1, d_orig.x1, true},   // left
+                {"x", first_gt(chan_x, u_x2), s_orig.x2, d_orig.x2, true},   // right
+                {"y", last_lt (chan_y, u_y1), s_orig.y1, d_orig.y1, false},  // bottom
+                {"y", first_gt(chan_y, u_y2), s_orig.y2, d_orig.y2, false},  // top
+            };
+            for (const CU& c : cus) {
+                if (c.det == NONE) continue;
+                if (std::abs(c.det - c.sf) < (c.horiz_stubs ? m_h : m_v)) continue;
+                if (std::abs(c.det - c.df) < (c.horiz_stubs ? m_h : m_v)) continue;
+                Topology t;
+                t.type = std::string("CORNER_U_") + (c.horiz_stubs ? "HVH@x" : "VHV@y")
+                       + std::to_string(c.det);
+                if (c.horiz_stubs) {   // V trunk at x=det, H stubs at each block's y-mid
+                    if (std::abs(dy_mid - sy_mid) < m_v) continue;
+                    t.segments.push_back(make_seg(c.sf, sy_mid, c.det, sy_mid, h_layer_));
+                    t.segments.push_back(make_seg(c.det, sy_mid, c.det, dy_mid, v_layer_));
+                    t.segments.push_back(make_seg(c.det, dy_mid, c.df, dy_mid, h_layer_));
+                } else {               // H trunk at y=det, V stubs at each block's x-mid
+                    if (std::abs(dx_mid - sx_mid) < m_h) continue;
+                    t.segments.push_back(make_seg(sx_mid, c.sf, sx_mid, c.det, v_layer_));
+                    t.segments.push_back(make_seg(sx_mid, c.det, dx_mid, c.det, h_layer_));
+                    t.segments.push_back(make_seg(dx_mid, c.det, dx_mid, c.df, v_layer_));
+                }
+                accept_abut(std::move(t));
+            }
         }
     }
     return candidates;

@@ -306,9 +306,17 @@ def test_corner_touch_rescued_by_diagonal_L():
     cands = _gen(fp).generate_candidates("A", ["B"])
     assert cands, "corner-touch 2-pin blocks produced NO candidate (silently unrouted)"
     types = sorted(c.type for c in cands)
-    assert types == ["CORNER_HV", "CORNER_VH"], types
+    assert {"CORNER_HV", "CORNER_VH"} <= set(types), types
+    # The single-detour U family: one CORNER_U per detour side (the generic
+    # add_u_shapes collapses for a corner touch — both stubs clamp onto the
+    # shared corner coordinate — so these are emitted by the corner path).
+    assert sum(t.startswith("CORNER_U_") for t in types) == 4, types
+    assert len(cands) == 6, types                     # 2 L's + 4 U's, nothing else
     for c in cands:
-        assert len(c.segments) == 2, f"{c.type}: corner L must have two legs"
+        if not c.type.startswith("CORNER_U_"):
+            assert len(c.segments) == 2, f"{c.type}: corner L must have two legs"
+        else:
+            assert len(c.segments) == 3, f"{c.type}: corner U must have three legs"
         assert "BUSTERM_OPEN" not in _violations(c, fp), (c.type, _violations(c, fp))
         # Every leg must have a real (non-zero) perpendicular slide window.
         ct = buda.ConnTopology(); ct.build(c, fp)
@@ -426,6 +434,9 @@ def test_corner_touch_keeps_corner_ls_under_double_detour():
     g.set_double_detour(True)
     types = {c.type for c in g.generate_candidates("A", ["B"])}
     assert {"CORNER_HV", "CORNER_VH"} <= types, sorted(types)
+    # double_detour is purely ADDITIVE: the L's and the 4 single-detour U's
+    # stay, and the UU's join them.
+    assert sum(t.startswith("CORNER_U_") for t in types) == 4, sorted(types)
     assert any(t.startswith("UU_") for t in types), sorted(types)
 
 
