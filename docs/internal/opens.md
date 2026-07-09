@@ -10,14 +10,8 @@ items this page doesn't see).
 
 ## Quick wins (small, low risk)
 
-1. **Resolve pre-planner hier slide columns against the cell-local
-   floorplan** — [`wishlist-topo.md`](wishlist-topo.md) → *"Resolve
-   pre-planner hier slide columns against the cell-local floorplan"*. A
-   cell-level HBundle template dumped before `run_planner hier` shows
-   `mslide`/`wl[lo..hi]` as `free` (PR #215 made the sentinel honest);
-   building the template's ConnTopology against the cell-local floorplan the
-   generator already constructs would make the columns meaningful pre-plan,
-   matching the flat flow.
+*(none open — the hier slide-column resolution was the last one; see
+"Recently resolved" below.)*
 
 ## Substantial features (bounded, clear plans)
 
@@ -74,6 +68,15 @@ items this page doesn't see).
    follows the documented pattern (own translation unit behind a CMake flag).
 
 ## Recently resolved (verified on main, 2026-07-09)
+
+- **Pre-planner hier slide columns** ✅ — `dump_topologies` now resolves each
+  hier bundle's generation-time floorplan (`_make_topo_fp_resolver`, sharing
+  `check_connectivity`'s `_floorplan_for_hbundle`), so a cell-level template
+  shows real finite `mslide`/`wl[lo..hi]`/`--conn` slides before
+  `run_planner hier`, matching the flat flow (the PR #215 `free` display
+  remains for genuinely unresolvable slides). See
+  [`wishlist-topo.md`](wishlist-topo.md) → *"Resolve pre-planner hier slide
+  columns … ✅ RESOLVED"*.
 
 - **Per-edge MST flip move-source** ✅ — already resolved as an **opt-in
   toggle** rather than a removal: `ripup_reroute [max_iter]

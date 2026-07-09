@@ -211,7 +211,24 @@ own deliberate before/after review — the corpus diff is mechanical now:
 re-baseline `tools/topo_snapshot.py` + `tools/wl_corpus.py` and review the
 golden diff bundle by bundle.
 
-## Resolve pre-planner hier slide columns against the cell-local floorplan
+## Resolve pre-planner hier slide columns against the cell-local floorplan — ✅ RESOLVED
+
+**Resolution.**  `dump_topologies` now resolves each hier bundle's
+generation-time floorplan via `_make_topo_fp_resolver`
+(`src/buda_session/hier.py`) — a per-call wrapper→Floorplan resolver built on
+the SAME 3-case `_floorplan_for_hbundle` that `check_connectivity` already
+used (cell-local / endpoint-depth / cross-level custom; expanded per-instance
+wrappers and flat bundles keep `self.fp`).  The floorplan is threaded through
+`_topo_min_slide`, `_topology_wl_interval` (+ `_seg_slide_box`/`_fp_extent`
+for the sentinel clamp), and `_dump_conn_detail`, so a cell-level template
+shows real finite `mslide`/`wl[lo..hi]`/`--conn` slides the moment candidates
+exist — measured: the PR #215 repro's I_H goes `free` → `mslide=80`,
+`slide=[60..140]` (cell-local), and after `run_planner hier` the expanded
+wrapper reports the SAME magnitudes in absolute coords (`slide=[110..190]`).
+`free` remains the display for a genuinely unresolvable slide.  Test:
+`test_dump_topologies_conn.py::test_mslide_resolves_cell_local_before_planner`
+(the inverse of the old `…_prints_free_not_sentinel`, plus the pre/post-planner
+consistency check).  The original item follows.
 
 **Context.**  `dump_topologies` slide-derived columns — `mslide`
 (`_topo_min_slide`, `src/buda_session/reports.py`) and the `wl[lo..hi]`

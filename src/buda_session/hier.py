@@ -599,6 +599,47 @@ class HierMixin:
             fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
         return fp_cache[cache_key]
 
+    def _make_topo_fp_resolver(self):
+        """Per-call resolver: bundle wrapper → the Floorplan its candidates were
+        generated against, for `dump_topologies`' slide/envelope columns —
+        `self.fp` for everything except the two hier generation cases whose
+        floorplan genuinely differs from it:
+
+          (a) a pre-expansion CELL-LOCAL template (`cell_context` +
+              `entry_busterm_ids` set), generated in cell-local coordinates;
+          (c) a CROSS-LEVEL bundle (`drv_spec_depth >= 0`), generated in a
+              custom endpoint floorplan whose spec-path block names are not
+              in `self.fp`.
+
+        Both markers are set only by the hierarchical bundler, so a FLAT
+        bundle — which is also a `buda.HBundle`, and whose candidates were
+        generated against `session.fp` even when a BDB is open (Codex #231) —
+        always keeps `self.fp`, as do the expanded per-instance wrappers
+        (absolute coords) and same-level cross-block hier bundles (generated
+        against the BDB depth projection that `add_blocks_from_bdb` mirrors
+        into `self.fp`).  Resolution via the same `_floorplan_for_hbundle`
+        that `check_connectivity` uses, so a cell-level template shows real
+        finite slides BEFORE `run_planner hier` instead of the
+        unbounded-sentinel `free`."""
+        if self.bdb is None:
+            return lambda w: self.fp
+        fp_cache = {}
+        comps_by_name = {c.name: c for c in self.bdb.all_components()}
+        expanded_ids = {id(w)
+                        for ws in (self._hier_expansion_map or {}).values()
+                        for w in ws}
+
+        def resolve(w):
+            b = w.input.original_bundle
+            if (isinstance(b, buda.HBundle) and id(w) not in expanded_ids
+                    and ((b.cell_context and b.entry_busterm_ids)
+                         or b.drv_spec_depth >= 0)):
+                fp = self._floorplan_for_hbundle(b, fp_cache, comps_by_name)
+                if fp is not None:
+                    return fp
+            return self.fp
+        return resolve
+
     @staticmethod
     def _clone_hbundle_with_id(b, new_id):
         """Return a shallow clone of HBundle b with id replaced by new_id."""

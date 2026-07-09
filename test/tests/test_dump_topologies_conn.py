@@ -16,6 +16,7 @@
 (what each seg connects to, its pass-through busterms, slide range, net-pull)."""
 
 import io
+import re
 from contextlib import redirect_stdout
 
 
@@ -183,11 +184,38 @@ def test_dump_topologies_shows_wl_envelope_per_candidate():
         assert lo <= nominal + 0.5, (c.type, lo, nominal)   # tight floor <= as-generated
 
 
-def test_mslide_unbounded_prints_free_not_sentinel():
+def test_flat_dump_with_open_bdb_stays_on_session_fp():
+    """Codex #231: a FLAT flow's bundles are also `buda.HBundle`s, so with any
+    BDB open (e.g. a checkpoint) the resolver must NOT route them through the
+    BDB depth floorplan — their candidates were generated against `session.fp`
+    (hand-added blocks the BDB has no components for).  The dump must show the
+    same finite slides as the no-BDB flat flow, never `free`."""
+    s = _run([
+        "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+        "open_bdb :memory:",                       # empty checkpoint BDB
+        "add_block A 0 0 100 100", "add_block B 300 20 400 120",
+        "add_bus ab[8] A.tx B.rx",
+        "run_bundler strict", "generate_topologies",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies")
+    out = buf.getvalue()
+    assert "mslide" in out, out
+    assert "free" not in out, out   # flat candidates resolve against self.fp
+    # The direct I_H's slide is the blocks' 80-unit shared y-overlap [20..100].
+    assert re.search(r"\bI_H\s+\d+\s+\[\d+\.\.\d+\]\s+1\s+0\s+80\b", out), out
+
+
+def test_mslide_resolves_cell_local_before_planner():
     """A cell-level HBundle template is still in cell-local coordinates before
-    `run_planner hier`, so ConnTopology can't resolve its block faces against the
-    absolute floorplan and every segment reads as unbounded.  The `mslide` column
-    must print `free` (mirroring `--conn`), never the raw ~2e9 slide sentinel."""
+    `run_planner hier`.  dump_topologies resolves each hier bundle's
+    ConnTopology against the floorplan its candidates were GENERATED in (the
+    cell-local one, via `_make_topo_fp_resolver` — the same resolution
+    check_connectivity uses), so `mslide`, `wl[lo..hi]`, and the `--conn`
+    slide column show real finite numbers pre-planner — matching the flat
+    flow — instead of the unbounded-sentinel `free` (which remains the
+    display for a genuinely unresolvable candidate; PR #215)."""
     s = _run([
         "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
         "open_bdb :memory:",
@@ -203,13 +231,31 @@ def test_mslide_unbounded_prints_free_not_sentinel():
     ])
     buf = io.StringIO()
     with redirect_stdout(buf):
-        s.do_command("dump_topologies")          # BEFORE run_planner hier
+        s.do_command("dump_topologies --conn")   # BEFORE run_planner hier
     out = buf.getvalue()
     assert "mslide" in out, out
-    # At least one candidate has an unresolved (unbounded) slide, shown as `free`.
-    assert "free" in out, out
+    # Every slide resolves against the cell-local floorplan: no `free` left.
+    assert "free" not in out, out
+    # The I_H candidate's slide is the two children's shared face overlap in
+    # cell-local coords (pipe cells at y 60..140 inside the 420x200 cell -> 80),
+    # and its envelope is the fixed direct wire [25..25].
+    assert re.search(r"\bI_H\s+25\s+\[25\.\.25\]\s+1\s+0\s+80\b", out), out
+    # --conn prints the finite cell-local window, not `free`.
+    assert "slide=[60..140] = 80" in out, out
     # And the raw sentinel integer never leaks into any column.
     sess = s.__class__
     sentinel = sess._SLIDE_SENTINEL
     assert not any(tok.lstrip("-").isdigit() and abs(int(tok)) >= sentinel
                    for tok in out.split()), out
+
+    # AFTER run_planner hier the expanded per-instance wrapper reports the
+    # SAME slide magnitudes in absolute coordinates (cell window offset by
+    # the instance position) — the pre-planner dump now matches it.
+    with redirect_stdout(io.StringIO()):
+        s.do_command("run_planner hier")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies --conn")
+    out2 = buf.getvalue()
+    assert re.search(r"\bI_H\s+25\s+\[25\.\.25\]\s+1\s+0\s+80\b", out2), out2
+    assert "slide=[110..190] = 80" in out2, out2
