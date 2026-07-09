@@ -2411,9 +2411,10 @@ class BudaVisualizer:
         for a in self._keepout_artists:
             a.set_visible(self.ui_state.keepouts)
         
-        for a in self._busterm_artists:
-            a.set_visible(self.ui_state.busterms)
-            
+        # Terminals hide in detailed mode (per-bit view replaces them); gate on
+        # both so a redraw (e.g. from a solo toggle) can't re-reveal them there.
+        self._apply_busterm_visibility()
+
         self._apply_preroute_visibility()
 
         # Abstract via/conn markers hide in detailed mode (per-bit vias replace
@@ -2685,7 +2686,7 @@ class BudaVisualizer:
         if self._cbar_ax: self._cbar_ax.set_visible(True)
         for a in self._keepout_artists: a.set_visible(True)
         self._redraw_blocks()   # restores default (all blocks equal) style
-        for a in self._busterm_artists: a.set_visible(True)
+        self._apply_busterm_visibility()      # terminals hidden in detailed mode
         self._apply_vias_conns_visibility()   # abstract vias hidden in detailed mode
         for e in self._grid_rail_artists:
              e['artist'].set_visible(self.ui_state.detailed_mode and self.ui_state.tracks)
@@ -4134,6 +4135,17 @@ class BudaVisualizer:
             self._register_detailed(bid, sc, alpha=0.95, lw=None, layer=up)
             self._detailed_via_artists.append(sc)
 
+    def _apply_busterm_visibility(self):
+        """Terminal (busterm) markers belong to the abstract view — hidden in
+        Detailed mode. They're registered per-bundle, so entering Detailed
+        already bulk-hides them; this keeps every OTHER state change consistent
+        (a solo toggle or any fig_redraw would otherwise re-reveal them on the
+        Terminals toggle alone). Shown only with Terminals on AND not detailed.
+        """
+        vis = self.ui_state.busterms and not self.ui_state.detailed_mode
+        for a in self._busterm_artists:
+            a.set_visible(vis)
+
     def _apply_vias_conns_visibility(self):
         """Gate BOTH via/conn artist sets by mode so they never coexist.
 
@@ -4175,9 +4187,10 @@ class BudaVisualizer:
         for entries in self._detailed_bundle_artists.values():
             for e in entries:
                 e['artist'].set_visible(active)
-        # Re-gate BOTH via sets: entering hides the abstract markers the bulk
-        # loop above just revealed, leaving respects Vias/Conns instead of the
-        # unconditional set_visible(True) the bulk loop applied.
+        # Re-gate the abstract-only marker sets: entering hides what the bulk
+        # loop above just revealed; leaving respects the Terminals / Vias/Conns
+        # toggles instead of the unconditional set_visible the bulk loop applied.
+        self._apply_busterm_visibility()
         self._apply_vias_conns_visibility()
         # If Tracks is already on when entering Detailed, build the rails now.
         if active and self.ui_state.tracks and not self._rails_built:

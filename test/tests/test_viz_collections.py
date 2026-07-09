@@ -549,6 +549,34 @@ def test_abstract_vias_hidden_in_detailed_mode(monkeypatch):
     assert n() > 0, "abstract vias must return when leaving detailed"
 
 
+def test_terminals_hidden_in_detailed_mode(monkeypatch):
+    # Terminal (busterm) markers belong to the abstract view and hide in
+    # Detailed mode. A fig_redraw while detailed was on (e.g. from a Solo
+    # toggle) used to re-reveal them, gated on the Terminals toggle alone.
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._busterm_artists                        # this design has some
+    assert viz.ui_state.busterms is True
+    n = lambda: sum(1 for a in viz._busterm_artists if a.get_visible())
+
+    assert n() > 0                                     # visible in abstract mode
+    viz._highlighted = next(iter(viz._bundle_artists)) # select a bundle
+    viz._refresh_highlight()
+    viz._toggle_detailed()                             # enter detailed → hidden
+    assert n() == 0, "terminals must hide in detailed mode"
+
+    viz._toggle_solo()                                 # Solo on  → fires fig_redraw
+    assert n() == 0, "Solo toggle re-revealed terminals in detailed mode"
+    viz._toggle_solo()                                 # Solo off → fires fig_redraw
+    assert n() == 0
+
+    # Any other redraw while detailed is on must not reveal them either.
+    viz.ui_state.notify()
+    assert n() == 0
+
+    viz._toggle_detailed()                             # back to abstract
+    assert n() > 0, "terminals must return when leaving detailed"
+
+
 def test_entering_detailed_respects_vias_conns_off(monkeypatch):
     # The detailed toggle's bulk reveal of _detailed_bundle_artists must not
     # leak the via scatters while Vias/Conns is off.
