@@ -2299,17 +2299,14 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     add_trunk_mst_candidates(blocks, results);
     add_mst_candidates(blocks, results);
     add_multi_trunk_candidates(pins, blocks, results);
-    // One-time seg-to-seg annotation (topo-truth Phase 4): every candidate's
-    // busterm taps are final here (the add_* above annotate their own), so
-    // derive the junction records ONCE; downstream ConnTopology builds
-    // (filter_pinched below, planner, NUTS, DNUTS, verify) only read them.
-    for (auto& t : results) annotate_seg_conns(t);
-    annotate_and_sort(results);
-    filter_pinched(results);
-    for (auto& t : results)
-        if (t.connected_block_names.empty())
-            for (const auto& b : blocks)
-                t.connected_block_names.push_back(b.block_name);
+    // Shared post-emission pipeline (annotate → sort → keepout cull → pinch →
+    // coverage fill).  The keepout cull is NEW on this path: previously only
+    // trunk LOCI were keepout-gated pre-emission, and an MST/BITRUNK edge or
+    // a trunk STUB through a fully-blocked zone survived to the planner — a
+    // silent DNUTS open (the 2-pin path has always culled these post-emission).
+    std::vector<std::string> block_names;
+    for (const auto& b : blocks) block_names.push_back(b.block_name);
+    finalize_candidates(results, block_names);
     return results;
 }
 
@@ -3158,6 +3155,41 @@ void TopologyGenerator::add_multi_trunk_candidates(
     }
 }
 
+void TopologyGenerator::finalize_candidates(std::vector<Topology>& candidates,
+                                            const std::vector<std::string>& block_names) {
+    // One-time seg-to-seg annotation (topo-truth Phase 4): every candidate's
+    // busterm taps are final here (each path's emitters annotate their own),
+    // so derive the junction records ONCE; downstream ConnTopology builds
+    // (filter_pinched below, planner, NUTS, DNUTS, verify) only read them.
+    for (auto& t : candidates) annotate_seg_conns(t);
+    annotate_and_sort(candidates);
+
+    // Keepout cull: drop a candidate any of whose segments is blocked on all
+    // same-direction layers by an explicit keepout zone.  OOB/U segments
+    // outside the zones are unaffected; only fully-blocked segments cull.
+    const auto& kos = floorplan_.get_keepout_zones();
+    if (!kos.empty()) {
+        candidates.erase(
+            std::remove_if(candidates.begin(), candidates.end(),
+                [&](const Topology& t) {
+                    for (const auto& seg : t.segments) {
+                        bool is_h = (seg.start.y == seg.end.y);
+                        const std::vector<int>& layers =
+                            is_h ? all_h_layers_ : all_v_layers_;
+                        if (all_layers_blocked_by_keepouts(seg, layers, kos))
+                            return true;
+                    }
+                    return false;
+                }),
+            candidates.end());
+    }
+
+    filter_pinched(candidates);
+    for (auto& t : candidates)
+        if (t.connected_block_names.empty())
+            t.connected_block_names = block_names;
+}
+
 std::vector<Topology> TopologyGenerator::generate_candidates(
     const std::string& src_name,
     const std::vector<std::string>& dst_names)
@@ -3373,36 +3405,9 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     }
 
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
-    // One-time seg-to-seg annotation (topo-truth Phase 4) — see generate_npin.
-    for (auto& t : candidates) annotate_seg_conns(t);
-    annotate_and_sort(candidates);
-
-    // Keepout filtering for 2-pin: remove topologies whose trunk segment is
-    // blocked on all available layers.  OOB/U-shape segments outside the
-    // keepout are not affected; only fully-blocked in-bbox segments are culled.
-    {
-        const auto& kos = floorplan_.get_keepout_zones();
-        if (!kos.empty()) {
-            candidates.erase(
-                std::remove_if(candidates.begin(), candidates.end(),
-                    [&](const Topology& t) {
-                        for (const auto& seg : t.segments) {
-                            bool is_h = (seg.start.y == seg.end.y);
-                            const std::vector<int>& layers =
-                                is_h ? all_h_layers_ : all_v_layers_;
-                            if (all_layers_blocked_by_keepouts(seg, layers, kos))
-                                return true;
-                        }
-                        return false;
-                    }),
-                candidates.end());
-        }
-    }
-
-    filter_pinched(candidates);
-    for (auto& t : candidates)
-        if (t.connected_block_names.empty())
-            t.connected_block_names = {src_name, dst_name};
+    // Shared post-emission pipeline (annotate → sort → keepout cull → pinch →
+    // coverage fill) — same stage order this path has always run.
+    finalize_candidates(candidates, {src_name, dst_name});
 
     // Abutment fallback: two blocks sharing a FULL edge have coinciding facing
     // faces, so the direct I collapses to zero length and every L/Z/U stub is

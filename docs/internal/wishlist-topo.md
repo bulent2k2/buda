@@ -187,7 +187,31 @@ behind a flag.  Full design: `topo_conn_unification.md` §7.
 byte-identity harness (`tools/topo_snapshot.py` goldens +
 `test_topo_analysis_golden.py`) is the acceptance gate.
 
-## Unify the 2-pin vs n-pin filter ordering
+## Unify the 2-pin vs n-pin filter ordering — ✅ IMPLEMENTED
+
+**As-built.**  `TopologyGenerator::finalize_candidates` (`topology.cpp`) is
+the shared post-emission pipeline both dispatch targets now flow through:
+seg-conn annotation → sort → **keepout cull** → pinch filter →
+`connected_block_names` fill (then the caller's `filter_uncovered` coverage
+gate, unchanged).  For `generate_2pin` this is the exact stage order it
+always ran (byte-identical by construction); `generate_npin` **gains the
+post-emission keepout cull** — its trunk-locus pre-gates remain as the
+emission-side efficiency measure, but stubs and MST/BITRUNK edges are now
+culled when fully blocked on all same-direction layers.
+
+**Measured.**  Corpus: BOTH golden corpora byte-identical (no corpus n-pin
+bundle has a fully-blocked segment — the loci pre-gates already steer
+trunks).  The latent bug the cull closes, demonstrated on a 3-block
+scenario (keepout over B's stub corridor on all V layers): pre-unification
+`TRUNK_H_OOB@y250` survived with a dead V stub, routed **0 overlaps / 0
+violations at abstract NUTS, then stranded 4/4 bits at DetailedNUTS** — and
+was reachable without a pin via stage-a `ripup_reroute` (metric counts only
+overlaps; a dead stub's band is empty).  Post-unification the candidate is
+culled and the scenario routes fully clean.  Semantic note: a bundle whose
+EVERY candidate is keepout-dead now surfaces as UNROUTED (zero-candidate
+warning) instead of routing phantom wires — the 2-pin cull's long-standing
+behaviour, now shared.  Tests: `test/tests/test_topo_filter_unify.py`.
+The original item follows.
 
 **Context.**  The two generation paths order their post-emission stages
 differently (mapped in [`topo_conn_unification.md`](topo_conn_unification.md)

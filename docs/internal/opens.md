@@ -31,14 +31,7 @@ items this page doesn't see).
    selection term, or letting negotiate/ripup up-rank across candidate
    classes. The natural continuation of the 2026-07 planner work (signal
    tracks, abutment Gap A, `kHeight`); real golden churn to review.
-4. **Unify the 2-pin vs n-pin filter ordering** —
-   [`wishlist-topo.md`](wishlist-topo.md) → *"Unify the 2-pin vs n-pin
-   filter ordering"*. One shared emit → annotate → keepout cull → pinch →
-   coverage pipeline so a filter fix lands once instead of per-path.
-   Deliberately deferred: it CHANGES ROUTING BYTES and needs its own
-   deliberate corpus review (mechanical now via `topo_snapshot` +
-   `wl_corpus`).
-5. **Abstract-vs-detailed keepout model audit** —
+4. **Abstract-vs-detailed keepout model audit** —
    [`wishlist-planner.md`](wishlist-planner.md) → noted inside *"LOW-layer
    abutment crossings … ✅ RESOLVED"*: abstract NUTS's `keepout_occupied`
    admits positions DNUTS's per-track filter rejects. The planner no longer
@@ -48,19 +41,19 @@ items this page doesn't see).
 
 ## Big / blocked / conditional
 
-6. **Global-overlap re-route of NON-contended bundles** —
+5. **Global-overlap re-route of NON-contended bundles** —
    [`wishlist-ripup.md`](wishlist-ripup.md) → *"Global-overlap re-route of
    NON-contended bundles"*. The measured b61-class global win (10 → 8
    overlaps from re-routing a bundle that is not itself contended).
    Explicitly bigger/riskier — enlarges the ripup search, can churn; only
    worth it if the corpus shows several such cases.
-7. **True along-flex trunk DOF (Stage C)** —
+6. **True along-flex trunk DOF (Stage C)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"True along-flex trunk DOF"*.
    Stage A (ConnSeg `along_flex`/`along_pull`) landed; the always-on flip is
    **blocked** by regressions upstream of NUTS (far-face traversal inflates
    V-trunk WL and flips planner selections) — that investigation gates any
    NUTS-side work.
-8. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
+7. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
    *"Persist the routing pipeline into the BDB"* (the export consumer) and
    `gds_oa_interchange.md`. Everything BDB-side is ✅ (persist stages 1–5,
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
@@ -68,6 +61,14 @@ items this page doesn't see).
    follows the documented pattern (own translation unit behind a CMake flag).
 
 ## Recently resolved (verified on main, 2026-07-09)
+
+- **2-pin / n-pin filter-ordering unification** ✅ — one shared
+  post-emission pipeline (`finalize_candidates`: annotate → sort → keepout
+  cull → pinch → coverage fill).  Both golden corpora byte-identical; the
+  n-pin path gains the keepout cull, closing a silent-open class (a dead
+  stub/MST edge routed 0/0 at NUTS then stranded every bit at DNUTS, and
+  was reachable via stage-a ripup).  See [`wishlist-topo.md`](wishlist-topo.md)
+  → *"Unify the 2-pin vs n-pin filter ordering … ✅ IMPLEMENTED"*.
 
 - **Pre-planner hier slide columns** ✅ — `dump_topologies` now resolves each
   hier bundle's generation-time floorplan (`_make_topo_fp_resolver`, sharing

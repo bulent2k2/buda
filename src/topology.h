@@ -518,6 +518,17 @@ private:
         const std::string& src_name,
         const std::vector<std::string>& dst_names);
     void filter_pinched(std::vector<Topology>& candidates);
+    // Shared post-emission pipeline both dispatch targets flow through:
+    // seg-conn annotation → sort → keepout cull (drop a candidate whose ANY
+    // segment is blocked on all same-direction layers by explicit keepout
+    // zones) → pinch filter → connected_block_names fill.  One place, so a
+    // filter fix or a new gate lands once instead of per-path (previously
+    // only generate_2pin ran the keepout cull; an n-pin MST/BITRUNK/stub
+    // segment through a fully-blocked zone survived to the planner — a
+    // silent DNUTS open).  Emission-side gates (trunk-locus keepout probes,
+    // min-stub, per-shape structural checks) remain each path's own.
+    void finalize_candidates(std::vector<Topology>& candidates,
+                             const std::vector<std::string>& block_names);
     const Floorplan& floorplan_;
     bool use_busterm_         = true;
     bool allow_double_detour_ = false;
