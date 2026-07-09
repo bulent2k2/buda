@@ -1,9 +1,12 @@
-Buda is an open-source system to help plan interconnect for hierarchical chip designs. It has three major components:
-1. bundling of nets into buses
-2. generating a set of optimal bus topologies
-3. layer assignment and track assignment that supports non-uniform width wires/buses
+Buda is an open-source system to help plan interconnect for hierarchical chip designs. It has four major components:
+1. bundling of nets into buses,
+2. generating a set of optimal bus topologies,
+3. planning for congestion and layer assignment,
+4. track assignment that supports non-uniform width segments, wires and buses.
 
-Here is the [complete conversation of origin](https://gemini.google.com/share/293d9e6c10a4) that expands on that brief abstract.
+Buda system also provides a floorplan editor and a DB for persistence.
+
+Here is the [complete conversation of origin](https://gemini.google.com/share/293d9e6c10a4) for Buda.
 
 A key quote: "This is an exciting challenge. Revitalizing a proven concept with modern algorithms and software architecture is a fantastic way to approach EDA (Electronic Design Automation) tool development. Given your background, you likely remember that 25 years ago, compute constraints dictated simple heuristics. Today, we can leverage graph neural networks (GNNs), massive parallelism, and modern optimization solvers.
 
