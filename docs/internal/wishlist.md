@@ -2,10 +2,15 @@
 
 Tracked-but-not-yet-done items, organized by subsystem. Each entry records: what,
 why deferred, and where to start. This page is the **index**; the entries live in
-per-subsystem files so each area stays scannable.
+per-subsystem files so each area stays scannable. For the **cross-subsystem
+priority view** — what's actually open right now, ranked by value/effort — see
+[`opens.md`](opens.md).
 
 ## History
 
+- **2026-07-09** — Added [`opens.md`](opens.md), the ranked open-items snapshot
+  (verified against main: corner-touch + partial-overlap topologies, abutment
+  Gap A, and `kHeight` all landed; refreshed the stale BDB/topo index lines here).
 - **2026-07-02** — Planner "coverage gate" resolved: superseded by a uniform
   generation-time gate (`TopologyGenerator::filter_uncovered` runs verify's
   `check_topo` on every candidate; drops `BUSTERM_OPEN` only, never-strand
@@ -25,8 +30,10 @@ per-subsystem files so each area stays scannable.
 - **[wishlist-bdb.md](wishlist-bdb.md)** — BDB, test data & interchange.
   `open_bdb *.sql` write-back mode (✅), schema versioning (✅), provenance
   metadata (✅); persist the pipeline into the BDB — bundles (✅), topologies (✅),
-  abstract-NUTS bus-segments + bus-vias (✅); detailed-NUTS net-segments,
-  route-snapshot hash, and BDB→OA/GDS export remain.
+  planner output (✅), abstract-NUTS bus-segments + bus-vias (✅), detailed-NUTS
+  net-segments + per-bit vias (✅), route-snapshot hash (✅), resume/rehydrate
+  (✅); GDS round-trip ✅ — only the **OA bridge** remains (gated on the
+  proprietary Si2 OA libraries).
 - **[wishlist-topo.md](wishlist-topo.md)** — Topology generation & connectivity.
   True along-flex trunk DOF (Stage C of the flexible-root re-arch); incremental
   re-analysis (topo/conn unification Phase D, deferred by measurement); unify
@@ -34,8 +41,8 @@ per-subsystem files so each area stays scannable.
   corpus review); resolve pre-planner hier slide columns (`mslide` / `wl[lo..hi]`)
   against the cell-local floorplan so a template dump shows finite slides without
   planning first (PR #215 made the sentinel honest via a `free` display);
-  corner-margin default `dx=dy=0` (MEASURED — keep 0; but corner-only-touching
-  blocks generate zero candidates at 0, a generation gap to rescue like abutment).
+  corner-margin default `dx=dy=0` (MEASURED — keep 0; the corner-touch
+  generation gap is ✅ resolved via `CORNER_HV`/`CORNER_VH` diagonal L's).
   See [topo_conn_unification.md](topo_conn_unification.md).
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.
   Coverage gate (✅ resolved — superseded by the generation-time

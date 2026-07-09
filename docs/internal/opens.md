@@ -1,0 +1,101 @@
+# Open items — the cross-subsystem priority view
+
+What remains to focus on, ranked by value/effort. This page is a **snapshot
+index** (last verified against `main`: **2026-07-09**, post PR #226/#227) —
+the details, evidence, and where-to-start notes live in the per-subsystem
+wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
+lands, mark it ✅ here *and* in its wishlist file; re-verify the whole list
+against `main` when picking the next piece of work (parallel sessions land
+items this page doesn't see).
+
+## Quick wins (small, low risk)
+
+1. **Remove the per-edge MST flip move-source** —
+   [`wishlist-ripup.md`](wishlist-ripup.md) → *"Remove the per-edge MST flip
+   move-source (measured redundant)"*. Measured: no flip ever clears an
+   overlap on the corpus (index alternates strictly dominate); dropping the
+   `('flip', …)` moves from `_ripup_reroute` saves ~1 trial per contended MST
+   edge and simplifies the scan. Routes byte-identical by construction (the
+   flip never committed). Keep `flip_mst_edge` + `Segment::edge_id` as
+   primitives for a future *stronger* per-edge move.
+2. **Resolve pre-planner hier slide columns against the cell-local
+   floorplan** — [`wishlist-topo.md`](wishlist-topo.md) → *"Resolve
+   pre-planner hier slide columns against the cell-local floorplan"*. A
+   cell-level HBundle template dumped before `run_planner hier` shows
+   `mslide`/`wl[lo..hi]` as `free` (PR #215 made the sentinel honest);
+   building the template's ConnTopology against the cell-local floorplan the
+   generator already constructs would make the columns meaningful pre-plan,
+   matching the flat flow.
+
+## Substantial features (bounded, clear plans)
+
+3. **CONVERGENT fan-in topology** —
+   [`wishlist-bundler.md`](wishlist-bundler.md) → *"Multi-source (fan-in)
+   topology support"*. The last whole-subsystem gap: a CONVERGENT bundle
+   spanning several driver blocks routes from ONE arbitrary driver (the CLI
+   warns rather than misroutes). Needs a multi-source fan-in tree shape
+   (reuse `trunk_mst`/`compute_mst`) plus a net-driver fidelity check in
+   `check_topo`. Full investigation: `convergent_bundling.md`. **Highest
+   user-facing value** of the open items.
+4. **Selection basis: rank on measured routability** —
+   [`wishlist-planner.md`](wishlist-planner.md) → *"Selection basis: rank on
+   measured routability, not the generation-time WL estimate"*. The
+   WL-estimate ranking structurally under-selects `BITRUNK` datapath trees
+   that route better than they estimate. Levers sketched: a peak-band-demand
+   selection term, or letting negotiate/ripup up-rank across candidate
+   classes. The natural continuation of the 2026-07 planner work (signal
+   tracks, abutment Gap A, `kHeight`); real golden churn to review.
+5. **Unify the 2-pin vs n-pin filter ordering** —
+   [`wishlist-topo.md`](wishlist-topo.md) → *"Unify the 2-pin vs n-pin
+   filter ordering"*. One shared emit → annotate → keepout cull → pinch →
+   coverage pipeline so a filter fix lands once instead of per-path.
+   Deliberately deferred: it CHANGES ROUTING BYTES and needs its own
+   deliberate corpus review (mechanical now via `topo_snapshot` +
+   `wl_corpus`).
+6. **Abstract-vs-detailed keepout model audit** —
+   [`wishlist-planner.md`](wishlist-planner.md) → noted inside *"LOW-layer
+   abutment crossings … ✅ RESOLVED"*: abstract NUTS's `keepout_occupied`
+   admits positions DNUTS's per-track filter rejects. The planner no longer
+   routes into the known shapes (Gap A abutment predicate), but the two
+   models still disagree — a contained investigation to close the class for
+   good.
+
+## Big / blocked / conditional
+
+7. **Global-overlap re-route of NON-contended bundles** —
+   [`wishlist-ripup.md`](wishlist-ripup.md) → *"Global-overlap re-route of
+   NON-contended bundles"*. The measured b61-class global win (10 → 8
+   overlaps from re-routing a bundle that is not itself contended).
+   Explicitly bigger/riskier — enlarges the ripup search, can churn; only
+   worth it if the corpus shows several such cases.
+8. **True along-flex trunk DOF (Stage C)** —
+   [`wishlist-topo.md`](wishlist-topo.md) → *"True along-flex trunk DOF"*.
+   Stage A (ConnSeg `along_flex`/`along_pull`) landed; the always-on flip is
+   **blocked** by regressions upstream of NUTS (far-face traversal inflates
+   V-trunk WL and flips planner selections) — that investigation gates any
+   NUTS-side work.
+9. **OA bridge (import/export)** — [`wishlist-bdb.md`](wishlist-bdb.md) →
+   *"Persist the routing pipeline into the BDB"* (the export consumer) and
+   `gds_oa_interchange.md`. Everything BDB-side is ✅ (persist stages 1–5,
+   resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
+   the proprietary Si2 OA C++ libraries** — waits on external access, then
+   follows the documented pattern (own translation unit behind a CMake flag).
+
+## Recently resolved (verified on main, 2026-07-09)
+
+- **Corner-touch generation gap** ✅ — rescued at generation independent of
+  `corner_margin` via `CORNER_HV`/`CORNER_VH` diagonal L's (reusing the MST
+  path's `corner_diagonal_L`); fully-coincident blocks correctly stay
+  candidate-free. See [`wishlist-topo.md`](wishlist-topo.md) corner-margin
+  item, Experiment 2 follow-up.
+- **Partially-overlapping blocks** ✅ — free-corner `L_OVL` candidates
+  (PR #221) and corner-wrapping `U_OVL_*`/`UU_OVL_*` with load-bearing
+  per-segment perp clamps (PR #224), clamps persisted to BDB v16 and
+  restored by `load_pipeline`. See [`wishlist-topo.md`](wishlist-topo.md)
+  *"Persist the overlap-U perp clamps"* (✅).
+- **LOW-layer abutment crossings** ✅ (PR #225) — Gap A predicate flags an
+  empty open interior between two distinct abutting endpoint cells; big2
+  full flow 0 overlaps / 0 DNUTS opens (was 0/72), ~1 s.
+- **`kHeight` short-stub layer steering** ✅ (PR #226) — short segments
+  prefer the lowest same-direction TOP layer; rnr/mix WL −5.4 %, overlaps
+  3 → 1; `set_planner_param kHeight 0` restores the legacy tie-break.
