@@ -261,6 +261,8 @@ class PersistMixin:
                     sr.layer_hint = seg.layer_hint
                     sr.is_jog = seg.is_jog
                     sr.edge_id = seg.edge_id
+                    sr.perp_clamp_lo = seg.perp_clamp_lo
+                    sr.perp_clamp_hi = seg.perp_clamp_hi
                     self.bdb.add_topology_segment(sr)
                 self._persist_topology_annotations(bid, ci, topo, seen_busterms)
                 n_cands += 1
@@ -621,6 +623,8 @@ class PersistMixin:
                     sg.layer_hint = sr.layer_hint
                     sg.is_jog = sr.is_jog
                     sg.edge_id = sr.edge_id       # MST-edge identity (v14)
+                    sg.perp_clamp_lo = sr.perp_clamp_lo   # overlap-U slide clamp (v16)
+                    sg.perp_clamp_hi = sr.perp_clamp_hi
                     segs.append(sg)
                 t.segments = segs        # reassign whole vector (pybind copies)
                 bad = [n for n in t.connected_block_names
@@ -830,6 +834,8 @@ class PersistMixin:
                 sr.layer_hint = seg.layer_hint
                 sr.is_jog = seg.is_jog
                 sr.edge_id = seg.edge_id
+                sr.perp_clamp_lo = seg.perp_clamp_lo
+                sr.perp_clamp_hi = seg.perp_clamp_hi
                 self.bdb.add_topology_segment(sr)
             # Logical seg-busterm links + TEG-over bridges (load_pipeline
             # restores both; never re-derived from geometry).

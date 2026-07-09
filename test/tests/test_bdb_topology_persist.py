@@ -176,6 +176,82 @@ def test_select_topology_refreshes_is_selected(tmp_path):
     assert selected == [1]
 
 
+_NO_LO, _NO_HI = -2147483648, 2147483647   # Segment perp_clamp INT_MIN/INT_MAX sentinels
+
+
+def _overlap_session(bdb_path):
+    """Overlapping endpoint blocks A/B ('/' stagger) + an 8-bit bus → the
+    corner-wrapping U_OVL/UU_OVL candidates carry per-segment perp clamps.  Opened
+    on a BDB so generate_topologies checkpoints them (with clamps, v16)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _quiet(s,
+           f"open_bdb {bdb_path}",
+           "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+           "add_block A 0 0 400 400", "add_block B 200 200 600 600",
+           "add_bus n[8] A.tx B.rx",
+           "run_bundler strict",
+           "generate_topologies double_detour")
+    return s
+
+
+def test_overlap_u_perp_clamp_persists_and_roundtrips(tmp_path):
+    """v16: the overlap-U perp clamps are written to topology_segment and survive
+    the *.bdb.sql round-trip.  The in-memory clamp of every U_OVL/UU_OVL segment
+    equals its persisted row, and at least one segment per candidate is clamped."""
+    path = str(tmp_path / "ovl.bdb")
+    s = _overlap_session(path)
+    w = s.bundles[0]
+    bid = str(w.input.original_bundle.id)
+    ovl = [(i, c) for i, c in enumerate(w.input.candidates)
+           if c.type.startswith(("U_OVL", "UU_OVL"))]
+    assert ovl, [c.type for c in w.input.candidates]
+    for ci, cand in ovl:
+        rows = s.bdb.topology_segments(bid, ci)
+        assert len(rows) == len(cand.segments)
+        assert any(r.perp_clamp_lo != _NO_LO or r.perp_clamp_hi != _NO_HI for r in rows), \
+            f"{cand.type}: no persisted perp clamp"
+        for r, seg in zip(rows, cand.segments):
+            assert (r.perp_clamp_lo, r.perp_clamp_hi) == \
+                   (seg.perp_clamp_lo, seg.perp_clamp_hi), f"{cand.type} seg {r.seg_index}"
+
+    before = {(t.cand_index, x.seg_index): (x.perp_clamp_lo, x.perp_clamp_hi)
+              for t in s.bdb.topologies(bid)
+              for x in s.bdb.topology_segments(bid, t.cand_index)}
+    sqlp = str(tmp_path / "ovl.bdb.sql")
+    bdb_serialize.dump(path, sqlp)
+    rebuilt = bdb_serialize.load(sqlp, str(tmp_path / "ovl_rebuilt.bdb"))
+    db2 = buda.BDB(rebuilt)
+    after = {(t.cand_index, x.seg_index): (x.perp_clamp_lo, x.perp_clamp_hi)
+             for t in db2.topologies(bid)
+             for x in db2.topology_segments(bid, t.cand_index)}
+    assert after == before
+
+
+def test_overlap_u_perp_clamp_survives_load_pipeline_resume(tmp_path):
+    """The clamp is load-bearing: a U_OVL checkpointed and resumed via load_pipeline
+    BEFORE NUTS must reload clamped, so its face-tap arm still cannot slide into B.
+    Pre-v16 the reloaded segment came back unclamped (window = A's full face) and
+    could collapse through B."""
+    path = str(tmp_path / "ovl_resume.bdb")
+    _overlap_session(path)                                  # checkpoints to the BDB
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2,
+           f"open_bdb {path}",
+           "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+           "add_block A 0 0 400 400", "add_block B 200 200 600 600",
+           "load_pipeline")
+    w = s2.bundles[0]
+    hvh = next(c for c in w.input.candidates if c.type == "U_OVL_HVH")
+    ct = buda.ConnTopology(); ct.build(hvh, s2.fp)
+    seg0 = ct.segs()[0]                                     # A-tap H arm, below B
+    assert seg0.perp_hi > seg0.perp_lo
+    assert seg0.perp_lo >= 0 and seg0.perp_hi <= 200, (
+        f"reloaded U_OVL_HVH tap arm window [{seg0.perp_lo},{seg0.perp_hi}] escapes "
+        "A's exclusive band [0,200] — perp clamp lost on resume")
+
+
 def test_v3_db_migrates_to_v4_adds_topology_tables(tmp_path):
     p = str(tmp_path / "v3.bdb")
     con = sqlite3.connect(p)

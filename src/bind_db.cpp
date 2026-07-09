@@ -130,7 +130,9 @@ void bind_db(py::module_& m) {
         .def_readwrite("layer_hint", &TopoSegRow::layer_hint)
         .def_readwrite("is_jog",     &TopoSegRow::is_jog)
         .def_readwrite("assigned_layer", &TopoSegRow::assigned_layer)
-        .def_readwrite("edge_id",    &TopoSegRow::edge_id);
+        .def_readwrite("edge_id",    &TopoSegRow::edge_id)
+        .def_readwrite("perp_clamp_lo", &TopoSegRow::perp_clamp_lo)
+        .def_readwrite("perp_clamp_hi", &TopoSegRow::perp_clamp_hi);
 
     py::class_<TopoBridgeRow>(m, "TopoBridgeRow")
         .def(py::init<>())
