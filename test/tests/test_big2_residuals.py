@@ -16,17 +16,22 @@
 the flow moved to `run_planner signal_tracks` + `negotiate_congestion` +
 `ripup_reroute`, which clears every NUTS overlap on the full pipeline).
 
-1. DNUTS opens (the live failure): the full flow ends with 72 unplaced bits —
-   two single-segment ABUTMENT-CROSSING bundles (bus_042/32b, bus_002/40b)
-   whose only wire is a ~20-unit V stub crossing a shared block edge, which
-   the planner assigns to LOW layer M3.  On a LOW layer the two leaf blocks'
-   footprints are keepouts, and the stub's whole slide window lies inside
-   them, so DetailedNUTS finds ZERO unblocked signal tracks — a guaranteed
-   open that abstract NUTS reports as clean (overlaps=0, violations=0).
-   `test_low_layer_abutment_stub_dnuts_open_repro` reproduces the mechanism
-   in isolation (seconds): same floorplan, just those two buses, the M3
-   assignment pinned.  Root-cause item: wishlist-planner.md ("LOW-layer
-   abutment crossings...").
+1. DNUTS opens — RESOLVED (was the live failure): the full flow used to end
+   with 72 unplaced bits — two single-segment ABUTMENT-CROSSING bundles
+   (bus_042/32b, bus_002/40b) whose only wire is a ~20-unit V stub crossing
+   a shared block edge, which the planner assigned to LOW layer M3.  On a
+   LOW layer the two leaf blocks' footprints are keepouts, and the stub's
+   whole slide window lies inside them, so DetailedNUTS finds ZERO unblocked
+   signal tracks — a guaranteed open that abstract NUTS reports as clean
+   (overlaps=0, violations=0).  The planner-side fix (`low_seg_obstructed`,
+   Gap A): an empty open interior between two DISTINCT abutting endpoint
+   cells is flagged obstructed, so layer selection routes the crossing
+   over-the-cell on TOP — big2's full flow now ends fully clean (0 overlaps,
+   0 opens, ~1s).  `test_low_layer_abutment_stub_dnuts_open_repro` still
+   reproduces the DNUTS-side mechanism in isolation by PINNING the M3
+   assignment; `test_low_layer_abutment_stub_planner_avoids_low` asserts the
+   planner-side guarantee.  History: wishlist-planner.md ("LOW-layer
+   abutment crossings...", resolved).
 
 2. Spread-fit NUTS overlap residue (the band-repack target,
    docs/internal/nuts_band_repack.md): WITHOUT the negotiation/ripup stages
@@ -124,8 +129,14 @@ def test_low_layer_abutment_stub_dnuts_open_repro(tmp_path, monkeypatch):
     band's signal tracks are all keepout-blocked by the two leaf blocks it
     crosses between — and abstract NUTS reports the placement as CLEAN.
 
-    Pin data measured from the full big2 run (2026-07, x86-64): both bundles
-    single-segment, planner-assigned layer 3, band centres 1770 / 3822."""
+    The planner no longer makes this assignment (low_seg_obstructed flags
+    the abutment case), so the M3 layers are PINNED here to keep exercising
+    the DNUTS-side mechanism: the abstract/detailed keepout-model mismatch
+    stays observable if anything ever routes into it again.
+
+    Pin data measured from the pre-fix full big2 run (2026-07, x86-64): both
+    bundles single-segment, planner-assigned layer 3, band centres
+    1770 / 3822."""
     monkeypatch.chdir(_BIG2)
     fixture = _filtered_fixture(tmp_path, ["bus_042", "bus_002"])
     s = _run_lines(["source tracks4top.buda", f"source {fixture}",
@@ -159,6 +170,30 @@ def test_low_layer_abutment_stub_dnuts_open_repro(tmp_path, monkeypatch):
     open_bids = {w.input.original_bundle.id for w in s.bundles}
     placed_bids = {n.bundle_id for n in s.detailed_result.net_segments}
     assert not (open_bids & placed_bids), "no bit of either bus should place"
+
+
+@pytest.mark.mid
+def test_low_layer_abutment_stub_planner_avoids_low(tmp_path, monkeypatch):
+    """The planner-side guarantee (the wishlist-planner.md fix): an abutment
+    crossing — empty open interior between two DISTINCT abutting endpoint
+    cells — is unroutable on a LOW layer (its whole slide window lies inside
+    the two leaf footprints, zero unblocked signal tracks), so
+    low_seg_obstructed flags it and layer selection routes it over-the-cell
+    on TOP.  End-to-end: both buses land on a TOP V layer and every bit
+    places."""
+    monkeypatch.chdir(_BIG2)
+    fixture = _filtered_fixture(tmp_path, ["bus_042", "bus_002"])
+    s = _run_lines(["source tracks4top.buda", f"source {fixture}",
+                    "run_bundler", "generate_topologies",
+                    "run_planner signal_tracks",
+                    "run_nuts", "run_detailed_nuts"])
+    for w in s.bundles:
+        assert len(w.plan.seg_layers) == 1, "abutment crossing is one segment"
+        assert w.plan.seg_layers[0] in (5, 7), (
+            f"abutment crossing assigned unroutable layer "
+            f"{w.plan.seg_layers[0]} (expected a TOP V layer)")
+    assert s.nuts_result.num_overlaps == 0
+    assert s.detailed_result.num_unplaced == 0
 
 
 @pytest.mark.mid
