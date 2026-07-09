@@ -52,11 +52,13 @@ class NutsFlowMixin:
             total += length
         return per_bundle, per_layer, total, n_unplaced
 
-    def _fp_extent(self):
+    def _fp_extent(self, fp=None):
         """Floorplan coordinate extent (block edges) grown by one span each side.
         Used to clamp an untightened (INT-sentinel) slide range so the WL interval
-        stays finite.  None when the floorplan is empty."""
-        xs, ys = self.fp.get_hanan_grid()
+        stays finite.  None when the floorplan is empty.  `fp` defaults to
+        `self.fp`; the WL-envelope path passes the floorplan the topology was
+        generated against (a hier template's cell-local one)."""
+        xs, ys = (fp if fp is not None else self.fp).get_hanan_grid()
         if not xs or not ys:
             return None
         mx, Mx, my, My = min(xs), max(xs), min(ys), max(ys)
@@ -66,7 +68,7 @@ class NutsFlowMixin:
 
     _WL_SENT = 10 ** 8   # ConnTopology marks an unbounded slide with ~5e8
 
-    def _seg_slide_box(self, segs, slide_lo=None, slide_hi=None):
+    def _seg_slide_box(self, segs, slide_lo=None, slide_hi=None, fp=None):
         """Per-segment perpendicular slide box [lo, hi], with untightened
         (INT-sentinel) ranges clamped to the floorplan extent (then perp_pos).
 
@@ -75,7 +77,7 @@ class NutsFlowMixin:
         (non-NaN) — this is what NUTS honours when a dogleg was adopted
         (`nuts.cpp` slide_map; `_adopt_doglegs`), so the envelope must use the same
         window or a doglegged bundle reads as false out-of-envelope."""
-        ext = self._fp_extent()
+        ext = self._fp_extent(fp)
         SENT = self._WL_SENT
         use_ovr = (slide_lo is not None and slide_hi is not None
                    and len(slide_lo) == len(segs) and len(slide_hi) == len(segs))
@@ -105,7 +107,7 @@ class NutsFlowMixin:
             box.append((lo, hi))
         return box
 
-    def _topology_wl_interval(self, topo, slide_lo=None, slide_hi=None):
+    def _topology_wl_interval(self, topo, slide_lo=None, slide_hi=None, fp=None):
         """[lo, hi] abstract wirelength envelope from the topology's slide + span
         DOF.  Model: each ConnTopology segment's along-span = max − min over its
         junction / busterm coordinates; a busterm coordinate is fixed at its face,
@@ -124,14 +126,17 @@ class NutsFlowMixin:
               a doglegged bundle stays inside its envelope.
 
         Returns (lo, hi); (0, 0) for an empty topology.  NUTS jogs are extra wire
-        outside the topology and are reported separately, not bracketed here."""
+        outside the topology and are reported separately, not bracketed here.
+        `fp` = the floorplan the topology was generated against (default
+        `self.fp`; dump_topologies passes a pre-expansion hier bundle's
+        cell-local floorplan so the envelope is finite and honest)."""
         ct = buda.ConnTopology()
-        ct.build(topo, self.fp)
+        ct.build(topo, fp if fp is not None else self.fp)
         segs = ct.segs()
         n = len(segs)
         if n == 0:
             return (0, 0)
-        box = self._seg_slide_box(segs, slide_lo, slide_hi)
+        box = self._seg_slide_box(segs, slide_lo, slide_hi, fp)
 
         # Per-segment along-coordinate sources: (fixed_value, -1) for a busterm,
         # (None, seg_idx) for a junction riding segment seg_idx's perp position.

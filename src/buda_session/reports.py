@@ -36,20 +36,24 @@ class ReportsMixin:
         return frozenset(
             (s.start.x, s.start.y, s.end.x, s.end.y) for s in topo.segments)
 
-    def _topo_min_slide(self, topo):
+    def _topo_min_slide(self, topo, fp=None):
         """Minimum perpendicular slide (perp_hi - perp_lo) across the candidate's
         ConnSegs, via the same ConnTopology API the flexibility tests use. A value
         of 0 means a pinched/zero-freedom candidate. Returns None if connectivity
         can't be built.
 
-        A sentinel-scale return (>= `_SLIDE_SENTINEL`) means every segment's slide
-        is *unbounded* — the candidate references block faces ConnTopology can't
-        resolve against `self.fp` (e.g. a cell-level hier template before
-        `run_planner hier` expands it into absolute coordinates). The caller
-        displays that as `free`, mirroring the `--conn` detail."""
+        `fp` is the floorplan the candidate was generated against (default
+        `self.fp`) — dump_topologies resolves a pre-expansion hier bundle's
+        cell-local / depth / endpoint floorplan via `_make_topo_fp_resolver`
+        so a cell-level template shows real finite slides before
+        `run_planner hier`.  A sentinel-scale return (>= `_SLIDE_SENTINEL`)
+        means every segment's slide is still *unbounded* — the candidate
+        references block faces ConnTopology can't resolve against the given
+        floorplan.  The caller displays that as `free`, mirroring the `--conn`
+        detail."""
         try:
             ct = buda.ConnTopology()
-            ct.build(topo, self.fp)
+            ct.build(topo, fp if fp is not None else self.fp)
             slides = [cs.perp_hi - cs.perp_lo for cs in ct.segs()
                       if cs.perp_hi > cs.perp_lo]
             return min(slides) if slides else 0
@@ -69,24 +73,30 @@ class ReportsMixin:
             return (x1 <= cs.perp_pos <= x2
                     and cs.along_lo <= y2 and cs.along_hi >= y1)
 
-    def _seg_spans_block(self, cs, name, ubbox):
+    def _seg_spans_block(self, cs, name, ubbox, fp=None):
         """True iff `cs` crosses block `name`'s SOLID geometry.  Multi-rect / TEG
         blocks store their real rectangles in get_block_rects(); a segment through
         a notch/gap between them does NOT cross the block even though it crosses the
         union bbox.  Single-rect blocks have an empty rect list — fall back to the
         union bbox (which is their solid extent)."""
-        rects = self.fp.get_block_rects(name)   # [] for single-rect blocks
+        if fp is None:
+            fp = self.fp
+        rects = fp.get_block_rects(name)   # [] for single-rect blocks
         if rects:
             return any(self._seg_crosses_rect(cs, x1, y1, x2, y2)
                        for (x1, y1, x2, y2) in rects)
         return self._seg_crosses_rect(cs, ubbox.x1, ubbox.y1, ubbox.x2, ubbox.y2)
 
-    def _dump_conn_detail(self, w, cand_idx):
+    def _dump_conn_detail(self, w, cand_idx, fp=None):
         """Print per-segment connectivity for one candidate of bundle `w`:
         (1) what each seg connects to (busterms + other segs), (2) the busterms
         it passes through without tapping, (3) its perpendicular slide range, and
         (4) its net-pull preference.  Built from ConnTopology — the same view the
-        planner and NUTS consume."""
+        planner and NUTS consume.  `fp` is the floorplan the candidate was
+        generated against (default `self.fp`; a pre-expansion hier bundle's
+        cell-local / depth / endpoint floorplan when the dump resolves one)."""
+        if fp is None:
+            fp = self.fp
         cands = list(w.input.candidates)
         if not (0 <= cand_idx < len(cands)):
             print("     (no candidate to detail)")
@@ -94,13 +104,13 @@ class ReportsMixin:
         topo = cands[cand_idx]
         try:
             ct = buda.ConnTopology()
-            ct.build(topo, self.fp)
+            ct.build(topo, fp)
             segs = list(ct.segs())
         except Exception as e:
             print(f"     (connectivity unavailable: {e})")
             return
 
-        blocks = self.fp.get_all_blocks()   # [(name, Rect union-bbox)]
+        blocks = fp.get_all_blocks()   # [(name, Rect union-bbox)]
         feedthru = set(topo.feedthru_blocks)
         # Effective per-segment layer: when this candidate IS the planned/selected
         # one, the planner may have reassigned layers (or honoured a pinned
@@ -143,7 +153,7 @@ class ReportsMixin:
             for name, ubbox in blocks:
                 if name in tapped:
                     continue
-                if self._seg_spans_block(cs, name, ubbox):
+                if self._seg_spans_block(cs, name, ubbox, fp):
                     passt.append(name + ("[feedthru]" if name in feedthru else ""))
             print(f"        passthru: {', '.join(passt) if passt else '(none)'}")
 
@@ -168,20 +178,27 @@ class ReportsMixin:
         n_dup_cands = 0
         printed = 0
 
+        # Resolve each hier bundle's generation-time floorplan (cell-local /
+        # depth / endpoint) so pre-planner templates show real finite slides
+        # and honest WL envelopes instead of the unbounded-sentinel `free` —
+        # the same resolution check_connectivity uses.
+        topo_fp = self._make_topo_fp_resolver()
+
         for w in wraps:
             b = w.input.original_bundle
             cands = list(w.input.candidates)
             cand_counts.append(len(cands))
             sel = w.plan.selected_topology_index
             pinned = bool(getattr(w.input, "topology_pinned", False))
+            w_fp = topo_fp(w)
 
             # Per-candidate facts.
             rows = []          # (idx, type, wl, nsegs, passthru, min_slide)
             sigs = {}          # geom signature -> [idx,...]
             for i, c in enumerate(cands):
-                ms = self._topo_min_slide(c)
+                ms = self._topo_min_slide(c, w_fp)
                 try:
-                    lo, hi = self._topology_wl_interval(c)
+                    lo, hi = self._topology_wl_interval(c, fp=w_fp)
                 except Exception:
                     lo, hi = None, None
                 rows.append((i, c.type, c.estimated_wirelength,
@@ -246,7 +263,8 @@ class ReportsMixin:
             # --conn: per-segment connectivity / pass-through / slide / pull for
             # the selected candidate (or candidate 0 if not yet planned).
             if conn_detail:
-                self._dump_conn_detail(w, sel if sel is not None and sel >= 0 else 0)
+                self._dump_conn_detail(w, sel if sel is not None and sel >= 0 else 0,
+                                       w_fp)
 
         # Aggregate summary.
         import statistics as _st

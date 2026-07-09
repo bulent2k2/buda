@@ -111,19 +111,16 @@ pass-through candidates. The summary reports the candidate-count distribution,
 duplicate / pinched / single / pass-through bundle counts, and a shape-family
 histogram (trunk `@coord` suffixes collapsed).
 
-**Hierarchical flow — slide columns resolve after planning.** The slide-derived
-columns (`mslide` and the `wl[lo..hi]` envelope's upper bound) are computed by
-building each candidate's `ConnTopology` against the current floorplan. A
-**cell-level HBundle template** is still in cell-local coordinates before
-`run_planner hier`, so its candidates' block faces don't resolve against the
-absolute floorplan and every segment reads as unbounded — `mslide` prints `free`
-and the envelope `hi` is only a loose extent-clamped bound. `run_planner hier`
-expands each template into per-instance absolute-coordinate wrappers, after which
-these columns are finite and correct. So in the hier flow, dump **after**
-`run_planner hier` when you care about slide freedom or the WL envelope; a
-pre-planning dump is still fine for the candidate pool (types, counts, nominal
-`wl`, pass-through). In the flat flow every column is already correct right after
-`generate_topologies`.
+**Hierarchical flow — slide columns resolve against the generation-time
+floorplan.** The slide-derived columns (`mslide` and the `wl[lo..hi]` envelope)
+are computed by building each candidate's `ConnTopology` against the floorplan
+its candidates were **generated in** — for a pre-planning hier bundle the dump
+resolves the cell-local / depth / endpoint floorplan (the same resolution
+`check_connectivity` uses), so a **cell-level HBundle template** shows real
+finite slides and an honest envelope the moment candidates exist, matching the
+flat flow; after `run_planner hier` the expanded per-instance wrappers report
+the same slide magnitudes in absolute coordinates. `free` remains the display
+for a genuinely unresolvable slide (never the raw sentinel).
 
 **`--conn` detail.** For the selected candidate of each shown bundle (candidate 0
 if not yet planned), `ConnTopology` is rebuilt and each segment is printed with:

@@ -599,6 +599,32 @@ class HierMixin:
             fp_cache[cache_key] = self._build_bdb_floorplan(ep_depth)
         return fp_cache[cache_key]
 
+    def _make_topo_fp_resolver(self):
+        """Per-call resolver: bundle wrapper → the Floorplan its candidates were
+        generated against — `self.fp` for flat bundles and for the expanded
+        per-instance wrappers (absolute coords), the cell-local / depth /
+        endpoint floorplan for a pre-expansion hier bundle.  The exact
+        resolution `check_connectivity` uses (`_floorplan_for_hbundle`), shared
+        with `dump_topologies` so `mslide`/`wl[lo..hi]`/`--conn` show real
+        finite slides for a cell-level template BEFORE `run_planner hier`
+        instead of the unbounded-sentinel `free`."""
+        if self.bdb is None:
+            return lambda w: self.fp
+        fp_cache = {}
+        comps_by_name = {c.name: c for c in self.bdb.all_components()}
+        expanded_ids = {id(w)
+                        for ws in (self._hier_expansion_map or {}).values()
+                        for w in ws}
+
+        def resolve(w):
+            b = w.input.original_bundle
+            if isinstance(b, buda.HBundle) and id(w) not in expanded_ids:
+                fp = self._floorplan_for_hbundle(b, fp_cache, comps_by_name)
+                if fp is not None:
+                    return fp
+            return self.fp
+        return resolve
+
     @staticmethod
     def _clone_hbundle_with_id(b, new_id):
         """Return a shallow clone of HBundle b with id replaced by new_id."""
