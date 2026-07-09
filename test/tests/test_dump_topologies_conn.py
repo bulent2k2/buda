@@ -184,6 +184,29 @@ def test_dump_topologies_shows_wl_envelope_per_candidate():
         assert lo <= nominal + 0.5, (c.type, lo, nominal)   # tight floor <= as-generated
 
 
+def test_flat_dump_with_open_bdb_stays_on_session_fp():
+    """Codex #231: a FLAT flow's bundles are also `buda.HBundle`s, so with any
+    BDB open (e.g. a checkpoint) the resolver must NOT route them through the
+    BDB depth floorplan — their candidates were generated against `session.fp`
+    (hand-added blocks the BDB has no components for).  The dump must show the
+    same finite slides as the no-BDB flat flow, never `free`."""
+    s = _run([
+        "def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+        "open_bdb :memory:",                       # empty checkpoint BDB
+        "add_block A 0 0 100 100", "add_block B 300 20 400 120",
+        "add_bus ab[8] A.tx B.rx",
+        "run_bundler strict", "generate_topologies",
+    ])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        s.do_command("dump_topologies")
+    out = buf.getvalue()
+    assert "mslide" in out, out
+    assert "free" not in out, out   # flat candidates resolve against self.fp
+    # The direct I_H's slide is the blocks' 80-unit shared y-overlap [20..100].
+    assert re.search(r"\bI_H\s+\d+\s+\[\d+\.\.\d+\]\s+1\s+0\s+80\b", out), out
+
+
 def test_mslide_resolves_cell_local_before_planner():
     """A cell-level HBundle template is still in cell-local coordinates before
     `run_planner hier`.  dump_topologies resolves each hier bundle's
