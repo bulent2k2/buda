@@ -132,6 +132,14 @@ struct BundleRow {
     // uniform copy of its template's local solve — load_pipeline restores it
     // as a locked (pinned, never-moved) wrapper.
     bool        bu_locked = false;
+    // v19: rotation-class clone provenance. Non-empty = this row is a CLONE
+    // template synthesized for a marked cell's 90°-rotated instance class
+    // (cell_context = the virtual clone name, e.g. "alu90"); the value is
+    // the ORIGINAL template's bundle id. The clone is a routing-template
+    // identity only — it never appears in cell/component/pin tables, so
+    // GDS/DEF/Verilog interchange is unaffected. Bottom-up gates resolve
+    // the clone's marked-ness through this link.
+    std::string cloned_from;
 };
 
 struct GrpRow {
@@ -321,7 +329,10 @@ public:
     //       from a bundler replica) + bundle.bu_locked (the row is a uniform
     //       bottom-up copy of its template's local solve — restored as a
     //       locked wrapper by load_pipeline).
-    static constexpr int SCHEMA_VERSION = 18;
+    // v19 = bundle.cloned_from (rotation-class clone template provenance:
+    //       the 90°-instance class of a marked cell gets its own template,
+    //       named e.g. "alu90", linked to the original template's id).
+    static constexpr int SCHEMA_VERSION = 19;
 
     explicit BDB(const std::string& db_path);
     ~BDB();

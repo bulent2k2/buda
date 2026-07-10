@@ -592,15 +592,20 @@ class HierMixin:
         return out
 
     def _bottom_up_congruence_issues(self, cell, comps=None, ref_name=None,
-                                     cache=None):
+                                     cache=None, only=None, allow_90=True):
         """Verify every instance of `cell` is a SUPPORTED transform of the
-        reference — the precondition for bottom-up template planning, whose
-        per-instance copies handle translation plus the direction-preserving
-        orientations (S = 180°, FN/FS = axis mirrors).  A 90°/270° instance
-        (E/W/FE/FW) is geometrically detectable but swaps H↔V segments, and
-        with them the pinned per-segment layers — refused until the
-        layer-pairing policy exists (opens.md).  An instance matching NO
-        orientation is genuinely non-congruent.
+        reference — the precondition for bottom-up template planning.  An
+        instance matching NO orientation is genuinely non-congruent and
+        always an issue.  With allow_90 (the default, used at set_bottom_up
+        time) the 90° family (E/W/FE/FW) is FINE: the rotation-class split
+        at run_planner hier gives it its own clone template, whose members
+        are direction-preserving among themselves.  allow_90=False is the
+        POST-SPLIT re-check per template: every instance must then be a
+        direction-preserving transform of the group reference (S = 180°,
+        FN/FS = axis mirrors), or the placement changed under us.
+
+        `only` restricts the report to the given instance names (a clone
+        template's members — detection covers ALL instances of the cell).
 
         Returns a list of human-readable issue strings (empty = OK)."""
         orients = self._detect_instance_orients(cell, comps=comps,
@@ -608,16 +613,19 @@ class HierMixin:
                                                 cache=cache)
         issues = []
         for name in sorted(orients):
+            if only is not None and name not in only:
+                continue
             o = orients[name]
             if o is None:
                 issues.append(
                     f"{name}: subtree matches the reference under NO "
                     f"orientation (genuinely non-congruent)")
-            elif o not in self._DIR_PRESERVING:
+            elif not allow_90 and o not in self._DIR_PRESERVING:
                 issues.append(
-                    f"{name}: 90°-rotated ({o}) — bottom-up copies support "
-                    f"N/S/FN/FS; 90° swaps H↔V layers (layer pairing is a "
-                    f"planned follow-up, see opens.md)")
+                    f"{name}: 90°-rotated ({o}) relative to the group "
+                    f"reference — the rotation-class split should have "
+                    f"put it in the clone template (placement changed "
+                    f"after the split?)")
         return issues
 
     def _build_cell_local_floorplan(self, parent_comp_name):
@@ -939,6 +947,157 @@ class HierMixin:
         nb.rcv_spec_paths    = b.rcv_spec_paths
         return nb
 
+    def _bu_cell_of(self, cell_context):
+        """Real cell type behind a bundle cell_context — identity unless the
+        context is a rotation-class CLONE name (e.g. 'alu90'), in which case
+        the marked cell it was cloned for is returned.  Every bottom-up gate
+        that asks 'is this template's cell marked?' resolves through here."""
+        m = getattr(self, "_bu_clone_cells", None) or {}
+        return m.get(cell_context, cell_context)
+
+    def _bu_clone_name(self, cell):
+        """Virtual template name for `cell`'s 90°-rotation class: `<cell>90`,
+        uniquified with `_1`, `_2`, … against real cell names and every other
+        bundle cell_context (live + persisted).  A clone this session (or a
+        prior persisted run) already created for `cell` keeps its name."""
+        live = getattr(self, "_bu_clone_cells", None) or {}
+        for cname, real in live.items():
+            if real == cell:
+                return cname
+        taken, by_id = set(), {}
+        rows = self.bdb.all_bundles() if self.bdb is not None else []
+        for r in rows:
+            by_id[r.id] = r
+        for r in rows:
+            if r.cloned_from:
+                origin = by_id.get(r.cloned_from)
+                if origin is not None and origin.cell_context == cell:
+                    return r.cell_context     # persisted clone: reuse
+                continue                      # other clones get re-created
+            if r.cell_context:
+                taken.add(r.cell_context)
+        if self.bdb is not None:
+            taken |= {c.name for c in self.bdb.all_cells()}
+        for w in self.bundles:
+            if w.input.original_bundle.cell_context:
+                taken.add(w.input.original_bundle.cell_context)
+        name, i = f"{cell}90", 0
+        while name in taken:
+            i += 1
+            name = f"{cell}90_{i}"
+        return name
+
+    def _split_bottom_up_rotation_classes(self):
+        """Give each marked cell's 90°-rotated instance class its OWN
+        template — the rotation-class CLONE.  Within the 90° family
+        (W/E/FW/FE) any two instances differ by a direction-preserving
+        transform, so once the class has its own reference instance the
+        whole existing copy machinery (local solve → transform copies)
+        applies unchanged; the H↔V 'layer pairing' question disappears
+        because the clone's candidates are generated FROM the rotated
+        reference's actual cell-local floorplan and planned with real
+        per-direction layer costs.
+
+        Runs at `run_planner hier` time (marks can arrive any time before
+        planning): per marked-cell template whose instances span both
+        classes, the 90° instances move to a new HBundle (cell_context =
+        the virtual clone name from _bu_clone_name, provenance recorded in
+        self._bu_clone_cells / _bu_clone_from and persisted as
+        bundle.cloned_from, v19), their donor replicas are re-keyed to the
+        clone, and the clone's candidates are generated on the spot with
+        the last hier-generation knobs.  Idempotent: a second run finds no
+        90° instances left on any template (each template's classes are
+        internally direction-preserving) and creates nothing.
+
+        The clone is a routing-template identity only — cell/component/pin
+        tables never see it, so GDS/DEF/Verilog interchange is unaffected.
+        Returns the number of clone templates created."""
+        if self.bdb is None or not self.bundles:
+            return 0
+        bu = set(self.bdb.bottom_up_cells())
+        if not bu:
+            return 0
+        if getattr(self, "_bu_clone_cells", None) is None:
+            self._bu_clone_cells = {}
+        if getattr(self, "_bu_clone_from", None) is None:
+            self._bu_clone_from = {}
+        comps = list(self.bdb.all_components())
+        comps_by_name = {c.name: c for c in comps}
+        cell_ids = {w.input.original_bundle.id for w in self.bundles
+                    if w.input.original_bundle.cell_context}
+        replicas = {}          # template id → [replica wrappers]
+        for w in self.bundles:
+            b = w.input.original_bundle
+            if b.cell_context and b.parent_id in cell_ids and b.instances:
+                replicas.setdefault(b.parent_id, []).append(w)
+        next_id = max((w.input.original_bundle.id
+                       for w in self.bundles), default=-1) + 1
+        knobs = getattr(self, "_hier_gen_knobs", (False, False, False))
+        ocache, fp_cache = {}, {}
+        clone_names = {}       # real cell → clone name (one per cell)
+        result, made = [], 0
+        for w in self.bundles:
+            b = w.input.original_bundle
+            result.append(w)
+            if (not b.cell_context
+                    or self._bu_cell_of(b.cell_context) not in bu
+                    or b.parent_id in cell_ids          # replica
+                    or not b.instances or len(b.instances) < 2):
+                continue
+            orients = self._detect_instance_orients(
+                b.cell_context, comps, ref_name=b.instances[0], cache=ocache)
+            rot = sorted(i for i in b.instances
+                         if orients.get(i) is not None
+                         and orients[i] not in _DIR_PRESERVING)
+            if not rot:
+                continue
+            cell = self._bu_cell_of(b.cell_context)
+            cname = clone_names.get(cell)
+            if cname is None:
+                cname = clone_names[cell] = self._bu_clone_name(cell)
+                self._bu_clone_cells[cname] = cell
+            clone = self._clone_hbundle_with_id(b, next_id)
+            next_id += 1
+            clone.cell_context = cname
+            clone.instances = rot
+            b.instances = [i for i in b.instances if i not in rot]
+            # Move the 90°-class donors (replica wrappers) to the clone;
+            # the clone's own nets are its reference instance's donor nets.
+            for r in replicas.get(b.id, []):
+                rb = r.input.original_bundle
+                if rb.instances and rb.instances[0] in rot:
+                    rb.parent_id = clone.id
+                    rb.cell_context = cname
+                    if rb.instances[0] == rot[0]:
+                        clone.net_names = list(rb.net_names)
+            self._bu_clone_from[clone.id] = b.id
+            nw = buda.BundleWrapper()
+            nw.input.original_bundle = clone
+            nw.input.width = w.input.width
+            result.append(nw)
+            made += 1
+            print(f"[BottomUp] cell '{cell}': 90°-rotated instance class "
+                  f"({', '.join(rot)}) split into clone template "
+                  f"'{cname}' (bundle {clone.id}, ref {rot[0]})")
+            # Candidates for the clone: generated from the ROTATED
+            # reference's actual cell-local floorplan — real per-direction
+            # layer costs replace any H<->V layer-pairing mapping.
+            self._generate_hier_topo_one(nw, knobs[0], knobs[1],
+                                         fp_cache, comps_by_name, knobs[2])
+        if not made:
+            return 0
+        self.bundles = result
+        self._hier_bundles_orig = list(self.bundles)
+        # Re-persist bundles + candidates: _persist_topologies rewrites the
+        # bundle rows from self.bundles (clone rows carry cloned_from via
+        # _bu_clone_from, re-keyed replicas their new parent, templates
+        # their shrunken instance lists) and then the candidate pools.
+        nt = self._persist_topologies()
+        if nt:
+            print(f"[BDB] persisted the clone template(s) + "
+                  f"{nt} candidate topolog{'y' if nt == 1 else 'ies'}.")
+        return made
+
     def _plan_bottom_up_templates(self, iterations):
         """Stage (a) of bottom-up template planning: solve each marked cell's
         cell-local template bundles ONCE in a dedicated cell-local planner,
@@ -975,7 +1134,7 @@ class HierMixin:
         for w in self.bundles:
             b = w.input.original_bundle
             if (not b.cell_context or not b.instances
-                    or b.cell_context not in bu_cells
+                    or self._bu_cell_of(b.cell_context) not in bu_cells
                     or b.parent_id in cell_ids       # replica
                     or not w.input.candidates):
                 continue
@@ -1089,7 +1248,7 @@ class HierMixin:
         for w in templates:
             b = w.input.original_bundle
             if (not b.cell_context or not b.instances
-                    or b.cell_context not in bu_cells
+                    or self._bu_cell_of(b.cell_context) not in bu_cells
                     or b.parent_id in cell_ids            # replica
                     or not w.input.topology_pinned
                     or not w.input.pinned_seg_layers
@@ -1121,10 +1280,13 @@ class HierMixin:
             for ts in local.segments:
                 by_tid.setdefault(ts.bundle_id, []).append(ts)
             # Per-instance orientations relative to the template's reference
-            # (whose cell-local layout the local solve just placed).
+            # (whose cell-local layout the local solve just placed).  `cell`
+            # may be a rotation-class clone name — detection needs the REAL
+            # cell type (the clone's instances are dir-preserving relative
+            # to the clone reference, so the copies transform as usual).
             ref_inst = wrappers[0].input.original_bundle.instances[0]
-            orients = self._detect_instance_orients(cell, comps.values(),
-                                                    ref_name=ref_inst)
+            orients = self._detect_instance_orients(
+                self._bu_cell_of(cell), comps.values(), ref_name=ref_inst)
             ref_c = comps.get(ref_inst)
             cw = int(round(ref_c.x2 - ref_c.x1)) if ref_c else 0
             ch = int(round(ref_c.y2 - ref_c.y1)) if ref_c else 0
@@ -1181,7 +1343,8 @@ class HierMixin:
         for tid, iws in exp_map.items():
             locked = [iw for iw in iws
                       if iw.hier.locked
-                      and iw.input.original_bundle.cell_context in bu_cells]
+                      and self._bu_cell_of(
+                          iw.input.original_bundle.cell_context) in bu_cells]
             if locked:
                 cands.append((tid, locked, frozenset(id(x) for x in locked)))
         out, seen = [], set()
@@ -1269,8 +1432,8 @@ class HierMixin:
             cells.setdefault(cell, []).append(iws)
         for cell in sorted(cells):
             ref_name = cells[cell][0][0].input.original_bundle.instances[0]
-            orients = self._detect_instance_orients(cell, comps.values(),
-                                                    ref_name=ref_name)
+            orients = self._detect_instance_orients(
+                self._bu_cell_of(cell), comps.values(), ref_name=ref_name)
             rc = comps.get(ref_name)
             rcw = round(rc.x2 - rc.x1, 6) if rc else 0.0
             rch = round(rc.y2 - rc.y1, 6) if rc else 0.0
@@ -1352,20 +1515,46 @@ class HierMixin:
         return out
 
     def _bottom_up_placed_instances(self):
-        """{cell: [placed ComponentRows]} for every marked cell with >= 2
+        """{group: [placed ComponentRows]} for every marked cell with >= 2
         placed instances — the placement-stage unit of work (no bundler,
-        busterms, or routing required)."""
+        busterms, or routing required).  PARTITIONED by rotation class:
+        direction-preserving instances group under the real cell name, the
+        90° family under the cell's clone name (_bu_clone_name — the same
+        deterministic name the planner-time split will use, registered in
+        _bu_clone_cells so _bu_cell_of resolves it here too).  A solo class
+        (one instance) has nothing to compare or align and is dropped, like
+        a single-instance cell before."""
         out = {}
         if self.bdb is None:
             return out
         bu = set(self.bdb.bottom_up_cells())
         if not bu:
             return out
-        for c in self.bdb.all_components():
+        comps = self.bdb.all_components()
+        by_cell = {}
+        for c in comps:
             if c.cell in bu and c.x1 >= 0:
-                out.setdefault(c.cell, []).append(c)
-        return {cell: sorted(insts, key=lambda c: c.name)
-                for cell, insts in out.items() if len(insts) >= 2}
+                by_cell.setdefault(c.cell, []).append(c)
+        ocache = {}
+        for cell, insts in by_cell.items():
+            insts.sort(key=lambda c: c.name)
+            if len(insts) < 2:
+                continue
+            orients = self._detect_instance_orients(
+                cell, comps, ref_name=insts[0].name, cache=ocache)
+            rot = [c for c in insts
+                   if orients.get(c.name) is not None
+                   and orients[c.name] not in self._DIR_PRESERVING]
+            keep = [c for c in insts if c not in rot]
+            if len(keep) >= 2:
+                out[cell] = keep
+            if len(rot) >= 2:
+                cname = self._bu_clone_name(cell)
+                if getattr(self, "_bu_clone_cells", None) is None:
+                    self._bu_clone_cells = {}
+                self._bu_clone_cells[cname] = cell
+                out[cname] = rot
+        return out
 
     def _check_template_tracks_placement(self, verbose=True):
         """Placement-stage track-alignment check: no routing needed, so it
@@ -1420,8 +1609,12 @@ class HierMixin:
         for cell in sorted(by_cell):
             insts = by_cell[cell]
             ref = insts[0]
+            # `cell` may be a rotation-class group key (clone name) —
+            # detection needs the real cell type; within the group all
+            # relative orients are direction-preserving.
             orients = self._detect_instance_orients(
-                cell, self.bdb.all_components(), ref_name=ref.name)
+                self._bu_cell_of(cell), self.bdb.all_components(),
+                ref_name=ref.name)
             aligned, misaligned = [ref.name], {}
             for c in insts[1:]:
                 issues = []
@@ -1627,12 +1820,21 @@ class HierMixin:
                      for _, e, sign, anc, skip in recs], offside)
 
         applied = {}   # instance name → (dx, dy, cell) actually moved
+        # Anchor semantics need EVERY placed instance of a marked cell —
+        # including solo-class instances that get no alignment group of
+        # their own — so the marked set comes from the BDB, not by_cell.
+        bu_all = set(self.bdb.bottom_up_cells())
+
+        def all_marked_names():
+            return {c.name for c in self.bdb.all_components()
+                    if c.cell in bu_all and c.x1 >= 0}
+
         # Enclosing cells before enclosed ones, and FRESH coordinates per
         # cell: a parent's nudge drags its whole subtree, so a nested cell's
         # deltas must never come from a pre-move snapshot.  Order by marked-
         # ancestor nesting level (not instance depth — a child cell may also
         # have standalone top-level instances that would tie the depths).
-        marked0 = {c.name for cs in by_cell.values() for c in cs}
+        marked0 = all_marked_names()
 
         def nest_level(c):
             parts = c.name.split("/")
@@ -1647,19 +1849,26 @@ class HierMixin:
             insts = snap.get(cell, [])
             if len(insts) < 2:
                 continue
-            marked = {c.name for cs in snap.values() for c in cs}
+            marked = all_marked_names()
             def inside_marked(name):
                 parts = name.split("/")
                 return any("/".join(parts[:k]) in marked
                            for k in range(1, len(parts)))
             movable = {c.name for c in insts if not inside_marked(c.name)}
+            # `cell` may be a rotation-class group key (clone name):
+            # detection needs the real cell type, and only THIS group's
+            # members matter (the other class legitimately sits at 90°
+            # relative to this group's reference).
+            group = {c.name for c in insts}
             orients = self._detect_instance_orients(
-                cell, self.bdb.all_components(), ref_name=insts[0].name)
+                self._bu_cell_of(cell), self.bdb.all_components(),
+                ref_name=insts[0].name)
             unsupported = sorted(
                 n for n, o in orients.items()
-                if o is None or o not in self._DIR_PRESERVING)
+                if n in group
+                and (o is None or o not in self._DIR_PRESERVING))
             for n in unsupported:
-                print(f"WARNING: align_bottom_up: {n} of cell '{cell}' has "
+                print(f"WARNING: align_bottom_up: {n} of group '{cell}' has "
                       f"unsupported orientation ({orients[n]}) — left "
                       f"unmoved")
 
@@ -1826,7 +2035,7 @@ class HierMixin:
             # verdict used (ref maps to 'N', so orients[inst] IS the
             # ref→sibling transform).
             orients = self._detect_instance_orients(
-                cell, comps.values(), ref_name=v['ref'])
+                self._bu_cell_of(cell), comps.values(), ref_name=v['ref'])
             for inst, iw in by_inst.items():
                 if inst == v['ref'] or inst in v['misaligned']:
                     continue        # ref solves; misaligned solve globally
@@ -1897,18 +2106,24 @@ class HierMixin:
             if b.id in replica_wrapper_of:
                 continue   # replica: covered by its template's expansion
             # Bottom-up cells: copies must be exact transforms, and only the
-            # direction-preserving orientations (N/S/FN/FS) keep the pinned
-            # per-segment layers valid — hard error otherwise, since uniform
-            # copies are the whole contract.  Checked here (not only at
-            # set_bottom_up time) because placement may have changed.
-            if b.cell_context in bottom_up and b.cell_context not in checked_bu:
+            # direction-preserving orientations (N/S/FN/FS) RELATIVE TO THE
+            # GROUP REFERENCE keep the pinned per-segment layers valid —
+            # hard error otherwise, since uniform copies are the whole
+            # contract.  The rotation-class split (which ran just before
+            # this expansion) moved every 90°-family instance to its own
+            # clone template whose members are direction-preserving among
+            # themselves, so a violation here means the placement changed
+            # under us or an instance matches no orientation at all.
+            if (self._bu_cell_of(b.cell_context) in bottom_up
+                    and b.cell_context not in checked_bu):
                 checked_bu.add(b.cell_context)
                 issues = self._bottom_up_congruence_issues(
-                    b.cell_context, comps.values(),
-                    ref_name=b.instances[0], cache=ocache)
+                    self._bu_cell_of(b.cell_context), comps.values(),
+                    ref_name=b.instances[0], cache=ocache,
+                    only=set(b.instances), allow_90=False)
                 if issues:
                     raise RuntimeError(
-                        f"run_planner hier: bottom-up cell "
+                        f"run_planner hier: bottom-up template "
                         f"'{b.cell_context}' has unsupported instances: "
                         f"{'; '.join(issues[:4])}")
             # Per-instance orientation, GEOMETRICALLY detected against the
@@ -1916,10 +2131,11 @@ class HierMixin:
             # its cell-local layout).  Detected instances get the full
             # transform — the fix for the old translation-only silent
             # mis-transform; an undetectable instance falls back to
-            # translation with a warning.
+            # translation with a warning.  cell_context may be a rotation-
+            # class clone name — detection needs the real cell type.
             orients = self._detect_instance_orients(
-                b.cell_context, comps.values(), ref_name=b.instances[0],
-                cache=ocache)
+                self._bu_cell_of(b.cell_context), comps.values(),
+                ref_name=b.instances[0], cache=ocache)
             ref_c = comps.get(b.instances[0])
             cw = int(round(ref_c.x2 - ref_c.x1)) if ref_c else 0
             ch = int(round(ref_c.y2 - ref_c.y1)) if ref_c else 0
@@ -1998,9 +2214,10 @@ class HierMixin:
                 # and are never rip-up victims or replan/negotiate targets.
                 # Requires a full pin — a template the local solve could not
                 # plan stays unlocked rather than freezing an unplanned state.
-                new_w.hier.locked = (b.cell_context in bottom_up
-                                     and w.input.topology_pinned
-                                     and bool(w.input.pinned_seg_layers))
+                new_w.hier.locked = (
+                    self._bu_cell_of(b.cell_context) in bottom_up
+                    and w.input.topology_pinned
+                    and bool(w.input.pinned_seg_layers))
                 expansion_map[b.id].append(new_w)
                 wrapper_at[(b.id, inst_name)] = new_w
                 result.append(new_w)

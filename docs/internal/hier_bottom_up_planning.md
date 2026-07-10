@@ -27,7 +27,7 @@ bbox. Verified gaps relative to what bottom-up needs:
 | # | Gap | Where |
 |---|-----|-------|
 | G1 | **No shared decision across instances.** `optimize_topologies` scores each expanded instance wrapper independently; only explicit pinning (`topology_pinned` + `pinned_seg_layers`, propagated at expansion, `hier.py:745-748`) forces a shared candidate index, and layer assignment is always per-wrapper. | `src/buda_cmds/planner_cmds.py:112-124`, `src/congestion_planner.cpp` |
-| G2 | ~~Instance transform is translation-only.~~ **CLOSED 2026-07-10 (orientation-aware copy, see §7):** the expansion now detects each instance's orientation geometrically and applies `transform_topology` (all 8 orients); bottom-up copies transform NUTS/DNUTS results for the direction-preserving set `N/S/FN/FS`; 90°/270° instances of *marked* cells remain refused (H↔V layer pairing follow-on, opens.md). | `src/topology.cpp` (`transform_topology`), `src/nuts.cpp` (`transform_track_segment`), `src/detailed_nuts.cpp` (`transform_net_*`), `hier.py` (`_detect_instance_orients`) |
+| G2 | ~~Instance transform is translation-only.~~ **CLOSED 2026-07-10 (orientation-aware copy + rotation-class clones, see §7):** the expansion detects each instance's orientation geometrically and applies `transform_topology` (all 8 orients); bottom-up copies transform NUTS/DNUTS results for the direction-preserving set `N/S/FN/FS`; a marked cell's 90°/270° family gets its own rotation-class CLONE template (`<cell>90`, v19 `bundle.cloned_from`) solved once per class — only a no-orientation-matches instance is refused. | `src/topology.cpp` (`transform_topology`), `src/nuts.cpp` (`transform_track_segment`), `src/detailed_nuts.cpp` (`transform_net_*`), `hier.py` (`_detect_instance_orients`, `_split_bottom_up_rotation_classes`) |
 | G3 | ~~Abstract NUTS enforces keepouts on non-TOP layers only~~ **Corrected after PR review (re-verified in code): NOT a gap for explicitly layer-tagged zones.** `Floorplan::low_layer_keepouts` returns **all user zones unfiltered** (`result = keepouts_` first) and `keepout_occupied` matches each zone's `layer_ids` against the segment's layer — so a user/derived zone explicitly tagged with a TOP layer *is* enforced by the abstract solve today. The `!is_top` filter in `NUTSEngine::low_keepouts` only scopes the *implicit leaf-footprint* zones (LOW-only by design). The derived bottom-up zones of §4.3 are always explicitly layer-tagged, so no NUTS change is needed for them. | `src/topology.cpp` (`low_layer_keepouts`), `src/nuts_geom.h` (`keepout_occupied`), `src/nuts.cpp:1019-1026` |
 | G4 | **No cross-instance track-phase check.** Track centres are a pure function of the layer's absolute `(origin, unit_pitch, slots)` plus absolute-rect overrides/keepouts; nothing compares what two translated instance windows actually see. | `src/routing_grid.cpp:50-143` |
 | G5 | **No template-level routing persistence.** Routing is persisted per expanded instance (`_add_expanded_bundle` stores only the selected topology per instance); the `cell` table has no attributes for flags like *bottom-up*, and `BDB::_set_meta` is not bound to Python. | `src/buda_session/persist.py`, `src/bdb.cpp`, `src/bind_db.cpp:385` |
@@ -261,6 +261,29 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
   direction).  The plain top-down expansion applies the correct geometric
   transform for all 8 orientations (90° instances get pinned per-segment
   layers dropped with a warning).
+
+  **AS-BUILT UPDATE 2 (2026-07-10, rotation-class clone templates):** 90°
+  instances of MARKED cells are now supported too.  Instead of an H↔V
+  layer-pairing map, `_split_bottom_up_rotation_classes` (hier.py, run at
+  the start of `run_planner hier`) gives each marked cell's 90° family its
+  own CLONE template: a new HBundle with `cell_context = <cell>90`
+  (`_bu_clone_name` — uniquified against real cells and other contexts,
+  reused across re-runs), the class instances moved onto it, their donor
+  replicas re-keyed, and candidates generated from the rotated class
+  reference's actual cell-local floorplan (`_generate_hier_topo_one` with
+  the remembered generation knobs).  Within the class every instance is a
+  direction-preserving transform of the class reference (E∘W⁻¹ ∈
+  {N,S,FN,FS}), so the local solve → transform-copy machinery applies
+  verbatim; each class is solved once and copied within itself.  Every
+  bottom-up gate resolves the clone's marked-ness via `_bu_cell_of`
+  (clone context → real cell), and `check_template_tracks` (both modes) +
+  `align_bottom_up` group per rotation class
+  (`_bottom_up_placed_instances` partitions by detected class).
+  Persistence: `bundle.cloned_from` (schema v19) links clone → original
+  template; `load_pipeline` rebuilds the registry.  The clone is a
+  routing-template identity only — never in cell/component/pin tables, so
+  GDS/DEF/Verilog interchange is untouched.  Only a
+  no-orientation-matches instance remains refused.
 - **G3 (TOP-layer NUTS keepouts)** — re-verified after PR review and found
   to be a NON-gap for explicitly layer-tagged zones (§1); §4.3 needs no NUTS
   change, only the layer-tagging convention on the derived zones.
