@@ -28,10 +28,10 @@ bbox. Verified gaps relative to what bottom-up needs:
 |---|-----|-------|
 | G1 | **No shared decision across instances.** `optimize_topologies` scores each expanded instance wrapper independently; only explicit pinning (`topology_pinned` + `pinned_seg_layers`, propagated at expansion, `hier.py:745-748`) forces a shared candidate index, and layer assignment is always per-wrapper. | `src/buda_cmds/planner_cmds.py:112-124`, `src/congestion_planner.cpp` |
 | G2 | **Instance transform is translation-only.** `offset_topology(t, dx, dy, inst_name)` shifts and name-qualifies; `component.orient` (which the BDB *does* carry, incl. `rotate_comp`/`flip_comp` composition) is never consulted. A rotated/mirrored instance would receive geometrically wrong copies. | `src/topology.cpp:30-75`, `hier.py:709-737` |
-| G3 | **Abstract NUTS enforces keepouts on non-TOP layers only** (`NUTSEngine::low_keepouts` filters `!is_top`). A keepout on a TOP layer — exactly where higher-level bundles route — is invisible to the abstract solve (planner band capacity and DNUTS do honor it). | `src/nuts.cpp:1019-1026` |
+| G3 | ~~Abstract NUTS enforces keepouts on non-TOP layers only~~ **Corrected after PR review (re-verified in code): NOT a gap for explicitly layer-tagged zones.** `Floorplan::low_layer_keepouts` returns **all user zones unfiltered** (`result = keepouts_` first) and `keepout_occupied` matches each zone's `layer_ids` against the segment's layer — so a user/derived zone explicitly tagged with a TOP layer *is* enforced by the abstract solve today. The `!is_top` filter in `NUTSEngine::low_keepouts` only scopes the *implicit leaf-footprint* zones (LOW-only by design). The derived bottom-up zones of §4.3 are always explicitly layer-tagged, so no NUTS change is needed for them. | `src/topology.cpp` (`low_layer_keepouts`), `src/nuts_geom.h` (`keepout_occupied`), `src/nuts.cpp:1019-1026` |
 | G4 | **No cross-instance track-phase check.** Track centres are a pure function of the layer's absolute `(origin, unit_pitch, slots)` plus absolute-rect overrides/keepouts; nothing compares what two translated instance windows actually see. | `src/routing_grid.cpp:50-143` |
 | G5 | **No template-level routing persistence.** Routing is persisted per expanded instance (`_add_expanded_bundle` stores only the selected topology per instance); the `cell` table has no attributes for flags like *bottom-up*, and `BDB::_set_meta` is not bound to Python. | `src/buda_session/persist.py`, `src/bdb.cpp`, `src/bind_db.cpp:385` |
-| G6 | **No API to inject fixed occupancy into NUTS** other than Floorplan `KeepoutZone`s (which inherit G3). The planner has `inject_band_demand` but that is soft demand, not a hard blockage. | `src/nuts.cpp:1237-1255`, `src/congestion_planner.h:212-214` |
+| G6 | **No API to inject fixed occupancy into NUTS** other than Floorplan `KeepoutZone`s. The planner has `inject_band_demand` but that is soft demand, not a hard blockage. | `src/nuts.cpp:1237-1255`, `src/congestion_planner.h:212-214` |
 
 Stale-doc items in HIER_TOPOLOGY.md (to fix in a doc-only commit alongside
 this work): file map points at monolithic `buda_cli.py` (now
@@ -67,7 +67,7 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
 - `set_bottom_up <cell> [on|off]` — persisted in the BDB so `load_pipeline`
   and the Floorplanner see it.
 - `check_template_tracks [on_mismatch stop|independent]` — report-style
-  command (like `check_connectivity`); its verdict is cached on the session
+  command (like `check_design`, né `check_connectivity`); its verdict is cached on the session
   and consumed by `run_detailed_nuts`. If the user never runs it,
   `run_detailed_nuts` runs it implicitly for bottom-up cells (fail-safe).
 - All existing commands keep their semantics for unmarked cells; a design
@@ -131,15 +131,23 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
    - **Floorplan/grid keepout mirror:** each copied segment also becomes a
      per-layer `KeepoutZone` (span × occupied width) via the existing
      `add_keepout_zone` + `RoutingGrid.add_keepout` path, so the **planner**
-     (band capacity — already all-layer) and **DNUTS** (signal-track
-     filtering + `cull_keepout_crossers`) see the same blockage with zero new
-     code in those stages. These zones are tagged as derived (auto-cleared
-     and regenerated on re-run, never persisted as user keepouts).
-   - **Fix G3** so the mirror also protects TOP layers in any *subsequent*
-     abstract NUTS pass (`run_nuts_on_layer`, ripup trials): extend
-     `low_keepouts()` to include TOP-layer zones that are explicitly
-     layer-tagged (leaf-cell implicit zones stay LOW-only, preserving today's
-     behavior for unmarked designs).
+     (band capacity — already all-layer), **DNUTS** (signal-track filtering +
+     `cull_keepout_crossers`), and the **verifier** (`verify.cpp`'s
+     `keepout_zones()` feeding `KEEPOUT_CROSS`, the fourth consumer added by
+     PR #237) see the same blockage with zero new code in those stages.
+     Conventions per the keepout-model audit: always **explicitly
+     layer-tagged** (never empty `layer_ids`, which means all-layers), and
+     registered through the direct `RoutingGrid.add_keepout` path — NOT via
+     `_install_leaf_keepouts`, whose per-grid-object guard will not re-sync
+     zones added after it has run. These zones are tagged as derived
+     (auto-cleared and regenerated on re-run, never persisted as user
+     keepouts).
+   - **No abstract-NUTS change needed for the mirror** (corrected G3, see
+     §1): `low_layer_keepouts` already passes user zones through unfiltered
+     and `keepout_occupied` matches per-zone `layer_ids` — an explicitly
+     TOP-tagged derived zone is enforced by any *subsequent* abstract pass
+     (`run_nuts_on_layer`, ripup trials) today. Only the implicit
+     leaf-footprint zones are LOW-only, by design, and stay that way.
 4. **Ordering inside one `run_nuts`:** local solves first, copies injected,
    then the normal per-layer global solve runs for everything else. Bottom-up
    segments never appear as free segments in the global solve.
@@ -147,7 +155,7 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
 ## 5. Stage (c) — `check_template_tracks` + DNUTS copy
 
 **Where:** new command in `verify_viz_cmds.py`, helper in `ReportsMixin`
-(mirroring `check_connectivity`); a small C++ helper beside
+(mirroring `check_design`); a small C++ helper beside
 `RoutingGrid`/`verify` for the track enumeration.
 
 1. **What "same signal tracks" means.** For each bottom-up cell, for each
@@ -215,8 +223,9 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
   existing top-down expansion (which silently mis-transforms today).
   Full orientation-aware `offset_topology` (rotate/mirror candidates + NUTS
   /DNUTS copies) is a separable follow-on (resolved decision Q1).
-- **G3 (TOP-layer NUTS keepouts)** — fixed as part of §4.3; also closes a
-  latent hole for plain flat-flow users who declare TOP-layer keepouts.
+- **G3 (TOP-layer NUTS keepouts)** — re-verified after PR review and found
+  to be a NON-gap for explicitly layer-tagged zones (§1); §4.3 needs no NUTS
+  change, only the layer-tagging convention on the derived zones.
 - **HIER_TOPOLOGY.md refresh** — doc-only commit fixing the stale items in §1.
 
 ## 8. Test plan
@@ -243,7 +252,7 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
    planner errors out.
 7. **Persistence round-trip:** run flow, `save_bdb`, `load_pipeline expanded`
    in a fresh session → flags, template selection, copies (with provenance)
-   restored; `check_connectivity` clean.
+   restored; `check_design` clean.
 8. **No-regression:** full existing fast tier; a design with no
    `set_bottom_up` produces byte-identical `route_snapshot`.
 
@@ -258,8 +267,8 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
    `test/tests/test_hier_bottom_up.py`).
 2. Planner: local template solve + pin broadcast + `hier.locked` +
    commit-first ordering + ladder/ripup exclusions.
-3. NUTS: local solve + copy + `add_fixed_segments` + derived keepout mirror +
-   G3 fix.
+3. NUTS: local solve + copy + `add_fixed_segments` + derived keepout mirror
+   (explicitly layer-tagged; no NUTS keepout change needed — corrected G3).
 4. `check_template_tracks` + verdict caching.
 5. DNUTS: reference-instance solve + copy + `on_mismatch` policies + bit-level
    keepout refinement.
@@ -281,8 +290,8 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
 - **Q3 — Keepout model: fixed segments + keepout mirror.** Copies are
   injected into NUTS as immovable pre-placed segments (exact widths,
   same-bundle sharing semantics preserved); a derived `KeepoutZone` mirror
-  feeds the planner and DNUTS; G3 fixed for explicitly layer-tagged zones
-  (§4.3).
+  feeds the planner, DNUTS, and the verifier; zones explicitly layer-tagged
+  (no NUTS change needed — G3 corrected, §1/§4.3).
 - **Q4 — Keepout scope: bottom-up-marked cells only.** Unmarked cells keep
   today's top-down demand-reservation behavior; zero regression for
   existing hier flows. Generalizing to all cells stays a possible future

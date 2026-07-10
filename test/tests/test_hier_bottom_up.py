@@ -162,7 +162,26 @@ def test_congruence_flags_rotated_hier_instance_via_geometry():
     assert comps["proc_i2"].orient == "N"   # precondition for this test
     s = _bare_session(db)
     issues = s._bottom_up_congruence_issues("proc_cell")
-    assert issues and "child placement differs" in issues[0]
+    assert issues and "subtree differs" in issues[0]
+
+
+def test_congruence_flags_moved_grandchild():
+    """The comparison walks the FULL subtree: a moved grandchild leaves the
+    outline and the direct children matching, so a one-level check would
+    pass — and the translation-only copies would be wrong (PR review #1)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf_cell", 30, 30)
+    db.add_cell("mid_cell", 100, 100)
+    db.add_cell("top_cell", 300, 200)
+    db.add_inst_to_cell("mid_cell", "l_i", "leaf_cell", 10, 10)
+    db.add_inst_to_cell("top_cell", "m_i", "mid_cell", 50, 50)
+    db.add_inst("T1", "top_cell", "", 0, 0)
+    db.add_inst("T2", "top_cell", "", 400, 0)
+    s = _bare_session(db)
+    assert s._bottom_up_congruence_issues("top_cell") == []
+    db.move_comp("T2/m_i/l_i", 475, 65)      # grandchild of T2 only
+    issues = s._bottom_up_congruence_issues("top_cell")
+    assert issues and "subtree differs" in issues[0] and "m_i/l_i" in issues[0]
 
 
 # ── set_bottom_up command ─────────────────────────────────────────────────────

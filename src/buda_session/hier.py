@@ -348,11 +348,15 @@ class HierMixin:
         per-instance copies are translation-only (offset_topology).
 
         Checks, per instance: identity orientation 'N', equal outline
-        dimensions, and identical child placement relative to the instance
-        origin. The geometric child comparison matters because rotate_comp /
+        dimensions, and an identical FULL SUBTREE — every descendant matched
+        by path suffix on (cell type, orient, bbox relative to the instance
+        origin). The geometric comparison matters because rotate_comp /
         flip_comp on a *hierarchical* block rewrite the children's absolute
         bboxes and deliberately keep orient='N' — the orient token alone
-        cannot detect such an instance.
+        cannot detect such an instance; the full-depth walk matters because
+        a moved GRANDCHILD leaves outline + direct children matching, and
+        the per-descendant orient matters because a rotated *square* leaf
+        descendant leaves the geometry matching too.
 
         Returns a list of human-readable issue strings (empty = congruent).
         """
@@ -372,10 +376,20 @@ class HierMixin:
             return (round(c.x2 - c.x1, 3), round(c.y2 - c.y1, 3))
 
         def shape(inst):
-            return {k.name.rsplit('/', 1)[-1]:
-                    (round(k.x1 - inst.x1, 3), round(k.y1 - inst.y1, 3),
-                     round(k.x2 - inst.x1, 3), round(k.y2 - inst.y1, 3))
-                    for k in by_parent.get(inst.id, [])}
+            # Full subtree, keyed by path suffix relative to the instance.
+            out, stack, prefix = {}, [inst], inst.name + "/"
+            while stack:
+                node = stack.pop()
+                for k in by_parent.get(node.id, []):
+                    rel = (k.name[len(prefix):]
+                           if k.name.startswith(prefix) else k.name)
+                    out[rel] = (k.cell, k.orient,
+                                round(k.x1 - inst.x1, 3),
+                                round(k.y1 - inst.y1, 3),
+                                round(k.x2 - inst.x1, 3),
+                                round(k.y2 - inst.y1, 3))
+                    stack.append(k)
+            return out
 
         ref = insts[0]
         ref_shape = shape(ref)
@@ -389,7 +403,7 @@ class HierMixin:
                 bad = (sorted(set(ref_shape) ^ set(s))
                        or sorted(k for k in ref_shape
                                  if s.get(k) != ref_shape[k]))
-                issues.append(f"{c.name}: child placement differs from "
+                issues.append(f"{c.name}: subtree differs from "
                               f"{ref.name} (e.g. {', '.join(bad[:3])})")
         return issues
 
@@ -822,6 +836,7 @@ class HierMixin:
         expansion_map = {}  # original bundle id → [expanded wrappers]
         wrapper_at = {}     # (template id, instance path) → expanded wrapper
         checked_bu = set()
+        warned_orient = set()
         for w in bundles:
             b = w.input.original_bundle
             if not b.cell_context or not b.instances:
@@ -851,8 +866,12 @@ class HierMixin:
                     continue
                 # For non-bottom-up cells a rotated/mirrored instance is only
                 # a quality risk (each instance is planned separately), so
-                # warn rather than error.
-                if parent.orient != "N" and parent.cell not in bottom_up:
+                # warn rather than error — once per instance, not per
+                # (bundle × instance): a rotated instance shared by many
+                # bundles would otherwise repeat the identical line.
+                if (parent.orient != "N" and parent.cell not in bottom_up
+                        and inst_name not in warned_orient):
+                    warned_orient.add(inst_name)
                     print(f"WARNING: instance {inst_name} has orientation "
                           f"{parent.orient}; hier expansion is translation-"
                           f"only — copied topologies may be mis-transformed")

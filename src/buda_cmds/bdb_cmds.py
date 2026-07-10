@@ -392,13 +392,14 @@ def cmd_set_bottom_up(session, cmd, args, cmd_line):
         print(f"Error: set_bottom_up mode must be on|off, got '{args[1]}'")
         return
     on = mode == "on"
-    insts = [c for c in session.bdb.all_components() if c.cell == cell]
+    comps = session.bdb.all_components()
+    insts = [c for c in comps if c.cell == cell]
     if on:
         # Bottom-up copies are translation-only, so every instance must be a
         # pure translated copy: identity orientation, equal outline, identical
-        # child placement (rotate/flip of a hierarchical block rewrites the
+        # full subtree (rotate/flip of a hierarchical block rewrites the
         # children while keeping orient='N', so geometry must be compared).
-        issues = session._bottom_up_congruence_issues(cell)
+        issues = session._bottom_up_congruence_issues(cell, comps)
         if issues:
             shown = "; ".join(issues[:4])
             more = "" if len(issues) <= 4 else f" (+{len(issues) - 4} more)"
