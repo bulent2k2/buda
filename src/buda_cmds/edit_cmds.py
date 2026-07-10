@@ -174,7 +174,7 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
     # (uid-deduped, like generate_more_topologies) and close the
     # session; 'pin' also selects it.  A not-ok verdict is a WARNING,
     # not a rejection: the user candidate stays visible to
-    # check_connectivity, exactly like generation's never-strand rule.
+    # check_design, exactly like generation's never-strand rule.
     if session._edit_session() is None: return
     w, topo = session._edit_w, session._edit_topo
     if not topo.segments:
@@ -190,7 +190,7 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
     if not v.ok():
         session._edit_report(v)
         print("  Warning: committing a not-clean topology — "
-              "check_connectivity will report it.")
+              "check_design will report it.")
     uid = buda.topo_uid(topo)
     pool = list(w.input.candidates)
     existing = next((i for i, c in enumerate(pool)

@@ -50,7 +50,7 @@ relative to the sourcing script's directory.
 |---|---|---|
 | `-h`, `--help` | — | Print usage (auto-generated from the flags below) and exit. |
 | `-nv`, `--no-viz` | off | Skip `visualize` / `visualize_topologies` commands so no GUI window opens. Use for batch runs, tests, and CI. The full pipeline still runs and all logs are written. |
-| `--verbose-conn` | off | Make `check_connectivity` print **every** per-bit violation individually. By default per-bit violations are collapsed into one line per (bundle, topology, kind, locus) group with a total — on a large design this turns tens of thousands of lines into a few hundred. |
+| `--verbose-conn` | off | Make `check_design` (alias `check_connectivity`) print **every** per-bit violation individually. By default per-bit violations are collapsed into one line per (bundle, topology, kind, locus) group with a total — on a large design this turns tens of thousands of lines into a few hundred. |
 | `--ipc-verbose` | off | Surface the `buda_viz` ↔ `def_viz` IPC socket **status** chatter (`[viz_ipc] listening on …`, `[buda_viz] IPC session=… connected=…`, `[buda_viz] IPC timer started …`). These are debugging lines and are hidden by default. Socket **errors** are always printed regardless of this flag. |
 
 Flags may appear before or after the script path.

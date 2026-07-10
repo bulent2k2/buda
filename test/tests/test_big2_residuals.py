@@ -208,7 +208,7 @@ def test_big2_prenegotiation_spreadfit_residue(monkeypatch):
     nuts_band_repack.md and tighten this to zero."""
     monkeypatch.chdir(_BIG2)
     s = _run_lines(open(_BIG2 / "big2.buda").readlines(),
-                   skip={"visualize", "check_connectivity", "exit",
+                   skip={"visualize", "check_design", "exit",
                          "negotiate_congestion", "ripup_reroute",
                          "run_detailed_nuts"})
     r = s.nuts_result

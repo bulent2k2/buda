@@ -136,7 +136,7 @@ def test_floorplan_mutation_invalidates():
 
 def test_different_floorplan_invalidates_and_analysis_differs():
     """Same topology analyzed against another floorplan (the hier
-    check_connectivity pattern) must not serve the first floorplan's slides."""
+    check_design pattern) must not serve the first floorplan's slides."""
     fp = _fp()
     t = _cands(fp)[0]
     ct1 = buda.ConnTopology()

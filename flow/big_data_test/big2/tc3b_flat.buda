@@ -5,10 +5,10 @@ run_bundler
 #generate_topologies double_detour
 # nuts: 6 overlaps,  dnuts: 52
 generate_topologies
-check_connectivity topo all
+check_design topo all
 run_planner
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity
+check_design
 visualize

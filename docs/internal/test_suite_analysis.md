@@ -108,7 +108,7 @@ each decorated with `@pytest.mark.slow`.
 | `test_hier_planner.py` | ~11 | Hierarchical global planner: cell-local, cross-level passes |
 | `test_hierarchy_depth_planning.py` | 8 | Depth-aware busterm rollup (xfail — see below) |
 | `test_check_layer_dir.py` | 5 | LAYER_DIR violation detection |
-| `test_check_connectivity_hbundle.py` | 16 | check_topo / check_nuts / check_dnuts on HBundle flows |
+| `test_check_design_hbundle.py` | 16 | check_topo / check_nuts / check_dnuts on HBundle flows |
 | `test_reversed_span_connectivity.py` | 1 | Span direction independence |
 
 ### Abstract NUTS (Stage 4)

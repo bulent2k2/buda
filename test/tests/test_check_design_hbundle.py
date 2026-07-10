@@ -15,7 +15,7 @@
 """Connectivity checks (check_topo / check_nuts / check_dnuts) on realistic
 hbundle-style trunk-and-stub topologies.
 
-These exercise the same verification that `check_connectivity {topo,nuts,dnuts}`
+These exercise the same verification that `check_design {topo,nuts,dnuts}`
 runs in the CLI over HBundle candidates.  The geometry comes from the real
 TopologyGenerator (the code path hbundles use), so the inferred connectivity —
 which segment connects to which segment and which busterm — is exactly what the

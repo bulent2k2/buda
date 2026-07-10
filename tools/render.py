@@ -63,7 +63,7 @@ import buda_cli      # noqa: E402
 # a GUI — skipped while replaying the flow's setup.
 _SKIP = {
     "run_planner", "run_nuts", "run_nuts_on_layer", "run_detailed_nuts",
-    "check_connectivity", "visualize", "visualize_topologies",
+    "check_design", "visualize", "visualize_topologies",
     "select_topology", "select_topologies", "dump_topologies", "report_overhead",
     "exit",
 }

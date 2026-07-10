@@ -149,7 +149,7 @@ Phase E3b).  `edit_topology` opens a working **copy** of the given candidate
 * `edit_commit` — appends the result to the bundle's pool as a `USER`
   candidate, deduplicated by `topo_uid` (an identical topology is reported,
   not duplicated); `pin` also selects it.  A not-clean topology commits with
-  a WARNING (visible to `check_connectivity`), mirroring generation's
+  a WARNING (visible to `check_design`), mirroring generation's
   never-strand rule.  The pool is re-persisted to the open BDB.
 
 ```
@@ -197,7 +197,7 @@ note):
   incident wires do not physically touch (a silent feedthru relay no downstream
   stage catches). **Dropped too, but only when a clean candidate — neither open
   nor relay — survives**, so a bundle whose only options are relays is never
-  stranded (those stay visible to `check_connectivity` / `dump_topologies
+  stranded (those stay visible to `check_design` / `dump_topologies
   --problems`).
 
 If **every** candidate is uncovered — or a bundle's only options are relays —

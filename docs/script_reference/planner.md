@@ -196,7 +196,7 @@ on TOP, preserving TOP capacity for long global trunks.
 
 **Side effects:** Replaces the session bundle list with the expanded
 per-instance wrappers (see `dump_hbundles expanded`); subsequent `run_nuts` /
-`check_connectivity` / `visualize` operate on the expanded set.
+`check_design` / `visualize` operate on the expanded set.
 
 **Example:**
 ```

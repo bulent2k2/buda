@@ -23,7 +23,7 @@ NOT, as currently modelled.  The topology generator represents a bundle by a
 single src→dst pair, so a bundle whose nets have different drivers is routed from
 ONE arbitrary driver and the others are silently left unrouted — NUTS places
 horizontal runs at only one source row, vs all four under STRICT.
-`check_connectivity` does not catch the omission (it checks a topology's internal
+`check_design` does not catch the omission (it checks a topology's internal
 self-consistency, not fidelity to the original net drivers).  The CLI therefore
 prints a warning when CONVERGENT is selected.
 """
@@ -111,12 +111,12 @@ def test_convergent_fanin_collapses_to_one_driver():
 
 
 def test_convergent_topo_check_does_not_flag_missing_drivers(capsys):
-    # Gap: check_connectivity passes for the convergent bundle even though three
+    # Gap: check_design passes for the convergent bundle even though three
     # drivers are unrouted — it verifies the topology's own consistency, not that
     # the routed bundle matches the original per-net drivers.
     sess, _ = _run_pipeline("CONVERGENT")
     capsys.readouterr()                       # clear pipeline output
-    sess.do_command("check_connectivity topo")
+    sess.do_command("check_design topo")
     out = capsys.readouterr().out.lower()
     assert "no opens" in out or "success" in out
 

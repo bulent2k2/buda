@@ -120,10 +120,10 @@ add_bus b4[5]  u3/u31/l1.tx  u1/u11/l2.rx,u2/u21/l2.rx,u4/u41/l2.rx
 # ── Pipeline ─────────────────────────────────────────────
 run_bundler strict
 generate_topologies
-check_connectivity topo
+check_design topo
 run_planner 1
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 visualize

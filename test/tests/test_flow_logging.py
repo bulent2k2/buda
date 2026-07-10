@@ -41,7 +41,7 @@ run_bundler
 generate_topologies
 run_planner 1
 run_nuts
-check_connectivity nuts
+check_design nuts
 """
 
 
@@ -78,7 +78,7 @@ def test_log_captures_full_detail(tmp_path):
     # Full detail lives in the log …
     assert "segments placed" in log
     assert "total bus width" in log          # per-layer NUTS detail
-    assert "Success: no opens found." in log
+    assert "Success: no violations found." in log
     # … under per-command headers, each with a runtime footer.
     assert "━━━ run_nuts ━━━" in log
     assert re.search(r"\[runtime\] run_nuts: \d+\.\d+s", log)

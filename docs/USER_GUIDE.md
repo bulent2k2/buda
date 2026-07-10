@@ -279,10 +279,10 @@ generate_hier_topologies
 run_planner hier 5
 
 run_nuts
-check_connectivity nuts
+check_design nuts
 
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize
 ```

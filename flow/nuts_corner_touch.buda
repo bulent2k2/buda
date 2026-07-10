@@ -34,7 +34,7 @@ run_bundler strict
 corner_margin dy 2 dx 2
 set_min_stub_length 2
 generate_topologies
-check_connectivity topo
+check_design topo
 
 # Pin bus y's Z-topo (index 4); bus x is pinned via the sidecar (which also puts
 # its trunk on M4).  Together: x trunk → M4, y trunk → M6 (cross-layer).
@@ -42,8 +42,8 @@ select_topologies 2 4
 run_planner 1
 
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize

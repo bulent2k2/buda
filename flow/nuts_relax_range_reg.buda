@@ -16,5 +16,5 @@ run_planner
 select_topology 1 3
 run_nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 visualize

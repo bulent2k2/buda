@@ -15,9 +15,9 @@
 """ConnTopology.build must not hard-crash when a busterm annotation references
 a block that is absent from the floorplan it is being checked against.
 
-Regression (flow/hbundles/10_chip_units_blocks_leaf.buda, `check_connectivity
+Regression (flow/hbundles/10_chip_units_blocks_leaf.buda, `check_design
 topo`): cell-level HBundle templates carry seg_busterms annotations naming
-cell-local blocks (e.g. `lo`/`hi`).  When `_check_connectivity` built a
+cell-local blocks (e.g. `lo`/`hi`).  When `_check_design` built a
 ConnTopology against the chip floorplan (`self.fp`), `compute_slide_ranges`
 called `bmap.at(block_name)` and threw `IndexError: map::at: key not found`,
 aborting the whole CLI.  The fix:

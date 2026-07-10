@@ -10,10 +10,10 @@ add_block blk_33 3500 3645 4220 4615
 add_bus bus_007[28] blk_00.p blk_06.p,blk_33.p,blk_17.p,blk_05.p,blk_21.p
 run_bundler
 generate_topologies
-check_connectivity topo all
+check_design topo all
 run_planner
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity
+check_design
 visualize

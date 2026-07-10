@@ -16,5 +16,5 @@ source tracks4top.buda
 run_planner
 run_nuts
 run_detailed_nuts
-check_connectivity
+check_design
 #visualize

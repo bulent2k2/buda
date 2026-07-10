@@ -35,15 +35,15 @@ run_bundler strict
 corner_margin dy 2 dx 2
 set_min_stub_length 2
 generate_topologies
-check_connectivity topo
+check_design topo
 
 # force the cyclic corner overlap (Z_VHV through the channel for both buses)
 select_topologies 1,2 4
 run_planner 1
 
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize
