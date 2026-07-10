@@ -187,6 +187,8 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._flow_log_path = None     # its path (for the "Full detail →" line)
         self._cmd_stats = []           # per-command (cmd_line, elapsed, nlines, nwarn, nerr) for runtime summary
         self._end_report_done = False  # runtime summary emitted (idempotent guard)
+        self._at_last_command = True   # True while running the flow's final command
+        self._at_tail_stack = []       # per-source-frame: was this source at its parent's tail?
 
     # ── Per-command logging / runtime stats ─────────────────────────────────
     def run_command(self, cmd_line):
@@ -305,13 +307,16 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
     def _print_end_report(self):
         """Emit the runtime summary + flow-log pointer exactly once.
 
-        Called both from main()'s finally AND right before a blocking GUI
-        `show()`: a `visualize` window is usually the last thing a flow does,
-        and when BUDA is launched through the macOS .app, closing that window
-        makes Cocoa terminate the process (quit-after-last-window) before the
-        finally runs — so the summary would never print. Emitting it before the
-        window opens makes it survive; the idempotent guard stops a double
-        print when the finally does run (e.g. --no-viz, or on Linux)."""
+        Called from main()'s finally AND right before a blocking GUI `show()`
+        — but the latter only when the `visualize` is the flow's LAST command
+        (`_at_last_command`). Rationale: launched through the macOS .app,
+        closing the last window makes Cocoa terminate the process
+        (quit-after-last-window) before the finally runs, so a trailing
+        visualize's summary would never print — emitting it before that window
+        opens makes it survive. An INTERLEAVED visualize (more commands follow)
+        must NOT early-print: the process keeps running after that window
+        closes, so the finally prints the complete summary. The idempotent guard
+        keeps it to a single print on every path."""
         if self._end_report_done:
             return
         self._end_report_done = True
@@ -405,6 +410,8 @@ def main():
             print(f"Warning: could not open flow log {flow_log_path}: {e}")
 
         try:
+            # The top-level source IS the whole run, so it starts "at the tail".
+            session._at_last_command = True
             session.run_command(f"source {script}")
             # Persist a fixture opened with `open_bdb <file>.sql writeback` if the
             # run completed without an explicit exit (which flushes on its own).

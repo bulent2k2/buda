@@ -92,9 +92,12 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
             marker = "  ← opens here" if (not all_mode and i == start) else ""
             print(f"  bundle {b.id}: {len(w.input.candidates)} "
                   f"topologies{inst_note}{marker}")
-        # Emit the runtime summary before the window blocks — through the macOS
-        # .app, closing it can terminate the process before main()'s finally.
-        session._print_end_report()
+        # If this is the flow's LAST command, emit the runtime summary before
+        # the window blocks — through the macOS .app, closing the last window
+        # can terminate the process before main()'s finally. An interleaved
+        # visualize skips this (the finally prints the complete summary).
+        if session._at_last_command:
+            session._print_end_report()
         TopologyExplorer(session.fp, wrappers,
                          sidecar_path=session._sidecar_path(),
                          layer_stack=session.layers,
@@ -151,9 +154,12 @@ def cmd_visualize(session, cmd, args, cmd_line):
                 session.detailed_result, session.routing_grid, session.layers)
     else:
         viz.draw_buses()
-    # Emit the runtime summary before the window blocks — through the macOS
-    # .app, closing it can terminate the process before main()'s finally runs.
-    session._print_end_report()
+    # If this is the flow's LAST command, emit the runtime summary before the
+    # window blocks — through the macOS .app, closing the last window can
+    # terminate the process before main()'s finally. An interleaved visualize
+    # skips this (the finally prints the complete summary once it returns).
+    if session._at_last_command:
+        session._print_end_report()
     viz.show()
 
 
