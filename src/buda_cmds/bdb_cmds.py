@@ -457,23 +457,38 @@ def cmd_save_bdb(session, cmd, args, cmd_line):
             parent_dir = os.path.dirname(session._script_stack[-1])
             dest = os.path.normpath(os.path.join(parent_dir, dest))
         live = getattr(session, "_bdb_open_path", None)
-        if (live and live != ':memory:'
-                and os.path.abspath(dest) == os.path.abspath(live)):
-            print("Error: save_bdb: destination is the live BDB file itself "
-                  "— a binary BDB already persists in place; pick a "
-                  "different path for the snapshot")
-            return
+        if live and live != ':memory:':
+            # Symlink-proof: realpath resolves links in the destination AND
+            # its parents; samefile additionally catches hard links when
+            # both ends exist. A backup onto the file the live connection
+            # holds open would corrupt it, not snapshot it.
+            same = os.path.realpath(dest) == os.path.realpath(live)
+            if not same and os.path.exists(dest) and os.path.exists(live):
+                try:
+                    same = os.path.samefile(dest, live)
+                except OSError:
+                    pass
+            if same:
+                print("Error: save_bdb: destination is the live BDB file "
+                      "itself — a binary BDB already persists in place; "
+                      "pick a different path for the snapshot")
+                return
         try:
             if dest.endswith(".sql"):
+                import shutil
                 import tempfile
                 import bdb_serialize
                 tmp_dir = tempfile.mkdtemp(prefix="buda_saveas_")
-                tmp = os.path.join(tmp_dir,
-                                   os.path.basename(dest)[:-len(".sql")])
-                session.bdb.save_copy(tmp)
-                bdb_serialize.dump(tmp, dest)
-                os.remove(tmp)
-                os.rmdir(tmp_dir)
+                try:
+                    tmp = os.path.join(tmp_dir,
+                                       os.path.basename(dest)[:-len(".sql")])
+                    session.bdb.save_copy(tmp)
+                    bdb_serialize.dump(tmp, dest)
+                finally:
+                    # rmtree, not remove+rmdir: BDB runs journal_mode=WAL,
+                    # the backup copy inherits it, and the dump's connection
+                    # can leave -wal/-shm sidecars beside the temp binary.
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
             else:
                 session.bdb.save_copy(dest)
         except RuntimeError as e:

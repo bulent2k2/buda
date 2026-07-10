@@ -772,6 +772,25 @@ def test_save_bdb_as_rejects_live_file(tmp_path):
     assert "wrote snapshot" not in out
 
 
+def test_save_bdb_as_rejects_live_file_via_symlink(tmp_path):
+    """The live-file guard resolves symlinks (Codex #245): a destination
+    reaching the open database through a linked path is refused too."""
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    live = real_dir / "live.bdb"
+    db = buda.BDB(str(live))
+    db.add_cell("c", 10, 10)
+    del db
+    link_dir = tmp_path / "link"
+    link_dir.symlink_to(real_dir, target_is_directory=True)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _run_cmd(s, f"open_bdb {live}")
+    out = _run_cmd(s, f"save_bdb {link_dir / 'live.bdb'}")
+    assert "Error" in out and "live BDB file" in out
+    assert "wrote snapshot" not in out
+
+
 def test_save_bdb_no_arg_message_mentions_save_as():
     s = _bare_session(_two_inst_db(derive=False))
     out = _run_cmd(s, "save_bdb")                     # no writeback armed
