@@ -392,6 +392,7 @@ Requested after the feature merged: run the alignment verification BEFORE
   block overlaps introduced) → placement AND routed checks report ALIGNED →
   `run_detailed_nuts` under the strict default solves 416 reference bits
   once and copies 1872 to 63 sibling instances.
-- Possible refinements: an overlap/out-of-die guard on the applied moves
-  (Floorplanner `validate()` exists), and a per-cell `max_shift` default
-  derived from the placement's free slack.
+- Refinements landed since: the post-move `validate()` audit (new-vs-pre
+  issue diff), and — resolving the slack-cap idea as exact geometry — the
+  default auto-revert of any move that introduces a NEW issue (`force`
+  keeps them; `max_shift` remains the explicit user cap).

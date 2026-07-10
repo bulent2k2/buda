@@ -598,10 +598,8 @@ def test_align_bottom_up_minimal_total_movement():
     assert s._bottom_up_congruence_issues("proc_cell") == []
 
 
-def test_align_bottom_up_validate_reports_new_issues():
-    """After the moves, FloorplannerEngine.validate() audits the placement:
-    a nudge that pushes an instance outside the die (or into an overlap) is
-    reported as a NEW issue, distinct from pre-existing ones."""
+def _outside_die_db():
+    """P1 snaps +0.5 to P0's phase -> y2 = 402 > die 401.9."""
     db = buda.BDB(":memory:")
     db.set_die(420, 401.9)
     db.add_cell("proc_cell", 420, 200)
@@ -609,12 +607,58 @@ def test_align_bottom_up_validate_reports_new_issues():
     db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
     db.add_inst("P0", "proc_cell", "", 0, 0)
     db.add_inst("P1", "proc_cell", "", 0, 201.5)   # phase 1.5, in-die
+    return db
+
+
+def test_align_bottom_up_auto_reverts_new_issues():
+    """DEFAULT: a move that introduces a NEW issue (here OUTSIDE_DIE) is
+    auto-reverted — the exact-geometry slack cap — and the final placement
+    audit is clean."""
+    db = _outside_die_db()
     s = _placement_session(db)
     out = _run_cmd(s, "align_bottom_up")
-    # P1 snaps +0.5 to P0's phase -> y2 = 402 > die 401.9.
-    assert "1 instance(s) moved" in out
-    assert "align_bottom_up introduced OUTSIDE_DIE" in out and "P1" in out
+    assert "REVERTED" in out and "OUTSIDE_DIE" in out and "P1" in out
+    assert "0 instance(s) moved, 1 reverted" in out
+    assert "0 new issue(s)" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P1"].y1 == pytest.approx(201.5)         # back in place
+    assert comps["P1/pa_i"].y1 == pytest.approx(261.5)    # subtree restored
+
+
+def test_align_bottom_up_force_keeps_issue_moves():
+    """'force' restores the report-only behavior: the move is kept and the
+    new issue is warned."""
+    db = _outside_die_db()
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up force")
+    assert "1 instance(s) moved" in out and "REVERTED" not in out
+    assert "align_bottom_up introduced OUTSIDE_DIE" in out
     assert "1 new issue(s)" in out and "0 pre-existing" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P1"].y1 == pytest.approx(202)           # move kept
+
+
+def test_align_bottom_up_revert_on_overlap_with_neighbor():
+    """A nudge into an unmarked neighbor's footprint is reverted; the
+    already-aligned sibling keeps its position."""
+    db = buda.BDB(":memory:")
+    db.add_cell("box_cell", 100, 100)
+    db.add_cell("blk_cell", 80, 0.3)
+    db.add_inst("A", "box_cell", "", 0, 0)
+    db.add_inst("B", "box_cell", "", 0, 100.6)     # phase 0.6
+    db.add_inst("X0", "blk_cell", "", 10, 100.05)  # blocker in the gap
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"] + _PATTERNS
+              + ["set_bottom_up box_cell"]):
+        _run_cmd(s, c)
+    out = _run_cmd(s, "align_bottom_up")
+    # B's -0.6 snap lands on the blocker -> reverted; A never moved.
+    assert "REVERTED" in out and "OVERLAP" in out
+    assert "0 instance(s) moved, 1 reverted" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["B"].y1 == pytest.approx(100.6)
+    assert comps["A"].y1 == pytest.approx(0)
 
 
 def test_align_bottom_up_validate_quiet_when_clean():

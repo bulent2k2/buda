@@ -417,26 +417,37 @@ def cmd_set_bottom_up(session, cmd, args, cmd_line):
 
 
 def cmd_align_bottom_up(session, cmd, args, cmd_line):
-    # align_bottom_up [max_shift <um>]
+    # align_bottom_up [max_shift <um>] [force]
     # Nudge every set_bottom_up cell's instances onto a common track phase
     # with minimal total movement (subtree-aware translate_comp), so the
     # bottom-up copies land on real signal tracks in every occurrence.
     # Requires an open BDB and a routing grid (def_track_pattern); run
     # BEFORE derive_busterms / add_blocks_from_bdb.  Optional max_shift
-    # skips any nudge larger than the given distance (um).
+    # skips any nudge larger than the given distance (um).  By default a
+    # move that introduces a NEW overlap / outside-die issue is auto-
+    # REVERTED (exact-geometry slack cap); 'force' keeps such moves and
+    # only warns.
     if session.bdb is None:
         print("Error: open_bdb first"); return
     max_shift = None
-    if args:
-        if len(args) >= 2 and args[0].lower() == "max_shift":
+    force = False
+    i = 0
+    while i < len(args):
+        tok = args[i].lower()
+        if tok == "max_shift" and i + 1 < len(args):
             try:
-                max_shift = float(args[1])
+                max_shift = float(args[i + 1])
             except ValueError:
-                print(f"Error: max_shift needs a number, got '{args[1]}'")
+                print(f"Error: max_shift needs a number, got '{args[i+1]}'")
                 return
+            i += 2
+        elif tok == "force":
+            force = True
+            i += 1
         else:
-            print("Error: usage: align_bottom_up [max_shift <um>]"); return
-    session._align_bottom_up(max_shift=max_shift)
+            print("Error: usage: align_bottom_up [max_shift <um>] [force]")
+            return
+    session._align_bottom_up(max_shift=max_shift, force=force)
 
 
 def cmd_save_bdb(session, cmd, args, cmd_line):

@@ -14,12 +14,13 @@ items this page doesn't see).
 in [`hier_bottom_up_planning.md`](hier_bottom_up_planning.md) §11 unless
 noted.)*
 
-- **`align_bottom_up` slack-aware default cap + auto-revert** — today the
-  nudge is unlimited unless `max_shift` is passed, and the post-move
-  `validate()` audit *reports* a new overlap/outside-die issue but keeps
-  the move. Derive a per-cell default cap from the placement's free slack,
-  and optionally revert (translate back) any move that introduced a NEW
-  issue.
+- **`align_bottom_up` slack-aware default cap + auto-revert** ✅ — resolved
+  as an EXACT-GEOMETRY cap rather than a derived scalar (a scalar slack
+  bound would also block large-but-legal nudges, e.g. mix2's 90 µm snaps):
+  by default any move whose post-apply `validate()` diff shows a NEW
+  overlap/outside-die issue is auto-reverted to a fixpoint (a revert can
+  newly collide with a still-moved sibling); `force` keeps such moves with
+  the old WARNING-only behavior. `max_shift` remains the explicit user cap.
 - **Floorplanner UI toggle for `cell.bottom_up`** — the flag is persisted
   (v17) and the engine/BDB sides are done; the GUI neither displays nor
   edits it.
