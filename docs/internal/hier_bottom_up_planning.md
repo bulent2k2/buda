@@ -128,6 +128,21 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
    - **New `NUTSEngine::add_fixed_segments(...)`** (closes G6): fixed
      segments enter each `LayerSolver`'s `occupied` list exactly like keepout
      intervals do today, on **any** layer, and are immovable in repack.
+     *As built:* the fixed extents live as **engine-internal** zones
+     (`solver_keepouts()` = `low_keepouts()` + derived zones), consumed by
+     `LayerSolver`, `repair_overlaps`, and `tighten_pulls`; they are
+     deliberately NOT added to the Floorplan, so the report-only
+     `count_keepout_conflicts` and `verify`'s `KEEPOUT_CROSS` never flag a
+     fixed segment against its own footprint — while fixed segments ARE
+     still checked against real user zones (a uniform copy landing on a
+     keepout that exists in only one instance stays loud). Extraction skips
+     fixed bundles; the copies are appended to the result after every
+     mutating pass and before the metrics, so an overlap against a fixed
+     segment counts and downstream stages consume them normally.
+     `rerun_layer` holds them aside the same way. A template whose local
+     solve required a **dogleg split** is not copied (adopting a split
+     per-instance is future work): that cell's instances are unlocked and
+     fall back to per-instance global NUTS with a WARNING.
    - **Floorplan/grid keepout mirror:** each copied segment also becomes a
      per-layer `KeepoutZone` (span × occupied width) via the existing
      `add_keepout_zone` + `RoutingGrid.add_keepout` path, so the **planner**
@@ -276,6 +291,17 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
    targets).
 3. NUTS: local solve + copy + `add_fixed_segments` + derived keepout mirror
    (explicitly layer-tagged; no NUTS keepout change needed — corrected G3).
+   — **DONE** (`HierMixin._bottom_up_fixed_segments` solves each marked
+   cell's templates once in a cell-local `NUTSEngine` and translates the
+   result per instance via the new `offset_track_segment`; cached, reset on
+   re-plan; injected into all four engine sites — run_nuts, post_nuts,
+   run_nuts_on_layer, ripup/negotiate internal re-runs. Blockage is
+   engine-internal (`solver_keepouts()`), see §4.3 as-built note; dogleg
+   templates fall back per-instance with a WARNING. The planner-side
+   pricing needs no zones: locked wrappers' committed assignments are
+   charged by `optimize_topologies` and re-charged by `recharge_committed_`
+   in every replan. Grid-level (DNUTS) blocking lands with stages 4-5,
+   where the copy machinery can exclude the cell's own windows.)
 4. `check_template_tracks` + verdict caching.
 5. DNUTS: reference-instance solve + copy + `on_mismatch` policies + bit-level
    keepout refinement.

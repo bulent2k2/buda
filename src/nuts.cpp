@@ -450,7 +450,7 @@ void NUTSEngine::repair_overlaps(std::vector<TrackSegment>& segments,
     PlacementSnapshot snapshot;
     snapshot.take(segments);
 
-    const auto kozs = low_keepouts();
+    const auto kozs = solver_keepouts();
     auto pull_of = [&](const TrackSegment& ts) {
         auto it = net_pull_map.find({ts.bundle_id, ts.seg_idx});
         return it == net_pull_map.end() ? 0 : it->second;
@@ -631,7 +631,7 @@ void NUTSEngine::tighten_pulls(std::vector<TrackSegment>& segments,
 {
     const auto& net_pull_map = ctx.net_pull_map;
     const auto& align_map    = ctx.align_map;
-    const auto kozs = low_keepouts();
+    const auto kozs = solver_keepouts();
 
     PlacementSnapshot pre_move;
     // True routed length = sum of every placed segment's span extent.  Sliding a
@@ -1025,6 +1025,56 @@ std::vector<KeepoutZone> NUTSEngine::low_keepouts() const {
     return floorplan_.low_layer_keepouts(low_ids);
 }
 
+std::vector<KeepoutZone> NUTSEngine::solver_keepouts() const {
+    auto kozs = low_keepouts();
+    kozs.insert(kozs.end(), fixed_zones_.begin(), fixed_zones_.end());
+    return kozs;
+}
+
+void NUTSEngine::add_fixed_segments(const std::vector<TrackSegment>& segs) {
+    for (const auto& s : segs) {
+        fixed_segments_.push_back(s);
+        fixed_segments_.back().placed = true;
+        fixed_bundle_ids_.insert(s.bundle_id);
+        // Physical extent as an explicitly layer-tagged zone.  Rect is
+        // integer-coordinate, so round OUTWARD — conservative: never lets a
+        // free segment overlap the fixed one, at worst blocks <1 unit extra.
+        KeepoutZone koz;
+        koz.layer_ids = {s.layer};
+        const double h = s.width / 2.0;
+        if (s.horiz) {
+            koz.bbox = Rect{(int)std::floor(sp_lo(s)),
+                            (int)std::floor(s.track_position - h),
+                            (int)std::ceil (sp_hi(s)),
+                            (int)std::ceil (s.track_position + h)};
+        } else {
+            koz.bbox = Rect{(int)std::floor(s.track_position - h),
+                            (int)std::floor(sp_lo(s)),
+                            (int)std::ceil (s.track_position + h),
+                            (int)std::ceil (sp_hi(s))};
+        }
+        fixed_zones_.push_back(std::move(koz));
+    }
+}
+
+TrackSegment offset_track_segment(const TrackSegment& ts, int dx, int dy,
+                                  int new_bundle_id) {
+    TrackSegment out = ts;
+    out.bundle_id = new_bundle_id;
+    const double along = ts.horiz ? dx : dy;   // routing-direction delta
+    const double perp  = ts.horiz ? dy : dx;   // perpendicular delta
+    out.span_lo     += along;
+    out.span_hi     += along;
+    out.track_position += perp;                // NaN + perp stays NaN
+    out.interval_lo += perp;
+    out.interval_hi += perp;
+    if (!std::isnan(out.pull_target))    out.pull_target    += perp;
+    if (std::isfinite(out.track_lo_bound)) out.track_lo_bound += perp;
+    if (std::isfinite(out.track_hi_bound)) out.track_hi_bound += perp;
+    for (double& f : out.busterm_faces) f += along;
+    return out;
+}
+
 
 std::vector<TrackSegment> NUTSEngine::extract_segments(
     const std::vector<BundleWrapper>& bundles,
@@ -1034,6 +1084,9 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
     std::vector<TrackSegment> result;
     for (const auto& bw : bundles) {
         if (bw.input.candidates.empty() || bw.plan.selected_topology_index < 0) continue;
+        // A fixed (bottom-up copy) bundle is never re-solved: its already-
+        // placed segments are appended to the result verbatim instead.
+        if (fixed_bundle_ids_.count(bw.input.original_bundle.id)) continue;
         const Topology& topo = bw.input.candidates[bw.plan.selected_topology_index];
         for (int si = 0; si < (int)topo.segments.size(); ++si) {
             const Segment& seg = topo.segments[si];
@@ -1174,8 +1227,9 @@ public:
           jn_segs(ctx.ts_ptr_map),    // global segment lookup
           order_preds(constraints.preds), order_bounds(constraints.bounds),
           // Incorporate KeepoutZones into 'occupied' list (user zones + leaf-cell
-          // zones on LOW layers; TOP segments are filtered out by layer_ids).
-          kozs(eng.low_keepouts())
+          // zones on LOW layers + fixed bottom-up segments' derived zones; TOP
+          // segments are filtered out by layer_ids).
+          kozs(eng.solver_keepouts())
     {
         // Same-layer lookup for alignment siblings (and ordering-constraint phase 0).
         for (TrackSegment* ts : segs)
@@ -2067,6 +2121,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
         tighten_pulls(result.segments, ctx);
+        // Merge the fixed (bottom-up copy) segments AFTER every pass that
+        // could move a segment and BEFORE the metrics, so they are immovable
+        // but fully accounted (an overlap against a fixed segment counts).
+        result.segments.insert(result.segments.end(),
+                               fixed_segments_.begin(), fixed_segments_.end());
         compute_metrics(result);
         out.result = std::move(result);
         return out;
@@ -2129,6 +2188,20 @@ NUTSResult NUTSEngine::rerun_layer(
     merge_grid(x_grid, extra_x_);
     merge_grid(y_grid, extra_y_);
     NUTSResult result = prev;
+    // Hold the fixed (bottom-up copy) segments aside: they must be neither
+    // reset nor re-placed, and build_context must not map them (a repair pass
+    // could otherwise pick one as a victim).  Their derived zones still block
+    // the re-solve via solver_keepouts(); re-appended before the metrics.
+    std::vector<TrackSegment> fixed_held;
+    if (!fixed_bundle_ids_.empty()) {
+        auto& segs = result.segments;
+        auto mid = std::stable_partition(segs.begin(), segs.end(),
+            [&](const TrackSegment& t) {
+                return fixed_bundle_ids_.count(t.bundle_id) == 0;
+            });
+        fixed_held.assign(mid, segs.end());
+        segs.erase(mid, segs.end());
+    }
     for (auto& ts : result.segments) {
         if (ts.layer != layer_id) continue;
         ts.track_position = std::numeric_limits<double>::quiet_NaN();
@@ -2155,6 +2228,8 @@ NUTSResult NUTSEngine::rerun_layer(
     // overlap / wirelength guards stay global, so cross-layer spans are honoured)
     // — keeps the single-layer contract while still recovering wirelength.
     tighten_pulls(result.segments, ctx, layer_id);
+    result.segments.insert(result.segments.end(),
+                           fixed_held.begin(), fixed_held.end());
     compute_metrics(result);
     result.num_keepout_conflicts =
         count_keepout_conflicts(low_keepouts(), result.segments);

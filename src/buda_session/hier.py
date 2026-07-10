@@ -746,6 +746,8 @@ class HierMixin:
 
         See docs/internal/hier_bottom_up_planning.md §3.
         """
+        # A re-plan invalidates any cached bottom-up local NUTS solve.
+        self._bu_fixed_cache = None
         bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
         if not bu_cells or not self.bundles:
             return
@@ -796,6 +798,109 @@ class HierMixin:
             print(f"[BottomUp] cell '{cell}': {len(assignments)} template "
                   f"bundle(s) planned locally; decision pinned for "
                   f"{n_inst} instance(s)")
+
+    def _bottom_up_fixed_segments(self):
+        """Stage (b) of bottom-up template planning: solve each marked cell's
+        template bundles ONCE with a cell-local NUTSEngine (cell-local
+        coordinates, same track pitch) and return the per-instance translated
+        copies as already-placed TrackSegments.  The caller registers them
+        with the global engine via add_fixed_segments, which (a) skips those
+        bundles in extraction, (b) blocks every solver pass with each copy's
+        physical extent, and (c) appends the copies to the result — so all
+        instances carry one uniform, locally-optimal track layout and every
+        other bundle detours it.
+
+        Cached on the session (ripup/negotiate re-run NUTS many times; the
+        local solve depends only on the pinned template plan, which locked
+        wrappers never change).  _plan_bottom_up_templates resets the cache
+        on every re-plan.
+
+        A template whose local solve required a DOGLEG split is not copied:
+        the split rewrites the topology, and adopting it per-instance is not
+        yet supported — that cell's instances are unlocked and fall back to
+        per-instance global NUTS with a WARNING (uniformity knowingly broken,
+        never silent).  See docs/internal/hier_bottom_up_planning.md §4.
+        """
+        cache = getattr(self, "_bu_fixed_cache", None)
+        if cache is not None:
+            return cache
+        fixed = []
+        self._bu_fixed_cache = fixed
+        if not getattr(self, "_planner_is_hier", False) or self.bdb is None:
+            return fixed
+        bu_cells = set(self.bdb.bottom_up_cells())
+        templates = getattr(self, "_hier_bundles_orig", None) or []
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
+        if not bu_cells or not templates or not exp_map:
+            return fixed
+        comps = {c.name: c for c in self.bdb.all_components()}
+        cell_ids = {w.input.original_bundle.id for w in templates
+                    if w.input.original_bundle.cell_context}
+        by_cell = {}
+        for w in templates:
+            b = w.input.original_bundle
+            if (not b.cell_context or not b.instances
+                    or b.cell_context not in bu_cells
+                    or b.parent_id in cell_ids            # replica
+                    or not w.input.topology_pinned
+                    or not w.input.pinned_seg_layers
+                    or not w.input.candidates
+                    or not (0 <= w.plan.selected_topology_index
+                            < len(w.input.candidates))):
+                continue
+            by_cell.setdefault(b.cell_context, []).append(w)
+        for cell in sorted(by_cell):
+            wrappers = by_cell[cell]
+            fp = self._build_cell_local_floorplan(
+                wrappers[0].input.original_bundle.instances[0])
+            if fp is None:
+                continue
+            nuts = buda.NUTSEngine(fp, self.layers)
+            nuts.set_track_pitch(self._nuts_pitch)
+            with buda.ostream_redirect():
+                local = nuts.run(wrappers)
+            if local.dogleg_topologies:
+                print(f"WARNING: bottom-up cell '{cell}': local NUTS needed "
+                      f"a dogleg split; uniform copies are not supported for "
+                      f"doglegged templates yet — falling back to "
+                      f"per-instance NUTS for this cell")
+                for w in wrappers:
+                    for iw in exp_map.get(w.input.original_bundle.id, []):
+                        iw.hier.locked = False
+                continue
+            by_tid = {}
+            for ts in local.segments:
+                by_tid.setdefault(ts.bundle_id, []).append(ts)
+            n_copied = 0
+            for w in wrappers:
+                tid = w.input.original_bundle.id
+                for iw in exp_map.get(tid, []):
+                    if not iw.hier.locked:
+                        continue
+                    parent = comps.get(iw.input.original_bundle.instances[0])
+                    if parent is None:
+                        continue
+                    dx = int(round(parent.x1))
+                    dy = int(round(parent.y1))
+                    for ts in by_tid.get(tid, []):
+                        fixed.append(buda.offset_track_segment(
+                            ts, dx, dy, iw.input.original_bundle.id))
+                        n_copied += 1
+            print(f"[BottomUp] cell '{cell}': local NUTS placed "
+                  f"{len(local.segments)} segment(s), "
+                  f"{local.num_overlaps} overlap(s); copied {n_copied} "
+                  f"fixed segment(s) to instances")
+        return fixed
+
+    def _inject_bottom_up_fixed(self, nuts_engine):
+        """Register the bottom-up fixed copies with a NUTS engine (no-op when
+        there are none).  Must be called on EVERY engine that solves
+        self.bundles — run_nuts, post_nuts re-run, run_nuts_on_layer, and the
+        ripup/negotiate internal re-runs — or the fixed instances would be
+        re-solved as free bundles."""
+        fixed = self._bottom_up_fixed_segments()
+        if fixed:
+            nuts_engine.add_fixed_segments(fixed)
 
     def _expand_hier_bundles(self, bundles):
         """Expand cell-level BundleWrappers to per-instance absolute-coord wrappers.

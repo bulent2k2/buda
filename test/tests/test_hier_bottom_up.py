@@ -111,19 +111,27 @@ def test_meta_set_binding():
 
 # ── Congruence helper ─────────────────────────────────────────────────────────
 
-def _two_inst_db():
+def _two_inst_db(x2=500, y2=0, cross_net=False):
     """proc_cell (two pipe_cell children) instantiated twice, with 4-bit
-    cell-local buses in each instance — the template-sharing vehicle."""
+    cell-local buses in each instance — the template-sharing vehicle.
+    cross_net adds a depth-0 4-bit bus between two leaf blocks placed left
+    and right of proc_i1, whose direct route crosses that instance."""
     db = buda.BDB(":memory:")
     db.add_cell("proc_cell", 420, 200)
     db.add_cell("pipe_cell", 110, 80)
     db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
     db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
     db.add_inst("proc_i1", "proc_cell", "", 0, 0)
-    db.add_inst("proc_i2", "proc_cell", "", 500, 0)
+    db.add_inst("proc_i2", "proc_cell", "", x2, y2)
     for i in range(4):
         db.add_net_pins(f"ab1_{i}", "proc_i1/pa_i.out", ["proc_i1/pb_i.in"])
         db.add_net_pins(f"ab2_{i}", "proc_i2/pa_i.out", ["proc_i2/pb_i.in"])
+    if cross_net:
+        db.add_cell("leaf_cell", 60, 60)
+        db.add_inst("L0", "leaf_cell", "", -200, 70)
+        db.add_inst("R0", "leaf_cell", "", 1200, 70)
+        for i in range(4):
+            db.add_net_pins(f"lr_{i}", "L0.out", ["R0.in"])
     buda.BustermGen(db).derive(1)
     return db
 
@@ -327,6 +335,76 @@ def test_locked_wrappers_excluded_from_ripup_and_replan():
     for bid in locked_ids:
         assert s.planner.replan_bundle(s.bundles, bid) is None
         assert s.planner.replan_bundle_ripup(s.bundles, bid) == []
+
+
+# ── Step 3: local NUTS solve + fixed per-instance copies ──────────────────────
+
+def _fixed_by_inst_seg(s):
+    """(instance, seg_idx) → TrackSegment for the cell-instance wrappers."""
+    inst_of = {w.input.original_bundle.id: b.instances[0]
+               for w in s.bundles
+               for b in [w.input.original_bundle] if b.cell_context}
+    return {(inst_of[ts.bundle_id], ts.seg_idx): ts
+            for ts in s.nuts_result.segments if ts.bundle_id in inst_of}
+
+
+def test_bottom_up_nuts_copies_are_uniform_translates():
+    """The marked cell's NUTS layout is solved once and copied: every
+    instance segment equals the sibling's shifted by the instance offset,
+    on BOTH axes (instances offset in x and y)."""
+    db = _two_inst_db(x2=500, y2=300)
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    _run_cmd(s, "run_planner hier")
+    out = _run_cmd(s, "run_nuts")
+    assert "[BottomUp] cell 'proc_cell': local NUTS placed" in out
+    segs = _fixed_by_inst_seg(s)
+    n = len({k[1] for k in segs})
+    assert n > 0
+    for si in range(n):
+        a, b = segs[("proc_i1", si)], segs[("proc_i2", si)]
+        assert a.placed and b.placed
+        assert a.layer == b.layer and a.horiz == b.horiz
+        d_along, d_perp = (500, 300) if a.horiz else (300, 500)
+        assert b.track_position == pytest.approx(a.track_position + d_perp)
+        assert min(b.span_lo, b.span_hi) == pytest.approx(
+            min(a.span_lo, a.span_hi) + d_along)
+        assert max(b.span_lo, b.span_hi) == pytest.approx(
+            max(a.span_lo, a.span_hi) + d_along)
+
+
+def test_bottom_up_fixed_blocks_crossing_bundle():
+    """A depth-0 bus routed across a marked instance must not overlap the
+    fixed copies — they enter every solver pass as hard occupancy."""
+    db = _two_inst_db(cross_net=True)
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    assert s.nuts_result.num_overlaps == 0
+    # The fixed copies and the crossing bundle are both in the result.
+    bids = {ts.bundle_id for ts in s.nuts_result.segments}
+    locked = {w.input.original_bundle.id for w in s.bundles if w.hier.locked}
+    assert locked and locked <= bids and len(bids) > len(locked)
+
+
+def test_bottom_up_fixed_stable_across_ripup():
+    """ripup_reroute must leave the fixed copies exactly in place (their
+    bundles are excluded as contenders and extraction skips them)."""
+    db = _two_inst_db(cross_net=True)
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    before = {(ts.bundle_id, ts.seg_idx): ts.track_position
+              for ts in s.nuts_result.segments}
+    _run_cmd(s, "ripup_reroute 2")
+    locked = {w.input.original_bundle.id for w in s.bundles if w.hier.locked}
+    after = {(ts.bundle_id, ts.seg_idx): ts.track_position
+             for ts in s.nuts_result.segments}
+    for key, pos in after.items():
+        if key[0] in locked:
+            assert pos == pytest.approx(before[key])
 
 
 def test_user_pin_on_template_survives_local_solve():

@@ -272,6 +272,7 @@ class RipupMixin:
         final accepted state once at the end."""
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
+        self._inject_bottom_up_fixed(nuts)
         if self.planner is not None:
             nuts.set_extra_grid_points(
                 list(self.planner.get_x_grid()),

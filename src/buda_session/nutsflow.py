@@ -634,6 +634,7 @@ class NutsFlowMixin:
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
+        self._inject_bottom_up_fixed(nuts)
         self.nuts_result = nuts.run(self.bundles)
         self._adopt_doglegs()
 
@@ -790,6 +791,7 @@ class NutsFlowMixin:
         layer_name   = layer_names.get(layer_id, f"L{layer_id}")
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
+        self._inject_bottom_up_fixed(nuts)
         if self.planner is not None:
             nuts.set_extra_grid_points(
                 list(self.planner.get_x_grid()),

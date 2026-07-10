@@ -161,8 +161,16 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)
+        .def("add_fixed_segments",    &NUTSEngine::add_fixed_segments,
+             py::arg("segs"))
         .def("run",                   &NUTSEngine::run)
         .def("rerun_layer",           &NUTSEngine::rerun_layer);
+
+    m.def("offset_track_segment", &offset_track_segment,
+          py::arg("ts"), py::arg("dx"), py::arg("dy"), py::arg("new_bundle_id"),
+          "Translate a placed TrackSegment by (dx, dy) and re-key it to "
+          "another bundle — the per-instance copy step of bottom-up "
+          "template planning");
 
     // ── Routing grid + detailed NUTS ──────────────────────────────────────
     py::class_<TrackSlot>(m, "TrackSlot")
