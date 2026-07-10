@@ -2982,6 +2982,11 @@ class BudaVisualizer:
 
         self._refresh_highlight()
 
+        # The route changed (e.g. a re-run pinned a different topology): refresh
+        # the cached home extent so a later 'h' fits the re-routed design, not
+        # the extent captured at first render.
+        self._recompute_home_bbox()
+
     # ------------------------------------------------------------------
     # Bundle list panel
     # ------------------------------------------------------------------
@@ -3342,6 +3347,19 @@ class BudaVisualizer:
         self._topo_explorer.fig.show()
         install_tk_geometry_resync(self._topo_explorer.fig)
         extract_from_fullscreen_tab(self._topo_explorer.fig)
+
+    def _recompute_home_bbox(self):
+        """Refresh the cached home extent from the currently drawn artists, so a
+        later 'h' fits the CURRENT design after a re-run (which may have pinned a
+        different-extent topology) instead of the extent captured at first
+        render. Uses the same autoscale as show(); the current view is preserved
+        (this only updates the cache, it does not move the camera)."""
+        ax = self.ax
+        cur_x, cur_y = ax.get_xlim(), ax.get_ylim()
+        ax.set_autoscale_on(True)          # autoscale_view is a no-op once lims are fixed
+        ax.autoscale_view()
+        self._home_data_bbox = ax.get_xlim() + ax.get_ylim()
+        ax.set_xlim(cur_x); ax.set_ylim(cur_y)   # restore view (also re-disables autoscale)
 
     def _zoom_home(self):
         if self._home_data_bbox is not None:

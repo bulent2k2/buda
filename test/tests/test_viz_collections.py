@@ -102,6 +102,25 @@ def test_topo_explorer_v_raises_main_window(monkeypatch):
         assert raised and raised[-1] is viz.fig, key
 
 
+def test_recompute_home_bbox_tracks_current_artists(monkeypatch):
+    """After a re-run pins a different-extent topology, `h` should fit the
+    re-routed design, not the extent captured at first render. _recompute_home_bbox
+    refreshes the cached home extent from the current artists without moving the
+    camera; _redraw_nuts_tracks calls it after every re-route."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    ax = viz.ax
+    view = (ax.get_xlim(), ax.get_ylim())
+
+    # Simulate a re-route whose new route reaches beyond the first-render extent.
+    ax.plot([10000.0], [12000.0], 'o')
+    viz._recompute_home_bbox()
+
+    x0, x1, y0, y1 = viz._home_data_bbox
+    assert x1 >= 10000.0 and y1 >= 12000.0, viz._home_data_bbox   # home grew to fit it
+    # Cache-only: the current view must be untouched.
+    assert ax.get_xlim() == view[0] and ax.get_ylim() == view[1]
+
+
 def _build_viz(flow_name, monkeypatch):
     """Run a .buda flow through the CLI and return the BudaVisualizer it builds,
     with plt.show() neutralized so nothing blocks or opens a window."""
