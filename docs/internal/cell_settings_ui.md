@@ -89,6 +89,16 @@ sections are hand-built) — the whole point of the request.
   function (e.g. `bottom_up_congruence_issues(comps, cell)` in a shared module)
   that both `src/buda_session/hier.py` and `floorplanner_commands.py` import, so
   the GUI and CLI can never diverge on what "congruent" means.
+- **Eligibility gates *enabling*, not *clearing*.** Mirror the CLI exactly: the
+  congruence check runs only on the ON transition (`set_bottom_up … off` always
+  clears). So `_set_bottom_up_checked(state, cell, value)` validates congruence
+  **only when `value` is truthy**; setting it OFF is unconditional. This
+  matters for the real failure mode Codex flagged: a cell marked `bottom_up`
+  that *later* becomes incongruent (a rotate/move in the same session, or a
+  stale BDB opened from disk) must always be clearable from the GUI — never
+  stranded. Generalizing to non-`bool` `kind`s: `eligible` bounds the
+  value-*increasing* / non-default direction; returning a setting to its
+  default is always permitted.
 
 Persistence rides the existing model: the flag is a direct `state.bdb` write
 (independent of the engine's in-memory placement). A binary BDB persists
@@ -104,12 +114,17 @@ Floorplanner-save work).
 - **`_CellSettingsDialog`** — modal `Toplevel` + `grab_set()`; a scroll-canvas
   table (the Block-Constraints pattern) with a header built from
   `CELL_SETTINGS` labels plus "Cell" and "Instances" columns, one row per cell
-  type. For a `bool` setting → a `Checkbutton`; an **ineligible cell's control
-  is disabled with the reason shown inline** (turning the CLI's "not
-  congruent" error into a visible, non-surprising UI state — a checked-out cell
-  reads *why* it can't be enabled). Apply/Cancel; Apply calls
-  `fpc.set_cell_setting` per changed row and reports a one-line summary of what
-  changed / what was refused.
+  type. For a `bool` setting → a `Checkbutton`. **Eligibility disables only the
+  *enable* direction, never *clearing*** (Codex #248 P2): a cell that is OFF and
+  ineligible shows a disabled checkbox with the reason inline (can't turn on);
+  but a cell that is already ON and has *become* ineligible (a rotate/move this
+  session, or a stale BDB) keeps its checkbox **enabled so it can be unchecked**
+  — with a warning marker (e.g. "⚠ incongruent — clear only") — because the CLI
+  lets `off` clear unconditionally and the GUI must not strand the user in a
+  state only the CLI/DB edit can undo. So the render rule is: disabled iff
+  `value == default and not eligible`; otherwise actionable. Apply/Cancel; Apply
+  calls `fpc.set_cell_setting` per changed row and reports a one-line summary of
+  what changed / what was refused.
 - **Button** — a "Cell Settings…" button next to Optimize (`self._opt_btn` in
   the Blocks pane), stored as `self._cellcfg_btn` and added to the
   `_apply_ro_state` disable list so read-only sessions grey it out (parity with
@@ -132,6 +147,9 @@ all-cells surface.
 - `set_cell_setting(state, cell, "bottom_up", True)` sets a congruent cell
   (`bdb.cell_bottom_up` becomes true) and **refuses** a non-congruent cell (the
   flag stays off, an issue is surfaced).
+- **Clearing is unconditional** (Codex #248 P2): mark a congruent cell ON, make
+  it incongruent (rotate/move an instance), then `set_cell_setting(state, cell,
+  "bottom_up", False)` still clears it — never gated by congruence.
 - Read-only session → `set_cell_setting` raises `PermissionError`.
 - Extensibility smoke: a second dummy `CellSetting` renders/round-trips through
   `list_cell_settings` / `set_cell_setting` without touching the dialog code.
