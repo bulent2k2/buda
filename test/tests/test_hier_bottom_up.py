@@ -696,6 +696,32 @@ def test_align_bottom_up_reports_unfixable_anchor():
     assert before == after                           # nothing moved
 
 
+def test_translate_comp_moves_pins_with_subtree(tmp_path):
+    """Pin positions are absolute, so translate_comp shifts the subtree's
+    pins too (keeping compute_hpwl and pin consumers honest); the (-1, -1)
+    unknown-position sentinel is not shifted (owner review #244 finding 1)."""
+    p = str(tmp_path / "pins.bdb")
+    db = buda.BDB(p)
+    db.add_cell("c", 100, 100)
+    db.add_cell_pin("c", "p", "OUTPUT", 10, 20)
+    db.add_inst("I0", "c", "", 0, 0)
+    db.add_inst("I1", "c", "", 200, 0)
+    db.add_net_pins("n0", "I0.p", ["I1.p"])
+    i0 = {c.name: c.id for c in db.all_components()}["I0"]
+    assert [(q.px, q.py) for q in db.pins_by_comp(i0)] == [(10, 20)]
+    del db
+    con = sqlite3.connect(p)   # a sentinel pin (no producer is Python-bound)
+    con.execute("INSERT INTO pin(net_id, comp_id, pin_name, dir, px, py)"
+                " VALUES(1, ?, 'ghost', 'UNKNOWN', -1, -1)", (i0,))
+    con.commit()
+    con.close()
+    db = buda.BDB(p)
+    db.translate_comp("I0", 5, 7)
+    pins = {q.pin_name: (q.px, q.py) for q in db.pins_by_comp(i0)}
+    assert pins["p"] == (15, 27)          # absolute pin rides along
+    assert pins["ghost"] == (-1, -1)      # unknown sentinel untouched
+
+
 def test_align_bottom_up_max_shift_guard():
     db = _two_inst_db(x2=500, y2=301, derive=False)
     s = _placement_session(db)

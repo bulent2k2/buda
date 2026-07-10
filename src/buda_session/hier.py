@@ -1000,6 +1000,17 @@ class HierMixin:
         """
         fixed = self._bottom_up_fixed_segments()
         if not fixed:
+            # Post-planner with locked-then-unlocked instances = every marked
+            # cell fell back per-instance (dogleg templates): the placement-
+            # stage report below could read ALIGNED while DNUTS will in fact
+            # solve per-instance — say so rather than switch modes silently.
+            if (verbose and getattr(self, "_planner_is_hier", False)
+                    and self.nuts_result is not None
+                    and self.bdb is not None and self.bdb.bottom_up_cells()):
+                print("check_template_tracks: no bottom-up fixed routing "
+                      "exists after run_nuts (dogleg fallback unlocked every "
+                      "marked cell?) — DNUTS will solve per-instance; the "
+                      "placement-stage report below does not gate it.")
             return self._check_template_tracks_placement(verbose=verbose)
         verdict = {}
         self._template_track_verdict = verdict

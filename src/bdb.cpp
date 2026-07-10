@@ -2315,12 +2315,25 @@ void BDB::translate_comp(const std::string& name, double dx, double dy) {
     gather_subtree(_db, name, rows);
     Stmt u(_db, "UPDATE component SET x1=x1+?1, y1=y1+?2, x2=x2+?1, y2=y2+?2"
                 " WHERE id=?3");
+    // Pin positions are ABSOLUTE, so the subtree's pins ride along — unlike
+    // flip/rotate (where the per-pin transform is nontrivial and pins stay
+    // stale by convention), a pure translation is exact.  This keeps the
+    // compute_hpwl() below meaningful and the pin consumers (export_gds
+    // TEXT positions, viz flylines, nets_by_hpwl) honest after an align.
+    // The (-1, -1) unknown-position sentinel must not be shifted.
+    Stmt up(_db, "UPDATE pin SET px=px+?1, py=py+?2"
+                 " WHERE comp_id=?3 AND px>=0 AND py>=0");
     for (const auto& r : rows) {
         sqlite3_reset(u);
         sqlite3_bind_double(u, 1, dx);
         sqlite3_bind_double(u, 2, dy);
         sqlite3_bind_int   (u, 3, r.id);
         sqlite3_step(u);
+        sqlite3_reset(up);
+        sqlite3_bind_double(up, 1, dx);
+        sqlite3_bind_double(up, 2, dy);
+        sqlite3_bind_int   (up, 3, r.id);
+        sqlite3_step(up);
     }
     compute_hpwl();
 }
