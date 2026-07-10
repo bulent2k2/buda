@@ -27,7 +27,7 @@ bbox. Verified gaps relative to what bottom-up needs:
 | # | Gap | Where |
 |---|-----|-------|
 | G1 | **No shared decision across instances.** `optimize_topologies` scores each expanded instance wrapper independently; only explicit pinning (`topology_pinned` + `pinned_seg_layers`, propagated at expansion, `hier.py:745-748`) forces a shared candidate index, and layer assignment is always per-wrapper. | `src/buda_cmds/planner_cmds.py:112-124`, `src/congestion_planner.cpp` |
-| G2 | **Instance transform is translation-only.** `offset_topology(t, dx, dy, inst_name)` shifts and name-qualifies; `component.orient` (which the BDB *does* carry, incl. `rotate_comp`/`flip_comp` composition) is never consulted. A rotated/mirrored instance would receive geometrically wrong copies. | `src/topology.cpp:30-75`, `hier.py:709-737` |
+| G2 | ~~Instance transform is translation-only.~~ **CLOSED 2026-07-10 (orientation-aware copy, see §7):** the expansion now detects each instance's orientation geometrically and applies `transform_topology` (all 8 orients); bottom-up copies transform NUTS/DNUTS results for the direction-preserving set `N/S/FN/FS`; 90°/270° instances of *marked* cells remain refused (H↔V layer pairing follow-on, opens.md). | `src/topology.cpp` (`transform_topology`), `src/nuts.cpp` (`transform_track_segment`), `src/detailed_nuts.cpp` (`transform_net_*`), `hier.py` (`_detect_instance_orients`) |
 | G3 | ~~Abstract NUTS enforces keepouts on non-TOP layers only~~ **Corrected after PR review (re-verified in code): NOT a gap for explicitly layer-tagged zones.** `Floorplan::low_layer_keepouts` returns **all user zones unfiltered** (`result = keepouts_` first) and `keepout_occupied` matches each zone's `layer_ids` against the segment's layer — so a user/derived zone explicitly tagged with a TOP layer *is* enforced by the abstract solve today. The `!is_top` filter in `NUTSEngine::low_keepouts` only scopes the *implicit leaf-footprint* zones (LOW-only by design). The derived bottom-up zones of §4.3 are always explicitly layer-tagged, so no NUTS change is needed for them. | `src/topology.cpp` (`low_layer_keepouts`), `src/nuts_geom.h` (`keepout_occupied`), `src/nuts.cpp:1019-1026` |
 | G4 | **No cross-instance track-phase check.** Track centres are a pure function of the layer's absolute `(origin, unit_pitch, slots)` plus absolute-rect overrides/keepouts; nothing compares what two translated instance windows actually see. | `src/routing_grid.cpp:50-143` |
 | G5 | **No template-level routing persistence.** Routing is persisted per expanded instance (`_add_expanded_bundle` stores only the selected topology per instance); the `cell` table has no attributes for flags like *bottom-up*, and `BDB::_set_meta` is not bound to Python. | `src/buda_session/persist.py`, `src/bdb.cpp`, `src/bind_db.cpp:385` |
@@ -238,6 +238,27 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
   existing top-down expansion (which silently mis-transforms today).
   Full orientation-aware `offset_topology` (rotate/mirror candidates + NUTS
   /DNUTS copies) is a separable follow-on (resolved decision Q1).
+
+  **AS-BUILT UPDATE (2026-07-10, orientation-aware copy — mirrors + 180):**
+  the follow-on landed.  `_detect_instance_orients` (hier.py) geometrically
+  identifies each instance's orientation by matching the full subtree shape
+  under all 8 candidates (per descendant it accepts the reference's RAW
+  orient token — BDB mutation convention — or the o∘raw COMPOSED token —
+  GDS-import convention; identity is preferred when it matches, and an
+  ambiguous self-symmetric layout is disambiguated by a track-phase score).
+  The congruence guard now *accepts* the direction-preserving set
+  `N/S/FN/FS` and refuses only 90°/270° (H↔V layer pairing follow-on, see
+  opens.md) and no-match instances.  Copies are transformed end-to-end via
+  the shared C++ `OrientMap` algebra (`orient_compose`/`orient_inverse`,
+  `transform_topology`, `transform_track_segment`, `transform_net_segment`,
+  `transform_net_via` — the latter three throw on 90°), the track check
+  reflects a mirrored instance's pools back into the reference frame before
+  comparing (both routed and placement-stage modes), and `align_bottom_up`
+  aligns mirrored instances via their effective coordinate about the track
+  layout's symmetry center (`K ≡ 2σ_l mod pitch_l`, CRT-combined per
+  direction).  The plain top-down expansion applies the correct geometric
+  transform for all 8 orientations (90° instances get pinned per-segment
+  layers dropped with a warning).
 - **G3 (TOP-layer NUTS keepouts)** — re-verified after PR review and found
   to be a NON-gap for explicitly layer-tagged zones (§1); §4.3 needs no NUTS
   change, only the layer-tagging convention on the derived zones.
@@ -350,6 +371,9 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
   (rotate/mirror in `offset_topology` + NUTS/DNUTS copies) is a separate
   follow-on. The existing top-down expansion additionally gets a *warning*
   for non-`N` instances (today's silent mis-transform, G2).
+  *(Superseded 2026-07-10: the follow-on landed with a "mirrors + 180 now"
+  scope — see the G2 as-built update in §7. Marked cells accept `N/S/FN/FS`;
+  90°/270° still refused pending the layer-pairing policy.)*
 - **Q2 — Partial alignment: copy aligned, solve outliers.** Under
   `on_mismatch independent`, aligned instances still get the DNUTS copy;
   only misaligned instances solve individually (folded into §5.4).

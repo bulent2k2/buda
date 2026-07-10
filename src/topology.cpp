@@ -74,6 +74,130 @@ Topology offset_topology(const Topology& t, int dx, int dy,
     return out;
 }
 
+OrientMap orient_map(const std::string& orient) {
+    // Token = mirror-about-X-axis first, then CCW rotation (bdb/gds_io
+    // convention).  Derived output-normalized forms over a w×h box:
+    //   N  (x, y)       S  (w−x, h−y)   FN (x, h−y)   FS (w−x, y)
+    //   W  (h−y, x)     E  (y, w−x)     FW (y, x)     FE (h−y, w−x)
+    static const std::map<std::string, OrientMap> table = {
+        {"N",  {false, false, false}}, {"S",  {false, true,  true }},
+        {"FN", {false, false, true }}, {"FS", {false, true,  false}},
+        {"W",  {true,  true,  false}}, {"E",  {true,  false, true }},
+        {"FW", {true,  false, false}}, {"FE", {true,  true,  true }},
+    };
+    auto it = table.find(orient);
+    return it != table.end() ? it->second : OrientMap{};
+}
+
+static Point apply_orient(const OrientMap& m, Point p, int w, int h) {
+    int x = p.x, y = p.y;
+    if (m.swap) { std::swap(x, y); std::swap(w, h); }
+    if (m.rx) x = w - x;
+    if (m.ry) y = h - y;
+    return Point{x, y};
+}
+
+std::string orient_compose(const std::string& outer,
+                           const std::string& inner) {
+    // Compose the normalized maps (box dims cancel: reflections compose as
+    // XORs, routed through the outer swap) and look the result back up.
+    const OrientMap a = orient_map(inner), b = orient_map(outer);
+    OrientMap c;
+    c.swap = a.swap != b.swap;
+    // inner's output axes feed outer's input; when outer swaps, inner's
+    // rx/ry land on the other output axis.
+    const bool irx = b.swap ? a.ry : a.rx;
+    const bool iry = b.swap ? a.rx : a.ry;
+    c.rx = irx != b.rx;
+    c.ry = iry != b.ry;
+    static const char* toks[8] = {"N","S","FN","FS","W","E","FW","FE"};
+    for (const char* t : toks) {
+        const OrientMap m = orient_map(t);
+        if (m.swap == c.swap && m.rx == c.rx && m.ry == c.ry) return t;
+    }
+    return "N";   // unreachable: the 8 maps cover the group
+}
+
+std::string orient_inverse(const std::string& orient) {
+    static const char* toks[8] = {"N","S","FN","FS","W","E","FW","FE"};
+    for (const char* t : toks)
+        if (orient_compose(orient, t) == "N") return t;
+    return "N";
+}
+
+Topology transform_topology(const Topology& t, const std::string& orient,
+                            int cell_w, int cell_h, int dx, int dy,
+                            const std::string& name_prefix) {
+    if (orient == "N" || orient.empty())
+        return offset_topology(t, dx, dy, name_prefix);
+    const OrientMap m = orient_map(orient);
+    auto xf_point = [&](Point p) {
+        Point q = apply_orient(m, p, cell_w, cell_h);
+        return Point{q.x + dx, q.y + dy};
+    };
+    auto xf_rect = [&](const Rect& r) {
+        const Point a = xf_point(Point{r.x1, r.y1});
+        const Point b = xf_point(Point{r.x2, r.y2});
+        return Rect{std::min(a.x, b.x), std::min(a.y, b.y),
+                    std::max(a.x, b.x), std::max(a.y, b.y)};
+    };
+    auto xf_seg = [&](Segment& s) {
+        // The clamp is an absolute interval on the segment's ORIGINAL perp
+        // axis (y for H, x for V); map it through that axis's transform,
+        // swapping the endpoints under reflection and keeping the
+        // INT_MIN/INT_MAX unbounded sentinels symbolic.
+        const bool was_h = (s.start.y == s.end.y);
+        // The output box is cell_h×cell_w under a swap.  The original perp
+        // axis (y for H, x for V) lands on output y exactly when the
+        // transformed segment is still horizontal (was_h != m.swap keeps
+        // H→H / V→V under no swap and flips under 90/270).
+        const bool out_axis_is_y = (was_h != m.swap);
+        const bool axis_reflected = out_axis_is_y ? m.ry : m.rx;
+        const int out_w = m.swap ? cell_h : cell_w;
+        const int out_h = m.swap ? cell_w : cell_h;
+        const int dim = out_axis_is_y ? out_h : out_w;
+        const int d = out_axis_is_y ? dy : dx;
+        const int lo = s.perp_clamp_lo, hi = s.perp_clamp_hi;
+        if (axis_reflected) {
+            s.perp_clamp_lo = (hi == INT_MAX) ? INT_MIN : dim - hi + d;
+            s.perp_clamp_hi = (lo == INT_MIN) ? INT_MAX : dim - lo + d;
+        } else {
+            s.perp_clamp_lo = (lo == INT_MIN) ? INT_MIN : lo + d;
+            s.perp_clamp_hi = (hi == INT_MAX) ? INT_MAX : hi + d;
+        }
+        s.start = xf_point(s.start);
+        s.end   = xf_point(s.end);
+    };
+    auto qualify = [&](const std::string& n) {
+        return (!name_prefix.empty() && n.find('/') == std::string::npos)
+                   ? name_prefix + "/" + n : n;
+    };
+    auto xf_busterm = [&](Busterm& b) {
+        b.bbox      = xf_rect(b.bbox);
+        b.orig_bbox = xf_rect(b.orig_bbox);
+        for (auto& r : b.rects) r = xf_rect(r);
+    };
+
+    Topology out = t;   // copy type/wirelength/trunk_location/pass_through
+    for (auto& s : out.segments) xf_seg(s);
+    for (auto& [seg_idx, ep] : out.seg_busterms) {
+        (void)seg_idx;
+        if (ep.first)  { xf_busterm(*ep.first);  ep.first->block_name  = qualify(ep.first->block_name); }
+        if (ep.second) { xf_busterm(*ep.second); ep.second->block_name = qualify(ep.second->block_name); }
+    }
+    if (!name_prefix.empty()) {
+        for (auto& n : out.connected_block_names) n = qualify(n);
+        for (auto& n : out.feedthru_blocks)       n = qualify(n);
+    }
+    std::map<std::string, Segment> bridges;
+    for (auto& [name, seg] : out.bridge_segments) {
+        Segment s = seg; xf_seg(s);
+        bridges[qualify(name)] = s;
+    }
+    out.bridge_segments = std::move(bridges);
+    return out;
+}
+
 // Forward decl: the geometric endpoint annotator (defined later in this TU).
 static void annotate_endpoints(Topology& topo, const std::vector<Busterm>& blocks);
 

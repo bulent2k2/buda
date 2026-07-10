@@ -721,13 +721,22 @@ instance, with the copied routing becoming keepouts for higher-level bundles
 (`cell.bottom_up`, schema v17), so the flag survives `save_bdb` /
 `load_pipeline`.
 
-Turning the flag **on** requires every instance of the cell to be a pure
-*translated* copy of the first one — identity orientation `'N'`, equal
-outline, identical child placement relative to the instance origin — because
-per-instance copies are translation-only.  A non-congruent instance set is
-rejected with an error listing the offenders; `run_planner hier` re-checks the
-same congruence at expansion time (placement may change after marking) and
-hard-errors on violation.  `off` is always accepted.
+Turning the flag **on** requires every instance of the cell to be a
+**direction-preserving transform** of the first one: a translation, a 180°
+rotation (`S`), or an axis mirror (`FN`/`FS`) — the per-instance copies are
+orientation-transformed end-to-end (topologies, NUTS segments, DNUTS
+bits/vias).  The orientation is detected **geometrically** by matching the
+full subtree shape under all 8 orientations (hierarchical
+`rotate_comp`/`flip_comp` rewrite descendant bboxes and keep every orient
+token `'N'`, so tokens alone cannot be trusted; when a self-symmetric child
+layout matches several orientations, identity is preferred if it matches,
+else the candidate whose track phases fit best).  A 90°/270° instance
+(`E/W/FE/FW`) is rejected — it swaps H↔V segments and with them the pinned
+per-segment layers (the layer-pairing policy is a planned follow-up, see
+`docs/internal/opens.md`); an instance matching NO orientation is genuinely
+non-congruent.  Rejections list the offenders; `run_planner hier` re-checks
+at expansion time (placement may change after marking) and hard-errors on
+violation.  `off` is always accepted.
 
 | Argument | Type | Description |
 |---|---|---|
@@ -753,6 +762,16 @@ pitch (V-layer pitches constrain x, H-layer pitches constrain y, combined as
 their LCM); the common phase is chosen among the instances' current phases
 minimizing the summed circular shift (the L1 circular median lies on a data
 point), so the majority of instances usually stand still.
+
+**Mirrored instances** (`S`/`FN`/`FS`, detected geometrically) participate
+via their *effective* coordinate `e = K − extent − c` on each reflected
+axis, where `K ≡ 2σ_l (mod pitch_l)` for every layer of the direction
+(CRT-combined) and σ_l is the reflection-symmetry center of that layer's
+signal-track set; the real nudge is the negated effective shift.  A
+direction whose track layout has no such symmetry (or whose layers'
+congruences are inconsistent) cannot host an aligned mirrored window at
+all — such instances are left unmoved on that axis with a WARNING and do
+not vote for the phase.
 
 Moves are applied with `translate_comp` (whole subtree — congruence is
 preserved).  Requires an open BDB and a routing grid (`def_track_pattern`);

@@ -25,11 +25,65 @@ split); bodies unchanged — `self` is the composed BudaSession, so
 cross-mixin helper calls resolve through the class as before.
 """
 import json
+import math
 import os
 import re
 import sys
 
 import buda
+
+# ── Orientation helpers (module-level: shared pure functions) ────────────────
+# Output-normalized orientation maps over a w×h box: (swap, reflect-x,
+# reflect-y).  Token convention = mirror-about-X-axis FIRST, then CCW
+# rotation (bdb.cpp / gds_io.cpp).
+_ORIENT_MAPS = {"N":  (0, 0, 0), "S":  (0, 1, 1),
+                "FN": (0, 0, 1), "FS": (0, 1, 0),
+                "W":  (1, 1, 0), "E":  (1, 0, 1),
+                "FW": (1, 0, 0), "FE": (1, 1, 1)}
+_DIR_PRESERVING = ("N", "S", "FN", "FS")   # H stays H, V stays V
+
+_PHASE_SCALE = 1_000_000   # µ-unit integers for exact modular phase math
+
+
+def _oxf_rect(o, x1, y1, x2, y2, w, h):
+    """Transform a rect through orientation `o` over a w×h box
+    (normalized: the transformed box's lower-left stays at the origin)."""
+    s, rx, ry = _ORIENT_MAPS[o]
+
+    def pt(x, y):
+        if s:
+            x, y, bw, bh = y, x, h, w
+        else:
+            bw, bh = w, h
+        if rx:
+            x = bw - x
+        if ry:
+            y = bh - y
+        return x, y
+    ax, ay = pt(x1, y1)
+    bx, by = pt(x2, y2)
+    return (round(min(ax, bx), 3), round(min(ay, by), 3),
+            round(max(ax, bx), 3), round(max(ay, by), 3))
+
+
+def _pattern_two_sigma(pat):
+    """2σ mod pitch (µ-int) of the pattern's signal-track centers, σ = a
+    reflection-symmetry center of the set (T = 2σ − T mod pitch); None
+    when the layout has no such symmetry.  A mirrored instance can only
+    ever share tracks with an unmirrored one about such a σ."""
+    p = pat.unit_pitch()
+    P = max(1, int(round(p * _PHASE_SCALE)))
+    ts = sorted({int(round(pos * _PHASE_SCALE)) % P
+                 for pos, slot in pat.tracks_in_range(pat.origin,
+                                                      pat.origin + p)
+                 if slot.type == "SIGNAL"})
+    if not ts:
+        return None
+    for t in ts:   # a symmetry must pair the first track with SOME track
+        cand = (ts[0] + t) % P
+        if sorted((cand - u) % P for u in ts) == ts:
+            return cand
+    return None
 
 
 class HierMixin:
@@ -348,41 +402,111 @@ class HierMixin:
                              int(round(c.x2)), int(round(c.y2)))
         return fp
 
-    def _bottom_up_congruence_issues(self, cell, comps=None):
-        """Verify every instance of `cell` is a pure translated copy of the
-        first one — the precondition for bottom-up template planning, whose
-        per-instance copies are translation-only (offset_topology).
+    # Output-normalized 8-orientation maps over a w×h box — mirror of the
+    # C++ orient_map table (topology.cpp): (swap axes, reflect x, reflect y).
+    # Class aliases of the module-level orientation tables, so instance
+    # code (and tests) can keep saying self._ORIENT_MAPS.
+    _ORIENT_MAPS = _ORIENT_MAPS
+    _DIR_PRESERVING = _DIR_PRESERVING
 
-        Checks, per instance: identity orientation 'N', equal outline
-        dimensions, and an identical FULL SUBTREE — every descendant matched
-        by path suffix on (cell type, orient, bbox relative to the instance
-        origin). The geometric comparison matters because rotate_comp /
-        flip_comp on a *hierarchical* block rewrite the children's absolute
-        bboxes and deliberately keep orient='N' — the orient token alone
-        cannot detect such an instance; the full-depth walk matters because
-        a moved GRANDCHILD leaves outline + direct children matching, and
-        the per-descendant orient matters because a rotated *square* leaf
-        descendant leaves the geometry matching too.
+    def _mirror_const(self, horiz_flag):
+        """K with K ≡ 2σ_l (mod pitch_l) for every grid layer of the
+        direction (CRT-combined, in layout units, mod the direction's pitch
+        LCM); None when any pattern is asymmetric or the congruences are
+        inconsistent.  A mirrored instance at coordinate c (extent E on the
+        axis) sees the phase-φ tracks iff c ≡ K − E − φ (mod LCM)."""
+        K, M = 0, 1
+        for l, horiz in self._grid_layer_dirs().items():
+            if horiz != horiz_flag:
+                continue
+            pat = self.routing_grid.get_layer_grid(l).global_pattern()
+            a = _pattern_two_sigma(pat)
+            if a is None:
+                return None
+            m = max(1, int(round(pat.unit_pitch() * _PHASE_SCALE)))
+            g = math.gcd(M, m)
+            if (a - K) % g:
+                return None      # inconsistent congruences
+            mg = m // g
+            t = ((a - K) // g * pow(M // g, -1, mg)) % mg if mg > 1 else 0
+            K, M = K + M * t, M * mg
+        return (K % M) / _PHASE_SCALE
 
-        Returns a list of human-readable issue strings (empty = congruent).
-        """
+    def _axis_phase_ok(self, refl, c_lo, c_hi, r_lo, horiz_flag):
+        """Can an instance whose axis coordinate is c_lo (extent c_hi−c_lo,
+        reflected on the axis iff refl) share the direction's signal tracks
+        with a reference at r_lo?  Pure phase arithmetic — the cheap
+        necessary condition (overrides/keepouts still need the real
+        check_template_tracks)."""
+        dirs = self._grid_layer_dirs()
+        period = self._pitch_lcm(
+            [self.routing_grid.get_layer_grid(l).global_pattern()
+                 .unit_pitch()
+             for l, h in dirs.items() if h == horiz_flag])
+        if period is None:
+            return True
+        if not refl:
+            d = (c_lo - r_lo) % period
+        else:
+            K = self._mirror_const(horiz_flag)
+            if K is None:
+                return False
+            d = (c_lo + (c_hi - c_lo) + r_lo - K) % period
+        return min(d, period - d) < 1e-6
+
+    def _orient_phase_score(self, o, c, ref):
+        """Detection tiebreak for AMBIGUOUS instances (a self-symmetric
+        child layout matches several orientations, e.g. S vs FS): the count
+        of axes whose track phase works under orient `o`.  Direction-
+        swapping orients score -1 (dispreferred and out of phase-math
+        scope); no routing grid → all zero (no discrimination)."""
+        s_, rx, ry = self._ORIENT_MAPS[o]
+        if s_:
+            return -1
+        if self.routing_grid is None:
+            return 0
+        return (int(self._axis_phase_ok(rx, c.x1, c.x2, ref.x1, False))
+                + int(self._axis_phase_ok(ry, c.y1, c.y2, ref.y1, True)))
+
+    def _detect_instance_orients(self, cell, comps=None, ref_name=None,
+                                 cache=None):
+        """{instance name: orient token or None} — the 8-orientation
+        transform mapping the REFERENCE instance's subtree onto each placed
+        instance of `cell` (None = no orientation matches: genuinely
+        non-congruent).  Detection is GEOMETRIC over the full subtree —
+        rotate_comp/flip_comp on a hierarchical block rewrite the children's
+        absolute bboxes and keep the root token 'N', so the token alone is
+        untrustworthy — comparing per descendant: (cell type, composed
+        orient, bbox relative to the instance origin, transformed).  For a
+        CHILDLESS cell the geometry is orientation-blind (empty subtree), so
+        the root tokens decide: O = inst.orient ∘ ref.orient⁻¹.
+
+        ref_name picks the reference (default: first placed instance by
+        name); the reference maps to 'N'.  `cache` (a caller-owned dict)
+        memoizes on (cell, ref) — deliberately PER-CALL-SITE, never stored
+        on the session: placement can mutate between commands (move_comp /
+        rotate_comp / align), which would silently stale a session cache."""
+        if cache is None:
+            cache = {}
         if comps is None:
             comps = self.bdb.all_components()
         insts, by_parent = [], {}
         for c in comps:
-            if c.cell == cell:
+            if c.cell == cell and c.x1 >= 0:
                 insts.append(c)
             by_parent.setdefault(c.parent_id, []).append(c)
-        issues = [f"{c.name}: orientation {c.orient} (need 'N')"
-                  for c in insts if c.orient != "N"]
-        if len(insts) < 2:
-            return issues
+        insts.sort(key=lambda c: c.name)
+        if not insts:
+            return {}
+        ref = next((c for c in insts if c.name == ref_name), insts[0])
+        key = (cell, ref.name)
+        if key in cache:
+            return cache[key]
 
         def dims(c):
             return (round(c.x2 - c.x1, 3), round(c.y2 - c.y1, 3))
 
         def shape(inst):
-            # Full subtree, keyed by path suffix relative to the instance.
             out, stack, prefix = {}, [inst], inst.name + "/"
             while stack:
                 node = stack.pop()
@@ -390,27 +514,100 @@ class HierMixin:
                     rel = (k.name[len(prefix):]
                            if k.name.startswith(prefix) else k.name)
                     out[rel] = (k.cell, k.orient,
-                                round(k.x1 - inst.x1, 3),
-                                round(k.y1 - inst.y1, 3),
-                                round(k.x2 - inst.x1, 3),
-                                round(k.y2 - inst.y1, 3))
+                                (round(k.x1 - inst.x1, 3),
+                                 round(k.y1 - inst.y1, 3),
+                                 round(k.x2 - inst.x1, 3),
+                                 round(k.y2 - inst.y1, 3)))
                     stack.append(k)
             return out
 
-        ref = insts[0]
+        w, h = dims(ref)
         ref_shape = shape(ref)
-        for c in insts[1:]:
-            if dims(c) != dims(ref):
-                issues.append(f"{c.name}: outline {dims(c)} differs from "
-                              f"{ref.name} {dims(ref)}")
+        # Pre-transform the reference shape under each candidate orient.
+        # Per descendant, TWO orient tokens are acceptable: the reference's
+        # RAW token (BDB's flip_comp/rotate_comp rewrite descendant bboxes
+        # and leave their tokens untouched) or the COMPOSED token o∘raw
+        # (GDS-imported hierarchies carry the SREF orientation per row).
+        ref_under = {}
+        for o in self._ORIENT_MAPS:
+            ref_under[o] = {
+                rel: (kcell, korient, buda.orient_compose(o, korient),
+                      _oxf_rect(o, *bbox, w, h))
+                for rel, (kcell, korient, bbox) in ref_shape.items()}
+        out = {}
+        for c in insts:
+            if c is ref:
+                out[c.name] = "N"
                 continue
-            s = shape(c)
-            if s != ref_shape:
-                bad = (sorted(set(ref_shape) ^ set(s))
-                       or sorted(k for k in ref_shape
-                                 if s.get(k) != ref_shape[k]))
-                issues.append(f"{c.name}: subtree differs from "
-                              f"{ref.name} (e.g. {', '.join(bad[:3])})")
+            found = None
+            if not ref_shape:
+                # Childless: geometry is orientation-blind; trust the root
+                # tokens (rotate/flip DO compose them for leaves) when the
+                # outline is consistent with the implied orient.
+                cand = buda.orient_compose(
+                    c.orient, buda.orient_inverse(ref.orient))
+                exp = (h, w) if self._ORIENT_MAPS[cand][0] else (w, h)
+                found = cand if dims(c) == exp else None
+            else:
+                cshape = shape(c)
+                matches = []
+                for o, rshape in ref_under.items():
+                    exp = (h, w) if self._ORIENT_MAPS[o][0] else (w, h)
+                    if dims(c) != exp or cshape.keys() != rshape.keys():
+                        continue
+                    if all(kc == kcell and bb == bbox
+                           and ko in (kraw, kcomp)
+                           for rel, (kcell, kraw, kcomp, bbox)
+                           in rshape.items()
+                           for kc, ko, bb in [cshape[rel]]):
+                        matches.append(o)
+                if "N" in matches:
+                    # Identity matching = the instance is (as far as the
+                    # geometry can prove) a plain copy; never re-interpret
+                    # it as a mirror of a self-symmetric layout just to
+                    # improve track phase — its LEAF CONTENT is unmirrored.
+                    found = "N"
+                elif len(matches) == 1:
+                    found = matches[0]
+                elif matches:
+                    # AMBIGUOUS (self-symmetric child layout, e.g. S vs
+                    # FS): every match instantiates the template onto the
+                    # same child boxes, so any is geometrically valid —
+                    # prefer the one whose track phases work (most axes),
+                    # ties broken by canonical order.
+                    found = max(matches, key=lambda o:
+                                self._orient_phase_score(o, c, ref))
+            out[c.name] = found
+        cache[key] = out
+        return out
+
+    def _bottom_up_congruence_issues(self, cell, comps=None, ref_name=None,
+                                     cache=None):
+        """Verify every instance of `cell` is a SUPPORTED transform of the
+        reference — the precondition for bottom-up template planning, whose
+        per-instance copies handle translation plus the direction-preserving
+        orientations (S = 180°, FN/FS = axis mirrors).  A 90°/270° instance
+        (E/W/FE/FW) is geometrically detectable but swaps H↔V segments, and
+        with them the pinned per-segment layers — refused until the
+        layer-pairing policy exists (opens.md).  An instance matching NO
+        orientation is genuinely non-congruent.
+
+        Returns a list of human-readable issue strings (empty = OK)."""
+        orients = self._detect_instance_orients(cell, comps=comps,
+                                                ref_name=ref_name,
+                                                cache=cache)
+        issues = []
+        for name in sorted(orients):
+            o = orients[name]
+            if o is None:
+                issues.append(
+                    f"{name}: subtree matches the reference under NO "
+                    f"orientation (genuinely non-congruent)")
+            elif o not in self._DIR_PRESERVING:
+                issues.append(
+                    f"{name}: 90°-rotated ({o}) — bottom-up copies support "
+                    f"N/S/FN/FS; 90° swaps H↔V layers (layer pairing is a "
+                    f"planned follow-up, see opens.md)")
         return issues
 
     def _build_cell_local_floorplan(self, parent_comp_name):
@@ -913,20 +1110,34 @@ class HierMixin:
             by_tid = {}
             for ts in local.segments:
                 by_tid.setdefault(ts.bundle_id, []).append(ts)
+            # Per-instance orientations relative to the template's reference
+            # (whose cell-local layout the local solve just placed).
+            ref_inst = wrappers[0].input.original_bundle.instances[0]
+            orients = self._detect_instance_orients(cell, comps.values(),
+                                                    ref_name=ref_inst)
+            ref_c = comps.get(ref_inst)
+            cw = int(round(ref_c.x2 - ref_c.x1)) if ref_c else 0
+            ch = int(round(ref_c.y2 - ref_c.y1)) if ref_c else 0
             n_copied = 0
             for w in wrappers:
                 tid = w.input.original_bundle.id
                 for iw in exp_map.get(tid, []):
                     if not iw.hier.locked:
                         continue
-                    parent = comps.get(iw.input.original_bundle.instances[0])
+                    inst = iw.input.original_bundle.instances[0]
+                    parent = comps.get(inst)
                     if parent is None:
                         continue
+                    oi = orients.get(inst) or "N"
                     dx = int(round(parent.x1))
                     dy = int(round(parent.y1))
+                    bid = iw.input.original_bundle.id
                     for ts in by_tid.get(tid, []):
-                        fixed.append(buda.offset_track_segment(
-                            ts, dx, dy, iw.input.original_bundle.id))
+                        # Cell frame (src 0,0) → instance frame, through the
+                        # instance's orientation (locked cells are guarded to
+                        # the direction-preserving set at expansion).
+                        fixed.append(buda.transform_track_segment(
+                            ts, oi, cw, ch, 0, 0, dx, dy, bid))
                         n_copied += 1
             print(f"[BottomUp] cell '{cell}': local NUTS placed "
                   f"{len(local.segments)} segment(s), "
@@ -1023,8 +1234,11 @@ class HierMixin:
             segs_by_bid.setdefault(ts.bundle_id, {})[ts.seg_idx] = ts
         comps = {c.name: c for c in self.bdb.all_components()}
 
-        def rel_tracks(ts, inst_name):
+        def rel_tracks(ts, inst_name, refl=False, extent=0.0):
             # Track pool of ts's window, relative to the instance origin.
+            # For a mirrored sibling (refl) the pool is reflected back into
+            # the REFERENCE frame (rel' = extent - rel, order reversed) so
+            # physically identical tracks compare equal position-by-position.
             if self.routing_grid is None \
                     or not self.routing_grid.has_layer(ts.layer):
                 return None
@@ -1034,14 +1248,22 @@ class HierMixin:
                                              ts.interval_lo, ts.interval_hi)
             c = comps[inst_name]
             off = c.y1 if ts.horiz else c.x1
-            return [(round(p - off, 6), round(slot.width, 6))
-                    for p, slot in tracks]
+            rel = [(round(p - off, 6), round(slot.width, 6))
+                   for p, slot in tracks]
+            if refl:
+                rel = [(round(extent - p, 6), w) for p, w in reversed(rel)]
+            return rel
 
         cells = {}
         for cell, tid, iws in self._bottom_up_instance_groups():
             cells.setdefault(cell, []).append(iws)
         for cell in sorted(cells):
             ref_name = cells[cell][0][0].input.original_bundle.instances[0]
+            orients = self._detect_instance_orients(cell, comps.values(),
+                                                    ref_name=ref_name)
+            rc = comps.get(ref_name)
+            rcw = round(rc.x2 - rc.x1, 6) if rc else 0.0
+            rch = round(rc.y2 - rc.y1, 6) if rc else 0.0
             aligned, misaligned = [ref_name], {}
             n_windows = 0
             for iws in cells[cell]:
@@ -1054,6 +1276,8 @@ class HierMixin:
                     if inst == ref_name:
                         continue
                     bid = iw.input.original_bundle.id
+                    oi = orients.get(inst) or "N"
+                    _, rx, ry = self._ORIENT_MAPS.get(oi, (0, 0, 0))
                     issues = misaligned.get(inst, [])
                     for si, rts in sorted(segs_by_bid.get(ref_bid,
                                                           {}).items()):
@@ -1061,7 +1285,12 @@ class HierMixin:
                         if sts is None:
                             continue
                         a = rel_tracks(rts, ref_name)
-                        b = rel_tracks(sts, inst)
+                        # A mirrored instance's perp axis: y for an H wire
+                        # (reflected iff ry), x for a V wire (iff rx).
+                        b = rel_tracks(
+                            sts, inst,
+                            refl=bool(ry if sts.horiz else rx),
+                            extent=rch if sts.horiz else rcw)
                         if a is None or b is None:
                             continue
                         n_windows += 1
@@ -1160,28 +1389,38 @@ class HierMixin:
                       "(def_track_pattern) — nothing to compare yet.")
             return verdict
 
-        def rel_tracks(inst, lid, horiz):
+        def rel_tracks(inst, lid, horiz, refl=False):
             g = self.routing_grid.get_layer_grid(lid)
             if horiz:
                 tracks = g.signal_tracks_in_span(inst.x1, inst.x2,
                                                  inst.y1, inst.y2)
-                off = inst.y1
+                off, extent = inst.y1, inst.y2 - inst.y1
             else:
                 tracks = g.signal_tracks_in_span(inst.y1, inst.y2,
                                                  inst.x1, inst.x2)
-                off = inst.x1
-            return [(round(p - off, 6), round(slot.width, 6))
-                    for p, slot in tracks]
+                off, extent = inst.x1, inst.x2 - inst.x1
+            rel = [(round(p - off, 6), round(slot.width, 6))
+                   for p, slot in tracks]
+            if refl:
+                # Mirrored instance: reflect the pool back into the
+                # reference frame so identical tracks compare equal.
+                rel = [(round(extent - p, 6), w) for p, w in reversed(rel)]
+            return rel
 
         for cell in sorted(by_cell):
             insts = by_cell[cell]
             ref = insts[0]
+            orients = self._detect_instance_orients(
+                cell, self.bdb.all_components(), ref_name=ref.name)
             aligned, misaligned = [ref.name], {}
             for c in insts[1:]:
                 issues = []
+                oi = orients.get(c.name) or "N"
+                _, rx, ry = self._ORIENT_MAPS.get(oi, (0, 0, 0))
                 for lid, horiz in sorted(dirs.items()):
                     a = rel_tracks(ref, lid, horiz)
-                    b = rel_tracks(c, lid, horiz)
+                    b = rel_tracks(c, lid, horiz,
+                                   refl=bool(ry if horiz else rx))
                     if len(a) != len(b):
                         issues.append(f"L{lid}: {len(b)} track(s) vs "
                                       f"{len(a)} at reference")
@@ -1258,6 +1497,18 @@ class HierMixin:
         lies on a data point), so the whole group moves as little as
         possible — often the reference moves and the majority stand still.
 
+        MIRRORED instances (S/FN/FS — detected geometrically): a reflected
+        window sees the reference's tracks iff the signal-track set is
+        mirror-symmetric (about some center σ, per layer: T = 2σ − T mod
+        pitch) and the instance's EFFECTIVE coordinate e = K − extent − c
+        shares the group phase, where K ≡ 2σ_l (mod pitch_l) for every
+        layer of the direction (combined by CRT) and extent = the instance
+        dim on the axis; the real nudge is the NEGATED effective shift.
+        An asymmetric pattern, or layers whose 2σ congruences are
+        inconsistent, make a mirrored instance's phase target undefined on
+        that axis — it is left unmoved with a WARNING (and does not vote
+        for the phase).  check_template_tracks remains the ground truth.
+
         Moves are applied with translate_comp (whole subtree, preserving
         congruence).  Region overrides are absolute-rect-keyed and cannot
         be fixed by translation — the check reports them.  Run BEFORE
@@ -1324,24 +1575,33 @@ class HierMixin:
 
         pre_issues = self._validate_placement()
 
+        # Mirrored instances need the direction's mirror constant K with
+        # K ≡ 2σ_l (mod pitch_l) for every layer (σ_l = the symmetry center
+        # of layer l's signal-track set); None = undefined (see docstring).
+        kx = self._mirror_const(False)   # V layers constrain x
+        ky = self._mirror_const(True)    # H layers constrain y
+
         def to_phase(c, p, period):
             d = (p - c) % period
             return d - period if d > period / 2 else d
 
-        def shifts(insts, movable, coord, period):
-            # Signed minimal per-instance shifts to the common phase that
-            # (1) sits on the most anchors — immovable instances inside
-            # marked ancestors — then (2) minimizes the movables' total
-            # movement (the L1 circular median lies on a data point).
-            # Anchors always get shift 0; returns the names of any anchors
-            # OFF the chosen phase (not fixable by translation).
+        def shifts(recs, period):
+            # recs: (name, eff_coord, sign, anchor?, skip?) per instance.
+            # Signed minimal per-instance REAL shifts to the common
+            # effective phase that (1) sits on the most anchors — immovable
+            # instances inside marked ancestors — then (2) minimizes the
+            # movables' total movement (the L1 circular median lies on a
+            # data point).  Anchors/skips get shift 0 (skips don't vote);
+            # returns the names of any anchors OFF the chosen phase (not
+            # fixable by translation).
             if period is None:
-                return [0.0] * len(insts), []
-            anchors = [(c.name, coord(c)) for c in insts
-                       if c.name not in movable]
-            movs = [coord(c) for c in insts if c.name in movable]
+                return [0.0] * len(recs), []
+            anchors = [(n, e) for n, e, _, anc, skip in recs
+                       if anc and not skip]
+            movs = [e for _, e, _, anc, skip in recs
+                    if not anc and not skip]
             best = None
-            for cand in ([a for _, a in anchors] or movs):
+            for cand in ([a for _, a in anchors] or movs or [0.0]):
                 p = cand % period
                 mis = sum(1 for _, a in anchors
                           if abs(to_phase(a, p, period)) > 1e-6)
@@ -1352,8 +1612,9 @@ class HierMixin:
             p = best[2]
             offside = [n for n, a in anchors
                        if abs(to_phase(a, p, period)) > 1e-6]
-            return ([to_phase(coord(c), p, period)
-                     if c.name in movable else 0.0 for c in insts], offside)
+            return ([0.0 if (anc or skip)
+                     else sign * to_phase(e, p, period)
+                     for _, e, sign, anc, skip in recs], offside)
 
         applied = {}   # instance name → (dx, dy, cell) actually moved
         # Enclosing cells before enclosed ones, and FRESH coordinates per
@@ -1382,8 +1643,46 @@ class HierMixin:
                 return any("/".join(parts[:k]) in marked
                            for k in range(1, len(parts)))
             movable = {c.name for c in insts if not inside_marked(c.name)}
-            dxs, off_x = shifts(insts, movable, lambda c: c.x1, lx)
-            dys, off_y = shifts(insts, movable, lambda c: c.y1, ly)
+            orients = self._detect_instance_orients(
+                cell, self.bdb.all_components(), ref_name=insts[0].name)
+            unsupported = sorted(
+                n for n, o in orients.items()
+                if o is None or o not in self._DIR_PRESERVING)
+            for n in unsupported:
+                print(f"WARNING: align_bottom_up: {n} of cell '{cell}' has "
+                      f"unsupported orientation ({orients[n]}) — left "
+                      f"unmoved")
+
+            def axis_recs(axis):
+                # axis 0 = x (V layers, const kx), 1 = y (H layers, ky).
+                K = kx if axis == 0 else ky
+                recs = []
+                for c in insts:
+                    o = orients.get(c.name)
+                    skip = c.name in unsupported
+                    _, rx, ry = self._ORIENT_MAPS.get(o or "N", (0, 0, 0))
+                    refl = rx if axis == 0 else ry
+                    coord = c.x1 if axis == 0 else c.y1
+                    eff, sign = coord, 1.0
+                    if refl and not skip:
+                        if K is None:
+                            print(f"WARNING: align_bottom_up: {c.name} is "
+                                  f"mirrored on {'x' if axis == 0 else 'y'} "
+                                  f"but that direction's track layout has "
+                                  f"no usable mirror symmetry — left "
+                                  f"unmoved on this axis")
+                            skip = True
+                        else:
+                            extent = (c.x2 - c.x1 if axis == 0
+                                      else c.y2 - c.y1)
+                            eff = K - extent - coord
+                            sign = -1.0
+                    recs.append((c.name, eff, sign,
+                                 c.name not in movable, skip))
+                return recs
+
+            dxs, off_x = shifts(axis_recs(0), lx)
+            dys, off_y = shifts(axis_recs(1), ly)
             for n in sorted(set(off_x) | set(off_y)):
                 print(f"WARNING: align_bottom_up: {n} (inside a marked "
                       f"parent) sits off cell '{cell}'s chosen phase — the "
@@ -1464,8 +1763,12 @@ class HierMixin:
         (or implicitly run) track verdict.  Returns None when no bottom-up
         fixed routing exists; else (ref_ids, copy_specs, skip_ids):
           ref_ids    — bundle ids solved once (the reference instances)
-          copy_specs — [(ref_bid, sib_bid, ddx, ddy)] translated copies for
-                       ALIGNED siblings
+          copy_specs — [(ref_bid, sib_bid, orient, cw, ch, rx, ry, sx, sy)]
+                       oriented copies for ALIGNED siblings: map the
+                       reference solve from the ref instance's frame (cw×ch
+                       box at (rx, ry)) through `orient` (N/S/FN/FS — locked
+                       instances are guarded to the direction-preserving set
+                       at expansion) into the sibling frame at (sx, sy)
           skip_ids   — the copied siblings (excluded from the global solve);
                        misaligned siblings stay in the global solve
                        ('independent' policy — copy aligned, solve outliers).
@@ -1507,13 +1810,29 @@ class HierMixin:
             ref_bid = ref_iw.input.original_bundle.id
             ref_ids.add(ref_bid)
             rc = comps[v['ref']]
+            cw = int(round(rc.x2 - rc.x1))
+            ch = int(round(rc.y2 - rc.y1))
+            # Orientation of each sibling relative to the SAME reference the
+            # verdict used (ref maps to 'N', so orients[inst] IS the
+            # ref→sibling transform).
+            orients = self._detect_instance_orients(
+                cell, comps.values(), ref_name=v['ref'])
             for inst, iw in by_inst.items():
                 if inst == v['ref'] or inst in v['misaligned']:
                     continue        # ref solves; misaligned solve globally
+                oi = orients.get(inst)
+                if oi is None or oi not in self._DIR_PRESERVING:
+                    # Shouldn't happen for locked instances (guarded at
+                    # expansion) — leave it in the global solve.
+                    print(f"WARNING: bottom-up DNUTS copy: instance "
+                          f"'{inst}' of '{cell}' has unsupported "
+                          f"orientation ({oi}); solving it independently.")
+                    continue
                 c = comps[inst]
                 copy_specs.append((ref_bid, iw.input.original_bundle.id,
-                                   int(round(c.x1 - rc.x1)),
-                                   int(round(c.y1 - rc.y1))))
+                                   oi, cw, ch,
+                                   int(round(rc.x1)), int(round(rc.y1)),
+                                   int(round(c.x1)), int(round(c.y1))))
                 skip_ids.add(iw.input.original_bundle.id)
         if not ref_ids:
             return None
@@ -1559,6 +1878,7 @@ class HierMixin:
         wrapper_at = {}     # (template id, instance path) → expanded wrapper
         checked_bu = set()
         warned_orient = set()
+        ocache = {}   # orient-detection memo for this expansion pass
         for w in bundles:
             b = w.input.original_bundle
             if not b.cell_context or not b.instances:
@@ -1566,37 +1886,45 @@ class HierMixin:
                 continue
             if b.id in replica_wrapper_of:
                 continue   # replica: covered by its template's expansion
-            # Expansion is translation-only (offset_topology), so a bottom-up
-            # cell requires congruent (purely translated) instances — hard
-            # error otherwise, since uniform copies are its whole contract.
-            # Checked here (not only at set_bottom_up time) because placement
-            # may have changed since the cell was marked.
+            # Bottom-up cells: copies must be exact transforms, and only the
+            # direction-preserving orientations (N/S/FN/FS) keep the pinned
+            # per-segment layers valid — hard error otherwise, since uniform
+            # copies are the whole contract.  Checked here (not only at
+            # set_bottom_up time) because placement may have changed.
             if b.cell_context in bottom_up and b.cell_context not in checked_bu:
                 checked_bu.add(b.cell_context)
                 issues = self._bottom_up_congruence_issues(
-                    b.cell_context, comps.values())
+                    b.cell_context, comps.values(),
+                    ref_name=b.instances[0], cache=ocache)
                 if issues:
                     raise RuntimeError(
                         f"run_planner hier: bottom-up cell "
-                        f"'{b.cell_context}' has non-congruent instances "
-                        f"(translation-only copies impossible): "
+                        f"'{b.cell_context}' has unsupported instances: "
                         f"{'; '.join(issues[:4])}")
+            # Per-instance orientation, GEOMETRICALLY detected against the
+            # template's reference instance (candidates were generated from
+            # its cell-local layout).  Detected instances get the full
+            # transform — the fix for the old translation-only silent
+            # mis-transform; an undetectable instance falls back to
+            # translation with a warning.
+            orients = self._detect_instance_orients(
+                b.cell_context, comps.values(), ref_name=b.instances[0],
+                cache=ocache)
+            ref_c = comps.get(b.instances[0])
+            cw = int(round(ref_c.x2 - ref_c.x1)) if ref_c else 0
+            ch = int(round(ref_c.y2 - ref_c.y1)) if ref_c else 0
             expansion_map[b.id] = []
             for inst_name in b.instances:
                 parent = comps.get(inst_name)
                 if parent is None:
                     continue
-                # For non-bottom-up cells a rotated/mirrored instance is only
-                # a quality risk (each instance is planned separately), so
-                # warn rather than error — once per instance, not per
-                # (bundle × instance): a rotated instance shared by many
-                # bundles would otherwise repeat the identical line.
-                if (parent.orient != "N" and parent.cell not in bottom_up
-                        and inst_name not in warned_orient):
+                oi = orients.get(inst_name)
+                if oi is None and inst_name not in warned_orient:
                     warned_orient.add(inst_name)
-                    print(f"WARNING: instance {inst_name} has orientation "
-                          f"{parent.orient}; hier expansion is translation-"
-                          f"only — copied topologies may be mis-transformed")
+                    print(f"WARNING: instance {inst_name} matches the "
+                          f"template under no orientation — falling back to "
+                          f"translation; copied topologies may be "
+                          f"mis-transformed")
                 dx = int(round(parent.x1))
                 dy = int(round(parent.y1))
                 new_w = buda.BundleWrapper()
@@ -1609,14 +1937,22 @@ class HierMixin:
                 clone.instances = [inst_name]
                 new_w.input.original_bundle = clone
                 new_w.input.width = w.input.width
-                # Offset each template candidate to instance coords AND qualify
-                # its cell-local block names (segments' seg_busterms annotation,
-                # connected_block_names, feedthru_blocks) with the instance path,
-                # so ConnTopology's authoritative endpoint annotation resolves
-                # against the global floorplan (no geometric-fallback mis-taps).
-                new_w.input.candidates = [
-                    buda.offset_topology(t, dx, dy, inst_name)
-                    for t in w.input.candidates]
+                # Map each template candidate to instance coords — through
+                # the instance's detected orientation over the cell box, then
+                # the translation — AND qualify its cell-local block names
+                # (segments' seg_busterms annotation, connected_block_names,
+                # feedthru_blocks) with the instance path, so ConnTopology's
+                # authoritative endpoint annotation resolves against the
+                # global floorplan (no geometric-fallback mis-taps).
+                if oi and oi != "N":
+                    new_w.input.candidates = [
+                        buda.transform_topology(t, oi, cw, ch, dx, dy,
+                                                inst_name)
+                        for t in w.input.candidates]
+                else:
+                    new_w.input.candidates = [
+                        buda.offset_topology(t, dx, dy, inst_name)
+                        for t in w.input.candidates]
                 # Reserve the instance footprint: until this local bundle is
                 # planned, its demand is parked as virtual usage so earlier
                 # (global) bundles leave room over the cell interior.
@@ -1632,7 +1968,20 @@ class HierMixin:
                 new_w.input.topology_pinned = w.input.topology_pinned
                 new_w.plan.selected_topology_index = w.plan.selected_topology_index
                 if w.input.pinned_seg_layers:
-                    new_w.input.pinned_seg_layers = list(w.input.pinned_seg_layers)
+                    if oi in ("W", "E", "FW", "FE"):
+                        # 90/270 swaps every segment H<->V: the pinned layers
+                        # are direction-invalid for this instance — drop them
+                        # and let the planner re-assign (bottom-up cells never
+                        # reach here; their guard refuses 90° instances).
+                        if inst_name not in warned_orient:
+                            warned_orient.add(inst_name)
+                            print(f"WARNING: instance {inst_name} is "
+                                  f"90°-rotated ({oi}) — pinned per-segment "
+                                  f"layers dropped for it (H<->V swap); the "
+                                  f"planner re-assigns its layers")
+                    else:
+                        new_w.input.pinned_seg_layers = \
+                            list(w.input.pinned_seg_layers)
                 # Bottom-up template instance: a uniform copy of the local
                 # solve (index + layers pinned above).  locked wrappers are
                 # planned first (later bundles detour their committed usage)
