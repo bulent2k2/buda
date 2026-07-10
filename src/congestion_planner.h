@@ -175,6 +175,18 @@ public:
     //   "base_span_ref"    — span at which a segment pays the full non-TOP
     //                        penalty; shorter segments pay proportionally
     //                        less (default: 25% of the larger grid extent)
+    //   "kPeak"            — peak-band-utilization cost (default 0 = OFF):
+    //                        each segment additionally pays kPeak * its worst
+    //                        band's post-charge fill fraction (usage+eff+pitch)
+    //                        / cap.  The overflow-only kCong term is ZERO below
+    //                        capacity, so without this a candidate loading a
+    //                        band to 95% scores the same as one loading it to
+    //                        10% — routability-blind selection (wishlist-
+    //                        planner "Selection basis" lever 1).  With kPeak
+    //                        set, a topology that concentrates demand on one
+    //                        nearly-full band (a spine through a saturated
+    //                        column) loses to one that spreads it (a BITRUNK
+    //                        tree), before any overflow materializes.
     void set_planner_param(const std::string& name, double value);
     // Minimum inter-bus spacing, mirroring NUTSEngine::set_track_pitch.  The
     // band books reserve one pitch of margin per additional bus in a band so a
@@ -243,6 +255,14 @@ private:
     // sub-band window (slide bounds are usually not Hanan lines) must not be
     // priced against the whole band.
     double cong_cost_segment(const Segment& seg, int layer_id, double eff_width,
+                             int perp_pos_override = INT_MIN,
+                             int slide_lo = INT_MIN, int slide_hi = INT_MIN) const;
+    // Peak EXISTING utilization (usage/cap, pre-charge — see the .cpp comment
+    // for why post-charge was measured and rejected) over the bands this
+    // segment would use.  0 when every band is empty or the segment crosses
+    // none; can exceed 1 on already-overflowing bands.  Only evaluated when
+    // kPeak_ > 0, so the default path costs nothing extra.
+    double peak_util_segment(const Segment& seg, int layer_id,
                              int perp_pos_override = INT_MIN,
                              int slide_lo = INT_MIN, int slide_hi = INT_MIN) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
@@ -399,6 +419,19 @@ private:
     // capacity.  Set to 0 via `set_planner_param kHeight 0` for the legacy
     // highest-metal tie-break.
     double kHeight_          = 0.05;
+    // Peak-band-utilization weight (routability-aware selection, lever 1 of
+    // the wishlist-planner "Selection basis" item).  The kCong_ term above is
+    // overflow-only — ZERO below capacity — so candidate ranking is blind to
+    // how full a band gets until it bursts.  With kPeak_ > 0 each segment
+    // additionally pays kPeak_ * peak_util_segment(...): its worst band's
+    // post-charge fill fraction.  This is what lets a two-level BITRUNK tree
+    // (spreads a column's demand across branch trunks, honest WL estimate
+    // higher) outrank a single trunk+MST spine that saturates one band.
+    // Default 0 = OFF: the term is not even evaluated, so existing flows are
+    // bit-identical.  Suggested starting value when opting in: 0.05-0.2 (a
+    // full band then costs about as much as 50-200 units of extra estimated
+    // wirelength at the default kWL 0.001).
+    double kPeak_            = 0.0;
     // Span reference for scaling the non-TOP penalty: a segment of length
     // base_span_ref_ (or longer) pays the full base_cost_non_top_; shorter
     // segments pay proportionally less, so short local stubs offload to

@@ -27,6 +27,7 @@ adjusted between runs to re-plan with different weights.
 | `kWL` | `0.001` | Wirelength cost per layout unit, added to the topology score. Steers equal-congestion choices toward shorter topologies, so a detour wins only when it avoids real congestion. |
 | `kBalance` | `0.01` | TOP-layer load-balancing weight. Adds `kBalance × (layer's committed load / max same-direction layer load)` to each candidate `TOP` layer's segment score, biasing an equal-cost segment toward the **less-loaded** of the same-direction TOP layers. Without it, equal-cost ties (e.g. on TOP layers with no span window, where span/base costs are 0) break toward the highest metal, piling every H segment on the top H layer and every V segment on the top V layer — the over-subscription that drives NUTS track overlaps. `LOW` layers don't compete (they carry `base_cost_non_top`). Set `0` to disable balancing and restore the highest-metal tie-break. Effective range is small: the useful plateau is roughly `[0.005, 0.015]`; above it, over-balancing starts pushing buses onto LOW layers. |
 | `kHeight` | `0.05` | Layer-height cost for **short** segments on `TOP` layers — the mirror image of the span-scaled `base_cost_non_top`. Adds `kHeight × height_rank × max(0, 1 − seg_span/base_span_ref)` where `height_rank` is the layer's index among the same-direction TOP layers ascending (lowest TOP metal = 0). A short stub pays per rank to climb the stack (each rank up is a taller via stack for no benefit), so it prefers the **lowest feasible TOP layer**; a long trunk (`span ≥ base_span_ref`) pays nothing and keeps the TOP-most trunk preference. Deliberately above the `kBalance` tie-noise (≤ 0.01) so the steering wins ties, and far below `base_cost_non_top` and any real congestion overflow, so it never overrides capacity. Set `0` to restore the legacy highest-metal tie-break for short segments. Measured (corpus): `rnr/mix` abstract WL −5.4% and residual NUTS overlaps 3→1; `tc3a_flat`/`b4_bus_077` WL −0.3/−0.7%; flows with one TOP layer per direction byte-identical. |
+| `kPeak` | `0` (**off**) | Routability-aware selection (opt-in; wishlist-planner *"Selection basis"* lever 1). The `kCong` term above is **overflow-only** — zero for any band below capacity — so candidate ranking cannot tell a band others filled to 95% from an empty one until it bursts. `kPeak` adds `kPeak × peak_util`, where `peak_util` is the maximum **existing** fill fraction (`usage/cap`, pre-charge) over the bands the segment would use: a candidate squeezing into an already-loaded corridor now loses to one that detours around it **before** any overflow. Pre-charge deliberately: post-charge utilization was measured and rejected — on an uncongested design it degenerates into an intrinsic "narrow channel" penalty that biases against the column channels the `BITRUNK` datapath trees use (datapath WL regressed across the sweep). Measured at `kPeak 0.1` on the congested corpus: `big2` NUTS overlaps 5→**0**; `rnr/mix` DNUTS unplaced 190→**145** (−24%); `channel_stress` heals its 3 keepout-open bits for +1–2 residual overlaps. **Not a safe default**: trunk-dominated `tc3a_flat` regresses at every tested value (12–80 DNUTS opens) and the value is sensitive (big2: 0.05→120 opens, 0.1→0, 0.2→56). Default `0` skips the term entirely — existing flows are bit-identical. |
 
 **Example:**
 ```
@@ -36,6 +37,7 @@ set_planner_param base_cost_non_top 0.1
 set_planner_param kWL 0.01           # stronger preference for short routes
 set_planner_param kBalance 0.0       # disable TOP-layer load balancing
 set_planner_param kHeight 0.0        # legacy: short stubs float to the highest metal
+set_planner_param kPeak 0.1          # opt-in: steer off already-loaded bands
 ```
 
 ---
@@ -66,6 +68,11 @@ Runs the global congestion-aware router. Bundles are processed widest-first
    prefers the **lowest** same-direction TOP layer (each height rank up is a
    taller via stack), while long trunks pay nothing and keep the TOP-most
    preference (see `set_planner_param kHeight`).
+   With `kPeak` set (opt-in, default 0 = term skipped), each segment
+   additionally pays `kPeak·peak_util` — the maximum *existing* fill
+   fraction (`usage/cap`) over the bands it would use — so selection steers
+   off nearly-full bands *before* they overflow (see `set_planner_param
+   kPeak`).
    The congestion charge goes to the cheapest Hanan band the segment's slide
    interval can host the bus in (slide-aware lookup), not just the band at the
    interval centre.  Band capacity is clamped to the slide window's overlap

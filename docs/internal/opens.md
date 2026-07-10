@@ -47,13 +47,15 @@ noted.)*
    `check_topo`. Full investigation: `convergent_bundling.md`. **Highest
    user-facing value** of the open items.
 3. **Selection basis: rank on measured routability** —
-   [`wishlist-planner.md`](wishlist-planner.md) → *"Selection basis: rank on
-   measured routability, not the generation-time WL estimate"*. The
-   WL-estimate ranking structurally under-selects `BITRUNK` datapath trees
-   that route better than they estimate. Levers sketched: a peak-band-demand
-   selection term, or letting negotiate/ripup up-rank across candidate
-   classes. The natural continuation of the 2026-07 planner work (signal
-   tracks, abutment Gap A, `kHeight`); real golden churn to review.
+   [`wishlist-planner.md`](wishlist-planner.md) → *"Selection basis …
+   LEVER 1 SHIPPED"*. Lever 1 landed as the opt-in `set_planner_param
+   kPeak` (peak existing-band-utilization term; measured at 0.1: big2
+   overlaps 5→0, rnr/mix DNUTS −24%, channel_stress keepout opens healed —
+   but tc3a regresses at every value, so **off by default**). Remaining:
+   the default-on decision (needs a negotiate/ripup interaction study —
+   double-steering is the suspected tc3a mechanism) and lever 2 (let
+   negotiate/ripup promote a higher-estimate candidate class, not just
+   index alternates).
 ### Bottom-up template planning follow-ons (added 2026-07-10)
 
 - ✅ **Orientation-aware instance copying** — **DONE (2026-07-10, mirrors +
