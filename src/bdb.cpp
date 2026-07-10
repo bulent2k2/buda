@@ -115,7 +115,8 @@ static const char* BUNDLE_DDL = R"(
         rcv_spec_paths TEXT,                -- JSON array
         gen_knobs      TEXT DEFAULT '',     -- additive-generation knob memo (v15)
         is_expanded    INTEGER DEFAULT 0,   -- planner-expanded instance row (v18)
-        bu_locked      INTEGER DEFAULT 0    -- bottom-up template copy (v18)
+        bu_locked      INTEGER DEFAULT 0,   -- bottom-up template copy (v18)
+        cloned_from    TEXT DEFAULT ''      -- rotation-class clone origin (v19)
     );
     CREATE TABLE IF NOT EXISTS bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
@@ -673,6 +674,14 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);
         sqlite3_exec(_db,
             "ALTER TABLE bundle ADD COLUMN bu_locked INTEGER DEFAULT 0",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 19) {
+        // v18 -> v19: rotation-class clone template provenance.  Pre-v19
+        // designs have no clone templates, so the '' default is correct.
+        // Idempotent ALTER.
+        sqlite3_exec(_db,
+            "ALTER TABLE bundle ADD COLUMN cloned_from TEXT DEFAULT ''",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -2609,8 +2618,8 @@ void BDB::add_bundle(const BundleRow& br) {
     Stmt s(_db,
         "INSERT INTO bundle(id,level,strategy,reason,num_terminals,cell_context,"
         "instances,parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,"
-        "drv_spec_path,rcv_spec_paths,is_expanded,bu_locked)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        "drv_spec_path,rcv_spec_paths,is_expanded,bu_locked,cloned_from)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(id) DO UPDATE SET level=excluded.level,"
         " strategy=excluded.strategy, reason=excluded.reason,"
         " num_terminals=excluded.num_terminals, cell_context=excluded.cell_context,"
@@ -2618,7 +2627,8 @@ void BDB::add_bundle(const BundleRow& br) {
         " is_replicated=excluded.is_replicated, drv_spec_depth=excluded.drv_spec_depth,"
         " rcv_spec_depth=excluded.rcv_spec_depth, drv_spec_path=excluded.drv_spec_path,"
         " rcv_spec_paths=excluded.rcv_spec_paths,"
-        " is_expanded=excluded.is_expanded, bu_locked=excluded.bu_locked");
+        " is_expanded=excluded.is_expanded, bu_locked=excluded.bu_locked,"
+        " cloned_from=excluded.cloned_from");
     sqlite3_bind_text  (s, 1, br.id.c_str(),           -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, br.level);
     sqlite3_bind_text  (s, 3, br.strategy.c_str(),     -1, SQLITE_TRANSIENT);
@@ -2635,6 +2645,7 @@ void BDB::add_bundle(const BundleRow& br) {
     sqlite3_bind_text  (s, 13, br.rcv_spec_paths.c_str(),  -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 14, br.is_expanded ? 1 : 0);
     sqlite3_bind_int   (s, 15, br.bu_locked ? 1 : 0);
+    sqlite3_bind_text  (s, 16, br.cloned_from.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(s);
 }
 
@@ -2700,7 +2711,7 @@ std::vector<BundleRow> BDB::all_bundles() const {
     Stmt q(_db,
         "SELECT id,level,strategy,reason,num_terminals,cell_context,instances,"
         "parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,drv_spec_path,"
-        "rcv_spec_paths,is_expanded,bu_locked"
+        "rcv_spec_paths,is_expanded,bu_locked,cloned_from"
         " FROM bundle ORDER BY CAST(id AS INTEGER), id");
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
@@ -2724,6 +2735,7 @@ std::vector<BundleRow> BDB::all_bundles() const {
         b.rcv_spec_paths = txt(q, 12);
         b.is_expanded    = sqlite3_column_int(q, 13) != 0;
         b.bu_locked      = sqlite3_column_int(q, 14) != 0;
+        b.cloned_from    = txt(q, 15);
         rows.push_back(std::move(b));
     }
     return rows;

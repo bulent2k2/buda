@@ -76,15 +76,16 @@ def test_list_reports_value_and_eligibility_for_congruent_cell():
     assert pipe.settings["bottom_up"][:2] == (False, True)
 
 
-def test_list_flags_90_rotated_cell_with_reason():
+def test_90_rotated_instance_is_eligible_for_clone_split():
+    """A 90° instance no longer blocks marking: the rotation-class split at
+    run_planner hier gives it its own clone template, and the GUI shares
+    that eligibility definition with the CLI."""
     state = _hier_state()
-    # 90° is geometrically detectable but swaps H<->V layers — refused
-    # until the layer-pairing policy exists (opens.md).
     state.bdb.rotate_comp("proc_i2", 90)
     rows = fpc.list_cell_settings(state)
-    value, can_activate, reason = _row(rows, "proc_cell").settings["bottom_up"]
-    assert value is False and can_activate is False
-    assert "90°-rotated" in reason
+    assert _row(rows, "proc_cell").settings["bottom_up"][:2] == (False, True)
+    fpc.set_cell_setting(state, "proc_cell", "bottom_up", True)
+    assert state.bdb.cell_bottom_up("proc_cell") is True
 
 
 def test_list_flags_genuinely_incongruent_cell_with_reason():
@@ -133,12 +134,12 @@ def test_set_bottom_up_refuses_incongruent_cell():
 
 
 def test_clearing_is_unconditional_even_when_incongruent():
-    """A cell marked bottom_up that LATER becomes incongruent (a rotate in
-    the same session, or a stale BDB) must always be clearable — the OFF
-    transition is never gated by congruence (Codex #248 P2)."""
+    """A cell marked bottom_up that LATER becomes incongruent (a child
+    moved in one instance, or a stale BDB) must always be clearable — the
+    OFF transition is never gated by congruence (Codex #248 P2)."""
     state = _hier_state()
     fpc.set_cell_setting(state, "proc_cell", "bottom_up", True)
-    state.bdb.rotate_comp("proc_i2", 90)                     # now ineligible
+    state.bdb.move_comp("proc_i2/pa_i", 540, 75)             # now ineligible
     rows = fpc.list_cell_settings(state)
     value, can_activate, _ = _row(rows, "proc_cell").settings["bottom_up"]
     assert value is True and can_activate is False           # "clear only"
@@ -174,10 +175,10 @@ def test_gui_and_cli_share_one_congruence_definition():
     CLI's set_bottom_up uses (buda_session.hier.bottom_up_congruence_issues),
     so the two can never diverge on what "congruent" means."""
     state = _hier_state()
-    state.bdb.rotate_comp("proc_i2", 90)
+    state.bdb.move_comp("proc_i2/pa_i", 540, 75)   # no orientation matches
     comps = state.bdb.all_components()
     issues = bottom_up_congruence_issues(comps, "proc_cell")
-    assert issues, "shared helper must flag the 90°-rotated instance"
+    assert issues, "shared helper must flag the non-congruent instance"
     ok, reason = fpc._bottom_up_eligible(state, "proc_cell", False, True,
                                          {"comps": comps})
     assert ok is False

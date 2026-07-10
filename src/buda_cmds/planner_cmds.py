@@ -87,11 +87,15 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # Apply user-pinned selections to template wrappers BEFORE expansion
         # so topology_pinned + pinned_seg_layers propagate to all instances.
         session._apply_selections()
-        # Bottom-up cells (set_bottom_up): solve each marked cell's local
-        # template bundles once in a dedicated cell-local planner and pin the
-        # decision, so expansion broadcasts one uniform assignment to every
-        # instance and marks them hier.locked (planned first, never moved).
+        # Bottom-up cells (set_bottom_up): first give any 90°-rotated
+        # instance class its own clone template (candidates generated from
+        # the rotated reference's cell-local floorplan), then solve each
+        # marked cell's local template bundles once in a dedicated
+        # cell-local planner and pin the decision, so expansion broadcasts
+        # one uniform assignment to every instance and marks them
+        # hier.locked (planned first, never moved).
         # See docs/internal/hier_bottom_up_planning.md §3.
+        session._split_bottom_up_rotation_classes()
         session._plan_bottom_up_templates(iterations)
         # Expand cell-level bundles → per-instance absolute-coord wrappers.
         # Each expanded wrapper gets a unique HBundle ID.

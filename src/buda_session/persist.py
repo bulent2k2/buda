@@ -133,6 +133,9 @@ class PersistMixin:
             row.rcv_spec_depth = hb.rcv_spec_depth
             row.drv_spec_path = hb.drv_spec_path
             row.rcv_spec_paths = json.dumps(list(hb.rcv_spec_paths))
+            # v19: rotation-class clone provenance survives every rewrite.
+            row.cloned_from = str((getattr(self, "_bu_clone_from", None)
+                                   or {}).get(hb.id, ""))
             self.bdb.add_bundle(row)
             for nm in hb.get_net_names():
                 self.bdb.add_bundle_net(row.id, nm)
@@ -559,6 +562,26 @@ class PersistMixin:
             print("Error: load_pipeline requires an open BDB (open_bdb first)")
             return 0
         rows = self.bdb.all_bundles()
+        # v19: rebuild the rotation-class clone registry (clone cell_context
+        # → real marked cell) so the bottom-up gates resolve clone templates
+        # through _bu_cell_of on this resumed session too.
+        by_id = {b.id: b for b in rows}
+        self._bu_clone_cells = {}
+        self._bu_clone_from = {}
+        for b in rows:
+            if getattr(b, "cloned_from", ""):
+                origin = by_id.get(b.cloned_from)
+                if origin is not None and origin.cell_context:
+                    self._bu_clone_cells[b.cell_context] = origin.cell_context
+                    try:
+                        self._bu_clone_from[int(b.id)] = int(b.cloned_from)
+                    except ValueError:
+                        pass
+        if self._bu_clone_cells:
+            print(f"[BottomUp] restored {len(self._bu_clone_cells)} "
+                  f"rotation-class clone template(s): "
+                  + ", ".join(f"{k}←{v}"
+                              for k, v in sorted(self._bu_clone_cells.items())))
         if expanded:
             exp_rows = [b for b in rows if b.is_expanded]
             if exp_rows:
@@ -863,6 +886,8 @@ class PersistMixin:
         row.rcv_spec_depth = hb.rcv_spec_depth
         row.drv_spec_path = hb.drv_spec_path
         row.rcv_spec_paths = json.dumps(list(hb.rcv_spec_paths))
+        row.cloned_from = str((getattr(self, "_bu_clone_from", None)
+                               or {}).get(hb.id, ""))
         self.bdb.add_bundle(row)                    # is_replicated defaults to False
         for nm in hb.get_net_names():
             self.bdb.add_bundle_net(bid, nm)

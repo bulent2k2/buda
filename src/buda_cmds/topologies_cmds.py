@@ -227,6 +227,9 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
+    # Remembered so a rotation-class clone created later (at run_planner
+    # hier) generates its candidates with the same knobs.
+    session._hier_gen_knobs = (use_center, use_double_detour, use_multi_trunk)
 
     # Cache floorplans keyed by (depth, is_cell_local, instance_or_empty)
     fp_cache = {}

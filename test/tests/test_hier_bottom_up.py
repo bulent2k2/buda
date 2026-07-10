@@ -151,18 +151,21 @@ def test_congruence_ok_for_translated_instances():
     assert s._bottom_up_congruence_issues("proc_cell") == []
 
 
-def test_congruence_flags_rotated_leaf_instance_via_orient():
+def test_congruence_detects_rotated_leaf_instance_via_orient():
     """A childless instance 90° rotation composes the orient token — caught
     by the detection even when the outline is unchanged (square).  90° is
-    refused for bottom-up (H<->V layer swap is a planned follow-up)."""
+    fine at mark time (the rotation-class split gives it its own clone
+    template); the post-split re-check (allow_90=False) still flags it."""
     db = buda.BDB(":memory:")
     db.add_cell("leaf_cell", 80, 80)
     db.add_inst("L1", "leaf_cell", "", 0, 0)
     db.add_inst("L2", "leaf_cell", "", 200, 0)
     db.rotate_comp("L2", 90)          # 80x80: outline unchanged, orient moves
     s = _bare_session(db)
-    issues = s._bottom_up_congruence_issues("leaf_cell")
+    assert s._bottom_up_congruence_issues("leaf_cell") == []
+    issues = s._bottom_up_congruence_issues("leaf_cell", allow_90=False)
     assert issues and "L2" in issues[0] and "90°" in issues[0]
+    assert s._detect_instance_orients("leaf_cell")["L2"] == "W"
 
 
 def test_congruence_accepts_180_rotated_hier_instance():
@@ -230,7 +233,7 @@ def test_set_bottom_up_command_errors():
 
 def test_set_bottom_up_command_rejects_non_congruent():
     db = _two_inst_db()
-    db.rotate_comp("proc_i2", 90)         # 90° refused (H<->V layer swap)
+    db.move_comp("proc_i2/pa_i", 540, 70)   # child moved: NO orientation fits
     s = _bare_session(db)
     out = _run_cmd(s, "set_bottom_up proc_cell")
     assert "not congruent" in out
@@ -239,16 +242,19 @@ def test_set_bottom_up_command_rejects_non_congruent():
     db2 = _two_inst_db()
     s2 = _bare_session(db2)
     _run_cmd(s2, "set_bottom_up proc_cell")
-    db2.rotate_comp("proc_i2", 90)
+    db2.move_comp("proc_i2/pa_i", 540, 70)
     assert "bottom_up = off" in _run_cmd(s2, "set_bottom_up proc_cell off")
 
 
-def test_set_bottom_up_command_accepts_mirrored_and_180():
-    """Direction-preserving orientations (S/FN/FS) are supported by the
-    orientation-aware copies — marking must succeed."""
+def test_set_bottom_up_command_accepts_mirrored_180_and_90():
+    """Direction-preserving orientations (S/FN/FS) are copied directly; a
+    90° instance is fine too — the rotation-class split at run_planner hier
+    gives it its own clone template.  Marking must succeed for all."""
     for xform in [lambda db: db.rotate_comp("proc_i2", 180),
                   lambda db: db.flip_comp("proc_i2", True),
-                  lambda db: db.flip_comp("proc_i2", False)]:
+                  lambda db: db.flip_comp("proc_i2", False),
+                  lambda db: db.rotate_comp("proc_i2", 90),
+                  lambda db: db.rotate_comp("proc_i2", 270)]:
         db = _two_inst_db()
         xform(db)
         s = _bare_session(db)
@@ -280,16 +286,31 @@ def test_planner_hier_ok_for_congruent_bottom_up_cell():
     assert insts == {"proc_i1", "proc_i2"}
 
 
-def test_planner_hier_rejects_90_rotated_instance_of_bottom_up_cell():
-    """Placement may change after marking — the expansion re-checks the
-    orientations and hard-errors on a 90° instance (H<->V layer swap;
-    layer pairing is a planned follow-up)."""
-    db = _two_inst_db()
+def test_planner_hier_splits_90_rotated_instance_into_clone():
+    """A marked cell with a 90°-rotated instance is no longer refused: at
+    run_planner hier the rotation class gets its OWN clone template
+    (candidates generated from the rotated reference's cell-local
+    floorplan), and both classes plan/lock as usual."""
+    db = _two_inst_db(derive=False)
+    db.rotate_comp("proc_i2", 90)
+    buda.BustermGen(db).derive(1)
     s = _flow_session(db)
-    _run_cmd(s, "set_bottom_up proc_cell")   # congruent at mark time
-    db.rotate_comp("proc_i2", 90)            # ... then placement changes
-    with pytest.raises(RuntimeError, match="bottom-up cell 'proc_cell'"):
-        _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "set_bottom_up proc_cell")
+    out = _run_cmd(s, "run_planner hier")            # must not raise
+    assert "split into clone template" in out and "proc_cell90" in out
+    ctxs = {b.cell_context for w in s.bundles
+            for b in [w.input.original_bundle] if b.cell_context}
+    assert ctxs == {"proc_cell", "proc_cell90"}
+    assert s._bu_clone_cells == {"proc_cell90": "proc_cell"}
+    # Both classes' instances locked (each carries its own local solve).
+    locked = {b.cell_context for w in s.bundles
+              for b in [w.input.original_bundle]
+              if b.cell_context and w.hier.locked}
+    assert locked == {"proc_cell", "proc_cell90"}
+    # The clone persisted with provenance (v19 cloned_from → template id).
+    clone_rows = [r for r in db.all_bundles() if r.cloned_from]
+    assert clone_rows and all(r.cell_context == "proc_cell90"
+                              for r in clone_rows)
 
 
 def test_planner_hier_unmarked_cell_is_not_blocked():
@@ -1105,3 +1126,255 @@ def test_detection_rejects_mixed_token_subtree():
     assert orients["proc_i2"] is None
     issues = s._bottom_up_congruence_issues("proc_cell")
     assert issues and "NO orientation" in issues[0]
+
+
+# ── Rotation-class clone templates (90°-family occurrences) ──────────────────
+
+def _four_inst_two_class_db(path=":memory:", y3=0, y4=300):
+    """proc_cell placed four times: P1/P2 upright (N), P3/P4 rotated 90° —
+    the two-rotation-class vehicle.  Each instance carries its own 4-bit
+    cell-local bus."""
+    db = buda.BDB(path)
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    for k, (x, y) in enumerate([(0, 0), (500, 300),
+                                (1000, y3), (1500, y4)], 1):
+        db.add_inst(f"P{k}", "proc_cell", "", x, y)
+    db.rotate_comp("P3", 90)
+    db.rotate_comp("P4", 90)
+    for k in range(1, 5):
+        for i in range(4):
+            db.add_net_pins(f"n{k}_{i}", f"P{k}/pa_i.out", [f"P{k}/pb_i.in"])
+    buda.BustermGen(db).derive(1)
+    return db
+
+
+def _two_class_flow(db):
+    """Full bottom-up flow (layers, patterns, bundler, topologies, mark,
+    plan, nuts) on a two-rotation-class db."""
+    s = _bare_session(db)
+    out = []
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + ["run_hier_bundler", "generate_hier_topologies",
+                 "set_bottom_up proc_cell", "run_planner hier", "run_nuts"]):
+        out.append(_run_cmd(s, c))
+    return s, "".join(out)
+
+
+def test_bu_clone_name_uniquified():
+    """`<cell>90` collides with a real cell → `_1` suffix; an existing live
+    mapping for the cell is reused (stable across re-runs)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("proc_cell90", 10, 10)      # a REAL cell squats the name
+    s = _bare_session(db)
+    assert s._bu_clone_name("proc_cell") == "proc_cell90_1"
+    s._bu_clone_cells = {"weird_name": "proc_cell"}
+    assert s._bu_clone_name("proc_cell") == "weird_name"   # reuse, not rename
+
+
+def test_v18_to_v19_migration_adds_cloned_from(tmp_path):
+    """Opening a pre-v19 DB adds bundle.cloned_from (default '') and stamps
+    the new schema version."""
+    p = str(tmp_path / "v18.bdb")
+    con = sqlite3.connect(p)
+    con.executescript(
+        """
+        CREATE TABLE bundle (id TEXT PRIMARY KEY, level INTEGER DEFAULT 0,
+            strategy TEXT, reason TEXT, num_terminals INTEGER DEFAULT 0,
+            cell_context TEXT, instances TEXT, parent_id TEXT,
+            is_replicated INTEGER DEFAULT 0,
+            drv_spec_depth INTEGER DEFAULT -1,
+            rcv_spec_depth INTEGER DEFAULT -1,
+            drv_spec_path TEXT, rcv_spec_paths TEXT,
+            gen_knobs TEXT DEFAULT '', is_expanded INTEGER DEFAULT 0,
+            bu_locked INTEGER DEFAULT 0);
+        INSERT INTO bundle(id, cell_context) VALUES('1', 'old_cell');
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES('schema_version','18');
+        PRAGMA user_version = 18;
+        """
+    )
+    con.commit()
+    con.close()
+    db = buda.BDB(p)
+    assert db.schema_version() == buda.BDB.SCHEMA_VERSION
+    rows = db.all_bundles()
+    assert rows and rows[0].cloned_from == ""
+    r = buda.BundleRow()
+    r.id = "2"; r.cell_context = "old_cell90"; r.cloned_from = "1"
+    db.add_bundle(r)
+    assert {b.id: b.cloned_from for b in db.all_bundles()}["2"] == "1"
+
+
+def test_two_class_check_and_dnuts_copies():
+    """End to end with two rotation classes: each class is checked and
+    copied against ITS OWN reference — check reports both groups ALIGNED,
+    DNUTS solves one reference per class and translates within the class."""
+    db = _four_inst_two_class_db()
+    s, out = _two_class_flow(db)
+    assert "split into clone template 'proc_cell90'" in out
+    out = _run_cmd(s, "check_template_tracks")
+    assert out.count("ALIGNED") >= 2 and "MISALIGNED" not in out
+    assert set(s._template_track_verdict) == {"proc_cell", "proc_cell90"}
+    assert s._template_track_verdict["proc_cell"]["ref"] == "P1"
+    assert s._template_track_verdict["proc_cell90"]["ref"] == "P3"
+    out = _run_cmd(s, "run_detailed_nuts")   # strict default policy
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+    bits, horiz_of = _oriented_bits(s)
+    per_inst = {}
+    for (inst, si, bi), ns in bits.items():
+        per_inst.setdefault(inst, {})[(si, bi)] = ns
+    assert set(per_inst) == {"P1", "P2", "P3", "P4"}
+    # Within each class the sibling is an exact translate of its reference.
+    for ref, sib, (dx, dy) in [("P1", "P2", (500, 300)),
+                               ("P3", "P4", (500, 300))]:
+        assert set(per_inst[ref]) == set(per_inst[sib])
+        for (si, bi), a in per_inst[ref].items():
+            b = per_inst[sib][(si, bi)]
+            if horiz_of[(a.bundle_id, si)]:
+                assert b.track_position == pytest.approx(
+                    a.track_position + dy)
+                assert b.span_lo == pytest.approx(a.span_lo + dx)
+            else:
+                assert b.track_position == pytest.approx(
+                    a.track_position + dx)
+                assert b.span_lo == pytest.approx(a.span_lo + dy)
+    # The two classes genuinely routed in DIFFERENT frames: the rotated
+    # class's bus runs vertically where the upright class's runs
+    # horizontally (pa->pb is horizontal in the N frame).
+    dirs_a = {horiz_of[(ns.bundle_id, si)]
+              for (si, bi), ns in per_inst["P1"].items()}
+    dirs_b = {horiz_of[(ns.bundle_id, si)]
+              for (si, bi), ns in per_inst["P3"].items()}
+    assert dirs_a != dirs_b
+
+
+def test_two_class_persistence_round_trip(tmp_path):
+    """The clone template persists (v19 cloned_from) and a fresh session's
+    load_pipeline expanded restores the registry, the locked wrappers of
+    BOTH classes, and the copy path through DNUTS."""
+    p = str(tmp_path / "twoclass.bdb")
+    db = _four_inst_two_class_db(path=p)
+    s1, _ = _two_class_flow(db)
+    locked1 = {w.input.original_bundle.id for w in s1.bundles
+               if w.hier.locked}
+    ctxs1 = {w.input.original_bundle.cell_context for w in s1.bundles
+             if w.hier.locked}
+    assert ctxs1 == {"proc_cell", "proc_cell90"}
+    del s1, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + [f"open_bdb {p}", "add_blocks_from_bdb 0",
+                 "add_blocks_from_bdb 1 skip"]):
+        _run_cmd(s2, c)
+    out = _run_cmd(s2, "load_pipeline expanded")
+    assert "rehydrated" in out
+    assert "rotation-class clone template" in out
+    assert s2._bu_clone_cells == {"proc_cell90": "proc_cell"}
+    locked2 = {w.input.original_bundle.id for w in s2.bundles
+               if w.hier.locked}
+    assert locked2 == locked1
+    out = _run_cmd(s2, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+
+
+def test_placement_check_and_align_per_class():
+    """Placement-stage check and align_bottom_up operate per rotation
+    class: the upright pair is aligned, the rotated pair (off by one unit
+    in y) is reported under the clone group and aligned within it — the
+    upright instances never move."""
+    db = _four_inst_two_class_db(y3=1, y4=300)   # P3 y=1: off P4's phase
+    s = _placement_session(db)
+    out = _run_cmd(s, "check_template_tracks")
+    assert "'proc_cell': ALIGNED" in out
+    assert "'proc_cell90': MISALIGNED" in out
+    groups = s._bottom_up_placed_instances()
+    assert {c.name for c in groups["proc_cell"]} == {"P1", "P2"}
+    assert {c.name for c in groups["proc_cell90"]} == {"P3", "P4"}
+    out = _run_cmd(s, "align_bottom_up")
+    assert "1 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P1"].x1 == 0.0 and comps["P2"].x1 == 500.0
+    # Exactly one of the rotated pair snapped one unit to the other's phase.
+    assert (comps["P3"].y1, comps["P4"].y1) in ((0.0, 300.0), (1.0, 301.0))
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" not in out
+
+
+def test_rotated_only_bundle_reassigned_to_clone_class():
+    """Codex #253 finding 1: a bundle that exists ONLY in the 90°
+    occurrences has no cross-class members of its own — classification
+    against a per-cell reference must still move it WHOLESALE to the clone
+    class, or mixed coordinate frames get grouped under the real
+    cell_context (reintroducing the H/V-swap the split exists to avoid)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    db.add_inst_to_cell("proc_cell", "pc_i", "pipe_cell", 290, 60)
+    for k, (x, y) in enumerate([(0, 0), (500, 300),
+                                (1000, 0), (1500, 300)], 1):
+        db.add_inst(f"P{k}", "proc_cell", "", x, y)
+    db.rotate_comp("P3", 90)
+    db.rotate_comp("P4", 90)
+    for k in range(1, 5):
+        for i in range(4):
+            db.add_net_pins(f"n{k}_{i}", f"P{k}/pa_i.out", [f"P{k}/pb_i.in"])
+    # An extra bus (pb -> pc: its own signature, hence its own template)
+    # that lives ONLY in the rotated instances P3/P4.
+    for k in (3, 4):
+        for i in range(2):
+            db.add_net_pins(f"x{k}_{i}", f"P{k}/pb_i.out", [f"P{k}/pc_i.in"])
+    buda.BustermGen(db).derive(1)
+    s, out = _two_class_flow(db)
+    assert "reassigned to clone template 'proc_cell90'" in out
+    # No template under the REAL context may reference a rotated instance.
+    for w in s._hier_bundles_orig:
+        b = w.input.original_bundle
+        if b.cell_context == "proc_cell":
+            assert not ({"P3", "P4"} & set(b.instances)), (
+                f"bundle {b.id} kept rotated instances under 'proc_cell'")
+    # The reassigned row persisted with provenance to a real-context row.
+    rows = {r.id: r for r in db.all_bundles()}
+    reassigned = [r for r in rows.values()
+                  if r.cloned_from and r.cell_context == "proc_cell90"]
+    assert reassigned
+    for r in reassigned:
+        assert rows[r.cloned_from].cell_context == "proc_cell"
+    # And the flow still completes cleanly per class.
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" not in out
+    out = _run_cmd(s, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+
+
+def test_rebundle_drops_stale_clone_provenance():
+    """Codex #253 finding 2: _bu_clone_from is keyed by numeric bundle id;
+    a re-run of the bundler creates fresh bundles that reuse those ids, so
+    the map must be cleared or the next persist stamps a bogus cloned_from
+    on an unrelated bundle (which load_pipeline would then restore as a
+    clone of the wrong cell)."""
+    db = _four_inst_two_class_db()
+    s, _ = _two_class_flow(db)
+    assert s._bu_clone_from                       # the split recorded ids
+    _run_cmd(s, "run_hier_bundler")               # fresh bundles, same ids
+    assert s._bu_clone_from == {}
+    assert all(r.cloned_from == "" for r in db.all_bundles())
+    # The NAME registry survives, so a re-split reuses the same name.
+    out = _run_cmd(s, "run_planner hier")
+    assert "'proc_cell90'" in out
+    rows = {r.id: r for r in db.all_bundles()}
+    for r in rows.values():
+        if r.cloned_from:
+            assert rows[r.cloned_from].cell_context == "proc_cell"
+            assert r.cell_context == "proc_cell90"

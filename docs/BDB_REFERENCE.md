@@ -148,7 +148,14 @@ bridges), closing the last un-persisted `Topology` field; v12 added
 topo-truth Phase 5), so a reload restores BOTH halves of a topology's
 connectivity logically; v13 added **`component.orient`** (instance
 rotation/mirror as an 8-orientation token `N/S/E/W/FN/FS/FE/FW`, default `'N'`)
-so GDS import→export→re-import preserves orientation.
+so GDS import→export→re-import preserves orientation; v14 added
+`topology.topo_uid` + `topology_segment.edge_id` (stable candidate/MST-edge
+identity); v15 added `topology.source` + `bundle.gen_knobs`; v16 added
+`topology_segment.perp_clamp_lo/hi`; v17 added **`cell.bottom_up`** (bottom-up
+template planning flag); v18 added `bundle.is_expanded` + `bundle.bu_locked`
+(planner-expanded / bottom-up-locked row provenance); v19 added
+**`bundle.cloned_from`** (rotation-class clone template provenance — see
+[`set_bottom_up`](#set_bottom_up)).
 `tools/bdb_serialize.py` preserves the version across the `*.bdb.sql`
 round-trip.
 
@@ -721,22 +728,39 @@ instance, with the copied routing becoming keepouts for higher-level bundles
 (`cell.bottom_up`, schema v17), so the flag survives `save_bdb` /
 `load_pipeline`.
 
-Turning the flag **on** requires every instance of the cell to be a
-**direction-preserving transform** of the first one: a translation, a 180°
-rotation (`S`), or an axis mirror (`FN`/`FS`) — the per-instance copies are
-orientation-transformed end-to-end (topologies, NUTS segments, DNUTS
-bits/vias).  The orientation is detected **geometrically** by matching the
-full subtree shape under all 8 orientations (hierarchical
-`rotate_comp`/`flip_comp` rewrite descendant bboxes and keep every orient
-token `'N'`, so tokens alone cannot be trusted; when a self-symmetric child
-layout matches several orientations, identity is preferred if it matches,
-else the candidate whose track phases fit best).  A 90°/270° instance
-(`E/W/FE/FW`) is rejected — it swaps H↔V segments and with them the pinned
-per-segment layers (the layer-pairing policy is a planned follow-up, see
-`docs/internal/opens.md`); an instance matching NO orientation is genuinely
-non-congruent.  Rejections list the offenders; `run_planner hier` re-checks
-at expansion time (placement may change after marking) and hard-errors on
-violation.  `off` is always accepted.
+Turning the flag **on** requires every instance of the cell to be a rigid
+transform of the first one — any of the 8 orientations.  The orientation is
+detected **geometrically** by matching the full subtree shape under all 8
+candidates (hierarchical `rotate_comp`/`flip_comp` rewrite descendant bboxes
+and keep every orient token `'N'`, so tokens alone cannot be trusted; when a
+self-symmetric child layout matches several orientations, identity is
+preferred if it matches, else the candidate whose track phases fit best).
+Only an instance matching NO orientation is rejected (genuinely
+non-congruent, offenders listed).
+
+The copies are handled per **rotation class**:
+
+- **Direction-preserving instances** (`N`, `S` = 180°, `FN`/`FS` = axis
+  mirrors) copy from the cell's reference directly — topologies, NUTS
+  segments, and DNUTS bits/vias are orientation-transformed end-to-end.
+- **The 90° family** (`E/W/FE/FW`) is split at `run_planner hier` into its
+  own **rotation-class clone template**: a virtual template named
+  `<cell>90` (uniquified `_1`, `_2`, … against real cell names and other
+  bundle contexts) whose candidates are generated from the rotated
+  reference instance's *actual* cell-local floorplan and planned with real
+  per-direction layer costs — so no H↔V "layer pairing" mapping is ever
+  applied to an existing solve.  Within the class every instance is a
+  direction-preserving transform of the class reference, and the usual
+  solve-once-copy-many machinery applies unchanged.  The clone is a
+  routing-template identity only: it persists as a `bundle` row
+  (`cell_context = '<cell>90'`, provenance in `bundle.cloned_from`,
+  schema v19) and **never** appears in the `cell`/`component`/`pin`
+  tables, so GDS/DEF/Verilog interchange is unaffected;
+  `load_pipeline` restores the clone registry from `cloned_from`.
+
+`run_planner hier` re-checks congruence at expansion time (placement may
+change after marking) and hard-errors on violation.  `off` is always
+accepted.
 
 | Argument | Type | Description |
 |---|---|---|
@@ -756,7 +780,10 @@ align_bottom_up [max_shift <um>] [force]
 
 Nudge every `set_bottom_up` cell's instances onto a common track phase with
 **minimal total movement**, so the bottom-up copies land on real signal
-tracks in every occurrence.  Per cell and axis, an instance offset is
+tracks in every occurrence.  Instances are grouped per **rotation class**
+(upright and 90°-rotated occurrences align to their own class references —
+the same grouping the planner-time clone templates use, under the same
+`<cell>90` group name).  Per group and axis, an instance offset is
 track-shift-invariant iff it is a multiple of every relevant layer's unit
 pitch (V-layer pitches constrain x, H-layer pitches constrain y, combined as
 their LCM); the common phase is chosen among the instances' current phases

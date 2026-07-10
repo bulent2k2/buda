@@ -76,10 +76,17 @@ noted.)*
   now applies the correct GEOMETRIC transform for ALL 8 orientations
   (fixing its silent translation-only mis-transform; 90° instances get
   their pinned per-segment layers dropped with a warning since H↔V swaps).
-  **Remaining follow-up:** 90°/270° instances of *marked* (bottom-up)
-  cells stay refused — copying them needs an H↔V *layer pairing* policy
-  (which V layer hosts a copied H segment, per direction) across planner
-  reservations, NUTS fixed segments, and DNUTS copies.
+  **90°/270° instances of marked cells: ✅ DONE (2026-07-10)** via
+  **rotation-class clone templates** — instead of an H↔V layer-pairing map,
+  the 90° family of a marked cell is split at `run_planner hier` into its
+  own clone template (virtual name `<cell>90`, uniquified; persisted with
+  `bundle.cloned_from`, v19) whose candidates are generated from the
+  rotated reference's actual cell-local floorplan and planned with real
+  per-direction layer costs; within the class every instance is a
+  direction-preserving transform of the class reference, so the existing
+  copy machinery applies unchanged.  The clone never touches
+  cell/component/pin tables (interchange unaffected);
+  check_template_tracks / align_bottom_up group per class.
 - **`generate_more_topologies` is not hier-aware** — the additive
   per-bundle command matches by net-name against the flat floorplan and
   never enters the 3-case hier dispatch; `generate_topologies_for_hbundle`
