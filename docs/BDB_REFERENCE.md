@@ -1491,8 +1491,9 @@ vendored, the implementation would:
 - translate OA objects ↔ the same BDB tables documented in §1, normalizing all
   coordinates to **µm** (OA stores in DBU; convert using the tech `oaDBUPerUU`).
 
-Until OA support lands, the supported interchange path is **LEF/DEF + Verilog
-in, with GDS import/export once available**.
+Until OA support lands, the supported interchange paths are **LEF/DEF +
+Verilog in** and **GDSII import/export** (round-trip); OA is the only
+remaining planned format.
 
 For committing BDBs as reviewable test data — and the schema-versioning /
 provenance / routing-write-back groundwork that the OA/GDS export will build on —
