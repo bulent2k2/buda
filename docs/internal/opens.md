@@ -10,8 +10,12 @@ items this page doesn't see).
 
 ## Quick wins (small, low risk)
 
-*(none open — the hier slide-column resolution was the last one; see
-"Recently resolved" below.)*
+1. **Rename `check_connectivity` → `check_design`** —
+   [`wishlist-nuts.md`](wishlist-nuts.md) → *"Rename check_connectivity"*.
+   The command long outgrew its name: it audits connectivity AND layer-
+   direction validity AND keepout crossings (`KEEPOUT_CROSS`). Introduce
+   `check_design` as the primary name, keep `check_connectivity` as an
+   alias (no flow/test churn), migrate call sites opportunistically.
 
 ## Substantial features (bounded, clear plans)
 
@@ -31,13 +35,6 @@ items this page doesn't see).
    selection term, or letting negotiate/ripup up-rank across candidate
    classes. The natural continuation of the 2026-07 planner work (signal
    tracks, abutment Gap A, `kHeight`); real golden churn to review.
-4. **Verify keepout-blindness (`KEEPOUT_CROSS`)** —
-   [`wishlist-nuts.md`](wishlist-nuts.md) → *"Verify is keepout-blind"*.
-   Defense-in-depth spun off the closed keepout audit: `check_nuts` /
-   `check_dnuts` never test a placed wire against keepouts (the cull now
-   prevents such wires, so this only matters if a future stage regresses).
-   Small and contained.
-
 ## Big / blocked / conditional
 
 5. **Global-overlap re-route of NON-contended bundles** —
@@ -61,6 +58,16 @@ items this page doesn't see).
 
 ## Recently resolved (verified on main, 2026-07-09)
 
+- **Verify keepout-blindness (`KEEPOUT_CROSS`)** ✅ — `check_nuts` flags a
+  placed segment lying ON a keepout that overlaps its span (the live
+  exhausted-window commit — it used to say "Success"; hbundles/10's 2
+  commits now reported), `check_dnuts` flags a crossing bit with the cull's
+  own predicate (defense-in-depth). Both take `zone_fp` (the floorplan the
+  engine placed against) so hier bundles' zone-less resolved floorplans
+  can't mask real conflicts. See
+  [`keepout_model_audit.md`](keepout_model_audit.md) class 4 and
+  [`wishlist-nuts.md`](wishlist-nuts.md).
+
 - **Abstract-vs-detailed keepout model audit** ✅ — the two stages now agree
   on what a keepout blocks: span-aware DNUTS track pools
   (`signal_tracks_in_span`, preferred with midpoint fallback), a
@@ -69,7 +76,8 @@ items this page doesn't see).
   real crossings it exposes in channel_stress), an abstract
   `num_keepout_conflicts` report channel, and empty-`layer_ids` = blocks-all
   unification. Full write-up:
-  [`keepout_model_audit.md`](keepout_model_audit.md); spin-off item 4 above.
+  [`keepout_model_audit.md`](keepout_model_audit.md); the `KEEPOUT_CROSS`
+  spin-off is also resolved (above).
 
 - **2-pin / n-pin filter-ordering unification** ✅ — one shared
   post-emission pipeline (`finalize_candidates`: annotate → sort → keepout

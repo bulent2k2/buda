@@ -24,6 +24,29 @@
 
 namespace buda {
 
+// ── keepout audit (KEEPOUT_CROSS) ─────────────────────────────────────────────
+
+// The zone list every keepout-aware stage tests against: user zones plus the
+// implicit solid-leaf-cell zones on non-TOP layers — the same construction as
+// NUTSEngine::low_keepouts, and layer-equivalent to the grid keepouts
+// DetailedNUTS places against (leaf zones carry the non-TOP id set; user
+// zones their declared set; empty layer_ids = blocks every layer).
+static std::vector<KeepoutZone> keepout_zones(const Floorplan& fp,
+                                              const LayerStack& layers)
+{
+    std::vector<int> low_ids;
+    for (int lid : layers.get_layer_ids_by_dir(LayerDir::VERTICAL))
+        if (!layers.is_top(lid)) low_ids.push_back(lid);
+    for (int lid : layers.get_layer_ids_by_dir(LayerDir::HORIZONTAL))
+        if (!layers.is_top(lid)) low_ids.push_back(lid);
+    return fp.low_layer_keepouts(low_ids);
+}
+
+// True when the zone applies to `layer` (empty layer_ids = every layer).
+static bool zone_on_layer(const KeepoutZone& koz, int layer) {
+    return koz.layer_ids.empty() || koz.layer_ids.count(layer) > 0;
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // True when `pos` falls within the block face extent in the perpendicular axis.
@@ -266,7 +289,8 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
 
 ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
                       const Topology& topo, const Floorplan& fp,
-                      const LayerStack& layers, int bundle_id)
+                      const LayerStack& layers, int bundle_id,
+                      const Floorplan* zone_fp)
 {
     ConnResult result;
     const auto& segs = ct.segs();
@@ -428,6 +452,49 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
         }
     }
 
+    // 4. KEEPOUT_CROSS: a placed bus segment whose physical extent
+    //    [pos ± w/2] lies on a keepout overlapping its span.  Placement avoids
+    //    keepout-occupied intervals, but the exhausted-window fallback commits
+    //    the interval centre regardless — the engine counts it
+    //    (NUTSResult::num_keepout_conflicts) and this makes the audit see it
+    //    too instead of blessing an unroutable placement.  Same semantics as
+    //    count_keepout_conflicts (strict overlap on both axes; a zone with
+    //    empty layer_ids blocks every layer).  Zones come from zone_fp — the
+    //    floorplan the engine placed against (see verify.h).
+    {
+        const auto kozs = keepout_zones(zone_fp ? *zone_fp : fp, layers);
+        for (const auto& [si, tsp] : ts_map) {
+            const TrackSegment& ts = *tsp;
+            if (!ts.placed) continue;
+            const double s_lo = std::min(ts.span_lo, ts.span_hi);
+            const double s_hi = std::max(ts.span_lo, ts.span_hi);
+            const double e_lo = ts.track_position - ts.width / 2.0;
+            const double e_hi = ts.track_position + ts.width / 2.0;
+            for (const auto& koz : kozs) {
+                if (!zone_on_layer(koz, ts.layer)) continue;
+                const Rect& r = koz.bbox;
+                const double k_p1 = ts.horiz ? r.y1 : r.x1;
+                const double k_p2 = ts.horiz ? r.y2 : r.x2;
+                const double k_a1 = ts.horiz ? r.x1 : r.y1;
+                const double k_a2 = ts.horiz ? r.x2 : r.y2;
+                if (s_lo < k_a2 && s_hi > k_a1 && e_lo < k_p2 && e_hi > k_p1) {
+                    ConnViolation v;
+                    v.kind = ViolationKind::KEEPOUT_CROSS;
+                    v.bundle_id = bundle_id; v.seg_idx = si;
+                    std::ostringstream msg;
+                    msg << "Seg " << si << " on layer M" << ts.layer
+                        << " placed ON keepout (" << r.x1 << "," << r.y1
+                        << ")-(" << r.x2 << "," << r.y2 << "): extent ["
+                        << e_lo << "," << e_hi << "] at track_pos="
+                        << ts.track_position << " (nuts)";
+                    v.message = msg.str();
+                    result.violations.push_back(std::move(v));
+                    break;  // one violation per segment suffices
+                }
+            }
+        }
+    }
+
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(segs, topo, fp, bundle_id, "nuts", result);
 
@@ -438,7 +505,8 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
 
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const Topology& topo, const Floorplan& fp,
-                       const LayerStack& layers, int bundle_id, int num_bits)
+                       const LayerStack& layers, int bundle_id, int num_bits,
+                       const Floorplan* zone_fp)
 {
     ConnResult result;
     const auto& segs = ct.segs();
@@ -615,6 +683,48 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                 v.message = "Block '" + bname + "' Bit " + std::to_string(bit)
                     + " has no pass-through segment at placed track positions (dnuts)";
                 result.violations.push_back(std::move(v));
+            }
+        }
+    }
+
+    // 5. KEEPOUT_CROSS: a bit-wire whose track centre sits inside a keepout
+    //    that overlaps its final span — the same predicate as DetailedNUTS's
+    //    cull_keepout_crossers (closed on the perp axis, strict on the along
+    //    axis), against the layer-equivalent zone list.  Pure
+    //    defense-in-depth: the cull removes such bits before any result is
+    //    returned, so a hit here means a stage regressed and emitted an
+    //    illegal wire the audit must not bless.  Zones come from zone_fp —
+    //    the floorplan the engine placed against (see verify.h).
+    {
+        const auto kozs = keepout_zones(zone_fp ? *zone_fp : fp, layers);
+        for (const auto& [key, nsp] : ns_map) {
+            const auto [si, bit] = key;
+            if (si < 0 || si >= n) continue;
+            const NetSegment& ns = *nsp;
+            const bool horiz = segs[si].horiz;
+            const double a_lo = std::min(ns.span_lo, ns.span_hi);
+            const double a_hi = std::max(ns.span_lo, ns.span_hi);
+            for (const auto& koz : kozs) {
+                if (!zone_on_layer(koz, ns.layer)) continue;
+                const Rect& r = koz.bbox;
+                const double k_p1 = horiz ? r.y1 : r.x1;
+                const double k_p2 = horiz ? r.y2 : r.x2;
+                const double k_a1 = horiz ? r.x1 : r.y1;
+                const double k_a2 = horiz ? r.x2 : r.y2;
+                if (ns.track_position >= k_p1 && ns.track_position <= k_p2 &&
+                    a_lo < k_a2 && a_hi > k_a1) {
+                    ConnViolation v;
+                    v.kind = ViolationKind::KEEPOUT_CROSS;
+                    v.bundle_id = bundle_id; v.seg_idx = si; v.bit_index = bit;
+                    std::ostringstream msg;
+                    msg << "Seg " << si << " Bit " << bit << " on layer M"
+                        << ns.layer << " crosses keepout (" << r.x1 << ","
+                        << r.y1 << ")-(" << r.x2 << "," << r.y2
+                        << ") at track_pos=" << ns.track_position << " (dnuts)";
+                    v.message = msg.str();
+                    result.violations.push_back(std::move(v));
+                    break;  // one violation per bit suffices
+                }
             }
         }
     }

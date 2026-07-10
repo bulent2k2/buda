@@ -298,7 +298,8 @@ void bind_nuts(py::module_& m) {
         .value("BUSTERM_FACE", ViolationKind::BUSTERM_FACE)
         .value("UNPLACED",     ViolationKind::UNPLACED)
         .value("LAYER_DIR",    ViolationKind::LAYER_DIR)
-        .value("FEEDTHRU_RELAY", ViolationKind::FEEDTHRU_RELAY);
+        .value("FEEDTHRU_RELAY", ViolationKind::FEEDTHRU_RELAY)
+        .value("KEEPOUT_CROSS", ViolationKind::KEEPOUT_CROSS);
 
     py::class_<ConnViolation>(m, "ConnViolation")
         .def_readwrite("kind",       &ConnViolation::kind)
@@ -315,10 +316,14 @@ void bind_nuts(py::module_& m) {
 
     m.def("check_topo",  &check_topo,
           py::arg("ct"), py::arg("topo"), py::arg("fp"), py::arg("bundle_id"));
+    // zone_fp: floorplan whose keepout zones the engine placed against, for
+    // the KEEPOUT_CROSS audit — None = fp (see verify.h).
     m.def("check_nuts",  &check_nuts,
           py::arg("ct"), py::arg("nuts"), py::arg("topo"), py::arg("fp"),
-          py::arg("layers"), py::arg("bundle_id"));
+          py::arg("layers"), py::arg("bundle_id"),
+          py::arg("zone_fp") = nullptr);
     m.def("check_dnuts", &check_dnuts,
           py::arg("ct"), py::arg("dnuts"), py::arg("topo"), py::arg("fp"),
-          py::arg("layers"), py::arg("bundle_id"), py::arg("num_bits"));
+          py::arg("layers"), py::arg("bundle_id"), py::arg("num_bits"),
+          py::arg("zone_fp") = nullptr);
 }

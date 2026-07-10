@@ -26,17 +26,44 @@ false positives vs the 3 real crossings. Full write-up:
 [`keepout_model_audit.md`](keepout_model_audit.md); tests in
 `test/tests/test_keepout_model.py`.
 
-## Verify is keepout-blind (`KEEPOUT_CROSS` violation type)
+## Rename `check_connectivity` → `check_design`
 
-**What:** `check_nuts` / `check_dnuts` (`src/verify.cpp`) audit
-connectivity, layer direction, and unplaced bits, but never test a placed
-wire against keepouts — the pre-audit illegal wires sailed through
-`check_connectivity`. With `cull_keepout_crossers` in place DNUTS no longer
-emits such wires, so this is defense-in-depth only: a `KEEPOUT_CROSS`
-violation (placed extent × keepout, span-overlap semantics as
-`count_keepout_conflicts`) would make verify self-sufficient if a future
-stage regresses. Small, contained; noted in the audit
-([`keepout_model_audit.md`](keepout_model_audit.md) class 4).
+**What:** the command's name predates most of what it does. It began as a
+pure connectivity audit (SEG/BUSTERM opens); today it also checks
+layer-direction validity (`LAYER_DIR` — an unbuildable wire, not an open)
+and keepout crossings (`KEEPOUT_CROSS` — an illegal placement, not an
+open). "check_connectivity" undersells the audit and misleads users into
+thinking a Success verdict only covers opens.
+
+**How (small):** register `check_design` in
+`src/buda_cmds/verify_viz_cmds.py` as the primary name for the same
+handler and keep `check_connectivity` as an alias — the command registry is
+a dict, so this is one entry plus doc updates (`verify_viz.md`,
+`BUDA_SCRIPT_REFERENCE.md` index, CLAUDE.md). No flow/test churn at
+introduction; migrate the `flow/` + `demo/` call sites and test
+assertions opportunistically, then (much later) deprecate the alias with a
+one-line notice. The printed headers ("Verifying NUTS-level
+connectivity...") deserve a matching touch-up ("Verifying NUTS-level
+design rules...") in the same pass — a few test greps assert on those
+strings, so update them together.
+
+## Verify is keepout-blind (`KEEPOUT_CROSS` violation type) — ✅ RESOLVED
+
+**What (history):** `check_nuts` / `check_dnuts` (`src/verify.cpp`) audited
+connectivity, layer direction, and unplaced bits, but never tested a placed
+wire against keepouts — a segment the engine itself counted as a keepout
+conflict got "Success: no opens found".
+
+**Resolution:** `KEEPOUT_CROSS` violation type at both stages — nuts flags a
+placed segment whose extent lies on a keepout overlapping its span (the
+live exhausted-window commit, `count_keepout_conflicts` semantics per
+segment); dnuts flags a bit inside a keepout with the cull's own predicate
+(defense-in-depth — the cull prevents it in production). The checks take an
+optional `zone_fp` (the floorplan the engine placed against) because a hier
+bundle's resolved generation floorplan has no zones and would silently
+bless real conflicts. Details:
+[`keepout_model_audit.md`](keepout_model_audit.md) class 4; tests in
+`test/tests/test_keepout_model.py` + the hbundles/10 flow test.
 
 ## Band-level repack for spread-fit overlap clusters — ✅ IMPLEMENTED
 

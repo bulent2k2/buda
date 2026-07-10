@@ -174,3 +174,116 @@ def test_all_layer_zone_blocks_every_stage():
         if ts.layer == 4 and min(ts.span_lo, ts.span_hi) < 450 \
                 and max(ts.span_lo, ts.span_hi) > 350:
             assert ts.track_position - ts.width / 2.0 >= 40
+
+
+# ---------------------------------------------------------------------------
+# KEEPOUT_CROSS (audit class 4 — verify keepout-blindness).  check_nuts /
+# check_dnuts used to have no keepout test at all: the pinned repro's forced
+# commit ON the keepout passed `check_connectivity nuts` with "Success: no
+# opens found."  Now:
+#   nuts  — a placed bus segment whose extent [pos ± w/2] lies on a keepout
+#           overlapping its span is a KEEPOUT_CROSS violation (the live gap:
+#           the exhausted-window fallback commit).
+#   dnuts — a bit whose track centre sits inside a keepout overlapping its
+#           final span is flagged with the cull's own predicate.  Pure
+#           defense-in-depth: cull_keepout_crossers removes such bits from
+#           every production result, so this only fires if a stage regresses
+#           — which is why the test hand-builds the crossing wire.
+# ---------------------------------------------------------------------------
+
+def _pinned_keepout_session():
+    """The compound repro, pinned to the keepout layer (see above)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _run(s, ("def_layer 4 M4 H TOP 50", "def_layer 6 M6 H TOP 50",
+             "def_layer 5 M5 V TOP 50",
+             f"def_track_pattern 4 0 {_PATN}", f"def_track_pattern 6 0 {_PATN}",
+             f"def_track_pattern 5 0 {_PATN}",
+             "add_block A 0 0 100 100", "add_block B 500 0 600 100",
+             "add_keepout 350 0 450 100 M4",
+             "add_bus n[8] A.tx B.rx", "run_bundler strict",
+             "generate_topologies", "run_planner 3"))
+    w = s.bundles[0]
+    w.plan.seg_layers = [4]
+    w.input.topology_pinned = True
+    return s
+
+
+def test_check_nuts_flags_keepout_commit():
+    import buda
+    s = _pinned_keepout_session()
+    _run(s, ("run_nuts",))
+    assert s.nuts_result.num_keepout_conflicts == 1   # the engine counts it...
+
+    w = s.bundles[0]
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    ct = buda.ConnTopology()
+    ct.build(topo, s.fp)
+    res = buda.check_nuts(ct, s.nuts_result, topo, s.fp, s.layers, 1)
+    kinds = [v.kind.name for v in res.violations]
+    # ...and the audit now sees the same event instead of blessing it.
+    assert kinds.count("KEEPOUT_CROSS") == 1, kinds
+    v = next(v for v in res.violations if v.kind.name == "KEEPOUT_CROSS")
+    assert v.seg_idx == 0 and "placed ON keepout" in v.message
+
+    # CLI surface: the nuts-stage check reports it, no false Success.
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("check_connectivity nuts")
+    out = buf.getvalue()
+    assert "Success" not in out and "keepout" in out.lower()
+
+
+def test_check_dnuts_flags_crossing_bit_defense_in_depth():
+    import buda
+    s = _pinned_keepout_session()
+    _run(s, ("run_nuts", "run_detailed_nuts"))
+    w = s.bundles[0]
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    ct = buda.ConnTopology()
+    ct.build(topo, s.fp)
+
+    # Production result: the cull already removed the crossing bits, so the
+    # audit reports them UNPLACED — and no KEEPOUT_CROSS false positive.
+    res = buda.check_dnuts(ct, s.detailed_result, topo, s.fp, s.layers, 1, 8)
+    kinds = [v.kind.name for v in res.violations]
+    assert "KEEPOUT_CROSS" not in kinds
+    assert kinds.count("UNPLACED") == 8
+
+    # Synthetic regression wire (a stage that stopped culling): one bit
+    # through the keepout must be flagged.
+    fake = buda.DetailedNUTSResult()
+    ns = buda.NetSegment()
+    ns.bundle_id, ns.seg_idx, ns.bit_index = 1, 0, 0
+    ns.layer, ns.width = 4, 1.0
+    ns.track_position = 50.0                 # inside keepout y[0,100]
+    ns.span_lo, ns.span_hi = 100.0, 500.0    # crosses keepout x[350,450]
+    fake.net_segments = [ns]
+    res = buda.check_dnuts(ct, fake, topo, s.fp, s.layers, 1, 1)
+    kinds = [v.kind.name for v in res.violations]
+    assert kinds.count("KEEPOUT_CROSS") == 1, kinds
+    v = next(v for v in res.violations if v.kind.name == "KEEPOUT_CROSS")
+    assert v.seg_idx == 0 and v.bit_index == 0 and "crosses keepout" in v.message
+
+
+def test_check_keepout_cross_no_false_positive_on_clean_flow():
+    import buda
+    # The graze case places everything legally — the new checks must stay
+    # silent at both stages.
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _run(s, ("def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+             f"def_track_pattern 4 0 {_PATN}", f"def_track_pattern 5 0 {_PATN}",
+             "add_block A 0 0 100 200", "add_block B 500 0 600 200",
+             "add_keepout 350 0 450 40 M4",
+             "add_bus n[8] A.tx B.rx", "run_bundler strict",
+             "generate_topologies", "run_planner 3", "run_nuts",
+             "run_detailed_nuts"))
+    w = s.bundles[0]
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    ct = buda.ConnTopology()
+    ct.build(topo, s.fp)
+    res_n = buda.check_nuts(ct, s.nuts_result, topo, s.fp, s.layers, 1)
+    res_d = buda.check_dnuts(ct, s.detailed_result, topo, s.fp, s.layers, 1, 8)
+    assert [v.kind.name for v in res_n.violations] == []
+    assert [v.kind.name for v in res_d.violations] == []
