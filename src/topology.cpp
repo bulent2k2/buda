@@ -2352,6 +2352,7 @@ std::vector<Topology> TopologyGenerator::generate_npin(
     std::vector<std::string> block_names;
     for (const auto& b : blocks) block_names.push_back(b.block_name);
     finalize_candidates(results, block_names);
+    annotate_and_sort(results);   // final WL rank (deferred out of finalize_candidates)
     return results;
 }
 
@@ -3207,7 +3208,11 @@ void TopologyGenerator::finalize_candidates(std::vector<Topology>& candidates,
     // so derive the junction records ONCE; downstream ConnTopology builds
     // (filter_pinched below, planner, NUTS, DNUTS, verify) only read them.
     for (auto& t : candidates) annotate_seg_conns(t);
-    annotate_and_sort(candidates);
+    // NOTE: the WL sort is intentionally NOT done here.  Each caller runs one
+    // annotate_and_sort as its final step — generate_2pin after its abutment/
+    // corner rescue (so the rescue candidates are ranked too), generate_npin
+    // right after this call.  The culls below are order-independent, so the
+    // deferral does not change which candidates survive or their final order.
 
     // Keepout cull: drop a candidate any of whose segments has its WHOLE
     // perpendicular slide window blocked on all same-direction layers by
@@ -3469,8 +3474,12 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
     }
 
     for (auto& t : candidates) annotate_endpoints(t, {src_bt, dst_bt});
-    // Shared post-emission pipeline (annotate → sort → keepout cull → pinch →
-    // coverage fill) — same stage order this path has always run.
+    // Shared post-emission pipeline (annotate → keepout cull → pinch → coverage
+    // fill).  The WL sort is deferred to the END of this function — a single
+    // annotate_and_sort after the abutment/corner rescue below — so the rescue's
+    // candidates are WL-ranked in the same pass (the culls are order-independent,
+    // so deferring the sort leaves the normal path's surviving set and final order
+    // unchanged).
     finalize_candidates(candidates, {src_name, dst_name});
 
     // Abutment fallback: two blocks sharing a FULL edge have coinciding facing
@@ -3504,14 +3513,10 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
             annotate_endpoints(t, {src_bt, dst_bt});
             annotate_seg_conns(t);
             t.connected_block_names = {src_name, dst_name};
-            // Score by real length — this fallback runs AFTER the normal
-            // annotate/sort pass, so without this the ABUT/CORNER candidates keep
-            // estimated_wirelength=0 and the planner's WL term cannot tell an
-            // asymmetric corner's two strategies apart.
-            t.estimated_wirelength = 0;
-            for (const auto& seg : t.segments)
-                t.estimated_wirelength += std::abs(seg.end.x - seg.start.x)
-                                        + std::abs(seg.end.y - seg.start.y);
+            // estimated_wirelength (and the WL ranking of an asymmetric corner's
+            // two strategies) is set by the single annotate_and_sort at the end of
+            // generate_2pin, which now runs AFTER this rescue — so the fallback no
+            // longer scores itself.
             const auto& kos = floorplan_.get_keepout_zones();
             bool blocked = false;
             if (!kos.empty()) {
@@ -3649,6 +3654,11 @@ std::vector<Topology> TopologyGenerator::generate_2pin(const std::string& src_na
             }
         }
     }
+    // Single WL-rank over the final set — normal candidates AND any abutment/corner
+    // rescue appended above.  Deferring the one sort to here (rather than before the
+    // culls) is what lets the rescue L's be ranked without a second sort or the
+    // fallback pre-scoring itself.
+    annotate_and_sort(candidates);
     return candidates;
 }
 

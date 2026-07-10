@@ -77,11 +77,14 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]
     # ADDITIVE variant of generate_topologies_for_bundle (Phase E2 of
     # topo_conn_unification.md): run the generator with the given knobs
-    # and APPEND the new candidates to the bundle's existing list,
+    # and merge the new candidates into the bundle's existing list,
     # deduplicated by stable content uid — instead of replacing it.
-    # Append-only means existing candidate indices (and therefore the
-    # bundle's pin and plan state) are untouched: the expert accretes a
-    # candidate pool across knob experiments without losing selections.
+    # The merged pool is re-sorted by the same key as generation
+    # (wirelength, then type) so cand_index stays a meaningful ranking;
+    # the expert accretes a candidate pool across knob experiments without
+    # losing SELECTIONS — the pin (and dogleg slot) are remapped to follow
+    # their candidate across the re-sort, so raw indices may move but the
+    # selected/dogleg candidate is preserved.
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
@@ -114,6 +117,28 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
                 seen.add(uid)
                 existing.append(c)
                 added += 1
+            # Keep the accreted pool WL-sorted, mirroring the C++ annotate_and_sort
+            # (estimated_wirelength ascending, then type) so cand_index stays a
+            # meaningful ranking instead of "old pool, then newly-appended tail".
+            # Re-sorting moves indices, so remap the candidate-index references that
+            # must follow their candidate — the pin (selected_topology_index) and the
+            # dogleg slot/original.  Per-segment plan arrays ride the SELECTED
+            # candidate, not a candidate index, so they need no remap.
+            bid = str(w.input.original_bundle.id)
+
+            def _uid_at(idx):
+                return buda.topo_uid(existing[idx]) if 0 <= idx < len(existing) else None
+            sel_uid = _uid_at(w.plan.selected_topology_index)
+            dg_uid = _uid_at(session._dogleg_slot.get(bid, -1))
+            og_uid = _uid_at(session._dogleg_originals.get(bid, -1))
+            existing.sort(key=lambda c: (c.estimated_wirelength, c.type))
+            pos = {buda.topo_uid(c): i for i, c in enumerate(existing)}
+            if sel_uid is not None:
+                w.plan.selected_topology_index = pos[sel_uid]
+            if dg_uid is not None:
+                session._dogleg_slot[bid] = pos[dg_uid]
+            if og_uid is not None:
+                session._dogleg_originals[bid] = pos[og_uid]
             w.input.candidates = existing
             label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
             print(f"Added {added} new topolog{'y' if added == 1 else 'ies'} "

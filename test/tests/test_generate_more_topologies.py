@@ -15,9 +15,11 @@
 """Phase E2 — additive generation (`generate_more_topologies`).
 
 Unlike `generate_topologies_for_bundle` (regenerate-and-replace, pin
-re-attached by uid), the additive command APPENDS knob-produced candidates to
-the existing pool, deduplicated by stable content uid, leaving existing
-indices — and therefore the pin and plan state — untouched.
+re-attached by uid), the additive command MERGES knob-produced candidates into
+the existing pool, deduplicated by stable content uid, then re-sorts the pool by
+the same key as generation (wirelength, then type).  Raw indices may move, but
+the SELECTION is preserved: the pin (and dogleg slot) are remapped to follow
+their candidate across the re-sort.
 """
 import contextlib
 import io
@@ -47,15 +49,16 @@ def _session():
     return s
 
 
-def test_additive_appends_dedupes_and_preserves_pin(capsys):
+def test_additive_merges_dedupes_resorts_and_preserves_pin(capsys):
     s = _session()
     w = s.bundles[0]
     base = list(w.input.candidates)
     assert base, "base generation produced no candidates"
-    base_uids = [buda.topo_uid(c) for c in base]
+    base_uids = set(buda.topo_uid(c) for c in base)
 
     pin_idx = min(1, len(base) - 1)
     bid = w.input.original_bundle.id
+    pinned_uid = buda.topo_uid(base[pin_idx])
     _quiet(s, f"select_topology {bid} {pin_idx + 1}")
 
     s.do_command("generate_more_topologies d multi_trunk")
@@ -64,20 +67,25 @@ def test_additive_appends_dedupes_and_preserves_pin(capsys):
 
     now = list(w.input.candidates)
     now_uids = [buda.topo_uid(c) for c in now]
-    # Append-only: the original list is a strict prefix, so indices (and the
-    # pin) are untouched.
-    assert now_uids[:len(base_uids)] == base_uids
+    # Merged (not appended): every base candidate survives, plus new ones, no dups.
+    assert base_uids <= set(now_uids)
     assert len(now) > len(base), "multi_trunk added nothing on a 6-block fan-out"
-    assert w.input.topology_pinned
-    assert w.plan.selected_topology_index == pin_idx
-    # No duplicates entered the pool.
     assert len(set(now_uids)) == len(now_uids)
+    # Pool is re-sorted by generation's key (wirelength asc, then type).
+    keys = [(c.estimated_wirelength, c.type) for c in now]
+    assert keys == sorted(keys), keys
+    # The SELECTION is preserved: the pin still points at the SAME candidate, at
+    # its post-resort index (which may differ from the original pin_idx).
+    assert w.input.topology_pinned
+    assert buda.topo_uid(now[w.plan.selected_topology_index]) == pinned_uid
 
-    # Idempotence: the same knobs again add zero (all uid-duplicates).
+    # Idempotence: the same knobs again add zero and leave the (already-sorted)
+    # pool and the selection unchanged.
     s.do_command("generate_more_topologies d multi_trunk")
     out = capsys.readouterr().out
     assert "Added 0 new" in out, out
     assert [buda.topo_uid(c) for c in w.input.candidates] == now_uids
+    assert buda.topo_uid(w.input.candidates[w.plan.selected_topology_index]) == pinned_uid
 
 
 def test_additive_unknown_hint_warns(capsys):
