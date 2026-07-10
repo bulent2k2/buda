@@ -1,6 +1,7 @@
 # Bottom-Up Template Planning — Design Plan
 
-Status: **PROPOSAL** (draft for review — open questions at the end).
+Status: **APPROVED PLAN** — the four open design questions were reviewed
+with the user and resolved (§10); ready for implementation in the §9 order.
 Scope: a new hierarchical-flow mode where the user marks selected cell
 templates as **bottom-up**: their cell-local interconnect is planned, NUTSed,
 and (track-phase permitting) detailed-NUTSed **once per template**, and the
@@ -170,10 +171,12 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
 4. **Mismatch policy.** `on_mismatch stop` (default): `run_detailed_nuts`
    refuses with the report and a pointer at the fix (move the instance to a
    pitch-aligned site, or align the override). `on_mismatch independent`:
-   misaligned cells' instance bundles are handed to the normal global DNUTS
-   individually (uniformity broken knowingly, warning printed). Aligned cells
-   still copy. (Open question Q2: whether a *partially* aligned cell may copy
-   for its aligned instances and solve only the outliers.)
+   **copy-aligned-solve-outliers** — within a partially aligned cell, the
+   aligned instances still receive the reference-instance DNUTS copy, and
+   only the misaligned instances' bundles are handed to the normal global
+   DNUTS individually (uniformity broken knowingly, per-instance warning
+   printed). A cell whose *reference set* is empty (every instance disagrees
+   with every other) solves fully independently.
 5. **Bit-level keepouts.** After copy, each instance's bit wires refine the
    stage-(b) bus-level keepout: register per-track grid keepouts so
    higher-level DNUTS bits cannot land on occupied tracks where spans
@@ -247,21 +250,23 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
 7. Tests + HIER_TOPOLOGY.md refresh + new doc section in BDB_REFERENCE /
    script reference.
 
-## 10. Open questions (need user input)
+## 10. Resolved design decisions (reviewed with the user, 2026-07-10)
 
-- **Q1 — Orientation:** guard-and-refuse for non-`N` instances now (full
-  rotate/mirror support as a follow-on), or implement orientation-aware
-  copying as part of this work?
-- **Q2 — Partial alignment:** when only some instances of a cell are
-  track-misaligned, may the aligned ones still receive the DNUTS copy while
-  the outliers solve independently, or does any mismatch force the whole
-  cell into the chosen fallback?
-- **Q3 — Keepout representation:** user's spec says lower-level wires become
-  *Keepouts*. Plan proposes fixed-segment injection inside NUTS **plus** a
-  derived keepout mirror for planner/DNUTS (§4.3). Acceptable, or should it
-  be keepout-zones-only everywhere (simpler mental model, coarser, and needs
-  the G3 fix regardless)?
-- **Q4 — Scope of the keepout behavior:** derived keepouts only for
-  bottom-up-marked cells (plan as written), or should *every* hier cell's
-  planned-and-NUTSed local routing become keepouts for higher levels (a
-  broader flow change, independent of bottom-up marking)?
+- **Q1 — Orientation: guard now, rotate later.** `set_bottom_up` and
+  `run_planner hier` verify all instances of a marked cell have identity
+  orientation `'N'` and error otherwise; orientation-aware copying
+  (rotate/mirror in `offset_topology` + NUTS/DNUTS copies) is a separate
+  follow-on. The existing top-down expansion additionally gets a *warning*
+  for non-`N` instances (today's silent mis-transform, G2).
+- **Q2 — Partial alignment: copy aligned, solve outliers.** Under
+  `on_mismatch independent`, aligned instances still get the DNUTS copy;
+  only misaligned instances solve individually (folded into §5.4).
+- **Q3 — Keepout model: fixed segments + keepout mirror.** Copies are
+  injected into NUTS as immovable pre-placed segments (exact widths,
+  same-bundle sharing semantics preserved); a derived `KeepoutZone` mirror
+  feeds the planner and DNUTS; G3 fixed for explicitly layer-tagged zones
+  (§4.3).
+- **Q4 — Keepout scope: bottom-up-marked cells only.** Unmarked cells keep
+  today's top-down demand-reservation behavior; zero regression for
+  existing hier flows. Generalizing to all cells stays a possible future
+  knob, out of scope here.
