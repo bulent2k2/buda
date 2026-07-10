@@ -741,7 +741,7 @@ Python API: `db.set_cell_bottom_up(cell, on)`, `db.cell_bottom_up(cell)`,
 ### `align_bottom_up`
 
 ```
-align_bottom_up [max_shift <um>]
+align_bottom_up [max_shift <um>] [force]
 ```
 
 Nudge every `set_bottom_up` cell's instances onto a common track phase with
@@ -761,9 +761,20 @@ absolute rects and cannot be compensated by translation — verify with
 `check_template_tracks`, which also runs pre-routing (placement-stage,
 whole-window comparison) exactly for this pairing.
 
+After the moves, `FloorplannerEngine.validate()` audits the placement.
+**By default any move that introduced a NEW overlap / outside-die issue is
+auto-reverted** — the exact-geometry realization of a slack-aware cap: the
+applied end state itself is the test, so large-but-legal nudges pass while a
+nudge into a neighbor or off the die is undone (iterating to a fixpoint,
+since one revert can newly collide with a still-moved sibling).  A reverted
+instance leaves its cell possibly misaligned — `check_template_tracks`
+reports it.  Pre-existing issues are summarized, never blamed on the
+alignment.
+
 | Argument | Type | Description |
 |---|---|---|
 | `max_shift <um>` | keyword + float | Optional cap: any nudge larger than this is skipped with a WARNING. |
+| `force` | keyword | Keep moves that introduce NEW validate issues (WARNING only, no auto-revert). |
 
 Python API: `db.translate_comp(name, dx, dy)` — translate a component and
 its whole subtree (unlike `move_comp`, which repositions only the named

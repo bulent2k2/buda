@@ -1232,16 +1232,19 @@ class HierMixin:
     def _validate_placement(self):
         """FloorplannerEngine.validate() over the BDB's placed components:
         OVERLAP pairs (ancestor/descendant pairs excluded) and OUTSIDE_DIE
-        (skipped when the BDB has no die).  Returns [(kind, message)]."""
+        (skipped when the BDB has no die).  Returns
+        [(kind, block_a, block_b, message)] — the block names let the
+        aligner's auto-revert attribute a new issue to the moved instance."""
         eng = buda.FloorplannerEngine()
         if self.bdb.die_w() > 0 and self.bdb.die_h() > 0:
             eng.set_die(self.bdb.die_w(), self.bdb.die_h())
         for c in self.bdb.all_components():
             if c.x1 >= 0:
                 eng.add_block(c.name, c.x1, c.y1, c.x2, c.y2)
-        return [(i.kind, i.message) for i in eng.validate()]
+        return [(i.kind, i.block_a, i.block_b, i.message)
+                for i in eng.validate()]
 
-    def _align_bottom_up(self, max_shift=None):
+    def _align_bottom_up(self, max_shift=None, force=False):
         """Nudge every marked cell's instances onto a common track phase
         with MINIMAL total movement, so the bottom-up copies land on real
         signal tracks in every occurrence.
@@ -1272,10 +1275,18 @@ class HierMixin:
         not fixable by translation and are reported.
 
         After the moves, FloorplannerEngine.validate() audits the placement
-        (block overlaps + outside-die): issues NEW relative to the pre-move
-        placement are each printed as a WARNING (the moves are kept — undo
-        by re-running with a tighter max_shift or fixing the floorplan);
-        pre-existing issues are summarized, not blamed on the alignment.
+        (block overlaps + outside-die).  By DEFAULT any move that introduced
+        a NEW issue is AUTO-REVERTED — the exact-geometry realization of a
+        "slack-aware cap": instead of pre-deriving a scalar bound from free
+        slack (which would also block large-but-legal nudges), the applied
+        end state itself is the test.  The revert loop runs to a fixpoint,
+        because undoing one instance can newly collide with a still-moved
+        sibling (both slid into the same gap) — the worst case restores the
+        original placement.  A reverted instance leaves its cell (and any
+        nested cell aligned against it) possibly misaligned — re-run
+        check_template_tracks, which reports it.  `force=True` keeps
+        issue-introducing moves and only WARNs (the pre-revert behavior).
+        Pre-existing issues are summarized, never blamed on the alignment.
         """
         by_cell = self._bottom_up_placed_instances()
         if not by_cell:
@@ -1344,7 +1355,7 @@ class HierMixin:
             return ([to_phase(coord(c), p, period)
                      if c.name in movable else 0.0 for c in insts], offside)
 
-        moved = 0
+        applied = {}   # instance name → (dx, dy, cell) actually moved
         # Enclosing cells before enclosed ones, and FRESH coordinates per
         # cell: a parent's nudge drags its whole subtree, so a nested cell's
         # deltas must never come from a pre-move snapshot.  Order by marked-
@@ -1390,22 +1401,59 @@ class HierMixin:
                     continue
                 if dx or dy:
                     self.bdb.translate_comp(c.name, dx, dy)
-                    moved += 1
+                    applied[c.name] = (dx, dy, cell)
                     print(f"[Align] cell '{cell}': {c.name} moved by "
                           f"(dx={dx:+.3f}, dy={dy:+.3f})")
-        # Placement changed: every derived bottom-up artifact is stale.
-        self._bu_fixed_cache = None
-        self._template_track_verdict = None
-        self._template_track_verdict_placement = None
+
+        # Post-move placement audit.  Default: auto-revert every move that
+        # introduced a NEW issue (the exact-geometry slack cap), iterating
+        # to a fixpoint since a revert can newly collide with a still-moved
+        # sibling.  Attribution: an issue's block (or its subtree parent) is
+        # matched back to the moved instance.  force=True keeps the moves
+        # and only warns.
+        pre = set(pre_issues)
+        reverted = {}
+        if applied and not force:
+            while True:
+                new = [i for i in self._validate_placement() if i not in pre]
+                names = set()
+                first_issue = {}
+                for kind, a, b, msg in new:
+                    for blk in (a, b):
+                        if not blk:
+                            continue
+                        hit = next((n for n in applied
+                                    if blk == n or blk.startswith(n + "/")),
+                                   None)
+                        if hit is not None:
+                            names.add(hit)
+                            first_issue.setdefault(hit, (kind, msg))
+                if not names:
+                    break
+                for n in sorted(names):
+                    dx, dy, cell = applied.pop(n)
+                    self.bdb.translate_comp(n, -dx, -dy)
+                    reverted[n] = cell
+                    kind, msg = first_issue[n]
+                    print(f"WARNING: align_bottom_up: move of {n} REVERTED "
+                          f"— it introduced {kind} ({msg}); cell '{cell}' "
+                          f"may stay misaligned (pass 'force' to keep such "
+                          f"moves)")
+        moved = len(applied)
+        if applied or reverted:
+            # Placement changed at some point: every derived bottom-up
+            # artifact is stale.
+            self._bu_fixed_cache = None
+            self._template_track_verdict = None
+            self._template_track_verdict_placement = None
         pitches = (f"x-period {lx}" if lx else "x unconstrained") + ", " + \
                   (f"y-period {ly}" if ly else "y unconstrained")
-        print(f"[Align] {moved} instance(s) moved ({pitches}); verify with "
-              f"check_template_tracks.")
-        # Post-move placement audit: report anything the nudges broke.
-        if moved:
-            pre = set(pre_issues)
+        print(f"[Align] {moved} instance(s) moved"
+              + (f", {len(reverted)} reverted" if reverted else "")
+              + f" ({pitches}); verify with check_template_tracks.")
+        if applied or reverted:
             new = [i for i in self._validate_placement() if i not in pre]
-            for kind, msg in new:
+            for kind, a, b, msg in new:
                 print(f"WARNING: align_bottom_up introduced {kind}: {msg}")
             print(f"[Align] validate: {len(new)} new issue(s) from the "
                   f"moves, {len(pre)} pre-existing.")
