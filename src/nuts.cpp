@@ -1057,6 +1057,56 @@ void NUTSEngine::add_fixed_segments(const std::vector<TrackSegment>& segs) {
     }
 }
 
+TrackSegment transform_track_segment(const TrackSegment& ts,
+                                     const std::string& orient,
+                                     int cell_w, int cell_h,
+                                     int src_x, int src_y,
+                                     int dst_x, int dst_y,
+                                     int new_bundle_id) {
+    const OrientMap m = orient_map(orient);
+    if (m.swap)
+        throw std::runtime_error(
+            "transform_track_segment: 90/270-degree orientations swap H<->V "
+            "and thus the assigned layer — not supported for copies (needs "
+            "the layer-pairing policy)");
+    TrackSegment out = ts;
+    out.bundle_id = new_bundle_id;
+    // Axis roles in the source cell frame.
+    const bool along_is_x = ts.horiz;
+    const bool along_refl = along_is_x ? m.rx : m.ry;
+    const bool perp_refl  = along_is_x ? m.ry : m.rx;
+    const int  along_dim  = along_is_x ? cell_w : cell_h;
+    const int  perp_dim   = along_is_x ? cell_h : cell_w;
+    const int  along_src  = along_is_x ? src_x : src_y;
+    const int  perp_src   = along_is_x ? src_y : src_x;
+    const int  along_dst  = along_is_x ? dst_x : dst_y;
+    const int  perp_dst   = along_is_x ? dst_y : dst_x;
+
+    auto along = [&](double v) {
+        const double loc = v - along_src;
+        return (along_refl ? along_dim - loc : loc) + along_dst;
+    };
+    auto perp = [&](double v) {   // NaN and ±inf ride IEEE arithmetic
+        const double loc = v - perp_src;
+        return (perp_refl ? perp_dim - loc : loc) + perp_dst;
+    };
+    const double s_lo = along(ts.span_lo), s_hi = along(ts.span_hi);
+    out.span_lo = std::min(s_lo, s_hi);
+    out.span_hi = std::max(s_lo, s_hi);
+    out.track_position = perp(ts.track_position);
+    const double i_lo = perp(ts.interval_lo), i_hi = perp(ts.interval_hi);
+    out.interval_lo = std::min(i_lo, i_hi);
+    out.interval_hi = std::max(i_lo, i_hi);
+    out.pull_target = perp(ts.pull_target);
+    const double b_lo = perp(ts.track_lo_bound);
+    const double b_hi = perp(ts.track_hi_bound);
+    out.track_lo_bound = std::min(b_lo, b_hi);
+    out.track_hi_bound = std::max(b_lo, b_hi);
+    if (perp_refl) out.net_pull = -ts.net_pull;
+    for (double& f : out.busterm_faces) f = along(f);
+    return out;
+}
+
 TrackSegment offset_track_segment(const TrackSegment& ts, int dx, int dy,
                                   int new_bundle_id) {
     TrackSegment out = ts;

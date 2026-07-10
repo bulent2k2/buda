@@ -55,6 +55,55 @@ NetVia offset_net_via(const NetVia& v, int dx, int dy, int new_bundle_id) {
     return out;
 }
 
+NetSegment transform_net_segment(const NetSegment& ns,
+                                 const std::string& orient,
+                                 int cell_w, int cell_h,
+                                 int src_x, int src_y, int dst_x, int dst_y,
+                                 int new_bundle_id, bool horiz) {
+    const OrientMap m = orient_map(orient);
+    if (m.swap)
+        throw std::runtime_error(
+            "transform_net_segment: 90/270-degree orientations are not "
+            "supported for copies (H<->V layer swap needs layer pairing)");
+    NetSegment out = ns;
+    out.bundle_id = new_bundle_id;
+    const bool along_refl = horiz ? m.rx : m.ry;
+    const bool perp_refl  = horiz ? m.ry : m.rx;
+    const int  along_dim  = horiz ? cell_w : cell_h;
+    const int  perp_dim   = horiz ? cell_h : cell_w;
+    const int  along_src  = horiz ? src_x : src_y;
+    const int  perp_src   = horiz ? src_y : src_x;
+    const int  along_dst  = horiz ? dst_x : dst_y;
+    const int  perp_dst   = horiz ? dst_y : dst_x;
+    auto along = [&](double v) {
+        const double loc = v - along_src;
+        return (along_refl ? along_dim - loc : loc) + along_dst;
+    };
+    const double lo = along(ns.span_lo), hi = along(ns.span_hi);
+    out.span_lo = std::min(lo, hi);
+    out.span_hi = std::max(lo, hi);
+    const double p = ns.track_position - perp_src;
+    out.track_position = (perp_refl ? perp_dim - p : p) + perp_dst;
+    return out;
+}
+
+NetVia transform_net_via(const NetVia& v, const std::string& orient,
+                         int cell_w, int cell_h,
+                         int src_x, int src_y, int dst_x, int dst_y,
+                         int new_bundle_id) {
+    const OrientMap m = orient_map(orient);
+    if (m.swap)
+        throw std::runtime_error(
+            "transform_net_via: 90/270-degree orientations are not "
+            "supported for copies (H<->V layer swap needs layer pairing)");
+    NetVia out = v;
+    out.bundle_id = new_bundle_id;
+    const double x = v.x - src_x, y = v.y - src_y;
+    out.x = (m.rx ? cell_w - x : x) + dst_x;
+    out.y = (m.ry ? cell_h - y : y) + dst_y;
+    return out;
+}
+
 bool DetailedNUTSEngine::signals_contiguous(
         double pos_a, double pos_b,
         const std::vector<std::pair<double, TrackSlot>>& all_tracks) {

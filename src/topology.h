@@ -249,6 +249,38 @@ inline void prepend_segment(Topology& t, const Segment& spine) {
 Topology offset_topology(const Topology& t, int dx, int dy,
                          const std::string& name_prefix = "");
 
+// ── Orientation transforms (bottom-up + hier expansion) ─────────────────────
+// The 8-orientation token convention is bdb.cpp/gds_io.cpp's: mirror about
+// the X axis FIRST, then rotate CCW (N/W/S/E = 0/90/270-free letters; F* =
+// mirrored).  OrientMap is the same transform in output-normalized form over
+// a w×h cell box: optionally swap the axes (90/270), then reflect per OUTPUT
+// axis — the transformed box has its lower-left at the origin, so a
+// transformed instance's bbox lines up with the placed component's bbox.
+struct OrientMap {
+    bool swap = false;   // 90/270: axes exchange (box becomes h×w)
+    bool rx = false;     // reflect the output x axis
+    bool ry = false;     // reflect the output y axis
+};
+OrientMap orient_map(const std::string& orient);
+// Token algebra: compose (outer ∘ inner) and invert, staying in the 8-token
+// group.  Mirrors and 180° are involutions; 90/270 invert to each other.
+std::string orient_compose(const std::string& outer, const std::string& inner);
+std::string orient_inverse(const std::string& orient);
+
+// Orientation-aware sibling of offset_topology: map every coordinate of `t`
+// (segments incl. perp clamps, busterm rects, bridges) from the cell-local
+// frame through `orient` over a cell_w×cell_h cell box, then shift by
+// (dx, dy); block names are qualified with `name_prefix` exactly like
+// offset_topology.  Supports all 8 orientations — under 90/270 an H segment
+// becomes V (and vice versa), so any per-segment LAYER decisions made in the
+// cell frame are direction-invalid and must be re-assigned by the caller
+// (the top-down planner does; bottom-up copies therefore restrict to the
+// direction-preserving set N/S/FN/FS).  orient "N" reduces to
+// offset_topology.
+Topology transform_topology(const Topology& t, const std::string& orient,
+                            int cell_w, int cell_h, int dx, int dy,
+                            const std::string& name_prefix = "");
+
 // Explicitly (re)annotate a topology's seg_busterms from a floorplan's blocks —
 // the authoritative endpoint annotation ConnTopology reads.  For hand-built or
 // BDB-reloaded topologies that did not go through generate_candidates; call it
