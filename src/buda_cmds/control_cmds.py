@@ -57,15 +57,28 @@ def cmd_source(session, cmd, args, cmd_line):
         session.script_path = full_path
 
     session._script_stack.append(full_path)
+    # Track whether this source frame sits at its parent's tail; a command is the
+    # flow's LAST only when every ancestor source was at its tail AND it is the
+    # last real command here. `_print_end_report` uses this to decide whether a
+    # `visualize` may emit the runtime summary before its window blocks.
+    session._at_tail_stack.append(session._at_last_command)
     try:
         with open(full_path, 'r') as f:
-            for line in f:
-                if not line.strip().startswith('#'):
-                    # run_command times + log-routes each command when a
-                    # flow log is active; it falls back to do_command
-                    # (raw, unlogged) for interactive/embedded callers.
-                    session.run_command(line)
+            lines = f.readlines()
+        def _is_cmd(l):
+            s = l.strip()
+            return bool(s) and not s.startswith('#')
+        last_i = max((i for i, l in enumerate(lines) if _is_cmd(l)), default=-1)
+        parent_tail = all(session._at_tail_stack)
+        for i, line in enumerate(lines):
+            if not line.strip().startswith('#'):
+                # run_command times + log-routes each command when a flow log is
+                # active; it falls back to do_command (raw, unlogged) for
+                # interactive/embedded callers.
+                session._at_last_command = parent_tail and (i == last_i)
+                session.run_command(line)
     finally:
+        session._at_tail_stack.pop()
         session._script_stack.pop()
 
 

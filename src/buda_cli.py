@@ -184,7 +184,11 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._hier_bundles_orig = []   # pre-expansion snapshot set by run_hier_bundler
         self._planner_is_hier = False  # True after `run_planner hier` (self.bundles is expanded)
         self._flow_log = None          # open flow-log file (set by main); enables per-command logging
+        self._flow_log_path = None     # its path (for the "Full detail →" line)
         self._cmd_stats = []           # per-command (cmd_line, elapsed, nlines, nwarn, nerr) for runtime summary
+        self._end_report_done = False  # runtime summary emitted (idempotent guard)
+        self._at_last_command = True   # True while running the flow's final command
+        self._at_tail_stack = []       # per-source-frame: was this source at its parent's tail?
 
     # ── Per-command logging / runtime stats ─────────────────────────────────
     def run_command(self, cmd_line):
@@ -300,6 +304,26 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         if self._flow_log is not None:
             self._flow_log.write(text); self._flow_log.flush()
 
+    def _print_end_report(self):
+        """Emit the runtime summary + flow-log pointer exactly once.
+
+        Called from main()'s finally AND right before a blocking GUI `show()`
+        — but the latter only when the `visualize` is the flow's LAST command
+        (`_at_last_command`). Rationale: launched through the macOS .app,
+        closing the last window makes Cocoa terminate the process
+        (quit-after-last-window) before the finally runs, so a trailing
+        visualize's summary would never print — emitting it before that window
+        opens makes it survive. An INTERLEAVED visualize (more commands follow)
+        must NOT early-print: the process keeps running after that window
+        closes, so the finally prints the complete summary. The idempotent guard
+        keeps it to a single print on every path."""
+        if self._end_report_done:
+            return
+        self._end_report_done = True
+        self.print_runtime_summary(sys.stdout)
+        if self._flow_log is not None and self._flow_log_path is not None:
+            print(f"Full per-command detail → {self._flow_log_path}")
+
     def _log_write(self, text):
         """Mirror a diagnostic to the flow log, independent of the per-command
         capture.  Used by passthrough commands (e.g. a `source` that fails fast)
@@ -379,20 +403,24 @@ def main():
         # here and prints only a one-line summary to the terminal, so the two
         # are no longer duplicated.
         flow_log_path = session._get_log_path('flow.log')
+        session._flow_log_path = flow_log_path
         try:
             session._flow_log = open(flow_log_path, 'w', buffering=1)
         except OSError as e:
             print(f"Warning: could not open flow log {flow_log_path}: {e}")
 
         try:
+            # The top-level source IS the whole run, so it starts "at the tail".
+            session._at_last_command = True
             session.run_command(f"source {script}")
             # Persist a fixture opened with `open_bdb <file>.sql writeback` if the
             # run completed without an explicit exit (which flushes on its own).
             session._flush_bdb_writeback()
         finally:
-            session.print_runtime_summary(sys.stdout)
+            # Idempotent: a blocking `visualize` already emitted this before the
+            # GUI opened (so it survives a macOS .app quit-on-window-close).
+            session._print_end_report()
             if session._flow_log is not None:
-                print(f"Full per-command detail → {flow_log_path}")
                 session._flow_log.close()
     else:
         # No script: show usage and insist on one rather than quietly exiting.
