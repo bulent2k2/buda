@@ -362,3 +362,36 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
   today's top-down demand-reservation behavior; zero regression for
   existing hier flows. Generalizing to all cells stays a possible future
   knob, out of scope here.
+
+---
+
+## 11. Follow-on (implemented): placement-stage check + auto-alignment
+
+Requested after the feature merged: run the alignment verification BEFORE
+`derive_busterms`, and nudge placement so every occurrence aligns.
+
+- **Placement-stage `check_template_tracks`** — with no routing yet the
+  check falls back to whole-instance windows per grid layer (span = the
+  instance extent along the layer direction, interval = its perpendicular
+  extent), normalized by instance origin. Runs right after `open_bdb` +
+  `set_bottom_up` + `def_track_pattern`. Advisory by design: whole-window
+  agreement does not strictly imply per-sub-window agreement when a keepout
+  sits at different relative positions in two instances, so the routed
+  (post-`run_nuts`) check remains the DNUTS gate. Verdict cached separately
+  (`_template_track_verdict_placement`); feeds `align_bottom_up`.
+- **`align_bottom_up [max_shift <um>]`** — per cell and axis, snaps all
+  instances to a common phase modulo the LCM of that direction's layer
+  pitches, choosing the phase (among the instances' current phases — the
+  circular L1 median lies on a data point) that minimizes total movement.
+  Applied via the new subtree-aware `BDB::translate_comp` (v18 API; a
+  `move_comp` nudge would strand the children and break congruence).
+  Overrides are absolute-rect-keyed and not fixable by translation — the
+  check reports any residue. `max_shift` skips larger nudges with a WARNING.
+- **Verified on flow/rnr/mix2**: all four cells placement-MISALIGNED →
+  `align_bottom_up` moves 18 instances (x-period 234, y-period 72; zero
+  block overlaps introduced) → placement AND routed checks report ALIGNED →
+  `run_detailed_nuts` under the strict default solves 416 reference bits
+  once and copies 1872 to 63 sibling instances.
+- Possible refinements: an overlap/out-of-die guard on the applied moves
+  (Floorplanner `validate()` exists), and a per-cell `max_shift` default
+  derived from the placement's free slack.

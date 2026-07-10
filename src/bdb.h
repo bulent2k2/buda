@@ -398,6 +398,11 @@ public:
     // ── Mutations ──────────────────────────────────────────────────────────
     // Move a single instance to new origin (x,y); size is preserved.
     void move_comp(const std::string& name, double x, double y);
+    // Translate a component AND its whole subtree by (dx, dy) — unlike
+    // move_comp, which repositions only the named component's bbox and would
+    // break instance congruence for a hierarchical block.  Used by
+    // align_bottom_up's placement nudges.
+    void translate_comp(const std::string& name, double dx, double dy);
     // Set a single instance bounding box exactly.
     void set_comp_is_leaf(const std::string& name, bool is_leaf);
     void set_comp_bbox(const std::string& name,

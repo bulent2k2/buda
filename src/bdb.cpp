@@ -2310,6 +2310,21 @@ void gather_subtree(sqlite3* db, const std::string& name,
 }
 } // anonymous namespace
 
+void BDB::translate_comp(const std::string& name, double dx, double dy) {
+    std::vector<BBoxRow> rows;
+    gather_subtree(_db, name, rows);
+    Stmt u(_db, "UPDATE component SET x1=x1+?1, y1=y1+?2, x2=x2+?1, y2=y2+?2"
+                " WHERE id=?3");
+    for (const auto& r : rows) {
+        sqlite3_reset(u);
+        sqlite3_bind_double(u, 1, dx);
+        sqlite3_bind_double(u, 2, dy);
+        sqlite3_bind_int   (u, 3, r.id);
+        sqlite3_step(u);
+    }
+    compute_hpwl();
+}
+
 void BDB::flip_comp(const std::string& name, bool flip_x) {
     std::vector<BBoxRow> rows;
     gather_subtree(_db, name, rows);

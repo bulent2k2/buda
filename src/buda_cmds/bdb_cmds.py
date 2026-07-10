@@ -413,6 +413,29 @@ def cmd_set_bottom_up(session, cmd, args, cmd_line):
     print(f"[BDB] cell '{cell}' bottom_up = {mode} ({len(insts)} instance(s))")
 
 
+def cmd_align_bottom_up(session, cmd, args, cmd_line):
+    # align_bottom_up [max_shift <um>]
+    # Nudge every set_bottom_up cell's instances onto a common track phase
+    # with minimal total movement (subtree-aware translate_comp), so the
+    # bottom-up copies land on real signal tracks in every occurrence.
+    # Requires an open BDB and a routing grid (def_track_pattern); run
+    # BEFORE derive_busterms / add_blocks_from_bdb.  Optional max_shift
+    # skips any nudge larger than the given distance (um).
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    max_shift = None
+    if args:
+        if len(args) >= 2 and args[0].lower() == "max_shift":
+            try:
+                max_shift = float(args[1])
+            except ValueError:
+                print(f"Error: max_shift needs a number, got '{args[1]}'")
+                return
+        else:
+            print("Error: usage: align_bottom_up [max_shift <um>]"); return
+    session._align_bottom_up(max_shift=max_shift)
+
+
 def cmd_save_bdb(session, cmd, args, cmd_line):
     # Serialize the working BDB back to its writeback source .sql now.
     # Only meaningful after `open_bdb <file>.sql writeback`.
@@ -447,4 +470,5 @@ COMMANDS = {
     "load_pipeline": cmd_load_pipeline,
     "save_bdb": cmd_save_bdb,
     "set_bottom_up": cmd_set_bottom_up,
+    "align_bottom_up": cmd_align_bottom_up,
 }

@@ -111,11 +111,13 @@ def test_meta_set_binding():
 
 # ── Congruence helper ─────────────────────────────────────────────────────────
 
-def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:"):
+def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:", derive=True):
     """proc_cell (two pipe_cell children) instantiated twice, with 4-bit
     cell-local buses in each instance — the template-sharing vehicle.
     cross_net adds a depth-0 4-bit bus between two leaf blocks placed left
-    and right of proc_i1, whose direct route crosses that instance."""
+    and right of proc_i1, whose direct route crosses that instance.
+    derive=False skips busterm derivation (for flows that align placement
+    first and derive afterwards)."""
     db = buda.BDB(path)
     db.add_cell("proc_cell", 420, 200)
     db.add_cell("pipe_cell", 110, 80)
@@ -132,7 +134,8 @@ def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:"):
         db.add_inst("R0", "leaf_cell", "", 1200, 70)
         for i in range(4):
             db.add_net_pins(f"lr_{i}", "L0.out", ["R0.in"])
-    buda.BustermGen(db).derive(1)
+    if derive:
+        buda.BustermGen(db).derive(1)
     return db
 
 
@@ -527,6 +530,81 @@ def test_post_nuts_planner_skips_locked_wrappers():
         if bid in locked_layers:
             assert list(w.plan.seg_layers) == locked_layers[bid], (
                 f"post_nuts moved locked bundle {bid}'s layers")
+
+
+# ── Placement-stage check + align_bottom_up ──────────────────────────────────
+
+def _placement_session(db):
+    """Layers + patterns + mark only — NO derive_busterms / bundler / routing."""
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS + ["set_bottom_up proc_cell"]):
+        _run_cmd(s, c)
+    return s
+
+
+def test_check_template_tracks_placement_stage():
+    """check_template_tracks works BEFORE derive_busterms: with no routing
+    it compares whole-instance windows per grid layer."""
+    s = _placement_session(_two_inst_db(x2=500, y2=301, derive=False))
+    out = _run_cmd(s, "check_template_tracks")
+    assert "placement-stage" in out and "MISALIGNED" in out
+    assert "proc_i2" in out
+    s2 = _placement_session(_two_inst_db(x2=500, y2=300, derive=False))
+    out2 = _run_cmd(s2, "check_template_tracks")
+    assert "placement-stage" in out2 and "MISALIGNED" not in out2
+    assert "ALIGNED" in out2
+
+
+def test_align_bottom_up_then_strict_flow():
+    """align_bottom_up nudges the off-phase instance by half a pitch, the
+    placement check turns ALIGNED, and the full flow then completes DNUTS
+    under the STRICT default policy with the reference-solve-and-copy path."""
+    db = _two_inst_db(x2=500, y2=301, derive=False)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "[Align]" in out and "1 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["proc_i2"].y1 == pytest.approx(302)      # +1 to phase 0
+    assert comps["proc_i2/pa_i"].y1 == pytest.approx(362) # subtree moved too
+    assert s._bottom_up_congruence_issues("proc_cell") == []
+    assert "MISALIGNED" not in _run_cmd(s, "check_template_tracks")
+    for c in ["derive_busterms 1", "run_hier_bundler",
+              "generate_hier_topologies", "run_planner hier", "run_nuts"]:
+        _run_cmd(s, c)
+    out = _run_cmd(s, "run_detailed_nuts")                # strict default
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+
+
+def test_align_bottom_up_minimal_total_movement():
+    """The target phase minimizes TOTAL movement: with phases 0, 1, 1 the
+    majority phase wins — the reference moves 1, the other two stand still
+    (a keep-reference-fixed policy would move 2)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst("P0", "proc_cell", "", 0, 0)
+    db.add_inst("P1", "proc_cell", "", 500, 301)
+    db.add_inst("P2", "proc_cell", "", 1000, 601)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "1 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P0"].y1 == pytest.approx(1)      # ref moved to the majority phase
+    assert comps["P1"].y1 == pytest.approx(301)    # untouched
+    assert comps["P2"].y1 == pytest.approx(601)    # untouched
+    assert s._bottom_up_congruence_issues("proc_cell") == []
+
+
+def test_align_bottom_up_max_shift_guard():
+    db = _two_inst_db(x2=500, y2=301, derive=False)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up max_shift 0.5")
+    assert "WARNING" in out and "0 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["proc_i2"].y1 == pytest.approx(301)      # untouched
 
 
 # ── Step 6: persistence round-trip (v18 bu_locked + template selection) ──────
