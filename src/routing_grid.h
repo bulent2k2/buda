@@ -95,6 +95,20 @@ public:
     // Identical result to signal_tracks_in(...).size(), no heap allocation.
     int count_signal_tracks_in(double x, double lo, double hi) const;
 
+    // Span-aware sibling of signal_tracks_in: SIGNAL tracks whose centre falls
+    // in [perp_lo, perp_hi], with a track blocked when a keepout's PERP extent
+    // covers the track centre AND its ALONG extent overlaps [along_lo,
+    // along_hi] — the whole span the wire will occupy, not one sample point.
+    // signal_tracks_in(x, …) is the along_lo == along_hi == x special case; a
+    // keepout that overlaps the span but misses the sample point is invisible
+    // to it, which let DetailedNUTS route bits straight through a keepout
+    // (keepout-model audit).  The pattern is still resolved at the along
+    // MIDPOINT (effective_pattern_at's point sampling — the documented
+    // override approximation, unchanged here).
+    std::vector<std::pair<double, TrackSlot>>
+    signal_tracks_in_span(double along_lo, double along_hi,
+                          double perp_lo, double perp_hi) const;
+
     // The layer's NON-SIGNAL track slots (POWER / GROUND / CLOCK / SHIELD /
     // CUSTOM) materialized as first-class PreRoutedSegments — Phase G of
     // docs/internal/placed_segment_preroutes.md.  Global-pattern slots whose
@@ -121,6 +135,10 @@ public:
         bool include_signal = false) const;
 
     bool is_horizontal() const { return is_horizontal_; }
+
+    // Raw keepout rects (read-only) — DetailedNUTS's post-placement crossing
+    // cull re-checks final junction-adjusted bit spans against them.
+    const std::vector<Rect>& keepouts() const { return keepouts_; }
 
 private:
     TrackPattern                 global_pattern_;

@@ -60,8 +60,49 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     DetailedNUTSResult result;
     place_by_layer(bus_segs, result);
     adjust_bit_spans(bus_segs, result);
+    // After spans are final (and before vias pair up bits): remove any bit
+    // whose adjusted span crosses a keepout on its layer — an illegal wire
+    // the placement-time sampling could not rule out.  Counted as unplaced,
+    // so the opens feed the stage-b healing machinery.
+    cull_keepout_crossers(result);
     emit_bit_vias(bus_segs, result);
     return result;
+}
+
+void DetailedNUTSEngine::cull_keepout_crossers(DetailedNUTSResult& result) const {
+    std::vector<NetSegment> kept;
+    kept.reserve(result.net_segments.size());
+    int culled = 0;
+    for (auto& ns : result.net_segments) {
+        bool crossing = false;
+        if (stack_.has_layer(ns.layer)) {
+            const RoutingGrid& grid = stack_.get_layer_grid(ns.layer);
+            const bool horiz = grid.is_horizontal();
+            const double a_lo = std::min(ns.span_lo, ns.span_hi);
+            const double a_hi = std::max(ns.span_lo, ns.span_hi);
+            for (const Rect& k : grid.keepouts()) {
+                const double k_p1 = horiz ? k.y1 : k.x1;
+                const double k_p2 = horiz ? k.y2 : k.x2;
+                const double k_a1 = horiz ? k.x1 : k.y1;
+                const double k_a2 = horiz ? k.x2 : k.y2;
+                if (ns.track_position >= k_p1 && ns.track_position <= k_p2 &&
+                    a_lo < k_a2 && a_hi > k_a1) {
+                    crossing = true;
+                    break;
+                }
+            }
+        }
+        if (crossing) ++culled;
+        else          kept.push_back(std::move(ns));
+    }
+    if (culled > 0) {
+        result.net_segments.swap(kept);
+        result.num_unplaced    += culled;
+        result.num_keepout_bits = culled;
+        std::cout << "[DetailedNUTS] WARNING: " << culled << " bit(s) removed — "
+                  << "final span crosses a keepout on its layer (counted "
+                  << "unplaced; an illegal wire is never kept silently).\n";
+    }
 }
 
 void DetailedNUTSEngine::place_by_layer(
@@ -106,7 +147,21 @@ void DetailedNUTSEngine::place_by_layer(
             const BusSegment& bs = bus_segs[idx];
             double x = (bs.span_lo + bs.span_hi) / 2.0;
 
-            auto signal_tracks = grid.signal_tracks_in(x, bs.interval_lo, bs.interval_hi);
+            // Track pools (keepout-model audit): PREFER tracks clear of every
+            // keepout across the wire's whole abstract span — the old
+            // single-sample query (signal_tracks_in at the span midpoint) let
+            // a keepout that misses the midpoint go undetected and routed
+            // bits straight through it.  The abstract span is a conservative
+            // overestimate of the final junction-adjusted bit spans, so when
+            // the span-clear pool is too small we fall back to the classic
+            // midpoint pool rather than forfeit honest placements to false
+            // positives — cull_keepout_crossers (post-adjustment) removes any
+            // bit whose FINAL span still crosses a keepout.
+            auto signal_tracks = grid.signal_tracks_in_span(
+                bs.span_lo, bs.span_hi, bs.interval_lo, bs.interval_hi);
+            if ((int)signal_tracks.size() < bs.bit_width)
+                signal_tracks = grid.signal_tracks_in(x, bs.interval_lo,
+                                                      bs.interval_hi);
 
             // Cross-layer corner bound (carried from abstract NUTS): keep only
             // signal tracks on this trunk's committed side of the split, so it

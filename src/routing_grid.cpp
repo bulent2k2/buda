@@ -113,6 +113,35 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
     return result;
 }
 
+std::vector<std::pair<double, TrackSlot>>
+RoutingGrid::signal_tracks_in_span(double along_lo, double along_hi,
+                                   double perp_lo, double perp_hi) const {
+    if (along_lo > along_hi) std::swap(along_lo, along_hi);
+    const double mid = (along_lo + along_hi) / 2.0;
+    const TrackPattern& pat = effective_pattern_at(
+        is_horizontal_ ? mid : perp_lo, is_horizontal_ ? perp_lo : mid);
+    auto all = pat.tracks_in_range(perp_lo, perp_hi);
+    std::vector<std::pair<double, TrackSlot>> result;
+    result.reserve(all.size());
+    for (auto& p : all) {
+        if (p.second.type != "SIGNAL") continue;
+        bool blocked = false;
+        for (const auto& koz : keepouts_) {
+            const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
+            const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
+            const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
+            const double k_a2 = is_horizontal_ ? koz.x2 : koz.y2;
+            if (p.first >= k_p1 && p.first <= k_p2 &&
+                along_lo <= k_a2 && along_hi >= k_a1) {
+                blocked = true;
+                break;
+            }
+        }
+        if (!blocked) result.push_back(std::move(p));
+    }
+    return result;
+}
+
 std::vector<PreRoutedSegment> RoutingGrid::preroutes_in(
     double perp_lo, double perp_hi, double along_lo, double along_hi,
     bool include_signal) const

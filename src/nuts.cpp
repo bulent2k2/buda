@@ -2103,11 +2103,19 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // winning result), one line per distinct edge, like planner overflow, so
     // a compromised junction is never silent.
     derive_junction_infeasibilities(bundles, out.result);
+    // Keepout conflicts: report-only, so a bus committed onto a keepout by the
+    // exhausted-window centre fallback is never silent (keepout-model audit).
+    out.result.num_keepout_conflicts =
+        count_keepout_conflicts(low_keepouts(), out.result.segments);
     // Track overlaps first: it is the headline health metric, so it stays
     // visible even when a terminal/summary truncates the tail of this line.
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "
               << "Track overlaps: " << out.result.num_overlaps << ", "
               << "Interval violations: " << out.result.num_violations << ".\n";
+    if (out.result.num_keepout_conflicts > 0)
+        std::cout << "[NUTS] WARNING: " << out.result.num_keepout_conflicts
+                  << " segment(s) placed ON a keepout (window exhausted; the "
+                  << "bus cannot physically route there — re-pin or re-plan).\n";
     return out.result;
 }
 
@@ -2148,6 +2156,8 @@ NUTSResult NUTSEngine::rerun_layer(
     // — keeps the single-layer contract while still recovering wirelength.
     tighten_pulls(result.segments, ctx, layer_id);
     compute_metrics(result);
+    result.num_keepout_conflicts =
+        count_keepout_conflicts(low_keepouts(), result.segments);
     // Refresh the junction-infeasibility signal from the re-solved state: the
     // copy from prev may hold edges the rerun just fixed (stale) or miss ones
     // it introduced (dropped) — derive, don't inherit.

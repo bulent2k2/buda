@@ -363,9 +363,13 @@ def test_planner3_window_capacity_avoids_double_booked_trunk():
 # then leaves a single corner overlap (B48×B53 on M7).  Under the corrected
 # congestion accounting (Issue #22: closed-interval for_each_band) this flow
 # sits right at its packing limit — one residual corner touch that no
-# threshold/pin re-tune fully removes — while detailed NUTS still places every
-# bit and there are no interval violations.  (Before the fix the buggy
-# under-count let it tune to exactly 0; that was a knife-edge artifact.)
+# threshold/pin re-tune fully removes — and there are no interval violations.
+# (Before the fix the buggy under-count let it tune to exactly 0; that was a
+# knife-edge artifact.)  DetailedNUTS reports 3 keepout-crossing bits: this
+# flow has always routed exactly 3 bits straight through a keepout (the old
+# midpoint-sampled track query couldn't see a keepout that missed the span
+# midpoint — keepout-model audit); the post-placement crossing cull now
+# removes them and counts them as unplaced instead of emitting illegal wires.
 # ---------------------------------------------------------------------------
 
 def test_channel_stress_packs_clean():
@@ -391,7 +395,14 @@ def test_channel_stress_packs_clean():
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(2)) == 0   # every bit still placed
+    # The 3 unplaced are the 3 real keepout crossings this flow always had
+    # (previously emitted as illegal wires through the keepout, now culled
+    # and reported).  Never more.
+    assert int(dm.group(2)) == 3, \
+        f"expected exactly the 3 historical keepout crossings, got {dm.group(2)}"
+    km = re.search(r"\[DetailedNUTS\] WARNING: (\d+) bit\(s\) removed", out)
+    assert km and int(km.group(1)) == 3, \
+        "keepout-crossing cull warning missing or wrong count"
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +535,13 @@ def test_ripup2_targets_actual_blocker():
 # strict pass at this size.  Residual NUTS overlaps / unplaced dnuts bits
 # are known stage-4 packing gaps (docs/future/nuts_packing_gaps.md) and
 # are ratcheted, not accepted silently.
+#
+# Keepout-model audit: this flow has always routed exactly 7 bits (bundles
+# 1 and 3, seg 1, on M7 — a non-TOP layer where leaf footprints are
+# keepouts) straight through leaf-cell keepouts, invisibly (measured on
+# main with the same crossing predicate the cull now applies).  Those 7
+# are now culled and counted, and 2 abstract segments report their forced
+# keepout commits — expected keepout WARNINGs, not planner regressions.
 # ---------------------------------------------------------------------------
 
 def test_10_four_level_scale_one_bundle_per_bus():
@@ -548,7 +566,11 @@ def test_10_four_level_scale_one_bundle_per_bus():
     assert re.search(r"D2: 40 bundles\s+strict:40", out)
     assert re.search(r"D3: 80 bundles\s+strict:80", out)
     assert "Rip-up" not in out
-    assert "WARNING" not in out
+    # The only WARNINGs are the keepout report channels (see header comment):
+    # every other WARNING — planner overflow/best-effort etc. — stays fatal.
+    other_warn = [l for l in out.splitlines()
+                  if "WARNING" in l and "keepout" not in l]
+    assert not other_warn, f"unexpected WARNINGs:\n" + "\n".join(other_warn)
     assert "Success: no opens found." in out      # nuts connectivity
     segs, viols, ovlps = nuts_summary(out)
     # Segment count rose 196→212: the corrected LOW-layer congestion model
@@ -559,8 +581,14 @@ def test_10_four_level_scale_one_bundle_per_bus():
     assert ovlps <= 1                             # ratchet (10→4→1; corner-overlap pass)
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) >= 1232               # ratchet (1112→1224→1232)
-    assert int(dm.group(2)) == 0                  # all bits now place (was 8 unplaced)
+    assert int(dm.group(1)) >= 1225               # ratchet (1112→1224→1232; −7 culled crossers)
+    # The 7 unplaced are the flow's 7 historical keepout crossings, culled
+    # instead of emitted as illegal wires.  Never more.
+    assert int(dm.group(2)) == 7, \
+        f"expected exactly the 7 historical keepout crossings, got {dm.group(2)}"
+    km = re.search(r"\[DetailedNUTS\] WARNING: (\d+) bit\(s\) removed", out)
+    assert km and int(km.group(1)) == 7, \
+        "keepout-crossing cull warning missing or wrong count"
 
 
 # ---------------------------------------------------------------------------

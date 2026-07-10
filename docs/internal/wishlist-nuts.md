@@ -3,6 +3,41 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
+## Abstract-vs-detailed keepout model mismatch — ✅ RESOLVED (audit closed)
+
+**What (history):** the two stages disagreed about what a keepout blocks.
+DetailedNUTS filtered tracks against keepouts at ONE along-coordinate — the
+span midpoint — so a keepout overlapping the span but missing the midpoint
+was invisible and bits routed straight through it with every metric clean
+(channel_stress had always emitted 3 such illegal bit-wires); abstract
+NUTS's exhausted-window fallback committed the interval centre ON a keepout
+with no metric; and `keepout_occupied` silently ignored empty-`layer_ids`
+zones that generation treats as blocking every layer.
+
+**Resolution:** `RoutingGrid::signal_tracks_in_span` (span-aware track pool,
+preferred; classic midpoint pool as fallback) +
+`DetailedNUTSEngine::cull_keepout_crossers` (post-`adjust_bit_spans` cull of
+bits whose FINAL span crosses a keepout — zero false positives, counted in
+`num_unplaced`/`num_keepout_bits` with a WARNING) +
+`NUTSResult::num_keepout_conflicts` (abstract report channel, WARNING) +
+empty-`layer_ids` = blocks-all in `keepout_occupied`. The naive alternative
+(hard-filter on the abstract span) was measured and rejected: 495 corpus
+false positives vs the 3 real crossings. Full write-up:
+[`keepout_model_audit.md`](keepout_model_audit.md); tests in
+`test/tests/test_keepout_model.py`.
+
+## Verify is keepout-blind (`KEEPOUT_CROSS` violation type)
+
+**What:** `check_nuts` / `check_dnuts` (`src/verify.cpp`) audit
+connectivity, layer direction, and unplaced bits, but never test a placed
+wire against keepouts — the pre-audit illegal wires sailed through
+`check_connectivity`. With `cull_keepout_crossers` in place DNUTS no longer
+emits such wires, so this is defense-in-depth only: a `KEEPOUT_CROSS`
+violation (placed extent × keepout, span-overlap semantics as
+`count_keepout_conflicts`) would make verify self-sufficient if a future
+stage regresses. Small, contained; noted in the audit
+([`keepout_model_audit.md`](keepout_model_audit.md) class 4).
+
 ## Band-level repack for spread-fit overlap clusters — ✅ IMPLEMENTED
 
 **What:** (Baseline updated 2026-07 — see `nuts_band_repack.md` §1: with
