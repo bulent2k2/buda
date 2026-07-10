@@ -27,11 +27,14 @@ noted.)*
   [`cell_settings_ui.md`](cell_settings_ui.md): an extensible, schema-driven
   per-cell settings dialog (mirrors Optimize) with `cell.bottom_up` as the
   first descriptor, reusing the CLI's congruence check.
-- **Hier topology unit tests drive a local reimplementation** —
-  `test_hier_topology.py` re-implements generation in-file instead of
-  calling `HierMixin._generate_hier_topo_one`, so the cross-level (case c)
-  branch of the real dispatch has no coverage. Port the tests to the real
-  entry point.
+- **Hier topology unit tests drive a local reimplementation** ✅ —
+  `test_hier_topology.py` now drives the REAL dispatch
+  (`generate_hier_topologies` via a BudaSession) in every test and BDD
+  scenario, the in-file reimplementation (and the cell-local floorplan
+  replica) is deleted, and the cross-level case (c) branch gains its
+  first coverage: three new tests pin the `drv_spec_depth` bundling, the
+  `[cross-level D0→D1]` dispatch tag, absolute endpoint-spanning
+  coordinates, and no-regression on sibling bundles (15 tests total).
 
 ## Substantial features (bounded, clear plans)
 
