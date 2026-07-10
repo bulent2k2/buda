@@ -108,6 +108,7 @@ rectangles, up to the specified number of extra levels below the visible depth.
 | **Add** | Button | Add a new block (root or child, depending on current drill level) |
 | **Align ▾** | Menu button | Open the alignment/distribution menu |
 | **Optimize…** | Button | Open the placement optimizer dialog |
+| **Cell Settings…** | Button | Open the per-cell settings dialog (see below) |
 | **Tree** | Treeview | Hierarchical block list; supports single and multi-select |
 
 ### Align ▾ Menu
@@ -136,6 +137,37 @@ Displays information about the current selection.
 
 **Make Unique** — Creates a private copy of the cell so subsequent resizes do not
 propagate to other instances of the same cell.
+
+**Bottom-Up (cell)** — Quick-access checkbox for the selected block's cell,
+shown whenever the cell is known. Toggles the persisted `cell.bottom_up` flag
+(same plumbing as the Cell Settings dialog). The checkbox renders from the
+cheap flag read; the congruence check runs on click — an ineligible enable is
+refused with the reason in the status bar and the checkbox reverts.
+
+---
+
+## Cell Settings Dialog
+
+Opened by the **Cell Settings…** button (disabled in read-only sessions).
+One row per cell type, one column per registered per-cell setting
+(`CELL_SETTINGS` in `tools/floorplanner_commands.py` — see
+[cell_settings_ui.md](internal/cell_settings_ui.md) for the extensible
+descriptor registry). Currently one setting:
+
+| Column | Type | Purpose |
+|---|---|---|
+| Cell | Label | Cell type name |
+| Instances | Label | Number of component instances of the cell |
+| Bottom-Up | Checkbox | `cell.bottom_up`: plan/NUTS the cell's local interconnect once, copy to every instance |
+
+Eligibility (the CLI's congruence check, computed once on open) gates only the
+*enable* direction: a cell that is OFF and not congruent shows a disabled
+checkbox with the reason inline; a cell already ON that has since become
+incongruent stays actionable ("⚠ clear only") so it is never stranded.
+**Apply** validates and persists each change through the command layer and
+reports a one-line summary; refused changes are listed in a warning dialog.
+The flag is written straight to the BDB — a `*.bdb.sql` session lands it in
+the temp binary, and **Write / Save As** serializes it back.
 
 ---
 
