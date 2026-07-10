@@ -230,6 +230,18 @@ void bind_routing(py::module_& m) {
     m.def("offset_topology", &offset_topology,
           py::arg("topo"), py::arg("dx"), py::arg("dy"),
           py::arg("name_prefix") = std::string());
+    m.def("transform_topology", &transform_topology,
+          py::arg("topo"), py::arg("orient"), py::arg("cell_w"),
+          py::arg("cell_h"), py::arg("dx"), py::arg("dy"),
+          py::arg("name_prefix") = std::string(),
+          "Orientation-aware offset_topology: map a cell-local topology "
+          "through an 8-orientation token over a cell_w x cell_h box, then "
+          "shift; 90/270 swap H<->V segments (layers must be re-assigned)");
+    m.def("orient_compose", &orient_compose,
+          py::arg("outer"), py::arg("inner"),
+          "Compose two 8-orientation tokens (outer applied after inner)");
+    m.def("orient_inverse", &orient_inverse, py::arg("orient"),
+          "Inverse of an 8-orientation token (mirrors/180 are involutions)");
 
     // Explicitly annotate a (hand-built or reloaded) topology's seg_busterms from
     // a floorplan, so ConnTopology can read the authoritative endpoint taps

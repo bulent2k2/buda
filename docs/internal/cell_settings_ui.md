@@ -22,13 +22,21 @@ toggle for `cell.bottom_up`"*. As-built notes:
   DB read AND the index build once, with only the per-cell subtree compare
   per row — not O(#cells × #components) (Codex #251 P2). Descriptors
   without the parameter still work (TypeError fallback re-calls without it).
-- The shared congruence helper landed as
-  `buda_session.util.bottom_up_congruence_issues(comps, cell)`, split into
-  `bottom_up_congruence_index(comps)` +
-  `bottom_up_congruence_issues_from_index(index, cell)` for the batch path;
-  `hier.py`'s `_bottom_up_congruence_issues` is now a thin delegating
-  wrapper, and `floorplanner_commands._bottom_up_eligible` uses the
-  index form.
+- The shared congruence helper lives in **`buda_session.hier`** (not
+  `util.py` as originally proposed): PR #249 made congruence
+  **orientation-aware** (translation + the direction-preserving orients
+  S/FN/FS are congruent; 90° rotations and no-match instances are not),
+  and its detection core (`_ORIENT_MAPS`, `_oxf_rect`,
+  `buda.orient_compose`) lives in `hier.py`. The module-level pure
+  functions `bottom_up_congruence_index(comps)`,
+  `detect_instance_orients(comps, cell, …, phase_score=None, index=None)`
+  and `bottom_up_congruence_issues(comps, cell, …)` are the shared API;
+  the session's `_detect_instance_orients` / `_bottom_up_congruence_issues`
+  are thin wrappers injecting the routing-grid-aware phase tiebreak, and
+  `floorplanner_commands._bottom_up_eligible` calls the module functions
+  with the cached index and the default (grid-less) tiebreak. The
+  phase score only picks *between* geometrically valid orientations, so
+  GUI and CLI eligibility verdicts are identical.
 - The complementary Selection-panel quick checkbox shipped too
   (`Bottom-Up (cell)`, `_show_bu_chk` / `_on_bottom_up_toggle`), rendered
   from the cheap `cell_bottom_up()` read with the congruence check deferred

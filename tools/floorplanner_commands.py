@@ -38,9 +38,14 @@ import buda
 
 # The one shared definition of bottom-up congruence (also used by the CLI's
 # set_bottom_up / run_planner hier), so the GUI and CLI can never diverge on
-# what "congruent" (bottom-up-eligible) means.
-from buda_session.util import (bottom_up_congruence_index,
-                               bottom_up_congruence_issues_from_index)
+# what "congruent" (bottom-up-eligible) means.  Orientation-aware since
+# PR #249: translation plus the direction-preserving orients (S/FN/FS) are
+# congruent, 90° rotations and no-match instances are not.  The GUI passes
+# no phase_score (it has no routing grid); the tiebreak only picks BETWEEN
+# geometrically valid orientations, so the eligibility verdict is identical
+# to the CLI's.
+from buda_session.hier import (bottom_up_congruence_index,
+                               bottom_up_congruence_issues)
 
 
 def parse_time_budget(s: str) -> float:
@@ -1151,7 +1156,7 @@ def _bottom_up_eligible(state, cell, old, new, ctx=None):
         index = bottom_up_congruence_index(comps)
         if ctx is not None:
             ctx["bu_index"] = index
-    issues = bottom_up_congruence_issues_from_index(index, cell)
+    issues = bottom_up_congruence_issues(None, cell, index=index)
     if issues:
         shown = "; ".join(issues[:4])
         more = "" if len(issues) <= 4 else f" (+{len(issues) - 4} more)"

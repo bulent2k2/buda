@@ -166,6 +166,22 @@ void bind_nuts(py::module_& m) {
         .def("run",                   &NUTSEngine::run)
         .def("rerun_layer",           &NUTSEngine::rerun_layer);
 
+    m.def("transform_track_segment", &transform_track_segment,
+          py::arg("ts"), py::arg("orient"), py::arg("cell_w"),
+          py::arg("cell_h"), py::arg("src_x"), py::arg("src_y"),
+          py::arg("dst_x"), py::arg("dst_y"), py::arg("new_bundle_id"),
+          "Orientation-aware offset_track_segment (N/S/FN/FS; 90/270 throw)");
+    m.def("transform_net_segment", &transform_net_segment,
+          py::arg("ns"), py::arg("orient"), py::arg("cell_w"),
+          py::arg("cell_h"), py::arg("src_x"), py::arg("src_y"),
+          py::arg("dst_x"), py::arg("dst_y"), py::arg("new_bundle_id"),
+          py::arg("horiz"),
+          "Orientation-aware offset_net_segment (N/S/FN/FS; 90/270 throw)");
+    m.def("transform_net_via", &transform_net_via,
+          py::arg("v"), py::arg("orient"), py::arg("cell_w"),
+          py::arg("cell_h"), py::arg("src_x"), py::arg("src_y"),
+          py::arg("dst_x"), py::arg("dst_y"), py::arg("new_bundle_id"),
+          "Orientation-aware offset_net_via (N/S/FN/FS; 90/270 throw)");
     m.def("offset_track_segment", &offset_track_segment,
           py::arg("ts"), py::arg("dx"), py::arg("dy"), py::arg("new_bundle_id"),
           "Translate a placed TrackSegment by (dx, dy) and re-key it to "

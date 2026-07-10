@@ -124,6 +124,20 @@ struct NUTSResult {
 TrackSegment offset_track_segment(const TrackSegment& ts, int dx, int dy,
                                   int new_bundle_id);
 
+// Orientation-aware sibling: map a placed segment from a source frame
+// (cell box of cell_w×cell_h at (src_x, src_y)) through `orient` into a
+// destination frame at (dst_x, dst_y).  Supports the direction-preserving
+// set N/S/FN/FS only — 90/270 swap H↔V and thus the layer, which needs the
+// (deferred) layer-pairing policy; throws on those.  Reflections swap the
+// interval/bound endpoints (±inf corner-bound sentinels ride IEEE
+// arithmetic) and flip the net_pull sign on a reflected perpendicular.
+TrackSegment transform_track_segment(const TrackSegment& ts,
+                                     const std::string& orient,
+                                     int cell_w, int cell_h,
+                                     int src_x, int src_y,
+                                     int dst_x, int dst_y,
+                                     int new_bundle_id);
+
 // Records how segment S's span must follow segment T's track position
 // (S connects to T at S's lo or hi end, or mid-span).
 struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };

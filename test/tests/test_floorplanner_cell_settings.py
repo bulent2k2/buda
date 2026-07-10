@@ -36,7 +36,7 @@ if _ROOT not in sys.path:
 from tools import floorplanner_commands as fpc
 
 import buda
-from buda_session.util import bottom_up_congruence_issues
+from buda_session.hier import bottom_up_congruence_issues
 
 
 def _hier_state(x2=500, y2=0):
@@ -76,15 +76,37 @@ def test_list_reports_value_and_eligibility_for_congruent_cell():
     assert pipe.settings["bottom_up"][:2] == (False, True)
 
 
-def test_list_flags_incongruent_cell_with_reason():
+def test_list_flags_90_rotated_cell_with_reason():
     state = _hier_state()
-    # rotate_comp on a *hierarchical* block rewrites the children and keeps
-    # orient='N' — exactly the case the geometric subtree compare catches.
-    state.bdb.rotate_comp("proc_i2", 180)
+    # 90° is geometrically detectable but swaps H<->V layers — refused
+    # until the layer-pairing policy exists (opens.md).
+    state.bdb.rotate_comp("proc_i2", 90)
     rows = fpc.list_cell_settings(state)
     value, can_activate, reason = _row(rows, "proc_cell").settings["bottom_up"]
     assert value is False and can_activate is False
-    assert "subtree differs" in reason
+    assert "90°-rotated" in reason
+
+
+def test_list_flags_genuinely_incongruent_cell_with_reason():
+    state = _hier_state()
+    # A child moved inside ONE instance matches the reference under no
+    # orientation at all.
+    state.bdb.move_comp("proc_i2/pa_i", 540, 75)
+    rows = fpc.list_cell_settings(state)
+    value, can_activate, reason = _row(rows, "proc_cell").settings["bottom_up"]
+    assert value is False and can_activate is False
+    assert "NO orientation" in reason
+
+
+def test_180_rotated_instance_is_still_eligible():
+    """Orientation-aware congruence (PR #249): S/FN/FS instances are valid
+    bottom-up copies, so the GUI must accept them exactly as the CLI does."""
+    state = _hier_state()
+    state.bdb.rotate_comp("proc_i2", 180)      # S orient — supported
+    rows = fpc.list_cell_settings(state)
+    assert _row(rows, "proc_cell").settings["bottom_up"][:2] == (False, True)
+    fpc.set_cell_setting(state, "proc_cell", "bottom_up", True)
+    assert state.bdb.cell_bottom_up("proc_cell") is True
 
 
 def test_list_no_bdb_returns_empty():
@@ -104,7 +126,7 @@ def test_set_bottom_up_on_congruent_cell_persists():
 
 def test_set_bottom_up_refuses_incongruent_cell():
     state = _hier_state()
-    state.bdb.rotate_comp("proc_i2", 180)
+    state.bdb.move_comp("proc_i2/pa_i", 540, 75)   # no orientation matches
     with pytest.raises(ValueError, match="not congruent"):
         fpc.set_cell_setting(state, "proc_cell", "bottom_up", True)
     assert state.bdb.cell_bottom_up("proc_cell") is False   # flag stays off
@@ -116,7 +138,7 @@ def test_clearing_is_unconditional_even_when_incongruent():
     transition is never gated by congruence (Codex #248 P2)."""
     state = _hier_state()
     fpc.set_cell_setting(state, "proc_cell", "bottom_up", True)
-    state.bdb.rotate_comp("proc_i2", 180)                    # now incongruent
+    state.bdb.rotate_comp("proc_i2", 90)                     # now ineligible
     rows = fpc.list_cell_settings(state)
     value, can_activate, _ = _row(rows, "proc_cell").settings["bottom_up"]
     assert value is True and can_activate is False           # "clear only"
@@ -149,13 +171,13 @@ def test_unknown_cell_propagates_bdb_error():
 
 def test_gui_and_cli_share_one_congruence_definition():
     """fpc's eligibility must be the same function of all_components() the
-    CLI's set_bottom_up uses (buda_session.util.bottom_up_congruence_issues),
+    CLI's set_bottom_up uses (buda_session.hier.bottom_up_congruence_issues),
     so the two can never diverge on what "congruent" means."""
     state = _hier_state()
-    state.bdb.rotate_comp("proc_i2", 180)
+    state.bdb.rotate_comp("proc_i2", 90)
     comps = state.bdb.all_components()
     issues = bottom_up_congruence_issues(comps, "proc_cell")
-    assert issues, "shared helper must flag the rotated instance"
+    assert issues, "shared helper must flag the 90°-rotated instance"
     ok, reason = fpc._bottom_up_eligible(state, "proc_cell", False, True,
                                          {"comps": comps})
     assert ok is False

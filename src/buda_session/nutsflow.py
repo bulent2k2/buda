@@ -1056,16 +1056,16 @@ class NutsFlowMixin:
                 placed_bits[ns.bundle_id] = placed_bits.get(ns.bundle_id,
                                                             0) + 1
             copies, copy_vias, extra_unplaced = [], [], 0
-            for ref_bid, sib_bid, ddx, ddy in copy_specs:
+            for ref_bid, sib_bid, oi, cw, ch, rx, ry, sx, sy in copy_specs:
                 for ns in r1.net_segments:
                     if ns.bundle_id == ref_bid:
-                        copies.append(buda.offset_net_segment(
-                            ns, ddx, ddy, sib_bid,
+                        copies.append(buda.transform_net_segment(
+                            ns, oi, cw, ch, rx, ry, sx, sy, sib_bid,
                             horiz_of.get((ref_bid, ns.seg_idx), True)))
                 for v in r1.net_vias:
                     if v.bundle_id == ref_bid:
-                        copy_vias.append(
-                            buda.offset_net_via(v, ddx, ddy, sib_bid))
+                        copy_vias.append(buda.transform_net_via(
+                            v, oi, cw, ch, rx, ry, sx, sy, sib_bid))
                 extra_unplaced += (exp_bits.get(ref_bid, 0)
                                    - placed_bits.get(ref_bid, 0))
             eng2 = buda.DetailedNUTSEngine(self.routing_grid)

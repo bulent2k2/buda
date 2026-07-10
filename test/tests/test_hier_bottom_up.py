@@ -152,8 +152,9 @@ def test_congruence_ok_for_translated_instances():
 
 
 def test_congruence_flags_rotated_leaf_instance_via_orient():
-    """A childless instance rotation composes the orient token — caught by
-    the orientation check even when the outline is unchanged (square)."""
+    """A childless instance 90° rotation composes the orient token — caught
+    by the detection even when the outline is unchanged (square).  90° is
+    refused for bottom-up (H<->V layer swap is a planned follow-up)."""
     db = buda.BDB(":memory:")
     db.add_cell("leaf_cell", 80, 80)
     db.add_inst("L1", "leaf_cell", "", 0, 0)
@@ -161,19 +162,21 @@ def test_congruence_flags_rotated_leaf_instance_via_orient():
     db.rotate_comp("L2", 90)          # 80x80: outline unchanged, orient moves
     s = _bare_session(db)
     issues = s._bottom_up_congruence_issues("leaf_cell")
-    assert issues and "L2" in issues[0] and "orientation" in issues[0]
+    assert issues and "L2" in issues[0] and "90°" in issues[0]
 
 
-def test_congruence_flags_rotated_hier_instance_via_geometry():
+def test_congruence_accepts_180_rotated_hier_instance():
     """rotate_comp on a block WITH children rewrites the children and keeps
-    orient='N' — only the geometric child comparison can catch it."""
+    orient='N' — the geometric detection recognizes the 180° transform (S),
+    which the orientation-aware copies support."""
     db = _two_inst_db()
     db.rotate_comp("proc_i2", 180)    # outline unchanged, children reflected
     comps = {c.name: c for c in db.all_components()}
-    assert comps["proc_i2"].orient == "N"   # precondition for this test
+    assert comps["proc_i2"].orient == "N"   # tokens alone can't see this
     s = _bare_session(db)
-    issues = s._bottom_up_congruence_issues("proc_cell")
-    assert issues and "subtree differs" in issues[0]
+    assert s._bottom_up_congruence_issues("proc_cell") == []
+    orients = s._detect_instance_orients("proc_cell")
+    assert orients["proc_i2"] == "S"
 
 
 def test_congruence_flags_moved_grandchild():
@@ -192,7 +195,7 @@ def test_congruence_flags_moved_grandchild():
     assert s._bottom_up_congruence_issues("top_cell") == []
     db.move_comp("T2/m_i/l_i", 475, 65)      # grandchild of T2 only
     issues = s._bottom_up_congruence_issues("top_cell")
-    assert issues and "subtree differs" in issues[0] and "m_i/l_i" in issues[0]
+    assert issues and "NO orientation" in issues[0] and "T2" in issues[0]
 
 
 # ── set_bottom_up command ─────────────────────────────────────────────────────
@@ -227,7 +230,7 @@ def test_set_bottom_up_command_errors():
 
 def test_set_bottom_up_command_rejects_non_congruent():
     db = _two_inst_db()
-    db.rotate_comp("proc_i2", 180)
+    db.rotate_comp("proc_i2", 90)         # 90° refused (H<->V layer swap)
     s = _bare_session(db)
     out = _run_cmd(s, "set_bottom_up proc_cell")
     assert "not congruent" in out
@@ -236,8 +239,22 @@ def test_set_bottom_up_command_rejects_non_congruent():
     db2 = _two_inst_db()
     s2 = _bare_session(db2)
     _run_cmd(s2, "set_bottom_up proc_cell")
-    db2.rotate_comp("proc_i2", 180)
+    db2.rotate_comp("proc_i2", 90)
     assert "bottom_up = off" in _run_cmd(s2, "set_bottom_up proc_cell off")
+
+
+def test_set_bottom_up_command_accepts_mirrored_and_180():
+    """Direction-preserving orientations (S/FN/FS) are supported by the
+    orientation-aware copies — marking must succeed."""
+    for xform in [lambda db: db.rotate_comp("proc_i2", 180),
+                  lambda db: db.flip_comp("proc_i2", True),
+                  lambda db: db.flip_comp("proc_i2", False)]:
+        db = _two_inst_db()
+        xform(db)
+        s = _bare_session(db)
+        out = _run_cmd(s, "set_bottom_up proc_cell")
+        assert "bottom_up = on" in out, out
+        assert db.cell_bottom_up("proc_cell") is True
 
 
 # ── run_planner hier expansion guard ──────────────────────────────────────────
@@ -263,13 +280,14 @@ def test_planner_hier_ok_for_congruent_bottom_up_cell():
     assert insts == {"proc_i1", "proc_i2"}
 
 
-def test_planner_hier_rejects_rotated_instance_of_bottom_up_cell():
-    """Placement may change after marking — the expansion re-checks congruence
-    and hard-errors, because translation-only copies would be wrong."""
+def test_planner_hier_rejects_90_rotated_instance_of_bottom_up_cell():
+    """Placement may change after marking — the expansion re-checks the
+    orientations and hard-errors on a 90° instance (H<->V layer swap;
+    layer pairing is a planned follow-up)."""
     db = _two_inst_db()
     s = _flow_session(db)
     _run_cmd(s, "set_bottom_up proc_cell")   # congruent at mark time
-    db.rotate_comp("proc_i2", 180)           # ... then placement changes
+    db.rotate_comp("proc_i2", 90)            # ... then placement changes
     with pytest.raises(RuntimeError, match="bottom-up cell 'proc_cell'"):
         _run_cmd(s, "run_planner hier")
 
@@ -279,7 +297,7 @@ def test_planner_hier_unmarked_cell_is_not_blocked():
     top-down flow plans each instance separately)."""
     db = _two_inst_db()
     s = _flow_session(db)
-    db.rotate_comp("proc_i2", 180)
+    db.rotate_comp("proc_i2", 90)
     _run_cmd(s, "run_planner hier")          # must not raise
 
 
@@ -907,3 +925,183 @@ def test_user_pin_on_template_survives_local_solve():
     assert all(w.plan.selected_topology_index == pin_idx
                for w in ws.values())
     assert all(w.hier.locked for w in ws.values())
+
+
+# ── Orientation-aware copies (mirrors + 180) ─────────────────────────────────
+
+def test_orient_algebra():
+    """Compose/inverse spot checks of the shared orientation-map algebra
+    (token = mirror-about-X first, then CCW rotation)."""
+    assert buda.orient_compose("S", "S") == "N"      # 180 twice
+    assert buda.orient_compose("FN", "FN") == "N"    # mirror is an involution
+    assert buda.orient_compose("FS", "FS") == "N"
+    assert buda.orient_compose("FN", "S") == "FS"    # 180 then y-mirror
+    assert buda.orient_compose("W", "W") == "S"      # 90 twice
+    for o in ["N", "S", "FN", "FS", "W", "E", "FW", "FE"]:
+        assert buda.orient_compose(o, buda.orient_inverse(o)) == "N"
+        assert buda.orient_compose(buda.orient_inverse(o), o) == "N"
+
+
+def _oriented_bits(s):
+    """(bits by (inst, seg, bit), horiz-of map) for the cell-local bundles."""
+    inst_of = {w.input.original_bundle.id: b.instances[0]
+               for w in s.bundles
+               for b in [w.input.original_bundle] if b.cell_context}
+    horiz_of = {(ts.bundle_id, ts.seg_idx): ts.horiz
+                for ts in s._bottom_up_fixed_segments()}
+    bits = {}
+    for ns in s.detailed_result.net_segments:
+        if ns.bundle_id in inst_of:
+            bits[(inst_of[ns.bundle_id], ns.seg_idx, ns.bit_index)] = ns
+    return bits, horiz_of
+
+
+def test_dnuts_copies_180_rotated_instance():
+    """A 180°-rotated sibling passes the mirror-normalized track check and
+    its copied bits are the exact point reflection of the reference's.
+    With pitch-2 patterns (centers 0.5+2k) and a 420x200 cell, the S
+    instance aligns at ODD offsets on both axes."""
+    db = _two_inst_db(x2=501, y2=301, derive=False)
+    db.rotate_comp("proc_i2", 180)
+    buda.BustermGen(db).derive(1)
+    s, _ = _dnuts_flow(db)
+    out = _run_cmd(s, "check_template_tracks")
+    assert "ALIGNED" in out and "MISALIGNED" not in out
+    out = _run_cmd(s, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+    bits, horiz_of = _oriented_bits(s)
+    keys1 = {k[1:] for k in bits if k[0] == "proc_i1"}
+    keys2 = {k[1:] for k in bits if k[0] == "proc_i2"}
+    assert keys1 and keys1 == keys2
+    # ref frame: 420x200 at (0, 0); sibling frame at (501, 301), S orient.
+    for si, bi in keys1:
+        a = bits[("proc_i1", si, bi)]
+        b = bits[("proc_i2", si, bi)]
+        if horiz_of[(a.bundle_id, si)]:
+            assert b.track_position == pytest.approx(
+                301 + 200 - a.track_position)
+            assert b.span_lo == pytest.approx(501 + 420 - a.span_hi)
+            assert b.span_hi == pytest.approx(501 + 420 - a.span_lo)
+        else:
+            assert b.track_position == pytest.approx(
+                501 + 420 - a.track_position)
+            assert b.span_lo == pytest.approx(301 + 200 - a.span_hi)
+            assert b.span_hi == pytest.approx(301 + 200 - a.span_lo)
+
+
+def test_dnuts_copies_x_mirrored_instance():
+    """An FS (x-mirrored) sibling: horizontal bits keep their track offset
+    and mirror their span; vertical bits mirror their track and keep the
+    span offset.  x must be odd for the mirrored phase, y stays even."""
+    db = _two_inst_db(x2=501, y2=300, derive=False)
+    db.flip_comp("proc_i2", True)        # mirror about vertical centre → FS
+    buda.BustermGen(db).derive(1)
+    s, _ = _dnuts_flow(db)
+    out = _run_cmd(s, "check_template_tracks")
+    assert "ALIGNED" in out and "MISALIGNED" not in out
+    out = _run_cmd(s, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+    bits, horiz_of = _oriented_bits(s)
+    keys1 = {k[1:] for k in bits if k[0] == "proc_i1"}
+    keys2 = {k[1:] for k in bits if k[0] == "proc_i2"}
+    assert keys1 and keys1 == keys2
+    for si, bi in keys1:
+        a = bits[("proc_i1", si, bi)]
+        b = bits[("proc_i2", si, bi)]
+        if horiz_of[(a.bundle_id, si)]:
+            assert b.track_position == pytest.approx(a.track_position + 300)
+            assert b.span_lo == pytest.approx(501 + 420 - a.span_hi)
+            assert b.span_hi == pytest.approx(501 + 420 - a.span_lo)
+        else:
+            assert b.track_position == pytest.approx(
+                501 + 420 - a.track_position)
+            assert b.span_lo == pytest.approx(a.span_lo + 300)
+            assert b.span_hi == pytest.approx(a.span_hi + 300)
+
+
+def test_check_template_tracks_flags_misplaced_mirrored_instance():
+    """The mirror normalization is not a free pass.  The toy cell's child
+    layout is y-symmetric, so a flipped instance matches both S and FS and
+    the detection may pick whichever mirror the track phase can absorb —
+    any INTEGER y offset is thereby healable (pitch 2, 2σ = 1).  An
+    off-grid half-unit offset breaks the phase under every interpretation
+    and must be flagged."""
+    db = _two_inst_db(x2=501, y2=300.5, derive=False)
+    db.flip_comp("proc_i2", True)
+    buda.BustermGen(db).derive(1)
+    s, _ = _dnuts_flow(db)
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" in out and "proc_i2" in out
+
+
+def test_align_bottom_up_mirrored_instance():
+    """The aligner moves a mirrored instance via its EFFECTIVE coordinate:
+    with pitch-2 patterns (2σ = 1) and cell width 420, an FS instance
+    aligns at ODD x — the aligner nudges it off the even grid where the
+    translated majority sits (translation math would leave it be)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst("P0", "proc_cell", "", 0, 0)
+    db.add_inst("P1", "proc_cell", "", 500, 0)
+    db.add_inst("P2", "proc_cell", "", 1000, 0)
+    db.flip_comp("P2", True)
+    s = _placement_session(db)
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" in out and "P2" in out
+    out = _run_cmd(s, "align_bottom_up")
+    assert "1 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P2"].x1 in (999.0, 1001.0)   # odd phase, minimal nudge
+    assert comps["P0"].x1 == 0.0 and comps["P1"].x1 == 500.0
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" not in out and "ALIGNED" in out
+
+
+def test_topdown_expansion_transforms_rotated_instance():
+    """UNMARKED cells: the top-down expansion must transform each
+    instance's candidates geometrically (the old translation-only path
+    silently mis-transformed them).  A 90°-rotated instance's candidates
+    must fit its rotated (dims-swapped) bbox."""
+    db = _two_inst_db(x2=500, y2=300, derive=False)
+    db.rotate_comp("proc_i2", 90)        # 420x200 → bbox 200x420
+    buda.BustermGen(db).derive(1)
+    s = _flow_session(db)
+    _run_cmd(s, "run_planner hier")
+    w2 = [w for w in s.bundles
+          for b in [w.input.original_bundle]
+          if b.cell_context and b.instances == ["proc_i2"]]
+    assert w2
+    for w in w2:
+        assert w.input.candidates
+        for t in w.input.candidates:
+            for seg in t.segments:
+                for px, py in [(seg.start.x, seg.start.y),
+                               (seg.end.x, seg.end.y)]:
+                    assert 500 <= px <= 700 and 300 <= py <= 720, (
+                        f"segment endpoint ({px}, {py}) outside the rotated "
+                        f"instance bbox — translation-only expansion?")
+
+
+def _orient_of(db, name):
+    return next(c.orient for c in db.all_components() if c.name == name)
+
+
+def test_detection_rejects_mixed_token_subtree():
+    """One token convention per matched instance (Codex #249 P2): a
+    180°-rotated instance whose child was ADDITIONALLY back-rotated in
+    place (bbox unchanged, leaf token composed to 'S') must not pass —
+    the child would satisfy the composed convention while its sibling
+    satisfies the raw one, yet no single rigid transform maps the
+    reference (the leaf content differs)."""
+    db = _two_inst_db()
+    db.rotate_comp("proc_i2", 180)          # children reflected, tokens 'N'
+    assert _orient_of(db, "proc_i2/pa_i") == "N"
+    db.rotate_comp("proc_i2/pa_i", 180)     # in-place: bbox same, token 'S'
+    assert _orient_of(db, "proc_i2/pa_i") == "S"
+    s = _bare_session(db)
+    orients = s._detect_instance_orients("proc_cell")
+    assert orients["proc_i2"] is None
+    issues = s._bottom_up_congruence_issues("proc_cell")
+    assert issues and "NO orientation" in issues[0]

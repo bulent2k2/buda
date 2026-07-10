@@ -164,4 +164,18 @@ NetSegment offset_net_segment(const NetSegment& ns, int dx, int dy,
                               int new_bundle_id, bool horiz);
 NetVia offset_net_via(const NetVia& v, int dx, int dy, int new_bundle_id);
 
+// Orientation-aware siblings: map a solved bit-wire / via from a source
+// frame (cell box cell_w×cell_h at (src_x, src_y)) through `orient` into a
+// destination frame at (dst_x, dst_y).  Direction-preserving orientations
+// only (N/S/FN/FS) — 90/270 throw, exactly like transform_track_segment.
+NetSegment transform_net_segment(const NetSegment& ns,
+                                 const std::string& orient,
+                                 int cell_w, int cell_h,
+                                 int src_x, int src_y, int dst_x, int dst_y,
+                                 int new_bundle_id, bool horiz);
+NetVia transform_net_via(const NetVia& v, const std::string& orient,
+                         int cell_w, int cell_h,
+                         int src_x, int src_y, int dst_x, int dst_y,
+                         int new_bundle_id);
+
 } // namespace buda

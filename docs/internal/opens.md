@@ -26,15 +26,19 @@ noted.)*
   schema-driven per-cell settings dialog (mirrors Optimize) with
   `cell.bottom_up` as the first `CellSetting` descriptor, plus a
   Selection-panel quick checkbox. The congruence check is shared verbatim
-  with the CLI (`buda_session.util.bottom_up_congruence_issues`); enabling
-  is congruence-gated, clearing is unconditional. Command layer + tests:
+  with the CLI (`buda_session.hier.bottom_up_congruence_issues`, the
+  orientation-aware definition); enabling is congruence-gated, clearing is
+  unconditional. Command layer + tests:
   `tools/floorplanner_commands.py` /
   `test/tests/test_floorplanner_cell_settings.py`.
-- **Hier topology unit tests drive a local reimplementation** —
-  `test_hier_topology.py` re-implements generation in-file instead of
-  calling `HierMixin._generate_hier_topo_one`, so the cross-level (case c)
-  branch of the real dispatch has no coverage. Port the tests to the real
-  entry point.
+- **Hier topology unit tests drive a local reimplementation** ✅ —
+  `test_hier_topology.py` now drives the REAL dispatch
+  (`generate_hier_topologies` via a BudaSession) in every test and BDD
+  scenario, the in-file reimplementation (and the cell-local floorplan
+  replica) is deleted, and the cross-level case (c) branch gains its
+  first coverage: three new tests pin the `drv_spec_depth` bundling, the
+  `[cross-level D0→D1]` dispatch tag, absolute endpoint-spanning
+  coordinates, and no-regression on sibling bundles (15 tests total).
 
 ## Substantial features (bounded, clear plans)
 
@@ -56,14 +60,26 @@ noted.)*
    tracks, abutment Gap A, `kHeight`); real golden churn to review.
 ### Bottom-up template planning follow-ons (added 2026-07-10)
 
-- **Orientation-aware instance copying** — the Q1 decision deferred it:
-  instances of a bottom-up cell must be identity-orientation today
-  (guard-and-refuse; the top-down flow only warns). Supporting rotated /
-  mirrored instances means rotate/mirror-aware `offset_topology` plus
-  transformed NUTS/DNUTS copies — and would also fix the pre-existing
-  silent mis-transform in the plain top-down hier expansion. Biggest of
-  the bottom-up deferrals; the BDB side (`component.orient`,
-  `rotate_comp`/`flip_comp` composition) is already in place.
+- ✅ **Orientation-aware instance copying** — **DONE (2026-07-10, mirrors +
+  180 scope)**. Bottom-up copies now support the direction-preserving
+  orientations (`N/S/FN/FS`) end-to-end: geometric per-instance orientation
+  detection (full-subtree shape match — hierarchical `rotate_comp`/
+  `flip_comp` keep every token `'N'`, so tokens alone are untrustworthy;
+  ambiguous self-symmetric layouts are disambiguated by a track-phase
+  score, identity preferred when it matches), `transform_topology` /
+  `transform_track_segment` / `transform_net_segment` / `transform_net_via`
+  (C++, shared `OrientMap` algebra with `orient_compose`/`orient_inverse`),
+  mirror-normalized `check_template_tracks` pools (both routed and
+  placement-stage modes), and `align_bottom_up` mirrored-phase math
+  (effective coordinate about the pattern's symmetry center σ, per-direction
+  CRT-combined `K ≡ 2σ_l mod pitch_l`). The plain top-down hier expansion
+  now applies the correct GEOMETRIC transform for ALL 8 orientations
+  (fixing its silent translation-only mis-transform; 90° instances get
+  their pinned per-segment layers dropped with a warning since H↔V swaps).
+  **Remaining follow-up:** 90°/270° instances of *marked* (bottom-up)
+  cells stay refused — copying them needs an H↔V *layer pairing* policy
+  (which V layer hosts a copied H segment, per direction) across planner
+  reservations, NUTS fixed segments, and DNUTS copies.
 - **`generate_more_topologies` is not hier-aware** — the additive
   per-bundle command matches by net-name against the flat floorplan and
   never enters the 3-case hier dispatch; `generate_topologies_for_hbundle`
