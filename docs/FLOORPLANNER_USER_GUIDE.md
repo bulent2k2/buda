@@ -97,6 +97,18 @@ When multiple blocks share the same cell type, a **Make Unique** button appears.
 Clicking it creates a private cell definition so resizing that block no longer
 affects its siblings.
 
+### Per-Cell Settings (Bottom-Up)
+
+The Selection panel also shows a **Bottom-Up (cell)** checkbox for the selected
+block's cell — the persisted `cell.bottom_up` flag that marks the cell for
+bottom-up template planning (plan/NUTS its local interconnect once, copy to
+every instance; the CLI equivalent is `set_bottom_up`). Enabling it is refused
+with a reason if the cell's instances are not pure translated copies (the same
+congruence rule the CLI applies); clearing is always allowed. The
+**Cell Settings…** button in the Blocks panel opens a dialog listing every cell
+type with its instance count and settings — the all-cells surface for the same
+flags. See the [Reference Guide](FLOORPLANNER_REFERENCE_GUIDE.md#cell-settings-dialog).
+
 ---
 
 ## Moving and Resizing

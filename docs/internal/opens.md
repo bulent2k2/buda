@@ -21,12 +21,16 @@ noted.)*
   overlap/outside-die issue is auto-reverted to a fixpoint (a revert can
   newly collide with a still-moved sibling); `force` keeps such moves with
   the old WARNING-only behavior. `max_shift` remains the explicit user cap.
-- **Floorplanner UI toggle for `cell.bottom_up`** — the flag is persisted
-  (v17) and the engine/BDB sides are done; the GUI neither displays nor
-  edits it. Design proposed in
-  [`cell_settings_ui.md`](cell_settings_ui.md): an extensible, schema-driven
-  per-cell settings dialog (mirrors Optimize) with `cell.bottom_up` as the
-  first descriptor, reusing the CLI's congruence check.
+- **Floorplanner UI toggle for `cell.bottom_up`** ✅ — implemented per the
+  design in [`cell_settings_ui.md`](cell_settings_ui.md): an extensible,
+  schema-driven per-cell settings dialog (mirrors Optimize) with
+  `cell.bottom_up` as the first `CellSetting` descriptor, plus a
+  Selection-panel quick checkbox. The congruence check is shared verbatim
+  with the CLI (`buda_session.hier.bottom_up_congruence_issues`, the
+  orientation-aware definition); enabling is congruence-gated, clearing is
+  unconditional. Command layer + tests:
+  `tools/floorplanner_commands.py` /
+  `test/tests/test_floorplanner_cell_settings.py`.
 - **Hier topology unit tests drive a local reimplementation** ✅ —
   `test_hier_topology.py` now drives the REAL dispatch
   (`generate_hier_topologies` via a BudaSession) in every test and BDD

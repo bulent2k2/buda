@@ -1,7 +1,53 @@
 # Floorplanner per-cell configuration UI — design proposal
 
-Status: **proposed** (not yet implemented). Tracks the
-[`opens.md`](opens.md) quick-win *"Floorplanner UI toggle for
+Status: **implemented** (PR #248 was the design review; the follow-up PR
+landed it). Resolves the [`opens.md`](opens.md) quick-win *"Floorplanner UI
+toggle for `cell.bottom_up`"*. As-built notes:
+
+- The registry + command layer live as a section of
+  `tools/floorplanner_commands.py` (`CellSetting`, `CELL_SETTINGS`,
+  `CellSettingsRow`, `list_cell_settings`, `set_cell_setting`) rather than a
+  separate `tools/cell_settings.py`.
+- Validation is enforced **centrally** in `set_cell_setting`: it reads the
+  old value, calls the descriptor's transition-based
+  `eligible(state, cell, old, new)` and raises `ValueError` with the reason
+  on refusal, then dispatches to the descriptor's `set` — which is therefore
+  the *raw* BDB write (`set_cell_bottom_up`), not a separately-gated
+  `_set_bottom_up_checked`. One validation path instead of two.
+- `eligible` takes an optional trailing `ctx` argument — a dict
+  `list_cell_settings` shares across every cell of one call (seeded with
+  `"comps"`, the pre-fetched `all_components()` rows) in which a descriptor
+  caches whatever derived index it needs. Bottom-up caches its component
+  index there (`bottom_up_congruence_index`), so one dialog open pays the
+  DB read AND the index build once, with only the per-cell subtree compare
+  per row — not O(#cells × #components) (Codex #251 P2). Descriptors
+  without the parameter still work (TypeError fallback re-calls without it).
+- The shared congruence helper lives in **`buda_session.hier`** (not
+  `util.py` as originally proposed): PR #249 made congruence
+  **orientation-aware** (translation + the direction-preserving orients
+  S/FN/FS are congruent; 90° rotations and no-match instances are not),
+  and its detection core (`_ORIENT_MAPS`, `_oxf_rect`,
+  `buda.orient_compose`) lives in `hier.py`. The module-level pure
+  functions `bottom_up_congruence_index(comps)`,
+  `detect_instance_orients(comps, cell, …, phase_score=None, index=None)`
+  and `bottom_up_congruence_issues(comps, cell, …)` are the shared API;
+  the session's `_detect_instance_orients` / `_bottom_up_congruence_issues`
+  are thin wrappers injecting the routing-grid-aware phase tiebreak, and
+  `floorplanner_commands._bottom_up_eligible` calls the module functions
+  with the cached index and the default (grid-less) tiebreak. The
+  phase score only picks *between* geometrically valid orientations, so
+  GUI and CLI eligibility verdicts are identical.
+- The complementary Selection-panel quick checkbox shipped too
+  (`Bottom-Up (cell)`, `_show_bu_chk` / `_on_bottom_up_toggle`), rendered
+  from the cheap `cell_bottom_up()` read with the congruence check deferred
+  to the click handler, per the owner-review note below.
+- Tests: `test/tests/test_floorplanner_cell_settings.py` (fast tier).
+- User-facing docs: [Floorplanner Reference](../FLOORPLANNER_REFERENCE_GUIDE.md)
+  ("Cell Settings Dialog") and [User Guide](../FLOORPLANNER_USER_GUIDE.md).
+
+Original proposal follows (the design of record; deviations above).
+
+Tracks the [`opens.md`](opens.md) quick-win *"Floorplanner UI toggle for
 `cell.bottom_up`"*: the flag is persisted (schema v17) and the engine/BDB
 sides are done, but the GUI neither displays nor edits it.
 

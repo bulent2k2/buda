@@ -86,6 +86,207 @@ def _pattern_two_sigma(pat):
     return None
 
 
+def bottom_up_congruence_index(comps):
+    """One-pass component index for congruence/orientation checks over MANY
+    cells: ``(insts_by_cell, by_parent)``.
+
+    Build it once per `all_components()` read and evaluate any number of
+    cells against it (the Floorplanner Cell Settings dialog path, which
+    would otherwise rebuild the full index per cell —
+    O(#cells × #components)).  Single-cell callers just omit `index` and
+    the functions below build it themselves.
+    """
+    insts_by_cell, by_parent = {}, {}
+    for c in comps:
+        insts_by_cell.setdefault(c.cell, []).append(c)
+        by_parent.setdefault(c.parent_id, []).append(c)
+    return insts_by_cell, by_parent
+
+
+def _default_orient_score(o, c, ref):
+    """Ambiguity tiebreak when no session/routing grid is available (the
+    Floorplanner path): no phase discrimination, but keep dispreferring
+    direction-swapping orients exactly as _orient_phase_score does."""
+    return -1 if _ORIENT_MAPS[o][0] else 0
+
+
+def detect_instance_orients(comps, cell, ref_name=None, cache=None,
+                            phase_score=None, index=None):
+    """{instance name: orient token or None} — the 8-orientation
+    transform mapping the REFERENCE instance's subtree onto each placed
+    instance of `cell` (None = no orientation matches: genuinely
+    non-congruent).  Detection is GEOMETRIC over the full subtree —
+    rotate_comp/flip_comp on a hierarchical block rewrite the children's
+    absolute bboxes and keep the root token 'N', so the token alone is
+    untrustworthy — comparing per descendant: (cell type, composed
+    orient, bbox relative to the instance origin, transformed).  For a
+    CHILDLESS cell the geometry is orientation-blind (empty subtree), so
+    the root tokens decide: O = inst.orient ∘ ref.orient⁻¹.
+
+    ref_name picks the reference (default: first placed instance by
+    name); the reference maps to 'N'.  `cache` (a caller-owned dict)
+    memoizes on (cell, ref) — deliberately PER-CALL-SITE, never stored
+    on the session: placement can mutate between commands (move_comp /
+    rotate_comp / align), which would silently stale a session cache.
+
+    Module-level pure core shared by the session
+    (`HierMixin._detect_instance_orients`, which injects its routing-grid
+    `phase_score`) and the Floorplanner (default score).  `index` accepts a
+    prebuilt `bottom_up_congruence_index(comps)` so a many-cell caller pays
+    the component walk once."""
+    if cache is None:
+        cache = {}
+    if phase_score is None:
+        phase_score = _default_orient_score
+    if index is None:
+        index = bottom_up_congruence_index(comps)
+    insts_by_cell, by_parent = index
+    insts = sorted((c for c in insts_by_cell.get(cell, []) if c.x1 >= 0),
+                   key=lambda c: c.name)
+    if not insts:
+        return {}
+    ref = next((c for c in insts if c.name == ref_name), insts[0])
+    key = (cell, ref.name)
+    if key in cache:
+        return cache[key]
+
+    def dims(c):
+        return (round(c.x2 - c.x1, 3), round(c.y2 - c.y1, 3))
+
+    def shape(inst):
+        out, stack, prefix = {}, [inst], inst.name + "/"
+        while stack:
+            node = stack.pop()
+            for k in by_parent.get(node.id, []):
+                rel = (k.name[len(prefix):]
+                       if k.name.startswith(prefix) else k.name)
+                out[rel] = (k.cell, k.orient,
+                            (round(k.x1 - inst.x1, 3),
+                             round(k.y1 - inst.y1, 3),
+                             round(k.x2 - inst.x1, 3),
+                             round(k.y2 - inst.y1, 3)))
+                stack.append(k)
+        return out
+
+    w, h = dims(ref)
+    ref_shape = shape(ref)
+    # Pre-transform the reference shape under each candidate orient.
+    # TWO token conventions exist for the descendants of a transformed
+    # instance: the reference's RAW tokens (BDB's flip_comp/rotate_comp
+    # rewrite descendant bboxes and leave their tokens untouched) or the
+    # COMPOSED tokens o∘raw (GDS-imported hierarchies carry the SREF
+    # orientation per row).  A rigid transform is uniformly one or the
+    # other, so the convention is chosen ONCE per candidate — accepting
+    # them per-descendant would let a MIXED subtree pass (e.g. a square
+    # leaf child separately rotated in place, bbox unchanged: its
+    # composed token would pass while its siblings pass raw, yet no
+    # single transform maps the reference — Codex #249).
+    ref_under = {}
+    for o in _ORIENT_MAPS:
+        ref_under[o] = {
+            rel: (kcell, korient, buda.orient_compose(o, korient),
+                  _oxf_rect(o, *bbox, w, h))
+            for rel, (kcell, korient, bbox) in ref_shape.items()}
+    out = {}
+    for c in insts:
+        if c is ref:
+            out[c.name] = "N"
+            continue
+        found = None
+        if not ref_shape:
+            # Childless: geometry is orientation-blind; trust the root
+            # tokens (rotate/flip DO compose them for leaves) when the
+            # outline is consistent with the implied orient.
+            cand = buda.orient_compose(
+                c.orient, buda.orient_inverse(ref.orient))
+            exp = (h, w) if _ORIENT_MAPS[cand][0] else (w, h)
+            found = cand if dims(c) == exp else None
+        else:
+            cshape = shape(c)
+            matches = []
+            for o, rshape in ref_under.items():
+                exp = (h, w) if _ORIENT_MAPS[o][0] else (w, h)
+                if dims(c) != exp or cshape.keys() != rshape.keys():
+                    continue
+                ok_geom = ok_raw = ok_comp = True
+                for rel, (kcell, kraw, kcomp, bbox) in rshape.items():
+                    kc, ko, bb = cshape[rel]
+                    if kc != kcell or bb != bbox:
+                        ok_geom = False
+                        break
+                    ok_raw = ok_raw and ko == kraw
+                    ok_comp = ok_comp and ko == kcomp
+                if ok_geom and (ok_raw or ok_comp):
+                    matches.append(o)
+            if "N" in matches:
+                # Identity matching = the instance is (as far as the
+                # geometry can prove) a plain copy; never re-interpret
+                # it as a mirror of a self-symmetric layout just to
+                # improve track phase — its LEAF CONTENT is unmirrored.
+                found = "N"
+            elif len(matches) == 1:
+                found = matches[0]
+            elif matches:
+                # AMBIGUOUS (self-symmetric child layout, e.g. S vs
+                # FS): every match instantiates the template onto the
+                # same child boxes, so any is geometrically valid —
+                # prefer the one whose track phases work (most axes),
+                # ties broken by canonical order.
+                found = max(matches,
+                            key=lambda o: phase_score(o, c, ref))
+        out[c.name] = found
+    cache[key] = out
+    return out
+
+
+def bottom_up_congruence_issues(comps, cell, ref_name=None, cache=None,
+                                phase_score=None, index=None,
+                                only=None, allow_90=True):
+    """Verify every instance of `cell` is a SUPPORTED transform of the
+    reference — the precondition for bottom-up template planning.  An
+    instance matching NO orientation is genuinely non-congruent and
+    always an issue.  With allow_90 (the default, used at set_bottom_up /
+    Floorplanner-marking time) the 90° family (E/W/FE/FW) is FINE: the
+    rotation-class split at run_planner hier gives it its own clone
+    template, whose members are direction-preserving among themselves.
+    allow_90=False is the POST-SPLIT re-check per template: every
+    instance must then be a direction-preserving transform of the group
+    reference (S = 180°, FN/FS = axis mirrors), or the placement changed
+    under us.
+
+    `only` restricts the report to the given instance names (a clone
+    template's members — detection covers ALL instances of the cell).
+
+    The ONE shared definition of bottom-up eligibility: the CLI
+    (`set_bottom_up` / `run_planner hier`, via the session wrapper below)
+    and the Floorplanner's cell settings both call it, so the two can
+    never diverge on what "congruent" means.  The phase-score tiebreak
+    only picks BETWEEN geometrically valid orientations (e.g. S vs FS on
+    a self-symmetric layout), so its presence/absence never changes the
+    eligibility verdict.
+
+    Returns a list of human-readable issue strings (empty = OK)."""
+    orients = detect_instance_orients(comps, cell, ref_name=ref_name,
+                                      cache=cache, phase_score=phase_score,
+                                      index=index)
+    issues = []
+    for name in sorted(orients):
+        if only is not None and name not in only:
+            continue
+        o = orients[name]
+        if o is None:
+            issues.append(
+                f"{name}: subtree matches the reference under NO "
+                f"orientation (genuinely non-congruent)")
+        elif not allow_90 and o not in _DIR_PRESERVING:
+            issues.append(
+                f"{name}: 90°-rotated ({o}) relative to the group "
+                f"reference — the rotation-class split should have "
+                f"put it in the clone template (placement changed "
+                f"after the split?)")
+    return issues
+
+
 class HierMixin:
 
     def _add_expanded_bundle(self, w, sel, expanded_to_template):
@@ -470,163 +671,33 @@ class HierMixin:
 
     def _detect_instance_orients(self, cell, comps=None, ref_name=None,
                                  cache=None):
-        """{instance name: orient token or None} — the 8-orientation
-        transform mapping the REFERENCE instance's subtree onto each placed
-        instance of `cell` (None = no orientation matches: genuinely
-        non-congruent).  Detection is GEOMETRIC over the full subtree —
-        rotate_comp/flip_comp on a hierarchical block rewrite the children's
-        absolute bboxes and keep the root token 'N', so the token alone is
-        untrustworthy — comparing per descendant: (cell type, composed
-        orient, bbox relative to the instance origin, transformed).  For a
-        CHILDLESS cell the geometry is orientation-blind (empty subtree), so
-        the root tokens decide: O = inst.orient ∘ ref.orient⁻¹.
-
-        ref_name picks the reference (default: first placed instance by
-        name); the reference maps to 'N'.  `cache` (a caller-owned dict)
-        memoizes on (cell, ref) — deliberately PER-CALL-SITE, never stored
-        on the session: placement can mutate between commands (move_comp /
-        rotate_comp / align), which would silently stale a session cache."""
-        if cache is None:
-            cache = {}
+        """Session wrapper over the module-level `detect_instance_orients`
+        (see its docstring for the detection semantics): fills `comps` from
+        the open BDB and injects the routing-grid-aware
+        `_orient_phase_score` as the ambiguity tiebreak."""
         if comps is None:
             comps = self.bdb.all_components()
-        insts, by_parent = [], {}
-        for c in comps:
-            if c.cell == cell and c.x1 >= 0:
-                insts.append(c)
-            by_parent.setdefault(c.parent_id, []).append(c)
-        insts.sort(key=lambda c: c.name)
-        if not insts:
-            return {}
-        ref = next((c for c in insts if c.name == ref_name), insts[0])
-        key = (cell, ref.name)
-        if key in cache:
-            return cache[key]
-
-        def dims(c):
-            return (round(c.x2 - c.x1, 3), round(c.y2 - c.y1, 3))
-
-        def shape(inst):
-            out, stack, prefix = {}, [inst], inst.name + "/"
-            while stack:
-                node = stack.pop()
-                for k in by_parent.get(node.id, []):
-                    rel = (k.name[len(prefix):]
-                           if k.name.startswith(prefix) else k.name)
-                    out[rel] = (k.cell, k.orient,
-                                (round(k.x1 - inst.x1, 3),
-                                 round(k.y1 - inst.y1, 3),
-                                 round(k.x2 - inst.x1, 3),
-                                 round(k.y2 - inst.y1, 3)))
-                    stack.append(k)
-            return out
-
-        w, h = dims(ref)
-        ref_shape = shape(ref)
-        # Pre-transform the reference shape under each candidate orient.
-        # TWO token conventions exist for the descendants of a transformed
-        # instance: the reference's RAW tokens (BDB's flip_comp/rotate_comp
-        # rewrite descendant bboxes and leave their tokens untouched) or the
-        # COMPOSED tokens o∘raw (GDS-imported hierarchies carry the SREF
-        # orientation per row).  A rigid transform is uniformly one or the
-        # other, so the convention is chosen ONCE per candidate — accepting
-        # them per-descendant would let a MIXED subtree pass (e.g. a square
-        # leaf child separately rotated in place, bbox unchanged: its
-        # composed token would pass while its siblings pass raw, yet no
-        # single transform maps the reference — Codex #249).
-        ref_under = {}
-        for o in self._ORIENT_MAPS:
-            ref_under[o] = {
-                rel: (kcell, korient, buda.orient_compose(o, korient),
-                      _oxf_rect(o, *bbox, w, h))
-                for rel, (kcell, korient, bbox) in ref_shape.items()}
-        out = {}
-        for c in insts:
-            if c is ref:
-                out[c.name] = "N"
-                continue
-            found = None
-            if not ref_shape:
-                # Childless: geometry is orientation-blind; trust the root
-                # tokens (rotate/flip DO compose them for leaves) when the
-                # outline is consistent with the implied orient.
-                cand = buda.orient_compose(
-                    c.orient, buda.orient_inverse(ref.orient))
-                exp = (h, w) if self._ORIENT_MAPS[cand][0] else (w, h)
-                found = cand if dims(c) == exp else None
-            else:
-                cshape = shape(c)
-                matches = []
-                for o, rshape in ref_under.items():
-                    exp = (h, w) if self._ORIENT_MAPS[o][0] else (w, h)
-                    if dims(c) != exp or cshape.keys() != rshape.keys():
-                        continue
-                    ok_geom = ok_raw = ok_comp = True
-                    for rel, (kcell, kraw, kcomp, bbox) in rshape.items():
-                        kc, ko, bb = cshape[rel]
-                        if kc != kcell or bb != bbox:
-                            ok_geom = False
-                            break
-                        ok_raw = ok_raw and ko == kraw
-                        ok_comp = ok_comp and ko == kcomp
-                    if ok_geom and (ok_raw or ok_comp):
-                        matches.append(o)
-                if "N" in matches:
-                    # Identity matching = the instance is (as far as the
-                    # geometry can prove) a plain copy; never re-interpret
-                    # it as a mirror of a self-symmetric layout just to
-                    # improve track phase — its LEAF CONTENT is unmirrored.
-                    found = "N"
-                elif len(matches) == 1:
-                    found = matches[0]
-                elif matches:
-                    # AMBIGUOUS (self-symmetric child layout, e.g. S vs
-                    # FS): every match instantiates the template onto the
-                    # same child boxes, so any is geometrically valid —
-                    # prefer the one whose track phases work (most axes),
-                    # ties broken by canonical order.
-                    found = max(matches, key=lambda o:
-                                self._orient_phase_score(o, c, ref))
-            out[c.name] = found
-        cache[key] = out
-        return out
+        return detect_instance_orients(comps, cell, ref_name=ref_name,
+                                       cache=cache,
+                                       phase_score=self._orient_phase_score)
 
     def _bottom_up_congruence_issues(self, cell, comps=None, ref_name=None,
                                      cache=None, only=None, allow_90=True):
-        """Verify every instance of `cell` is a SUPPORTED transform of the
-        reference — the precondition for bottom-up template planning.  An
-        instance matching NO orientation is genuinely non-congruent and
-        always an issue.  With allow_90 (the default, used at set_bottom_up
-        time) the 90° family (E/W/FE/FW) is FINE: the rotation-class split
-        at run_planner hier gives it its own clone template, whose members
-        are direction-preserving among themselves.  allow_90=False is the
-        POST-SPLIT re-check per template: every instance must then be a
-        direction-preserving transform of the group reference (S = 180°,
-        FN/FS = axis mirrors), or the placement changed under us.
-
-        `only` restricts the report to the given instance names (a clone
-        template's members — detection covers ALL instances of the cell).
+        """Session wrapper over the shared `bottom_up_congruence_issues`
+        (module level above — the Floorplanner's cell settings call the
+        same function, so the GUI and CLI can never diverge on what
+        "congruent" means), with the session's routing-grid phase tiebreak.
+        `only` / `allow_90` as in the shared function (the post-split
+        expansion re-check passes allow_90=False scoped to each
+        template's own instances).
 
         Returns a list of human-readable issue strings (empty = OK)."""
-        orients = self._detect_instance_orients(cell, comps=comps,
-                                                ref_name=ref_name,
-                                                cache=cache)
-        issues = []
-        for name in sorted(orients):
-            if only is not None and name not in only:
-                continue
-            o = orients[name]
-            if o is None:
-                issues.append(
-                    f"{name}: subtree matches the reference under NO "
-                    f"orientation (genuinely non-congruent)")
-            elif not allow_90 and o not in self._DIR_PRESERVING:
-                issues.append(
-                    f"{name}: 90°-rotated ({o}) relative to the group "
-                    f"reference — the rotation-class split should have "
-                    f"put it in the clone template (placement changed "
-                    f"after the split?)")
-        return issues
+        if comps is None:
+            comps = self.bdb.all_components()
+        return bottom_up_congruence_issues(comps, cell, ref_name=ref_name,
+                                           cache=cache,
+                                           phase_score=self._orient_phase_score,
+                                           only=only, allow_90=allow_90)
 
     def _build_cell_local_floorplan(self, parent_comp_name):
         """Build a Floorplan in cell-local coords for sub-components of parent."""
