@@ -181,6 +181,12 @@ void DetailedNUTSEngine::place_by_layer(
                     g.bundle_id   = nb.bundle_id;
                     g.span_lo     = lo;
                     g.span_hi     = hi;
+                    // ± full width (not width/2) is INTENTIONAL over-
+                    // approximation: the interval only gates which groups
+                    // contribute their exact track_positions to the reserved
+                    // set, so widening it is conservative-only (a bit is
+                    // never kept off a track that isn't really reserved) and
+                    // guards against float-edge misses on abutting windows.
                     g.interval_lo = nb.track_position - nb.width;
                     g.interval_hi = nb.track_position + nb.width;
                 } else {

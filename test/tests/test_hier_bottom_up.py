@@ -507,6 +507,28 @@ def test_dnuts_independent_policy_solves_outliers():
     assert s.detailed_result.num_unplaced == 0
 
 
+def test_post_nuts_planner_skips_locked_wrappers():
+    """run_planner post_nuts must not reassign a locked wrapper's layers:
+    extraction skips fixed bundles, so a reassignment would diverge
+    plan.seg_layers from the placed copies (and a later resume would
+    restore an internally inconsistent pin).  PR #238 re-review finding 1
+    — thresholds chosen so the locked trunks would otherwise qualify."""
+    db = _two_inst_db(cross_net=True)
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    locked_layers = {w.input.original_bundle.id: list(w.plan.seg_layers)
+                     for w in s.bundles if w.hier.locked}
+    assert locked_layers
+    _run_cmd(s, "run_planner post_nuts V 50 300 H 50 300")
+    for w in s.bundles:
+        bid = w.input.original_bundle.id
+        if bid in locked_layers:
+            assert list(w.plan.seg_layers) == locked_layers[bid], (
+                f"post_nuts moved locked bundle {bid}'s layers")
+
+
 # ── Step 6: persistence round-trip (v18 bu_locked + template selection) ──────
 
 def test_bottom_up_persistence_round_trip(tmp_path):

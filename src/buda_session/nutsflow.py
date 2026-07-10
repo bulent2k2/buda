@@ -572,10 +572,20 @@ class NutsFlowMixin:
             hi_layer = layers_sorted[-1]
             layer_set = set(layers_sorted)
 
+            # A locked (bottom-up copy) wrapper's plan must stay identical to
+            # its placed fixed routing: reassigning its layers here would
+            # diverge plan.seg_layers from the routed copies (extraction
+            # skips fixed bundles, so the re-run below cannot move them) and
+            # a later load_pipeline would restore an internally inconsistent
+            # pin. Excluded from the span map too, so the short/medium/long
+            # counts reflect only the reassignable bundles.
+            locked_ids = {w.input.original_bundle.id for w in self.bundles
+                          if w.hier.locked}
+
             # Map bundle_id → max span length among segments on this direction's layers.
             bid_max_span: dict[int, float] = {}
             for seg in self.nuts_result.segments:
-                if seg.layer not in layer_set:
+                if seg.layer not in layer_set or seg.bundle_id in locked_ids:
                     continue
                 span_len = seg.span_hi - seg.span_lo
                 bid = seg.bundle_id
@@ -1031,6 +1041,13 @@ class NutsFlowMixin:
             # Per-instance copies of the reference bits + vias.  Unplaced
             # reference bits have no rows to copy, so each copy inherits the
             # reference's shortfall in the honest unplaced count.
+            # INVARIANT (load-bearing): copies are NOT re-culled against
+            # keepouts — they come from the already-culled reference solve,
+            # and a sibling is only copied when check_template_tracks proved
+            # its span-aware track pools (which INCLUDE keepouts) identical
+            # to the reference's: a sibling whose window differs by a keepout
+            # is misaligned and never reaches this copy loop.  If the
+            # keepout model changes, keep the check's pools in lockstep.
             exp_bits, placed_bits = {}, {}
             for b in ref_segs:
                 exp_bits[b.bundle_id] = (exp_bits.get(b.bundle_id, 0)
