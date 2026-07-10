@@ -28,7 +28,7 @@ SQLite browser (e.g. [DB Browser for SQLite](https://sqlitebrowser.org/)).
 5. [Notes and caveats](#5-notes-and-caveats)
 6. [Design interchange formats](#6-design-interchange-formats)
    - [Supported today: LEF/DEF + Verilog](#supported-today-lefdef--verilog)
-   - [Planned: GDSII import/export](#planned-gdsii-importexport)
+   - [GDSII import/export](#gdsii-importexport)
    - [Planned: OpenAccess import/export](#planned-openaccess-importexport)
 
 ---
@@ -172,7 +172,8 @@ was persisted, `_persist_nuts` persists the parents first. `clear_bundles()` /
 `run_nuts` also writes a **`route_snapshot`** singleton (id=1): a SHA-256 over a
 canonical, order-independent serialization of all `bus_segment` + `bus_via` rows,
 plus the row counts and stage — so a routing change is one reviewable line in the
-`*.bdb.sql` diff, and it is the natural feed for the planned BDB → OA/GDS export.
+`*.bdb.sql` diff, and it is the natural feed for BDB → GDS export (and the
+planned OA export).
 C++ API: `add_bus_segment(BusSegRow)`, `add_bus_via(BusViaRow)`,
 `clear_bus_routing()`, `bus_segments(bundle_id)`, `bus_vias(bundle_id)`,
 `set_route_snapshot(hash, n_seg, n_via, stage[, n_net_seg, n_net_via])`,
@@ -1347,7 +1348,7 @@ shape of the planned export/round-trip formats.
 | LEF | import | ✅ supported (subset) | `import_def_lef` |
 | DEF | import | ✅ supported (subset) | `import_def_lef` |
 | Verilog (structural) | import | ✅ supported (subset) | `import_verilog` |
-| GDSII | import + export | 🚧 planned | — |
+| GDSII | import + export | ✅ supported (Phases G0–G4) | `import_gds` / `export_gds` |
 | OpenAccess | import + export | 🚧 planned | — |
 
 ### Supported today: LEF/DEF + Verilog
