@@ -156,9 +156,27 @@ def test_gui_and_cli_share_one_congruence_definition():
     comps = state.bdb.all_components()
     issues = bottom_up_congruence_issues(comps, "proc_cell")
     assert issues, "shared helper must flag the rotated instance"
-    ok, reason = fpc._bottom_up_eligible(state, "proc_cell", False, True, comps)
+    ok, reason = fpc._bottom_up_eligible(state, "proc_cell", False, True,
+                                         {"comps": comps})
     assert ok is False
     assert issues[0] in reason
+
+
+def test_list_builds_component_index_once(monkeypatch):
+    """One list_cell_settings call must build the congruence component index
+    ONCE and reuse it for every cell — not O(#cells × #components) dialog
+    construction (Codex #251 P2)."""
+    state = _hier_state()
+    calls = {"n": 0}
+    real_index = fpc.bottom_up_congruence_index
+
+    def counting_index(comps):
+        calls["n"] += 1
+        return real_index(comps)
+
+    monkeypatch.setattr(fpc, "bottom_up_congruence_index", counting_index)
+    rows = fpc.list_cell_settings(state)
+    assert len(rows) == 2 and calls["n"] == 1
 
 
 # ── Extensibility smoke ──────────────────────────────────────────────────────

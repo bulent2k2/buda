@@ -39,7 +39,8 @@ import buda
 # The one shared definition of bottom-up congruence (also used by the CLI's
 # set_bottom_up / run_planner hier), so the GUI and CLI can never diverge on
 # what "congruent" (bottom-up-eligible) means.
-from buda_session.util import bottom_up_congruence_issues
+from buda_session.util import (bottom_up_congruence_index,
+                               bottom_up_congruence_issues_from_index)
 
 
 def parse_time_budget(s: str) -> float:
@@ -1111,12 +1112,15 @@ class CellSetting:
     """One per-cell configuration property.
 
     `eligible` gates on the TRANSITION, not a direction heuristic:
-    (state, cell, old, new, comps=None) -> (ok, reason) for moving `cell`
+    (state, cell, old, new, ctx=None) -> (ok, reason) for moving `cell`
     from `old` to `new`.  Each descriptor owns its own rule — bottom_up
     gates only the ON transition (clearing is always allowed), a future
     float/choice kind defines exactly which of ITS transitions need
-    validation.  The optional `comps` is a pre-fetched `all_components()`
-    row list so list_cell_settings pays the read once per call, not per cell.
+    validation.  The optional `ctx` is a dict list_cell_settings shares
+    across every cell of one call (seeded with "comps", the pre-fetched
+    `all_components()` rows) so a descriptor can cache whatever derived
+    index it needs — the DB read AND the index build are paid once per
+    dialog open, not per cell.
     """
     key:      str                # logical/BDB key, e.g. "bottom_up"
     label:    str                # column header, e.g. "Bottom-Up"
@@ -1124,21 +1128,30 @@ class CellSetting:
     default:  object             # value that is "unset" (False for bottom_up)
     get:      Callable           # (state, cell) -> value
     set:      Callable           # (state, cell, value) -> None (raises on invalid)
-    eligible: Callable           # (state, cell, old, new, comps=None) -> (ok, reason)
+    eligible: Callable           # (state, cell, old, new, ctx=None) -> (ok, reason)
     help:     str = ""           # tooltip / status text
 
 
-def _bottom_up_eligible(state, cell, old, new, comps=None):
+def _bottom_up_eligible(state, cell, old, new, ctx=None):
     """Gate only the ON transition on instance congruence; `off` clears
     unconditionally — a cell marked bottom_up that later became incongruent
     (a rotate/move this session, or a stale BDB) must always be clearable.
     This mirrors the CLI's set_bottom_up exactly.  The GUI gate is UX, not
-    the safety net: run_planner hier re-checks congruence at expansion time."""
+    the safety net: run_planner hier re-checks congruence at expansion time.
+
+    The component index is cached in `ctx` so one list_cell_settings call
+    builds it once and every cell's check reuses it (Codex #251 P2)."""
     if not new:
         return (True, "")
-    if comps is None:
-        comps = state.bdb.all_components()
-    issues = bottom_up_congruence_issues(comps, cell)
+    index = ctx.get("bu_index") if ctx is not None else None
+    if index is None:
+        comps = (ctx.get("comps") if ctx is not None else None)
+        if comps is None:
+            comps = state.bdb.all_components()
+        index = bottom_up_congruence_index(comps)
+        if ctx is not None:
+            ctx["bu_index"] = index
+    issues = bottom_up_congruence_issues_from_index(index, cell)
     if issues:
         shown = "; ".join(issues[:4])
         more = "" if len(issues) <= 4 else f" (+{len(issues) - 4} more)"
@@ -1180,14 +1193,17 @@ def _cell_setting(key: str) -> CellSetting:
 def list_cell_settings(state: FloorplannerAppState) -> list[CellSettingsRow]:
     """One row per cell type with its per-setting value + activate-eligibility.
 
-    Computed from a single all_components() read per call, so a large BDB
-    pays the congruence subtree scan once when the dialog opens, not per
-    widget.  Non-bool kinds have no single "activating" value, so their
+    Computed from a single all_components() read per call — and a single
+    derived component index, cached in the shared `ctx` dict — so a large
+    BDB pays the DB read and the index build once when the dialog opens,
+    not per cell/widget (the per-cell cost is just that cell's subtree
+    compare).  Non-bool kinds have no single "activating" value, so their
     can_activate is True (their eligible runs at set time instead).
     """
     if state.bdb is None:
         return []
     comps = state.bdb.all_components()
+    ctx: dict = {"comps": comps}      # shared across all cells of this call
     inst_counts: dict[str, int] = {}
     for c in comps:
         inst_counts[c.cell] = inst_counts.get(c.cell, 0) + 1
@@ -1198,9 +1214,9 @@ def list_cell_settings(state: FloorplannerAppState) -> list[CellSettingsRow]:
             value = s.get(state, cr.name)
             if s.kind == "bool":
                 try:
-                    ok, reason = s.eligible(state, cr.name, value, True, comps)
+                    ok, reason = s.eligible(state, cr.name, value, True, ctx)
                 except TypeError:
-                    # Descriptor without the optional comps parameter.
+                    # Descriptor without the optional ctx parameter.
                     ok, reason = s.eligible(state, cr.name, value, True)
             else:
                 ok, reason = True, ""

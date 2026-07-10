@@ -25,6 +25,23 @@ _RR_MAX_CANDIDATES_PER_BUNDLE = 8   # alternate candidates tried per contender /
 _RR_DEFAULT_MAX_ITER = 10           # outer-loop cap when no arg given
 
 
+def bottom_up_congruence_index(comps):
+    """One-pass component index for congruence checks over MANY cells:
+    ``(insts_by_cell, by_parent)``.
+
+    Build it once per `all_components()` read and evaluate any number of
+    cells against it via `bottom_up_congruence_issues_from_index` — the
+    Cell Settings dialog path, which would otherwise rebuild the full
+    index per cell (O(#cells × #components)).  Single-cell callers use
+    `bottom_up_congruence_issues`, which composes the two.
+    """
+    insts_by_cell, by_parent = {}, {}
+    for c in comps:
+        insts_by_cell.setdefault(c.cell, []).append(c)
+        by_parent.setdefault(c.parent_id, []).append(c)
+    return insts_by_cell, by_parent
+
+
 def bottom_up_congruence_issues(comps, cell):
     """Verify every instance of `cell` is a pure translated copy of the
     first one — the precondition for bottom-up template planning, whose
@@ -47,11 +64,15 @@ def bottom_up_congruence_issues(comps, cell):
 
     Returns a list of human-readable issue strings (empty = congruent).
     """
-    insts, by_parent = [], {}
-    for c in comps:
-        if c.cell == cell:
-            insts.append(c)
-        by_parent.setdefault(c.parent_id, []).append(c)
+    return bottom_up_congruence_issues_from_index(
+        bottom_up_congruence_index(comps), cell)
+
+
+def bottom_up_congruence_issues_from_index(index, cell):
+    """`bottom_up_congruence_issues` against a prebuilt
+    `bottom_up_congruence_index` (same checks, same issue strings)."""
+    insts_by_cell, by_parent = index
+    insts = insts_by_cell.get(cell, [])
     issues = [f"{c.name}: orientation {c.orient} (need 'N')"
               for c in insts if c.orient != "N"]
     if len(insts) < 2:

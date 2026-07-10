@@ -14,14 +14,21 @@ toggle for `cell.bottom_up`"*. As-built notes:
   on refusal, then dispatches to the descriptor's `set` — which is therefore
   the *raw* BDB write (`set_cell_bottom_up`), not a separately-gated
   `_set_bottom_up_checked`. One validation path instead of two.
-- `eligible` takes an optional trailing `comps` argument (a pre-fetched
-  `all_components()` row list) so `list_cell_settings` pays the congruence
-  subtree scan once per dialog open; descriptors without the parameter
-  still work (TypeError fallback re-calls without it).
+- `eligible` takes an optional trailing `ctx` argument — a dict
+  `list_cell_settings` shares across every cell of one call (seeded with
+  `"comps"`, the pre-fetched `all_components()` rows) in which a descriptor
+  caches whatever derived index it needs. Bottom-up caches its component
+  index there (`bottom_up_congruence_index`), so one dialog open pays the
+  DB read AND the index build once, with only the per-cell subtree compare
+  per row — not O(#cells × #components) (Codex #251 P2). Descriptors
+  without the parameter still work (TypeError fallback re-calls without it).
 - The shared congruence helper landed as
-  `buda_session.util.bottom_up_congruence_issues(comps, cell)`;
+  `buda_session.util.bottom_up_congruence_issues(comps, cell)`, split into
+  `bottom_up_congruence_index(comps)` +
+  `bottom_up_congruence_issues_from_index(index, cell)` for the batch path;
   `hier.py`'s `_bottom_up_congruence_issues` is now a thin delegating
-  wrapper, and `floorplanner_commands._bottom_up_eligible` calls it.
+  wrapper, and `floorplanner_commands._bottom_up_eligible` uses the
+  index form.
 - The complementary Selection-panel quick checkbox shipped too
   (`Bottom-Up (cell)`, `_show_bu_chk` / `_on_bottom_up_toggle`), rendered
   from the cheap `cell_bottom_up()` read with the congruence check deferred
