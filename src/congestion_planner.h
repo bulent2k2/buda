@@ -120,6 +120,12 @@ struct BundleHierMeta {
     // cannot hold both them and this bundle.
     bool has_reservation = false;
     int  res_x1 = 0, res_y1 = 0, res_x2 = 0, res_y2 = 0;
+    // Bottom-up template instance: the assignment was decided once in the
+    // cell-local solve and copied here (pinned index + pinned layers).  A
+    // locked wrapper is planned FIRST (its plan is charged so later bundles
+    // detour) and is never chosen as a rip-up victim or a replan/negotiate
+    // target — moving one instance would break template uniformity.
+    bool locked = false;
 };
 
 struct BundleWrapper {

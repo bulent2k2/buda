@@ -712,6 +712,77 @@ class HierMixin:
         nb.rcv_spec_paths    = b.rcv_spec_paths
         return nb
 
+    def _plan_bottom_up_templates(self, iterations):
+        """Stage (a) of bottom-up template planning: solve each marked cell's
+        cell-local template bundles ONCE in a dedicated cell-local planner,
+        then pin the winning candidate index + per-segment layers on the
+        template wrapper.  _expand_hier_bundles propagates the pin to every
+        instance (and marks them hier.locked), so all instances carry one
+        uniform, locally-optimal assignment decided by intra-cell congestion
+        only — independent of any instance's surroundings.
+
+        Runs BEFORE expansion, on the pre-expansion template wrappers whose
+        candidates are still in cell-local coordinates.  A template the user
+        already pinned keeps its pin (the local solve only assigns layers).
+        Uses the WIDTH capacity model regardless of the global run's
+        signal_tracks opt-in: the local frame's coordinates do not align
+        with the absolute-coordinate routing grid, so track counting there
+        would sample the wrong windows.  Deepest cells solve first (nested
+        bottom-up cells resolve before their parents).
+
+        See docs/internal/hier_bottom_up_planning.md §3.
+        """
+        bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
+        if not bu_cells or not self.bundles:
+            return
+        # Same replica detection as _expand_hier_bundles: a replica's routing
+        # is carried by its template's per-instance expansion, so only the
+        # template participates in the local solve.
+        cell_ids = {w.input.original_bundle.id for w in self.bundles
+                    if w.input.original_bundle.cell_context}
+        by_cell = {}
+        for w in self.bundles:
+            b = w.input.original_bundle
+            if (not b.cell_context or not b.instances
+                    or b.cell_context not in bu_cells
+                    or b.parent_id in cell_ids       # replica
+                    or not w.input.candidates):
+                continue
+            by_cell.setdefault(b.cell_context, []).append(w)
+        deepest_first = sorted(
+            by_cell,
+            key=lambda c: -max(w.input.original_bundle.level
+                               for w in by_cell[c]))
+        for cell in deepest_first:
+            wrappers = by_cell[cell]
+            fp = self._build_cell_local_floorplan(
+                wrappers[0].input.original_bundle.instances[0])
+            if fp is None:
+                print(f"WARNING: bottom-up cell '{cell}': no placed instance "
+                      f"to derive the cell-local floorplan — skipped")
+                continue
+            planner = buda.CongestionPlanner(fp, self.layers)
+            for pname, pval in self._planner_params.items():
+                planner.set_planner_param(pname, pval)
+            planner.set_track_pitch(self._nuts_pitch)
+            planner.build_congestion_map()
+            assignments = planner.optimize_topologies(wrappers, iterations)
+            bid_to_w = {w.input.original_bundle.id: w for w in wrappers}
+            for asn in assignments:
+                w = bid_to_w.get(asn.bundle_id)
+                if w is None:
+                    continue
+                w.plan.selected_topology_index = asn.topo_index
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.input.topology_pinned = True
+                w.input.pinned_seg_layers = list(asn.seg_layers)
+            n_inst = len(wrappers[0].input.original_bundle.instances)
+            print(f"[BottomUp] cell '{cell}': {len(assignments)} template "
+                  f"bundle(s) planned locally; decision pinned for "
+                  f"{n_inst} instance(s)")
+
     def _expand_hier_bundles(self, bundles):
         """Expand cell-level BundleWrappers to per-instance absolute-coord wrappers.
 
@@ -821,6 +892,15 @@ class HierMixin:
                 new_w.plan.selected_topology_index = w.plan.selected_topology_index
                 if w.input.pinned_seg_layers:
                     new_w.input.pinned_seg_layers = list(w.input.pinned_seg_layers)
+                # Bottom-up template instance: a uniform copy of the local
+                # solve (index + layers pinned above).  locked wrappers are
+                # planned first (later bundles detour their committed usage)
+                # and are never rip-up victims or replan/negotiate targets.
+                # Requires a full pin — a template the local solve could not
+                # plan stays unlocked rather than freezing an unplanned state.
+                new_w.hier.locked = (b.cell_context in bottom_up
+                                     and w.input.topology_pinned
+                                     and bool(w.input.pinned_seg_layers))
                 expansion_map[b.id].append(new_w)
                 wrapper_at[(b.id, inst_name)] = new_w
                 result.append(new_w)

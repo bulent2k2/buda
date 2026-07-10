@@ -251,3 +251,79 @@ def test_planner_hier_unmarked_cell_is_not_blocked():
     s = _flow_session(db)
     db.rotate_comp("proc_i2", 180)
     _run_cmd(s, "run_planner hier")          # must not raise
+
+
+# ── Step 2: local template solve + pin broadcast + hier.locked ────────────────
+
+def _cell_wrappers(s):
+    """Expanded per-instance wrappers of the cell-local template, by instance."""
+    return {b.instances[0]: w for w in s.bundles
+            for b in [w.input.original_bundle] if b.cell_context}
+
+
+def test_bottom_up_instances_share_one_assignment():
+    """The marked cell is planned once locally; every instance carries the
+    same pinned candidate index AND identical per-segment layers, and is
+    hier.locked."""
+    db = _two_inst_db()
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    out = _run_cmd(s, "run_planner hier")
+    assert "[BottomUp] cell 'proc_cell'" in out
+    ws = _cell_wrappers(s)
+    assert set(ws) == {"proc_i1", "proc_i2"}
+    w1, w2 = ws["proc_i1"], ws["proc_i2"]
+    assert w1.hier.locked and w2.hier.locked
+    assert w1.input.topology_pinned and w2.input.topology_pinned
+    assert w1.plan.selected_topology_index == w2.plan.selected_topology_index
+    assert list(w1.plan.seg_layers) == list(w2.plan.seg_layers)
+    assert len(w1.plan.seg_layers) > 0
+    # And the two selected topologies are exact translates (same type,
+    # same segment count).
+    t1 = w1.input.candidates[w1.plan.selected_topology_index]
+    t2 = w2.input.candidates[w2.plan.selected_topology_index]
+    assert t1.type == t2.type and len(t1.segments) == len(t2.segments)
+
+
+def test_unmarked_instances_are_not_locked():
+    db = _two_inst_db()
+    s = _flow_session(db)
+    _run_cmd(s, "run_planner hier")
+    ws = _cell_wrappers(s)
+    assert ws and all(not w.hier.locked for w in ws.values())
+
+
+def test_locked_wrappers_excluded_from_ripup_and_replan():
+    """ripup_reroute must never pick a locked wrapper as a re-route contender,
+    and the planner's incremental replan refuses a locked target outright."""
+    db = _two_inst_db()
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    locked_ids = {w.input.original_bundle.id for w in s.bundles
+                  if w.hier.locked}
+    assert locked_ids
+    assert not (set(s._rr_contenders('a')) & locked_ids)
+    for bid in locked_ids:
+        assert s.planner.replan_bundle(s.bundles, bid) is None
+        assert s.planner.replan_bundle_ripup(s.bundles, bid) == []
+
+
+def test_user_pin_on_template_survives_local_solve():
+    """A user-pinned template keeps its pinned candidate through the local
+    solve — bottom-up only adds the uniform layer assignment on top."""
+    db = _two_inst_db()
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    template = next(w for w in s.bundles
+                    if w.input.original_bundle.cell_context)
+    assert len(template.input.candidates) >= 2, "need alternatives to pin"
+    pin_idx = 1
+    template.input.topology_pinned = True
+    template.plan.selected_topology_index = pin_idx
+    _run_cmd(s, "run_planner hier")
+    ws = _cell_wrappers(s)
+    assert all(w.plan.selected_topology_index == pin_idx
+               for w in ws.values())
+    assert all(w.hier.locked for w in ws.values())

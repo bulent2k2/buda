@@ -151,14 +151,20 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
 `RoutingGrid`/`verify` for the track enumeration.
 
 1. **What "same signal tracks" means.** For each bottom-up cell, for each
-   layer its local routing uses, for each solved segment's perpendicular
-   interval: enumerate `signal_tracks_in` over each instance's translated
+   layer its local routing uses, for each solved segment: enumerate the
+   **span-aware** track pool (`signal_tracks_in_span` over the segment's
+   translated span × perpendicular interval — NOT the point-sample
+   `signal_tracks_in`, whose keepout filter misses zones that cross the
+   wire span but not the sample point; DNUTS itself prefers the span variant
+   for the same reason, `detailed_nuts.cpp:150-164`) in each instance's
    window, subtract the instance origin, and compare the resulting relative
    track-centre lists (and slot widths) across instances, within epsilon.
    This is the ground truth — it automatically accounts for pattern phase
    (offset not a multiple of `unit_pitch`), absolute-rect
    `add_grid_override` regions that cut through some instances but not
-   others, and grid keepouts that differ per instance.
+   others, and grid keepouts that differ per instance — including a keepout
+   or derived blockage crossing only part of one instance's copy of a
+   segment.
 2. **Report.** Per (cell, layer): `ALIGNED` or `MISALIGNED`, with the
    offending instances, the phase delta (`offset mod unit_pitch`), and
    missing/extra tracks. Summary per cell: aligned everywhere → eligible for
