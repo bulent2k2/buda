@@ -266,7 +266,14 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
    shared by `set_bottom_up` and `_expand_hier_bundles`; tests in
    `test/tests/test_hier_bottom_up.py`).
 2. Planner: local template solve + pin broadcast + `hier.locked` +
-   commit-first ordering + ladder/ripup exclusions.
+   commit-first ordering + ladder/ripup exclusions. — **DONE**
+   (`HierMixin._plan_bottom_up_templates` runs a dedicated cell-local
+   `CongestionPlanner` per marked cell, deepest first, WIDTH model, and pins
+   index + layers on the template; expansion marks fully-pinned instances
+   `hier.locked`; locked wrappers sort first in `optimize_topologies`, are
+   skipped as rip-up victims in the main ladder and `replan_bundle_ripup`,
+   and are refused as `replan_bundle` / negotiate / `ripup_reroute`
+   targets).
 3. NUTS: local solve + copy + `add_fixed_segments` + derived keepout mirror
    (explicitly layer-tagged; no NUTS keepout change needed — corrected G3).
 4. `check_template_tracks` + verdict caching.
