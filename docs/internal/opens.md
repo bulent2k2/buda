@@ -23,7 +23,10 @@ noted.)*
   the old WARNING-only behavior. `max_shift` remains the explicit user cap.
 - **Floorplanner UI toggle for `cell.bottom_up`** — the flag is persisted
   (v17) and the engine/BDB sides are done; the GUI neither displays nor
-  edits it.
+  edits it. Design proposed in
+  [`cell_settings_ui.md`](cell_settings_ui.md): an extensible, schema-driven
+  per-cell settings dialog (mirrors Optimize) with `cell.bottom_up` as the
+  first descriptor, reusing the CLI's congruence check.
 - **Hier topology unit tests drive a local reimplementation** —
   `test_hier_topology.py` re-implements generation in-file instead of
   calling `HierMixin._generate_hier_topo_one`, so the cross-level (case c)
