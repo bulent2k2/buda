@@ -27,7 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Iterable
+from typing import Callable, Iterable
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build")):
@@ -35,6 +35,11 @@ for _p in (os.path.join(_ROOT, "src"), os.path.join(_ROOT, "build")):
         sys.path.insert(0, _p)
 
 import buda
+
+# The one shared definition of bottom-up congruence (also used by the CLI's
+# set_bottom_up / run_planner hier), so the GUI and CLI can never diverge on
+# what "congruent" (bottom-up-eligible) means.
+from buda_session.util import bottom_up_congruence_issues
 
 
 def parse_time_budget(s: str) -> float:
@@ -1090,6 +1095,142 @@ def make_block_unique(state: FloorplannerAppState, name: str) -> str | None:
     state.bdb.add_cell(new_cell, w, h)
     state.bdb.set_comp_cell(name, new_cell)
     return new_cell
+
+
+# ── Per-cell settings (extensible registry; docs/internal/cell_settings_ui.md) ─
+#
+# Each CellSetting descriptor carries everything the Cell Settings dialog, this
+# command layer, and (optionally) a generic CLI need to render, read, validate,
+# and write one per-cell property.  Adding a future per-cell config (route
+# priority, keepout margin, layer preference, orientation-lock, …) = append one
+# descriptor; the dialog builds one column per descriptor from `kind`.
+
+
+@dataclass
+class CellSetting:
+    """One per-cell configuration property.
+
+    `eligible` gates on the TRANSITION, not a direction heuristic:
+    (state, cell, old, new, comps=None) -> (ok, reason) for moving `cell`
+    from `old` to `new`.  Each descriptor owns its own rule — bottom_up
+    gates only the ON transition (clearing is always allowed), a future
+    float/choice kind defines exactly which of ITS transitions need
+    validation.  The optional `comps` is a pre-fetched `all_components()`
+    row list so list_cell_settings pays the read once per call, not per cell.
+    """
+    key:      str                # logical/BDB key, e.g. "bottom_up"
+    label:    str                # column header, e.g. "Bottom-Up"
+    kind:     str                # "bool" now; "choice" | "float" later
+    default:  object             # value that is "unset" (False for bottom_up)
+    get:      Callable           # (state, cell) -> value
+    set:      Callable           # (state, cell, value) -> None (raises on invalid)
+    eligible: Callable           # (state, cell, old, new, comps=None) -> (ok, reason)
+    help:     str = ""           # tooltip / status text
+
+
+def _bottom_up_eligible(state, cell, old, new, comps=None):
+    """Gate only the ON transition on instance congruence; `off` clears
+    unconditionally — a cell marked bottom_up that later became incongruent
+    (a rotate/move this session, or a stale BDB) must always be clearable.
+    This mirrors the CLI's set_bottom_up exactly.  The GUI gate is UX, not
+    the safety net: run_planner hier re-checks congruence at expansion time."""
+    if not new:
+        return (True, "")
+    if comps is None:
+        comps = state.bdb.all_components()
+    issues = bottom_up_congruence_issues(comps, cell)
+    if issues:
+        shown = "; ".join(issues[:4])
+        more = "" if len(issues) <= 4 else f" (+{len(issues) - 4} more)"
+        return (False, f"instances are not congruent: {shown}{more}")
+    return (True, "")
+
+
+CELL_SETTINGS: list[CellSetting] = [
+    CellSetting(
+        key="bottom_up", label="Bottom-Up", kind="bool", default=False,
+        get=lambda st, c: st.bdb.cell_bottom_up(c),
+        set=lambda st, c, v: st.bdb.set_cell_bottom_up(c, bool(v)),
+        eligible=_bottom_up_eligible,
+        help="Plan/NUTS this cell's local interconnect once, "
+             "copy to every instance.",
+    ),
+]
+
+
+@dataclass
+class CellSettingsRow:
+    """One cell type's settings snapshot for the dialog: per-key
+    {key: (value, can_activate, reason)} — can_activate is whether the
+    setting's *activating* transition (bool: -> True) would be accepted,
+    with a human-readable reason when it would not."""
+    cell:      str
+    instances: int
+    settings:  dict[str, tuple]
+
+
+def _cell_setting(key: str) -> CellSetting:
+    for s in CELL_SETTINGS:
+        if s.key == key:
+            return s
+    raise ValueError(f"unknown cell setting '{key}' "
+                     f"(known: {', '.join(s.key for s in CELL_SETTINGS)})")
+
+
+def list_cell_settings(state: FloorplannerAppState) -> list[CellSettingsRow]:
+    """One row per cell type with its per-setting value + activate-eligibility.
+
+    Computed from a single all_components() read per call, so a large BDB
+    pays the congruence subtree scan once when the dialog opens, not per
+    widget.  Non-bool kinds have no single "activating" value, so their
+    can_activate is True (their eligible runs at set time instead).
+    """
+    if state.bdb is None:
+        return []
+    comps = state.bdb.all_components()
+    inst_counts: dict[str, int] = {}
+    for c in comps:
+        inst_counts[c.cell] = inst_counts.get(c.cell, 0) + 1
+    rows = []
+    for cr in sorted(state.bdb.all_cells(), key=lambda c: c.name):
+        settings = {}
+        for s in CELL_SETTINGS:
+            value = s.get(state, cr.name)
+            if s.kind == "bool":
+                try:
+                    ok, reason = s.eligible(state, cr.name, value, True, comps)
+                except TypeError:
+                    # Descriptor without the optional comps parameter.
+                    ok, reason = s.eligible(state, cr.name, value, True)
+            else:
+                ok, reason = True, ""
+            settings[s.key] = (value, ok, reason)
+        rows.append(CellSettingsRow(cr.name, inst_counts.get(cr.name, 0),
+                                    settings))
+    return rows
+
+
+def set_cell_setting(state: FloorplannerAppState, cell: str, key: str, value):
+    """Validate and persist one per-cell setting straight to state.bdb.
+
+    Raises PermissionError on a read-only session (exactly as write_bdb),
+    ValueError when the descriptor's eligible refuses the transition (e.g.
+    enabling bottom_up on non-congruent instances), and whatever the BDB
+    write raises for an undefined cell.  Persistence rides the existing
+    model: a binary BDB lands immediately; a *.bdb.sql session lands in the
+    temp binary and Write / Save As serializes it back.
+    """
+    if state.is_read_only:
+        raise PermissionError(
+            "This session is read-only — another fp session has the write lock.")
+    if state.bdb is None:
+        raise RuntimeError("No BDB open")
+    s = _cell_setting(key)
+    old = s.get(state, cell)
+    ok, reason = s.eligible(state, cell, old, value)
+    if not ok:
+        raise ValueError(f"{key}: cannot set '{cell}' to {value!r}: {reason}")
+    s.set(state, cell, value)
 
 
 def build_hierarchy_tree(state: FloorplannerAppState) -> list[BlockNode]:

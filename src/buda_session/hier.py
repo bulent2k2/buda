@@ -31,6 +31,8 @@ import sys
 
 import buda
 
+from .util import bottom_up_congruence_issues
+
 
 class HierMixin:
 
@@ -350,68 +352,17 @@ class HierMixin:
 
     def _bottom_up_congruence_issues(self, cell, comps=None):
         """Verify every instance of `cell` is a pure translated copy of the
-        first one — the precondition for bottom-up template planning, whose
-        per-instance copies are translation-only (offset_topology).
+        first one — the precondition for bottom-up template planning.
 
-        Checks, per instance: identity orientation 'N', equal outline
-        dimensions, and an identical FULL SUBTREE — every descendant matched
-        by path suffix on (cell type, orient, bbox relative to the instance
-        origin). The geometric comparison matters because rotate_comp /
-        flip_comp on a *hierarchical* block rewrite the children's absolute
-        bboxes and deliberately keep orient='N' — the orient token alone
-        cannot detect such an instance; the full-depth walk matters because
-        a moved GRANDCHILD leaves outline + direct children matching, and
-        the per-descendant orient matters because a rotated *square* leaf
-        descendant leaves the geometry matching too.
+        Thin session wrapper over the shared `bottom_up_congruence_issues`
+        (buda_session.util), which the Floorplanner's cell settings also use
+        so the GUI and CLI can never diverge on what "congruent" means.
 
         Returns a list of human-readable issue strings (empty = congruent).
         """
         if comps is None:
             comps = self.bdb.all_components()
-        insts, by_parent = [], {}
-        for c in comps:
-            if c.cell == cell:
-                insts.append(c)
-            by_parent.setdefault(c.parent_id, []).append(c)
-        issues = [f"{c.name}: orientation {c.orient} (need 'N')"
-                  for c in insts if c.orient != "N"]
-        if len(insts) < 2:
-            return issues
-
-        def dims(c):
-            return (round(c.x2 - c.x1, 3), round(c.y2 - c.y1, 3))
-
-        def shape(inst):
-            # Full subtree, keyed by path suffix relative to the instance.
-            out, stack, prefix = {}, [inst], inst.name + "/"
-            while stack:
-                node = stack.pop()
-                for k in by_parent.get(node.id, []):
-                    rel = (k.name[len(prefix):]
-                           if k.name.startswith(prefix) else k.name)
-                    out[rel] = (k.cell, k.orient,
-                                round(k.x1 - inst.x1, 3),
-                                round(k.y1 - inst.y1, 3),
-                                round(k.x2 - inst.x1, 3),
-                                round(k.y2 - inst.y1, 3))
-                    stack.append(k)
-            return out
-
-        ref = insts[0]
-        ref_shape = shape(ref)
-        for c in insts[1:]:
-            if dims(c) != dims(ref):
-                issues.append(f"{c.name}: outline {dims(c)} differs from "
-                              f"{ref.name} {dims(ref)}")
-                continue
-            s = shape(c)
-            if s != ref_shape:
-                bad = (sorted(set(ref_shape) ^ set(s))
-                       or sorted(k for k in ref_shape
-                                 if s.get(k) != ref_shape[k]))
-                issues.append(f"{c.name}: subtree differs from "
-                              f"{ref.name} (e.g. {', '.join(bad[:3])})")
-        return issues
+        return bottom_up_congruence_issues(comps, cell)
 
     def _build_cell_local_floorplan(self, parent_comp_name):
         """Build a Floorplan in cell-local coords for sub-components of parent."""

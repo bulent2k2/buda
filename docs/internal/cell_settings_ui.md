@@ -1,7 +1,38 @@
 # Floorplanner per-cell configuration UI — design proposal
 
-Status: **proposed** (not yet implemented). Tracks the
-[`opens.md`](opens.md) quick-win *"Floorplanner UI toggle for
+Status: **implemented** (PR #248 was the design review; the follow-up PR
+landed it). Resolves the [`opens.md`](opens.md) quick-win *"Floorplanner UI
+toggle for `cell.bottom_up`"*. As-built notes:
+
+- The registry + command layer live as a section of
+  `tools/floorplanner_commands.py` (`CellSetting`, `CELL_SETTINGS`,
+  `CellSettingsRow`, `list_cell_settings`, `set_cell_setting`) rather than a
+  separate `tools/cell_settings.py`.
+- Validation is enforced **centrally** in `set_cell_setting`: it reads the
+  old value, calls the descriptor's transition-based
+  `eligible(state, cell, old, new)` and raises `ValueError` with the reason
+  on refusal, then dispatches to the descriptor's `set` — which is therefore
+  the *raw* BDB write (`set_cell_bottom_up`), not a separately-gated
+  `_set_bottom_up_checked`. One validation path instead of two.
+- `eligible` takes an optional trailing `comps` argument (a pre-fetched
+  `all_components()` row list) so `list_cell_settings` pays the congruence
+  subtree scan once per dialog open; descriptors without the parameter
+  still work (TypeError fallback re-calls without it).
+- The shared congruence helper landed as
+  `buda_session.util.bottom_up_congruence_issues(comps, cell)`;
+  `hier.py`'s `_bottom_up_congruence_issues` is now a thin delegating
+  wrapper, and `floorplanner_commands._bottom_up_eligible` calls it.
+- The complementary Selection-panel quick checkbox shipped too
+  (`Bottom-Up (cell)`, `_show_bu_chk` / `_on_bottom_up_toggle`), rendered
+  from the cheap `cell_bottom_up()` read with the congruence check deferred
+  to the click handler, per the owner-review note below.
+- Tests: `test/tests/test_floorplanner_cell_settings.py` (fast tier).
+- User-facing docs: [Floorplanner Reference](../FLOORPLANNER_REFERENCE_GUIDE.md)
+  ("Cell Settings Dialog") and [User Guide](../FLOORPLANNER_USER_GUIDE.md).
+
+Original proposal follows (the design of record; deviations above).
+
+Tracks the [`opens.md`](opens.md) quick-win *"Floorplanner UI toggle for
 `cell.bottom_up`"*: the flag is persisted (schema v17) and the engine/BDB
 sides are done, but the GUI neither displays nor edits it.
 

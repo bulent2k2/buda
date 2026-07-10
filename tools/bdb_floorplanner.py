@@ -172,6 +172,8 @@ class BdbFloorplanner:
         self._add_btn.config(state=s)
         self._align_mb.config(state=s)
         self._opt_btn.config(state=s)
+        self._cellcfg_btn.config(state=s)
+        self._bu_chk.config(state=s)
         self._run_flow_btn.config(state=s)
         if ro:
             self._status.set(
@@ -259,6 +261,9 @@ class BdbFloorplanner:
         self._opt_btn = ttk.Button(filter_f2, text="Optimize…",
                                    command=self._open_optimize_dialog)
         self._opt_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._cellcfg_btn = ttk.Button(filter_f2, text="Cell Settings…",
+                                       command=self._open_cell_settings_dialog)
+        self._cellcfg_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
         self._edge_mode_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(filter_f2, text="Edges", variable=self._edge_mode_var,
                         command=self._sync_edge_mode).pack(side=tk.LEFT, padx=(4, 0))
@@ -278,6 +283,17 @@ class BdbFloorplanner:
         self._make_unique_btn = ttk.Button(props, text="Make Unique",
                                            command=self._on_make_unique)
         # Shown only when a replicated block is selected (packed in _update_selection_label)
+        # One-cell quick access to the bottom_up cell setting (same plumbing as
+        # the Cell Settings dialog — fpc.set_cell_setting).  Rendered from the
+        # cheap cell_bottom_up() read; the congruence check is deferred to the
+        # click handler so selection stays lag-free on a large BDB.
+        self._bu_var = tk.BooleanVar(value=False)
+        self._bu_chk = ttk.Checkbutton(props, text="Bottom-Up (cell)",
+                                       variable=self._bu_var,
+                                       command=self._on_bottom_up_toggle)
+        self._bu_cell: str | None = None
+        # Shown only when the selected block's cell is known (packed in
+        # _update_selection_label)
 
         # View settings panel
         view_f = ttk.LabelFrame(left, text="View", padding=6)
@@ -693,6 +709,23 @@ class BdbFloorplanner:
             self._push_undo(snap)
             self._draw()
             self._status.set(self._fmt_optimize_status(dlg.metrics))
+
+    def _open_cell_settings_dialog(self):
+        """All-cells settings surface (docs/internal/cell_settings_ui.md):
+        one row per cell type, one column per CellSetting descriptor."""
+        if self.state is None or self.state.bdb is None:
+            self._status.set("Open or create a BDB first.")
+            return
+        rows = fpc.list_cell_settings(self.state)
+        if not rows:
+            self._status.set("No cells defined in the BDB.")
+            return
+        dlg = _CellSettingsDialog(self.root, self.state, rows)
+        self.root.wait_window(dlg.top)
+        if dlg.summary:
+            self._status.set(dlg.summary)
+        # The selected block's quick-access checkbox may now be stale.
+        self._update_selection_label()
 
     @staticmethod
     def _fmt_optimize_status(m: dict | None) -> str:
@@ -1501,21 +1534,25 @@ class BdbFloorplanner:
             orient = self._edge_orient(self._edge_sel[0][1]) if n else "-"
             self._sel_var.set(f"Edge mode: {n} edge(s) selected ({orient}).")
             self._make_unique_btn.pack_forget()
+            self._hide_bu_chk()
             return
         if len(self._canvas_sel) > 1:
             self._sel_var.set(f"{len(self._canvas_sel)} blocks selected.")
             self._make_unique_btn.pack_forget()
+            self._hide_bu_chk()
             return
         name = self.state.selected
         if not name:
             self._sel_var.set("No block selected.")
             self._make_unique_btn.pack_forget()
+            self._hide_bu_chk()
             return
         try:
             b = self.state.block(name)
         except Exception:
             self._sel_var.set(name)
             self._make_unique_btn.pack_forget()
+            self._hide_bu_chk()
             return
         n_children = len(self._children_of(name))
         child_hint = f"  [{n_children} children]" if n_children else ""
@@ -1527,11 +1564,50 @@ class BdbFloorplanner:
         else:
             cell_hint = f"\nCell: {cell}" if cell else ""
             self._make_unique_btn.pack_forget()
+        self._show_bu_chk(cell)
         self._sel_var.set(
             f"{name}{child_hint}{cell_hint}\n"
             f"({b.x1:.1f}, {b.y1:.1f}) - ({b.x2:.1f}, {b.y2:.1f})\n"
             f"{b.x2 - b.x1:.1f} x {b.y2 - b.y1:.1f}"
         )
+
+    def _hide_bu_chk(self):
+        self._bu_cell = None
+        self._bu_chk.pack_forget()
+
+    def _show_bu_chk(self, cell):
+        """Surface the selected cell's bottom_up flag in the Selection panel.
+
+        Deliberately rendered from the cheap cell_bottom_up() read — NO
+        congruence scan here (the Selection panel refreshes on every click,
+        and the scan is a full all_components() subtree compare).  Eligibility
+        is checked in the click handler, where the CLI also pays it.
+        """
+        if not cell or self.state is None or self.state.bdb is None:
+            self._hide_bu_chk()
+            return
+        self._bu_cell = cell
+        try:
+            self._bu_var.set(bool(self.state.bdb.cell_bottom_up(cell)))
+        except Exception:
+            self._hide_bu_chk()
+            return
+        ro = getattr(self.state, "is_read_only", False)
+        self._bu_chk.config(state="disabled" if ro else "normal")
+        self._bu_chk.pack(fill=tk.X, pady=(4, 0))
+
+    def _on_bottom_up_toggle(self):
+        cell = self._bu_cell
+        if not cell or self.state is None:
+            return
+        want = self._bu_var.get()
+        try:
+            fpc.set_cell_setting(self.state, cell, "bottom_up", want)
+            self._status.set(
+                f"Cell '{cell}' bottom_up = {'on' if want else 'off'}.")
+        except Exception as exc:
+            self._bu_var.set(not want)     # refused — revert the checkbox
+            self._status.set(f"Bottom-Up refused for '{cell}': {exc}")
 
     def _on_make_unique(self):
         name = self.state.selected
@@ -2224,6 +2300,145 @@ class _OptimizeDialog:
         except queue.Empty:
             pass
         self.top.after(100, lambda: self._poll(q))
+
+
+class _CellSettingsDialog:
+    """Modal per-cell settings table, schema-driven from fpc.CELL_SETTINGS.
+
+    A thin view over the command layer (docs/internal/cell_settings_ui.md):
+    the table is one row per cell type and one column per CellSetting
+    descriptor, `kind` selecting the widget.  Eligibility (computed once by
+    list_cell_settings on open) disables only the *enable* direction, never
+    clearing: a cell that is OFF and ineligible shows a disabled control
+    with the reason inline; a cell that is already ON but has *become*
+    ineligible keeps its control enabled so it can be unchecked — with a
+    "⚠ clear only" marker — because the CLI lets `off` clear unconditionally
+    and the GUI must not strand the user.  Apply dispatches each changed row
+    through fpc.set_cell_setting (which re-validates) and reports a one-line
+    summary of what changed / what was refused.
+    """
+
+    def __init__(self, parent, state, rows):
+        self.state   = state
+        self.summary = None
+        self._rows   = rows
+
+        self.top = tk.Toplevel(parent)
+        self.top.title("Cell Settings")
+        self.top.resizable(False, False)
+        self.top.grab_set()  # modal
+
+        tbl_f = ttk.LabelFrame(self.top, text="Per-Cell Settings", padding=6)
+        tbl_f.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+
+        col_min = [160, 70] + [90] * len(fpc.CELL_SETTINGS) + [220]
+        hdr_f = ttk.Frame(tbl_f)
+        hdr_f.pack(fill=tk.X)
+        for col, w in enumerate(col_min):
+            hdr_f.columnconfigure(col, minsize=w)
+        ttk.Label(hdr_f, text="Cell", anchor="w").grid(
+            row=0, column=0, sticky="w", padx=2)
+        ttk.Label(hdr_f, text="Instances", anchor="center").grid(row=0, column=1)
+        for j, s in enumerate(fpc.CELL_SETTINGS):
+            ttk.Label(hdr_f, text=s.label, anchor="center").grid(
+                row=0, column=2 + j)
+
+        scroll_canvas = tk.Canvas(tbl_f, height=min(len(rows) * 28 + 4, 240),
+                                  bd=0, highlightthickness=0)
+        vsb = ttk.Scrollbar(tbl_f, orient="vertical",
+                            command=scroll_canvas.yview)
+        scroll_canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        rows_f = ttk.Frame(scroll_canvas)
+        scroll_canvas.create_window((0, 0), window=rows_f, anchor="nw")
+        rows_f.bind("<Configure>",
+                    lambda e: scroll_canvas.configure(
+                        scrollregion=scroll_canvas.bbox("all")))
+        for col, w in enumerate(col_min):
+            rows_f.columnconfigure(col, minsize=w)
+
+        # Parallel per-key var dicts (the Block-Constraints pattern):
+        # _vars[key][cell] = tk variable; _orig mirrors the opening values so
+        # Apply only dispatches actual changes.
+        self._vars: dict[str, dict[str, object]] = {
+            s.key: {} for s in fpc.CELL_SETTINGS}
+        self._orig: dict[str, dict[str, object]] = {
+            s.key: {} for s in fpc.CELL_SETTINGS}
+
+        for i, row in enumerate(rows):
+            ttk.Label(rows_f, text=row.cell, anchor="w").grid(
+                row=i, column=0, sticky="w", padx=2, pady=1)
+            ttk.Label(rows_f, text=f"×{row.instances}", anchor="center").grid(
+                row=i, column=1, pady=1)
+            notes = []
+            for j, s in enumerate(fpc.CELL_SETTINGS):
+                value, can_activate, reason = row.settings[s.key]
+                self._orig[s.key][row.cell] = value
+                if s.kind == "bool":
+                    var = tk.BooleanVar(value=bool(value))
+                    self._vars[s.key][row.cell] = var
+                    # Disabled iff at-default AND the activating transition is
+                    # refused; a non-default value stays actionable (clear only).
+                    disabled = (value == s.default) and not can_activate
+                    chk = ttk.Checkbutton(
+                        rows_f, variable=var,
+                        state="disabled" if disabled else "normal")
+                    chk.grid(row=i, column=2 + j, pady=1)
+                    if not can_activate:
+                        notes.append(f"⚠ {s.label}: "
+                                     + ("clear only — " if not disabled else "")
+                                     + reason)
+                else:
+                    # Future kinds ("choice" → Combobox, "float" → Spinbox);
+                    # until one lands, a plain Entry round-trips the value and
+                    # the descriptor's set validates on Apply.
+                    var = tk.StringVar(value=str(value))
+                    self._vars[s.key][row.cell] = var
+                    ttk.Entry(rows_f, textvariable=var, width=8).grid(
+                        row=i, column=2 + j, pady=1)
+            note = " | ".join(notes)
+            lbl = ttk.Label(rows_f, text=note, anchor="w",
+                            foreground="#b45309", wraplength=320)
+            lbl.grid(row=i, column=2 + len(fpc.CELL_SETTINGS),
+                     sticky="w", padx=(6, 2), pady=1)
+
+        btn_f = ttk.Frame(self.top)
+        btn_f.pack(fill=tk.X, padx=8, pady=8)
+        ttk.Button(btn_f, text="Apply", command=self._apply).pack(
+            side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_f, text="Cancel", command=self.top.destroy).pack(
+            side=tk.RIGHT)
+
+    def _apply(self):
+        applied, refused = [], []
+        for s in fpc.CELL_SETTINGS:
+            for row in self._rows:
+                cell = row.cell
+                var = self._vars[s.key][cell]
+                new = var.get()
+                if s.kind == "bool":
+                    new = bool(new)
+                if new == self._orig[s.key][cell]:
+                    continue
+                try:
+                    fpc.set_cell_setting(self.state, cell, s.key, new)
+                    applied.append(f"{cell}.{s.key}={new}")
+                except Exception as exc:
+                    refused.append(f"{cell}.{s.key}: {exc}")
+        parts = []
+        if applied:
+            parts.append(f"applied {', '.join(applied)}")
+        if refused:
+            parts.append(f"refused {'; '.join(refused)}")
+        self.summary = ("Cell settings: " + "; ".join(parts)
+                        if parts else "Cell settings: no changes.")
+        if refused:
+            messagebox.showwarning(
+                "Cell Settings", "Some changes were refused:\n\n"
+                + "\n".join(refused), parent=self.top)
+        self.top.destroy()
 
 
 def main():
