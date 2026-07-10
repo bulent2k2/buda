@@ -121,8 +121,99 @@ plain one-way nets between the same blocks — see
 
 Topology generation would need to treat a multi-driver bundle as a fan-in tree
 (several source busterms, one sink), e.g. an MST/Steiner trunk that each driver
-joins, rather than a single `src→dst` spine. `check_connectivity` should then
+joins, rather than a single `src→dst` spine. `check_design` should then
 also verify that every original net driver is actually attached (the missing
 fidelity check that let this slip through). Revisit `test_bundler.py`'s
 `bundler_logic.feature` "Convergent Bundling" scenario and the pipeline test here
 alongside that work.
+
+## Test-case assessment (2026-07-10)
+
+Coverage for the future fan-in work already exists in two tiers, with known
+gaps:
+
+**Tier 1 — minimal synthetic repro (acceptance harness, inversion-ready).**
+`test_bundler_convergent_pipeline.py`'s 4-drivers-at-separated-rows → 1-sink
+scenario makes the defect *measurable from NUTS output* (`_h_rows` /
+`_covered`): STRICT reaches all four source rows, CONVERGENT reaches one.
+When the fan-in tree lands, two tests invert into the acceptance tests:
+
+- `test_convergent_fanin_collapses_to_one_driver` →
+  `_covered(rows) == set(_SOURCE_ROWS)` (every driver physically routed);
+- `test_convergent_topo_check_does_not_flag_missing_drivers` → the new
+  net-driver fidelity check FLAGS a bundle with an unattached driver.
+
+**Tier 2 — realistic scale vehicle.** `demo/ariane136_l2.buda` (25 SRAM
+blocks + cpu_core, already `run_bundler CONVERGENT`): the per-way/per-bank
+read-data buses have 12 different SRAM drivers fanning in to cpu_core —
+1024 bits in one genuinely convergent merge. Today it exhibits the unsound
+single-driver route at scale; after the fix it is the QoR showcase. Its
+sibling `ariane136_l2b.buda` hand-aggregates the same rdata into
+broadcast-style single-driver buses — a ready A/B of "fan-in tree" vs
+"manual aggregation".
+
+**Gaps to fill alongside the implementation:**
+
+- No unit-level topology test for the multi-source shape itself (per-driver
+  busterms/segments; interplay with `finalize_candidates`' coverage gate) —
+  make it fixtureless so `bin/u2b` can render it.
+- No mixed-case test: a bundle where some nets share a driver and some
+  don't, and fan-in meeting the multicast trunk+branch shapes.
+- No hier variant: `run_hier_bundler` supports STRICT/BIDIRECTIONAL only —
+  scope decision needed (see the hier rows in the scan below).
+- Neither ariane demo is in the golden or `wl_corpus` sets — no ratchet.
+  Add `ariane136_l2` to `wl_corpus` once the fan-in tree routes it.
+
+## Corpus scan: where CONVERGENT would change bundling today (2026-07-10)
+
+Every `flow/` + `demo/` script was scanned for **fan-in merges**: nets
+sharing a receiver-instance set with ≥2 distinct driver instances — exactly
+where CONVERGENT diverges from STRICT. Rerun with
+`PYTHONPATH=build python3 tools/scan_fanin.py` (static `add_net`/`add_bus`
+parse following `source`; BDB-fixture flows materialized via
+`bdb_serialize.py` and read at leaf endpoint level, which approximates the
+depth-aware hier signatures). 40 of the flows/demos contain at least one
+merge; curated below.
+
+**Genuine fan-in semantics — good flow-test / QoR candidates once the
+feature lands** (all currently STRICT):
+
+| Flow | Fan-in pattern | Scale |
+|---|---|---|
+| `demo/mempool_tile.buda` | 4 cores → shared bank array (TCDM crossbar write path), core pairs → shared icaches | 256b + 2×64b |
+| `demo/mempool_group.buda` | 3 interconnect ports → the tile array | 108b |
+| `demo/mempool_cluster.buda` | all-to-all: each group receives from the other 3 — four *overlapping* fan-ins (stress case for trunk sharing between fan-in trees) | 4×192b |
+| `demo/ariane/ariane_core.buda` | alu/lsu/mult/id_stage → issue (writeback!) and alu/lsu/mult → regfile | 44b + 18b |
+| `demo/ariane/ariane.buda` | dcache_hi/lo + execute → lsu; execute + icache → frontend | 34b + 26b |
+| `demo/ariane136.buda`, `demo/ariane_buda5.buda` | dcache_data + icache_data → cpu_core | 192b |
+| `demo/large_scale_demo.buda` (+ `_pseudo_hier`; flow-side twins `flow/test6.buda`, `flow/large_scale_demo_buses.buda`) | SoC: 7 masters → NoC, 4 → L3, 3 → sec, 2 → disp | 1400b + 352b + … |
+| `demo/congestion_demo.buda` | cpu + gpu → display — the minimal *real* example | 32b |
+
+The mempool trio and `ariane_core`'s writeback fan-in are the most
+faithful to the feature's intent (multiple masters → one slave);
+`large_scale_demo`'s 7-master NoC merge is the big-QoR target, and its
+`flow/test6.buda` twin means a flow-tier regression vehicle already exists.
+
+**Incidental signature collisions — do NOT switch these** (the shared
+receiver is a coincidence of the scenario, and merging would change what
+the flow tests):
+
+- `flow/channel_stress.buda` (+ `test4`/`test4_nets` copies, and `test5`'s
+  3×3 variant) — many top drivers → each bottom block, but these flows
+  exist to stress *per-bus* channel packing; merging 62 bundles into 8
+  would test something else entirely.
+- `flow/datapath_multi_trunk.buda`, `flow/datapath_row_vhv.buda`,
+  `flow/synth_{hv,vh}_bitrunk.buda` — column taps from two sources; these
+  exercise BITRUNK shapes, not fan-in.
+- Small regression flows (`dnuts1/2`, `planner6`, `pull1`,
+  `sel_topos_typo`, `three_blocks_3_bundles`, `four_blocks_3_bundles`,
+  `future/nuts_span_stretch_gap3`) — premises depend on their exact
+  bundle counts.
+- Hier flows (`hbundles/04/05/08/10`, `hier_bundle1/2`) — leaf-level
+  fan-ins exist (e.g. hbundles/10 shows 59 merge groups), but the hier
+  bundler has no CONVERGENT mode; these become relevant only if the mode
+  is added there, and the depth-aware signature may split the leaf-level
+  groups differently.
+- BDB-fixture flows (`rnr/mix`, `mix2`, `slowdown*`) — 12 leaf-level
+  merges each, but all are template-replicated copies of the incidental
+  dnuts1 pattern (`u0`+`v0` → `u11` per instance); not fan-in intent.
