@@ -117,28 +117,13 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
                 seen.add(uid)
                 existing.append(c)
                 added += 1
-            # Keep the accreted pool WL-sorted, mirroring the C++ annotate_and_sort
-            # (estimated_wirelength ascending, then type) so cand_index stays a
-            # meaningful ranking instead of "old pool, then newly-appended tail".
-            # Re-sorting moves indices, so remap the candidate-index references that
-            # must follow their candidate — the pin (selected_topology_index) and the
-            # dogleg slot/original.  Per-segment plan arrays ride the SELECTED
-            # candidate, not a candidate index, so they need no remap.
-            bid = str(w.input.original_bundle.id)
-
-            def _uid_at(idx):
-                return buda.topo_uid(existing[idx]) if 0 <= idx < len(existing) else None
-            sel_uid = _uid_at(w.plan.selected_topology_index)
-            dg_uid = _uid_at(session._dogleg_slot.get(bid, -1))
-            og_uid = _uid_at(session._dogleg_originals.get(bid, -1))
-            existing.sort(key=lambda c: (c.estimated_wirelength, c.type))
-            pos = {buda.topo_uid(c): i for i, c in enumerate(existing)}
-            if sel_uid is not None:
-                w.plan.selected_topology_index = pos[sel_uid]
-            if dg_uid is not None:
-                session._dogleg_slot[bid] = pos[dg_uid]
-            if og_uid is not None:
-                session._dogleg_originals[bid] = pos[og_uid]
+            # Keep the accreted pool WL-sorted (mirrors the C++ annotate_and_sort:
+            # wirelength ascending, then type) so cand_index stays a meaningful
+            # ranking instead of "old pool, then newly-appended tail".  The shared
+            # helper re-sorts and remaps the selection + dogleg refs so the pin
+            # follows its candidate; the SAME helper runs in the knob-memo replay
+            # (_apply_gen_knobs) so a resumed bundle stays ranked.
+            existing = session._resort_pool_preserving_selection(w, existing)
             w.input.candidates = existing
             label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
             print(f"Added {added} new topolog{'y' if added == 1 else 'ies'} "
