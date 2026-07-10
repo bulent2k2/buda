@@ -15,7 +15,7 @@
 """Read-only inspection and verification reports.
 
 dump_topologies (+ per-segment connectivity detail), the geometry/slide
-helpers they share, check_connectivity at all three stages, and the
+helpers they share, check_design (alias check_connectivity) at all three stages, and the
 violation summary collapsing (with its class-level constants).
 
 Methods extracted verbatim from buda_cli.BudaSession (the CLI mixin
@@ -181,7 +181,7 @@ class ReportsMixin:
         # Resolve each hier bundle's generation-time floorplan (cell-local /
         # depth / endpoint) so pre-planner templates show real finite slides
         # and honest WL envelopes instead of the unbounded-sentinel `free` —
-        # the same resolution check_connectivity uses.
+        # the same resolution check_design uses.
         topo_fp = self._make_topo_fp_resolver()
 
         for w in wraps:
@@ -285,7 +285,7 @@ class ReportsMixin:
         print("   shape histogram: "
               + ", ".join(f"{t}={n}" for t, n in top_shapes))
 
-    def _check_connectivity(self, stage: str, all_candidates: bool = False):
+    def _check_design(self, stage: str, all_candidates: bool = False):
         if stage in ("nuts", "dnuts") and self.nuts_result is None:
             print("  Error: run_nuts required first.")
             return
@@ -305,7 +305,7 @@ class ReportsMixin:
 
         labels = {"topo": "topology", "nuts": "NUTS", "dnuts": "Detailed NUTS"}
         suffix = " (all candidates)" if (all_candidates and stage == "topo") else ""
-        print(f"[Check] Verifying {labels[stage]}-level connectivity{suffix}...")
+        print(f"[Check] Verifying {labels[stage]}-level design{suffix}...")
 
         if self._hier_expansion_map:
             fp_block_names = {name for name, _ in self.fp.get_all_blocks()}
@@ -365,11 +365,18 @@ class ReportsMixin:
                 if stage == "topo":
                     res = buda.check_topo(ct, topo, check_fp, bid)
                 elif stage == "nuts":
-                    res = buda.check_nuts(ct, self.nuts_result, topo, check_fp, self.layers, bid)
+                    # zone_fp = self.fp: NUTS placed against the SESSION
+                    # floorplan's keepout zones; a hier bundle's resolved
+                    # check_fp (right space for the busterm-face checks) has
+                    # no zones, and testing KEEPOUT_CROSS against it would
+                    # bless conflicts the engine itself counted.
+                    res = buda.check_nuts(ct, self.nuts_result, topo, check_fp,
+                                          self.layers, bid, zone_fp=self.fp)
                 else:
                     num_bits = len(w.input.original_bundle.get_net_names())
                     res = buda.check_dnuts(ct, self.detailed_result, topo, check_fp,
-                                           self.layers, bid, num_bits)
+                                           self.layers, bid, num_bits,
+                                           zone_fp=self.fp)
 
                 for v in res.violations:
                     if all_candidates and stage == "topo":
@@ -380,7 +387,7 @@ class ReportsMixin:
                     total += 1
 
         if total == 0:
-            print("  Success: no opens found.")
+            print("  Success: no violations found.")
         elif self.verbose_conn:
             for prefix, v in collected:
                 print(f"  {prefix}: {v.message}")
@@ -395,6 +402,7 @@ class ReportsMixin:
         "SEG_OPEN":     "segment disconnected",
         "LAYER_DIR":    "wrong layer direction",
         "FEEDTHRU_RELAY": "block used as feedthrough relay (segments not wire-joined)",
+        "KEEPOUT_CROSS": "wire placed on a keepout",
     }
 
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest

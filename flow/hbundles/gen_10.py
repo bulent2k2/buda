@@ -104,7 +104,7 @@ W("""#
 #   wrappers after expansion (one per physical bus).
 #   741 candidates; all 176 bundles planned STRICT (overflow=0, no
 #   rip-ups; see the per-level summary).  196 segments placed.
-#   check_connectivity nuts: Success — no opens found.
+#   check_design nuts: Success — no violations found.
 #
 #   Residual (~0.8% of bits): 10 NUTS track overlaps and 8 unplaced
 #   dnuts bits.  These are known stage-4 packing gaps, not planner
@@ -182,10 +182,10 @@ run_planner hier 5
 
 run_nuts
 
-check_connectivity nuts
+check_design nuts
 
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize
 """)

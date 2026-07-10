@@ -44,9 +44,9 @@ _BIG_DIR = os.path.join(_FLOW, 'big_data_test')
 
 # Lines of big.buda (== tc3a_flat.buda) to execute.  Stop at run_nuts: the pull
 # placement is fixed there, and detailed-NUTS / connectivity add seconds without
-# changing what this test measures.  check_connectivity is skipped for speed.
+# changing what this test measures.  check_design is skipped for speed.
 _RUN_THROUGH = "run_nuts"
-_SKIP_PREFIXES = ("check_connectivity", "visualize", "run_detailed_nuts")
+_SKIP_PREFIXES = ("check_design", "visualize", "run_detailed_nuts")
 
 
 def _run_through_nuts(script_name):

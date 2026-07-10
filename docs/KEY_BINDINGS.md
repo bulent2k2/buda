@@ -57,7 +57,7 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `b` | Toggle visibility of the floorplan **blocks**. |
 | `t` | Toggle visibility of **busterms**. |
 | `g` | Toggle visibility of the **Hanan** grid. |
-| `cmd+1`, `ctrl+1` | Bring the **Main View** window to the front. |
+| `v`, `cmd+1`, `ctrl+1` | Bring the **Main View** window to the front. Since the Main View's `v` opens/raises this explorer, tapping `v` cycles between the two windows. |
 | `z` | **Zoom In** (centered on the mouse cursor). |
 | `Z` (Shift+z) | **Zoom Out** (centered on the mouse cursor). |
 | `cmd+z`, `ctrl+z` | **Zoom to Selection**: Fit the view to the active bundle's terminals/topology. |

@@ -19,7 +19,7 @@ run_bundler strict
 corner_margin dy 2 dx 2
 set_min_stub_length 2
 generate_topologies
-check_connectivity topo
+check_design topo
 visualize_topologies
 
 # force a cycle:
@@ -27,8 +27,8 @@ select_topologies 1-3 4
 run_planner 1
 
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize

@@ -25,7 +25,7 @@ no downstream stage catches:
 
 Never-strand guard: if EVERY candidate is uncovered — or a bundle's ONLY options
 are relays — the list is kept unchanged (with a warning) so the planner's
-escalation ladder still commits one, and check_connectivity reports the issue.
+escalation ladder still commits one, and check_design reports the issue.
 
 This supersedes the "planner coverage gate" wishlist item: the planner stays
 focused on capacity/congestion, and bad candidates never reach it.

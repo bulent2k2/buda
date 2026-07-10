@@ -1,18 +1,18 @@
 # copied from big.buda
 
 # machine dependent (only my MacBook, not in the cloud)
-# ━━━ check_connectivity nuts ━━━
-# [Check] Verifying NUTS-level connectivity...
+# ━━━ check_design nuts ━━━
+# [Check] Verifying NUTS-level design...
 #   Bundle 48: Seg 0 and Seg 1 disconnected (nuts); track_pos[1]=2622.5 not in span[0]=[3063,7990]
 #   Total: 1 violation(s) in 1 group(s) across 1 bundle(s). Use --verbose-conn for per-bit detail.
-#[runtime] check_connectivity nuts: 0.008s (3 lines, 0 warn, 0 err)
+#[runtime] check_design nuts: 0.008s (3 lines, 0 warn, 0 err)
 
 source ../tracks/tracks4top.buda
 source tc3a_flat_x10.buda
 run_bundler
 generate_topologies
-check_connectivity topo all
+check_design topo all
 run_planner
 run_nuts
-check_connectivity nuts --verbose-conn
+check_design nuts --verbose-conn
 exit

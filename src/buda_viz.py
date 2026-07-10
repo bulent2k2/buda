@@ -808,7 +808,9 @@ class TopologyExplorer:
       cmd-p / cmd-n                    — prev / next topology within bundle
       [ / ]  (or ◀/▶ Bundle buttons)  — prev / next bundle
       s (or Select button)             — toggle selection (pin/unpin)
-      cmd-1                            — raise the main BUDA viz window
+      v / cmd-1 / ctrl-1               — raise the main BUDA viz window
+                                         ('v' cycles back and forth: the main
+                                          window's 'v' opens/raises this one)
       z / Z                            — zoom in / out
       cmd-z / ctrl-z                   — zoom to active bundle extent
       h / H / cmd-a / ctrl-a           — reset zoom to home full view
@@ -1553,7 +1555,10 @@ class TopologyExplorer:
                 self._draw(); return
         if event.key in ('cmd+q', 'ctrl+q'):    plt.close('all'); return
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
-        if event.key in ('cmd+1', 'ctrl+1'):
+        # 'v' mirrors cmd/ctrl-1 (raise the main BUDA viz window) — since the
+        # main window's 'v' opens/raises this explorer, tapping 'v' cycles
+        # between the two windows.
+        if event.key in ('v', 'cmd+1', 'ctrl+1'):
             if self._main_fig is not None: raise_window(self._main_fig)
             return
         if event.key in ('cmd+z', 'ctrl+z'):    self._zoom_to_bundle(); return
@@ -1683,9 +1688,9 @@ class TopologyExplorer:
             self.fig.canvas.draw_idle()
         if result is not None and self._refresh_fn is not None:
             self._refresh_fn(result)
-            # We don't automatically raise the main window here anymore, 
+            # We don't automatically raise the main window here anymore,
             # as it snatches focus from the TopologyExplorer.
-            # User can use 'cmd+1' (on Mac) or just click the window.
+            # User can use 'v' / 'cmd+1' / 'ctrl+1' or just click the window.
 
     def fig_redraw(self):
         self._draw()

@@ -119,9 +119,9 @@ def test_tc3a_flat_no_perp_range_inversion():
     # required NUTS-stage cleanliness, which is CPU-sensitive here — bundle 48
     # tips into a NUTS open on some hosts under -march=native.)
     topo = re.search(
-        r"━━━ check_connectivity topo all ━━━\n(.*?)(?=\n━━━|\Z)", out, re.S)
+        r"━━━ check_design topo all ━━━\n(.*?)(?=\n━━━|\Z)", out, re.S)
     assert topo, f"topo-stage connectivity section not found\n{out[-2000:]}"
-    assert "Success: no opens found." in topo.group(1), \
+    assert "Success: no violations found." in topo.group(1), \
         f"topo-stage connectivity not clean (perp-range inversion?):\n{topo.group(1)}"
     # The collinear-relay merge closes the DetailedNUTS strand deterministically.
     dm = re.search(
@@ -155,7 +155,7 @@ def test_two():
     assert segs  == 21
     assert viols == 0
     assert ovlps == 0
-    assert out.count("Success: no opens found.") == 3
+    assert out.count("Success: no violations found.") == 3
     dm = re.search(
         r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
@@ -283,7 +283,7 @@ def test_nuts_relax_range_reg_pinned_u_detour():
     assert int(dm.group(2)) == 0
     assert "disconnected" not in out
     assert "unbuildable" not in out
-    assert out.count("Success: no opens found.") == 1
+    assert out.count("Success: no violations found.") == 1
 
 
 def test_08_cross_level_detour_trunk_connectivity():
@@ -311,7 +311,7 @@ def test_08_cross_level_detour_trunk_connectivity():
     assert ovlps == 0
     assert "disconnected" not in out
     # topo check is not run in this flow; nuts + dnuts must both be clean
-    assert out.count("Success: no opens found.") == 2
+    assert out.count("Success: no violations found.") == 2
 
 
 def test_sel_topos_typo():
@@ -471,7 +471,7 @@ def test_09_local_global_compete_reservation_avoids_ripup():
     assert segs  == 2
     assert viols == 0
     assert ovlps == 0
-    assert out.count("Success: no opens found.") == 2
+    assert out.count("Success: no violations found.") == 2
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
     assert int(dm.group(1)) == 56    # 24 + 32 bits, one segment each
@@ -542,19 +542,25 @@ def test_ripup2_targets_actual_blocker():
 # main with the same crossing predicate the cull now applies).  Those 7
 # are now culled and counted, and 2 abstract segments report their forced
 # keepout commits — expected keepout WARNINGs, not planner regressions.
+# check_design mirrors the same two events (KEEPOUT_CROSS): the nuts
+# stage reports the 2 committed segments and the dnuts stage the 7 culled
+# bits as unplaced, so only the topo stage stays fully clean.
 # ---------------------------------------------------------------------------
 
 def test_10_four_level_scale_one_bundle_per_bus():
     out, rc = run_script("hbundles/10_chip_units_blocks_leaf.buda")
     assert_clean(out, rc, "hbundles/10_chip_units_blocks_leaf.buda")
-    # Regression: check_connectivity over hbundles verifies every candidate —
+    # Regression: check_design over hbundles verifies every candidate —
     # cell-level templates carry cell-local block names (e.g. lo/hi) absent from
     # the chip floorplan.  The check must resolve each hbundle's own generation
     # floorplan instead of crashing with `map::at: key not found`.
-    assert "Verifying topology-level connectivity (all candidates)..." in out
+    assert "Verifying topology-level design (all candidates)..." in out
     assert "map::at" not in out
     assert "Traceback" not in out
-    assert out.count("Success: no opens found.") >= 2   # topo + nuts both clean
+    # topo clean; the nuts stage honestly reports the flow's 2 keepout-
+    # committed segments (KEEPOUT_CROSS — it used to bless them), never more.
+    assert out.count("Success: no violations found.") >= 1
+    assert out.count("placed ON keepout") == 2
     # 176 buses → exactly one HBundle per bus, at its routing-context level.
     assert "HierBundler: 176 hbundles (D0: 26, D1: 30, D2: 40, D3: 80)" in out
     # The two D3 blk_cell templates expand over their 40 instances;
@@ -571,7 +577,7 @@ def test_10_four_level_scale_one_bundle_per_bus():
     other_warn = [l for l in out.splitlines()
                   if "WARNING" in l and "keepout" not in l]
     assert not other_warn, f"unexpected WARNINGs:\n" + "\n".join(other_warn)
-    assert "Success: no opens found." in out      # nuts connectivity
+    assert "Success: no violations found." in out      # nuts connectivity
     segs, viols, ovlps = nuts_summary(out)
     # Segment count rose 196→212: the corrected LOW-layer congestion model
     # (Gap 2 — leaf cells block LOW, containers stay transparent) and inter-bus

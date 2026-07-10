@@ -35,6 +35,13 @@ enum class ViolationKind {
     FEEDTHRU_RELAY, // a (single-rect) block is used as a feedthrough relay: two
                   // segments connect to it (BUSTERM) but are not joined by any
                   // wire path, so they rely on the block's internal routing
+    KEEPOUT_CROSS, // a placed wire lies ON a keepout that overlaps its span —
+                  // nuts: the bus segment's physical extent [pos ± w/2]
+                  // strictly overlaps the zone (the exhausted-window fallback
+                  // commit, same semantics as NUTSResult::num_keepout_conflicts);
+                  // dnuts: a bit's track centre is inside the zone (same
+                  // predicate as DetailedNUTS's cull_keepout_crossers —
+                  // defense-in-depth: the cull prevents this in production)
 };
 
 struct ConnViolation {
@@ -59,17 +66,28 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
                       const Floorplan& fp, int bundle_id);
 
 // NUTS-level check: same topology structure but positions from TrackSegments.
-// Includes block-coverage check for pass-through blocks at placed positions
-// and layer-direction validity (H segment on H layer, V on V).
+// Includes block-coverage check for pass-through blocks at placed positions,
+// layer-direction validity (H segment on H layer, V on V), and the
+// KEEPOUT_CROSS audit.
+//
+// zone_fp: the floorplan whose keepout zones the NUTS engine actually placed
+// against — in the hier flow `fp` may be a bundle's cell-local generation
+// floorplan (right coordinate/name space for the busterm-face checks) whose
+// zone list is EMPTY, while placements are global; testing keepouts against
+// it would silently pass a segment the engine itself counted as a conflict.
+// nullptr = use fp (the flat flow, where they are the same object).
 ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
                       const Topology& topo, const Floorplan& fp,
-                      const LayerStack& layers, int bundle_id);
+                      const LayerStack& layers, int bundle_id,
+                      const Floorplan* zone_fp = nullptr);
 
 // Detailed-NUTS-level: per-bit connectivity check using NetSegment positions.
-// Includes block-coverage check for pass-through blocks at placed positions
-// and layer-direction validity (H segment on H layer, V on V).
+// Includes block-coverage check for pass-through blocks at placed positions,
+// layer-direction validity (H segment on H layer, V on V), and the
+// KEEPOUT_CROSS audit (zone_fp as in check_nuts).
 ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
                        const Topology& topo, const Floorplan& fp,
-                       const LayerStack& layers, int bundle_id, int num_bits);
+                       const LayerStack& layers, int bundle_id, int num_bits,
+                       const Floorplan* zone_fp = nullptr);
 
 } // namespace buda

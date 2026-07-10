@@ -26,8 +26,8 @@ add_keepout 1000 8900 2800 9100 M7
 add_keepout 500 7000 1600 7200 M7
 
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 visualize
 

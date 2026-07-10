@@ -5,4 +5,4 @@ generate_topologies
 run_planner
 run_nuts
 run_detailed_nuts
-check_connectivity
+check_design

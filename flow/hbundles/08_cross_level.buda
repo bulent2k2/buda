@@ -47,7 +47,7 @@
 #   14 HBundles (D0:7 D1:3 D2:4) — one per bus (each net bundled exactly
 #   once at its most specific endpoints; level = common-ancestor depth).
 #   14 expanded wrappers; 19 segments placed; 0 NUTS overlaps
-#   check_connectivity: Success — no opens found (nuts and dnuts).
+#   check_design: Success — no violations found (nuts and dnuts).
 #
 #   Bundle classification:
 #     D0: xl_b2l_ht  (left/top→right/top/lo)     [D1→D2 cross-chip]
@@ -157,9 +157,9 @@ run_planner hier 5
 
 run_nuts
 
-check_connectivity nuts
+check_design nuts
 
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize

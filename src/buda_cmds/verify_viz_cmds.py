@@ -32,15 +32,19 @@ def cmd_report_wirelength(session, cmd, args, cmd_line):
     session._report_wirelength()
 
 
-def cmd_check_connectivity(session, cmd, args, cmd_line):
-    # Usage: check_connectivity [topo|nuts|dnuts] [all]
-    # 'all' is only meaningful for the topo stage: checks every candidate
-    # topology, not just the selected one.  Automatically used when no
-    # topology has been selected yet (i.e. before run_planner).
+def cmd_check_design(session, cmd, args, cmd_line):
+    # Usage: check_design [topo|nuts|dnuts] [all]   (alias: check_connectivity)
+    # Design audit at the given stage: connectivity opens, layer-direction
+    # validity, keepout crossings, unplaced bits.  'all' is only meaningful
+    # for the topo stage: checks every candidate topology, not just the
+    # selected one.  Automatically used when no topology has been selected
+    # yet (i.e. before run_planner).  The command outgrew its original name
+    # (it audits far more than connectivity), hence the rename; the old name
+    # stays registered as an alias so existing scripts keep working.
     stage     = args[0].lower() if args else "dnuts"
     all_cands = len(args) > 1 and args[1].lower() == "all"
     if stage in ("topo", "nuts", "dnuts"):
-        session._check_connectivity(stage, all_candidates=all_cands)
+        session._check_design(stage, all_candidates=all_cands)
     else:
         print(f"Error: unknown stage '{stage}' — use topo, nuts, or dnuts")
 
@@ -92,6 +96,12 @@ def cmd_visualize_topologies(session, cmd, args, cmd_line):
             marker = "  ← opens here" if (not all_mode and i == start) else ""
             print(f"  bundle {b.id}: {len(w.input.candidates)} "
                   f"topologies{inst_note}{marker}")
+        # If this is the flow's LAST command, emit the runtime summary before
+        # the window blocks — through the macOS .app, closing the last window
+        # can terminate the process before main()'s finally. An interleaved
+        # visualize skips this (the finally prints the complete summary).
+        if session._at_last_command:
+            session._print_end_report()
         TopologyExplorer(session.fp, wrappers,
                          sidecar_path=session._sidecar_path(),
                          layer_stack=session.layers,
@@ -148,13 +158,20 @@ def cmd_visualize(session, cmd, args, cmd_line):
                 session.detailed_result, session.routing_grid, session.layers)
     else:
         viz.draw_buses()
+    # If this is the flow's LAST command, emit the runtime summary before the
+    # window blocks — through the macOS .app, closing the last window can
+    # terminate the process before main()'s finally. An interleaved visualize
+    # skips this (the finally prints the complete summary once it returns).
+    if session._at_last_command:
+        session._print_end_report()
     viz.show()
 
 
 COMMANDS = {
     "report_wirelength": cmd_report_wirelength,
     "report_wl": cmd_report_wirelength,
-    "check_connectivity": cmd_check_connectivity,
+    "check_design": cmd_check_design,
+    "check_connectivity": cmd_check_design,   # legacy alias (pre-rename)
     "visualize_topologies": cmd_visualize_topologies,
     "dump_topologies": cmd_dump_topologies,
     "visualize": cmd_visualize,
