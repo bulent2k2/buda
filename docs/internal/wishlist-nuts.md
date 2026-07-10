@@ -26,26 +26,29 @@ false positives vs the 3 real crossings. Full write-up:
 [`keepout_model_audit.md`](keepout_model_audit.md); tests in
 `test/tests/test_keepout_model.py`.
 
-## Rename `check_connectivity` → `check_design`
+## Rename `check_connectivity` → `check_design` — ✅ RESOLVED
 
-**What:** the command's name predates most of what it does. It began as a
-pure connectivity audit (SEG/BUSTERM opens); today it also checks
-layer-direction validity (`LAYER_DIR` — an unbuildable wire, not an open)
-and keepout crossings (`KEEPOUT_CROSS` — an illegal placement, not an
-open). "check_connectivity" undersells the audit and misleads users into
+**What (history):** the command's name predated most of what it does. It
+began as a pure connectivity audit (SEG/BUSTERM opens); today it also
+checks layer-direction validity (`LAYER_DIR` — an unbuildable wire, not an
+open) and keepout crossings (`KEEPOUT_CROSS` — an illegal placement, not
+an open). "check_connectivity" undersold the audit and misled users into
 thinking a Success verdict only covers opens.
 
-**How (small):** register `check_design` in
-`src/buda_cmds/verify_viz_cmds.py` as the primary name for the same
-handler and keep `check_connectivity` as an alias — the command registry is
-a dict, so this is one entry plus doc updates (`verify_viz.md`,
-`BUDA_SCRIPT_REFERENCE.md` index, CLAUDE.md). No flow/test churn at
-introduction; migrate the `flow/` + `demo/` call sites and test
-assertions opportunistically, then (much later) deprecate the alias with a
-one-line notice. The printed headers ("Verifying NUTS-level
-connectivity...") deserve a matching touch-up ("Verifying NUTS-level
-design rules...") in the same pass — a few test greps assert on those
-strings, so update them together.
+**Resolution:** `check_design` is the primary command
+(`src/buda_cmds/verify_viz_cmds.py`, handler `cmd_check_design`, session
+method `_check_design`); `check_connectivity` stays registered as a legacy
+alias mapping to the same handler (regression:
+`test/tests/test_check_design_alias.py` asserts byte-identical output).
+Rather than the originally planned opportunistic migration, all `flow/`,
+`demo/`, `tools/`, and test call sites moved in the same pass, and the
+printed strings were touched up with them: headers read "Verifying
+{topology|NUTS|Detailed NUTS}-level design..." and the clean verdict is
+"Success: no violations found." (`test_check_connectivity_hbundle.py` →
+`test_check_design_hbundle.py`). Docs updated (`verify_viz.md`,
+`BUDA_SCRIPT_REFERENCE.md`, `BUDA_CLI.md`, `USER_GUIDE.md`, CLAUDE.md);
+historical/internal notes keep the old name (accurate via the alias).
+Deprecating the alias with a one-line notice remains a far-future option.
 
 ## Verify is keepout-blind (`KEEPOUT_CROSS` violation type) — ✅ RESOLVED
 

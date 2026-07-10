@@ -26,13 +26,13 @@ generate_topologies double_detour
 #   select_topology 1 5     # TRUNK_V@x5772 (index may shift as generation evolves)
 # Check the SELECTED topologies before planning so a topology-gen coverage gap is
 # caught at the topo stage and can't be masked by a later NUTS/DNUTS change.
-check_connectivity topo
+check_design topo
 dump_topologies --conn
 run_planner
 dump_topologies --conn
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity
+check_design
 visualize
 exit

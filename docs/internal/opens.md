@@ -10,12 +10,8 @@ items this page doesn't see).
 
 ## Quick wins (small, low risk)
 
-1. **Rename `check_connectivity` → `check_design`** —
-   [`wishlist-nuts.md`](wishlist-nuts.md) → *"Rename check_connectivity"*.
-   The command long outgrew its name: it audits connectivity AND layer-
-   direction validity AND keepout crossings (`KEEPOUT_CROSS`). Introduce
-   `check_design` as the primary name, keep `check_connectivity` as an
-   alias (no flow/test churn), migrate call sites opportunistically.
+*(none open — the `check_design` rename was the last one; see "Recently
+resolved" below.)*
 
 ## Substantial features (bounded, clear plans)
 
@@ -57,6 +53,16 @@ items this page doesn't see).
    follows the documented pattern (own translation unit behind a CMake flag).
 
 ## Recently resolved (verified on main, 2026-07-09)
+
+- **Rename `check_connectivity` → `check_design`** ✅ — the command audits
+  connectivity, layer directions, and keepout crossings, so the old name
+  undersold it. `check_design` is the primary name; `check_connectivity`
+  stays registered as a legacy alias (identical handler — alias regression
+  test `test_check_design_alias.py`). All `flow/`, `demo/`, `tools/`, and
+  test call sites migrated; the check headers now read "Verifying …-level
+  design" and the clean verdict "Success: no violations found." (layer-dir
+  and keepout violations were never *opens*). See
+  [`wishlist-nuts.md`](wishlist-nuts.md).
 
 - **Verify keepout-blindness (`KEEPOUT_CROSS`)** ✅ — `check_nuts` flags a
   placed segment lying ON a keepout that overlaps its span (the live

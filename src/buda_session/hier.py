@@ -618,7 +618,7 @@ class HierMixin:
         (absolute coords) and same-level cross-block hier bundles (generated
         against the BDB depth projection that `add_blocks_from_bdb` mirrors
         into `self.fp`).  Resolution via the same `_floorplan_for_hbundle`
-        that `check_connectivity` uses, so a cell-level template shows real
+        that `check_design` uses, so a cell-level template shows real
         finite slides BEFORE `run_planner hier` instead of the
         unbounded-sentinel `free`."""
         if self.bdb is None:

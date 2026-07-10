@@ -212,7 +212,7 @@ def test_mslide_resolves_cell_local_before_planner():
     `run_planner hier`.  dump_topologies resolves each hier bundle's
     ConnTopology against the floorplan its candidates were GENERATED in (the
     cell-local one, via `_make_topo_fp_resolver` — the same resolution
-    check_connectivity uses), so `mslide`, `wl[lo..hi]`, and the `--conn`
+    check_design uses), so `mslide`, `wl[lo..hi]`, and the `--conn`
     slide column show real finite numbers pre-planner — matching the flat
     flow — instead of the unbounded-sentinel `free` (which remains the
     display for a genuinely unresolvable candidate; PR #215)."""

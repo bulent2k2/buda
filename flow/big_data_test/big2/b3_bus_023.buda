@@ -12,10 +12,10 @@ add_net bus_023[16] blk_01.p blk_34.p,blk_39.p,blk_09.p,blk_19.p,io_pad_br.p
 
 run_bundler
 generate_topologies
-check_connectivity topo all
+check_design topo all
 run_planner
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity
+check_design
 visualize

@@ -11,14 +11,14 @@ dump_hbundles
 generate_hier_topologies
 run_planner hier 5 signal_tracks
 run_nuts
-check_connectivity nuts
+check_design nuts
 negotiate_congestion
 ripup_reroute
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 negotiate_congestion
 ripup_reroute
-check_connectivity dnuts
+check_design dnuts
 report_wirelength
 exit

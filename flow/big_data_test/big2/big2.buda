@@ -6,16 +6,16 @@ run_bundler
 #generate_topologies double_detour
 # nuts: 6 overlaps,  dnuts: 52
 generate_topologies
-check_connectivity topo all
+check_design topo all
 run_planner signal_tracks
 run_nuts
 negotiate_congestion
 # overlaps 2->0, but has no impact on DNUTS
 ripup_reroute
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
 negotiate_congestion
 # no help:
 # ripup_reroute
-check_connectivity
+check_design
 visualize

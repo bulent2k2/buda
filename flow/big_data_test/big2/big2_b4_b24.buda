@@ -175,10 +175,10 @@ select_topology 2 8
 # Check the SELECTED topologies before planning so a topology-gen coverage gap
 # (bundle 24 / blk_09) is caught at the topo stage and can't be masked by a later
 # NUTS/DNUTS change. Bundle 4's detach is a NUTS-stage artifact (clean at topo).
-check_connectivity topo
+check_design topo
 run_planner
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity
+check_design
 exit

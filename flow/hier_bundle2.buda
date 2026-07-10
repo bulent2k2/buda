@@ -43,10 +43,10 @@ add_bus e2[1]  u2/s1/r.o  u2/s2/l.i,u2/s3/r.i,u2/s3/l.i,u2/s4/r.i,u3/s1/r.i,u3/s
 
 run_bundler strict
 generate_topologies
-check_connectivity topo
+check_design topo
 run_planner 1
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 visualize

@@ -32,15 +32,19 @@ def cmd_report_wirelength(session, cmd, args, cmd_line):
     session._report_wirelength()
 
 
-def cmd_check_connectivity(session, cmd, args, cmd_line):
-    # Usage: check_connectivity [topo|nuts|dnuts] [all]
-    # 'all' is only meaningful for the topo stage: checks every candidate
-    # topology, not just the selected one.  Automatically used when no
-    # topology has been selected yet (i.e. before run_planner).
+def cmd_check_design(session, cmd, args, cmd_line):
+    # Usage: check_design [topo|nuts|dnuts] [all]   (alias: check_connectivity)
+    # Design audit at the given stage: connectivity opens, layer-direction
+    # validity, keepout crossings, unplaced bits.  'all' is only meaningful
+    # for the topo stage: checks every candidate topology, not just the
+    # selected one.  Automatically used when no topology has been selected
+    # yet (i.e. before run_planner).  The command outgrew its original name
+    # (it audits far more than connectivity), hence the rename; the old name
+    # stays registered as an alias so existing scripts keep working.
     stage     = args[0].lower() if args else "dnuts"
     all_cands = len(args) > 1 and args[1].lower() == "all"
     if stage in ("topo", "nuts", "dnuts"):
-        session._check_connectivity(stage, all_candidates=all_cands)
+        session._check_design(stage, all_candidates=all_cands)
     else:
         print(f"Error: unknown stage '{stage}' — use topo, nuts, or dnuts")
 
@@ -166,7 +170,8 @@ def cmd_visualize(session, cmd, args, cmd_line):
 COMMANDS = {
     "report_wirelength": cmd_report_wirelength,
     "report_wl": cmd_report_wirelength,
-    "check_connectivity": cmd_check_connectivity,
+    "check_design": cmd_check_design,
+    "check_connectivity": cmd_check_design,   # legacy alias (pre-rename)
     "visualize_topologies": cmd_visualize_topologies,
     "dump_topologies": cmd_dump_topologies,
     "visualize": cmd_visualize,

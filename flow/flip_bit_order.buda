@@ -17,13 +17,13 @@ run_bundler strict
 # try N instead of S:
 detour_channel S 75
 generate_topologies
-check_connectivity topo
+check_design topo
 run_planner 1
 run_nuts
-check_connectivity nuts
+check_design nuts
 
 # this bit order has balanced/matched parasitics
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize

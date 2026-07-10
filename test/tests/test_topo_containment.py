@@ -230,7 +230,7 @@ def test_b34_bus_028_repro_routes_cleanly():
     assert r.returncode == 0, f"non-zero exit {r.returncode}\n{out}"
     assert "no BUSTERM connection" not in out, out
     assert "0 bits unplaced" in out, out
-    assert "Success: no opens found." in out, out
+    assert "Success: no violations found." in out, out
 
 
 def test_b34_cheapest_candidate_is_not_a_pinch():

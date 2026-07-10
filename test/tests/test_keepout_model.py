@@ -179,7 +179,7 @@ def test_all_layer_zone_blocks_every_stage():
 # ---------------------------------------------------------------------------
 # KEEPOUT_CROSS (audit class 4 — verify keepout-blindness).  check_nuts /
 # check_dnuts used to have no keepout test at all: the pinned repro's forced
-# commit ON the keepout passed `check_connectivity nuts` with "Success: no
+# commit ON the keepout passed `check_design nuts` with "Success: no
 # opens found."  Now:
 #   nuts  — a placed bus segment whose extent [pos ± w/2] lies on a keepout
 #           overlapping its span is a KEEPOUT_CROSS violation (the live gap:
@@ -229,7 +229,7 @@ def test_check_nuts_flags_keepout_commit():
     # CLI surface: the nuts-stage check reports it, no false Success.
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        s.do_command("check_connectivity nuts")
+        s.do_command("check_design nuts")
     out = buf.getvalue()
     assert "Success" not in out and "keepout" in out.lower()
 

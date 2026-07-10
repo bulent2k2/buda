@@ -1,6 +1,6 @@
 # BUDA Script Reference — Verification & visualisation
 
-Connectivity audits and interactive inspection: `check_connectivity`, `dump_topologies`, `visualize`, `visualize_topologies`.
+Design audits and interactive inspection: `check_design`, `dump_topologies`, `visualize`, `visualize_topologies`.
 
 Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pipeline overview for where these commands run in the flow.
 
@@ -8,16 +8,23 @@ Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pip
 
 ## Verification commands
 
-### `check_connectivity`
+### `check_design`
 
 ```
-check_connectivity [stage] [all]
+check_design [stage] [all]        (alias: check_connectivity)
 ```
 
-Verify signal/bus electrical connectivity and report any open connections, missing stubs, or track routing violations. The `nuts` and `dnuts` stages also
-flag layer-direction violations: a segment (or its bit wires) assigned to a
-layer whose routing direction does not match the segment's orientation is
-reported as unbuildable.
+Audit the design at the given stage: verify signal/bus electrical
+connectivity and report any open connections, missing stubs, or track
+routing violations. The `nuts` and `dnuts` stages also flag layer-direction
+violations: a segment (or its bit wires) assigned to a layer whose routing
+direction does not match the segment's orientation is reported as
+unbuildable.
+
+> **Renamed from `check_connectivity`:** the command outgrew its original
+> name — it audits far more than connectivity (layer directions, keepout
+> crossings, unplaced bits). `check_connectivity` remains registered as a
+> legacy alias with identical behavior, so existing scripts keep working.
 
 The `nuts` and `dnuts` stages additionally audit **keepout crossings**
 (`KEEPOUT_CROSS`): at `nuts`, a placed bus segment whose physical extent
@@ -35,7 +42,7 @@ conflict. See `docs/internal/keepout_model_audit.md`.
 | `stage` | str | `dnuts` | Routing stage to verify: `topo` (topology candidates), `nuts` (abstract track sharing), or `dnuts` (detailed bit placement). |
 | `all` | keyword | — | Checks all candidate topologies instead of just the selected one. Only applicable for the `topo` stage. Automatically enabled if no topology is selected yet. |
 
-**Hierarchical design — missing-block warning:** When `check_connectivity` is called after `run_planner hier`, it additionally checks that every `connected_block_name` referenced in the selected topologies exists in the current floorplan. If any are missing:
+**Hierarchical design — missing-block warning:** When `check_design` is called after `run_planner hier`, it additionally checks that every `connected_block_name` referenced in the selected topologies exists in the current floorplan. If any are missing:
 ```
   Warning: N block(s) referenced in topologies but not in floorplan: name1, name2, ...
   Hint: call 'add_blocks_from_bdb N skip' for all required depths.
@@ -44,8 +51,8 @@ This catches the common error of calling only `add_blocks_from_bdb 0` when depth
 
 **Example:**
 ```buda
-# Check detailed NUTS placement for opens (typically at the end of script)
-check_connectivity dnuts
+# Audit detailed NUTS placement (typically at the end of script)
+check_design dnuts
 ```
 
 ---
@@ -127,7 +134,7 @@ floorplan.** The slide-derived columns (`mslide` and the `wl[lo..hi]` envelope)
 are computed by building each candidate's `ConnTopology` against the floorplan
 its candidates were **generated in** — for a pre-planning hier bundle the dump
 resolves the cell-local / depth / endpoint floorplan (the same resolution
-`check_connectivity` uses), so a **cell-level HBundle template** shows real
+`check_design` uses), so a **cell-level HBundle template** shows real
 finite slides and an honest envelope the moment candidates exist, matching the
 flat flow; after `run_planner hier` the expanded per-instance wrappers report
 the same slide magnitudes in absolute coordinates. `free` remains the display

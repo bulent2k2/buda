@@ -197,7 +197,7 @@ def snapshot_bundles(s, include_edge_id=True):
     snapshot and the per-bundle digest golden derive from identical bytes.
 
     Hier (pre-expansion) HBundles are analyzed against the same per-bundle
-    resolved floorplan check_connectivity uses, so the snapshot sees the
+    resolved floorplan check_design uses, so the snapshot sees the
     coordinate/name space the candidates were generated in.
     """
     import buda

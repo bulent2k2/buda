@@ -560,7 +560,7 @@ def test_floorplanner_commands_export_hbundle_script(tmp_path):
     assert "add_blocks_from_bdb 1 skip" in text
     assert "run_hier_bundler depth 1" in text
     assert "run_nuts" in text and "run_detailed_nuts" in text
-    assert "check_connectivity dnuts" in text
+    assert "check_design dnuts" in text
     # Self-contained tech sidecar, sourced by relative basename.
     assert "source proto_tracks.buda" in text
     sidecar = script_path.parent / "proto_tracks.buda"

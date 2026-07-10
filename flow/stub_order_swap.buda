@@ -15,8 +15,8 @@ run_planner
 add_keepout 1000 8900 2800 9100 M7
 
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 visualize
 

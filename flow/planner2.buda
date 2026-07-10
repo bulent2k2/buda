@@ -15,12 +15,12 @@ add_bus b2[8] u2.tx u1.rx
 run_bundler strict
 
 generate_topologies
-check_connectivity topo
+check_design topo
 run_planner 1
 
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity dnuts
+check_design dnuts
 
 visualize

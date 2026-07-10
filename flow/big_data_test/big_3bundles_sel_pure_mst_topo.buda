@@ -167,7 +167,7 @@ select_topology 2 10
 select_topology 3 7
 run_planner
 run_nuts
-check_connectivity nuts
+check_design nuts
 run_detailed_nuts
-check_connectivity
+check_design
 visualize
