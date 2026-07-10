@@ -82,6 +82,26 @@ def test_topo_explorer_carries_over_layer_visibility(monkeypatch):
     assert exp._hidden_seg, "every segment should be marked hidden"
 
 
+def test_topo_explorer_v_raises_main_window(monkeypatch):
+    """In the explorer, 'v' mirrors cmd/ctrl-1 (raise the main viz window); the
+    main window's 'v' opens/raises the explorer, so 'v' cycles between them."""
+    import buda_viz
+    from types import SimpleNamespace
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._highlighted = next(iter(viz._bundle_artists))
+    viz._refresh_highlight()
+    viz._open_topo_explorer()
+    exp = viz._topo_explorer
+    assert exp is not None and exp._main_fig is viz.fig
+
+    raised = []
+    monkeypatch.setattr(buda_viz, "raise_window", lambda f: raised.append(f))
+    for key in ("v", "cmd+1", "ctrl+1"):
+        raised.clear()
+        exp._on_key(SimpleNamespace(key=key, xdata=None, ydata=None))
+        assert raised and raised[-1] is viz.fig, key
+
+
 def _build_viz(flow_name, monkeypatch):
     """Run a .buda flow through the CLI and return the BudaVisualizer it builds,
     with plt.show() neutralized so nothing blocks or opens a window."""
