@@ -103,22 +103,33 @@ def test_topo_explorer_v_raises_main_window(monkeypatch):
 
 
 def test_recompute_home_bbox_tracks_current_artists(monkeypatch):
-    """After a re-run pins a different-extent topology, `h` should fit the
-    re-routed design, not the extent captured at first render. _recompute_home_bbox
-    refreshes the cached home extent from the current artists without moving the
-    camera; _redraw_nuts_tracks calls it after every re-route."""
+    """After a re-run pins a different-extent topology, `h` fits the CURRENT
+    design (blocks + live route) — including SHRINKING back when re-routing from
+    a large extent to a smaller one. It is computed from the live registered
+    artists, NOT autoscale_view(): Matplotlib's dataLim never shrinks when
+    artists are removed, so autoscaling would keep the stale union (Codex #242).
+    Cache-only: the camera is not moved. _redraw_nuts_tracks calls it per re-route."""
     viz = _build_viz("dnuts1.buda", monkeypatch)
     ax = viz.ax
+    viz._recompute_home_bbox()
+    base = viz._home_data_bbox
     view = (ax.get_xlim(), ax.get_ylim())
 
-    # Simulate a re-route whose new route reaches beyond the first-render extent.
-    ax.plot([10000.0], [12000.0], 'o')
+    # A route segment reaching far beyond the design, registered like a real one.
+    bid = next(iter(viz._bundle_artists))
+    ln, = ax.plot([1e4, 1.1e4], [1.2e4, 1.2e4])
+    viz._register(bid, ln, alpha=1.0)
     viz._recompute_home_bbox()
+    assert viz._home_data_bbox[1] >= 1e4 and viz._home_data_bbox[3] >= 1.2e4  # grew
 
-    x0, x1, y0, y1 = viz._home_data_bbox
-    assert x1 >= 10000.0 and y1 >= 12000.0, viz._home_data_bbox   # home grew to fit it
-    # Cache-only: the current view must be untouched.
-    assert ax.get_xlim() == view[0] and ax.get_ylim() == view[1]
+    # Re-routing back to the smaller design must SHRINK the home again — the bug
+    # Codex flagged: autoscale_view() would keep the stale (larger) union.
+    ln.remove()
+    viz._bundle_artists[bid] = [e for e in viz._bundle_artists[bid]
+                                if e['artist'] is not ln]
+    viz._recompute_home_bbox()
+    assert viz._home_data_bbox == base, (viz._home_data_bbox, base)   # shrank back
+    assert ax.get_xlim() == view[0] and ax.get_ylim() == view[1]      # camera untouched
 
 
 def _build_viz(flow_name, monkeypatch):

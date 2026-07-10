@@ -3349,17 +3349,61 @@ class BudaVisualizer:
         extract_from_fullscreen_tab(self._topo_explorer.fig)
 
     def _recompute_home_bbox(self):
-        """Refresh the cached home extent from the currently drawn artists, so a
-        later 'h' fits the CURRENT design after a re-run (which may have pinned a
-        different-extent topology) instead of the extent captured at first
-        render. Uses the same autoscale as show(); the current view is preserved
-        (this only updates the cache, it does not move the camera)."""
-        ax = self.ax
-        cur_x, cur_y = ax.get_xlim(), ax.get_ylim()
-        ax.set_autoscale_on(True)          # autoscale_view is a no-op once lims are fixed
-        ax.autoscale_view()
-        self._home_data_bbox = ax.get_xlim() + ax.get_ylim()
-        ax.set_xlim(cur_x); ax.set_ylim(cur_y)   # restore view (also re-disables autoscale)
+        """Refresh the cached home extent from the LIVE design artists (blocks +
+        the current route: abstract track / busterm / via lines and detailed
+        bit-wire collections), so a later 'h' fits the CURRENT design after a
+        re-run that pinned a different-extent topology.
+
+        Computed explicitly, NOT via autoscale_view(): Matplotlib's Axes.dataLim
+        never shrinks when artists are removed, so autoscaling would keep fitting
+        a previous, larger topology after re-routing to a smaller one (Codex #242).
+        Reserved bands (detour channel, pre-routes) are intentionally excluded —
+        'h' frames the design, not the empty reservation. Cache-only: the current
+        view is untouched (this does not move the camera)."""
+        import numpy as np
+
+        def _extent(a):
+            if hasattr(a, 'get_xdata'):                       # Line2D
+                xd = np.asarray(a.get_xdata(), float)
+                yd = np.asarray(a.get_ydata(), float)
+                if xd.size and yd.size:
+                    return xd.min(), xd.max(), yd.min(), yd.max()
+                return None
+            if hasattr(a, 'get_width') and hasattr(a, 'get_x'):   # Rectangle (block)
+                x, y = a.get_x(), a.get_y()
+                w, h = a.get_width(), a.get_height()
+                return min(x, x + w), max(x, x + w), min(y, y + h), max(y, y + h)
+            if hasattr(a, 'get_paths'):                       # Line/Path Collection
+                pts = [np.asarray(p.vertices, float) for p in a.get_paths()
+                       if len(p.vertices)]
+                off = np.asarray(a.get_offsets(), float)
+                if off.ndim == 2 and off.size:
+                    pts.append(off)
+                if pts:
+                    v = np.vstack(pts)
+                    return v[:, 0].min(), v[:, 0].max(), v[:, 1].min(), v[:, 1].max()
+            return None
+
+        arts = list(self._block_patch_artists)
+        for reg in (self._bundle_artists, self._detailed_bundle_artists):
+            for entries in reg.values():
+                arts.extend(e['artist'] for e in entries)
+
+        x0 = x1 = y0 = y1 = None
+        for a in arts:
+            ext = _extent(a)
+            if ext is None or not all(np.isfinite(ext)):
+                continue
+            ax0, ax1, ay0, ay1 = ext
+            x0 = ax0 if x0 is None else min(x0, ax0)
+            x1 = ax1 if x1 is None else max(x1, ax1)
+            y0 = ay0 if y0 is None else min(y0, ay0)
+            y1 = ay1 if y1 is None else max(y1, ay1)
+        if x0 is None:
+            return                              # nothing to fit — keep the old cache
+        mx = 0.05 * (x1 - x0) if x1 > x0 else 1.0
+        my = 0.05 * (y1 - y0) if y1 > y0 else 1.0
+        self._home_data_bbox = (x0 - mx, x1 + mx, y0 - my, y1 + my)
 
     def _zoom_home(self):
         if self._home_data_bbox is not None:
