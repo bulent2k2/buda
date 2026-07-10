@@ -627,6 +627,75 @@ def test_align_bottom_up_validate_quiet_when_clean():
     assert "0 new issue(s)" in out
 
 
+def test_align_bottom_up_warns_on_stale_busterms():
+    """Codex #244 finding 1: the staleness warning must fire when
+    derive_busterms ran before the align — not only after bundling."""
+    db = _two_inst_db(x2=500, y2=301, derive=True)   # busterms already derived
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "WARNING" in out and "derived busterms" in out
+    assert "stale" in out
+
+
+def _nested_db(k9_y=61):
+    """Marked parent cell containing an instance of a marked child cell,
+    plus a standalone child-cell instance (K9)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("kid_cell", 50, 50)
+    db.add_cell("par_cell", 400, 200)
+    db.add_inst_to_cell("par_cell", "k_i", "kid_cell", 20, 60)
+    db.add_inst("P0", "par_cell", "", 0, 0)
+    db.add_inst("P1", "par_cell", "", 500, 301)      # off-phase parent
+    db.add_inst("K9", "kid_cell", "", 1000, k9_y)    # standalone child inst
+    return db
+
+
+def test_align_bottom_up_nested_marked_cells():
+    """Codex #244 finding 2: with parent AND child cells marked, the parent
+    aligns first, the child's coordinates are re-read AFTER the parent move
+    (no double shift), and child instances inside marked parents are
+    anchors — only the standalone instance moves, toward them."""
+    db = _nested_db()
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"] + _PATTERNS
+              + ["set_bottom_up par_cell", "set_bottom_up kid_cell"]):
+        _run_cmd(s, c)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "2 instance(s) moved" in out
+    assert "sits off" not in out                     # anchors agree post-parent-move
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P1"].y1 == pytest.approx(302)      # parent snapped +1
+    assert comps["P1/k_i"].y1 == pytest.approx(362)  # dragged once, NOT re-shifted
+    assert comps["K9"].y1 == pytest.approx(62)       # movable: joins the anchors
+    assert comps["P0"].y1 == pytest.approx(0)        # majority stands still
+    assert s._bottom_up_congruence_issues("par_cell") == []
+    assert s._bottom_up_congruence_issues("kid_cell") == []
+    assert "MISALIGNED" not in _run_cmd(s, "check_template_tracks")
+
+
+def test_align_bottom_up_reports_unfixable_anchor():
+    """Two child instances placed at incompatible offsets INSIDE the parent
+    template cannot be phase-aligned by translation — reported, not moved."""
+    db = buda.BDB(":memory:")
+    db.add_cell("kid_cell", 50, 50)
+    db.add_cell("par_cell", 400, 200)
+    db.add_inst_to_cell("par_cell", "k1", "kid_cell", 20, 60)
+    db.add_inst_to_cell("par_cell", "k2", "kid_cell", 100, 61)  # off k1's phase
+    db.add_inst("P0", "par_cell", "", 0, 0)
+    db.add_inst("P1", "par_cell", "", 500, 300)
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"] + _PATTERNS
+              + ["set_bottom_up par_cell", "set_bottom_up kid_cell"]):
+        _run_cmd(s, c)
+    before = {c.name: (c.x1, c.y1) for c in db.all_components()}
+    out = _run_cmd(s, "align_bottom_up")
+    assert "sits off" in out and "not fixable by translation" in out
+    after = {c.name: (c.x1, c.y1) for c in db.all_components()}
+    assert before == after                           # nothing moved
+
+
 def test_align_bottom_up_max_shift_guard():
     db = _two_inst_db(x2=500, y2=301, derive=False)
     s = _placement_session(db)

@@ -1250,6 +1250,16 @@ class HierMixin:
         derive_busterms / add_blocks_from_bdb; a nudge exceeding max_shift
         (when given) is skipped with a WARNING.  Returns #instances moved.
 
+        NESTED marked cells: cells are processed parents-first (by instance
+        depth) with coordinates re-read after each cell's moves, because a
+        parent nudge drags its whole subtree.  An instance living INSIDE a
+        marked ancestor's instance is an ANCHOR — moving it alone would
+        break the ancestor's congruence — so it never moves; the target
+        phase is chosen among the anchors' phases when any exist (movable
+        siblings come to them).  Anchors at differing phases (the template
+        places two child instances at incompatible relative positions) are
+        not fixable by translation and are reported.
+
         After the moves, FloorplannerEngine.validate() audits the placement
         (block overlaps + outside-die): issues NEW relative to the pre-move
         placement are each printed as a WARNING (the moves are kept — undo
@@ -1266,10 +1276,18 @@ class HierMixin:
             print("Error: align_bottom_up requires a routing grid "
                   "(def_track_pattern) to know the track pitches")
             return 0
-        if self.bundles:
-            print("WARNING: align_bottom_up after bundling/routing began — "
-                  "derived busterms, projected blocks, and routing are now "
-                  "stale; re-run the flow from derive_busterms.")
+        # Anything derived from placement is stale after a nudge — warn on
+        # EVERY such artifact, not just bundles: derive_busterms and
+        # add_blocks_from_bdb can each run before the bundler.
+        stale = [w for got, w in (
+            (self.bdb.all_busterms(), "derived busterms"),
+            (self.fp.get_all_blocks(), "projected floorplan blocks"),
+            (self.bundles, "bundles/routing"),
+        ) if got]
+        if stale:
+            print(f"WARNING: align_bottom_up after {' + '.join(stale)} were "
+                  f"built — those coordinates are now stale; re-run the "
+                  f"flow from derive_busterms.")
         lx = self._pitch_lcm(
             [self.routing_grid.get_layer_grid(l).global_pattern().unit_pitch()
              for l, horiz in dirs.items() if not horiz])
@@ -1284,27 +1302,71 @@ class HierMixin:
 
         pre_issues = self._validate_placement()
 
-        def deltas(coords, period):
-            # Signed minimal per-instance shifts to the total-movement-
-            # minimizing common phase (candidates = the data points).
+        def to_phase(c, p, period):
+            d = (p - c) % period
+            return d - period if d > period / 2 else d
+
+        def shifts(insts, movable, coord, period):
+            # Signed minimal per-instance shifts to the common phase that
+            # (1) sits on the most anchors — immovable instances inside
+            # marked ancestors — then (2) minimizes the movables' total
+            # movement (the L1 circular median lies on a data point).
+            # Anchors always get shift 0; returns the names of any anchors
+            # OFF the chosen phase (not fixable by translation).
             if period is None:
-                return [0.0] * len(coords)
-            def to_phase(c, p):
-                d = (p - c) % period
-                return d - period if d > period / 2 else d
+                return [0.0] * len(insts), []
+            anchors = [(c.name, coord(c)) for c in insts
+                       if c.name not in movable]
+            movs = [coord(c) for c in insts if c.name in movable]
             best = None
-            for cand in coords:
-                ds = [to_phase(c, cand % period) for c in coords]
-                cost = sum(abs(d) for d in ds)
-                if best is None or cost < best[0] - 1e-9:
-                    best = (cost, ds)
-            return best[1]
+            for cand in ([a for _, a in anchors] or movs):
+                p = cand % period
+                mis = sum(1 for _, a in anchors
+                          if abs(to_phase(a, p, period)) > 1e-6)
+                cost = sum(abs(to_phase(m, p, period)) for m in movs)
+                if (best is None or mis < best[0]
+                        or (mis == best[0] and cost < best[1] - 1e-9)):
+                    best = (mis, cost, p)
+            p = best[2]
+            offside = [n for n, a in anchors
+                       if abs(to_phase(a, p, period)) > 1e-6]
+            return ([to_phase(coord(c), p, period)
+                     if c.name in movable else 0.0 for c in insts], offside)
 
         moved = 0
-        for cell in sorted(by_cell):
-            insts = by_cell[cell]
-            dxs = deltas([c.x1 for c in insts], lx)
-            dys = deltas([c.y1 for c in insts], ly)
+        # Enclosing cells before enclosed ones, and FRESH coordinates per
+        # cell: a parent's nudge drags its whole subtree, so a nested cell's
+        # deltas must never come from a pre-move snapshot.  Order by marked-
+        # ancestor nesting level (not instance depth — a child cell may also
+        # have standalone top-level instances that would tie the depths).
+        marked0 = {c.name for cs in by_cell.values() for c in cs}
+
+        def nest_level(c):
+            parts = c.name.split("/")
+            return sum(1 for k in range(1, len(parts))
+                       if "/".join(parts[:k]) in marked0)
+
+        order = sorted(by_cell,
+                       key=lambda cl: (max(nest_level(c)
+                                           for c in by_cell[cl]), cl))
+        for cell in order:
+            snap = self._bottom_up_placed_instances()   # fresh after moves
+            insts = snap.get(cell, [])
+            if len(insts) < 2:
+                continue
+            marked = {c.name for cs in snap.values() for c in cs}
+            def inside_marked(name):
+                parts = name.split("/")
+                return any("/".join(parts[:k]) in marked
+                           for k in range(1, len(parts)))
+            movable = {c.name for c in insts if not inside_marked(c.name)}
+            dxs, off_x = shifts(insts, movable, lambda c: c.x1, lx)
+            dys, off_y = shifts(insts, movable, lambda c: c.y1, ly)
+            for n in sorted(set(off_x) | set(off_y)):
+                print(f"WARNING: align_bottom_up: {n} (inside a marked "
+                      f"parent) sits off cell '{cell}'s chosen phase — the "
+                      f"parent template places it at an incompatible "
+                      f"offset; not fixable by translation")
             for c, dx, dy in zip(insts, dxs, dys):
                 dx = 0.0 if abs(dx) < 1e-9 else dx
                 dy = 0.0 if abs(dy) < 1e-9 else dy
