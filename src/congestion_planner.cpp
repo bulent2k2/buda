@@ -605,9 +605,25 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     const int centre = (slide_lo + slide_hi) / 2;
     if ((int)grid.size() < 2) return centre;
 
+    // Band-choice metric.  cong_cost_segment is overflow-only — every
+    // below-capacity band in the slide window costs 0, and the nearest wins
+    // the tie — so with kPeak enabled the EXISTING utilization must join the
+    // metric here too, or the routability term would only price the band the
+    // legacy tie-break already chose: the charge (and NUTS's seg_perp) could
+    // still land in a nearly-full band with an empty one available in the
+    // same window (Codex #252 P2).  Gated on kPeak_ so the default band
+    // choice is bit-identical.
+    auto band_cost = [&](int pp) {
+        double c = cong_cost_segment(seg, layer_id, eff_width, pp,
+                                     slide_lo, slide_hi);
+        if (kPeak_ > 0.0)
+            c += kPeak_ * peak_util_segment(seg, layer_id, pp,
+                                            slide_lo, slide_hi);
+        return c;
+    };
+
     int    best_pp   = centre;
-    double best_cost = cong_cost_segment(seg, layer_id, eff_width, centre,
-                                         slide_lo, slide_hi);
+    double best_cost = band_cost(centre);
     int    best_dist = 0;
 
     for (int b = 0; b + 1 < (int)grid.size(); ++b) {
@@ -615,8 +631,7 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
         int win_hi = std::min(grid[b + 1], slide_hi);
         if (win_hi - win_lo < eff_width) continue;   // band can't host the bus
         int pp = (win_lo + win_hi) / 2;              // centre of the usable window
-        double cost = cong_cost_segment(seg, layer_id, eff_width, pp,
-                                        slide_lo, slide_hi);
+        double cost = band_cost(pp);
         int dist = std::abs(pp - centre);
         if (cost < best_cost - 1e-9 ||
             (std::abs(cost - best_cost) < 1e-9 && dist < best_dist)) {

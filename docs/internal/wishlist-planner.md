@@ -175,21 +175,25 @@ bands a segment would use, **pre-charge** — post-charge utilization was
 measured and rejected (on an uncongested design it degenerates into an
 intrinsic "narrow channel" penalty that biases against exactly the column
 channels the BITRUNK trees use; datapath WL regressed across the sweep).
+The same term joins the slide-window band choice (`best_band_perp`) — the
+Codex #252 review caught that pricing a band the legacy nearest-band
+tie-break had already chosen steers nothing within the window; with the
+fix the charge itself (and NUTS's `seg_perp`) moves to the emptier band.
 Default `0` skips the term entirely (existing flows bit-identical; goldens
-guard it). Measured at `kPeak 0.1` on the congested corpus: **big2 NUTS
-overlaps 5→0**, **rnr/mix DNUTS unplaced 190→145 (−24%)**, channel_stress
-heals its 3 keepout-open bits (for +1–2 residual overlaps). **Why not
-default-on:** trunk-dominated `tc3a_flat` regresses at every tested value
-(12–80 DNUTS opens) and the response is value-sensitive (big2: 0.05→120
-opens, 0.1→0, 0.2→56) — the flow-feedback loops (negotiate/ripup) and the
-term interact untuned. Tests: `test/tests/test_planner_kpeak.py`
+guard it). Measured at `kPeak 0.1` on the congested corpus:
+**channel_stress heals its 3 keepout-open bits at zero overlap cost**,
+**rnr/mix DNUTS unplaced 190→128 (−33%)**, tc3a_flat stays clean
+(0.05–0.1). **Why not default-on:** big2 (signal_tracks + heavy
+negotiate/ripup healing) prefers the knob off — 5 NUTS overlaps / 0 opens
+baseline vs 6 / ~110 at every tested value — the term and the feedback
+loops double-steer untuned. Tests: `test/tests/test_planner_kpeak.py`
 (loaded-corridor steering repro + off-is-off + param recognition); docs:
 `docs/script_reference/planner.md`.
 
 **Still open:** the default-on decision (needs the wl_corpus gate below
 plus a negotiate/ripup interaction study — those loops already fix some of
-what kPeak prevents, and double-steering is the suspected source of the
-tc3a regressions), and **lever 2** (QoR-measured re-rank: let
+what kPeak prevents, and the big2 regression is the concrete double-steer
+case to debug first), and **lever 2** (QoR-measured re-rank: let
 negotiate/ripup promote a higher-estimate candidate CLASS, not just index
 alternates). The original analysis follows.
 
