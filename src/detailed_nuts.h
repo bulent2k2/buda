@@ -95,6 +95,12 @@ struct DetailedNUTSResult {
     std::vector<NetSegment> net_segments;
     std::vector<NetVia>     net_vias;
     int num_unplaced = 0;
+    // Bits removed by the post-placement keepout cull: their FINAL
+    // (junction-adjusted) span crossed a keepout on their layer — a physical
+    // violation the single-point track sampling used to place silently
+    // (keepout-model audit).  Each is also counted in num_unplaced, so the
+    // healing machinery (negotiate/ripup stage b) sees them as opens.
+    int num_keepout_bits = 0;
 };
 
 class DetailedNUTSEngine {
@@ -113,6 +119,11 @@ private:
                         DetailedNUTSResult& result) const;
     void adjust_bit_spans(const std::vector<BusSegment>& bus_segs,
                           DetailedNUTSResult& result) const;
+    // Post-placement keepout cull (keepout-model audit): remove every bit
+    // whose FINAL adjusted span crosses a keepout on its layer, counting it
+    // unplaced.  Runs on final spans, so it has zero false positives — the
+    // exact complement of the placement-time preferred-pool heuristic.
+    void cull_keepout_crossers(DetailedNUTSResult& result) const;
     void emit_bit_vias(const std::vector<BusSegment>& bus_segs,
                        DetailedNUTSResult& result) const;
 

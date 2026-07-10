@@ -62,7 +62,10 @@ def cmd_def_track_pattern(session, cmd, args, cmd_line):
     if n_sig > 0:
         session.layers.set_bit_pitch(layer_id, pat.unit_pitch() / n_sig)
 
-    # Re-apply any existing keepouts to this new layer grid.
+    # Re-apply any existing keepouts to this new layer grid.  Explicit layer
+    # sets only: a zone with EMPTY layer_ids (= blocks all layers, Python-API
+    # only) is synced by _install_leaf_keepouts before every solve — handling
+    # it here too would double-install it on layers patterned after the zone.
     for koz in session.fp.get_keepout_zones():
         if layer_id in koz.layer_ids:
             session.routing_grid.add_keepout(layer_id, 

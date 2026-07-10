@@ -85,6 +85,14 @@ struct NUTSResult {
     std::vector<JunctionInfeasibility> junction_infeasibilities;
     int num_violations = 0;   // segments placed outside their interval
     int num_overlaps   = 0;   // pairs of segments that physically overlap after placement
+    // Placed segments whose physical extent [pos - w/2, pos + w/2] lands on a
+    // keepout (user zones + implicit LOW-layer leaf footprints) overlapping
+    // their span.  Placement AVOIDS keepout-occupied intervals, but when a
+    // window is exhausted the interval-centre fallback still commits —
+    // previously with NO metric, so a bus through a keepout reported a fully
+    // clean NUTS (keepout-model audit).  Counted per segment; report-only
+    // (placement behaviour unchanged).
+    int num_keepout_conflicts = 0;
     std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
     // Topologies the dogleg pass mutated (bundle_id -> new selected Topology and
     // its seg_layers).  The CLI adopts these into its bundles before rebuilding

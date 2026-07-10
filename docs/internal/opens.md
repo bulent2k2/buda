@@ -31,13 +31,12 @@ items this page doesn't see).
    selection term, or letting negotiate/ripup up-rank across candidate
    classes. The natural continuation of the 2026-07 planner work (signal
    tracks, abutment Gap A, `kHeight`); real golden churn to review.
-4. **Abstract-vs-detailed keepout model audit** —
-   [`wishlist-planner.md`](wishlist-planner.md) → noted inside *"LOW-layer
-   abutment crossings … ✅ RESOLVED"*: abstract NUTS's `keepout_occupied`
-   admits positions DNUTS's per-track filter rejects. The planner no longer
-   routes into the known shapes (Gap A abutment predicate), but the two
-   models still disagree — a contained investigation to close the class for
-   good.
+4. **Verify keepout-blindness (`KEEPOUT_CROSS`)** —
+   [`wishlist-nuts.md`](wishlist-nuts.md) → *"Verify is keepout-blind"*.
+   Defense-in-depth spun off the closed keepout audit: `check_nuts` /
+   `check_dnuts` never test a placed wire against keepouts (the cull now
+   prevents such wires, so this only matters if a future stage regresses).
+   Small and contained.
 
 ## Big / blocked / conditional
 
@@ -61,6 +60,16 @@ items this page doesn't see).
    follows the documented pattern (own translation unit behind a CMake flag).
 
 ## Recently resolved (verified on main, 2026-07-09)
+
+- **Abstract-vs-detailed keepout model audit** ✅ — the two stages now agree
+  on what a keepout blocks: span-aware DNUTS track pools
+  (`signal_tracks_in_span`, preferred with midpoint fallback), a
+  post-adjustment crossing cull (`num_keepout_bits`, zero false positives —
+  the naive span-hard filter would have stranded 495 corpus bits vs the 3
+  real crossings it exposes in channel_stress), an abstract
+  `num_keepout_conflicts` report channel, and empty-`layer_ids` = blocks-all
+  unification. Full write-up:
+  [`keepout_model_audit.md`](keepout_model_audit.md); spin-off item 4 above.
 
 - **2-pin / n-pin filter-ordering unification** ✅ — one shared
   post-emission pipeline (`finalize_candidates`: annotate → sort → keepout

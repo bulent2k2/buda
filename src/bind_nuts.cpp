@@ -147,6 +147,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("junction_infeasibilities",
                        &NUTSResult::junction_infeasibilities)
         .def_readwrite("num_violations",     &NUTSResult::num_violations)
+        .def_readwrite("num_keepout_conflicts", &NUTSResult::num_keepout_conflicts)
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
         .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer)
         .def_readwrite("dogleg_topologies",   &NUTSResult::dogleg_topologies)
@@ -273,7 +274,8 @@ void bind_nuts(py::module_& m) {
         .def(py::init<>())
         .def_readwrite("net_segments", &DetailedNUTSResult::net_segments)
         .def_readwrite("net_vias",     &DetailedNUTSResult::net_vias)
-        .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced);
+        .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced)
+        .def_readwrite("num_keepout_bits", &DetailedNUTSResult::num_keepout_bits);
 
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
         .def(py::init<const RoutingGridStack&>())

@@ -104,13 +104,15 @@ inline void occupancy_from(const TrackSegment& ts, const TrackSegment& o,
 }
 
 // KeepoutZones on the segment's layer that intersect its span, as occupied
-// perpendicular intervals.
+// perpendicular intervals.  A zone with EMPTY layer_ids blocks every layer —
+// the same convention topology generation's keepout predicates use (the
+// keepout-model audit found this helper silently ignoring such zones).
 inline void keepout_occupied(const std::vector<KeepoutZone>& kozs,
                              const TrackSegment* t,
                              std::vector<std::pair<double,double>>& occ)
 {
     for (const auto& koz : kozs) {
-        if (!koz.layer_ids.count(t->layer)) continue;
+        if (!koz.layer_ids.empty() && !koz.layer_ids.count(t->layer)) continue;
         if (t->horiz) {
             // Horizontal segment: span in X, pos in Y.
             if (sp_lo(*t) < koz.bbox.x2 && sp_hi(*t) > koz.bbox.x1)
@@ -123,6 +125,31 @@ inline void keepout_occupied(const std::vector<KeepoutZone>& kozs,
                                static_cast<double>(koz.bbox.x2)});
         }
     }
+}
+
+// Count placed segments whose PHYSICAL extent [pos - w/2, pos + w/2] lands on
+// a keepout that overlaps their span — the keepout-model audit's report
+// channel.  Placement avoids keepout-occupied intervals, but an exhausted
+// window falls back to the interval centre with no metric; this makes that
+// commit loud.  Touching an edge does not count (strict overlap), matching
+// keepout_occupied's span test.
+inline int count_keepout_conflicts(const std::vector<KeepoutZone>& kozs,
+                                   const std::vector<TrackSegment>& segments)
+{
+    if (kozs.empty()) return 0;
+    int n = 0;
+    for (const auto& ts : segments) {
+        if (!ts.placed) continue;
+        std::vector<std::pair<double,double>> occ;
+        keepout_occupied(kozs, &ts, occ);
+        const double h  = ts.width / 2.0;
+        const double lo = ts.track_position - h;
+        const double hi = ts.track_position + h;
+        for (const auto& [k_lo, k_hi] : occ) {
+            if (lo < k_hi && hi > k_lo) { ++n; break; }
+        }
+    }
+    return n;
 }
 
 // Physical overlap test for two placed segments at their current (adjusted)

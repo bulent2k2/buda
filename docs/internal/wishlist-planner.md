@@ -38,10 +38,15 @@ test_low_layer_abutment_stub_planner_avoids_low` (planner-side guarantee:
 TOP layer chosen, all 72 bits place) and `…_dnuts_open_repro` (the
 DNUTS-side mechanism, kept alive by pinning M3 manually).
 
-**Still open (tracked in wishlist-nuts.md territory):** the abstract/
-detailed keepout-model mismatch — abstract NUTS's `keepout_occupied`
-admits a position DNUTS's per-track filter rejects — is unchanged; the
-planner now simply never routes into it on this shape.
+**Follow-up — ✅ RESOLVED:** the abstract/detailed keepout-model mismatch
+noted here was audited and closed (span-aware DNUTS track pools + final-span
+crossing cull + abstract `num_keepout_conflicts` report channel + empty-
+`layer_ids` unification). See
+[`keepout_model_audit.md`](keepout_model_audit.md) and
+[`wishlist-nuts.md`](wishlist-nuts.md). The planner's own band sampling at
+cut coordinates remains a point-sample approximation (audit class 5) — a
+cost misestimate now surfaced downstream as honest DNUTS opens rather than
+silent illegal wires; full span-aware band accounting is deferred.
 
 ## Planner coverage gate (defense-in-depth) — ✅ RESOLVED (superseded by the generation-time gate)
 
