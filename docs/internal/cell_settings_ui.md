@@ -18,7 +18,7 @@ currently only — entry.
   unknown), `bottom_up_cells()` (sorted), and `CellRow.bottom_up`
   (`all_cells()` returns it). See `src/bdb.h` / `src/bind_db.cpp`.
 - **CLI command** `set_bottom_up <cell> [on|off]`
-  (`src/buda_cmds/bdb_cmds.py:383`) — the behavior the GUI must match. It is
+  (`src/buda_cmds/bdb_cmds.py:380`) — the behavior the GUI must match. It is
   **not** a blind flag: turning it ON first runs a **congruence check** and
   refuses non-uniform cells.
 - **The congruence check** — `_bottom_up_congruence_issues(cell, comps)`
@@ -54,17 +54,25 @@ class CellSetting:
     key:      str       # logical/BDB key, e.g. "bottom_up"
     label:    str       # column header, e.g. "Bottom-Up"
     kind:     str       # "bool" now; "choice" | "float" later
+    default:  object     # value that is "unset" (False for bottom_up)
     get:      Callable   # (state, cell) -> value
     set:      Callable   # (state, cell, value) -> None   (raises on invalid)
-    eligible: Callable   # (state, cell) -> (ok: bool, reason: str)
+    # Gate on the TRANSITION, not a direction heuristic: (ok, reason) for
+    # moving `cell` from `old` to `new`. Each descriptor owns its own rule,
+    # so the clearing guarantee is a property of the descriptor, not a
+    # registry-wide "non-default direction" convention that future float/
+    # choice kinds would need exceptions to (owner review, #248 P3).
+    eligible: Callable   # (state, cell, old, new) -> (ok: bool, reason: str)
     help:     str        # tooltip / status text
 
 CELL_SETTINGS = [
     CellSetting(
-        key="bottom_up", label="Bottom-Up", kind="bool",
+        key="bottom_up", label="Bottom-Up", kind="bool", default=False,
         get=lambda st, c: st.bdb.cell_bottom_up(c),
         set=_set_bottom_up_checked,     # congruence-gated, then bdb.set_cell_bottom_up
-        eligible=_bottom_up_eligible,   # (False, "instances not congruent: …")
+        # Only the ON transition is gated; `off` clears unconditionally.
+        eligible=lambda st, c, old, new: (
+            (True, "") if not new else _bottom_up_congruent(st, c)),
         help="Plan/NUTS this cell's local interconnect once, copy to every instance.",
     ),
 ]
@@ -76,19 +84,33 @@ selecting the widget (`bool` → `Checkbutton`, `choice` → `Combobox`, `float`
 → `Spinbox`). This is deliberately more declarative than Optimize (whose
 sections are hand-built) — the whole point of the request.
 
+The transition-based `eligible(state, cell, old, new)` is what keeps the
+"clearing is always allowed" guarantee (Codex P2) descriptor-local instead of
+a registry rule: `bool` gates only `new is True`; a future `float` keepout
+margin or `choice` layer preference each define exactly which of *their*
+transitions require validation, with no ambiguous "increasing / non-default"
+heuristic to except.
+
 ## Command layer (`tools/floorplanner_commands.py`) — GUI-free, testable
 
 - `list_cell_settings(state) -> list[CellSettingsRow]` — one row per cell type
   (from `state.bdb.all_cells()`), each carrying the cell name, instance count
-  (`count_cell_instances`), and per-key `{key: (value, eligible_ok, reason)}`.
-  Eligibility is computed once from a single `all_components()` read.
+  (`count_cell_instances`), and per-key `{key: (value, can_activate, reason)}`,
+  where `can_activate = eligible(state, cell, value, <activating value>)` (for
+  `bool`, the activating value is `True`). Computed once from a single
+  `all_components()` read per call, so a large BDB pays the subtree scan once
+  when the dialog opens, not per widget.
 - `set_cell_setting(state, cell, key, value)` — read-only guard (raise
   `PermissionError`, exactly as `write_bdb`), then dispatch to the descriptor's
   `set`, which persists straight to `state.bdb`.
-- **Shared validation** — lift `_bottom_up_congruence_issues` into a free
-  function (e.g. `bottom_up_congruence_issues(comps, cell)` in a shared module)
-  that both `src/buda_session/hier.py` and `floorplanner_commands.py` import, so
-  the GUI and CLI can never diverge on what "congruent" means.
+- **Shared validation, named module.** Lift `_bottom_up_congruence_issues` into
+  a free function `bottom_up_congruence_issues(comps, cell)` in
+  **`src/buda_session/util.py`** (already the mixin-shared-helpers home), and
+  have `hier.py`'s method and `floorplanner_commands.py`'s
+  `_bottom_up_congruent` both call it, so the GUI and CLI can never diverge on
+  what "congruent" means. The import works from both sides today:
+  `bdb_floorplanner.py` puts `tools/` and `src/` on `sys.path`, and the fpc
+  tests run under pytest's `pythonpath = build src` (owner review confirmed).
 - **Eligibility gates *enabling*, not *clearing*.** Mirror the CLI exactly: the
   congruence check runs only on the ON transition (`set_bottom_up … off` always
   clears). So `_set_bottom_up_checked(state, cell, value)` validates congruence
@@ -96,9 +118,13 @@ sections are hand-built) — the whole point of the request.
   matters for the real failure mode Codex flagged: a cell marked `bottom_up`
   that *later* becomes incongruent (a rotate/move in the same session, or a
   stale BDB opened from disk) must always be clearable from the GUI — never
-  stranded. Generalizing to non-`bool` `kind`s: `eligible` bounds the
-  value-*increasing* / non-default direction; returning a setting to its
-  default is always permitted.
+  stranded. The transition-based `eligible` above makes this each descriptor's
+  own rule, not a registry-wide direction heuristic.
+- **GUI eligibility is UX, not the safety net.** `run_planner hier` re-checks
+  congruence at expansion time (`docs/internal/hier_bottom_up_planning.md`), so
+  a bottom-up flag that slipped through (e.g. a BDB hand-edited outside the GUI)
+  is still caught before it can mis-route — the dialog's gate just prevents the
+  user from *creating* that state, it isn't the last line of defense.
 
 Persistence rides the existing model: the flag is a direct `state.bdb` write
 (independent of the engine's in-memory placement). A binary BDB persists
@@ -122,9 +148,10 @@ Floorplanner-save work).
   — with a warning marker (e.g. "⚠ incongruent — clear only") — because the CLI
   lets `off` clear unconditionally and the GUI must not strand the user in a
   state only the CLI/DB edit can undo. So the render rule is: disabled iff
-  `value == default and not eligible`; otherwise actionable. Apply/Cancel; Apply
-  calls `fpc.set_cell_setting` per changed row and reports a one-line summary of
-  what changed / what was refused.
+  `value == default and not can_activate` (the `can_activate` bit
+  `list_cell_settings` already computed); otherwise actionable. Apply/Cancel;
+  Apply calls `fpc.set_cell_setting` per changed row and reports a one-line
+  summary of what changed / what was refused.
 - **Button** — a "Cell Settings…" button next to Optimize (`self._opt_btn` in
   the Blocks pane), stored as `self._cellcfg_btn` and added to the
   `_apply_ro_state` disable list so read-only sessions grey it out (parity with
@@ -136,8 +163,18 @@ Because selecting a component already surfaces its cell in the **Selection**
 panel (`_update_selection_label`, line 1498, with the ⚠ "Shared: … (×N)" line +
 Make Unique button), drop a small **"Bottom-Up" checkbox there** for the
 selected cell — one-cell quick access — reusing the same
-`fpc.set_cell_setting` + eligibility gate. The dialog stays the extensible,
-all-cells surface.
+`fpc.set_cell_setting`. The dialog stays the extensible, all-cells surface.
+
+**Don't pay the congruence scan on every selection** (owner review, #248 P3):
+`_bottom_up_congruence_issues` is a full `all_components()` walk + subtree
+compare, and the Selection panel refreshes on every click, so computing
+eligibility there would add visible click-selection lag on a large BDB. Render
+the checkbox state immediately from the cheap `cell_bottom_up()`, and defer the
+congruence check to the click handler (where the CLI also pays it) — or cache
+per-cell eligibility and invalidate it on a placement mutation. The dialog path
+has no such cost: it computes eligibility once on open, and its modal `grab_set`
+prevents mid-dialog placement edits (the out-of-scope note below covers live
+re-validation).
 
 ## Tests (`test/tests/test_floorplanner_cell_settings.py`)
 
