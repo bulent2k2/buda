@@ -33,3 +33,14 @@ reuse the `trunk_mst` / `compute_mst` machinery in `src/conn_topology.cpp`),
 `src/bundler.cpp` (`generate_signature`). Full investigation, evidence, and
 verdict: [`convergent_bundling.md`](convergent_bundling.md). Pipeline test that
 locks in the current behaviour: `test/tests/test_bundler_convergent_pipeline.py`.
+
+**Test vehicles (assessed 2026-07-10):** the pipeline test is an
+inversion-ready acceptance harness (its one-row assertion flips to
+all-rows, its no-fidelity-check assertion flips to the new check firing),
+and a corpus scan identified the realistic flow-test candidates — the
+mempool trio (cores→banks crossbar, all-to-all groups), ariane_core's
+writeback fan-in, large_scale_demo's 7-master NoC merge, and
+`ariane136_l2` (already CONVERGENT, 12 drivers / 1024 bits) as the QoR
+showcase. Details + incidental-collision exclusions:
+[`convergent_bundling.md`](convergent_bundling.md) → *"Test-case
+assessment"* and *"Corpus scan"*.
