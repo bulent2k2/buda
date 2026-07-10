@@ -1,0 +1,34 @@
+source mix_tracks.buda
+open_bdb mix2.bdb.sql
+
+# Bottom-up template planning: every hierarchical cell's local interconnect
+# is planned + NUTSed once per template and copied to all instances; the
+# copies become fixed blockages the top-level bundles detour.  Must be set
+# after open_bdb (flags live in the BDB) and before run_planner hier.
+# Leaf cells (dnuts*__u*, dogleg*__bot*/__top*) have no internal bundles,
+# so marking them would be a no-op; 'top' is the global level itself.
+set_bottom_up dnuts1
+set_bottom_up dnuts2
+set_bottom_up dogleg1
+set_bottom_up dogleg2
+
+derive_busterms 2
+add_blocks_from_bdb 0
+add_blocks_from_bdb 1 skip
+add_blocks_from_bdb 2 skip
+run_hier_bundler depth 2
+# dump_hbundles
+generate_hier_topologies
+run_planner hier 5 signal_tracks
+dump_topologies
+run_nuts
+# Stage (c) verification: do all instances of each marked cell see the same
+# signal tracks?  run_detailed_nuts runs this implicitly, but calling it
+# explicitly shows the per-cell ALIGNED/MISALIGNED report and is where you
+# choose the mismatch policy (default: stop).  To copy the aligned instances
+# and solve any misaligned ones individually instead, use:
+#   check_template_tracks on_mismatch independent
+check_template_tracks on_mismatch independent
+run_detailed_nuts
+visualize
+exit
