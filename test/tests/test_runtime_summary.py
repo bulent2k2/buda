@@ -20,8 +20,15 @@ main()'s finally runs) and again in the finally — guarded to fire only once.
 """
 import io
 import contextlib
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import pytest
 
 import buda_cli
+
+_ROOT = Path(__file__).parents[2]
 
 
 def _session_with_stats():
@@ -80,7 +87,10 @@ def _flags_while_sourcing(tmp_path, files, entry):
 
     s.run_command = spy
     s._at_last_command = True                     # as main() sets it
-    orig(f"source {tmp_path / entry}")
+    try:
+        orig(f"source {tmp_path / entry}")        # `exit` raises SystemExit
+    except SystemExit:
+        pass
     return seen
 
 
@@ -113,3 +123,50 @@ def test_at_last_command_nested_source_tail(tmp_path):
         "child.buda":  "def_layer 4 M4 V TOP 0.0\n",
     }, "parent.buda")
     assert notail == [("def_layer", False), ("def_layer", True)], notail
+
+
+def test_at_last_command_is_exit_not_the_preceding_command(tmp_path):
+    # `exit` is a command, so a trailing `exit` — not the command before it —
+    # is the flow's last. (A `visualize` before `exit` is therefore NOT flagged
+    # last and never early-prints; the summary rides out on exit's SystemExit
+    # through main()'s finally instead.)
+    seen = _flags_while_sourcing(tmp_path, {
+        "f.buda": "def_layer 3 M3 H TOP 0.0\nexit\n",
+    }, "f.buda")
+    assert seen == [("def_layer", False), ("exit", True)], seen
+
+
+@pytest.mark.mid
+def test_visualize_then_exit_still_prints_complete_summary(tmp_path, monkeypatch):
+    """The 'nice surprise': a flow ending `visualize` then `exit`. visualize is
+    NOT the last command (exit is), so it never early-prints — yet the summary
+    still appears exactly once and complete, because exit's sys.exit unwinds
+    through the same _print_end_report in main()'s finally."""
+    import buda_viz
+    import matplotlib.pyplot as plt
+    monkeypatch.setattr(plt, "show", lambda *a, **k: None)
+    monkeypatch.setattr(buda_viz.BudaVisualizer, "show", lambda self: None)
+
+    keep = [l for l in (_ROOT / "flow" / "dnuts1.buda").read_text().splitlines()
+            if l.strip().split('#')[0].strip() not in ("visualize", "exit")]
+    flow = tmp_path / "ve.buda"
+    flow.write_text("\n".join(keep) + "\nvisualize\nexit\n")
+
+    s = buda_cli.BudaSession()
+    s._flow_log_path = str(tmp_path / "f.log")
+    s._flow_log = open(s._flow_log_path, "w", buffering=1)
+    s._at_last_command = True                     # as main() sets it
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            try:
+                s.run_command(f"source {flow}")   # visualize (not last), then exit
+            except SystemExit:
+                pass
+            finally:
+                s._print_end_report()             # stands in for main()'s finally
+    finally:
+        s._flow_log.close()
+    out = buf.getvalue()
+    assert out.count("Runtime summary") == 1, out
+    assert "run_detailed_nuts" in out             # complete — not truncated at visualize
