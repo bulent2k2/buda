@@ -242,10 +242,12 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
   **AS-BUILT UPDATE (2026-07-10, orientation-aware copy — mirrors + 180):**
   the follow-on landed.  `_detect_instance_orients` (hier.py) geometrically
   identifies each instance's orientation by matching the full subtree shape
-  under all 8 candidates (per descendant it accepts the reference's RAW
-  orient token — BDB mutation convention — or the o∘raw COMPOSED token —
-  GDS-import convention; identity is preferred when it matches, and an
-  ambiguous self-symmetric layout is disambiguated by a track-phase score).
+  under all 8 candidates (descendant tokens must match the reference's RAW
+  tokens — BDB mutation convention — or the o∘raw COMPOSED tokens —
+  GDS-import convention — with the convention chosen ONCE per candidate,
+  never mixed per descendant [Codex #249]; identity is preferred when it
+  matches, and an ambiguous self-symmetric layout is disambiguated by a
+  track-phase score).
   The congruence guard now *accepts* the direction-preserving set
   `N/S/FN/FS` and refuses only 90°/270° (H↔V layer pairing follow-on, see
   opens.md) and no-match instances.  Copies are transformed end-to-end via

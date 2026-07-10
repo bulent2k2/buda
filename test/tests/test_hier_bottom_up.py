@@ -1082,3 +1082,26 @@ def test_topdown_expansion_transforms_rotated_instance():
                     assert 500 <= px <= 700 and 300 <= py <= 720, (
                         f"segment endpoint ({px}, {py}) outside the rotated "
                         f"instance bbox — translation-only expansion?")
+
+
+def _orient_of(db, name):
+    return next(c.orient for c in db.all_components() if c.name == name)
+
+
+def test_detection_rejects_mixed_token_subtree():
+    """One token convention per matched instance (Codex #249 P2): a
+    180°-rotated instance whose child was ADDITIONALLY back-rotated in
+    place (bbox unchanged, leaf token composed to 'S') must not pass —
+    the child would satisfy the composed convention while its sibling
+    satisfies the raw one, yet no single rigid transform maps the
+    reference (the leaf content differs)."""
+    db = _two_inst_db()
+    db.rotate_comp("proc_i2", 180)          # children reflected, tokens 'N'
+    assert _orient_of(db, "proc_i2/pa_i") == "N"
+    db.rotate_comp("proc_i2/pa_i", 180)     # in-place: bbox same, token 'S'
+    assert _orient_of(db, "proc_i2/pa_i") == "S"
+    s = _bare_session(db)
+    orients = s._detect_instance_orients("proc_cell")
+    assert orients["proc_i2"] is None
+    issues = s._bottom_up_congruence_issues("proc_cell")
+    assert issues and "NO orientation" in issues[0]

@@ -524,10 +524,16 @@ class HierMixin:
         w, h = dims(ref)
         ref_shape = shape(ref)
         # Pre-transform the reference shape under each candidate orient.
-        # Per descendant, TWO orient tokens are acceptable: the reference's
-        # RAW token (BDB's flip_comp/rotate_comp rewrite descendant bboxes
-        # and leave their tokens untouched) or the COMPOSED token o∘raw
-        # (GDS-imported hierarchies carry the SREF orientation per row).
+        # TWO token conventions exist for the descendants of a transformed
+        # instance: the reference's RAW tokens (BDB's flip_comp/rotate_comp
+        # rewrite descendant bboxes and leave their tokens untouched) or the
+        # COMPOSED tokens o∘raw (GDS-imported hierarchies carry the SREF
+        # orientation per row).  A rigid transform is uniformly one or the
+        # other, so the convention is chosen ONCE per candidate — accepting
+        # them per-descendant would let a MIXED subtree pass (e.g. a square
+        # leaf child separately rotated in place, bbox unchanged: its
+        # composed token would pass while its siblings pass raw, yet no
+        # single transform maps the reference — Codex #249).
         ref_under = {}
         for o in self._ORIENT_MAPS:
             ref_under[o] = {
@@ -555,11 +561,15 @@ class HierMixin:
                     exp = (h, w) if self._ORIENT_MAPS[o][0] else (w, h)
                     if dims(c) != exp or cshape.keys() != rshape.keys():
                         continue
-                    if all(kc == kcell and bb == bbox
-                           and ko in (kraw, kcomp)
-                           for rel, (kcell, kraw, kcomp, bbox)
-                           in rshape.items()
-                           for kc, ko, bb in [cshape[rel]]):
+                    ok_geom = ok_raw = ok_comp = True
+                    for rel, (kcell, kraw, kcomp, bbox) in rshape.items():
+                        kc, ko, bb = cshape[rel]
+                        if kc != kcell or bb != bbox:
+                            ok_geom = False
+                            break
+                        ok_raw = ok_raw and ko == kraw
+                        ok_comp = ok_comp and ko == kcomp
+                    if ok_geom and (ok_raw or ok_comp):
                         matches.append(o)
                 if "N" in matches:
                     # Identity matching = the instance is (as far as the
