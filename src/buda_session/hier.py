@@ -999,19 +999,24 @@ class HierMixin:
         per-direction layer costs.
 
         Runs at `run_planner hier` time (marks can arrive any time before
-        planning): per marked-cell template whose instances span both
-        classes, the 90° instances move to a new HBundle (cell_context =
-        the virtual clone name from _bu_clone_name, provenance recorded in
-        self._bu_clone_cells / _bu_clone_from and persisted as
-        bundle.cloned_from, v19), their donor replicas are re-keyed to the
-        clone, and the clone's candidates are generated on the spot with
-        the last hier-generation knobs.  Idempotent: a second run finds no
-        90° instances left on any template (each template's classes are
-        internally direction-preserving) and creates nothing.
+        planning).  Class membership is decided against ONE per-cell
+        reference (the first template's first instance) — never against
+        each template's own first instance, which would leave a
+        rotated-only bundle, or one whose instance list happens to start
+        with a rotated instance, in the wrong class (Codex #253).  Per
+        template of the cell: instances of the other class move to a new
+        clone HBundle (cell_context = the virtual clone name from
+        _bu_clone_name, provenance in self._bu_clone_cells /
+        _bu_clone_from and persisted as bundle.cloned_from, v19), donor
+        replicas are re-keyed, and candidates are (re)generated from the
+        owning side's reference with the last hier-generation knobs; a
+        template whose instances ALL belong to the other class is
+        re-contexted wholesale (same id, nets, and donors).  Idempotent: a
+        second run finds no cross-class instances on any template.
 
         The clone is a routing-template identity only — cell/component/pin
         tables never see it, so GDS/DEF/Verilog interchange is unaffected.
-        Returns the number of clone templates created."""
+        Returns the number of clone-class templates created/reassigned."""
         if self.bdb is None or not self.bundles:
             return 0
         bu = set(self.bdb.bottom_up_cells())
@@ -1034,56 +1039,125 @@ class HierMixin:
                        for w in self.bundles), default=-1) + 1
         knobs = getattr(self, "_hier_gen_knobs", (False, False, False))
         ocache, fp_cache = {}, {}
-        clone_names = {}       # real cell → clone name (one per cell)
-        result, made = [], 0
+
+        # Pass 1 — classify per cell_context against the per-cell
+        # canonical reference.  plans: template id → action tuple.
+        by_ctx = {}
         for w in self.bundles:
             b = w.input.original_bundle
-            result.append(w)
-            if (not b.cell_context
-                    or self._bu_cell_of(b.cell_context) not in bu
-                    or b.parent_id in cell_ids          # replica
-                    or not b.instances or len(b.instances) < 2):
-                continue
+            if (b.cell_context
+                    and self._bu_cell_of(b.cell_context) in bu
+                    and b.parent_id not in cell_ids       # not a replica
+                    and b.instances):
+                by_ctx.setdefault(b.cell_context, []).append(w)
+        clone_names = {}       # real cell → clone name (one per cell)
+        plans = {}             # template id → (keep, rot, cname, bref, cell,
+                               #                origin_tid)
+        for ctx, tws in by_ctx.items():
+            cell = self._bu_cell_of(ctx)
+            cell_ref = tws[0].input.original_bundle.instances[0]
             orients = self._detect_instance_orients(
-                b.cell_context, comps, ref_name=b.instances[0], cache=ocache)
-            rot = sorted(i for i in b.instances
-                         if orients.get(i) is not None
-                         and orients[i] not in _DIR_PRESERVING)
-            if not rot:
+                cell, comps, ref_name=cell_ref, cache=ocache)
+
+            def is_rot(i, _o=orients):
+                o = _o.get(i)
+                return o is not None and o not in _DIR_PRESERVING
+
+            rot_all = sorted({i for tw in tws
+                              for i in tw.input.original_bundle.instances
+                              if is_rot(i)})
+            if not rot_all:
                 continue
-            cell = self._bu_cell_of(b.cell_context)
             cname = clone_names.get(cell)
             if cname is None:
                 cname = clone_names[cell] = self._bu_clone_name(cell)
                 self._bu_clone_cells[cname] = cell
-            clone = self._clone_hbundle_with_id(b, next_id)
-            next_id += 1
-            clone.cell_context = cname
-            clone.instances = rot
-            b.instances = [i for i in b.instances if i not in rot]
-            # Move the 90°-class donors (replica wrappers) to the clone;
-            # the clone's own nets are its reference instance's donor nets.
-            for r in replicas.get(b.id, []):
-                rb = r.input.original_bundle
-                if rb.instances and rb.instances[0] in rot:
-                    rb.parent_id = clone.id
-                    rb.cell_context = cname
-                    if rb.instances[0] == rot[0]:
-                        clone.net_names = list(rb.net_names)
-            self._bu_clone_from[clone.id] = b.id
-            nw = buda.BundleWrapper()
-            nw.input.original_bundle = clone
-            nw.input.width = w.input.width
-            result.append(nw)
-            made += 1
-            print(f"[BottomUp] cell '{cell}': 90°-rotated instance class "
-                  f"({', '.join(rot)}) split into clone template "
-                  f"'{cname}' (bundle {clone.id}, ref {rot[0]})")
-            # Candidates for the clone: generated from the ROTATED
-            # reference's actual cell-local floorplan — real per-direction
-            # layer costs replace any H<->V layer-pairing mapping.
-            self._generate_hier_topo_one(nw, knobs[0], knobs[1],
-                                         fp_cache, comps_by_name, knobs[2])
+            bref = rot_all[0]      # clone-class canonical reference
+            # cloned_from must point at a row that STAYS under the real
+            # context (the loader resolves clone → origin → real cell);
+            # the first template always keeps cell_ref, so it qualifies.
+            origin_tid = next(
+                tw.input.original_bundle.id for tw in tws
+                if any(not is_rot(i)
+                       for i in tw.input.original_bundle.instances))
+            for tw in tws:
+                b = tw.input.original_bundle
+                rot = [i for i in b.instances if is_rot(i)]
+                if rot:
+                    plans[b.id] = ([i for i in b.instances if i not in rot],
+                                   rot, cname, bref, cell, origin_tid)
+
+        # Pass 2 — apply, preserving self.bundles order (clones inserted
+        # right after their template).
+        result, made = [], 0
+        for w in self.bundles:
+            b = w.input.original_bundle
+            result.append(w)
+            plan = plans.get(b.id) if b.parent_id not in cell_ids else None
+            if plan is None or not b.cell_context:
+                continue
+            keep, rot, cname, bref, cell, origin_tid = plan
+            # Clone-side instance order: the class reference first (when
+            # this bundle has it), so the group solves share one frame.
+            order_rot = ([bref] + sorted(i for i in rot if i != bref)
+                         if bref in rot else sorted(rot))
+            if keep:
+                clone = self._clone_hbundle_with_id(b, next_id)
+                next_id += 1
+                clone.cell_context = cname
+                clone.instances = order_rot
+                ref_moved = b.instances[0] in rot
+                b.instances = keep
+                # Move the clone-class donors (replica wrappers); the
+                # clone's own nets are its reference instance's donor nets.
+                for r in replicas.get(b.id, []):
+                    rb = r.input.original_bundle
+                    if rb.instances and rb.instances[0] in rot:
+                        rb.parent_id = clone.id
+                        rb.cell_context = cname
+                        if rb.instances[0] == order_rot[0]:
+                            clone.net_names = list(rb.net_names)
+                self._bu_clone_from[clone.id] = b.id
+                nw = buda.BundleWrapper()
+                nw.input.original_bundle = clone
+                nw.input.width = w.input.width
+                result.append(nw)
+                made += 1
+                print(f"[BottomUp] cell '{cell}': 90°-rotated instance "
+                      f"class ({', '.join(order_rot)}) split into clone "
+                      f"template '{cname}' (bundle {clone.id}, "
+                      f"ref {order_rot[0]})")
+                # Candidates generated from the owning side's reference —
+                # real per-direction layer costs on the class's actual
+                # cell-local floorplan.
+                self._generate_hier_topo_one(nw, knobs[0], knobs[1],
+                                             fp_cache, comps_by_name,
+                                             knobs[2])
+                if ref_moved:
+                    # The kept side lost the instance its candidates were
+                    # generated from — regenerate in its new frame.
+                    self._generate_hier_topo_one(w, knobs[0], knobs[1],
+                                                 fp_cache, comps_by_name,
+                                                 knobs[2])
+            else:
+                # Rotated-only template: the WHOLE bundle belongs to the
+                # clone class — re-context in place (same id, nets, and
+                # donors), anchoring on the class reference when present.
+                old_ref = b.instances[0]
+                b.cell_context = cname
+                b.instances = order_rot
+                for r in replicas.get(b.id, []):
+                    r.input.original_bundle.cell_context = cname
+                self._bu_clone_from[b.id] = origin_tid
+                made += 1
+                print(f"[BottomUp] cell '{cell}': rotated-only bundle "
+                      f"{b.id} reassigned to clone template '{cname}'")
+                if order_rot[0] != old_ref:
+                    # Its candidates were generated from old_ref's frame —
+                    # regenerate from the class reference.
+                    self._generate_hier_topo_one(w, knobs[0], knobs[1],
+                                                 fp_cache, comps_by_name,
+                                                 knobs[2])
         if not made:
             return 0
         self.bundles = result

@@ -129,6 +129,11 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
     # fixture) — save_bdb's save-as guard refuses to back up onto it.
     session._bdb_open_path = bdb_path
     session.bdb = buda.BDB(bdb_path)
+    # A different design's rotation-class clone registry is meaningless
+    # here (and stale id-keyed provenance would corrupt the next persist,
+    # Codex #253); load_pipeline rebuilds both from this BDB's rows.
+    session._bu_clone_cells = {}
+    session._bu_clone_from = {}
 
 
 def cmd_import_def_lef(session, cmd, args, cmd_line):

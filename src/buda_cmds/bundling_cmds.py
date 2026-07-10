@@ -57,6 +57,7 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
         w.input.original_bundle = b
         w.input.width = len(b.get_net_names()) * 1.5 # 1.5 layout-units per bit
         session.bundles.append(w)
+    session._bu_clone_from = {}   # fresh ids: drop stale clone provenance
     print(f"Bundler created {len(session.bundles)} hbundles.")
     session._bundler_strategy = strat_arg
     n = session._persist_bundles(strat_arg)
@@ -93,6 +94,11 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
         w.input.width = len(b.get_net_names()) * 1.5
         session.bundles.append(w)
     session._hier_bundles_orig = list(session.bundles)  # snapshot for dump_hbundles
+    # Fresh bundles reuse small integer ids: stale id-keyed clone provenance
+    # from a previous split would stamp a bogus cloned_from on an unrelated
+    # bundle at the next persist (Codex #253).  The NAME registry survives,
+    # so a re-split reuses the same clone name.
+    session._bu_clone_from = {}
     counts = {}
     for b in raw_bundles:
         counts[b.level] = counts.get(b.level, 0) + 1

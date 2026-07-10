@@ -271,7 +271,13 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
   reused across re-runs), the class instances moved onto it, their donor
   replicas re-keyed, and candidates generated from the rotated class
   reference's actual cell-local floorplan (`_generate_hier_topo_one` with
-  the remembered generation knobs).  Within the class every instance is a
+  the remembered generation knobs).  Classification is against ONE
+  per-cell reference (the first template's first instance), so a bundle
+  living only in the 90° occurrences — or one whose instance list starts
+  with a rotated instance — is re-contexted/regenerated correctly rather
+  than left mixing frames under the real context (Codex #253); the
+  id-keyed provenance map is cleared on re-bundle and open_bdb so a
+  fresh bundle reusing an id can never inherit stale `cloned_from`.  Within the class every instance is a
   direction-preserving transform of the class reference (E∘W⁻¹ ∈
   {N,S,FN,FS}), so the local solve → transform-copy machinery applies
   verbatim; each class is solved once and copied within itself.  Every

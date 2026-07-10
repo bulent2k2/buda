@@ -1308,3 +1308,73 @@ def test_placement_check_and_align_per_class():
     assert (comps["P3"].y1, comps["P4"].y1) in ((0.0, 300.0), (1.0, 301.0))
     out = _run_cmd(s, "check_template_tracks")
     assert "MISALIGNED" not in out
+
+
+def test_rotated_only_bundle_reassigned_to_clone_class():
+    """Codex #253 finding 1: a bundle that exists ONLY in the 90°
+    occurrences has no cross-class members of its own — classification
+    against a per-cell reference must still move it WHOLESALE to the clone
+    class, or mixed coordinate frames get grouped under the real
+    cell_context (reintroducing the H/V-swap the split exists to avoid)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    db.add_inst_to_cell("proc_cell", "pc_i", "pipe_cell", 290, 60)
+    for k, (x, y) in enumerate([(0, 0), (500, 300),
+                                (1000, 0), (1500, 300)], 1):
+        db.add_inst(f"P{k}", "proc_cell", "", x, y)
+    db.rotate_comp("P3", 90)
+    db.rotate_comp("P4", 90)
+    for k in range(1, 5):
+        for i in range(4):
+            db.add_net_pins(f"n{k}_{i}", f"P{k}/pa_i.out", [f"P{k}/pb_i.in"])
+    # An extra bus (pb -> pc: its own signature, hence its own template)
+    # that lives ONLY in the rotated instances P3/P4.
+    for k in (3, 4):
+        for i in range(2):
+            db.add_net_pins(f"x{k}_{i}", f"P{k}/pb_i.out", [f"P{k}/pc_i.in"])
+    buda.BustermGen(db).derive(1)
+    s, out = _two_class_flow(db)
+    assert "reassigned to clone template 'proc_cell90'" in out
+    # No template under the REAL context may reference a rotated instance.
+    for w in s._hier_bundles_orig:
+        b = w.input.original_bundle
+        if b.cell_context == "proc_cell":
+            assert not ({"P3", "P4"} & set(b.instances)), (
+                f"bundle {b.id} kept rotated instances under 'proc_cell'")
+    # The reassigned row persisted with provenance to a real-context row.
+    rows = {r.id: r for r in db.all_bundles()}
+    reassigned = [r for r in rows.values()
+                  if r.cloned_from and r.cell_context == "proc_cell90"]
+    assert reassigned
+    for r in reassigned:
+        assert rows[r.cloned_from].cell_context == "proc_cell"
+    # And the flow still completes cleanly per class.
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" not in out
+    out = _run_cmd(s, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+
+
+def test_rebundle_drops_stale_clone_provenance():
+    """Codex #253 finding 2: _bu_clone_from is keyed by numeric bundle id;
+    a re-run of the bundler creates fresh bundles that reuse those ids, so
+    the map must be cleared or the next persist stamps a bogus cloned_from
+    on an unrelated bundle (which load_pipeline would then restore as a
+    clone of the wrong cell)."""
+    db = _four_inst_two_class_db()
+    s, _ = _two_class_flow(db)
+    assert s._bu_clone_from                       # the split recorded ids
+    _run_cmd(s, "run_hier_bundler")               # fresh bundles, same ids
+    assert s._bu_clone_from == {}
+    assert all(r.cloned_from == "" for r in db.all_bundles())
+    # The NAME registry survives, so a re-split reuses the same name.
+    out = _run_cmd(s, "run_planner hier")
+    assert "'proc_cell90'" in out
+    rows = {r.id: r for r in db.all_bundles()}
+    for r in rows.values():
+        if r.cloned_from:
+            assert rows[r.cloned_from].cell_context == "proc_cell"
+            assert r.cell_context == "proc_cell90"
