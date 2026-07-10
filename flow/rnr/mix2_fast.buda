@@ -28,6 +28,11 @@ generate_hier_topologies
 run_planner hier 5 signal_tracks
 dump_topologies
 run_nuts
+# Optional healing (respects the locked bottom-up copies — they are never
+# re-routed; measured on this flow: overlaps 28 -> 12 -> 7, DNUTS unplaced
+# 259 -> 203 at ~7s extra):
+#   negotiate_congestion
+#   ripup_reroute
 # Post-routing verification (per routed-segment window) — the DNUTS gate.
 # Aligned cells solve DNUTS once per template and copy bits to siblings;
 # the default on_mismatch policy is 'stop' (use 'independent' to solve any

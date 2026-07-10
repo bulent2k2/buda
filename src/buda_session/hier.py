@@ -1218,6 +1218,18 @@ class HierMixin:
             l = l // math.gcd(l, v) * v
         return l / SCALE
 
+    def _validate_placement(self):
+        """FloorplannerEngine.validate() over the BDB's placed components:
+        OVERLAP pairs (ancestor/descendant pairs excluded) and OUTSIDE_DIE
+        (skipped when the BDB has no die).  Returns [(kind, message)]."""
+        eng = buda.FloorplannerEngine()
+        if self.bdb.die_w() > 0 and self.bdb.die_h() > 0:
+            eng.set_die(self.bdb.die_w(), self.bdb.die_h())
+        for c in self.bdb.all_components():
+            if c.x1 >= 0:
+                eng.add_block(c.name, c.x1, c.y1, c.x2, c.y2)
+        return [(i.kind, i.message) for i in eng.validate()]
+
     def _align_bottom_up(self, max_shift=None):
         """Nudge every marked cell's instances onto a common track phase
         with MINIMAL total movement, so the bottom-up copies land on real
@@ -1237,6 +1249,12 @@ class HierMixin:
         be fixed by translation — the check reports them.  Run BEFORE
         derive_busterms / add_blocks_from_bdb; a nudge exceeding max_shift
         (when given) is skipped with a WARNING.  Returns #instances moved.
+
+        After the moves, FloorplannerEngine.validate() audits the placement
+        (block overlaps + outside-die): issues NEW relative to the pre-move
+        placement are each printed as a WARNING (the moves are kept — undo
+        by re-running with a tighter max_shift or fixing the floorplan);
+        pre-existing issues are summarized, not blamed on the alignment.
         """
         by_cell = self._bottom_up_placed_instances()
         if not by_cell:
@@ -1263,6 +1281,8 @@ class HierMixin:
             print("WARNING: add_grid_override regions present — phase "
                   "alignment cannot compensate absolute-rect overrides; "
                   "verify with check_template_tracks afterwards.")
+
+        pre_issues = self._validate_placement()
 
         def deltas(coords, period):
             # Signed minimal per-instance shifts to the total-movement-
@@ -1308,6 +1328,14 @@ class HierMixin:
                   (f"y-period {ly}" if ly else "y unconstrained")
         print(f"[Align] {moved} instance(s) moved ({pitches}); verify with "
               f"check_template_tracks.")
+        # Post-move placement audit: report anything the nudges broke.
+        if moved:
+            pre = set(pre_issues)
+            new = [i for i in self._validate_placement() if i not in pre]
+            for kind, msg in new:
+                print(f"WARNING: align_bottom_up introduced {kind}: {msg}")
+            print(f"[Align] validate: {len(new)} new issue(s) from the "
+                  f"moves, {len(pre)} pre-existing.")
         return moved
 
     def _bottom_up_dnuts_plan(self):

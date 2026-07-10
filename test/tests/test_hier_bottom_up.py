@@ -598,6 +598,35 @@ def test_align_bottom_up_minimal_total_movement():
     assert s._bottom_up_congruence_issues("proc_cell") == []
 
 
+def test_align_bottom_up_validate_reports_new_issues():
+    """After the moves, FloorplannerEngine.validate() audits the placement:
+    a nudge that pushes an instance outside the die (or into an overlap) is
+    reported as a NEW issue, distinct from pre-existing ones."""
+    db = buda.BDB(":memory:")
+    db.set_die(420, 401.9)
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst("P0", "proc_cell", "", 0, 0)
+    db.add_inst("P1", "proc_cell", "", 0, 201.5)   # phase 1.5, in-die
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    # P1 snaps +0.5 to P0's phase -> y2 = 402 > die 401.9.
+    assert "1 instance(s) moved" in out
+    assert "align_bottom_up introduced OUTSIDE_DIE" in out and "P1" in out
+    assert "1 new issue(s)" in out and "0 pre-existing" in out
+
+
+def test_align_bottom_up_validate_quiet_when_clean():
+    """No new issues -> no WARNING, just the summary line."""
+    db = _two_inst_db(x2=500, y2=301, derive=False)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "1 instance(s) moved" in out
+    assert "introduced" not in out
+    assert "0 new issue(s)" in out
+
+
 def test_align_bottom_up_max_shift_guard():
     db = _two_inst_db(x2=500, y2=301, derive=False)
     s = _placement_session(db)
