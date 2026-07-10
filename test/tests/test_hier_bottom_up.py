@@ -731,6 +731,53 @@ def test_align_bottom_up_max_shift_guard():
     assert comps["proc_i2"].y1 == pytest.approx(301)      # untouched
 
 
+# ── save_bdb <path>: save-as snapshot ─────────────────────────────────────────
+
+def test_save_bdb_as_snapshot_after_align(tmp_path):
+    """The align-checkpoint use case: save_bdb <path> snapshots the CURRENT
+    state (aligned coords + bottom_up flags) to a new file — text (.sql,
+    reopenable via open_bdb) or binary — without touching any source."""
+    db = _two_inst_db(x2=500, y2=301, derive=False)   # :memory: works too
+    s = _placement_session(db)
+    _run_cmd(s, "align_bottom_up")
+    sql_snap = str(tmp_path / "aligned.bdb.sql")
+    bin_snap = str(tmp_path / "aligned.bdb")
+    assert "wrote snapshot" in _run_cmd(s, f"save_bdb {sql_snap}")
+    assert "wrote snapshot" in _run_cmd(s, f"save_bdb {bin_snap}")
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _run_cmd(s2, f"open_bdb {sql_snap}")              # text form round-trips
+    comps = {c.name: c for c in s2.bdb.all_components()}
+    assert comps["proc_i2"].y1 == pytest.approx(302)  # aligned coord kept
+    assert s2.bdb.bottom_up_cells() == ["proc_cell"]  # flag kept
+
+    db3 = buda.BDB(bin_snap)                          # binary form directly
+    comps3 = {c.name: c for c in db3.all_components()}
+    assert comps3["proc_i2"].y1 == pytest.approx(302)
+    assert db3.schema_version() == buda.BDB.SCHEMA_VERSION
+
+
+def test_save_bdb_as_rejects_live_file(tmp_path):
+    """Backing up onto the file the live connection holds open is refused."""
+    live = str(tmp_path / "live.bdb")
+    db = buda.BDB(live)
+    db.add_cell("c", 10, 10)
+    del db
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _run_cmd(s, f"open_bdb {live}")
+    out = _run_cmd(s, f"save_bdb {live}")
+    assert "Error" in out and "live BDB file" in out
+    assert "wrote snapshot" not in out
+
+
+def test_save_bdb_no_arg_message_mentions_save_as():
+    s = _bare_session(_two_inst_db(derive=False))
+    out = _run_cmd(s, "save_bdb")                     # no writeback armed
+    assert "save_bdb <file.bdb[.sql]>" in out
+
+
 # ── Step 6: persistence round-trip (v18 bu_locked + template selection) ──────
 
 def test_bottom_up_persistence_round_trip(tmp_path):

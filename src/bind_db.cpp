@@ -389,6 +389,7 @@ void bind_db(py::module_& m) {
              py::arg("key"), py::arg("def") = std::string())
         .def("meta_set",        &BDB::meta_set,
              py::arg("key"), py::arg("value"))
+        .def("save_copy",       &BDB::save_copy, py::arg("dest_path"))
         .def_readonly_static("SCHEMA_VERSION", &BDB::SCHEMA_VERSION)
         .def("die_w",           &BDB::die_w)
         .def("die_h",           &BDB::die_h)

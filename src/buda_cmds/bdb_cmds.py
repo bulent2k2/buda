@@ -125,6 +125,9 @@ def cmd_open_bdb(session, cmd, args, cmd_line):
         print("open_bdb: 'writeback' applies only to a serialized *.sql "
               "fixture; a binary BDB is opened read-write and persists "
               "directly — ignoring.")
+    # The file the live connection holds open (temp binary for a .sql
+    # fixture) — save_bdb's save-as guard refuses to back up onto it.
+    session._bdb_open_path = bdb_path
     session.bdb = buda.BDB(bdb_path)
 
 
@@ -437,13 +440,52 @@ def cmd_align_bottom_up(session, cmd, args, cmd_line):
 
 
 def cmd_save_bdb(session, cmd, args, cmd_line):
-    # Serialize the working BDB back to its writeback source .sql now.
-    # Only meaningful after `open_bdb <file>.sql writeback`.
+    # save_bdb [<path.bdb | path.bdb.sql>]
+    # No argument: serialize the working BDB back to its writeback source
+    # .sql now (only meaningful after `open_bdb <file>.sql writeback`).
+    # With a path: SAVE-AS — snapshot the CURRENT state to a new file,
+    # independent of any writeback source (e.g. a placement checkpoint right
+    # after align_bottom_up). A .sql destination gets the diffable text form
+    # (tools/bdb_serialize), anything else a binary SQLite snapshot; an
+    # existing destination is overwritten. Unlike the no-arg form, a save-as
+    # is a one-shot copy: it is NOT re-flushed at exit.
+    if args:
+        if session.bdb is None:
+            print("Error: open_bdb first"); return
+        dest = args[0]
+        if (session._script_stack and not os.path.isabs(dest)):
+            parent_dir = os.path.dirname(session._script_stack[-1])
+            dest = os.path.normpath(os.path.join(parent_dir, dest))
+        live = getattr(session, "_bdb_open_path", None)
+        if (live and live != ':memory:'
+                and os.path.abspath(dest) == os.path.abspath(live)):
+            print("Error: save_bdb: destination is the live BDB file itself "
+                  "— a binary BDB already persists in place; pick a "
+                  "different path for the snapshot")
+            return
+        try:
+            if dest.endswith(".sql"):
+                import tempfile
+                import bdb_serialize
+                tmp_dir = tempfile.mkdtemp(prefix="buda_saveas_")
+                tmp = os.path.join(tmp_dir,
+                                   os.path.basename(dest)[:-len(".sql")])
+                session.bdb.save_copy(tmp)
+                bdb_serialize.dump(tmp, dest)
+                os.remove(tmp)
+                os.rmdir(tmp_dir)
+            else:
+                session.bdb.save_copy(dest)
+        except RuntimeError as e:
+            print(f"Error: {e}"); return
+        print(f"save_bdb: wrote snapshot {dest}")
+        return
     if session._write_bdb_sql():
         print(f"save_bdb: wrote {session._bdb_writeback_src}")
     else:
         print("save_bdb: nothing to write — open the BDB with "
-              "`open_bdb <file>.sql writeback` to enable write-back.")
+              "`open_bdb <file>.sql writeback` to enable write-back, or "
+              "give a path to save a snapshot copy: save_bdb <file.bdb[.sql]>")
 
 
 COMMANDS = {
