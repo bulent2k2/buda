@@ -834,10 +834,11 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                         hgt = kHeight_ * top_height_rank(lid) *
                               std::max(0.0, 1.0 - seg_span / span_ref_eff_);
                     // Routability term (kPeak, default 0 = skipped entirely):
-                    // pay for the worst band's post-charge fill fraction, so a
-                    // candidate that concentrates demand on a nearly-full band
-                    // loses to one that spreads it — BEFORE overflow, which is
-                    // the only point the kCong term above can see.
+                    // pay for the worst band's EXISTING fill fraction (pre-
+                    // charge — see peak_util_segment), so a candidate headed
+                    // into a nearly-full band loses to one that avoids it —
+                    // BEFORE overflow, which is the only point the kCong term
+                    // above can see.
                     double pk = 0.0;
                     if (kPeak_ > 0.0)
                         pk = kPeak_ * peak_util_segment(seg, lid, pp,
