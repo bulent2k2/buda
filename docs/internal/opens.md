@@ -10,8 +10,12 @@ items this page doesn't see).
 
 ## Quick wins (small, low risk)
 
-*(none open — the hier slide-column resolution was the last one; see
-"Recently resolved" below.)*
+1. **Rename `check_connectivity` → `check_design`** —
+   [`wishlist-nuts.md`](wishlist-nuts.md) → *"Rename check_connectivity"*.
+   The command long outgrew its name: it audits connectivity AND layer-
+   direction validity AND keepout crossings (`KEEPOUT_CROSS`). Introduce
+   `check_design` as the primary name, keep `check_connectivity` as an
+   alias (no flow/test churn), migrate call sites opportunistically.
 
 ## Substantial features (bounded, clear plans)
 

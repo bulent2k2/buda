@@ -26,6 +26,27 @@ false positives vs the 3 real crossings. Full write-up:
 [`keepout_model_audit.md`](keepout_model_audit.md); tests in
 `test/tests/test_keepout_model.py`.
 
+## Rename `check_connectivity` → `check_design`
+
+**What:** the command's name predates most of what it does. It began as a
+pure connectivity audit (SEG/BUSTERM opens); today it also checks
+layer-direction validity (`LAYER_DIR` — an unbuildable wire, not an open)
+and keepout crossings (`KEEPOUT_CROSS` — an illegal placement, not an
+open). "check_connectivity" undersells the audit and misleads users into
+thinking a Success verdict only covers opens.
+
+**How (small):** register `check_design` in
+`src/buda_cmds/verify_viz_cmds.py` as the primary name for the same
+handler and keep `check_connectivity` as an alias — the command registry is
+a dict, so this is one entry plus doc updates (`verify_viz.md`,
+`BUDA_SCRIPT_REFERENCE.md` index, CLAUDE.md). No flow/test churn at
+introduction; migrate the `flow/` + `demo/` call sites and test
+assertions opportunistically, then (much later) deprecate the alias with a
+one-line notice. The printed headers ("Verifying NUTS-level
+connectivity...") deserve a matching touch-up ("Verifying NUTS-level
+design rules...") in the same pass — a few test greps assert on those
+strings, so update them together.
+
 ## Verify is keepout-blind (`KEEPOUT_CROSS` violation type) — ✅ RESOLVED
 
 **What (history):** `check_nuts` / `check_dnuts` (`src/verify.cpp`) audited
