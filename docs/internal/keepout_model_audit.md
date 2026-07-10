@@ -104,15 +104,38 @@ re-apply stays explicit-only to avoid double-installing). End-to-end
 regression: `test_keepout_model.py::test_all_layer_zone_blocks_every_stage`.
 No corpus flow declares an all-layer zone, so goldens are unaffected.
 
-### 4. `verify.cpp` is keepout-blind — NOTED, open
+### 4. `verify.cpp` is keepout-blind — FIXED (`KEEPOUT_CROSS`)
 
-`check_nuts` / `check_dnuts` audit connectivity, layer direction, and
-unplaced bits, but never test a placed wire against keepouts — the class-1
-illegal wires sailed through `check_connectivity` too. With the cull in
-place DNUTS no longer emits such wires, so the check would currently find
-nothing; still, a `KEEPOUT_CROSS` violation type would make verify
-self-sufficient (defense in depth if a future stage regresses). Deferred —
-tracked in [`wishlist-nuts.md`](wishlist-nuts.md).
+`check_nuts` / `check_dnuts` audited connectivity, layer direction, and
+unplaced bits, but never tested a placed wire against keepouts — the class-1
+illegal wires sailed through `check_connectivity` too, and the class-2
+forced commits still did after the audit (the pinned repro's segment ON the
+keepout got "Success: no opens found" at the nuts stage).
+
+**Fix:** new `KEEPOUT_CROSS` violation type.
+- `check_nuts` — a placed bus segment whose physical extent `[pos ± w/2]`
+  lies on a keepout overlapping its span (the `count_keepout_conflicts`
+  semantics, per segment with details). This is the **live** half: the
+  exhausted-window fallback commit is now flagged by the audit, not just
+  counted by the engine (hbundles/10's 2 committed segments are reported).
+- `check_dnuts` — a bit whose track centre sits inside a keepout overlapping
+  its final span (the cull's own predicate). Pure **defense-in-depth**:
+  `cull_keepout_crossers` removes such bits from every production result, so
+  a hit means a stage regressed and emitted an illegal wire.
+
+**The zone_fp subtlety:** in the hier flow, `check_connectivity` resolves a
+bundle's cell-local generation floorplan (right coordinate/name space for
+the busterm-face checks) — but its keepout zone list is *empty/different*,
+and testing against it silently blessed the two conflicts the engine itself
+counted (hbundles/10). The checks therefore take an optional `zone_fp` — the
+floorplan the engine actually placed against (the session floorplan; the CLI
+passes it for the nuts/dnuts stages) — for the KEEPOUT_CROSS audit, while
+`fp` keeps serving the connectivity checks.
+
+Tests: `test_keepout_model.py::test_check_nuts_flags_keepout_commit`,
+`…::test_check_dnuts_flags_crossing_bit_defense_in_depth` (synthetic
+regression wire), `…::test_check_keepout_cross_no_false_positive_on_clean_flow`,
+plus the hbundles/10 flow test pinning the 2 reported commits.
 
 ### 5. Planner band sampling at cut coordinates — NOTED, open (and mitigated)
 

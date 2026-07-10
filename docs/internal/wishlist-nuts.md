@@ -26,17 +26,23 @@ false positives vs the 3 real crossings. Full write-up:
 [`keepout_model_audit.md`](keepout_model_audit.md); tests in
 `test/tests/test_keepout_model.py`.
 
-## Verify is keepout-blind (`KEEPOUT_CROSS` violation type)
+## Verify is keepout-blind (`KEEPOUT_CROSS` violation type) — ✅ RESOLVED
 
-**What:** `check_nuts` / `check_dnuts` (`src/verify.cpp`) audit
-connectivity, layer direction, and unplaced bits, but never test a placed
-wire against keepouts — the pre-audit illegal wires sailed through
-`check_connectivity`. With `cull_keepout_crossers` in place DNUTS no longer
-emits such wires, so this is defense-in-depth only: a `KEEPOUT_CROSS`
-violation (placed extent × keepout, span-overlap semantics as
-`count_keepout_conflicts`) would make verify self-sufficient if a future
-stage regresses. Small, contained; noted in the audit
-([`keepout_model_audit.md`](keepout_model_audit.md) class 4).
+**What (history):** `check_nuts` / `check_dnuts` (`src/verify.cpp`) audited
+connectivity, layer direction, and unplaced bits, but never tested a placed
+wire against keepouts — a segment the engine itself counted as a keepout
+conflict got "Success: no opens found".
+
+**Resolution:** `KEEPOUT_CROSS` violation type at both stages — nuts flags a
+placed segment whose extent lies on a keepout overlapping its span (the
+live exhausted-window commit, `count_keepout_conflicts` semantics per
+segment); dnuts flags a bit inside a keepout with the cull's own predicate
+(defense-in-depth — the cull prevents it in production). The checks take an
+optional `zone_fp` (the floorplan the engine placed against) because a hier
+bundle's resolved generation floorplan has no zones and would silently
+bless real conflicts. Details:
+[`keepout_model_audit.md`](keepout_model_audit.md) class 4; tests in
+`test/tests/test_keepout_model.py` + the hbundles/10 flow test.
 
 ## Band-level repack for spread-fit overlap clusters — ✅ IMPLEMENTED
 

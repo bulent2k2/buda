@@ -19,6 +19,17 @@ flag layer-direction violations: a segment (or its bit wires) assigned to a
 layer whose routing direction does not match the segment's orientation is
 reported as unbuildable.
 
+The `nuts` and `dnuts` stages additionally audit **keepout crossings**
+(`KEEPOUT_CROSS`): at `nuts`, a placed bus segment whose physical extent
+lies on a keepout that overlaps its span (the exhausted-window fallback
+commit — the same event `NUTSResult.num_keepout_conflicts` counts); at
+`dnuts`, a bit-wire whose track sits inside a keepout overlapping its final
+span (defense-in-depth — DetailedNUTS's crossing cull removes such bits
+before any result is returned, so a hit means a stage regressed). Keepout
+zones are taken from the session floorplan the NUTS engine placed against,
+so hierarchical bundles' cell-local generation floorplans cannot mask a
+conflict. See `docs/internal/keepout_model_audit.md`.
+
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `stage` | str | `dnuts` | Routing stage to verify: `topo` (topology candidates), `nuts` (abstract track sharing), or `dnuts` (detailed bit placement). |

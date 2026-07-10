@@ -365,11 +365,18 @@ class ReportsMixin:
                 if stage == "topo":
                     res = buda.check_topo(ct, topo, check_fp, bid)
                 elif stage == "nuts":
-                    res = buda.check_nuts(ct, self.nuts_result, topo, check_fp, self.layers, bid)
+                    # zone_fp = self.fp: NUTS placed against the SESSION
+                    # floorplan's keepout zones; a hier bundle's resolved
+                    # check_fp (right space for the busterm-face checks) has
+                    # no zones, and testing KEEPOUT_CROSS against it would
+                    # bless conflicts the engine itself counted.
+                    res = buda.check_nuts(ct, self.nuts_result, topo, check_fp,
+                                          self.layers, bid, zone_fp=self.fp)
                 else:
                     num_bits = len(w.input.original_bundle.get_net_names())
                     res = buda.check_dnuts(ct, self.detailed_result, topo, check_fp,
-                                           self.layers, bid, num_bits)
+                                           self.layers, bid, num_bits,
+                                           zone_fp=self.fp)
 
                 for v in res.violations:
                     if all_candidates and stage == "topo":
@@ -395,6 +402,7 @@ class ReportsMixin:
         "SEG_OPEN":     "segment disconnected",
         "LAYER_DIR":    "wrong layer direction",
         "FEEDTHRU_RELAY": "block used as feedthrough relay (segments not wire-joined)",
+        "KEEPOUT_CROSS": "wire placed on a keepout",
     }
 
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest

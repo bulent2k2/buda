@@ -542,6 +542,9 @@ def test_ripup2_targets_actual_blocker():
 # main with the same crossing predicate the cull now applies).  Those 7
 # are now culled and counted, and 2 abstract segments report their forced
 # keepout commits — expected keepout WARNINGs, not planner regressions.
+# check_connectivity mirrors the same two events (KEEPOUT_CROSS): the nuts
+# stage reports the 2 committed segments and the dnuts stage the 7 culled
+# bits as unplaced, so only the topo stage stays fully clean.
 # ---------------------------------------------------------------------------
 
 def test_10_four_level_scale_one_bundle_per_bus():
@@ -554,7 +557,10 @@ def test_10_four_level_scale_one_bundle_per_bus():
     assert "Verifying topology-level connectivity (all candidates)..." in out
     assert "map::at" not in out
     assert "Traceback" not in out
-    assert out.count("Success: no opens found.") >= 2   # topo + nuts both clean
+    # topo clean; the nuts stage honestly reports the flow's 2 keepout-
+    # committed segments (KEEPOUT_CROSS — it used to bless them), never more.
+    assert out.count("Success: no opens found.") >= 1
+    assert out.count("placed ON keepout") == 2
     # 176 buses → exactly one HBundle per bus, at its routing-context level.
     assert "HierBundler: 176 hbundles (D0: 26, D1: 30, D2: 40, D3: 80)" in out
     # The two D3 blk_cell templates expand over their 40 instances;
