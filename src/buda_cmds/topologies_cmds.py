@@ -77,11 +77,14 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]
     # ADDITIVE variant of generate_topologies_for_bundle (Phase E2 of
     # topo_conn_unification.md): run the generator with the given knobs
-    # and APPEND the new candidates to the bundle's existing list,
+    # and merge the new candidates into the bundle's existing list,
     # deduplicated by stable content uid — instead of replacing it.
-    # Append-only means existing candidate indices (and therefore the
-    # bundle's pin and plan state) are untouched: the expert accretes a
-    # candidate pool across knob experiments without losing selections.
+    # The merged pool is re-sorted by the same key as generation
+    # (wirelength, then type) so cand_index stays a meaningful ranking;
+    # the expert accretes a candidate pool across knob experiments without
+    # losing SELECTIONS — the pin (and dogleg slot) are remapped to follow
+    # their candidate across the re-sort, so raw indices may move but the
+    # selected/dogleg candidate is preserved.
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
@@ -114,6 +117,13 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
                 seen.add(uid)
                 existing.append(c)
                 added += 1
+            # Keep the accreted pool WL-sorted (mirrors the C++ annotate_and_sort:
+            # wirelength ascending, then type) so cand_index stays a meaningful
+            # ranking instead of "old pool, then newly-appended tail".  The shared
+            # helper re-sorts and remaps the selection + dogleg refs so the pin
+            # follows its candidate; the SAME helper runs in the knob-memo replay
+            # (_apply_gen_knobs) so a resumed bundle stays ranked.
+            existing = session._resort_pool_preserving_selection(w, existing)
             w.input.candidates = existing
             label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
             print(f"Added {added} new topolog{'y' if added == 1 else 'ies'} "

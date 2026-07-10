@@ -133,6 +133,33 @@ class EditMixin:
             return None
         return self._edit_w, self._edit_topo
 
+    def _resort_pool_preserving_selection(self, w, pool):
+        """Sort `pool` by generation's key (wirelength, then type — the same
+        annotate_and_sort uses) and remap the candidate-index references that must
+        follow their candidate: the selection (selected_topology_index) and the
+        dogleg slot/original.  Per-segment plan arrays ride the SELECTED candidate,
+        not a candidate index, so they need no remap.  Shared by
+        generate_more_topologies and the knob-memo replay (_apply_gen_knobs) so both
+        leave the pool consistently WL-ranked.  Returns the sorted list (the caller
+        assigns it to w.input.candidates).  The dogleg dicts are keyed by the
+        INTEGER original_bundle.id — matching _adopt_doglegs/_reset_doglegs."""
+        bid = w.input.original_bundle.id      # int key (dogleg dicts); NOT str
+
+        def _uid_at(idx):
+            return buda.topo_uid(pool[idx]) if 0 <= idx < len(pool) else None
+        sel_uid = _uid_at(w.plan.selected_topology_index)
+        dg_uid = _uid_at(self._dogleg_slot.get(bid, -1))
+        og_uid = _uid_at(self._dogleg_originals.get(bid, -1))
+        pool.sort(key=lambda c: (c.estimated_wirelength, c.type))
+        posn = {buda.topo_uid(c): i for i, c in enumerate(pool)}
+        if sel_uid is not None:
+            w.plan.selected_topology_index = posn[sel_uid]
+        if dg_uid is not None:
+            self._dogleg_slot[bid] = posn[dg_uid]
+        if og_uid is not None:
+            self._dogleg_originals[bid] = posn[og_uid]
+        return pool
+
     def _apply_gen_knobs(self, w, src, dsts, old_pin_uid=None):
         """Honor the bundle's persisted generation-knob memo (v15): re-run the
         knob-configured generator additively after a bulk regeneration, so a
@@ -156,6 +183,11 @@ class EditMixin:
                 pool.append(c)
                 added += 1
         if added:
+            # Re-sort so the resumed pool matches the WL ranking generate_more_
+            # topologies produced (else it reverts to base + unsorted knob tail);
+            # remaps a live pin + dogleg refs.  The uid re-attach below then finds
+            # a pin that was LOST during regeneration in the already-sorted pool.
+            pool = self._resort_pool_preserving_selection(w, pool)
             w.input.candidates = pool
             print(f"  Re-applied knob memo '{knobs}' for bundle "
                   f"{w.input.original_bundle.id}: +{added} candidate(s).")
