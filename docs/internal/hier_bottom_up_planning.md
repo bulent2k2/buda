@@ -196,13 +196,19 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
 
 ## 7. Prerequisite/related fixes folded in
 
-- **G2 (orientation)** — bottom-up *requires* instances to be congruent. At
-  minimum: `set_bottom_up` and `run_planner hier` verify all instances of a
-  marked cell (and, generally, of any expanded template) share
-  `orient == 'N'`; a violation is an error for bottom-up cells and a warning
-  for the existing top-down expansion (which silently mis-transforms today).
+- **G2 (orientation)** — bottom-up *requires* instances to be congruent.
+  Implemented as a **geometric** congruence check, not an orient-only one:
+  `rotate_comp`/`flip_comp` on a *hierarchical* block rewrite the children's
+  absolute bboxes and deliberately keep `orient='N'` (only childless subtrees
+  compose the token), so the orient field alone cannot detect a rotated
+  instance of a cell with children. `_bottom_up_congruence_issues` compares,
+  per instance: orientation `'N'`, outline dimensions, and child placement
+  relative to the instance origin. A violation is an error for bottom-up
+  cells (checked at `set_bottom_up` time AND re-checked at `run_planner hier`
+  expansion, since placement may change in between) and a warning for the
+  existing top-down expansion (which silently mis-transforms today).
   Full orientation-aware `offset_topology` (rotate/mirror candidates + NUTS
-  /DNUTS copies) is a separable follow-on (open question Q1).
+  /DNUTS copies) is a separable follow-on (resolved decision Q1).
 - **G3 (TOP-layer NUTS keepouts)** — fixed as part of §4.3; also closes a
   latent hole for plain flat-flow users who declare TOP-layer keepouts.
 - **HIER_TOPOLOGY.md refresh** — doc-only commit fixing the stale items in §1.
@@ -238,7 +244,12 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
 ## 9. Implementation order
 
 1. BDB: `cell.bottom_up` column + migration + bindings + `set_bottom_up`
-   command + orientation guard. *(small, unblocks everything)*
+   command + orientation guard. *(small, unblocks everything)* — **DONE**
+   (schema v17; `set_cell_bottom_up`/`cell_bottom_up`/`bottom_up_cells` +
+   `meta_set` bound; `add_cell`/`resize_cell` converted from REPLACE to
+   upsert so a resize no longer resets the flag; geometric congruence guard
+   shared by `set_bottom_up` and `_expand_hier_bundles`; tests in
+   `test/tests/test_hier_bottom_up.py`).
 2. Planner: local template solve + pin broadcast + `hier.locked` +
    commit-first ordering + ladder/ripup exclusions.
 3. NUTS: local solve + copy + `add_fixed_segments` + derived keepout mirror +

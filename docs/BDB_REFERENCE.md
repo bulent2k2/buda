@@ -684,6 +684,37 @@ entries.
 
 ---
 
+### `set_bottom_up`
+
+```
+set_bottom_up <cell> [on|off]
+```
+
+Mark a cell template for **bottom-up planning** (default `on`): the hier flow
+plans/NUTSes the cell's local interconnect once and copies the result to every
+instance, with the copied routing becoming keepouts for higher-level bundles
+(see `docs/internal/hier_bottom_up_planning.md`).  Persisted in the BDB
+(`cell.bottom_up`, schema v17), so the flag survives `save_bdb` /
+`load_pipeline`.
+
+Turning the flag **on** requires every instance of the cell to be a pure
+*translated* copy of the first one — identity orientation `'N'`, equal
+outline, identical child placement relative to the instance origin — because
+per-instance copies are translation-only.  A non-congruent instance set is
+rejected with an error listing the offenders; `run_planner hier` re-checks the
+same congruence at expansion time (placement may change after marking) and
+hard-errors on violation.  `off` is always accepted.
+
+| Argument | Type | Description |
+|---|---|---|
+| `cell` | str | Cell type name; must exist in the `cell` table. |
+| `on\|off` | keyword | Optional; defaults to `on`. |
+
+Python API: `db.set_cell_bottom_up(cell, on)`, `db.cell_bottom_up(cell)`,
+`db.bottom_up_cells()`, and `CellRow.bottom_up` via `db.all_cells()`.
+
+---
+
 ### `add_inst`
 
 ```
@@ -1166,6 +1197,11 @@ rows: list[GrpRow] = db.all_groups()
 db.units()  → int    # DEF UNITS DISTANCE MICRONS value (e.g. 1000)
 db.die_w()  → float  # die width in µm
 db.die_h()  → float  # die height in µm
+```
+
+```python
+db.meta_get(key, def="") → str   # read a meta(key,value) row ('schema_version', 'bdb_tool', …)
+db.meta_set(key, value)          # write (upsert) a meta row — design-level key/value store
 ```
 
 ```python

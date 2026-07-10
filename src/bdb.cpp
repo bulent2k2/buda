@@ -355,9 +355,10 @@ void BDB::_create_schema() {
             PRIMARY KEY (grp_id, kind, ref)
         );
         CREATE TABLE IF NOT EXISTS cell (
-            name   TEXT PRIMARY KEY,
-            width  REAL NOT NULL,
-            height REAL NOT NULL
+            name      TEXT PRIMARY KEY,
+            width     REAL NOT NULL,
+            height    REAL NOT NULL,
+            bottom_up INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
@@ -408,6 +409,10 @@ void BDB::_set_meta(const std::string& key, const std::string& value) {
     sqlite3_bind_text(s, 1, key.c_str(),   -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(s, 2, value.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(s);
+}
+
+void BDB::meta_set(const std::string& key, const std::string& value) {
+    _set_meta(key, value);
 }
 
 std::string BDB::meta_get(const std::string& key, const std::string& def) const {
@@ -624,6 +629,14 @@ void BDB::_migrate() {
             nullptr, nullptr, nullptr);
         sqlite3_exec(_db,
             "ALTER TABLE topology_segment ADD COLUMN perp_clamp_hi INTEGER DEFAULT ( 2147483647)",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 17) {
+        // v16 -> v17: bottom-up template planning flag on cell types.  Pre-v17
+        // designs have no marked cells, so the 0 default is correct and no
+        // data migration is needed.  Idempotent ALTER.
+        sqlite3_exec(_db,
+            "ALTER TABLE cell ADD COLUMN bottom_up INTEGER NOT NULL DEFAULT 0",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -1941,8 +1954,12 @@ void BDB::set_comp_bbox(const std::string& name,
 }
 
 void BDB::resize_cell(const std::string& cell, double w, double h) {
-    // Keep the cell definition in sync
-    Stmt uc(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+    // Keep the cell definition in sync.  Upsert, NOT INSERT OR REPLACE:
+    // REPLACE deletes + re-inserts the row, which would reset non-geometry
+    // cell attributes (bottom_up) as a side effect of a resize.
+    Stmt uc(_db, "INSERT INTO cell(name,width,height) VALUES(?,?,?)"
+                 " ON CONFLICT(name) DO UPDATE SET"
+                 " width=excluded.width, height=excluded.height");
     sqlite3_bind_text  (uc, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_double(uc, 2, w);
     sqlite3_bind_double(uc, 3, h);
@@ -2000,7 +2017,10 @@ int BDB::add_comp(const std::string& name, const std::string& cell,
 }
 
 void BDB::add_cell(const std::string& name, double w, double h) {
-    Stmt ins(_db, "INSERT OR REPLACE INTO cell(name,width,height) VALUES(?,?,?)");
+    // Upsert (not REPLACE) so re-declaring a cell's size keeps its bottom_up flag.
+    Stmt ins(_db, "INSERT INTO cell(name,width,height) VALUES(?,?,?)"
+                  " ON CONFLICT(name) DO UPDATE SET"
+                  " width=excluded.width, height=excluded.height");
     sqlite3_bind_text  (ins, 1, name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_double(ins, 2, w);
     sqlite3_bind_double(ins, 3, h);
@@ -2009,12 +2029,36 @@ void BDB::add_cell(const std::string& name, double w, double h) {
 }
 
 std::vector<CellRow> BDB::all_cells() const {
-    Stmt q(_db, "SELECT name, width, height FROM cell ORDER BY name");
+    Stmt q(_db, "SELECT name, width, height, bottom_up FROM cell ORDER BY name");
     std::vector<CellRow> result;
     while (sqlite3_step(q) == SQLITE_ROW)
         result.push_back({ (const char*)sqlite3_column_text(q,0),
                            sqlite3_column_double(q,1),
-                           sqlite3_column_double(q,2) });
+                           sqlite3_column_double(q,2),
+                           sqlite3_column_int(q,3) != 0 });
+    return result;
+}
+
+void BDB::set_cell_bottom_up(const std::string& cell, bool on) {
+    Stmt u(_db, "UPDATE cell SET bottom_up=? WHERE name=?");
+    sqlite3_bind_int (u, 1, on ? 1 : 0);
+    sqlite3_bind_text(u, 2, cell.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(u);
+    if (sqlite3_changes(_db) == 0)
+        throw std::runtime_error("set_cell_bottom_up: cell not defined: " + cell);
+}
+
+bool BDB::cell_bottom_up(const std::string& cell) const {
+    Stmt q(_db, "SELECT bottom_up FROM cell WHERE name=?");
+    sqlite3_bind_text(q, 1, cell.c_str(), -1, SQLITE_TRANSIENT);
+    return sqlite3_step(q) == SQLITE_ROW && sqlite3_column_int(q, 0) != 0;
+}
+
+std::vector<std::string> BDB::bottom_up_cells() const {
+    Stmt q(_db, "SELECT name FROM cell WHERE bottom_up!=0 ORDER BY name");
+    std::vector<std::string> result;
+    while (sqlite3_step(q) == SQLITE_ROW)
+        result.push_back((const char*)sqlite3_column_text(q, 0));
     return result;
 }
 

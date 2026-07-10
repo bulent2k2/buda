@@ -145,6 +145,7 @@ Set `export PYTHONPATH=build` once per shell session if invoking Python directly
 | `export_gds <file.gds> [outline <l>] [labels <l>\|off] [via_size <um>]` | Export the BDB as deterministic GDSII (reverse of `import_gds`, from the **persisted** tables): cells → structures + SREFs (with instance orientation via `component.orient`), `net_segment` wires (`bus_segment` fallback) on mapped pairs, vias as squares, one net-name TEXT per pin — re-importable with the same map (tested round-trip, incl. rotation/mirror) |
 | `set_die <w> <h>` | Set die dimensions in the BDB |
 | `add_cell <name> <w> <h>` / `add_cell_pin <cell> <pin> [dir] [px py]` | Define a cell type and its port interface |
+| `set_bottom_up <cell> [on\|off]` | Mark a cell template for bottom-up planning (plan/NUTS its local interconnect once, copy to every instance; copies become keepouts for higher levels — see docs/internal/hier_bottom_up_planning.md). Persisted (`cell.bottom_up`, v17); requires congruent (purely translated, orient `N`) instances, re-checked at `run_planner hier` |
 | `add_inst <inst> <cell> <parent> <x> <y>` / `add_inst_to_cell <parent_cell> <inst> <child_cell> <x> <y>` | Instantiate a cell into the hierarchy / define a cell's internal structure |
 | `add_comp <name> <cell> <parent> <x1> <y1> <x2> <y2>` | Insert a component row with explicit absolute coords |
 | `move_comp` / `flip_comp` / `rotate_comp` / `resize_cell` / `set_comp_*` | Mutate placement (move, mirror, rotate 90/180/270, resize) |

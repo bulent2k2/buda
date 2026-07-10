@@ -342,6 +342,57 @@ class HierMixin:
                              int(round(c.x2)), int(round(c.y2)))
         return fp
 
+    def _bottom_up_congruence_issues(self, cell, comps=None):
+        """Verify every instance of `cell` is a pure translated copy of the
+        first one — the precondition for bottom-up template planning, whose
+        per-instance copies are translation-only (offset_topology).
+
+        Checks, per instance: identity orientation 'N', equal outline
+        dimensions, and identical child placement relative to the instance
+        origin. The geometric child comparison matters because rotate_comp /
+        flip_comp on a *hierarchical* block rewrite the children's absolute
+        bboxes and deliberately keep orient='N' — the orient token alone
+        cannot detect such an instance.
+
+        Returns a list of human-readable issue strings (empty = congruent).
+        """
+        if comps is None:
+            comps = self.bdb.all_components()
+        insts, by_parent = [], {}
+        for c in comps:
+            if c.cell == cell:
+                insts.append(c)
+            by_parent.setdefault(c.parent_id, []).append(c)
+        issues = [f"{c.name}: orientation {c.orient} (need 'N')"
+                  for c in insts if c.orient != "N"]
+        if len(insts) < 2:
+            return issues
+
+        def dims(c):
+            return (round(c.x2 - c.x1, 3), round(c.y2 - c.y1, 3))
+
+        def shape(inst):
+            return {k.name.rsplit('/', 1)[-1]:
+                    (round(k.x1 - inst.x1, 3), round(k.y1 - inst.y1, 3),
+                     round(k.x2 - inst.x1, 3), round(k.y2 - inst.y1, 3))
+                    for k in by_parent.get(inst.id, [])}
+
+        ref = insts[0]
+        ref_shape = shape(ref)
+        for c in insts[1:]:
+            if dims(c) != dims(ref):
+                issues.append(f"{c.name}: outline {dims(c)} differs from "
+                              f"{ref.name} {dims(ref)}")
+                continue
+            s = shape(c)
+            if s != ref_shape:
+                bad = (sorted(set(ref_shape) ^ set(s))
+                       or sorted(k for k in ref_shape
+                                 if s.get(k) != ref_shape[k]))
+                issues.append(f"{c.name}: child placement differs from "
+                              f"{ref.name} (e.g. {', '.join(bad[:3])})")
+        return issues
+
     def _build_cell_local_floorplan(self, parent_comp_name):
         """Build a Floorplan in cell-local coords for sub-components of parent."""
         comps = {c.name: c for c in self.bdb.all_components()}
@@ -675,6 +726,7 @@ class HierMixin:
         Cross-block bundles (not expanded) are not included in the map.
         """
         comps = {c.name: c for c in self.bdb.all_components()}
+        bottom_up = set(self.bdb.bottom_up_cells())
         # Replica bookkeeping: the multiple-occurrence merge accumulates all
         # instance paths on the template but leaves each replica in the list
         # with its own instance and its own nets.  Expanding both the template
@@ -698,6 +750,7 @@ class HierMixin:
         result = []
         expansion_map = {}  # original bundle id → [expanded wrappers]
         wrapper_at = {}     # (template id, instance path) → expanded wrapper
+        checked_bu = set()
         for w in bundles:
             b = w.input.original_bundle
             if not b.cell_context or not b.instances:
@@ -705,11 +758,33 @@ class HierMixin:
                 continue
             if b.id in replica_wrapper_of:
                 continue   # replica: covered by its template's expansion
+            # Expansion is translation-only (offset_topology), so a bottom-up
+            # cell requires congruent (purely translated) instances — hard
+            # error otherwise, since uniform copies are its whole contract.
+            # Checked here (not only at set_bottom_up time) because placement
+            # may have changed since the cell was marked.
+            if b.cell_context in bottom_up and b.cell_context not in checked_bu:
+                checked_bu.add(b.cell_context)
+                issues = self._bottom_up_congruence_issues(
+                    b.cell_context, comps.values())
+                if issues:
+                    raise RuntimeError(
+                        f"run_planner hier: bottom-up cell "
+                        f"'{b.cell_context}' has non-congruent instances "
+                        f"(translation-only copies impossible): "
+                        f"{'; '.join(issues[:4])}")
             expansion_map[b.id] = []
             for inst_name in b.instances:
                 parent = comps.get(inst_name)
                 if parent is None:
                     continue
+                # For non-bottom-up cells a rotated/mirrored instance is only
+                # a quality risk (each instance is planned separately), so
+                # warn rather than error.
+                if parent.orient != "N" and parent.cell not in bottom_up:
+                    print(f"WARNING: instance {inst_name} has orientation "
+                          f"{parent.orient}; hier expansion is translation-"
+                          f"only — copied topologies may be mis-transformed")
                 dx = int(round(parent.x1))
                 dy = int(round(parent.y1))
                 new_w = buda.BundleWrapper()

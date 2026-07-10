@@ -377,6 +377,41 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
         expanded=bool(args) and args[0] == "expanded")
 
 
+def cmd_set_bottom_up(session, cmd, args, cmd_line):
+    # set_bottom_up <cell> [on|off]
+    # Mark a cell template for bottom-up planning: its cell-local interconnect
+    # is planned/NUTSed once and copied to every instance (see
+    # docs/internal/hier_bottom_up_planning.md).  Persisted in the BDB.
+    if not args:
+        print("Error: set_bottom_up requires <cell> [on|off]"); return
+    if session.bdb is None:
+        print("Error: open_bdb first"); return
+    cell = args[0]
+    mode = args[1].lower() if len(args) > 1 else "on"
+    if mode not in ("on", "off"):
+        print(f"Error: set_bottom_up mode must be on|off, got '{args[1]}'")
+        return
+    on = mode == "on"
+    insts = [c for c in session.bdb.all_components() if c.cell == cell]
+    if on:
+        # Bottom-up copies are translation-only, so every instance must be a
+        # pure translated copy: identity orientation, equal outline, identical
+        # child placement (rotate/flip of a hierarchical block rewrites the
+        # children while keeping orient='N', so geometry must be compared).
+        issues = session._bottom_up_congruence_issues(cell)
+        if issues:
+            shown = "; ".join(issues[:4])
+            more = "" if len(issues) <= 4 else f" (+{len(issues) - 4} more)"
+            print(f"Error: set_bottom_up {cell}: instances are not congruent "
+                  f"(translated-only copies impossible): {shown}{more}")
+            return
+    try:
+        session.bdb.set_cell_bottom_up(cell, on)
+    except RuntimeError as e:
+        print(f"Error: {e}"); return
+    print(f"[BDB] cell '{cell}' bottom_up = {mode} ({len(insts)} instance(s))")
+
+
 def cmd_save_bdb(session, cmd, args, cmd_line):
     # Serialize the working BDB back to its writeback source .sql now.
     # Only meaningful after `open_bdb <file>.sql writeback`.
@@ -410,4 +445,5 @@ COMMANDS = {
     "refine_busterms": cmd_refine_busterms,
     "load_pipeline": cmd_load_pipeline,
     "save_bdb": cmd_save_bdb,
+    "set_bottom_up": cmd_set_bottom_up,
 }
