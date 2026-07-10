@@ -84,12 +84,25 @@ same event, `=1` on the pinned repro).
 ### 3. Empty `layer_ids` semantic divergence — FIXED
 
 Topology generation's keepout predicates treat a `KeepoutZone` with empty
-`layer_ids` as **blocking every layer**; `keepout_occupied` silently
-*ignored* such zones (`layer_ids.count(t->layer)` on an empty set is never
-true). One convention now: `keepout_occupied` matches generation
-(`!koz.layer_ids.empty() && !koz.layer_ids.count(...) → skip`, i.e. empty =
-blocks all). No corpus flow declares an all-layer zone, so goldens are
-unaffected; the trap is closed for the first user who does.
+`layer_ids` as **blocking every layer**; every other production consumer
+silently *ignored* such zones (`layer_ids.count(t->layer)` /
+`lid in koz.layer_ids` on an empty set is never true). Such a zone is only
+creatable via the Python `Floorplan.add_keepout_zone(..., [])` API (the CLI
+requires explicit layers), but through that door it fell through **four**
+paths at once: abstract NUTS (`keepout_occupied`), the planner's band
+capacity (`band_available_length`), and both grid-installation paths
+(`def_track_pattern`'s re-apply, `_install_leaf_keepouts`) — so the planner
+assumed capacity through it and DetailedNUTS routed bits straight through
+it (Codex review caught the propagation gap beyond `keepout_occupied`).
+
+One convention now, empty = blocks all, at every consumer:
+`keepout_occupied` and `band_available_length` test
+`!layer_ids.empty() && !layer_ids.count(...)`, and
+`_install_leaf_keepouts` is the single grid-sync point for all-layer zones
+(installed on every defined grid, TOP included; `def_track_pattern`'s
+re-apply stays explicit-only to avoid double-installing). End-to-end
+regression: `test_keepout_model.py::test_all_layer_zone_blocks_every_stage`.
+No corpus flow declares an all-layer zone, so goldens are unaffected.
 
 ### 4. `verify.cpp` is keepout-blind — NOTED, open
 

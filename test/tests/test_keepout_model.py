@@ -139,3 +139,38 @@ def test_partial_keepout_is_dodged_not_culled():
     assert s.nuts_result.num_keepout_conflicts == 0
     # No bit landed on a keepout-covered track while spanning the keepout.
     assert _bits_crossing(s.detailed_result, 4, 350, 450, 0, 40) == []
+
+
+# ---------------------------------------------------------------------------
+# Empty-layer_ids zone = blocks EVERY layer (audit class 3).  Only reachable
+# via the Python Floorplan API (the CLI requires explicit layers); topology
+# predicates always honoured it, but abstract NUTS's keepout_occupied, the
+# planner's band capacity, and the grid-installation paths all silently
+# skipped such zones — so DetailedNUTS routed through them.  Same graze
+# shape as above, zone declared with NO layers: every stage must now treat
+# it exactly like the explicit-M4 zone (dodge legally, all counters 0).
+# ---------------------------------------------------------------------------
+
+def test_all_layer_zone_blocks_every_stage():
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    _run(s, ("def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+             f"def_track_pattern 4 0 {_PATN}", f"def_track_pattern 5 0 {_PATN}",
+             "add_block A 0 0 100 200", "add_block B 500 0 600 200"))
+    s.fp.add_keepout_zone(350, 0, 450, 40, [])   # NO layers = all layers
+    _run(s, ("add_bus n[8] A.tx B.rx", "run_bundler strict",
+             "generate_topologies", "run_planner 3", "run_nuts",
+             "run_detailed_nuts"))
+
+    assert s.detailed_result.num_unplaced == 0
+    assert s.detailed_result.num_keepout_bits == 0
+    assert s.nuts_result.num_keepout_conflicts == 0
+    # The zone reached the M4 grid (via _install_leaf_keepouts' all-layer
+    # sync): no bit crosses it on a covered track.
+    assert _bits_crossing(s.detailed_result, 4, 350, 450, 0, 40) == []
+    # And abstract NUTS dodged it too (keepout_occupied saw the zone): the
+    # bus segment's physical extent sits clear of y[0,40] over x[350,450].
+    for ts in s.nuts_result.segments:
+        if ts.layer == 4 and min(ts.span_lo, ts.span_hi) < 450 \
+                and max(ts.span_lo, ts.span_hi) > 350:
+            assert ts.track_position - ts.width / 2.0 >= 40

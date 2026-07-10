@@ -73,6 +73,8 @@ int CongestionPlanner::find_band(bool is_vcut, int perp_pos) const {
 // solid-leaf-cell zones on LOW layers (Floorplan::low_layer_keepouts).  TOP
 // layers see only the user zones, so they tile cells freely; containers are
 // absent from the zone list and keep their full channel capacity (Gap 2).
+// A zone with EMPTY layer_ids blocks every layer — the same convention as the
+// topology predicates and NUTS's keepout_occupied (keepout-model audit).
 static double band_available_length(
         int cut_coord, bool is_vcut,
         const std::vector<KeepoutZone>& keepouts,
@@ -81,7 +83,7 @@ static double band_available_length(
 {
     std::vector<std::pair<int,int>> blocked;
     for (const auto& koz : keepouts) {
-        if (!koz.layer_ids.count(layer_id)) continue;
+        if (!koz.layer_ids.empty() && !koz.layer_ids.count(layer_id)) continue;
         const Rect& r = koz.bbox;
         bool covers = is_vcut
             ? (cut_coord >= r.x1 && cut_coord <= r.x2)

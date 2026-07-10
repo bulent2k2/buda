@@ -920,14 +920,27 @@ class NutsFlowMixin:
         abstract NUTS (Gap 2).  Independent of the order in which blocks,
         containers, and track patterns were declared.  Guarded per grid object so
         repeated calls (detailed re-runs, or a `signal_tracks` plan before DNUTS)
-        don't re-add duplicates.  No-op without a routing grid."""
+        don't re-add duplicates.  No-op without a routing grid.
+
+        Also the one grid-sync point for user zones with EMPTY layer_ids, which
+        block EVERY layer (keepout-model audit class 3 — the convention shared
+        by the topology predicates, keepout_occupied, and the planner's band
+        capacity).  Such zones only arise via the Python Floorplan API (the CLI
+        requires explicit layers) and def_track_pattern's re-apply skips them,
+        so they are installed here on every defined grid, TOP included."""
         if self.routing_grid is None:
             return
         if getattr(self, '_leaf_keepouts_grid', None) is self.routing_grid:
             return
         for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL):
             for lid in self.layers.get_layer_ids_by_dir(d):
-                if self.layers.is_top(lid) or not self.routing_grid.has_layer(lid):
+                if not self.routing_grid.has_layer(lid):
+                    continue
+                for koz in self.fp.get_keepout_zones():
+                    if not koz.layer_ids:
+                        self.routing_grid.add_keepout(lid, koz.bbox.x1, koz.bbox.y1,
+                                                      koz.bbox.x2, koz.bbox.y2)
+                if self.layers.is_top(lid):
                     continue
                 for koz in self.fp.low_layer_keepouts([lid]):
                     if lid in koz.layer_ids:
