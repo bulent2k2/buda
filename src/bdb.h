@@ -326,6 +326,13 @@ public:
     explicit BDB(const std::string& db_path);
     ~BDB();
 
+    // Snapshot the CURRENT database state into a new binary file at
+    // dest_path (SQLite online-backup API: safe while this BDB is open,
+    // works for file-backed and :memory: databases alike; an existing
+    // destination is overwritten).  The save-as primitive under
+    // `save_bdb <path>`.
+    void save_copy(const std::string& dest_path) const;
+
     // ── Schema version & metadata ──────────────────────────────────────────
     // The schema version stored in this DB (PRAGMA user_version). Equals
     // SCHEMA_VERSION after open, since the constructor migrates forward.

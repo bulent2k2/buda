@@ -417,6 +417,29 @@ void BDB::meta_set(const std::string& key, const std::string& value) {
     _set_meta(key, value);
 }
 
+void BDB::save_copy(const std::string& dest_path) const {
+    sqlite3* out = nullptr;
+    if (sqlite3_open(dest_path.c_str(), &out) != SQLITE_OK) {
+        std::string err = out ? sqlite3_errmsg(out) : "cannot open";
+        sqlite3_close(out);
+        throw std::runtime_error("save_copy: cannot open " + dest_path +
+                                 ": " + err);
+    }
+    sqlite3_backup* bk = sqlite3_backup_init(out, "main", _db, "main");
+    if (!bk) {
+        std::string err = sqlite3_errmsg(out);
+        sqlite3_close(out);
+        throw std::runtime_error("save_copy: backup init failed for " +
+                                 dest_path + ": " + err);
+    }
+    sqlite3_backup_step(bk, -1);          // whole database in one step
+    sqlite3_backup_finish(bk);
+    const int rc = sqlite3_errcode(out);
+    sqlite3_close(out);
+    if (rc != SQLITE_OK && rc != SQLITE_DONE)
+        throw std::runtime_error("save_copy: backup failed for " + dest_path);
+}
+
 std::string BDB::meta_get(const std::string& key, const std::string& def) const {
     Stmt q(_db, "SELECT value FROM meta WHERE key=?");
     sqlite3_bind_text(q, 1, key.c_str(), -1, SQLITE_TRANSIENT);

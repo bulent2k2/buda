@@ -340,13 +340,36 @@ opened read-write and persists directly. See
 ### `save_bdb`
 
 ```
-save_bdb
+save_bdb [<path.bdb | path.bdb.sql>]
 ```
 
-Serialize the working BDB back to the source `*.bdb.sql` **now** (mid-run). Only
-meaningful after `open_bdb <file>.sql writeback`; otherwise it is a no-op with a
-note. The write also happens automatically on the next `open_bdb`, on `exit`, and
-at end of run, so an explicit `save_bdb` is only needed to checkpoint mid-flow.
+**No argument:** serialize the working BDB back to the source `*.bdb.sql`
+**now** (mid-run). Only meaningful after `open_bdb <file>.sql writeback`;
+otherwise it is a no-op with a note. The write also happens automatically on
+the next `open_bdb`, on `exit`, and at end of run, so an explicit `save_bdb`
+is only needed to checkpoint mid-flow.
+
+**With a path (save-as):** snapshot the CURRENT state to a new file,
+independent of any writeback source — e.g. a placement checkpoint right
+after `align_bottom_up` that later runs reopen directly (the `set_bottom_up`
+flags and aligned coordinates are both in the copy). A `.sql` destination
+gets the diffable text form (`tools/bdb_serialize`), anything else a binary
+SQLite snapshot (`BDB::save_copy`, the online-backup API — safe while the
+session holds the database open, `:memory:` included). An existing
+destination is overwritten; the file the live connection holds open is
+refused. Unlike the no-arg form, a save-as is a **one-shot copy** — it is
+not re-flushed at exit, so a mid-flow snapshot is not overwritten by the
+end-of-run state.
+
+```buda
+open_bdb mix2.bdb.sql          # fixture stays pristine (no writeback)
+set_bottom_up dnuts1
+align_bottom_up
+save_bdb mix2_aligned.bdb.sql  # aligned placement checkpoint, one shot
+```
+
+Python API: `db.save_copy(dest_path)` — binary snapshot of the live
+database.
 
 ---
 
