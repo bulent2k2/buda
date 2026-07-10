@@ -116,6 +116,14 @@ struct NUTSResult {
 // A sweep-line / first-fit algorithm assigns track positions so that no two
 // segments on the same layer with overlapping spans also overlap in the
 // perpendicular direction.
+// Translate a placed TrackSegment by (dx, dy) and re-key it to another
+// bundle — the per-instance copy step of bottom-up template planning (the
+// TrackSegment analogue of offset_topology).  The routing-direction fields
+// shift by the along-axis delta and the perpendicular fields (position,
+// interval, pull target, corner bounds) by the cross-axis delta.
+TrackSegment offset_track_segment(const TrackSegment& ts, int dx, int dy,
+                                  int new_bundle_id);
+
 // Records how segment S's span must follow segment T's track position
 // (S connects to T at S's lo or hi end, or mid-span).
 struct SpanAdjConn { int src_bid, src_si; bool lo_end; bool is_endpoint; };
@@ -173,6 +181,16 @@ public:
     // perpendicular intervals.  Must be called before run() / rerun_layer().
     void set_extra_grid_points(std::vector<int> xs, std::vector<int> ys);
 
+    // Bottom-up template planning (stage b): register already-placed segments
+    // (per-instance translated copies of a cell-local NUTS solve) as FIXED.
+    // Their bundles are skipped by extraction (never re-solved), every solver
+    // pass sees each fixed segment's physical extent as an engine-internal
+    // keepout zone on its layer (identical occupancy to another placed bundle,
+    // but immovable), and the segments are appended verbatim to the result so
+    // downstream stages (persist, viz, detailed NUTS) consume them normally.
+    // Must be called before run() / rerun_layer().
+    void add_fixed_segments(const std::vector<TrackSegment>& segs);
+
     // Run NUTS on the bundles that have already been processed by CongestionPlanner.
     // Each BundleWrapper must have candidates filled and selected_topology_index set.
     NUTSResult run(const std::vector<BundleWrapper>& bundles);
@@ -197,6 +215,20 @@ private:
     // behaves as a keepout for the whole lower stack.  TOP segments are filtered
     // out by KeepoutZone::layer_ids.  Mirrors the planner's band-capacity model.
     std::vector<KeepoutZone> low_keepouts() const;
+
+    // low_keepouts() plus the fixed segments' derived zones — what the solver
+    // passes (LayerSolver, repair_overlaps, tighten_pulls) must avoid.  The
+    // fixed zones stay OUT of low_keepouts() itself so the report-only
+    // count_keepout_conflicts never flags a fixed segment against its own
+    // footprint (it IS still checked against real user zones — a uniform copy
+    // landing on a keepout that exists in only one instance must be loud).
+    std::vector<KeepoutZone> solver_keepouts() const;
+
+    // Fixed (bottom-up copy) segments: appended to every result, never
+    // re-solved; their bundles are excluded from extraction.
+    std::vector<TrackSegment> fixed_segments_;
+    std::set<int>             fixed_bundle_ids_;
+    std::vector<KeepoutZone>  fixed_zones_;
 
     // Build a flat list of TrackSegments from all selected topologies.
     std::vector<TrackSegment> extract_segments(

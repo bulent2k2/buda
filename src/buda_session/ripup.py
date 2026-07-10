@@ -119,12 +119,19 @@ class RipupMixin:
         candidate than the victim's).
 
         ripup_reroute is an explicit congestion-fix pass, so it may re-route ANY
-        contended bundle — including one pinned earlier (its pin is replaced)."""
+        contended bundle — including one pinned earlier (its pin is replaced).
+        The one exception is a hier.locked wrapper (bottom-up template
+        instance): its assignment is a uniform copy shared by every sibling
+        instance and must not be moved unilaterally."""
         order, seen = [], set()
         def add(bid):
-            if bid not in seen:
-                seen.add(bid)
-                order.append(bid)
+            if bid in seen:
+                return
+            seen.add(bid)
+            w = self._rr_wrapper(bid)
+            if w is not None and w.hier.locked:
+                return
+            order.append(bid)
         if stage == 'b':
             for bid in self._rr_open_bundles():
                 add(bid)
@@ -265,6 +272,7 @@ class RipupMixin:
         final accepted state once at the end."""
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
+        self._inject_bottom_up_fixed(nuts)
         if self.planner is not None:
             nuts.set_extra_grid_points(
                 list(self.planner.get_x_grid()),
@@ -607,6 +615,14 @@ class RipupMixin:
                 for bid in affected:
                     w = self._rr_wrapper(bid)
                     if w is None:
+                        continue
+                    # A hier.locked wrapper (bottom-up template instance) is
+                    # never a negotiation target: its pinned assignment is a
+                    # uniform copy shared by all sibling instances.  Its
+                    # overlap partner (if unlocked) still replans around it —
+                    # and replan_bundle_ripup's victim stage skips locked
+                    # blockers C++-side too.
+                    if w.hier.locked:
                         continue
                     # Unpin: the corrected prices, not a pinned index, choose
                     # the topology (snapshot restores the pins on rejection).

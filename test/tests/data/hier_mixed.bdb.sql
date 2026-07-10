@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=16;
+PRAGMA user_version=18;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -15,7 +15,9 @@ CREATE TABLE bundle (
         rcv_spec_depth INTEGER DEFAULT -1,
         drv_spec_path  TEXT,
         rcv_spec_paths TEXT,                -- JSON array
-        gen_knobs      TEXT DEFAULT ''      -- additive-generation knob memo (v15)
+        gen_knobs      TEXT DEFAULT '',     -- additive-generation knob memo (v15)
+        is_expanded    INTEGER DEFAULT 0,   -- planner-expanded instance row (v18)
+        bu_locked      INTEGER DEFAULT 0    -- bottom-up template copy (v18)
     );
 CREATE TABLE bundle_busterm (
         bundle_id  TEXT REFERENCES bundle(id),
@@ -86,16 +88,17 @@ INSERT INTO "busterm" VALUES('bt:proc_a/pc_i',6,'proc_a/pc_i',1,640.0,110.0,750.
 INSERT INTO "busterm" VALUES('bt:snk_a',7,'snk_a',0,870.0,50.0,1070.0,250.0,'BLOCK',NULL,NULL,'THRU',0.0,0.0,0.0,0.0);
 INSERT INTO "busterm" VALUES('bt:snk_a/rcv_i',8,'snk_a/rcv_i',1,930.0,110.0,1010.0,190.0,'PORT','bt:snk_a',NULL,'THRU',0.0,0.0,0.0,0.0);
 CREATE TABLE cell (
-            name   TEXT PRIMARY KEY,
-            width  REAL NOT NULL,
-            height REAL NOT NULL
+            name      TEXT PRIMARY KEY,
+            width     REAL NOT NULL,
+            height    REAL NOT NULL,
+            bottom_up INTEGER NOT NULL DEFAULT 0
         );
-INSERT INTO "cell" VALUES('proc_cell',420.0,200.0);
-INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0);
-INSERT INTO "cell" VALUES('src_cell',200.0,200.0);
-INSERT INTO "cell" VALUES('snk_cell',200.0,200.0);
-INSERT INTO "cell" VALUES('gen_cell',80.0,80.0);
-INSERT INTO "cell" VALUES('rcv_cell',80.0,80.0);
+INSERT INTO "cell" VALUES('proc_cell',420.0,200.0,0);
+INSERT INTO "cell" VALUES('pipe_cell',110.0,80.0,0);
+INSERT INTO "cell" VALUES('src_cell',200.0,200.0,0);
+INSERT INTO "cell" VALUES('snk_cell',200.0,200.0,0);
+INSERT INTO "cell" VALUES('gen_cell',80.0,80.0,0);
+INSERT INTO "cell" VALUES('rcv_cell',80.0,80.0,0);
 CREATE TABLE cell_children (
             parent_cell TEXT NOT NULL REFERENCES cell(name),
             inst_name   TEXT NOT NULL,
@@ -172,7 +175,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','16');
+INSERT INTO "meta" VALUES('schema_version','18');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,

@@ -106,10 +106,17 @@ struct DetailedNUTSResult {
 class DetailedNUTSEngine {
 public:
     explicit DetailedNUTSEngine(const RoutingGridStack& stack);
+    // Bottom-up template planning (stage c): pre-reserve the tracks used by
+    // already-solved bit-wires (the reference-instance solve and its
+    // per-instance copies) so this engine's run places every other bundle's
+    // bits off them.  Reservations keep the same-bundle sharing exemption (a
+    // fixed bit never blocks its own bundle).  Must be called before run().
+    void add_fixed_bits(const std::vector<NetSegment>& bits);
     DetailedNUTSResult run(const std::vector<BusSegment>& bus_segments) const;
 
 private:
     const RoutingGridStack& stack_;
+    std::vector<NetSegment> fixed_bits_;
 
     // The three stages of run(), in order (each mutates `result` in place):
     // per-layer bit placement in abstract_pos order (Option B), the per-bit
@@ -147,5 +154,14 @@ std::vector<BusSegment> make_bus_segments(
     const NUTSResult& nuts_result,
     const Floorplan& floorplan,
     const std::string& bit_order = "LO_HI");
+
+// Bottom-up per-instance copy helpers (stage c) — the NetSegment/NetVia
+// analogues of offset_track_segment: translate a solved reference-instance
+// bit-wire / via by (dx, dy) and re-key it to a sibling instance's bundle.
+// `horiz` is the wire direction (from the abstract segment): a horizontal
+// wire's span shifts by dx and its track position by dy.
+NetSegment offset_net_segment(const NetSegment& ns, int dx, int dy,
+                              int new_bundle_id, bool horiz);
+NetVia offset_net_via(const NetVia& v, int dx, int dy, int new_bundle_id);
 
 } // namespace buda

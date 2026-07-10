@@ -161,8 +161,16 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)
+        .def("add_fixed_segments",    &NUTSEngine::add_fixed_segments,
+             py::arg("segs"))
         .def("run",                   &NUTSEngine::run)
         .def("rerun_layer",           &NUTSEngine::rerun_layer);
+
+    m.def("offset_track_segment", &offset_track_segment,
+          py::arg("ts"), py::arg("dx"), py::arg("dy"), py::arg("new_bundle_id"),
+          "Translate a placed TrackSegment by (dx, dy) and re-key it to "
+          "another bundle — the per-instance copy step of bottom-up "
+          "template planning");
 
     // ── Routing grid + detailed NUTS ──────────────────────────────────────
     py::class_<TrackSlot>(m, "TrackSlot")
@@ -196,6 +204,9 @@ void bind_nuts(py::module_& m) {
         }, py::arg("x"), py::arg("y"))
         .def("signal_tracks_in",      &RoutingGrid::signal_tracks_in,
              py::arg("x"), py::arg("lo"), py::arg("hi"))
+        .def("signal_tracks_in_span", &RoutingGrid::signal_tracks_in_span,
+             py::arg("along_lo"), py::arg("along_hi"),
+             py::arg("lo"), py::arg("hi"))
         .def("count_signal_tracks_in", &RoutingGrid::count_signal_tracks_in,
              py::arg("x"), py::arg("lo"), py::arg("hi"));
 
@@ -279,7 +290,19 @@ void bind_nuts(py::module_& m) {
 
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
         .def(py::init<const RoutingGridStack&>())
+        .def("add_fixed_bits", &DetailedNUTSEngine::add_fixed_bits,
+             py::arg("bits"))
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
+
+    m.def("offset_net_segment", &offset_net_segment,
+          py::arg("ns"), py::arg("dx"), py::arg("dy"),
+          py::arg("new_bundle_id"), py::arg("horiz"),
+          "Translate a solved bit-wire by (dx, dy) and re-key it to a "
+          "sibling instance's bundle (bottom-up stage c copy)");
+    m.def("offset_net_via", &offset_net_via,
+          py::arg("v"), py::arg("dx"), py::arg("dy"), py::arg("new_bundle_id"),
+          "Translate a per-bit via by (dx, dy) and re-key it to a sibling "
+          "instance's bundle (bottom-up stage c copy)");
 
     // Stage-4 -> stage-9 handoff, single-sourced in C++: every TrackSegment
     // of the NUTS result becomes a BusSegment (track_position -> abstract_pos,

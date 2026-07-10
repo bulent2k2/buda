@@ -123,6 +123,15 @@ struct BundleRow {
     int         rcv_spec_depth = -1;
     std::string drv_spec_path;
     std::string rcv_spec_paths;       // JSON array
+    // v18: written by the planner's expansion persist (synthetic per-instance
+    // wrapper row), as opposed to a bundler-persisted replica — the two are
+    // otherwise shape-identical, and load_pipeline's expanded view must keep
+    // exactly the expanded rows.
+    bool        is_expanded = false;
+    // Bottom-up template copy (v18): this expanded per-instance row carries a
+    // uniform copy of its template's local solve — load_pipeline restores it
+    // as a locked (pinned, never-moved) wrapper.
+    bool        bu_locked = false;
 };
 
 struct GrpRow {
@@ -264,6 +273,10 @@ struct RouteSnapshotRow {
 struct CellRow {
     std::string name;
     double      width, height;
+    // Bottom-up template planning flag (v17): when set, the hier flow plans /
+    // NUTSes this cell's local interconnect once and copies the result to
+    // every instance (see docs/internal/hier_bottom_up_planning.md).
+    bool        bottom_up = false;
 };
 
 struct CellPinRow {
@@ -302,7 +315,13 @@ public:
     //       generation-knob memo);
     // v16 = topology_segment.perp_clamp_lo/hi (overlap-U per-segment perp slide
     //       clamp) so a resumed U_OVL candidate reloads clamped.
-    static constexpr int SCHEMA_VERSION = 16;
+    // v17 = cell.bottom_up (bottom-up template planning flag: the cell's local
+    //       interconnect is planned/NUTSed once and copied to every instance).
+    // v18 = bundle.is_expanded (planner-expanded per-instance row, distinct
+    //       from a bundler replica) + bundle.bu_locked (the row is a uniform
+    //       bottom-up copy of its template's local solve — restored as a
+    //       locked wrapper by load_pipeline).
+    static constexpr int SCHEMA_VERSION = 18;
 
     explicit BDB(const std::string& db_path);
     ~BDB();
@@ -315,6 +334,9 @@ public:
     // 'schema_version' and 'bdb_tool'.
     std::string meta_get(const std::string& key,
                          const std::string& def = "") const;
+    // Write (upsert) a meta(key,value) row. Public sibling of the internal
+    // _set_meta so tools/session code can persist design-level flags.
+    void meta_set(const std::string& key, const std::string& value);
 
     // ── Ingestion ──────────────────────────────────────────────────────────
     void import_def_lef(const std::string& def_path, const std::string& lef_path);
@@ -332,6 +354,12 @@ public:
     // ── Cell definitions ───────────────────────────────────────────────────
     void add_cell(const std::string& name, double w, double h);
     std::vector<CellRow> all_cells() const;
+    // Bottom-up template planning flag (v17). set_cell_bottom_up throws if the
+    // cell is not defined; cell_bottom_up returns false for an unknown cell.
+    void set_cell_bottom_up(const std::string& cell, bool on);
+    bool cell_bottom_up(const std::string& cell) const;
+    // Names of all cells with bottom_up set, sorted (empty when none).
+    std::vector<std::string> bottom_up_cells() const;
 
     // ── Cell-level pins (port interface) ──────────────────────────────────
     // Define or update a port on a cell type.  px/py are offsets from the

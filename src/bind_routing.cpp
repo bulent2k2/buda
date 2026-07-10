@@ -474,7 +474,8 @@ void bind_routing(py::module_& m) {
         .def_readwrite("res_x1",          &BundleHierMeta::res_x1)
         .def_readwrite("res_y1",          &BundleHierMeta::res_y1)
         .def_readwrite("res_x2",          &BundleHierMeta::res_x2)
-        .def_readwrite("res_y2",          &BundleHierMeta::res_y2);
+        .def_readwrite("res_y2",          &BundleHierMeta::res_y2)
+        .def_readwrite("locked",          &BundleHierMeta::locked);
 
     py::class_<BundleWrapper>(m, "BundleWrapper")
         .def(py::init<>())

@@ -101,7 +101,9 @@ void bind_db(py::module_& m) {
         .def_readwrite("drv_spec_depth", &BundleRow::drv_spec_depth)
         .def_readwrite("rcv_spec_depth", &BundleRow::rcv_spec_depth)
         .def_readwrite("drv_spec_path",  &BundleRow::drv_spec_path)
-        .def_readwrite("rcv_spec_paths", &BundleRow::rcv_spec_paths);
+        .def_readwrite("rcv_spec_paths", &BundleRow::rcv_spec_paths)
+        .def_readwrite("is_expanded",    &BundleRow::is_expanded)
+        .def_readwrite("bu_locked",      &BundleRow::bu_locked);
 
     py::class_<TopoRow>(m, "TopoRow")
         .def(py::init<>())
@@ -226,9 +228,10 @@ void bind_db(py::module_& m) {
         .def_readwrite("n_net_vias",     &RouteSnapshotRow::n_net_vias);
 
     py::class_<CellRow>(m, "CellRow")
-        .def_readwrite("name",   &CellRow::name)
-        .def_readwrite("width",  &CellRow::width)
-        .def_readwrite("height", &CellRow::height);
+        .def_readwrite("name",      &CellRow::name)
+        .def_readwrite("width",     &CellRow::width)
+        .def_readwrite("height",    &CellRow::height)
+        .def_readwrite("bottom_up", &CellRow::bottom_up);
 
     py::class_<CellPinRow>(m, "CellPinRow")
         .def_readwrite("cell",     &CellPinRow::cell)
@@ -384,6 +387,8 @@ void bind_db(py::module_& m) {
         .def("schema_version",  &BDB::schema_version)
         .def("meta_get",        &BDB::meta_get,
              py::arg("key"), py::arg("def") = std::string())
+        .def("meta_set",        &BDB::meta_set,
+             py::arg("key"), py::arg("value"))
         .def_readonly_static("SCHEMA_VERSION", &BDB::SCHEMA_VERSION)
         .def("die_w",           &BDB::die_w)
         .def("die_h",           &BDB::die_h)
@@ -407,6 +412,10 @@ void bind_db(py::module_& m) {
         .def("add_cell",        &BDB::add_cell,
              py::arg("name"), py::arg("w"), py::arg("h"))
         .def("all_cells",       &BDB::all_cells)
+        .def("set_cell_bottom_up", &BDB::set_cell_bottom_up,
+             py::arg("cell"), py::arg("on"))
+        .def("cell_bottom_up",  &BDB::cell_bottom_up, py::arg("cell"))
+        .def("bottom_up_cells", &BDB::bottom_up_cells)
         .def("add_inst",        &BDB::add_inst,
              py::arg("inst_name"), py::arg("cell_name"), py::arg("parent_name"),
              py::arg("x"), py::arg("y"))

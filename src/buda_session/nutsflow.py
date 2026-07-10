@@ -572,10 +572,20 @@ class NutsFlowMixin:
             hi_layer = layers_sorted[-1]
             layer_set = set(layers_sorted)
 
+            # A locked (bottom-up copy) wrapper's plan must stay identical to
+            # its placed fixed routing: reassigning its layers here would
+            # diverge plan.seg_layers from the routed copies (extraction
+            # skips fixed bundles, so the re-run below cannot move them) and
+            # a later load_pipeline would restore an internally inconsistent
+            # pin. Excluded from the span map too, so the short/medium/long
+            # counts reflect only the reassignable bundles.
+            locked_ids = {w.input.original_bundle.id for w in self.bundles
+                          if w.hier.locked}
+
             # Map bundle_id → max span length among segments on this direction's layers.
             bid_max_span: dict[int, float] = {}
             for seg in self.nuts_result.segments:
-                if seg.layer not in layer_set:
+                if seg.layer not in layer_set or seg.bundle_id in locked_ids:
                     continue
                 span_len = seg.span_hi - seg.span_lo
                 bid = seg.bundle_id
@@ -634,6 +644,7 @@ class NutsFlowMixin:
         pitch = self._nuts_pitch if hasattr(self, '_nuts_pitch') and self._nuts_pitch else 1.0
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(pitch)
+        self._inject_bottom_up_fixed(nuts)
         self.nuts_result = nuts.run(self.bundles)
         self._adopt_doglegs()
 
@@ -790,6 +801,7 @@ class NutsFlowMixin:
         layer_name   = layer_names.get(layer_id, f"L{layer_id}")
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
+        self._inject_bottom_up_fixed(nuts)
         if self.planner is not None:
             nuts.set_extra_grid_points(
                 list(self.planner.get_x_grid()),
@@ -1006,9 +1018,74 @@ class NutsFlowMixin:
         # placed with, so the two stages can never drift.
         bus_segs = buda.make_bus_segments(self.bundles, self.nuts_result,
                                           self.fp, bit_order)
-        engine = buda.DetailedNUTSEngine(self.routing_grid)
-        with buda.ostream_redirect():
-            self.detailed_result = engine.run(bus_segs)
+        # Bottom-up cells (stage c): solve the reference instance once, copy
+        # its bits/vias to the aligned siblings, and solve everything else
+        # around the copies (their tracks pre-reserved).  May raise under the
+        # 'stop' mismatch policy.  None = no bottom-up routing, single run.
+        bu_plan = self._bottom_up_dnuts_plan()
+        if bu_plan is None:
+            engine = buda.DetailedNUTSEngine(self.routing_grid)
+            with buda.ostream_redirect():
+                self.detailed_result = engine.run(bus_segs)
+        else:
+            ref_ids, copy_specs, skip_ids = bu_plan
+            ref_segs  = [b for b in bus_segs if b.bundle_id in ref_ids]
+            rest_segs = [b for b in bus_segs
+                         if b.bundle_id not in ref_ids
+                         and b.bundle_id not in skip_ids]
+            horiz_of = {(ts.bundle_id, ts.seg_idx): ts.horiz
+                        for ts in self._bottom_up_fixed_segments()}
+            eng1 = buda.DetailedNUTSEngine(self.routing_grid)
+            with buda.ostream_redirect():
+                r1 = eng1.run(ref_segs)
+            # Per-instance copies of the reference bits + vias.  Unplaced
+            # reference bits have no rows to copy, so each copy inherits the
+            # reference's shortfall in the honest unplaced count.
+            # INVARIANT (load-bearing): copies are NOT re-culled against
+            # keepouts — they come from the already-culled reference solve,
+            # and a sibling is only copied when check_template_tracks proved
+            # its span-aware track pools (which INCLUDE keepouts) identical
+            # to the reference's: a sibling whose window differs by a keepout
+            # is misaligned and never reaches this copy loop.  If the
+            # keepout model changes, keep the check's pools in lockstep.
+            exp_bits, placed_bits = {}, {}
+            for b in ref_segs:
+                exp_bits[b.bundle_id] = (exp_bits.get(b.bundle_id, 0)
+                                         + b.bit_width)
+            for ns in r1.net_segments:
+                placed_bits[ns.bundle_id] = placed_bits.get(ns.bundle_id,
+                                                            0) + 1
+            copies, copy_vias, extra_unplaced = [], [], 0
+            for ref_bid, sib_bid, ddx, ddy in copy_specs:
+                for ns in r1.net_segments:
+                    if ns.bundle_id == ref_bid:
+                        copies.append(buda.offset_net_segment(
+                            ns, ddx, ddy, sib_bid,
+                            horiz_of.get((ref_bid, ns.seg_idx), True)))
+                for v in r1.net_vias:
+                    if v.bundle_id == ref_bid:
+                        copy_vias.append(
+                            buda.offset_net_via(v, ddx, ddy, sib_bid))
+                extra_unplaced += (exp_bits.get(ref_bid, 0)
+                                   - placed_bits.get(ref_bid, 0))
+            eng2 = buda.DetailedNUTSEngine(self.routing_grid)
+            eng2.add_fixed_bits(list(r1.net_segments) + copies)
+            with buda.ostream_redirect():
+                r2 = eng2.run(rest_segs)
+            merged = buda.DetailedNUTSResult()
+            merged.net_segments = (list(r1.net_segments) + copies
+                                   + list(r2.net_segments))
+            merged.net_vias = (list(r1.net_vias) + copy_vias
+                               + list(r2.net_vias))
+            merged.num_unplaced = (r1.num_unplaced + extra_unplaced
+                                   + r2.num_unplaced)
+            merged.num_keepout_bits = (r1.num_keepout_bits
+                                       + r2.num_keepout_bits)
+            self.detailed_result = merged
+            print(f"[BottomUp] DNUTS: {len(r1.net_segments)} reference "
+                  f"bit(s) solved once, {len(copies)} copied to "
+                  f"{len(copy_specs)} sibling instance(s); "
+                  f"{len(r2.net_segments)} other bit(s) solved around them.")
 
         n_net = len(self.detailed_result.net_segments)
         n_unplaced = self.detailed_result.num_unplaced

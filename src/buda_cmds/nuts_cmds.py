@@ -54,6 +54,10 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"pitch-aware band reservations match this NUTS run.")
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
+    # Bottom-up cells: solve each marked cell's templates once locally and
+    # register the per-instance copies as fixed (skipped by extraction,
+    # blocking every other bundle). See hier_bottom_up_planning.md §4.
+    session._inject_bottom_up_fixed(nuts)
 
     if session.planner is not None:
         nuts.set_extra_grid_points(
@@ -96,7 +100,14 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
         print("Error: run_detailed_nuts requires a routing grid (def_track_pattern)")
         return
 
-    session._run_detailed_nuts(bit_order=session._detailed_bit_order)
+    try:
+        session._run_detailed_nuts(bit_order=session._detailed_bit_order)
+    except RuntimeError as e:
+        # Bottom-up mismatch under the 'stop' policy: refuse, keep the
+        # session usable (the user can fix placement or switch policy with
+        # 'check_template_tracks on_mismatch independent' and re-run).
+        print(f"Error: {e}")
+        return
     n_ns, n_nv = session._persist_detailed_nuts()
     if n_ns:
         print(f"[BDB] persisted {n_ns} net segment(s) and {n_nv} "

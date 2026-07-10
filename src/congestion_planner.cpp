@@ -969,11 +969,15 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         span_ref_eff_ = 0.25 * std::max(ext_x, ext_y);
     }
 
-    // Sort: higher priority first (depth-0 before depth-1, constrained first);
-    // within the same priority, process widest buses first.
+    // Sort: locked (bottom-up template instance) wrappers first — their
+    // assignment is already decided, committing it up front makes every
+    // later bundle price and detour it; then higher priority (depth-0 before
+    // depth-1, constrained first); within the same priority, widest first.
     std::vector<int> order(bundles.size());
     std::iota(order.begin(), order.end(), 0);
     std::sort(order.begin(), order.end(), [&](int a, int b) {
+        if (bundles[a].hier.locked != bundles[b].hier.locked)
+            return bundles[a].hier.locked;
         if (bundles[a].hier.priority != bundles[b].hier.priority)
             return bundles[a].hier.priority > bundles[b].hier.priority;
         return bundles[a].input.width > bundles[b].input.width;
@@ -1034,6 +1038,10 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         if (!plan.found) {
             std::vector<std::pair<double,int>> ranked;   // (overlap, committed idx)
             for (int k = 0; k < (int)committed.size(); ++k) {
+                // A locked (bottom-up) wrapper is never a rip-up victim:
+                // its plan is a template copy shared by every sibling
+                // instance and must not be moved unilaterally.
+                if (bundles[committed[k].bundle_idx].hier.locked) continue;
                 double ovl = plan_band_overlap(bundles[committed[k].bundle_idx],
                                                committed[k].plan, contended);
                 if (ovl > 0.0) ranked.push_back({ovl, k});
@@ -1200,6 +1208,7 @@ std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
     for (auto& bw : bundles)
         if (bw.input.original_bundle.id == target_bundle_id) { target = &bw; break; }
     if (!target || target->input.candidates.empty()) return std::nullopt;
+    if (target->hier.locked) return std::nullopt;   // template copy: not movable
     const int tsel = target->plan.selected_topology_index;
     if (tsel < 0 || tsel >= (int)target->input.candidates.size()) return std::nullopt;
 
@@ -1232,6 +1241,7 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
     for (auto& bw : bundles)
         if (bw.input.original_bundle.id == target_bundle_id) { target = &bw; break; }
     if (!target || target->input.candidates.empty()) return out;
+    if (target->hier.locked) return out;            // template copy: not movable
     const int tsel = target->plan.selected_topology_index;
     if (tsel < 0 || tsel >= (int)target->input.candidates.size()) return out;
 
@@ -1246,6 +1256,7 @@ std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
         std::vector<std::pair<double, BundleWrapper*>> ranked;
         for (auto& bw : bundles) {
             if (&bw == target || !has_committed_plan_(bw)) continue;
+            if (bw.hier.locked) continue;   // template copy: never a victim
             double ovl = plan_band_overlap(bw, fixed_plan_of_(bw), contended);
             if (ovl > 0.0) ranked.push_back({ovl, &bw});
         }
