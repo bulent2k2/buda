@@ -82,6 +82,14 @@ public:
         overrides_.push_back(std::move(ov));
     }
 
+    // The layer-wide pattern (ignores region overrides).  Exposed for the
+    // placement-phase math in align_bottom_up: an instance offset is
+    // track-shift-invariant iff it is a multiple of this pattern's
+    // unit_pitch — overrides are absolute-rect-keyed and cannot be fixed by
+    // translation, so they are the check's job, not the aligner's.
+    const TrackPattern& global_pattern() const { return global_pattern_; }
+    bool has_overrides() const { return !overrides_.empty(); }
+
     // Returns the first matching override pattern for point (x,y), else global.
     const TrackPattern& effective_pattern_at(double x, double y) const;
 

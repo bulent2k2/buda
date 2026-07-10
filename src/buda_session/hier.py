@@ -990,16 +990,30 @@ class HierMixin:
         policy — self._bu_mismatch_policy 'stop'|'independent' — governs the
         rest).  A layer with no track pattern is skipped (DNUTS skips it
         too); with no routing grid at all the check is vacuous.
+
+        Before any routing exists (e.g. right after open_bdb +
+        set_bottom_up, before derive_busterms), the check falls back to the
+        PLACEMENT-STAGE mode: whole-instance windows per grid layer instead
+        of per-routed-segment windows.  That verdict is advisory (printed,
+        cached separately, feeds align_bottom_up) — it never gates DNUTS,
+        which re-checks against the real routed windows.
         """
-        verdict = {}
-        self._template_track_verdict = verdict
         fixed = self._bottom_up_fixed_segments()
         if not fixed:
-            if verbose:
-                print("check_template_tracks: no bottom-up fixed routing to "
-                      "check (mark cells with set_bottom_up and run the flow "
-                      "through run_nuts first).")
-            return verdict
+            # Post-planner with locked-then-unlocked instances = every marked
+            # cell fell back per-instance (dogleg templates): the placement-
+            # stage report below could read ALIGNED while DNUTS will in fact
+            # solve per-instance — say so rather than switch modes silently.
+            if (verbose and getattr(self, "_planner_is_hier", False)
+                    and self.nuts_result is not None
+                    and self.bdb is not None and self.bdb.bottom_up_cells()):
+                print("check_template_tracks: no bottom-up fixed routing "
+                      "exists after run_nuts (dogleg fallback unlocked every "
+                      "marked cell?) — DNUTS will solve per-instance; the "
+                      "placement-stage report below does not gate it.")
+            return self._check_template_tracks_placement(verbose=verbose)
+        verdict = {}
+        self._template_track_verdict = verdict
         if self.routing_grid is None and verbose:
             print("check_template_tracks: no routing grid defined "
                   "(def_track_pattern) — nothing to compare yet; alignment "
@@ -1084,6 +1098,318 @@ class HierMixin:
                           f"tracks (ref {ref_name}, {n_windows} window(s) "
                           f"compared)")
         return verdict
+
+    def _grid_layer_dirs(self):
+        """{layer_id: horiz?} for every layer that has a track pattern."""
+        out = {}
+        if self.routing_grid is None:
+            return out
+        for lid in self.layers.get_layer_ids_by_dir(buda.LayerDir.HORIZONTAL):
+            if self.routing_grid.has_layer(lid):
+                out[lid] = True
+        for lid in self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL):
+            if self.routing_grid.has_layer(lid):
+                out[lid] = False
+        return out
+
+    def _bottom_up_placed_instances(self):
+        """{cell: [placed ComponentRows]} for every marked cell with >= 2
+        placed instances — the placement-stage unit of work (no bundler,
+        busterms, or routing required)."""
+        out = {}
+        if self.bdb is None:
+            return out
+        bu = set(self.bdb.bottom_up_cells())
+        if not bu:
+            return out
+        for c in self.bdb.all_components():
+            if c.cell in bu and c.x1 >= 0:
+                out.setdefault(c.cell, []).append(c)
+        return {cell: sorted(insts, key=lambda c: c.name)
+                for cell, insts in out.items() if len(insts) >= 2}
+
+    def _check_template_tracks_placement(self, verbose=True):
+        """Placement-stage track-alignment check: no routing needed, so it
+        runs right after open_bdb + set_bottom_up (before derive_busterms).
+
+        Compares the span-aware signal-track pool over each instance's
+        WHOLE window per grid layer (span = the instance's extent along the
+        layer direction, interval = its perpendicular extent), normalized by
+        the instance origin.  Whole-window agreement covers pattern phase,
+        overrides, and keepouts for the full footprint; it is advisory — the
+        routed check (per fixed-segment window, run after run_nuts) remains
+        the DNUTS gate, because a keepout at different *relative* positions
+        can agree on the whole window yet differ on a sub-window.
+
+        Verdict cached on self._template_track_verdict_placement (feeds
+        align_bottom_up), same shape as the routed verdict.
+        """
+        verdict = {}
+        self._template_track_verdict_placement = verdict
+        by_cell = self._bottom_up_placed_instances()
+        if not by_cell:
+            if verbose:
+                print("check_template_tracks: nothing to check — mark cells "
+                      "with set_bottom_up (each needs >= 2 placed instances) "
+                      "in an open BDB first.")
+            return verdict
+        dirs = self._grid_layer_dirs()
+        if not dirs:
+            if verbose:
+                print("check_template_tracks: no routing grid defined "
+                      "(def_track_pattern) — nothing to compare yet.")
+            return verdict
+
+        def rel_tracks(inst, lid, horiz):
+            g = self.routing_grid.get_layer_grid(lid)
+            if horiz:
+                tracks = g.signal_tracks_in_span(inst.x1, inst.x2,
+                                                 inst.y1, inst.y2)
+                off = inst.y1
+            else:
+                tracks = g.signal_tracks_in_span(inst.y1, inst.y2,
+                                                 inst.x1, inst.x2)
+                off = inst.x1
+            return [(round(p - off, 6), round(slot.width, 6))
+                    for p, slot in tracks]
+
+        for cell in sorted(by_cell):
+            insts = by_cell[cell]
+            ref = insts[0]
+            aligned, misaligned = [ref.name], {}
+            for c in insts[1:]:
+                issues = []
+                for lid, horiz in sorted(dirs.items()):
+                    a = rel_tracks(ref, lid, horiz)
+                    b = rel_tracks(c, lid, horiz)
+                    if len(a) != len(b):
+                        issues.append(f"L{lid}: {len(b)} track(s) vs "
+                                      f"{len(a)} at reference")
+                        continue
+                    for (pa, wa), (pb, wb) in zip(a, b):
+                        if abs(pa - pb) > 1e-6 or abs(wa - wb) > 1e-6:
+                            issues.append(f"L{lid}: track at rel {pb:+.3f} "
+                                          f"vs reference {pa:+.3f}")
+                            break
+                if issues:
+                    misaligned[c.name] = issues
+                else:
+                    aligned.append(c.name)
+            verdict[cell] = {'ref': ref.name, 'aligned': aligned,
+                             'misaligned': misaligned}
+            if verbose:
+                if misaligned:
+                    detail = "; ".join(
+                        f"{i}: {v[0]}" + (f" (+{len(v)-1} more)"
+                                          if len(v) > 1 else "")
+                        for i, v in sorted(misaligned.items()))
+                    print(f"[TemplateTracks] (placement-stage) cell "
+                          f"'{cell}': MISALIGNED — {detail}")
+                else:
+                    print(f"[TemplateTracks] (placement-stage) cell "
+                          f"'{cell}': ALIGNED — {len(aligned)} instance(s) "
+                          f"see identical signal tracks over their whole "
+                          f"window (ref {ref.name})")
+        if verbose:
+            print("[TemplateTracks] placement-stage verdict is advisory: "
+                  "the post-run_nuts check (per routed window) gates "
+                  "run_detailed_nuts. Misaligned? try align_bottom_up.")
+        return verdict
+
+    @staticmethod
+    def _pitch_lcm(pitches):
+        """LCM of float pitches via micro-unit integers (None if empty)."""
+        if not pitches:
+            return None
+        import math
+        SCALE = 1_000_000
+        ints = [max(1, int(round(p * SCALE))) for p in pitches]
+        l = ints[0]
+        for v in ints[1:]:
+            l = l // math.gcd(l, v) * v
+        return l / SCALE
+
+    def _validate_placement(self):
+        """FloorplannerEngine.validate() over the BDB's placed components:
+        OVERLAP pairs (ancestor/descendant pairs excluded) and OUTSIDE_DIE
+        (skipped when the BDB has no die).  Returns [(kind, message)]."""
+        eng = buda.FloorplannerEngine()
+        if self.bdb.die_w() > 0 and self.bdb.die_h() > 0:
+            eng.set_die(self.bdb.die_w(), self.bdb.die_h())
+        for c in self.bdb.all_components():
+            if c.x1 >= 0:
+                eng.add_block(c.name, c.x1, c.y1, c.x2, c.y2)
+        return [(i.kind, i.message) for i in eng.validate()]
+
+    def _align_bottom_up(self, max_shift=None):
+        """Nudge every marked cell's instances onto a common track phase
+        with MINIMAL total movement, so the bottom-up copies land on real
+        signal tracks in every occurrence.
+
+        Per cell and axis: an instance offset is track-shift-invariant iff
+        it is a multiple of every relevant layer's unit pitch — V-layer
+        pitches constrain x, H-layer pitches constrain y (combined as their
+        LCM).  All instances must share one phase (their coordinate mod
+        LCM); the target phase is chosen among the instances' current
+        phases minimizing the summed circular shift (the L1 circular median
+        lies on a data point), so the whole group moves as little as
+        possible — often the reference moves and the majority stand still.
+
+        Moves are applied with translate_comp (whole subtree, preserving
+        congruence).  Region overrides are absolute-rect-keyed and cannot
+        be fixed by translation — the check reports them.  Run BEFORE
+        derive_busterms / add_blocks_from_bdb; a nudge exceeding max_shift
+        (when given) is skipped with a WARNING.  Returns #instances moved.
+
+        NESTED marked cells: cells are processed parents-first (by instance
+        depth) with coordinates re-read after each cell's moves, because a
+        parent nudge drags its whole subtree.  An instance living INSIDE a
+        marked ancestor's instance is an ANCHOR — moving it alone would
+        break the ancestor's congruence — so it never moves; the target
+        phase is chosen among the anchors' phases when any exist (movable
+        siblings come to them).  Anchors at differing phases (the template
+        places two child instances at incompatible relative positions) are
+        not fixable by translation and are reported.
+
+        After the moves, FloorplannerEngine.validate() audits the placement
+        (block overlaps + outside-die): issues NEW relative to the pre-move
+        placement are each printed as a WARNING (the moves are kept — undo
+        by re-running with a tighter max_shift or fixing the floorplan);
+        pre-existing issues are summarized, not blamed on the alignment.
+        """
+        by_cell = self._bottom_up_placed_instances()
+        if not by_cell:
+            print("align_bottom_up: nothing to align — mark cells with "
+                  "set_bottom_up (each needs >= 2 placed instances) first.")
+            return 0
+        dirs = self._grid_layer_dirs()
+        if not dirs:
+            print("Error: align_bottom_up requires a routing grid "
+                  "(def_track_pattern) to know the track pitches")
+            return 0
+        # Anything derived from placement is stale after a nudge — warn on
+        # EVERY such artifact, not just bundles: derive_busterms and
+        # add_blocks_from_bdb can each run before the bundler.
+        stale = [w for got, w in (
+            (self.bdb.all_busterms(), "derived busterms"),
+            (self.fp.get_all_blocks(), "projected floorplan blocks"),
+            (self.bundles, "bundles/routing"),
+        ) if got]
+        if stale:
+            print(f"WARNING: align_bottom_up after {' + '.join(stale)} were "
+                  f"built — those coordinates are now stale; re-run the "
+                  f"flow from derive_busterms.")
+        lx = self._pitch_lcm(
+            [self.routing_grid.get_layer_grid(l).global_pattern().unit_pitch()
+             for l, horiz in dirs.items() if not horiz])
+        ly = self._pitch_lcm(
+            [self.routing_grid.get_layer_grid(l).global_pattern().unit_pitch()
+             for l, horiz in dirs.items() if horiz])
+        if any(self.routing_grid.get_layer_grid(l).has_overrides()
+               for l in dirs):
+            print("WARNING: add_grid_override regions present — phase "
+                  "alignment cannot compensate absolute-rect overrides; "
+                  "verify with check_template_tracks afterwards.")
+
+        pre_issues = self._validate_placement()
+
+        def to_phase(c, p, period):
+            d = (p - c) % period
+            return d - period if d > period / 2 else d
+
+        def shifts(insts, movable, coord, period):
+            # Signed minimal per-instance shifts to the common phase that
+            # (1) sits on the most anchors — immovable instances inside
+            # marked ancestors — then (2) minimizes the movables' total
+            # movement (the L1 circular median lies on a data point).
+            # Anchors always get shift 0; returns the names of any anchors
+            # OFF the chosen phase (not fixable by translation).
+            if period is None:
+                return [0.0] * len(insts), []
+            anchors = [(c.name, coord(c)) for c in insts
+                       if c.name not in movable]
+            movs = [coord(c) for c in insts if c.name in movable]
+            best = None
+            for cand in ([a for _, a in anchors] or movs):
+                p = cand % period
+                mis = sum(1 for _, a in anchors
+                          if abs(to_phase(a, p, period)) > 1e-6)
+                cost = sum(abs(to_phase(m, p, period)) for m in movs)
+                if (best is None or mis < best[0]
+                        or (mis == best[0] and cost < best[1] - 1e-9)):
+                    best = (mis, cost, p)
+            p = best[2]
+            offside = [n for n, a in anchors
+                       if abs(to_phase(a, p, period)) > 1e-6]
+            return ([to_phase(coord(c), p, period)
+                     if c.name in movable else 0.0 for c in insts], offside)
+
+        moved = 0
+        # Enclosing cells before enclosed ones, and FRESH coordinates per
+        # cell: a parent's nudge drags its whole subtree, so a nested cell's
+        # deltas must never come from a pre-move snapshot.  Order by marked-
+        # ancestor nesting level (not instance depth — a child cell may also
+        # have standalone top-level instances that would tie the depths).
+        marked0 = {c.name for cs in by_cell.values() for c in cs}
+
+        def nest_level(c):
+            parts = c.name.split("/")
+            return sum(1 for k in range(1, len(parts))
+                       if "/".join(parts[:k]) in marked0)
+
+        order = sorted(by_cell,
+                       key=lambda cl: (max(nest_level(c)
+                                           for c in by_cell[cl]), cl))
+        for cell in order:
+            snap = self._bottom_up_placed_instances()   # fresh after moves
+            insts = snap.get(cell, [])
+            if len(insts) < 2:
+                continue
+            marked = {c.name for cs in snap.values() for c in cs}
+            def inside_marked(name):
+                parts = name.split("/")
+                return any("/".join(parts[:k]) in marked
+                           for k in range(1, len(parts)))
+            movable = {c.name for c in insts if not inside_marked(c.name)}
+            dxs, off_x = shifts(insts, movable, lambda c: c.x1, lx)
+            dys, off_y = shifts(insts, movable, lambda c: c.y1, ly)
+            for n in sorted(set(off_x) | set(off_y)):
+                print(f"WARNING: align_bottom_up: {n} (inside a marked "
+                      f"parent) sits off cell '{cell}'s chosen phase — the "
+                      f"parent template places it at an incompatible "
+                      f"offset; not fixable by translation")
+            for c, dx, dy in zip(insts, dxs, dys):
+                dx = 0.0 if abs(dx) < 1e-9 else dx
+                dy = 0.0 if abs(dy) < 1e-9 else dy
+                if max_shift is not None and \
+                        max(abs(dx), abs(dy)) > max_shift + 1e-9:
+                    print(f"WARNING: align_bottom_up: {c.name} needs "
+                          f"(dx={dx:+.3f}, dy={dy:+.3f}) > max_shift "
+                          f"{max_shift} — skipped (cell '{cell}' may stay "
+                          f"misaligned)")
+                    continue
+                if dx or dy:
+                    self.bdb.translate_comp(c.name, dx, dy)
+                    moved += 1
+                    print(f"[Align] cell '{cell}': {c.name} moved by "
+                          f"(dx={dx:+.3f}, dy={dy:+.3f})")
+        # Placement changed: every derived bottom-up artifact is stale.
+        self._bu_fixed_cache = None
+        self._template_track_verdict = None
+        self._template_track_verdict_placement = None
+        pitches = (f"x-period {lx}" if lx else "x unconstrained") + ", " + \
+                  (f"y-period {ly}" if ly else "y unconstrained")
+        print(f"[Align] {moved} instance(s) moved ({pitches}); verify with "
+              f"check_template_tracks.")
+        # Post-move placement audit: report anything the nudges broke.
+        if moved:
+            pre = set(pre_issues)
+            new = [i for i in self._validate_placement() if i not in pre]
+            for kind, msg in new:
+                print(f"WARNING: align_bottom_up introduced {kind}: {msg}")
+            print(f"[Align] validate: {len(new)} new issue(s) from the "
+                  f"moves, {len(pre)} pre-existing.")
+        return moved
 
     def _bottom_up_dnuts_plan(self):
         """Stage (c) DNUTS routing plan for bottom-up cells, from the cached

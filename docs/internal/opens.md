@@ -10,8 +10,24 @@ items this page doesn't see).
 
 ## Quick wins (small, low risk)
 
-*(none open — the `check_design` rename was the last one; see "Recently
-resolved" below.)*
+*(bottom-up items added 2026-07-10, post PR #238 + its follow-ons; details
+in [`hier_bottom_up_planning.md`](hier_bottom_up_planning.md) §11 unless
+noted.)*
+
+- **`align_bottom_up` slack-aware default cap + auto-revert** — today the
+  nudge is unlimited unless `max_shift` is passed, and the post-move
+  `validate()` audit *reports* a new overlap/outside-die issue but keeps
+  the move. Derive a per-cell default cap from the placement's free slack,
+  and optionally revert (translate back) any move that introduced a NEW
+  issue.
+- **Floorplanner UI toggle for `cell.bottom_up`** — the flag is persisted
+  (v17) and the engine/BDB sides are done; the GUI neither displays nor
+  edits it.
+- **Hier topology unit tests drive a local reimplementation** —
+  `test_hier_topology.py` re-implements generation in-file instead of
+  calling `HierMixin._generate_hier_topo_one`, so the cross-level (case c)
+  branch of the real dispatch has no coverage. Port the tests to the real
+  entry point.
 
 ## Substantial features (bounded, clear plans)
 
@@ -31,7 +47,43 @@ resolved" below.)*
    selection term, or letting negotiate/ripup up-rank across candidate
    classes. The natural continuation of the 2026-07 planner work (signal
    tracks, abutment Gap A, `kHeight`); real golden churn to review.
+### Bottom-up template planning follow-ons (added 2026-07-10)
+
+- **Orientation-aware instance copying** — the Q1 decision deferred it:
+  instances of a bottom-up cell must be identity-orientation today
+  (guard-and-refuse; the top-down flow only warns). Supporting rotated /
+  mirrored instances means rotate/mirror-aware `offset_topology` plus
+  transformed NUTS/DNUTS copies — and would also fix the pre-existing
+  silent mis-transform in the plain top-down hier expansion. Biggest of
+  the bottom-up deferrals; the BDB side (`component.orient`,
+  `rotate_comp`/`flip_comp` composition) is already in place.
+- **`generate_more_topologies` is not hier-aware** — the additive
+  per-bundle command matches by net-name against the flat floorplan and
+  never enters the 3-case hier dispatch; `generate_topologies_for_hbundle`
+  is replace-only. An expert cannot accrete candidates for an HBundle.
+
 ## Big / blocked / conditional
+
+*(bottom-up conditionals, added 2026-07-10 — these only fire on specific
+designs and fail LOUD, never silent:)*
+
+- **Dogleg-split templates are not copied** — when a cell's LOCAL NUTS
+  solve needs a dogleg, that cell falls back to per-instance global NUTS
+  with a WARNING. Copying a split means adopting the dogleg topology on
+  the template AND offsetting it per instance (candidates, plan arrays,
+  slide overrides). See
+  [`hier_bottom_up_planning.md`](hier_bottom_up_planning.md) §4.3 as-built.
+- **Resume from a pre-`run_nuts` checkpoint loses NUTS-copy uniformity** —
+  `load_pipeline expanded` restores locked wrappers, but with no persisted
+  routing and no template wrappers the local solve cannot be reconstructed
+  (loud WARNING, per-instance fallback). Fix = rebuild template wrappers
+  from the persisted template bundle rows (candidates + the v18-persisted
+  template selection are all there).
+- **Keepout scope generalization** — deferred by the Q4 decision: only
+  *marked* cells' copied routing blocks higher levels; making EVERY hier
+  cell's planned+NUTSed local routing a blockage is a possible future
+  knob (changes results of every existing hier design — needs golden
+  review).
 
 5. **Global-overlap re-route of NON-contended bundles** —
    [`wishlist-ripup.md`](wishlist-ripup.md) → *"Global-overlap re-route of

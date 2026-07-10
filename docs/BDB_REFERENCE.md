@@ -715,6 +715,39 @@ Python API: `db.set_cell_bottom_up(cell, on)`, `db.cell_bottom_up(cell)`,
 
 ---
 
+### `align_bottom_up`
+
+```
+align_bottom_up [max_shift <um>]
+```
+
+Nudge every `set_bottom_up` cell's instances onto a common track phase with
+**minimal total movement**, so the bottom-up copies land on real signal
+tracks in every occurrence.  Per cell and axis, an instance offset is
+track-shift-invariant iff it is a multiple of every relevant layer's unit
+pitch (V-layer pitches constrain x, H-layer pitches constrain y, combined as
+their LCM); the common phase is chosen among the instances' current phases
+minimizing the summed circular shift (the L1 circular median lies on a data
+point), so the majority of instances usually stand still.
+
+Moves are applied with `translate_comp` (whole subtree — congruence is
+preserved).  Requires an open BDB and a routing grid (`def_track_pattern`);
+run **before** `derive_busterms` / `add_blocks_from_bdb` (a later run prints
+a staleness WARNING).  Region `add_grid_override` patterns are keyed to
+absolute rects and cannot be compensated by translation — verify with
+`check_template_tracks`, which also runs pre-routing (placement-stage,
+whole-window comparison) exactly for this pairing.
+
+| Argument | Type | Description |
+|---|---|---|
+| `max_shift <um>` | keyword + float | Optional cap: any nudge larger than this is skipped with a WARNING. |
+
+Python API: `db.translate_comp(name, dx, dy)` — translate a component and
+its whole subtree (unlike `move_comp`, which repositions only the named
+component's bbox).
+
+---
+
 ### `add_inst`
 
 ```

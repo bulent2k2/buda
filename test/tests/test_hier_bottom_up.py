@@ -111,11 +111,13 @@ def test_meta_set_binding():
 
 # ── Congruence helper ─────────────────────────────────────────────────────────
 
-def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:"):
+def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:", derive=True):
     """proc_cell (two pipe_cell children) instantiated twice, with 4-bit
     cell-local buses in each instance — the template-sharing vehicle.
     cross_net adds a depth-0 4-bit bus between two leaf blocks placed left
-    and right of proc_i1, whose direct route crosses that instance."""
+    and right of proc_i1, whose direct route crosses that instance.
+    derive=False skips busterm derivation (for flows that align placement
+    first and derive afterwards)."""
     db = buda.BDB(path)
     db.add_cell("proc_cell", 420, 200)
     db.add_cell("pipe_cell", 110, 80)
@@ -132,7 +134,8 @@ def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:"):
         db.add_inst("R0", "leaf_cell", "", 1200, 70)
         for i in range(4):
             db.add_net_pins(f"lr_{i}", "L0.out", ["R0.in"])
-    buda.BustermGen(db).derive(1)
+    if derive:
+        buda.BustermGen(db).derive(1)
     return db
 
 
@@ -527,6 +530,205 @@ def test_post_nuts_planner_skips_locked_wrappers():
         if bid in locked_layers:
             assert list(w.plan.seg_layers) == locked_layers[bid], (
                 f"post_nuts moved locked bundle {bid}'s layers")
+
+
+# ── Placement-stage check + align_bottom_up ──────────────────────────────────
+
+def _placement_session(db):
+    """Layers + patterns + mark only — NO derive_busterms / bundler / routing."""
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS + ["set_bottom_up proc_cell"]):
+        _run_cmd(s, c)
+    return s
+
+
+def test_check_template_tracks_placement_stage():
+    """check_template_tracks works BEFORE derive_busterms: with no routing
+    it compares whole-instance windows per grid layer."""
+    s = _placement_session(_two_inst_db(x2=500, y2=301, derive=False))
+    out = _run_cmd(s, "check_template_tracks")
+    assert "placement-stage" in out and "MISALIGNED" in out
+    assert "proc_i2" in out
+    s2 = _placement_session(_two_inst_db(x2=500, y2=300, derive=False))
+    out2 = _run_cmd(s2, "check_template_tracks")
+    assert "placement-stage" in out2 and "MISALIGNED" not in out2
+    assert "ALIGNED" in out2
+
+
+def test_align_bottom_up_then_strict_flow():
+    """align_bottom_up nudges the off-phase instance by half a pitch, the
+    placement check turns ALIGNED, and the full flow then completes DNUTS
+    under the STRICT default policy with the reference-solve-and-copy path."""
+    db = _two_inst_db(x2=500, y2=301, derive=False)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "[Align]" in out and "1 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["proc_i2"].y1 == pytest.approx(302)      # +1 to phase 0
+    assert comps["proc_i2/pa_i"].y1 == pytest.approx(362) # subtree moved too
+    assert s._bottom_up_congruence_issues("proc_cell") == []
+    assert "MISALIGNED" not in _run_cmd(s, "check_template_tracks")
+    for c in ["derive_busterms 1", "run_hier_bundler",
+              "generate_hier_topologies", "run_planner hier", "run_nuts"]:
+        _run_cmd(s, c)
+    out = _run_cmd(s, "run_detailed_nuts")                # strict default
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+
+
+def test_align_bottom_up_minimal_total_movement():
+    """The target phase minimizes TOTAL movement: with phases 0, 1, 1 the
+    majority phase wins — the reference moves 1, the other two stand still
+    (a keep-reference-fixed policy would move 2)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst("P0", "proc_cell", "", 0, 0)
+    db.add_inst("P1", "proc_cell", "", 500, 301)
+    db.add_inst("P2", "proc_cell", "", 1000, 601)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "1 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P0"].y1 == pytest.approx(1)      # ref moved to the majority phase
+    assert comps["P1"].y1 == pytest.approx(301)    # untouched
+    assert comps["P2"].y1 == pytest.approx(601)    # untouched
+    assert s._bottom_up_congruence_issues("proc_cell") == []
+
+
+def test_align_bottom_up_validate_reports_new_issues():
+    """After the moves, FloorplannerEngine.validate() audits the placement:
+    a nudge that pushes an instance outside the die (or into an overlap) is
+    reported as a NEW issue, distinct from pre-existing ones."""
+    db = buda.BDB(":memory:")
+    db.set_die(420, 401.9)
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst("P0", "proc_cell", "", 0, 0)
+    db.add_inst("P1", "proc_cell", "", 0, 201.5)   # phase 1.5, in-die
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    # P1 snaps +0.5 to P0's phase -> y2 = 402 > die 401.9.
+    assert "1 instance(s) moved" in out
+    assert "align_bottom_up introduced OUTSIDE_DIE" in out and "P1" in out
+    assert "1 new issue(s)" in out and "0 pre-existing" in out
+
+
+def test_align_bottom_up_validate_quiet_when_clean():
+    """No new issues -> no WARNING, just the summary line."""
+    db = _two_inst_db(x2=500, y2=301, derive=False)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "1 instance(s) moved" in out
+    assert "introduced" not in out
+    assert "0 new issue(s)" in out
+
+
+def test_align_bottom_up_warns_on_stale_busterms():
+    """Codex #244 finding 1: the staleness warning must fire when
+    derive_busterms ran before the align — not only after bundling."""
+    db = _two_inst_db(x2=500, y2=301, derive=True)   # busterms already derived
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "WARNING" in out and "derived busterms" in out
+    assert "stale" in out
+
+
+def _nested_db(k9_y=61):
+    """Marked parent cell containing an instance of a marked child cell,
+    plus a standalone child-cell instance (K9)."""
+    db = buda.BDB(":memory:")
+    db.add_cell("kid_cell", 50, 50)
+    db.add_cell("par_cell", 400, 200)
+    db.add_inst_to_cell("par_cell", "k_i", "kid_cell", 20, 60)
+    db.add_inst("P0", "par_cell", "", 0, 0)
+    db.add_inst("P1", "par_cell", "", 500, 301)      # off-phase parent
+    db.add_inst("K9", "kid_cell", "", 1000, k9_y)    # standalone child inst
+    return db
+
+
+def test_align_bottom_up_nested_marked_cells():
+    """Codex #244 finding 2: with parent AND child cells marked, the parent
+    aligns first, the child's coordinates are re-read AFTER the parent move
+    (no double shift), and child instances inside marked parents are
+    anchors — only the standalone instance moves, toward them."""
+    db = _nested_db()
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"] + _PATTERNS
+              + ["set_bottom_up par_cell", "set_bottom_up kid_cell"]):
+        _run_cmd(s, c)
+    out = _run_cmd(s, "align_bottom_up")
+    assert "2 instance(s) moved" in out
+    assert "sits off" not in out                     # anchors agree post-parent-move
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["P1"].y1 == pytest.approx(302)      # parent snapped +1
+    assert comps["P1/k_i"].y1 == pytest.approx(362)  # dragged once, NOT re-shifted
+    assert comps["K9"].y1 == pytest.approx(62)       # movable: joins the anchors
+    assert comps["P0"].y1 == pytest.approx(0)        # majority stands still
+    assert s._bottom_up_congruence_issues("par_cell") == []
+    assert s._bottom_up_congruence_issues("kid_cell") == []
+    assert "MISALIGNED" not in _run_cmd(s, "check_template_tracks")
+
+
+def test_align_bottom_up_reports_unfixable_anchor():
+    """Two child instances placed at incompatible offsets INSIDE the parent
+    template cannot be phase-aligned by translation — reported, not moved."""
+    db = buda.BDB(":memory:")
+    db.add_cell("kid_cell", 50, 50)
+    db.add_cell("par_cell", 400, 200)
+    db.add_inst_to_cell("par_cell", "k1", "kid_cell", 20, 60)
+    db.add_inst_to_cell("par_cell", "k2", "kid_cell", 100, 61)  # off k1's phase
+    db.add_inst("P0", "par_cell", "", 0, 0)
+    db.add_inst("P1", "par_cell", "", 500, 300)
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"] + _PATTERNS
+              + ["set_bottom_up par_cell", "set_bottom_up kid_cell"]):
+        _run_cmd(s, c)
+    before = {c.name: (c.x1, c.y1) for c in db.all_components()}
+    out = _run_cmd(s, "align_bottom_up")
+    assert "sits off" in out and "not fixable by translation" in out
+    after = {c.name: (c.x1, c.y1) for c in db.all_components()}
+    assert before == after                           # nothing moved
+
+
+def test_translate_comp_moves_pins_with_subtree(tmp_path):
+    """Pin positions are absolute, so translate_comp shifts the subtree's
+    pins too (keeping compute_hpwl and pin consumers honest); the (-1, -1)
+    unknown-position sentinel is not shifted (owner review #244 finding 1)."""
+    p = str(tmp_path / "pins.bdb")
+    db = buda.BDB(p)
+    db.add_cell("c", 100, 100)
+    db.add_cell_pin("c", "p", "OUTPUT", 10, 20)
+    db.add_inst("I0", "c", "", 0, 0)
+    db.add_inst("I1", "c", "", 200, 0)
+    db.add_net_pins("n0", "I0.p", ["I1.p"])
+    i0 = {c.name: c.id for c in db.all_components()}["I0"]
+    assert [(q.px, q.py) for q in db.pins_by_comp(i0)] == [(10, 20)]
+    del db
+    con = sqlite3.connect(p)   # a sentinel pin (no producer is Python-bound)
+    con.execute("INSERT INTO pin(net_id, comp_id, pin_name, dir, px, py)"
+                " VALUES(1, ?, 'ghost', 'UNKNOWN', -1, -1)", (i0,))
+    con.commit()
+    con.close()
+    db = buda.BDB(p)
+    db.translate_comp("I0", 5, 7)
+    pins = {q.pin_name: (q.px, q.py) for q in db.pins_by_comp(i0)}
+    assert pins["p"] == (15, 27)          # absolute pin rides along
+    assert pins["ghost"] == (-1, -1)      # unknown sentinel untouched
+
+
+def test_align_bottom_up_max_shift_guard():
+    db = _two_inst_db(x2=500, y2=301, derive=False)
+    s = _placement_session(db)
+    out = _run_cmd(s, "align_bottom_up max_shift 0.5")
+    assert "WARNING" in out and "0 instance(s) moved" in out
+    comps = {c.name: c for c in db.all_components()}
+    assert comps["proc_i2"].y1 == pytest.approx(301)      # untouched
 
 
 # ── Step 6: persistence round-trip (v18 bu_locked + template selection) ──────
