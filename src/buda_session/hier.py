@@ -51,6 +51,12 @@ class HierMixin:
         tpl = expanded_to_template.get(hb.id)
         row.parent_id = str(tpl) if tpl is not None else ""
         row.is_replicated = True                   # marks an expanded instance
+        # v18: planner-expanded instance row (vs. a bundler replica, which is
+        # shape-identical) — load_pipeline's expanded view keys off this.
+        row.is_expanded = True
+        # Bottom-up copy provenance (v18): load_pipeline restores this row as
+        # a locked (pinned, never-moved) wrapper.
+        row.bu_locked = bool(w.hier.locked)
         row.drv_spec_depth = hb.drv_spec_depth
         row.rcv_spec_depth = hb.rcv_spec_depth
         row.drv_spec_path = hb.drv_spec_path
@@ -746,8 +752,10 @@ class HierMixin:
 
         See docs/internal/hier_bottom_up_planning.md §3.
         """
-        # A re-plan invalidates any cached bottom-up local NUTS solve.
+        # A re-plan invalidates any cached bottom-up local NUTS solve and
+        # the track-alignment verdict derived from it.
         self._bu_fixed_cache = None
+        self._template_track_verdict = None
         bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
         if not bu_cells or not self.bundles:
             return
@@ -794,6 +802,19 @@ class HierMixin:
                 w.input.assigned_h_layer = asn.h_layer_id
                 w.input.topology_pinned = True
                 w.input.pinned_seg_layers = list(asn.seg_layers)
+            # Persist the template's own decision (is_selected + assigned
+            # layers on the TEMPLATE bundle rows) — the canonical record of
+            # the local solve, so a resumed session re-enters bottom-up with
+            # the same pinned assignment instead of re-deciding.
+            if self.bdb is not None:
+                persisted_ids = {b.id for b in self.bdb.all_bundles()}
+                for w in wrappers:
+                    bid = str(w.input.original_bundle.id)
+                    sel = w.plan.selected_topology_index
+                    if bid in persisted_ids and sel >= 0:
+                        self.bdb.set_topology_selected(bid, sel)
+                        self.bdb.reset_assigned_layers(bid)
+                        self._persist_assigned_layers(bid, sel, w)
             n_inst = len(wrappers[0].input.original_bundle.instances)
             print(f"[BottomUp] cell '{cell}': {len(assignments)} template "
                   f"bundle(s) planned locally; decision pinned for "
@@ -831,7 +852,28 @@ class HierMixin:
         bu_cells = set(self.bdb.bottom_up_cells())
         templates = getattr(self, "_hier_bundles_orig", None) or []
         exp_map = getattr(self, "_hier_expansion_map", None) or {}
-        if not bu_cells or not templates or not exp_map:
+        if not bu_cells or not exp_map:
+            return fixed
+        if not templates:
+            # Resume path (load_pipeline expanded): the template wrappers are
+            # gone, but the persisted NUTS result already CONTAINS the fixed
+            # copies (they were merged into the result before persisting) —
+            # source them from there instead of re-solving locally.
+            locked_ids = {w.input.original_bundle.id for w in self.bundles
+                          if w.hier.locked}
+            if not locked_ids:
+                return fixed
+            if self.nuts_result is not None:
+                fixed.extend(ts for ts in self.nuts_result.segments
+                             if ts.bundle_id in locked_ids and ts.placed)
+            if fixed:
+                print(f"[BottomUp] resume: {len(fixed)} fixed segment(s) "
+                      f"restored from the persisted NUTS routing")
+            else:
+                print("WARNING: bottom-up locked instances present but no "
+                      "template wrappers and no persisted NUTS routing — "
+                      "uniform NUTS copies are unavailable on this resume; "
+                      "re-run from run_planner hier in a full session")
             return fixed
         comps = {c.name: c for c in self.bdb.all_components()}
         cell_ids = {w.input.original_bundle.id for w in templates
@@ -901,6 +943,207 @@ class HierMixin:
         fixed = self._bottom_up_fixed_segments()
         if fixed:
             nuts_engine.add_fixed_segments(fixed)
+
+    def _bottom_up_instance_groups(self):
+        """(cell, template id, [locked instance wrappers]) triples for every
+        bottom-up template that produced locked instances — the shared walk
+        under check_template_tracks and the DNUTS copy plan.
+
+        Derived from the expansion map ALONE, so it works both in a live
+        session and on a load_pipeline-expanded resume (where the template
+        wrappers are gone and the map was rebuilt from parent_id links).
+        Replica entries — which alias a subset of their template's wrappers —
+        are dropped by subset dedup."""
+        exp_map = getattr(self, "_hier_expansion_map", None) or {}
+        bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
+        cands = []
+        for tid, iws in exp_map.items():
+            locked = [iw for iw in iws
+                      if iw.hier.locked
+                      and iw.input.original_bundle.cell_context in bu_cells]
+            if locked:
+                cands.append((tid, locked, frozenset(id(x) for x in locked)))
+        out, seen = [], set()
+        for tid, iws, s in sorted(cands, key=lambda c: c[0]):
+            if s in seen or any(s < s2 for _, _, s2 in cands):
+                continue          # replica alias of a (larger) template group
+            seen.add(s)
+            out.append((iws[0].input.original_bundle.cell_context, tid, iws))
+        return out
+
+    def _check_template_tracks(self, verbose=True):
+        """Stage (c) verification of bottom-up template planning: do all
+        instances of each marked cell see the SAME signal tracks?
+
+        Ground truth, per fixed (copied) segment: the SPAN-AWARE track pool
+        (`signal_tracks_in_span` over the segment's span × interval window —
+        the pool DNUTS itself prefers, so keepouts crossing only part of the
+        wire are honored), enumerated in each instance's translated window
+        and normalized by the instance origin.  Instances agree exactly when
+        their placement offset is a multiple of the layer's track pitch AND
+        no absolute-rect override or keepout cuts their windows differently.
+
+        Returns AND caches the verdict:
+          {cell: {'ref': inst, 'aligned': [inst...],
+                  'misaligned': {inst: [issue strings]}}}
+        consumed by run_detailed_nuts (copy aligned instances; the mismatch
+        policy — self._bu_mismatch_policy 'stop'|'independent' — governs the
+        rest).  A layer with no track pattern is skipped (DNUTS skips it
+        too); with no routing grid at all the check is vacuous.
+        """
+        verdict = {}
+        self._template_track_verdict = verdict
+        fixed = self._bottom_up_fixed_segments()
+        if not fixed:
+            if verbose:
+                print("check_template_tracks: no bottom-up fixed routing to "
+                      "check (mark cells with set_bottom_up and run the flow "
+                      "through run_nuts first).")
+            return verdict
+        if self.routing_grid is None and verbose:
+            print("check_template_tracks: no routing grid defined "
+                  "(def_track_pattern) — nothing to compare yet; alignment "
+                  "will be trivially reported ALIGNED.")
+        segs_by_bid = {}
+        for ts in fixed:
+            segs_by_bid.setdefault(ts.bundle_id, {})[ts.seg_idx] = ts
+        comps = {c.name: c for c in self.bdb.all_components()}
+
+        def rel_tracks(ts, inst_name):
+            # Track pool of ts's window, relative to the instance origin.
+            if self.routing_grid is None \
+                    or not self.routing_grid.has_layer(ts.layer):
+                return None
+            g = self.routing_grid.get_layer_grid(ts.layer)
+            lo, hi = sorted((ts.span_lo, ts.span_hi))
+            tracks = g.signal_tracks_in_span(lo, hi,
+                                             ts.interval_lo, ts.interval_hi)
+            c = comps[inst_name]
+            off = c.y1 if ts.horiz else c.x1
+            return [(round(p - off, 6), round(slot.width, 6))
+                    for p, slot in tracks]
+
+        cells = {}
+        for cell, tid, iws in self._bottom_up_instance_groups():
+            cells.setdefault(cell, []).append(iws)
+        for cell in sorted(cells):
+            ref_name = cells[cell][0][0].input.original_bundle.instances[0]
+            aligned, misaligned = [ref_name], {}
+            n_windows = 0
+            for iws in cells[cell]:
+                ref_iw = next(iw for iw in iws
+                              if iw.input.original_bundle.instances[0]
+                              == ref_name)
+                ref_bid = ref_iw.input.original_bundle.id
+                for iw in iws:
+                    inst = iw.input.original_bundle.instances[0]
+                    if inst == ref_name:
+                        continue
+                    bid = iw.input.original_bundle.id
+                    issues = misaligned.get(inst, [])
+                    for si, rts in sorted(segs_by_bid.get(ref_bid,
+                                                          {}).items()):
+                        sts = segs_by_bid.get(bid, {}).get(si)
+                        if sts is None:
+                            continue
+                        a = rel_tracks(rts, ref_name)
+                        b = rel_tracks(sts, inst)
+                        if a is None or b is None:
+                            continue
+                        n_windows += 1
+                        if len(a) != len(b):
+                            issues.append(
+                                f"L{rts.layer} seg{si}: {len(b)} track(s) "
+                                f"vs {len(a)} at reference")
+                            continue
+                        for (pa, wa), (pb, wb) in zip(a, b):
+                            if abs(pa - pb) > 1e-6 or abs(wa - wb) > 1e-6:
+                                issues.append(
+                                    f"L{rts.layer} seg{si}: track at rel "
+                                    f"{pb:+.3f} vs reference {pa:+.3f}")
+                                break
+                    if issues:
+                        misaligned[inst] = issues
+                    elif inst not in aligned and inst not in misaligned:
+                        aligned.append(inst)
+            # An instance flagged by ANY template window is misaligned.
+            aligned = [i for i in aligned if i not in misaligned]
+            verdict[cell] = {'ref': ref_name, 'aligned': aligned,
+                             'misaligned': misaligned}
+            if verbose:
+                if misaligned:
+                    detail = "; ".join(
+                        f"{i}: {v[0]}" + (f" (+{len(v)-1} more)"
+                                          if len(v) > 1 else "")
+                        for i, v in sorted(misaligned.items()))
+                    print(f"[TemplateTracks] cell '{cell}': MISALIGNED — "
+                          f"{detail}")
+                else:
+                    print(f"[TemplateTracks] cell '{cell}': ALIGNED — "
+                          f"{len(aligned)} instance(s) see identical signal "
+                          f"tracks (ref {ref_name}, {n_windows} window(s) "
+                          f"compared)")
+        return verdict
+
+    def _bottom_up_dnuts_plan(self):
+        """Stage (c) DNUTS routing plan for bottom-up cells, from the cached
+        (or implicitly run) track verdict.  Returns None when no bottom-up
+        fixed routing exists; else (ref_ids, copy_specs, skip_ids):
+          ref_ids    — bundle ids solved once (the reference instances)
+          copy_specs — [(ref_bid, sib_bid, ddx, ddy)] translated copies for
+                       ALIGNED siblings
+          skip_ids   — the copied siblings (excluded from the global solve);
+                       misaligned siblings stay in the global solve
+                       ('independent' policy — copy aligned, solve outliers).
+        Raises RuntimeError under the default 'stop' policy when any
+        instance is misaligned.
+        """
+        fixed = self._bottom_up_fixed_segments()
+        if not fixed:
+            return None
+        if getattr(self, "_template_track_verdict", None) is None:
+            print("run_detailed_nuts: bottom-up cells present — running "
+                  "check_template_tracks (implicit).")
+            self._check_template_tracks()
+        verdict = self._template_track_verdict
+        policy = getattr(self, "_bu_mismatch_policy", "stop")
+        mis = [(cell, inst) for cell, v in verdict.items()
+               for inst in v['misaligned']]
+        if mis and policy == "stop":
+            names = "; ".join(f"{c}/{i}" for c, i in mis[:5])
+            more = "" if len(mis) <= 5 else f" (+{len(mis) - 5} more)"
+            raise RuntimeError(
+                f"run_detailed_nuts: {len(mis)} bottom-up instance(s) see "
+                f"different signal tracks than their template reference "
+                f"({names}{more}). Fix the placement (offset instances by a "
+                f"multiple of the layer track pitch / align grid overrides), "
+                f"or accept per-instance solving with "
+                f"'check_template_tracks on_mismatch independent'.")
+        comps = {c.name: c for c in self.bdb.all_components()}
+        ref_ids, skip_ids, copy_specs = set(), set(), []
+        for cell, tid, iws in self._bottom_up_instance_groups():
+            v = verdict.get(cell)
+            if v is None:
+                continue
+            by_inst = {iw.input.original_bundle.instances[0]: iw
+                       for iw in iws}
+            ref_iw = by_inst.get(v['ref'])
+            if ref_iw is None:
+                continue
+            ref_bid = ref_iw.input.original_bundle.id
+            ref_ids.add(ref_bid)
+            rc = comps[v['ref']]
+            for inst, iw in by_inst.items():
+                if inst == v['ref'] or inst in v['misaligned']:
+                    continue        # ref solves; misaligned solve globally
+                c = comps[inst]
+                copy_specs.append((ref_bid, iw.input.original_bundle.id,
+                                   int(round(c.x1 - rc.x1)),
+                                   int(round(c.y1 - rc.y1))))
+                skip_ids.add(iw.input.original_bundle.id)
+        if not ref_ids:
+            return None
+        return ref_ids, copy_specs, skip_ids
 
     def _expand_hier_bundles(self, bundles):
         """Expand cell-level BundleWrappers to per-instance absolute-coord wrappers.

@@ -1,5 +1,5 @@
 -- BUDA BDB text dump (sqlite3 iterdump); regenerate via tools/bdb_serialize.py
-PRAGMA user_version=17;
+PRAGMA user_version=18;
 BEGIN TRANSACTION;
 CREATE TABLE bundle (
         id             TEXT PRIMARY KEY,
@@ -15,7 +15,9 @@ CREATE TABLE bundle (
         rcv_spec_depth INTEGER DEFAULT -1,
         drv_spec_path  TEXT,
         rcv_spec_paths TEXT,                -- JSON array
-        gen_knobs      TEXT DEFAULT ''      -- additive-generation knob memo (v15)
+        gen_knobs      TEXT DEFAULT '',     -- additive-generation knob memo (v15)
+        is_expanded    INTEGER DEFAULT 0,   -- planner-expanded instance row (v18)
+        bu_locked      INTEGER DEFAULT 0    -- bottom-up template copy (v18)
     );
 CREATE TABLE bundle_busterm (
         bundle_id  TEXT REFERENCES bundle(id),
@@ -173,7 +175,7 @@ CREATE TABLE meta (
             key   TEXT PRIMARY KEY,
             value TEXT
         );
-INSERT INTO "meta" VALUES('schema_version','17');
+INSERT INTO "meta" VALUES('schema_version','18');
 INSERT INTO "meta" VALUES('bdb_tool','buda-bdb');
 CREATE TABLE net (
             id   INTEGER PRIMARY KEY,

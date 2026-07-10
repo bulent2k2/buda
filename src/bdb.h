@@ -123,6 +123,15 @@ struct BundleRow {
     int         rcv_spec_depth = -1;
     std::string drv_spec_path;
     std::string rcv_spec_paths;       // JSON array
+    // v18: written by the planner's expansion persist (synthetic per-instance
+    // wrapper row), as opposed to a bundler-persisted replica — the two are
+    // otherwise shape-identical, and load_pipeline's expanded view must keep
+    // exactly the expanded rows.
+    bool        is_expanded = false;
+    // Bottom-up template copy (v18): this expanded per-instance row carries a
+    // uniform copy of its template's local solve — load_pipeline restores it
+    // as a locked (pinned, never-moved) wrapper.
+    bool        bu_locked = false;
 };
 
 struct GrpRow {
@@ -308,7 +317,11 @@ public:
     //       clamp) so a resumed U_OVL candidate reloads clamped.
     // v17 = cell.bottom_up (bottom-up template planning flag: the cell's local
     //       interconnect is planned/NUTSed once and copied to every instance).
-    static constexpr int SCHEMA_VERSION = 17;
+    // v18 = bundle.is_expanded (planner-expanded per-instance row, distinct
+    //       from a bundler replica) + bundle.bu_locked (the row is a uniform
+    //       bottom-up copy of its template's local solve — restored as a
+    //       locked wrapper by load_pipeline).
+    static constexpr int SCHEMA_VERSION = 18;
 
     explicit BDB(const std::string& db_path);
     ~BDB();

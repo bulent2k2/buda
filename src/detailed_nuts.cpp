@@ -31,6 +31,30 @@ namespace buda {
 DetailedNUTSEngine::DetailedNUTSEngine(const RoutingGridStack& stack)
     : stack_(stack) {}
 
+void DetailedNUTSEngine::add_fixed_bits(const std::vector<NetSegment>& bits) {
+    fixed_bits_.insert(fixed_bits_.end(), bits.begin(), bits.end());
+}
+
+NetSegment offset_net_segment(const NetSegment& ns, int dx, int dy,
+                              int new_bundle_id, bool horiz) {
+    NetSegment out = ns;
+    out.bundle_id = new_bundle_id;
+    const double along = horiz ? dx : dy;
+    const double perp  = horiz ? dy : dx;
+    out.span_lo        += along;
+    out.span_hi        += along;
+    out.track_position += perp;
+    return out;
+}
+
+NetVia offset_net_via(const NetVia& v, int dx, int dy, int new_bundle_id) {
+    NetVia out = v;
+    out.bundle_id = new_bundle_id;
+    out.x += dx;
+    out.y += dy;
+    return out;
+}
+
 bool DetailedNUTSEngine::signals_contiguous(
         double pos_a, double pos_b,
         const std::vector<std::pair<double, TrackSlot>>& all_tracks) {
@@ -139,6 +163,38 @@ void DetailedNUTSEngine::place_by_layer(
             std::vector<double> track_positions;
         };
         std::vector<LayerAssignment> layer_assigns;
+
+        // Pre-reserve the fixed bit-wires (bottom-up copies) on this layer:
+        // one assignment per (bundle, seg) group, so every segment placed by
+        // this run treats their tracks exactly like an earlier competing
+        // assignment (same span/interval overlap test, same same-bundle
+        // sharing exemption).
+        {
+            std::map<std::pair<int,int>, LayerAssignment> groups;
+            for (const auto& nb : fixed_bits_) {
+                if (nb.layer != layer) continue;
+                auto [it, fresh] = groups.try_emplace({nb.bundle_id, nb.seg_idx});
+                LayerAssignment& g = it->second;
+                const double lo = std::min(nb.span_lo, nb.span_hi);
+                const double hi = std::max(nb.span_lo, nb.span_hi);
+                if (fresh) {
+                    g.bundle_id   = nb.bundle_id;
+                    g.span_lo     = lo;
+                    g.span_hi     = hi;
+                    g.interval_lo = nb.track_position - nb.width;
+                    g.interval_hi = nb.track_position + nb.width;
+                } else {
+                    g.span_lo     = std::min(g.span_lo, lo);
+                    g.span_hi     = std::max(g.span_hi, hi);
+                    g.interval_lo = std::min(g.interval_lo,
+                                             nb.track_position - nb.width);
+                    g.interval_hi = std::max(g.interval_hi,
+                                             nb.track_position + nb.width);
+                }
+                g.track_positions.push_back(nb.track_position);
+            }
+            for (auto& [k, g] : groups) layer_assigns.push_back(std::move(g));
+        }
 
         // --------------------------------------------------------------- //
         // 2. Process each segment in abstract_pos order.                  //

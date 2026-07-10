@@ -113,7 +113,9 @@ static const char* BUNDLE_DDL = R"(
         rcv_spec_depth INTEGER DEFAULT -1,
         drv_spec_path  TEXT,
         rcv_spec_paths TEXT,                -- JSON array
-        gen_knobs      TEXT DEFAULT ''      -- additive-generation knob memo (v15)
+        gen_knobs      TEXT DEFAULT '',     -- additive-generation knob memo (v15)
+        is_expanded    INTEGER DEFAULT 0,   -- planner-expanded instance row (v18)
+        bu_locked      INTEGER DEFAULT 0    -- bottom-up template copy (v18)
     );
     CREATE TABLE IF NOT EXISTS bundle_net (
         bundle_id TEXT REFERENCES bundle(id),
@@ -637,6 +639,17 @@ void BDB::_migrate() {
         // data migration is needed.  Idempotent ALTER.
         sqlite3_exec(_db,
             "ALTER TABLE cell ADD COLUMN bottom_up INTEGER NOT NULL DEFAULT 0",
+            nullptr, nullptr, nullptr);
+    }
+    if (v < 18) {
+        // v17 -> v18: bottom-up copy provenance on expanded per-instance
+        // bundle rows.  Pre-v18 designs carry no bottom-up routing, so the 0
+        // default is correct.  Idempotent ALTER.
+        sqlite3_exec(_db,
+            "ALTER TABLE bundle ADD COLUMN is_expanded INTEGER DEFAULT 0",
+            nullptr, nullptr, nullptr);
+        sqlite3_exec(_db,
+            "ALTER TABLE bundle ADD COLUMN bu_locked INTEGER DEFAULT 0",
             nullptr, nullptr, nullptr);
     }
     if (v < SCHEMA_VERSION) {
@@ -2545,14 +2558,16 @@ void BDB::add_bundle(const BundleRow& br) {
     Stmt s(_db,
         "INSERT INTO bundle(id,level,strategy,reason,num_terminals,cell_context,"
         "instances,parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,"
-        "drv_spec_path,rcv_spec_paths) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        "drv_spec_path,rcv_spec_paths,is_expanded,bu_locked)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT(id) DO UPDATE SET level=excluded.level,"
         " strategy=excluded.strategy, reason=excluded.reason,"
         " num_terminals=excluded.num_terminals, cell_context=excluded.cell_context,"
         " instances=excluded.instances, parent_id=excluded.parent_id,"
         " is_replicated=excluded.is_replicated, drv_spec_depth=excluded.drv_spec_depth,"
         " rcv_spec_depth=excluded.rcv_spec_depth, drv_spec_path=excluded.drv_spec_path,"
-        " rcv_spec_paths=excluded.rcv_spec_paths");
+        " rcv_spec_paths=excluded.rcv_spec_paths,"
+        " is_expanded=excluded.is_expanded, bu_locked=excluded.bu_locked");
     sqlite3_bind_text  (s, 1, br.id.c_str(),           -1, SQLITE_TRANSIENT);
     sqlite3_bind_int   (s, 2, br.level);
     sqlite3_bind_text  (s, 3, br.strategy.c_str(),     -1, SQLITE_TRANSIENT);
@@ -2567,6 +2582,8 @@ void BDB::add_bundle(const BundleRow& br) {
     sqlite3_bind_int   (s, 11, br.rcv_spec_depth);
     sqlite3_bind_text  (s, 12, br.drv_spec_path.c_str(),   -1, SQLITE_TRANSIENT);
     sqlite3_bind_text  (s, 13, br.rcv_spec_paths.c_str(),  -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int   (s, 14, br.is_expanded ? 1 : 0);
+    sqlite3_bind_int   (s, 15, br.bu_locked ? 1 : 0);
     sqlite3_step(s);
 }
 
@@ -2632,7 +2649,8 @@ std::vector<BundleRow> BDB::all_bundles() const {
     Stmt q(_db,
         "SELECT id,level,strategy,reason,num_terminals,cell_context,instances,"
         "parent_id,is_replicated,drv_spec_depth,rcv_spec_depth,drv_spec_path,"
-        "rcv_spec_paths FROM bundle ORDER BY CAST(id AS INTEGER), id");
+        "rcv_spec_paths,is_expanded,bu_locked"
+        " FROM bundle ORDER BY CAST(id AS INTEGER), id");
     auto txt = [](sqlite3_stmt* st, int c) -> std::string {
         const unsigned char* p = sqlite3_column_text(st, c);
         return p ? reinterpret_cast<const char*>(p) : std::string();
@@ -2653,6 +2671,8 @@ std::vector<BundleRow> BDB::all_bundles() const {
         b.rcv_spec_depth = sqlite3_column_int(q, 10);
         b.drv_spec_path  = txt(q, 11);
         b.rcv_spec_paths = txt(q, 12);
+        b.is_expanded    = sqlite3_column_int(q, 13) != 0;
+        b.bu_locked      = sqlite3_column_int(q, 14) != 0;
         rows.push_back(std::move(b));
     }
     return rows;

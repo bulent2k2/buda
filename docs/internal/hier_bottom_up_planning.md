@@ -302,12 +302,45 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
    charged by `optimize_topologies` and re-charged by `recharge_committed_`
    in every replan. Grid-level (DNUTS) blocking lands with stages 4-5,
    where the copy machinery can exclude the cell's own windows.)
-4. `check_template_tracks` + verdict caching.
+4. `check_template_tracks` + verdict caching. — **DONE**
+   (`HierMixin._check_template_tracks`: span-aware `signal_tracks_in_span`
+   pools per fixed-segment window, normalized by instance origin; verdict
+   cached on the session, invalidated on re-plan; command in
+   `verify_viz_cmds` also sets the `on_mismatch` policy, persisted in BDB
+   meta; `run_detailed_nuts` runs the check implicitly when never invoked.)
 5. DNUTS: reference-instance solve + copy + `on_mismatch` policies + bit-level
-   keepout refinement.
-6. Persistence (provenance, template selection, `load_pipeline`).
+   keepout refinement. — **DONE**
+   (`_run_detailed_nuts` two-phase: phase 1 solves only the reference
+   instances' bus segments; bits/vias translated per aligned sibling via the
+   new `offset_net_segment`/`offset_net_via`; phase 2 solves everything else
+   with `DetailedNUTSEngine::add_fixed_bits` pre-seeding the per-layer
+   reservation list — the copies block every other bundle with the same
+   span/interval overlap test and same-bundle exemption as live assignments,
+   which subsumes the planned "bit-level grid keepout" mechanism without the
+   self-exclusion problem. `stop` raises (command soft-catches, session
+   stays usable); `independent` = copy-aligned-solve-outliers as decided.)
+6. Persistence (provenance, template selection, `load_pipeline`). — **DONE**
+   (v18: `bundle.is_expanded` — planner-expanded instance row, previously
+   indistinguishable from a bundler replica, which load_pipeline's expanded
+   view now keys off exactly — and `bundle.bu_locked` — bottom-up copy
+   provenance at BUNDLE granularity, which supersedes the planned row-level
+   `bus_segment.source`/`net_segment.source` columns: the whole instance
+   bundle is a copy, so per-row provenance added schema for no information.
+   The template's local decision persists on the template bundle rows
+   (`is_selected` + assigned layers); `_persist_planner_output` now always
+   links instance rows to their TEMPLATE (not a replica alias) and the
+   loader canonicalizes legacy parent chains; `load_pipeline expanded`
+   restores locked wrappers (pin + layers), rebuilds the expansion map from
+   parent links, restores the mismatch policy from meta, and
+   `_bottom_up_fixed_segments` falls back to the persisted NUTS routing when
+   the template wrappers are gone — a resumed session keeps uniformity
+   through DNUTS.)
 7. Tests + HIER_TOPOLOGY.md refresh + new doc section in BDB_REFERENCE /
-   script reference.
+   script reference. — **DONE** (28 tests in `test_hier_bottom_up.py`
+   covering §8 items 1-7 — the §8.8 no-regression is the full fast+mid
+   suite; HIER_TOPOLOGY.md carries an as-built correction preamble;
+   `set_bottom_up` documented in BDB_REFERENCE.md and CLAUDE.md;
+   `check_template_tracks` documented in CLAUDE.md.)
 
 ## 10. Resolved design decisions (reviewed with the user, 2026-07-10)
 

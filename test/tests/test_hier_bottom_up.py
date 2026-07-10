@@ -111,12 +111,12 @@ def test_meta_set_binding():
 
 # ── Congruence helper ─────────────────────────────────────────────────────────
 
-def _two_inst_db(x2=500, y2=0, cross_net=False):
+def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:"):
     """proc_cell (two pipe_cell children) instantiated twice, with 4-bit
     cell-local buses in each instance — the template-sharing vehicle.
     cross_net adds a depth-0 4-bit bus between two leaf blocks placed left
     and right of proc_i1, whose direct route crosses that instance."""
-    db = buda.BDB(":memory:")
+    db = buda.BDB(path)
     db.add_cell("proc_cell", 420, 200)
     db.add_cell("pipe_cell", 110, 80)
     db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
@@ -405,6 +405,155 @@ def test_bottom_up_fixed_stable_across_ripup():
     for key, pos in after.items():
         if key[0] in locked:
             assert pos == pytest.approx(before[key])
+
+
+# ── Steps 4+5: check_template_tracks + DNUTS reference solve & copy ──────────
+
+_PATTERNS = ["def_track_pattern 6 0 SIGNAL 1 1",
+             "def_track_pattern 7 0 SIGNAL 1 1",
+             "def_track_pattern 4 0 SIGNAL 1 1",
+             "def_track_pattern 5 0 SIGNAL 1 1"]
+
+
+def _dnuts_flow(db, policy_cmd=None):
+    """Full bottom-up flow up to run_nuts, with track patterns (pitch 2)."""
+    s = _bare_session(db)
+    out = []
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + ["run_hier_bundler", "generate_hier_topologies",
+                 "set_bottom_up proc_cell", "run_planner hier", "run_nuts"]
+              + ([policy_cmd] if policy_cmd else [])):
+        out.append(_run_cmd(s, c))
+    return s, "".join(out)
+
+
+def test_check_template_tracks_aligned():
+    """Instances offset by a multiple of the track pitch (2) on both axes
+    see identical relative track pools — ALIGNED."""
+    s, _ = _dnuts_flow(_two_inst_db(x2=500, y2=300))
+    out = _run_cmd(s, "check_template_tracks")
+    assert "ALIGNED" in out and "MISALIGNED" not in out
+    v = s._template_track_verdict["proc_cell"]
+    assert v["misaligned"] == {} and len(v["aligned"]) == 2
+
+
+def test_check_template_tracks_misaligned():
+    """A half-pitch offset (y2=301, pitch 2) shifts every horizontal-layer
+    track pool — MISALIGNED, and the default 'stop' policy refuses DNUTS."""
+    s, _ = _dnuts_flow(_two_inst_db(x2=500, y2=301))
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" in out and "proc_i2" in out
+    out = _run_cmd(s, "run_detailed_nuts")
+    assert "Error" in out and "different signal tracks" in out
+    assert s.detailed_result is None
+
+
+def test_dnuts_copies_aligned_instances():
+    """Aligned cell: the reference instance's bits are solved once and the
+    sibling's bits are exact translates; vias copied too."""
+    s, _ = _dnuts_flow(_two_inst_db(x2=500, y2=300))
+    out = _run_cmd(s, "run_detailed_nuts")   # implicit check, then copy
+    assert "[BottomUp] DNUTS:" in out
+    inst_of = {w.input.original_bundle.id: b.instances[0]
+               for w in s.bundles
+               for b in [w.input.original_bundle] if b.cell_context}
+    horiz_of = {(ts.bundle_id, ts.seg_idx): ts.horiz
+                for ts in s._bottom_up_fixed_segments()}
+    bits = {}
+    for ns in s.detailed_result.net_segments:
+        if ns.bundle_id in inst_of:
+            bits[(inst_of[ns.bundle_id], ns.seg_idx, ns.bit_index)] = ns
+    keys1 = {k[1:] for k in bits if k[0] == "proc_i1"}
+    keys2 = {k[1:] for k in bits if k[0] == "proc_i2"}
+    assert keys1 and keys1 == keys2
+    for si, bi in keys1:
+        a = bits[("proc_i1", si, bi)]
+        b = bits[("proc_i2", si, bi)]
+        horiz = horiz_of[(a.bundle_id, si)]
+        d_along, d_perp = (500, 300) if horiz else (300, 500)
+        assert b.track_position == pytest.approx(a.track_position + d_perp)
+        assert b.span_lo == pytest.approx(a.span_lo + d_along)
+        assert b.span_hi == pytest.approx(a.span_hi + d_along)
+    vias = {}
+    for v in s.detailed_result.net_vias:
+        if v.bundle_id in inst_of:
+            vias.setdefault(inst_of[v.bundle_id], []).append(v)
+    assert len(vias.get("proc_i1", [])) == len(vias.get("proc_i2", []))
+
+
+def test_dnuts_independent_policy_solves_outliers():
+    """'independent' policy: the aligned reference still solves; the
+    misaligned sibling is solved individually — all bits land on real
+    tracks, none silently dropped."""
+    s, _ = _dnuts_flow(_two_inst_db(x2=500, y2=301),
+                       policy_cmd="check_template_tracks "
+                                  "on_mismatch independent")
+    out = _run_cmd(s, "run_detailed_nuts")
+    assert "Error" not in out
+    assert s.detailed_result is not None
+    inst_of = {w.input.original_bundle.id: b.instances[0]
+               for w in s.bundles
+               for b in [w.input.original_bundle] if b.cell_context}
+    per_inst = {}
+    for ns in s.detailed_result.net_segments:
+        if ns.bundle_id in inst_of:
+            per_inst[inst_of[ns.bundle_id]] = \
+                per_inst.get(inst_of[ns.bundle_id], 0) + 1
+    # Both instances fully routed (4-bit bus, every seg gets 4 bits).
+    assert per_inst.get("proc_i1", 0) > 0
+    assert per_inst.get("proc_i1") == per_inst.get("proc_i2")
+    assert s.detailed_result.num_unplaced == 0
+
+
+# ── Step 6: persistence round-trip (v18 bu_locked + template selection) ──────
+
+def test_bottom_up_persistence_round_trip(tmp_path):
+    """Full flow into a file BDB, then a fresh session resumes with
+    load_pipeline expanded: locked wrappers (pins included), the fixed
+    routing, the template's persisted selection, and the mismatch policy all
+    come back, and DNUTS still runs the reference-solve-and-copy path."""
+    db_path = str(tmp_path / "bu.bdb")
+    db = _two_inst_db(x2=500, y2=300, path=db_path)
+    s1, _ = _dnuts_flow(db, policy_cmd="check_template_tracks "
+                                       "on_mismatch independent")
+    template_id = next(w.input.original_bundle.id
+                       for w in s1._hier_bundles_orig
+                       if w.input.original_bundle.cell_context)
+    # The template's own decision is persisted (canonical local-solve record).
+    assert any(t.is_selected for t in s1.bdb.topologies(str(template_id)))
+    locked1 = {w.input.original_bundle.id for w in s1.bundles
+               if w.hier.locked}
+    pos1 = {(ts.bundle_id, ts.seg_idx): ts.track_position
+            for ts in s1.nuts_result.segments if ts.bundle_id in locked1}
+    assert locked1 and pos1
+    del s1, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + [f"open_bdb {db_path}", "add_blocks_from_bdb 0",
+                 "add_blocks_from_bdb 1 skip"]):
+        _run_cmd(s2, c)
+    out = _run_cmd(s2, "load_pipeline expanded")
+    assert "rehydrated" in out
+    locked2 = {w.input.original_bundle.id for w in s2.bundles
+               if w.hier.locked}
+    assert locked2 == locked1
+    for w in s2.bundles:
+        if w.hier.locked:
+            assert w.input.topology_pinned
+            assert list(w.input.pinned_seg_layers)
+    assert s2._bu_mismatch_policy == "independent"       # meta row restored
+    # Resume path: the fixed copies come from the persisted routing.
+    fixed2 = {(ts.bundle_id, ts.seg_idx): ts.track_position
+              for ts in s2._bottom_up_fixed_segments()}
+    assert fixed2 == pytest.approx(pos1)
+    out = _run_cmd(s2, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
 
 
 def test_user_pin_on_template_survives_local_solve():

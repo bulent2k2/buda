@@ -101,7 +101,9 @@ void bind_db(py::module_& m) {
         .def_readwrite("drv_spec_depth", &BundleRow::drv_spec_depth)
         .def_readwrite("rcv_spec_depth", &BundleRow::rcv_spec_depth)
         .def_readwrite("drv_spec_path",  &BundleRow::drv_spec_path)
-        .def_readwrite("rcv_spec_paths", &BundleRow::rcv_spec_paths);
+        .def_readwrite("rcv_spec_paths", &BundleRow::rcv_spec_paths)
+        .def_readwrite("is_expanded",    &BundleRow::is_expanded)
+        .def_readwrite("bu_locked",      &BundleRow::bu_locked);
 
     py::class_<TopoRow>(m, "TopoRow")
         .def(py::init<>())

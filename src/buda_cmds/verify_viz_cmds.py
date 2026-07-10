@@ -167,11 +167,43 @@ def cmd_visualize(session, cmd, args, cmd_line):
     viz.show()
 
 
+def cmd_check_template_tracks(session, cmd, args, cmd_line):
+    # Usage: check_template_tracks [on_mismatch stop|independent]
+    # Bottom-up template planning stage (c) verification: compare the
+    # span-aware signal-track pools every instance of each marked cell sees
+    # for its copied routing (run after run_nuts, before run_detailed_nuts).
+    # The optional on_mismatch policy is consumed by run_detailed_nuts:
+    # 'stop' (default) refuses to run while any instance is misaligned;
+    # 'independent' copies the aligned instances and solves the misaligned
+    # ones individually.  The verdict is cached; run_detailed_nuts runs this
+    # check implicitly if it was never invoked.
+    if args:
+        if (len(args) >= 2 and args[0].lower() == "on_mismatch"
+                and args[1].lower() in ("stop", "independent")):
+            session._bu_mismatch_policy = args[1].lower()
+            if session.bdb is not None:
+                # Survives a save_bdb/load_pipeline checkpoint (meta row).
+                session.bdb.meta_set("bu_mismatch_policy",
+                                     session._bu_mismatch_policy)
+            print(f"check_template_tracks: on_mismatch policy = "
+                  f"{session._bu_mismatch_policy}")
+        else:
+            print("Error: usage: check_template_tracks "
+                  "[on_mismatch stop|independent]")
+            return
+    if session.bdb is None:
+        print("Error: check_template_tracks requires an open BDB "
+              "(bottom-up cells live there)")
+        return
+    session._check_template_tracks()
+
+
 COMMANDS = {
     "report_wirelength": cmd_report_wirelength,
     "report_wl": cmd_report_wirelength,
     "check_design": cmd_check_design,
     "check_connectivity": cmd_check_design,   # legacy alias (pre-rename)
+    "check_template_tracks": cmd_check_template_tracks,
     "visualize_topologies": cmd_visualize_topologies,
     "dump_topologies": cmd_dump_topologies,
     "visualize": cmd_visualize,

@@ -1,5 +1,22 @@
 # HierTopologyGenerator — Phase D Design
 
+> **As-built updates (2026-07):** this design note predates the CLI split and
+> several later phases. Corrections against the current code:
+> the implementation lives in `src/buda_cmds/topologies_cmds.py` (command
+> handlers) and `src/buda_session/hier.py` (`HierMixin._generate_hier_topo_one`
+> + floorplan/reason helpers), not `src/buda_cli.py`; the **cross-level** case
+> (`drv_spec_depth >= 0`) builds an endpoint-only custom floorplan rather than
+> the depth-D floorplan; floorplan caching is keyed `('cell', parent)` /
+> `('depth', d)` (the cross-level path rebuilds per call); §6's priority rule
+> **is implemented** (`priority = -(level*10000 + n_candidates)` in
+> `planner_cmds.py`, width-DESC tie-break in the C++ sort); all three hier
+> generate commands also accept `multi_trunk` (two-level BITRUNK trees) and
+> persist their candidates into the open BDB; generation ends in the coverage
+> gate (`filter_uncovered`); and sidecar pins are re-applied on regeneration.
+> Bottom-up template planning (a per-cell `set_bottom_up` mode: plan/NUTS/DNUTS
+> once per template, copy per instance, copies become blockages) is designed
+> and implemented in `docs/internal/hier_bottom_up_planning.md`.
+
 ## 1. Goal
 
 Generate routing topology candidates for each HBundle output from
@@ -165,7 +182,7 @@ When `CongestionPlanner` processes hier bundles (Phase E), bundles at lower
 depth levels may have **very limited routing flexibility** because their
 entry/exit faces are constrained by the parent-level routing decision.
 
-**Prioritization rule** (to be implemented in Phase E):
+**Prioritization rule** (implemented — see as-built note above):
 
 > Within each depth level, sort bundles ascending by **number of topology
 > candidates** before the planner loop — bundles with fewer options get
@@ -189,8 +206,10 @@ is blocked.
 
 ## 7. Files Modified
 
-| File | Change |
+| File | Change (locations as-built; see note at top) |
 |------|--------|
-| `src/buda_cli.py` | Add `generate_hier_topologies`; helper methods `_build_bdb_floorplan`, `_build_cell_local_floorplan`, `_parse_bundle_reason`; store `_corner_margin` |
+| `src/buda_cmds/topologies_cmds.py` | `generate_hier_topologies` / `generate_topologies_for_hbundle` command handlers |
+| `src/buda_session/hier.py` | `_generate_hier_topo_one` (3-case dispatch), `_build_bdb_floorplan`, `_build_cell_local_floorplan`, `_parse_bundle_reason`, expansion + bottom-up machinery |
+| `src/buda_cmds/setup_cmds.py` | stores `_corner_margin` |
 | `test/tests/features/hier_topology.feature` | BDD scenarios |
 | `test/tests/test_hier_topology.py` | Step defs + standalone tests |

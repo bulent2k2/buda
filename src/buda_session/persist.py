@@ -560,9 +560,24 @@ class PersistMixin:
             return 0
         rows = self.bdb.all_bundles()
         if expanded:
-            template_ids = {b.parent_id for b in rows if b.is_replicated}
-            rows = [b for b in rows
-                    if b.is_replicated or b.id not in template_ids]
+            exp_rows = [b for b in rows if b.is_expanded]
+            if exp_rows:
+                # v18: exact view — the planner-expanded instance rows plus
+                # every bundle that is neither a template of one, nor a
+                # bundler replica of one (replicas persist is_replicated=0
+                # with parent_id=template and carry the template's
+                # cell-local candidates — parent linkage is their only tell).
+                tids = {b.parent_id for b in exp_rows}
+                rows = exp_rows + [b for b in rows
+                                   if not b.is_expanded
+                                   and b.id not in tids
+                                   and b.parent_id not in tids]
+            else:
+                # Pre-v18 checkpoint: the legacy heuristic (expanded rows'
+                # parent_ids happened to cover replicas too).
+                template_ids = {b.parent_id for b in rows if b.is_replicated}
+                rows = [b for b in rows
+                        if b.is_replicated or b.id not in template_ids]
         else:
             rows = [b for b in rows if not b.is_replicated]
         if not rows:
@@ -684,6 +699,14 @@ class PersistMixin:
                             w.input.assigned_h_layer = l
                         if l in v_layer_ids and w.input.assigned_v_layer < 0:
                             w.input.assigned_v_layer = l
+                # Bottom-up copy (v18): restore the wrapper LOCKED — pinned
+                # index + pinned layers, planned first, never moved by
+                # rip-up/negotiate/ripup_reroute — so a resumed session keeps
+                # template uniformity instead of re-deciding per instance.
+                if getattr(br, "bu_locked", False):
+                    w.hier.locked = True
+                    w.input.topology_pinned = True
+                    w.input.pinned_seg_layers = list(w.plan.seg_layers)
             bundles.append(w)
 
         if missing_blocks:
@@ -698,6 +721,37 @@ class PersistMixin:
                   "— run generate_topologies with a BDB open first")
             return 0
         self.bundles = bundles
+        if expanded:
+            # Rebuild the hier bookkeeping the bottom-up machinery needs on
+            # resume: the planner ran (this IS the post-expansion view), and
+            # the template→instances map comes back from parent_id links.
+            # parent_id may point at a REPLICA (pre-fix checkpoints) — walk
+            # the chain to the root template so sibling instances group.
+            self._planner_is_hier = True
+            all_rows = {b.id: b for b in self.bdb.all_bundles()}
+
+            def canon(pid):
+                seen = set()
+                while (pid in all_rows and all_rows[pid].parent_id
+                       and pid not in seen):
+                    seen.add(pid)
+                    pid = all_rows[pid].parent_id
+                return pid
+
+            exp_map = {}
+            by_id = {w.input.original_bundle.id: w for w in bundles}
+            for br in rows:
+                if br.is_replicated and br.parent_id:
+                    w = by_id.get(int(br.id))
+                    if w is not None:
+                        exp_map.setdefault(int(canon(br.parent_id)),
+                                           []).append(w)
+            if exp_map:
+                self._hier_expansion_map = exp_map
+        # Bottom-up mismatch policy survives the checkpoint (meta, v17+).
+        pol = self.bdb.meta_get("bu_mismatch_policy", "")
+        if pol in ("stop", "independent"):
+            self._bu_mismatch_policy = pol
 
         # Rehydrate the abstract-NUTS result (if run_nuts was persisted) so
         # run_detailed_nuts can resume from it.
@@ -759,10 +813,17 @@ class PersistMixin:
         # An id is an expanded per-instance wrapper ONLY if it came from the hier
         # expansion map — NOT merely because it's absent from the BDB (a flat flow
         # can open_bdb after generate, so its normal bundles aren't persisted yet).
+        # A wrapper can appear under BOTH its template's key and a replica
+        # alias key (replicas map to the template's wrapper at their
+        # instance).  Largest-list-first + setdefault makes the TEMPLATE id
+        # win, so the persisted parent_id always links instance → template
+        # (the loader's expansion-map rebuild groups instances by it).
         expanded_to_template = {}
-        for tid, wrappers in (self._hier_expansion_map or {}).items():
+        for tid, wrappers in sorted((self._hier_expansion_map or {}).items(),
+                                    key=lambda kv: -len(kv[1])):
             for ew in wrappers:
-                expanded_to_template[ew.input.original_bundle.id] = tid
+                expanded_to_template.setdefault(ew.input.original_bundle.id,
+                                                tid)
         original_ids = {b.id for b in self.bdb.all_bundles()}
         n = 0
         for w in self.bundles:
