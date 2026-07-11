@@ -727,7 +727,7 @@ entries.
 ### `set_bottom_up`
 
 ```
-set_bottom_up <cell> [on|off]
+set_bottom_up <cell>|* [on|off]
 ```
 
 Mark a cell template for **bottom-up planning** (default `on`): the hier flow
@@ -736,6 +736,23 @@ instance, with the copied routing becoming keepouts for higher-level bundles
 (see `docs/internal/hier_bottom_up_planning.md`).  Persisted in the BDB
 (`cell.bottom_up`, schema v17), so the flag survives `save_bdb` /
 `load_pipeline`.
+
+**`*` — keepout-scope generalization.** `set_bottom_up *` marks **every
+eligible** cell in one call, where *eligible* = a cell with ≥2 congruent
+placed instances (the solve-once-copy machinery's unit of work).  It is a
+pure convenience over marking each cell by name — it reuses the entire
+marked-cell path (template solve, fixed-segment blockage,
+`check_template_tracks`, DNUTS copy) with no new mechanism.  Cells that
+**cannot** be frozen-and-copied — non-congruent instances, or a single
+instance (nothing to copy) — are **reported and left on the top-down path**
+(fail LOUD, never silently marked).  `* off` clears the flag on every
+currently-marked cell.  The generalization is **opt-in**: the default hier
+flow marks nothing, so existing designs are unchanged unless you mark cells.
+Because every marked cell is subject to the track-phase alignment contract,
+run `align_bottom_up` (after a `def_track_pattern`) before `derive_busterms`
+so copied instances share a phase — otherwise stage (c)
+`check_template_tracks` stops DNUTS with the mismatch report, exactly as it
+does for an explicit mark.
 
 Turning the flag **on** requires every instance of the cell to be a rigid
 transform of the first one — any of the 8 orientations.  The orientation is

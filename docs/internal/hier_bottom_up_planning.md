@@ -431,6 +431,24 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
   today's top-down demand-reservation behavior; zero regression for
   existing hier flows. Generalizing to all cells stays a possible future
   knob, out of scope here.
+  *(Superseded 2026-07-11: the generalization landed as the opt-in
+  `set_bottom_up *` — mark EVERY eligible cell at once, where eligible =
+  ≥2 congruent placed instances, the solve-once-copy machinery's unit.
+  It reuses 100% of the marked-cell path (template solve, fixed-segment
+  blockage, `check_template_tracks`, DNUTS copy) with no new blockage
+  code; non-congruent or single-instance cells are reported and left on
+  the top-down path — fail LOUD, never silent. The default flow still
+  marks nothing, so Q4's zero-regression guarantee holds unless the user
+  opts in. Measured: on `flow/rnr/mix2_fast` (patterns + align, 4 cells
+  hand-marked) `set_bottom_up *` marks 25 cells yet routes byte-identical
+  to the hand-tuned setup — the extra 21 have no freezable local
+  interconnect, so the generalization is a safe superset there; on
+  `flow/hbundles/10` (no patterns, no align) it marks 4 cells, shifts
+  NUTS 212→207 segments / 1→28 overlaps, and DNUTS stops LOUD on the
+  track-phase mismatch — the reminder that `*` needs `align_bottom_up`
+  and a track pattern, exactly as any explicit mark does. Single-instance
+  cells remain out of scope: the copy machinery needs ≥2 instances to be
+  a "template".)*
 
 ---
 

@@ -44,12 +44,6 @@ items this page doesn't see).
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
 designs and fail LOUD, never silent:)*
 
-- **Keepout scope generalization** — deferred by the Q4 decision (see [Hier Bottom Up planning design doc](hier_bottom_up_planning.md)): only
-  *marked* cells' copied routing blocks higher levels; making EVERY hier
-  cell's planned+NUTSed local routing a blockage is a possible future
-  knob (changes results of every existing hier design — needs golden
-  review).
-
 5. **Global-overlap re-route of NON-contended bundles** —
    [`wishlist-ripup.md`](wishlist-ripup.md) → *"Global-overlap re-route of
    NON-contended bundles"*. The measured b61-class global win (10 → 8
@@ -91,6 +85,23 @@ designs and fail LOUD, never silent:)*
 *(moved down from the active sections above as they landed; details and
 evidence in the per-subsystem wishlist files as cited.)*
 
+- **Keepout scope generalization** ✅ — **DONE (2026-07-11)**, landed as
+  the opt-in `set_bottom_up *`: mark EVERY eligible cell at once, where
+  eligible = ≥2 congruent placed instances (the solve-once-copy unit).
+  Reuses 100% of the marked-cell path (template solve, fixed-segment
+  blockage, `check_template_tracks`, DNUTS copy) with no new blockage
+  code; non-congruent or single-instance cells are reported and left on
+  the top-down path (fail LOUD). The default flow still marks nothing, so
+  Q4's zero-regression guarantee holds unless the user opts in.
+  `_eligible_bottom_up_cells` (enumeration) + `_set_bottom_up_all`
+  (command). Measured: `flow/rnr/mix2_fast` (patterns + align, 4 cells
+  hand-marked) → `*` marks 25 cells but routes BYTE-IDENTICAL (the extra
+  21 have no freezable local interconnect — a safe superset);
+  `flow/hbundles/10` (no patterns/align) → `*` marks 4 cells, shifts NUTS
+  212→207 segments / 1→28 overlaps and stops DNUTS LOUD on the
+  track-phase mismatch (the reminder that `*` needs `align_bottom_up` +
+  a track pattern, like any explicit mark). See the §10 Q4 as-built note
+  in [`hier_bottom_up_planning.md`](hier_bottom_up_planning.md).
 - **`align_bottom_up` slack-aware default cap + auto-revert** ✅ — resolved
   as an EXACT-GEOMETRY cap rather than a derived scalar (a scalar slack
   bound would also block large-but-legal nudges, e.g. mix2's 90 µm snaps):

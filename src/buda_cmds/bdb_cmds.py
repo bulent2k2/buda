@@ -386,12 +386,14 @@ def cmd_load_pipeline(session, cmd, args, cmd_line):
 
 
 def cmd_set_bottom_up(session, cmd, args, cmd_line):
-    # set_bottom_up <cell> [on|off]
+    # set_bottom_up <cell>|* [on|off]
     # Mark a cell template for bottom-up planning: its cell-local interconnect
     # is planned/NUTSed once and copied to every instance (see
     # docs/internal/hier_bottom_up_planning.md).  Persisted in the BDB.
+    # '*' is the keepout-scope generalization: mark EVERY eligible (>= 2
+    # congruent placed instances) cell at once ('* off' clears all marks).
     if not args:
-        print("Error: set_bottom_up requires <cell> [on|off]"); return
+        print("Error: set_bottom_up requires <cell>|* [on|off]"); return
     if session.bdb is None:
         print("Error: open_bdb first"); return
     cell = args[0]
@@ -400,6 +402,9 @@ def cmd_set_bottom_up(session, cmd, args, cmd_line):
         print(f"Error: set_bottom_up mode must be on|off, got '{args[1]}'")
         return
     on = mode == "on"
+    if cell == "*":
+        _set_bottom_up_all(session, on)
+        return
     comps = session.bdb.all_components()
     insts = [c for c in comps if c.cell == cell]
     if on:
@@ -419,6 +424,32 @@ def cmd_set_bottom_up(session, cmd, args, cmd_line):
     except RuntimeError as e:
         print(f"Error: {e}"); return
     print(f"[BDB] cell '{cell}' bottom_up = {mode} ({len(insts)} instance(s))")
+
+
+def _set_bottom_up_all(session, on):
+    # set_bottom_up * [on|off] — the keepout-scope generalization.
+    # ON marks every ELIGIBLE cell (>= 2 congruent placed instances); cells
+    # whose instances cannot be frozen-and-copied (non-congruent, or single
+    # instance) are reported and left on the top-down path (fail LOUD, never
+    # silent).  OFF clears the mark on every currently-marked cell.
+    if not on:
+        cleared = list(session.bdb.bottom_up_cells())
+        for c in cleared:
+            session.bdb.set_cell_bottom_up(c, False)
+        print(f"[BDB] set_bottom_up * off: cleared {len(cleared)} cell(s)")
+        return
+    eligible, skipped = session._eligible_bottom_up_cells()
+    for c in eligible:
+        session.bdb.set_cell_bottom_up(c, True)
+    print(f"[BDB] set_bottom_up * on: marked {len(eligible)} eligible cell(s)"
+          + (f": {', '.join(eligible)}" if eligible else ""))
+    if skipped:
+        print(f"[BDB] set_bottom_up *: {len(skipped)} cell(s) left top-down "
+              "(not congruent — cannot freeze-and-copy):")
+        for c, reason in skipped[:8]:
+            print(f"    {c}: {reason}")
+        if len(skipped) > 8:
+            print(f"    (+{len(skipped) - 8} more)")
 
 
 def cmd_align_bottom_up(session, cmd, args, cmd_line):
