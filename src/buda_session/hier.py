@@ -1649,9 +1649,65 @@ class HierMixin:
                 iw.input.topology_pinned = True
                 iw.input.pinned_seg_layers = list(layers)
                 n_inst += 1
+                # Persist the instance's adopted split as its selected
+                # topology (run_planner hier persisted the PRE-split
+                # selection; the run_nuts bus rows will carry the split's
+                # segment indices, and a load_pipeline-expanded resume
+                # must restore matching candidates — Codex #256).
+                if self.bdb is not None:
+                    self._add_expanded_bundle(iw, islot, {bid: tid})
+                    self.bdb.set_topology_selected(str(bid), islot)
+            # Same for the TEMPLATE row (the canonical local-solve record
+            # a pre-expansion resume re-enters bottom-up with).
+            if self.bdb is not None:
+                self._persist_template_dogleg(w, tid, slot, layers)
             print(f"[BottomUp] cell '{cell}': local NUTS split template "
                   f"bundle {tid} with a dogleg — split candidate adopted "
                   f"on the template and {n_inst} locked instance(s)")
+
+    def _persist_template_dogleg(self, w, tid, slot, layers):
+        """Persist a template's adopted dogleg split as a candidate row at
+        its live slot (source='dogleg', selected, per-segment assigned
+        layers + logical annotations) — the resume counterpart of the live
+        adoption: a checkpoint taken after run_nuts must restore candidates
+        whose segment indices match the persisted bus rows.  Upsert-safe (a
+        re-solve overwrites the same cand_index); _reset_bottom_up_doglegs
+        deletes the row when a re-plan drops the adoption."""
+        import json
+        bid = str(tid)
+        if not any(b.id == bid for b in self.bdb.all_bundles()):
+            return
+        topo = w.input.candidates[slot]
+        tr = buda.TopoRow()
+        tr.id = bid
+        tr.cand_index = slot
+        tr.type = topo.type
+        tr.wirelength = topo.estimated_wirelength
+        tr.trunk_location = topo.trunk_location
+        tr.pass_through_count = topo.pass_through_count
+        tr.connected_blocks = json.dumps(list(topo.connected_block_names))
+        tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
+        tr.is_selected = True
+        tr.topo_uid = buda.topo_uid(topo)
+        tr.source = "dogleg"
+        self.bdb.add_topology(tr)
+        for si, seg in enumerate(topo.segments):
+            sr = buda.TopoSegRow()
+            sr.id = bid
+            sr.cand_index = slot
+            sr.seg_index = si
+            sr.x1, sr.y1 = seg.start.x, seg.start.y
+            sr.x2, sr.y2 = seg.end.x, seg.end.y
+            sr.layer_hint = seg.layer_hint
+            sr.is_jog = seg.is_jog
+            sr.edge_id = seg.edge_id
+            sr.perp_clamp_lo = seg.perp_clamp_lo
+            sr.perp_clamp_hi = seg.perp_clamp_hi
+            sr.assigned_layer = (int(layers[si]) if si < len(layers)
+                                 else -1)
+            self.bdb.add_topology_segment(sr)
+        self._persist_topology_annotations(bid, slot, topo)
+        self.bdb.set_topology_selected(bid, slot)
 
     def _reset_bottom_up_doglegs(self):
         """Drop template-level dogleg adoptions before a re-plan (the
@@ -1674,6 +1730,10 @@ class HierMixin:
             if 0 <= slot < len(cands):
                 del cands[slot]
                 w.input.candidates = cands
+                if self.bdb is not None:
+                    # Drop the persisted split row too (the re-plan's own
+                    # persist re-selects among the pristine candidates).
+                    self.bdb.delete_topology(str(tid), slot)
             orig = self._bu_dogleg_originals.get(tid, 0)
             w.plan.selected_topology_index = \
                 orig if 0 <= orig < len(w.input.candidates) else 0

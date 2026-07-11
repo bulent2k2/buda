@@ -1382,14 +1382,14 @@ def test_rebundle_drops_stale_clone_provenance():
 
 # ── Dogleg-split templates are copied (opens.md conditional) ─────────────────
 
-def _dogleg_cell_flow():
+def _dogleg_cell_flow(path=":memory:"):
     """flow/nuts_dogleg_cycle.buda's cyclic-constraint geometry transplanted
     INSIDE a cell, instantiated twice: two buses crossing the same horizontal
     channel with the above/below assignment swapped between the columns — the
     cell-LOCAL solve must dogleg one trunk.  Both templates are pinned to the
     same Z_VHV candidates the flat repro forces (identical cell-local
     geometry → identical candidate ordering)."""
-    db = buda.BDB(":memory:")
+    db = buda.BDB(path)
     db.add_cell("dl_cell", 300, 200)
     db.add_cell("blk_cell", 20, 50)
     for name, (x, y) in [("A_top", (80, 150)), ("B_bot", (80, 0)),
@@ -1498,3 +1498,51 @@ def test_doglegged_template_replan_resets_and_readopts():
               for w in tpl}
     assert sizes1 == sizes2, "template pool grew across re-plan cycles"
     assert s.nuts_result.num_overlaps == 0
+
+
+def test_doglegged_template_resume_round_trip(tmp_path):
+    """Codex #256 P2: the adopted split is PERSISTED (template row with
+    source='dogleg' + per-instance selected topologies), so a checkpoint
+    taken after run_nuts restores wrappers whose segment indices match the
+    persisted bus rows — the resumed strict DNUTS routes the split
+    correctly instead of mis-deriving connections for the jog segments."""
+    p = str(tmp_path / "dl.bdb")
+    s1 = _dogleg_cell_flow(path=p)
+    _run_cmd(s1, "run_planner hier")
+    out = _run_cmd(s1, "run_nuts")
+    assert "split candidate adopted" in out
+    n_fixed1 = len(s1._bottom_up_fixed_segments())
+    locked1 = {w.input.original_bundle.id for w in s1.bundles
+               if w.hier.locked}
+    del s1
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    for c in (["def_layer 4 M4 H TOP 52.94", "def_layer 5 M5 V TOP 50.00"]
+              + ["def_track_pattern 4 -400 POWER 4 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1 GROUND 4 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1",
+                 "def_track_pattern 5 0 POWER 3 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1 GROUND 3 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1",
+                 f"open_bdb {p}", "add_blocks_from_bdb 0",
+                 "add_blocks_from_bdb 1 skip"]):
+        _run_cmd(s2, c)
+    out = _run_cmd(s2, "load_pipeline expanded")
+    assert "rehydrated" in out
+    # Every locked wrapper's restored selected candidate carries the SPLIT
+    # segment count (matching the persisted bus rows), with full layers.
+    locked2 = {w.input.original_bundle.id for w in s2.bundles
+               if w.hier.locked}
+    assert locked2 == locked1
+    for w in s2.bundles:
+        if not w.hier.locked:
+            continue
+        sel = w.input.candidates[w.plan.selected_topology_index]
+        n_bus = sum(1 for ts in s2.nuts_result.segments
+                    if ts.bundle_id == w.input.original_bundle.id)
+        assert len(sel.segments) == n_bus == len(w.plan.seg_layers)
+    assert len(s2._bottom_up_fixed_segments()) == n_fixed1
+    out = _run_cmd(s2, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+    assert s2.detailed_result.num_unplaced == 0
