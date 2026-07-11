@@ -269,8 +269,25 @@ opens @0.1 128→**86** (−55% vs baseline 190; healed endpoint unchanged
 (the 0.2 regression is gone), big2 unchanged (its mechanism is the
 horizon, above). Tests: `test/tests/test_planner_kpeak_supply.py` (blind
 default strands 8 bits through an override-starved corridor; floor
-detours it clean; floor silent when supply suffices). The original
-analysis follows.
+detours it clean; floor silent when supply suffices), plus the
+count/vector lockstep guard in `test_routing_grid.py`.
+
+Two open refinements from the PR #257 review (optional, unmeasured):
+- **Proportional supply clamp.** The floor's flat `1.0` makes a
+  can't-host band *tie* a merely-full band and still rank better than an
+  already-overflowing one (relative util > 1), so under total scarcity
+  it stops discriminating among bad options. `peak = max(peak,
+  tracks_needed / max(1.0, supply))` would price a 3-for-8 band at ~2.7
+  and a 7-for-8 near-miss at ~1.14 at the same cost. Measure on the
+  corpus before adopting — the flat clamp's numbers are already good,
+  and the region above 1.0 competes with real overflow pricing.
+- **Override-boundary pattern resolution** (routing-grid, see
+  wishlist-nuts): `signal_tracks_in_span` (and its count twin,
+  deliberately in lockstep) resolve the pattern at the window's
+  `perp_lo`, so an override whose edge touches a Hanan row claims the
+  entire band above it — the sharp edge documented in
+  `test_planner_kpeak_supply.py`'s fixture comment. The original
+  analysis follows.
 
 **What.** The planner selects one candidate per bundle by a cost model
 (`kCong·congestion + kSpan·span + base_cost_non_top + kWL·wirelength`, see

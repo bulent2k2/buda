@@ -159,3 +159,27 @@ structured `NUTSResult::junction_infeasibilities` entry consumed by
 `ripup_reroute` as a re-pin contender. Design + history in
 [`seg_junction_coplacement.md`](seg_junction_coplacement.md); tests in
 `test/tests/test_junction_coplacement.py`.
+
+## Override-boundary pattern resolution in span queries (sharp edge)
+
+**What:** `RoutingGrid::signal_tracks_in_span` (and
+`count_signal_tracks_in_span`, deliberately in lockstep) resolve the track
+pattern by a single point sample — `effective_pattern_at` at the along
+MIDPOINT and the window's `perp_lo`. The override region test is
+boundary-inclusive, so an override whose edge exactly touches a Hanan row
+claims the ENTIRE band above that row for the query: the band reads with
+the override's (often power-heavy) pattern even though most of it lies
+outside the region. Surfaced while building the kPeak supply-floor test —
+`test/tests/test_planner_kpeak_supply.py` keeps its override edge at 99
+(off the Hanan row at 100) and documents the trap in its fixture comment;
+a `y2=120` override there also turned the healthy `[120,140]` detour band
+supply-dead and stranded the detour route.
+
+**Fix sketch:** resolve the pattern per-band-slice (split the perp window
+at override boundaries and walk each slice with its own effective
+pattern), the way `preroutes_in` already tiles global-minus-override
+shadows — or at minimum sample at the window's perp MIDPOINT. Any change
+must keep the two span walkers in lockstep (guarded by the count/vector
+test in `test_routing_grid.py`) and re-verify what DetailedNUTS places
+from, since the planner's supply floor deliberately consults the same
+pool DNUTS does.
