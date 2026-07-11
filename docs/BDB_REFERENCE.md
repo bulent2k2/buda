@@ -420,6 +420,15 @@ block missing from the current Floorplan.
 rows + non-template bundles) instead of the pre-expansion templates. An
 expanded instance persists only its selected topology (at its template
 `cand_index`), so its selection is remapped to the compact in-memory list.
+For **bottom-up** designs the pre-expansion TEMPLATE wrappers are restored
+alongside (from the template bundle rows referenced as parents by the
+expanded rows, validated against their own cell-local floorplans, with the
+persisted local-solve selection as a full pin): a checkpoint taken
+**before `run_nuts`** then re-runs the cell-local solve on resume and keeps
+uniform per-instance copies, while a **post-`run_nuts`** checkpoint keeps
+sourcing the fixed copies from the persisted routing (exact; the preference
+ends at the next re-plan). Re-running `run_planner hier` on a resumed
+post-expansion session remains unsupported.
 
 Not restored: `seg_perp` (a NUTS placement *preference* from the planner's
 charged bands), planner band state, overlap details. TEG-over bridge segments

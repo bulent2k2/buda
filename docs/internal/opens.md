@@ -135,12 +135,21 @@ designs and fail LOUD, never silent:)*
   (`_apply_fp_session_settings`; min-stub deliberately NOT retrofitted
   onto the depth-projection / cross-level frames — that measurably
   regressed tuned hier flows and belongs to a golden review).
-- **Resume from a pre-`run_nuts` checkpoint loses NUTS-copy uniformity** —
-  `load_pipeline expanded` restores locked wrappers, but with no persisted
-  routing and no template wrappers the local solve cannot be reconstructed
-  (loud WARNING, per-instance fallback). Fix = rebuild template wrappers
-  from the persisted template bundle rows (candidates + the v18-persisted
-  template selection are all there).
+- ✅ **Resume from a pre-`run_nuts` checkpoint loses NUTS-copy
+  uniformity** — **DONE (2026-07-11)**. `load_pipeline expanded` now also
+  rebuilds the pre-expansion TEMPLATE wrappers
+  (`_restore_bottom_up_templates`, sharing the extracted
+  `_restore_wrapper` loader body): the canonical parents of the expanded
+  rows, validated against their OWN cell-local floorplans (their block
+  names are cell-local), with the v18-persisted local-solve selection
+  restored as the full pin stage (b) requires. A pre-`run_nuts` resume
+  then re-runs the cell-local solve and keeps uniform per-instance
+  copies; a post-`run_nuts` resume still prefers the persisted routing
+  (exact — `_bu_fixed_from_resume`, cleared by a re-plan), and a
+  template without a usable persisted selection falls back per-instance
+  LOUD as before. Note: re-running `run_planner hier` on a resumed
+  (post-expansion) session remains unsupported (double expansion —
+  pre-existing).
 - **Keepout scope generalization** — deferred by the Q4 decision: only
   *marked* cells' copied routing blocks higher levels; making EVERY hier
   cell's planned+NUTSed local routing a blockage is a possible future

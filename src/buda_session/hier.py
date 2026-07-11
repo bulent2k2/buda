@@ -1330,9 +1330,11 @@ class HierMixin:
         # the track-alignment verdict derived from it; adopted template
         # doglegs are dropped so the local planner re-decides from
         # pristine candidates (instance slots are cleared by the
-        # planner-time _reset_doglegs).
+        # planner-time _reset_doglegs).  The resumed-routing preference is
+        # over too: this re-plan's local solve is authoritative now.
         self._bu_fixed_cache = None
         self._template_track_verdict = None
+        self._bu_fixed_from_resume = False
         self._reset_bottom_up_doglegs()
         bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
         if not bu_cells or not self.bundles:
@@ -1429,11 +1431,11 @@ class HierMixin:
         wrappers never change).  _plan_bottom_up_templates resets the cache
         on every re-plan.
 
-        A template whose local solve required a DOGLEG split is not copied:
-        the split rewrites the topology, and adopting it per-instance is not
-        yet supported — that cell's instances are unlocked and fall back to
-        per-instance global NUTS with a WARNING (uniformity knowingly broken,
-        never silent).  See docs/internal/hier_bottom_up_planning.md §4.
+        A template whose local solve required a DOGLEG split is copied like
+        any other: the split is adopted on the template and every locked
+        instance (_adopt_bottom_up_doglegs), so copies and selected
+        candidates agree segment-for-segment.
+        See docs/internal/hier_bottom_up_planning.md §4.
         """
         cache = getattr(self, "_bu_fixed_cache", None)
         if cache is not None:
@@ -1447,26 +1449,37 @@ class HierMixin:
         exp_map = getattr(self, "_hier_expansion_map", None) or {}
         if not bu_cells or not exp_map:
             return fixed
-        if not templates:
-            # Resume path (load_pipeline expanded): the template wrappers are
-            # gone, but the persisted NUTS result already CONTAINS the fixed
-            # copies (they were merged into the result before persisting) —
-            # source them from there instead of re-solving locally.
+        if getattr(self, "_bu_fixed_from_resume", False):
+            # Resumed session (load_pipeline expanded), no re-plan since:
+            # when the checkpoint was taken AFTER run_nuts, the persisted
+            # NUTS result already CONTAINS the exact fixed copies — prefer
+            # them over a fresh local solve (which could legally differ:
+            # the local planner's band centres and extended grid are not
+            # persisted).  A PRE-run_nuts checkpoint has no routing rows —
+            # fall through to the local solve on the RESTORED template
+            # wrappers (_restore_bottom_up_templates), which is the whole
+            # point of restoring them: uniform copies instead of the old
+            # per-instance fallback.
             locked_ids = {w.input.original_bundle.id for w in self.bundles
                           if w.hier.locked}
-            if not locked_ids:
-                return fixed
-            if self.nuts_result is not None:
+            if locked_ids and self.nuts_result is not None:
                 fixed.extend(ts for ts in self.nuts_result.segments
                              if ts.bundle_id in locked_ids and ts.placed)
             if fixed:
                 print(f"[BottomUp] resume: {len(fixed)} fixed segment(s) "
                       f"restored from the persisted NUTS routing")
-            else:
-                print("WARNING: bottom-up locked instances present but no "
-                      "template wrappers and no persisted NUTS routing — "
-                      "uniform NUTS copies are unavailable on this resume; "
-                      "re-run from run_planner hier in a full session")
+                return fixed
+            fixed = []
+            self._bu_fixed_cache = fixed
+        if not templates:
+            locked_ids = {w.input.original_bundle.id for w in self.bundles
+                          if w.hier.locked}
+            if not locked_ids:
+                return fixed
+            print("WARNING: bottom-up locked instances present but no "
+                  "template wrappers and no persisted NUTS routing — "
+                  "uniform NUTS copies are unavailable on this resume; "
+                  "re-run from run_planner hier in a full session")
             return fixed
         comps = {c.name: c for c in self.bdb.all_components()}
         cell_ids = {w.input.original_bundle.id for w in templates

@@ -530,6 +530,201 @@ class PersistMixin:
                                      "detailed_nuts", n_ns, n_nv)
         return (n_ns, n_nv)
 
+
+    def _restore_wrapper(self, br, h_layer_ids, v_layer_ids, missing_blocks,
+                         fp=None):
+        """Rebuild ONE BundleWrapper from its persisted rows (bundle +
+        candidate topologies + segments + logical annotations + bridges +
+        selection/pin/layers/bu_locked) — the loader loop's body, extracted
+        so the expanded view can ALSO reconstruct the pre-expansion
+        bottom-up TEMPLATE wrappers (_restore_bottom_up_templates).
+
+        `fp` is the floorplan candidates are validated against (block-name
+        existence gate before load_seg_busterms) — self.fp by default; a
+        cell-local TEMPLATE passes its own cell-local floorplan, since its
+        block names are cell-local and legitimately absent from self.fp.
+        Returns None when the row has no persisted candidates (e.g. a
+        bundler-only stop); unknown block names accumulate in
+        missing_blocks (the caller decides whether that is fatal)."""
+        import json
+        if fp is None:
+            fp = self.fp
+        topos = self.bdb.topologies(br.id)
+        if not topos:
+            return None
+        hb = buda.HBundle()
+        hb.id = int(br.id)
+        hb.net_names = list(self.bdb.bundle_nets(br.id))
+        hb.reason = br.reason
+        hb.num_terminals = br.num_terminals
+        hb.level = br.level
+        hb.cell_context = br.cell_context
+        hb.instances = json.loads(br.instances) if br.instances else []
+        hb.parent_id = int(br.parent_id) if br.parent_id else -1
+        hb.drv_spec_depth = br.drv_spec_depth
+        hb.rcv_spec_depth = br.rcv_spec_depth
+        hb.drv_spec_path = br.drv_spec_path
+        hb.rcv_spec_paths = (json.loads(br.rcv_spec_paths)
+                             if br.rcv_spec_paths else [])
+        w = buda.BundleWrapper()
+        w.input.original_bundle = hb
+        w.input.width = len(hb.get_net_names()) * 1.5   # as run_bundler sets it
+        # sel/sel_ci: the selected candidate's COMPACT in-memory index vs its
+        # PERSISTED cand_index. They differ when only a subset of candidates
+        # was persisted (hier expanded bundles keep just their selected
+        # topology, at its original template cand_index).
+        cands, sel, sel_ci, pinned = [], -1, -1, False
+        # One bulk read per bundle (empty for non-TEG designs, the common
+        # case) instead of one SELECT per candidate.
+        bridges_by_ci = {}
+        for brg in self.bdb.all_topology_bridges(br.id):
+            bridges_by_ci.setdefault(brg.cand_index, []).append(brg)
+        for tr in topos:
+            t = buda.Topology()
+            t.type = tr.type
+            t.estimated_wirelength = tr.wirelength
+            t.trunk_location = tr.trunk_location
+            t.pass_through_count = tr.pass_through_count
+            t.connected_block_names = (json.loads(tr.connected_blocks)
+                                       if tr.connected_blocks else [])
+            t.feedthru_blocks = (json.loads(tr.feedthru_blocks)
+                                 if tr.feedthru_blocks else [])
+            segs = []
+            for sr in self.bdb.topology_segments(br.id, tr.cand_index):
+                sg = buda.Segment()
+                sg.start = buda.Point(int(sr.x1), int(sr.y1))
+                sg.end = buda.Point(int(sr.x2), int(sr.y2))
+                sg.layer_hint = sr.layer_hint
+                sg.is_jog = sr.is_jog
+                sg.edge_id = sr.edge_id       # MST-edge identity (v14)
+                sg.perp_clamp_lo = sr.perp_clamp_lo   # overlap-U slide clamp (v16)
+                sg.perp_clamp_hi = sr.perp_clamp_hi
+                segs.append(sg)
+            t.segments = segs        # reassign whole vector (pybind copies)
+            bad = [n for n in t.connected_block_names
+                   if not fp.has_block(n)]
+            if bad:
+                missing_blocks.update(bad)
+            else:
+                # Restore the authoritative seg_busterms annotation from the
+                # persisted topology_seg_busterm links — LOGICALLY, never
+                # re-derived from geometry (single-source-of-topo-truth
+                # Phase 3: annotate_topology would just re-guess what the
+                # links record exactly).
+                # (also re-derives seg_conns — Phase 4's junction records —
+                # inside the helper, so EVERY reload path gets a fully
+                # annotated topology, not just load_pipeline; Phase 5 will
+                # persist them logically like the busterm links.)
+                buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
+            # TEG-over bridges (v11): the explicit segment over a multi-rect
+            # block's notch, kept OUTSIDE t.segments (bridge_segments map).
+            bridges = {}
+            for brg in bridges_by_ci.get(tr.cand_index, ()):
+                sg = buda.Segment()
+                sg.start = buda.Point(int(brg.x1), int(brg.y1))
+                sg.end = buda.Point(int(brg.x2), int(brg.y2))
+                sg.layer_hint = brg.layer_hint
+                sg.is_jog = brg.is_jog
+                bridges[brg.block_name] = sg
+            if bridges:
+                t.bridge_segments = bridges
+            # v14 uid integrity: topo_uid is recomputable from the persisted
+            # rows alone, so a reloaded candidate must reproduce it exactly
+            # (uid(generated) == uid(reloaded) — Phase E1's round-trip
+            # contract). Pre-v14 checkpoints carry no uid and backfill
+            # silently; a mismatch on a v14 checkpoint flags a lossy reload.
+            if tr.topo_uid and not bad and buda.topo_uid(t) != tr.topo_uid:
+                print(f"  Warning: bundle {br.id} cand {tr.cand_index}: "
+                      f"reloaded topo_uid {buda.topo_uid(t)} != persisted "
+                      f"{tr.topo_uid} (lossy checkpoint?)")
+            if tr.is_selected:
+                sel = len(cands)     # compact index of this candidate
+                sel_ci = tr.cand_index
+                pinned = tr.is_pinned
+            cands.append(t)
+        w.input.candidates = cands
+        if sel >= 0:
+            # Restore the planner's decision so run_nuts can run directly.
+            w.plan.selected_topology_index = sel
+            # A pre-plan select_topology pin survives the checkpoint so a
+            # resumed run_planner honors it (Codex #136 P2).
+            w.input.topology_pinned = pinned
+            layers = [sr.assigned_layer
+                      for sr in self.bdb.topology_segments(br.id, sel_ci)]
+            if any(l >= 0 for l in layers):
+                w.plan.seg_layers = layers
+                for l in layers:
+                    if l in h_layer_ids and w.input.assigned_h_layer < 0:
+                        w.input.assigned_h_layer = l
+                    if l in v_layer_ids and w.input.assigned_v_layer < 0:
+                        w.input.assigned_v_layer = l
+            # Bottom-up copy (v18): restore the wrapper LOCKED — pinned
+            # index + pinned layers, planned first, never moved by
+            # rip-up/negotiate/ripup_reroute — so a resumed session keeps
+            # template uniformity instead of re-deciding per instance.
+            if getattr(br, "bu_locked", False):
+                w.hier.locked = True
+                w.input.topology_pinned = True
+                w.input.pinned_seg_layers = list(w.plan.seg_layers)
+        return w
+
+    def _restore_bottom_up_templates(self, exp_map, all_rows,
+                                     h_layer_ids, v_layer_ids):
+        """Rebuild the pre-expansion bottom-up TEMPLATE wrappers from the
+        persisted template bundle rows (candidates + the v18-persisted
+        local-solve selection/layers), into self._hier_bundles_orig — so a
+        resume from a PRE-run_nuts checkpoint re-runs the cell-local solve
+        and keeps NUTS-copy uniformity instead of falling back
+        per-instance with a WARNING (the opens.md resume conditional).
+
+        Templates are the canonical parents of the expanded instance rows
+        (exp_map keys); only marked cells' templates (clone contexts
+        resolved via _bu_cell_of) are restored.  Each is validated against
+        its OWN cell-local floorplan — its block names are cell-local and
+        legitimately absent from self.fp — and its persisted selection is
+        restored as the FULL pin stage (b) requires (topology_pinned +
+        pinned_seg_layers), exactly what _plan_bottom_up_templates wrote
+        live.  A template without a usable persisted selection is skipped
+        with a WARNING (its cell falls back per-instance, loud as before)."""
+        bu = set(self.bdb.bottom_up_cells())
+        if not bu:
+            return
+        templates = []
+        for tid in sorted(exp_map):
+            br = all_rows.get(str(tid))
+            if (br is None or not br.cell_context
+                    or self._bu_cell_of(br.cell_context) not in bu):
+                continue
+            import json
+            insts = json.loads(br.instances) if br.instances else []
+            cell_fp = (self._build_cell_local_floorplan(insts[0])
+                       if insts else None)
+            if cell_fp is None:
+                continue
+            missing = set()
+            w = self._restore_wrapper(br, h_layer_ids, v_layer_ids,
+                                      missing, fp=cell_fp)
+            if w is None:
+                continue
+            if (0 <= w.plan.selected_topology_index
+                    < len(w.input.candidates)
+                    and w.plan.seg_layers
+                    and any(l >= 0 for l in w.plan.seg_layers)):
+                w.input.topology_pinned = True
+                w.input.pinned_seg_layers = list(w.plan.seg_layers)
+                templates.append(w)
+            else:
+                print(f"WARNING: bottom-up template {br.id} "
+                      f"('{br.cell_context}') restored without a persisted "
+                      f"local-solve selection — its cell falls back to "
+                      f"per-instance NUTS on this resume")
+        if templates:
+            self._hier_bundles_orig = templates
+            print(f"[BottomUp] restored {len(templates)} template "
+                  f"wrapper(s) from the checkpoint — a pre-run_nuts resume "
+                  f"re-runs the cell-local solve; a post-run_nuts resume "
+                  f"keeps the persisted routing")
+
     def _load_pipeline_from_bdb(self, expanded=False):
         """Rehydrate the in-memory pipeline from the open BDB (resume path).
 
@@ -612,124 +807,11 @@ class PersistMixin:
         v_layer_ids = set(self.layers.get_layer_ids_by_dir(buda.LayerDir.VERTICAL))
         bundles, missing_blocks, skipped = [], set(), 0
         for br in rows:
-            topos = self.bdb.topologies(br.id)
-            if not topos:
+            w = self._restore_wrapper(br, h_layer_ids, v_layer_ids,
+                                      missing_blocks)
+            if w is None:
                 skipped += 1
                 continue          # no candidates persisted (e.g. bundler-only stop)
-            hb = buda.HBundle()
-            hb.id = int(br.id)
-            hb.net_names = list(self.bdb.bundle_nets(br.id))
-            hb.reason = br.reason
-            hb.num_terminals = br.num_terminals
-            hb.level = br.level
-            hb.cell_context = br.cell_context
-            hb.instances = json.loads(br.instances) if br.instances else []
-            hb.parent_id = int(br.parent_id) if br.parent_id else -1
-            hb.drv_spec_depth = br.drv_spec_depth
-            hb.rcv_spec_depth = br.rcv_spec_depth
-            hb.drv_spec_path = br.drv_spec_path
-            hb.rcv_spec_paths = (json.loads(br.rcv_spec_paths)
-                                 if br.rcv_spec_paths else [])
-            w = buda.BundleWrapper()
-            w.input.original_bundle = hb
-            w.input.width = len(hb.get_net_names()) * 1.5   # as run_bundler sets it
-            # sel/sel_ci: the selected candidate's COMPACT in-memory index vs its
-            # PERSISTED cand_index. They differ when only a subset of candidates
-            # was persisted (hier expanded bundles keep just their selected
-            # topology, at its original template cand_index).
-            cands, sel, sel_ci, pinned = [], -1, -1, False
-            # One bulk read per bundle (empty for non-TEG designs, the common
-            # case) instead of one SELECT per candidate.
-            bridges_by_ci = {}
-            for brg in self.bdb.all_topology_bridges(br.id):
-                bridges_by_ci.setdefault(brg.cand_index, []).append(brg)
-            for tr in topos:
-                t = buda.Topology()
-                t.type = tr.type
-                t.estimated_wirelength = tr.wirelength
-                t.trunk_location = tr.trunk_location
-                t.pass_through_count = tr.pass_through_count
-                t.connected_block_names = (json.loads(tr.connected_blocks)
-                                           if tr.connected_blocks else [])
-                t.feedthru_blocks = (json.loads(tr.feedthru_blocks)
-                                     if tr.feedthru_blocks else [])
-                segs = []
-                for sr in self.bdb.topology_segments(br.id, tr.cand_index):
-                    sg = buda.Segment()
-                    sg.start = buda.Point(int(sr.x1), int(sr.y1))
-                    sg.end = buda.Point(int(sr.x2), int(sr.y2))
-                    sg.layer_hint = sr.layer_hint
-                    sg.is_jog = sr.is_jog
-                    sg.edge_id = sr.edge_id       # MST-edge identity (v14)
-                    sg.perp_clamp_lo = sr.perp_clamp_lo   # overlap-U slide clamp (v16)
-                    sg.perp_clamp_hi = sr.perp_clamp_hi
-                    segs.append(sg)
-                t.segments = segs        # reassign whole vector (pybind copies)
-                bad = [n for n in t.connected_block_names
-                       if not self.fp.has_block(n)]
-                if bad:
-                    missing_blocks.update(bad)
-                else:
-                    # Restore the authoritative seg_busterms annotation from the
-                    # persisted topology_seg_busterm links — LOGICALLY, never
-                    # re-derived from geometry (single-source-of-topo-truth
-                    # Phase 3: annotate_topology would just re-guess what the
-                    # links record exactly).
-                    # (also re-derives seg_conns — Phase 4's junction records —
-                    # inside the helper, so EVERY reload path gets a fully
-                    # annotated topology, not just load_pipeline; Phase 5 will
-                    # persist them logically like the busterm links.)
-                    buda.load_seg_busterms(self.bdb, br.id, tr.cand_index, t)
-                # TEG-over bridges (v11): the explicit segment over a multi-rect
-                # block's notch, kept OUTSIDE t.segments (bridge_segments map).
-                bridges = {}
-                for brg in bridges_by_ci.get(tr.cand_index, ()):
-                    sg = buda.Segment()
-                    sg.start = buda.Point(int(brg.x1), int(brg.y1))
-                    sg.end = buda.Point(int(brg.x2), int(brg.y2))
-                    sg.layer_hint = brg.layer_hint
-                    sg.is_jog = brg.is_jog
-                    bridges[brg.block_name] = sg
-                if bridges:
-                    t.bridge_segments = bridges
-                # v14 uid integrity: topo_uid is recomputable from the persisted
-                # rows alone, so a reloaded candidate must reproduce it exactly
-                # (uid(generated) == uid(reloaded) — Phase E1's round-trip
-                # contract). Pre-v14 checkpoints carry no uid and backfill
-                # silently; a mismatch on a v14 checkpoint flags a lossy reload.
-                if tr.topo_uid and not bad and buda.topo_uid(t) != tr.topo_uid:
-                    print(f"  Warning: bundle {br.id} cand {tr.cand_index}: "
-                          f"reloaded topo_uid {buda.topo_uid(t)} != persisted "
-                          f"{tr.topo_uid} (lossy checkpoint?)")
-                if tr.is_selected:
-                    sel = len(cands)     # compact index of this candidate
-                    sel_ci = tr.cand_index
-                    pinned = tr.is_pinned
-                cands.append(t)
-            w.input.candidates = cands
-            if sel >= 0:
-                # Restore the planner's decision so run_nuts can run directly.
-                w.plan.selected_topology_index = sel
-                # A pre-plan select_topology pin survives the checkpoint so a
-                # resumed run_planner honors it (Codex #136 P2).
-                w.input.topology_pinned = pinned
-                layers = [sr.assigned_layer
-                          for sr in self.bdb.topology_segments(br.id, sel_ci)]
-                if any(l >= 0 for l in layers):
-                    w.plan.seg_layers = layers
-                    for l in layers:
-                        if l in h_layer_ids and w.input.assigned_h_layer < 0:
-                            w.input.assigned_h_layer = l
-                        if l in v_layer_ids and w.input.assigned_v_layer < 0:
-                            w.input.assigned_v_layer = l
-                # Bottom-up copy (v18): restore the wrapper LOCKED — pinned
-                # index + pinned layers, planned first, never moved by
-                # rip-up/negotiate/ripup_reroute — so a resumed session keeps
-                # template uniformity instead of re-deciding per instance.
-                if getattr(br, "bu_locked", False):
-                    w.hier.locked = True
-                    w.input.topology_pinned = True
-                    w.input.pinned_seg_layers = list(w.plan.seg_layers)
             bundles.append(w)
 
         if missing_blocks:
@@ -771,6 +853,13 @@ class PersistMixin:
                                            []).append(w)
             if exp_map:
                 self._hier_expansion_map = exp_map
+                self._restore_bottom_up_templates(exp_map, all_rows,
+                                                  h_layer_ids, v_layer_ids)
+                # Post-run_nuts resumes source the bottom-up fixed copies
+                # from the persisted routing (exact); a pre-run_nuts resume
+                # has none and falls through to a fresh local solve on the
+                # restored templates.  A re-plan clears the flag.
+                self._bu_fixed_from_resume = True
         # Bottom-up mismatch policy survives the checkpoint (meta, v17+).
         pol = self.bdb.meta_get("bu_mismatch_policy", "")
         if pol in ("stop", "independent"):
