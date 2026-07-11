@@ -171,11 +171,41 @@ No candidate fits its slide windows at all (e.g. sidecar pins saved under an old
 
 ### Cell-interior demand reservation
 
-Globals are planned first by design, but TOP layers ignore block footprints, so global trunks fly over cell interiors — the only place the later-planned, tightly-windowed locals can route. To stop early globals from eating that capacity, each expanded cell-local wrapper carries a **reservation** (`has_reservation` + the instance bbox): before planning starts, its effective bus width is parked as *virtual usage* on every TOP-layer band inside the region (`apply_reservation`), and released right before the bundle's own turn.
+Globals are planned first by design, but TOP layers ignore block footprints, so global trunks fly over cell interiors — the only place the later-planned, tightly-windowed locals can route. To stop early globals from eating that capacity, each expanded cell-local wrapper carries a **reservation** (`has_reservation` + the parent instance bbox `res_x1..res_y2`, stamped by `_expand_hier_bundles` at expansion time): before planning starts, its effective bus width is parked as *virtual usage* on every TOP-layer band inside the region (`apply_reservation`), and released right before the bundle's own turn.
+
+The recipe — `apply_reservation(bw, sign)`, `sign=+1` parks, `-1` releases the identical charge:
+
+1. No-op unless `bw.hier.has_reservation` (only expanded cell-local wrappers carry one; flat-flow and cross-block bundles never do).
+2. Resolve the two TOP layers. The bundle's eventual H segment consumes V-cut capacity on the TOP **H** layer and its V segment H-cut capacity on the TOP **V** layer, so only cuts living on those two layers are touched — LOW layers are never reserved (locals reach them cheaply via the span-scaled non-TOP discount anyway).
+3. Keep only cuts whose coordinate lies inside the region along the cut axis (the wire would have to cross that cut to exist inside the cell).
+4. Compute the parked width exactly as a real segment would be charged: `eff_bus_width(bits, width, layer) + track_pitch` — pattern-aware per-bit footprint when the layer has a track pattern, plus one pitch of inter-bus spacing (Gap 1).
+5. Charge that width on **every band overlapping the region's perpendicular range**. The local bundle will eventually occupy *one* of those bands, but until it plans, any of them could be its home — so each must individually leave room. This deliberate over-counting is what makes reservations *pessimistic*: a region spanning k bands parks k× the real demand.
+6. `plan_all` parks all reservations up front (`sign=+1` in processing order) and releases each bundle's own (`sign=-1`) at the top of its turn — from then on its demand is real, not reserved.
 
 Because congestion cost is overflow-based, the virtual usage repels a global from a region band **only when the band cannot hold both** of them — it is a "leave room" constraint, not a keep-out. A global that fits alongside the local still routes straight over the cell. When contention is real, the global detours on its first pass and no rip-up is needed (`flow/hbundles/09_local_global_compete.buda`).
 
 Limitation: a reservation is not a committed plan, so a bundle blocked *only* by reservations cannot rip them up — it falls through the ladder and the conflict resolves when the reserved bundle itself plans (possibly via rip-up then).
+
+### Level ordering: top-down vs deep-first (`BUDA_HIER_DEEP_FIRST`)
+
+The level key of the processing order is a design choice, not a law. Top-down (the default) reasons "widest, longest buses claim TOP first; locals are protected by reservations and offload to LOW cheaply". The opposite reading — deeper cells are smaller and have fewer resources, so most-constrained-first argues they should commit **real** usage before globals plan — is testable: `BUDA_HIER_DEEP_FIRST=1` inverts *only* the level key (deepest level first; fewest-candidates-first within a level preserved; unset is bit-identical to the historical formula).
+
+A/B on the full hier corpus (2026-07-11, `flow/hbundles/01–10` + `flow/rnr/mix2_fast`):
+
+| Flow | Detailed WL (base → deep) | NUTS overlaps | DNUTS unplaced | Verdict |
+|---|---|---|---|---|
+| 01_pipeline_hier | 3360 → 2640 (−21%) | 0 → 0 | 0 → 0 | win |
+| 02_two_procs | 7816 → 5280 (−32%) | 0 → 0 | 0 → 0 | win |
+| 03, 04, 08, 09 | identical | identical | identical | neutral |
+| 05_stress_grid | 31626 → 26025 (−18%) | 0 → 1 | 47 → 8 | win |
+| 06_multipin_stress | 51995 → 53305 (+2.5%) | 2 → 0 | 34 → 26 | win (defects) |
+| 07_wide_fan_stress | 39942 → 47980 (+20%) | 1 → 6 | 0 → 9 | regression |
+| 10_chip_units_blocks_leaf | 369313 → 360138 (−2.5%) | 1 → 1 | 7 → 17 | regression (defects) |
+| mix2_fast | identical | 28 → 28 | 259 → 259 | control (all wrappers locked) |
+
+Reading the wins: reservations over-count (recipe step 5), so top-down globals sometimes detour around phantom congestion — in 01/02 the D0 buses pick 3-segment Z shapes over a straight `I_H` that deep-first proves fits (all four bundles end up as single straight wires). Reading the losses: deep-first has **no symmetric protection for global demand** — locals plan blind to globals and squat on TOP bands (07: D1 takes 48 segments on M6 vs 32, two D0 buses then commit WITH overflow; 10: D0 squeezed onto bands whose real signal-track supply falls short, +10 DNUTS opens). Each order protects one side by priority and the other by an approximation; neither dominates (4 improved / 2 regressed / 4 neutral), so the default stays top-down.
+
+The synthesis suggested by the data — deep-first ordering plus an `apply_reservation` analog parking *global* demand while locals plan (or a two-pass top-down-then-replan-bottom-up, effectively one built-in negotiation iteration) — is catalogued in [internal/opens.md](internal/opens.md).
 
 ### Per-level summary
 
