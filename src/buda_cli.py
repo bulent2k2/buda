@@ -180,6 +180,10 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._busterm_gen = None     # BustermGen instance (created by derive_busterms)
         self.bdb_net_mode = False    # when True, add_net/add_bus also write to BDB
         self._corner_margin = (0, 0) # (dx, dy) — mirrors fp global corner margin
+        # Mirrors the fp min-stub-length tiers, so derived hier floorplans
+        # (cell-local / cross-level / depth projection) re-apply them via
+        # _apply_fp_session_settings.
+        self._min_stub = {"global": None, "dir": {}, "layer": {}}
         self._hier_expansion_map = {}  # original bundle id → [expanded BundleWrappers]
         self._hier_bundles_orig = []   # pre-expansion snapshot set by run_hier_bundler
         self._planner_is_hier = False  # True after `run_planner hier` (self.bundles is expanded)

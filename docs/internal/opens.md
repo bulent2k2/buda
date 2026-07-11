@@ -108,12 +108,25 @@ noted.)*
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
 designs and fail LOUD, never silent:)*
 
-- **Dogleg-split templates are not copied** — when a cell's LOCAL NUTS
-  solve needs a dogleg, that cell falls back to per-instance global NUTS
-  with a WARNING. Copying a split means adopting the dogleg topology on
-  the template AND offsetting it per instance (candidates, plan arrays,
-  slide overrides). See
-  [`hier_bottom_up_planning.md`](hier_bottom_up_planning.md) §4.3 as-built.
+- ✅ **Dogleg-split templates are not copied** — **DONE (2026-07-11)**.
+  When the cell-local solve needs a dogleg, `_adopt_bottom_up_doglegs`
+  now adopts the split exactly like the flat flow's `_adopt_doglegs`: the
+  template gets the split candidate (appended / slot-overwritten,
+  `_bu_dogleg_slot` bookkeeping reset on every re-plan) fully pinned with
+  the split's layers + placement overrides, and every LOCKED instance
+  gets the orientation-TRANSFORMED split candidate + full pin (instance
+  slots ride the shared `_dogleg_slot`, cleaned by the planner-time
+  `_reset_doglegs`). The fixed copies already carried the split geometry;
+  the adoption makes every wrapper's selected candidate agree with them
+  segment-for-segment (the DNUTS-handoff invariant). Getting the LOCAL
+  solve to even reproduce a flat dogleg exposed three frame-fidelity gaps,
+  all fixed: the local planner's `seg_perp` band centres were not copied
+  to the template plan, the local NUTS never saw the local planner's
+  candidate-extended Hanan grid, and the cell-local floorplan dropped the
+  session's declared corner margin AND min-stub lengths
+  (`_apply_fp_session_settings`; min-stub deliberately NOT retrofitted
+  onto the depth-projection / cross-level frames — that measurably
+  regressed tuned hier flows and belongs to a golden review).
 - **Resume from a pre-`run_nuts` checkpoint loses NUTS-copy uniformity** —
   `load_pipeline expanded` restores locked wrappers, but with no persisted
   routing and no template wrappers the local solve cannot be reconstructed
