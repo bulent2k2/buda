@@ -390,8 +390,10 @@ def cmd_set_bottom_up(session, cmd, args, cmd_line):
     # Mark a cell template for bottom-up planning: its cell-local interconnect
     # is planned/NUTSed once and copied to every instance (see
     # docs/internal/hier_bottom_up_planning.md).  Persisted in the BDB.
-    # '*' is the keepout-scope generalization: mark EVERY eligible (>= 2
-    # congruent placed instances) cell at once ('* off' clears all marks).
+    # '*' is the keepout-scope generalization: mark EVERY eligible cell at
+    # once (congruent placed instances — >= 2 = solve-once-COPY, a single
+    # instance = solve-once + freeze as a keepout, nothing to copy;
+    # '* off' clears all marks).
     if not args:
         print("Error: set_bottom_up requires <cell>|* [on|off]"); return
     if session.bdb is None:
@@ -428,10 +430,11 @@ def cmd_set_bottom_up(session, cmd, args, cmd_line):
 
 def _set_bottom_up_all(session, on):
     # set_bottom_up * [on|off] — the keepout-scope generalization.
-    # ON marks every ELIGIBLE cell (>= 2 congruent placed instances); cells
-    # whose instances cannot be frozen-and-copied (non-congruent, or single
-    # instance) are reported and left on the top-down path (fail LOUD, never
-    # silent).  OFF clears the mark on every currently-marked cell.
+    # ON marks every ELIGIBLE cell (congruent placed instances: >= 2 =
+    # solve-once-copy, a single instance = solve-once + freeze as a keepout);
+    # cells whose >= 2 instances are non-congruent (cannot be frozen) are
+    # reported and left on the top-down path (fail LOUD, never silent).
+    # OFF clears the mark on every currently-marked cell.
     if not on:
         cleared = list(session.bdb.bottom_up_cells())
         for c in cleared:

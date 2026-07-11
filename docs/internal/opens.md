@@ -87,12 +87,16 @@ evidence in the per-subsystem wishlist files as cited.)*
 
 - **Keepout scope generalization** ✅ — **DONE (2026-07-11)**, landed as
   the opt-in `set_bottom_up *`: mark EVERY eligible cell at once, where
-  eligible = ≥2 congruent placed instances (the solve-once-copy unit).
-  Reuses 100% of the marked-cell path (template solve, fixed-segment
-  blockage, `check_template_tracks`, DNUTS copy) with no new blockage
-  code; non-congruent or single-instance cells are reported and left on
-  the top-down path (fail LOUD). The default flow still marks nothing, so
-  Q4's zero-regression guarantee holds unless the user opts in.
+  eligible = a cell with congruent placed instances (≥2 = solve-once-COPY;
+  a SINGLE instance = solve-once + freeze its cell-local routing as a
+  keepout for the levels above, nothing to copy — verified: the lone
+  locked instance's segment blocks a crossing depth-0 bus, DNUTS routes
+  the rest around it). Reuses 100% of the marked-cell path (template
+  solve, fixed-segment blockage, `check_template_tracks`, DNUTS copy) with
+  no new blockage code; only a cell whose ≥2 instances are non-congruent
+  is reported and left top-down (fail LOUD). The default flow still marks
+  nothing, so Q4's zero-regression guarantee holds unless the user opts
+  in.
   `_eligible_bottom_up_cells` (enumeration) + `_set_bottom_up_all`
   (command). Measured: `flow/rnr/mix2_fast` (patterns + align, 4 cells
   hand-marked) → `*` marks 25 cells but routes BYTE-IDENTICAL (the extra
