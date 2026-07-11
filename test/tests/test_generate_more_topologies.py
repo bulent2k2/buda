@@ -280,3 +280,47 @@ def test_hier_unknown_hint_warns(capsys):
     s.do_command("generate_more_topologies zz multi_trunk")
     out = capsys.readouterr().out
     assert "Could not find bundle matching hint" in out, out
+
+
+def test_hier_markerless_resume_accretes(tmp_path):
+    """Codex #254 P2: a load_pipeline resume whose checkpoint holds ONLY
+    same-level cross-block HBundles (no cell_context, no drv_spec_depth)
+    has no hier markers and an empty _hier_bundles_orig — it must still be
+    detected as hierarchical (its nets never went through the flat add_net
+    endpoint bookkeeping), or the flat branch dead-ends on the
+    missing-endpoint warning and never accretes."""
+    p = str(tmp_path / "xblk.bdb")
+    db = buda.BDB(p)
+    db.add_cell("leaf_cell", 200, 300)
+    for i in range(6):
+        x, y = (i % 3) * 400, (i // 3) * 600
+        db.add_inst(f"b{i}", "leaf_cell", "", x, y)
+    for i in range(8):
+        db.add_net_pins(f"d_{i}", "b0.p",
+                        ["b1.q", "b2.r", "b3.s", "b4.t", "b5.u"])
+    buda.BustermGen(db).derive(1)
+    s1 = buda_cli.BudaSession()
+    s1.no_viz = True
+    s1.bdb = db
+    _quiet(s1, "def_layer 4 M4 H TOP 20", "def_layer 5 M5 V TOP 20",
+           "run_hier_bundler", "generate_hier_topologies")
+    del s1, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, "def_layer 4 M4 H TOP 20", "def_layer 5 M5 V TOP 20",
+           f"open_bdb {p}", "add_blocks_from_bdb 0", "load_pipeline")
+    # Premise: genuinely markerless, endpoint-less resume.
+    assert not getattr(s2, "_hier_bundles_orig", None)
+    assert not s2._net_endpoints
+    w = s2.bundles[0]
+    b = w.input.original_bundle
+    assert not b.cell_context and b.drv_spec_depth < 0
+    base = len(w.input.candidates)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s2.do_command("generate_more_topologies d multi_trunk")
+    out = out.getvalue()
+    assert "no endpoint info" not in out, out
+    assert "new candidate(s)" in out, out
+    assert len(w.input.candidates) > base

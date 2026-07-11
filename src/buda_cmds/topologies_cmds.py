@@ -104,13 +104,18 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
         return
     hint = pos_args[0]
     # Hier session detection: the hier bundler ran (live), or this is a
-    # resumed BDB session whose bundles carry hier markers / whose nets
-    # never went through the flat add_net endpoint bookkeeping.
+    # resumed BDB session whose bundles carry hier markers, or — the
+    # markerless resume (Codex #254) — a load_pipeline checkpoint holding
+    # ONLY same-level cross-block HBundles (no cell_context, no
+    # drv_spec_depth): its nets never went through the flat add_net
+    # endpoint bookkeeping, which every flat session's did, so an empty
+    # _net_endpoints with bundles present marks it hierarchical.
     hier = bool(getattr(session, "_hier_bundles_orig", None)) or (
-        session.bdb is not None and any(
-            b.cell_context or b.drv_spec_depth >= 0
-            for w in session.bundles
-            for b in [w.input.original_bundle]))
+        session.bdb is not None and (
+            any(b.cell_context or b.drv_spec_depth >= 0
+                for w in session.bundles
+                for b in [w.input.original_bundle])
+            or (bool(session.bundles) and not session._net_endpoints)))
 
     targets = []
     if hier:
