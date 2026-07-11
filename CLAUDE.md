@@ -85,7 +85,7 @@ bin/bb --help     # describe all options (-h)
 
 Tests are split into three cumulative tiers via pytest markers (`mid`, `slow` in
 `pytest.ini`); the default run excludes both. Per-test runtimes and the tier
-rationale live in [docs/internal/test_runtime_analysis.md](docs/internal/test_runtime_analysis.md).
+rationale (and the parallel-run setup) live in [docs/internal/test/](docs/internal/test/).
 
 Manual build:
 
@@ -629,4 +629,5 @@ Realized by Phase G of the NUTS/DNUTS refactor ([plan + as-built resolution](doc
 - **matplotlib** + **tkinter** — visualization and floorplanner GUI
 - **SQLite** — bundled as `src/sqlite3.c` (amalgamation; no system dependency)
 - **pytest** + **pytest-bdd** — testing
+- **pytest-xdist** *(optional)* — parallel test runs; `bb -m`/`bb -s` use it automatically when installed (`pip install pytest-xdist`). See [docs/internal/test/parallelism.md](docs/internal/test/parallelism.md).
 - **CMake 3.15+**

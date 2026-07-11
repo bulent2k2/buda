@@ -32,15 +32,19 @@ Build options:
   -c, --clean       Clean rebuild (make clean before building)
 
 Test options (each implies a build first; tiers are cumulative):
-  -t, --test, test  Run the FAST tier only       (~8s, 434 tests)
-  -m, --mid,  mid   Run FAST + MID tiers          (+full-pipeline flow tests, ~27s total)
-  -s, --slow, slow  Run ALL tiers                 (+SA/GA optimizer storms, ~47s total)
+  -t, --test, test  Run the FAST tier only       (~10s, serial)
+  -m, --mid,  mid   Run FAST + MID tiers          (+full-pipeline integration tests)
+  -s, --slow, slow  Run ALL tiers                 (+SA/GA optimizer storms)
+
+The mid/slow tiers run in PARALLEL when pytest-xdist is installed (`-n auto
+--dist loadfile`, ~3x on 4 cores); the fast tier stays serial. Override with
+BB_JOBS=<N> (e.g. BB_JOBS=8), or force serial with BB_JOBS=0.
 
 Other:
   -h, --help        Show this help and exit
 
 Tier definitions live in pytest.ini (the `mid` and `slow` markers); per-test
-runtimes are documented in docs/internal/test_runtime_analysis.md.
+runtimes and the parallelism setup are in docs/internal/test/.
 
 Examples:
   bb              # incremental build, no tests
@@ -136,7 +140,11 @@ if [ "$RUN_TESTS" = true ]; then
         pct = int(pct_str)
         
         if (pct >= next_milestone) {
+            # Find the pytest node id (the "::"-bearing field). It is $1 in
+            # serial -v output, but a later field under xdist ("[gwN] [ NN%]
+            # PASSED test/...::test_x"), so scan rather than assume $1.
             test_info = $1
+            for (i = 1; i <= NF; i++) if ($i ~ /::/) { test_info = $i; break }
             n = split(test_info, parts, "/")
             display_name = parts[n]
             if (length(display_name) > 65) {
@@ -169,8 +177,25 @@ if [ "$RUN_TESTS" = true ]; then
             ;;
     esac
 
+    # Parallelize the heavier tiers when pytest-xdist is available: the mid/slow
+    # integration tests are independent and CPU-bound, so `-n auto` gives a big
+    # speedup (~3x on 4 cores). `--dist loadfile` keeps every test in a file on
+    # ONE worker, so tests that share a fixture path (e.g. a viz sidecar next to
+    # a common .buda) can't race across workers. The fast tier stays serial — it
+    # is already ~10s and worker startup wouldn't pay off. Override the worker
+    # count with BB_JOBS (e.g. BB_JOBS=8), or disable with BB_JOBS=0 / no xdist.
+    XDIST_OPT=()
+    if [ "$TEST_TIER" != "fast" ] && [ "${BB_JOBS:-auto}" != "0" ]; then
+        if python -c "import xdist" 2>/dev/null; then
+            XDIST_OPT=(-n "${BB_JOBS:-auto}" --dist loadfile)
+            echo "  (parallel: pytest-xdist -n ${BB_JOBS:-auto} --dist loadfile)"
+        else
+            echo "  (serial: 'pip install pytest-xdist' to parallelize this tier)"
+        fi
+    fi
+
     set +e
-    PYTHONUNBUFFERED=1 python -m pytest -v "${MARK_OPT[@]}" 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
+    PYTHONUNBUFFERED=1 python -m pytest -v "${MARK_OPT[@]}" "${XDIST_OPT[@]}" 2>&1 | awk -v log_file="$TEST_LOG" "$AWK_FILTER"
     PYTEST_RC=${PIPESTATUS[0]}
     set -e
 

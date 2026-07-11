@@ -1,7 +1,7 @@
 # BUDA Test Suite Analysis
 
 Structure, coverage, and xfail/skip inventory for the BUDA pytest suite.
-Companion to [test_runtime_analysis.md](test_runtime_analysis.md), which
+Companion to [runtime_analysis.md](runtime_analysis.md), which
 covers per-test runtimes and the three-tier marker scheme.
 
 > Last updated: 2026-06-23
