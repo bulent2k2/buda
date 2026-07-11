@@ -1378,3 +1378,171 @@ def test_rebundle_drops_stale_clone_provenance():
         if r.cloned_from:
             assert rows[r.cloned_from].cell_context == "proc_cell"
             assert r.cell_context == "proc_cell90"
+
+
+# ── Dogleg-split templates are copied (opens.md conditional) ─────────────────
+
+def _dogleg_cell_flow(path=":memory:"):
+    """flow/nuts_dogleg_cycle.buda's cyclic-constraint geometry transplanted
+    INSIDE a cell, instantiated twice: two buses crossing the same horizontal
+    channel with the above/below assignment swapped between the columns — the
+    cell-LOCAL solve must dogleg one trunk.  Both templates are pinned to the
+    same Z_VHV candidates the flat repro forces (identical cell-local
+    geometry → identical candidate ordering)."""
+    db = buda.BDB(path)
+    db.add_cell("dl_cell", 300, 200)
+    db.add_cell("blk_cell", 20, 50)
+    for name, (x, y) in [("A_top", (80, 150)), ("B_bot", (80, 0)),
+                         ("A_bot", (190, 0)), ("B_top", (190, 150))]:
+        db.add_inst_to_cell("dl_cell", name, "blk_cell", x, y)
+    db.add_inst("D1", "dl_cell", "", 0, 0)
+    # Offsets are multiples of BOTH pattern pitches (M4: 34, M5: 32) so the
+    # instances share one track phase (x mod 32 == 0, y mod 34 == 0).
+    db.add_inst("D2", "dl_cell", "", 640, 340)
+    for k in (1, 2):
+        for i in range(4):
+            db.add_net_pins(f"x{k}_{i}", f"D{k}/A_top.o", [f"D{k}/A_bot.i"])
+            db.add_net_pins(f"y{k}_{i}", f"D{k}/B_bot.o", [f"D{k}/B_top.i"])
+    buda.BustermGen(db).derive(1)
+    s = _bare_session(db)
+    for c in (["def_layer 4 M4 H TOP 52.94", "def_layer 5 M5 V TOP 50.00"]
+              + ["def_track_pattern 4 -400 POWER 4 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1 GROUND 4 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1",
+                 "def_track_pattern 5 0 POWER 3 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1 GROUND 3 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1",
+                 "corner_margin dy 2 dx 2", "set_min_stub_length 2",
+                 "run_hier_bundler", "generate_hier_topologies",
+                 "set_bottom_up dl_cell"]):
+        _run_cmd(s, c)
+    # Pin both templates to the flat repro's cyclic Z_VHV pair (candidate 4).
+    templates = [w for w in s.bundles
+                 for b in [w.input.original_bundle]
+                 if b.cell_context and b.parent_id < 0]
+    assert len(templates) == 2
+    for w in templates:
+        assert len(w.input.candidates) >= 4
+        assert "Z" in w.input.candidates[3].type, \
+            w.input.candidates[3].type
+        w.input.topology_pinned = True
+        w.plan.selected_topology_index = 3
+    return s
+
+
+def test_doglegged_template_is_copied_not_abandoned():
+    """A cell whose LOCAL solve needs a dogleg no longer falls back to
+    per-instance NUTS: the split is adopted on the template and every
+    locked instance, the copies stay uniform (D2 = exact translate of D1,
+    jog included), and the strict DNUTS copy path completes."""
+    s = _dogleg_cell_flow()
+    out = _run_cmd(s, "run_planner hier")
+    out = _run_cmd(s, "run_nuts")
+    assert "split candidate adopted" in out, out
+    assert "falling back" not in out
+    assert getattr(s, "_bu_dogleg_slot", None), "template slot bookkeeping"
+    # Every instance stayed locked, selection points at the adopted split,
+    # and the plan arrays cover the extra jog segment.
+    inst_ws = [w for w in s.bundles
+               for b in [w.input.original_bundle]
+               if b.cell_context and w.hier.locked]
+    assert len(inst_ws) == 4          # 2 templates x 2 instances
+    fixed = s._bottom_up_fixed_segments()
+    n_dogleg = 0
+    for w in inst_ws:
+        b = w.input.original_bundle
+        sel = w.input.candidates[w.plan.selected_topology_index]
+        segs = [ts for ts in fixed if ts.bundle_id == b.id]
+        assert len(segs) == len(sel.segments) == len(w.plan.seg_layers)
+        if len(sel.segments) > 3:     # Z(3) + split piece + jog
+            n_dogleg += 1
+    assert n_dogleg >= 2, "the split must reach BOTH instances of the cell"
+    # Uniformity: per template, D2's fixed segments are exact translates
+    # of D1's (paired by seg_idx WITHIN the template — seg indices collide
+    # across the two bus templates).
+    for _cell, _tid, iws in s._bottom_up_instance_groups():
+        bid_of = {iw.input.original_bundle.instances[0]:
+                  iw.input.original_bundle.id for iw in iws}
+        segs = {inst: sorted((ts for ts in fixed if ts.bundle_id == bid),
+                             key=lambda t: t.seg_idx)
+                for inst, bid in bid_of.items()}
+        assert len(segs["D1"]) == len(segs["D2"]) > 0
+        for a, b2 in zip(segs["D1"], segs["D2"]):
+            da, dp = (640, 340) if a.horiz else (340, 640)
+            assert b2.span_lo == pytest.approx(a.span_lo + da)
+            assert b2.span_hi == pytest.approx(a.span_hi + da)
+            assert b2.track_position == pytest.approx(a.track_position + dp)
+    assert s.nuts_result.num_overlaps == 0
+    out = _run_cmd(s, "check_template_tracks")
+    assert "MISALIGNED" not in out
+    out = _run_cmd(s, "run_detailed_nuts")   # strict default policy
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+    assert s.detailed_result.num_unplaced == 0
+
+
+def test_doglegged_template_replan_resets_and_readopts():
+    """A re-plan drops the adopted template split (pristine pool, original
+    selection) and the next run_nuts re-adopts it — the slot-overwrite
+    semantics keep the pool from growing across cycles."""
+    s = _dogleg_cell_flow()
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    tpl = [w for w in (s._hier_bundles_orig or [])
+           for b in [w.input.original_bundle]
+           if b.cell_context and b.parent_id < 0]
+    sizes1 = {w.input.original_bundle.id: len(w.input.candidates)
+              for w in tpl}
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    sizes2 = {w.input.original_bundle.id: len(w.input.candidates)
+              for w in tpl}
+    assert sizes1 == sizes2, "template pool grew across re-plan cycles"
+    assert s.nuts_result.num_overlaps == 0
+
+
+def test_doglegged_template_resume_round_trip(tmp_path):
+    """Codex #256 P2: the adopted split is PERSISTED (template row with
+    source='dogleg' + per-instance selected topologies), so a checkpoint
+    taken after run_nuts restores wrappers whose segment indices match the
+    persisted bus rows — the resumed strict DNUTS routes the split
+    correctly instead of mis-deriving connections for the jog segments."""
+    p = str(tmp_path / "dl.bdb")
+    s1 = _dogleg_cell_flow(path=p)
+    _run_cmd(s1, "run_planner hier")
+    out = _run_cmd(s1, "run_nuts")
+    assert "split candidate adopted" in out
+    n_fixed1 = len(s1._bottom_up_fixed_segments())
+    locked1 = {w.input.original_bundle.id for w in s1.bundles
+               if w.hier.locked}
+    del s1
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    for c in (["def_layer 4 M4 H TOP 52.94", "def_layer 5 M5 V TOP 50.00"]
+              + ["def_track_pattern 4 -400 POWER 4 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1 GROUND 4 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1",
+                 "def_track_pattern 5 0 POWER 3 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1 GROUND 3 1 SIGNAL 2 1 SIGNAL 2 1 "
+                 "SIGNAL 2 1 SIGNAL 2 1",
+                 f"open_bdb {p}", "add_blocks_from_bdb 0",
+                 "add_blocks_from_bdb 1 skip"]):
+        _run_cmd(s2, c)
+    out = _run_cmd(s2, "load_pipeline expanded")
+    assert "rehydrated" in out
+    # Every locked wrapper's restored selected candidate carries the SPLIT
+    # segment count (matching the persisted bus rows), with full layers.
+    locked2 = {w.input.original_bundle.id for w in s2.bundles
+               if w.hier.locked}
+    assert locked2 == locked1
+    for w in s2.bundles:
+        if not w.hier.locked:
+            continue
+        sel = w.input.candidates[w.plan.selected_topology_index]
+        n_bus = sum(1 for ts in s2.nuts_result.segments
+                    if ts.bundle_id == w.input.original_bundle.id)
+        assert len(sel.segments) == n_bus == len(w.plan.seg_layers)
+    assert len(s2._bottom_up_fixed_segments()) == n_fixed1
+    out = _run_cmd(s2, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+    assert s2.detailed_result.num_unplaced == 0

@@ -593,10 +593,7 @@ class HierMixin:
 
     def _build_bdb_floorplan(self, depth):
         """Build a Floorplan with placed components at exactly this depth from BDB."""
-        fp = buda.Floorplan()
-        dx, dy = self._corner_margin
-        if dx or dy:
-            fp.set_global_corner_margin(dx, dy)
+        fp = self._apply_fp_session_settings(buda.Floorplan())
         for c in self.bdb.all_components():
             if c.depth == depth and c.x1 >= 0:
                 fp.add_block(c.name, int(round(c.x1)), int(round(c.y1)),
@@ -699,13 +696,43 @@ class HierMixin:
                                            phase_score=self._orient_phase_score,
                                            only=only, allow_90=allow_90)
 
+    def _apply_fp_session_settings(self, fp, min_stub=False):
+        """Mirror session-level Floorplan settings onto a DERIVED floorplan
+        (cell-local, cross-level, depth projection): the global corner
+        margin always; the min-stub-length tiers only on request.
+
+        min_stub=True is passed by the CELL-LOCAL floorplan, whose frame
+        must match the flat pipeline's semantics exactly — a bottom-up
+        template is generated AND locally solved there, and without the
+        declared min-stub the local solve sees different stub/slide
+        windows than the flat solve would for the same geometry (found via
+        the dogleg repro: the cell-local cycle never materialized).  The
+        depth-projection and cross-level frames deliberately keep their
+        historical margins-only behavior: retrofitting min-stub onto them
+        measurably regressed tuned hier flows (flow 10: 212→224 segments,
+        7→67 opens) and belongs to a golden review, not a bottom-up fix.
+        Returns fp for chaining."""
+        dx, dy = self._corner_margin
+        if dx or dy:
+            fp.set_global_corner_margin(dx, dy)
+        ms = (getattr(self, "_min_stub", None) or {}) if min_stub else {}
+        if ms.get("global") is not None:
+            fp.set_min_stub_length(ms["global"])
+        for d, v in (ms.get("dir") or {}).items():
+            fp.set_min_stub_length_dir(d, v)
+        for lid, v in (ms.get("layer") or {}).items():
+            fp.set_min_stub_length_layer(lid, v)
+        return fp
+
     def _build_cell_local_floorplan(self, parent_comp_name):
-        """Build a Floorplan in cell-local coords for sub-components of parent."""
+        """Build a Floorplan in cell-local coords for sub-components of
+        parent, carrying the session's floorplan settings (corner margin,
+        min stub lengths) exactly like the flat flow's fp."""
         comps = {c.name: c for c in self.bdb.all_components()}
         parent = comps.get(parent_comp_name)
         if parent is None:
             return None
-        fp = buda.Floorplan()
+        fp = self._apply_fp_session_settings(buda.Floorplan(), min_stub=True)
         for c in comps.values():
             if c.parent_id == parent.id and c.x1 >= 0:
                 local_name = c.name.rsplit('/', 1)[-1]
@@ -853,10 +880,7 @@ class HierMixin:
                 print(f"  Warning: driver comp {b.drv_spec_path!r} not found — "
                       f"skipping bundle {b.id}")
                 return 0
-            fp = buda.Floorplan()
-            dx, dy = self._corner_margin
-            if dx or dy:
-                fp.set_global_corner_margin(dx, dy)
+            fp = self._apply_fp_session_settings(buda.Floorplan())
             fp.add_block(b.drv_spec_path,
                          int(round(drv_comp.x1)), int(round(drv_comp.y1)),
                          int(round(drv_comp.x2)), int(round(drv_comp.y2)))
@@ -972,10 +996,7 @@ class HierMixin:
                 fp = None
                 drv_comp = comps_by_name.get(b.drv_spec_path)
                 if drv_comp is not None:
-                    fp = buda.Floorplan()
-                    dx, dy = self._corner_margin
-                    if dx or dy:
-                        fp.set_global_corner_margin(dx, dy)
+                    fp = self._apply_fp_session_settings(buda.Floorplan())
                     fp.add_block(b.drv_spec_path,
                                  int(round(drv_comp.x1)), int(round(drv_comp.y1)),
                                  int(round(drv_comp.x2)), int(round(drv_comp.y2)))
@@ -1306,9 +1327,13 @@ class HierMixin:
         See docs/internal/hier_bottom_up_planning.md §3.
         """
         # A re-plan invalidates any cached bottom-up local NUTS solve and
-        # the track-alignment verdict derived from it.
+        # the track-alignment verdict derived from it; adopted template
+        # doglegs are dropped so the local planner re-decides from
+        # pristine candidates (instance slots are cleared by the
+        # planner-time _reset_doglegs).
         self._bu_fixed_cache = None
         self._template_track_verdict = None
+        self._reset_bottom_up_doglegs()
         bu_cells = set(self.bdb.bottom_up_cells()) if self.bdb else set()
         if not bu_cells or not self.bundles:
             return
@@ -1344,6 +1369,16 @@ class HierMixin:
             planner.set_track_pitch(self._nuts_pitch)
             planner.build_congestion_map()
             assignments = planner.optimize_topologies(wrappers, iterations)
+            # The local NUTS solve must see the same candidate-extended
+            # Hanan grid the local planner charged (exactly as run_nuts
+            # hands the global planner's grid to the global engine) — the
+            # grid defines each segment's interval constraint, and a
+            # coarser one lets contending trunks drift apart instead of
+            # surfacing the overlap the dogleg pass classifies.
+            if getattr(self, "_bu_planner_grids", None) is None:
+                self._bu_planner_grids = {}
+            self._bu_planner_grids[cell] = (list(planner.get_x_grid()),
+                                            list(planner.get_y_grid()))
             bid_to_w = {w.input.original_bundle.id: w for w in wrappers}
             for asn in assignments:
                 w = bid_to_w.get(asn.bundle_id)
@@ -1351,6 +1386,11 @@ class HierMixin:
                     continue
                 w.plan.selected_topology_index = asn.topo_index
                 w.plan.seg_layers = list(asn.seg_layers)
+                # Mirror the flat planner handoff (planner_cmds): the local
+                # NUTS honors the local planner's charged-band centres, so
+                # contention materializes as raw overlaps (the dogleg pass's
+                # cycle detection needs them) instead of trunks scattering.
+                w.plan.seg_perp = list(asn.seg_perp)
                 w.input.assigned_v_layer = asn.v_layer_id
                 w.input.assigned_h_layer = asn.h_layer_id
                 w.input.topology_pinned = True
@@ -1452,20 +1492,15 @@ class HierMixin:
                 continue
             nuts = buda.NUTSEngine(fp, self.layers)
             nuts.set_track_pitch(self._nuts_pitch)
+            # The local planner's candidate-extended Hanan grid (mirrors
+            # run_nuts handing the global planner's grid to the global
+            # engine — the grid defines interval constraints).
+            gx, gy = (getattr(self, "_bu_planner_grids", None)
+                      or {}).get(cell, ([], []))
+            if gx or gy:
+                nuts.set_extra_grid_points(gx, gy)
             with buda.ostream_redirect():
                 local = nuts.run(wrappers)
-            if local.dogleg_topologies:
-                print(f"WARNING: bottom-up cell '{cell}': local NUTS needed "
-                      f"a dogleg split; uniform copies are not supported for "
-                      f"doglegged templates yet — falling back to "
-                      f"per-instance NUTS for this cell")
-                for w in wrappers:
-                    for iw in exp_map.get(w.input.original_bundle.id, []):
-                        iw.hier.locked = False
-                continue
-            by_tid = {}
-            for ts in local.segments:
-                by_tid.setdefault(ts.bundle_id, []).append(ts)
             # Per-instance orientations relative to the template's reference
             # (whose cell-local layout the local solve just placed).  `cell`
             # may be a rotation-class clone name — detection needs the REAL
@@ -1477,6 +1512,19 @@ class HierMixin:
             ref_c = comps.get(ref_inst)
             cw = int(round(ref_c.x2 - ref_c.x1)) if ref_c else 0
             ch = int(round(ref_c.y2 - ref_c.y1)) if ref_c else 0
+            if local.dogleg_topologies:
+                # The local solve needed a dogleg split: adopt the split
+                # topology on the TEMPLATE (cell-local frame) and on every
+                # locked instance (orientation-transformed) so the copied
+                # routing below — which already carries the split geometry —
+                # matches every wrapper's selected candidate downstream
+                # (DNUTS handoff, verification, persistence).
+                self._adopt_bottom_up_doglegs(cell, wrappers, local,
+                                              exp_map, comps, orients,
+                                              cw, ch)
+            by_tid = {}
+            for ts in local.segments:
+                by_tid.setdefault(ts.bundle_id, []).append(ts)
             n_copied = 0
             for w in wrappers:
                 tid = w.input.original_bundle.id
@@ -1503,6 +1551,198 @@ class HierMixin:
                   f"{local.num_overlaps} overlap(s); copied {n_copied} "
                   f"fixed segment(s) to instances")
         return fixed
+
+    def _adopt_bottom_up_doglegs(self, cell, wrappers, local, exp_map,
+                                 comps, orients, cw, ch):
+        """Adopt the LOCAL solve's dogleg splits so doglegged templates are
+        copied like any other (the old behavior unlocked the cell and fell
+        back to per-instance global NUTS).  Mirrors `_adopt_doglegs` (the
+        flat run_nuts adoption), sourced from the cell-local NUTSResult:
+
+        - TEMPLATE wrapper (cell-local frame): the split topology is
+          appended as a new candidate (or overwrites the same slot on a
+          re-solve — `_bu_dogleg_slot` bookkeeping, reset on every re-plan
+          by `_reset_bottom_up_doglegs`), selected, and fully pinned with
+          the split's per-segment layers + placement overrides
+          (net_pull/perp/slides) so a re-solve reproduces the split
+          stably.
+        - Every LOCKED instance wrapper: the split topology transformed
+          through the instance's orientation (the same
+          `transform_topology` the expansion copies use), appended +
+          selected + fully pinned with the split's layers.  Slot
+          bookkeeping rides the session's `_dogleg_slot`/`_dogleg_originals`
+          (integer bundle ids are unique across expansion), so the
+          planner-time `_reset_doglegs` cleans instance slots exactly like
+          flat adoptions; the placement-steering overrides stay empty —
+          the instance's geometry is fixed (add_fixed_segments), never
+          re-placed.
+
+        The fixed copies the caller then transforms from `local.segments`
+        already carry the split geometry, so copies and candidates agree
+        segment-for-segment — the invariant the DNUTS handoff
+        (make_bus_segments' per-segment analysis) relies on."""
+        if getattr(self, "_bu_dogleg_slot", None) is None:
+            self._bu_dogleg_slot = {}
+            self._bu_dogleg_originals = {}
+        dl = local.dogleg_topologies
+        for w in wrappers:
+            tid = w.input.original_bundle.id
+            if tid not in dl:
+                continue
+            layers = list(local.dogleg_seg_layers[tid])
+            # Template adoption (cell-local frame).
+            cands = w.input.candidates            # pybind copy
+            slot = self._bu_dogleg_slot.get(tid)
+            if slot is not None and 0 <= slot < len(cands):
+                cands[slot] = dl[tid]             # re-solve: same slot
+            else:
+                self._bu_dogleg_originals[tid] = \
+                    w.plan.selected_topology_index
+                cands.append(dl[tid])
+                slot = len(cands) - 1
+                self._bu_dogleg_slot[tid] = slot
+            w.input.candidates = cands
+            w.plan.selected_topology_index = slot
+            w.plan.seg_layers = layers
+            w.input.topology_pinned = True
+            w.input.pinned_seg_layers = list(layers)
+            np_ = local.dogleg_seg_net_pull
+            if tid in np_:
+                w.plan.seg_net_pull = list(np_[tid])
+            sp = local.dogleg_seg_perp
+            if tid in sp:
+                w.plan.seg_perp = list(sp[tid])
+            slo, shi = local.dogleg_seg_slide_lo, local.dogleg_seg_slide_hi
+            if tid in slo:
+                w.plan.seg_slide_lo = list(slo[tid])
+                w.plan.seg_slide_hi = list(shi[tid])
+            # Per-instance adoption (transformed frames).
+            n_inst = 0
+            for iw in exp_map.get(tid, []):
+                if not iw.hier.locked:
+                    continue
+                inst = iw.input.original_bundle.instances[0]
+                parent = comps.get(inst)
+                if parent is None:
+                    continue
+                oi = orients.get(inst) or "N"
+                dx = int(round(parent.x1))
+                dy = int(round(parent.y1))
+                t = (buda.transform_topology(dl[tid], oi, cw, ch, dx, dy,
+                                             inst)
+                     if oi != "N"
+                     else buda.offset_topology(dl[tid], dx, dy, inst))
+                bid = iw.input.original_bundle.id
+                icands = iw.input.candidates
+                islot = self._dogleg_slot.get(bid)
+                if islot is not None and 0 <= islot < len(icands):
+                    icands[islot] = t
+                else:
+                    self._dogleg_originals[bid] = \
+                        iw.plan.selected_topology_index
+                    icands.append(t)
+                    islot = len(icands) - 1
+                    self._dogleg_slot[bid] = islot
+                iw.input.candidates = icands
+                iw.plan.selected_topology_index = islot
+                iw.plan.seg_layers = list(layers)
+                iw.input.topology_pinned = True
+                iw.input.pinned_seg_layers = list(layers)
+                n_inst += 1
+                # Persist the instance's adopted split as its selected
+                # topology (run_planner hier persisted the PRE-split
+                # selection; the run_nuts bus rows will carry the split's
+                # segment indices, and a load_pipeline-expanded resume
+                # must restore matching candidates — Codex #256).
+                if self.bdb is not None:
+                    self._add_expanded_bundle(iw, islot, {bid: tid})
+                    self.bdb.set_topology_selected(str(bid), islot)
+            # Same for the TEMPLATE row (the canonical local-solve record
+            # a pre-expansion resume re-enters bottom-up with).
+            if self.bdb is not None:
+                self._persist_template_dogleg(w, tid, slot, layers)
+            print(f"[BottomUp] cell '{cell}': local NUTS split template "
+                  f"bundle {tid} with a dogleg — split candidate adopted "
+                  f"on the template and {n_inst} locked instance(s)")
+
+    def _persist_template_dogleg(self, w, tid, slot, layers):
+        """Persist a template's adopted dogleg split as a candidate row at
+        its live slot (source='dogleg', selected, per-segment assigned
+        layers + logical annotations) — the resume counterpart of the live
+        adoption: a checkpoint taken after run_nuts must restore candidates
+        whose segment indices match the persisted bus rows.  Upsert-safe (a
+        re-solve overwrites the same cand_index); _reset_bottom_up_doglegs
+        deletes the row when a re-plan drops the adoption."""
+        import json
+        bid = str(tid)
+        if not any(b.id == bid for b in self.bdb.all_bundles()):
+            return
+        topo = w.input.candidates[slot]
+        tr = buda.TopoRow()
+        tr.id = bid
+        tr.cand_index = slot
+        tr.type = topo.type
+        tr.wirelength = topo.estimated_wirelength
+        tr.trunk_location = topo.trunk_location
+        tr.pass_through_count = topo.pass_through_count
+        tr.connected_blocks = json.dumps(list(topo.connected_block_names))
+        tr.feedthru_blocks = json.dumps(list(topo.feedthru_blocks))
+        tr.is_selected = True
+        tr.topo_uid = buda.topo_uid(topo)
+        tr.source = "dogleg"
+        self.bdb.add_topology(tr)
+        for si, seg in enumerate(topo.segments):
+            sr = buda.TopoSegRow()
+            sr.id = bid
+            sr.cand_index = slot
+            sr.seg_index = si
+            sr.x1, sr.y1 = seg.start.x, seg.start.y
+            sr.x2, sr.y2 = seg.end.x, seg.end.y
+            sr.layer_hint = seg.layer_hint
+            sr.is_jog = seg.is_jog
+            sr.edge_id = seg.edge_id
+            sr.perp_clamp_lo = seg.perp_clamp_lo
+            sr.perp_clamp_hi = seg.perp_clamp_hi
+            sr.assigned_layer = (int(layers[si]) if si < len(layers)
+                                 else -1)
+            self.bdb.add_topology_segment(sr)
+        self._persist_topology_annotations(bid, slot, topo)
+        self.bdb.set_topology_selected(bid, slot)
+
+    def _reset_bottom_up_doglegs(self):
+        """Drop template-level dogleg adoptions before a re-plan (the
+        bottom-up twin of `_reset_doglegs`): the appended split candidate
+        is removed from each template's pool and the pre-split selection
+        restored, so the local planner re-decides from pristine candidates
+        and the next local NUTS re-detects cycles from scratch.  Instance
+        wrappers are covered by the planner-time `_reset_doglegs` (their
+        slots live in the shared `_dogleg_slot`)."""
+        slots = getattr(self, "_bu_dogleg_slot", None)
+        if not slots:
+            return
+        templates = getattr(self, "_hier_bundles_orig", None) or []
+        for w in templates:
+            tid = w.input.original_bundle.id
+            slot = slots.get(tid)
+            if slot is None:
+                continue
+            cands = w.input.candidates
+            if 0 <= slot < len(cands):
+                del cands[slot]
+                w.input.candidates = cands
+                if self.bdb is not None:
+                    # Drop the persisted split row too (the re-plan's own
+                    # persist re-selects among the pristine candidates).
+                    self.bdb.delete_topology(str(tid), slot)
+            orig = self._bu_dogleg_originals.get(tid, 0)
+            w.plan.selected_topology_index = \
+                orig if 0 <= orig < len(w.input.candidates) else 0
+            w.plan.seg_net_pull = []
+            w.plan.seg_slide_lo = []
+            w.plan.seg_slide_hi = []
+            w.plan.seg_perp = []
+        self._bu_dogleg_slot = {}
+        self._bu_dogleg_originals = {}
 
     def _inject_bottom_up_fixed(self, nuts_engine):
         """Register the bottom-up fixed copies with a NUTS engine (no-op when
@@ -1571,17 +1811,19 @@ class HierMixin:
         """
         fixed = self._bottom_up_fixed_segments()
         if not fixed:
-            # Post-planner with locked-then-unlocked instances = every marked
-            # cell fell back per-instance (dogleg templates): the placement-
-            # stage report below could read ALIGNED while DNUTS will in fact
-            # solve per-instance — say so rather than switch modes silently.
+            # Post-planner with no fixed routing = no marked cell produced a
+            # copyable local solve (templates unplannable / no instances):
+            # the placement-stage report below could read ALIGNED while
+            # DNUTS will in fact solve per-instance — say so rather than
+            # switch modes silently.
             if (verbose and getattr(self, "_planner_is_hier", False)
                     and self.nuts_result is not None
                     and self.bdb is not None and self.bdb.bottom_up_cells()):
                 print("check_template_tracks: no bottom-up fixed routing "
-                      "exists after run_nuts (dogleg fallback unlocked every "
-                      "marked cell?) — DNUTS will solve per-instance; the "
-                      "placement-stage report below does not gate it.")
+                      "exists after run_nuts (no marked cell produced a "
+                      "copyable local solve) — DNUTS will solve "
+                      "per-instance; the placement-stage report below does "
+                      "not gate it.")
             return self._check_template_tracks_placement(verbose=verbose)
         verdict = {}
         self._template_track_verdict = verdict

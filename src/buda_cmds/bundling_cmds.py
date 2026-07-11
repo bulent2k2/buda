@@ -97,8 +97,11 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     # Fresh bundles reuse small integer ids: stale id-keyed clone provenance
     # from a previous split would stamp a bogus cloned_from on an unrelated
     # bundle at the next persist (Codex #253).  The NAME registry survives,
-    # so a re-split reuses the same clone name.
+    # so a re-split reuses the same clone name.  Template dogleg slots are
+    # equally id-keyed and index into the OLD wrappers' pools — drop them.
     session._bu_clone_from = {}
+    session._bu_dogleg_slot = {}
+    session._bu_dogleg_originals = {}
     counts = {}
     for b in raw_bundles:
         counts[b.level] = counts.get(b.level, 0) + 1

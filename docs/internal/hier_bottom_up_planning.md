@@ -140,9 +140,23 @@ run_detailed_nuts                  # aligned: local DNUTS once + copy per instan
      mutating pass and before the metrics, so an overlap against a fixed
      segment counts and downstream stages consume them normally.
      `rerun_layer` holds them aside the same way. A template whose local
-     solve required a **dogleg split** is not copied (adopting a split
-     per-instance is future work): that cell's instances are unlocked and
-     fall back to per-instance global NUTS with a WARNING.
+     solve required a **dogleg split** IS copied (as-built update
+     2026-07-11, `_adopt_bottom_up_doglegs`): the split topology is adopted
+     on the template (cell-local frame, slot bookkeeping reset per re-plan
+     by `_reset_bottom_up_doglegs`) and, orientation-transformed, on every
+     locked instance (slots ride the shared `_dogleg_slot`, cleaned by the
+     planner-time `_reset_doglegs`), each fully pinned with the split's
+     per-segment layers — so the fixed copies (which already carry the
+     split geometry) agree with every wrapper's selected candidate
+     segment-for-segment, the invariant the DNUTS handoff relies on.
+     Frame-fidelity prerequisites fixed alongside: the local planner's
+     `seg_perp` band centres are copied onto the template plan, the local
+     NUTS receives the local planner's candidate-extended Hanan grid
+     (`_bu_planner_grids`), and the cell-local floorplan carries the
+     session's corner margin + min-stub settings
+     (`_apply_fp_session_settings(min_stub=True)`; the depth-projection and
+     cross-level frames stay margins-only — retrofitting min-stub there
+     regressed tuned hier flows and is left to a golden review).
    - **Floorplan/grid keepout mirror:** each copied segment also becomes a
      per-layer `KeepoutZone` (span × occupied width) via the existing
      `add_keepout_zone` + `RoutingGrid.add_keepout` path, so the **planner**
@@ -349,7 +363,7 @@ instantiated twice — ideal. New `test_hier_bottom_up.py` +
    re-plan; injected into all four engine sites — run_nuts, post_nuts,
    run_nuts_on_layer, ripup/negotiate internal re-runs. Blockage is
    engine-internal (`solver_keepouts()`), see §4.3 as-built note; dogleg
-   templates fall back per-instance with a WARNING. The planner-side
+   templates are adopted and copied too — see the §4.3 as-built update. The planner-side
    pricing needs no zones: locked wrappers' committed assignments are
    charged by `optimize_topologies` and re-charged by `recharge_committed_`
    in every replan. Grid-level (DNUTS) blocking lands with stages 4-5,

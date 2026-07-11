@@ -108,7 +108,13 @@ def cmd_corner_margin(session, cmd, args, cmd_line):
 
 
 def cmd_set_min_stub_length(session, cmd, args, cmd_line):
-    if args: session.fp.set_min_stub_length(int(args[0]))
+    # The setting lives on the session Floorplan; the session mirror lets
+    # DERIVED floorplans (hier cell-local / cross-level / depth projection)
+    # re-apply it, so their generation and local solves see the same stub
+    # semantics as the flat pipeline (_apply_fp_session_settings).
+    if args:
+        session.fp.set_min_stub_length(int(args[0]))
+        session._min_stub["global"] = int(args[0])
 
 
 def cmd_set_min_stub_length_dir(session, cmd, args, cmd_line):
@@ -117,8 +123,10 @@ def cmd_set_min_stub_length_dir(session, cmd, args, cmd_line):
         val = int(args[1])
         if dstr in ("H", "HORIZONTAL"):
             session.fp.set_min_stub_length_dir(buda.LayerDir.HORIZONTAL, val)
+            session._min_stub["dir"][buda.LayerDir.HORIZONTAL] = val
         elif dstr in ("V", "VERTICAL"):
             session.fp.set_min_stub_length_dir(buda.LayerDir.VERTICAL, val)
+            session._min_stub["dir"][buda.LayerDir.VERTICAL] = val
         else:
             print(f"Error: unknown direction '{args[0]}' — use H or V")
 
@@ -130,6 +138,7 @@ def cmd_set_min_stub_length_layer(session, cmd, args, cmd_line):
         lid = session._layer_name_map.get(lname)
         if lid is not None:
             session.fp.set_min_stub_length_layer(lid, val)
+            session._min_stub["layer"][lid] = val
         else:
             print(f"Error: unknown layer '{lname}'")
 
