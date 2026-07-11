@@ -4,6 +4,10 @@ This document describes the software requirements for building and testing BUDA
 in a native Windows environment with MSVC. It documents the current project
 state; some Windows support gaps are still called out explicitly.
 
+For the cross-platform dependency reference (required / optional / bundled,
+versions, purposes) see [build_test_dependencies.md](build_test_dependencies.md);
+this page is the Windows-specific companion.
+
 ## Target Environment
 
 The recommended native Windows environment is:
@@ -66,7 +70,7 @@ The project currently assumes Python is available for:
 Install these packages in the active Python environment:
 
 ```powershell
-python -m pip install pybind11 pytest pytest-bdd matplotlib
+python -m pip install pybind11 pytest pytest-bdd matplotlib numpy
 ```
 
 Package purposes:
@@ -75,10 +79,31 @@ Package purposes:
 - `pytest`: Python test runner.
 - `pytest-bdd`: Gherkin/Cucumber-style behavior tests.
 - `matplotlib`: visualization and GUI plotting.
+- `numpy`: array math for the visualizer (and a matplotlib dependency).
 
 The Python standard library modules `sqlite3` and `tkinter` are also used.
 `sqlite3` is normally included with CPython. `tkinter` requires a Python build
 with Tcl/Tk support.
+
+### Optional pytest-xdist (parallel tests)
+
+`pytest-xdist` parallelizes the heavier test tiers (integration/pipeline tests):
+
+```powershell
+python -m pip install pytest-xdist
+```
+
+The `bb` wrapper that enables this automatically is a Bash script (see the
+portability note below), so on native Windows run pytest directly with the same
+flags:
+
+```powershell
+python -m pytest -m "not slow" -n auto --dist loadfile
+```
+
+`--dist loadfile` keeps each file on one worker so tests that share a fixture
+path can't race across workers. See
+[internal/test/parallelism.md](internal/test/parallelism.md).
 
 ### Optional Ninja
 
