@@ -1,16 +1,26 @@
 Also see the [variation on this design](big2/ReadMe-big2.md).
 
+# init/origin:
+bfp tc3 ~/chip_designs/tc3a.bdb
+> Then, sa run + manual edits
+python3 tools/bdb_serialize.py dump ~/chip_designs/tc3a.bdb tc3a.bdb.sql
+buda tc3a.buda
+
 # bdb2buda
 
 cd ~/src/buda
-python3 tools/bdb2buda.py flow/big_data_test/tc3a.bdb -o flow/big_data_test/tc3a_flat_x10.buda
-> Written to flow/big_data_test/tc3a_flat_x10.buda
+python3 tools/bdb2buda.py tc3a.bdb -o tc3a_flat_x10.buda
+
+# sourced in tc3a_flat.buda -> renamed to big.buda
 
 ## use it in tc3a_flat.buda
-buda --no-viz flow/big_data_test/tc3a_flat.buda > big_flat_out.log 2> big_flat_err.log &
+buda --no-viz big > big_flat_out.log 2> big_flat_err.log &
 > 1.41s user 0.11s system 80% cpu 1.884 total
 
-# repro
+# 5x (new on 2026.07.11)
+python3 ../../tools/bdb2buda.py ~/chip_designs/tc3a.bdb -scale 5.0 -o tc3a_flat_5x.buda
+
+# (old) repro
 cd ~/src/buda
 time buda --no-viz flow/big_data_test/tc3a.buda > big_out.log 2> big_err.log &
 > 5.21s user 0.41s system 105% cpu 5.335 total
@@ -20,18 +30,10 @@ wc -l big*
 >   9084 big_out.log
 >   14764 total
 
-# init
-bfp tc3 ~/chip_designs/tc3a.bdb &
-
-Then, sa run + manual edits
-
-buda ~/chip_designs/tc3a.buda &
-
 # copy
-cd ~/src/buda
-cp ~/chip_designs/tc3a* flow/big_data_test
-bfp flow/big_data_test/tc3a.bdb &
-buda flow/big_data_test/tc3a.buda &
+cd flow/big_data_test
+bfp ~/chip_designs/tc3a.bdb
+buda tc3a.buda
 
 # FIXED. big dump problem
 15k lines:

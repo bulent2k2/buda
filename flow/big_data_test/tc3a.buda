@@ -1,7 +1,7 @@
-# bfp tc3 ~/chip_designs/tc3a.bdb
-# sa run + manual edits
+# > 1000% congested.
+# x10 expansion in tc3a_flat.buda ~= big.buda
 source ../tracks/tracks4top.buda
-open_bdb /Users/ben/chip_designs/tc3a.bdb
+open_bdb tc3a.bdb.sql
 derive_busterms 1
 add_blocks_from_bdb 0
 add_blocks_from_bdb 1 skip

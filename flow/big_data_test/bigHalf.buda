@@ -1,11 +1,15 @@
 source ../tracks/tracks4top.buda
-source tc3a_flat_x10.buda
+source tc3a_flat_5x.buda
 run_bundler
 generate_topologies
 check_design topo all
 run_planner
 run_nuts
+negotiate_congestion
+ripup_reroute
 check_design nuts
 run_detailed_nuts
+negotiate_congestion
+ripup_reroute
 check_design
 visualize
