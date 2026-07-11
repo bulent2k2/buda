@@ -3,7 +3,10 @@
 tools/bdb2buda.py — Convert a BDB to a flat .buda script.
 
 Usage:
-  python3 tools/bdb2buda.py <file.bdb> [-cell <cellname>] [-scale <N>] [-o <output.buda>]
+  python3 tools/bdb2buda.py <file.bdb|file.bdb.sql> [-cell <cellname>] [-scale <N>] [-o <output.buda>]
+
+The input may be a binary ``.bdb`` or a diffable ``.bdb.sql`` text fixture
+(the latter is materialized to a throwaway temp binary, read-only).
 
 With no -cell flag, the top-level (depth-0) components are written as blocks
 and all nets connecting them are emitted.
@@ -45,6 +48,10 @@ except ModuleNotFoundError:
         "Error: buda_db module not found — run 'bin/bb' to build first, "
         "or set PYTHONPATH=build."
     )
+
+# Lets convert() accept a diffable *.bdb.sql text fixture as transparently as a
+# binary *.bdb (materialized to a throwaway temp binary, read-only).
+import bdb_serialize
 
 
 def _leaf(name: str) -> str:
@@ -104,8 +111,16 @@ def convert(bdb_path: str, cell_name: Optional[str] = None,
         Multiply every coordinate by this factor and round to the nearest
         integer.  Default 10 converts µm → tenths-of-µm so that fractional
         coordinates (e.g. 12.5 µm) become valid integers (125).
+
+    A ``*.bdb.sql`` (or ``*.sql``) text fixture is accepted transparently: it
+    is materialized to a throwaway temp binary first (read-only — the source
+    ``.sql`` is never modified). A binary ``*.bdb`` is used directly.
     """
-    db = buda_db.BDB(bdb_path)
+    try:
+        bin_path = bdb_serialize.materialize_if_sql(bdb_path)
+    except Exception as e:
+        raise ValueError(f"could not read serialized BDB {bdb_path!r}: {e}")
+    db = buda_db.BDB(bin_path)
     all_comps = {c.id: c for c in db.all_components()}
 
     # ── Select the target component set ──────────────────────────────────────
@@ -276,7 +291,7 @@ def main() -> None:
         else:
             print(f"Unknown argument: {argv[i]}", file=sys.stderr)
             print(
-                "Usage: bdb2buda.py <file.bdb> [-cell <cellname>] "
+                "Usage: bdb2buda.py <file.bdb|file.bdb.sql> [-cell <cellname>] "
                 "[-scale <N>] [-o <output.buda>]",
                 file=sys.stderr,
             )

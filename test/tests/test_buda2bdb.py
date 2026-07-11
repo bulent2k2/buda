@@ -27,6 +27,7 @@ if _ROOT not in sys.path:
 import buda_db
 from tools import buda2bdb
 from tools import bdb2buda
+from tools import bdb_serialize
 
 
 def _write(tmp_path, name, text):
@@ -243,6 +244,32 @@ def test_roundtrip_via_bdb2buda(tmp_path):
     assert d_in == d_out, f"die: {d_in!r} != {d_out!r}"
     assert b_in == b_out, f"blocks: {b_in} != {b_out}"
     assert c_in == c_out, f"conns: {c_in} != {c_out}"
+
+
+def test_bdb2buda_accepts_bdb_sql_input(tmp_path):
+    # bdb2buda takes a diffable *.bdb.sql text fixture as transparently as a
+    # binary *.bdb (materialized read-only) — identical script from either.
+    src = ("set_die 800 600\n"
+           "add_block a 0 0 100 100\n"
+           "add_block b 300 0 400 100\n"
+           "add_net clk a.o b.i\n")
+    script = _write(tmp_path, "chip.buda", src)
+    bdb = str(tmp_path / "chip.bdb")
+    buda2bdb.convert(script, bdb, "chip")
+
+    sql = str(tmp_path / "chip.bdb.sql")
+    bdb_serialize.dump(bdb, sql)
+
+    out_bin = bdb2buda.convert(bdb, cell_name="chip", scale=1.0)
+    out_sql = bdb2buda.convert(sql, cell_name="chip", scale=1.0)
+    assert out_sql.strip() and out_sql == out_bin
+    # the source .sql is never mutated by conversion (read-only materialize)
+    assert (tmp_path / "chip.bdb.sql").read_text().startswith("--")
+
+    # A malformed .sql fails cleanly as a ValueError (caught by main()).
+    bad = _write(tmp_path, "bad.bdb.sql", "this is not sql;\n")
+    with pytest.raises(ValueError, match="could not read serialized BDB"):
+        bdb2buda.convert(bad)
 
 
 def test_roundtrip_flow_two(tmp_path):
