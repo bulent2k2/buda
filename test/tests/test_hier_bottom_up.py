@@ -139,6 +139,31 @@ def _two_inst_db(x2=500, y2=0, cross_net=False, path=":memory:", derive=True):
     return db
 
 
+def _one_inst_db(cross_net=False, path=":memory:", derive=True):
+    """proc_cell (two pipe_cell children + a 4-bit cell-local bus) placed
+    ONCE — the single-instance keepout vehicle: nothing to copy TO, but the
+    cell-local routing is still solved once and frozen as a keepout.
+    cross_net adds a depth-0 4-bit bus (L0→R0) whose direct route crosses
+    the lone instance."""
+    db = buda.BDB(path)
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 110, 80)
+    db.add_inst_to_cell("proc_cell", "pa_i", "pipe_cell", 20, 60)
+    db.add_inst_to_cell("proc_cell", "pb_i", "pipe_cell", 155, 60)
+    db.add_inst("proc_i1", "proc_cell", "", 0, 0)
+    for i in range(4):
+        db.add_net_pins(f"ab1_{i}", "proc_i1/pa_i.out", ["proc_i1/pb_i.in"])
+    if cross_net:
+        db.add_cell("leaf_cell", 60, 60)
+        db.add_inst("L0", "leaf_cell", "", -200, 70)
+        db.add_inst("R0", "leaf_cell", "", 1200, 70)
+        for i in range(4):
+            db.add_net_pins(f"lr_{i}", "L0.out", ["R0.in"])
+    if derive:
+        buda.BustermGen(db).derive(1)
+    return db
+
+
 def _bare_session(db):
     s = buda_cli.BudaSession()
     s.no_viz = True
@@ -310,6 +335,18 @@ def test_set_bottom_up_star_skips_non_congruent_loud():
     marked = set(db.bottom_up_cells())
     assert "proc_cell" not in marked                  # refused, not silent
     assert "pipe_cell" in marked                      # leaf siblings still fine
+
+
+def test_set_bottom_up_star_includes_single_instance():
+    """'*' marks a SINGLE-instance cell too: nothing to copy, but its
+    cell-local routing still becomes a keepout for the levels above."""
+    db = _one_inst_db()
+    s = _bare_session(db)
+    # proc_cell has one instance; pipe_cell has two (pa_i, pb_i).
+    elig, skipped = s._eligible_bottom_up_cells()
+    assert "proc_cell" in elig and skipped == []
+    _run_cmd(s, "set_bottom_up *")
+    assert db.cell_bottom_up("proc_cell") is True
 
 
 def test_set_bottom_up_star_clears_stale_non_congruent_mark():
@@ -513,6 +550,25 @@ def test_bottom_up_fixed_blocks_crossing_bundle():
     bids = {ts.bundle_id for ts in s.nuts_result.segments}
     locked = {w.input.original_bundle.id for w in s.bundles if w.hier.locked}
     assert locked and locked <= bids and len(bids) > len(locked)
+
+
+def test_single_instance_marked_cell_becomes_keepout():
+    """A marked cell placed ONCE has no sibling to copy to, but its
+    cell-local routing is still solved once and frozen: exactly one locked
+    wrapper, its segment enters NUTS as hard occupancy, and a depth-0 bus
+    crossing the instance detours it (no overlap)."""
+    db = _one_inst_db(cross_net=True)
+    s = _flow_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    _run_cmd(s, "run_planner hier")
+    _run_cmd(s, "run_nuts")
+    locked = {w.input.original_bundle.id for w in s.bundles if w.hier.locked}
+    assert len(locked) == 1                          # the lone instance
+    fixed = s._bottom_up_fixed_segments()
+    assert len(fixed) >= 1                            # frozen keepout exists
+    assert s.nuts_result.num_overlaps == 0           # crossing bus detoured
+    bids = {ts.bundle_id for ts in s.nuts_result.segments}
+    assert locked <= bids and len(bids) > len(locked)  # crossing bundle too
 
 
 def test_bottom_up_fixed_stable_across_ripup():

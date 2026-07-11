@@ -703,14 +703,19 @@ class HierMixin:
         """Enumerate every cell type that COULD be marked bottom-up — the
         keepout-scope generalization's unit (`set_bottom_up *`).
 
-        Eligible = a cell with >= 2 placed instances (the solve-once-copy
-        machinery's minimum — a single-instance cell has nothing to copy
-        and stays top-down) whose instances are congruent (allow_90=True,
-        since the rotation-class split handles the 90 family).  Returns
-        `(eligible_sorted, skipped)` where `skipped` is a list of
-        `(cell, reason)` for cells with instances that CANNOT be frozen —
-        so the caller reports them LOUD and leaves them on today's
-        top-down path rather than silently dropping them."""
+        Eligible = a cell with >= 1 placed instance whose instances are
+        congruent (allow_90=True, since the rotation-class split handles the
+        90 family).  A cell with >= 2 instances is the solve-once-COPY unit
+        (plan/NUTS once, copy to siblings); a SINGLE-instance cell has
+        nothing to copy but its cell-local routing is still solved once and
+        frozen as a keepout for the levels above — the same
+        `_bottom_up_fixed_segments` copy-to-one path — so it belongs in the
+        generalization too.  Returns `(eligible_sorted, skipped)` where
+        `skipped` is a list of `(cell, reason)` for cells whose >= 2
+        instances are NON-congruent (cannot be frozen-and-copied) — the
+        caller reports them LOUD and leaves them top-down.  (A single
+        instance is trivially congruent, so single-instance cells are never
+        skipped.)"""
         if comps is None:
             comps = self.bdb.all_components()
         # One component walk for the whole scan (Codex #265): pass the
@@ -723,8 +728,8 @@ class HierMixin:
         cache = {}
         for cell in sorted(insts_by_cell):
             placed = sum(1 for c in insts_by_cell[cell] if c.x1 >= 0)
-            if placed < 2:
-                continue                        # single instance: nothing to copy
+            if placed < 1:
+                continue                        # unplaced: nothing to freeze
             issues = self._bottom_up_congruence_issues(
                 cell, comps, cache=cache, index=index)
             if issues:

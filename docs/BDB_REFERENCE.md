@@ -738,15 +738,19 @@ instance, with the copied routing becoming keepouts for higher-level bundles
 `load_pipeline`.
 
 **`*` — keepout-scope generalization.** `set_bottom_up *` marks **every
-eligible** cell in one call, where *eligible* = a cell with ≥2 congruent
-placed instances (the solve-once-copy machinery's unit of work).  It is a
-pure convenience over marking each cell by name — it reuses the entire
-marked-cell path (template solve, fixed-segment blockage,
-`check_template_tracks`, DNUTS copy) with no new mechanism.  Cells that
-**cannot** be frozen-and-copied — non-congruent instances, or a single
-instance (nothing to copy) — are **reported and left on the top-down path**
-(fail LOUD, never silently marked).  `* off` clears the flag on every
-currently-marked cell.  The generalization is **opt-in**: the default hier
+eligible** cell in one call, where *eligible* = a cell with congruent placed
+instances.  A cell with ≥2 instances is the solve-once-**copy** unit
+(plan/NUTS once, copy to siblings); a **single-instance** cell has nothing
+to copy but its cell-local routing is still solved once and **frozen as a
+keepout** for the levels above (the same fixed-segment path, copy-to-one).
+It is a pure convenience over marking each cell by name — it reuses the
+entire marked-cell path (template solve, fixed-segment blockage,
+`check_template_tracks`, DNUTS copy) with no new mechanism.  Cells whose
+**≥2 instances are non-congruent** (cannot be frozen-and-copied) are
+**reported and left on the top-down path** (fail LOUD, never silently
+marked); a single instance is trivially congruent, so single-instance cells
+are never skipped.  `* off` clears the flag on every currently-marked cell.
+The generalization is **opt-in**: the default hier
 flow marks nothing, so existing designs are unchanged unless you mark cells.
 Because every marked cell is subject to the track-phase alignment contract,
 run `align_bottom_up` (after a `def_track_pattern`) before `derive_busterms`
