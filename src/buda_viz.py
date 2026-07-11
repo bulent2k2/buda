@@ -2866,11 +2866,11 @@ class BudaVisualizer:
                     transform=ax.transAxes, fontsize=9, color=txt_color,
                     va='center', clip_on=True, fontweight='bold')
 
-            # Stats line ("6 segs, 48 bits").
+            # Stats line ("6 segs, 48 wires").
             n_segs = layer_seg_count.get(lid, 0)
             n_bits = layer_bit_count.get(lid, 0)
             if n_segs:
-                stats_txt = f'{n_segs} segs, {n_bits} bits'
+                stats_txt = f'{n_segs} segs, {n_bits} wires'
                 ax.text(0.22, y_stats, stats_txt,
                         transform=ax.transAxes, fontsize=8,
                         color=dim_color, va='center', clip_on=True)
@@ -3057,7 +3057,7 @@ class BudaVisualizer:
         ax.set_axis_off()
         nseg, nbits = self._nuts_seg_counts()
         if nseg:
-            ax.text(0.5, 0.5, f"{nseg} segments · {nbits} bits",
+            ax.text(0.5, 0.5, f"{nseg} segments · {nbits} wires",
                     transform=ax.transAxes, ha='center', va='center',
                     fontsize=8.5, color='#333333', fontweight='bold',
                     clip_on=True)

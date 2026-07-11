@@ -407,7 +407,7 @@ def test_layer_stats_header_counts(monkeypatch):
     # The always-on header above the Layer panel shows the compact total line.
     assert viz._ax_layer_stats is not None
     texts = [t.get_text() for t in viz._ax_layer_stats.texts]
-    assert texts == [f"{nseg} segments · {nbits} bits"], texts
+    assert texts == [f"{nseg} segments · {nbits} wires"], texts
 
 
 def test_bundle_rows_drop_bits_suffix_when_detailed(monkeypatch):
