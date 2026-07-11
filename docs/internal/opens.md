@@ -87,10 +87,18 @@ noted.)*
   copy machinery applies unchanged.  The clone never touches
   cell/component/pin tables (interchange unaffected);
   check_template_tracks / align_bottom_up group per class.
-- **`generate_more_topologies` is not hier-aware** — the additive
-  per-bundle command matches by net-name against the flat floorplan and
-  never enters the 3-case hier dispatch; `generate_topologies_for_hbundle`
-  is replace-only. An expert cannot accrete candidates for an HBundle.
+- ✅ **`generate_more_topologies` is not hier-aware** — **DONE
+  (2026-07-11)**. The additive command now detects a hier-bundled session
+  and accretes through the same 3-case dispatch as
+  `generate_hier_topologies` (`_generate_hier_topo_one(additive=True)` →
+  shared `_merge_more_candidates`: topo_uid dedup + WL re-sort with
+  selection/dogleg remap). Hints match an HBundle id or first net-name
+  prefix; a replica match redirects to its template; the v15 knob memo now
+  replays on bulk `generate_hier_topologies` too (`_apply_hier_gen_knobs`),
+  so accreted HBundle pools survive regeneration. Post-expansion accretion
+  is refused with the re-run recipe (pools live on expanded wrappers then).
+  `generate_topologies_for_hbundle` stays replace-only by design — parity
+  with the flat `generate_topologies_for_bundle`.
 
 ## Big / blocked / conditional
 
