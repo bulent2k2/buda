@@ -25,7 +25,7 @@ reviewable diff).
 Deliberate re-baseline: rerun `PYTHONPATH=build:tools python3
 tools/nuts_snapshot.py` and review the golden diff in the PR.
 
-Host portability: the three HOST_SENSITIVE_FLOWS (b4_bus_077, tc3a_flat,
+Host portability: the three HOST_SENSITIVE_FLOWS (b4_bus_077, big,
 rnr/mix) pin FP/ISA-sensitive placements generated on an x86-64 host — on
 another host a mismatch is environmental (a different discrete track choice
 under -march=native), not a code bug, so it XFAILs with an explanation

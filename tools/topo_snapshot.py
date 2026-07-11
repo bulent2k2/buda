@@ -63,7 +63,7 @@ CORPUS_FAST = [
 ]
 CORPUS_MID = [
     "demo/comprehensive_demo.buda",
-    "flow/big_data_test/tc3a_flat.buda",
+    "flow/big_data_test/big.buda",
     "flow/big_data_test/big2/b4_bus_077.buda",
     "flow/rnr/mix.buda",                       # hier
 ]
@@ -74,7 +74,7 @@ CORPUS = CORPUS_FAST + CORPUS_MID
 # hard, mismatches localize to a bundle, and the reviewable-diff workflow is the
 # wl_corpus one (regenerate the full snapshot on the baseline tree and diff).
 DIGEST_FLOWS = {
-    "flow/big_data_test/tc3a_flat.buda",
+    "flow/big_data_test/big.buda",
     "flow/rnr/mix.buda",
 }
 
