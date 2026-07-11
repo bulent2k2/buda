@@ -635,6 +635,20 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                     int supply = grid_->get_layer_grid(layer_id)
                                      .count_signal_tracks_in_span(
                                          (double)lo, (double)hi, w_lo, w_hi);
+                    // Deliberately the STRICT span-clear pool, NOT DetailedNUTS's
+                    // admission policy (which retries the midpoint pool when the
+                    // span pool falls short).  That retry is an admission
+                    // optimism whose safety net is cull_keepout_crossers: bits
+                    // admitted via the midpoint pool whose final span still
+                    // crosses the keepout are culled into opens.  Mirroring the
+                    // retry here was measured and rejected — it un-floors bands
+                    // whose span-pool shortfall is real, and the buses steered
+                    // back into them strand (kPeak 0.1: mix opens 86 -> 134,
+                    // hbundles/06 2 -> 42, worse than its 34 baseline).  The
+                    // span-clear pool is the conservative predictor of what
+                    // SURVIVES placement; the cost of its rare false positive is
+                    // a slightly longer route, the cost of the fallback's false
+                    // negative is opens — lexicographically worse.
                     if ((double)supply < tracks_needed) peak = 1.0;
                 }
             }
