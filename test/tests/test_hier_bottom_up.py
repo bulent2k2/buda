@@ -1546,3 +1546,106 @@ def test_doglegged_template_resume_round_trip(tmp_path):
     out = _run_cmd(s2, "run_detailed_nuts")
     assert "[BottomUp] DNUTS:" in out and "Error" not in out
     assert s2.detailed_result.num_unplaced == 0
+
+
+def test_pre_run_nuts_checkpoint_resume_keeps_uniformity(tmp_path):
+    """The opens.md resume conditional: a checkpoint taken AFTER
+    run_planner hier but BEFORE run_nuts has no persisted routing — the
+    resumed session used to fall back to per-instance NUTS with a
+    WARNING.  The loader now rebuilds the TEMPLATE wrappers from the
+    persisted template rows (candidates + the v18 local-solve selection as
+    a full pin), so the resumed run_nuts re-runs the cell-local solve and
+    the instances stay uniform copies."""
+    db_path = str(tmp_path / "prenuts.bdb")
+    db = _two_inst_db(x2=500, y2=300, path=db_path)
+    s1 = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + ["run_hier_bundler", "generate_hier_topologies",
+                 "set_bottom_up proc_cell", "run_planner hier"]):
+        _run_cmd(s1, c)
+    assert s1.nuts_result is None          # checkpoint truly pre-run_nuts
+    del s1, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + [f"open_bdb {db_path}", "add_blocks_from_bdb 0",
+                 "add_blocks_from_bdb 1 skip"]):
+        _run_cmd(s2, c)
+    out = _run_cmd(s2, "load_pipeline expanded")
+    assert "rehydrated" in out
+    assert "restored 1 template wrapper(s)" in out, out
+    tpl = [w for w in s2._hier_bundles_orig
+           for b in [w.input.original_bundle] if b.cell_context]
+    assert len(tpl) == 1
+    assert tpl[0].input.topology_pinned
+    assert list(tpl[0].input.pinned_seg_layers)
+    # The resumed run_nuts re-runs the local solve and copies — no
+    # per-instance fallback warning, both instances locked and uniform.
+    out = _run_cmd(s2, "run_nuts")
+    assert "uniform NUTS copies are unavailable" not in out, out
+    assert "local NUTS placed" in out and "copied" in out, out
+    fixed = s2._bottom_up_fixed_segments()
+    assert fixed
+    inst_of = {w.input.original_bundle.id: w.input.original_bundle.instances[0]
+               for w in s2.bundles
+               for b in [w.input.original_bundle]
+               if b.cell_context and w.hier.locked}
+    assert set(inst_of.values()) == {"proc_i1", "proc_i2"}
+    by_inst = {}
+    for ts in fixed:
+        by_inst.setdefault(inst_of[ts.bundle_id], []).append(ts)
+    assert len(by_inst["proc_i1"]) == len(by_inst["proc_i2"]) > 0
+    key = lambda ts: ts.seg_idx
+    for a, b2 in zip(sorted(by_inst["proc_i1"], key=key),
+                     sorted(by_inst["proc_i2"], key=key)):
+        da, dp = (500, 300) if a.horiz else (300, 500)
+        assert b2.span_lo == pytest.approx(a.span_lo + da)
+        assert b2.track_position == pytest.approx(a.track_position + dp)
+    # And the copy path carries all the way through strict DNUTS.
+    out = _run_cmd(s2, "check_template_tracks")
+    assert "MISALIGNED" not in out
+    out = _run_cmd(s2, "run_detailed_nuts")
+    assert "[BottomUp] DNUTS:" in out and "Error" not in out
+    assert s2.detailed_result.num_unplaced == 0
+
+
+def test_post_run_nuts_resume_still_prefers_persisted_routing(tmp_path):
+    """With templates now restored too, a POST-run_nuts resume must still
+    source the fixed copies from the persisted routing (exact — the local
+    planner's band centres/extended grid are not persisted, so a fresh
+    local solve could legally differ), and a re-run of run_nuts keeps
+    routing around those same copies."""
+    db_path = str(tmp_path / "postnuts.bdb")
+    db = _two_inst_db(x2=500, y2=300, path=db_path)
+    s1, _ = _dnuts_flow(db)
+    pos1 = {(ts.bundle_id, ts.seg_idx): ts.track_position
+            for ts in s1._bottom_up_fixed_segments()}
+    assert pos1
+    del s1, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + [f"open_bdb {db_path}", "add_blocks_from_bdb 0",
+                 "add_blocks_from_bdb 1 skip", "load_pipeline expanded"]):
+        _run_cmd(s2, c)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        fixed2 = {(ts.bundle_id, ts.seg_idx): ts.track_position
+                  for ts in s2._bottom_up_fixed_segments()}
+    assert "restored from the persisted NUTS routing" in out.getvalue()
+    assert fixed2 == pytest.approx(pos1)
+    # A re-run of run_nuts on the resumed session routes around the SAME
+    # fixed copies (no per-instance fallback warning, positions kept).
+    out = _run_cmd(s2, "run_nuts")
+    assert "uniform NUTS copies are unavailable" not in out, out
+    fixed3 = {(ts.bundle_id, ts.seg_idx): ts.track_position
+              for ts in s2._bottom_up_fixed_segments()}
+    assert fixed3 == pytest.approx(pos1)
