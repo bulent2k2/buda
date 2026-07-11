@@ -2145,6 +2145,7 @@ class BudaVisualizer:
         self._btn_all_bundles= None
         self._btn_all_overlaps = None
         self._ax_layers      = None   # custom layer panel (replaces CheckButtons)
+        self._ax_layer_stats = None   # nuts-segment total header above the layer panel
         self._ax_design_stats = None  # bundles·buses·nets header above the list
         self._ax_bundles     = None
         self._ax_overlaps    = None
@@ -2964,6 +2965,7 @@ class BudaVisualizer:
         # Refresh layer list in case new layers were introduced.
         self._update_layer_ids()
         self._redraw_layer_list()
+        self._redraw_layer_stats()
 
         # Rebuild overlap list.
         self._overlap_entries = sorted(
@@ -3031,6 +3033,34 @@ class BudaVisualizer:
         ax.text(0.5, 0.5, f"{nbus} buses · {nn} nets",
                 transform=ax.transAxes, ha='center', va='center',
                 fontsize=8.5, color='#333333', fontweight='bold', clip_on=True)
+
+    def _nuts_seg_counts(self):
+        """Return (n_segments, n_bits) placed across all layers in the current
+        NUTS result — the totals the per-layer rows break down.  (0, 0) before
+        NUTS has run."""
+        n_segs = n_bits = 0
+        if self._nuts_result is not None:
+            for ts in self._nuts_result.segments:
+                if not ts.placed:
+                    continue
+                n_segs += 1
+                n_bits += self._bundle_bits(ts.bundle_id)
+        return n_segs, n_bits
+
+    def _redraw_layer_stats(self):
+        """Draw the always-on total-NUTS-segments header above the layer panel,
+        mirroring the 'buses · nets' line above the bundle panel."""
+        ax = self._ax_layer_stats
+        if ax is None:
+            return
+        ax.clear()
+        ax.set_axis_off()
+        nseg, nbits = self._nuts_seg_counts()
+        if nseg:
+            ax.text(0.5, 0.5, f"{nseg} segments · {nbits} bits",
+                    transform=ax.transAxes, ha='center', va='center',
+                    fontsize=8.5, color='#333333', fontweight='bold',
+                    clip_on=True)
 
     def _redraw_bundle_list(self):
         """Clear and redraw all rows in the bundle checkbox list."""
@@ -4600,9 +4630,10 @@ class BudaVisualizer:
         TOP_Y    = 0.95
         BOT_Y    = 0.09   # bottom margin
 
-        # Fixed overhead consumed by buttons, scroll arrows, the stats line, and
-        # gaps: All Bundles btn + 2 slim btns + (4 scroll arrows) + stats + (6 gaps)
-        fixed_h  = BTN_H + 2 * BTN_H_SM + 4 * SCROLL_H + STAT_H + 6 * GAP
+        # Fixed overhead consumed by buttons, scroll arrows, the stats lines, and
+        # gaps: All Bundles btn + 2 slim btns + (4 scroll arrows) + 2 stats
+        # (layer-seg total + buses·nets) + (7 gaps)
+        fixed_h  = BTN_H + 2 * BTN_H_SM + 4 * SCROLL_H + 2 * STAT_H + 7 * GAP
         avail    = max(TOP_Y - BOT_Y - fixed_h, 0.15)
         # Split the list space unevenly: the bundle list is the one worth
         # scanning, so give it the most; the layer list gets a slightly larger
@@ -4620,8 +4651,13 @@ class BudaVisualizer:
             y -= gap + h
             return [RX, y, RW, h]
 
+        # ── NUTS segment total: 'N segments · M bits' (always-on header) ──
+        self._ax_layer_stats = self.fig.add_axes(_rect(STAT_H))
+        self._ax_layer_stats.set_axis_off()
+        self._redraw_layer_stats()
+
         # ── All Layers ──────────────────────────────────────────────────
-        ax_all_layers = self.fig.add_axes(_rect(BTN_H_SM))
+        ax_all_layers = self.fig.add_axes(_rect(BTN_H_SM, GAP))
         self._btn_all_layers = Button(ax_all_layers, '☑ All Layers', color='#e8e8e8')
         self._btn_all_layers.label.set_fontsize(8.5)
         self._btn_all_layers.on_clicked(lambda _: self._on_layer_toggle_all())
