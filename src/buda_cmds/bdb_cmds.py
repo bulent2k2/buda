@@ -439,10 +439,23 @@ def _set_bottom_up_all(session, on):
         print(f"[BDB] set_bottom_up * off: cleared {len(cleared)} cell(s)")
         return
     eligible, skipped = session._eligible_bottom_up_cells()
+    elig_set = set(eligible)
     for c in eligible:
         session.bdb.set_cell_bottom_up(c, True)
+    # Enforce the invariant "after '* on', the marked set == the eligible
+    # set": clear any cell that is currently marked but no longer eligible
+    # (Codex #265).  A stale mark on a now-non-congruent cell would
+    # otherwise survive and make run_planner hier hit the unsupported
+    # template path instead of leaving the cell top-down as reported.
+    stale = sorted(c for c in session.bdb.bottom_up_cells()
+                   if c not in elig_set)
+    for c in stale:
+        session.bdb.set_cell_bottom_up(c, False)
     print(f"[BDB] set_bottom_up * on: marked {len(eligible)} eligible cell(s)"
           + (f": {', '.join(eligible)}" if eligible else ""))
+    if stale:
+        print(f"[BDB] set_bottom_up *: cleared {len(stale)} stale mark(s) now "
+              f"ineligible: {', '.join(stale)}")
     if skipped:
         print(f"[BDB] set_bottom_up *: {len(skipped)} cell(s) left top-down "
               "(not congruent — cannot freeze-and-copy):")
