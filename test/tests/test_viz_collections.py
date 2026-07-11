@@ -589,10 +589,11 @@ def test_abstract_vias_hidden_in_detailed_mode(monkeypatch):
     viz.ui_state.notify()
     assert n() == 0, "fig_redraw re-revealed abstract vias in detailed mode"
 
-    # Toggling off/on repeatedly (each firing a redraw) stays clean.
-    for _ in range(3):
-        viz._toggle_detailed(); viz.ui_state.notify()  # leave
-        viz._toggle_detailed(); viz.ui_state.notify()  # re-enter
+    # A full leave/re-enter cycle (each step firing a redraw) stays clean — one
+    # round-trip proves the toggle path re-gates correctly; more just multiplies
+    # the (expensive) viz redraws without adding coverage.
+    viz._toggle_detailed(); viz.ui_state.notify()      # leave
+    viz._toggle_detailed(); viz.ui_state.notify()      # re-enter
     assert n() == 0
 
     viz._toggle_detailed()                             # back to abstract

@@ -5,27 +5,28 @@ integration suites filled in (429s / 391 tests on a 4-core Linux box;
 ~5 min on Apple Silicon). This note records why we parallelize rather than
 re-tier, and how it's wired.
 
-## The runtime is a long tail, not breadth
+## Profile the RIGHT thing — rebuild, and mind the markers
 
-`pytest -m mid --durations=30` shows ~6 tests are ~65% of the wall time:
+> ⚠️ **Always `bin/bb` (rebuild) before profiling, and profile `-m "not slow"`
+> (what `bb -m` actually runs), not `-m mid`.** Two easy mistakes skewed the
+> first read of this:
+> - A **stale build** inflated `test_ripup_reroute`'s big2 tests to ~37s each
+>   (~119s for the file); on a current build they are ~2.6s each (~13s total).
+> - `-m mid` *selects* the `mid` marker and so **includes** tests that are ALSO
+>   `slow` — e.g. `test_nuts_placement_golden[mix.buda]` (62s) is `@slow` and is
+>   excluded from `bb -m`. Profile with `-m "mid and not slow"`.
 
-| Test(s) | Time | % of mid |
-|---|---:|---:|
-| `test_ripup_reroute` (4 heavy of 25) | ~119s | 28% |
-| `test_build_hier_demo` (~12) | ~64s | 15% |
-| `test_nuts_placement_golden[flow/rnr/mix.buda]` (1) | 62s | 14% |
-| viz tests (`test_viz_collections` / `_preroutes`) | ~40s | 9% |
-| everything else (~350 tests) | ~140s | 33% |
+On a current build, `pytest -m "mid and not slow" --durations` shows the mid
+tier is **breadth of integration tests**, each a few seconds — mostly viz tests
+(every one builds a full matplotlib `BudaVisualizer`) and `build_hier_demo`
+(each assembles a hierarchical BDB), 3–16s apiece, with no single giant test.
 
-Because it's a long tail, a symmetric split of `mid` into three sub-tiers
-(mid-fast / mid-mid / mid-slow) was rejected: it yields **five** tiers to
-remember and forces a hand-classification of every new test, for a problem that
-is really "a handful of tests are big." Two better levers:
+A symmetric split of `mid` into three sub-tiers (mid-fast / mid-mid / mid-slow)
+was still rejected: it yields **five** tiers to remember and forces a
+hand-classification of every new test. Two better levers:
 
 1. **Parallelize** — these tests are independent and CPU-bound (this doc).
-2. Optionally, later: promote just the heaviest tail to `slow` (one marker), or
-   speed up specific offenders (e.g. `nuts_golden[mix.buda]` at 62s for one
-   golden; `build_hier_demo` runs the SA optimizer deterministically ~12×).
+2. Speed up the heaviest individual tests where it's free (see below).
 
 ## Setup: `-n auto --dist loadfile`
 
@@ -81,6 +82,23 @@ before diagnosing parallelism.
 | Pin worker count | `BB_JOBS=8 bb -m` |
 | Force serial | `BB_JOBS=0 bb -m` (or uninstall xdist) |
 | Fast tier | always serial (`bb -t`) |
+
+## Surgical speedups applied
+
+Two safe, coverage-preserving trims to the heaviest individual tests:
+
+- **`test_build_hier_demo`** — 4 read-only tests each rebuilt the identical
+  default demo (`_CELLS`, seed=1, ~4s of BDB assembly). A module-scoped
+  `default_demo_bdb` fixture builds it once and shares it read-only (tests that
+  run the bundler/planner, which persist into the BDB, still build their own).
+  File: ~64s → ~46s.
+- **`test_abstract_vias_hidden_in_detailed_mode`** — a `range(3)` detailed
+  on/off loop drove ~12 full viz redraws; one leave/re-enter round-trip proves
+  the re-gating just as well. 16.5s → ~9s.
+
+Not touched: `test_ripup_reroute` is inherently iterative and each test mutates
+a fresh `BudaSession` (no shareable setup); reducing its iteration counts would
+change what it validates.
 
 ## Regenerate the numbers
 
