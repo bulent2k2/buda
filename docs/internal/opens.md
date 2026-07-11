@@ -60,9 +60,10 @@ noted.)*
    so **off by default**). Lever 2 landed in `_rr_candidate_order`:
    under measured contention ripup's trial pool appends the top-8
    farness-ranked candidates from beyond the 8-cheapest-estimate window,
-   so a higher-estimate class (OOB trunk, BITRUNK tree) is promotable
-   exactly when every cheap alternate fails — goldens byte-identical,
-   big2 stage-a residual overlaps 1→0. The kPeak default-on question is
+   so a higher-estimate class (OOB trunk, BITRUNK tree) is promotable —
+   committing only on a strictly better measured metric (cheap-first
+   order + strict `<`: ties keep the cheaper move) — goldens
+   byte-identical, big2 stage-a residual overlaps 1→0. The kPeak default-on question is
    **decided: stays opt-in** — big2's plain pipeline strands two wide
    trunks on supply-poor bands at every tested value (`peak_util` is
    blind to absolute signal-track supply; both capacity modes), though

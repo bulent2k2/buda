@@ -201,13 +201,16 @@ structurally unreachable (verified on `flow/datapath_multi_trunk.buda`:
 every bundle's two-level trees sit beyond the first-8 window). Now, when
 the contender has measured contention sites, the top-8 farness-ranked
 candidates from BEYOND the first-8 window are APPENDED after the legacy
-pool — whenever a cheap alternate improves, the first-improving scan
-commits the same move as before (routes unchanged; goldens byte-identical),
-and the expensive classes are trialed exactly when every cheap alternate
-fails, acceptance still gated by the measured (opens, overlaps) metric.
-Farness-first over the WHOLE pool was measured and rejected: it commits a
-far expensive candidate before a cheap same-effect one (mix.buda bundle 85:
-idx 26 over idx 5, +2% abstract WL at an equal metric). Measured on big2
+pool. The ripup loop keeps the best measured metric over a contender's
+move list with a STRICT `<`, so the cheap-first order is load-bearing: an
+extra displaces a cheap fix only by a STRICTLY better (opens, overlaps)
+metric — at an equal metric the earlier (cheap) move always wins the tie,
+so routes change only where a promotion strictly improves the measured
+metric (goldens byte-identical; mix.buda verified identical to main).
+Farness-first over the WHOLE pool was measured and rejected: it put the
+far expensive candidate BEFORE the cheap same-effect one, handing it the
+tie (mix.buda bundle 85: idx 26 over idx 5, +2% abstract WL at an equal
+metric). Measured on big2
 (`tc3b_flat_x5`): stage-a residual overlaps after ripup 1→0 (bundle 27
 promoted to index 11, unreachable before), abstract WL −0.18%, detailed WL
 +0.04%, stage-b endpoint unchanged (0/0). `negotiate_congestion` needs no

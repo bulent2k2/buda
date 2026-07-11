@@ -22,13 +22,14 @@ with the higher-estimate classes (OOB trunks, two-level BITRUNK trees) at
 indices 8-40, so no measured contention could ever promote one: the trial
 that would test it was structurally unreachable.
 
-The re-rank keeps the legacy first-8 pool FIRST (farness-ranked, exactly as
-before — whenever a cheap alternate improves, the first-improving scan
-commits the same move and routes are unchanged; the golden corpora guard
-that) and APPENDS the top-8 farness-ranked candidates from beyond the
-first-8 window.  The expensive classes are reachable exactly when every
-cheap alternate fails, and acceptance stays QoR-gated by the measured
-(opens, overlaps) metric.
+The re-rank keeps the legacy first-8 pool FIRST (farness-ranked, exactly
+as before) and APPENDS the top-8 farness-ranked candidates from beyond the
+first-8 window.  The ripup loop keeps the best measured metric over a
+contender's move list with a STRICT `<`, so the cheap-first order is
+load-bearing: an extra displaces a cheap fix only by a STRICTLY better
+(opens, overlaps) metric — ties always keep the earlier, cheaper move, so
+routes change only where a promotion strictly improves the measured
+metric (the golden corpora guard that).
 
 These tests pin the pool-composition contract directly on a real 39-candidate
 fan-out bundle, with `_rr_contention_centres` stubbed so the contention input

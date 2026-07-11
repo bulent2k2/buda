@@ -365,16 +365,20 @@ class RipupMixin:
         could never be promoted no matter what the measured metric says.
         When contention sites exist, the top-N farness-ranked candidates from
         BEYOND the first-N window are therefore APPENDED after the legacy
-        pool: whenever a cheap alternate improves, the first-improving scan
-        commits it exactly as before (routes unchanged), and the expensive
-        classes are trialed only when every cheap alternate fails — measured
-        contention can then promote them, and acceptance stays QoR-gated (a
-        move is kept only if the (opens, overlaps) metric strictly improves).
-        Farness-first over the WHOLE pool was tried and rejected: it commits
-        a far expensive candidate before a cheap same-effect one (mix.buda
-        bundle 85: idx 26 over idx 5, +2% abstract WL at an equal metric).
-        With no sites the legacy first-N pool is returned (nothing to rank
-        by, no evidence to justify extra trials)."""
+        pool.  The caller's per-contender scan keeps the best measured
+        metric over the whole move list with a STRICT `<` (ripup loop), so
+        ordering cheap-first is load-bearing: an extra can displace a cheap
+        fix only by a STRICTLY better (opens, overlaps) metric — at an equal
+        metric the earlier (cheap) move always wins the tie.  That is
+        precisely the QoR-gated promotion this exists for; where no extra
+        strictly beats the cheap best, routes are unchanged (the golden
+        corpora guard that — mix.buda is byte-identical, and big2's
+        promotion clears its final residual overlap).  Farness-first over
+        the WHOLE pool was tried and rejected: it put the far expensive
+        candidate BEFORE the cheap same-effect one, handing it the tie
+        (mix.buda bundle 85: idx 26 over idx 5, +2% abstract WL at an equal
+        metric).  With no sites the legacy first-N pool is returned (nothing
+        to rank by, no evidence to justify extra trials)."""
         cap = _RR_MAX_CANDIDATES_PER_BUNDLE
         n = min(len(w.input.candidates), cap)
         idxs = [i for i in range(n) if i != old_tidx]
