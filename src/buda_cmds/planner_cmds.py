@@ -20,6 +20,8 @@ Each handler takes (session, cmd, args, cmd_line) and is registered
 in this module's COMMANDS dict; the buda_cmds package assembles the
 full registry that buda_cli.do_command dispatches through.
 """
+import os
+
 import buda
 
 
@@ -102,9 +104,13 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         expanded, session._hier_expansion_map = session._expand_hier_bundles(session.bundles)
         # priority = -(level * 10000 + n_candidates): higher routes first.
         # Depth-0 before depth-1; fewer candidates (less flexibility) first.
+        # BUDA_HIER_DEEP_FIRST=1 (experiment): invert the level key only —
+        # deepest level plans first; still fewest-candidates-first per level.
+        deep_first = os.environ.get("BUDA_HIER_DEEP_FIRST") == "1"
         for w in expanded:
             b = w.input.original_bundle
-            w.hier.priority = -(b.level * 10_000 + len(w.input.candidates))
+            lvl_key = b.level if deep_first else -b.level
+            w.hier.priority = lvl_key * 10_000 - len(w.input.candidates)
             w.hier.level    = b.level   # for the per-level planning summary
         session.planner = buda.CongestionPlanner(session.fp, session.layers)
         for pname, pval in session._planner_params.items():
