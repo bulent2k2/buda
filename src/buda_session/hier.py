@@ -696,6 +696,36 @@ class HierMixin:
                                            phase_score=self._orient_phase_score,
                                            only=only, allow_90=allow_90)
 
+    def _eligible_bottom_up_cells(self, comps=None):
+        """Enumerate every cell type that COULD be marked bottom-up — the
+        keepout-scope generalization's unit (`set_bottom_up *`).
+
+        Eligible = a cell with >= 2 placed instances (the solve-once-copy
+        machinery's minimum — a single-instance cell has nothing to copy
+        and stays top-down) whose instances are congruent (allow_90=True,
+        since the rotation-class split handles the 90 family).  Returns
+        `(eligible_sorted, skipped)` where `skipped` is a list of
+        `(cell, reason)` for cells with instances that CANNOT be frozen —
+        so the caller reports them LOUD and leaves them on today's
+        top-down path rather than silently dropping them."""
+        if comps is None:
+            comps = self.bdb.all_components()
+        by_cell = {}
+        for c in comps:
+            if c.x1 >= 0:                       # placed only
+                by_cell.setdefault(c.cell, []).append(c)
+        eligible, skipped = [], []
+        cache = {}
+        for cell in sorted(by_cell):
+            if len(by_cell[cell]) < 2:
+                continue                        # single instance: nothing to copy
+            issues = self._bottom_up_congruence_issues(cell, comps, cache=cache)
+            if issues:
+                skipped.append((cell, issues[0]))
+            else:
+                eligible.append(cell)
+        return eligible, skipped
+
     def _apply_fp_session_settings(self, fp, min_stub=False):
         """Mirror session-level Floorplan settings onto a DERIVED floorplan
         (cell-local, cross-level, depth projection): the global corner

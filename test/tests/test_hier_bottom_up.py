@@ -263,6 +263,74 @@ def test_set_bottom_up_command_accepts_mirrored_180_and_90():
         assert db.cell_bottom_up("proc_cell") is True
 
 
+# ── set_bottom_up * (keepout-scope generalization) ────────────────────────────
+
+def test_set_bottom_up_star_marks_all_eligible():
+    """'*' marks every eligible (>= 2 congruent placed instances) cell — the
+    keepout-scope generalization.  _two_inst_db has proc_cell (2 instances)
+    and pipe_cell (4 leaf instances), both congruent."""
+    db = _two_inst_db()
+    s = _bare_session(db)
+    out = _run_cmd(s, "set_bottom_up *")
+    assert "marked 2 eligible cell(s)" in out
+    assert set(db.bottom_up_cells()) == {"proc_cell", "pipe_cell"}
+
+
+def test_set_bottom_up_star_equivalent_to_explicit_marks():
+    """'*' marks exactly the cells an expert would mark one by one — same
+    set as calling set_bottom_up on each eligible cell."""
+    db1 = _two_inst_db(); s1 = _bare_session(db1)
+    _run_cmd(s1, "set_bottom_up *")
+    star = set(db1.bottom_up_cells())
+    db2 = _two_inst_db(); s2 = _bare_session(db2)
+    elig, _ = s2._eligible_bottom_up_cells()
+    for c in elig:
+        _run_cmd(s2, f"set_bottom_up {c}")
+    assert star == set(db2.bottom_up_cells()) == set(elig)
+
+
+def test_set_bottom_up_star_off_clears_all():
+    db = _two_inst_db()
+    s = _bare_session(db)
+    _run_cmd(s, "set_bottom_up *")
+    assert db.bottom_up_cells()                       # non-empty
+    out = _run_cmd(s, "set_bottom_up * off")
+    assert "cleared 2 cell(s)" in out
+    assert db.bottom_up_cells() == []
+
+
+def test_set_bottom_up_star_skips_non_congruent_loud():
+    """A non-congruent cell is left on the top-down path and REPORTED (never
+    silently marked); congruent siblings are still marked."""
+    db = _two_inst_db()
+    db.move_comp("proc_i2/pa_i", 540, 70)             # proc_cell non-congruent
+    s = _bare_session(db)
+    out = _run_cmd(s, "set_bottom_up *")
+    assert "left top-down" in out and "proc_cell" in out
+    marked = set(db.bottom_up_cells())
+    assert "proc_cell" not in marked                  # refused, not silent
+    assert "pipe_cell" in marked                      # leaf siblings still fine
+
+
+def test_set_bottom_up_star_end_to_end_routes():
+    """A full flow with 'set_bottom_up *' routes through NUTS with the marked
+    cells driving bottom-up (locked wrappers exist), equivalent to marking
+    proc_cell explicitly for the shared template."""
+    db = _two_inst_db(x2=500, y2=300)
+    s = _bare_session(db)
+    for c in (["def_layer 6 M6 H TOP 50", "def_layer 7 M7 V TOP 50",
+               "def_layer 4 M4 H 50", "def_layer 5 M5 V 50"]
+              + _PATTERNS
+              + ["set_bottom_up *", "run_hier_bundler",
+                 "generate_hier_topologies", "run_planner hier", "run_nuts"]):
+        _run_cmd(s, c)
+    assert any(w.hier.locked for w in s.bundles)      # bottom-up drove it
+    assert s.nuts_result is not None
+    out = _run_cmd(s, "run_detailed_nuts")            # aligned → copies
+    assert "Error" not in out and s.detailed_result is not None
+    assert s.detailed_result.num_unplaced == 0
+
+
 # ── run_planner hier expansion guard ──────────────────────────────────────────
 
 def _flow_session(db):
