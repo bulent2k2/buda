@@ -315,3 +315,40 @@ def test_dilution_factor_scales_abstract_bus_width():
     p = make_standard_pattern()
     # 4 signal units in 14 → a 4-unit abstract bus needs 4 × 3.5 = 14 physical units
     assert 4.0 * p.dilution_factor() == pytest.approx(14.0, rel=1e-4)
+
+
+# ---------------------------------------------------------------------------
+# count_signal_tracks_in_span — lockstep with signal_tracks_in_span
+# ---------------------------------------------------------------------------
+
+def test_count_signal_tracks_in_span_lockstep():
+    """count_signal_tracks_in_span is the allocation-free twin of
+    signal_tracks_in_span (the planner's kPeak supply floor only needs the
+    count).  "Kept in lockstep" is a promise only a test can keep: assert
+    count == len(vector twin) across plain, keepout-clipped (span-aware:
+    overlapping the span but missing its midpoint), override, and
+    empty/degenerate windows, so drift is caught the moment someone edits
+    one walker and not the other."""
+    stack = buda.RoutingGridStack()
+    stack.define_layer(4, make_standard_pattern(), True)
+    # keepout overlapping the span [0, 100] but missing its midpoint 50 —
+    # invisible to the point query, visible to both span-aware walkers
+    stack.add_keepout(4, x1=60, y1=3, x2=80, y2=6)
+    # region override with a different (power-heavy) pattern
+    stack.add_override(4, x1=100, y1=0, x2=200, y2=500,
+                       pattern=buda.TrackPattern(origin=0.0, slots=[
+                           make_slot("POWER", "VDD", 28.0, 1.0),
+                           make_slot("SIGNAL", "sig", 1.0, 0.0)]))
+    grid = stack.get_layer_grid(4)
+    windows = [
+        (0.0, 100.0, 0.0, 14.0),      # global pattern, keepout clips the span
+        (0.0, 50.0, 0.0, 14.0),       # span ends before the keepout
+        (120.0, 180.0, 0.0, 60.0),    # inside the override region
+        (0.0, 100.0, 7.0, 3.0),       # inverted perp window (degenerate)
+        (90.0, 10.0, 0.0, 14.0),      # inverted along window (walkers swap)
+        (0.0, 0.0, 0.0, 14.0),        # zero-length span (point special case)
+    ]
+    for a_lo, a_hi, p_lo, p_hi in windows:
+        assert (grid.count_signal_tracks_in_span(a_lo, a_hi, p_lo, p_hi)
+                == len(grid.signal_tracks_in_span(a_lo, a_hi, p_lo, p_hi))), \
+            (a_lo, a_hi, p_lo, p_hi)

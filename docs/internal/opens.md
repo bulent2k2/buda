@@ -63,12 +63,15 @@ noted.)*
    so a higher-estimate class (OOB trunk, BITRUNK tree) is promotable —
    committing only on a strictly better measured metric (cheap-first
    order + strict `<`: ties keep the cheaper move) — goldens
-   byte-identical, big2 stage-a residual overlaps 1→0. The kPeak default-on question is
-   **decided: stays opt-in** — big2's plain pipeline strands two wide
-   trunks on supply-poor bands at every tested value (`peak_util` is
-   blind to absolute signal-track supply; both capacity modes), though
-   negotiate+ripup fully heal it. Reopener: a supply-aware `peak_util`
-   (see wishlist-planner).
+   byte-identical, big2 stage-a residual overlaps 1→0. The kPeak
+   default-on question is **decided: stays opt-in**, confirmed after the
+   supply-aware `peak_util` floor shipped — big2's stranding turned out
+   to be the pre-charge horizon (early-planned wide trunks vs later
+   arrivals sharing the DNUTS window), not absolute-supply blindness, so
+   no plan-time term can fix it; negotiate+ripup heal it. The floor
+   shipped anyway on its own merits (region-override supply the width
+   model can't see: mix pre-heal opens −55%, tc3a's kPeak-0.2 regression
+   gone; see wishlist-planner).
 ### Bottom-up template planning follow-ons (added 2026-07-10)
 
 - ✅ **Orientation-aware instance copying** — **DONE (2026-07-10, mirrors +

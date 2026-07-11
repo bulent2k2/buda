@@ -221,33 +221,73 @@ routability). Tests: `test/tests/test_ripup_class_rerank.py` (pool
 composition: legacy-first, beyond-cap extras, farness ranking, self-trial
 exclusion).
 
-**`kPeak` default decision (2026-07-11): stays opt-in (default 0).**
-The big2 "double-steer" hypothesis was debugged and REJECTED — big2_noviz
-runs the PLAIN pipeline (no negotiate/ripup at all), so the regression is
-pure planner steering meeting DNUTS supply. Measured on top of lever 2:
-- The damage is concentrated and structural: at every tested value
-  (0.05/0.1/0.2) exactly two wide trunk segments (bundle 23 seg 1, 60
-  bits; bundle 25 seg 0, 56 bits) are steered onto M4 windows with
-  near-zero real signal-track supply and strand completely (0 bits
-  placed, ~104–116 opens vs 0 baseline). `peak_util` prices *relative*
-  existing load (`usage/cap`), so an almost-supply-free band at
-  utilization 0 looks maximally attractive — the term is blind to
-  *absolute* supply.
-- NOT a width-model artifact: `run_planner signal_tracks` + kPeak 0.1
-  shows the identical 6 overlaps / 116 opens.
-- The feedback loops fully heal it: big2 + kPeak 0.1 +
-  `negotiate_congestion` + `ripup_reroute` reaches 0 overlaps / 0 opens —
-  the same endpoint as the baseline healed run. So the knob is safe (and
-  useful) in flows that run the loops; a *default* must not depend on
-  them.
-- The best value is flow-dependent and non-monotonic: mix optimum is 0.1
-  (190→128 unplaced, −33%; 0.2 backslides to 169), channel_stress heals
-  at 0.1, tc3a clean at 0.05–0.1.
-**Reopener (the follow-on lever):** a supply-aware `peak_util` — treat a
-band whose absolute signal-track supply within the segment's span cannot
-host the bundle's bit count as fully utilized (util ≥ 1) instead of
-attractive-empty. That removes the big2 failure mode at its root and
-would justify re-running this decision. The original analysis follows.
+**`kPeak` default decision (2026-07-11): stays opt-in (default 0).
+Confirmed after the supply-aware follow-on shipped — the reopener premise
+was falsified by measurement.** The full experimental record (per-testcase
+corpus tables, value sweeps, healed endpoints, and the three
+implemented-and-rejected variants) lives in
+[kpeak_measurements.md](kpeak_measurements.md).
+- The big2 "double-steer" hypothesis was debugged and REJECTED first —
+  big2_noviz runs the PLAIN pipeline (no negotiate/ripup at all). At every
+  tested value (0.05/0.1/0.2) exactly two wide trunk segments (bundle 23
+  seg 1, 60 bits; bundle 25 seg 0, 56 bits) strand completely (~104–116
+  opens vs 0 baseline), identically in `signal_tracks` mode.
+- The "absolute-supply blindness" diagnosis was then ALSO falsified: the
+  stranded trunks' NUTS windows hold **153 / 93** real signal tracks for
+  their 60 / 56 bits — supply is ample, and the DNUTS failure path is the
+  `reserved`-tracks exhaustion, not "insufficient signal tracks". Bundle
+  23 isn't even party to any NUTS overlap: interval-overlapping
+  *competitors* placed earlier reserve most of the shared window's
+  tracks, and the all-or-nothing check strands the widest late-processed
+  segment. The real mechanism is the **pre-charge horizon**: a wide
+  bundle plans early against a nearly-empty map, so NO per-bundle term —
+  relative or absolute — evaluated at its plan time can price the
+  arrivals that come after it. Intrinsically a feedback problem;
+  `negotiate_congestion` + `ripup_reroute` are the fix (they heal big2 to
+  0/0, the baseline endpoint).
+- The healed endpoint is itself flow-dependent: `mix` + kPeak 0.1 heals
+  to 0 overlaps / **16** opens vs the baseline's 1 / **0** (same with and
+  without the supply floor, with mix's configured negotiate/ripup
+  budget) — so even "kPeak + the loops" is a per-design option to
+  validate with `check_design`, not a blanket recommendation.
+
+**Supply-aware `peak_util` — SHIPPED as a kPeak improvement (2026-07-11),
+on its own merits, not as the default-reopener** (that premise died
+above). When kPeak > 0 and the layer has a `def_track_pattern`, the
+band's span-wide SIGNAL supply (`count_signal_tracks_in_span`, the same
+override/keepout-aware pool DetailedNUTS places from; along-extent uses
+the shared `routed_extent` endpoint-block clamp; window = Hanan band ∩
+slide window) is checked against the bundle's bit count and util is
+clamped to ≥ 1 on a shortfall — an empty-because-unroutable band never
+ranks better than a full one. The planner now receives the routing grid
+in WIDTH mode too (read only behind kPeak/track-mode gates; defaults
+bit-identical, goldens verified). This catches the class the width model
+structurally cannot see: a region override's supply (eff_bus_width uses
+the layer's GLOBAL pattern). Measured (vs pre-floor kPeak): mix pre-heal
+opens @0.1 128→**86** (−55% vs baseline 190; healed endpoint unchanged
+16), channel_stress heals from 0.05 (was 0.1), tc3a clean at ALL values
+(the 0.2 regression is gone), big2 unchanged (its mechanism is the
+horizon, above). Tests: `test/tests/test_planner_kpeak_supply.py` (blind
+default strands 8 bits through an override-starved corridor; floor
+detours it clean; floor silent when supply suffices), plus the
+count/vector lockstep guard in `test_routing_grid.py`.
+
+Two open refinements from the PR #257 review (optional, unmeasured):
+- **Proportional supply clamp.** The floor's flat `1.0` makes a
+  can't-host band *tie* a merely-full band and still rank better than an
+  already-overflowing one (relative util > 1), so under total scarcity
+  it stops discriminating among bad options. `peak = max(peak,
+  tracks_needed / max(1.0, supply))` would price a 3-for-8 band at ~2.7
+  and a 7-for-8 near-miss at ~1.14 at the same cost. Measure on the
+  corpus before adopting — the flat clamp's numbers are already good,
+  and the region above 1.0 competes with real overflow pricing.
+- **Override-boundary pattern resolution** (routing-grid, see
+  wishlist-nuts): `signal_tracks_in_span` (and its count twin,
+  deliberately in lockstep) resolve the pattern at the window's
+  `perp_lo`, so an override whose edge touches a Hanan row claims the
+  entire band above it — the sharp edge documented in
+  `test_planner_kpeak_supply.py`'s fixture comment. The original
+  analysis follows.
 
 **What.** The planner selects one candidate per bundle by a cost model
 (`kCong·congestion + kSpan·span + base_cost_non_top + kWL·wirelength`, see

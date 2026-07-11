@@ -227,7 +227,11 @@ void bind_nuts(py::module_& m) {
              py::return_value_policy::copy)
         .def("has_overrides",   &RoutingGrid::has_overrides)
         .def("count_signal_tracks_in", &RoutingGrid::count_signal_tracks_in,
-             py::arg("x"), py::arg("lo"), py::arg("hi"));
+             py::arg("x"), py::arg("lo"), py::arg("hi"))
+        .def("count_signal_tracks_in_span",
+             &RoutingGrid::count_signal_tracks_in_span,
+             py::arg("along_lo"), py::arg("along_hi"),
+             py::arg("lo"), py::arg("hi"));
 
     py::class_<RoutingGridStack>(m, "RoutingGridStack")
         .def(py::init<>())

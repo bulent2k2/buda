@@ -273,6 +273,49 @@ int RoutingGrid::count_signal_tracks_in(double x, double lo, double hi) const {
     return cnt;
 }
 
+int RoutingGrid::count_signal_tracks_in_span(double along_lo, double along_hi,
+                                             double perp_lo, double perp_hi) const {
+    // Count-only twin of signal_tracks_in_span: same tiling walk + span-aware
+    // keepout filter, but never allocates (the planner's kPeak supply floor
+    // only needs the count).  Kept in lockstep with signal_tracks_in_span
+    // above: pattern resolved at the along MIDPOINT, a track blocked when a
+    // keepout's perp extent covers its centre AND its along extent overlaps
+    // [along_lo, along_hi].
+    if (along_lo > along_hi) std::swap(along_lo, along_hi);
+    const double mid = (along_lo + along_hi) / 2.0;
+    const TrackPattern& pat = effective_pattern_at(
+        is_horizontal_ ? mid : perp_lo, is_horizontal_ ? perp_lo : mid);
+    const double up = pat.unit_pitch();
+    if (up <= 0.0 || pat.slots.empty() || perp_lo > perp_hi) return 0;
+    int n_start = static_cast<int>(std::floor((perp_lo - pat.origin) / up)) - 1;
+    int cnt = 0;
+    for (int n = n_start; ; ++n) {
+        double unit_start = pat.origin + static_cast<double>(n) * up;
+        if (unit_start > perp_hi) break;
+        double pos = unit_start;
+        for (const auto& slot : pat.slots) {
+            double centre = pos + slot.width / 2.0;
+            if (centre >= perp_lo && centre <= perp_hi && slot.type == "SIGNAL") {
+                bool blocked = false;
+                for (const auto& koz : keepouts_) {
+                    const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
+                    const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
+                    const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
+                    const double k_a2 = is_horizontal_ ? koz.x2 : koz.y2;
+                    if (centre >= k_p1 && centre <= k_p2 &&
+                        along_lo <= k_a2 && along_hi >= k_a1) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (!blocked) ++cnt;
+            }
+            pos += slot.width + slot.space_after;
+        }
+    }
+    return cnt;
+}
+
 // ---------------------------------------------------------------------------
 // RoutingGridStack
 // ---------------------------------------------------------------------------

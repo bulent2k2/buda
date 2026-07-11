@@ -117,6 +117,14 @@ public:
     signal_tracks_in_span(double along_lo, double along_hi,
                           double perp_lo, double perp_hi) const;
 
+    // COUNT of the same span-aware SIGNAL tracks, without materializing a
+    // vector (hot-path sibling, like count_signal_tracks_in for the point
+    // version): the congestion planner's kPeak supply floor calls this once
+    // per candidate segment per band choice.  Identical result to
+    // signal_tracks_in_span(...).size().
+    int count_signal_tracks_in_span(double along_lo, double along_hi,
+                                    double perp_lo, double perp_hi) const;
+
     // The layer's NON-SIGNAL track slots (POWER / GROUND / CLOCK / SHIELD /
     // CUSTOM) materialized as first-class PreRoutedSegments — Phase G of
     // docs/internal/placed_segment_preroutes.md.  Global-pattern slots whose
