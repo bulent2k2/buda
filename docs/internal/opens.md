@@ -8,38 +8,6 @@ lands, mark it ✅ here *and* in its wishlist file; re-verify the whole list
 against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
-## Quick wins (small, low risk)
-
-*(bottom-up items added 2026-07-10, post PR #238 + its follow-ons; details
-in [`hier_bottom_up_planning.md`](hier_bottom_up_planning.md) §11 unless
-noted.)*
-
-- **`align_bottom_up` slack-aware default cap + auto-revert** ✅ — resolved
-  as an EXACT-GEOMETRY cap rather than a derived scalar (a scalar slack
-  bound would also block large-but-legal nudges, e.g. mix2's 90 µm snaps):
-  by default any move whose post-apply `validate()` diff shows a NEW
-  overlap/outside-die issue is auto-reverted to a fixpoint (a revert can
-  newly collide with a still-moved sibling); `force` keeps such moves with
-  the old WARNING-only behavior. `max_shift` remains the explicit user cap.
-- **Floorplanner UI toggle for `cell.bottom_up`** ✅ — implemented per the
-  design in [`cell_settings_ui.md`](cell_settings_ui.md): an extensible,
-  schema-driven per-cell settings dialog (mirrors Optimize) with
-  `cell.bottom_up` as the first `CellSetting` descriptor, plus a
-  Selection-panel quick checkbox. The congruence check is shared verbatim
-  with the CLI (`buda_session.hier.bottom_up_congruence_issues`, the
-  orientation-aware definition); enabling is congruence-gated, clearing is
-  unconditional. Command layer + tests:
-  `tools/floorplanner_commands.py` /
-  `test/tests/test_floorplanner_cell_settings.py`.
-- **Hier topology unit tests drive a local reimplementation** ✅ —
-  `test_hier_topology.py` now drives the REAL dispatch
-  (`generate_hier_topologies` via a BudaSession) in every test and BDD
-  scenario, the in-file reimplementation (and the cell-local floorplan
-  replica) is deleted, and the cross-level case (c) branch gains its
-  first coverage: three new tests pin the `drv_spec_depth` bundling, the
-  `[cross-level D0→D1]` dispatch tag, absolute endpoint-spanning
-  coordinates, and no-regression on sibling bundles (15 tests total).
-
 ## Substantial features (bounded, clear plans)
 
 2. **CONVERGENT fan-in topology** —
@@ -72,87 +40,11 @@ noted.)*
    shipped anyway on its own merits (region-override supply the width
    model can't see: mix pre-heal opens −55%, tc3a's kPeak-0.2 regression
    gone; see wishlist-planner).
-### Bottom-up template planning follow-ons (added 2026-07-10)
-
-- ✅ **Orientation-aware instance copying** — **DONE (2026-07-10, mirrors +
-  180 scope)**. Bottom-up copies now support the direction-preserving
-  orientations (`N/S/FN/FS`) end-to-end: geometric per-instance orientation
-  detection (full-subtree shape match — hierarchical `rotate_comp`/
-  `flip_comp` keep every token `'N'`, so tokens alone are untrustworthy;
-  ambiguous self-symmetric layouts are disambiguated by a track-phase
-  score, identity preferred when it matches), `transform_topology` /
-  `transform_track_segment` / `transform_net_segment` / `transform_net_via`
-  (C++, shared `OrientMap` algebra with `orient_compose`/`orient_inverse`),
-  mirror-normalized `check_template_tracks` pools (both routed and
-  placement-stage modes), and `align_bottom_up` mirrored-phase math
-  (effective coordinate about the pattern's symmetry center σ, per-direction
-  CRT-combined `K ≡ 2σ_l mod pitch_l`). The plain top-down hier expansion
-  now applies the correct GEOMETRIC transform for ALL 8 orientations
-  (fixing its silent translation-only mis-transform; 90° instances get
-  their pinned per-segment layers dropped with a warning since H↔V swaps).
-  **90°/270° instances of marked cells: ✅ DONE (2026-07-10)** via
-  **rotation-class clone templates** — instead of an H↔V layer-pairing map,
-  the 90° family of a marked cell is split at `run_planner hier` into its
-  own clone template (virtual name `<cell>90`, uniquified; persisted with
-  `bundle.cloned_from`, v19) whose candidates are generated from the
-  rotated reference's actual cell-local floorplan and planned with real
-  per-direction layer costs; within the class every instance is a
-  direction-preserving transform of the class reference, so the existing
-  copy machinery applies unchanged.  The clone never touches
-  cell/component/pin tables (interchange unaffected);
-  check_template_tracks / align_bottom_up group per class.
-- ✅ **`generate_more_topologies` is not hier-aware** — **DONE
-  (2026-07-11)**. The additive command now detects a hier-bundled session
-  and accretes through the same 3-case dispatch as
-  `generate_hier_topologies` (`_generate_hier_topo_one(additive=True)` →
-  shared `_merge_more_candidates`: topo_uid dedup + WL re-sort with
-  selection/dogleg remap). Hints match an HBundle id or first net-name
-  prefix; a replica match redirects to its template; the v15 knob memo now
-  replays on bulk `generate_hier_topologies` too (`_apply_hier_gen_knobs`),
-  so accreted HBundle pools survive regeneration. Post-expansion accretion
-  is refused with the re-run recipe (pools live on expanded wrappers then).
-  `generate_topologies_for_hbundle` stays replace-only by design — parity
-  with the flat `generate_topologies_for_bundle`.
-
 ## Big / blocked / conditional
 
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
 designs and fail LOUD, never silent:)*
 
-- ✅ **Dogleg-split templates are not copied** — **DONE (2026-07-11)**.
-  When the cell-local solve needs a dogleg, `_adopt_bottom_up_doglegs`
-  now adopts the split exactly like the flat flow's `_adopt_doglegs`: the
-  template gets the split candidate (appended / slot-overwritten,
-  `_bu_dogleg_slot` bookkeeping reset on every re-plan) fully pinned with
-  the split's layers + placement overrides, and every LOCKED instance
-  gets the orientation-TRANSFORMED split candidate + full pin (instance
-  slots ride the shared `_dogleg_slot`, cleaned by the planner-time
-  `_reset_doglegs`). The fixed copies already carried the split geometry;
-  the adoption makes every wrapper's selected candidate agree with them
-  segment-for-segment (the DNUTS-handoff invariant). Getting the LOCAL
-  solve to even reproduce a flat dogleg exposed three frame-fidelity gaps,
-  all fixed: the local planner's `seg_perp` band centres were not copied
-  to the template plan, the local NUTS never saw the local planner's
-  candidate-extended Hanan grid, and the cell-local floorplan dropped the
-  session's declared corner margin AND min-stub lengths
-  (`_apply_fp_session_settings`; min-stub deliberately NOT retrofitted
-  onto the depth-projection / cross-level frames — that measurably
-  regressed tuned hier flows and belongs to a golden review).
-- ✅ **Resume from a pre-`run_nuts` checkpoint loses NUTS-copy
-  uniformity** — **DONE (2026-07-11)**. `load_pipeline expanded` now also
-  rebuilds the pre-expansion TEMPLATE wrappers
-  (`_restore_bottom_up_templates`, sharing the extracted
-  `_restore_wrapper` loader body): the canonical parents of the expanded
-  rows, validated against their OWN cell-local floorplans (their block
-  names are cell-local), with the v18-persisted local-solve selection
-  restored as the full pin stage (b) requires. A pre-`run_nuts` resume
-  then re-runs the cell-local solve and keeps uniform per-instance
-  copies; a post-`run_nuts` resume still prefers the persisted routing
-  (exact — `_bu_fixed_from_resume`, cleared by a re-plan), and a
-  template without a usable persisted selection falls back per-instance
-  LOUD as before. Note: re-running `run_planner hier` on a resumed
-  (post-expansion) session remains unsupported (double expansion —
-  pre-existing).
 - **Keepout scope generalization** — deferred by the Q4 decision: only
   *marked* cells' copied routing blocks higher levels; making EVERY hier
   cell's planned+NUTSed local routing a blockage is a possible future
@@ -194,6 +86,110 @@ designs and fail LOUD, never silent:)*
    iteration at the planner level). Ordering changes shift every hier
    design's results, so this needs the same golden-review discipline as
    the keepout-scope knob (item above).
+
+## Resolved (by 2026-07-11)
+
+*(moved down from the active sections above as they landed; details and
+evidence in the per-subsystem wishlist files as cited.)*
+
+- **`align_bottom_up` slack-aware default cap + auto-revert** ✅ — resolved
+  as an EXACT-GEOMETRY cap rather than a derived scalar (a scalar slack
+  bound would also block large-but-legal nudges, e.g. mix2's 90 µm snaps):
+  by default any move whose post-apply `validate()` diff shows a NEW
+  overlap/outside-die issue is auto-reverted to a fixpoint (a revert can
+  newly collide with a still-moved sibling); `force` keeps such moves with
+  the old WARNING-only behavior. `max_shift` remains the explicit user cap.
+- **Floorplanner UI toggle for `cell.bottom_up`** ✅ — implemented per the
+  design in [`cell_settings_ui.md`](cell_settings_ui.md): an extensible,
+  schema-driven per-cell settings dialog (mirrors Optimize) with
+  `cell.bottom_up` as the first `CellSetting` descriptor, plus a
+  Selection-panel quick checkbox. The congruence check is shared verbatim
+  with the CLI (`buda_session.hier.bottom_up_congruence_issues`, the
+  orientation-aware definition); enabling is congruence-gated, clearing is
+  unconditional. Command layer + tests:
+  `tools/floorplanner_commands.py` /
+  `test/tests/test_floorplanner_cell_settings.py`.
+- **Hier topology unit tests drive a local reimplementation** ✅ —
+  `test_hier_topology.py` now drives the REAL dispatch
+  (`generate_hier_topologies` via a BudaSession) in every test and BDD
+  scenario, the in-file reimplementation (and the cell-local floorplan
+  replica) is deleted, and the cross-level case (c) branch gains its
+  first coverage: three new tests pin the `drv_spec_depth` bundling, the
+  `[cross-level D0→D1]` dispatch tag, absolute endpoint-spanning
+  coordinates, and no-regression on sibling bundles (15 tests total).
+- ✅ **Orientation-aware instance copying** — **DONE (2026-07-10, mirrors +
+  180 scope)**. Bottom-up copies now support the direction-preserving
+  orientations (`N/S/FN/FS`) end-to-end: geometric per-instance orientation
+  detection (full-subtree shape match — hierarchical `rotate_comp`/
+  `flip_comp` keep every token `'N'`, so tokens alone are untrustworthy;
+  ambiguous self-symmetric layouts are disambiguated by a track-phase
+  score, identity preferred when it matches), `transform_topology` /
+  `transform_track_segment` / `transform_net_segment` / `transform_net_via`
+  (C++, shared `OrientMap` algebra with `orient_compose`/`orient_inverse`),
+  mirror-normalized `check_template_tracks` pools (both routed and
+  placement-stage modes), and `align_bottom_up` mirrored-phase math
+  (effective coordinate about the pattern's symmetry center σ, per-direction
+  CRT-combined `K ≡ 2σ_l mod pitch_l`). The plain top-down hier expansion
+  now applies the correct GEOMETRIC transform for ALL 8 orientations
+  (fixing its silent translation-only mis-transform; 90° instances get
+  their pinned per-segment layers dropped with a warning since H↔V swaps).
+  **90°/270° instances of marked cells: ✅ DONE (2026-07-10)** via
+  **rotation-class clone templates** — instead of an H↔V layer-pairing map,
+  the 90° family of a marked cell is split at `run_planner hier` into its
+  own clone template (virtual name `<cell>90`, uniquified; persisted with
+  `bundle.cloned_from`, v19) whose candidates are generated from the
+  rotated reference's actual cell-local floorplan and planned with real
+  per-direction layer costs; within the class every instance is a
+  direction-preserving transform of the class reference, so the existing
+  copy machinery applies unchanged.  The clone never touches
+  cell/component/pin tables (interchange unaffected);
+  check_template_tracks / align_bottom_up group per class.
+- ✅ **`generate_more_topologies` is not hier-aware** — **DONE
+  (2026-07-11)**. The additive command now detects a hier-bundled session
+  and accretes through the same 3-case dispatch as
+  `generate_hier_topologies` (`_generate_hier_topo_one(additive=True)` →
+  shared `_merge_more_candidates`: topo_uid dedup + WL re-sort with
+  selection/dogleg remap). Hints match an HBundle id or first net-name
+  prefix; a replica match redirects to its template; the v15 knob memo now
+  replays on bulk `generate_hier_topologies` too (`_apply_hier_gen_knobs`),
+  so accreted HBundle pools survive regeneration. Post-expansion accretion
+  is refused with the re-run recipe (pools live on expanded wrappers then).
+  `generate_topologies_for_hbundle` stays replace-only by design — parity
+  with the flat `generate_topologies_for_bundle`.
+- ✅ **Dogleg-split templates are not copied** — **DONE (2026-07-11)**.
+  When the cell-local solve needs a dogleg, `_adopt_bottom_up_doglegs`
+  now adopts the split exactly like the flat flow's `_adopt_doglegs`: the
+  template gets the split candidate (appended / slot-overwritten,
+  `_bu_dogleg_slot` bookkeeping reset on every re-plan) fully pinned with
+  the split's layers + placement overrides, and every LOCKED instance
+  gets the orientation-TRANSFORMED split candidate + full pin (instance
+  slots ride the shared `_dogleg_slot`, cleaned by the planner-time
+  `_reset_doglegs`). The fixed copies already carried the split geometry;
+  the adoption makes every wrapper's selected candidate agree with them
+  segment-for-segment (the DNUTS-handoff invariant). Getting the LOCAL
+  solve to even reproduce a flat dogleg exposed three frame-fidelity gaps,
+  all fixed: the local planner's `seg_perp` band centres were not copied
+  to the template plan, the local NUTS never saw the local planner's
+  candidate-extended Hanan grid, and the cell-local floorplan dropped the
+  session's declared corner margin AND min-stub lengths
+  (`_apply_fp_session_settings`; min-stub deliberately NOT retrofitted
+  onto the depth-projection / cross-level frames — that measurably
+  regressed tuned hier flows and belongs to a golden review).
+- ✅ **Resume from a pre-`run_nuts` checkpoint loses NUTS-copy
+  uniformity** — **DONE (2026-07-11)**. `load_pipeline expanded` now also
+  rebuilds the pre-expansion TEMPLATE wrappers
+  (`_restore_bottom_up_templates`, sharing the extracted
+  `_restore_wrapper` loader body): the canonical parents of the expanded
+  rows, validated against their OWN cell-local floorplans (their block
+  names are cell-local), with the v18-persisted local-solve selection
+  restored as the full pin stage (b) requires. A pre-`run_nuts` resume
+  then re-runs the cell-local solve and keeps uniform per-instance
+  copies; a post-`run_nuts` resume still prefers the persisted routing
+  (exact — `_bu_fixed_from_resume`, cleared by a re-plan), and a
+  template without a usable persisted selection falls back per-instance
+  LOUD as before. Note: re-running `run_planner hier` on a resumed
+  (post-expansion) session remains unsupported (double expansion —
+  pre-existing).
 
 ## Recently resolved (verified on main, 2026-07-09)
 
