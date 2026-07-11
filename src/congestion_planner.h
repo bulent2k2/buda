@@ -177,16 +177,18 @@ public:
     //                        less (default: 25% of the larger grid extent)
     //   "kPeak"            — peak-band-utilization cost (default 0 = OFF):
     //                        each segment additionally pays kPeak * its worst
-    //                        band's post-charge fill fraction (usage+eff+pitch)
-    //                        / cap.  The overflow-only kCong term is ZERO below
-    //                        capacity, so without this a candidate loading a
-    //                        band to 95% scores the same as one loading it to
-    //                        10% — routability-blind selection (wishlist-
-    //                        planner "Selection basis" lever 1).  With kPeak
-    //                        set, a topology that concentrates demand on one
-    //                        nearly-full band (a spine through a saturated
-    //                        column) loses to one that spreads it (a BITRUNK
-    //                        tree), before any overflow materializes.
+    //                        band's EXISTING fill fraction (usage/cap,
+    //                        pre-charge — see peak_util_segment for why
+    //                        post-charge was measured and rejected).  The
+    //                        overflow-only kCong term is ZERO below capacity,
+    //                        so without this a candidate headed into a band
+    //                        others filled to 95% scores the same as one
+    //                        using an empty band — routability-blind
+    //                        selection (wishlist-planner "Selection basis"
+    //                        lever 1).  With kPeak set, selection (and the
+    //                        slide-window band choice in best_band_perp)
+    //                        steers off nearly-full bands before any
+    //                        overflow materializes.
     void set_planner_param(const std::string& name, double value);
     // Minimum inter-bus spacing, mirroring NUTSEngine::set_track_pitch.  The
     // band books reserve one pitch of margin per additional bus in a band so a
@@ -424,13 +426,15 @@ private:
     // overflow-only — ZERO below capacity — so candidate ranking is blind to
     // how full a band gets until it bursts.  With kPeak_ > 0 each segment
     // additionally pays kPeak_ * peak_util_segment(...): its worst band's
-    // post-charge fill fraction.  This is what lets a two-level BITRUNK tree
-    // (spreads a column's demand across branch trunks, honest WL estimate
-    // higher) outrank a single trunk+MST spine that saturates one band.
-    // Default 0 = OFF: the term is not even evaluated, so existing flows are
-    // bit-identical.  Suggested starting value when opting in: 0.05-0.2 (a
-    // full band then costs about as much as 50-200 units of extra estimated
-    // wirelength at the default kWL 0.001).
+    // EXISTING fill fraction (usage/cap, pre-charge — see peak_util_segment
+    // for why post-charge was measured and rejected), and the same term
+    // joins best_band_perp's slide-window band choice.  This is what lets a
+    // candidate avoiding a loaded corridor outrank one that squeezes into
+    // it.  Default 0 = OFF: the term is not even evaluated, so existing
+    // flows are bit-identical.  Suggested starting value when opting in:
+    // 0.05-0.1 (a full band then costs about as much as 50-100 units of
+    // extra estimated wirelength at the default kWL 0.001; 0.2 was measured
+    // to over-steer on tc3a).
     double kPeak_            = 0.0;
     // Span reference for scaling the non-TOP penalty: a segment of length
     // base_span_ref_ (or longer) pays the full base_cost_non_top_; shorter
