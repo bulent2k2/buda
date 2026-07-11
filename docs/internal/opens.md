@@ -62,8 +62,12 @@ noted.)*
    farness-ranked candidates from beyond the 8-cheapest-estimate window,
    so a higher-estimate class (OOB trunk, BITRUNK tree) is promotable
    exactly when every cheap alternate fails — goldens byte-identical,
-   big2 stage-a residual overlaps 1→0. Remaining: the kPeak default-on
-   decision (big2 is the concrete double-steer case to debug).
+   big2 stage-a residual overlaps 1→0. The kPeak default-on question is
+   **decided: stays opt-in** — big2's plain pipeline strands two wide
+   trunks on supply-poor bands at every tested value (`peak_util` is
+   blind to absolute signal-track supply; both capacity modes), though
+   negotiate+ripup fully heal it. Reopener: a supply-aware `peak_util`
+   (see wishlist-planner).
 ### Bottom-up template planning follow-ons (added 2026-07-10)
 
 - ✅ **Orientation-aware instance copying** — **DONE (2026-07-10, mirrors +

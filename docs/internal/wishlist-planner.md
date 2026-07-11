@@ -166,7 +166,7 @@ missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
 
-## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVERS 1+2 SHIPPED; `kPeak` default flip still open
+## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVERS 1+2 SHIPPED; `kPeak` default DECIDED (stays opt-in)
 
 **Lever 1 as-built (2026-07-10):** `set_planner_param kPeak <w>` adds a
 peak-EXISTING-band-utilization term to the per-segment soft cost
@@ -218,10 +218,33 @@ routability). Tests: `test/tests/test_ripup_class_rerank.py` (pool
 composition: legacy-first, beyond-cap extras, farness ranking, self-trial
 exclusion).
 
-**Still open:** the `kPeak` default-on decision (needs the wl_corpus gate
-below plus a negotiate/ripup interaction study — those loops already fix
-some of what kPeak prevents, and the big2 regression is the concrete
-double-steer case to debug first). The original analysis follows.
+**`kPeak` default decision (2026-07-11): stays opt-in (default 0).**
+The big2 "double-steer" hypothesis was debugged and REJECTED — big2_noviz
+runs the PLAIN pipeline (no negotiate/ripup at all), so the regression is
+pure planner steering meeting DNUTS supply. Measured on top of lever 2:
+- The damage is concentrated and structural: at every tested value
+  (0.05/0.1/0.2) exactly two wide trunk segments (bundle 23 seg 1, 60
+  bits; bundle 25 seg 0, 56 bits) are steered onto M4 windows with
+  near-zero real signal-track supply and strand completely (0 bits
+  placed, ~104–116 opens vs 0 baseline). `peak_util` prices *relative*
+  existing load (`usage/cap`), so an almost-supply-free band at
+  utilization 0 looks maximally attractive — the term is blind to
+  *absolute* supply.
+- NOT a width-model artifact: `run_planner signal_tracks` + kPeak 0.1
+  shows the identical 6 overlaps / 116 opens.
+- The feedback loops fully heal it: big2 + kPeak 0.1 +
+  `negotiate_congestion` + `ripup_reroute` reaches 0 overlaps / 0 opens —
+  the same endpoint as the baseline healed run. So the knob is safe (and
+  useful) in flows that run the loops; a *default* must not depend on
+  them.
+- The best value is flow-dependent and non-monotonic: mix optimum is 0.1
+  (190→128 unplaced, −33%; 0.2 backslides to 169), channel_stress heals
+  at 0.1, tc3a clean at 0.05–0.1.
+**Reopener (the follow-on lever):** a supply-aware `peak_util` — treat a
+band whose absolute signal-track supply within the segment's span cannot
+host the bundle's bit count as fully utilized (util ≥ 1) instead of
+attractive-empty. That removes the big2 failure mode at its root and
+would justify re-running this decision. The original analysis follows.
 
 **What.** The planner selects one candidate per bundle by a cost model
 (`kCong·congestion + kSpan·span + base_cost_non_top + kWL·wirelength`, see
