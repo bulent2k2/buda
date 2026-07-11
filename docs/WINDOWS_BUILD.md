@@ -36,11 +36,15 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 
 python -m pip install --upgrade pip
-python -m pip install pybind11 pytest pytest-bdd matplotlib
+python -m pip install pybind11 pytest pytest-bdd matplotlib numpy
+python -m pip install pytest-xdist          # optional: parallel test runs
 ```
 
 If Python 3.13 is not installed, replace `py -3.13` with the installed 64-bit
 Python version, for example `py -3.12` or `python`.
+
+(See [build_test_dependencies.md](build_test_dependencies.md) for the full
+required / optional / bundled dependency reference.)
 
 Confirm tkinter is available if you plan to use the GUI tools:
 
@@ -71,10 +75,12 @@ Set `PYTHONPATH` so Python can find the compiled extension and BUDA scripts:
 $env:PYTHONPATH = "$PWD\build;$PWD\src;$PWD\tools;$env:PYTHONPATH"
 ```
 
-Run tests:
+Run tests (the fast tier; add `-m "not slow"` for the mid tier, `-o addopts=""`
+for everything):
 
 ```powershell
 pytest -q
+pytest -q -m "not slow" -n auto --dist loadfile    # mid tier, parallel (needs pytest-xdist)
 ```
 
 Run a BUDA script:
@@ -101,10 +107,12 @@ usually under `build\Release`. Set `PYTHONPATH` accordingly:
 $env:PYTHONPATH = "$PWD\build\Release;$PWD\build;$PWD\src;$PWD\tools;$env:PYTHONPATH"
 ```
 
-Run tests:
+Run tests (the fast tier; add `-m "not slow"` for the mid tier, `-o addopts=""`
+for everything):
 
 ```powershell
 pytest -q
+pytest -q -m "not slow" -n auto --dist loadfile    # mid tier, parallel (needs pytest-xdist)
 ```
 
 Run a BUDA script:

@@ -30,6 +30,18 @@ _CELLS = [os.path.join(_ROOT, "flow", f)
           for f in ("dnuts1.buda", "dnuts2.buda", "channel_stress.buda")]
 
 
+@pytest.fixture(scope="module")
+def default_demo_bdb(tmp_path_factory):
+    """Build the default demo (`_CELLS`, seed=1) ONCE for the read-only tests
+    that need it. The BDB assembly is ~4s and several tests otherwise rebuild
+    the identical design; sharing collapses those into a single build. Tests
+    using this fixture must treat the BDB as READ-ONLY (a test that runs the
+    bundler / planner, which persist into the BDB, builds its own instead)."""
+    path = str(tmp_path_factory.mktemp("demo_default") / "default.bdb")
+    build_hier_demo.build(path, _CELLS, seed=1)
+    return path
+
+
 def _top_bus_coverage(db):
     """Map each depth-1 instance → number of DISTINCT top buses touching it."""
     cid2name = {c.id: c.name for c in db.all_components()}
@@ -147,11 +159,10 @@ def test_optimize_is_deterministic(tmp_path):
     assert _inst_boxes(a) == _inst_boxes(b)
 
 
-def test_export_flow_covers_full_hierarchy(tmp_path):
+def test_export_flow_covers_full_hierarchy(tmp_path, default_demo_bdb):
     # Export Flow must report the design's full depth and load every level.
     import floorplanner_commands as fpc
-    bdb = str(tmp_path / "full.bdb")
-    build_hier_demo.build(bdb, _CELLS, seed=1)        # chip(0) → inst(1) → leaf(2)
+    bdb = default_demo_bdb                             # chip(0) → inst(1) → leaf(2)
     state = fpc.load_bdb(bdb)
     assert fpc.design_max_depth(state) == 2
     script = str(tmp_path / "full_flow.buda")
@@ -186,11 +197,8 @@ def test_hier_flow_run_nuts_does_not_crash(tmp_path):
     assert len(sess.nuts_result.segments) > 0
 
 
-def test_build_hier_demo_hierarchy_and_buses(tmp_path):
-    out = str(tmp_path / "hier.bdb")
-    build_hier_demo.build(out, _CELLS, seed=1)
-
-    db = buda_db.BDB(out)
+def test_build_hier_demo_hierarchy_and_buses(default_demo_bdb):
+    db = buda_db.BDB(default_demo_bdb)
     comps = db.all_components()
     by_depth = {}
     for c in comps:
@@ -212,10 +220,8 @@ def test_build_hier_demo_hierarchy_and_buses(tmp_path):
     assert min(_top_bus_coverage(db).values()) >= 3
 
 
-def test_cell_internal_nets_replicated_per_instance(tmp_path):
-    out = str(tmp_path / "cell.bdb")
-    build_hier_demo.build(out, _CELLS, seed=1)
-    names = {n.name for n in buda_db.BDB(out).all_nets()}
+def test_cell_internal_nets_replicated_per_instance(default_demo_bdb):
+    names = {n.name for n in buda_db.BDB(default_demo_bdb).all_nets()}
     # Same cell net exists once per instance, with the instance-path prefix.
     assert "chip/i_dnuts1_0/n11_0" in names
     assert "chip/i_dnuts1_1/n11_0" in names
@@ -225,10 +231,8 @@ def test_cell_internal_nets_replicated_per_instance(tmp_path):
     assert any(n.startswith("chip/i_chan_0/") for n in names)
 
 
-def test_cell_internal_nets_are_intra_instance(tmp_path):
-    out = str(tmp_path / "intra.bdb")
-    build_hier_demo.build(out, _CELLS, seed=1)
-    db = buda_db.BDB(out)
+def test_cell_internal_nets_are_intra_instance(default_demo_bdb):
+    db = buda_db.BDB(default_demo_bdb)
     cid2name = {c.id: c.name for c in db.all_components()}
     nid = {n.name: n.id for n in db.all_nets()}["chip/i_dnuts1_0/n11_0"]
     pins = [p for p in db.all_pins() if p.net_id == nid]

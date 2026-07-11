@@ -8,18 +8,28 @@ marker scheme that lets `bb` run a fast subset for the inner dev loop.
 > MPLBACKEND=Agg pytest -o addopts="" -p no:cacheprovider --durations=0 -q
 > ```
 > Absolute times are from the development machine (Apple Silicon); treat them
-> as relative. Last measured: 2026-06-19.
+> as relative. Last measured: 2026-06-19 (per-file table); mid-tier total
+> refreshed 2026-07-11.
+>
+> **The `mid` tier now runs in parallel** — see
+> [parallelism.md](parallelism.md). The times below are *serial* per-test call
+> times (still the right lens for spotting slow tests); the mid-tier wall time
+> under `bb -m` is ~3× lower with `pytest-xdist`.
 
 ## Tiers (markers)
 
 Tests are split into three cumulative tiers via pytest markers (registered in
 `pytest.ini`). The default run excludes `mid` and `slow`:
 
-| Tier | Marker | What | Tests | Time | Run with |
+| Tier | Marker | What | Tests | Time (serial) | Run with |
 |---|---|---|---:|---:|---|
-| **fast** | *(none)* | unit / component / logic tests | ~632 | **< 10s** | `bb -t` / `pytest` |
-| **mid** | `mid` | full-pipeline `.buda` scripts + BDB/interchange/floorplanner round-trips | ~360 | **~40s** | `bb -m` |
+| **fast** | *(none)* | unit / component / logic tests | ~680 | **~10s** | `bb -t` / `pytest` |
+| **mid** | `mid` | full-pipeline `.buda` scripts + BDB/interchange/floorplanner round-trips | ~390 | **~7 min → ~2 min parallel** | `bb -m` |
 | **slow** | `slow` | SA/GA placement-optimizer storms | 2 | **~19s** | `bb -s` |
+
+> The mid tier grew from ~40s (2026-06) to ~7 min serial as the ripup / hier /
+> viz integration suites filled in — a long tail (~6 tests are ~65%), which is
+> why it's parallelized rather than re-tiered. See [parallelism.md](parallelism.md).
 
 - The **fast** tier is the default inner-loop check — it now targets **< 10s**
   so the edit→test loop stays snappy. It skips every subprocess-spawning flow,

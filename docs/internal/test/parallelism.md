@@ -1,0 +1,121 @@
+# Parallel test runs (pytest-xdist)
+
+The `mid` tier grew from ~40s (2026-06) to **~7 min** as the viz / ripup / hier
+integration suites filled in (429s / 391 tests on a 4-core Linux box;
+~5 min on Apple Silicon). This note records why we parallelize rather than
+re-tier, and how it's wired.
+
+## Profile the RIGHT thing — rebuild, and mind the markers
+
+> ⚠️ **Always `bin/bb` (rebuild) before profiling, and profile `-m "not slow"`
+> (what `bb -m` actually runs), not `-m mid`.** Two easy mistakes skewed the
+> first read of this:
+> - A **stale build** inflated `test_ripup_reroute`'s big2 tests to ~37s each
+>   (~119s for the file); on a current build they are ~2.6s each (~13s total).
+> - `-m mid` *selects* the `mid` marker and so **includes** tests that are ALSO
+>   `slow` — e.g. `test_nuts_placement_golden[mix.buda]` (62s) is `@slow` and is
+>   excluded from `bb -m`. Profile with `-m "mid and not slow"`.
+
+On a current build, `pytest -m "mid and not slow" --durations` shows the mid
+tier is **breadth of integration tests**, each a few seconds — mostly viz tests
+(every one builds a full matplotlib `BudaVisualizer`) and `build_hier_demo`
+(each assembles a hierarchical BDB), 3–16s apiece, with no single giant test.
+
+A symmetric split of `mid` into three sub-tiers (mid-fast / mid-mid / mid-slow)
+was still rejected: it yields **five** tiers to remember and forces a
+hand-classification of every new test. Two better levers:
+
+1. **Parallelize** — these tests are independent and CPU-bound (this doc).
+2. Speed up the heaviest individual tests where it's free (see below).
+
+## Setup: `-n auto --dist loadfile`
+
+`pip install pytest-xdist`, then `bb -m` / `bb -s` auto-parallelize when xdist is
+importable (the **fast** tier stays serial — it is ~10s and worker startup
+wouldn't pay off). Direct invocation:
+
+```bash
+pytest -o addopts="" -m "not slow" -n auto --dist loadfile      # mid, parallel
+```
+
+Measured (4-core Linux, after a clean build): **429s → 133s, 391 passed, 0
+failures — ~3.2×.** On an 8–10-core Mac the speedup is larger, bounded by the
+heaviest single *file* (see below).
+
+### Why `--dist loadfile` (not the default per-test `load`)
+
+`loadfile` keeps every test in a file on **one** worker. Several tests share a
+fixture path next to a common `.buda` — e.g. the viz tests write a selection
+sidecar `flow/<stem>.json` beside the flow they build, and many use
+`dnuts1.buda`. Under the default per-test `load`, two such tests land on
+different workers and **race on the same sidecar/log file**. `loadfile`
+serializes within a file, so those never cross workers, while different files
+still run in parallel — which is where the long-tail files live anyway.
+
+**Rule for the next person adding a flow test:** `loadfile` only protects
+*same-file* sharing. Cross-file safety rests on two invariants that hold today
+but are unstated in code — keep them true: (1) **no two test files drive the
+same flow via the CLI subprocess** (`bin/buda …` / `subprocess.run`), because
+both would write the same `flow/log/<stem>_flow.log` and race across workers;
+and (2) **in-process runs don't write flow logs** — a bare `BudaSession` (e.g.
+the golden corpus via `nuts_snapshot.run_flow`) never sets `_flow_log` (only
+`buda_cli.main` does), so in-process reuse of a flow across files is safe. So:
+add a subprocess flow test only for a flow no other file runs that way, or run
+it in-process. If you make `run_flow` log-faithful, this invariant changes and
+per-flow paths must move under `tmp_path`.
+
+On this 4-core box the default per-test `load` measured the *same* 132.78s (also
+0 failures) — with only 4 cores the run is CPU-bound (429s / 4 ≈ 107s + overhead),
+so the distribution mode doesn't move wall time, and `loadfile`'s determinism is
+free. A single clean per-test run does **not** prove the suite is race-free
+(races are timing-dependent), so `loadfile` stays the default.
+
+The trade-off shows up at higher core counts: `loadfile`'s floor is the heaviest
+single *file* (`test_ripup_reroute`, ~120s in one file, can't be split), whereas
+per-test `load`'s floor is the heaviest single *test* (`nuts_golden[mix.buda]`,
+62s). On an 8+-core Mac, per-test `load` could therefore beat `loadfile` — but
+only once the viz/flow tests are made sidecar-isolated (unique `tmp_path` per
+test) so per-test distribution can't race. That isolation pass is deferred as
+future work; until then, `loadfile` is the safe default.
+
+### Gotcha: rebuild first
+
+A parallel run that suddenly shows ~100 failures with `AttributeError: '...'
+object has no attribute '...'` is almost always a **stale build**, not an xdist
+race — the compiled `buda`/`buda_db` in `build/` lags the source. `bb`
+rebuilds before testing; a bare `pytest` does not. Rebuild (`bin/bb`) and re-run
+before diagnosing parallelism.
+
+## Controls
+
+| Want | Do |
+|---|---|
+| Parallel mid/slow (default when xdist present) | `bb -m` / `bb -s` |
+| Pin worker count | `BB_JOBS=8 bb -m` |
+| Force serial | `BB_JOBS=0 bb -m` (or uninstall xdist) |
+| Fast tier | always serial (`bb -t`) |
+
+## Surgical speedups applied
+
+Two safe, coverage-preserving trims to the heaviest individual tests:
+
+- **`test_build_hier_demo`** — 4 read-only tests each rebuilt the identical
+  default demo (`_CELLS`, seed=1, ~4s of BDB assembly). A module-scoped
+  `default_demo_bdb` fixture builds it once and shares it read-only (tests that
+  run the bundler/planner, which persist into the BDB, still build their own).
+  File: ~64s → ~46s.
+- **`test_abstract_vias_hidden_in_detailed_mode`** — a `range(3)` detailed
+  on/off loop drove ~12 full viz redraws; one leave/re-enter round-trip proves
+  the re-gating just as well. 16.5s → ~9s.
+
+Not touched: `test_ripup_reroute` is inherently iterative and each test mutates
+a fresh `BudaSession` (no shareable setup); reducing its iteration counts would
+change what it validates.
+
+## Regenerate the numbers
+
+```bash
+bin/bb                                                   # rebuild first!
+pytest -o addopts="" -m "not slow" --durations=30 -q     # serial, per-test times
+time pytest -o addopts="" -m "not slow" -n auto --dist loadfile -q   # parallel
+```
