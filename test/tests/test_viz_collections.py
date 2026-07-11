@@ -382,6 +382,34 @@ def test_design_stats_header_counts(monkeypatch):
         viz._btn_all_bundles.label.get_text()
 
 
+def test_layer_stats_header_counts(monkeypatch):
+    """The layer-panel header reports the design-wide NUTS segment/bit totals —
+    the parallel of the bundle panel's 'buses · nets' line — and those totals
+    equal the sum of the per-layer breakdown the rows show."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert viz._nuts_result is not None          # dnuts1 runs NUTS
+
+    nseg, nbits = viz._nuts_seg_counts()
+    placed = [ts for ts in viz._nuts_result.segments if ts.placed]
+    assert nseg == len(placed), f"expected {len(placed)} placed segs, got {nseg}"
+    assert nbits == sum(viz._bundle_bits(ts.bundle_id) for ts in placed)
+
+    # Totals must equal the per-layer breakdown drawn in the layer rows.
+    per_layer_segs = {}
+    per_layer_bits = {}
+    for ts in placed:
+        per_layer_segs[ts.layer] = per_layer_segs.get(ts.layer, 0) + 1
+        per_layer_bits[ts.layer] = (per_layer_bits.get(ts.layer, 0)
+                                    + viz._bundle_bits(ts.bundle_id))
+    assert nseg == sum(per_layer_segs.values())
+    assert nbits == sum(per_layer_bits.values())
+
+    # The always-on header above the Layer panel shows the compact total line.
+    assert viz._ax_layer_stats is not None
+    texts = [t.get_text() for t in viz._ax_layer_stats.texts]
+    assert texts == [f"{nseg} segments · {nbits} wires"], texts
+
+
 def test_bundle_rows_drop_bits_suffix_when_detailed(monkeypatch):
     """In detailed mode each row shows a right-aligned [unplaced/total] column.
     The redundant '[bits]' suffix is dropped from the row label so it can't
