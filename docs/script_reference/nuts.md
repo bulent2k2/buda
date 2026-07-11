@@ -195,7 +195,14 @@ other instances.
 **Move sources (what a contender is allowed to try):**
 - **Index alternates (always on).** Re-pin the bundle to one of its *other*
   candidate topologies, tried relevance-first (candidates farthest from the
-  measured contention first).
+  measured contention first). The base pool is the 8 cheapest-estimate
+  candidates (they are WL-sorted); under measured contention the top-8
+  farness-ranked candidates from *beyond* that window are appended after it,
+  so a higher-estimate candidate class (an OOB detour trunk, a two-level
+  BITRUNK tree — always past index 8 on fan-out bundles) becomes reachable.
+  A promotion commits only on a *strictly* better measured (opens, overlaps)
+  metric: the cheap candidates are tried first and the commit comparison is
+  strict, so at an equal metric the cheaper move always wins the tie.
 - **Per-edge MST L/Z flip (`use_edge_candidates`, off by default).** When the
   bundle's *selected* candidate is an MST type (incl. `TRUNK+MST` hybrids, whose
   legs are edge-tagged), also flip the L/Z bend of that candidate's **contended**

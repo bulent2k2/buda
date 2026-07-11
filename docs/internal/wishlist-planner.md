@@ -166,7 +166,7 @@ missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
 
-## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVER 1 SHIPPED (opt-in `kPeak`); default flip + lever 2 still open
+## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVERS 1+2 SHIPPED; `kPeak` default DECIDED (stays opt-in)
 
 **Lever 1 as-built (2026-07-10):** `set_planner_param kPeak <w>` adds a
 peak-EXISTING-band-utilization term to the per-segment soft cost
@@ -190,12 +190,64 @@ loops double-steer untuned. Tests: `test/tests/test_planner_kpeak.py`
 (loaded-corridor steering repro + off-is-off + param recognition); docs:
 `docs/script_reference/planner.md`.
 
-**Still open:** the default-on decision (needs the wl_corpus gate below
-plus a negotiate/ripup interaction study — those loops already fix some of
-what kPeak prevents, and the big2 regression is the concrete double-steer
-case to debug first), and **lever 2** (QoR-measured re-rank: let
-negotiate/ripup promote a higher-estimate candidate CLASS, not just index
-alternates). The original analysis follows.
+**Lever 2 as-built (2026-07-11):** the QoR-measured re-rank lives in
+`ripup_reroute`'s trial-pool builder (`_rr_candidate_order`,
+`src/buda_session/ripup.py`). Candidates are WL-sorted
+(`annotate_and_sort`), and the pool used to be `range(min(n, 8))` — the 8
+cheapest estimates only, so on a fan-out trunk bundle (35–45 candidates,
+OOB trunks / BITRUNK trees at indices 8–40) no measured contention could
+ever promote a higher-estimate class: the trial that would test it was
+structurally unreachable (verified on `flow/datapath_multi_trunk.buda`:
+every bundle's two-level trees sit beyond the first-8 window). Now, when
+the contender has measured contention sites, the top-8 farness-ranked
+candidates from BEYOND the first-8 window are APPENDED after the legacy
+pool. The ripup loop keeps the best measured metric over a contender's
+move list with a STRICT `<`, so the cheap-first order is load-bearing: an
+extra displaces a cheap fix only by a STRICTLY better (opens, overlaps)
+metric — at an equal metric the earlier (cheap) move always wins the tie,
+so routes change only where a promotion strictly improves the measured
+metric (goldens byte-identical; mix.buda verified identical to main).
+Farness-first over the WHOLE pool was measured and rejected: it put the
+far expensive candidate BEFORE the cheap same-effect one, handing it the
+tie (mix.buda bundle 85: idx 26 over idx 5, +2% abstract WL at an equal
+metric). Measured on big2
+(`tc3b_flat_x5`): stage-a residual overlaps after ripup 1→0 (bundle 27
+promoted to index 11, unreachable before), abstract WL −0.18%, detailed WL
++0.04%, stage-b endpoint unchanged (0/0). `negotiate_congestion` needs no
+companion change — its `replan_bundle` re-plans UNPINNED, scoring ALL
+candidates through the cost model, so every class was already reachable
+there (and lever 1's `kPeak` is the knob that biases that model toward
+routability). Tests: `test/tests/test_ripup_class_rerank.py` (pool
+composition: legacy-first, beyond-cap extras, farness ranking, self-trial
+exclusion).
+
+**`kPeak` default decision (2026-07-11): stays opt-in (default 0).**
+The big2 "double-steer" hypothesis was debugged and REJECTED — big2_noviz
+runs the PLAIN pipeline (no negotiate/ripup at all), so the regression is
+pure planner steering meeting DNUTS supply. Measured on top of lever 2:
+- The damage is concentrated and structural: at every tested value
+  (0.05/0.1/0.2) exactly two wide trunk segments (bundle 23 seg 1, 60
+  bits; bundle 25 seg 0, 56 bits) are steered onto M4 windows with
+  near-zero real signal-track supply and strand completely (0 bits
+  placed, ~104–116 opens vs 0 baseline). `peak_util` prices *relative*
+  existing load (`usage/cap`), so an almost-supply-free band at
+  utilization 0 looks maximally attractive — the term is blind to
+  *absolute* supply.
+- NOT a width-model artifact: `run_planner signal_tracks` + kPeak 0.1
+  shows the identical 6 overlaps / 116 opens.
+- The feedback loops fully heal it: big2 + kPeak 0.1 +
+  `negotiate_congestion` + `ripup_reroute` reaches 0 overlaps / 0 opens —
+  the same endpoint as the baseline healed run. So the knob is safe (and
+  useful) in flows that run the loops; a *default* must not depend on
+  them.
+- The best value is flow-dependent and non-monotonic: mix optimum is 0.1
+  (190→128 unplaced, −33%; 0.2 backslides to 169), channel_stress heals
+  at 0.1, tc3a clean at 0.05–0.1.
+**Reopener (the follow-on lever):** a supply-aware `peak_util` — treat a
+band whose absolute signal-track supply within the segment's span cannot
+host the bundle's bit count as fully utilized (util ≥ 1) instead of
+attractive-empty. That removes the big2 failure mode at its root and
+would justify re-running this decision. The original analysis follows.
 
 **What.** The planner selects one candidate per bundle by a cost model
 (`kCong·congestion + kSpan·span + base_cost_non_top + kWL·wirelength`, see
@@ -226,8 +278,8 @@ WL, for the candidate classes that route better than they estimate:
 - a **QoR-measured re-rank** — the `ripup_reroute` / `negotiate_congestion`
   machinery already re-plans against *actual* NUTS overlaps and DNUTS opens; let it
   promote a datapath tree when the committed trunk+MST leaves residual column
-  contention (it currently only re-pins index alternates, never up-ranks a
-  higher-estimate class).
+  contention (it used to only re-pin the 8 cheapest index alternates, never
+  up-ranking a higher-estimate class — SHIPPED as lever 2, see as-built above).
 
 **Related, tracked in [`wishlist-topo.md`](wishlist-topo.md):** honest
 generation-time **trunk-tail tightening** of `TRUNK+MST` hybrids (their dangling

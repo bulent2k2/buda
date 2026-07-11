@@ -354,17 +354,38 @@ class RipupMixin:
 
     def _rr_candidate_order(self, w, old_tidx, stage):
         """Alternate-candidate trial order for one contender (wishlist-ripup
-        item 4): candidates whose same-orientation segments sit FARTHEST from
-        the bundle's measured contention sites are tried first — they are the
-        likeliest to move the offending wire out of the congested window, so
-        the first-improving scan usually stops after one or two trials instead
-        of walking all eight.  Pure reordering (same candidate set, same cap):
-        the reachable moves are unchanged, only found sooner."""
-        n = min(len(w.input.candidates), _RR_MAX_CANDIDATES_PER_BUNDLE)
+        item 4 + QoR-measured class re-rank): candidates whose
+        same-orientation segments sit FARTHEST from the bundle's measured
+        contention sites are tried first — they are the likeliest to move the
+        offending wire out of the congested window, so the first-improving
+        scan usually stops after one or two trials instead of walking all
+        eight.  Candidates are WL-sorted (annotate_and_sort), so the legacy
+        first-N pool restricts trials to the N cheapest estimates forever — a
+        higher-estimate class (e.g. a two-level BITRUNK tree at index 20)
+        could never be promoted no matter what the measured metric says.
+        When contention sites exist, the top-N farness-ranked candidates from
+        BEYOND the first-N window are therefore APPENDED after the legacy
+        pool.  The caller's per-contender scan keeps the best measured
+        metric over the whole move list with a STRICT `<` (ripup loop), so
+        ordering cheap-first is load-bearing: an extra can displace a cheap
+        fix only by a STRICTLY better (opens, overlaps) metric — at an equal
+        metric the earlier (cheap) move always wins the tie.  That is
+        precisely the QoR-gated promotion this exists for; where no extra
+        strictly beats the cheap best, routes are unchanged (the golden
+        corpora guard that — mix.buda is byte-identical, and big2's
+        promotion clears its final residual overlap).  Farness-first over
+        the WHOLE pool was tried and rejected: it put the far expensive
+        candidate BEFORE the cheap same-effect one, handing it the tie
+        (mix.buda bundle 85: idx 26 over idx 5, +2% abstract WL at an equal
+        metric).  With no sites the legacy first-N pool is returned (nothing
+        to rank by, no evidence to justify extra trials)."""
+        cap = _RR_MAX_CANDIDATES_PER_BUNDLE
+        n = min(len(w.input.candidates), cap)
         idxs = [i for i in range(n) if i != old_tidx]
         sites = self._rr_contention_centres(stage, w.input.original_bundle.id)
         if not sites:
             return idxs
+        extras = [i for i in range(n, len(w.input.candidates)) if i != old_tidx]
         def farness(i):
             cand = w.input.candidates[i]
             worst = None
@@ -381,7 +402,8 @@ class RipupMixin:
                 if best is not None and (worst is None or best < worst):
                     worst = best
             return worst if worst is not None else 0.0
-        return sorted(idxs, key=farness, reverse=True)
+        return (sorted(idxs, key=farness, reverse=True)
+                + sorted(extras, key=farness, reverse=True)[:cap])
 
     def _gen_hv(self):
         """The generator's top H / top V layer ids (used to hint flipped MST legs

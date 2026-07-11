@@ -133,6 +133,14 @@ explicitly out of scope for v1.
    the residual cost is the terminal no-improvement sweep, which a filter
    could cut only by risking exactly that.  With negotiation now clearing the
    bulk before ripup runs, the remaining sweep is small.
+   *Extended (2026-07-11, wishlist-planner "Selection basis" lever 2):* under
+   measured contention the pool is no longer only the first-8 window — the
+   top-8 farness-ranked candidates from BEYOND it are appended after the
+   legacy pool, so a higher-estimate class (OOB trunk, BITRUNK tree — always
+   past index 8 in the WL-sorted list) becomes promotable exactly when every
+   cheap alternate fails.  Legacy-first ordering keeps routes unchanged
+   whenever a cheap move improves (goldens byte-identical); big2 stage-a
+   residual overlaps 1→0.  See `test/tests/test_ripup_class_rerank.py`.
 
 5. **Tiny synthetic stage-b (DNUTS-open) canned fixture. — ✅ RESOLVED.**
    `_build_dnuts_open_session` (`test/tests/test_ripup_reroute.py`): an
