@@ -4,8 +4,7 @@ What remains to focus on, ranked by value/effort. This page is a **snapshot
 index** (last verified against `main`: **2026-07-09**, post PR #226/#227) —
 the details, evidence, and where-to-start notes live in the per-subsystem
 wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
-lands, mark it ✅ here *and* in its wishlist file; re-verify the whole list
-against `main` when picking the next piece of work (parallel sessions land
+lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved by <date>*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
