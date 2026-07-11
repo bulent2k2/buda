@@ -52,6 +52,18 @@ different workers and **race on the same sidecar/log file**. `loadfile`
 serializes within a file, so those never cross workers, while different files
 still run in parallel — which is where the long-tail files live anyway.
 
+**Rule for the next person adding a flow test:** `loadfile` only protects
+*same-file* sharing. Cross-file safety rests on two invariants that hold today
+but are unstated in code — keep them true: (1) **no two test files drive the
+same flow via the CLI subprocess** (`bin/buda …` / `subprocess.run`), because
+both would write the same `flow/log/<stem>_flow.log` and race across workers;
+and (2) **in-process runs don't write flow logs** — a bare `BudaSession` (e.g.
+the golden corpus via `nuts_snapshot.run_flow`) never sets `_flow_log` (only
+`buda_cli.main` does), so in-process reuse of a flow across files is safe. So:
+add a subprocess flow test only for a flow no other file runs that way, or run
+it in-process. If you make `run_flow` log-faithful, this invariant changes and
+per-flow paths must move under `tmp_path`.
+
 On this 4-core box the default per-test `load` measured the *same* 132.78s (also
 0 failures) — with only 4 cores the run is CPU-bound (429s / 4 ≈ 107s + overhead),
 so the distribution mode doesn't move wall time, and `loadfile`'s determinism is
