@@ -22,14 +22,19 @@ tools give a round-trip between the flat and hier worlds, which also makes
 ## Usage
 
 ```bash
-python3 tools/buda2bdb.py <cellname.buda> <bdbfile> [-cell <name>]
+python3 tools/buda2bdb.py <cellname.buda> <bdbfile.bdb|bdbfile.bdb.sql> [-cell <name>]
 ```
 
 | Argument / option | Default | Description |
 |---|---|---|
 | `<cellname.buda>` | *(required)* | Input flat `.buda` script |
-| `<bdbfile>` | *(required)* | Target BDB; created if it does not exist |
+| `<bdbfile>` | *(required)* | Target BDB; created if it does not exist. May be a binary `.bdb` or a diffable `.bdb.sql` (or `.sql`) text fixture |
 | `-cell <name>` | filename stem | Cell name to create (e.g. `cpu.buda` → `cpu`) |
+
+A **`.bdb.sql`** target is edited via a throwaway temp binary and serialized
+back to the text form (reusing `tools/bdb_serialize`); an existing `.sql` is
+materialized first, so adding/replacing a cell preserves the cells already in
+the fixture. See [BDB Test-Data Management](internal/bdb_test_data.md).
 
 ### Examples
 
@@ -39,6 +44,9 @@ python3 tools/buda2bdb.py flow/two.buda /tmp/two.bdb
 
 # Add/replace cell "core" in an existing BDB, overriding the name
 python3 tools/buda2bdb.py core_flat.buda soc.bdb -cell core
+
+# Write the result straight to a diffable text fixture
+python3 tools/buda2bdb.py core_flat.buda cells.bdb.sql -cell core
 ```
 
 ---

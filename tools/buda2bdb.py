@@ -3,7 +3,7 @@
 tools/buda2bdb.py — Ingest a flat .buda script into a BDB as a cell.
 
 Usage:
-  python3 tools/buda2bdb.py <cellname.buda> <bdbfile> [-cell <name>]
+  python3 tools/buda2bdb.py <cellname.buda> <bdbfile.bdb|bdbfile.bdb.sql> [-cell <name>]
 
 The script's blocks become the cell's internal blocks, its nets become the
 cell's local nets, and `set_die` (or, when absent, the bounding box of all
@@ -11,6 +11,9 @@ blocks) becomes the cell size.
 
   * The cell name defaults to the input filename stem (cpu.buda -> cell "cpu");
     override with -cell.
+  * <bdbfile> may be a binary `.bdb` or a diffable `.bdb.sql` text fixture; a
+    `.sql` is edited via a temp binary and serialized back (existing cells are
+    preserved, so REPLACE works on a fixture too).
   * If <bdbfile> does not exist it is created.  If it exists, the cell is added.
   * If the cell already exists in the BDB it is REPLACED (its representative
     instance, children, cell_children template rows, synthetic child cells, and
@@ -31,8 +34,10 @@ Out of scope: cell external ports (cell_pin), routing technology (layers/tracks)
 
 import os
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 from typing import Optional
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -48,6 +53,10 @@ except ModuleNotFoundError:
         "Error: buda_db module not found — run 'bin/bb' to build first, "
         "or set PYTHONPATH=build."
     )
+
+# Lets convert() write (and cell-REPLACE into) a diffable *.bdb.sql text fixture
+# as transparently as a binary *.bdb — see convert().
+import bdb_serialize
 
 # Commands that carry data we translate; everything else is ignored.
 _BUS_RE = re.compile(r'^(.+)\[(\d+)(?::(\d+))?\]$')
@@ -298,39 +307,64 @@ def _delete_cell_footprint(bdb_path: str, cell: str) -> None:
 
 def convert(buda_path: str, bdb_path: str, cell: str) -> dict:
     """Parse the script and (re)create `cell` in the BDB.  Returns a small stats
-    dict {cell, w, h, n_blocks, n_nets}."""
+    dict {cell, w, h, n_blocks, n_nets}.
+
+    `bdb_path` may be a binary ``*.bdb`` (edited in place) or a diffable
+    ``*.bdb.sql`` (or ``*.sql``) text fixture: the operation runs on a temp
+    binary — an existing ``.sql`` is materialized first so a cell REPLACE works
+    on a fixture — and the result is serialized back to the ``.sql`` at the end.
+    """
     parsed = parse_script(buda_path)
     if not parsed.blocks:
         sys.exit("Error: no add_block commands found in the script")
     _validate(parsed)
     w, h, ox, oy = _cell_size_and_origin(parsed)
 
-    # Replace an existing cell before rebuilding.
-    _delete_cell_footprint(bdb_path, cell)
+    # Route a *.bdb.sql target through a temp binary (materialize an existing
+    # one first so REPLACE sees prior cells; serialize back at the end).
+    is_sql = bdb_path.endswith(".sql")
+    work_bin = bdb_path
+    tmp_dir = None
+    if is_sql:
+        tmp_dir = tempfile.mkdtemp(prefix="buda_bdb_")
+        work_bin = os.path.join(tmp_dir, os.path.basename(bdb_path)[:-4] or "out.bdb")
+        if os.path.exists(bdb_path):
+            bdb_serialize.load(bdb_path, work_bin)   # existing text -> binary
 
-    db = buda_db.BDB(bdb_path)
-    # 1. Size the parent cell.
-    db.add_cell(cell, w, h)
-    # 2. Define internal structure: a synthetic leaf cell + cell_children row
-    #    per block, with coordinates local to the cell origin.
-    for name, (x1, y1, x2, y2) in parsed.blocks.items():
-        child_cell = f"{cell}__{name}"
-        db.add_cell(child_cell, x2 - x1, y2 - y1)
-        db.add_inst_to_cell(cell, name, child_cell, x1 - ox, y1 - oy)
-    # 3. Materialize the representative instance "<cell>" + its children.
-    db.add_inst(cell, cell, "", 0.0, 0.0)
-    # 4. Create the cell-local nets on the child components.
-    for net in parsed.nets:
-        drv = f"{cell}/{net['drv']}"
-        rcvs = [f"{cell}/{r}" for r in net["rcvs"]]
-        if net["dir"] == "unknown":
-            db.add_net_pins_undirected(net["name"], [drv] + rcvs)
-        elif net["dir"] == "inout":
-            db.add_net_pins_inout(net["name"], [drv] + rcvs)
-        else:
-            db.add_net_pins(net["name"], drv, rcvs)
-    # 5. Size-sync any other instances of this cell already in the BDB.
-    db.resize_cell(cell, w, h)
+    try:
+        # Replace an existing cell before rebuilding.
+        _delete_cell_footprint(work_bin, cell)
+
+        db = buda_db.BDB(work_bin)
+        # 1. Size the parent cell.
+        db.add_cell(cell, w, h)
+        # 2. Define internal structure: a synthetic leaf cell + cell_children row
+        #    per block, with coordinates local to the cell origin.
+        for name, (x1, y1, x2, y2) in parsed.blocks.items():
+            child_cell = f"{cell}__{name}"
+            db.add_cell(child_cell, x2 - x1, y2 - y1)
+            db.add_inst_to_cell(cell, name, child_cell, x1 - ox, y1 - oy)
+        # 3. Materialize the representative instance "<cell>" + its children.
+        db.add_inst(cell, cell, "", 0.0, 0.0)
+        # 4. Create the cell-local nets on the child components.
+        for net in parsed.nets:
+            drv = f"{cell}/{net['drv']}"
+            rcvs = [f"{cell}/{r}" for r in net["rcvs"]]
+            if net["dir"] == "unknown":
+                db.add_net_pins_undirected(net["name"], [drv] + rcvs)
+            elif net["dir"] == "inout":
+                db.add_net_pins_inout(net["name"], [drv] + rcvs)
+            else:
+                db.add_net_pins(net["name"], drv, rcvs)
+        # 5. Size-sync any other instances of this cell already in the BDB.
+        db.resize_cell(cell, w, h)
+
+        if is_sql:
+            del db                                   # flush/close before dump
+            bdb_serialize.dump(work_bin, bdb_path)   # temp binary -> text
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     return {"cell": cell, "w": w, "h": h,
             "n_blocks": len(parsed.blocks), "n_nets": len(parsed.nets)}
@@ -354,7 +388,8 @@ def main() -> None:
             i += 1
 
     if len(positional) < 2:
-        print("Usage: buda2bdb.py <cellname.buda> <bdbfile> [-cell <name>]",
+        print("Usage: buda2bdb.py <cellname.buda> "
+              "<bdbfile.bdb|bdbfile.bdb.sql> [-cell <name>]",
               file=sys.stderr)
         sys.exit(1)
 

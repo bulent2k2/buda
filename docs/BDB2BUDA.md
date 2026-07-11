@@ -29,10 +29,16 @@ Typical uses:
 ## Usage
 
 ```bash
-python3 tools/bdb2buda.py <file.bdb> [options] [-o <output.buda>]
+python3 tools/bdb2buda.py <file.bdb|file.bdb.sql> [options] [-o <output.buda>]
 ```
 
 Output goes to **stdout** unless `-o` is given.
+
+The input may be a binary **`.bdb`** or a diffable **`.bdb.sql`** (or `.sql`)
+text fixture — the checked-in form under `test/tests/data/`. A `.sql` is
+materialized to a throwaway temp binary first (read-only; the source `.sql`
+is never modified), so both produce identical output. See
+[BDB Test-Data Management](internal/bdb_test_data.md).
 
 ### Options
 
@@ -53,6 +59,9 @@ python3 tools/bdb2buda.py design.bdb -cell chip_top -scale 1 -o chip.buda
 
 # Print to stdout and inspect
 python3 tools/bdb2buda.py /tmp/bfp_tc1.bdb | head -20
+
+# Straight from a checked-in diffable text fixture (no binary needed)
+python3 tools/bdb2buda.py test/tests/data/hier_mixed.bdb.sql -o hier_mixed.buda
 ```
 
 ---

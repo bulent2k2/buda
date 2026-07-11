@@ -27,6 +27,7 @@ if _ROOT not in sys.path:
 import buda_db
 from tools import buda2bdb
 from tools import bdb2buda
+from tools import bdb_serialize
 
 
 def _write(tmp_path, name, text):
@@ -243,6 +244,95 @@ def test_roundtrip_via_bdb2buda(tmp_path):
     assert d_in == d_out, f"die: {d_in!r} != {d_out!r}"
     assert b_in == b_out, f"blocks: {b_in} != {b_out}"
     assert c_in == c_out, f"conns: {c_in} != {c_out}"
+
+
+def test_bdb2buda_accepts_bdb_sql_input(tmp_path):
+    # bdb2buda takes a diffable *.bdb.sql text fixture as transparently as a
+    # binary *.bdb (materialized read-only) — identical script from either.
+    src = ("set_die 800 600\n"
+           "add_block a 0 0 100 100\n"
+           "add_block b 300 0 400 100\n"
+           "add_net clk a.o b.i\n")
+    script = _write(tmp_path, "chip.buda", src)
+    bdb = str(tmp_path / "chip.bdb")
+    buda2bdb.convert(script, bdb, "chip")
+
+    sql = str(tmp_path / "chip.bdb.sql")
+    bdb_serialize.dump(bdb, sql)
+
+    out_bin = bdb2buda.convert(bdb, cell_name="chip", scale=1.0)
+    out_sql = bdb2buda.convert(sql, cell_name="chip", scale=1.0)
+    assert out_sql.strip() and out_sql == out_bin
+    # the source .sql is never mutated by conversion (read-only materialize)
+    assert (tmp_path / "chip.bdb.sql").read_text().startswith("--")
+
+    # A malformed .sql fails cleanly as a ValueError (caught by main()).
+    bad = _write(tmp_path, "bad.bdb.sql", "this is not sql;\n")
+    with pytest.raises(ValueError, match="could not read serialized BDB"):
+        bdb2buda.convert(bad)
+
+
+def _comps_from_sql(tmp_path, sql, stem):
+    binp = str(tmp_path / f"{stem}.mat.bdb")
+    bdb_serialize.load(sql, binp)
+    return _comps(binp)
+
+
+def test_buda2bdb_writes_bdb_sql_output(tmp_path):
+    # A *.bdb.sql target is written as diffable text (via a temp binary),
+    # reloading to the same design as a binary target.
+    src = ("set_die 1000 800\n"
+           "add_block a 100 100 300 200\n"
+           "add_block b 400 400 600 500\n"
+           "add_net n0 a.o b.i\n")
+    script = _write(tmp_path, "cpu.buda", src)
+
+    sql = str(tmp_path / "cpu.bdb.sql")
+    stats = buda2bdb.convert(script, sql, "cpu")
+    assert stats["n_blocks"] == 2 and stats["n_nets"] == 1
+    text = (tmp_path / "cpu.bdb.sql").read_text()
+    assert text.startswith("--") and "PRAGMA user_version=" in text
+
+    binp = str(tmp_path / "cpu.bdb")
+    buda2bdb.convert(script, binp, "cpu")
+
+    def key(comps):
+        return sorted((n, c.cell, c.x1, c.y1, c.x2, c.y2)
+                      for n, c in comps.items())
+    assert key(_comps_from_sql(tmp_path, sql, "cpu")) == key(_comps(binp))
+
+
+def test_buda2bdb_replace_into_existing_sql_preserves_other_cells(tmp_path):
+    # Adding a cell INTO an existing *.bdb.sql keeps the cells already there:
+    # the .sql is materialized before editing, not overwritten from scratch.
+    sql = str(tmp_path / "lib.bdb.sql")
+    buda2bdb.convert(_write(tmp_path, "cpu.buda",
+                            "set_die 400 400\nadd_block a 0 0 100 100\n"),
+                     sql, "cpu")
+    buda2bdb.convert(_write(tmp_path, "mem.buda",
+                            "set_die 400 400\nadd_block m 0 0 100 100\n"),
+                     sql, "mem")
+    binp = str(tmp_path / "lib.mat.bdb")
+    bdb_serialize.load(sql, binp)
+    cells = {c.name for c in buda_db.BDB(binp).all_cells()}
+    assert {"cpu", "mem"} <= cells
+
+
+def test_buda2bdb_then_bdb2buda_sql_only_roundtrip(tmp_path):
+    # End-to-end with .bdb.sql on both sides: script -> .bdb.sql (buda2bdb) ->
+    # script (bdb2buda reading the .sql), stable across the round-trip.
+    src = ("set_die 800 600\n"
+           "add_block a 0 0 100 100\n"
+           "add_block b 300 0 400 100\n"
+           "add_net clk a.o b.i\n")
+    script = _write(tmp_path, "chip.buda", src)
+    sql = str(tmp_path / "chip.bdb.sql")
+    buda2bdb.convert(script, sql, "chip")
+
+    out = bdb2buda.convert(sql, cell_name="chip", scale=1.0)
+    d_in, b_in, c_in = _sections(src)
+    d_out, b_out, c_out = _sections(out)
+    assert (d_in, b_in, c_in) == (d_out, b_out, c_out)
 
 
 def test_roundtrip_flow_two(tmp_path):
