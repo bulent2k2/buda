@@ -166,7 +166,36 @@ missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
 
-## Selection basis: rank on measured routability, not the generation-time WL estimate — DEFERRED
+## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVER 1 SHIPPED (opt-in `kPeak`); default flip + lever 2 still open
+
+**Lever 1 as-built (2026-07-10):** `set_planner_param kPeak <w>` adds a
+peak-EXISTING-band-utilization term to the per-segment soft cost
+(`CongestionPlanner::peak_util_segment`): the max `usage/cap` over the
+bands a segment would use, **pre-charge** — post-charge utilization was
+measured and rejected (on an uncongested design it degenerates into an
+intrinsic "narrow channel" penalty that biases against exactly the column
+channels the BITRUNK trees use; datapath WL regressed across the sweep).
+The same term joins the slide-window band choice (`best_band_perp`) — the
+Codex #252 review caught that pricing a band the legacy nearest-band
+tie-break had already chosen steers nothing within the window; with the
+fix the charge itself (and NUTS's `seg_perp`) moves to the emptier band.
+Default `0` skips the term entirely (existing flows bit-identical; goldens
+guard it). Measured at `kPeak 0.1` on the congested corpus:
+**channel_stress heals its 3 keepout-open bits at zero overlap cost**,
+**rnr/mix DNUTS unplaced 190→128 (−33%)**, tc3a_flat stays clean
+(0.05–0.1). **Why not default-on:** big2 (signal_tracks + heavy
+negotiate/ripup healing) prefers the knob off — 5 NUTS overlaps / 0 opens
+baseline vs 6 / ~110 at every tested value — the term and the feedback
+loops double-steer untuned. Tests: `test/tests/test_planner_kpeak.py`
+(loaded-corridor steering repro + off-is-off + param recognition); docs:
+`docs/script_reference/planner.md`.
+
+**Still open:** the default-on decision (needs the wl_corpus gate below
+plus a negotiate/ripup interaction study — those loops already fix some of
+what kPeak prevents, and the big2 regression is the concrete double-steer
+case to debug first), and **lever 2** (QoR-measured re-rank: let
+negotiate/ripup promote a higher-estimate candidate CLASS, not just index
+alternates). The original analysis follows.
 
 **What.** The planner selects one candidate per bundle by a cost model
 (`kCong·congestion + kSpan·span + base_cost_non_top + kWL·wirelength`, see

@@ -35,6 +35,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kWL")               kWL_               = value;
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "kHeight")           kHeight_           = value;
+    else if (name == "kPeak")             kPeak_             = value;
     else if (name == "base_span_ref")     base_span_ref_     = value;
     else if (name == "track_cap_slack")   track_cap_slack_   = value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
@@ -554,6 +555,41 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
     return peak_cost;
 }
 
+// Peak EXISTING band utilization over the bands this segment would use — the
+// routability term behind `set_planner_param kPeak` (see the header).  Unlike
+// cong_cost_segment this is NOT overflow-gated: a band others filled to 95%
+// reports 0.95 even though this segment still fits, so candidate ranking can
+// steer off nearly-full bands before they burst.
+//
+// Deliberately PRE-charge (usage/cap, the candidate's own eff_width excluded
+// from the numerator): post-charge utilization was measured to be the wrong
+// quantity — on an uncongested design it reduces to (eff+pitch)/cap, an
+// intrinsic "how narrow is this channel" penalty that biases AGAINST the
+// column channels the BITRUNK datapath trees deliberately use (datapath WL
+// regressed ~2-20% across the sweep).  Pre-charge is zero on empty bands
+// (the term is inert exactly when there is nothing to route around) and
+// prices only contention accumulated from earlier-committed bundles — plus
+// this candidate's own earlier segments, which plan_bundle applies to the
+// running cut state, so a candidate stacking several stubs into one band
+// prices its own pile-up too.  eff_width is still what steers WHICH band the
+// charge would land in (best_band_perp upstream); it is only excluded from
+// the price.  cap<=0 (blocked) bands are skipped — cong_cost_segment already
+// hard-prices them.
+double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
+                                            int perp_pos_override,
+                                            int slide_lo, int slide_hi) const {
+    bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
+    double peak = 0.0;
+    for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
+        const GlobalCut& c = cuts_[ci];
+        double cap = usable_band_cap(c, b, is_vcut_dir, slide_lo, slide_hi);
+        if (cap <= 0.0) return;
+        double util = c.usage(b) / cap;
+        if (util > peak) peak = util;
+    });
+    return peak;
+}
+
 // Slide-aware band choice.  cong_cost_segment charges the whole bus to the
 // single band containing the lookup coordinate; using the slide-interval
 // centre for that lookup is a point estimate that can land in an arbitrarily
@@ -569,9 +605,25 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     const int centre = (slide_lo + slide_hi) / 2;
     if ((int)grid.size() < 2) return centre;
 
+    // Band-choice metric.  cong_cost_segment is overflow-only — every
+    // below-capacity band in the slide window costs 0, and the nearest wins
+    // the tie — so with kPeak enabled the EXISTING utilization must join the
+    // metric here too, or the routability term would only price the band the
+    // legacy tie-break already chose: the charge (and NUTS's seg_perp) could
+    // still land in a nearly-full band with an empty one available in the
+    // same window (Codex #252 P2).  Gated on kPeak_ so the default band
+    // choice is bit-identical.
+    auto band_cost = [&](int pp) {
+        double c = cong_cost_segment(seg, layer_id, eff_width, pp,
+                                     slide_lo, slide_hi);
+        if (kPeak_ > 0.0)
+            c += kPeak_ * peak_util_segment(seg, layer_id, pp,
+                                            slide_lo, slide_hi);
+        return c;
+    };
+
     int    best_pp   = centre;
-    double best_cost = cong_cost_segment(seg, layer_id, eff_width, centre,
-                                         slide_lo, slide_hi);
+    double best_cost = band_cost(centre);
     int    best_dist = 0;
 
     for (int b = 0; b + 1 < (int)grid.size(); ++b) {
@@ -579,8 +631,7 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
         int win_hi = std::min(grid[b + 1], slide_hi);
         if (win_hi - win_lo < eff_width) continue;   // band can't host the bus
         int pp = (win_lo + win_hi) / 2;              // centre of the usable window
-        double cost = cong_cost_segment(seg, layer_id, eff_width, pp,
-                                        slide_lo, slide_hi);
+        double cost = band_cost(pp);
         int dist = std::abs(pp - centre);
         if (cost < best_cost - 1e-9 ||
             (std::abs(cost - best_cost) < 1e-9 && dist < best_dist)) {
@@ -782,7 +833,17 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     if (layers_.is_top(lid) && span_ref_eff_ > 0.0)
                         hgt = kHeight_ * top_height_rank(lid) *
                               std::max(0.0, 1.0 - seg_span / span_ref_eff_);
-                    double s    = cong + span + base + bal + hgt;
+                    // Routability term (kPeak, default 0 = skipped entirely):
+                    // pay for the worst band's EXISTING fill fraction (pre-
+                    // charge — see peak_util_segment), so a candidate headed
+                    // into a nearly-full band loses to one that avoids it —
+                    // BEFORE overflow, which is the only point the kCong term
+                    // above can see.
+                    double pk = 0.0;
+                    if (kPeak_ > 0.0)
+                        pk = kPeak_ * peak_util_segment(seg, lid, pp,
+                                                        slide_lo, slide_hi);
+                    double s    = cong + span + base + bal + hgt + pk;
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                 }
                 if (best_s == std::numeric_limits<double>::max())
