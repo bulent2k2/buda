@@ -4,7 +4,7 @@ What remains to focus on, ranked by value/effort. This page is a **snapshot
 index** (last verified against `main`: **2026-07-09**, post PR #226/#227) —
 the details, evidence, and where-to-start notes live in the per-subsystem
 wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
-lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved by <date>*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
+lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
@@ -44,7 +44,7 @@ items this page doesn't see).
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
 designs and fail LOUD, never silent:)*
 
-- **Keepout scope generalization** — deferred by the Q4 decision: only
+- **Keepout scope generalization** — deferred by the Q4 decision (see [Hier Bottom Up planning design doc](hier_bottom_up_planning.md)): only
   *marked* cells' copied routing blocks higher levels; making EVERY hier
   cell's planned+NUTSed local routing a blockage is a possible future
   knob (changes results of every existing hier design — needs golden
