@@ -75,16 +75,25 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
 
 def cmd_generate_more_topologies(session, cmd, args, cmd_line):
     # Usage: generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]
-    # ADDITIVE variant of generate_topologies_for_bundle (Phase E2 of
-    # topo_conn_unification.md): run the generator with the given knobs
-    # and merge the new candidates into the bundle's existing list,
-    # deduplicated by stable content uid — instead of replacing it.
-    # The merged pool is re-sorted by the same key as generation
-    # (wirelength, then type) so cand_index stays a meaningful ranking;
-    # the expert accretes a candidate pool across knob experiments without
-    # losing SELECTIONS — the pin (and dogleg slot) are remapped to follow
-    # their candidate across the re-sort, so raw indices may move but the
-    # selected/dogleg candidate is preserved.
+    # ADDITIVE variant of generate_topologies_for_bundle /
+    # generate_topologies_for_hbundle (Phase E2 of topo_conn_unification.md):
+    # run the generator with the given knobs and merge the new candidates
+    # into the bundle's existing list, deduplicated by stable content uid —
+    # instead of replacing it.  The merged pool is re-sorted by the same key
+    # as generation (wirelength, then type) so cand_index stays a meaningful
+    # ranking; the expert accretes a candidate pool across knob experiments
+    # without losing SELECTIONS — the pin (and dogleg slot) are remapped to
+    # follow their candidate across the re-sort, so raw indices may move but
+    # the selected/dogleg candidate is preserved.
+    #
+    # HIER-AWARE: in a hier-bundled session the hint matches an HBundle id
+    # or its first net-name prefix, generation goes through the same 3-case
+    # dispatch as generate_hier_topologies (cell-local / cross-level /
+    # cross-block floorplans), and a replica match redirects to its template
+    # (the bundle that actually carries the routing for all instances).
+    # Accretion happens on PRE-expansion templates: after run_planner hier
+    # the pools live on per-instance expanded wrappers, so re-run the flow
+    # from generate_hier_topologies instead.
     use_center        = "center_mode"   in args
     use_double_detour = "double_detour" in args
     use_multi_trunk   = "multi_trunk"   in args
@@ -94,63 +103,108 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
         print("Error: generate_more_topologies requires a hint")
         return
     hint = pos_args[0]
-    topo_gen = session._make_topo_gen(session.fp, use_center, use_double_detour,
-                                   use_multi_trunk)
-    found = False
-    for w in session.bundles:
-        net_name = w.input.original_bundle.get_net_names()[0]
-        if net_name.startswith(hint):
+    # Hier session detection: the hier bundler ran (live), or this is a
+    # resumed BDB session whose bundles carry hier markers, or — the
+    # markerless resume (Codex #254) — a load_pipeline checkpoint holding
+    # ONLY same-level cross-block HBundles (no cell_context, no
+    # drv_spec_depth): its nets never went through the flat add_net
+    # endpoint bookkeeping, which every flat session's did, so an empty
+    # _net_endpoints with bundles present marks it hierarchical.
+    hier = bool(getattr(session, "_hier_bundles_orig", None)) or (
+        session.bdb is not None and (
+            any(b.cell_context or b.drv_spec_depth >= 0
+                for w in session.bundles
+                for b in [w.input.original_bundle])
+            or (bool(session.bundles) and not session._net_endpoints)))
+
+    targets = []
+    if hier:
+        if getattr(session, "_planner_is_hier", False):
+            print("Error: generate_more_topologies after run_planner hier — "
+                  "the pools now live on per-instance expanded wrappers. "
+                  "Accrete on the pre-expansion templates instead: re-run "
+                  "generate_hier_topologies (the per-bundle knob memo "
+                  "re-applies prior accretions), generate_more_topologies, "
+                  "then run_planner hier.")
+            return
+        by_id = {w.input.original_bundle.id: w for w in session.bundles}
+        cell_ids = {w.input.original_bundle.id for w in session.bundles
+                    if w.input.original_bundle.cell_context}
+        if hint.isdigit() and int(hint) in by_id:
+            matches = [by_id[int(hint)]]
+        else:
+            matches = [w for w in session.bundles
+                       if w.input.original_bundle.get_net_names()
+                       and w.input.original_bundle.get_net_names()[0]
+                          .startswith(hint)]
+        seen_ids = set()
+        for w in matches:
+            b = w.input.original_bundle
+            if b.cell_context and b.parent_id in cell_ids:
+                # Replica: its routing comes from its template's expansion.
+                tw = by_id.get(b.parent_id)
+                if tw is not None:
+                    print(f"Note: bundle {b.id} is a replica — accreting on "
+                          f"its template bundle {b.parent_id} (which carries "
+                          f"the routing for every instance).")
+                    w = tw
+            bid = w.input.original_bundle.id
+            if bid not in seen_ids:
+                seen_ids.add(bid)
+                targets.append(w)
+        if not targets:
+            print(f"Warning: Could not find bundle matching hint {hint}")
+            return
+        fp_cache = {}
+        comps_by_name = {c.name: c for c in session.bdb.all_components()}
+        for w in targets:
+            session._generate_hier_topo_one(w, use_center, use_double_detour,
+                                            fp_cache, comps_by_name,
+                                            use_multi_trunk, additive=True)
+    else:
+        topo_gen = session._make_topo_gen(session.fp, use_center,
+                                          use_double_detour, use_multi_trunk)
+        for w in session.bundles:
+            net_name = w.input.original_bundle.get_net_names()[0]
+            if not net_name.startswith(hint):
+                continue
             ep = session._net_endpoints.get(net_name)
             if ep is None:
-                print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
+                print(f"Warning: no endpoint info for net '{net_name}' — "
+                      f"skipping bundle {w.input.original_bundle.id}")
                 continue
             src, dsts = ep
             session._validate_endpoint_blocks(net_name, src, dsts)
             fresh = topo_gen.generate_candidates(src, dsts)
-            existing = list(w.input.candidates)
-            seen = {buda.topo_uid(c) for c in existing}
-            added = 0
-            for c in fresh:
-                uid = buda.topo_uid(c)
-                if uid in seen:
-                    continue
-                seen.add(uid)
-                existing.append(c)
-                added += 1
-            # Keep the accreted pool WL-sorted (mirrors the C++ annotate_and_sort:
-            # wirelength ascending, then type) so cand_index stays a meaningful
-            # ranking instead of "old pool, then newly-appended tail".  The shared
-            # helper re-sorts and remaps the selection + dogleg refs so the pin
-            # follows its candidate; the SAME helper runs in the knob-memo replay
-            # (_apply_gen_knobs) so a resumed bundle stays ranked.
-            existing = session._resort_pool_preserving_selection(w, existing)
-            w.input.candidates = existing
-            label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
+            # topo_uid dedup + WL re-sort with selection/dogleg remap — the
+            # SAME helper runs in the knob-memo replays (_apply_gen_knobs /
+            # _apply_hier_gen_knobs) so a resumed bundle stays ranked.
+            added, dups = session._merge_more_candidates(w, fresh)
+            label = (f"{src}->{dsts[0]}" if len(dsts) == 1
+                     else f"{src}->[{','.join(dsts)}]")
             print(f"Added {added} new topolog{'y' if added == 1 else 'ies'} "
                   f"for bundle {w.input.original_bundle.id} ({label}) — "
-                  f"{len(fresh) - added} duplicate(s) skipped, pool now "
-                  f"{len(existing)}.")
-            found = True
-    if not found:
-        print(f"Warning: Could not find bundle matching hint {hint}")
-    else:
-        # Per-bundle knob memo (v15): a resumed bulk generate_topologies
-        # re-applies these knobs additively, so the accreted pool does
-        # not silently revert (Phase E2b).
-        knobs = " ".join(k for k, on in (
-            ("center_mode", use_center),
-            ("double_detour", use_double_detour),
-            ("multi_trunk", use_multi_trunk)) if on)
-        if session.bdb is not None and knobs:
-            for w in session.bundles:
-                nn = w.input.original_bundle.get_net_names()[0]
-                if nn.startswith(hint):
-                    bid = str(w.input.original_bundle.id)
-                    prev = set(session.bdb.bundle_gen_knobs(bid).split())
-                    session.bdb.set_bundle_gen_knobs(
-                        bid, " ".join(sorted(prev | set(knobs.split()))))
-        if session._persist_topologies():
-            print("[BDB] re-persisted candidate topologies to the open BDB.")
+                  f"{dups} duplicate(s) skipped, pool now "
+                  f"{len(w.input.candidates)}.")
+            targets.append(w)
+        if not targets:
+            print(f"Warning: Could not find bundle matching hint {hint}")
+            return
+    # Per-bundle knob memo (v15): a resumed bulk generate_[hier_]topologies
+    # re-applies these knobs additively, so the accreted pool does not
+    # silently revert (Phase E2b).
+    knobs = " ".join(k for k, on in (
+        ("center_mode", use_center),
+        ("double_detour", use_double_detour),
+        ("multi_trunk", use_multi_trunk)) if on)
+    if session.bdb is not None and knobs:
+        for w in targets:
+            bid = str(w.input.original_bundle.id)
+            prev = set(session.bdb.bundle_gen_knobs(bid).split())
+            session.bdb.set_bundle_gen_knobs(
+                bid, " ".join(sorted(prev | set(knobs.split()))))
+    if session._persist_topologies():
+        print("[BDB] re-persisted candidate topologies to the open BDB.")
 
 
 def cmd_generate_topologies(session, cmd, args, cmd_line):
@@ -237,9 +291,16 @@ def cmd_generate_hier_topologies(session, cmd, args, cmd_line):
     comps_by_name = {c.name: c for c in session.bdb.all_components()}
 
     for w in session.bundles:
+        old_pin_uid = session._pinned_uid(w)
         n = session._generate_hier_topo_one(w, use_center, use_double_detour,
                                           fp_cache, comps_by_name,
                                           use_multi_trunk)
+        # Honor the bundle's persisted generation-knob memo (v15): re-apply
+        # prior generate_more_topologies accretions additively so the pool
+        # does not silently revert on a bulk regeneration (Phase E2b — the
+        # hier twin of the flat command's _apply_gen_knobs call).
+        session._apply_hier_gen_knobs(w, fp_cache, comps_by_name,
+                                      old_pin_uid)
         total_candidates += n
     print(f"generate_hier_topologies: {len(session.bundles)} bundles, "
           f"{total_candidates} total candidates")

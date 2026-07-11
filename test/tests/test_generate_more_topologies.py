@@ -151,3 +151,176 @@ def test_additive_unknown_hint_warns(capsys):
     s = _session()
     s.do_command("generate_more_topologies zzz")
     assert "Could not find bundle matching hint" in capsys.readouterr().out
+
+
+# ── Hier-aware accretion (opens.md: generate_more_topologies + HBundles) ──────
+
+def _hier_session():
+    """The 6-block fan-out INSIDE a cell, instantiated twice — the hier twin
+    of _session(): the cell-local template gets new BITRUNK shapes from
+    multi_trunk exactly as the flat fixture does."""
+    db = buda.BDB(":memory:")
+    db.add_cell("big_cell", 1400, 1600)
+    db.add_cell("leaf_cell", 200, 300)
+    for i in range(6):
+        x, y = (i % 3) * 400 + 20, (i // 3) * 600 + 20
+        db.add_inst_to_cell("big_cell", f"b{i}", "leaf_cell", x, y)
+    db.add_inst("B1", "big_cell", "", 0, 0)
+    db.add_inst("B2", "big_cell", "", 1600, 0)
+    for i in range(8):
+        for k in (1, 2):
+            db.add_net_pins(f"d{k}_{i}", f"B{k}/b0.p",
+                            [f"B{k}/b1.q", f"B{k}/b2.r", f"B{k}/b3.s",
+                             f"B{k}/b4.t", f"B{k}/b5.u"])
+    buda.BustermGen(db).derive(1)
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    s.bdb = db
+    _quiet(s, "def_layer 4 M4 H TOP 20", "def_layer 5 M5 V TOP 20",
+           "run_hier_bundler", "generate_hier_topologies")
+    return s
+
+
+def _template_of(s, prefix):
+    """The (template, replica-or-None) wrappers whose first net starts with
+    prefix / whose parent links to the former."""
+    tw = next(w for w in s.bundles
+              if w.input.original_bundle.get_net_names()[0].startswith(prefix))
+    rep = next((w for w in s.bundles
+                if w.input.original_bundle.parent_id
+                == tw.input.original_bundle.id), None)
+    return tw, rep
+
+
+def test_hier_additive_on_template_by_net_hint(capsys):
+    s = _hier_session()
+    tw, _ = _template_of(s, "d1")
+    base = list(tw.input.candidates)
+    assert base, "hier base generation produced no candidates"
+    base_uids = {buda.topo_uid(c) for c in base}
+    pin_idx = min(1, len(base) - 1)
+    pinned_uid = buda.topo_uid(base[pin_idx])
+    tw.input.topology_pinned = True
+    tw.plan.selected_topology_index = pin_idx
+
+    s.do_command("generate_more_topologies d1 multi_trunk")
+    out = capsys.readouterr().out
+    assert "new candidate(s)" in out, out
+    now = list(tw.input.candidates)
+    now_uids = [buda.topo_uid(c) for c in now]
+    assert base_uids <= set(now_uids)          # merged, not replaced
+    assert len(now) > len(base), "multi_trunk added nothing on the fan-out"
+    assert len(set(now_uids)) == len(now_uids)  # deduped
+    assert _is_wl_sorted(now)
+    assert tw.input.topology_pinned            # pin follows its candidate
+    assert buda.topo_uid(now[tw.plan.selected_topology_index]) == pinned_uid
+
+    # Idempotence: same knobs add zero.
+    s.do_command("generate_more_topologies d1 multi_trunk")
+    out = capsys.readouterr().out
+    assert "+0 new candidate(s)" in out, out
+    assert [buda.topo_uid(c) for c in tw.input.candidates] == now_uids
+
+
+def test_hier_additive_by_bundle_id(capsys):
+    s = _hier_session()
+    tw, _ = _template_of(s, "d1")
+    base_n = len(tw.input.candidates)
+    bid = tw.input.original_bundle.id
+    s.do_command(f"generate_more_topologies {bid} multi_trunk")
+    out = capsys.readouterr().out
+    assert "new candidate(s)" in out, out
+    assert len(tw.input.candidates) > base_n
+
+
+def test_hier_replica_hint_redirects_to_template(capsys):
+    """A hint matching a REPLICA's nets accretes on its template — the
+    bundle that actually carries the routing for every instance."""
+    s = _hier_session()
+    tw, rep = _template_of(s, "d1")
+    assert rep is not None, "fixture must produce a replica"
+    base_n = len(tw.input.candidates)
+    rep_pool = list(rep.input.candidates)
+    s.do_command("generate_more_topologies d2 multi_trunk")
+    out = capsys.readouterr().out
+    assert "is a replica — accreting on its template" in out, out
+    assert len(tw.input.candidates) > base_n
+    # The replica's own pool is untouched (expansion never reads it).
+    assert len(rep.input.candidates) == len(rep_pool)
+
+
+def test_hier_knob_memo_replays_on_bulk_regen(capsys):
+    """The v15 per-bundle knob memo works for HBundles too: a bulk
+    generate_hier_topologies re-applies the accretion additively, so the
+    pool does not silently revert."""
+    s = _hier_session()
+    tw, _ = _template_of(s, "d1")
+    _quiet(s, "generate_more_topologies d1 multi_trunk")
+    accreted = {buda.topo_uid(c) for c in tw.input.candidates}
+    s.do_command("generate_hier_topologies")
+    out = capsys.readouterr().out
+    assert "Re-applied knob memo 'multi_trunk'" in out, out
+    tw2, _ = _template_of(s, "d1")
+    assert accreted <= {buda.topo_uid(c) for c in tw2.input.candidates}
+
+
+def test_hier_additive_refused_post_expansion(capsys):
+    """After run_planner hier the pools live on per-instance expanded
+    wrappers — accretion there would merge cell-local candidates into
+    absolute-coordinate pools, so the command refuses with the recipe."""
+    s = _hier_session()
+    _quiet(s, "run_planner hier")
+    s.do_command("generate_more_topologies d1 multi_trunk")
+    out = capsys.readouterr().out
+    assert "Error" in out and "run_planner hier" in out, out
+
+
+def test_hier_unknown_hint_warns(capsys):
+    s = _hier_session()
+    s.do_command("generate_more_topologies zz multi_trunk")
+    out = capsys.readouterr().out
+    assert "Could not find bundle matching hint" in out, out
+
+
+def test_hier_markerless_resume_accretes(tmp_path):
+    """Codex #254 P2: a load_pipeline resume whose checkpoint holds ONLY
+    same-level cross-block HBundles (no cell_context, no drv_spec_depth)
+    has no hier markers and an empty _hier_bundles_orig — it must still be
+    detected as hierarchical (its nets never went through the flat add_net
+    endpoint bookkeeping), or the flat branch dead-ends on the
+    missing-endpoint warning and never accretes."""
+    p = str(tmp_path / "xblk.bdb")
+    db = buda.BDB(p)
+    db.add_cell("leaf_cell", 200, 300)
+    for i in range(6):
+        x, y = (i % 3) * 400, (i // 3) * 600
+        db.add_inst(f"b{i}", "leaf_cell", "", x, y)
+    for i in range(8):
+        db.add_net_pins(f"d_{i}", "b0.p",
+                        ["b1.q", "b2.r", "b3.s", "b4.t", "b5.u"])
+    buda.BustermGen(db).derive(1)
+    s1 = buda_cli.BudaSession()
+    s1.no_viz = True
+    s1.bdb = db
+    _quiet(s1, "def_layer 4 M4 H TOP 20", "def_layer 5 M5 V TOP 20",
+           "run_hier_bundler", "generate_hier_topologies")
+    del s1, db
+
+    s2 = buda_cli.BudaSession()
+    s2.no_viz = True
+    _quiet(s2, "def_layer 4 M4 H TOP 20", "def_layer 5 M5 V TOP 20",
+           f"open_bdb {p}", "add_blocks_from_bdb 0", "load_pipeline")
+    # Premise: genuinely markerless, endpoint-less resume.
+    assert not getattr(s2, "_hier_bundles_orig", None)
+    assert not s2._net_endpoints
+    w = s2.bundles[0]
+    b = w.input.original_bundle
+    assert not b.cell_context and b.drv_spec_depth < 0
+    base = len(w.input.candidates)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        s2.do_command("generate_more_topologies d multi_trunk")
+    out = out.getvalue()
+    assert "no endpoint info" not in out, out
+    assert "new candidate(s)" in out, out
+    assert len(w.input.candidates) > base

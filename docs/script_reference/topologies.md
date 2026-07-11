@@ -94,18 +94,39 @@ generate_topologies_for_bundle bus_rsp  # multicast
 generate_more_topologies <hint> [center_mode] [double_detour] [multi_trunk]
 ```
 
-**Additive** sibling of `generate_topologies_for_bundle`: runs the generator
-with the given knobs and **appends** the resulting candidates to the bundle's
-existing pool instead of replacing it, deduplicated by stable content identity
-(`topo_uid`).  Append-only means existing candidate indices — and therefore the
-bundle's pin (`select_topology` / sidecar) and plan state — are untouched, so
-an expert can accrete a candidate pool across knob experiments without losing
-selections.  Re-running with the same knobs adds nothing (all duplicates
-skipped, reported).  The enlarged pool is re-persisted to the open BDB.
+**Additive** sibling of `generate_topologies_for_bundle` /
+`generate_topologies_for_hbundle`: runs the generator with the given knobs and
+**appends** the resulting candidates to the bundle's existing pool instead of
+replacing it, deduplicated by stable content identity (`topo_uid`).
+Append-only means existing candidate indices — and therefore the bundle's pin
+(`select_topology` / sidecar) and plan state — are untouched, so an expert can
+accrete a candidate pool across knob experiments without losing selections.
+Re-running with the same knobs adds nothing (all duplicates skipped,
+reported).  The enlarged pool is re-persisted to the open BDB.
+
+**Hier flow**: in a hier-bundled session (`run_hier_bundler`) the command is
+fully hier-aware —
+
+- the `hint` matches an **HBundle id** (numeric) or the bundle's first
+  net-name prefix, exactly as `dump_hbundles` shows them;
+- generation goes through the same **3-case dispatch** as
+  `generate_hier_topologies` (cell-local / cross-level / cross-block
+  floorplans), so the fresh candidates are born in the bundle's own frame;
+- a hint that matches a **replica** redirects to its template — the bundle
+  that actually carries the routing for every instance (a printed note says
+  so);
+- the accretion is recorded in the per-bundle **knob memo** (v15), and a bulk
+  `generate_hier_topologies` re-applies it additively, so the accreted pool
+  survives regeneration;
+- accretion happens on **pre-expansion templates**: after `run_planner hier`
+  the pools live on per-instance expanded wrappers, so the command refuses
+  with the re-run recipe (`generate_hier_topologies` →
+  `generate_more_topologies` → `run_planner hier`).
 
 ```
 generate_more_topologies bus_rsp multi_trunk    # add BITRUNK trees to the pool
 generate_more_topologies t0_b3 double_detour    # add UU variants
+generate_more_topologies 7 center_mode          # hier: accrete on HBundle 7
 ```
 
 ---

@@ -160,6 +160,29 @@ class EditMixin:
             self._dogleg_originals[bid] = posn[og_uid]
         return pool
 
+    def _merge_more_candidates(self, w, fresh):
+        """ADDITIVE install of a generation result: append the candidates of
+        `fresh` whose stable content uid (`topo_uid`) is not already in w's
+        pool, then re-sort the merged pool WL-ranked with the selection and
+        dogleg references remapped (`_resort_pool_preserving_selection`).
+        Existing candidates, the pin, and plan state are untouched — the
+        accretion contract of generate_more_topologies, shared by its flat
+        and hier paths and by the knob-memo replays.  Returns
+        (n_added, n_duplicates)."""
+        existing = list(w.input.candidates)
+        seen = {buda.topo_uid(c) for c in existing}
+        added = 0
+        for c in fresh:
+            uid = buda.topo_uid(c)
+            if uid in seen:
+                continue
+            seen.add(uid)
+            existing.append(c)
+            added += 1
+        w.input.candidates = self._resort_pool_preserving_selection(
+            w, existing)
+        return added, len(fresh) - added
+
     def _apply_gen_knobs(self, w, src, dsts, old_pin_uid=None):
         """Honor the bundle's persisted generation-knob memo (v15): re-run the
         knob-configured generator additively after a bulk regeneration, so a

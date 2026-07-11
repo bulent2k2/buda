@@ -784,7 +784,8 @@ class HierMixin:
                 f"{self._bundle_net_summary(nets)}")
 
     def _generate_hier_topo_one(self, w, use_center, use_double_detour,
-                                fp_cache, comps_by_name, use_multi_trunk=False):
+                                fp_cache, comps_by_name, use_multi_trunk=False,
+                                additive=False):
         """Generate topology candidates for a single HBundle wrapper.
 
         Updates w.input.candidates in place. Returns candidate count.
@@ -792,9 +793,32 @@ class HierMixin:
         comps_by_name is {name: ComponentRow} from bdb.all_components().
         use_multi_trunk adds two-level BITRUNK_HVH/VHV datapath trees (opt-in),
         as in the flat generate_topologies.
+
+        additive=True is the generate_more_topologies contract: the fresh
+        candidates are MERGED into the existing pool (topo_uid dedup + WL
+        re-sort with the selection/dogleg refs remapped) instead of
+        replacing it — existing candidates, the pin, and plan state are
+        untouched.  Returns the number of NEW candidates then.
         """
         b = w.input.original_bundle
         nets_suffix = self._bundle_nets_suffix(w)   # rides on each per-bundle log line
+
+        def install(fresh):
+            # Shared install tail of the 3 cases: replace (bulk semantics —
+            # plan reset, pin re-attach by uid, USER candidates kept) or
+            # merge additively.  Returns (n_for_return, log_detail).
+            if additive:
+                added, dups = self._merge_more_candidates(w, fresh)
+                return added, (f"+{added} new candidate(s), {dups} "
+                               f"duplicate(s) skipped, pool now "
+                               f"{len(w.input.candidates)}")
+            old_pin_uid = self._pinned_uid(w)
+            kept_user = self._user_candidates(w)
+            w.input.candidates = fresh
+            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
+            n = len(w.input.candidates)
+            return n, f"{n} candidates"
+
         if b.cell_context and b.entry_busterm_ids:
             # Case (a): cell-local floorplan
             parent_name = b.instances[0] if b.instances else None
@@ -812,18 +836,14 @@ class HierMixin:
                                      use_multi_trunk)
             src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
             dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
-            old_pin_uid = self._pinned_uid(w)
-            kept_user = self._user_candidates(w)
-            w.input.candidates = tg.generate_candidates(src_local, dsts_local)
-            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
+            n, detail = install(tg.generate_candidates(src_local, dsts_local))
             label = f"{src_local}→{dsts_local[0]}"
-            n = len(w.input.candidates)
-            if n == 0:
+            if n == 0 and not w.input.candidates:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}] {nets_suffix}")
             else:
                 print(f"HierTopo D{b.level}: bundle {b.id} ({label}) "
-                      f"{n} candidates  [cell:{b.cell_context}] {nets_suffix}")
+                      f"{detail}  [cell:{b.cell_context}] {nets_suffix}")
             return n
 
         elif b.drv_spec_depth >= 0:
@@ -854,20 +874,17 @@ class HierMixin:
                 return 0
             tg = self._make_topo_gen(fp, use_center, use_double_detour,
                                      use_multi_trunk)
-            old_pin_uid = self._pinned_uid(w)
-            kept_user = self._user_candidates(w)
-            w.input.candidates = tg.generate_candidates(b.drv_spec_path, list(b.rcv_spec_paths))
-            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
+            n, detail = install(tg.generate_candidates(b.drv_spec_path,
+                                                       list(b.rcv_spec_paths)))
             label = (f"{b.drv_spec_path}→{b.rcv_spec_paths[0]}"
                      if len(b.rcv_spec_paths) == 1
                      else f"{b.drv_spec_path}→[{','.join(b.rcv_spec_paths)}]")
-            n = len(w.input.candidates)
             tag = f"[cross-level D{b.drv_spec_depth}→D{b.rcv_spec_depth}]"
-            if n == 0:
+            if n == 0 and not w.input.candidates:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted!  {tag} {nets_suffix}")
             else:
-                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates  {tag} {nets_suffix}")
+                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {detail}  {tag} {nets_suffix}")
             return n
 
         else:
@@ -887,18 +904,43 @@ class HierMixin:
             if src is None:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
-            old_pin_uid = self._pinned_uid(w)
-            kept_user = self._user_candidates(w)
-            w.input.candidates = tg.generate_candidates(src, dsts)
-            self._reset_plan_for_regen(w, old_pin_uid, kept_user)
+            n, detail = install(tg.generate_candidates(src, dsts))
             label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
-            n = len(w.input.candidates)
-            if n == 0:
+            if n == 0 and not w.input.candidates:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted! {nets_suffix}")
             else:
-                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {n} candidates {nets_suffix}")
+                print(f"HierTopo D{b.level}: bundle {b.id} ({label}) {detail} {nets_suffix}")
             return n
+
+    def _apply_hier_gen_knobs(self, w, fp_cache, comps_by_name,
+                              old_pin_uid=None):
+        """Hier twin of `_apply_gen_knobs` (edit.py): honor the bundle's
+        persisted generation-knob memo (v15) by re-running the 3-case hier
+        generator ADDITIVELY after a bulk regeneration, so an HBundle pool
+        accreted with generate_more_topologies does not silently revert on
+        the next generate_hier_topologies.  Re-attempts the uid pin
+        reattach among the appended extras."""
+        if self.bdb is None:
+            return
+        knobs = self.bdb.bundle_gen_knobs(str(w.input.original_bundle.id))
+        if not knobs:
+            return
+        ks = set(knobs.split())
+        added = self._generate_hier_topo_one(
+            w, "center_mode" in ks, "double_detour" in ks, fp_cache,
+            comps_by_name, "multi_trunk" in ks, additive=True)
+        if added:
+            print(f"  Re-applied knob memo '{knobs}' for bundle "
+                  f"{w.input.original_bundle.id}: +{added} candidate(s).")
+            if old_pin_uid and not w.input.topology_pinned:
+                for i, c in enumerate(w.input.candidates):
+                    if buda.topo_uid(c) == old_pin_uid:
+                        w.plan.selected_topology_index = i
+                        w.input.topology_pinned = True
+                        print(f"  Pin re-attached by topo_uid to candidate "
+                              f"{i + 1}.")
+                        break
 
     def _floorplan_for_hbundle(self, b, fp_cache, comps_by_name):
         """Return the Floorplan an HBundle's candidates were generated in.
