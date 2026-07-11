@@ -223,7 +223,10 @@ exclusion).
 
 **`kPeak` default decision (2026-07-11): stays opt-in (default 0).
 Confirmed after the supply-aware follow-on shipped — the reopener premise
-was falsified by measurement.**
+was falsified by measurement.** The full experimental record (per-testcase
+corpus tables, value sweeps, healed endpoints, and the three
+implemented-and-rejected variants) lives in
+[kpeak_measurements.md](kpeak_measurements.md).
 - The big2 "double-steer" hypothesis was debugged and REJECTED first —
   big2_noviz runs the PLAIN pipeline (no negotiate/ripup at all). At every
   tested value (0.05/0.1/0.2) exactly two wide trunk segments (bundle 23
