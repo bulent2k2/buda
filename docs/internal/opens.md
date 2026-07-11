@@ -177,6 +177,23 @@ designs and fail LOUD, never silent:)*
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
+8. **Hier level ordering: deep-first + symmetric global reservation** —
+   `run_planner hier` plans top-down (depth-0 first), protecting the
+   later-planned cell-local bundles with the pessimistic cell-interior
+   demand reservations. The `BUDA_HIER_DEEP_FIRST=1` A/B (2026-07-11,
+   findings + reservation recipe in
+   [`../congestion_planner.md`](../congestion_planner.md) → *"Level
+   ordering"*) showed neither order dominates on the hier corpus: 4 flows
+   improved (reservations over-count, so top-down globals detour around
+   phantom congestion — hbundles/01/02/05/06), 2 regressed (deep-first
+   locals squat on TOP bands with nothing protecting global demand —
+   hbundles/07/10), 4 neutral, mix2 insensitive (all wrappers locked).
+   The promising synthesis: deep-first ordering **plus** an
+   `apply_reservation` analog parking *global* demand while locals plan —
+   or a two-pass top-down-then-replan-bottom-up (one built-in negotiation
+   iteration at the planner level). Ordering changes shift every hier
+   design's results, so this needs the same golden-review discipline as
+   the keepout-scope knob (item above).
 
 ## Recently resolved (verified on main, 2026-07-09)
 
