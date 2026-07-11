@@ -52,15 +52,18 @@ noted.)*
    user-facing value** of the open items.
 3. **Selection basis: rank on measured routability** —
    [`wishlist-planner.md`](wishlist-planner.md) → *"Selection basis …
-   LEVER 1 SHIPPED"*. Lever 1 landed as the opt-in `set_planner_param
+   LEVERS 1+2 SHIPPED"*. Lever 1 landed as the opt-in `set_planner_param
    kPeak` (peak existing-band-utilization term, in both segment scoring
    and the slide-window band choice; measured at 0.1: channel_stress
    keepout opens healed at zero overlap cost, rnr/mix DNUTS −33%, tc3a
    clean — but big2's negotiate/ripup-healed flow prefers the knob off,
-   so **off by default**). Remaining: the default-on decision (big2 is
-   the concrete double-steer case to debug) and lever 2 (let
-   negotiate/ripup promote a higher-estimate candidate class, not just
-   index alternates).
+   so **off by default**). Lever 2 landed in `_rr_candidate_order`:
+   under measured contention ripup's trial pool appends the top-8
+   farness-ranked candidates from beyond the 8-cheapest-estimate window,
+   so a higher-estimate class (OOB trunk, BITRUNK tree) is promotable
+   exactly when every cheap alternate fails — goldens byte-identical,
+   big2 stage-a residual overlaps 1→0. Remaining: the kPeak default-on
+   decision (big2 is the concrete double-steer case to debug).
 ### Bottom-up template planning follow-ons (added 2026-07-10)
 
 - ✅ **Orientation-aware instance copying** — **DONE (2026-07-10, mirrors +
