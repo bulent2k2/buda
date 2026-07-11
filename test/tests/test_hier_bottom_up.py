@@ -312,6 +312,23 @@ def test_set_bottom_up_star_skips_non_congruent_loud():
     assert "pipe_cell" in marked                      # leaf siblings still fine
 
 
+def test_set_bottom_up_star_clears_stale_non_congruent_mark():
+    """A cell marked when congruent, then made non-congruent, must be
+    CLEARED by a later '* on' (not just reported) — otherwise run_planner
+    hier would still treat it as bottom-up and hit the unsupported path
+    (Codex #265).  After '* on' the marked set == the eligible set."""
+    db = _two_inst_db()
+    s = _bare_session(db)
+    _run_cmd(s, "set_bottom_up proc_cell")
+    assert db.cell_bottom_up("proc_cell") is True
+    db.move_comp("proc_i2/pa_i", 540, 70)             # now non-congruent
+    out = _run_cmd(s, "set_bottom_up *")
+    assert "cleared 1 stale mark" in out and "proc_cell" in out
+    assert db.cell_bottom_up("proc_cell") is False     # actually cleared
+    elig, _ = s._eligible_bottom_up_cells()
+    assert set(db.bottom_up_cells()) == set(elig)       # invariant
+
+
 def test_set_bottom_up_star_end_to_end_routes():
     """A full flow with 'set_bottom_up *' routes through NUTS with the marked
     cells driving bottom-up (locked wrappers exist), equivalent to marking

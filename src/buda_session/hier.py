@@ -679,20 +679,23 @@ class HierMixin:
                                        phase_score=self._orient_phase_score)
 
     def _bottom_up_congruence_issues(self, cell, comps=None, ref_name=None,
-                                     cache=None, only=None, allow_90=True):
+                                     cache=None, only=None, allow_90=True,
+                                     index=None):
         """Session wrapper over the shared `bottom_up_congruence_issues`
         (module level above — the Floorplanner's cell settings call the
         same function, so the GUI and CLI can never diverge on what
         "congruent" means), with the session's routing-grid phase tiebreak.
         `only` / `allow_90` as in the shared function (the post-split
         expansion re-check passes allow_90=False scoped to each
-        template's own instances).
+        template's own instances).  `index` accepts a prebuilt
+        `bottom_up_congruence_index(comps)` so a many-cell caller
+        (`set_bottom_up *`) pays the component walk once, not per cell.
 
         Returns a list of human-readable issue strings (empty = OK)."""
         if comps is None:
             comps = self.bdb.all_components()
         return bottom_up_congruence_issues(comps, cell, ref_name=ref_name,
-                                           cache=cache,
+                                           cache=cache, index=index,
                                            phase_score=self._orient_phase_score,
                                            only=only, allow_90=allow_90)
 
@@ -710,16 +713,20 @@ class HierMixin:
         top-down path rather than silently dropping them."""
         if comps is None:
             comps = self.bdb.all_components()
-        by_cell = {}
-        for c in comps:
-            if c.x1 >= 0:                       # placed only
-                by_cell.setdefault(c.cell, []).append(c)
+        # One component walk for the whole scan (Codex #265): pass the
+        # prebuilt index into every per-cell congruence check so the
+        # wildcard is O(#components + #cell_types·subtree), not
+        # O(#cell_types·#components).
+        index = bottom_up_congruence_index(comps)
+        insts_by_cell = index[0]
         eligible, skipped = [], []
         cache = {}
-        for cell in sorted(by_cell):
-            if len(by_cell[cell]) < 2:
+        for cell in sorted(insts_by_cell):
+            placed = sum(1 for c in insts_by_cell[cell] if c.x1 >= 0)
+            if placed < 2:
                 continue                        # single instance: nothing to copy
-            issues = self._bottom_up_congruence_issues(cell, comps, cache=cache)
+            issues = self._bottom_up_congruence_issues(
+                cell, comps, cache=cache, index=index)
             if issues:
                 skipped.append((cell, issues[0]))
             else:
