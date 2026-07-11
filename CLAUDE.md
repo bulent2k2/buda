@@ -624,6 +624,9 @@ Realized by Phase G of the NUTS/DNUTS refactor ([plan + as-built resolution](doc
 
 ## Dependencies
 
+Full details (required / optional / bundled, versions, install cheat-sheet) in
+[docs/build_test_dependencies.md](docs/build_test_dependencies.md). Summary:
+
 - **pybind11** — C++/Python bindings
 - **Python 3.13+**
 - **matplotlib** + **tkinter** — visualization and floorplanner GUI
