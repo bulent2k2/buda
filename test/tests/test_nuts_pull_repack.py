@@ -42,7 +42,8 @@ _FLOW = os.path.normpath(os.path.join(
     os.path.dirname(__file__), '..', '..', 'flow'))
 _BIG_DIR = os.path.join(_FLOW, 'big_data_test')
 
-# Lines of big.buda (== tc3a_flat.buda) to execute.  Stop at run_nuts: the pull
+# Lines of big.buda (the tc3a flat design, sourcing tc3a_flat_x10) to execute.
+# Stop at run_nuts: the pull
 # placement is fixed there, and detailed-NUTS / connectivity add seconds without
 # changing what this test measures.  check_design is skipped for speed.
 _RUN_THROUGH = "run_nuts"
@@ -73,14 +74,14 @@ def big_nuts_session():
     cwd = os.getcwd()
     os.chdir(_BIG_DIR)            # so `source ../tracks4top.buda` etc. resolve
     try:
-        yield _run_through_nuts("tc3a_flat.buda")
+        yield _run_through_nuts("big.buda")
     finally:
         os.chdir(cwd)
 
 
 def _build_big_session():
     """Fresh big-flow session (caller already cwd'd into _BIG_DIR)."""
-    return _run_through_nuts("tc3a_flat.buda")
+    return _run_through_nuts("big.buda")
 
 
 def _pull_deviation(session):

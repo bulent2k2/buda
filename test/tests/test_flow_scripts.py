@@ -111,8 +111,8 @@ def test_tc3a_flat_no_perp_range_inversion():
     complete_relay_junctions now MERGES such collinear stubs into one straight
     pass-through wire (topology-stage, deterministic — no FP), so the strand is
     gone on every host."""
-    out, rc = run_script("big_data_test/tc3a_flat.buda")
-    assert rc == 0, f"tc3a_flat aborted (rc={rc}) — perp-range inversion?\n{out[-3000:]}"
+    out, rc = run_script("big_data_test/big.buda")
+    assert rc == 0, f"big/tc3a aborted (rc={rc}) — perp-range inversion?\n{out[-3000:]}"
     # Anchor to the TOPO-stage check section specifically — a bare
     # `"Success..." in out` could be satisfied by a later clean NUTS/DNUTS stage
     # even if the topo check regressed.  (Not `>= 2` Success lines: that also

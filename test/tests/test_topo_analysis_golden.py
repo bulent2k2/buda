@@ -22,7 +22,7 @@ and the analysis-equivalence gate (item 5) in one: any refactor of
 topology.cpp / conn_topology.cpp that changes a single derived value or a
 single ordering fails here with a line-level diff.
 
-Large flows (tc3a_flat, rnr/mix) gate on per-bundle sha256 digests instead of
+Large flows (big, rnr/mix) gate on per-bundle sha256 digests instead of
 full text (multi-MB); a digest mismatch names the bundle, and the reviewable
 diff comes from regenerating the full snapshot on the baseline tree
 (tools/topo_snapshot.py <out_dir>) — the wl_corpus comparison workflow.

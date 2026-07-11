@@ -39,7 +39,7 @@ tools/nuts_snapshot.py` and review the golden diff in the PR.
 Host portability: the checked-in goldens were generated on an x86-64 host
 (the Claude Code CI container, -O3 -march=native).  The six small flows are
 placement-stable across hosts; the three HOST_SENSITIVE_FLOWS below
-(b4_bus_077, tc3a_flat, rnr/mix) are the designs whose NUTS outcomes the
+(b4_bus_077, big, rnr/mix) are the designs whose NUTS outcomes the
 big2/tc3a test notes (PR #203) document as FP/ISA-divergent — a different
 discrete track choice on another host is a hard mismatch that the 1e-6
 FORMATTING quantum cannot absorb (it is not a tolerance).  An off-host
@@ -75,7 +75,7 @@ CORPUS_SMALL = [
     "flow/big_data_test/big2/b4_bus_077.buda",
 ]
 CORPUS_LARGE = [
-    "flow/big_data_test/tc3a_flat.buda",
+    "flow/big_data_test/big.buda",
     "flow/rnr/mix.buda",                       # hier + ripup_reroute
 ]
 CORPUS = CORPUS_SMALL + CORPUS_LARGE
@@ -89,7 +89,7 @@ CORPUS = CORPUS_SMALL + CORPUS_LARGE
 # environmental until proven otherwise.
 HOST_SENSITIVE_FLOWS = {
     "flow/big_data_test/big2/b4_bus_077.buda",
-    "flow/big_data_test/tc3a_flat.buda",
+    "flow/big_data_test/big.buda",
     "flow/rnr/mix.buda",
 }
 
@@ -97,7 +97,7 @@ HOST_SENSITIVE_FLOWS = {
 # per-(stage, layer) sha256 digest instead — byte-identity is gated just as
 # hard, and mismatches localize to a stage + layer.
 DIGEST_FLOWS = {
-    "flow/big_data_test/tc3a_flat.buda",
+    "flow/big_data_test/big.buda",
     "flow/rnr/mix.buda",
 }
 
