@@ -245,15 +245,11 @@ void CongestionPlanner::rebuild_cuts_() {
 // non-TOP stack unusable for stubs.  Clamp the along-extent to the endpoint
 // block faces before matching cuts.  Blocks merely crossed mid-span still
 // block normally (capacity already excludes them).
-void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
-                                      int perp_pos_override,
-                                      const std::function<void(int, int)>& fn) const {
+void CongestionPlanner::routed_extent(const Segment& seg, int layer_id,
+                                      int& lo, int& hi) const {
     bool is_h = (seg.start.y == seg.end.y);
-    int  pp_h = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.y;
-    int  pp_v = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.x;
-
-    int lo = is_h ? std::min(seg.start.x, seg.end.x) : std::min(seg.start.y, seg.end.y);
-    int hi = is_h ? std::max(seg.start.x, seg.end.x) : std::max(seg.start.y, seg.end.y);
+    lo = is_h ? std::min(seg.start.x, seg.end.x) : std::min(seg.start.y, seg.end.y);
+    hi = is_h ? std::max(seg.start.x, seg.end.x) : std::max(seg.start.y, seg.end.y);
     if (!layers_.is_top(layer_id)) {
         int perp = is_h ? seg.start.y : seg.start.x;
         for (const auto& [name, r] : blocks_cache_) {
@@ -272,6 +268,17 @@ void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
             if (hi_in) hi = std::max(rlo, lo);       // right/top endpoint → block face
         }
     }
+}
+
+void CongestionPlanner::for_each_band(const Segment& seg, int layer_id,
+                                      int perp_pos_override,
+                                      const std::function<void(int, int)>& fn) const {
+    bool is_h = (seg.start.y == seg.end.y);
+    int  pp_h = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.y;
+    int  pp_v = (perp_pos_override != INT_MIN) ? perp_pos_override : seg.start.x;
+
+    int lo, hi;
+    routed_extent(seg, layer_id, lo, hi);
 
     // A zero-extent along-span (lo == hi) routes nothing here — e.g. a non-TOP
     // segment fully clamped inside its endpoint block above.  It must match no
@@ -577,7 +584,8 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
 // hard-prices them.
 double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                                             int perp_pos_override,
-                                            int slide_lo, int slide_hi) const {
+                                            int slide_lo, int slide_hi,
+                                            double tracks_needed) const {
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak = 0.0;
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
@@ -587,6 +595,51 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
         double util = c.usage(b) / cap;
         if (util > peak) peak = util;
     });
+
+    // ABSOLUTE-SUPPLY floor (the big2 stranding fix).  usage/cap is purely
+    // RELATIVE, so a band can report util=0 — maximally attractive — while
+    // its real signal-track supply along the segment's span is too small to
+    // host the bus at all: empty because nothing CAN route there, and the
+    // relative term then actively steers wide trunks into exactly those
+    // windows (big2: two 56/60-bit trunks stranded on supply-poor M4, ~116
+    // DNUTS opens).  When the layer has a def_track_pattern, count the real
+    // span-wide SIGNAL tracks in the band's perpendicular window — the same
+    // span-aware, keepout-aware pool DetailedNUTS itself places from
+    // (count_signal_tracks_in_span) — and clamp util to >= 1 when it cannot
+    // host tracks_needed bits: a can't-host band must never rank better
+    // than a 100%-full one.  The along-extent uses the same endpoint-block
+    // clamp as the band charge (routed_extent), so LOW-layer pin-access
+    // tails don't false-floor short stubs.  No track_cap_slack here: the
+    // slack is a quantisation allowance for the HARD integer capacity;
+    // this is a soft steering term and an exact shortfall is exactly the
+    // signal it exists to price.  tracks_needed <= 0 (unknown width)
+    // or a pattern-less layer keeps the pure relative behavior.
+    if (tracks_needed > 0.0 && peak < 1.0 &&
+        grid_ != nullptr && grid_->has_layer(layer_id)) {
+        int lo, hi;
+        routed_extent(seg, layer_id, lo, hi);
+        if (lo < hi) {
+            bool is_h = (seg.start.y == seg.end.y);
+            int  pp   = (perp_pos_override != INT_MIN)
+                            ? perp_pos_override
+                            : (is_h ? seg.start.y : seg.start.x);
+            const auto& pgrid = is_h ? y_grid_ : x_grid_;
+            int b = find_band(/*is_vcut=*/is_h, pp);
+            if (b >= 0 && b + 1 < (int)pgrid.size()) {
+                // The perp window NUTS/DNUTS can actually use: the Hanan band,
+                // intersected with the slide window when one is known.
+                double w_lo = pgrid[b], w_hi = pgrid[b + 1];
+                if (slide_lo != INT_MIN) w_lo = std::max(w_lo, (double)slide_lo);
+                if (slide_hi != INT_MIN) w_hi = std::min(w_hi, (double)slide_hi);
+                if (w_lo < w_hi) {
+                    int supply = grid_->get_layer_grid(layer_id)
+                                     .count_signal_tracks_in_span(
+                                         (double)lo, (double)hi, w_lo, w_hi);
+                    if ((double)supply < tracks_needed) peak = 1.0;
+                }
+            }
+        }
+    }
     return peak;
 }
 
@@ -599,7 +652,8 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
 // eff_width and return the cheapest usable coordinate instead.
 int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
                                       double eff_width,
-                                      int slide_lo, int slide_hi) const {
+                                      int slide_lo, int slide_hi,
+                                      double tracks_needed) const {
     bool is_h = (seg.start.y == seg.end.y);
     const auto& grid = is_h ? y_grid_ : x_grid_;
     const int centre = (slide_lo + slide_hi) / 2;
@@ -618,7 +672,7 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
                                      slide_lo, slide_hi);
         if (kPeak_ > 0.0)
             c += kPeak_ * peak_util_segment(seg, layer_id, pp,
-                                            slide_lo, slide_hi);
+                                            slide_lo, slide_hi, tracks_needed);
         return c;
     };
 
@@ -763,7 +817,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             }
             auto band_perp = [&](int lid, double eff) {
                 if (slide_lo == INT_MIN) return INT_MIN;   // no window: nominal lookup
-                return best_band_perp(seg, lid, eff, slide_lo, slide_hi);
+                return best_band_perp(seg, lid, eff, slide_lo, slide_hi,
+                                      (double)nbits);
             };
 
             int    best_lid = layers_rev[0];
@@ -842,7 +897,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     double pk = 0.0;
                     if (kPeak_ > 0.0)
                         pk = kPeak_ * peak_util_segment(seg, lid, pp,
-                                                        slide_lo, slide_hi);
+                                                        slide_lo, slide_hi,
+                                                        (double)nbits);
                     double s    = cong + span + base + bal + hgt + pk;
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                 }

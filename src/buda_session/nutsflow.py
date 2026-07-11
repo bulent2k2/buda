@@ -986,12 +986,22 @@ class NutsFlowMixin:
         capacity model that cannot be honoured, and quietly planning with the
         width model instead would hide that the signal-track accounting never
         happened."""
-        if "signal_tracks" not in args:
-            return
         has_pattern = self.routing_grid is not None and any(
             self.routing_grid.has_layer(lid)
             for d in (buda.LayerDir.HORIZONTAL, buda.LayerDir.VERTICAL)
             for lid in self.layers.get_layer_ids_by_dir(d))
+        if "signal_tracks" not in args:
+            # Width mode keeps the geometric capacity model, but the planner
+            # still receives the routing grid when patterned layers exist:
+            # peak_util_segment's absolute-supply floor (kPeak) consults the
+            # real signal-track supply in EITHER capacity mode.  Leaf keepouts
+            # go in first so the count matches what DetailedNUTS will place
+            # from.  The grid is only read behind kPeak>0 / signal-track-mode
+            # gates, so default width-mode flows stay bit-identical.
+            if has_pattern:
+                self._install_leaf_keepouts()
+                self.planner.set_routing_grid(self.routing_grid)
+            return
         if not has_pattern:
             print("Error: run_planner signal_tracks needs a routing grid to count "
                   "signal tracks, but no def_track_pattern is defined. Add "

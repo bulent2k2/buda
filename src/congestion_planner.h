@@ -264,9 +264,16 @@ private:
     // segment would use.  0 when every band is empty or the segment crosses
     // none; can exceed 1 on already-overflowing bands.  Only evaluated when
     // kPeak_ > 0, so the default path costs nothing extra.
+    // tracks_needed (> 0 = the bundle's bit count) arms the ABSOLUTE-supply
+    // floor: when the planner has a routing grid with this layer patterned
+    // and the band's real span-wide signal-track supply cannot host that
+    // many bits, util is clamped to >= 1 — an empty-because-unroutable band
+    // must never look cheaper than a full one (the big2 kPeak stranding fix;
+    // see the .cpp comment).
     double peak_util_segment(const Segment& seg, int layer_id,
                              int perp_pos_override = INT_MIN,
-                             int slide_lo = INT_MIN, int slide_hi = INT_MIN) const;
+                             int slide_lo = INT_MIN, int slide_hi = INT_MIN,
+                             double tracks_needed = 0.0) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
     double score_segment(const Segment& seg, int layer_id, double eff_width,
                          int perp_pos_override = INT_MIN,
@@ -310,6 +317,12 @@ private:
     BundleAssignment make_assignment(const BundleWrapper& bw, const PlanResult& plan) const;
     void log_choice(const BundleWrapper& bw, const PlanResult& plan, const std::string& tag) const;
 
+    // The segment's routed along-extent on this layer: the raw span, clamped
+    // to endpoint leaf-cell faces on non-TOP layers (the in-cell portion is
+    // pin access, not routed wire).  lo >= hi means nothing is routed here.
+    // The single clamp rule shared by for_each_band's cut matching and
+    // peak_util_segment's absolute-supply floor.
+    void routed_extent(const Segment& seg, int layer_id, int& lo, int& hi) const;
     // Invoke fn(cut_index, band) for every cut/band this segment loads —
     // the same matching rule as apply_segment, factored for reuse.
     void for_each_band(const Segment& seg, int layer_id, int perp_pos_override,
@@ -371,8 +384,11 @@ private:
     // coordinate inside the band with the lowest peak congestion cost across
     // the cuts the segment crosses.  Ties break toward the interval centre.
     // Falls back to the interval centre when no band can host the bus.
+    // tracks_needed feeds peak_util_segment's absolute-supply floor (kPeak
+    // only), so the band choice also steers away from supply-poor bands.
     int best_band_perp(const Segment& seg, int layer_id, double eff_width,
-                       int slide_lo, int slide_hi) const;
+                       int slide_lo, int slide_hi,
+                       double tracks_needed = 0.0) const;
 
     const Floorplan&  floorplan_;
     const LayerStack& layers_;
