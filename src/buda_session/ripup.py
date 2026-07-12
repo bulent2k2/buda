@@ -250,6 +250,7 @@ class RipupMixin:
         self.planner = buda.CongestionPlanner(self.fp, self.layers)
         for pname, pval in self._planner_params.items():
             self.planner.set_planner_param(pname, pval)
+        self._apply_hier_refine_default(self.planner)
         self.planner.set_track_pitch(self._nuts_pitch)
         self._planner_pitch = self._nuts_pitch
         self.planner.build_congestion_map()

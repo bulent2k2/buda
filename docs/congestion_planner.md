@@ -238,7 +238,15 @@ Every deep-first win is captured or exceeded (01/02/05; 06's win is not
 reachable by strictly-better moves), 10 improves instead of regressing,
 and the two deep-first regressions (07/10) cannot recur. The knob also
 works in the flat `run_planner` (the pass runs over whatever was
-committed); default stays 0 pending broader corpus time. Tests:
+committed). **Defaults (decided 2026-07-12,
+[internal/refine_passes_default.md](internal/refine_passes_default.md)):
+hier planning defaults to 1 pass** — the flat+demo measurement campaign
+showed exact no-ops everywhere except `big2_noviz` (0 → 60 opens, the
+pre-charge-horizon class), which keeps the FLAT default at 0, while the
+hier side added `mix` healing 1/0 → 0/0 with its heal loops converging
+9× faster (ripup trials inherit the refinement configuration by design
+— fidelity over gating). An explicit `set_planner_param refine_passes
+<n>`, including 0, always wins. Tests:
 `test/tests/test_planner_refine.py`.
 
 ### Per-level summary
