@@ -31,6 +31,20 @@ items this page doesn't see).
    shipped anyway on its own merits (region-override supply the width
    model can't see: mix pre-heal opens −55%, tc3a's kPeak-0.2 regression
    gone; see wishlist-planner).
+4. **`refine_passes` default-on decision** —
+   [`refine_passes_default.md`](refine_passes_default.md). The planner
+   refinement passes (PR #274, the hier level-ordering synthesis) are the
+   strongest default-on candidate among the opt-in knobs: zero corpus
+   regressions, neutral designs provably exact no-ops, and every hier
+   design currently pays the phantom-reservation QoR tax by default
+   (hbundles/01 +21% WL, 05 47 opens). Gated on the unmeasured surfaces:
+   the flat+demo corpus and mix/big2 healed endpoints at
+   `refine_passes 1`, the ripup-trial interaction (fallback full-replans
+   would refine inside every trial — measure or gate it), runtime on the
+   big designs, and the borderline-score host-dependence family. The
+   documented middle step is a hier-only default; whatever the scope, the
+   flip is its own PR whose diff is the re-baselined measurement record.
+
 ## Big / blocked / conditional
 
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
