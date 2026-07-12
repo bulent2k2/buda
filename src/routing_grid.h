@@ -15,6 +15,7 @@
  */
 
 #pragma once
+#include <functional>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -110,9 +111,12 @@ public:
     // signal_tracks_in(x, …) is the along_lo == along_hi == x special case; a
     // keepout that overlaps the span but misses the sample point is invisible
     // to it, which let DetailedNUTS route bits straight through a keepout
-    // (keepout-model audit).  The pattern is still resolved at the along
-    // MIDPOINT (effective_pattern_at's point sampling — the documented
-    // override approximation, unchanged here).
+    // (keepout-model audit).  ALONG the span the pattern is still resolved at
+    // the MIDPOINT (the documented override approximation); ACROSS the perp
+    // window the pattern is resolved PER SLICE — the window splits at
+    // override perp edges and each slice samples its own midpoint — so an
+    // override whose edge touches a Hanan row no longer claims the entire
+    // band above it (see for_each_signal_track_in_span).
     std::vector<std::pair<double, TrackSlot>>
     signal_tracks_in_span(double along_lo, double along_hi,
                           double perp_lo, double perp_hi) const;
@@ -157,6 +161,22 @@ public:
     const std::vector<Rect>& keepouts() const { return keepouts_; }
 
 private:
+    // The single span-aware SIGNAL-track walker behind signal_tracks_in_span
+    // and count_signal_tracks_in_span — one implementation, so the vector and
+    // count views cannot drift (the lockstep the tests guard is structural).
+    // Per-slice pattern resolution: the perp window is split at the perp
+    // edges of every override whose along range contains the span midpoint,
+    // and each slice's pattern is resolved at the SLICE midpoint — so a
+    // boundary-touching override claims only its own side, not the whole
+    // band above it (the sharp edge the old perp_lo point-sample had).
+    // Interior slice boundaries are half-open (a track centre exactly on a
+    // cut belongs to the slice above); the window ends stay closed, so a
+    // no-override query is identical to the classic single-pattern walk.
+    // The span-aware keepout filter is per track, as before.
+    void for_each_signal_track_in_span(
+        double along_lo, double along_hi, double perp_lo, double perp_hi,
+        const std::function<void(double, const TrackSlot&)>& fn) const;
+
     TrackPattern                 global_pattern_;
     std::vector<PatternOverride> overrides_;
     std::vector<Rect>            keepouts_;

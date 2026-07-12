@@ -56,11 +56,12 @@ def _route(kpeak, bits):
             "def_track_pattern 4 0 SIGNAL 1 1",
             "def_track_pattern 5 0 SIGNAL 1 1",
             # corridor band override: power-heavy, ~3 signal tracks in y[0,100].
-            # Ends at 99 (not a Hanan row): the override region test is
-            # boundary-inclusive and signal_tracks_in_span resolves the
-            # pattern at the window's perp_lo, so an override reaching a
-            # Hanan row would also claim the whole band ABOVE that row and
-            # turn the detour bands supply-poor too.
+            # (Historical note: this ends at 99 because the span walkers used
+            # to resolve the pattern at the window's perp_lo, so an override
+            # reaching the Hanan row at 100 claimed the band above it too.
+            # Per-slice resolution fixed that — see
+            # test_boundary_touching_override_detour_places below — and 99 is
+            # kept so this fixture stays byte-stable.)
             "add_grid_override 4 0 0 1400 99 0 POWER 28 1 SIGNAL 1 0",
             f"add_bus d[{bits}] S.p D.p",
             "run_bundler strict", "generate_topologies"]
@@ -99,3 +100,32 @@ def test_floor_silent_when_supply_suffices():
     s, sel = _route(0.2, bits=2)
     assert sel == "I_H", sel
     assert s.detailed_result.num_unplaced == 0
+
+
+def test_boundary_touching_override_detour_places():
+    """End-to-end regression for the override-boundary fix (per-slice pattern
+    resolution in the span walkers): with the corridor override ending
+    EXACTLY on the Hanan row at 120, the pre-fix walkers read the detour
+    band above it as supply-dead (the override claimed the whole band via
+    the perp_lo point sample) — the kPeak-steered detour route itself
+    stranded all 8 bits.  With per-slice resolution the detour band reads
+    its real (healthy) pattern and every bit places."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = ["def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+            "add_block S 0 0 100 100", "add_block D 900 0 1000 100",
+            "add_block H1 1200 140 1300 200",
+            "def_track_pattern 4 0 SIGNAL 1 1",
+            "def_track_pattern 5 0 SIGNAL 1 1",
+            "add_grid_override 4 0 0 1400 120 0 POWER 28 1 SIGNAL 1 0",
+            "add_bus d[8] S.p D.p",
+            "run_bundler strict", "generate_topologies",
+            "set_planner_param kPeak 0.2",
+            "run_planner", "run_nuts", "run_detailed_nuts"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    w = s.bundles[0]
+    sel = w.input.candidates[w.plan.selected_topology_index].type
+    assert sel != "I_H", sel                     # floor still steers off the corridor
+    assert s.detailed_result.num_unplaced == 0   # and the detour now places

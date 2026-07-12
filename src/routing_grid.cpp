@@ -113,32 +113,81 @@ RoutingGrid::signal_tracks_in(double x, double lo, double hi) const {
     return result;
 }
 
+void RoutingGrid::for_each_signal_track_in_span(
+    double along_lo, double along_hi, double perp_lo, double perp_hi,
+    const std::function<void(double, const TrackSlot&)>& fn) const {
+    if (along_lo > along_hi) std::swap(along_lo, along_hi);
+    if (perp_lo > perp_hi) return;
+    const double mid = (along_lo + along_hi) / 2.0;
+
+    // Perp slices: cut [perp_lo, perp_hi] at the perp edges of every override
+    // whose ALONG range contains the span midpoint (the same along test
+    // effective_pattern_at applies).  Each slice's pattern is then resolved
+    // at the SLICE midpoint, so a boundary-touching override claims only its
+    // own side — the old single perp_lo sample let an override ending exactly
+    // on a Hanan row claim the entire (physically global-pattern) band above.
+    std::vector<double> cuts = {perp_lo, perp_hi};
+    for (const auto& ov : overrides_) {
+        const double a1 = is_horizontal_ ? (double)ov.region.x1 : (double)ov.region.y1;
+        const double a2 = is_horizontal_ ? (double)ov.region.x2 : (double)ov.region.y2;
+        if (mid < a1 || mid > a2) continue;
+        const double p1 = is_horizontal_ ? (double)ov.region.y1 : (double)ov.region.x1;
+        const double p2 = is_horizontal_ ? (double)ov.region.y2 : (double)ov.region.x2;
+        if (p1 > perp_lo && p1 < perp_hi) cuts.push_back(p1);
+        if (p2 > perp_lo && p2 < perp_hi) cuts.push_back(p2);
+    }
+    std::sort(cuts.begin(), cuts.end());
+    cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+
+    for (size_t si = 0; si + 1 < cuts.size(); ++si) {
+        const double s_lo = cuts[si], s_hi = cuts[si + 1];
+        // Interior boundaries are half-open (a centre exactly on a cut
+        // belongs to the slice above); the window ends stay closed, so a
+        // no-override query walks exactly the classic [perp_lo, perp_hi].
+        const bool hi_closed = (si + 2 == cuts.size());
+        const double sample = 0.5 * (s_lo + s_hi);
+        const TrackPattern& pat = effective_pattern_at(
+            is_horizontal_ ? mid : sample, is_horizontal_ ? sample : mid);
+        const double up = pat.unit_pitch();
+        if (up <= 0.0 || pat.slots.empty()) continue;
+        int n_start = static_cast<int>(std::floor((s_lo - pat.origin) / up)) - 1;
+        for (int n = n_start; ; ++n) {
+            const double unit_start = pat.origin + static_cast<double>(n) * up;
+            if (unit_start > s_hi) break;
+            double pos = unit_start;
+            for (const auto& slot : pat.slots) {
+                const double centre = pos + slot.width / 2.0;
+                pos += slot.width + slot.space_after;
+                if (centre < s_lo) continue;
+                if (hi_closed ? (centre > s_hi) : (centre >= s_hi)) continue;
+                if (slot.type != "SIGNAL") continue;
+                bool blocked = false;
+                for (const auto& koz : keepouts_) {
+                    const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
+                    const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
+                    const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
+                    const double k_a2 = is_horizontal_ ? koz.x2 : koz.y2;
+                    if (centre >= k_p1 && centre <= k_p2 &&
+                        along_lo <= k_a2 && along_hi >= k_a1) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (!blocked) fn(centre, slot);
+            }
+        }
+    }
+}
+
 std::vector<std::pair<double, TrackSlot>>
 RoutingGrid::signal_tracks_in_span(double along_lo, double along_hi,
                                    double perp_lo, double perp_hi) const {
-    if (along_lo > along_hi) std::swap(along_lo, along_hi);
-    const double mid = (along_lo + along_hi) / 2.0;
-    const TrackPattern& pat = effective_pattern_at(
-        is_horizontal_ ? mid : perp_lo, is_horizontal_ ? perp_lo : mid);
-    auto all = pat.tracks_in_range(perp_lo, perp_hi);
     std::vector<std::pair<double, TrackSlot>> result;
-    result.reserve(all.size());
-    for (auto& p : all) {
-        if (p.second.type != "SIGNAL") continue;
-        bool blocked = false;
-        for (const auto& koz : keepouts_) {
-            const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
-            const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
-            const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
-            const double k_a2 = is_horizontal_ ? koz.x2 : koz.y2;
-            if (p.first >= k_p1 && p.first <= k_p2 &&
-                along_lo <= k_a2 && along_hi >= k_a1) {
-                blocked = true;
-                break;
-            }
-        }
-        if (!blocked) result.push_back(std::move(p));
-    }
+    for_each_signal_track_in_span(
+        along_lo, along_hi, perp_lo, perp_hi,
+        [&](double centre, const TrackSlot& slot) {
+            result.push_back({centre, slot});
+        });
     return result;
 }
 
@@ -275,44 +324,13 @@ int RoutingGrid::count_signal_tracks_in(double x, double lo, double hi) const {
 
 int RoutingGrid::count_signal_tracks_in_span(double along_lo, double along_hi,
                                              double perp_lo, double perp_hi) const {
-    // Count-only twin of signal_tracks_in_span: same tiling walk + span-aware
-    // keepout filter, but never allocates (the planner's kPeak supply floor
-    // only needs the count).  Kept in lockstep with signal_tracks_in_span
-    // above: pattern resolved at the along MIDPOINT, a track blocked when a
-    // keepout's perp extent covers its centre AND its along extent overlaps
-    // [along_lo, along_hi].
-    if (along_lo > along_hi) std::swap(along_lo, along_hi);
-    const double mid = (along_lo + along_hi) / 2.0;
-    const TrackPattern& pat = effective_pattern_at(
-        is_horizontal_ ? mid : perp_lo, is_horizontal_ ? perp_lo : mid);
-    const double up = pat.unit_pitch();
-    if (up <= 0.0 || pat.slots.empty() || perp_lo > perp_hi) return 0;
-    int n_start = static_cast<int>(std::floor((perp_lo - pat.origin) / up)) - 1;
+    // Count-only view of the SAME walker as signal_tracks_in_span — one
+    // implementation (for_each_signal_track_in_span), so the vector and count
+    // twins cannot drift; this exists because the planner's kPeak supply
+    // floor only needs the count, not a materialized vector.
     int cnt = 0;
-    for (int n = n_start; ; ++n) {
-        double unit_start = pat.origin + static_cast<double>(n) * up;
-        if (unit_start > perp_hi) break;
-        double pos = unit_start;
-        for (const auto& slot : pat.slots) {
-            double centre = pos + slot.width / 2.0;
-            if (centre >= perp_lo && centre <= perp_hi && slot.type == "SIGNAL") {
-                bool blocked = false;
-                for (const auto& koz : keepouts_) {
-                    const double k_p1 = is_horizontal_ ? koz.y1 : koz.x1;
-                    const double k_p2 = is_horizontal_ ? koz.y2 : koz.x2;
-                    const double k_a1 = is_horizontal_ ? koz.x1 : koz.y1;
-                    const double k_a2 = is_horizontal_ ? koz.x2 : koz.y2;
-                    if (centre >= k_p1 && centre <= k_p2 &&
-                        along_lo <= k_a2 && along_hi >= k_a1) {
-                        blocked = true;
-                        break;
-                    }
-                }
-                if (!blocked) ++cnt;
-            }
-            pos += slot.width + slot.space_after;
-        }
-    }
+    for_each_signal_track_in_span(along_lo, along_hi, perp_lo, perp_hi,
+                                  [&](double, const TrackSlot&) { ++cnt; });
     return cnt;
 }
 
