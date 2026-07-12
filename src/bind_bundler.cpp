@@ -29,7 +29,8 @@ void bind_bundler(py::module_& m) {
     py::enum_<Strategy>(m, "Strategy")
         .value("STRICT",        Strategy::STRICT)
         .value("CONVERGENT",    Strategy::CONVERGENT)
-        .value("BIDIRECTIONAL", Strategy::BIDIRECTIONAL);
+        .value("BIDIRECTIONAL", Strategy::BIDIRECTIONAL)
+        .value("COMBINED",      Strategy::COMBINED);
 
     py::class_<HBundle>(m, "HBundle")
         .def(py::init<>())
@@ -47,6 +48,8 @@ void bind_bundler(py::module_& m) {
         .def_readwrite("drv_spec_depth",     &HBundle::drv_spec_depth)
         .def_readwrite("rcv_spec_depth",     &HBundle::rcv_spec_depth)
         .def_readwrite("drv_spec_path",      &HBundle::drv_spec_path)
+        .def_readwrite("net_drivers",        &HBundle::net_drivers)
+        .def_readwrite("net_receivers",      &HBundle::net_receivers)
         .def_readwrite("rcv_spec_paths",     &HBundle::rcv_spec_paths)
         .def("get_net_names",                &HBundle::get_net_names);
 
@@ -63,5 +66,6 @@ void bind_bundler(py::module_& m) {
     py::class_<HierarchicalBundler>(m, "HierarchicalBundler")
         .def(py::init<BDB&>())
         .def("set_strategy", &HierarchicalBundler::set_strategy)
+        .def("set_bundling_overrides", &HierarchicalBundler::set_bundling_overrides)
         .def("run", &HierarchicalBundler::run, py::arg("max_depth") = 1);
 }

@@ -27,10 +27,17 @@ clean. **COMBINED landed (2026-07-12):** `run_bundler COMBINED` = the join of
 CONVERGENT and BIDIRECTIONAL (union-find chains), with `set_bundling`
 per-prefix permission overrides and the `set_max_bundle_bits <N|auto>`
 balanced bus-preserving split pass (auto = shortest-busterm-edge cap).
-**Remaining follow-on:** a CONVERGENT/COMBINED mode for the HIER bundler
-(`run_hier_bundler` supports STRICT/BIDIRECTIONAL only — scope decision
-needed; the depth-aware signature may split leaf-level merge groups
-differently). Details: [`convergent_bundling.md`](convergent_bundling.md).
+**HIER modes landed (2026-07-12):** `run_hier_bundler` accepts all four
+strategies per bundling depth (same-level nets; multi-driver differing-set
+groups become `FANIN:` bundles routed as per-bit tapered trees in their
+frame, cell-local fan-in templates merge with replicas, `set_bundling`
+overrides apply to both bundlers).  The depth-aware semantics ARE the scope
+decision: each net bundles once at its most specific level, so fan-ins
+split across subtrees/depths stay separate routing problems.  **Remaining
+corners:** cross-level nets keep STRICT/BIDIRECTIONAL grouping (single
+drv_spec metadata), and `set_max_bundle_bits` stays flat-only (hier splits
+would have to propagate through template↔replica linkage).
+Details: [`convergent_bundling.md`](convergent_bundling.md).
 
 **What (historical):** `run_bundler CONVERGENT` groups nets by shared receiver only, so a
 bundle can span several **different driver blocks** at different locations (a

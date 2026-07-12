@@ -306,3 +306,23 @@ the filled-in counts.
 | `src/buda_cli.py` | Add `run_hier_bundler` command |
 | `test/tests/features/hier_bundler.feature` | BDD scenarios |
 | `test/tests/test_hier_bundler.py` | Step defs + standalone tests |
+
+
+## Strategies (STRICT | CONVERGENT | BIDIRECTIONAL | COMBINED)
+
+`run_hier_bundler` accepts the same four strategies as the flat
+`run_bundler`, applied **per bundling depth** to same-level nets (each net
+bundles once at its most specific level, so fan-ins split across subtrees
+or specificity depths remain separate routing problems — the depth-aware
+semantics).  A multi-driver group whose nets have **differing endpoint
+block sets** becomes a *fan-in bundle*: reason `FANIN:root|FROM:leaves`,
+per-net endpoints in `HBundle.net_drivers`/`net_receivers`, routed by
+generation as a per-bit tapered fan-in tree in the bundle's frame
+(cell-local fan-in templates merge with replicas exactly like STRICT
+templates).  A mixed-direction group over ONE block set keeps the
+block-to-block BIDIRECTIONAL treatment.  `set_bundling` per-prefix
+overrides apply to both bundlers.  Cross-level nets keep
+STRICT/BIDIRECTIONAL grouping, and `set_max_bundle_bits` is flat-only —
+both documented follow-ons.  See
+[convergent_bundling.md](internal/convergent_bundling.md) and
+`test/tests/test_hier_bundler_combined.py`.

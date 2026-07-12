@@ -15,6 +15,8 @@
  */
 
 #include "bundler.h"
+#include <functional>
+#include <set>
 #include <sstream>
 #include <algorithm>
 #include <climits>
@@ -122,7 +124,33 @@ std::string HierarchicalBundler::_sig(
         all.push_back(drv_name);
         return _bidir_sig(std::move(all));
     }
+    if (_strategy == Strategy::CONVERGENT) {
+        std::string sig = "REC:";
+        for (const auto& n : sorted_rcv_names) { sig += n; sig += ','; }
+        return sig;
+    }
     return _strict_sig(drv_name, sorted_rcv_names);
+}
+
+bool HierarchicalBundler::_net_allows(const std::string& net_name,
+                                      const char* rel) const {
+    // Longest matching prefix wins; "*" is the global default; no match =
+    // fully permissive.  Mirrors the flat _net_allowed_relations exactly.
+    const std::string* best = nullptr;
+    int best_len = -1;
+    for (const auto& [prefix, mode] : _overrides) {
+        if (prefix == "*") {
+            if (best_len < 0) { best = &mode; best_len = 0; }
+        } else if (net_name.compare(0, prefix.size(), prefix) == 0 &&
+                   (int)prefix.size() > best_len) {
+            best = &mode; best_len = (int)prefix.size();
+        }
+    }
+    if (!best) return true;                       // permissive default
+    if (*best == "strict")           return false;
+    if (*best == "no_convergent")    return std::string(rel) == "bidir";
+    if (*best == "no_bidirectional") return std::string(rel) == "conv";
+    return true;                                  // "combined"
 }
 
 std::unordered_map<int, HierarchicalBundler::NetEndpoints>
@@ -371,7 +399,15 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 if (info.bundle_depth != depth) continue;
                 auto sorted_rcv = info.rcv_spec_paths;
                 std::sort(sorted_rcv.begin(), sorted_rcv.end());
-                xl_sig_to_nets[_sig(info.drv_spec_path, sorted_rcv)].push_back(net_id);
+                // Cross-level nets keep STRICT/BIDIRECTIONAL grouping under
+                // every strategy: their single drv_spec metadata cannot yet
+                // describe a multi-driver group (fan-in for cross-level nets
+                // is a documented follow-on).
+                const std::string xsig =
+                    (_strategy == Strategy::BIDIRECTIONAL)
+                        ? _sig(info.drv_spec_path, sorted_rcv)
+                        : _strict_sig(info.drv_spec_path, sorted_rcv);
+                xl_sig_to_nets[xsig].push_back(net_id);
             }
             for (const auto& [sig, net_ids] : xl_sig_to_nets) {
                 HBundle b;
@@ -403,8 +439,8 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 ++it;
         }
 
-        // Group same-level nets by STRICT signature at this depth.
-        std::map<std::string, std::vector<int>> sig_to_nets;
+        // Same-level nets at this depth: per-net endpoint names first.
+        std::map<int, std::pair<std::string, std::vector<std::string>>> ep_names;
         for (const auto& [net_id, ep] : ep_map) {
             // Bundle each net exactly once, at its most specific projection
             // available within max_depth.  Pin propagation makes the net
@@ -423,10 +459,159 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 if (rit != comp_by_id.end()) rcv_names.push_back(rit->second.name);
             }
             std::sort(rcv_names.begin(), rcv_names.end());
-            sig_to_nets[_sig(drv_it->second.name, rcv_names)].push_back(net_id);
+            ep_names[net_id] = {drv_it->second.name, std::move(rcv_names)};
         }
 
-        for (const auto& [sig, net_ids] : sig_to_nets) {
+        // Grouping: the pure strategies keep the historical sorted-signature
+        // map (byte-identical bundles); COMBINED — or any active override —
+        // takes the union-find JOIN over the permitted relations, exactly
+        // mirroring the flat _generalized_bundles (a merge via a relation
+        // needs the strategy AND both nets to permit it; the strict relation
+        // is always permitted).
+        std::vector<std::pair<std::string, std::vector<int>>> groups;
+        const bool general = (_strategy == Strategy::COMBINED) ||
+                             !_overrides.empty();
+        if (!general) {
+            std::map<std::string, std::vector<int>> sig_to_nets;
+            for (const auto& [net_id, dr] : ep_names)
+                sig_to_nets[_sig(dr.first, dr.second)].push_back(net_id);
+            for (auto& [sig, ids] : sig_to_nets)
+                groups.emplace_back(sig, std::move(ids));
+        } else {
+            std::map<int, int> parent;
+            for (const auto& [net_id, dr] : ep_names) parent[net_id] = net_id;
+            std::function<int(int)> find = [&](int x) {
+                while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+                return x;
+            };
+            const bool strat_conv  = (_strategy == Strategy::CONVERGENT ||
+                                      _strategy == Strategy::COMBINED);
+            const bool strat_bidir = (_strategy == Strategy::BIDIRECTIONAL ||
+                                      _strategy == Strategy::COMBINED);
+            std::map<std::string, int> by_sig;
+            for (const auto& [net_id, dr] : ep_names) {
+                const std::string& nname = net_name.count(net_id)
+                                               ? net_name[net_id] : std::string();
+                std::vector<std::string> sigs;
+                sigs.push_back("S" + _strict_sig(dr.first, dr.second));
+                std::string rec;
+                for (const auto& r : dr.second) { rec += r; rec += ','; }
+                if (strat_conv && _net_allows(nname, "conv"))
+                    sigs.push_back("C REC:" + rec);
+                if (strat_bidir && _net_allows(nname, "bidir")) {
+                    std::vector<std::string> all = dr.second;
+                    all.push_back(dr.first);
+                    sigs.push_back("B" + _bidir_sig(std::move(all)));
+                }
+                for (const auto& key : sigs) {
+                    auto it = by_sig.find(key);
+                    if (it == by_sig.end()) by_sig[key] = net_id;
+                    else {
+                        int ra = find(it->second), rb = find(net_id);
+                        if (ra != rb) parent[rb] = ra;
+                    }
+                }
+            }
+            // Deterministic order: groups sorted by their smallest net name.
+            std::map<int, std::vector<int>> by_root;
+            for (const auto& [net_id, dr] : ep_names)
+                by_root[find(net_id)].push_back(net_id);
+            std::vector<std::pair<std::string, std::vector<int>>> tmp;
+            for (auto& [root, ids] : by_root) {
+                std::string min_name;
+                for (int nid : ids) {
+                    auto it = net_name.find(nid);
+                    if (it != net_name.end() &&
+                        (min_name.empty() || it->second < min_name))
+                        min_name = it->second;
+                }
+                tmp.emplace_back(min_name, std::move(ids));
+            }
+            std::sort(tmp.begin(), tmp.end(),
+                      [](const auto& a, const auto& b) { return a.first < b.first; });
+            for (auto& [k, ids] : tmp)
+                groups.emplace_back(std::string(), std::move(ids));
+        }
+
+        for (const auto& [sig_hint, net_ids] : groups) {
+            // Per-group endpoint survey: unique drivers/receivers in sorted
+            // net-name order (deterministic), fan-in when drivers differ.
+            std::vector<std::pair<std::string, int>> name_id;
+            for (int nid : net_ids) {
+                auto it = net_name.find(nid);
+                name_id.emplace_back(it != net_name.end() ? it->second : "", nid);
+            }
+            std::sort(name_id.begin(), name_id.end());
+            std::vector<std::string> drivers;
+            std::vector<std::string> receivers;   // unique, first-seen order
+            for (const auto& [nm, nid] : name_id) {
+                const auto& dr = ep_names.at(nid);
+                if (std::find(drivers.begin(), drivers.end(), dr.first) == drivers.end())
+                    drivers.push_back(dr.first);
+                for (const auto& r : dr.second)
+                    if (std::find(receivers.begin(), receivers.end(), r) == receivers.end())
+                        receivers.push_back(r);
+            }
+            // Fan-in = several drivers AND differing endpoint BLOCK SETS.
+            // A mixed-direction group over ONE block set (A→B with B→A —
+            // the BIDIRECTIONAL case) keeps the historical block-to-block
+            // treatment: the single trunk between the same blocks serves
+            // every net, no fan-in tree needed.
+            bool same_set = true;
+            {
+                std::set<std::string> first_set;
+                bool first = true;
+                for (const auto& [nm, nid] : name_id) {
+                    const auto& dr = ep_names.at(nid);
+                    std::set<std::string> es(dr.second.begin(), dr.second.end());
+                    es.insert(dr.first);
+                    if (first) { first_set = std::move(es); first = false; }
+                    else if (es != first_set) { same_set = false; break; }
+                }
+            }
+            const bool fanin = drivers.size() > 1 && !same_set;
+
+            std::string sig;
+            if (fanin) {
+                // Fan-in reason: root at the shared sink (the first net's
+                // first receiver — CONVERGENT guarantees a shared receiver
+                // set; a COMBINED chain root is a deterministic pick), the
+                // drivers (+ receivers beyond the root) as leaves.  Hier
+                // generation parses this form directly (FANIN:root|FROM:…).
+                const std::string root =
+                    ep_names.at(name_id[0].second).second.empty()
+                        ? receivers[0]
+                        : ep_names.at(name_id[0].second).second[0];
+                sig = "FANIN:" + root + "|FROM:";
+                for (const auto& d : drivers)
+                    if (d != root) { sig += d; sig += ','; }
+                for (const auto& r : receivers)
+                    if (r != root &&
+                        std::find(drivers.begin(), drivers.end(), r) == drivers.end()) {
+                        sig += r; sig += ',';
+                    }
+            } else if (!sig_hint.empty()) {
+                sig = sig_hint;
+            } else {
+                // Single-driver union-find group: the finest signature the
+                // whole group shares (familiar reasons survive overrides).
+                std::set<std::string> strict_sigs, conv_sigs;
+                for (const auto& [nm, nid] : name_id) {
+                    const auto& dr = ep_names.at(nid);
+                    strict_sigs.insert(_strict_sig(dr.first, dr.second));
+                    std::string rec = "REC:";
+                    for (const auto& r : dr.second) { rec += r; rec += ','; }
+                    conv_sigs.insert(rec);
+                }
+                if (strict_sigs.size() == 1)      sig = *strict_sigs.begin();
+                else if (conv_sigs.size() == 1)   sig = *conv_sigs.begin();
+                else {
+                    std::vector<std::string> all = receivers;
+                    all.insert(all.end(), drivers.begin(), drivers.end());
+                    sig = _bidir_sig(std::move(all));
+                }
+            }
+
             HBundle b;
             b.id    = ++next_id;
             // Routing-context level: the depth of the endpoints' common
@@ -454,44 +639,110 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             const auto& ep0 = ep_map.at(net_ids[0]);
             b.num_terminals = 1 + (int)ep0.receiver_comp_ids.size();
 
+            // Fan-in metadata: per-net endpoints ALIGNED with the sorted
+            // net_names, so the per-bit taper can walk each net's own
+            // driver→sink path at generation time.
+            if (fanin) {
+                for (const auto& nm : b.net_names) {
+                    for (const auto& [n2, nid2] : name_id) {
+                        if (n2 != nm) continue;
+                        const auto& dr = ep_names.at(nid2);
+                        b.net_drivers.push_back(dr.first);
+                        b.net_receivers.push_back(dr.second);
+                        break;
+                    }
+                }
+            }
+
             // ── Cell context + busterm IDs ─────────────────────────────────
-            auto drv_it = comp_by_id.find(ep0.driver_comp_id);
-            if (drv_it != comp_by_id.end()) {
-                int par_id = drv_it->second.parent_id;
-                bool has_parent = (par_id >= 0);
-                bool same_par = false;
-                if (has_parent) {
-                    same_par = true;
-                    for (int rid : ep0.receiver_comp_ids) {
-                        auto rit = comp_by_id.find(rid);
-                        if (rit == comp_by_id.end() || rit->second.parent_id != par_id) {
-                            same_par = false; break;
+            if (drivers.size() == 1) {
+                // Single-driver group: the HISTORICAL ep0-based path,
+                // verbatim — entry/exit id ORDER feeds generation, so the
+                // pure strategies stay byte-identical.
+                auto drv_it = comp_by_id.find(ep0.driver_comp_id);
+                if (drv_it != comp_by_id.end()) {
+                    int par_id = drv_it->second.parent_id;
+                    bool has_parent = (par_id >= 0);
+                    bool same_par = false;
+                    if (has_parent) {
+                        same_par = true;
+                        for (int rid : ep0.receiver_comp_ids) {
+                            auto rit = comp_by_id.find(rid);
+                            if (rit == comp_by_id.end() || rit->second.parent_id != par_id) {
+                                same_par = false; break;
+                            }
+                        }
+                    }
+                    if (same_par) {
+                        // Intra-cell: all endpoints share the same parent component.
+                        auto par_it = comp_by_id.find(par_id);
+                        if (par_it != comp_by_id.end()) {
+                            b.cell_context = par_it->second.cell;
+                            b.instances.push_back(par_it->second.name);
+                            b.entry_busterm_ids = {"bt:" + drv_it->second.name};
+                            for (int rid : ep0.receiver_comp_ids) {
+                                auto rit = comp_by_id.find(rid);
+                                if (rit != comp_by_id.end())
+                                    b.exit_busterm_ids.push_back("bt:" + rit->second.name);
+                            }
+                        }
+                    } else {
+                        // Cross-block bundle (or root-level endpoints): look up
+                        // busterm IDs from BDB if derive_busterms was called.
+                        auto drv_bt = bt_by_comp_name.find(drv_it->second.name);
+                        if (drv_bt != bt_by_comp_name.end())
+                            b.entry_busterm_ids = {drv_bt->second};
+                        for (int rid : ep0.receiver_comp_ids) {
+                            auto rit = comp_by_id.find(rid);
+                            if (rit == comp_by_id.end()) continue;
+                            auto rcv_bt = bt_by_comp_name.find(rit->second.name);
+                            if (rcv_bt != bt_by_comp_name.end())
+                                b.exit_busterm_ids.push_back(rcv_bt->second);
                         }
                     }
                 }
-                if (same_par) {
-                    // Intra-cell: all endpoints share the same parent component.
+            } else {
+                // Multi-driver group (fan-in, or a mixed-direction same-set
+                // group): same_par is decided over EVERY endpoint of EVERY
+                // net (all drivers must share the parent for the bundle to
+                // be a cell-local template); entry ids carry ALL drivers,
+                // exit ids the unique receivers.
+                int par_id = -2;
+                bool same_par = true;
+                for (int nid : net_ids) {
+                    const auto& epn = ep_map.at(nid);
+                    std::vector<int> comp_ids = epn.receiver_comp_ids;
+                    comp_ids.push_back(epn.driver_comp_id);
+                    for (int cid : comp_ids) {
+                        auto cit = comp_by_id.find(cid);
+                        if (cit == comp_by_id.end() || cit->second.parent_id < 0) {
+                            same_par = false; break;
+                        }
+                        if (par_id == -2) par_id = cit->second.parent_id;
+                        else if (cit->second.parent_id != par_id) {
+                            same_par = false; break;
+                        }
+                    }
+                    if (!same_par) break;
+                }
+                if (same_par && par_id >= 0) {
                     auto par_it = comp_by_id.find(par_id);
                     if (par_it != comp_by_id.end()) {
                         b.cell_context = par_it->second.cell;
                         b.instances.push_back(par_it->second.name);
-                        b.entry_busterm_ids = {"bt:" + drv_it->second.name};
-                        for (int rid : ep0.receiver_comp_ids) {
-                            auto rit = comp_by_id.find(rid);
-                            if (rit != comp_by_id.end())
-                                b.exit_busterm_ids.push_back("bt:" + rit->second.name);
-                        }
+                        for (const auto& d : drivers)
+                            b.entry_busterm_ids.push_back("bt:" + d);
+                        for (const auto& r : receivers)
+                            b.exit_busterm_ids.push_back("bt:" + r);
                     }
                 } else {
-                    // Cross-block bundle (or root-level endpoints): look up
-                    // busterm IDs from BDB if derive_busterms was called.
-                    auto drv_bt = bt_by_comp_name.find(drv_it->second.name);
-                    if (drv_bt != bt_by_comp_name.end())
-                        b.entry_busterm_ids = {drv_bt->second};
-                    for (int rid : ep0.receiver_comp_ids) {
-                        auto rit = comp_by_id.find(rid);
-                        if (rit == comp_by_id.end()) continue;
-                        auto rcv_bt = bt_by_comp_name.find(rit->second.name);
+                    for (const auto& d : drivers) {
+                        auto drv_bt = bt_by_comp_name.find(d);
+                        if (drv_bt != bt_by_comp_name.end())
+                            b.entry_busterm_ids.push_back(drv_bt->second);
+                    }
+                    for (const auto& r : receivers) {
+                        auto rcv_bt = bt_by_comp_name.find(r);
                         if (rcv_bt != bt_by_comp_name.end())
                             b.exit_busterm_ids.push_back(rcv_bt->second);
                     }

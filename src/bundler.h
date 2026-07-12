@@ -51,6 +51,14 @@ struct HBundle {
     std::string drv_spec_path;
     std::vector<std::string> rcv_spec_paths;
 
+    // Fan-in metadata (multi-driver CONVERGENT/COMBINED hier bundles only,
+    // else empty): per-net driver and receiver names ALIGNED with net_names,
+    // in the bundle's frame (depth-level component paths).  Feeds the
+    // per-bit taper (derive_fanin_seg_bits) at hier generation; not
+    // persisted — a resumed session falls back to conservative full width.
+    std::vector<std::string>              net_drivers;
+    std::vector<std::vector<std::string>> net_receivers;
+
     std::vector<std::string> get_net_names() const { return net_names; }
 };
 // STRICT       — same driver + same receivers (a true parallel bus).
@@ -61,7 +69,11 @@ struct HBundle {
 //                 bundled together — a→b,c with b→c,a with c→b,a, or simply
 //                 A→B with its return B→A.  Routing is block-to-block and
 //                 direction-agnostic, so the single trunk serves every net.
-enum class Strategy { STRICT, CONVERGENT, BIDIRECTIONAL };
+// COMBINED      — the JOIN of CONVERGENT and BIDIRECTIONAL: nets merge when
+//                 connected by a CHAIN of either relation (union-find), the
+//                 only genuinely new point on the strategy lattice
+//                 STRICT ⊂ {CONVERGENT, BIDIRECTIONAL} ⊂ COMBINED.
+enum class Strategy { STRICT, CONVERGENT, BIDIRECTIONAL, COMBINED };
 class Netlist {
 public:
     void add_net(const std::string& name, const std::string& driver, const std::vector<std::string>& receivers);
@@ -88,13 +100,30 @@ public:
     explicit HierarchicalBundler(BDB& db);
     // STRICT (default) groups by driver + receivers; BIDIRECTIONAL is
     // direction-agnostic (sorted set of all endpoint names), so a net and its
-    // reverse — and the cyclic multi-receiver case — bundle together.
+    // reverse — and the cyclic multi-receiver case — bundle together;
+    // CONVERGENT groups by receiver set only (fan-in); COMBINED is the join
+    // of the latter two (chains of either relation, union-find).  All are
+    // applied per bundling depth to SAME-LEVEL nets; cross-level nets keep
+    // STRICT/BIDIRECTIONAL grouping (their single drv_spec metadata cannot
+    // yet describe a multi-driver group — documented follow-on).
     void set_strategy(Strategy s) { _strategy = s; }
+    // Per-net-name-prefix permission overrides (set_bundling): mode is one
+    // of strict|no_convergent|no_bidirectional|combined; longest matching
+    // prefix wins, "*" is the global default.  A merge via a relation needs
+    // the strategy AND both nets to permit it.
+    void set_bundling_overrides(
+        const std::vector<std::pair<std::string, std::string>>& ovr) {
+        _overrides = ovr;
+    }
     std::vector<HBundle> run(int max_depth = 1);
 
 private:
     BDB& _db;
     Strategy _strategy = Strategy::STRICT;
+    std::vector<std::pair<std::string, std::string>> _overrides;
+    // Relations ("conv"/"bidir") the named net may merge through, resolved
+    // from _overrides (longest prefix) ∩ the strategy's relations.
+    bool _net_allows(const std::string& net_name, const char* rel) const;
 
     // Counts nets that fell back to UNKNOWN-direction positional driver/receiver
     // assignment during a run(); summarized once instead of one line per net.
