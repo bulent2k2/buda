@@ -38,6 +38,7 @@ offending wire pair named instead of shipping a silent short.
 import io
 import contextlib
 
+import buda
 import buda_cli
 
 
@@ -79,14 +80,41 @@ def _cross_net_same_track_overlaps(s):
 
 
 def _assert_clean_fanin(s, blocks):
-    """The bundle really is a tapered fan-in (the scenario under test),
-    everything places, and no cross-net pair shares a track."""
+    """The bundle really is a TAPERED fan-in (the scenario under test),
+    everything places, and no cross-net pair shares a track.
+
+    Guards against the vacuous-pass regression (Codex #280): if fan-in bit
+    derivation ever stops running, or runs but falls back to all-segments
+    full width, the short check would be exercising ordinary full-width
+    routing instead of the same-bundle/different-subset exemption.  So:
+    (1) the selected topology must carry a seg_bits map (derivation ran);
+    (2) re-deriving with the production inputs must report ZERO fallen-back
+        bits (every bit found a clean driver→sink segment path — the
+        derivation's own fallback signal, which the session path discards);
+    (3) each placed segment's emitted DNUTS bit set must equal its seg_bits
+        membership (the taper actually reached the detailed stage)."""
     w = s.bundles[0]
     topo = w.input.candidates[w.plan.selected_topology_index]
     assert set(topo.connected_block_names) == set(blocks)
+
+    sb = dict(topo.seg_bits)
+    assert sb, "fan-in taper derivation did not run (empty seg_bits)"
+    nets = list(w.input.original_bundle.get_net_names())
+    drvs = [s._net_endpoints[n][0] for n in nets]
+    rcvs = [list(s._net_endpoints[n][1]) for n in nets]
+    fallback = buda.derive_fanin_seg_bits(topo, s.fp, drvs, rcvs)
+    assert list(fallback) == [], \
+        f"bits {list(fallback)} fell back to all-segments (untapered)"
+
     assert s.detailed_result.num_unplaced == 0
+    emitted = {}
+    for ns in s.detailed_result.net_segments:
+        emitted.setdefault(ns.seg_idx, set()).add(ns.bit_index)
+    assert emitted == {si: set(v) for si, v in sb.items()}, (emitted, sb)
+
     shorts = _cross_net_same_track_overlaps(s)
     assert not shorts, f"cross-net same-track overlap(s): {shorts}"
+    return sb
 
 
 def test_same_row_drivers_no_cross_net_short():
@@ -122,4 +150,24 @@ def test_same_side_column_drivers_no_cross_net_short():
                 "add_block sink 700 60 850 140",
                 "add_net w0 ma.tx0 sink.r0", "add_net w1 ma.tx1 sink.r1",
                 "add_net w2 mb.tx sink.r2"])
-    _assert_clean_fanin(s, ("ma", "mb", "sink"))
+    sb = _assert_clean_fanin(s, ("ma", "mb", "sink"))
+    # This geometry's winner carries a PROPER subset (ma's stub: bits {0,1}
+    # of 3) — the differing-membership premise is live, not just derived.
+    assert any(len(v) < 3 for v in sb.values()), sb
+
+
+def test_scattered_drivers_disjoint_subsets_no_cross_net_short():
+    """Scattered drivers (no shared row/column): the tree needs real
+    per-driver branches, so the taper produces the fully DISJOINT stub
+    memberships {0,1} (ma) vs {2} (mb) — the exact shape whose local→global
+    bit mapping would short if the same-bundle exemption ever co-located
+    the two stubs (Codex #280: assert the tapered subsets, not just
+    connectivity, so a fallback-to-full-width regression cannot make the
+    suite pass vacuously)."""
+    s = _route(["add_block ma 0 0 100 80", "add_block mb 300 600 400 680",
+                "add_block sink 800 250 950 450",
+                "add_net w0 ma.tx0 sink.r0", "add_net w1 ma.tx1 sink.r1",
+                "add_net w2 mb.tx sink.r2"])
+    sb = _assert_clean_fanin(s, ("ma", "mb", "sink"))
+    stub_bits = sorted(tuple(v) for v in sb.values() if len(v) < 3)
+    assert stub_bits == [(0, 1), (2,)], sb
