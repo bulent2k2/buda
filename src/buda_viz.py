@@ -818,7 +818,8 @@ class TopologyExplorer:
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
-                 ui_state: ViewState = None, start_bidx=0, layer_visible=None):
+                 ui_state: ViewState = None, start_bidx=0, layer_visible=None,
+                 on_focus_bundle=None):
         self.fp          = fp
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
@@ -829,6 +830,9 @@ class TopologyExplorer:
         self._main_fig   = main_fig    # back-reference to main viz figure for cmd-1
         self._rerun_fn   = rerun_fn    # () -> NUTSResult | None
         self._refresh_fn = refresh_fn  # (NUTSResult) -> None
+        # Called with the current bundle's id when 'v' cycles back to the main
+        # window, so the main view adopts the bundle paged to with [ / ] here.
+        self._on_focus_bundle = on_focus_bundle
         
         self._block_patch_artists = []
         self._block_name_artists = []
@@ -1557,8 +1561,13 @@ class TopologyExplorer:
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         # 'v' mirrors cmd/ctrl-1 (raise the main BUDA viz window) — since the
         # main window's 'v' opens/raises this explorer, tapping 'v' cycles
-        # between the two windows.
+        # between the two windows.  Before switching back, hand the current
+        # bundle to the main view so a [ / ] page here becomes its selection —
+        # the two windows stay in sync in both directions.
         if event.key in ('v', 'cmd+1', 'ctrl+1'):
+            if self._on_focus_bundle is not None and self.wrappers:
+                self._on_focus_bundle(
+                    self.wrappers[self.bidx].input.original_bundle.id)
             if self._main_fig is not None: raise_window(self._main_fig)
             return
         if event.key in ('cmd+z', 'ctrl+z'):    self._zoom_to_bundle(); return
@@ -2149,6 +2158,16 @@ class BudaVisualizer:
         self._ax_design_stats = None  # bundles·buses·nets header above the list
         self._ax_bundles     = None
         self._ax_overlaps    = None
+        # Adaptive right-panel split: when the design has no overlaps the empty
+        # Overlap panel's space is folded into the bundle list.  Geometries for
+        # both modes are captured at show()-time; _apply_overlap_layout switches.
+        self._right_rects    = None
+        self._ov_layout_mode = 'with_ov'
+        self._ax_bscroll_dn  = None
+        self._ax_oscroll_up  = None
+        self._ax_oscroll_dn  = None
+        self._btn_oscroll_up = None
+        self._btn_oscroll_dn = None
         self._rerun_layer_fn = rerun_layer_fn   # (layer_id: int) -> NUTSResult | None
         self._rerun_fn       = rerun_fn         # () -> NUTSResult | None  (full re-run)
         self._overlap_entries = []   # sorted list of OverlapDetail from nuts_result
@@ -3065,6 +3084,11 @@ class BudaVisualizer:
         self._selected_overlap = None
         self._overlap_state    = 0
 
+        # Re-rank the bundle rows (opens may have moved between bundles) and
+        # re-fit the panel split (overlaps may have appeared or vanished).
+        self._sort_bid_list()
+        self._apply_overlap_layout()
+
         self._refresh_highlight()
 
         # The route changed (e.g. a re-run pinned a different topology): refresh
@@ -3085,6 +3109,69 @@ class BudaVisualizer:
         ax_h_in   = fig_h_in * ax_h_frac
         row_h_in  = 0.145   # ~10 pt rows at standard DPI
         return max(1, int(ax_h_in / row_h_in))
+
+    def _bundle_unplaced(self):
+        """{bundle_id: DNUTS-dropped bit-wire count}, only for bundles with
+        opens.  Empty when detailed NUTS hasn't run."""
+        if not self._detailed_result:
+            return {}
+        placed = {}
+        for ns in self._detailed_result.net_segments:
+            placed[ns.bundle_id] = placed.get(ns.bundle_id, 0) + 1
+        opens = {}
+        for w in self.bundles:
+            bid = w.input.original_bundle.id
+            sel = w.plan.selected_topology_index
+            if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+                continue
+            n_exp = (len(w.input.original_bundle.get_net_names())
+                     * len(w.input.candidates[sel].segments))
+            n_unp = n_exp - placed.get(bid, 0)
+            if n_unp > 0:
+                opens[bid] = n_unp
+        return opens
+
+    def _sort_bid_list(self):
+        """Order the bundle rows: bundles with DNUTS-dropped (open) bits first,
+        most dropped first, so every open is investigated straight from the top
+        of the panel; the clean rest keep the plain id order."""
+        opens = self._bundle_unplaced()
+        self._bid_list = sorted(self._bundle_artists.keys(),
+                                key=lambda b: (-opens.get(b, 0), b))
+
+    def _apply_overlap_layout(self):
+        """Fold the Overlap panel's vertical space into the bundle list while
+        the design has no overlaps (the panel would sit empty), and restore the
+        split when overlaps (re)appear after a re-route.  Hidden widgets are
+        parked on a degenerate off-corner rect so they can't catch clicks or
+        scroll events.  Returns True when the layout changed."""
+        if self._ax_overlaps is None or not self._right_rects:
+            return False
+        mode = 'with_ov' if self._overlap_entries else 'no_ov'
+        if mode == self._ov_layout_mode:
+            return False
+        self._ov_layout_mode = mode
+        r = self._right_rects[mode]
+        self._ax_bundles.set_position(r['bundle_list'])
+        self._ax_bscroll_dn.set_position(r['bscroll_dn'])
+        self._btn_all_overlaps.ax.set_position(r['ov_btn'])
+        show_ov = (mode == 'with_ov')
+        if show_ov:
+            u = self._right_rects['ov_widgets']
+            self._ax_oscroll_up.set_position(u['oscroll_up'])
+            self._ax_overlaps.set_position(u['overlaps'])
+            self._ax_oscroll_dn.set_position(u['oscroll_dn'])
+        for a in (self._ax_oscroll_up, self._ax_overlaps, self._ax_oscroll_dn):
+            a.set_visible(show_ov)
+            if not show_ov:
+                a.set_position([0.0005, 0.0005, 0.0004, 0.0004])
+        for b in (self._btn_oscroll_up, self._btn_oscroll_dn):
+            if b is not None:
+                b.set_active(show_ov)
+        self._redraw_bundle_list()     # row capacity follows the new height
+        if show_ov:
+            self._redraw_overlap_list()
+        return True
 
     def _design_counts(self):
         """Return (n_bundles, n_buses, n_nets) for the whole design.
@@ -3456,10 +3543,21 @@ class BudaVisualizer:
             layer_stack=self.layer_stack,
             ui_state=self.ui_state,
             start_bidx=start,
-            layer_visible=self._layer_visible)
+            layer_visible=self._layer_visible,
+            on_focus_bundle=self._adopt_explorer_bundle)
         self._topo_explorer.fig.show()
         install_tk_geometry_resync(self._topo_explorer.fig)
         extract_from_fullscreen_tab(self._topo_explorer.fig)
+
+    def _adopt_explorer_bundle(self, bundle_id):
+        """Explorer return-hook ('v' back to this window): select the bundle
+        the explorer is showing, so a [ / ] page there becomes the selection
+        here and the two windows stay in sync."""
+        if bundle_id == self._highlighted:
+            return
+        if bundle_id in self._bid_list:
+            self._scroll_bundle_into_view(self._bid_list.index(bundle_id))
+        self._set_highlight(bundle_id)
 
     def _recompute_home_bbox(self):
         """Refresh the cached home extent from the LIVE design artists (blocks +
@@ -4620,7 +4718,7 @@ class BudaVisualizer:
             self._ipc = None
 
     def show(self):
-        self._bid_list = sorted(self._bundle_artists.keys())
+        self._sort_bid_list()          # DNUTS-open bundles rank first
         self._bundle_visible = {bid: True for bid in self._bid_list}
 
         # Build overlap entries sorted by layer → bid_a → bid_b.
@@ -4842,6 +4940,34 @@ class BudaVisualizer:
         ax_oscroll_dn = self.fig.add_axes(_rect(SCROLL_H))
         btn_oscroll_dn = Button(ax_oscroll_dn, '▼', color='#f0f0f0')
         btn_oscroll_dn.on_clicked(lambda _: self._scroll_overlaps(+5))
+
+        # Capture both right-panel geometries — the split above ('with_ov') and
+        # the overlap space folded into the bundle list ('no_ov'). The widgets
+        # from the bundle list downward shift by the overlap widgets' extent.
+        def _lbwh(a):
+            p = a.get_position()
+            return [p.x0, p.y0, p.width, p.height]
+        _extra = 2 * SCROLL_H + GAP + overlap_list_h
+        _bl, _bd, _ob = (_lbwh(self._ax_bundles), _lbwh(ax_bscroll_dn),
+                         _lbwh(ax_all_overlaps))
+        self._right_rects = {
+            'with_ov': {'bundle_list': _bl, 'bscroll_dn': _bd, 'ov_btn': _ob},
+            'no_ov': {
+                'bundle_list': [_bl[0], _bl[1] - _extra, _bl[2], _bl[3] + _extra],
+                'bscroll_dn':  [_bd[0], _bd[1] - _extra, _bd[2], _bd[3]],
+                'ov_btn':      [_ob[0], _ob[1] - _extra, _ob[2], _ob[3]],
+            },
+            'ov_widgets': {'oscroll_up': _lbwh(ax_oscroll_up),
+                           'overlaps':   _lbwh(self._ax_overlaps),
+                           'oscroll_dn': _lbwh(ax_oscroll_dn)},
+        }
+        self._ax_bscroll_dn  = ax_bscroll_dn
+        self._ax_oscroll_up  = ax_oscroll_up
+        self._ax_oscroll_dn  = ax_oscroll_dn
+        self._btn_oscroll_up = btn_oscroll_up
+        self._btn_oscroll_dn = btn_oscroll_dn
+        self._ov_layout_mode = 'with_ov'
+        self._apply_overlap_layout()   # no overlaps → bundle list takes the space
 
         self.fig.canvas.mpl_connect('scroll_event', self._on_scroll_event)
         self.fig.canvas.mpl_connect('close_event',  self._on_close)

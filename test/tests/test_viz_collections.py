@@ -102,6 +102,78 @@ def test_topo_explorer_v_raises_main_window(monkeypatch):
         assert raised and raised[-1] is viz.fig, key
 
 
+def test_explorer_v_syncs_selection_to_main(monkeypatch):
+    """Paging bundles with [ / ] in the explorer and cycling back with 'v'
+    adopts the explorer's bundle as the main-view selection, so the two
+    windows stay in sync in both directions (main 'v' already jumps the
+    explorer to the main selection)."""
+    import buda_viz
+    from types import SimpleNamespace
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    viz._set_highlight(next(iter(viz._bundle_artists)))
+    viz._open_topo_explorer()
+    exp = viz._topo_explorer
+    monkeypatch.setattr(buda_viz, "raise_window", lambda f: None)
+
+    exp._step_bundle(+1)                       # the '[' / ']' page
+    target = exp.wrappers[exp.bidx].input.original_bundle.id
+    assert target != viz._highlighted
+    exp._on_key(SimpleNamespace(key="v", xdata=None, ydata=None))
+    assert viz._highlighted == target
+
+    # Cycling back on the SAME bundle must not toggle the selection off
+    # (_set_highlight toggles on same-id — the hook guards against that).
+    exp._on_key(SimpleNamespace(key="v", xdata=None, ydata=None))
+    assert viz._highlighted == target
+
+
+def test_open_bundles_rank_first(monkeypatch):
+    """Bundles with DNUTS-dropped (open) bits are ordered at the top of the
+    bundle panel — most dropped first — so the user investigates every open
+    from the top instead of hunting through the list."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    bids = sorted(viz._bundle_artists.keys())
+    assert viz._bid_list == bids               # clean design: plain id order
+
+    worst, worse = bids[-1], bids[-2]
+    monkeypatch.setattr(viz, "_bundle_unplaced",
+                        lambda: {worst: 7, worse: 3})
+    viz._sort_bid_list()
+    assert viz._bid_list[:2] == [worst, worse]
+    assert viz._bid_list[2:] == [b for b in bids if b not in (worst, worse)]
+
+
+def test_overlap_panel_space_folds_into_bundle_list(monkeypatch):
+    """With no overlaps the Overlap list and its scroll arrows are hidden and
+    the bundle list absorbs their vertical space (more visible rows); the
+    split is restored when overlaps (re)appear, e.g. after a re-route."""
+    from types import SimpleNamespace
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    assert not viz._overlap_entries            # dnuts1 routes clean
+    assert viz._ov_layout_mode == 'no_ov'
+    assert not viz._ax_overlaps.get_visible()
+    assert not viz._ax_oscroll_up.get_visible()
+    tall_h = viz._ax_bundles.get_position().height
+    split_h = viz._right_rects['with_ov']['bundle_list'][3]
+    assert tall_h > split_h + 1e-6
+    rows_tall = viz._bundle_list_n_visible()
+
+    # Overlaps appear (as after a re-route) → split restored.
+    viz._overlap_entries = [SimpleNamespace(layer=5, bid_a=1, bid_b=2)]
+    assert viz._apply_overlap_layout() is True
+    assert viz._ov_layout_mode == 'with_ov'
+    assert viz._ax_overlaps.get_visible()
+    pos = viz._ax_bundles.get_position()
+    assert abs(pos.height - split_h) < 1e-9
+    assert viz._bundle_list_n_visible() <= rows_tall
+
+    # Gone again → folded again, byte-identical geometry.
+    viz._overlap_entries = []
+    assert viz._apply_overlap_layout() is True
+    assert not viz._ax_overlaps.get_visible()
+    assert abs(viz._ax_bundles.get_position().height - tall_h) < 1e-9
+
+
 def test_recompute_home_bbox_tracks_current_artists(monkeypatch):
     """After a re-run pins a different-extent topology, `h` fits the CURRENT
     design (blocks + live route) — including SHRINKING back when re-routing from
