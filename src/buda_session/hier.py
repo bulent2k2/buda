@@ -793,7 +793,9 @@ class HierMixin:
         'BIDIR:a,b,c,'    → ('a', ['b', 'c'])   — direction-agnostic: any
             instance can root the trunk, so use the first and branch to the rest;
             the block-to-block topology reaches every instance either way.
-        Returns (None, []) on failure."""
+        A '|SPLIT:k/n' suffix (the bundle bit bound's split marker) is
+        stripped first.  Returns (None, []) on failure."""
+        reason = reason.split('|SPLIT:')[0]
         try:
             if reason.startswith('BIDIR:'):
                 insts = [n for n in reason[len('BIDIR:'):].split(',') if n]

@@ -14,6 +14,7 @@ Part of the [BUDA Script Reference](../BUDA_SCRIPT_REFERENCE.md) — see its pip
 run_bundler strict
 run_bundler convergent
 run_bundler bidirectional
+run_bundler combined
 ```
 
 Group all nets in the netlist into `Bundle` objects (default `strict`). Must be
@@ -25,16 +26,18 @@ called after all `add_net` / `add_bus` commands and before
 | `strict` | Driver instance **and** sorted receiver instances must match exactly (a true parallel bus). |
 | `convergent` | Only sorted receiver instances must match; different drivers allowed (fan-in). |
 | `bidirectional` | Direction-agnostic: the signature is the sorted set of **all** endpoint instances (driver + receivers), so nets connecting the same group of blocks in any roles bundle together — `A→B` with its return `B→A`, or the cyclic `a→b,c` / `b→c,a` / `c→b,a`. |
+| `combined` | The **join** of `convergent` and `bidirectional`: nets merge when connected by a *chain* of either relation (union-find). The only genuinely new point on the strategy lattice `strict ⊂ {convergent, bidirectional} ⊂ combined` — maximal bundling; restrict per net prefix with `set_bundling`. |
 
 > ℹ️ `bidirectional` groups nets that connect the **same** blocks, so the single
 > block-to-block trunk routes every net (routing is direction-agnostic) — it is
 > sound. In the visualizer such a busterm is both a driver and a receiver and is
 > drawn with its own symbol (green diamond).
 >
-> ⚠️ `convergent`, by contrast, can group nets whose drivers are **different
-> blocks** at different locations, which topology generation (a single `src→dst`
-> per bundle) cannot yet route faithfully — only one driver is reached, the
-> others are left unrouted — so it prints a warning. See
+> ℹ️ A `convergent` (or `combined`) bundle spanning multiple driver blocks
+> routes as a **fan-in tree** rooted at the shared sink with every driver as a
+> leaf, and the realization is **per-bit tapered**: each segment carries only
+> the bits whose driver→sink path uses it, verified by `check_design`'s
+> `NET_DRIVER_OPEN` and `BIT_SHORT` audits. See
 > [`docs/internal/convergent_bundling.md`](../internal/convergent_bundling.md).
 
 Bundle width is computed automatically as `1.5 × (number of nets)` layout
@@ -48,6 +51,49 @@ choices (architect overrides).
 ```
 run_bundler strict
 ```
+
+---
+
+### `set_bundling`
+
+```
+set_bundling <prefix>|* <strict|no_convergent|no_bidirectional|combined>
+```
+
+Per-net-prefix bundling permission, applied at the next flat `run_bundler`
+(any strategy). The **longest matching prefix** wins; `*` sets the global
+default. A merge via a relation happens only when the strategy enables it
+**and both nets permit it** — so `set_bundling clk_ strict` keeps clock nets
+out of every convergent/bidirectional merge while the rest of the design
+bundles maximally under `combined`. `set_bundling <prefix> combined` restores
+full permission for a sub-prefix under a stricter global default.
+
+---
+
+### `set_max_bundle_bits`
+
+```
+set_max_bundle_bits <N>          # static cap
+set_max_bundle_bits auto         # dynamic cap from the shortest busterm edge
+set_max_bundle_bits <N> auto     # both (the larger part count wins)
+set_max_bundle_bits off
+```
+
+Optional bundle bit bound, applied as a **split pass** after bundling (any
+strategy). A bundle over the limit is split into **balanced** parts — 600
+bits at `N=512` become 300+300, never 512+88 — cutting at bus boundaries
+(`<bus>_<idx>` net-name groups) whenever a bus fits whole; a single bus
+larger than the target is chunked evenly.
+
+`auto` derives a per-bundle cap physically: for each endpoint block, the bits
+**incident to it** (exactly what the per-bit taper lands on its face) must
+fit `floor(min(w, h) / min_bit_pitch)` — the shortest busterm edge divided by
+the densest pattern layer's bit pitch (falls back to the NUTS track pitch
+when no layer has a pattern). The caps are enforced **per part**: the
+partitioner closes a part before any block's cap would be exceeded (a
+balanced size target alone cannot bound bits that cluster on one block),
+falling back to net-level packing for a bus that violates a cap on its own. Every split is reported with its binding
+constraint, and the parts' reasons carry a `|SPLIT:k/n` suffix.
 
 ---
 

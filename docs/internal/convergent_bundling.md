@@ -37,6 +37,24 @@ HIER bundler — `run_hier_bundler` supports STRICT/BIDIRECTIONAL only.
 
 Reproduced by `test/tests/test_bundler_convergent_pipeline.py`.
 
+**COMBINED (2026-07-12).** The strategies form a lattice: STRICT (finest) is
+refined by CONVERGENT and BIDIRECTIONAL — incomparable coarsenings — and the
+only genuinely new combination is their JOIN: `run_bundler COMBINED` merges
+nets connected by a CHAIN of either relation (union-find over the two
+signature families, `_generalized_bundles` in `bundling_cmds.py`; the pure
+C++ path stays byte-identical when neither COMBINED nor an override is in
+play, pinned by equivalence tests).  Mixed chain groups (a bidirectional
+pair joined to a convergent partner) route correctly because the fan-in
+realization is direction-agnostic and per-bit tapered — verified end-to-end
+with clean topo/dnuts checks.  `set_bundling <prefix>|* <mode>` gates each
+relation per net prefix (both nets must permit a merge), and
+`set_max_bundle_bits <N|auto>` bounds bundle size as a balanced,
+bus-preserving split pass — `auto` derives a per-bundle cap from the
+shortest busterm edge vs the bits the taper actually lands on each block.
+QoR: `demo/congestion_demo`'s cpu+gpu→display fan-in merges under COMBINED
+(3→2 bundles) with abstract WL 2224→1580 (−29%) at zero overlaps.  Tests:
+`test/tests/test_bundler_combined.py`.
+
 ## The two strategies
 
 `Bundler` (stage 1, `bundler.h/cpp`) groups nets by a string *signature*:
