@@ -1368,27 +1368,42 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
                 auto& cp = committed[k];
                 auto& bw = bundles[cp.bundle_idx];
                 if (bw.hier.locked) continue;
+                if (bw.input.topology_pinned) continue;      // user pin: keep
                 commit_plan(bw, cp.plan, -1.0);              // rip up
+                // Strictly-better-than-keeping accept rule.  Adopting any
+                // STRICT replan proved too loose (hbundles/10: 23 lateral,
+                // score-equal moves reshuffled NUTS packing, 7 -> 78 opens):
+                // score BOTH options against the SAME ripped-up state — the
+                // best plan KEEPING the old topology (temporary pin) vs the
+                // unrestricted best — and adopt only when leaving the old
+                // topology is STRICTLY better by the planner's own score.
+                // Equal-score switches and same-topology relayering restore
+                // the original plan exactly (a same-topo replan can never be
+                // strictly better than the pinned probe: they are the same
+                // search).  If the old topology is no longer STRICT-feasible
+                // (it was committed at the overflow/best-effort stages), any
+                // found replan is an improvement by definition.
+                int  old_sel = bw.plan.selected_topology_index;
+                bw.input.topology_pinned        = true;
+                bw.plan.selected_topology_index = cp.plan.best_topo;
+                PlanResult keep = plan_bundle(bw, PlanMode::STRICT);
+                bw.input.topology_pinned        = false;
+                bw.plan.selected_topology_index = old_sel;
                 PlanResult np = plan_bundle(bw, PlanMode::STRICT);
-                if (!np.found) {                             // keep original
-                    commit_plan(bw, cp.plan);
+                bool adopt = np.found &&
+                             (!keep.found || np.score + 1e-9 < keep.score);
+                if (!adopt) {
+                    commit_plan(bw, cp.plan);                // restore exactly
                     continue;
                 }
                 commit_plan(bw, np);
-                bool same = np.best_topo == cp.plan.best_topo &&
-                            np.seg_layers == cp.plan.seg_layers &&
-                            np.seg_perp == cp.plan.seg_perp;
-                if (!same) {
-                    ++changed;
-                    LevelStats& ls = level_stats[bw.hier.level];
-                    for (int lid : cp.plan.seg_layers) ls.layer_hist[lid] -= 1;
-                    for (int lid : np.seg_layers)      ls.layer_hist[lid] += 1;
-                    cp.plan = np;
-                    assignments[cp.asn_idx] = make_assignment(bw, np);
-                    log_choice(bw, np,
-                               std::string(bw.input.topology_pinned ? " [pinned]" : "")
-                               + " [refined]");
-                }
+                ++changed;
+                LevelStats& ls = level_stats[bw.hier.level];
+                for (int lid : cp.plan.seg_layers) ls.layer_hist[lid] -= 1;
+                for (int lid : np.seg_layers)      ls.layer_hist[lid] += 1;
+                cp.plan = np;
+                assignments[cp.asn_idx] = make_assignment(bw, np);
+                log_choice(bw, np, " [refined]");
             }
             std::cout << "[Planner] Refine pass " << pass << ": " << changed
                       << " of " << committed.size() << " bundle(s) changed.\n";
