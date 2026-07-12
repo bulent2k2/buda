@@ -818,7 +818,8 @@ class TopologyExplorer:
 
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
-                 ui_state: ViewState = None, start_bidx=0, layer_visible=None):
+                 ui_state: ViewState = None, start_bidx=0, layer_visible=None,
+                 on_focus_bundle=None):
         self.fp          = fp
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
@@ -829,6 +830,9 @@ class TopologyExplorer:
         self._main_fig   = main_fig    # back-reference to main viz figure for cmd-1
         self._rerun_fn   = rerun_fn    # () -> NUTSResult | None
         self._refresh_fn = refresh_fn  # (NUTSResult) -> None
+        # Called with the current bundle's id when 'v' cycles back to the main
+        # window, so the main view adopts the bundle paged to with [ / ] here.
+        self._on_focus_bundle = on_focus_bundle
         
         self._block_patch_artists = []
         self._block_name_artists = []
@@ -1557,8 +1561,13 @@ class TopologyExplorer:
         if event.key in ('f', 'cmd+f', 'ctrl+f'): _toggle_fullscreen(self.fig); return
         # 'v' mirrors cmd/ctrl-1 (raise the main BUDA viz window) — since the
         # main window's 'v' opens/raises this explorer, tapping 'v' cycles
-        # between the two windows.
+        # between the two windows.  Before switching back, hand the current
+        # bundle to the main view so a [ / ] page here becomes its selection —
+        # the two windows stay in sync in both directions.
         if event.key in ('v', 'cmd+1', 'ctrl+1'):
+            if self._on_focus_bundle is not None and self.wrappers:
+                self._on_focus_bundle(
+                    self.wrappers[self.bidx].input.original_bundle.id)
             if self._main_fig is not None: raise_window(self._main_fig)
             return
         if event.key in ('cmd+z', 'ctrl+z'):    self._zoom_to_bundle(); return
@@ -2149,6 +2158,16 @@ class BudaVisualizer:
         self._ax_design_stats = None  # bundles·buses·nets header above the list
         self._ax_bundles     = None
         self._ax_overlaps    = None
+        # Adaptive right-panel split: when the design has no overlaps the empty
+        # Overlap panel's space is folded into the bundle list.  Geometries for
+        # both modes are captured at show()-time; _apply_overlap_layout switches.
+        self._right_rects    = None
+        self._ov_layout_mode = 'with_ov'
+        self._ax_bscroll_dn  = None
+        self._ax_oscroll_up  = None
+        self._ax_oscroll_dn  = None
+        self._btn_oscroll_up = None
+        self._btn_oscroll_dn = None
         self._rerun_layer_fn = rerun_layer_fn   # (layer_id: int) -> NUTSResult | None
         self._rerun_fn       = rerun_fn         # () -> NUTSResult | None  (full re-run)
         self._overlap_entries = []   # sorted list of OverlapDetail from nuts_result
@@ -2238,7 +2257,8 @@ class BudaVisualizer:
     # Artist registry & interaction
     # ------------------------------------------------------------------
 
-    def _register(self, bundle_id, artist, *, alpha, lw=None, is_band=False, layer=None):
+    def _register(self, bundle_id, artist, *, alpha, lw=None, is_band=False, layer=None,
+                  phys_w=None, horiz=None, marker_phys=None, ms_floor=4.0):
         artist.set_picker(5)
         self._bundle_artists.setdefault(bundle_id, []).append({
             'artist':  artist,
@@ -2246,7 +2266,88 @@ class BudaVisualizer:
             'lw':      lw,
             'is_band': is_band,
             'layer':   layer,
+            # NUTS-placed segment lines carry their PHYSICAL bus width (data
+            # units, perpendicular to the segment) so _sync_nuts_linewidths can
+            # fit the drawn point-width to the true footprint at every zoom.
+            # lw stays the CURRENT drawn width; lw_cap is the static ceiling.
+            'phys_w':  phys_w,
+            'horiz':   horiz,
+            'lw_cap':  lw,
+            # Via/busterm-conn MARKERS carry their physical extent the same way
+            # (marker_phys, data units — the connected segments' width) so the
+            # marker size tracks the segment widths at every zoom; ms is the
+            # CURRENT markersize, ms_cap the static ceiling, ms_floor the
+            # visibility floor (points).
+            'marker_phys': marker_phys,
+            'ms':          lw if marker_phys else None,
+            'ms_cap':      lw if marker_phys else None,
+            'ms_floor':    ms_floor,
         })
+
+    _LW_MIN_PTS = 2.5   # visibility floor for physical-width segment lines
+
+    def _sync_nuts_linewidths(self):
+        """Fit each NUTS segment line's point-width to the segment's PHYSICAL
+        footprint at the current zoom.
+
+        The bold segment line is centered on the true track position but drawn
+        with a fixed point-width (viz_lw, up to ~15pt for wide buses).  Zoomed
+        out, those points span many times the physical band, so a line whose
+        track hugs a block face appears shifted/straddling its busterm (the
+        home-view artifact); zoomed in, the same points are NARROWER than the
+        band and the picture is accurate.  Convert the physical width to
+        points at the current zoom and clamp: never wider than the footprint
+        (unless below the visibility floor), never wider than the static
+        viz_lw (preserving the zoomed-in look).  Returns True if any width
+        changed (caller decides whether a redraw is needed)."""
+        if not self._bundle_artists:
+            return False
+        o  = self.ax.transData.transform((0.0, 0.0))
+        px = self.ax.transData.transform((1.0, 0.0))[0] - o[0]
+        py = self.ax.transData.transform((0.0, 1.0))[1] - o[1]
+        pts_x = abs(px) * 72.0 / self.fig.dpi   # points per data unit, x
+        pts_y = abs(py) * 72.0 / self.fig.dpi   # points per data unit, y
+        changed = False
+        for entries in self._bundle_artists.values():
+            for e in entries:
+                pw = e.get('phys_w')
+                mp = e.get('marker_phys')
+                if pw:
+                    # An H segment's width is vertical; a V segment's horizontal.
+                    pts = pts_y if e['horiz'] else pts_x
+                    lw  = max(self._LW_MIN_PTS, min(e['lw_cap'], pw * pts))
+                    if abs(lw - e['lw']) > 0.1:
+                        e['lw'] = lw
+                        e['artist'].set_linewidth(lw)
+                        changed = True
+                elif mp:
+                    # Via / busterm-conn marker: square, so use the tighter
+                    # axis scale; same clamp shape as the segment lines.
+                    ms = max(e['ms_floor'], min(e['ms_cap'], mp * min(pts_x, pts_y)))
+                    if abs(ms - e['ms']) > 0.1:
+                        e['ms'] = ms
+                        e['artist'].set_markersize(ms)
+                        changed = True
+        return changed
+
+    def _hook_lw_sync(self):
+        """Keep physical-width segment lines zoom-true: sync on axis-limit
+        changes (zoom/pan/home — fires before the draw, so the frame is right
+        the first time) with a draw_event backstop for figure resizes (which
+        change points-per-data-unit without touching the limits).  The
+        changed-guard prevents a redraw loop, as in the legend _refit hook."""
+        if getattr(self, '_lw_sync_hooked', False):
+            return
+        self._lw_sync_hooked = True
+        self.ax.callbacks.connect(
+            'xlim_changed', lambda ax: self._sync_nuts_linewidths())
+        self.ax.callbacks.connect(
+            'ylim_changed', lambda ax: self._sync_nuts_linewidths())
+
+        def _on_draw(_evt):
+            if self._sync_nuts_linewidths():
+                self.fig.canvas.draw_idle()
+        self.fig.canvas.mpl_connect('draw_event', _on_draw)
 
     def _on_pick(self, event):
         # Right-click is the zoom-to-box gesture (_install_bbox_zoom), not a
@@ -2510,7 +2611,8 @@ class BudaVisualizer:
                     continue
 
                 if e['lw'] is not None:
-                    a.set_linewidth(e['lw'])  # width never changes
+                    a.set_linewidth(e['lw'])  # current width (zoom-synced for
+                                              # physical-width NUTS lines)
 
                 if active_bids is None:
                     a.set_alpha(e['alpha'])
@@ -2982,6 +3084,11 @@ class BudaVisualizer:
         self._selected_overlap = None
         self._overlap_state    = 0
 
+        # Re-rank the bundle rows (opens may have moved between bundles) and
+        # re-fit the panel split (overlaps may have appeared or vanished).
+        self._sort_bid_list()
+        self._apply_overlap_layout()
+
         self._refresh_highlight()
 
         # The route changed (e.g. a re-run pinned a different topology): refresh
@@ -3002,6 +3109,87 @@ class BudaVisualizer:
         ax_h_in   = fig_h_in * ax_h_frac
         row_h_in  = 0.145   # ~10 pt rows at standard DPI
         return max(1, int(ax_h_in / row_h_in))
+
+    @staticmethod
+    def _expected_bit_wires(w):
+        """Expected DNUTS bit-wire count for a wrapper's selected topology,
+        or None when no topology is selected.
+
+        Taper-aware (#268): a fan-in segment with a non-empty
+        Topology::seg_bits entry emits NetSegments only for its member bits;
+        every other segment carries the full bundle width — the same rule as
+        C++ seg_bit_count and check_dnuts's UNPLACED audit (#273).  The naive
+        nets × segments would report phantom opens on clean CONVERGENT
+        fan-in bundles."""
+        sel = w.plan.selected_topology_index
+        if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+            return None
+        topo  = w.input.candidates[sel]
+        nbits = len(w.input.original_bundle.get_net_names())
+        sb    = topo.seg_bits
+        return sum(len(sb.get(si, [])) or nbits
+                   for si in range(len(topo.segments)))
+
+    def _bundle_unplaced(self):
+        """{bundle_id: DNUTS-dropped bit-wire count}, only for bundles with
+        opens.  Empty when detailed NUTS hasn't run."""
+        if not self._detailed_result:
+            return {}
+        placed = {}
+        for ns in self._detailed_result.net_segments:
+            placed[ns.bundle_id] = placed.get(ns.bundle_id, 0) + 1
+        opens = {}
+        for w in self.bundles:
+            bid   = w.input.original_bundle.id
+            n_exp = self._expected_bit_wires(w)
+            if n_exp is None:
+                continue
+            n_unp = n_exp - placed.get(bid, 0)
+            if n_unp > 0:
+                opens[bid] = n_unp
+        return opens
+
+    def _sort_bid_list(self):
+        """Order the bundle rows: bundles with DNUTS-dropped (open) bits first,
+        most dropped first, so every open is investigated straight from the top
+        of the panel; the clean rest keep the plain id order."""
+        opens = self._bundle_unplaced()
+        self._bid_list = sorted(self._bundle_artists.keys(),
+                                key=lambda b: (-opens.get(b, 0), b))
+
+    def _apply_overlap_layout(self):
+        """Fold the Overlap panel's vertical space into the bundle list while
+        the design has no overlaps (the panel would sit empty), and restore the
+        split when overlaps (re)appear after a re-route.  Hidden widgets are
+        parked on a degenerate off-corner rect so they can't catch clicks or
+        scroll events.  Returns True when the layout changed."""
+        if self._ax_overlaps is None or not self._right_rects:
+            return False
+        mode = 'with_ov' if self._overlap_entries else 'no_ov'
+        if mode == self._ov_layout_mode:
+            return False
+        self._ov_layout_mode = mode
+        r = self._right_rects[mode]
+        self._ax_bundles.set_position(r['bundle_list'])
+        self._ax_bscroll_dn.set_position(r['bscroll_dn'])
+        self._btn_all_overlaps.ax.set_position(r['ov_btn'])
+        show_ov = (mode == 'with_ov')
+        if show_ov:
+            u = self._right_rects['ov_widgets']
+            self._ax_oscroll_up.set_position(u['oscroll_up'])
+            self._ax_overlaps.set_position(u['overlaps'])
+            self._ax_oscroll_dn.set_position(u['oscroll_dn'])
+        for a in (self._ax_oscroll_up, self._ax_overlaps, self._ax_oscroll_dn):
+            a.set_visible(show_ov)
+            if not show_ov:
+                a.set_position([0.0005, 0.0005, 0.0004, 0.0004])
+        for b in (self._btn_oscroll_up, self._btn_oscroll_dn):
+            if b is not None:
+                b.set_active(show_ov)
+        self._redraw_bundle_list()     # row capacity follows the new height
+        if show_ov:
+            self._redraw_overlap_list()
+        return True
 
     def _design_counts(self):
         """Return (n_bundles, n_buses, n_nets) for the whole design.
@@ -3079,8 +3267,8 @@ class BudaVisualizer:
             # ("☑ 80 Bundles") so the stats line can stay a single row.
             all_lbl = f"{'☑' if all_on else '☐'} {len(self.bundles)} Bundles"
             if self._detailed_result:
-                n_total = sum(len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[w.plan.selected_topology_index].segments)
-                              for w in self.bundles if w.input.candidates and 0 <= w.plan.selected_topology_index < len(w.input.candidates))
+                n_total = sum(n for n in map(self._expected_bit_wires, self.bundles)
+                              if n is not None)
                 all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
             self._btn_all_bundles.label.set_text(all_lbl)
 
@@ -3106,11 +3294,10 @@ class BudaVisualizer:
             stats_part = ""
             stats_color = '#111111'
             if self._detailed_result:
-                sel = w.plan.selected_topology_index
-                if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+                n_expected = self._expected_bit_wires(w)   # taper-aware (#268)
+                if n_expected is None:
                     stats_part = '[no topo]'; stats_color = '#888888'
                 else:
-                    n_expected = len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[sel].segments)
                     n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
                     n_unp = n_expected - n_placed
                     stats_part = f"[{n_unp}/{n_expected}]"
@@ -3373,10 +3560,21 @@ class BudaVisualizer:
             layer_stack=self.layer_stack,
             ui_state=self.ui_state,
             start_bidx=start,
-            layer_visible=self._layer_visible)
+            layer_visible=self._layer_visible,
+            on_focus_bundle=self._adopt_explorer_bundle)
         self._topo_explorer.fig.show()
         install_tk_geometry_resync(self._topo_explorer.fig)
         extract_from_fullscreen_tab(self._topo_explorer.fig)
+
+    def _adopt_explorer_bundle(self, bundle_id):
+        """Explorer return-hook ('v' back to this window): select the bundle
+        the explorer is showing, so a [ / ] page there becomes the selection
+        here and the two windows stay in sync."""
+        if bundle_id == self._highlighted:
+            return
+        if bundle_id in self._bid_list:
+            self._scroll_bundle_into_view(self._bid_list.index(bundle_id))
+        self._set_highlight(bundle_id)
 
     def _recompute_home_bbox(self):
         """Refresh the cached home extent from the LIVE design artists (blocks +
@@ -3765,34 +3963,48 @@ class BudaVisualizer:
             return None, []
         return positions[0], positions[1:]
 
-    def _draw_via_marker(self, bid, x, y, msz, alpha, zorder, layer=None):
-        """X inside a square at an H↔V segment junction."""
+    def _draw_via_marker(self, bid, x, y, msz, alpha, zorder, layer=None,
+                         phys=None):
+        """X inside a square at an H↔V segment junction.
+
+        phys (data units, NUTS view): the junction's physical extent — the
+        wider of the two crossing segments' bus widths — so the marker size
+        tracks the segment widths at every zoom (_sync_nuts_linewidths)."""
         sq, = self.ax.plot(x, y, 's', color='white',
                            markeredgecolor='black', markeredgewidth=1.2,
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
-        self._register(bid, sq, alpha=alpha, lw=msz, layer=layer)
+        self._register(bid, sq, alpha=alpha, lw=msz, layer=layer,
+                       marker_phys=phys)
         self._vias_conns_artists.append(sq)
         xm, = self.ax.plot(x, y, 'x', color='black',
                            markersize=msz * 0.65, markeredgewidth=1.5,
                            alpha=alpha, zorder=zorder + 1, clip_on=True)
-        self._register(bid, xm, alpha=alpha, lw=msz * 0.65, layer=layer)
+        self._register(bid, xm, alpha=alpha, lw=msz * 0.65, layer=layer,
+                       marker_phys=(phys * 0.65 if phys else None),
+                       ms_floor=4.0 * 0.65)
         self._vias_conns_artists.append(xm)
         if not self.ui_state.vias_conns:
             sq.set_visible(False)
             xm.set_visible(False)
 
-    def _draw_busterm_conn(self, bid, x, y, col, msz, alpha, zorder, layer=None):
-        """Filled square at a segment endpoint that connects to a busterm."""
+    def _draw_busterm_conn(self, bid, x, y, col, msz, alpha, zorder, layer=None,
+                           phys=None):
+        """Filled square at a segment endpoint that connects to a busterm.
+
+        phys (data units, NUTS view): the owning segment's bus width — the
+        marker size tracks it at every zoom (_sync_nuts_linewidths)."""
         sq, = self.ax.plot(x, y, 's', color=col,
                            markeredgecolor='black', markeredgewidth=1.0,
                            markersize=msz, alpha=alpha, zorder=zorder, clip_on=True)
-        self._register(bid, sq, alpha=alpha, lw=msz, layer=layer)
+        self._register(bid, sq, alpha=alpha, lw=msz, layer=layer,
+                       marker_phys=phys)
         self._vias_conns_artists.append(sq)
         if not self.ui_state.vias_conns:
             sq.set_visible(False)
 
     def _draw_seg_connectors(self, bid, seg_idx, cs, sx, sy, col, msz, alpha,
-                              zorder, along_offset=0.0, adj_perp=None, layer=None):
+                              zorder, along_offset=0.0, adj_perp=None, layer=None,
+                              seg_widths=None):
         """Draw via or busterm-conn marker at each connection point on a segment.
 
         Uses ConnTopology's cs.conns to determine the marker type:
@@ -3806,7 +4018,18 @@ class BudaVisualizer:
         positions are snapped to the visual intersection of the two drawn lines —
         i.e. the adjacent segment's NUTS track position — instead of conn.at_pos
         which is the original geometry coordinate.
+
+        seg_widths (dict seg_idx→physical bus width): when provided (NUTS view),
+        markers carry the connected segments' physical extent so their size
+        tracks the drawn segment widths at every zoom (a via spans the junction
+        of two segments → the wider of the two).
         """
+        def _phys(*idxs):
+            if not seg_widths:
+                return None
+            ws = [seg_widths[i] for i in idxs if i in seg_widths]
+            return max(ws) if ws else None
+
         for conn in cs.conns:
             if conn.kind == ic.SegConnKind.SEG:
                 # Draw each via only once — from the lower-indexed segment.
@@ -3818,16 +4041,21 @@ class BudaVisualizer:
                         cx, cy = adj_perp[conn.seg_idx], sy
                     else:
                         cx, cy = sx, adj_perp[conn.seg_idx]
-                    self._draw_via_marker(bid, cx, cy, msz, alpha, zorder, layer=layer)
+                    self._draw_via_marker(bid, cx, cy, msz, alpha, zorder,
+                                          layer=layer,
+                                          phys=_phys(seg_idx, conn.seg_idx))
                     continue
             if cs.horiz:
                 cx, cy = conn.at_pos + along_offset, sy
             else:
                 cx, cy = sx, conn.at_pos + along_offset
             if conn.kind == ic.SegConnKind.BUSTERM:
-                self._draw_busterm_conn(bid, cx, cy, col, msz, alpha, zorder, layer=layer)
+                self._draw_busterm_conn(bid, cx, cy, col, msz, alpha, zorder,
+                                        layer=layer, phys=_phys(seg_idx))
             else:
-                self._draw_via_marker(bid, cx, cy, msz, alpha, zorder, layer=layer)
+                self._draw_via_marker(bid, cx, cy, msz, alpha, zorder,
+                                      layer=layer,
+                                      phys=_phys(seg_idx, conn.seg_idx))
 
     def draw_buses(self):
         """Draw topology segments without NUTS track assignment."""
@@ -3894,11 +4122,16 @@ class BudaVisualizer:
             cs_list = list(ct.segs())
             # adj_perp: seg_idx → NUTS track_position, used to snap vias to
             # the visual intersection of the two drawn lines.
+            # seg_widths: seg_idx → physical bus width, so via/conn markers can
+            # track the drawn segment widths at every zoom.
             adj_perp = {}
+            seg_widths = {}
             for j in range(len(topo.segments)):
                 adj_ts = ts_map.get((bid, j))
                 if adj_ts and adj_ts.placed:
                     adj_perp[j] = adj_ts.track_position
+                    if adj_ts.width > 0:
+                        seg_widths[j] = adj_ts.width
 
             for idx, seg in enumerate(topo.segments):
                 ts   = ts_map.get((bid, idx))
@@ -3940,13 +4173,23 @@ class BudaVisualizer:
                                      color=col, linewidth=viz_lw,
                                      solid_capstyle='butt',
                                      alpha=seg_alpha, zorder=10 + i)
-                self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
-                                layer=effective_layer)
+                # Placed segments carry their physical width so the drawn
+                # point-width can be fit to the true footprint at every zoom
+                # (_sync_nuts_linewidths) — a fixed point-width line overhangs
+                # its busterm face when zoomed out (home view).
+                if ts and ts.placed and ts.width > 0:
+                    self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
+                                   layer=effective_layer,
+                                   phys_w=ts.width, horiz=is_h)
+                else:
+                    self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
+                                   layer=effective_layer)
 
                 self._draw_seg_connectors(bid, idx, cs_list[idx], sx, sy, col,
                                           msz, seg_alpha, 12 + i,
                                           adj_perp=adj_perp,
-                                          layer=effective_layer)
+                                          layer=effective_layer,
+                                          seg_widths=seg_widths)
 
             drv, rcvs = self._busterm_positions(topo, ct, ts_map=ts_map, bid=bid)
             bidir = wrapper.input.original_bundle.reason.startswith("BIDIR:")
@@ -3963,6 +4206,10 @@ class BudaVisualizer:
                                 alpha=0.3, zorder=4)
             self.ax.add_collection(lc)
             self._register(bid, lc, alpha=0.3, is_band=True, layer=layer)
+
+        # Keep the physical-width lines zoom-true from now on.
+        self._sync_nuts_linewidths()
+        self._hook_lw_sync()
 
     # ------------------------------------------------------------------
     # Detailed NUTS (Stage 9) drawing
@@ -4488,7 +4735,7 @@ class BudaVisualizer:
             self._ipc = None
 
     def show(self):
-        self._bid_list = sorted(self._bundle_artists.keys())
+        self._sort_bid_list()          # DNUTS-open bundles rank first
         self._bundle_visible = {bid: True for bid in self._bid_list}
 
         # Build overlap entries sorted by layer → bid_a → bid_b.
@@ -4710,6 +4957,34 @@ class BudaVisualizer:
         ax_oscroll_dn = self.fig.add_axes(_rect(SCROLL_H))
         btn_oscroll_dn = Button(ax_oscroll_dn, '▼', color='#f0f0f0')
         btn_oscroll_dn.on_clicked(lambda _: self._scroll_overlaps(+5))
+
+        # Capture both right-panel geometries — the split above ('with_ov') and
+        # the overlap space folded into the bundle list ('no_ov'). The widgets
+        # from the bundle list downward shift by the overlap widgets' extent.
+        def _lbwh(a):
+            p = a.get_position()
+            return [p.x0, p.y0, p.width, p.height]
+        _extra = 2 * SCROLL_H + GAP + overlap_list_h
+        _bl, _bd, _ob = (_lbwh(self._ax_bundles), _lbwh(ax_bscroll_dn),
+                         _lbwh(ax_all_overlaps))
+        self._right_rects = {
+            'with_ov': {'bundle_list': _bl, 'bscroll_dn': _bd, 'ov_btn': _ob},
+            'no_ov': {
+                'bundle_list': [_bl[0], _bl[1] - _extra, _bl[2], _bl[3] + _extra],
+                'bscroll_dn':  [_bd[0], _bd[1] - _extra, _bd[2], _bd[3]],
+                'ov_btn':      [_ob[0], _ob[1] - _extra, _ob[2], _ob[3]],
+            },
+            'ov_widgets': {'oscroll_up': _lbwh(ax_oscroll_up),
+                           'overlaps':   _lbwh(self._ax_overlaps),
+                           'oscroll_dn': _lbwh(ax_oscroll_dn)},
+        }
+        self._ax_bscroll_dn  = ax_bscroll_dn
+        self._ax_oscroll_up  = ax_oscroll_up
+        self._ax_oscroll_dn  = ax_oscroll_dn
+        self._btn_oscroll_up = btn_oscroll_up
+        self._btn_oscroll_dn = btn_oscroll_dn
+        self._ov_layout_mode = 'with_ov'
+        self._apply_overlap_layout()   # no overlaps → bundle list takes the space
 
         self.fig.canvas.mpl_connect('scroll_event', self._on_scroll_event)
         self.fig.canvas.mpl_connect('close_event',  self._on_close)
