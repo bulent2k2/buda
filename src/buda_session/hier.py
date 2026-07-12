@@ -793,10 +793,19 @@ class HierMixin:
         'BIDIR:a,b,c,'    → ('a', ['b', 'c'])   — direction-agnostic: any
             instance can root the trunk, so use the first and branch to the rest;
             the block-to-block topology reaches every instance either way.
+        'FANIN:s|FROM:a,b,' -> ('s', ['a', 'b']) - a multi-driver hier
+            fan-in bundle: rooted at the shared sink s with the drivers
+            (and any receiver beyond the root) as leaves, exactly the
+            flat _bundle_endpoints convention, so generation builds the
+            same per-bit tapered fan-in tree.
         A '|SPLIT:k/n' suffix (the bundle bit bound's split marker) is
         stripped first.  Returns (None, []) on failure."""
         reason = reason.split('|SPLIT:')[0]
         try:
+            if reason.startswith('FANIN:'):
+                root_part, from_part = reason[len('FANIN:'):].split('|FROM:')
+                leaves = [n for n in from_part.split(',') if n]
+                return (root_part, leaves) if root_part and leaves else (None, [])
             if reason.startswith('BIDIR:'):
                 insts = [n for n in reason[len('BIDIR:'):].split(',') if n]
                 return (insts[0], insts[1:]) if insts else (None, [])
@@ -905,10 +914,35 @@ class HierMixin:
                 return 0
             tg = self._make_topo_gen(cell_fp, use_center, use_double_detour,
                                      use_multi_trunk)
-            src_local = b.entry_busterm_ids[0].removeprefix('bt:').rsplit('/', 1)[-1]
-            dsts_local = [e.removeprefix('bt:').rsplit('/', 1)[-1] for e in b.exit_busterm_ids]
+            entries = [e.removeprefix('bt:').rsplit('/', 1)[-1]
+                       for e in b.entry_busterm_ids]
+            exits = [e.removeprefix('bt:').rsplit('/', 1)[-1]
+                     for e in b.exit_busterm_ids]
+            if len(entries) > 1:
+                # Cell-local FAN-IN template (multi-driver CONVERGENT/
+                # COMBINED group inside one cell): root at the shared sink,
+                # drivers (+ extra receivers) as leaves — the flat fan-in
+                # convention, per-bit tapered below.  The root is filtered
+                # out of the leaves and the list deduped (mirroring the C++
+                # FANIN reason builder and the flat _bundle_endpoints):
+                # generate_npin doesn't dedupe, so a self-destination would
+                # instantiate the root block as a Busterm twice.
+                src_local = exits[0]
+                seen = {src_local}
+                dsts_local = []
+                for x in entries + exits[1:]:
+                    if x not in seen:
+                        seen.add(x)
+                        dsts_local.append(x)
+                fanin_a = True
+            else:
+                src_local = entries[0]
+                dsts_local = exits
+                fanin_a = False
             n, detail = install(tg.generate_candidates(src_local, dsts_local))
-            label = f"{src_local}→{dsts_local[0]}"
+            self._derive_hier_fanin_bits(w, cell_fp, local=True)
+            label = (f"[{','.join(dsts_local)}]→{src_local} fan-in" if fanin_a
+                     else f"{src_local}→{dsts_local[0]}")
             if n == 0 and not w.input.candidates:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted!  [cell:{b.cell_context}] {nets_suffix}")
@@ -973,7 +1007,12 @@ class HierMixin:
                 print(f"  Warning: could not parse reason for bundle {b.id}: {b.reason!r}")
                 return 0
             n, detail = install(tg.generate_candidates(src, dsts))
-            label = f"{src}→{dsts[0]}" if len(dsts) == 1 else f"{src}→[{','.join(dsts)}]"
+            self._derive_hier_fanin_bits(w, depth_fp, local=False)
+            if b.reason.startswith('FANIN:'):
+                label = f"[{','.join(dsts)}]→{src} fan-in"
+            else:
+                label = (f"{src}→{dsts[0]}" if len(dsts) == 1
+                         else f"{src}→[{','.join(dsts)}]")
             if n == 0 and not w.input.candidates:
                 print(f"  WARNING: HierTopo D{b.level}: bundle {b.id} ({label}) "
                       f"0 candidates — bundle will be unrouted! {nets_suffix}")
@@ -1123,6 +1162,10 @@ class HierMixin:
         nb.rcv_spec_depth    = b.rcv_spec_depth
         nb.drv_spec_path     = b.drv_spec_path
         nb.rcv_spec_paths    = b.rcv_spec_paths
+        # Fan-in taper metadata must ride clone templates (90° rotation
+        # classes) too, or their instances silently lose the per-bit taper.
+        nb.net_drivers       = b.net_drivers
+        nb.net_receivers     = b.net_receivers
         return nb
 
     def _bu_cell_of(self, cell_context):
@@ -2587,12 +2630,17 @@ class HierMixin:
         cell_bundle_ids = {w.input.original_bundle.id for w in bundles
                            if w.input.original_bundle.cell_context}
         donor_nets = {}    # (template id, instance path) → replica net list
+        donor_fanin = {}   # (template id, instance path) → (drvs, rcvs)
         replica_wrapper_of = {}  # replica id → (template id, instance path)
         for w in bundles:
             b = w.input.original_bundle
             if (b.cell_context and b.parent_id in cell_bundle_ids
                     and b.instances):
                 donor_nets[(b.parent_id, b.instances[0])] = list(b.net_names)
+                if b.net_drivers:
+                    donor_fanin[(b.parent_id, b.instances[0])] = (
+                        list(b.net_drivers),
+                        [list(r) for r in b.net_receivers])
                 replica_wrapper_of[b.id] = (b.parent_id, b.instances[0])
         # Start synthetic IDs above any real bundle ID in the set.
         max_id = max((w.input.original_bundle.id for w in bundles), default=-1)
@@ -2684,6 +2732,31 @@ class HierMixin:
                     new_w.input.candidates = [
                         buda.offset_topology(t, dx, dy, inst_name)
                         for t in w.input.candidates]
+                # Fan-in template: re-derive the per-bit taper for THIS
+                # instance from its own donor nets' endpoints (Codex #276:
+                # a replica's net names need not sort in the template's
+                # driver order, so the copied seg_bits indices could taper
+                # bits along the wrong driver branches).  The expanded
+                # candidates carry instance-qualified block names, matching
+                # the donor metadata's full paths; the template's own
+                # instance re-derives with the template metadata
+                # (idempotent).  Derivation failures fall back to
+                # all-segments — conservative, and reported by the flat
+                # fidelity machinery where applicable.
+                if b.net_drivers:
+                    d_drvs, d_rcvs = donor_fanin.get(
+                        (b.id, inst_name),
+                        (list(b.net_drivers),
+                         [list(r) for r in b.net_receivers]))
+                    clone.net_drivers = d_drvs
+                    clone.net_receivers = d_rcvs
+                    # original_bundle was assigned BY VALUE above — re-assign
+                    # so the wrapper's copy carries the donor metadata.
+                    new_w.input.original_bundle = clone
+                    cands = new_w.input.candidates
+                    for t in cands:
+                        buda.derive_fanin_seg_bits(t, self.fp, d_drvs, d_rcvs)
+                    new_w.input.candidates = cands
                 # Reserve the instance footprint: until this local bundle is
                 # planned, its demand is parked as virtual usage so earlier
                 # (global) bundles leave room over the cell interior.
@@ -2865,6 +2938,31 @@ class HierMixin:
                     continue
                 buda.derive_fanin_seg_bits(t, self.fp, drvs, rcvs)
             w.input.candidates = cands
+
+    def _derive_hier_fanin_bits(self, w, fp, local):
+        """Per-bit taper for a HIER fan-in bundle: derive Topology.seg_bits
+        on every candidate from the bundler-recorded per-net endpoints
+        (HBundle.net_drivers/net_receivers, aligned with the sorted
+        net_names).  local=True maps paths to cell-local leaf names (the
+        case (a) frame); case (b) uses the depth-level paths as-is.  No-op
+        for single-driver bundles (empty net_drivers).  seg_bits is derived
+        (never persisted) and rides the per-instance expansion copies
+        (offset/transform_topology copy the whole struct), so the planner /
+        NUTS / DNUTS width model tapers in the hier flow exactly as in the
+        flat flow; a resumed session falls back to conservative full
+        width."""
+        b = w.input.original_bundle
+        drvs = list(b.net_drivers)
+        if not drvs or fp is None:
+            return
+        rcvs = [list(r) for r in b.net_receivers]
+        if local:
+            drvs = [d.rsplit('/', 1)[-1] for d in drvs]
+            rcvs = [[r.rsplit('/', 1)[-1] for r in rl] for rl in rcvs]
+        cands = w.input.candidates
+        for t in cands:
+            buda.derive_fanin_seg_bits(t, fp, drvs, rcvs)
+        w.input.candidates = cands
 
     def _validate_endpoint_blocks(self, net_name, src, dsts):
         """Fatal input validation: every block a net/bus connects to must exist in

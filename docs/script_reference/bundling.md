@@ -60,8 +60,8 @@ run_bundler strict
 set_bundling <prefix>|* <strict|no_convergent|no_bidirectional|combined>
 ```
 
-Per-net-prefix bundling permission, applied at the next flat `run_bundler`
-(any strategy). The **longest matching prefix** wins; `*` sets the global
+Per-net-prefix bundling permission, applied at the next `run_bundler` OR
+`run_hier_bundler` (any strategy). The **longest matching prefix** wins; `*` sets the global
 default. A merge via a relation happens only when the strategy enables it
 **and both nets permit it** — so `set_bundling clk_ strict` keeps clock nets
 out of every convergent/bidirectional merge while the rest of the design

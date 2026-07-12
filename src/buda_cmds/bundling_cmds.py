@@ -398,7 +398,7 @@ def cmd_set_bundling(session, cmd, args, cmd_line):
         session._bundling_overrides[prefix] = mode
     print(f"[Bundler] bundling override: '{prefix}' -> {mode} "
           f"({len(session._bundling_overrides)} override(s) active; applies "
-          f"at the next run_bundler)")
+          f"at the next run_bundler / run_hier_bundler)")
 
 
 def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
@@ -444,15 +444,14 @@ def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):
 
 
 def cmd_run_hier_bundler(session, cmd, args, cmd_line):
-    # run_hier_bundler [depth <N>] [STRICT|BIDIRECTIONAL]
+    # run_hier_bundler [depth <N>] [STRICT|CONVERGENT|BIDIRECTIONAL|COMBINED]
     if session.bdb is None:
         print("Error: run_hier_bundler requires an open BDB (use open_bdb first)"); return
-    if (getattr(session, "_bundling_overrides", None)
-            or getattr(session, "_max_bundle_bits", None)
+    if (getattr(session, "_max_bundle_bits", None)
             or getattr(session, "_max_bundle_bits_auto", False)):
-        print("Warning: set_bundling / set_max_bundle_bits apply to the FLAT "
-              "run_bundler only — run_hier_bundler ignores them (COMBINED and "
-              "the bit bound are flat-flow features, like CONVERGENT).")
+        print("Warning: set_max_bundle_bits applies to the FLAT run_bundler "
+              "only — run_hier_bundler ignores it (hier bundle splitting "
+              "is a documented follow-on).")
     max_depth = 1
     if "depth" in args:
         idx = list(args).index("depth")
@@ -462,14 +461,26 @@ def cmd_run_hier_bundler(session, cmd, args, cmd_line):
     strat_toks = [a.upper() for a in args
                   if a.lower() != "depth" and not a.isdigit()]
     strat = strat_toks[0] if strat_toks else "STRICT"
-    if strat not in ("STRICT", "BIDIRECTIONAL"):
-        print(f"Error: run_hier_bundler strategy must be STRICT or "
-              f"BIDIRECTIONAL, got '{strat}'"); return
+    if strat not in ("STRICT", "CONVERGENT", "BIDIRECTIONAL", "COMBINED"):
+        print(f"Error: run_hier_bundler strategy must be STRICT, CONVERGENT, "
+              f"BIDIRECTIONAL or COMBINED, got '{strat}'"); return
     hb = buda.HierarchicalBundler(session.bdb)
     # BIDIRECTIONAL is direction-agnostic and connects the same blocks, so
     # (like the flat run_bundler) it routes correctly — no warning needed.
-    hb.set_strategy(buda.Strategy.BIDIRECTIONAL if strat == "BIDIRECTIONAL"
-                    else buda.Strategy.STRICT)
+    # A CONVERGENT/COMBINED multi-driver group becomes a fan-in bundle
+    # (reason 'FANIN:root|FROM:leaves', per-net endpoints in
+    # net_drivers/net_receivers) that generation routes as a per-bit
+    # tapered fan-in tree — same soundness story as the flat flow.  Note:
+    # relations apply per bundling depth to SAME-LEVEL nets; cross-level
+    # nets keep STRICT/BIDIRECTIONAL grouping (documented follow-on).
+    hb.set_strategy(getattr(buda.Strategy, strat))
+    overrides = getattr(session, "_bundling_overrides", None) or {}
+    if overrides:
+        hb.set_bundling_overrides(sorted(overrides.items()))
+    if strat == "COMBINED":
+        print("[HierBundler] COMBINED: join of CONVERGENT and BIDIRECTIONAL "
+              "per bundling depth (cross-level nets stay STRICT/BIDIR; "
+              "restrict per prefix with set_bundling).")
     raw_bundles = hb.run(max_depth)
     session.bundles = []
     for b in raw_bundles:

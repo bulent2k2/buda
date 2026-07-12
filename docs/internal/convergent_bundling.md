@@ -32,8 +32,8 @@ into the acceptance tests (`test_convergent_fanin_routes_every_driver`,
 the mixed shared+distinct-driver case).  QoR showcase: `demo/ariane136_l2` —
 the 1024-bit rdata merge generates `[ic_data_0..3,dc_data_0..7]->cpu_core
 fan-in` (12 drivers, 24 candidates) and passes `check_design topo`/`nuts`
-clean.  Remaining follow-on (out of scope here): a CONVERGENT mode for the
-HIER bundler — `run_hier_bundler` supports STRICT/BIDIRECTIONAL only.
+clean.  (The hier-bundler follow-on landed too — see the HIER section
+below.)
 
 Reproduced by `test/tests/test_bundler_convergent_pipeline.py`.
 
@@ -54,6 +54,41 @@ shortest busterm edge vs the bits the taper actually lands on each block.
 QoR: `demo/congestion_demo`'s cpu+gpu→display fan-in merges under COMBINED
 (3→2 bundles) with abstract WL 2224→1580 (−29%) at zero overlaps.  Tests:
 `test/tests/test_bundler_combined.py`.
+
+**HIER bundler (2026-07-12).** `run_hier_bundler` accepts all four
+strategies, applied PER BUNDLING DEPTH to same-level nets (the depth-aware
+semantics: each net bundles once at its most specific level, so fan-ins in
+different subtrees or at different specificity depths stay separate routing
+problems — that is the scope decision, not a limitation to hide).  A
+multi-driver group with DIFFERING endpoint block sets becomes a fan-in
+bundle: reason `FANIN:root|FROM:leaves` (parsed by `_parse_bundle_reason`
+into the flat root+leaves convention), per-net endpoints recorded in
+`HBundle.net_drivers`/`net_receivers` (aligned with sorted net_names,
+derived — not persisted, so a resumed session falls back to conservative
+full width), and generation routes it in the bundle's frame (cell-local for
+case (a) — where fan-in templates merge with replicas exactly like STRICT
+templates — depth floorplan for case (b)) with the per-bit taper derived at
+generation (`_derive_hier_fanin_bits`; seg_bits rides the per-instance
+expansion copies).  A mixed-direction group over ONE block set (A→B with
+B→A) keeps the historical block-to-block BIDIR treatment — fan-in requires
+differing sets — **including its busterm emission**: the all-drivers entry
+emission is reserved for fan-in bundles and general-path (COMBINED /
+override) multi-driver groups, so a pure-BIDIRECTIONAL request/response
+pair keeps the ep0 path and its 2-pin candidate pool verbatim.  A bundle's
+reason is never a driverless `REC:…` (generation cannot recover a driver
+from it): single-driver groups emit the finest-shared `DRV:…|REC:…`
+signature under every strategy, and the case (a) fan-in root is filtered
+out of its own leaf list (`generate_npin` doesn't dedupe).  `set_bundling`
+overrides apply to both bundlers (C++ `set_bundling_overrides`,
+longest-prefix, both-nets-must-permit); as on the flat side, ANY active
+override switches even a pure strategy onto the union-find path —
+partition-equal, but bundles are ordered by smallest net name instead of
+signature, so bundle IDs can differ from an override-free run.
+Remaining corner: CROSS-LEVEL nets keep STRICT/BIDIRECTIONAL grouping
+(their single drv_spec metadata cannot yet describe a multi-driver group);
+`set_max_bundle_bits` also stays flat-only (hier splits would have to
+propagate through template↔replica linkage).  Tests:
+`test/tests/test_hier_bundler_combined.py`.
 
 ## The two strategies
 
