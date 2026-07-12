@@ -38,6 +38,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kPeak")             kPeak_             = value;
     else if (name == "base_span_ref")     base_span_ref_     = value;
     else if (name == "track_cap_slack")   track_cap_slack_   = value;
+    else if (name == "refine_passes")     refine_passes_     = (int)value;
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
 
@@ -1326,6 +1327,76 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
         ls.by_stage[stage] += 1;
         ls.max_overflow = std::max(ls.max_overflow, plan.overflow);
         for (int lid : plan.seg_layers) ls.layer_hist[lid] += 1;
+    }
+
+    // ---- Refinement passes (opt-in: set_planner_param refine_passes N) ----
+    // The level-ordering synthesis (docs/congestion_planner.md "Level
+    // ordering"; opens.md item 8): one built-in negotiation iteration per
+    // pass.  Pass 1 above plans top-down, protecting later cell-locals with
+    // the pessimistic interior reservations; those reservations OVER-COUNT,
+    // so an early global can detour around phantom congestion (the deep-first
+    // A/B: hbundles/01/02 pick 3-segment Z shapes where a straight I_H fits).
+    // By refinement time every reservation is released and every bundle's
+    // demand is REAL, so revisiting the committed bundles DEEPEST-FIRST
+    // (ascending hier priority — the reverse of the commit order, so the
+    // widest globals re-decide last, seeing everything) lets a rip-up +
+    // STRICT replan either find an improvement against full information or
+    // deterministically re-derive the same plan (plan_bundle's tie-breaks
+    // are stable), giving a natural fixpoint (early-out when a pass changes
+    // nothing).  The A/B's deep-first failure mode (locals planning BLIND,
+    // globals unprotected — hbundles/07/10) cannot occur: nothing here plans
+    // blind, refinement only re-decides with all demand visible.  A bundle
+    // whose replan finds nothing (STRICT infeasible against the current
+    // state — e.g. it was committed at the overflow/best-effort stages)
+    // keeps its original plan exactly.  Locked (bottom-up template) wrappers
+    // are never revisited.  The per-level summary's layer mix is patched on
+    // every accepted change; the stage counts keep describing the pass-1
+    // ladder.
+    if (refine_passes_ > 0) {
+        std::vector<int> ref_order(committed.size());
+        std::iota(ref_order.begin(), ref_order.end(), 0);
+        std::sort(ref_order.begin(), ref_order.end(), [&](int a, int b) {
+            const auto& wa = bundles[committed[a].bundle_idx];
+            const auto& wb = bundles[committed[b].bundle_idx];
+            if (wa.hier.priority != wb.hier.priority)
+                return wa.hier.priority < wb.hier.priority;
+            return wa.input.width < wb.input.width;
+        });
+        for (int pass = 1; pass <= refine_passes_; ++pass) {
+            int changed = 0;
+            for (int k : ref_order) {
+                auto& cp = committed[k];
+                auto& bw = bundles[cp.bundle_idx];
+                if (bw.hier.locked) continue;
+                commit_plan(bw, cp.plan, -1.0);              // rip up
+                PlanResult np = plan_bundle(bw, PlanMode::STRICT);
+                if (!np.found) {                             // keep original
+                    commit_plan(bw, cp.plan);
+                    continue;
+                }
+                commit_plan(bw, np);
+                bool same = np.best_topo == cp.plan.best_topo &&
+                            np.seg_layers == cp.plan.seg_layers &&
+                            np.seg_perp == cp.plan.seg_perp;
+                if (!same) {
+                    ++changed;
+                    LevelStats& ls = level_stats[bw.hier.level];
+                    for (int lid : cp.plan.seg_layers) ls.layer_hist[lid] -= 1;
+                    for (int lid : np.seg_layers)      ls.layer_hist[lid] += 1;
+                    cp.plan = np;
+                    assignments[cp.asn_idx] = make_assignment(bw, np);
+                    log_choice(bw, np,
+                               std::string(bw.input.topology_pinned ? " [pinned]" : "")
+                               + " [refined]");
+                }
+            }
+            std::cout << "[Planner] Refine pass " << pass << ": " << changed
+                      << " of " << committed.size() << " bundle(s) changed.\n";
+            if (changed == 0) break;                         // fixpoint
+        }
+        for (auto& [lvl, ls] : level_stats)
+            for (auto it = ls.layer_hist.begin(); it != ls.layer_hist.end();)
+                it = (it->second <= 0) ? ls.layer_hist.erase(it) : std::next(it);
     }
 
     // Per-level planning summary — printed when the set spans hierarchy
