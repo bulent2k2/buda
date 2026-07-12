@@ -3,19 +3,38 @@
 Deferred follow-ups for net bundling (`src/bundler.cpp`). Index:
 [`wishlist.md`](wishlist.md).
 
-## Multi-source (fan-in) topology support to make CONVERGENT bundling sound
+## Multi-source (fan-in) topology support to make CONVERGENT bundling sound ✅
 
-**What:** `run_bundler CONVERGENT` groups nets by shared receiver only, so a
+**DONE (2026-07-11).** As-built: `_bundle_endpoints`
+(`src/buda_session/hier.py`) derives generation endpoints from ALL of a
+bundle's nets — a multi-driver CONVERGENT bundle roots at the shared sink
+with every driver block as a leaf, and the existing multicast trunk+branch /
+MST machinery (direction-agnostic root-to-N-leaves) routes the fan-in with
+the arrows reversed; single-driver bundles keep the historical first-net
+derivation byte-identically. The **net-driver fidelity check** landed as
+`NET_DRIVER_OPEN` (`_net_driver_fidelity`, `src/buda_session/reports.py`):
+every net endpoint block must appear in the topology's
+`connected_block_names` contract (flat flow; skips empty-contract USER
+candidates). The CONVERGENT warning is downgraded to a note. Acceptance
+tests inverted from the pipeline test's collapse assertions + a mixed
+shared/distinct-driver case; QoR showcase `demo/ariane136_l2` (12 drivers →
+cpu_core, 1024 bits) generates the fan-in tree and passes `check_design`
+clean. **Remaining follow-on:** a CONVERGENT mode for the HIER bundler
+(`run_hier_bundler` supports STRICT/BIDIRECTIONAL only — scope decision
+needed; the depth-aware signature may split leaf-level merge groups
+differently). Details: [`convergent_bundling.md`](convergent_bundling.md).
+
+**What (historical):** `run_bundler CONVERGENT` groups nets by shared receiver only, so a
 bundle can span several **different driver blocks** at different locations (a
-many-to-one fan-in). Topology generation models a bundle by a single `src→dst`
-pair, so such a bundle routes from ONE arbitrary driver and the others are
-silently left unrouted — physically wrong. Give topology generation a
+many-to-one fan-in). Topology generation modelled a bundle by a single `src→dst`
+pair, so such a bundle routed from ONE arbitrary driver and the others were
+silently left unrouted — physically wrong. The fix gave topology generation a
 **multi-source / fan-in tree** shape (several source busterms merging toward the
-shared sink, e.g. an MST/Steiner trunk each driver joins), and add the missing
-**net-driver fidelity check** to `check_connectivity` (today it validates a
+shared sink), and added the missing
+**net-driver fidelity check** to `check_design` (before, it validated a
 topology's internal self-consistency, not that every original net driver is
-actually attached — which is why the gap slipped through). Then `CONVERGENT`
-becomes genuinely useful for real fan-in patterns (multiple masters → one slave,
+actually attached — which is why the gap slipped through). `CONVERGENT` is now
+genuinely useful for real fan-in patterns (multiple masters → one slave,
 write data → memory) instead of a foot-gun.
 
 (Note: `BIDIRECTIONAL` does **not** need this — it groups nets connecting the

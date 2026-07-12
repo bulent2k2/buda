@@ -2755,6 +2755,50 @@ class HierMixin:
         validate against the real block 'u.core'."""
         return pin.rsplit('.', 1)[0]
 
+    def _bundle_endpoints(self, w):
+        """Derive a bundle's generation endpoints from ALL of its nets.
+
+        Single-driver bundle (STRICT, or a CONVERGENT group that degenerates
+        to one): the first net's (driver, receivers), exactly the historical
+        behavior — byte-identical for every existing flow.
+
+        Multi-driver bundle (CONVERGENT fan-in: nets from DIFFERENT driver
+        blocks sharing a receiver set): a single src->dst pair cannot
+        represent it — the old derivation routed the whole bundle from ONE
+        arbitrary driver and silently left the rest unrouted
+        (docs/internal/convergent_bundling.md).  Root the tree at the shared
+        SINK instead and hand every driver block (plus any receiver block
+        beyond the root) to the generator as leaves: generate_candidates'
+        multicast trunk+branch / MST machinery connects a root to N leaves
+        direction-agnostically, so the same shapes serve fan-in with the
+        arrows reversed, and connected_block_names then carries every
+        driver — the contract check_topo and the net-driver fidelity check
+        verify.
+
+        Returns (src, dsts, fanin) — fanin True on the multi-driver path —
+        or None when no net has endpoint info (the hier flow)."""
+        nets = w.input.original_bundle.get_net_names()
+        eps = [(n, self._net_endpoints.get(n)) for n in nets]
+        eps = [(n, e) for n, e in eps if e is not None]
+        if not eps:
+            return None
+        first = eps[0][1]
+        drivers = []
+        for _, (drv, _rcvs) in eps:
+            if drv not in drivers:
+                drivers.append(drv)
+        if len(drivers) == 1:
+            return first[0], list(first[1]), False
+        # Fan-in: root at the shared sink (the first net's first receiver);
+        # leaves = every driver + any receiver beyond the root.
+        root = first[1][0]
+        leaves = [d for d in drivers if d != root]
+        for _, (_drv, rcvs) in eps:
+            for r in rcvs:
+                if r != root and r not in leaves:
+                    leaves.append(r)
+        return root, leaves, True
+
     def _validate_endpoint_blocks(self, net_name, src, dsts):
         """Fatal input validation: every block a net/bus connects to must exist in
         the floorplan.  get_block_bounds() silently returns {0,0,0,0} for an unknown

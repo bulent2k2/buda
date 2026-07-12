@@ -15,17 +15,19 @@
 CONVERGENT bundles nets by their *shared receiver instance* only, ignoring the
 driver — so several nets from DIFFERENT drivers that fan in to one sink become a
 single bundle.  These tests drive the whole flat pipeline through the CLI
-(`run_bundler {STRICT|CONVERGENT}` → topology → planner → NUTS) for such a fan-in
-and contrast the two strategies, to show whether CONVERGENT makes physical sense.
+(`run_bundler {STRICT|CONVERGENT}` → topology → planner → NUTS) for such a
+fan-in and contrast the two strategies.
 
-Finding (documented here and in docs/internal/convergent_bundling.md): it does
-NOT, as currently modelled.  The topology generator represents a bundle by a
-single src→dst pair, so a bundle whose nets have different drivers is routed from
-ONE arbitrary driver and the others are silently left unrouted — NUTS places
-horizontal runs at only one source row, vs all four under STRICT.
-`check_design` does not catch the omission (it checks a topology's internal
-self-consistency, not fidelity to the original net drivers).  The CLI therefore
-prints a warning when CONVERGENT is selected.
+Historically CONVERGENT was UNSOUND: the topology generator represented a
+bundle by a single src→dst pair, so a multi-driver bundle routed from ONE
+arbitrary driver and the rest were silently unrouted, and check_design never
+noticed (it checked internal self-consistency only).  These are the inverted
+ACCEPTANCE tests for the fan-in tree fix (docs/internal/convergent_bundling.md):
+`_bundle_endpoints` derives the endpoints from ALL of a bundle's nets and roots
+a multi-driver bundle at the shared sink with every driver as a leaf, so the
+multicast/MST machinery physically attaches every driver block; the new
+net-driver fidelity check (`NET_DRIVER_OPEN`) flags any topology whose
+connected-block contract drops an endpoint block.
 """
 
 import buda_cli
@@ -81,6 +83,31 @@ def _covered(rows):
             if any(abs(r - t) < _ROW_TOL for r in rows)}
 
 
+def _blocks_covered_by_nuts(sess, blocks):
+    """Blocks whose bbox is crossed/touched by some placed NUTS segment —
+    the physical 'this driver is attached' predicate (a fan-in tree may tap
+    a driver with a stub at its row OR pass a trunk through its bbox)."""
+    covered = set()
+    for name in blocks:
+        r = sess.fp.get_block_bounds(name)
+        for s in sess.nuts_result.segments:
+            if not s.placed:
+                continue
+            if s.horiz:
+                hit = (r.y1 <= s.track_position <= r.y2
+                       and s.span_lo <= r.x2 and s.span_hi >= r.x1)
+            else:
+                hit = (r.x1 <= s.track_position <= r.x2
+                       and s.span_lo <= r.y2 and s.span_hi >= r.y1)
+            if hit:
+                covered.add(name)
+                break
+    return covered
+
+
+_SOURCES = ("src0", "src1", "src2", "src3")
+
+
 def test_strict_fanin_routes_every_driver():
     # STRICT keeps the four different-driver nets in four separate bundles, each
     # routed from its own driver → every source row is reached.
@@ -92,39 +119,84 @@ def test_strict_fanin_routes_every_driver():
     assert _covered(rows) == set(_SOURCE_ROWS)   # all four drivers routed
 
 
-def test_convergent_fanin_collapses_to_one_driver():
-    # CONVERGENT groups all four nets (shared receiver `sink`) into ONE bundle.
-    # The full pipeline RUNS, but the topology is modelled from a single driver,
-    # so only that one source row is routed; the other three are left unrouted.
+def test_convergent_fanin_routes_every_driver():
+    # ACCEPTANCE (inverted from the historical collapses-to-one-driver test):
+    # CONVERGENT groups all four nets (shared receiver `sink`) into ONE bundle,
+    # and the fan-in tree physically attaches EVERY driver block — the topology
+    # is rooted at the sink with all four sources as leaves.
     sess, raw = _run_pipeline("CONVERGENT")
     assert len(raw) == 1
     assert raw[0].reason == "REC:sink"
     assert sorted(raw[0].get_net_names()) == ["a0", "a1", "a2", "a3"]
 
-    rows = _h_rows(sess)
-    covered = _covered(rows)
-    assert len(covered) == 1, (
-        f"convergent bundle should reach exactly one source row, got {covered}")
-    # Three of the four drivers are silently unrouted — the crux of why the
-    # option is unsound for genuinely convergent (different-driver) nets.
-    assert len(set(_SOURCE_ROWS) - covered) == 3
+    # Every driver block (and the sink) is covered by placed routing.
+    covered = _blocks_covered_by_nuts(sess, _SOURCES + ("sink",))
+    assert covered == set(_SOURCES + ("sink",)), (
+        f"fan-in bundle must attach every driver; missing "
+        f"{set(_SOURCES + ('sink',)) - covered}")
+    # The topology's required-block contract carries all five blocks.
+    w = sess.bundles[0]
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    assert set(topo.connected_block_names) == set(_SOURCES + ("sink",))
 
 
-def test_convergent_topo_check_does_not_flag_missing_drivers(capsys):
-    # Gap: check_design passes for the convergent bundle even though three
-    # drivers are unrouted — it verifies the topology's own consistency, not that
-    # the routed bundle matches the original per-net drivers.
+def test_convergent_topo_check_passes_and_fidelity_flags_dropped_driver(capsys):
+    # ACCEPTANCE (inverted from the historical does-not-flag test): the routed
+    # fan-in bundle passes check_design; a topology that models the bundle from
+    # a single driver (the historical unsound shape) is now FLAGGED by the
+    # net-driver fidelity check (NET_DRIVER_OPEN).
     sess, _ = _run_pipeline("CONVERGENT")
     capsys.readouterr()                       # clear pipeline output
     sess.do_command("check_design topo")
     out = capsys.readouterr().out.lower()
     assert "no opens" in out or "success" in out
 
+    # Regress the bundle to the historical single-driver modelling and
+    # re-check: three drivers are now missing from the contract.
+    import buda
+    w = sess.bundles[0]
+    topo_gen = sess._make_topo_gen(sess.fp, False, False, False)
+    w.input.candidates = topo_gen.generate_candidates("src0", ["sink"])
+    w.plan.selected_topology_index = 0
+    sess.do_command("check_design topo")
+    out = capsys.readouterr().out
+    assert "NET_DRIVER_OPEN" in out or "net endpoint block" in out
+    for missing in ("src1", "src2", "src3"):
+        assert missing in out
+
+
+def test_convergent_mixed_shared_and_distinct_drivers():
+    # Mixed case (wishlist gap): two nets share driver `ma`, one comes from
+    # `mb` — CONVERGENT groups all three by the shared sink, and the fan-in
+    # tree attaches BOTH driver blocks.  Blocks scattered (not one column) so
+    # the tree needs real branches, not a single pass-through trunk.
+    sess = buda_cli.BudaSession()
+    sess.no_viz = True
+    for line in ("def_layer 4 M4 H TOP 50\ndef_layer 5 M5 V TOP 50\n"
+                 "add_block ma 0 0 100 80\n"
+                 "add_block mb 300 600 400 680\n"
+                 "add_block sink 800 250 950 450\n"
+                 "add_net w0 ma.tx0 sink.r0\n"
+                 "add_net w1 ma.tx1 sink.r1\n"
+                 "add_net w2 mb.tx sink.r2\n").strip().splitlines():
+        sess.do_command(line)
+    sess.do_command("run_bundler CONVERGENT")
+    raw = [w.input.original_bundle for w in sess.bundles]
+    assert len(raw) == 1 and sorted(raw[0].get_net_names()) == ["w0", "w1", "w2"]
+    for cmd in ("generate_topologies", "run_planner", "run_nuts"):
+        sess.do_command(cmd)
+    covered = _blocks_covered_by_nuts(sess, ("ma", "mb", "sink"))
+    assert covered == {"ma", "mb", "sink"}, f"missing {set(['ma','mb','sink']) - covered}"
+    w = sess.bundles[0]
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    assert set(topo.connected_block_names) == {"ma", "mb", "sink"}
+
 
 def test_cli_run_bundler_honors_strategy_argument(capsys):
-    # The CLI `run_bundler` command now honours its argument: STRICT yields four
+    # The CLI `run_bundler` command honours its argument: STRICT yields four
     # bundles (one per driver), CONVERGENT yields the single shared-receiver
-    # bundle and prints a warning about the unrouted-driver limitation.
+    # bundle and prints the fan-in note (the historical unrouted-driver
+    # WARNING is gone — multi-driver bundles now route as fan-in trees).
     strict = _build_session()
     strict.do_command("run_bundler STRICT")
     assert len(strict.bundles) == 4
@@ -134,7 +206,8 @@ def test_cli_run_bundler_honors_strategy_argument(capsys):
     conv.do_command("run_bundler CONVERGENT")
     out = capsys.readouterr().out.lower()
     assert len(conv.bundles) == 1
-    assert "warning" in out and "convergent" in out
+    assert "fan-in" in out and "convergent" in out
+    assert "warning" not in out
 
     # A bare `run_bundler` still defaults to STRICT, and a bad argument errors.
     bare = _build_session()

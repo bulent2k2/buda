@@ -31,15 +31,16 @@ def cmd_run_bundler(session, cmd, args, cmd_line):
               f"or BIDIRECTIONAL, got '{args[0]}'"); return
     if strat_arg == "CONVERGENT":
         # CONVERGENT groups nets by shared receiver only, so a bundle can
-        # span several DIFFERENT driver blocks at different locations.
-        # Topology generation (a single src->dst per bundle) then routes
-        # from one driver and leaves the others unrouted.  Warn rather
-        # than silently misroute.  See docs/internal/convergent_bundling.md.
+        # span several DIFFERENT driver blocks at different locations (a
+        # many-to-one fan-in).  Topology generation models such a bundle
+        # as a fan-in tree rooted at the shared sink with every driver
+        # block as a leaf (_bundle_endpoints), and check_design's
+        # net-driver fidelity check verifies every endpoint block is
+        # attached.  See docs/internal/convergent_bundling.md.
         session.bundler.set_strategy(buda.Strategy.CONVERGENT)
-        print("Warning: run_bundler CONVERGENT groups nets by shared "
-              "receiver only; bundles that span multiple driver blocks "
-              "are routed from a single driver (the others are left "
-              "unrouted). See docs/internal/convergent_bundling.md.")
+        print("[Bundler] CONVERGENT: nets grouped by shared receiver; a "
+              "multi-driver bundle routes as a fan-in tree rooted at the "
+              "shared sink (see docs/internal/convergent_bundling.md).")
     elif strat_arg == "BIDIRECTIONAL":
         # BIDIRECTIONAL bundles nets that connect the SAME set of blocks
         # in any direction (A->B with B->A, a->b,c with b->c,a / c->b,a).
