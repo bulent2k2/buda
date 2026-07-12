@@ -149,25 +149,28 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         """--log mode: copy a sourced .buda script into the run's archive dir
         the moment it is sourced, so the archive holds exactly the script text
         this run executed (the top-level script arrives here too — main runs it
-        via `source`).  A re-sourced identical file is copied once; a basename
-        collision (same name from two dirs) is uniquified; MANIFEST maps every
-        copy back to its origin path."""
+        via `source`).  Deduplication is by ORIGIN PATH: a re-sourced file is
+        archived once, but every distinct origin gets its own copy (basename
+        uniquified on collision) and MANIFEST line — even when two origins are
+        byte-identical, since the manifest's job is complete provenance (which
+        files this run read), not content storage (Codex #278)."""
         if not self._log_run_dir:
             return
+        src = os.path.abspath(path)
+        if src in self._log_archived:
+            return                               # this exact file, already archived
         try:
-            import filecmp, shutil
-            src = os.path.abspath(path)
+            import shutil
             os.makedirs(self._log_run_dir, exist_ok=True)
             stem, ext = os.path.splitext(os.path.basename(src))
             dst, n = os.path.join(self._log_run_dir, stem + ext), 2
             while os.path.exists(dst):
-                if filecmp.cmp(src, dst, shallow=False):
-                    return                       # already archived verbatim
                 dst = os.path.join(self._log_run_dir, f"{stem}-{n}{ext}")
                 n += 1
             shutil.copy2(src, dst)
             with open(os.path.join(self._log_run_dir, 'MANIFEST'), 'a') as mf:
                 mf.write(f"{os.path.basename(dst)} <- {src}\n")
+            self._log_archived.add(src)
         except OSError as e:
             print(f"Warning: could not archive {path} to {self._log_run_dir}: {e}")
 
@@ -231,6 +234,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._flow_log = None          # open flow-log file (set by main); enables per-command logging
         self._flow_log_path = None     # its path (for the "Full detail →" line)
         self._log_run_dir = None       # --log: log/<cell>/<timestamp>/ archive dir (logs + script copies)
+        self._log_archived = set()     # --log: origin abspaths already archived this run
         self._cmd_stats = []           # per-command (cmd_line, elapsed, nlines, nwarn, nerr) for runtime summary
         self._end_report_done = False  # runtime summary emitted (idempotent guard)
         self._at_last_command = True   # True while running the flow's final command
