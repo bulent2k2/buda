@@ -486,7 +486,10 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
         // takes the union-find JOIN over the permitted relations, exactly
         // mirroring the flat _generalized_bundles (a merge via a relation
         // needs the strategy AND both nets to permit it; the strict relation
-        // is always permitted).
+        // is always permitted).  As on the flat side, ANY active override
+        // switches even a pure strategy onto the union-find path: the
+        // partition is equal but bundles are ordered by smallest net name
+        // instead of signature, so bundle IDs can differ.
         std::vector<std::pair<std::string, std::vector<int>>> groups;
         const bool general = (_strategy == Strategy::COMBINED) ||
                              !_overrides.empty();
@@ -609,21 +612,21 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                         std::find(drivers.begin(), drivers.end(), r) == drivers.end()) {
                         sig += r; sig += ',';
                     }
-            } else if (!sig_hint.empty()) {
+            } else if (!sig_hint.empty() && sig_hint.rfind("REC:", 0) != 0) {
                 sig = sig_hint;
             } else {
-                // Single-driver union-find group: the finest signature the
-                // whole group shares (familiar reasons survive overrides).
-                std::set<std::string> strict_sigs, conv_sigs;
+                // Finest signature the whole group shares.  A driverless
+                // "REC:" reason (the pure-CONVERGENT map key, or a shared
+                // receiver set on the union-find path) is NEVER emitted:
+                // cross-block generation recovers the endpoints by parsing
+                // the reason, and it cannot recover a driver from a bare
+                // receiver list — the bundle would get 0 candidates.
+                std::set<std::string> strict_sigs;
                 for (const auto& [nm, nid] : name_id) {
                     const auto& dr = ep_names.at(nid);
                     strict_sigs.insert(_strict_sig(dr.first, dr.second));
-                    std::string rec = "REC:";
-                    for (const auto& r : dr.second) { rec += r; rec += ','; }
-                    conv_sigs.insert(rec);
                 }
-                if (strict_sigs.size() == 1)      sig = *strict_sigs.begin();
-                else if (conv_sigs.size() == 1)   sig = *conv_sigs.begin();
+                if (strict_sigs.size() == 1) sig = *strict_sigs.begin();
                 else {
                     std::vector<std::string> all = receivers;
                     all.insert(all.end(), drivers.begin(), drivers.end());
@@ -674,10 +677,17 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
             }
 
             // ── Cell context + busterm IDs ─────────────────────────────────
-            if (drivers.size() == 1) {
-                // Single-driver group: the HISTORICAL ep0-based path,
-                // verbatim — entry/exit id ORDER feeds generation, so the
-                // pure strategies stay byte-identical.
+            // The all-drivers emission is reserved for fan-in bundles and
+            // for multi-driver groups formed on the general (union-find)
+            // path.  A PURE-mode multi-driver same-set group — a plain
+            // BIDIRECTIONAL request/response pair — keeps the historical
+            // ep0 path verbatim, exactly as before COMBINED existed.
+            const bool multi_emit = fanin || (general && drivers.size() > 1);
+            if (!multi_emit) {
+                // Single-driver group (or pure-mode same-set bidir group):
+                // the HISTORICAL ep0-based path, verbatim — entry/exit id
+                // ORDER feeds generation, so the pure strategies stay
+                // byte-identical.
                 auto drv_it = comp_by_id.find(ep0.driver_comp_id);
                 if (drv_it != comp_by_id.end()) {
                     int par_id = drv_it->second.parent_id;

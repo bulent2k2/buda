@@ -922,10 +922,18 @@ class HierMixin:
                 # Cell-local FAN-IN template (multi-driver CONVERGENT/
                 # COMBINED group inside one cell): root at the shared sink,
                 # drivers (+ extra receivers) as leaves — the flat fan-in
-                # convention, per-bit tapered below.
+                # convention, per-bit tapered below.  The root is filtered
+                # out of the leaves and the list deduped (mirroring the C++
+                # FANIN reason builder and the flat _bundle_endpoints):
+                # generate_npin doesn't dedupe, so a self-destination would
+                # instantiate the root block as a Busterm twice.
                 src_local = exits[0]
-                dsts_local = entries + [x for x in exits[1:]
-                                        if x not in entries]
+                seen = {src_local}
+                dsts_local = []
+                for x in entries + exits[1:]:
+                    if x not in seen:
+                        seen.add(x)
+                        dsts_local.append(x)
                 fanin_a = True
             else:
                 src_local = entries[0]
@@ -1154,6 +1162,10 @@ class HierMixin:
         nb.rcv_spec_depth    = b.rcv_spec_depth
         nb.drv_spec_path     = b.drv_spec_path
         nb.rcv_spec_paths    = b.rcv_spec_paths
+        # Fan-in taper metadata must ride clone templates (90° rotation
+        # classes) too, or their instances silently lose the per-bit taper.
+        nb.net_drivers       = b.net_drivers
+        nb.net_receivers     = b.net_receivers
         return nb
 
     def _bu_cell_of(self, cell_context):

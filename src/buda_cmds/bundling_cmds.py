@@ -398,7 +398,7 @@ def cmd_set_bundling(session, cmd, args, cmd_line):
         session._bundling_overrides[prefix] = mode
     print(f"[Bundler] bundling override: '{prefix}' -> {mode} "
           f"({len(session._bundling_overrides)} override(s) active; applies "
-          f"at the next run_bundler)")
+          f"at the next run_bundler / run_hier_bundler)")
 
 
 def cmd_set_max_bundle_bits(session, cmd, args, cmd_line):

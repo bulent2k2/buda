@@ -71,8 +71,19 @@ templates — depth floorplan for case (b)) with the per-bit taper derived at
 generation (`_derive_hier_fanin_bits`; seg_bits rides the per-instance
 expansion copies).  A mixed-direction group over ONE block set (A→B with
 B→A) keeps the historical block-to-block BIDIR treatment — fan-in requires
-differing sets.  `set_bundling` overrides apply to both bundlers (C++
-`set_bundling_overrides`, longest-prefix, both-nets-must-permit).
+differing sets — **including its busterm emission**: the all-drivers entry
+emission is reserved for fan-in bundles and general-path (COMBINED /
+override) multi-driver groups, so a pure-BIDIRECTIONAL request/response
+pair keeps the ep0 path and its 2-pin candidate pool verbatim.  A bundle's
+reason is never a driverless `REC:…` (generation cannot recover a driver
+from it): single-driver groups emit the finest-shared `DRV:…|REC:…`
+signature under every strategy, and the case (a) fan-in root is filtered
+out of its own leaf list (`generate_npin` doesn't dedupe).  `set_bundling`
+overrides apply to both bundlers (C++ `set_bundling_overrides`,
+longest-prefix, both-nets-must-permit); as on the flat side, ANY active
+override switches even a pure strategy onto the union-find path —
+partition-equal, but bundles are ordered by smallest net name instead of
+signature, so bundle IDs can differ from an override-free run.
 Remaining corner: CROSS-LEVEL nets keep STRICT/BIDIRECTIONAL grouping
 (their single drv_spec metadata cannot yet describe a multi-driver group);
 `set_max_bundle_bits` also stays flat-only (hier splits would have to

@@ -166,6 +166,70 @@ def test_hier_set_bundling_override_gates_merges():
     assert frozenset({"x0", "x1"}) in bm
 
 
+def test_hier_convergent_single_driver_cross_block_routes():
+    """Review #276 blocking 1: a single-driver cross-block CONVERGENT group
+    (the overwhelmingly common case — one bus, one driver) must carry a
+    reason generation can parse.  The pure-CONVERGENT map key is a
+    driverless 'REC:…'; emitted verbatim it warned 'could not parse reason'
+    and produced 0 candidates, silently unrouting ordinary top-level buses."""
+    db = buda.BDB(":memory:")
+    db.add_cell("leaf_cell", 60, 60)
+    db.add_inst("L0", "leaf_cell", "", 0, 400)
+    db.add_inst("SNK", "leaf_cell", "", 1100, 500)
+    db.add_net_pins("x0", "L0.out", ["SNK.r0"])
+    db.add_net_pins("x1", "L0.out", ["SNK.r1"])
+    buda.BustermGen(db).derive(1)
+    s = _session(db)
+    _run(s, "run_hier_bundler CONVERGENT")
+    bm = _by_nets(s)
+    b = bm[frozenset({"x0", "x1"})]        # convergent group, one driver
+    assert "DRV:" in b.reason, b.reason    # finest-shared sig, never bare REC:
+    out = _run(s, "generate_hier_topologies")
+    assert "could not parse reason" not in out
+    assert len(s.bundles[0].input.candidates) > 0
+    for c in ("run_planner hier", "run_nuts", "run_detailed_nuts"):
+        _run(s, c)
+    assert s.detailed_result.num_unplaced == 0
+
+
+def test_hier_pure_bidirectional_return_pair_keeps_historical_emission():
+    """Review #276 blocking 2: a pure-BIDIRECTIONAL request/response pair
+    (pa→ps with ps→pa) is a multi-driver SAME-SET group and must keep the
+    historical ep0 emission (one entry busterm) and the 2-pin candidate
+    pool — not flip into npin fan-in generation with the root as its own
+    leaf.  Only fan-in bundles and general-path (COMBINED/override)
+    multi-driver groups take the all-drivers emission."""
+    s = _session(_fanin_db(return_net=True))
+    _run(s, "run_hier_bundler BIDIRECTIONAL")
+    bm = _by_nets(s)
+    b = bm[frozenset({"fa1_0", "fa1_1", "rt1_0"})]   # pa↔ps mixed-direction
+    assert b.reason.startswith("BIDIR:")
+    assert len(b.entry_busterm_ids) == 1             # historical ep0 path
+    assert not list(b.net_drivers)
+    out = _run(s, "generate_hier_topologies")
+    assert "fan-in" not in out
+    assert "could not parse reason" not in out
+    for c in ("run_planner hier", "run_nuts", "run_detailed_nuts"):
+        _run(s, c)
+    assert s.detailed_result.num_unplaced == 0
+
+
+def test_hier_fanin_root_never_its_own_leaf():
+    """Case (a) root filter: a cell-local fan-in whose exits include one of
+    the entries must not hand generation a self-destination (generate_npin
+    doesn't dedupe — the root block would be instantiated twice)."""
+    s = _session(_fanin_db(return_net=True))
+    _run(s, "run_hier_bundler COMBINED")
+    out = _run(s, "generate_hier_topologies")
+    for line in out.splitlines():
+        if "fan-in" not in line or "[" not in line:
+            continue
+        leaves = line.split("[", 1)[1].split("]", 1)[0].split(",")
+        root = line.split("]→", 1)[1].split(" ", 1)[0]
+        assert root not in leaves, line
+        assert len(leaves) == len(set(leaves)), line
+
+
 def test_hier_strict_and_bidirectional_unchanged():
     """The pure modes keep their historical partitions (no FANIN reasons,
     no fan-in metadata)."""
