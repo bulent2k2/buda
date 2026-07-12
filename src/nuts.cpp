@@ -1158,8 +1158,17 @@ std::vector<TrackSegment> NUTSEngine::extract_segments(
                 lid = seg.layer_hint;
 
             ts.layer = lid;
-            ts.width = layers_.eff_bus_width(
-                (int)bw.input.original_bundle.get_net_names().size(), bw.input.width, lid);
+            // Tapered fan-in: a segment carrying a bit SUBSET (seg_bits) is
+            // as wide as its member bits only, matching the planner's charge.
+            {
+                const int nbits =
+                    (int)bw.input.original_bundle.get_net_names().size();
+                const int    n = seg_bit_count(topo, si, nbits);
+                const double w = (nbits > 0 && n != nbits)
+                                     ? bw.input.width * ((double)n / (double)nbits)
+                                     : bw.input.width;
+                ts.width = layers_.eff_bus_width(n, w, lid);
+            }
 
             if (ts.horiz) {
                 ts.span_lo = std::min(seg.start.x, seg.end.x);

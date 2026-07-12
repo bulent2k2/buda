@@ -221,7 +221,17 @@ void bind_routing(py::module_& m) {
         .def_readwrite("seg_conns",             &Topology::seg_conns)
         .def_readwrite("bridge_segments",       &Topology::bridge_segments)
         .def_readwrite("connected_block_names", &Topology::connected_block_names)
+        .def_readwrite("seg_bits",              &Topology::seg_bits)
         .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks);
+
+    // Tapered fan-in: derive per-segment bit membership (Topology::seg_bits)
+    // from the bundle's per-net endpoint blocks — one driver + receiver list
+    // per bit, index = the bundle's net order.  Returns the bit indices that
+    // fell back to all-segments (no attach/path — the net-driver fidelity
+    // check's per-bit input).
+    m.def("derive_fanin_seg_bits", &derive_fanin_seg_bits,
+          py::arg("topo"), py::arg("fp"),
+          py::arg("driver_per_bit"), py::arg("receivers_per_bit"));
 
     // Deep-copy a topology with all geometry shifted by (dx, dy), preserving the
     // seg_busterms endpoint annotation (used by the hier flow to place a

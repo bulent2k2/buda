@@ -436,7 +436,11 @@ double CongestionPlanner::plan_band_overlap(const BundleWrapper& bw,
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
-        double eff = layers_.eff_bus_width(nbits, bw.input.width, lid) + track_pitch_;  // +pitch: Gap 1
+        const int    n = seg_bit_count(t, si, nbits);
+        const double w = (nbits > 0 && n != nbits)
+                             ? bw.input.width * ((double)n / (double)nbits)
+                             : bw.input.width;
+        double eff = layers_.eff_bus_width(n, w, lid) + track_pitch_;  // +pitch: Gap 1
         for_each_band(t.segments[si], lid, pp, [&](int ci, int b) {
             if (contended.count({ci, b})) overlap += eff;
         });
@@ -743,6 +747,19 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
     // Bit count for the honest per-layer width model (eff_bus_width);
     // 0 (hand-built wrappers without nets) falls back to width x dilution.
     const int nbits = (int)bw.input.original_bundle.get_net_names().size();
+    // Tapered fan-in width model: a segment carrying a bit SUBSET (seg_bits)
+    // is charged for its member bits only — count for pattern layers, a
+    // proportional base width for the dilution fallback.  Non-fan-in
+    // bundles (empty seg_bits) are byte-identical to the bundle-level model.
+    auto seg_n = [&](const Topology& t, int si) {
+        return seg_bit_count(t, si, nbits);
+    };
+    auto seg_w = [&](const Topology& t, int si) {
+        const int n = seg_bit_count(t, si, nbits);
+        return (nbits > 0 && n != nbits)
+                   ? bw.input.width * ((double)n / (double)nbits)
+                   : bw.input.width;
+    };
 
     auto h_layers = layers_.get_layer_ids_by_dir(LayerDir::HORIZONTAL);
     auto v_layers = layers_.get_layer_ids_by_dir(LayerDir::VERTICAL);
@@ -832,7 +849,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             auto band_perp = [&](int lid, double eff) {
                 if (slide_lo == INT_MIN) return INT_MIN;   // no window: nominal lookup
                 return best_band_perp(seg, lid, eff, slide_lo, slide_hi,
-                                      (double)nbits);
+                                      (double)seg_n(topo, si));
             };
 
             int    best_lid = layers_rev[0];
@@ -844,7 +861,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             if (si < (int)bw.input.pinned_seg_layers.size() && bw.input.pinned_seg_layers[si] != -1) {
                 best_lid = bw.input.pinned_seg_layers[si];
                 best_s   = 0.0; // Pinned choice is considered "perfect" cost for planning.
-                double eff = layers_.eff_bus_width(nbits, bw.input.width, best_lid);
+                double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
                 best_pp  = band_perp(best_lid, eff);
                 best_ov  = score_segment(seg, best_lid, eff, best_pp, slide_lo, slide_hi);
                 if (enforce_overflow && best_ov > kOvEps) {
@@ -856,7 +873,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             } else {
                 // Iterate highest-ID first so equal-cost layers prefer higher metal.
                 for (int lid : layers_rev) {
-                    double eff  = layers_.eff_bus_width(nbits, bw.input.width, lid);
+                    double eff  = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), lid);
                     int    pp   = band_perp(lid, eff);
                     double ov   = score_segment(seg, lid, eff, pp, slide_lo, slide_hi);
                     // STRICT: overflow is a hard constraint.  An overflowing
@@ -912,7 +929,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                     if (kPeak_ > 0.0)
                         pk = kPeak_ * peak_util_segment(seg, lid, pp,
                                                         slide_lo, slide_hi,
-                                                        (double)nbits);
+                                                        (double)seg_n(topo, si));
                     double s    = cong + span + base + bal + hgt + pk;
                     if (s < best_s) { best_s = s; best_lid = lid; best_ov = ov; best_pp = pp; }
                 }
@@ -928,7 +945,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             if (enforce_window && si < (int)conn_segs.size()) {
                 const ConnSeg& cs = conn_segs[si];
                 if (cs.perp_lo > -kSentinel && cs.perp_hi < kSentinel) {
-                    double eff = layers_.eff_bus_width(nbits, bw.input.width, best_lid);
+                    double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
                     if (static_cast<double>(cs.perp_hi - cs.perp_lo) < eff)
                         topo_infeasible = true;
                 }
@@ -938,7 +955,7 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
             // Apply chosen layer so later segments in this topology see
             // the updated congestion state.  Charge eff + pitch so the band
             // books mirror NUTS inter-bus spacing (Gap 1).
-            double eff = layers_.eff_bus_width(nbits, bw.input.width, best_lid);
+            double eff = layers_.eff_bus_width(seg_n(topo, si), seg_w(topo, si), best_lid);
             apply_segment(seg, best_lid, eff + track_pitch_, perp_pos);
             seg_layers.push_back(best_lid);
             seg_perp.push_back(perp_pos);
@@ -989,9 +1006,14 @@ void CongestionPlanner::commit_plan(const BundleWrapper& bw, const PlanResult& p
     for (int si = 0; si < (int)t.segments.size() && si < (int)plan.seg_layers.size(); ++si) {
         int pp  = (si < (int)plan.seg_perp.size()) ? plan.seg_perp[si] : INT_MIN;
         int lid = plan.seg_layers[si];
-        // Charge eff + pitch (Gap 1); sign rips up symmetrically.
+        // Charge eff + pitch (Gap 1); sign rips up symmetrically.  Tapered
+        // fan-in: charge each segment for its member bits only (seg_bits).
+        const int    n = seg_bit_count(t, si, nbits);
+        const double w = (nbits > 0 && n != nbits)
+                             ? bw.input.width * ((double)n / (double)nbits)
+                             : bw.input.width;
         apply_segment(t.segments[si], lid,
-                      sign * (layers_.eff_bus_width(nbits, bw.input.width, lid) + track_pitch_), pp);
+                      sign * (layers_.eff_bus_width(n, w, lid) + track_pitch_), pp);
     }
 }
 

@@ -2799,6 +2799,50 @@ class HierMixin:
                     leaves.append(r)
         return root, leaves, True
 
+    def _fanin_net_endpoints(self, w):
+        """Per-bit endpoint lists for a FAN-IN bundle: ([driver_block per
+        bit], [receiver_blocks per bit]) in the bundle's net order (= the
+        global bit index), or None when the bundle is not a multi-driver
+        fan-in or any net lacks endpoint info."""
+        ep = self._bundle_endpoints(w)
+        if ep is None or not ep[2]:
+            return None
+        drvs, rcvs = [], []
+        for n in w.input.original_bundle.get_net_names():
+            e = self._net_endpoints.get(n)
+            if e is None:
+                return None
+            drvs.append(e[0])
+            rcvs.append(list(e[1]))
+        return drvs, rcvs
+
+    def _derive_fanin_bits_all(self, selected_only=False):
+        """Derive per-segment bit membership (Topology.seg_bits — the tapered
+        fan-in model) for every FAN-IN bundle's candidates: each segment then
+        carries only the bits whose driver→sink path uses it, and the
+        planner / NUTS / DNUTS width model tapers accordingly (a driver stub
+        is as wide as its own sub-bus, not the whole bundle).
+
+        Called before planning (all candidates — the planner scores each) and
+        before the NUTS solve (selected only — covers the resume path where
+        run_planner was not re-run, and re-derives an adopted dogleg split).
+        Flat flow only; idempotent (derivation overwrites the whole map)."""
+        if (getattr(self, "_hier_bundles_orig", None)
+                or self._hier_expansion_map or not self._net_endpoints):
+            return
+        for w in self.bundles:
+            eps = self._fanin_net_endpoints(w)
+            if eps is None or not w.input.candidates:
+                continue
+            drvs, rcvs = eps
+            sel = w.plan.selected_topology_index
+            cands = w.input.candidates          # pybind copy semantics
+            for i, t in enumerate(cands):
+                if selected_only and i != sel:
+                    continue
+                buda.derive_fanin_seg_bits(t, self.fp, drvs, rcvs)
+            w.input.candidates = cands
+
     def _validate_endpoint_blocks(self, net_name, src, dsts):
         """Fatal input validation: every block a net/bus connects to must exist in
         the floorplan.  get_block_bounds() silently returns {0,0,0,0} for an unknown

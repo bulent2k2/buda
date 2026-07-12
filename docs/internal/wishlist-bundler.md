@@ -15,9 +15,13 @@ derivation byte-identically. The **net-driver fidelity check** landed as
 `NET_DRIVER_OPEN` (`_net_driver_fidelity`, `src/buda_session/reports.py`):
 every net endpoint block must appear in the topology's
 `connected_block_names` contract (flat flow; skips empty-contract USER
-candidates). The CONVERGENT warning is downgraded to a note. Acceptance
+candidates). The CONVERGENT warning is downgraded to a note. The realization is
+**per-bit tapered** (`Topology::seg_bits` / `BusSegment.bit_list`): each
+segment carries only the bits whose driver→sink path uses it, with planner
+charging, NUTS widths, and DNUTS emission all member-bit-scoped — no net's
+wire lands on another driver's block. Acceptance
 tests inverted from the pipeline test's collapse assertions + a mixed
-shared/distinct-driver case; QoR showcase `demo/ariane136_l2` (12 drivers →
+shared/distinct-driver case (with taper/width/via assertions); QoR showcase `demo/ariane136_l2` (12 drivers →
 cpu_core, 1024 bits) generates the fan-in tree and passes `check_design`
 clean. **Remaining follow-on:** a CONVERGENT mode for the HIER bundler
 (`run_hier_bundler` supports STRICT/BIDIRECTIONAL only — scope decision

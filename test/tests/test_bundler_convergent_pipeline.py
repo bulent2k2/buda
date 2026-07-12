@@ -173,6 +173,8 @@ def test_convergent_mixed_shared_and_distinct_drivers():
     sess = buda_cli.BudaSession()
     sess.no_viz = True
     for line in ("def_layer 4 M4 H TOP 50\ndef_layer 5 M5 V TOP 50\n"
+                 "def_track_pattern 4 0 SIGNAL 1 1\n"
+                 "def_track_pattern 5 0 SIGNAL 1 1\n"
                  "add_block ma 0 0 100 80\n"
                  "add_block mb 300 600 400 680\n"
                  "add_block sink 800 250 950 450\n"
@@ -190,6 +192,49 @@ def test_convergent_mixed_shared_and_distinct_drivers():
     w = sess.bundles[0]
     topo = w.input.candidates[w.plan.selected_topology_index]
     assert set(topo.connected_block_names) == {"ma", "mb", "sink"}
+
+    # Tapered per-bit fidelity (Codex #268 P1): each net's bits ride ONLY the
+    # segments on its own driver→sink path.  ma's stub carries bits {0,1}
+    # (nets w0/w1), mb's stub carries {2} (w2), the shared trunk all three —
+    # and the widths taper accordingly (pitch 2 → 6/4/2), so no net's wire
+    # ever lands on the OTHER driver's block.
+    sb = dict(topo.seg_bits)
+    assert sb, "fan-in bundle must carry per-segment bit membership"
+    stub_bits = sorted(tuple(v) for v in sb.values() if len(v) < 3)
+    assert stub_bits == [(0, 1), (2,)], sb
+    widths = sorted(ts.width for ts in sess.nuts_result.segments)
+    assert widths == [2.0, 4.0, 6.0], widths
+
+    sess.do_command("run_detailed_nuts")
+    assert sess.detailed_result.num_unplaced == 0
+    per_seg = {}
+    for ns in sess.detailed_result.net_segments:
+        per_seg.setdefault(ns.seg_idx, set()).add(ns.bit_index)
+    assert sorted(map(tuple, map(sorted, per_seg.values()))) == \
+        sorted(map(tuple, (v for v in sb.values()))), (per_seg, sb)
+    # w2 (bit 2, driven by mb) has NO wire touching ma, and w0/w1 none on mb.
+    ma = sess.fp.get_block_bounds("ma")
+    mb = sess.fp.get_block_bounds("mb")
+
+    def _touches(ns, r):
+        if ns.layer in (4,):   # H layer
+            return (r.y1 <= ns.track_position <= r.y2
+                    and ns.span_lo <= r.x2 and ns.span_hi >= r.x1)
+        return (r.x1 <= ns.track_position <= r.x2
+                and ns.span_lo <= r.y2 and ns.span_hi >= r.y1)
+
+    for ns in sess.detailed_result.net_segments:
+        if ns.bit_index == 2:
+            assert not _touches(ns, ma), "w2's wire landed on ma"
+        else:
+            assert not _touches(ns, mb), f"w{ns.bit_index}'s wire landed on mb"
+    # Vias pair by GLOBAL bit index: trunk↔ma-stub vias for bits 0,1 and
+    # trunk↔mb-stub for bit 2 only.
+    via_bits = {}
+    for v in sess.detailed_result.net_vias:
+        via_bits.setdefault((v.from_seg, v.to_seg), set()).add(v.bit_index)
+    for pair, bits in via_bits.items():
+        assert bits <= {0, 1} or bits == {2}, (pair, bits)
 
 
 def test_cli_run_bundler_honors_strategy_argument(capsys):

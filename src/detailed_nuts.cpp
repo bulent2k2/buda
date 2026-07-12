@@ -193,7 +193,7 @@ void DetailedNUTSEngine::place_by_layer(
             std::cout << "[DetailedNUTS] Warning: Layer " << layer
                       << " has no track pattern defined. Skipping " << indices.size()
                       << " segment(s)." << std::endl;
-            for (int idx : indices) result.num_unplaced += bus_segs[idx].bit_width;
+            for (int idx : indices) result.num_unplaced += bus_seg_nbits(bus_segs[idx]);
             continue;
         }
 
@@ -270,7 +270,7 @@ void DetailedNUTSEngine::place_by_layer(
             // bit whose FINAL span still crosses a keepout.
             auto signal_tracks = grid.signal_tracks_in_span(
                 bs.span_lo, bs.span_hi, bs.interval_lo, bs.interval_hi);
-            if ((int)signal_tracks.size() < bs.bit_width)
+            if ((int)signal_tracks.size() < bus_seg_nbits(bs))
                 signal_tracks = grid.signal_tracks_in(x, bs.interval_lo,
                                                       bs.interval_hi);
 
@@ -291,13 +291,13 @@ void DetailedNUTSEngine::place_by_layer(
             }
             int n_sig = (int)signal_tracks.size();
 
-            if (n_sig < bs.bit_width) {
+            if (n_sig < bus_seg_nbits(bs)) {
                 std::cout << "[DetailedNUTS] Warning: Layer " << layer
                           << " has insufficient signal tracks (" << n_sig
-                          << ") for bus width " << bs.bit_width
+                          << ") for bus width " << bus_seg_nbits(bs)
                           << " in interval [" << bs.interval_lo << ", " << bs.interval_hi << "]"
                           << std::endl;
-                result.num_unplaced += bs.bit_width;
+                result.num_unplaced += bus_seg_nbits(bs);
                 continue;
             }
 
@@ -338,7 +338,10 @@ void DetailedNUTSEngine::place_by_layer(
             //   Fallback: first valid window (LO_HI) or last (HI_LO).  //
             // ------------------------------------------------------- //
             const bool use_anchor = !std::isnan(bs.abstract_pos);
-            const int  bw = bs.bit_width;
+            // Tapered fan-in: only the member bits need tracks; bit_index is
+            // emitted as the GLOBAL index so cross-segment pairing (vias,
+            // span-follow) and net_names[bit_index] stay consistent.
+            const int  bw = bus_seg_nbits(bs);
 
             // chosen_indices: the bw signal-track indices to use,
             // already sorted by track position (ascending).
@@ -431,7 +434,7 @@ void DetailedNUTSEngine::place_by_layer(
                 NetSegment ns;
                 ns.bundle_id      = bs.bundle_id;
                 ns.seg_idx        = bs.seg_idx;
-                ns.bit_index      = bit;
+                ns.bit_index      = bs.bit_list.empty() ? bit : bs.bit_list[bit];
                 ns.track_position = signal_tracks[ti].first;
                 ns.width          = signal_tracks[ti].second.width;
                 ns.layer          = bs.layer;
@@ -615,6 +618,9 @@ std::vector<BusSegment> make_bus_segments(
     // placed with (this loop is the former Python handoff, verbatim).
     std::map<int, int>                  bid_to_nbits;
     std::map<int, std::vector<ConnSeg>> bid_to_cs;
+    // Tapered fan-in: the selected topology's per-segment bit membership
+    // (empty for every non-fan-in bundle).
+    std::map<int, const std::map<int, std::vector<int>>*> bid_to_bits;
     for (const auto& w : bundles) {
         const int bid = w.input.original_bundle.id;
         bid_to_nbits[bid] =
@@ -628,6 +634,8 @@ std::vector<BusSegment> make_bus_segments(
         ConnTopology ct;
         ct.build(w.input.candidates[sel], floorplan);
         bid_to_cs[bid] = ct.segs();
+        if (!w.input.candidates[sel].seg_bits.empty())
+            bid_to_bits[bid] = &w.input.candidates[sel].seg_bits;
     }
 
     std::vector<BusSegment> out;
@@ -644,6 +652,15 @@ std::vector<BusSegment> make_bus_segments(
         auto nb = bid_to_nbits.find(ts.bundle_id);
         bs.bit_width   = (nb != bid_to_nbits.end()) ? nb->second : 1;
         bs.bit_order   = bit_order;
+        // Tapered fan-in: carry the segment's member-bit subset (global
+        // indices) so the engine places only those bits on this segment.
+        auto bb = bid_to_bits.find(ts.bundle_id);
+        if (bb != bid_to_bits.end()) {
+            auto it = bb->second->find(ts.seg_idx);
+            if (it != bb->second->end() &&
+                (int)it->second.size() < bs.bit_width)
+                bs.bit_list = it->second;
+        }
         bs.abstract_pos = ts.track_position;
         // Cross-layer corner split bounds (carried into detailed NUTS so the
         // trunk's bits snap to its committed side on real signal tracks).

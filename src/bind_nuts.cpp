@@ -274,6 +274,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("interval_hi",     &BusSegment::interval_hi)
         .def_readwrite("bit_width",       &BusSegment::bit_width)
         .def_readwrite("bit_order",       &BusSegment::bit_order)
+        .def_readwrite("bit_list",        &BusSegment::bit_list)
         .def_readwrite("timing_critical", &BusSegment::timing_critical)
         .def_readwrite("connections",     &BusSegment::connections)
         .def_readwrite("busterm_faces",   &BusSegment::busterm_faces)

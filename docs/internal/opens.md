@@ -85,7 +85,12 @@ evidence in the per-subsystem wishlist files as cited.)*
   direction-agnostic multicast trunk+branch / MST shapes serve the fan-in
   with the arrows reversed. The missing **net-driver fidelity check**
   landed as `NET_DRIVER_OPEN` in `check_design` (every net endpoint block
-  must be in the topology's `connected_block_names` contract). Warning
+  must be in the topology's `connected_block_names` contract, plus a
+  per-bit path check for fan-in bundles). The realization is per-bit
+  TAPERED (`Topology::seg_bits`, derived at plan/NUTS time): each segment
+  carries only the bits whose driver→sink path uses it — planner charge,
+  NUTS width, and DNUTS emission all member-bit-scoped, so no net's wire
+  lands on another driver's block (Codex #268 P1). Warning
   downgraded to a note; pipeline collapse tests inverted into acceptance
   tests + a mixed-driver case; QoR: `demo/ariane136_l2`'s 1024-bit
   12-driver rdata merge generates the fan-in tree and checks clean.

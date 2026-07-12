@@ -25,6 +25,33 @@ cross-mixin helper calls resolve through the class as before.
 import buda
 
 
+class _FidelityViolation:
+    """Python-side violation for the net-driver fidelity check — duck-typed
+    to the C++ ConnViolation interface the reporting paths consume
+    (kind.name / seg indices / block_name / bit_index / message).
+    Module-level (like the shared hier helpers) so the mixin carries no
+    per-class descriptors the composed-class identity test would reject."""
+    class _Kind:
+        name = "NET_DRIVER_OPEN"
+    kind = _Kind()
+    seg_idx = -1
+    seg_idx2 = -1
+    bit_index = -1
+
+    def __init__(self, block, message):
+        self.block_name = block
+        self.message = message
+
+
+def _fidelity_union(block, nets):
+    shown = ", ".join(nets[:4]) + (" …" if len(nets) > 4 else "")
+    return _FidelityViolation(block, (
+        f"NET_DRIVER_OPEN: block '{block}' is an endpoint of net(s) "
+        f"{shown} but is not among the topology's connected blocks — "
+        f"the bus never attaches it (a fan-in driver dropped by a "
+        f"single-source topology?)"))
+
+
 class ReportsMixin:
 
     # ── topology inspection (dump_topologies) ──────────────────────────────
@@ -285,26 +312,6 @@ class ReportsMixin:
         print("   shape histogram: "
               + ", ".join(f"{t}={n}" for t, n in top_shapes))
 
-    class _FidelityViolation:
-        """Python-side violation for the net-driver fidelity check — duck-typed
-        to the C++ ConnViolation interface the reporting paths consume
-        (kind.name / seg indices / block_name / bit_index / message)."""
-        class _Kind:
-            name = "NET_DRIVER_OPEN"
-        kind = _Kind()
-        seg_idx = -1
-        seg_idx2 = -1
-        bit_index = -1
-
-        def __init__(self, block, nets):
-            self.block_name = block
-            shown = ", ".join(nets[:4]) + (" …" if len(nets) > 4 else "")
-            self.message = (
-                f"NET_DRIVER_OPEN: block '{block}' is an endpoint of net(s) "
-                f"{shown} but is not among the topology's connected blocks — "
-                f"the bus never attaches it (a fan-in driver dropped by a "
-                f"single-source topology?)")
-
     def _net_driver_fidelity(self, w, topo):
         """Net-driver fidelity check: every net endpoint block of the bundle
         must appear in the topology's required-block contract
@@ -327,8 +334,9 @@ class ReportsMixin:
                 or self._hier_expansion_map
                 or not topo.connected_block_names):
             return []
+        nets = w.input.original_bundle.get_net_names()
         by_block = {}
-        for net in w.input.original_bundle.get_net_names():
+        for net in nets:
             ep = self._net_endpoints.get(net)
             if ep is None:
                 continue
@@ -336,10 +344,31 @@ class ReportsMixin:
                 by_block.setdefault(blk, []).append(net)
         connected = set(topo.connected_block_names)
         out = []
+        missing = set()
         for blk in sorted(set(by_block) - connected):
             if not self.fp.has_block(blk):
                 continue                     # hierarchy artifact, not a block
-            out.append(self._FidelityViolation(blk, sorted(by_block[blk])))
+            missing.add(blk)
+            out.append(_fidelity_union(blk, sorted(by_block[blk])))
+        # Per-BIT fidelity for fan-in bundles (tapered model): a bit whose
+        # driver→sink segment path could not be established fell back to
+        # all-segments — the taper derivation IS the per-bit check, so
+        # re-running it (idempotent: it recomputes the derived seg_bits
+        # cache) yields exactly the failed bits.  Skip drivers the union
+        # check above already reported.
+        eps = self._fanin_net_endpoints(w)
+        if eps is not None:
+            drvs, rcvs = eps
+            for b in buda.derive_fanin_seg_bits(topo, self.fp, drvs, rcvs):
+                blk = drvs[b] if b < len(drvs) else ""
+                if not blk or blk in missing or not self.fp.has_block(blk):
+                    continue
+                net = nets[b] if b < len(nets) else f"bit {b}"
+                out.append(_FidelityViolation(blk, (
+                    f"NET_DRIVER_OPEN: net '{net}' (bit {b}) has no "
+                    f"driver→sink segment path from block '{blk}' in the "
+                    f"fan-in topology — its wires fall back to the whole "
+                    f"tree (untapered)")))
         return out
 
     def _check_design(self, stage: str, all_candidates: bool = False):

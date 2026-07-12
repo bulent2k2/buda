@@ -14,7 +14,18 @@ machinery — which connects a root to N leaves direction-agnostically — serve
 the fan-in with the arrows reversed).  The missing **net-driver fidelity
 check** landed too: `check_design` now emits `NET_DRIVER_OPEN` when a net
 endpoint block is absent from a topology's `connected_block_names` contract
-(`_net_driver_fidelity`, flat flow).  The historical sections below are kept
+(`_net_driver_fidelity`, flat flow).  **Per-bit taper** (Codex #268 P1): a
+fan-in tree is not all-bits-everywhere — `derive_fanin_seg_bits`
+(`topology.cpp`) walks each net's driver→sink path through the seg_conns
+graph and stores per-segment bit membership (`Topology::seg_bits`, derived,
+never persisted), so a driver stub carries ONLY its own sub-bus: the planner
+charges member-bit widths (`plan_bundle`/`commit_plan`/`plan_band_overlap`),
+NUTS extracts tapered `TrackSegment.width`s, and DNUTS places only member
+bits per segment (`BusSegment.bit_list`, global indices — via pairing and
+`net_names[bit_index]` unchanged), so no net's wire ever lands on another
+driver's block.  A bit with no derivable path falls back to all segments
+(conservative) and the fidelity check reports it per net.  The historical
+sections below are kept
 as the record of the gap; the pipeline test's collapse assertions are inverted
 into the acceptance tests (`test_convergent_fanin_routes_every_driver`,
 `test_convergent_topo_check_passes_and_fidelity_flags_dropped_driver`, plus

@@ -158,6 +158,10 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # Apply architect-pinned selections BEFORE optimizing so the
         # planner scores the correct topology and assigns layers for it.
         session._apply_selections()
+        # Tapered fan-in: derive per-segment bit membership on every fan-in
+        # bundle's candidates so the planner charges each driver stub for its
+        # own sub-bus only (Topology.seg_bits; no-op for non-fan-in bundles).
+        session._derive_fanin_bits_all()
         session._planner_is_hier = False
         session._planner_iterations = session._planner_iters(args)
         with buda.ostream_redirect():

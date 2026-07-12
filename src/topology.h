@@ -177,6 +177,14 @@ struct Topology {
     // Set by generate_candidates; used by connectivity verifier to detect
     // pass-through blocks that have no explicit BUSTERM endpoint connection.
     std::vector<std::string> connected_block_names;
+    // Per-segment bit membership for FAN-IN bundles (tapered bus): segment
+    // index → sorted global bit indices carried by that segment.  EMPTY map =
+    // every segment carries every bit (all non-fan-in bundles — the universal
+    // historical behavior).  DERIVED, never persisted and excluded from
+    // topo_uid: re-computed from the bundle's per-net endpoints at plan/NUTS
+    // time (derive_fanin_seg_bits); the dogleg split propagates the split
+    // trunk's bits to its new pieces in place.
+    std::map<int, std::vector<int>> seg_bits;
     // Blocks the trunk is routed *through* on purpose (opt-in feedthru): the trunk
     // is split at the block's two crossed faces (no stub to the block) and the
     // block's own lower-level router bridges the gap.  Empty unless a straddling
@@ -233,6 +241,11 @@ inline void prepend_segment(Topology& t, const Segment& spine) {
         shifted_conns[{kv.first.first + 1, kv.first.second}] = std::move(partners);
     }
     t.seg_conns = std::move(shifted_conns);
+    if (!t.seg_bits.empty()) {           // index-keyed taper membership
+        std::map<int, std::vector<int>> shifted_bits;
+        for (auto& kv : t.seg_bits) shifted_bits[kv.first + 1] = std::move(kv.second);
+        t.seg_bits = std::move(shifted_bits);
+    }
 }
 
 // Return a deep copy of `t` with all geometry shifted by (dx, dy): every
@@ -295,6 +308,33 @@ void annotate_topology(Topology& topo, const Floorplan& fp);
 // prepend_segment's index discipline).  Shared by complete_relay_junctions and
 // the TopoEdit operations (topo_edit.h).
 void erase_segment(Topology& topo, int idx);
+
+// Per-segment bit count for the tapered fan-in width model: the segment's
+// member-bit count when seg_bits carries an entry for it, else the bundle's
+// full bit count (all non-fan-in bundles, and any segment the derivation did
+// not restrict).  Every width consumer (planner charging, NUTS extraction,
+// DNUTS emission) goes through this so the taper cannot drift between stages.
+inline int seg_bit_count(const Topology& t, int si, int nbits) {
+    auto it = t.seg_bits.find(si);
+    if (it != t.seg_bits.end() && !it->second.empty()) return (int)it->second.size();
+    return nbits;
+}
+
+// Derive per-segment bit membership for a FAN-IN bundle (tapered bus).
+// Inputs: one driver block + receiver block list PER BIT (index = the
+// bundle's net order, i.e. the global bit index).  For each bit, walk the
+// segment graph (seg_conns junctions) from the segments attaching its driver
+// block (BUSTERM tap from seg_busterms, or a pass-through crossing of the
+// block's rects) to the segments attaching each receiver, marking the
+// shortest path's segments as carrying the bit.  A bit whose driver or
+// receiver attaches to no segment, or with no path, falls back to ALL
+// segments (conservative full-width — the net-driver fidelity check reports
+// it).  Writes topo.seg_bits and returns the list of fallen-back bit
+// indices (empty = clean taper).
+std::vector<int> derive_fanin_seg_bits(
+    Topology& topo, const Floorplan& fp,
+    const std::vector<std::string>& driver_per_bit,
+    const std::vector<std::vector<std::string>>& receivers_per_bit);
 
 // Explicitly (re)derive a topology's seg_conns from its segments: for each
 // endpoint that is not a busterm tap (per seg_busterms), record which
