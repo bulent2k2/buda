@@ -71,7 +71,12 @@ def _generalized_bundles(session, strategy):
     """Union-find partition of the netlist under the strategy's relations ∩
     per-net permissions.  Reproduces the pure C++ partitions exactly when
     unrestricted (the equivalence tests pin this), and computes the JOIN
-    for COMBINED.  Returns a list of HBundle in first-net order."""
+    for COMBINED.  Returns a list of HBundle in FIRST-NET order — the C++
+    path emits sorted-signature order, so the two are partition-equal but
+    order-different: activating any override flips to this path and can
+    reorder bundle IDs even when the partition is unchanged, which may
+    perturb downstream width-tie-breaks (same partition, possibly
+    different routing)."""
     eps = session._net_endpoints
     names = list(eps)
     parent = {n: n for n in names}
@@ -115,14 +120,14 @@ def _generalized_bundles(session, strategy):
         b.net_names = nets
         # Reason: the finest single signature the whole group shares (so
         # familiar STRICT/REC/BIDIR reasons survive), else COMBINED.
-        def shared(kind, sig_of):
+        def shared(sig_of):
             vals = {sig_of(*eps[n]) for n in nets}
             return vals.pop() if len(vals) == 1 else None
-        r = shared("strict", lambda d, rs: f"DRV:{d}|REC:{','.join(sorted(set(rs)))}")
+        r = shared(lambda d, rs: f"DRV:{d}|REC:{','.join(sorted(set(rs)))}")
         if r is None:
-            r = shared("conv", lambda d, rs: f"REC:{','.join(sorted(set(rs)))}")
+            r = shared(lambda d, rs: f"REC:{','.join(sorted(set(rs)))}")
         if r is None:
-            r = shared("bidir", lambda d, rs: f"BIDIR:{','.join(sorted({d, *rs}))}")
+            r = shared(lambda d, rs: f"BIDIR:{','.join(sorted({d, *rs}))}")
         if r is None:
             insts = sorted({i for n in nets for i in (eps[n][0], *eps[n][1])})
             r = "COMBINED:" + ",".join(insts)
