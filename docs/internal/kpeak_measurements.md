@@ -164,6 +164,26 @@ problem, and `negotiate_congestion` + `ripup_reroute` are the fix
    86 → 134, `hbundles/06` 2 → 42 (worse than its 34 baseline).
    → strict span-clear pool; the false-positive/false-negative
    asymmetry is lexicographic (a longer route vs opens).
+4. **Proportional supply clamp** (`tracks_needed/supply` instead of the
+   flat 1.0; owner review suggestion on #257, measured 2026-07-12 on
+   the supply-refinements branch): it does what it promises under total
+   scarcity — a synthetic all-bands-floored scenario flips from the
+   worst band (8-for-3) to the least-bad one and places all bits where
+   flat strands them — but the region above 1.0 leaks into the
+   topology/layer competition against overflow-priced alternatives, and
+   `mix` regressed decisively at kPeak 0.1: overlaps 20 → **40**, opens
+   86 → 107 (hbundles/05/06/07 and channel_stress unchanged; big2
+   untouched by construction — its floor never fires). → flat 1.0
+   kept; unexplored middle ground noted in wishlist-planner (flat in
+   the segment score, proportional only inside `best_band_perp`'s
+   same-segment band choice).
+
+**Related fix that survived (2026-07-12):** the override-boundary
+pattern-resolution sharp edge in the span walkers is fixed (per-slice
+resolution; see wishlist-nuts → *"Override-boundary pattern resolution"*
+— ✅). A boundary-touching override no longer reads the band above it as
+supply-dead, so the supply floor's inputs are honest at override edges;
+goldens byte-identical (no corpus flow uses `add_grid_override`).
 
 ## Guidance
 
