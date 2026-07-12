@@ -3110,6 +3110,26 @@ class BudaVisualizer:
         row_h_in  = 0.145   # ~10 pt rows at standard DPI
         return max(1, int(ax_h_in / row_h_in))
 
+    @staticmethod
+    def _expected_bit_wires(w):
+        """Expected DNUTS bit-wire count for a wrapper's selected topology,
+        or None when no topology is selected.
+
+        Taper-aware (#268): a fan-in segment with a non-empty
+        Topology::seg_bits entry emits NetSegments only for its member bits;
+        every other segment carries the full bundle width — the same rule as
+        C++ seg_bit_count and check_dnuts's UNPLACED audit (#273).  The naive
+        nets × segments would report phantom opens on clean CONVERGENT
+        fan-in bundles."""
+        sel = w.plan.selected_topology_index
+        if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+            return None
+        topo  = w.input.candidates[sel]
+        nbits = len(w.input.original_bundle.get_net_names())
+        sb    = topo.seg_bits
+        return sum(len(sb.get(si, [])) or nbits
+                   for si in range(len(topo.segments)))
+
     def _bundle_unplaced(self):
         """{bundle_id: DNUTS-dropped bit-wire count}, only for bundles with
         opens.  Empty when detailed NUTS hasn't run."""
@@ -3120,12 +3140,10 @@ class BudaVisualizer:
             placed[ns.bundle_id] = placed.get(ns.bundle_id, 0) + 1
         opens = {}
         for w in self.bundles:
-            bid = w.input.original_bundle.id
-            sel = w.plan.selected_topology_index
-            if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+            bid   = w.input.original_bundle.id
+            n_exp = self._expected_bit_wires(w)
+            if n_exp is None:
                 continue
-            n_exp = (len(w.input.original_bundle.get_net_names())
-                     * len(w.input.candidates[sel].segments))
             n_unp = n_exp - placed.get(bid, 0)
             if n_unp > 0:
                 opens[bid] = n_unp
@@ -3249,8 +3267,8 @@ class BudaVisualizer:
             # ("☑ 80 Bundles") so the stats line can stay a single row.
             all_lbl = f"{'☑' if all_on else '☐'} {len(self.bundles)} Bundles"
             if self._detailed_result:
-                n_total = sum(len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[w.plan.selected_topology_index].segments)
-                              for w in self.bundles if w.input.candidates and 0 <= w.plan.selected_topology_index < len(w.input.candidates))
+                n_total = sum(n for n in map(self._expected_bit_wires, self.bundles)
+                              if n is not None)
                 all_lbl += f" [{self._detailed_result.num_unplaced}/{n_total}]"
             self._btn_all_bundles.label.set_text(all_lbl)
 
@@ -3276,11 +3294,10 @@ class BudaVisualizer:
             stats_part = ""
             stats_color = '#111111'
             if self._detailed_result:
-                sel = w.plan.selected_topology_index
-                if not w.input.candidates or not (0 <= sel < len(w.input.candidates)):
+                n_expected = self._expected_bit_wires(w)   # taper-aware (#268)
+                if n_expected is None:
                     stats_part = '[no topo]'; stats_color = '#888888'
                 else:
-                    n_expected = len(w.input.original_bundle.get_net_names()) * len(w.input.candidates[sel].segments)
                     n_placed   = sum(1 for ns in self._detailed_result.net_segments if ns.bundle_id == bid)
                     n_unp = n_expected - n_placed
                     stats_part = f"[{n_unp}/{n_expected}]"

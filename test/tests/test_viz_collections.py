@@ -143,6 +143,38 @@ def test_open_bundles_rank_first(monkeypatch):
     assert viz._bid_list[2:] == [b for b in bids if b not in (worst, worse)]
 
 
+def test_expected_bit_wires_taper_aware(monkeypatch):
+    """#268 taper: a fan-in segment with a non-empty Topology::seg_bits entry
+    emits NetSegments only for its member bits.  The opens-first ranking and
+    the [n/N] badges must expect exactly that (like check_dnuts after #273) —
+    the naive nets × segments would report phantom opens on clean CONVERGENT
+    bundles and rank HEALTHY bundles at the top of the panel."""
+    from types import SimpleNamespace
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+
+    # Real (untapered) wrapper: expectation is the plain nets × segments.
+    w = next(w for w in viz.bundles if w.input.candidates)
+    topo  = w.input.candidates[w.plan.selected_topology_index]
+    nbits = len(w.input.original_bundle.get_net_names())
+    assert not topo.seg_bits                      # dnuts1 has no fan-in taper
+    assert viz._expected_bit_wires(w) == nbits * len(topo.segments)
+    assert not viz._bundle_unplaced()             # fully placed → no opens
+
+    # Tapered fan-in shape: segment 0 carries 3 member bits, the rest full.
+    def fake(seg_bits, nsegs=4, nbits=8, sel=0):
+        return SimpleNamespace(
+            plan=SimpleNamespace(selected_topology_index=sel),
+            input=SimpleNamespace(
+                candidates=[SimpleNamespace(seg_bits=seg_bits,
+                                            segments=[None] * nsegs)],
+                original_bundle=SimpleNamespace(
+                    get_net_names=lambda: ["n"] * nbits, id=999)))
+    assert viz._expected_bit_wires(fake({0: [0, 1, 2]})) == 3 + 8 * 3
+    # An EMPTY seg_bits entry means untapered (seg_bit_count's rule).
+    assert viz._expected_bit_wires(fake({0: []})) == 8 * 4
+    assert viz._expected_bit_wires(fake({}, sel=-1)) is None   # no topo
+
+
 def test_overlap_panel_space_folds_into_bundle_list(monkeypatch):
     """With no overlaps the Overlap list and its scroll arrows are hidden and
     the bundle list absorbs their vertical space (more visible rows); the
