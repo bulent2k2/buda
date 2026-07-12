@@ -42,10 +42,10 @@ middle step.
 ## Costs and risks
 
 1. **Every affected design's results change at once — the
-   golden-discipline cost.** For a hier-only default this is smaller than
-   it sounds: the snapshot goldens (`rnr_mix`, comprehensive_demo, the
-   big2 sub-flow, `tc3a_flat`) are all FLAT flows. But the flat path
-   refines too, and flat flows CAN change: at refine time the map is
+   golden-discipline cost.** (Correction from the measurement campaign:
+   `rnr_mix` is a HIER flow — `run_planner hier` — so even a hier-only
+   default re-baselines that one golden; the other snapshot goldens are
+   flat.) The flat path refines too, and flat flows CAN change: at refine time the map is
    strictly more congested than at a bundle's original plan time, so
    `keep` can become infeasible (the adopt-any-found arm fires) or a
    strictly-better escape can appear. A both-paths default means a
@@ -92,3 +92,46 @@ middle step.
 3. Whatever the scope, **the flip is its own PR** containing nothing but
    the default change and the deliberately re-baselined expectations —
    so the diff *is* the measurement record.
+
+## Decision (2026-07-12): HIER-ONLY default-on at 1 pass — SHIPPED
+
+The gating measurements were run the same day; every gap listed above is
+now closed with data:
+
+- **Demo corpus (11 flows)**: exact no-ops at `refine_passes 1` — zero
+  moves, identical metrics, no measurable runtime cost.
+- **Flat corpus**: exact no-ops everywhere EXCEPT `big2_noviz`, which
+  regressed exactly as kPeak did there (5 overlaps / 0 opens →
+  3 / **60**): strictly-better-in-model moves land a wide trunk in a
+  shared DNUTS window — the pre-charge-horizon class no plan-time
+  criterion can see. **This kills the both-paths default** and settles
+  the flat path at 0.
+- **Hier corpus**: all wins or exact no-ops (the PR #274 table), plus the
+  rnr family: `mix` pre-heal 15/190 → 12/156, **healed endpoint 1/0 →
+  0/0**, WL −1.7%, and the flow's heal loops converge **9× faster**
+  (91s → 10s — refinement hands negotiate/ripup a far better start);
+  `slowdown_rnr` identical; `mix2` healed 5/39 → 2/40 (a wash: +1 open,
+  −3 overlaps); `mix2_fast` a no-op (all wrappers locked).
+- **Ripup-trial inheritance**: measured rather than gated — the mix
+  numbers above INCLUDE trials inheriting refinement (the fallback
+  full-replan paths), and the fidelity argument won: trials should
+  re-derive state under the same configuration that produced it. The
+  default is applied at every hier planner construction site
+  (`run_planner hier`, `_rr_replan_hier`, the bottom-up cell-local
+  template planner) for exactly this reason.
+- **Runtime**: the refinement itself is noise; on mix it *saves* 80+
+  seconds by shrinking the heal loops' workload.
+
+**As shipped**: `run_planner hier` (and the other hier planner sites)
+default `refine_passes` to 1 when the user never set it; an explicit
+`set_planner_param refine_passes <n>` — including 0 — always wins; the
+flat `run_planner` keeps the C++ default 0. The one churned golden
+(`rnr_mix`) was re-baselined deliberately and records the improvement
+(overlaps 1 → 0). Tests: `test_planner_refine.py`
+(`test_hier_defaults_to_one_pass`, `test_explicit_zero_opts_out`,
+`test_flat_planner_stays_default_off`).
+
+**Not chosen**: default 2 — pass 2's only corpus win is hbundles/05
+(opens 32 → 8), mix at 2 passes is unmeasured, and "one built-in
+negotiation iteration" is the conservative default; stress designs can
+opt into 2.

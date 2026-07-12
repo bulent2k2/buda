@@ -557,10 +557,13 @@ def test_10_four_level_scale_one_bundle_per_bus():
     assert "Verifying topology-level design (all candidates)..." in out
     assert "map::at" not in out
     assert "Traceback" not in out
-    # topo clean; the nuts stage honestly reports the flow's 2 keepout-
-    # committed segments (KEEPOUT_CROSS — it used to bless them), never more.
+    # topo clean; the flow's 2 historical keepout-committed segments
+    # (KEEPOUT_CROSS) are GONE since hier planning defaults to one
+    # refinement pass (refine_passes, the level-ordering synthesis): the
+    # strictly-better replans move those bundles off the keepout bands.
     assert out.count("Success: no violations found.") >= 1
-    assert out.count("placed ON keepout") == 2
+    assert "Refine pass 1" in out
+    assert out.count("placed ON keepout") == 0
     # 176 buses → exactly one HBundle per bus, at its routing-context level.
     assert "HierBundler: 176 hbundles (D0: 26, D1: 30, D2: 40, D3: 80)" in out
     # The two D3 blk_cell templates expand over their 40 instances;
@@ -579,22 +582,22 @@ def test_10_four_level_scale_one_bundle_per_bus():
     assert not other_warn, f"unexpected WARNINGs:\n" + "\n".join(other_warn)
     assert "Success: no violations found." in out      # nuts connectivity
     segs, viols, ovlps = nuts_summary(out)
-    # Segment count rose 196→212: the corrected LOW-layer congestion model
-    # (Gap 2 — leaf cells block LOW, containers stay transparent) and inter-bus
-    # pitch reservation (Gap 1) steer the planner to different topologies.
-    assert segs == 212
+    # Segment count 196→212→209: the corrected LOW-layer congestion model
+    # (Gap 2), inter-bus pitch reservation (Gap 1), and the hier default
+    # refinement pass (strictly-better replans pick shorter topologies)
+    # each steered the planner to different topologies.
+    assert segs == 209
     assert viols == 0
-    assert ovlps <= 1                             # ratchet (10→4→1; corner-overlap pass)
+    assert ovlps == 0                    # ratchet (10→4→1→0; refinement pass)
     dm = re.search(r"\[DetailedNUTS\] (\d+) net segments placed, (\d+) bits unplaced", out)
     assert dm, "DetailedNUTS summary not found"
-    assert int(dm.group(1)) >= 1225               # ratchet (1112→1224→1232; −7 culled crossers)
-    # The 7 unplaced are the flow's 7 historical keepout crossings, culled
-    # instead of emitted as illegal wires.  Never more.
-    assert int(dm.group(2)) == 7, \
-        f"expected exactly the 7 historical keepout crossings, got {dm.group(2)}"
-    km = re.search(r"\[DetailedNUTS\] WARNING: (\d+) bit\(s\) removed", out)
-    assert km and int(km.group(1)) == 7, \
-        "keepout-crossing cull warning missing or wrong count"
+    assert int(dm.group(1)) >= 1220               # ratchet (1112→1224→1232→1220 w/ fewer segs)
+    # The 7 historical keepout-crossing bits are gone too (their bundles
+    # were refined off the keepout bands), so nothing is culled and every
+    # bit places.
+    assert int(dm.group(2)) == 0, \
+        f"expected 0 unplaced (refinement cleared the keepout crossings), got {dm.group(2)}"
+    assert "bit(s) removed" not in out, "no keepout-crossing culls expected"
 
 
 # ---------------------------------------------------------------------------

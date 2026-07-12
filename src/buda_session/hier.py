@@ -1350,6 +1350,24 @@ class HierMixin:
                   f"{nt} candidate topolog{'y' if nt == 1 else 'ies'}.")
         return made
 
+    def _apply_hier_refine_default(self, planner):
+        """HIER planning defaults `refine_passes` to 1 (the level-ordering
+        synthesis, docs/internal/refine_passes_default.md — decision
+        2026-07-12): the hier corpus measured only wins or exact no-ops
+        (hbundles/01 WL −21%, 02 −32%, 05 opens 47→32, 10 heals to 0/0;
+        mix heals 1/0 → 0/0 and its heal loops converge 9× faster), while
+        the FLAT path stays at the C++ default 0 — big2-class plain flows
+        regressed under refinement (the pre-charge-horizon class).  An
+        explicit `set_planner_param refine_passes <n>` (including 0)
+        always wins.  Applied at EVERY hier planner construction site
+        (run_planner hier, ripup's _rr_replan_hier fallback, the
+        bottom-up cell-local template planner) so ripup trials and
+        template solves run the same configuration that produced the
+        committed state — the configuration the corpus was measured
+        with."""
+        if "refine_passes" not in self._planner_params:
+            planner.set_planner_param("refine_passes", 1.0)
+
     def _plan_bottom_up_templates(self, iterations):
         """Stage (a) of bottom-up template planning: solve each marked cell's
         cell-local template bundles ONCE in a dedicated cell-local planner,
@@ -1412,6 +1430,7 @@ class HierMixin:
             planner = buda.CongestionPlanner(fp, self.layers)
             for pname, pval in self._planner_params.items():
                 planner.set_planner_param(pname, pval)
+            self._apply_hier_refine_default(planner)
             planner.set_track_pitch(self._nuts_pitch)
             planner.build_congestion_map()
             assignments = planner.optimize_topologies(wrappers, iterations)

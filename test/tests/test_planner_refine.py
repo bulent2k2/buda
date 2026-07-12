@@ -47,10 +47,12 @@ def _run_01(refine_passes, set_param=True):
     construction, so the flow's own run_planner hier picks it up)."""
     s = buda_cli.BudaSession()
     s.no_viz = True
-    with contextlib.redirect_stdout(io.StringIO()):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
         if set_param:
             s.do_command(f"set_planner_param refine_passes {refine_passes}")
         s.do_command(f"source {_ROOT / 'flow/hbundles/01_pipeline_hier.buda'}")
+    s._test_stdout = buf.getvalue()
     return s
 
 
@@ -78,14 +80,43 @@ def test_refinement_straightens_phantom_detours():
             w.input.candidates[sel].type
 
 
-def test_refinement_default_off_is_identical():
-    """refine_passes unset vs explicitly 0: same selections either way (the
-    loop is skipped entirely; the golden corpora guard flows at large)."""
-    a = _run_01(0, set_param=False)      # knob never touched
-    b = _run_01(0, set_param=True)       # explicit 0
-    sel_a = [w.plan.selected_topology_index for w in a.bundles]
-    sel_b = [w.plan.selected_topology_index for w in b.bundles]
-    assert sel_a == sel_b
+def test_hier_defaults_to_one_pass():
+    """The hier default-on decision (docs/internal/refine_passes_default.md):
+    `run_planner hier` with the knob UNSET runs one refinement pass — the
+    unset run matches an explicit `refine_passes 1`, not an explicit 0."""
+    unset = _run_01(0, set_param=False)          # knob never touched
+    one = _run_01(1, set_param=True)             # explicit 1
+    sel_unset = [w.plan.selected_topology_index for w in unset.bundles]
+    sel_one = [w.plan.selected_topology_index for w in one.bundles]
+    assert sel_unset == sel_one
+    assert "Refine pass 1" in unset._test_stdout
+
+
+def test_explicit_zero_opts_out():
+    """An explicit `set_planner_param refine_passes 0` wins over the hier
+    default: the loop is skipped entirely (no refine line, pass-1 result)."""
+    off = _run_01(0, set_param=True)
+    assert "Refine pass" not in off._test_stdout
+    # and it differs from the default (which straightens the detours)
+    unset = _run_01(0, set_param=False)
+    wl_off, wl_unset = _abstract_wl(off), _abstract_wl(unset)
+    assert wl_unset < wl_off
+
+
+def test_flat_planner_stays_default_off():
+    """The FLAT run_planner path keeps the C++ default 0 (big2-class plain
+    flows regressed under refinement): no refine pass runs unless the user
+    sets the knob."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        for c in ("def_layer 4 M4 H TOP 50", "def_layer 5 M5 V TOP 50",
+                  "add_block A 0 0 100 100", "add_block B 300 0 400 100",
+                  "add_net n0 A.p B.p", "run_bundler strict",
+                  "generate_topologies", "run_planner"):
+            s.do_command(c)
+    assert "Refine pass" not in buf.getvalue()
 
 
 def test_refine_passes_param_recognized():
