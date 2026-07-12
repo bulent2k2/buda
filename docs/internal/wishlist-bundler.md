@@ -23,7 +23,11 @@ wire lands on another driver's block. Acceptance
 tests inverted from the pipeline test's collapse assertions + a mixed
 shared/distinct-driver case (with taper/width/via assertions); QoR showcase `demo/ariane136_l2` (12 drivers →
 cpu_core, 1024 bits) generates the fan-in tree and passes `check_design`
-clean. **Remaining follow-on:** a CONVERGENT mode for the HIER bundler
+clean. **COMBINED landed (2026-07-12):** `run_bundler COMBINED` = the join of
+CONVERGENT and BIDIRECTIONAL (union-find chains), with `set_bundling`
+per-prefix permission overrides and the `set_max_bundle_bits <N|auto>`
+balanced bus-preserving split pass (auto = shortest-busterm-edge cap).
+**Remaining follow-on:** a CONVERGENT/COMBINED mode for the HIER bundler
 (`run_hier_bundler` supports STRICT/BIDIRECTIONAL only — scope decision
 needed; the depth-aware signature may split leaf-level merge groups
 differently). Details: [`convergent_bundling.md`](convergent_bundling.md).
