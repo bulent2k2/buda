@@ -269,11 +269,17 @@ private:
     // and the band's real span-wide signal-track supply cannot host that
     // many bits, util is clamped to >= 1 — an empty-because-unroutable band
     // must never look cheaper than a full one (the big2 kPeak stranding fix;
-    // see the .cpp comment).
+    // see the .cpp comment).  proportional_floor selects the floor SHAPE by
+    // the caller's comparison scope: false (the segment score, which
+    // compares across topologies/layers) keeps the flat 1.0; true (the
+    // intra-segment band choice, best_band_perp) prices a shortfall as
+    // needed/supply so bands that all fall short still rank by how
+    // impossible they are — see the floor-shape comment in the .cpp.
     double peak_util_segment(const Segment& seg, int layer_id,
                              int perp_pos_override = INT_MIN,
                              int slide_lo = INT_MIN, int slide_hi = INT_MIN,
-                             double tracks_needed = 0.0) const;
+                             double tracks_needed = 0.0,
+                             bool proportional_floor = false) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
     double score_segment(const Segment& seg, int layer_id, double eff_width,
                          int perp_pos_override = INT_MIN,

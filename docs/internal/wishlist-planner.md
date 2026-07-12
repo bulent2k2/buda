@@ -285,11 +285,27 @@ The two follow-on refinements from the PR #257 review are now settled
   regressed decisively at kPeak 0.1 (overlaps 20→**40**, opens 86→107);
   hbundles/05/06/07 and channel_stress unchanged; big2 untouched by
   construction (its floor never fires). Reverted to flat; the decision
-  and numbers live at the clamp site in `peak_util_segment`. Unexplored
-  middle ground if scarcity ordering ever matters on a real design:
-  keep the segment SCORE flat and use the proportional value only
-  inside `best_band_perp`'s same-segment band choice, where it cannot
-  distort cross-topology costs.
+  and numbers live at the clamp site in `peak_util_segment`.
+- **The middle ground — flat-score / proportional-band-choice hybrid —
+  explored and ADOPTED (2026-07-12).** The floor's shape now follows the
+  caller's comparison scope (`peak_util_segment(..., proportional_floor)`):
+  the segment SCORE keeps the flat 1.0 (it compares across
+  topologies/layers — the leak that killed the global clamp is
+  structurally excluded), while `best_band_perp`'s intra-segment band
+  choice prices a shortfall as needed/supply, so among bands that ALL
+  fall short the charge (and NUTS's `seg_perp` anchor) steers to the
+  least-impossible one instead of the flat tie leaving the anchor at
+  the window centre — even when the centre sits in the WORST band.
+  Corpus-neutral at kPeak 0.1 (mix 20/86, channel_stress 0/0,
+  hbundles/05 13, 06 2/2, 07 0/0 — all identical to flat): floored
+  multi-band slide windows don't arise on the current corpus, and a
+  single-bundle strand can never be fixed by band choice anyway (the
+  NUTS interval spans the whole window, and DNUTS admission is
+  interval-total) — the anchor placement matters only through
+  multi-bundle packing. Adopted despite the neutral corpus because the
+  tie-break flaw is real, the mechanism is pinned by test
+  (`test_hybrid_floor_steers_anchor_to_least_bad_band`: anchor 210 → 270
+  into the 4-track band), and the risk is bounded by construction.
 - **Override-boundary pattern resolution — FIXED** (see wishlist-nuts):
   the span walkers now resolve the pattern per perp slice, so a
   boundary-touching override no longer claims the band above it. The

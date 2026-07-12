@@ -174,9 +174,19 @@ problem, and `negotiate_congestion` + `ripup_reroute` are the fix
    `mix` regressed decisively at kPeak 0.1: overlaps 20 → **40**, opens
    86 → 107 (hbundles/05/06/07 and channel_stress unchanged; big2
    untouched by construction — its floor never fires). → flat 1.0
-   kept; unexplored middle ground noted in wishlist-planner (flat in
-   the segment score, proportional only inside `best_band_perp`'s
-   same-segment band choice).
+   kept in the segment score. The middle ground — proportional ONLY
+   inside `best_band_perp`'s intra-segment band choice, where large
+   values cannot leak into topology/layer competition — was then
+   explored separately and **adopted**: corpus-neutral at kPeak 0.1
+   (mix 20/86 etc., all identical to flat — floored multi-band slide
+   windows don't arise on the corpus, and a single-bundle strand can
+   never be fixed by band choice since the NUTS interval spans the
+   whole window and DNUTS admission is interval-total), but it fixes a
+   real tie-break flaw: under the flat floor all short bands tie and
+   the anchor stays at the window centre even when the centre sits in
+   the WORST band. Mechanism pinned by
+   `test_hybrid_floor_steers_anchor_to_least_bad_band` (anchor 210 →
+   270 into the 4-track band).
 
 **Related fix that survived (2026-07-12):** the override-boundary
 pattern-resolution sharp edge in the span walkers is fixed (per-slice
