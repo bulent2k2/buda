@@ -469,6 +469,15 @@ private:
     // charged eff_width + track_pitch_ and each band granted cap + track_pitch_,
     // so k buses in a band reserve the (k-1)*pitch of separation NUTS enforces.
     double track_pitch_       = 1.0;
+    // Refinement passes after the main commit loop (opt-in, default 0 = the
+    // loop is skipped entirely — existing flows bit-identical).  Each pass
+    // revisits every committed, unlocked bundle DEEPEST-FIRST against the
+    // now-REAL usage of everyone else (reservations all released): rip up,
+    // STRICT replan, adopt (or restore exactly when STRICT finds nothing).
+    // The level-ordering synthesis — one built-in negotiation iteration per
+    // pass, with a fixpoint early-out.  See the optimize_topologies comment
+    // and docs/congestion_planner.md "Level ordering".
+    int    refine_passes_     = 0;
 };
 
 } // namespace buda

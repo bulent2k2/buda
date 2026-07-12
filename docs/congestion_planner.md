@@ -205,7 +205,41 @@ A/B on the full hier corpus (2026-07-11, `flow/hbundles/01–10` + `flow/rnr/mix
 
 Reading the wins: reservations over-count (recipe step 5), so top-down globals sometimes detour around phantom congestion — in 01/02 the D0 buses pick 3-segment Z shapes over a straight `I_H` that deep-first proves fits (all four bundles end up as single straight wires). Reading the losses: deep-first has **no symmetric protection for global demand** — locals plan blind to globals and squat on TOP bands (07: D1 takes 48 segments on M6 vs 32, two D0 buses then commit WITH overflow; 10: D0 squeezed onto bands whose real signal-track supply falls short, +10 DNUTS opens). Each order protects one side by priority and the other by an approximation; neither dominates (4 improved / 2 regressed / 4 neutral), so the default stays top-down.
 
-The synthesis suggested by the data — deep-first ordering plus an `apply_reservation` analog parking *global* demand while locals plan (or a two-pass top-down-then-replan-bottom-up, effectively one built-in negotiation iteration) — is catalogued in [internal/opens.md](internal/opens.md).
+**The synthesis SHIPPED (2026-07-12) as opt-in refinement passes**
+(`set_planner_param refine_passes <n>`, default 0 = skipped entirely,
+existing flows bit-identical). The two-pass reading won: pass 1 stays
+top-down exactly as above (so nothing ever plans blind — the deep-first
+failure mode is structurally excluded), then each refinement pass revisits
+every committed, unlocked, un-pinned bundle DEEPEST-FIRST (ascending
+priority, the reverse of commit order — the widest globals re-decide last,
+seeing everything) against the now-REAL usage of everyone else, all
+reservations long released. Acceptance is the
+**strictly-better-than-keeping** rule: rip the bundle up, score the best
+plan KEEPING its old topology (a temporary pin probe) and the unrestricted
+STRICT best against the same state, and adopt only when leaving the old
+topology is strictly better by the planner's own score — otherwise restore
+the original plan exactly. That strictness is measured, not stylistic:
+adopting any found replan accepted 23 score-equal lateral moves on
+hbundles/10 and reshuffled NUTS packing (7 → 78 DNUTS opens); with the
+strict rule the same flow makes 4 real moves and heals instead. A
+fixpoint early-out stops when a pass changes nothing.
+
+A/B with the strict rule (same corpus as above):
+
+| Flow | base → refine 1 | refine 2 |
+|---|---|---|
+| 01_pipeline_hier | WL 3360 → **2640** (−21%), clean | fixpoint |
+| 02_two_procs | WL 7816 → **5280** (−32%), clean | fixpoint |
+| 05_stress_grid | opens 47 → 32, WL −7% | opens **8**, 1 overlap, WL −16% |
+| 10_chip_units_blocks_leaf | 1 ovl / 7 opens → **0 / 0**, WL −0.6% | one further small move, same 0 / 0 |
+| 03/04/06/07/08/09, mix2_fast | unchanged (0 moves) | unchanged |
+
+Every deep-first win is captured or exceeded (01/02/05; 06's win is not
+reachable by strictly-better moves), 10 improves instead of regressing,
+and the two deep-first regressions (07/10) cannot recur. The knob also
+works in the flat `run_planner` (the pass runs over whatever was
+committed); default stays 0 pending broader corpus time. Tests:
+`test/tests/test_planner_refine.py`.
 
 ### Per-level summary
 
