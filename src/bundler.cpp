@@ -399,14 +399,33 @@ std::vector<HBundle> HierarchicalBundler::run(int max_depth) {
                 if (info.bundle_depth != depth) continue;
                 auto sorted_rcv = info.rcv_spec_paths;
                 std::sort(sorted_rcv.begin(), sorted_rcv.end());
-                // Cross-level nets keep STRICT/BIDIRECTIONAL grouping under
-                // every strategy: their single drv_spec metadata cannot yet
-                // describe a multi-driver group (fan-in for cross-level nets
-                // is a documented follow-on).
-                const std::string xsig =
-                    (_strategy == Strategy::BIDIRECTIONAL)
-                        ? _sig(info.drv_spec_path, sorted_rcv)
-                        : _strict_sig(info.drv_spec_path, sorted_rcv);
+                // Cross-level nets: no convergent/fan-in grouping (their
+                // single drv_spec metadata cannot describe a multi-driver
+                // group — documented follow-on), but the BIDIRECTIONAL
+                // relation stays available under BIDIRECTIONAL *and*
+                // COMBINED (the lattice: COMBINED must never be finer than
+                // BIDIRECTIONAL): a cross-level return pair shares one
+                // endpoint set, and the direction-agnostic trunk of the
+                // existing drv_spec route serves both directions.
+                // set_bundling overrides gate the relation per net, as in
+                // the same-level path.
+                std::string xsig;
+                const std::string* nm = nullptr;
+                {
+                    auto nit = net_name.find(net_id);
+                    if (nit != net_name.end()) nm = &nit->second;
+                }
+                const bool bidir_ok =
+                    (_strategy == Strategy::BIDIRECTIONAL ||
+                     _strategy == Strategy::COMBINED) &&
+                    (!nm || _net_allows(*nm, "bidir"));
+                if (bidir_ok) {
+                    std::vector<std::string> all = sorted_rcv;
+                    all.push_back(info.drv_spec_path);
+                    xsig = _bidir_sig(std::move(all));
+                } else {
+                    xsig = _strict_sig(info.drv_spec_path, sorted_rcv);
+                }
                 xl_sig_to_nets[xsig].push_back(net_id);
             }
             for (const auto& [sig, net_ids] : xl_sig_to_nets) {

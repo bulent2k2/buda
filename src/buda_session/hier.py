@@ -2599,12 +2599,17 @@ class HierMixin:
         cell_bundle_ids = {w.input.original_bundle.id for w in bundles
                            if w.input.original_bundle.cell_context}
         donor_nets = {}    # (template id, instance path) → replica net list
+        donor_fanin = {}   # (template id, instance path) → (drvs, rcvs)
         replica_wrapper_of = {}  # replica id → (template id, instance path)
         for w in bundles:
             b = w.input.original_bundle
             if (b.cell_context and b.parent_id in cell_bundle_ids
                     and b.instances):
                 donor_nets[(b.parent_id, b.instances[0])] = list(b.net_names)
+                if b.net_drivers:
+                    donor_fanin[(b.parent_id, b.instances[0])] = (
+                        list(b.net_drivers),
+                        [list(r) for r in b.net_receivers])
                 replica_wrapper_of[b.id] = (b.parent_id, b.instances[0])
         # Start synthetic IDs above any real bundle ID in the set.
         max_id = max((w.input.original_bundle.id for w in bundles), default=-1)
@@ -2696,6 +2701,31 @@ class HierMixin:
                     new_w.input.candidates = [
                         buda.offset_topology(t, dx, dy, inst_name)
                         for t in w.input.candidates]
+                # Fan-in template: re-derive the per-bit taper for THIS
+                # instance from its own donor nets' endpoints (Codex #276:
+                # a replica's net names need not sort in the template's
+                # driver order, so the copied seg_bits indices could taper
+                # bits along the wrong driver branches).  The expanded
+                # candidates carry instance-qualified block names, matching
+                # the donor metadata's full paths; the template's own
+                # instance re-derives with the template metadata
+                # (idempotent).  Derivation failures fall back to
+                # all-segments — conservative, and reported by the flat
+                # fidelity machinery where applicable.
+                if b.net_drivers:
+                    d_drvs, d_rcvs = donor_fanin.get(
+                        (b.id, inst_name),
+                        (list(b.net_drivers),
+                         [list(r) for r in b.net_receivers]))
+                    clone.net_drivers = d_drvs
+                    clone.net_receivers = d_rcvs
+                    # original_bundle was assigned BY VALUE above — re-assign
+                    # so the wrapper's copy carries the donor metadata.
+                    new_w.input.original_bundle = clone
+                    cands = new_w.input.candidates
+                    for t in cands:
+                        buda.derive_fanin_seg_bits(t, self.fp, d_drvs, d_rcvs)
+                    new_w.input.candidates = cands
                 # Reserve the instance footprint: until this local bundle is
                 # planned, its demand is parked as virtual usage so earlier
                 # (global) bundles leave room over the cell interior.

@@ -180,6 +180,101 @@ def test_hier_strict_and_bidirectional_unchanged():
         assert frozenset({"x0"}) in bm and frozenset({"x1"}) in bm
 
 
+def test_hier_combined_keeps_bidir_grouping_for_cross_level_pairs():
+    """Codex #276 finding 1: COMBINED must never be FINER than
+    BIDIRECTIONAL — a cross-level return pair (deep pin ↔ shallow block,
+    both directions) merges under BIDIRECTIONAL and must merge under
+    COMBINED too (the direction-agnostic drv_spec trunk serves both)."""
+    def _db():
+        db = buda.BDB(":memory:")
+        db.add_cell("proc_cell", 420, 200)
+        db.add_cell("pipe_cell", 90, 80)
+        db.add_inst_to_cell("proc_cell", "pa", "pipe_cell", 10, 60)
+        db.add_inst("proc_i1", "proc_cell", "", 0, 0)
+        db.add_cell("leaf_cell", 60, 60)
+        db.add_inst("EXT", "leaf_cell", "", 800, 60)
+        db.add_net_pins("out0", "proc_i1/pa.out", ["EXT.in"])   # cross-level
+        db.add_net_pins("in0", "EXT.out", ["proc_i1/pa.rr"])    # its return
+        buda.BustermGen(db).derive(1)
+        return db
+    for strat, merged in (("BIDIRECTIONAL", True), ("COMBINED", True),
+                          ("CONVERGENT", False), ("STRICT", False)):
+        s = _session(_db())
+        _run(s, f"run_hier_bundler {strat}")
+        sets = set(_by_nets(s))
+        if merged:
+            assert frozenset({"out0", "in0"}) in sets, (strat, sets)
+        else:
+            assert frozenset({"out0"}) in sets and frozenset({"in0"}) in sets
+
+
+def test_hier_fanin_replica_taper_realigned_to_donor_net_order():
+    """Codex #276 finding 2: a replica whose net names sort in the OPPOSITE
+    driver order from the template's must still taper each bit along its
+    own driver's branch — the expansion re-derives seg_bits from the donor
+    metadata instead of reusing the template's indices."""
+    db = buda.BDB(":memory:")
+    db.add_cell("proc_cell", 420, 200)
+    db.add_cell("pipe_cell", 90, 80)
+    db.add_inst_to_cell("proc_cell", "pa", "pipe_cell", 10, 60)
+    db.add_inst_to_cell("proc_cell", "pb", "pipe_cell", 120, 60)
+    db.add_inst_to_cell("proc_cell", "ps", "pipe_cell", 300, 60)
+    db.add_inst("proc_i1", "proc_cell", "", 0, 0)
+    db.add_inst("proc_i2", "proc_cell", "", 600, 300)   # y-offset: real Hanan grid
+    # Template instance i1: sorted nets (aa1, zz1) -> drivers (pa, pb).
+    db.add_net_pins("aa1", "proc_i1/pa.out", ["proc_i1/ps.r0"])
+    db.add_net_pins("zz1", "proc_i1/pb.out", ["proc_i1/ps.r1"])
+    # Replica instance i2: sorted nets (aa2, zz2) -> drivers (pb, pa) —
+    # the OPPOSITE order.
+    db.add_net_pins("aa2", "proc_i2/pb.out", ["proc_i2/ps.r1"])
+    db.add_net_pins("zz2", "proc_i2/pa.out", ["proc_i2/ps.r0"])
+    buda.BustermGen(db).derive(1)
+    s = _session(db)
+    for c in ("run_hier_bundler CONVERGENT", "generate_hier_topologies",
+              "run_planner hier", "run_nuts", "run_detailed_nuts"):
+        _run(s, c)
+    assert s.detailed_result.num_unplaced == 0
+    # Ground truth per expanded wrapper: re-derive membership from its own
+    # donor metadata and compare with what the pipeline used.
+    checked = 0
+    for w in s.bundles:
+        b = w.input.original_bundle
+        if not b.reason.startswith("FANIN:"):
+            continue
+        assert list(b.net_drivers), b.reason      # donor metadata attached
+        sel = w.plan.selected_topology_index
+        t = w.input.candidates[sel]
+        used = dict(t.seg_bits)
+        expect = buda.Topology()
+        expect.type = t.type
+        expect.segments = list(t.segments)
+        expect.seg_busterms = dict(t.seg_busterms)
+        expect.seg_conns = dict(t.seg_conns)
+        buda.derive_fanin_seg_bits(expect, s.fp, list(b.net_drivers),
+                                   [list(r) for r in b.net_receivers])
+        assert dict(expect.seg_bits) == used, (b.instances, used)
+        # And concretely: any 1-bit branch's bit maps to the net whose
+        # driver leaf matches — the bits differ between the two instances.
+        checked += 1
+    assert checked == 2
+    per_inst_bits = {}
+    for w in s.bundles:
+        b = w.input.original_bundle
+        if not b.reason.startswith("FANIN:"):
+            continue
+        t = w.input.candidates[w.plan.selected_topology_index]
+        pa_bits = None
+        for si, bits in dict(t.seg_bits).items():
+            if len(bits) == 1:
+                # A 1-bit branch: resolve its net and driver.
+                net = b.get_net_names()[bits[0]]
+                drv = list(b.net_drivers)[bits[0]]
+                per_inst_bits[net] = drv.rsplit('/', 1)[-1]
+    # aa1 rides pa's branch; aa2 (same sorted position!) rides pb's.
+    if "aa1" in per_inst_bits and "aa2" in per_inst_bits:
+        assert per_inst_bits["aa1"] != per_inst_bits["aa2"]
+
+
 def test_hier_bundler_rejects_bad_strategy_and_accepts_new_ones():
     s = _session(_fanin_db())
     assert "Error" in _run(s, "run_hier_bundler SOMETHING")
