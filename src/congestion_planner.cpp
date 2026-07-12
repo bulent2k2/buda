@@ -589,7 +589,8 @@ double CongestionPlanner::cong_cost_segment(const Segment& seg, int layer_id,
 double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                                             int perp_pos_override,
                                             int slide_lo, int slide_hi,
-                                            double tracks_needed) const {
+                                            double tracks_needed,
+                                            bool proportional_floor) const {
     bool   is_vcut_dir = (seg.start.y == seg.end.y);   // H-seg crosses V-cuts
     double peak = 0.0;
     for_each_band(seg, layer_id, perp_pos_override, [&](int ci, int b) {
@@ -618,7 +619,7 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
     // this is a soft steering term and an exact shortfall is exactly the
     // signal it exists to price.  tracks_needed <= 0 (unknown width)
     // or a pattern-less layer keeps the pure relative behavior.
-    if (tracks_needed > 0.0 && peak < 1.0 &&
+    if (tracks_needed > 0.0 && (peak < 1.0 || proportional_floor) &&
         grid_ != nullptr && grid_->has_layer(layer_id)) {
         int lo, hi;
         routed_extent(seg, layer_id, lo, hi);
@@ -654,20 +655,36 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                     // a slightly longer route, the cost of the fallback's false
                     // negative is opens — lexicographically worse.
                     //
-                    // Deliberately a FLAT 1.0, not the proportional
-                    // needed/supply clamp — that too was implemented and
-                    // measured, and REJECTED on the corpus: proportional
-                    // preserves ordering among bad options under total
-                    // scarcity (a synthetic all-bands-floored scenario flips
-                    // from the worst band to the least-bad one and places),
-                    // but the region above 1.0 leaks into the topology/layer
+                    // TWO floor shapes, chosen by the CALLER'S comparison
+                    // scope.  The SEGMENT SCORE (plan_bundle) uses the flat
+                    // 1.0: it compares across topologies and layers, whose
+                    // other terms live on a small scale, and the globally
+                    // proportional needed/supply clamp was measured and
+                    // REJECTED there — the region above 1.0 leaked into that
                     // competition against overflow-priced alternatives and
                     // mix regressed decisively (kPeak 0.1: overlaps 20 -> 40,
-                    // opens 86 -> 107).  An unexplored middle ground — flat
-                    // here in the segment score, proportional only inside
-                    // best_band_perp's same-segment band choice — is noted in
-                    // wishlist-planner.
-                    if ((double)supply < tracks_needed) peak = 1.0;
+                    // opens 86 -> 107), even though it correctly flipped a
+                    // synthetic all-bands-floored scenario to the least-bad
+                    // band.  The BAND CHOICE (best_band_perp) opts into the
+                    // proportional shape (proportional_floor): its comparison
+                    // is INTRA-segment by construction — same segment, same
+                    // layer, same topology, only "which band inside the slide
+                    // window" — so a large value cannot distort cross-option
+                    // costs, and among bands that all fall short it steers
+                    // seg_perp to the least-impossible one (7-for-8 beats
+                    // 3-for-8) instead of tying at 1.0 and losing to
+                    // whichever is nearest.  The denominator clamps at 0.5,
+                    // NOT 1.0, so a ZERO-track band (POWER-only / keepout —
+                    // positive geometric cap, no routable tracks) prices
+                    // 2*needed, STRICTLY worse than a 1-track band's needed:
+                    // best_pp starts at the window centre and stands on ties,
+                    // so a 0-vs-1 tie would leave the anchor on the band
+                    // where nothing can route at all.
+                    if ((double)supply < tracks_needed)
+                        peak = proportional_floor
+                                   ? std::max(peak, tracks_needed /
+                                                  std::max(0.5, (double)supply))
+                                   : 1.0;
                 }
             }
         }
@@ -698,13 +715,19 @@ int CongestionPlanner::best_band_perp(const Segment& seg, int layer_id,
     // legacy tie-break already chose: the charge (and NUTS's seg_perp) could
     // still land in a nearly-full band with an empty one available in the
     // same window (Codex #252 P2).  Gated on kPeak_ so the default band
-    // choice is bit-identical.
+    // choice is bit-identical.  The supply floor here is PROPORTIONAL
+    // (needed/supply) rather than the segment score's flat 1.0: this
+    // comparison is intra-segment, so the large values cannot leak into
+    // topology/layer competition, and among bands that all fall short the
+    // charge (and NUTS's seg_perp) steers to the least-impossible one —
+    // see the floor-shape comment in peak_util_segment.
     auto band_cost = [&](int pp) {
         double c = cong_cost_segment(seg, layer_id, eff_width, pp,
                                      slide_lo, slide_hi);
         if (kPeak_ > 0.0)
             c += kPeak_ * peak_util_segment(seg, layer_id, pp,
-                                            slide_lo, slide_hi, tracks_needed);
+                                            slide_lo, slide_hi, tracks_needed,
+                                            /*proportional_floor=*/true);
         return c;
     };
 
