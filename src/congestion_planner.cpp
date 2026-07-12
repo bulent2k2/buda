@@ -669,11 +669,17 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                     // costs, and among bands that all fall short it steers
                     // seg_perp to the least-impossible one (7-for-8 beats
                     // 3-for-8) instead of tying at 1.0 and losing to
-                    // whichever is nearest.
+                    // whichever is nearest.  The denominator clamps at 0.5,
+                    // NOT 1.0, so a ZERO-track band (POWER-only / keepout —
+                    // positive geometric cap, no routable tracks) prices
+                    // 2*needed, STRICTLY worse than a 1-track band's needed:
+                    // best_pp starts at the window centre and stands on ties,
+                    // so a 0-vs-1 tie would leave the anchor on the band
+                    // where nothing can route at all.
                     if ((double)supply < tracks_needed)
                         peak = proportional_floor
                                    ? std::max(peak, tracks_needed /
-                                                  std::max(1.0, (double)supply))
+                                                  std::max(0.5, (double)supply))
                                    : 1.0;
                 }
             }
