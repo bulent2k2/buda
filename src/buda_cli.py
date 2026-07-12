@@ -124,7 +124,16 @@ def _strip_inline_comment(line):
 class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
                   ReportsMixin, RipupMixin):
     def _get_log_path(self, suffix):
-        """Get the log path for a given suffix, ensuring the log directory exists."""
+        """Get the log path for a given suffix, ensuring the log directory exists.
+
+        Default: <script_dir>/log/<stem>_<suffix> — one file per cell, silently
+        overwritten by every re-run.  With --log (-l), all logs go into the
+        run's archive dir log/<cell>/<timestamp>/<suffix> instead, next to
+        copies of the exact scripts that produced them, so exploratory re-runs
+        never collide (see _archive_script / main)."""
+        if self._log_run_dir:
+            os.makedirs(self._log_run_dir, exist_ok=True)
+            return os.path.join(self._log_run_dir, suffix)
         if self.script_path:
             script_dir = os.path.dirname(self.script_path)
             script_stem = os.path.splitext(os.path.basename(self.script_path))[0]
@@ -135,6 +144,32 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
             log_dir = 'log'
             os.makedirs(log_dir, exist_ok=True)
             return os.path.join(log_dir, suffix)
+
+    def _archive_script(self, path):
+        """--log mode: copy a sourced .buda script into the run's archive dir
+        the moment it is sourced, so the archive holds exactly the script text
+        this run executed (the top-level script arrives here too — main runs it
+        via `source`).  A re-sourced identical file is copied once; a basename
+        collision (same name from two dirs) is uniquified; MANIFEST maps every
+        copy back to its origin path."""
+        if not self._log_run_dir:
+            return
+        try:
+            import filecmp, shutil
+            src = os.path.abspath(path)
+            os.makedirs(self._log_run_dir, exist_ok=True)
+            stem, ext = os.path.splitext(os.path.basename(src))
+            dst, n = os.path.join(self._log_run_dir, stem + ext), 2
+            while os.path.exists(dst):
+                if filecmp.cmp(src, dst, shallow=False):
+                    return                       # already archived verbatim
+                dst = os.path.join(self._log_run_dir, f"{stem}-{n}{ext}")
+                n += 1
+            shutil.copy2(src, dst)
+            with open(os.path.join(self._log_run_dir, 'MANIFEST'), 'a') as mf:
+                mf.write(f"{os.path.basename(dst)} <- {src}\n")
+        except OSError as e:
+            print(f"Warning: could not archive {path} to {self._log_run_dir}: {e}")
 
     def __init__(self):
         self.fp = buda.Floorplan()
@@ -195,6 +230,7 @@ class BudaSession(PersistMixin, HierMixin, NutsFlowMixin, EditMixin,
         self._planner_is_hier = False  # True after `run_planner hier` (self.bundles is expanded)
         self._flow_log = None          # open flow-log file (set by main); enables per-command logging
         self._flow_log_path = None     # its path (for the "Full detail →" line)
+        self._log_run_dir = None       # --log: log/<cell>/<timestamp>/ archive dir (logs + script copies)
         self._cmd_stats = []           # per-command (cmd_line, elapsed, nlines, nwarn, nerr) for runtime summary
         self._end_report_done = False  # runtime summary emitted (idempotent guard)
         self._at_last_command = True   # True while running the flow's final command
@@ -378,6 +414,12 @@ def main():
                              'suffix is added automatically')
     parser.add_argument('-nv', '--no-viz', action='store_true',
                         help='skip visualize commands (useful for batch/CI runs)')
+    parser.add_argument('-l', '--log', action='store_true',
+                        help='archive this run: logs go to log/<cell>/<timestamp>/ '
+                             '(never overwriting a previous run) together with '
+                             'copies of the exact .buda scripts executed — the '
+                             'top-level script and every sourced file (MANIFEST '
+                             'maps each copy to its origin)')
     parser.add_argument('--verbose-conn', action='store_true',
                         help='print every connectivity violation individually; '
                              'default collapses per-bit violations into a summary')
@@ -406,6 +448,25 @@ def main():
                 set_app_name(os.path.splitext(os.path.basename(script))[0])
             except Exception:
                 pass
+
+        # --log: per-run archive dir log/<cell>/<timestamp>/ — all logs land
+        # there (instead of the shared log/<cell>_*.log files a re-run would
+        # overwrite) plus a copy of every script sourced, so each exploratory
+        # run keeps its logs AND the exact script text that produced them.
+        if args.log:
+            stem = os.path.splitext(os.path.basename(session.script_path))[0]
+            base = os.path.join(os.path.dirname(session.script_path), 'log', stem)
+            stamp = time.strftime('%Y%m%d-%H%M%S')
+            run_dir, n = os.path.join(base, stamp), 2
+            while os.path.exists(run_dir):       # same-second re-run
+                run_dir = os.path.join(base, f"{stamp}-{n}")
+                n += 1
+            try:
+                os.makedirs(run_dir)
+                session._log_run_dir = run_dir
+                print(f"Run archive → {run_dir}")
+            except OSError as e:
+                print(f"Warning: could not create run archive {run_dir}: {e}")
 
         # Open a flow log that captures the FULL detail of every command
         # (Python prints + C++ output routed through sys.stdout via

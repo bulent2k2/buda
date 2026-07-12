@@ -15,7 +15,7 @@ the standard flow, see the [User Guide](USER_GUIDE.md).
 ## Synopsis
 
 ```
-buda [-nv | --no-viz] [--verbose-conn] [--ipc-verbose] [-h] <script.buda>
+buda [-nv | --no-viz] [-l | --log] [--verbose-conn] [--ipc-verbose] [-h] <script.buda>
 ```
 
 The CLI itself is `src/buda_cli.py`; you normally invoke it through the `bin/buda`
@@ -50,6 +50,7 @@ relative to the sourcing script's directory.
 |---|---|---|
 | `-h`, `--help` | — | Print usage (auto-generated from the flags below) and exit. |
 | `-nv`, `--no-viz` | off | Skip `visualize` / `visualize_topologies` commands so no GUI window opens. Use for batch runs, tests, and CI. The full pipeline still runs and all logs are written. |
+| `-l`, `--log` | off | **Archive the run.** All logs go to a fresh `log/<cell>/<timestamp>/` dir (never overwriting a previous run's) together with a copy of the **exact scripts executed** — the top-level `.buda` and every `source`d file, snapshotted the moment each is sourced, with a `MANIFEST` mapping each copy to its origin path (same-basename collisions are uniquified, identical re-sources deduplicated). Made for exploratory tweak-and-re-run loops: each run keeps its logs *and* the script text that produced them. The dir is printed at start (`Run archive → …`). Without the flag, logging is unchanged (`log/<cell>_flow.log`, overwritten per run). |
 | `--verbose-conn` | off | Make `check_design` (alias `check_connectivity`) print **every** per-bit violation individually. By default per-bit violations are collapsed into one line per (bundle, topology, kind, locus) group with a total — on a large design this turns tens of thousands of lines into a few hundred. |
 | `--ipc-verbose` | off | Surface the `buda_viz` ↔ `def_viz` IPC socket **status** chatter (`[viz_ipc] listening on …`, `[buda_viz] IPC session=… connected=…`, `[buda_viz] IPC timer started …`). These are debugging lines and are hidden by default. Socket **errors** are always printed regardless of this flag. |
 
@@ -70,6 +71,10 @@ everything:
   command (planner decisions, NUTS metrics, warnings, and C++ output), each under
   a `━━━ <command> ━━━` header with a trailing `[runtime] …` line. The path is
   printed at the end of the run.
+
+With `-l`/`--log`, every log above instead lands in the per-run archive dir
+`log/<cell>/<timestamp>/` (as `flow.log`, `nuts.log`, …), next to the archived
+script copies and their `MANIFEST`.
 
 Other artifacts (`<stem>_nuts.log`, the `<stem>.json` topology sidecar, etc.) are
 listed in the [Output files](BUDA_SCRIPT_REFERENCE.md#output-files) table.
@@ -108,6 +113,11 @@ bin/buda demo/comprehensive_demo.buda
 # Batch run, no GUI — useful in CI; inspect the flow log afterwards
 bin/buda --no-viz flow/rnr/mix.buda
 cat flow/rnr/log/mix_flow.log
+
+# Exploratory tweak loop: archive each run's logs + the exact scripts it ran
+bin/buda -l flow/rnr/mix.buda
+ls flow/rnr/log/mix/            # one <timestamp>/ dir per run
+cat flow/rnr/log/mix/20260712-153042/MANIFEST
 
 # Full per-bit connectivity detail on the terminal
 bin/buda --no-viz --verbose-conn flow/rnr/mix.buda
