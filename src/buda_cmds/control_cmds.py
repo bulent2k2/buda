@@ -56,6 +56,11 @@ def cmd_source(session, cmd, args, cmd_line):
     if session.script_path is None:
         session.script_path = full_path
 
+    # --log archive: snapshot the script as it is about to run (top-level and
+    # every nested source alike — the tweak under exploration often lives in a
+    # sourced file, not the entry script).
+    session._archive_script(full_path)
+
     session._script_stack.append(full_path)
     # Track whether this source frame sits at its parent's tail; a command is the
     # flow's LAST only when every ancestor source was at its tail AND it is the
