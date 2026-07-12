@@ -649,6 +649,20 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                     // SURVIVES placement; the cost of its rare false positive is
                     // a slightly longer route, the cost of the fallback's false
                     // negative is opens — lexicographically worse.
+                    //
+                    // Deliberately a FLAT 1.0, not the proportional
+                    // needed/supply clamp — that too was implemented and
+                    // measured, and REJECTED on the corpus: proportional
+                    // preserves ordering among bad options under total
+                    // scarcity (a synthetic all-bands-floored scenario flips
+                    // from the worst band to the least-bad one and places),
+                    // but the region above 1.0 leaks into the topology/layer
+                    // competition against overflow-priced alternatives and
+                    // mix regressed decisively (kPeak 0.1: overlaps 20 -> 40,
+                    // opens 86 -> 107).  An unexplored middle ground — flat
+                    // here in the segment score, proportional only inside
+                    // best_band_perp's same-segment band choice — is noted in
+                    // wishlist-planner.
                     if ((double)supply < tracks_needed) peak = 1.0;
                 }
             }

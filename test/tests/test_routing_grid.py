@@ -352,3 +352,32 @@ def test_count_signal_tracks_in_span_lockstep():
         assert (grid.count_signal_tracks_in_span(a_lo, a_hi, p_lo, p_hi)
                 == len(grid.signal_tracks_in_span(a_lo, a_hi, p_lo, p_hi))), \
             (a_lo, a_hi, p_lo, p_hi)
+
+
+def test_boundary_touching_override_does_not_claim_band_above():
+    """Per-slice pattern resolution (wishlist-nuts "override-boundary" fix):
+    the span walkers used to resolve the pattern at the window's perp_lo, so
+    an override whose edge exactly touched a Hanan row claimed the ENTIRE
+    band above it — a physically healthy band read as supply-dead (this
+    stranded the kPeak supply test's detour route during development).  The
+    window now splits at override perp edges, each slice sampling its own
+    midpoint."""
+    stack = buda.RoutingGridStack()
+    # healthy global: 1 signal track per 2 units
+    stack.define_layer(4, buda.TrackPattern(origin=0.0, slots=[
+        make_slot("SIGNAL", "sig", 1.0, 1.0)]), True)
+    # power-heavy override ending EXACTLY at 120
+    stack.add_override(4, x1=0, y1=0, x2=1400, y2=120,
+                       pattern=buda.TrackPattern(origin=0.0, slots=[
+                           make_slot("POWER", "VDD", 28.0, 1.0),
+                           make_slot("SIGNAL", "sig", 1.0, 0.0)]))
+    grid = stack.get_layer_grid(4)
+    # the band above the boundary is on the GLOBAL pattern: 10 tracks
+    assert grid.count_signal_tracks_in_span(100, 900, 120, 140) == 10
+    # inside the override: the power-heavy pattern (~4 tracks in [0,120])
+    assert grid.count_signal_tracks_in_span(100, 900, 0, 100) == 3
+    # a window CROSSING the boundary counts both slices (1 override + 10 global)
+    assert grid.count_signal_tracks_in_span(100, 900, 100, 140) == 11
+    # and the twins agree on the sliced walk too
+    assert (grid.count_signal_tracks_in_span(100, 900, 100, 140)
+            == len(grid.signal_tracks_in_span(100, 900, 100, 140)))

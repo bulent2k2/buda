@@ -272,22 +272,28 @@ default strands 8 bits through an override-starved corridor; floor
 detours it clean; floor silent when supply suffices), plus the
 count/vector lockstep guard in `test_routing_grid.py`.
 
-Two open refinements from the PR #257 review (optional, unmeasured):
-- **Proportional supply clamp.** The floor's flat `1.0` makes a
-  can't-host band *tie* a merely-full band and still rank better than an
-  already-overflowing one (relative util > 1), so under total scarcity
-  it stops discriminating among bad options. `peak = max(peak,
-  tracks_needed / max(1.0, supply))` would price a 3-for-8 band at ~2.7
-  and a 7-for-8 near-miss at ~1.14 at the same cost. Measure on the
-  corpus before adopting — the flat clamp's numbers are already good,
-  and the region above 1.0 competes with real overflow pricing.
-- **Override-boundary pattern resolution** (routing-grid, see
-  wishlist-nuts): `signal_tracks_in_span` (and its count twin,
-  deliberately in lockstep) resolve the pattern at the window's
-  `perp_lo`, so an override whose edge touches a Hanan row claims the
-  entire band above it — the sharp edge documented in
-  `test_planner_kpeak_supply.py`'s fixture comment. The original
-  analysis follows.
+The two follow-on refinements from the PR #257 review are now settled
+(2026-07-12):
+- **Proportional supply clamp — implemented, measured, REJECTED.** The
+  flat `1.0` indeed goes flat under total scarcity: in a synthetic
+  all-bands-floored scenario, `tracks_needed/supply` flips the selection
+  from the worst band (8-for-3) to the least-bad one (8-for-7 at planner
+  band granularity) and every bit places, where flat strands all 8. But
+  the corpus paid for it: the region above 1.0 leaks into the
+  topology/layer competition against overflow-priced alternatives —
+  exactly the caution recorded when this was proposed — and `mix`
+  regressed decisively at kPeak 0.1 (overlaps 20→**40**, opens 86→107);
+  hbundles/05/06/07 and channel_stress unchanged; big2 untouched by
+  construction (its floor never fires). Reverted to flat; the decision
+  and numbers live at the clamp site in `peak_util_segment`. Unexplored
+  middle ground if scarcity ordering ever matters on a real design:
+  keep the segment SCORE flat and use the proportional value only
+  inside `best_band_perp`'s same-segment band choice, where it cannot
+  distort cross-topology costs.
+- **Override-boundary pattern resolution — FIXED** (see wishlist-nuts):
+  the span walkers now resolve the pattern per perp slice, so a
+  boundary-touching override no longer claims the band above it. The
+  original analysis follows.
 
 **What.** The planner selects one candidate per bundle by a cost model
 (`kCong·congestion + kSpan·span + base_cost_non_top + kWL·wirelength`, see
