@@ -231,6 +231,15 @@ static DoglegResult apply_dogleg(BundleWrapper& bw, int trunk_si,
     set_layer(piece_r_idx, h_layer);
     set_layer(jog_idx, v_layer);
 
+    // Tapered fan-in membership rides the split: both trunk pieces and the
+    // jog carry exactly the bits the original trunk carried (seg_bits is
+    // index-keyed; the split appends, so existing keys stay valid).
+    auto sb = topo.seg_bits.find(trunk_si);
+    if (sb != topo.seg_bits.end()) {
+        topo.seg_bits[piece_r_idx] = sb->second;
+        topo.seg_bits[jog_idx]     = sb->second;
+    }
+
     // Pin net_pull (ConnTopology would recompute the split bundle's pulls wrongly):
     // stubs keep their pre-split value, both sub-trunks inherit the trunk's, the
     // jog is net-zero.  Sliding a sub-trunk toward a face only stretches the jog

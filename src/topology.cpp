@@ -19,6 +19,7 @@
 #include "verify.h"
 #include <cmath>
 #include <climits>
+#include <deque>
 #include <set>
 #include <string>
 #include <iostream>
@@ -1365,6 +1366,126 @@ void erase_segment(Topology& topo, int idx) {
         if (!no.empty()) nc[{nk, k.second}] = std::move(no);
     }
     topo.seg_conns = std::move(nc);
+    // seg_bits is index-keyed too (tapered fan-in membership).
+    if (!topo.seg_bits.empty()) {
+        std::map<int, std::vector<int>> nsb;
+        for (auto& [k, v] : topo.seg_bits) {
+            if (k < idx)      nsb[k] = std::move(v);
+            else if (k > idx) nsb[k - 1] = std::move(v);
+        }
+        topo.seg_bits = std::move(nsb);
+    }
+}
+
+std::vector<int> derive_fanin_seg_bits(
+    Topology& topo, const Floorplan& fp,
+    const std::vector<std::string>& driver_per_bit,
+    const std::vector<std::vector<std::string>>& receivers_per_bit)
+{
+    const int n_seg  = (int)topo.segments.size();
+    const int n_bits = (int)driver_per_bit.size();
+    topo.seg_bits.clear();
+    std::vector<int> fallback_bits;
+    if (n_seg == 0 || n_bits == 0 || (int)receivers_per_bit.size() != n_bits)
+        return fallback_bits;
+
+    // Segment adjacency from the authoritative seg_conns junctions.
+    std::vector<std::vector<int>> adj(n_seg);
+    for (const auto& [key, others] : topo.seg_conns) {
+        const int a = key.first;
+        if (a < 0 || a >= n_seg) continue;
+        for (int b : others)
+            if (b >= 0 && b < n_seg) { adj[a].push_back(b); adj[b].push_back(a); }
+    }
+
+    // Segments attaching each endpoint block: a BUSTERM tap (seg_busterms),
+    // else a pass-through crossing of the block's rects (the same overlap
+    // predicate the coverage checks use).  Cached per block.
+    std::map<std::string, std::vector<int>> attach;
+    auto attach_segs = [&](const std::string& block) -> const std::vector<int>& {
+        auto it = attach.find(block);
+        if (it != attach.end()) return it->second;
+        std::vector<int> segs;
+        for (const auto& [si, eps] : topo.seg_busterms) {
+            if (si < 0 || si >= n_seg) continue;
+            if ((eps.first  && eps.first->block_name  == block) ||
+                (eps.second && eps.second->block_name == block))
+                segs.push_back(si);
+        }
+        if (segs.empty()) {
+            auto rects = fp.get_block_rects(block);
+            if (rects.empty()) rects.push_back(fp.get_block_bounds(block));
+            for (int si = 0; si < n_seg; ++si) {
+                const Segment& s = topo.segments[si];
+                const bool h    = (s.start.y == s.end.y);
+                const int  perp = h ? s.start.y : s.start.x;
+                const int  lo   = h ? std::min(s.start.x, s.end.x)
+                                    : std::min(s.start.y, s.end.y);
+                const int  hi   = h ? std::max(s.start.x, s.end.x)
+                                    : std::max(s.start.y, s.end.y);
+                for (const Rect& r : rects) {
+                    const bool hit = h
+                        ? (perp >= r.y1 && perp <= r.y2 && lo <= r.x2 && hi >= r.x1)
+                        : (perp >= r.x1 && perp <= r.x2 && lo <= r.y2 && hi >= r.y1);
+                    if (hit) { segs.push_back(si); break; }
+                }
+            }
+        }
+        return attach.emplace(block, std::move(segs)).first->second;
+    };
+
+    // Group bits with identical endpoints so the BFS runs once per group
+    // (an N-bit sub-bus from one driver is one walk, not N).
+    std::map<std::pair<std::string, std::vector<std::string>>,
+             std::vector<int>> groups;
+    for (int b = 0; b < n_bits; ++b)
+        groups[{driver_per_bit[b], receivers_per_bit[b]}].push_back(b);
+
+    std::vector<std::vector<int>> bits_of_seg(n_seg);
+    auto mark_all = [&](const std::vector<int>& bits) {
+        for (int si = 0; si < n_seg; ++si)
+            for (int b : bits) bits_of_seg[si].push_back(b);
+        fallback_bits.insert(fallback_bits.end(), bits.begin(), bits.end());
+    };
+
+    for (const auto& [ep, bits] : groups) {
+        const auto& d_segs = attach_segs(ep.first);
+        if (d_segs.empty()) { mark_all(bits); continue; }
+        // BFS from ALL driver-attaching segments at once (parent forest).
+        std::vector<int> parent(n_seg, -2);
+        std::deque<int> q;
+        for (int si : d_segs)
+            if (parent[si] == -2) { parent[si] = -1; q.push_back(si); }
+        while (!q.empty()) {
+            int u = q.front(); q.pop_front();
+            for (int v : adj[u])
+                if (parent[v] == -2) { parent[v] = u; q.push_back(v); }
+        }
+        std::set<int> member(d_segs.begin(), d_segs.end());
+        bool ok = true;
+        for (const std::string& rblock : ep.second) {
+            const auto& r_segs = attach_segs(rblock);
+            int hit = -1;
+            for (int si : r_segs)
+                if (parent[si] != -2) { hit = si; break; }
+            if (hit < 0) { ok = false; break; }
+            for (int si = hit; si != -1; si = parent[si]) member.insert(si);
+        }
+        if (!ok) { mark_all(bits); continue; }
+        for (int si : member)
+            for (int b : bits) bits_of_seg[si].push_back(b);
+    }
+
+    for (int si = 0; si < n_seg; ++si) {
+        auto& v = bits_of_seg[si];
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+        if (!v.empty()) topo.seg_bits[si] = std::move(v);
+    }
+    std::sort(fallback_bits.begin(), fallback_bits.end());
+    fallback_bits.erase(std::unique(fallback_bits.begin(), fallback_bits.end()),
+                        fallback_bits.end());
+    return fallback_bits;
 }
 
 // Number of connected components of `topo` under the SEG (wire-junction)

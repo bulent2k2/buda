@@ -313,6 +313,35 @@ def test_check_dnuts_reports_unplaced_bit():
         [v.message for v in res.violations])
 
 
+def test_check_dnuts_reports_bit_short_across_segments():
+    """BIT_SHORT (tapered fan-in defense-in-depth): two DIFFERENT bits of one
+    bundle are two different nets — their wires on the same layer sharing a
+    track over an extended span is a physical short.  The same-bundle
+    track-sharing exemption permits the co-location abstractly (it assumed
+    'per-bit they are the same nets', which per-segment bit subsets void),
+    so check_dnuts must surface it.  A junction TOUCH (zero-length contact,
+    where same-bit wires legitimately meet) must NOT flag."""
+    fp, topo, ct = _z_setup()
+    dnuts = _nominal_dnuts(ct, NUM_BITS)
+    # Move stub seg 2's bit 1 onto stub seg 0's row (both H, LAYER_H) and
+    # stretch its span to overlap seg 0's bits over an extent.
+    seg0 = next(ns for ns in dnuts.net_segments
+                if ns.seg_idx == 0 and ns.bit_index == 0)
+    for ns in dnuts.net_segments:
+        if ns.seg_idx == 2 and ns.bit_index == 1:
+            ns.track_position = seg0.track_position
+            ns.span_lo = seg0.span_lo + 1     # extended overlap, not a touch
+            ns.span_hi = seg0.span_hi + 1
+    res = buda.check_dnuts(ct, dnuts, topo, fp, _layers(), 1, NUM_BITS)
+    shorts = _kinds(res, buda.ViolationKind.BIT_SHORT)
+    assert shorts, [v.message for v in res.violations]
+    # The moved bit 1 shorts seg 0's OTHER bits (0, 2, 3) — never bit 1
+    # (same bit = same net, legal share).
+    for v in shorts:
+        assert {v.seg_idx, v.seg_idx2} == {0, 2}, v.message
+    assert all("bit 1" in v.message for v in shorts)
+
+
 def test_check_dnuts_reports_seg_open_for_single_bit():
     # Break continuity for exactly one bit of the trunk; only that bit opens.
     fp, topo, ct = _z_setup()

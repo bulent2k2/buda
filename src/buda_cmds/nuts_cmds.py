@@ -54,6 +54,10 @@ def cmd_run_nuts(session, cmd, args, cmd_line):
               f"pitch-aware band reservations match this NUTS run.")
     nuts = buda.NUTSEngine(session.fp, session.layers)
     nuts.set_track_pitch(pitch)
+    # Tapered fan-in: (re)derive the selected candidates' per-segment bit
+    # membership so extraction widths taper — covers the resume path where
+    # run_planner was not re-run this session (idempotent otherwise).
+    session._derive_fanin_bits_all(selected_only=True)
     # Bottom-up cells: solve each marked cell's templates once locally and
     # register the per-instance copies as fixed (skipped by extraction,
     # blocking every other bundle). See hier_bottom_up_planning.md §4.

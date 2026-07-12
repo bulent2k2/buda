@@ -1,10 +1,39 @@
 # CONVERGENT bundling — does it make sense?
 
 Investigation of the bundler's `CONVERGENT` strategy end-to-end through the flat
-routing pipeline. Short answer: **as currently modelled it is unsound** — it
-groups nets that the topology generator cannot faithfully route, so all but one
-driver of a convergent bundle are silently left unconnected. This note records
-the evidence, the root cause, and the options.
+routing pipeline. Short answer at the time of the investigation: **as then
+modelled it was unsound** — it grouped nets the topology generator could not
+faithfully route, so all but one driver of a convergent bundle were silently
+left unconnected. This note records the evidence, the root cause, and the fix.
+
+**STATUS (2026-07-11): FIXED — fan-in trees landed.** A multi-driver CONVERGENT
+bundle now routes as a fan-in tree rooted at the shared sink with every driver
+block as a leaf (`BudaSession._bundle_endpoints` derives generation endpoints
+from ALL of a bundle's nets, and the existing multicast trunk+branch / MST
+machinery — which connects a root to N leaves direction-agnostically — serves
+the fan-in with the arrows reversed).  The missing **net-driver fidelity
+check** landed too: `check_design` now emits `NET_DRIVER_OPEN` when a net
+endpoint block is absent from a topology's `connected_block_names` contract
+(`_net_driver_fidelity`, flat flow).  **Per-bit taper** (Codex #268 P1): a
+fan-in tree is not all-bits-everywhere — `derive_fanin_seg_bits`
+(`topology.cpp`) walks each net's driver→sink path through the seg_conns
+graph and stores per-segment bit membership (`Topology::seg_bits`, derived,
+never persisted), so a driver stub carries ONLY its own sub-bus: the planner
+charges member-bit widths (`plan_bundle`/`commit_plan`/`plan_band_overlap`),
+NUTS extracts tapered `TrackSegment.width`s, and DNUTS places only member
+bits per segment (`BusSegment.bit_list`, global indices — via pairing and
+`net_names[bit_index]` unchanged), so no net's wire ever lands on another
+driver's block.  A bit with no derivable path falls back to all segments
+(conservative) and the fidelity check reports it per net.  The historical
+sections below are kept
+as the record of the gap; the pipeline test's collapse assertions are inverted
+into the acceptance tests (`test_convergent_fanin_routes_every_driver`,
+`test_convergent_topo_check_passes_and_fidelity_flags_dropped_driver`, plus
+the mixed shared+distinct-driver case).  QoR showcase: `demo/ariane136_l2` —
+the 1024-bit rdata merge generates `[ic_data_0..3,dc_data_0..7]->cpu_core
+fan-in` (12 drivers, 24 candidates) and passes `check_design topo`/`nuts`
+clean.  Remaining follow-on (out of scope here): a CONVERGENT mode for the
+HIER bundler — `run_hier_bundler` supports STRICT/BIDIRECTIONAL only.
 
 Reproduced by `test/tests/test_bundler_convergent_pipeline.py`.
 
@@ -103,29 +132,43 @@ keys on the sorted set of all endpoint names at each bundle depth
 plain one-way nets between the same blocks — see
 `test/tests/test_hier_bidirectional.py`.
 
-## What we did about it (for now)
+## What we did about it (historical — superseded by the fan-in fix)
 
 - `run_bundler` now **honours** its `STRICT|CONVERGENT|BIDIRECTIONAL` argument
   (previously only STRICT, and the argument was ignored; default remains
-  `STRICT`). `CONVERGENT` prints a warning that a bundle spanning multiple driver
-  *blocks* routes from a single driver and the rest are left unrouted, pointing
-  here. `BIDIRECTIONAL` is sound (same blocks, direction-agnostic) so it does not
-  warn.
-- `test_bundler_convergent_pipeline.py` locks in the CONVERGENT gap (STRICT
-  routes every driver; CONVERGENT reaches only one source row; the connectivity
-  checker does not flag it; CLI honours the argument + warns).
-  `test_bundler_bidirectional.py` locks in that BIDIRECTIONAL groups the cyclic
-  case and the single trunk routes the whole group.
+  `STRICT`). `CONVERGENT` printed a warning that a bundle spanning multiple
+  driver *blocks* routes from a single driver — **downgraded (2026-07-11)** to
+  an informational note now that multi-driver bundles route as fan-in trees.
+  `BIDIRECTIONAL` is sound (same blocks, direction-agnostic) so it never
+  warned.
+- `test_bundler_convergent_pipeline.py` locked in the CONVERGENT gap; its
+  collapse assertions are now **inverted** into the fan-in acceptance tests
+  (every driver covered by placed routing; the fidelity check flags a
+  regressed single-driver topology; mixed shared+distinct drivers).
+  `test_bundler_bidirectional.py` locks in that BIDIRECTIONAL groups the
+  cyclic case and the single trunk routes the whole group.
 
-## If we ever make CONVERGENT real
+## If we ever make CONVERGENT real — DONE (2026-07-11, as-built)
 
-Topology generation would need to treat a multi-driver bundle as a fan-in tree
-(several source busterms, one sink), e.g. an MST/Steiner trunk that each driver
-joins, rather than a single `src→dst` spine. `check_design` should then
-also verify that every original net driver is actually attached (the missing
-fidelity check that let this slip through). Revisit `test_bundler.py`'s
-`bundler_logic.feature` "Convergent Bundling" scenario and the pipeline test here
-alongside that work.
+*(The plan below shipped exactly as sketched; see the STATUS block at the top.)*
+
+Topology generation treats a multi-driver bundle as a fan-in tree: the
+endpoint derivation (`_bundle_endpoints`, `src/buda_session/hier.py`) walks
+ALL of a bundle's nets — a single-driver bundle returns the first net's
+`(driver, receivers)` byte-identically to the old behavior; a multi-driver
+bundle returns `(sink, [driver blocks + extra receivers], fanin=True)` and
+`generate_candidates` produces its usual root-to-N-leaves multicast
+trunk+branch / MST shapes, which are direction-agnostic — so every driver
+gets a stub tap or pass-through and `connected_block_names` carries the full
+endpoint set. All three flat generation commands share the derivation
+(`generate_topologies`, `generate_topologies_for_bundle`,
+`generate_more_topologies`; the knob-memo replay receives the derived
+endpoints from its callers). `check_design` verifies fidelity:
+`_net_driver_fidelity` (`src/buda_session/reports.py`) reports
+`NET_DRIVER_OPEN` for any net endpoint block missing from the topology's
+contract — gated to the flat flow (hier bundles' endpoint instances live in
+a different name space than their generation floorplans) and skipping
+hand-built candidates with an empty contract.
 
 ## Test-case assessment (2026-07-10)
 

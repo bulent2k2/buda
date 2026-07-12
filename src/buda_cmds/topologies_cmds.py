@@ -23,6 +23,15 @@ full registry that buda_cli.do_command dispatches through.
 import buda
 
 
+def _endpoint_label(src, dsts, fanin=False):
+    """Human-readable endpoint label for generation messages.  A fan-in
+    bundle is rooted at the shared SINK with the drivers as leaves, so the
+    arrow is reversed to read naturally."""
+    if fanin:
+        return f"[{','.join(dsts)}]->{src} fan-in"
+    return f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
+
+
 def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
     # Usage: generate_topologies_for_bundle <hint> [center_mode] [double_detour] [multi_trunk]
     # Single dst  → 2-pin L/Z/U candidates
@@ -45,17 +54,17 @@ def cmd_generate_topologies_for_bundle(session, cmd, args, cmd_line):
     for w in session.bundles:
         net_name = w.input.original_bundle.get_net_names()[0]
         if net_name.startswith(hint):
-            ep = session._net_endpoints.get(net_name)
+            ep = session._bundle_endpoints(w)
             if ep is None:
                 print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
                 continue
-            src, dsts = ep
+            src, dsts, fanin = ep
             session._validate_endpoint_blocks(net_name, src, dsts)
             old_pin_uid = session._pinned_uid(w)
             kept_user = session._user_candidates(w)
             w.input.candidates = topo_gen.generate_candidates(src, dsts)
             session._reset_plan_for_regen(w, old_pin_uid, kept_user)
-            label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
+            label = _endpoint_label(src, dsts, fanin)
             print(f"Generated {len(w.input.candidates)} topologies for bundle "
                   f"{w.input.original_bundle.id} ({label})")
             if not w.input.candidates:
@@ -168,20 +177,19 @@ def cmd_generate_more_topologies(session, cmd, args, cmd_line):
             net_name = w.input.original_bundle.get_net_names()[0]
             if not net_name.startswith(hint):
                 continue
-            ep = session._net_endpoints.get(net_name)
+            ep = session._bundle_endpoints(w)
             if ep is None:
                 print(f"Warning: no endpoint info for net '{net_name}' — "
                       f"skipping bundle {w.input.original_bundle.id}")
                 continue
-            src, dsts = ep
+            src, dsts, fanin = ep
             session._validate_endpoint_blocks(net_name, src, dsts)
             fresh = topo_gen.generate_candidates(src, dsts)
             # topo_uid dedup + WL re-sort with selection/dogleg remap — the
             # SAME helper runs in the knob-memo replays (_apply_gen_knobs /
             # _apply_hier_gen_knobs) so a resumed bundle stays ranked.
             added, dups = session._merge_more_candidates(w, fresh)
-            label = (f"{src}->{dsts[0]}" if len(dsts) == 1
-                     else f"{src}->[{','.join(dsts)}]")
+            label = _endpoint_label(src, dsts, fanin)
             print(f"Added {added} new topolog{'y' if added == 1 else 'ies'} "
                   f"for bundle {w.input.original_bundle.id} ({label}) — "
                   f"{dups} duplicate(s) skipped, pool now "
@@ -227,18 +235,18 @@ def cmd_generate_topologies(session, cmd, args, cmd_line):
                                    use_multi_trunk)
     for w in session.bundles:
         net_name = w.input.original_bundle.get_net_names()[0]
-        ep = session._net_endpoints.get(net_name)
+        ep = session._bundle_endpoints(w)
         if ep is None:
             print(f"Warning: no endpoint info for net '{net_name}' — skipping bundle {w.input.original_bundle.id}")
             continue
-        src, dsts = ep
+        src, dsts, fanin = ep
         session._validate_endpoint_blocks(net_name, src, dsts)
         old_pin_uid = session._pinned_uid(w)
         kept_user = session._user_candidates(w)
         w.input.candidates = topo_gen.generate_candidates(src, dsts)
         session._reset_plan_for_regen(w, old_pin_uid, kept_user)
         session._apply_gen_knobs(w, src, dsts, old_pin_uid)
-        label = f"{src}->{dsts[0]}" if len(dsts) == 1 else f"{src}->[{','.join(dsts)}]"
+        label = _endpoint_label(src, dsts, fanin)
         print(f"Generated {len(w.input.candidates)} topologies for bundle "
               f"{w.input.original_bundle.id} ({label}) {session._bundle_nets_suffix(w)}")
         if not w.input.candidates:

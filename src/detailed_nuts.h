@@ -44,7 +44,15 @@ struct BusSegment {
     int         bit_width         = 1;
     std::string bit_order         = "LO_HI";  // "LO_HI" or "HI_LO"
     bool        timing_critical   = false;
-    
+    // Tapered fan-in: the GLOBAL bit indices this segment carries (sorted
+    // ascending).  Empty = all bits 0..bit_width-1 (every non-fan-in bundle).
+    // The engine then needs only bit_list.size() tracks and emits
+    // NetSegments with the global bit_index, so via pairing and
+    // net_names[bit_index] resolution work unchanged across segments that
+    // carry different subsets.  Populated by make_bus_segments from the
+    // selected topology's seg_bits.
+    std::vector<int> bit_list;
+
     // Explicit connectivity list for bit-wire span adjustment.
     std::vector<BusSegmentConn> connections;
 
@@ -64,6 +72,13 @@ struct BusSegment {
     double      track_lo_bound    = -std::numeric_limits<double>::infinity();
     double      track_hi_bound    =  std::numeric_limits<double>::infinity();
 };
+
+// Member-bit count of a BusSegment under the tapered fan-in model: the
+// bit_list size when a subset is declared, else the full bit_width.  Every
+// track-count consumer in the engine goes through this.
+inline int bus_seg_nbits(const BusSegment& bs) {
+    return bs.bit_list.empty() ? bs.bit_width : (int)bs.bit_list.size();
+}
 
 // One bit-wire; output of stage 9 (kind NET in the placed-segment hierarchy
 // — see placed_segment.h; layer/span/track_position/width live on the base

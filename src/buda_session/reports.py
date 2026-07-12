@@ -25,6 +25,33 @@ cross-mixin helper calls resolve through the class as before.
 import buda
 
 
+class _FidelityViolation:
+    """Python-side violation for the net-driver fidelity check — duck-typed
+    to the C++ ConnViolation interface the reporting paths consume
+    (kind.name / seg indices / block_name / bit_index / message).
+    Module-level (like the shared hier helpers) so the mixin carries no
+    per-class descriptors the composed-class identity test would reject."""
+    class _Kind:
+        name = "NET_DRIVER_OPEN"
+    kind = _Kind()
+    seg_idx = -1
+    seg_idx2 = -1
+    bit_index = -1
+
+    def __init__(self, block, message):
+        self.block_name = block
+        self.message = message
+
+
+def _fidelity_union(block, nets):
+    shown = ", ".join(nets[:4]) + (" …" if len(nets) > 4 else "")
+    return _FidelityViolation(block, (
+        f"NET_DRIVER_OPEN: block '{block}' is an endpoint of net(s) "
+        f"{shown} but is not among the topology's connected blocks — "
+        f"the bus never attaches it (a fan-in driver dropped by a "
+        f"single-source topology?)"))
+
+
 class ReportsMixin:
 
     # ── topology inspection (dump_topologies) ──────────────────────────────
@@ -285,6 +312,65 @@ class ReportsMixin:
         print("   shape histogram: "
               + ", ".join(f"{t}={n}" for t, n in top_shapes))
 
+    def _net_driver_fidelity(self, w, topo):
+        """Net-driver fidelity check: every net endpoint block of the bundle
+        must appear in the topology's required-block contract
+        (`connected_block_names` — what check_topo verifies coverage FOR).
+        This is the check whose absence let the CONVERGENT single-driver gap
+        slip through: check_topo validates a topology's INTERNAL consistency
+        against its own block list, so a topology generated from one driver
+        passed while three drivers were silently unrouted
+        (docs/internal/convergent_bundling.md).
+
+        Flat-flow only: hier bundles' endpoint instances live in a different
+        name space than their generation floorplans' blocks (leaf paths vs
+        depth/cell-local blocks), so the comparison is meaningless there —
+        gated on the session's hier markers plus a per-block has_block guard
+        (an endpoint not present as a block in the session floorplan is a
+        container/hierarchy artifact, not a dropped driver).  An empty
+        connected_block_names (a hand-built USER candidate) is skipped."""
+        if (not self._net_endpoints
+                or getattr(self, "_hier_bundles_orig", None)
+                or self._hier_expansion_map
+                or not topo.connected_block_names):
+            return []
+        nets = w.input.original_bundle.get_net_names()
+        by_block = {}
+        for net in nets:
+            ep = self._net_endpoints.get(net)
+            if ep is None:
+                continue
+            for blk in (ep[0], *ep[1]):
+                by_block.setdefault(blk, []).append(net)
+        connected = set(topo.connected_block_names)
+        out = []
+        missing = set()
+        for blk in sorted(set(by_block) - connected):
+            if not self.fp.has_block(blk):
+                continue                     # hierarchy artifact, not a block
+            missing.add(blk)
+            out.append(_fidelity_union(blk, sorted(by_block[blk])))
+        # Per-BIT fidelity for fan-in bundles (tapered model): a bit whose
+        # driver→sink segment path could not be established fell back to
+        # all-segments — the taper derivation IS the per-bit check, so
+        # re-running it (idempotent: it recomputes the derived seg_bits
+        # cache) yields exactly the failed bits.  Skip drivers the union
+        # check above already reported.
+        eps = self._fanin_net_endpoints(w)
+        if eps is not None:
+            drvs, rcvs = eps
+            for b in buda.derive_fanin_seg_bits(topo, self.fp, drvs, rcvs):
+                blk = drvs[b] if b < len(drvs) else ""
+                if not blk or blk in missing or not self.fp.has_block(blk):
+                    continue
+                net = nets[b] if b < len(nets) else f"bit {b}"
+                out.append(_FidelityViolation(blk, (
+                    f"NET_DRIVER_OPEN: net '{net}' (bit {b}) has no "
+                    f"driver→sink segment path from block '{blk}' in the "
+                    f"fan-in topology — its wires fall back to the whole "
+                    f"tree (untapered)")))
+        return out
+
     def _check_design(self, stage: str, all_candidates: bool = False):
         if stage in ("nuts", "dnuts") and self.nuts_result is None:
             print("  Error: run_nuts required first.")
@@ -378,7 +464,9 @@ class ReportsMixin:
                                            self.layers, bid, num_bits,
                                            zone_fp=self.fp)
 
-                for v in res.violations:
+                violations = list(res.violations)
+                violations += self._net_driver_fidelity(w, topo)
+                for v in violations:
                     if all_candidates and stage == "topo":
                         prefix = f"Bundle {bid} topo {topo_idx + 1} ({topo.type})"
                     else:
@@ -403,6 +491,8 @@ class ReportsMixin:
         "LAYER_DIR":    "wrong layer direction",
         "FEEDTHRU_RELAY": "block used as feedthrough relay (segments not wire-joined)",
         "KEEPOUT_CROSS": "wire placed on a keepout",
+        "NET_DRIVER_OPEN": "net endpoint block not attached to the topology",
+        "BIT_SHORT":    "different bits (nets) share a track with overlapping spans",
     }
 
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest

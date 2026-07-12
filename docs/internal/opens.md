@@ -9,14 +9,6 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
-2. **CONVERGENT fan-in topology** —
-   [`wishlist-bundler.md`](wishlist-bundler.md) → *"Multi-source (fan-in)
-   topology support"*. The last whole-subsystem gap: a CONVERGENT bundle
-   spanning several driver blocks routes from ONE arbitrary driver (the CLI
-   warns rather than misroutes). Needs a multi-source fan-in tree shape
-   (reuse `trunk_mst`/`compute_mst`) plus a net-driver fidelity check in
-   `check_topo`. Full investigation: `convergent_bundling.md`. **Highest
-   user-facing value** of the open items.
 3. **Selection basis: rank on measured routability** —
    [`wishlist-planner.md`](wishlist-planner.md) → *"Selection basis …
    LEVERS 1+2 SHIPPED"*. Lever 1 landed as the opt-in `set_planner_param
@@ -85,6 +77,25 @@ designs and fail LOUD, never silent:)*
 *(moved down from the active sections above as they landed; details and
 evidence in the per-subsystem wishlist files as cited.)*
 
+- **CONVERGENT fan-in topology** ✅ — **DONE (2026-07-11)**. A multi-driver
+  CONVERGENT bundle now routes as a **fan-in tree** rooted at the shared
+  sink with every driver block as a leaf: `_bundle_endpoints` derives
+  generation endpoints from ALL of a bundle's nets (single-driver bundles
+  byte-identical to the historical first-net derivation), and the existing
+  direction-agnostic multicast trunk+branch / MST shapes serve the fan-in
+  with the arrows reversed. The missing **net-driver fidelity check**
+  landed as `NET_DRIVER_OPEN` in `check_design` (every net endpoint block
+  must be in the topology's `connected_block_names` contract, plus a
+  per-bit path check for fan-in bundles). The realization is per-bit
+  TAPERED (`Topology::seg_bits`, derived at plan/NUTS time): each segment
+  carries only the bits whose driver→sink path uses it — planner charge,
+  NUTS width, and DNUTS emission all member-bit-scoped, so no net's wire
+  lands on another driver's block (Codex #268 P1). Warning
+  downgraded to a note; pipeline collapse tests inverted into acceptance
+  tests + a mixed-driver case; QoR: `demo/ariane136_l2`'s 1024-bit
+  12-driver rdata merge generates the fan-in tree and checks clean.
+  Remaining follow-on in [`wishlist-bundler.md`](wishlist-bundler.md): a
+  hier-bundler CONVERGENT mode (scope decision).
 - **Keepout scope generalization** ✅ — **DONE (2026-07-11)**, landed as
   the opt-in `set_bottom_up *`: mark EVERY eligible cell at once, where
   eligible = a cell with congruent placed instances (≥2 = solve-once-COPY;

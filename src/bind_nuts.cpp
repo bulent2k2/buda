@@ -274,6 +274,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("interval_hi",     &BusSegment::interval_hi)
         .def_readwrite("bit_width",       &BusSegment::bit_width)
         .def_readwrite("bit_order",       &BusSegment::bit_order)
+        .def_readwrite("bit_list",        &BusSegment::bit_list)
         .def_readwrite("timing_critical", &BusSegment::timing_critical)
         .def_readwrite("connections",     &BusSegment::connections)
         .def_readwrite("busterm_faces",   &BusSegment::busterm_faces)
@@ -345,6 +346,7 @@ void bind_nuts(py::module_& m) {
         .value("UNPLACED",     ViolationKind::UNPLACED)
         .value("LAYER_DIR",    ViolationKind::LAYER_DIR)
         .value("FEEDTHRU_RELAY", ViolationKind::FEEDTHRU_RELAY)
+        .value("BIT_SHORT",    ViolationKind::BIT_SHORT)
         .value("KEEPOUT_CROSS", ViolationKind::KEEPOUT_CROSS);
 
     py::class_<ConnViolation>(m, "ConnViolation")
