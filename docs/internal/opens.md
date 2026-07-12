@@ -54,23 +54,26 @@ designs and fail LOUD, never silent:)*
    resume, GDS round-trip incl. rotation/mirror); the OA half is **gated on
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
-8. **Hier level ordering: deep-first + symmetric global reservation** —
-   `run_planner hier` plans top-down (depth-0 first), protecting the
-   later-planned cell-local bundles with the pessimistic cell-interior
-   demand reservations. The `BUDA_HIER_DEEP_FIRST=1` A/B (2026-07-11,
-   findings + reservation recipe in
-   [`../congestion_planner.md`](../congestion_planner.md) → *"Level
-   ordering"*) showed neither order dominates on the hier corpus: 4 flows
-   improved (reservations over-count, so top-down globals detour around
-   phantom congestion — hbundles/01/02/05/06), 2 regressed (deep-first
-   locals squat on TOP bands with nothing protecting global demand —
-   hbundles/07/10), 4 neutral, mix2 insensitive (all wrappers locked).
-   The promising synthesis: deep-first ordering **plus** an
-   `apply_reservation` analog parking *global* demand while locals plan —
-   or a two-pass top-down-then-replan-bottom-up (one built-in negotiation
-   iteration at the planner level). Ordering changes shift every hier
-   design's results, so this needs the same golden-review discipline as
-   the keepout-scope knob (item above).
+
+## Resolved (by 2026-07-12)
+
+- **Hier level ordering: deep-first + symmetric global reservation** ✅ —
+  **DONE (2026-07-12)**, shipped as the two-pass synthesis: opt-in
+  planner refinement passes (`set_planner_param refine_passes <n>`,
+  default 0 = bit-identical). Pass 1 stays top-down (nothing plans
+  blind — the deep-first failure mode is structurally excluded); each
+  refinement pass revisits committed bundles DEEPEST-FIRST against real
+  usage (reservations released) with the strictly-better-than-keeping
+  accept rule (adopt an unrestricted STRICT replan only when it beats
+  the best plan keeping the old topology, both scored on the same
+  state — adopting any replan was measured and rejected: hbundles/10
+  went 7→78 opens on 23 score-equal lateral moves). Measured: every
+  deep-first win captured or exceeded (01 WL −21%, 02 −32%, 05 opens
+  47→8 at 2 passes), 10 heals 1 ovl/7 opens → **0/0** instead of
+  regressing, everything else (incl. mix2_fast) a byte-identical no-op.
+  Details + table in
+  [`../congestion_planner.md`](../congestion_planner.md) → *"Level
+  ordering"*; tests in `test/tests/test_planner_refine.py`.
 
 ## Resolved (by 2026-07-11)
 
