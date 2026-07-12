@@ -98,23 +98,30 @@ def test_log_flag_reruns_never_collide(tmp_path):
 
 
 def test_basename_collision_uniquified(tmp_path):
-    # Two different sourced files sharing a basename both survive, and an
-    # identical re-source is archived only once.
-    (tmp_path / "a").mkdir(); (tmp_path / "b").mkdir()
+    # Deduplication is by ORIGIN PATH: a re-sourced file is archived once, but
+    # every DISTINCT origin gets its own copy + MANIFEST line — including a
+    # same-basename origin that is byte-identical to an earlier one (Codex
+    # #278: content-dedup silently dropped that origin's provenance).
+    for d in ("a", "b", "c"):
+        (tmp_path / d).mkdir()
     (tmp_path / "a" / "inc.buda").write_text("def_layer 4 M4 H TOP 0.0\n")
     (tmp_path / "b" / "inc.buda").write_text("def_layer 5 M5 V TOP 0.0\n")
+    (tmp_path / "c" / "inc.buda").write_text("def_layer 4 M4 H TOP 0.0\n")
     flow = tmp_path / "cellA.buda"
     flow.write_text("source a/inc.buda\n"
                     "source b/inc.buda\n"
-                    "source a/inc.buda\n")     # identical re-source: no 3rd copy
+                    "source c/inc.buda\n"      # identical BYTES to a's, new origin
+                    "source a/inc.buda\n")     # same ORIGIN re-sourced: no new copy
     _run_main(flow, "-l")
 
     (run,) = _run_dirs(tmp_path)
     names = sorted(p.name for p in run.iterdir() if p.suffix == ".buda")
-    assert names == ["cellA.buda", "inc-2.buda", "inc.buda"], names
+    assert names == ["cellA.buda", "inc-2.buda", "inc-3.buda", "inc.buda"], names
     inc_lines = [l for l in (run / "MANIFEST").read_text().splitlines()
                  if l.startswith("inc")]
-    assert len(inc_lines) == 2              # two origins, third source deduped
+    assert len(inc_lines) == 3              # a, b, c — re-source of a deduped
+    for d in ("a", "b", "c"):
+        assert any(str(tmp_path / d / "inc.buda") in l for l in inc_lines), d
 
 
 def test_default_logging_unchanged_without_flag(tmp_path):
