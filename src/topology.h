@@ -326,7 +326,9 @@ inline int seg_bit_count(const Topology& t, int si, int nbits) {
 // segment graph (seg_conns junctions) from the segments attaching its driver
 // block (BUSTERM tap from seg_busterms, or a pass-through crossing of the
 // block's rects) to the segments attaching each receiver, marking the
-// shortest path's segments as carrying the bit.  A bit whose driver or
+// BFS-forest path to the first attaching receiver segment as carrying the
+// bit (a valid driver→receiver route; not necessarily the geometrically
+// nearest attach point).  A bit whose driver or
 // receiver attaches to no segment, or with no path, falls back to ALL
 // segments (conservative full-width — the net-driver fidelity check reports
 // it).  Writes topo.seg_bits and returns the list of fallen-back bit

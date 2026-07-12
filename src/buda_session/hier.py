@@ -2789,8 +2789,10 @@ class HierMixin:
                 drivers.append(drv)
         if len(drivers) == 1:
             return first[0], list(first[1]), False
-        # Fan-in: root at the shared sink (the first net's first receiver);
-        # leaves = every driver + any receiver beyond the root.
+        # Fan-in: root at the shared sink (the first net's first receiver —
+        # safe because CONVERGENT's signature guarantees every net in the
+        # bundle shares the same receiver-instance set); leaves = every
+        # driver + any receiver beyond the root.
         root = first[1][0]
         leaves = [d for d in drivers if d != root]
         for _, (_drv, rcvs) in eps:

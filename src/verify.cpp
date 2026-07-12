@@ -732,6 +732,64 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);
 
+    // BIT_SHORT: two DIFFERENT bits of this bundle are two different NETS,
+    // so their wires sharing a layer + track with overlapping (or touching —
+    // closed span test, collinear ends butting up count) spans is a physical
+    // short.  The abstract same-bundle track-sharing exemption assumed
+    // "per-bit they are the same nets"; the tapered fan-in
+    // (Topology::seg_bits) makes that conditional — two same-bundle segments
+    // with non-identical bit subsets co-located by the exemption would put
+    // different nets on one track, silently.  Defense-in-depth audit,
+    // predicate lifted from tools/show_detailed_shorts.py; wires bucketed by
+    // (layer, track) so the scan is near-linear.
+    {
+        std::map<std::pair<int, long long>,
+                 std::vector<const NetSegment*>> by_track;
+        for (const auto& [key, nsp] : ns_map)
+            by_track[std::make_pair(
+                         nsp->layer,
+                         (long long)(nsp->track_position * 1e6 +
+                                     (nsp->track_position >= 0 ? 0.5 : -0.5)))]
+                .push_back(nsp);
+        for (const auto& [tk, wires] : by_track) {
+            for (size_t i = 0; i < wires.size(); ++i) {
+                const NetSegment& a = *wires[i];
+                for (size_t j = i + 1; j < wires.size(); ++j) {
+                    const NetSegment& b = *wires[j];
+                    if (a.bit_index == b.bit_index) continue;   // same net
+                    // Within ONE segment the engine assigns distinct tracks
+                    // by construction; the exemption gap this audits is two
+                    // SEGMENTS co-located (and synthetic test fixtures place
+                    // a segment's bits collapsed — not a short).
+                    if (a.seg_idx == b.seg_idx) continue;
+                    // STRICT overlap: collinear same-bundle segments MEET at
+                    // junction points (zero-length touch) by construction —
+                    // that contact is where same-bit wires join, not a short.
+                    // A real exemption co-location overlaps over an extent.
+                    if (a.span_lo >= b.span_hi || b.span_lo >= a.span_hi)
+                        continue;                               // disjoint/touch
+                    ConnViolation v;
+                    v.kind = ViolationKind::BIT_SHORT;
+                    v.bundle_id = bundle_id;
+                    v.seg_idx   = a.seg_idx;
+                    v.seg_idx2  = b.seg_idx;
+                    v.bit_index = a.bit_index;
+                    std::ostringstream msg;
+                    msg << "BIT_SHORT: bit " << a.bit_index << " (seg "
+                        << a.seg_idx << ") and bit " << b.bit_index
+                        << " (seg " << b.seg_idx
+                        << ") are different nets but share layer M" << a.layer
+                        << " track " << a.track_position
+                        << " over span [" << std::max(a.span_lo, b.span_lo)
+                        << ", " << std::min(a.span_hi, b.span_hi)
+                        << "] (dnuts)";
+                    v.message = msg.str();
+                    result.violations.push_back(std::move(v));
+                }
+            }
+        }
+    }
+
     return result;
 }
 

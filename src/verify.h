@@ -35,6 +35,13 @@ enum class ViolationKind {
     FEEDTHRU_RELAY, // a (single-rect) block is used as a feedthrough relay: two
                   // segments connect to it (BUSTERM) but are not joined by any
                   // wire path, so they rely on the block's internal routing
+    BIT_SHORT,    // two DIFFERENT bits of one bundle (= two different nets)
+                  // share a layer + track with overlapping/touching spans — a
+                  // physical short.  The abstract same-bundle track-sharing
+                  // exemption assumed "per-bit they are the same nets"; the
+                  // tapered fan-in (Topology::seg_bits) makes that
+                  // conditional, so dnuts audits it (predicate lifted from
+                  // tools/show_detailed_shorts.py)
     KEEPOUT_CROSS, // a placed wire lies ON a keepout that overlaps its span —
                   // nuts: the bus segment's physical extent [pos ± w/2]
                   // strictly overlaps the zone (the exhausted-window fallback

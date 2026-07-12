@@ -492,6 +492,7 @@ class ReportsMixin:
         "FEEDTHRU_RELAY": "block used as feedthrough relay (segments not wire-joined)",
         "KEEPOUT_CROSS": "wire placed on a keepout",
         "NET_DRIVER_OPEN": "net endpoint block not attached to the topology",
+        "BIT_SHORT":    "different bits (nets) share a track with overlapping spans",
     }
 
     _CONN_GROUP_CAP = 100   # max summary lines before eliding the rest

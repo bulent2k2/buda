@@ -346,6 +346,7 @@ void bind_nuts(py::module_& m) {
         .value("UNPLACED",     ViolationKind::UNPLACED)
         .value("LAYER_DIR",    ViolationKind::LAYER_DIR)
         .value("FEEDTHRU_RELAY", ViolationKind::FEEDTHRU_RELAY)
+        .value("BIT_SHORT",    ViolationKind::BIT_SHORT)
         .value("KEEPOUT_CROSS", ViolationKind::KEEPOUT_CROSS);
 
     py::class_<ConnViolation>(m, "ConnViolation")
