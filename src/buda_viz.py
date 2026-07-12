@@ -2238,7 +2238,8 @@ class BudaVisualizer:
     # Artist registry & interaction
     # ------------------------------------------------------------------
 
-    def _register(self, bundle_id, artist, *, alpha, lw=None, is_band=False, layer=None):
+    def _register(self, bundle_id, artist, *, alpha, lw=None, is_band=False, layer=None,
+                  phys_w=None, horiz=None):
         artist.set_picker(5)
         self._bundle_artists.setdefault(bundle_id, []).append({
             'artist':  artist,
@@ -2246,7 +2247,71 @@ class BudaVisualizer:
             'lw':      lw,
             'is_band': is_band,
             'layer':   layer,
+            # NUTS-placed segment lines carry their PHYSICAL bus width (data
+            # units, perpendicular to the segment) so _sync_nuts_linewidths can
+            # fit the drawn point-width to the true footprint at every zoom.
+            # lw stays the CURRENT drawn width; lw_cap is the static ceiling.
+            'phys_w':  phys_w,
+            'horiz':   horiz,
+            'lw_cap':  lw,
         })
+
+    _LW_MIN_PTS = 2.5   # visibility floor for physical-width segment lines
+
+    def _sync_nuts_linewidths(self):
+        """Fit each NUTS segment line's point-width to the segment's PHYSICAL
+        footprint at the current zoom.
+
+        The bold segment line is centered on the true track position but drawn
+        with a fixed point-width (viz_lw, up to ~15pt for wide buses).  Zoomed
+        out, those points span many times the physical band, so a line whose
+        track hugs a block face appears shifted/straddling its busterm (the
+        home-view artifact); zoomed in, the same points are NARROWER than the
+        band and the picture is accurate.  Convert the physical width to
+        points at the current zoom and clamp: never wider than the footprint
+        (unless below the visibility floor), never wider than the static
+        viz_lw (preserving the zoomed-in look).  Returns True if any width
+        changed (caller decides whether a redraw is needed)."""
+        if not self._bundle_artists:
+            return False
+        o  = self.ax.transData.transform((0.0, 0.0))
+        px = self.ax.transData.transform((1.0, 0.0))[0] - o[0]
+        py = self.ax.transData.transform((0.0, 1.0))[1] - o[1]
+        pts_x = abs(px) * 72.0 / self.fig.dpi   # points per data unit, x
+        pts_y = abs(py) * 72.0 / self.fig.dpi   # points per data unit, y
+        changed = False
+        for entries in self._bundle_artists.values():
+            for e in entries:
+                pw = e.get('phys_w')
+                if not pw:
+                    continue
+                # An H segment's width is vertical; a V segment's horizontal.
+                pts = pts_y if e['horiz'] else pts_x
+                lw  = max(self._LW_MIN_PTS, min(e['lw_cap'], pw * pts))
+                if abs(lw - e['lw']) > 0.1:
+                    e['lw'] = lw
+                    e['artist'].set_linewidth(lw)
+                    changed = True
+        return changed
+
+    def _hook_lw_sync(self):
+        """Keep physical-width segment lines zoom-true: sync on axis-limit
+        changes (zoom/pan/home — fires before the draw, so the frame is right
+        the first time) with a draw_event backstop for figure resizes (which
+        change points-per-data-unit without touching the limits).  The
+        changed-guard prevents a redraw loop, as in the legend _refit hook."""
+        if getattr(self, '_lw_sync_hooked', False):
+            return
+        self._lw_sync_hooked = True
+        self.ax.callbacks.connect(
+            'xlim_changed', lambda ax: self._sync_nuts_linewidths())
+        self.ax.callbacks.connect(
+            'ylim_changed', lambda ax: self._sync_nuts_linewidths())
+
+        def _on_draw(_evt):
+            if self._sync_nuts_linewidths():
+                self.fig.canvas.draw_idle()
+        self.fig.canvas.mpl_connect('draw_event', _on_draw)
 
     def _on_pick(self, event):
         # Right-click is the zoom-to-box gesture (_install_bbox_zoom), not a
@@ -2510,7 +2575,8 @@ class BudaVisualizer:
                     continue
 
                 if e['lw'] is not None:
-                    a.set_linewidth(e['lw'])  # width never changes
+                    a.set_linewidth(e['lw'])  # current width (zoom-synced for
+                                              # physical-width NUTS lines)
 
                 if active_bids is None:
                     a.set_alpha(e['alpha'])
@@ -3940,8 +4006,17 @@ class BudaVisualizer:
                                      color=col, linewidth=viz_lw,
                                      solid_capstyle='butt',
                                      alpha=seg_alpha, zorder=10 + i)
-                self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
-                                layer=effective_layer)
+                # Placed segments carry their physical width so the drawn
+                # point-width can be fit to the true footprint at every zoom
+                # (_sync_nuts_linewidths) — a fixed point-width line overhangs
+                # its busterm face when zoomed out (home view).
+                if ts and ts.placed and ts.width > 0:
+                    self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
+                                   layer=effective_layer,
+                                   phys_w=ts.width, horiz=is_h)
+                else:
+                    self._register(bid, line, alpha=seg_alpha, lw=viz_lw,
+                                   layer=effective_layer)
 
                 self._draw_seg_connectors(bid, idx, cs_list[idx], sx, sy, col,
                                           msz, seg_alpha, 12 + i,
@@ -3963,6 +4038,10 @@ class BudaVisualizer:
                                 alpha=0.3, zorder=4)
             self.ax.add_collection(lc)
             self._register(bid, lc, alpha=0.3, is_band=True, layer=layer)
+
+        # Keep the physical-width lines zoom-true from now on.
+        self._sync_nuts_linewidths()
+        self._hook_lw_sync()
 
     # ------------------------------------------------------------------
     # Detailed NUTS (Stage 9) drawing

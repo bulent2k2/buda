@@ -410,6 +410,57 @@ def test_layer_stats_header_counts(monkeypatch):
     assert texts == [f"{nseg} segments · {nbits} wires"], texts
 
 
+def test_nuts_linewidth_tracks_zoom(monkeypatch):
+    """Abstract NUTS segment lines are zoom-true: the drawn point-width follows
+    the segment's PHYSICAL width at the current zoom (capped at the static
+    viz_lw, floored for visibility).  Regression for the home-view artifact
+    where a fixed ~14pt line, centered on a track hugging a block face,
+    rendered several times wider than the physical band and appeared to
+    straddle its busterm when zoomed out."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    entries = [e for es in viz._bundle_artists.values() for e in es
+               if e.get('phys_w')]
+    assert entries, "no physical-width NUTS lines registered"
+
+    def pts_per_unit(e):
+        o = viz.ax.transData.transform((0.0, 0.0))
+        px = abs(viz.ax.transData.transform((1.0, 0.0))[0] - o[0])
+        py = abs(viz.ax.transData.transform((0.0, 1.0))[1] - o[1])
+        return (py if e['horiz'] else px) * 72.0 / viz.fig.dpi
+
+    def expected(e):
+        return max(viz._LW_MIN_PTS, min(e['lw_cap'], e['phys_w'] * pts_per_unit(e)))
+
+    def check_all():
+        for e in entries:
+            lw = e['artist'].get_linewidth()
+            assert abs(lw - expected(e)) < 0.2, \
+                (lw, expected(e), e['phys_w'], e['horiz'])
+            assert abs(lw - e['lw']) < 1e-9   # registry mirrors the artist
+            # Never wider than the physical footprint unless at the floor.
+            lw_units = lw / pts_per_unit(e)
+            assert (lw_units <= e['phys_w'] * 1.01
+                    or lw <= viz._LW_MIN_PTS + 1e-6), (lw_units, e['phys_w'])
+
+    viz.fig.canvas.draw()          # settle the initial sync
+    check_all()
+
+    # Zoom OUT 10× (the home-view regime): widths must re-fit immediately —
+    # the xlim/ylim callbacks fire synchronously on set_xlim/set_ylim.
+    x0, x1 = viz.ax.get_xlim(); y0, y1 = viz.ax.get_ylim()
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    sx, sy = (x1 - x0) * 5, (y1 - y0) * 5
+    viz.ax.set_xlim(cx - sx, cx + sx); viz.ax.set_ylim(cy - sy, cy + sy)
+    check_all()
+
+    # Zoom IN 100× from there: widths cap at the static viz_lw.
+    viz.ax.set_xlim(cx - sx / 100, cx + sx / 100)
+    viz.ax.set_ylim(cy - sy / 100, cy + sy / 100)
+    check_all()
+    assert any(abs(e['artist'].get_linewidth() - e['lw_cap']) < 1e-6
+               for e in entries), "expected at least one line at the static cap"
+
+
 def test_bundle_rows_drop_bits_suffix_when_detailed(monkeypatch):
     """In detailed mode each row shows a right-aligned [unplaced/total] column.
     The redundant '[bits]' suffix is dropped from the row label so it can't
