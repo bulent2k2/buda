@@ -421,15 +421,25 @@ def test_nuts_linewidth_tracks_zoom(monkeypatch):
     entries = [e for es in viz._bundle_artists.values() for e in es
                if e.get('phys_w')]
     assert entries, "no physical-width NUTS lines registered"
+    m_entries = [e for es in viz._bundle_artists.values() for e in es
+                 if e.get('marker_phys')]
+    assert m_entries, "no physical-size via/conn markers registered"
 
-    def pts_per_unit(e):
+    def scales():
         o = viz.ax.transData.transform((0.0, 0.0))
         px = abs(viz.ax.transData.transform((1.0, 0.0))[0] - o[0])
         py = abs(viz.ax.transData.transform((0.0, 1.0))[1] - o[1])
-        return (py if e['horiz'] else px) * 72.0 / viz.fig.dpi
+        return px * 72.0 / viz.fig.dpi, py * 72.0 / viz.fig.dpi
+
+    def pts_per_unit(e):
+        px, py = scales()
+        return py if e['horiz'] else px
 
     def expected(e):
         return max(viz._LW_MIN_PTS, min(e['lw_cap'], e['phys_w'] * pts_per_unit(e)))
+
+    def expected_ms(e):
+        return max(e['ms_floor'], min(e['ms_cap'], e['marker_phys'] * min(*scales())))
 
     def check_all():
         for e in entries:
@@ -441,6 +451,12 @@ def test_nuts_linewidth_tracks_zoom(monkeypatch):
             lw_units = lw / pts_per_unit(e)
             assert (lw_units <= e['phys_w'] * 1.01
                     or lw <= viz._LW_MIN_PTS + 1e-6), (lw_units, e['phys_w'])
+        # Via/conn markers track the connected segments' widths the same way.
+        for e in m_entries:
+            ms = e['artist'].get_markersize()
+            assert abs(ms - expected_ms(e)) < 0.2, \
+                (ms, expected_ms(e), e['marker_phys'])
+            assert abs(ms - e['ms']) < 1e-9
 
     viz.fig.canvas.draw()          # settle the initial sync
     check_all()
