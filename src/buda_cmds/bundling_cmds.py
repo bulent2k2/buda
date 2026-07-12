@@ -212,10 +212,32 @@ def _split_oversized_bundles(session, raw_bundles):
             out.append(b)
             continue
 
-        # Balanced partition keeping bus groups together: fill parts to the
-        # balanced target, cutting only at bus-group boundaries when the
-        # group fits; a group larger than the target is chunked evenly.
+        # Balanced partition keeping bus groups together while ENFORCING the
+        # auto per-block caps per part (Codex #273): n_parts alone sizes the
+        # balanced target from the TOTAL, which cannot guarantee a part's
+        # bits incident to one block fit that block's edge when the incident
+        # bits cluster in a bus group smaller than the target — so each part
+        # also tracks per-constrained-block incidence and closes before any
+        # cap would be exceeded (net-level fallback for a group that
+        # violates a cap on its own).
         target = math.ceil(total / n_parts)
+        caps = {}
+        if auto and pitch and pitch > 0:
+            for n in nets:
+                e = eps.get(n)
+                if e is None:
+                    continue
+                for blk in {e[0], *e[1]}:
+                    if blk in caps or not session.fp.has_block(blk):
+                        continue
+                    r = session.fp.get_block_bounds(blk)
+                    caps[blk] = max(1, int(min(r.x2 - r.x1,
+                                               r.y2 - r.y1) / pitch))
+
+        def _inc(net):
+            e = eps.get(net)
+            return () if e is None else tuple({e[0], *e[1]})
+
         groups, order = {}, []
         for n in nets:
             k = _bus_group_key(n)
@@ -223,28 +245,52 @@ def _split_oversized_bundles(session, raw_bundles):
                 groups[k] = []
                 order.append(k)
             groups[k].append(n)
-        parts, cur = [], []
+
+        parts, cur, cur_cnt = [], [], {}
+
+        def _fits(add_nets, base_len, base_cnt):
+            if base_len + len(add_nets) > target:
+                return False
+            if caps:
+                cnt = dict(base_cnt)
+                for n in add_nets:
+                    for blk in _inc(n):
+                        if blk in caps:
+                            cnt[blk] = cnt.get(blk, 0) + 1
+                            if cnt[blk] > caps[blk]:
+                                return False
+            return True
+
+        def _close():
+            nonlocal cur, cur_cnt
+            if cur:
+                parts.append(cur)
+                cur, cur_cnt = [], {}
+
+        def _add(add_nets):
+            for n in add_nets:
+                cur.append(n)
+                for blk in _inc(n):
+                    if blk in caps:
+                        cur_cnt[blk] = cur_cnt.get(blk, 0) + 1
+
         for k in order:
             g = groups[k]
-            if len(g) > target:
-                # Oversized bus: chunk evenly (sizes differ by <= 1).
-                if cur:
-                    parts.append(cur)
-                    cur = []
-                n_chunks = math.ceil(len(g) / target)
-                base, extra = divmod(len(g), n_chunks)
-                pos = 0
-                for c in range(n_chunks):
-                    size = base + (1 if c < extra else 0)
-                    parts.append(g[pos:pos + size])
-                    pos += size
+            if _fits(g, len(cur), cur_cnt):
+                _add(g)
                 continue
-            if cur and len(cur) + len(g) > target:
-                parts.append(cur)
-                cur = []
-            cur.extend(g)
-        if cur:
-            parts.append(cur)
+            _close()
+            if _fits(g, 0, {}):
+                _add(g)
+                continue
+            # The group alone exceeds the target or a block cap: pack its
+            # nets individually, closing the part before any violation (a
+            # single net always fits an empty part — caps are >= 1).
+            for n in g:
+                if not _fits([n], len(cur), cur_cnt):
+                    _close()
+                _add([n])
+        _close()
 
         sizes = "+".join(str(len(p)) for p in parts)
         print(f"[Bundler] split bundle {b.id} ({total} bits) into "

@@ -89,7 +89,10 @@ larger than the target is chunked evenly.
 **incident to it** (exactly what the per-bit taper lands on its face) must
 fit `floor(min(w, h) / min_bit_pitch)` — the shortest busterm edge divided by
 the densest pattern layer's bit pitch (falls back to the NUTS track pitch
-when no layer has a pattern). Every split is reported with its binding
+when no layer has a pattern). The caps are enforced **per part**: the
+partitioner closes a part before any block's cap would be exceeded (a
+balanced size target alone cannot bound bits that cluster on one block),
+falling back to net-level packing for a bus that violates a cap on its own. Every split is reported with its binding
 constraint, and the parts' reasons carry a `|SPLIT:k/n` suffix.
 
 ---

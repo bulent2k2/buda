@@ -246,6 +246,38 @@ def test_auto_split_binds_on_shortest_busterm_edge():
     assert "Success" in _run(s, "check_design topo")
 
 
+def test_auto_split_enforces_cap_per_part_for_clustered_bits():
+    """Codex #273: n_parts alone sizes the balanced target from the TOTAL,
+    which cannot bound a part's bits incident to ONE block when those bits
+    cluster in a bus group smaller than the target.  4 drivers x 6-bit buses
+    into one sink; driver 'a' has a 6-unit edge (cap 3 at pitch 2) while the
+    others are large — the naive split (24 bits, n_parts=2, target=12) would
+    keep a's whole 6-bit bus in one part (6 > cap 3).  The partitioner must
+    close parts before any block cap is exceeded."""
+    s = buda_cli.BudaSession(); s.no_viz = True
+    for line in (_LAYERS
+                 + "add_block a 0 0 6 6\n"            # min edge 6 -> cap 3
+                 + "add_block b 0 200 100 280\n"
+                 + "add_block c 0 400 100 480\n"
+                 + "add_block d 0 600 100 680\n"
+                 + "add_block sink 800 100 950 400\n"
+                 + "add_bus ta[6] a.t sink.ra\n"
+                 + "add_bus tb[6] b.t sink.rb\n"
+                 + "add_bus tc[6] c.t sink.rc\n"
+                 + "add_bus td[6] d.t sink.rd\n").strip().splitlines():
+        s.do_command(line)
+    s.do_command("set_max_bundle_bits auto")
+    s.do_command("run_bundler CONVERGENT")
+    eps = s._net_endpoints
+    all_nets = []
+    for w in s.bundles:
+        part = w.input.original_bundle.get_net_names()
+        all_nets.extend(part)
+        a_bits = sum(1 for n in part if eps[n][0] == "a")
+        assert a_bits <= 3, (part, a_bits)
+    assert len(all_nets) == 24 and len(set(all_nets)) == 24  # nothing lost
+
+
 def test_bit_bound_off_and_no_bound_is_identity():
     s = buda_cli.BudaSession(); s.no_viz = True
     for line in (_LAYERS + "add_block A 0 0 100 80\n"
