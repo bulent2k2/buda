@@ -631,10 +631,20 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
         }
     }
 
-    // 3. Unplaced bits: every (seg_idx, bit) in [0,n) × [0,num_bits) must have
-    //    a NetSegment; absence means DetailedNUTS could not find a valid track.
+    // 3. Unplaced bits: every (seg_idx, bit) the segment CARRIES must have a
+    //    NetSegment; absence means DetailedNUTS could not find a valid track.
+    //    A tapered fan-in segment (Topology::seg_bits) carries only its
+    //    member bits — the other bits are deliberately not emitted there and
+    //    must not be reported unplaced.
     for (int i = 0; i < n; ++i) {
+        const std::vector<int>* members = nullptr;
+        auto sbit = topo.seg_bits.find(i);
+        if (sbit != topo.seg_bits.end() && !sbit->second.empty())
+            members = &sbit->second;
         for (int bit = 0; bit < num_bits; ++bit) {
+            if (members && !std::binary_search(members->begin(),
+                                               members->end(), bit))
+                continue;                    // not carried by this segment
             if (ns_map.count({i, bit})) continue;
             ConnViolation v;
             v.kind = ViolationKind::UNPLACED;

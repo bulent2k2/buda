@@ -235,6 +235,14 @@ def test_convergent_mixed_shared_and_distinct_drivers():
         via_bits.setdefault((v.from_seg, v.to_seg), set()).add(v.bit_index)
     for pair, bits in via_bits.items():
         assert bits <= {0, 1} or bits == {2}, (pair, bits)
+    # check_design dnuts must be CLEAN on a tapered bundle: the UNPLACED
+    # audit expects only the bits each segment CARRIES (seg_bits) — the
+    # deliberately-absent non-member bits are not unplaced.
+    import io, contextlib
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        sess.do_command("check_design dnuts")
+    assert "Success" in out.getvalue(), out.getvalue()
 
 
 def test_cli_run_bundler_honors_strategy_argument(capsys):
