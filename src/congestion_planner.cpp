@@ -1355,7 +1355,11 @@ std::vector<BundleAssignment> CongestionPlanner::optimize_topologies(
     if (refine_passes_ > 0) {
         std::vector<int> ref_order(committed.size());
         std::iota(ref_order.begin(), ref_order.end(), 0);
-        std::sort(ref_order.begin(), ref_order.end(), [&](int a, int b) {
+        // stable_sort: same priority + same width is the common case for
+        // same-level siblings, and an unstable sort would make the revisit
+        // order (and thus refine-enabled results) vary across STL
+        // implementations.  Stability pins ties to committed order.
+        std::stable_sort(ref_order.begin(), ref_order.end(), [&](int a, int b) {
             const auto& wa = bundles[committed[a].bundle_idx];
             const auto& wb = bundles[committed[b].bundle_idx];
             if (wa.hier.priority != wb.hier.priority)

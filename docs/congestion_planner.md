@@ -230,8 +230,8 @@ A/B with the strict rule (same corpus as above):
 |---|---|---|
 | 01_pipeline_hier | WL 3360 → **2640** (−21%), clean | fixpoint |
 | 02_two_procs | WL 7816 → **5280** (−32%), clean | fixpoint |
-| 05_stress_grid | opens 47 → 32, WL −7% | opens **8**, 1 overlap, WL −17% |
-| 10_chip_units_blocks_leaf | 1 ovl / 7 opens → **0 / 0**, WL −0.6% | fixpoint |
+| 05_stress_grid | opens 47 → 32, WL −7% | opens **8**, 1 overlap, WL −16% |
+| 10_chip_units_blocks_leaf | 1 ovl / 7 opens → **0 / 0**, WL −0.6% | one further small move, same 0 / 0 |
 | 03/04/06/07/08/09, mix2_fast | unchanged (0 moves) | unchanged |
 
 Every deep-first win is captured or exceeded (01/02/05; 06's win is not
