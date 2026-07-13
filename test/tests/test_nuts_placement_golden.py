@@ -25,13 +25,13 @@ reviewable diff).
 Deliberate re-baseline: rerun `PYTHONPATH=build:tools python3
 tools/nuts_snapshot.py` and review the golden diff in the PR.
 
-Host portability: the three HOST_SENSITIVE_FLOWS (b4_bus_077, big,
-rnr/mix) pin FP/ISA-sensitive placements generated on an x86-64 host — on
-another host a mismatch is environmental (a different discrete track choice
-under -march=native), not a code bug, so it XFAILs with an explanation
-instead of failing; set BUDA_NUTS_GOLDEN_STRICT=1 on the golden-generation
-host's CI to enforce them there.  The six stable small flows are always
-enforced.  See the tool docstring (tools/nuts_snapshot.py) and PR #203's
+Host portability: the four HOST_SENSITIVE_FLOWS (b4_bus_077, big,
+rnr/mix, channel_stress) pin FP/ISA-sensitive placements generated on an
+x86-64 host — on another host a mismatch is environmental (a different
+discrete track choice under -march=native), not a code bug, so it XFAILs
+with an explanation instead of failing; set BUDA_NUTS_GOLDEN_STRICT=1 on
+the golden-generation host's CI to enforce them there.  The five stable
+small flows are always enforced.  See the tool docstring (tools/nuts_snapshot.py) and PR #203's
 big2/tc3a host notes.
 """
 import difflib
