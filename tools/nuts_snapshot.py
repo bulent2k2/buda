@@ -91,6 +91,12 @@ HOST_SENSITIVE_FLOWS = {
     "flow/big_data_test/big2/b4_bus_077.buda",
     "flow/big_data_test/big.buda",
     "flow/rnr/mix.buda",
+    # channel_stress packs three V layers AT their track limit; under a
+    # different -march=native the last-band discrete track choice flips, moving
+    # a handful of wires (this host: 172 abstract segments vs the generation
+    # host's 171).  QoR-neutral, environmental — enforce on the generation host
+    # via BUDA_NUTS_GOLDEN_STRICT.
+    "flow/channel_stress.buda",
 }
 
 # Flows whose full snapshot is too large to commit as text: their golden is a
