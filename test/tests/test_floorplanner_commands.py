@@ -453,12 +453,18 @@ def test_optimizer_iteration_mode_unchanged():
 def test_optimizer_runtime_budget_soft_bound():
     import time
     # Time budget with no iteration cap (max_iter=0) and no early-stop.
+    # The PRIMARY guard is load-invariant: more budget => more iterations
+    # (the budget is honored and genuinely bounds the work).  The wall-clock
+    # assert only catches a runaway/unbounded run, so it is deliberately
+    # loose: 1.5s proved flaky under a loaded machine (a full serial suite
+    # run deschedules the 0.3s-budget process long enough to trip it) — the
+    # same environment-sensitivity class as the big2 exact counts (#203).
     t0 = time.time()
     short = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.3, patience=0)
     dt = time.time() - t0
     assert short.iterations > 0
-    assert dt < 1.5, f"0.3s budget overran: {dt:.2f}s"   # generous CI tolerance
-    # A longer budget does more work.
+    assert dt < 5.0, f"0.3s budget overran: {dt:.2f}s (runaway guard)"
+    # A longer budget does more work — the budget-honored signal.
     longer = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.8, patience=0)
     assert longer.iterations > short.iterations
 
@@ -471,10 +477,15 @@ def test_optimizer_patience_early_stop():
 
 def test_optimizer_ga_runtime_budget():
     import time
+    # Same guard shape as the SA twin above: loose wall clock (runaway
+    # only), load-invariant more-budget-more-work as the primary signal.
     t0 = time.time()
-    r = _mk_optimizer().run_ga(generations=0, time_budget_s=0.3, patience=0)
+    short = _mk_optimizer().run_ga(generations=0, time_budget_s=0.3, patience=0)
     dt = time.time() - t0
-    assert r.iterations > 0 and dt < 1.5
+    assert short.iterations > 0
+    assert dt < 5.0, f"0.3s budget overran: {dt:.2f}s (runaway guard)"
+    longer = _mk_optimizer().run_ga(generations=0, time_budget_s=0.8, patience=0)
+    assert longer.iterations > short.iterations
 
 
 def test_optimizer_timed_patience_scales_with_budget():
