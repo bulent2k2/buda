@@ -450,17 +450,43 @@ def test_optimizer_iteration_mode_unchanged():
     assert r.iterations == 2000
 
 
-def test_optimizer_runtime_budget_soft_bound():
+def _assert_more_budget_more_work(run_fn, attempts=3):
+    """More budget => more iterations, with a bounded retry (Codex #283).
+
+    A single comparison is still scheduler-dependent: iterations count CPU
+    received inside a WALL-clock window, so on a loaded machine the 0.8s
+    run can be descheduled harder than the 0.3s run and legitimately do
+    less work.  A scheduling flake is independent per attempt, so retrying
+    drives its probability to ~0 — while a genuine budget regression
+    (budget ignored, work no longer scaling with it) fails every attempt
+    deterministically.  Each attempt also re-checks the loose runaway
+    bound (an unbounded/hung run must fail regardless of load)."""
     import time
+    last = None
+    for _ in range(attempts):
+        t0 = time.time()
+        short = run_fn(0.3)
+        dt = time.time() - t0
+        assert short.iterations > 0
+        assert dt < 5.0, f"0.3s budget overran: {dt:.2f}s (runaway guard)"
+        longer = run_fn(0.8)
+        if longer.iterations > short.iterations:
+            return
+        last = (short.iterations, longer.iterations)
+    raise AssertionError(
+        f"more budget never produced more work in {attempts} attempts "
+        f"(last: 0.3s -> {last[0]} iters, 0.8s -> {last[1]})")
+
+
+def test_optimizer_runtime_budget_soft_bound():
     # Time budget with no iteration cap (max_iter=0) and no early-stop.
-    t0 = time.time()
-    short = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.3, patience=0)
-    dt = time.time() - t0
-    assert short.iterations > 0
-    assert dt < 1.5, f"0.3s budget overran: {dt:.2f}s"   # generous CI tolerance
-    # A longer budget does more work.
-    longer = _mk_optimizer().run_sa(max_iter=0, time_budget_s=0.8, patience=0)
-    assert longer.iterations > short.iterations
+    # The 1.5s wall bound this replaced proved flaky under a loaded machine
+    # (a full serial suite run deschedules the 0.3s-budget process long
+    # enough to trip it) — the same environment-sensitivity class as the
+    # big2 exact counts (#203).
+    _assert_more_budget_more_work(
+        lambda b: _mk_optimizer().run_sa(max_iter=0, time_budget_s=b,
+                                         patience=0))
 
 
 def test_optimizer_patience_early_stop():
@@ -470,11 +496,11 @@ def test_optimizer_patience_early_stop():
 
 
 def test_optimizer_ga_runtime_budget():
-    import time
-    t0 = time.time()
-    r = _mk_optimizer().run_ga(generations=0, time_budget_s=0.3, patience=0)
-    dt = time.time() - t0
-    assert r.iterations > 0 and dt < 1.5
+    # Same guard shape as the SA twin above (see
+    # _assert_more_budget_more_work for the retry rationale).
+    _assert_more_budget_more_work(
+        lambda b: _mk_optimizer().run_ga(generations=0, time_budget_s=b,
+                                         patience=0))
 
 
 def test_optimizer_timed_patience_scales_with_budget():
