@@ -617,11 +617,18 @@ def test_10_four_level_scale_one_bundle_per_bus():
         assert ovlps <= 1                 # a residual corner overlap when a replan doesn't clear here
         assert net_segs >= 1180
         # Off the generation host, any unplaced bits must all be accounted-for
-        # keepout culls (unplaced == removed) — nothing silently dropped.
+        # keepout culls (unplaced == removed) — nothing silently dropped — AND
+        # capped: the host-sensitive residual is the 2 historical
+        # keepout-committed M7 segments' ~22 crossing bits, so tolerate that
+        # plus headroom but not a routing regression that lands MANY more bits
+        # on keepouts (all culled would still satisfy the equality alone;
+        # Codex #281).
         km = re.search(r"\[DetailedNUTS\] WARNING: (\d+) bit\(s\) removed", out)
         removed = int(km.group(1)) if km else 0
         assert unplaced == removed, \
             f"unplaced {unplaced} != keepout-culled {removed} (a bit was dropped)"
+        assert unplaced <= 30, \
+            f"expected at most the ~22 historical keepout-crossing bits, got {unplaced}"
 
 
 # ---------------------------------------------------------------------------
