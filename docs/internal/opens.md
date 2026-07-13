@@ -1,7 +1,7 @@
 # Open items — the cross-subsystem priority view
 
 What remains to focus on, ranked by value/effort. This page is a **snapshot
-index** (last verified against `main`: **2026-07-09**, post PR #226/#227) —
+index** (last verified against `main`: **2026-07-13**, post PR #280/#281) —
 the details, evidence, and where-to-start notes live in the per-subsystem
 wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
@@ -31,6 +31,26 @@ items this page doesn't see).
    shipped anyway on its own merits (region-override supply the width
    model can't see: mix pre-heal opens −55%, tc3a's kPeak-0.2 regression
    gone; see wishlist-planner).
+
+4. **Non-TOP pin-access stub span-stretched onto its endpoint leaf** —
+   [`wishlist-nuts.md`](wishlist-nuts.md) → *"Non-TOP pin-access stub
+   span-stretched onto its endpoint leaf — OPEN"* and
+   [`../future/nuts_packing_gaps.md`](../future/nuts_packing_gaps.md) §4
+   (Gap 4). Flow 10's cross-chip `x_t*` stubs: the planner downgrades a
+   generator-hinted-TOP pin-access stub to a non-TOP layer, where the
+   endpoint leaf is a keepout and NUTS span-stretches the stub onto it →
+   the pin-access bits are culled (a silent open). **Host-sensitive** (the
+   M5-vs-M7 near-tie flips under `-march=native`; companion PR #281
+   host-tolerances the flow's test — until it lands the strict flow test
+   still fails on a non-golden host). **NOT a planner cost term** — the crossing is a
+   post-placement span-stretch event the planner's nominal scoring cannot
+   see (an exclusive leaf-overlap check never fires, an inclusive one
+   over-fires and broadly churns; both measured). Fix locus is NUTS-side:
+   a span-stretch clamp in `do_span_adjustments` (don't stretch a non-TOP
+   segment onto a leaf keepout — clamp at the face). **Effort:** medium;
+   touches the span-adjust that closed big2's strand, so a full golden +
+   fast/mid re-verify. Lower value (only a host-sensitive residual on one
+   flow, already bounded and loudly reported).
 
 ## Big / blocked / conditional
 

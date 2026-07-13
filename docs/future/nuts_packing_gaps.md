@@ -3,7 +3,7 @@
 `flow/hbundles/10_chip_units_blocks_leaf.buda` (4-level hierarchy, 176 buses /
 968 bits) ends with all 176 bundles planned STRICT (overflow-free books). The
 residual abstract-NUTS track overlaps and unplaced detailed-NUTS bits each trace
-to one of three systematic gaps at the planner/NUTS interface. The flow's test
+to one of four systematic gaps at the planner/NUTS interface. The flow's test
 (`test_10_four_level_scale_one_bundle_per_bus`) ratchets the residual counts so
 regressions are caught.
 
@@ -11,7 +11,9 @@ Gaps 1 and 2 are now **resolved** (flow 10: abstract-NUTS overlaps dropped from
 10 → 4, detailed-NUTS placements rose from 1112 → 1224). Gap 3 is largely
 resolved too: span-stretch corner overlaps, the cross-trunk-layer case, and now
 genuinely **cyclic** vertical constraints (via a dogleg) are handled; the
-remaining open items are noted at the end of §3.
+remaining open items are noted at the end of §3. Gap 4 (a non-TOP pin-access stub
+span-stretched onto its endpoint leaf) is **open** — diagnosed, with the reason a
+planner-side cost term cannot fix it and the NUTS-side options in §4.
 
 Related context: the planner exports its chosen band per segment
 (`BundleAssignment.seg_perp` → `BundleWrapper.seg_perp`), and NUTS uses it as the
@@ -216,3 +218,72 @@ bits, and 0 bit-level shorts.
   handled by the existing `g=1` split + carry-bound, not the dogleg; a dogleg for
   the cross-layer cyclic case is not implemented. Flow 10's last residual overlap
   is not a clean same-layer cycle the detector catches (it remains at 1).
+
+---
+
+## 4. Non-TOP pin-access stub span-stretched into its endpoint leaf — OPEN
+
+### Problem
+
+On some hosts flow 10 leaves **DetailedNUTS opens** that trace to a cross-block
+bus's vertical stub landing ON its own endpoint leaf cell. Concretely, bus
+`x_t4` (left/u4/bt/hi → right/u4/bt/lo, a cross-chip bus) selects `U_VHV`: an M6
+(TOP-H) trunk with two vertical stubs dropping into the endpoint leaves
+`left/u4/bt/hi` = (1490,340)-(1600,470) and `right/u4/bt/lo` = (3250,340)-(3360,470).
+The generator hints **M5 (TOP-V)** for those stubs — TOP layers tile leaf cells
+freely — but the planner **downgrades them to M7 (non-TOP-V)** to save the
+span-scaled `base_cost_non_top` (a short stub is cheap on a low layer). On M7 the
+endpoint leaf is a keepout. NUTS then span-stretches the stub to follow the trunk
+(placed at y≈356, INSIDE the leaf's y[340,470]); the M7 stub's extent lands on the
+leaf, `verify` flags `KEEPOUT_CROSS`, and DetailedNUTS culls the pin-access bits —
+a silent open (≈22 bits across the `x_t*` buses).
+
+### Why it is host-sensitive
+
+The M5-vs-M7 layer choice for these stubs is a near-tie in the planner's float
+score; `-march=native` codegen tips it differently per CPU. On the golden host
+the stubs stay on M5 (clean); on other x86-64 hosts they drop to M7 (opens). This
+is why `test_10_four_level_scale_one_bundle_per_bus` needs a host-tolerant gate —
+the exact residual is environmental. That gate is NOT in this tree: it is added
+by the **companion PR #281** (its QoR ratchet gated behind
+`BUDA_NUTS_GOLDEN_STRICT`, keepout-commit bound relaxed to `<= 2`). Until #281
+lands, the flow test's strict assertions still fail on a non-golden host — that
+failure is exactly this Gap.
+
+### Why a planner-side cost term does NOT fix it cleanly
+
+The planner scores each segment's **nominal** geometry; the defect is a
+**post-placement** event (NUTS span-stretch pulling the stub into the leaf), which
+the planner cannot see. Two attempts confirmed this:
+- A penalty that fires only when the nominal stub extent OVERLAPS a leaf never
+  triggers — the nominal stub merely *touches* the leaf face (e.g. seg (1595,470)
+  on the leaf's y=470 edge), so the crossing is invisible pre-NUTS. Opens stay 22.
+- A penalty on any stub that *touches* a leaf (inclusive bounds) over-fires: it
+  cannot distinguish a normal pin-access stub tapping a block face (fine on a LOW
+  layer — this is the `low_seg_obstructed` endpoint-tail trim, Gap A, that keeps
+  the 80 intra-blk local buses on low layers) from the `x_t4` stub NUTS later
+  stretches in. It pushes many stubs to TOP (net segments 1194→1282, matching the
+  blunt global `base_cost_non_top` knob) and trades the 22 keepout opens for ~6
+  different packing-gap opens — worse than the clean baseline and broadly
+  golden-churning.
+
+So this is NOT a planner cost-model gap; the real fix locus is NUTS-side.
+
+### Fix options (not implemented)
+
+1. **Span-stretch clamp (preferred).** When NUTS span-adjusts a *non-TOP*
+   segment, do not stretch its extent onto a leaf keepout on its layer — clamp at
+   the leaf face. The bit places at the face and vias to the trunk (which is on a
+   TOP layer and crosses the leaf freely). Localized to the span-adjust path,
+   gated on non-TOP + keepout. **Effort:** medium; touches the same span-adjust
+   code that closed big2's strand, so needs the full golden + fast/mid re-verify.
+2. **Respect the generator's TOP hint.** Stop the planner downgrading a
+   generator-hinted-TOP stub that lands a pin inside a leaf to a non-TOP layer.
+   Cleaner intent, but the "lands a pin inside a leaf" test hits the same
+   nominal-geometry over-firing as above and must be narrowed by connectivity.
+3. **Trunk placement.** Keep NUTS from placing a trunk over an endpoint leaf when
+   a non-TOP stub connects to it — the deepest change, most regression risk.
+
+Until one lands, the residual is bounded and reported (`KEEPOUT_CROSS` +
+`placed ON keepout` + the DNUTS cull warning — never silent) and the flow's test
+tolerates it off the golden host.
