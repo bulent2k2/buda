@@ -40,8 +40,9 @@ items this page doesn't see).
    generator-hinted-TOP pin-access stub to a non-TOP layer, where the
    endpoint leaf is a keepout and NUTS span-stretches the stub onto it →
    the pin-access bits are culled (a silent open). **Host-sensitive** (the
-   M5-vs-M7 near-tie flips under `-march=native`; PR #281 host-tolerances
-   the flow's test). **NOT a planner cost term** — the crossing is a
+   M5-vs-M7 near-tie flips under `-march=native`; companion PR #281
+   host-tolerances the flow's test — until it lands the strict flow test
+   still fails on a non-golden host). **NOT a planner cost term** — the crossing is a
    post-placement span-stretch event the planner's nominal scoring cannot
    see (an exclusive leaf-overlap check never fires, an inclusive one
    over-fires and broadly churns; both measured). Fix locus is NUTS-side:

@@ -243,8 +243,12 @@ a silent open (≈22 bits across the `x_t*` buses).
 The M5-vs-M7 layer choice for these stubs is a near-tie in the planner's float
 score; `-march=native` codegen tips it differently per CPU. On the golden host
 the stubs stay on M5 (clean); on other x86-64 hosts they drop to M7 (opens). This
-is why `test_10_four_level_scale_one_bundle_per_bus` needs a host-tolerant gate
-(`BUDA_NUTS_GOLDEN_STRICT`, PR #281) — the exact residual is environmental.
+is why `test_10_four_level_scale_one_bundle_per_bus` needs a host-tolerant gate —
+the exact residual is environmental. That gate is NOT in this tree: it is added
+by the **companion PR #281** (its QoR ratchet gated behind
+`BUDA_NUTS_GOLDEN_STRICT`, keepout-commit bound relaxed to `<= 2`). Until #281
+lands, the flow test's strict assertions still fail on a non-golden host — that
+failure is exactly this Gap.
 
 ### Why a planner-side cost term does NOT fix it cleanly
 

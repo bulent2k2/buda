@@ -15,8 +15,9 @@ keepout; NUTS then span-stretches the stub to follow its trunk INTO the leaf
 keepout → `KEEPOUT_CROSS` → DetailedNUTS culls the pin-access bits (a silent
 open, ≈22 bits across the `x_t*` buses). The M5-vs-M7 choice is a planner float
 near-tie that flips under `-march=native`, so the residual is **host-sensitive**
-(clean on the golden host, opens elsewhere — why the flow's test needs the
-`BUDA_NUTS_GOLDEN_STRICT` gate).
+(clean on the golden host, opens elsewhere — the companion **PR #281** host-
+tolerances the flow's test via a `BUDA_NUTS_GOLDEN_STRICT` gate; until it lands
+the flow test's strict assertions still fail on a non-golden host).
 
 **Why deferred / why NOT a planner cost term:** the planner scores *nominal*
 per-segment geometry; this crossing is a *post-placement* span-stretch event it
