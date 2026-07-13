@@ -8,6 +8,11 @@ priority view** — what's actually open right now, ranked by value/effort — s
 
 ## History
 
+- **2026-07-13** — Added the **non-TOP pin-access stub span-stretched onto its
+  endpoint leaf** open item ([`wishlist-nuts.md`](wishlist-nuts.md) +
+  [`opens.md`](opens.md) #4 + `../future/nuts_packing_gaps.md` §4): flow 10's
+  host-sensitive `x_t*` DNUTS opens, diagnosed as a NUTS span-stretch (not a
+  planner) fix. Refreshed `opens.md` verified date to 2026-07-13.
 - **2026-07-09** — Added [`opens.md`](opens.md), the ranked open-items snapshot
   (verified against main: corner-touch + partial-overlap topologies, abutment
   Gap A, and `kHeight` all landed; refreshed the stale BDB/topo index lines here).

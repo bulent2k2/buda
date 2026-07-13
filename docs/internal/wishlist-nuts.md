@@ -3,6 +3,44 @@
 Deferred follow-ups for track assignment (`src/nuts.cpp`,
 `src/detailed_nuts.cpp`). Index: [`wishlist.md`](wishlist.md).
 
+## Non-TOP pin-access stub span-stretched onto its endpoint leaf — OPEN
+
+**What:** A cross-block bus (flow 10's cross-chip `x_t*`, e.g. `x_t4`) routes as
+a TOP-H trunk + two vertical stubs dropping into its endpoint leaf cells. The
+generator hints a TOP-V layer (M5) for those stubs — TOP tiles leaves freely —
+but the planner downgrades them to a non-TOP-V layer (M7) to save the
+span-scaled `base_cost_non_top`. On the non-TOP layer the endpoint leaf is a
+keepout; NUTS then span-stretches the stub to follow its trunk INTO the leaf
+(trunk placed at y≈356, inside the leaf's y[340,470]), so the stub lands on the
+keepout → `KEEPOUT_CROSS` → DetailedNUTS culls the pin-access bits (a silent
+open, ≈22 bits across the `x_t*` buses). The M5-vs-M7 choice is a planner float
+near-tie that flips under `-march=native`, so the residual is **host-sensitive**
+(clean on the golden host, opens elsewhere — why the flow's test needs the
+`BUDA_NUTS_GOLDEN_STRICT` gate).
+
+**Why deferred / why NOT a planner cost term:** the planner scores *nominal*
+per-segment geometry; this crossing is a *post-placement* span-stretch event it
+cannot see. Two builds confirmed it — an exclusive leaf-overlap penalty never
+fires (the nominal stub only touches the leaf face), and an inclusive one
+over-fires: it cannot separate a normal pin-access stub tapping a block face
+(legitimately LOW, the `low_seg_obstructed` endpoint-tail trim / Gap A that keeps
+the 80 intra-blk local buses on low layers) from the stretched `x_t4` stub, so it
+pushes many stubs to TOP (net segments 1194→1282, matching the blunt global
+`base_cost_non_top` knob) and trades the 22 keepout opens for ~6 different
+packing-gap opens. So the fix locus is NUTS-side, not the planner.
+
+**Where to start:** preferred fix is a **span-stretch clamp** — in NUTS
+`do_span_adjustments`, when stretching a *non-TOP* segment, do not extend its
+extent onto a leaf keepout on its layer; clamp at the leaf face (the bit places
+at the face and vias to the TOP trunk, which crosses the leaf freely). Localized
+to the span-adjust path, gated on non-TOP + keepout — but it touches the same
+code that closed big2's strand, so it needs the full golden + fast/mid re-verify.
+Alternatives (respect the generator's TOP hint for leaf-tapping stubs;
+trunk-placement avoiding endpoint leaves) are noted in
+[`../future/nuts_packing_gaps.md`](../future/nuts_packing_gaps.md) §4. Until one
+lands the residual is bounded and loudly reported (`KEEPOUT_CROSS` +
+`placed ON keepout` + the DNUTS cull warning — never silent).
+
 ## Abstract-vs-detailed keepout model mismatch — ✅ RESOLVED (audit closed)
 
 **What (history):** the two stages disagreed about what a keepout blocks.
