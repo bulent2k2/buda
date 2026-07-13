@@ -405,9 +405,9 @@ def test_channel_stress_packs_clean():
     # handful, never a routing blow-up.
     unplaced = int(dm.group(2))
     km = re.search(r"\[DetailedNUTS\] WARNING: (\d+) bit\(s\) removed", out)
-    assert km, "keepout-crossing cull warning missing"
-    assert int(km.group(1)) == unplaced, \
-        f"unplaced {unplaced} != keepout-culled {km.group(1)} (a bit was dropped)"
+    removed = int(km.group(1)) if km else 0   # a host that packs 0 culls is fine
+    assert unplaced == removed, \
+        f"unplaced {unplaced} != keepout-culled {removed} (a bit was dropped)"
     assert unplaced <= 8, \
         f"expected only the flow's handful of keepout crossings, got {unplaced}"
 

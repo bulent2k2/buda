@@ -37,16 +37,17 @@ Deliberate re-baseline: rerun `PYTHONPATH=build:tools python3
 tools/nuts_snapshot.py` and review the golden diff in the PR.
 
 Host portability: the checked-in goldens were generated on an x86-64 host
-(the Claude Code CI container, -O3 -march=native).  The six small flows are
-placement-stable across hosts; the three HOST_SENSITIVE_FLOWS below
-(b4_bus_077, big, rnr/mix) are the designs whose NUTS outcomes the
-big2/tc3a test notes (PR #203) document as FP/ISA-divergent — a different
-discrete track choice on another host is a hard mismatch that the 1e-6
-FORMATTING quantum cannot absorb (it is not a tolerance).  An off-host
-mismatch on those three therefore means "re-verify against the true baseline
-tree locally" (regenerate goldens on the baseline commit, diff on the same
-machine), NOT "code bug"; the golden test warns-only for them unless
-BUDA_NUTS_GOLDEN_STRICT is set (set it on the golden-generation host's CI).
+(the Claude Code CI container, -O3 -march=native).  The five small flows are
+placement-stable across hosts; the four HOST_SENSITIVE_FLOWS below
+(b4_bus_077, big, rnr/mix, channel_stress) are the designs whose NUTS
+outcomes the big2/tc3a test notes (PR #203, #281) document as
+FP/ISA-divergent — a different discrete track choice on another host is a
+hard mismatch that the 1e-6 FORMATTING quantum cannot absorb (it is not a
+tolerance).  An off-host mismatch on those four therefore means "re-verify
+against the true baseline tree locally" (regenerate goldens on the baseline
+commit, diff on the same machine), NOT "code bug"; the golden test
+warns-only for them unless BUDA_NUTS_GOLDEN_STRICT is set (set it on the
+golden-generation host's CI).
 
 Usage:
   PYTHONPATH=build:tools python3 tools/nuts_snapshot.py            # rewrite goldens
