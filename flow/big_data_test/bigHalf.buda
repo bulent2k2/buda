@@ -1,15 +1,18 @@
+# no rr + fine-grain check
 source ../tracks/tracks4top.buda
 source tc3a_flat_5x.buda
 run_bundler
 generate_topologies
 check_design topo all
-run_planner
+run_planner signal_tracks
 run_nuts
+check_design nuts
 negotiate_congestion
-ripup_reroute
+# ripup_reroute
 check_design nuts
 run_detailed_nuts
+check_design
 negotiate_congestion
-ripup_reroute
+# ripup_reroute
 check_design
 visualize
