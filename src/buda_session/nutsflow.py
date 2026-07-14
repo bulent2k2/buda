@@ -1012,12 +1012,19 @@ class NutsFlowMixin:
         self.planner.set_routing_grid(self.routing_grid)
         self.planner.set_capacity_mode(buda.CapacityMode.SIGNAL_TRACKS)
 
-    def _run_detailed_nuts(self, bit_order="LO_HI", emit_vias=True):
+    def _run_detailed_nuts(self, bit_order="LO_HI", emit_vias=True,
+                           abort_unplaced=-1):
         """Execute bit-level track assignment using DetailedNUTSEngine.
 
         emit_vias=False (RR fast trials): skip the per-bit via emission —
         pure output, never read by the stage-b metric, so the trial metric
-        is identical; the commit re-runs with vias on."""
+        is identical; the commit re-runs with vias on.
+
+        abort_unplaced >= 0 (RR fast trials): sound early abort — placement
+        stops once the running unplaced count exceeds the committed metric's
+        opens (a certain rejection; unplaced never decreases).  Normal path
+        only: the bottom-up merge path ignores it (partial r1/r2 results
+        cannot be merged meaningfully) — conservative, never wrong."""
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
@@ -1040,7 +1047,8 @@ class NutsFlowMixin:
         if bu_plan is None:
             engine = buda.DetailedNUTSEngine(self.routing_grid)
             with buda.ostream_redirect():
-                self.detailed_result = engine.run(bus_segs, emit_vias)
+                self.detailed_result = engine.run(bus_segs, emit_vias,
+                                              abort_unplaced)
         else:
             ref_ids, copy_specs, skip_ids = bu_plan
             ref_segs  = [b for b in bus_segs if b.bundle_id in ref_ids]

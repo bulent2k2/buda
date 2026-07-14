@@ -401,3 +401,33 @@ Follow-on levers, per the Phase 0 profile: early-abort budgets in the trial
 solve (the corner+repair tail outweighs the fixpoint — biggest effect on the
 ~95% rejected trials), then the fixed-context single-bundle screen
 (`LayerSolver::repack_members`) as the headline multiplier.
+
+## RR round 3 — early-abort study + the sound stage-b place-abort (2026-07-14)
+
+The abort lever was DESIGNED as two halves and measured before building
+(bigHalf, `no_fast_trials`, per-trial `overlaps_post_fixpoint` vs final):
+
+- **Stage-a post-fixpoint abort: REJECTED — and the study reframes the
+  Phase-0 profile.**  Every one of the 16 stage-a trials sat far above the
+  metric post-fixpoint (~23-27 overlaps vs cur 2-3), and repair+corner then
+  took them to ~2: the "safety net" passes are the PRIMARY overlap
+  reducers, not a tail.  5/16 trials — including every actual accept
+  (3->2, 2->0) — would have been spuriously rejected by a post-fixpoint
+  abort.  Consequences: no abort there, and no future pass-skipping of
+  repair/corner either; the per-trial NUTS solve can only be attacked by
+  the fixed-context screen.
+- **Stage-b place-abort: SHIPPED (sound, zero spuriousness).**  287/373
+  rejected trials were certain rejections on opens alone (median excess 76
+  over cur), and `num_unplaced` is non-decreasing through place and cull —
+  so `DetailedNUTSEngine::run(…, abort_unplaced=cur_opens)` stops placing
+  the moment the running count exceeds the committed metric's opens
+  (result.aborted, post-place passes skipped).  Armed only for fast
+  trials; commits re-run full with the abort disarmed.  Trajectory
+  byte-identical by construction (aborted trials were already rejections);
+  bigHalf confirms identical moves/trials/endpoint, dnuts place 2.59->2.02s
+  + bit_spans 0.49->0.33s on the fast config (modest there because #290
+  already cut the trial count; scales with trial count elsewhere).
+
+Remaining round-3 lever: the fixed-context single-bundle screen
+(`LayerSolver::repack_members`) — now confirmed as the ONLY way at the
+per-trial NUTS solve, since its passes are all load-bearing.

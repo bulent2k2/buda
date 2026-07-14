@@ -155,6 +155,8 @@ void bind_nuts(py::module_& m) {
         // combined results) must be able to sum and reassign the profile.
         .def_readwrite("pass_seconds",       &NUTSResult::pass_seconds)
         .def_readwrite("n_solves",           &NUTSResult::n_solves)
+        .def_readwrite("overlaps_post_fixpoint",
+                       &NUTSResult::overlaps_post_fixpoint)
         .def_readwrite("dogleg_topologies",   &NUTSResult::dogleg_topologies)
         .def_readwrite("dogleg_seg_layers",   &NUTSResult::dogleg_seg_layers)
         .def_readwrite("dogleg_seg_net_pull", &NUTSResult::dogleg_seg_net_pull)
@@ -317,6 +319,7 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("net_vias",     &DetailedNUTSResult::net_vias)
         .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced)
         .def_readwrite("num_keepout_bits", &DetailedNUTSResult::num_keepout_bits)
+        .def_readwrite("aborted",          &DetailedNUTSResult::aborted)
         // Per-pass profile (RR round-3 Phase 0) — observation only.
         // readwrite: the bottom-up DNUTS path merges two engine results in
         // Python and must carry the summed profile (Codex #289).
@@ -327,7 +330,7 @@ void bind_nuts(py::module_& m) {
         .def("add_fixed_bits", &DetailedNUTSEngine::add_fixed_bits,
              py::arg("bits"))
         .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"),
-             py::arg("emit_vias") = true);
+             py::arg("emit_vias") = true, py::arg("abort_unplaced") = -1);
 
     m.def("offset_net_segment", &offset_net_segment,
           py::arg("ns"), py::arg("dx"), py::arg("dy"),

@@ -398,7 +398,8 @@ class RipupMixin:
             self.nuts_result = nuts.run(self.bundles)
         self._adopt_doglegs()
 
-    def _rr_rerun(self, stage, target_bid=None, full=False):
+    def _rr_rerun(self, stage, target_bid=None, full=False,
+                  abort_opens=-1):
         """Silently re-run planner + NUTS (+ DNUTS for stage b).
 
         When `target_bid` names the one bundle a trial moved, the replan is
@@ -471,7 +472,8 @@ class RipupMixin:
                     t0 = time.perf_counter()
                     self._run_detailed_nuts(
                         bit_order=self._detailed_bit_order,
-                        emit_vias=not fast)
+                        emit_vias=not fast,
+                        abort_unplaced=(abort_opens if fast else -1))
                     self._rr_t_add('dnuts', time.perf_counter() - t0)
                     self._rr_t_add_passes(
                         'dnuts', self.detailed_result.pass_seconds)
@@ -819,6 +821,14 @@ class RipupMixin:
 
     def _rr_trial(self, w, tidx, stage, metric, full=False):
         """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
+        # Sound stage-b early abort (fast trials): capture the COMMITTED
+        # metric's opens BEFORE mutating — once a trial's running unplaced
+        # count exceeds it, the trial is a certain rejection and DNUTS stops
+        # placing (unplaced never decreases through place/cull).
+        abort_opens = -1
+        if (stage == 'b' and not full
+                and getattr(self, '_rr_fast_trials', False)):
+            abort_opens = self._rr_m_primary(metric())
         w.plan.selected_topology_index = tidx
         w.input.topology_pinned = True
         bid = w.input.original_bundle.id
@@ -831,7 +841,8 @@ class RipupMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
-        self._rr_rerun(stage, target_bid=bid, full=full)
+        self._rr_rerun(stage, target_bid=bid, full=full,
+                       abort_opens=abort_opens)
         return metric()
 
     def _open_segments(self):
