@@ -108,9 +108,34 @@ residual is the per-trial FULL solves: bigHalf stage a `nuts 10.6s/34`
 identical 9-commit trajectory and 0/0 endpoint; slowdown_rnr 11.1s → 9.4s,
 mix 10.4s → 9.4s, big2_noviz unchanged — all with identical endpoints,
 moves, and trial counts.  The remaining ~27s of bigHalf stage b is the
-116 full NUTS+DNUTS trial solves — the incremental-solve round (two-tier
-trials: cheap per-layer NUTS / fixed-bits DNUTS as filter, full-fidelity
-verify before accept) is the follow-on that attacks it.
+116 full NUTS+DNUTS trial solves.
+
+**Tried and REVERTED — layer-scoped two-tier trials.**  The obvious
+incremental attack (a cheap trial tier: `NUTSEngine::rerun_bundle` swaps
+the one moved bundle's segments and re-solves only the layers its old+new
+segments touch — no orientation fixpoint / dogleg fallback / corner pass —
+ranking the moves, with the winner re-verified by the exact full pipeline
+before acceptance and a full-fidelity re-sweep on a cheap-tier stall) was
+implemented and measured **3.5× WORSE** on bigHalf (46s → 160s, trials
+116 → 1136).  Two structural reasons, worth recording so the next attempt
+skips them: (1) on a flat few-layer design, LAYERS are far too coarse a
+partition — an L-move touches one H + one V layer = half the stack, so
+the "cheap" solve cost ~54ms vs ~170ms full (barely 3×), and stage b
+still pays the full DNUTS (~57ms) per cheap trial; (2) the skipped
+passes make the cheap metric noisy enough to mis-rank (false negatives
+force the full re-sweep, false positives waste verifies), and the
+diverged trajectories more than ate the per-trial saving.  **The right
+follow-on shape** is a FIXED-CONTEXT single-bundle placement: hold every
+other bundle's placement from the baseline, place only the target's new
+segments into the existing occupancy (the `LayerSolver::repack_members`
+machinery already packs a member set against non-member obstacles — it
+needs a public "place these members, everyone else fixed" entry), metric
+= baseline-minus-target overlaps + the new segments' overlaps.  That is
+O(target segs) per trial (~1ms-class), leaving stage b's floor at the
+~57ms DNUTS — which then needs the fixed-bits incremental DNUTS
+(`add_fixed_bits`, the bottom-up ref/rest split) to matter.  Both are a
+separate, larger round; the measured numbers above are the bar it must
+beat.
 
 ## `ripup_reroute` v1 follow-ups (deferred from the implementing PR)
 
