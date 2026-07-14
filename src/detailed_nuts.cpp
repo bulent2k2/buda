@@ -130,7 +130,8 @@ bool DetailedNUTSEngine::signals_contiguous(
 // ---------------------------------------------------------------------------
 
 DetailedNUTSResult DetailedNUTSEngine::run(
-        const std::vector<BusSegment>& bus_segs, bool emit_vias) const {
+        const std::vector<BusSegment>& bus_segs, bool emit_vias,
+        int abort_unplaced) const {
     // Per-pass profiling (RR round-3 Phase 0) — observation only.
     using pclock = std::chrono::steady_clock;
     DetailedNUTSResult result;
@@ -141,8 +142,10 @@ DetailedNUTSResult DetailedNUTSEngine::run(
             std::chrono::duration<double>(t1 - t0).count();
         t0 = t1;
     };
-    place_by_layer(bus_segs, result);
+    place_by_layer(bus_segs, result, abort_unplaced);
     charge("place");
+    if (result.aborted)
+        return result;   // certain rejection: metric already decided (see .h)
     adjust_bit_spans(bus_segs, result);
     charge("bit_spans");
     // After spans are final (and before vias pair up bits): remove any bit
@@ -197,7 +200,16 @@ void DetailedNUTSEngine::cull_keepout_crossers(DetailedNUTSResult& result) const
 
 void DetailedNUTSEngine::place_by_layer(
         const std::vector<BusSegment>& bus_segs,
-        DetailedNUTSResult& result) const {
+        DetailedNUTSResult& result, int abort_unplaced) const {
+    // Sound early abort (RR fast trials): checked after every unplaced
+    // increment via this helper — see run()'s header comment.
+    auto over_budget = [&]() {
+        if (abort_unplaced >= 0 && result.num_unplaced > abort_unplaced) {
+            result.aborted = true;
+            return true;
+        }
+        return false;
+    };
     // ------------------------------------------------------------------ //
     // 1. Group segment indices by layer; sort each layer by abstract_pos. //
     // ------------------------------------------------------------------ //
@@ -211,6 +223,7 @@ void DetailedNUTSEngine::place_by_layer(
                       << " has no track pattern defined. Skipping " << indices.size()
                       << " segment(s)." << std::endl;
             for (int idx : indices) result.num_unplaced += bus_seg_nbits(bus_segs[idx]);
+            if (over_budget()) return;
             continue;
         }
 
@@ -315,6 +328,7 @@ void DetailedNUTSEngine::place_by_layer(
                           << " in interval [" << bs.interval_lo << ", " << bs.interval_hi << "]"
                           << std::endl;
                 result.num_unplaced += bus_seg_nbits(bs);
+                if (over_budget()) return;
                 continue;
             }
 
@@ -380,6 +394,7 @@ void DetailedNUTSEngine::place_by_layer(
                               << "] — reservation conflict (bundle " << bs.bundle_id << ")"
                               << std::endl;
                     result.num_unplaced += bw;
+                    if (over_budget()) return;
                     continue;
                 }
 
@@ -433,6 +448,7 @@ void DetailedNUTSEngine::place_by_layer(
                               << "] after reservation (bundle " << bs.bundle_id << ")"
                               << std::endl;
                     result.num_unplaced += bw;
+                    if (over_budget()) return;
                     continue;
                 }
 

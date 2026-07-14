@@ -120,6 +120,12 @@ struct DetailedNUTSResult {
     // round-3 profiling layer).  Keys: place / bit_spans / keepout_cull /
     // vias.  Pure observation: never read by any placement decision.
     std::map<std::string, double> pass_seconds;
+    // True when placement stopped at an abort threshold (RR fast trials):
+    // num_unplaced already exceeded the current metric mid-place, so the
+    // trial is a CERTAIN rejection (unplaced only grows through place and
+    // cull) — the remaining layers were skipped and net_segments is
+    // PARTIAL.  Never set outside an abort-armed run.
+    bool aborted = false;
 };
 
 class DetailedNUTSEngine {
@@ -135,8 +141,17 @@ public:
     // OUTPUT, never read by the stage-b metric (num_unplaced is computed by
     // place + cull), so the trial metric is IDENTICAL; a commit must re-run
     // with vias on (the session enforces this).
+    //
+    // abort_unplaced >= 0 (RR fast trials, round 3): SOUND early abort.
+    // num_unplaced is non-decreasing through place and cull, so the moment
+    // the running count exceeds the threshold (the committed metric's opens)
+    // the trial is a certain rejection whatever the remaining layers do —
+    // placement stops, result.aborted is set, and the post-place passes are
+    // skipped (the partial result is only ever read for its metric and then
+    // restored away; commits re-run full with the abort disarmed).
     DetailedNUTSResult run(const std::vector<BusSegment>& bus_segments,
-                           bool emit_vias = true) const;
+                           bool emit_vias = true,
+                           int abort_unplaced = -1) const;
 
 private:
     const RoutingGridStack& stack_;
@@ -147,7 +162,8 @@ private:
     // span-follow to connected bits' exact tracks (+ BUSTERM face re-extend),
     // and the per-bit via fan-out of the bundle-level symbolic bus-vias.
     void place_by_layer(const std::vector<BusSegment>& bus_segs,
-                        DetailedNUTSResult& result) const;
+                        DetailedNUTSResult& result,
+                        int abort_unplaced = -1) const;
     void adjust_bit_spans(const std::vector<BusSegment>& bus_segs,
                           DetailedNUTSResult& result) const;
     // Post-placement keepout cull (keepout-model audit): remove every bit

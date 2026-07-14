@@ -1261,3 +1261,26 @@ def test_dnuts_emit_vias_off_is_metric_identical():
     assert key(with_v) == key(no_v)
     assert with_v.num_unplaced == no_v.num_unplaced
     assert len(no_v.net_vias) == 0 and len(with_v.net_vias) > 0
+
+
+def test_dnuts_place_abort_is_sound_certain_rejection():
+    """Round-3 place-abort: with abort_unplaced armed, placement stops the
+    moment the running unplaced count exceeds the threshold — sound because
+    num_unplaced is non-decreasing through place and cull, so the trial is a
+    certain rejection.  The aborted result must carry the flag and a count
+    STRICTLY above the threshold; disarmed (-1) must reproduce the full run
+    exactly."""
+    import buda
+    s = _build_dnuts_open_session()          # baseline has real opens
+    segs = buda.make_bus_segments(s.bundles, s.nuts_result, s.fp, "LO_HI")
+    eng = buda.DetailedNUTSEngine(s.routing_grid)
+    with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+        full = eng.run(segs)
+        ab = eng.run(segs, emit_vias=False, abort_unplaced=0)
+        off = eng.run(segs, emit_vias=True, abort_unplaced=-1)
+    assert full.num_unplaced > 0             # fixture precondition
+    assert ab.aborted and ab.num_unplaced > 0
+    assert ab.num_unplaced <= full.num_unplaced   # partial count, lower bound
+    assert not off.aborted
+    assert off.num_unplaced == full.num_unplaced
+    assert len(off.net_vias) == len(full.net_vias)

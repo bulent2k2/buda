@@ -103,6 +103,14 @@ struct NUTSResult {
     // observation: never read by any placement decision.
     std::map<std::string, double> pass_seconds;
     int n_solves = 0;
+    // Overlap count right after the orientation fixpoint, BEFORE the
+    // repair/corner/tighten passes (round-3 early-abort study: how often do
+    // the reduction passes rescue a trial that looks doomed post-fixpoint?).
+    // Last solve's value when the dogleg fallback re-solved.  Observation
+    // only; counted over the same segment set the fixpoint placed (bottom-up
+    // fixed segments are appended later, so on bottom-up designs the basis
+    // differs from num_overlaps by the fixed-segment overlaps).
+    int overlaps_post_fixpoint = 0;
     // Topologies the dogleg pass mutated (bundle_id -> new selected Topology and
     // its seg_layers).  The CLI adopts these into its bundles before rebuilding
     // ConnTopology for detailed NUTS, so the split bundle's stubs get the correct

@@ -2179,6 +2179,8 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // back, and iterate — so each group packs against the other's already-
         // stretched spans instead of stale ones.  Replaces the per-layer loop.
         orientation_fixpoint(result.segments, by_layer, ctx, seed_cons);
+        result.overlaps_post_fixpoint =
+            (int)find_overlaps(result.segments).size();
         charge("fixpoint", t0);
         // Classify any genuinely cyclic vertical constraint NOW, on the raw
         // post-fixpoint overlaps: a 2-cycle shows both contradictory column
