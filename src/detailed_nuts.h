@@ -116,6 +116,10 @@ struct DetailedNUTSResult {
     // (keepout-model audit).  Each is also counted in num_unplaced, so the
     // healing machinery (negotiate/ripup stage b) sees them as opens.
     int num_keepout_bits = 0;
+    // Per-pass seconds of the run() that produced this result (the RR
+    // round-3 profiling layer).  Keys: place / bit_spans / keepout_cull /
+    // vias.  Pure observation: never read by any placement decision.
+    std::map<std::string, double> pass_seconds;
 };
 
 class DetailedNUTSEngine {

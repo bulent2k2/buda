@@ -19,6 +19,7 @@
 #include "nuts_dogleg.h"
 #include "conn_topology.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
 #include <iostream>
@@ -2145,22 +2146,40 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         if (y_grid.empty()) y_grid.assign(ys.begin(), ys.end());
     }
 
+    // Per-pass profiling (RR round-3 Phase 0): accumulate each pass's seconds
+    // across EVERY solve of this run — the dogleg fallback's trial re-solves
+    // included — so `pass_seconds` answers "where inside a trial's full solve
+    // does the time go".  Observation only; no placement decision reads it.
+    std::map<std::string, double> pass_t;
+    int n_solves = 0;
+    using pclock = std::chrono::steady_clock;
+    auto charge = [&pass_t](const char* key, pclock::time_point& t0) {
+        auto t1 = pclock::now();
+        pass_t[key] += std::chrono::duration<double>(t1 - t0).count();
+        t0 = t1;
+    };
+
     // One full placement of a (possibly dogleg-mutated) bundle set: extract
     // segments, build maps, run the orientation fixpoint, classify cycles, then
     // the repair/corner safety net.  Returned so the dogleg pass can re-place.
     auto solve = [&](const std::vector<BundleWrapper>& bs,
                      const std::map<int, LayerConstraints>& seed_cons) -> DoglegSolveOut {
+        ++n_solves;
+        auto t0 = pclock::now();
         NUTSResult result;
         result.segments = extract_segments(bs, x_grid, y_grid);
+        charge("extract", t0);
         NutsContext ctx = build_context(bs, floorplan_, result.segments);
         std::map<int, std::vector<TrackSegment*>> by_layer;
         for (auto& ts : result.segments)
             by_layer[ts.layer].push_back(&ts);
+        charge("context", t0);
         // Alternating orientation-group fixpoint: solve a whole orientation
         // group, propagate spans to the perpendicular group, solve it, propagate
         // back, and iterate — so each group packs against the other's already-
         // stretched spans instead of stale ones.  Replaces the per-layer loop.
         orientation_fixpoint(result.segments, by_layer, ctx, seed_cons);
+        charge("fixpoint", t0);
         // Classify any genuinely cyclic vertical constraint NOW, on the raw
         // post-fixpoint overlaps: a 2-cycle shows both contradictory column
         // overlaps at once.  The corner pass below would half-resolve it —
@@ -2169,23 +2188,28 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // passes could not have fixed these anyway.
         DoglegSolveOut out;
         out.plans = detect_dogleg_plans(result.segments, ctx.rev_conn_map, ctx.trunk_set);
+        charge("dogleg_detect", t0);
         // The final adjustments can extend spans of layers packed earlier,
         // materialising overlaps after their solve — repair them in place.
         repair_overlaps(result.segments, ctx);
+        charge("repair", t0);
         // Corner overlaps (perp-locked stubs colliding) need trunk adjustment,
         // not victim moves — resolve via same-layer ordering or cross-layer
         // split bounds.
         resolve_corner_overlaps(result.segments, ctx);
+        charge("corner", t0);
         // Final opportunistic tighten: slide pulled segments toward their pull in
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
         tighten_pulls(result.segments, ctx);
+        charge("tighten", t0);
         // Merge the fixed (bottom-up copy) segments AFTER every pass that
         // could move a segment and BEFORE the metrics, so they are immovable
         // but fully accounted (an overlap against a fixed segment counts).
         result.segments.insert(result.segments.end(),
                                fixed_segments_.begin(), fixed_segments_.end());
         compute_metrics(result);
+        charge("metrics", t0);
         out.result = std::move(result);
         return out;
     };
@@ -2234,6 +2258,10 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         std::cout << "[NUTS] WARNING: " << out.result.num_keepout_conflicts
                   << " segment(s) placed ON a keepout (window exhausted; the "
                   << "bus cannot physically route there — re-pin or re-plan).\n";
+    // Stamp the accumulated per-pass profile onto the FINAL result (the
+    // fallback's trial re-solves are already folded into the buckets).
+    out.result.pass_seconds = std::move(pass_t);
+    out.result.n_solves     = n_solves;
     return out.result;
 }
 

@@ -334,3 +334,41 @@ reachable fix turned out not to exist at small scale — the
 junction-infeasibility contender source already reaches small designs'
 occupants — which is itself a finding: the pass's unique value is on large
 designs where junction signals are absent (the b61 class).
+
+## RR efficiency round 3 — Phase 0: per-pass solve profile (2026-07-14)
+
+Round 2 pinned the cost to the per-trial full solves (85–92% of RR
+runtime); this round's Phase 0 instruments WHERE inside a solve the time
+goes.  `NUTSResult.pass_seconds` / `DetailedNUTSResult.pass_seconds`
+(observation only, buckets accumulate across the dogleg fallback's trial
+re-solves — `n_solves` counts them) feed per-pass totals into the RR/
+negotiate timing summary as a `solve passes:` line.
+
+First measurement (bigHalf, both rr lines enabled, this host):
+
+    stage b: nuts 55.4s/454 solves —
+      fixpoint 14.2  corner 12.4  tighten 10.8  repair 8.7
+      (context/dogleg_detect/extract/metrics ≈ 0.7 combined)
+    dnuts 18.0s/454 — place 7.5  vias 2.9  bit_spans 1.7  cull 0.2
+
+What the numbers say about the round-3 candidates:
+
+- **tighten_pulls is ~19% of the trial solve** and is metric-neutral for
+  stage a by construction (its guard rejects any move that adds an
+  overlap or violation, and it never removes one — WL only).  Skipping it
+  during trials is the cheapest structural win — but a forward-restore
+  commit would then commit an untightened layout, so tighten-skipped
+  commits must route through the legacy re-run (one full solve per
+  commit; still net-positive at ~20 rejected trials per commit).
+- **emit_bit_vias (2.9s) is pure output**: the stage-b metric
+  (num_unplaced) is computed by place + cull; vias are never read by a
+  trial.  Same commit caveat as tighten.  bit_spans must stay (the cull
+  reads adjusted spans).
+- **The safety net (corner 12.4 + repair 8.7) outweighs the core
+  fixpoint (14.2)** — early-abort budgets (stop a trial's solve once the
+  overlap count provably reaches the current metric) would truncate
+  exactly these tail passes on the ~95% of trials that are rejections.
+- context/extract are negligible: the fixed-context single-bundle screen
+  (`LayerSolver::repack_members`) remains the headline multiplier; these
+  numbers say its cheap-trial cost would be dominated by ONE layer's
+  placement, i.e. milliseconds.
