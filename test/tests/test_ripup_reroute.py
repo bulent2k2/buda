@@ -942,6 +942,21 @@ def test_results_carry_per_pass_profile():
     assert all(v >= 0.0 for v in dps.values()), dps
 
 
+def test_pass_profile_survives_python_result_merges():
+    """The bottom-up DNUTS path builds a MERGED DetailedNUTSResult in Python
+    (Codex #289): pass_seconds must be assignable so the merge can carry the
+    summed profile — otherwise a bottom-up stage-b trial charges the dnuts
+    wall with no dnuts.* buckets, a misleading gap in the profiling data."""
+    import buda
+    r = buda.DetailedNUTSResult()
+    r.pass_seconds = {'place': 1.5, 'vias': 0.5}
+    assert dict(r.pass_seconds) == {'place': 1.5, 'vias': 0.5}
+    n = buda.NUTSResult()
+    n.pass_seconds = {'fixpoint': 2.0}
+    n.n_solves = 3
+    assert dict(n.pass_seconds) == {'fixpoint': 2.0} and n.n_solves == 3
+
+
 def test_canned_stage_b_negotiate_clears_open():
     """Stage-b negotiation on the canned fixture (item 1 v2a): injecting the
     open segment's window teaches the width-blind planner about the dead band,

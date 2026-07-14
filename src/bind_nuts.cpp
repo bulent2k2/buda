@@ -151,8 +151,10 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("num_overlaps",       &NUTSResult::num_overlaps)
         .def_readwrite("overlaps_per_layer", &NUTSResult::overlaps_per_layer)
         // Per-pass solve profile (RR round-3 Phase 0) — observation only.
-        .def_readonly("pass_seconds",        &NUTSResult::pass_seconds)
-        .def_readonly("n_solves",            &NUTSResult::n_solves)
+        // readwrite: Python-side result MERGES (the bottom-up paths build
+        // combined results) must be able to sum and reassign the profile.
+        .def_readwrite("pass_seconds",       &NUTSResult::pass_seconds)
+        .def_readwrite("n_solves",           &NUTSResult::n_solves)
         .def_readwrite("dogleg_topologies",   &NUTSResult::dogleg_topologies)
         .def_readwrite("dogleg_seg_layers",   &NUTSResult::dogleg_seg_layers)
         .def_readwrite("dogleg_seg_net_pull", &NUTSResult::dogleg_seg_net_pull)
@@ -315,7 +317,9 @@ void bind_nuts(py::module_& m) {
         .def_readwrite("num_unplaced", &DetailedNUTSResult::num_unplaced)
         .def_readwrite("num_keepout_bits", &DetailedNUTSResult::num_keepout_bits)
         // Per-pass profile (RR round-3 Phase 0) — observation only.
-        .def_readonly("pass_seconds",      &DetailedNUTSResult::pass_seconds);
+        // readwrite: the bottom-up DNUTS path merges two engine results in
+        // Python and must carry the summed profile (Codex #289).
+        .def_readwrite("pass_seconds",     &DetailedNUTSResult::pass_seconds);
 
     py::class_<DetailedNUTSEngine>(m, "DetailedNUTSEngine")
         .def(py::init<const RoutingGridStack&>())

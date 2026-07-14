@@ -1091,6 +1091,14 @@ class NutsFlowMixin:
                                    + r2.num_unplaced)
             merged.num_keepout_bits = (r1.num_keepout_bits
                                        + r2.num_keepout_bits)
+            # Carry the per-pass profile through the merge (Codex #289):
+            # without it a bottom-up stage-b trial charges the dnuts WALL
+            # but contributes no dnuts.* pass buckets — a misleading gap in
+            # the round-3 profiling data.
+            pp = dict(r1.pass_seconds)
+            for k, v in r2.pass_seconds.items():
+                pp[k] = pp.get(k, 0.0) + v
+            merged.pass_seconds = pp
             self.detailed_result = merged
             print(f"[BottomUp] DNUTS: {len(r1.net_segments)} reference "
                   f"bit(s) solved once, {len(copies)} copied to "
