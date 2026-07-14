@@ -48,6 +48,10 @@ class EditMixin:
             # at its index for run_planner to re-evaluate; _reset_doglegs drops this
             # appended slot.  A re-solve (run_nuts again, no re-plan) overwrites the
             # same slot rather than appending a duplicate.
+            # LOAD-BEARING: appending means the adopted slot is always the LAST
+            # index — ripup's _rr_restore depends on it (its re-grow insert and
+            # dl_cand overwrite are exact only for an end slot, asserted there).
+            # Do not change adoption to mid-pool insertion without updating both.
             slot = self._dogleg_slot.get(bid)
             if slot is not None and 0 <= slot < len(cands):
                 cands[slot] = dl[bid]          # re-solve: overwrite the same slot

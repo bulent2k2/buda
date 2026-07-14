@@ -268,6 +268,17 @@ class RipupMixin:
                 topo = snap['dl_cand'].get(bid)
                 if slot is not None and topo is not None \
                         and 0 <= slot <= len(cands):
+                    # INVARIANT (shared with _adopt_doglegs, which appends —
+                    # "never overwrite the original in place" — so the
+                    # adopted slot is always the LAST index): end-deletion
+                    # shifts nothing and re-adoption re-appends to the same
+                    # position, which is what makes this insert and the
+                    # dl_cand overwrite below exact.  Mid-pool adoption
+                    # would silently mis-place both restores — trip loudly
+                    # instead.
+                    assert slot == len(cands), \
+                        f"dogleg slot {slot} is not the end slot " \
+                        f"({len(cands)}) — _adopt_doglegs no longer appends?"
                     cands.insert(slot, topo)
                     w.input.candidates = cands
                     cands = w.input.candidates
