@@ -372,3 +372,32 @@ What the numbers say about the round-3 candidates:
   (`LayerSolver::repack_members`) remains the headline multiplier; these
   numbers say its cheap-trial cost would be dominated by ONE layer's
   placement, i.e. milliseconds.
+
+
+## RR efficiency round 3 — fast trials (metric-neutral pass skipping, 2026-07-14)
+
+Shipped as the round's first lever (default on; `no_fast_trials` opts out):
+stage-a trials skip `tighten_pulls` (overlap-non-increasing by its per-move
+guard → the trial metric is an UPPER BOUND: accepts sound, rejections rarely
+spurious), stage-b trials skip via emission (pure output, metric identical).
+Commits always re-run the full pipeline (fast trials take no forward
+snapshots), so `m_true <= m_skip < cur` guarantees every commit strictly
+improves the TRUE metric and the committed route is a full-pipeline state.
+
+Measured (this host, A/B on vs `no_fast_trials`):
+
+    mix / slowdown_rnr / big2:  byte-identical trajectories and endpoints
+    bigHalf (rr enabled):       32.0s vs 87.9s, same 0/0 endpoint
+      - direct per-solve savings: stage-b dnuts 34.6ms vs 40.0ms (-13%,
+        the vias skip); stage-a solves skip tighten (~19% of a solve)
+      - the REST of the gap is a trajectory effect: fast trials' spurious
+        rejections changed which improving move was found first (23 vs 16
+        stage-a trials), and the divergent path needed 123 vs 454 stage-b
+        trials to the same clean endpoint.  The effect can swing either
+        way per design; the contract (strict true-metric improvement per
+        commit) holds on every path.
+
+Follow-on levers, per the Phase 0 profile: early-abort budgets in the trial
+solve (the corner+repair tail outweighs the fixpoint — biggest effect on the
+~95% rejected trials), then the fixed-context single-bundle screen
+(`LayerSolver::repack_members`) as the headline multiplier.

@@ -165,6 +165,7 @@ void bind_nuts(py::module_& m) {
     py::class_<NUTSEngine>(m, "NUTSEngine")
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
+        .def("set_skip_tighten",      &NUTSEngine::set_skip_tighten)
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)
         .def("add_fixed_segments",    &NUTSEngine::add_fixed_segments,
              py::arg("segs"))
@@ -325,7 +326,8 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const RoutingGridStack&>())
         .def("add_fixed_bits", &DetailedNUTSEngine::add_fixed_bits,
              py::arg("bits"))
-        .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"));
+        .def("run", &DetailedNUTSEngine::run, py::arg("bus_segments"),
+             py::arg("emit_vias") = true);
 
     m.def("offset_net_segment", &offset_net_segment,
           py::arg("ns"), py::arg("dx"), py::arg("dy"),

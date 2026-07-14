@@ -130,7 +130,7 @@ bool DetailedNUTSEngine::signals_contiguous(
 // ---------------------------------------------------------------------------
 
 DetailedNUTSResult DetailedNUTSEngine::run(
-        const std::vector<BusSegment>& bus_segs) const {
+        const std::vector<BusSegment>& bus_segs, bool emit_vias) const {
     // Per-pass profiling (RR round-3 Phase 0) — observation only.
     using pclock = std::chrono::steady_clock;
     DetailedNUTSResult result;
@@ -151,7 +151,10 @@ DetailedNUTSResult DetailedNUTSEngine::run(
     // so the opens feed the stage-b healing machinery.
     cull_keepout_crossers(result);
     charge("keepout_cull");
-    emit_bit_vias(bus_segs, result);
+    // Fast-trial mode: vias are pure output (the metric is placed by
+    // place + cull), so an RR trial may skip them — see the header.
+    if (emit_vias)
+        emit_bit_vias(bus_segs, result);
     charge("vias");
     return result;
 }

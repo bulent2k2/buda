@@ -129,11 +129,21 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
     # is max_iter.
     use_edge_candidates = "use_edge_candidates" in args
     use_global = "no_global" not in args
-    nums = [a for a in args if a not in ("use_edge_candidates", "no_global")]
+    # Fast trials (round 3): default on; `no_fast_trials` opts out (trials
+    # then run the full pipeline, the pre-round-3 behavior), `fast_trials`
+    # forces on.  Commits always re-run full either way.
+    fast_trials = None
+    if "no_fast_trials" in args:
+        fast_trials = False
+    elif "fast_trials" in args:
+        fast_trials = True
+    nums = [a for a in args if a not in ("use_edge_candidates", "no_global",
+                                         "fast_trials", "no_fast_trials")]
     max_iter = int(nums[0]) if nums else _RR_DEFAULT_MAX_ITER
     session._ripup_reroute(max_iter=max_iter,
                            use_edge_candidates=use_edge_candidates,
-                           use_global=use_global)
+                           use_global=use_global,
+                           fast_trials=fast_trials)
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):

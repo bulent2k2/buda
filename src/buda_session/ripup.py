@@ -30,9 +30,9 @@ import time
 
 import buda
 
-from .util import (_RR_DEFAULT_MAX_ITER, _RR_GLOBAL_MAX_TRIALS,
-                   _RR_GLOBAL_MOVES_PER_OCC, _RR_GLOBAL_TOP_K,
-                   _RR_MAX_CANDIDATES_PER_BUNDLE)
+from .util import (_RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
+                   _RR_GLOBAL_MAX_TRIALS, _RR_GLOBAL_MOVES_PER_OCC,
+                   _RR_GLOBAL_TOP_K, _RR_MAX_CANDIDATES_PER_BUNDLE)
 
 
 class RipupMixin:
@@ -377,14 +377,18 @@ class RipupMixin:
                 w.plan.seg_layers = list(asn.seg_layers)
                 w.plan.seg_perp = list(asn.seg_perp)
 
-    def _run_nuts_internal(self):
+    def _run_nuts_internal(self, skip_tighten=False):
         """Solve abstract NUTS for the current plan WITHOUT the run_nuts
         command's reporting/persistence (nuts-log write, diagnostics, BDB
         persist + route-snapshot hash).  Used by ripup_reroute reruns: nearly
         every trial result is discarded, and _checkpoint_routing persists the
-        final accepted state once at the end."""
+        final accepted state once at the end.  skip_tighten (fast trials,
+        stage a only): the solve skips the WL-only tighten_pulls pass, whose
+        overlap count is provably non-increasing — the trial metric is then
+        an UPPER BOUND, so accepts stay sound (commits re-run full)."""
         nuts = buda.NUTSEngine(self.fp, self.layers)
         nuts.set_track_pitch(self._nuts_pitch)
+        nuts.set_skip_tighten(skip_tighten)
         self._inject_bottom_up_fixed(nuts)
         if self.planner is not None:
             nuts.set_extra_grid_points(
@@ -394,7 +398,7 @@ class RipupMixin:
             self.nuts_result = nuts.run(self.bundles)
         self._adopt_doglegs()
 
-    def _rr_rerun(self, stage, target_bid=None):
+    def _rr_rerun(self, stage, target_bid=None, full=False):
         """Silently re-run planner + NUTS (+ DNUTS for stage b).
 
         When `target_bid` names the one bundle a trial moved, the replan is
@@ -448,7 +452,10 @@ class RipupMixin:
                     self.do_command(f"run_planner {self._planner_iterations}")
                 self._rr_t_add('replan', time.perf_counter() - t0)
                 t0 = time.perf_counter()
-                self._run_nuts_internal()
+                fast = (getattr(self, '_rr_fast_trials', False)
+                        and not full)
+                self._run_nuts_internal(
+                    skip_tighten=(fast and stage == 'a'))
                 self._rr_t_add('nuts', time.perf_counter() - t0)
                 self._rr_t_add_passes('nuts', self.nuts_result.pass_seconds)
                 # Dirty set for the scoped per-trial restore: the incremental
@@ -463,7 +470,8 @@ class RipupMixin:
                 if stage == 'b':
                     t0 = time.perf_counter()
                     self._run_detailed_nuts(
-                        bit_order=self._detailed_bit_order)
+                        bit_order=self._detailed_bit_order,
+                        emit_vias=not fast)
                     self._rr_t_add('dnuts', time.perf_counter() - t0)
                     self._rr_t_add_passes(
                         'dnuts', self.detailed_result.pass_seconds)
@@ -670,7 +678,9 @@ class RipupMixin:
                         return None, trials
                     m = self._rr_guarded_move(w, ('idx', tidx), old_tidx,
                                               stage, metric, snap)
-                    fwd = self._rr_snapshot() if m < cur else None
+                    fwd = (self._rr_snapshot()
+                           if m < cur and not getattr(
+                               self, '_rr_fast_trials', False) else None)
                     self._rr_restore(snap, only=self._rr_dirty)
                     trials += 1
                     if m < cur:
@@ -739,7 +749,7 @@ class RipupMixin:
                     add_seg(si)
         return eids
 
-    def _rr_apply_move(self, w, move, sel, stage, metric):
+    def _rr_apply_move(self, w, move, sel, stage, metric, full=False):
         """Apply a ripup move + re-run the pipeline; return the metric (or None
         if the move is an invalid flip that changed nothing).  Two kinds:
           ('idx', tidx) — pin candidate tidx (the wrapper's index alternate).
@@ -748,7 +758,7 @@ class RipupMixin:
             and far-endpoint taps (only the internal bend moves), so only
             seg_conns needs re-deriving (annotate_seg_conns — no fp, hier-safe)."""
         if move[0] == 'idx':
-            return self._rr_trial(w, move[1], stage, metric)
+            return self._rr_trial(w, move[1], stage, metric, full=full)
         cands = w.input.candidates
         if not (0 <= sel < len(cands)):
             return None
@@ -756,7 +766,7 @@ class RipupMixin:
         if not buda.flip_mst_edge(cands[sel], move[1], h, v, self.fp):
             return None                          # alt bend on an obstacle: no move
         buda.annotate_seg_conns(cands[sel])
-        return self._rr_trial(w, sel, stage, metric)
+        return self._rr_trial(w, sel, stage, metric, full=full)
 
     def _rr_guarded_move(self, w, move, old_tidx, stage, metric, snap):
         """_rr_apply_move with exception hygiene (#286 retrospective note):
@@ -807,7 +817,7 @@ class RipupMixin:
         return True
 
 
-    def _rr_trial(self, w, tidx, stage, metric):
+    def _rr_trial(self, w, tidx, stage, metric, full=False):
         """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
         w.plan.selected_topology_index = tidx
         w.input.topology_pinned = True
@@ -821,7 +831,7 @@ class RipupMixin:
             w.plan.seg_net_pull = []
             w.plan.seg_slide_lo = []
             w.plan.seg_slide_hi = []
-        self._rr_rerun(stage, target_bid=bid)
+        self._rr_rerun(stage, target_bid=bid, full=full)
         return metric()
 
     def _open_segments(self):
@@ -1047,7 +1057,8 @@ class RipupMixin:
                   f"({accepted} iteration(s) accepted).")
 
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
-                       use_edge_candidates=False, use_global=True):
+                       use_edge_candidates=False, use_global=True,
+                       fast_trials=None):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -1059,6 +1070,11 @@ class RipupMixin:
             print("Error: ripup_reroute needs run_nuts (stage a) or "
                   "run_detailed_nuts (stage b) to have run first.")
             return
+        # Fast trials (round 3): trials skip metric-neutral passes; commits
+        # re-run full.  Scoped to THIS run (reset at run end, and every run
+        # re-sets it at entry) so it cannot leak into other flows.
+        self._rr_fast_trials = (_RR_FAST_TRIALS_DEFAULT
+                                if fast_trials is None else fast_trials)
 
         m0 = metric()
         if self._rr_m_primary(m0) == 0:
@@ -1162,7 +1178,11 @@ class RipupMixin:
                                           or m < cand_best[0]))
                             or m == zero)
                     fwd = None
-                    if take and move[0] == 'idx':
+                    # Fast trials skip metric-neutral passes, so the trial
+                    # state is NOT the committable full-pipeline state — the
+                    # commit must take the legacy full re-run (no fwd).
+                    if (take and move[0] == 'idx'
+                            and not getattr(self, '_rr_fast_trials', False)):
                         fwd = self._rr_snapshot()
                     self._rr_undo_move(w, move, old_tidx)
                     self._rr_restore(snap, only=self._rr_dirty)
@@ -1221,7 +1241,7 @@ class RipupMixin:
                 self._rr_restore(fwd)
             else:
                 self._rr_apply_move(self._rr_wrapper(bid), move, old_t,
-                                    stage, metric)
+                                    stage, metric, full=True)
             # Recharge after BOTH commit paths: the forward restore never
             # touched the cuts, and even the legacy re-run's cuts predate
             # _adopt_doglegs when the winning trial re-solved a dogleg in
@@ -1246,6 +1266,7 @@ class RipupMixin:
         if _pp:
             print(f"[ripup_reroute] solve passes: {_pp}", flush=True)
         self._rr_t = None
+        self._rr_fast_trials = False
 
         # Commit the FINAL state: the trials/commits above re-ran the
         # planner/NUTS(/DNUTS) through the internal no-persist helpers

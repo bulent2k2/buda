@@ -199,6 +199,16 @@ public:
     // Minimum gap between adjacent placed buses (default 1.0 layout unit).
     void set_track_pitch(double pitch);
 
+    // Fast-trial mode (RR round 3): skip the final tighten_pulls pass.  The
+    // pass is WL-only and provably overlap-NON-INCREASING (its per-move guard
+    // reverts any move where find_overlaps grows), so a solve without it
+    // reports an overlap count that is an UPPER BOUND on the full solve's —
+    // an RR trial accepted on the skipped metric is sound (the true state is
+    // at least as good), a rejection may rarely be spurious.  A COMMIT must
+    // therefore re-run the full pipeline (the session enforces this).
+    // Default off: run() is byte-identical unless explicitly enabled.
+    void set_skip_tighten(bool v) { skip_tighten_ = v; }
+
     // Supply additional Hanan grid coordinates (e.g. segment endpoints outside
     // the floorplan bounding box) that the NUTSEngine should use when deriving
     // perpendicular intervals.  Must be called before run() / rerun_layer().
@@ -231,6 +241,7 @@ private:
     const Floorplan& floorplan_;
     const LayerStack& layers_;
     double track_pitch_ = 1.0;
+    bool skip_tighten_ = false;            // fast-trial mode (see setter)
     std::vector<int> extra_x_, extra_y_;   // additional grid points from CongestionPlanner
 
     // User keepouts plus implicit solid-leaf-cell keepouts on every non-TOP

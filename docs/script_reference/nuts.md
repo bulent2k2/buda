@@ -215,6 +215,21 @@ other instances.
   Enable it only when you want to explore edge flips. See
   [MST edge realization](../internal/mst_edge_realization.md).
 
+**Fast trials (round 3, default on; `no_fast_trials` opts out, `fast_trials`
+forces on).** Trials skip metric-neutral passes: stage a skips the WL-only
+`tighten_pulls` (overlap-NON-increasing by its per-move guard, so the trial
+metric is an UPPER BOUND — an accept implies the true state improves at least
+as much; only rejections can rarely be spurious), stage b skips per-bit via
+emission (pure output; the metric is identical).  COMMITS always re-run the
+full pipeline (fast trials take no forward snapshots), so every committed
+route is a full-pipeline state and every commit strictly improves the TRUE
+metric.  The choice among improving moves can differ from a full-trial run
+(first-improving order): measured on the rr corpus — mix / slowdown_rnr /
+big2 byte-identical; bigHalf reaches the same 0/0 endpoint by a different
+trajectory at 32s vs 88s (123 vs 454 stage-b trials; per-solve savings are
+the stage-b DNUTS −13% and the stage-a tighten skip — the rest of that gap
+is the trajectory).
+
 **Global-occupant pass (default on; `no_global` disables).** When the contender
 scan stalls above zero — every contender's every move tried, none improved —
 one bounded pass widens the search to the **band occupants**: for each

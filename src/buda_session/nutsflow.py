@@ -1012,8 +1012,12 @@ class NutsFlowMixin:
         self.planner.set_routing_grid(self.routing_grid)
         self.planner.set_capacity_mode(buda.CapacityMode.SIGNAL_TRACKS)
 
-    def _run_detailed_nuts(self, bit_order="LO_HI"):
-        """Execute bit-level track assignment using DetailedNUTSEngine."""
+    def _run_detailed_nuts(self, bit_order="LO_HI", emit_vias=True):
+        """Execute bit-level track assignment using DetailedNUTSEngine.
+
+        emit_vias=False (RR fast trials): skip the per-bit via emission —
+        pure output, never read by the stage-b metric, so the trial metric
+        is identical; the commit re-runs with vias on."""
         if self.nuts_result is None or self.routing_grid is None:
             return None
 
@@ -1036,7 +1040,7 @@ class NutsFlowMixin:
         if bu_plan is None:
             engine = buda.DetailedNUTSEngine(self.routing_grid)
             with buda.ostream_redirect():
-                self.detailed_result = engine.run(bus_segs)
+                self.detailed_result = engine.run(bus_segs, emit_vias)
         else:
             ref_ids, copy_specs, skip_ids = bu_plan
             ref_segs  = [b for b in bus_segs if b.bundle_id in ref_ids]
@@ -1047,7 +1051,7 @@ class NutsFlowMixin:
                         for ts in self._bottom_up_fixed_segments()}
             eng1 = buda.DetailedNUTSEngine(self.routing_grid)
             with buda.ostream_redirect():
-                r1 = eng1.run(ref_segs)
+                r1 = eng1.run(ref_segs, emit_vias)
             # Per-instance copies of the reference bits + vias.  Unplaced
             # reference bits have no rows to copy, so each copy inherits the
             # reference's shortfall in the honest unplaced count.
@@ -1081,7 +1085,7 @@ class NutsFlowMixin:
             eng2 = buda.DetailedNUTSEngine(self.routing_grid)
             eng2.add_fixed_bits(list(r1.net_segments) + copies)
             with buda.ostream_redirect():
-                r2 = eng2.run(rest_segs)
+                r2 = eng2.run(rest_segs, emit_vias)
             merged = buda.DetailedNUTSResult()
             merged.net_segments = (list(r1.net_segments) + copies
                                    + list(r2.net_segments))

@@ -131,7 +131,12 @@ public:
     // bits off them.  Reservations keep the same-bundle sharing exemption (a
     // fixed bit never blocks its own bundle).  Must be called before run().
     void add_fixed_bits(const std::vector<NetSegment>& bits);
-    DetailedNUTSResult run(const std::vector<BusSegment>& bus_segments) const;
+    // emit_vias=false (RR fast trials): skip the per-bit via emission — pure
+    // OUTPUT, never read by the stage-b metric (num_unplaced is computed by
+    // place + cull), so the trial metric is IDENTICAL; a commit must re-run
+    // with vias on (the session enforces this).
+    DetailedNUTSResult run(const std::vector<BusSegment>& bus_segments,
+                           bool emit_vias = true) const;
 
 private:
     const RoutingGridStack& stack_;
