@@ -232,6 +232,13 @@ public:
     void inject_band_demand(int layer_id, double span_lo, double span_hi,
                             double perp_lo, double perp_hi, double amount);
     void clear_injected_demand();
+    // Rebuild band usage from every wrapper's COMMITTED assignment (charging
+    // only, no scoring) + the injected demand.  For callers that changed
+    // wrapper state without going through a replan — e.g. ripup's
+    // commit-by-forward-restore — so direct cut readers (the visualizer's
+    // congestion overlay via get_cuts) see the committed route, not the last
+    // trial's recharge.  No-op before build_congestion_map.
+    void recharge_committed(const std::vector<BundleWrapper>& bundles);
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
     const std::vector<int>& get_x_grid() const { return x_grid_; }
     const std::vector<int>& get_y_grid() const { return y_grid_; }

@@ -548,6 +548,13 @@ def _full_wrapper_state(s):
     return st
 
 
+def _cut_usages(s):
+    """Per-band planner cut usage — what the visualizer's congestion overlay
+    draws directly from get_cuts() (Codex #286: a forward-restore commit must
+    leave the committed route here, not the last rejected trial)."""
+    return [list(c.band_usage) for c in s.planner.get_cuts()]
+
+
 def _force_legacy_commit(monkeypatch):
     """Disable commit-by-forward-restore so the winning move commits via the
     legacy pipeline re-run (the pre-L5 behavior)."""
@@ -568,6 +575,7 @@ def test_commit_by_forward_restore_matches_rerun_commit_stage_a(monkeypatch):
         s_leg.do_command("ripup_reroute")
     assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
     assert _full_wrapper_state(s_fwd) == _full_wrapper_state(s_leg)
+    assert _cut_usages(s_fwd) == _cut_usages(s_leg)
 
 
 def test_commit_by_forward_restore_matches_rerun_commit_stage_b(monkeypatch):
@@ -585,6 +593,7 @@ def test_commit_by_forward_restore_matches_rerun_commit_stage_b(monkeypatch):
             == s_leg.detailed_result.num_unplaced == 0)
     assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
     assert _full_wrapper_state(s_fwd) == _full_wrapper_state(s_leg)
+    assert _cut_usages(s_fwd) == _cut_usages(s_leg)
 
 
 def test_ripup_prints_timing_summary():

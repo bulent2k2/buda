@@ -78,11 +78,14 @@ residual is the per-trial FULL solves: bigHalf stage a `nuts 10.6s/34`
   dogleg candidate (or moved a dogleg slot) still commits via the legacy
   re-run, because `_rr_restore` can trim a candidate pool but never re-grow
   it; flip moves keep the legacy path too (their in-place geometry is not
-  snapshot-covered).  Invariant: after a forward-restore commit the planner's
-  internal cut usage reflects the last REJECTED trial — harmless, every
-  consumer (replan_bundle, negotiate) recharges from committed wrapper
-  assignments.  Exactness pinned by A/B tests (forward vs legacy commit:
-  identical wrapper state + metric, stages a and b).
+  snapshot-covered).  After the forward restore the planner's cut usage is
+  explicitly recharged from the restored committed assignments
+  (`CongestionPlanner::recharge_committed`, the public no-scoring recharge):
+  replanning consumers recharge anyway, but DIRECT cut readers — the
+  visualizer's congestion overlay reads `get_cuts()` — must see the
+  committed route, not the last rejected trial's recharge (Codex #286).
+  Exactness pinned by A/B tests (forward vs legacy commit: identical
+  wrapper state + metric + per-band cut usage, stages a and b).
 - **Scoped per-trial restore:** `_rr_restore(snap, only=dirty)` rewrites only
   the wrappers a trial dirtied — the incremental replan mutates just its
   target, plus any dogleg-adopted bundles (`_rr_rerun` collects

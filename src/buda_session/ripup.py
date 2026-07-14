@@ -936,16 +936,18 @@ class RipupMixin:
             m_new, bid, old_t, move, fwd = best
             # Commit.  An index move whose trial appended no dogleg candidate
             # commits by restoring the FORWARD snapshot captured at trial time
-            # — the exact winning state, no pipeline re-run.  (The planner's
-            # internal cut usage then reflects the last REJECTED trial's
-            # recharge, not the committed one; harmless, because every
-            # consumer — replan_bundle, negotiate — recharges from the
-            # committed wrapper assignments before planning.)  Flip moves and
-            # dogleg-appending trials take the legacy re-run: the flip's
-            # in-place geometry / the appended candidate are not
-            # forward-restorable (_rr_restore never re-grows a pool).
+            # — the exact winning state, no pipeline re-run.  The planner's
+            # cut usage is then explicitly recharged from the restored
+            # committed assignments: replanning consumers recharge anyway,
+            # but DIRECT cut readers (the visualizer's congestion overlay via
+            # get_cuts) must see the committed route, not the last rejected
+            # trial's recharge (Codex #286).  Flip moves and dogleg-appending
+            # trials take the legacy re-run: the flip's in-place geometry /
+            # the appended candidate are not forward-restorable (_rr_restore
+            # never re-grows a pool).
             if fwd is not None and self._rr_fwd_ok(snap, fwd):
                 self._rr_restore(fwd)
+                self.planner.recharge_committed(self.bundles)
             else:
                 self._rr_apply_move(self._rr_wrapper(bid), move, old_t,
                                     stage, metric)
