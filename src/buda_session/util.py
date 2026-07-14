@@ -24,6 +24,12 @@ import functools
 _RR_MAX_CANDIDATES_PER_BUNDLE = 8   # alternate candidates tried per contender / iter
 _RR_DEFAULT_MAX_ITER = 10           # outer-loop cap when no arg given
 
+# Global-occupant pass (runs at a stall; wishlist-ripup "global-overlap
+# re-route of NON-contended bundles").
+_RR_GLOBAL_TOP_K = 3                # band occupants ranked per contention site
+_RR_GLOBAL_MOVES_PER_OCC = 6        # index alternates tried per occupant
+_RR_GLOBAL_MAX_TRIALS = 36          # hard trial budget per stall
+
 
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).

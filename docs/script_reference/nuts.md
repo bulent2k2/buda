@@ -137,7 +137,7 @@ run_detailed_nuts hi_lo
 ### `ripup_reroute`
 
 ```
-ripup_reroute [max_iter] [use_edge_candidates]
+ripup_reroute [max_iter] [use_edge_candidates] [no_global]
 ```
 
 Feedback-driven rip-up & re-route. The congestion planner's band-capacity model is
@@ -150,7 +150,8 @@ the pipeline, and keeps only moves that reduce the metric.
 | Argument | Type | Default | Description |
 |---|---|---|---|
 | `max_iter` | int | `10` | Maximum number of outer hill-climb iterations (each commits at most one re-route). |
-| `use_edge_candidates` | flag | off | Also try the per-edge MST L/Z **flip** move-source (below) on contended MST candidates. Off by default. The two tokens are order-independent — `ripup_reroute 20 use_edge_candidates` and `ripup_reroute use_edge_candidates 20` are equivalent. |
+| `use_edge_candidates` | flag | off | Also try the per-edge MST L/Z **flip** move-source (below) on contended MST candidates. Off by default. |
+| `no_global` | flag | off | Disable the **global-occupant pass** (below), which otherwise runs when the contender scan stalls above zero. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
 
 **Two stages, auto-detected from pipeline state:**
 
@@ -213,6 +214,24 @@ other instances.
   index alternate always wins the commit — so leaving it off changes no routes.
   Enable it only when you want to explore edge flips. See
   [MST edge realization](../internal/mst_edge_realization.md).
+
+**Global-occupant pass (default on; `no_global` disables).** When the contender
+scan stalls above zero — every contender's every move tried, none improved —
+one bounded pass widens the search to the **band occupants**: for each
+remaining contention site (overlap rectangle / open segment window), the
+committed bundles holding the site's planner bands are ranked by their demand
+on exactly those bands (`CongestionPlanner::band_occupants`, the same victim
+ranking `negotiate_congestion`'s `replan_bundle_ripup` uses, exposed
+read-only), and each occupant's index alternates are trialed ranked against
+*the site's* location (the occupant itself is non-contended, so its own
+contention-derived ordering would be empty). A **non-contended** bundle
+holding the contended bands can be the global fix that no contender-derived
+move reaches — the big2 b61 class, where the winning candidate is even
+window-infeasible (STRICT-rejected at plan time; reachable because a pinned
+trial's replan ladder ends in BEST_EFFORT). Strict-improvement accept, top-3
+occupants per site, 6 moves per occupant, ≤36 trials per stall; a `GLOBAL`
+progress line marks the pass. Flows that never stall above zero are
+byte-identical with the pass on (the whole corpus today).
 
 **Notes:**
 - It is an explicit congestion-fix pass, so it may re-route any contended bundle —

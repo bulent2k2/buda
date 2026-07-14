@@ -119,16 +119,21 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
 
 
 def cmd_ripup_reroute(session, cmd, args, cmd_line):
-    # Usage: ripup_reroute [max_iter] [use_edge_candidates]
+    # Usage: ripup_reroute [max_iter] [use_edge_candidates] [no_global]
     # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;
     # else after run_nuts ⇒ drive down NUTS overlaps.
     # `use_edge_candidates` (off by default) toggles the per-edge MST L/Z
-    # flip move-source; the numeric token (any order) is max_iter.
+    # flip move-source; `no_global` disables the global-occupant pass that
+    # otherwise runs when the contender scan stalls above zero (the b61-class
+    # re-route of NON-contended band holders); the numeric token (any order)
+    # is max_iter.
     use_edge_candidates = "use_edge_candidates" in args
-    nums = [a for a in args if a != "use_edge_candidates"]
+    use_global = "no_global" not in args
+    nums = [a for a in args if a not in ("use_edge_candidates", "no_global")]
     max_iter = int(nums[0]) if nums else _RR_DEFAULT_MAX_ITER
     session._ripup_reroute(max_iter=max_iter,
-                        use_edge_candidates=use_edge_candidates)
+                           use_edge_candidates=use_edge_candidates,
+                           use_global=use_global)
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):

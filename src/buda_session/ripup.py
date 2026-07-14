@@ -29,7 +29,9 @@ import time
 
 import buda
 
-from .util import _RR_DEFAULT_MAX_ITER, _RR_MAX_CANDIDATES_PER_BUNDLE
+from .util import (_RR_DEFAULT_MAX_ITER, _RR_GLOBAL_MAX_TRIALS,
+                   _RR_GLOBAL_MOVES_PER_OCC, _RR_GLOBAL_TOP_K,
+                   _RR_MAX_CANDIDATES_PER_BUNDLE)
 
 
 class RipupMixin:
@@ -414,7 +416,7 @@ class RipupMixin:
                                   0.5 * (ts.interval_lo + ts.interval_hi)))
         return sites
 
-    def _rr_candidate_order(self, w, old_tidx, stage):
+    def _rr_candidate_order(self, w, old_tidx, stage, sites=None):
         """Alternate-candidate trial order for one contender (wishlist-ripup
         item 4 + QoR-measured class re-rank): candidates whose
         same-orientation segments sit FARTHEST from the bundle's measured
@@ -440,11 +442,21 @@ class RipupMixin:
         candidate BEFORE the cheap same-effect one, handing it the tie
         (mix.buda bundle 85: idx 26 over idx 5, +2% abstract WL at an equal
         metric).  With no sites the legacy first-N pool is returned (nothing
-        to rank by, no evidence to justify extra trials)."""
+        to rank by, no evidence to justify extra trials).
+
+        `sites` overrides the bundle's OWN contention sites (same
+        (is_horiz, perp_centre) shape): the global-occupant pass ranks a
+        NON-contended occupant's candidates against the overlap it holds
+        bands under — its own site list is empty by definition, and without
+        the override the beyond-window promotion (the reach to b61-class
+        window-infeasible candidates) would be lost.  None (the default)
+        keeps the derive-from-own-contention behavior byte-identically."""
         cap = _RR_MAX_CANDIDATES_PER_BUNDLE
         n = min(len(w.input.candidates), cap)
         idxs = [i for i in range(n) if i != old_tidx]
-        sites = self._rr_contention_centres(stage, w.input.original_bundle.id)
+        if sites is None:
+            sites = self._rr_contention_centres(stage,
+                                                w.input.original_bundle.id)
         if not sites:
             return idxs
         extras = [i for i in range(n, len(w.input.candidates)) if i != old_tidx]
@@ -472,6 +484,105 @@ class RipupMixin:
         by direction, mirroring _make_topo_gen)."""
         return (self.layers.get_top_layer(buda.LayerDir.HORIZONTAL),
                 self.layers.get_top_layer(buda.LayerDir.VERTICAL))
+
+    def _rr_global_sites(self, stage):
+        """Contention rectangles for the global-occupant pass, one per
+        measured failure: (layer, span_lo, span_hi, perp_lo, perp_hi).
+        Stage a: the NUTS overlap rectangles; stage b: the open segments'
+        placed windows — the same sites negotiate_congestion injects."""
+        sites = []
+        if self.nuts_result is None:
+            return sites
+        if stage == 'a':
+            for od in self.nuts_result.overlap_details:
+                sites.append((od.layer, od.span_lo, od.span_hi,
+                              od.perp_lo, od.perp_hi))
+        else:
+            ts_map = {(ts.bundle_id, ts.seg_idx): ts
+                      for ts in self.nuts_result.segments}
+            for bid, si, _missing, _exp in self._open_segments():
+                ts = ts_map.get((bid, si))
+                if ts is None:
+                    continue
+                sites.append((ts.layer,
+                              min(ts.span_lo, ts.span_hi),
+                              max(ts.span_lo, ts.span_hi),
+                              ts.interval_lo, ts.interval_hi))
+        return sites
+
+    def _rr_global_pass(self, stage, metric, snap, cur, exclude):
+        """Global-occupant pass (wishlist-ripup "global-overlap re-route of
+        NON-contended bundles" — the big2 b61 class).  Runs only when the
+        normal first-improving contender scan stalls above zero: a bundle
+        that appears in no overlap/open can still HOLD the contended bands,
+        and moving IT can be the global fix the contended bundles' own
+        alternates cannot reach.
+
+        Per remaining contention site: rank the committed bundles by their
+        demand on the site's bands (planner.band_occupants — the
+        replan_bundle_ripup victim ranking, exposed read-only), and trial
+        each occupant's index alternates ranked against THE SITE's location
+        (`sites=` override — the occupant itself is non-contended, so its own
+        site list is empty and the beyond-window promotion would be lost).
+        A trial rides the existing pinned `_rr_trial` path, whose replan
+        ladder ends in BEST_EFFORT — so a window-infeasible candidate
+        (STRICT-rejected at plan time; exactly b61's winning TRUNK_H+MST) is
+        reachable, and it commits only on a STRICTLY better MEASURED metric.
+
+        This is the complement of negotiate's `replan_bundle_ripup` victim
+        stage, not a duplicate: that stage triggers only for a CONTENDED,
+        STRICT-infeasible target, moves victims via unpinned-STRICT replans
+        (window-infeasible candidates unreachable by construction), and
+        accepts on planner-model pair-feasibility; this pass is
+        measured-metric-driven, occupant-first, and pinned-trial.
+
+        Budgets: top-K occupants per site, M moves per occupant, and a hard
+        per-stall trial cap.  First strict improvement wins (the main
+        scan's philosophy at the main scan's trial cost).  Returns
+        (cand_best-or-None, trials) in the main loop's tuple shape."""
+        if self.planner is None:
+            return None, 0
+        sites = self._rr_global_sites(stage)
+        if not sites:
+            return None, 0
+        print(f"[ripup_reroute] GLOBAL pass: contenders stalled at "
+              f"{self._rr_m_str(cur)} — ranking band occupants of "
+              f"{len(sites)} contention site(s)", flush=True)
+        h_layers = set(self.layers.get_layer_ids_by_dir(
+            buda.LayerDir.HORIZONTAL))
+        trials = 0
+        tried = set()
+        for (layer, s_lo, s_hi, p_lo, p_hi) in sites:
+            occ = self.planner.band_occupants(
+                self.bundles, layer, s_lo, s_hi, p_lo, p_hi,
+                _RR_GLOBAL_TOP_K)
+            site = [(layer in h_layers, 0.5 * (p_lo + p_hi))]
+            for bid, _demand in occ:
+                if bid in exclude or bid in tried:
+                    continue
+                w = self._rr_wrapper(bid)
+                if (w is None or w.hier.locked
+                        or len(w.input.candidates) < 2):
+                    continue
+                tried.add(bid)
+                old_tidx = snap['wrap'][bid][0]
+                order = self._rr_candidate_order(w, old_tidx, stage,
+                                                 sites=site)
+                for tidx in order[:_RR_GLOBAL_MOVES_PER_OCC]:
+                    if trials >= _RR_GLOBAL_MAX_TRIALS:
+                        return None, trials
+                    m = self._rr_trial(w, tidx, stage, metric)
+                    fwd = self._rr_snapshot() if m < cur else None
+                    self._rr_restore(snap, only=self._rr_dirty)
+                    trials += 1
+                    if m < cur:
+                        print(f"[ripup_reroute] GLOBAL: occupant bundle "
+                              f"{bid} improves {self._rr_m_str(cur)}->"
+                              f"{self._rr_m_str(m)} "
+                              f"(topo {old_tidx + 1}->{tidx + 1})",
+                              flush=True)
+                        return (m, bid, old_tidx, ('idx', tidx), fwd), trials
+        return None, trials
 
     def _rr_flip_edges(self, w, stage):
         """MST edge_ids of w's SELECTED candidate that a current contention touches
@@ -785,7 +896,7 @@ class RipupMixin:
                   f"({accepted} iteration(s) accepted).")
 
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
-                       use_edge_candidates=False):
+                       use_edge_candidates=False, use_global=True):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -928,6 +1039,15 @@ class RipupMixin:
                     break
                 print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
                       f"bundle {bid} — no improvement", flush=True)
+            if best is None and use_global:
+                # Normal contenders stalled above zero: bounded global pass
+                # over the contention sites' band OCCUPANTS (bundles that hold
+                # the contended bands without being contended themselves — the
+                # b61 class no contender-derived move can fix).  Opt out with
+                # the `no_global` keyword.
+                best, g_trials = self._rr_global_pass(stage, metric, snap,
+                                                      cur, set(contenders))
+                n_trials += g_trials
             if best is None:
                 print(f"[ripup_reroute] iter {it}: no improving re-route "
                       f"(metric={self._rr_m_str(cur)}) — stop.")

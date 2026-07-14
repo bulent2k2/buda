@@ -1610,6 +1610,43 @@ void CongestionPlanner::clear_injected_demand() {
     injected_.clear();
 }
 
+std::vector<std::pair<int, double>> CongestionPlanner::band_occupants(
+        const std::vector<BundleWrapper>& bundles, int layer_id,
+        double span_lo, double span_hi,
+        double perp_lo, double perp_hi, int top_k) const {
+    std::vector<std::pair<int, double>> out;
+    if (cuts_.empty() || top_k <= 0) return out;
+    const Layer* layer = layers_.get_layer(layer_id);
+    if (!layer) return out;
+    // The same synthetic rectangle->bands mapping inject_band_demand uses.
+    const int perp_c = (int)std::llround(0.5 * (perp_lo + perp_hi));
+    const int s_lo   = (int)std::llround(span_lo);
+    const int s_hi   = (int)std::llround(span_hi);
+    Segment seg;
+    if (layer->dir == LayerDir::HORIZONTAL) {
+        seg.start = Point{s_lo, perp_c};
+        seg.end   = Point{s_hi, perp_c};
+    } else {
+        seg.start = Point{perp_c, s_lo};
+        seg.end   = Point{perp_c, s_hi};
+    }
+    seg.layer_hint = layer_id;
+    std::set<std::pair<int,int>> bands;
+    for_each_band(seg, layer_id, perp_c, [&](int ci, int b) {
+        bands.insert({ci, b});
+    });
+    if (bands.empty()) return out;
+    for (const auto& bw : bundles) {
+        if (bw.hier.locked || !has_committed_plan_(bw)) continue;
+        double d = plan_band_overlap(bw, fixed_plan_of_(bw), bands);
+        if (d > 0.0) out.push_back({bw.input.original_bundle.id, d});
+    }
+    std::sort(out.begin(), out.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    if ((int)out.size() > top_k) out.resize(top_k);
+    return out;
+}
+
 void CongestionPlanner::apply_injected_(double sign) {
     for (const auto& [ci, b, amount] : injected_)
         if (ci >= 0 && ci < (int)cuts_.size())

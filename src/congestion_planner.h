@@ -239,6 +239,18 @@ public:
     // congestion overlay via get_cuts) see the committed route, not the last
     // trial's recharge.  No-op before build_congestion_map.
     void recharge_committed(const std::vector<BundleWrapper>& bundles);
+    // Rank committed bundles by their demand on the bands covered by a
+    // measured contention rectangle (the ripup global-occupant pass): map the
+    // rectangle onto (cut, band) pairs exactly as inject_band_demand does,
+    // score every committed, unlocked wrapper with plan_band_overlap on that
+    // set, and return the top_k (bundle_id, demand) pairs, demand descending.
+    // Read-only (no recharge — a heuristic ranking against the current cut
+    // state; the caller's trial measures reality).  Empty when the planner
+    // has no cuts yet.
+    std::vector<std::pair<int, double>> band_occupants(
+            const std::vector<BundleWrapper>& bundles, int layer_id,
+            double span_lo, double span_hi,
+            double perp_lo, double perp_hi, int top_k) const;
     const std::vector<GlobalCut>& get_cuts() const { return cuts_; }
     const std::vector<int>& get_x_grid() const { return x_grid_; }
     const std::vector<int>& get_y_grid() const { return y_grid_; }

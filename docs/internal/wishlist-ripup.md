@@ -235,20 +235,53 @@ move (a Z/dogleg that genuinely changes the footprint).  The original "remove
 the branch outright" proposal is superseded: the toggle preserves the
 exploration path at zero default cost.
 
-## Global-overlap re-route of NON-contended bundles — OPEN (bigger, riskier)
+## Global-overlap re-route of NON-contended bundles — ✅ IMPLEMENTED (the global-occupant pass)
 
-**What.** ripup only re-routes bundles that appear in an overlap; negotiate only
-re-plans the bundles of measured overlaps. But a *non-contended* bundle can hold
-bands whose re-route lowers the **total** overlap count. Measured example
-([`mst_edge_realization.md`](mst_edge_realization.md), #178): big2 bundle 61 is
-not itself contended, yet pinning it to its (window-infeasible, STRICT-rejected)
-`TRUNK_H+MST` candidate routes the whole design at **8 overlaps instead of 10** —
-a global win the greedy planner + contended-only ripup cannot see.
+**What (historical).** ripup only re-routed bundles that appear in an
+overlap; negotiate only re-plans the bundles of measured overlaps. But a
+*non-contended* bundle can hold bands whose re-route lowers the **total**
+overlap count. Measured example
+([`mst_edge_realization.md`](mst_edge_realization.md), #178): big2 bundle 61
+is not itself contended, yet pinning it to its (window-infeasible,
+STRICT-rejected) `TRUNK_H+MST` candidate routes the whole design at **8
+overlaps instead of 10** — a global win the greedy planner + contended-only
+ripup could not see.
 
-**Proposed (sketch).** After ripup/negotiate stall, add a bounded pass that, for
-each overlap's *band occupants* (not just the overlap's two bundles), trials a
-best-effort re-route (including window-infeasible MST candidates) and commits any
-that strictly lowers the global overlap count. High risk — it enlarges the ripup
-search and can churn — so it needs the full must-not-regress gate
-(test_flow_scripts goldens, big2 ≤ current, mix/tc3a clean) and careful cost
-control. Only worth it if the corpus shows several b61-class cases.
+**As built.** `_rr_global_pass` (`src/buda_session/ripup.py`), hooked at the
+stall point of `_ripup_reroute` — it runs ONLY when the normal
+first-improving contender scan finds nothing and the metric is nonzero, so
+every flow that reaches absolute zero (the whole corpus today) is
+structurally byte-identical.  Per remaining contention site (stage a:
+overlap rects; stage b: open segments' placed windows — negotiate's site
+set), the committed bundles holding the site's bands are ranked by
+`CongestionPlanner::band_occupants` — the rect→bands mapping of
+`inject_band_demand` composed with the `plan_band_overlap` victim ranking of
+`replan_bundle_ripup`, exposed as ONE read-only binding — and each
+occupant's index alternates are trialed ranked against *the site's* location
+(`_rr_candidate_order(sites=...)`: the occupant is non-contended, so its own
+contention-derived ordering would be empty and the beyond-window promotion —
+the reach to b61's window-infeasible candidate, commitable because a pinned
+trial's ladder ends in BEST_EFFORT — would be lost).  Strict-improvement
+accept, first improving occupant wins; budgets `_RR_GLOBAL_TOP_K=3` /
+`_RR_GLOBAL_MOVES_PER_OCC=6` / `_RR_GLOBAL_MAX_TRIALS=36` per stall.
+**Default on**, `no_global` keyword opts out (the churn risk the sketch
+worried about is contained by the stall-only trigger + strict accept +
+bounded budget; corpus verified byte-identical).
+
+**Differentiation from negotiate's `replan_bundle_ripup` victim stage**
+(kept explicit because they look similar): the victim stage triggers only
+for a CONTENDED, STRICT-infeasible target; victims replan via
+unpinned-STRICT (window-infeasible candidates unreachable by construction);
+accept is planner-model pair-feasibility.  The global pass is
+measured-metric-driven, occupant-first, pinned-trial — the complement.
+
+**Tests** (`test_ripup_reroute.py`): `band_occupants` ranking unit
+(holders positive, locked excluded, top_k), direct-drive pass mechanics
+(finds the improving occupant move, restores baseline, forward snapshot
+commits), stall-hook wiring + `no_global` gating, end-to-end clear on the
+canned occupant fixture, and `sites=None` byte-identity for
+`_rr_candidate_order`.  A fast-tier fixture where the pass is the ONLY
+reachable fix turned out not to exist at small scale — the
+junction-infeasibility contender source already reaches small designs'
+occupants — which is itself a finding: the pass's unique value is on large
+designs where junction signals are absent (the b61 class).
