@@ -921,6 +921,13 @@ class PersistMixin:
         """
         if self.bdb is None:
             return 0
+        if getattr(self, '_rr_in_trial', False):
+            # A ripup trial's full-replan fallback drives the run_planner
+            # COMMAND; its state is speculative and usually rejected — it
+            # must never reach the BDB (a load_pipeline resume would
+            # rehydrate it).  The accepted final state is persisted by
+            # _checkpoint_routing when the run commits moves.
+            return 0
         self.bdb.clear_expanded_bundles()          # idempotent re-plan
         # An id is an expanded per-instance wrapper ONLY if it came from the hier
         # expansion map — NOT merely because it's absent from the BDB (a flat flow

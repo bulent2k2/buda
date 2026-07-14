@@ -212,6 +212,16 @@ void bind_routing(py::module_& m) {
 
     py::class_<Topology>(m, "Topology")
         .def(py::init<>())
+        // Real copies for Python holders.  Element access on a bound
+        // vector member (def_readwrite getter = reference_internal) hands
+        // back a REFERENCE into the vector's storage — held across a
+        // size-changing reassignment of that vector it dangles (storage
+        // reallocates).  copy.copy() gives an independent Topology (the
+        // analysis cache is an immutable shared_ptr, safely shared).
+        .def("__copy__", [](const Topology& t) { return Topology(t); })
+        .def("__deepcopy__",
+             [](const Topology& t, py::dict) { return Topology(t); },
+             py::arg("memo"))
         .def_readwrite("type",                  &Topology::type)
         .def_readwrite("segments",              &Topology::segments)
         .def_readwrite("estimated_wirelength",  &Topology::estimated_wirelength)

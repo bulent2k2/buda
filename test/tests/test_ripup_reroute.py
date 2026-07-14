@@ -535,16 +535,25 @@ def test_canned_stage_b_ripup_clears_open():
 
 
 def _full_wrapper_state(s):
-    """Every wrapper field a ripup trial can mutate, for exact-state diffs."""
+    """Every wrapper field a ripup trial can mutate, for exact-state diffs —
+    including CONTENT-level candidate fingerprints (a dogleg re-solve
+    overwrites a slot in place: same count, new geometry) and the dogleg
+    bookkeeping dicts (#286 retrospective item 3)."""
     st = {}
     for w in s.bundles:
         bid = w.input.original_bundle.id
+        cand_fp = tuple(
+            (t.type, len(t.segments),
+             tuple((seg.start.x, seg.start.y, seg.end.x, seg.end.y)
+                   for seg in t.segments))
+            for t in w.input.candidates)
         st[bid] = (w.plan.selected_topology_index, w.input.topology_pinned,
-                   len(w.input.candidates), list(w.plan.seg_layers),
+                   cand_fp, list(w.plan.seg_layers),
                    list(w.plan.seg_perp), list(w.plan.seg_net_pull),
                    list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi),
                    w.input.assigned_v_layer, w.input.assigned_h_layer,
                    list(w.input.pinned_seg_layers))
+    st['_dogleg'] = (dict(s._dogleg_slot), dict(s._dogleg_originals))
     return st
 
 
@@ -814,6 +823,78 @@ def test_candidate_order_sites_override_matches_default():
     own = s._rr_contention_centres('a', w.input.original_bundle.id)
     assert own, "narrow fixture should leave bundle 1 contended"
     assert s._rr_candidate_order(w, old, 'a', sites=own) == default_order
+
+
+def test_restore_regrows_reset_deleted_dogleg_slot():
+    """#286 retrospective item 1 (mechanism test, mirroring the overwrite
+    guard above): a rejected full-replan-fallback trial ran _reset_doglegs,
+    DELETING the adopted split candidate — a trim-only restore would leave
+    the pool short and selected_topology_index out of range, silently
+    vanishing the bundle from opens/recharges.  The restore must RE-GROW
+    the pool from the snapshot's dl_cand content."""
+    s = _build_session(narrow=True)
+    w0 = s.bundles[0]
+    bid = w0.input.original_bundle.id
+    # Synthesize an adopted dogleg (the guard is about restore mechanics,
+    # not how the dogleg came to be — same convention as the overwrite test).
+    cands = w0.input.candidates
+    cands.append(cands[0])
+    w0.input.candidates = cands
+    slot = len(w0.input.candidates) - 1
+    s._dogleg_slot[bid] = slot
+    s._dogleg_originals[bid] = 0
+    w0.plan.selected_topology_index = slot
+    before = _full_wrapper_state(s)
+    snap = s._rr_snapshot()
+    # Simulate the rejected fallback trial's _reset_doglegs effect.
+    cands = w0.input.candidates
+    del cands[slot]
+    w0.input.candidates = cands
+    w0.plan.selected_topology_index = 0
+    s._dogleg_slot.clear()
+    s._dogleg_originals.clear()
+    s._rr_restore(snap)
+    assert len(w0.input.candidates) == slot + 1          # pool re-grown
+    assert w0.plan.selected_topology_index == slot       # slot valid again
+    assert _full_wrapper_state(s) == before
+
+
+def test_trial_state_never_persists_to_bdb():
+    """#286 retrospective item 1 (persist half): _persist_planner_output is
+    a no-op while a ripup trial is in flight — a rejected trial's
+    run_planner fallback must not leave planner rows a load_pipeline
+    resume would rehydrate — and _rr_rerun clears the flag afterwards."""
+    import buda
+    s = _build_session(narrow=True)
+    s.bdb = buda.BDB(":memory:")
+    s._rr_in_trial = True
+    assert s._persist_planner_output() == 0
+    s._rr_in_trial = False
+    stage, metric = s._rr_stage_metric()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s._rr_rerun(stage, target_bid=s.bundles[0].input.original_bundle.id)
+    assert s._rr_in_trial is False           # cleared even on the fast path
+
+
+@pytest.mark.mid
+def test_big2_commit_paths_agree_with_doglegs(monkeypatch):
+    """#286 retrospective item 3: the A/B exactness pair runs on a fixture
+    with no doglegs/MST, so the in-place dogleg re-solve branch of the
+    forward-restore commit was untested.  big2 stage a exercises MST
+    candidates and dogleg adoption en route; forward-restore and legacy
+    re-run commits must agree on content-level wrapper state, dogleg
+    bookkeeping, metric, and planner cut usage (the legacy path now
+    recharges after commit too — retrospective item 2)."""
+    s_fwd = _big2_to_stage("a")
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_fwd.do_command("ripup_reroute")
+    s_leg = _big2_to_stage("a")
+    _force_legacy_commit(monkeypatch)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_leg.do_command("ripup_reroute")
+    assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
+    assert _full_wrapper_state(s_fwd) == _full_wrapper_state(s_leg)
+    assert _cut_usages(s_fwd) == _cut_usages(s_leg)
 
 
 def test_ripup_prints_timing_summary():
