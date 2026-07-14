@@ -229,9 +229,13 @@ holding the contended bands can be the global fix that no contender-derived
 move reaches — the big2 b61 class, where the winning candidate is even
 window-infeasible (STRICT-rejected at plan time; reachable because a pinned
 trial's replan ladder ends in BEST_EFFORT). Strict-improvement accept, top-3
-occupants per site, 6 moves per occupant, ≤36 trials per stall; a `GLOBAL`
-progress line marks the pass. Flows that never stall above zero are
-byte-identical with the pass on (the whole corpus today).
+occupants per site (ranked AFTER excluding the already-scanned contenders,
+so the site's own overlap parties cannot crowd the slots), 6 moves per
+occupant with beyond-window promotions guaranteed representation, ≤36
+trials per stall; a `GLOBAL` progress line marks the pass. Like the
+contender scan, the pass may override a `topology_pinned` occupant's pin
+(only a `hier.locked` template copy is inviolable). Flows that never stall
+above zero are byte-identical with the pass on (the whole corpus today).
 
 **Notes:**
 - It is an explicit congestion-fix pass, so it may re-route any contended bundle —

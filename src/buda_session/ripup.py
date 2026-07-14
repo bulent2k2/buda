@@ -488,16 +488,17 @@ class RipupMixin:
     def _rr_global_sites(self, stage):
         """Contention rectangles for the global-occupant pass, one per
         measured failure: (layer, span_lo, span_hi, perp_lo, perp_hi).
-        Stage a: the NUTS overlap rectangles; stage b: the open segments'
-        placed windows — the same sites negotiate_congestion injects."""
+        Stage a: the NUTS overlap rectangles.  Stage b: the open segments'
+        placed windows (the same sites negotiate_congestion injects) PLUS
+        the NUTS overlap rectangles — the lexicographic metric keeps
+        grinding collateral overlaps after the opens hit 0, and a stall in
+        that regime (or one whose opens coexist with abstract overlaps)
+        must still surface its overlap sites or the pass is silently
+        inert (review #287)."""
         sites = []
         if self.nuts_result is None:
             return sites
-        if stage == 'a':
-            for od in self.nuts_result.overlap_details:
-                sites.append((od.layer, od.span_lo, od.span_hi,
-                              od.perp_lo, od.perp_hi))
-        else:
+        if stage == 'b':
             ts_map = {(ts.bundle_id, ts.seg_idx): ts
                       for ts in self.nuts_result.segments}
             for bid, si, _missing, _exp in self._open_segments():
@@ -508,6 +509,9 @@ class RipupMixin:
                               min(ts.span_lo, ts.span_hi),
                               max(ts.span_lo, ts.span_hi),
                               ts.interval_lo, ts.interval_hi))
+        for od in self.nuts_result.overlap_details:
+            sites.append((od.layer, od.span_lo, od.span_hi,
+                          od.perp_lo, od.perp_hi))
         return sites
 
     def _rr_global_pass(self, stage, metric, snap, cur, exclude):
@@ -538,7 +542,10 @@ class RipupMixin:
 
         Budgets: top-K occupants per site, M moves per occupant, and a hard
         per-stall trial cap.  First strict improvement wins (the main
-        scan's philosophy at the main scan's trial cost).  Returns
+        scan's philosophy at the main scan's trial cost).  Like the
+        contender scan, the pass may override a `topology_pinned`
+        occupant's pin (ripup is an explicit congestion-fix pass; only a
+        hier.locked template copy is inviolable).  Returns
         (cand_best-or-None, trials) in the main loop's tuple shape."""
         if self.planner is None:
             return None, 0
@@ -553,11 +560,21 @@ class RipupMixin:
         trials = 0
         tried = set()
         for (layer, s_lo, s_hi, p_lo, p_hi) in sites:
+            # The site's own overlap parties charge its bands by
+            # construction (their committed seg_perp IS the contended
+            # band), so a top-K C++ truncation would hand them the slots
+            # and starve the genuinely NON-contended holder the pass
+            # exists to find (review #287).  Request enough entries that
+            # K real occupants can survive the Python-side exclusion,
+            # then cap the TRIALED occupants per site at K here.
             occ = self.planner.band_occupants(
                 self.bundles, layer, s_lo, s_hi, p_lo, p_hi,
-                _RR_GLOBAL_TOP_K)
+                _RR_GLOBAL_TOP_K + len(exclude))
             site = [(layer in h_layers, 0.5 * (p_lo + p_hi))]
+            site_occupants = 0
             for bid, _demand in occ:
+                if site_occupants >= _RR_GLOBAL_TOP_K:
+                    break
                 if bid in exclude or bid in tried:
                     continue
                 w = self._rr_wrapper(bid)
@@ -565,6 +582,7 @@ class RipupMixin:
                         or len(w.input.candidates) < 2):
                     continue
                 tried.add(bid)
+                site_occupants += 1
                 old_tidx = snap['wrap'][bid][0]
                 for tidx in self._rr_global_moves(w, old_tidx, stage, site):
                     if trials >= _RR_GLOBAL_MAX_TRIALS:

@@ -701,6 +701,31 @@ def test_global_pass_moves_non_contended_occupant():
     assert _selections(s)[2] == move[1]
 
 
+def test_global_pass_survives_contender_dominated_ranking(monkeypatch):
+    """Review #287 medium: the site's own overlap parties charge its bands
+    by construction, so a top-K truncation BEFORE the Python exclusion can
+    return only excluded contenders and starve the genuine occupant.  With
+    K forced to 1 (the top slot goes to an overlap party — asserted, so
+    the fixture keeps its discriminating power), the pass must still reach
+    and trial occupant bundle 2 because the request is widened by
+    len(exclude) before the Python-side filter."""
+    import buda_session.ripup as ripup_mod
+    s = _build_occupant_session()
+    od = s.nuts_result.overlap_details[0]
+    occ = s.planner.band_occupants(s.bundles, od.layer,
+                                   od.span_lo, od.span_hi,
+                                   od.perp_lo, od.perp_hi, 1)
+    assert occ and occ[0][0] in (1, 3), \
+        f"fixture lost its discriminating power: top occupant {occ}"
+    monkeypatch.setattr(ripup_mod, "_RR_GLOBAL_TOP_K", 1)
+    stage, metric = s._rr_stage_metric()
+    snap = s._rr_snapshot()
+    with contextlib.redirect_stdout(io.StringIO()):
+        best, trials = s._rr_global_pass(stage, metric, snap, metric(),
+                                         {1, 3})
+    assert best is not None and best[1] == 2, (best, trials)
+
+
 def test_ripup_stall_invokes_global_pass_and_no_global_disables(monkeypatch):
     """Loop wiring: when the contender scan stalls above zero, the global
     pass runs by default; the `no_global` keyword disables it."""
@@ -733,18 +758,25 @@ def test_ripup_stall_invokes_global_pass_and_no_global_disables(monkeypatch):
 
 def test_ripup_global_pass_clears_stalled_overlap_end_to_end():
     """End to end through the command: contenders {1,3} have no moves (one
-    candidate each) — historical ripup stops at 1 overlap; the global pass
-    re-routes occupant bundle 2 and the run ends clean.  NOTE: in this
-    small fixture bundle 2 also surfaces as a junction-infeasibility
-    contender, so the normal scan reaches it first — the assertion here is
-    the ENDPOINT (0 overlaps, bundle 2 moved), with the pass as the
-    backstop; the direct-drive test above pins the pass's own mechanics."""
+    candidate each) — historical ripup stops at 1 overlap; occupant
+    bundle 2 is re-routed and the run ends clean.  NOTE: in this small
+    fixture bundle 2 also surfaces as a junction-infeasibility contender,
+    so the normal scan reaches it first — the assertions are the ENDPOINT
+    plus bundle 2's selection change (conditional on which path moved it),
+    with the global pass as the backstop; the direct-drive test above
+    pins the pass's own mechanics."""
     s = _build_occupant_session()
+    sel2_before = _selections(s)[2]
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("ripup_reroute")
-    assert s.nuts_result.num_overlaps == 0, buf.getvalue()
-    assert _selections(s)[2] != 1 or True    # bundle 2 re-routed (or repack)
+    out = buf.getvalue()
+    assert s.nuts_result.num_overlaps == 0, out
+    # Bundles 1 and 3 are single-candidate, so the only possible commit —
+    # whether the contender scan or the global pass made it — is a bundle 2
+    # re-route; the COMMIT line and the selection must agree.
+    assert "COMMIT bundle 2" in out, out
+    assert _selections(s)[2] != sel2_before, out
 
 
 def test_global_moves_budget_guarantees_beyond_window_extras():
@@ -772,17 +804,16 @@ def test_global_moves_budget_guarantees_beyond_window_extras():
 
 
 def test_candidate_order_sites_override_matches_default():
-    """`sites=None` keeps _rr_candidate_order byte-identical to the
-    historical derive-from-own-contention behavior, and an explicit
-    override reproduces it when handed the same centres."""
+    """An explicit `sites=` override handed the bundle's OWN contention
+    centres reproduces the default derive-from-own-contention ordering —
+    the override changes WHERE the ranking looks, never HOW it ranks."""
     s = _build_session(narrow=True)
     w = s.bundles[0]
     old = w.plan.selected_topology_index
     default_order = s._rr_candidate_order(w, old, 'a')
-    assert s._rr_candidate_order(w, old, 'a', sites=None) == default_order
     own = s._rr_contention_centres('a', w.input.original_bundle.id)
-    if own:
-        assert s._rr_candidate_order(w, old, 'a', sites=own) == default_order
+    assert own, "narrow fixture should leave bundle 1 contended"
+    assert s._rr_candidate_order(w, old, 'a', sites=own) == default_order
 
 
 def test_ripup_prints_timing_summary():
