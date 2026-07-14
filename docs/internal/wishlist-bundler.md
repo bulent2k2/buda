@@ -27,16 +27,24 @@ clean. **COMBINED landed (2026-07-12):** `run_bundler COMBINED` = the join of
 CONVERGENT and BIDIRECTIONAL (union-find chains), with `set_bundling`
 per-prefix permission overrides and the `set_max_bundle_bits <N|auto>`
 balanced bus-preserving split pass (auto = shortest-busterm-edge cap).
-**HIER modes landed (2026-07-12):** `run_hier_bundler` accepts all four
-strategies per bundling depth (same-level nets; multi-driver differing-set
-groups become `FANIN:` bundles routed as per-bit tapered trees in their
-frame, cell-local fan-in templates merge with replicas, `set_bundling`
-overrides apply to both bundlers).  The depth-aware semantics ARE the scope
-decision: each net bundles once at its most specific level, so fan-ins
-split across subtrees/depths stay separate routing problems.  **Remaining
-corners:** cross-level nets keep STRICT/BIDIRECTIONAL grouping (single
-drv_spec metadata), and `set_max_bundle_bits` stays flat-only (hier splits
-would have to propagate through template↔replica linkage).
+**HIER modes landed (merged 2026-07-14, PR #276):** `run_hier_bundler`
+accepts all four strategies per bundling depth (same-level nets;
+multi-driver differing-set groups become `FANIN:` bundles routed as
+per-bit tapered trees in their frame — the taper re-derived per instance
+at expansion from donor metadata — cell-local fan-in templates merge with
+replicas, `set_bundling` overrides apply to both bundlers, cross-level
+pairs merge under BIDIRECTIONAL and COMBINED alike).  The depth-aware
+semantics ARE the scope decision: each net bundles once at its most
+specific level, so fan-ins split across subtrees/depths stay separate
+routing problems.  Review hardening sealed the emission seam: reasons are
+never a driverless `REC:…` (pure CONVERGENT was stranding single-driver
+cross-block buses), and pure-mode same-set groups keep the historical
+ep0 emission + 2-pin pool (the all-drivers emission is fan-in /
+general-path only), each pinned by a seam-targeted regression test.
+**Remaining corners** (opens.md item 8): cross-level nets keep
+STRICT/BIDIRECTIONAL grouping (single drv_spec metadata), and
+`set_max_bundle_bits` stays flat-only (hier splits would have to
+propagate through template↔replica linkage).
 Details: [`convergent_bundling.md`](convergent_bundling.md).
 
 **What (historical):** `run_bundler CONVERGENT` groups nets by shared receiver only, so a
