@@ -30,6 +30,14 @@ _RR_GLOBAL_TOP_K = 3                # band occupants ranked per contention site
 _RR_GLOBAL_MOVES_PER_OCC = 6        # index alternates tried per occupant
 _RR_GLOBAL_MAX_TRIALS = 36          # hard trial budget per stall
 
+# Fast trials (RR round 3): trials skip metric-neutral passes (tighten_pulls
+# in stage a — overlap-non-increasing, so the trial metric is an upper bound
+# and accepts stay sound; via emission in stage b — pure output).  Commits
+# always re-run the FULL pipeline, so the committed state is never degraded.
+# Rejections can rarely be spurious (a move tighten would have improved past
+# the bar) — corpus-measured before this default was set.
+_RR_FAST_TRIALS_DEFAULT = True
+
 
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).

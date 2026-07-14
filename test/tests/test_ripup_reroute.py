@@ -577,11 +577,11 @@ def test_commit_by_forward_restore_matches_rerun_commit_stage_a(monkeypatch):
     produces — selections, every plan array, and the measured metric."""
     s_fwd = _build_session(narrow=True)
     with contextlib.redirect_stdout(io.StringIO()):
-        s_fwd.do_command("ripup_reroute")
+        s_fwd.do_command("ripup_reroute no_fast_trials")
     s_leg = _build_session(narrow=True)
     _force_legacy_commit(monkeypatch)
     with contextlib.redirect_stdout(io.StringIO()):
-        s_leg.do_command("ripup_reroute")
+        s_leg.do_command("ripup_reroute no_fast_trials")
     assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
     assert _full_wrapper_state(s_fwd) == _full_wrapper_state(s_leg)
     assert _cut_usages(s_fwd) == _cut_usages(s_leg)
@@ -593,11 +593,11 @@ def test_commit_by_forward_restore_matches_rerun_commit_stage_b(monkeypatch):
     forward-restore commit and the legacy re-run commit."""
     s_fwd = _build_dnuts_open_session()
     with contextlib.redirect_stdout(io.StringIO()):
-        s_fwd.do_command("ripup_reroute")
+        s_fwd.do_command("ripup_reroute no_fast_trials")
     s_leg = _build_dnuts_open_session()
     _force_legacy_commit(monkeypatch)
     with contextlib.redirect_stdout(io.StringIO()):
-        s_leg.do_command("ripup_reroute")
+        s_leg.do_command("ripup_reroute no_fast_trials")
     assert (s_fwd.detailed_result.num_unplaced
             == s_leg.detailed_result.num_unplaced == 0)
     assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
@@ -887,11 +887,11 @@ def test_big2_commit_paths_agree_with_doglegs(monkeypatch):
     recharges after commit too — retrospective item 2)."""
     s_fwd = _big2_to_stage("a")
     with contextlib.redirect_stdout(io.StringIO()):
-        s_fwd.do_command("ripup_reroute")
+        s_fwd.do_command("ripup_reroute no_fast_trials")
     s_leg = _big2_to_stage("a")
     _force_legacy_commit(monkeypatch)
     with contextlib.redirect_stdout(io.StringIO()):
-        s_leg.do_command("ripup_reroute")
+        s_leg.do_command("ripup_reroute no_fast_trials")
     assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
     assert _full_wrapper_state(s_fwd) == _full_wrapper_state(s_leg)
     assert _cut_usages(s_fwd) == _cut_usages(s_leg)
@@ -1179,3 +1179,85 @@ def test_use_edge_candidates_keyword_order_independent():
     assert _flip_edges_call_count(s, "3 use_edge_candidates") > 0
     s2 = _build_session(narrow=True)
     assert _flip_edges_call_count(s2, "use_edge_candidates 3") > 0
+
+
+# --- fast trials (RR round 3): metric-neutral pass skipping ------------------
+
+def test_fast_trials_match_full_trials_endpoint_stage_a():
+    """Fast trials (default) skip tighten_pulls during stage-a trials — the
+    trial metric is an UPPER BOUND (tighten is overlap-non-increasing), so
+    accepts are sound and commits re-run the full pipeline.  On the canned
+    fixture the trajectory and the committed full state must equal the
+    no_fast_trials run exactly."""
+    s_fast = _build_session(narrow=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_fast.do_command("ripup_reroute")
+    s_full = _build_session(narrow=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_full.do_command("ripup_reroute no_fast_trials")
+    assert s_fast.nuts_result.num_overlaps == 0
+    assert s_fast.nuts_result.num_overlaps == s_full.nuts_result.num_overlaps
+    assert _full_wrapper_state(s_fast) == _full_wrapper_state(s_full)
+    assert _cut_usages(s_fast) == _cut_usages(s_full)
+
+
+def test_fast_trials_commit_state_is_full_pipeline_stage_b():
+    """Stage-b fast trials skip via emission (pure output, metric identical);
+    the COMMITTED state must still be the full-pipeline state — vias present,
+    endpoint equal to the no_fast_trials run."""
+    s_fast = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_fast.do_command("ripup_reroute")
+    s_full = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_full.do_command("ripup_reroute no_fast_trials")
+    assert (s_fast.detailed_result.num_unplaced
+            == s_full.detailed_result.num_unplaced)
+    assert _full_wrapper_state(s_fast) == _full_wrapper_state(s_full)
+    # The committed detailed result carries vias (a via-less trial state was
+    # never committed) — byte-equal to the full run's.
+    fv = sorted((v.bundle_id, v.from_seg, v.to_seg, v.bit_index, v.x, v.y)
+                for v in s_fast.detailed_result.net_vias)
+    lv = sorted((v.bundle_id, v.from_seg, v.to_seg, v.bit_index, v.x, v.y)
+                for v in s_full.detailed_result.net_vias)
+    assert fv == lv and len(fv) > 0
+
+
+def test_skip_tighten_metric_is_upper_bound():
+    """Engine-level property the fast-trial accept soundness rests on: a
+    skip_tighten solve reports an overlap count >= the full solve's (tighten
+    is overlap-non-increasing: its per-move guard reverts any move where
+    find_overlaps grows), and its tighten bucket charges ~0."""
+    import buda
+    s = _build_session(narrow=True)
+    full = s.nuts_result
+    eng = buda.NUTSEngine(s.fp, s.layers)
+    eng.set_track_pitch(s._nuts_pitch)
+    eng.set_skip_tighten(True)
+    if s.planner is not None:
+        eng.set_extra_grid_points(list(s.planner.get_x_grid()),
+                                  list(s.planner.get_y_grid()))
+    with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+        skipped = eng.run(s.bundles)
+    assert skipped.num_overlaps >= full.num_overlaps
+    assert dict(skipped.pass_seconds).get('tighten', 0.0) <= 1e-4
+
+
+def test_dnuts_emit_vias_off_is_metric_identical():
+    """Engine-level property for stage b: emit_vias=False changes NOTHING but
+    the via list — same bit-wires, same unplaced count."""
+    import buda
+    s = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute")     # committed route bends across layers
+    segs = buda.make_bus_segments(s.bundles, s.nuts_result, s.fp, "LO_HI")
+    eng = buda.DetailedNUTSEngine(s.routing_grid)
+    with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+        with_v = eng.run(segs)
+        no_v = eng.run(segs, emit_vias=False)
+    key = lambda r: sorted((n.bundle_id, n.seg_idx, n.bit_index,
+                            n.track_position, n.span_lo, n.span_hi)
+                           for n in r.net_segments)
+    assert key(with_v) == key(no_v)
+    assert with_v.num_unplaced == no_v.num_unplaced
+    assert len(no_v.net_vias) == 0 and len(with_v.net_vias) > 0

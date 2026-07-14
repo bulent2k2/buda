@@ -2201,7 +2201,10 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         // Final opportunistic tighten: slide pulled segments toward their pull in
         // the settled layout (the sweep/repack only ever placed them by local
         // decisions and never revisited them when space opened next to the pull).
-        tighten_pulls(result.segments, ctx);
+        // Fast-trial mode skips it: WL-only and overlap-non-increasing, so the
+        // reported metric is an upper bound on the full solve's (see setter).
+        if (!skip_tighten_)
+            tighten_pulls(result.segments, ctx);
         charge("tighten", t0);
         // Merge the fixed (bottom-up copy) segments AFTER every pass that
         // could move a segment and BEFORE the metrics, so they are immovable
