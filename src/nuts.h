@@ -94,6 +94,15 @@ struct NUTSResult {
     // (placement behaviour unchanged).
     int num_keepout_conflicts = 0;
     std::map<int, int> overlaps_per_layer;  // layer_id -> overlap pair count
+    // Per-pass seconds of the solve(s) that produced this result (the RR
+    // round-3 profiling layer: WHERE inside a trial's full solve the time
+    // goes).  Keys: extract / context / fixpoint / dogleg_detect / repair /
+    // corner / tighten / metrics.  Buckets accumulate across EVERY solve of
+    // the run — the dogleg fallback's trial re-solves included (n_solves
+    // counts them) — so the sum tracks the run's total solve wall.  Pure
+    // observation: never read by any placement decision.
+    std::map<std::string, double> pass_seconds;
+    int n_solves = 0;
     // Topologies the dogleg pass mutated (bundle_id -> new selected Topology and
     // its seg_layers).  The CLI adopts these into its bundles before rebuilding
     // ConnTopology for detailed NUTS, so the split bundle's stubs get the correct

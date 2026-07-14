@@ -18,6 +18,7 @@
 #include "conn_topology.h"
 #include "nuts_geom.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -130,15 +131,28 @@ bool DetailedNUTSEngine::signals_contiguous(
 
 DetailedNUTSResult DetailedNUTSEngine::run(
         const std::vector<BusSegment>& bus_segs) const {
+    // Per-pass profiling (RR round-3 Phase 0) — observation only.
+    using pclock = std::chrono::steady_clock;
     DetailedNUTSResult result;
+    auto t0 = pclock::now();
+    auto charge = [&result, &t0](const char* key) {
+        auto t1 = pclock::now();
+        result.pass_seconds[key] +=
+            std::chrono::duration<double>(t1 - t0).count();
+        t0 = t1;
+    };
     place_by_layer(bus_segs, result);
+    charge("place");
     adjust_bit_spans(bus_segs, result);
+    charge("bit_spans");
     // After spans are final (and before vias pair up bits): remove any bit
     // whose adjusted span crosses a keepout on its layer — an illegal wire
     // the placement-time sampling could not rule out.  Counted as unplaced,
     // so the opens feed the stage-b healing machinery.
     cull_keepout_crossers(result);
+    charge("keepout_cull");
     emit_bit_vias(bus_segs, result);
+    charge("vias");
     return result;
 }
 

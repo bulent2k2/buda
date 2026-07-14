@@ -899,17 +899,62 @@ def test_big2_commit_paths_agree_with_doglegs(monkeypatch):
 
 def test_ripup_prints_timing_summary():
     """The per-run timing breakdown (Phase 0 instrumentation) rides the run's
-    final output for both ripup_reroute and negotiate_congestion."""
+    final output for both ripup_reroute and negotiate_congestion — including
+    the per-pass solve profile (round-3 Phase 0: WHERE inside the trial
+    solves the nuts/dnuts seconds go)."""
     s = _build_session(narrow=True)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("ripup_reroute")
-    assert "[ripup_reroute] timing: replan " in buf.getvalue()
+    out = buf.getvalue()
+    assert "[ripup_reroute] timing: replan " in out
+    assert "[ripup_reroute] solve passes: nuts[" in out
     s2 = _build_session(narrow=True)
     buf2 = io.StringIO()
     with contextlib.redirect_stdout(buf2):
         s2.do_command("negotiate_congestion")
-    assert "[negotiate] timing: replan " in buf2.getvalue()
+    out2 = buf2.getvalue()
+    assert "[negotiate] timing: replan " in out2
+    assert "[negotiate] solve passes: nuts[" in out2
+
+
+def test_results_carry_per_pass_profile():
+    """NUTSResult/DetailedNUTSResult expose the per-pass solve profile
+    (round-3 Phase 0): every pipeline pass has a non-negative bucket, and
+    n_solves counts the solves folded in (>= 1; dogleg trial re-solves
+    would add more).  Observation only — placement is untouched (the golden
+    corpora pin that)."""
+    s = _build_session(narrow=True)
+    nuts_keys = {'extract', 'context', 'fixpoint', 'dogleg_detect',
+                 'repair', 'corner', 'tighten', 'metrics'}
+    ps = dict(s.nuts_result.pass_seconds)
+    assert set(ps) == nuts_keys, ps
+    assert all(v >= 0.0 for v in ps.values()), ps
+    assert s.nuts_result.n_solves >= 1
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("def_track_pattern 4 0 SIGNAL 1 4")
+        s.do_command("def_track_pattern 5 0 SIGNAL 1 4")
+        s.do_command("def_track_pattern 7 0 SIGNAL 1 4")
+        s.do_command("run_detailed_nuts")
+    assert s.detailed_result is not None
+    dps = dict(s.detailed_result.pass_seconds)
+    assert set(dps) == {'place', 'bit_spans', 'keepout_cull', 'vias'}, dps
+    assert all(v >= 0.0 for v in dps.values()), dps
+
+
+def test_pass_profile_survives_python_result_merges():
+    """The bottom-up DNUTS path builds a MERGED DetailedNUTSResult in Python
+    (Codex #289): pass_seconds must be assignable so the merge can carry the
+    summed profile — otherwise a bottom-up stage-b trial charges the dnuts
+    wall with no dnuts.* buckets, a misleading gap in the profiling data."""
+    import buda
+    r = buda.DetailedNUTSResult()
+    r.pass_seconds = {'place': 1.5, 'vias': 0.5}
+    assert dict(r.pass_seconds) == {'place': 1.5, 'vias': 0.5}
+    n = buda.NUTSResult()
+    n.pass_seconds = {'fixpoint': 2.0}
+    n.n_solves = 3
+    assert dict(n.pass_seconds) == {'fixpoint': 2.0} and n.n_solves == 3
 
 
 def test_canned_stage_b_negotiate_clears_open():

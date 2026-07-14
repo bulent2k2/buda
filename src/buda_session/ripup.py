@@ -84,13 +84,26 @@ class RipupMixin:
         self._rr_t = {'replan': 0.0, 'nuts': 0.0, 'dnuts': 0.0,
                       'snapshot': 0.0, 'restore': 0.0,
                       'n_replan': 0, 'n_nuts': 0, 'n_dnuts': 0,
-                      'n_snapshot': 0, 'n_restore': 0}
+                      'n_snapshot': 0, 'n_restore': 0,
+                      'passes': {}}
 
     def _rr_t_add(self, key, dt):
         t = getattr(self, '_rr_t', None)
         if t is not None:
             t[key] += dt
             t['n_' + key] += 1
+
+    def _rr_t_add_passes(self, prefix, pass_seconds):
+        """Fold a solve's per-pass profile (NUTSResult/DetailedNUTSResult
+        .pass_seconds — RR round-3 Phase 0) into the run accumulator under
+        '<prefix>.<pass>' keys.  Same getattr guard as _rr_t_add: free
+        outside a run."""
+        t = getattr(self, '_rr_t', None)
+        if t is not None:
+            p = t['passes']
+            for k, v in pass_seconds.items():
+                key = f"{prefix}.{k}"
+                p[key] = p.get(key, 0.0) + v
 
     def _rr_t_str(self):
         t = getattr(self, '_rr_t', None)
@@ -101,6 +114,25 @@ class RipupMixin:
                 f"dnuts {t['dnuts']:.2f}s/{t['n_dnuts']}, "
                 f"snapshot {t['snapshot']:.2f}s/{t['n_snapshot']}, "
                 f"restore {t['restore']:.2f}s/{t['n_restore']}")
+
+    def _rr_t_passes_str(self):
+        """One line answering WHERE inside the solves the nuts/dnuts seconds
+        go: per-pass totals across every trial's solve (dogleg trial
+        re-solves folded in by the engine), descending, grouped by stage.
+        Empty string when no pass profile was collected."""
+        t = getattr(self, '_rr_t', None)
+        if not t or not t.get('passes'):
+            return ""
+        groups = []
+        for prefix in ('nuts', 'dnuts'):
+            items = sorted(((k.split('.', 1)[1], v)
+                            for k, v in t['passes'].items()
+                            if k.startswith(prefix + '.')),
+                           key=lambda kv: -kv[1])
+            if items:
+                body = " ".join(f"{k} {v:.2f}" for k, v in items)
+                groups.append(f"{prefix}[{body}]")
+        return " ".join(groups)
 
     def _rr_open_bundles(self):
         """Bundle ids whose placed-bit count falls short of expected (stage b).
@@ -418,6 +450,7 @@ class RipupMixin:
                 t0 = time.perf_counter()
                 self._run_nuts_internal()
                 self._rr_t_add('nuts', time.perf_counter() - t0)
+                self._rr_t_add_passes('nuts', self.nuts_result.pass_seconds)
                 # Dirty set for the scoped per-trial restore: the incremental
                 # replan mutated only the target; _adopt_doglegs (inside
                 # _run_nuts_internal) may additionally have rewritten any
@@ -432,6 +465,8 @@ class RipupMixin:
                     self._run_detailed_nuts(
                         bit_order=self._detailed_bit_order)
                     self._rr_t_add('dnuts', time.perf_counter() - t0)
+                    self._rr_t_add_passes(
+                        'dnuts', self.detailed_result.pass_seconds)
         finally:
             self._rr_in_trial = False
         return exact
@@ -864,10 +899,13 @@ class RipupMixin:
             t0 = time.perf_counter()
             self._run_nuts_internal()
             self._rr_t_add('nuts', time.perf_counter() - t0)
+            self._rr_t_add_passes('nuts', self.nuts_result.pass_seconds)
             if stage == 'b':
                 t0 = time.perf_counter()
                 self._run_detailed_nuts(bit_order=self._detailed_bit_order)
                 self._rr_t_add('dnuts', time.perf_counter() - t0)
+                self._rr_t_add_passes('dnuts',
+                                      self.detailed_result.pass_seconds)
 
     def _negotiate_congestion(self, max_iter=5):
         """Measured-congestion negotiation (wishlist-ripup item 1).  Instead of
@@ -999,6 +1037,9 @@ class RipupMixin:
               f"{self._rr_m_str(metric())} "
               f"after {accepted} accepted iteration(s).", flush=True)
         print(f"[negotiate] timing: {self._rr_t_str()}", flush=True)
+        _pp = self._rr_t_passes_str()
+        if _pp:
+            print(f"[negotiate] solve passes: {_pp}", flush=True)
         self._rr_t = None
         if self.bdb is not None and accepted:
             self._checkpoint_routing()
@@ -1201,6 +1242,9 @@ class RipupMixin:
               f"{self._rr_m_str(metric())} "
               f"after {committed} move(s), {n_trials} trial(s).", flush=True)
         print(f"[ripup_reroute] timing: {self._rr_t_str()}", flush=True)
+        _pp = self._rr_t_passes_str()
+        if _pp:
+            print(f"[ripup_reroute] solve passes: {_pp}", flush=True)
         self._rr_t = None
 
         # Commit the FINAL state: the trials/commits above re-ran the
