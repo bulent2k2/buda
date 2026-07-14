@@ -566,9 +566,7 @@ class RipupMixin:
                     continue
                 tried.add(bid)
                 old_tidx = snap['wrap'][bid][0]
-                order = self._rr_candidate_order(w, old_tidx, stage,
-                                                 sites=site)
-                for tidx in order[:_RR_GLOBAL_MOVES_PER_OCC]:
+                for tidx in self._rr_global_moves(w, old_tidx, stage, site):
                     if trials >= _RR_GLOBAL_MAX_TRIALS:
                         return None, trials
                     m = self._rr_trial(w, tidx, stage, metric)
@@ -583,6 +581,25 @@ class RipupMixin:
                               flush=True)
                         return (m, bid, old_tidx, ('idx', tidx), fwd), trials
         return None, trials
+
+    def _rr_global_moves(self, w, old_tidx, stage, site):
+        """The global pass's per-occupant move budget, extras GUARANTEED.
+
+        _rr_candidate_order returns the in-window pool (farness-ranked)
+        followed by the promoted beyond-window extras.  A plain head-slice
+        of _RR_GLOBAL_MOVES_PER_OCC would be all in-window whenever the
+        occupant has more than _RR_MAX_CANDIDATES_PER_BUNDLE candidates —
+        starving exactly the b61-class beyond-window candidates this pass
+        exists to reach (Codex #287 P1).  Split the budget instead: the
+        extras take up to half the slots (as many as exist), the in-window
+        pool fills the rest and stays FIRST — the first-improving accept
+        then still prefers a cheap fix when one improves."""
+        order = self._rr_candidate_order(w, old_tidx, stage, sites=site)
+        n = min(len(w.input.candidates), _RR_MAX_CANDIDATES_PER_BUNDLE)
+        in_win = [t for t in order if t < n]
+        extras = [t for t in order if t >= n]
+        k_ex = min(_RR_GLOBAL_MOVES_PER_OCC // 2, len(extras))
+        return (in_win[:_RR_GLOBAL_MOVES_PER_OCC - k_ex] + extras[:k_ex])
 
     def _rr_flip_edges(self, w, stage):
         """MST edge_ids of w's SELECTED candidate that a current contention touches

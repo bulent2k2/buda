@@ -599,7 +599,7 @@ def test_commit_by_forward_restore_matches_rerun_commit_stage_b(monkeypatch):
 # --- Global-occupant pass (wishlist-ripup "global-overlap re-route of ------
 # --- NON-contended bundles", the big2 b61 class) ----------------------------
 
-def _build_occupant_session():
+def _build_occupant_session(truncate=True):
     """Three buses through one narrow M4 corridor (band1 y[1180,1270]) that
     fits two: a and c collide (one NUTS overlap), b holds a band1 slot and
     has escape candidates (band2 y[600,660] is only reachable from x>=1650
@@ -636,12 +636,14 @@ def _build_occupant_session():
             s.do_command(c)
     assert [(od.bid_a, od.bid_b)
             for od in s.nuts_result.overlap_details] == [(1, 3)]
-    for bid in (1, 3):
-        w = next(w for w in s.bundles if w.input.original_bundle.id == bid)
-        sel = w.plan.selected_topology_index
-        w.input.candidates = [w.input.candidates[sel]]
-        w.plan.selected_topology_index = 0
-        w.input.topology_pinned = True
+    if truncate:
+        for bid in (1, 3):
+            w = next(w for w in s.bundles
+                     if w.input.original_bundle.id == bid)
+            sel = w.plan.selected_topology_index
+            w.input.candidates = [w.input.candidates[sel]]
+            w.plan.selected_topology_index = 0
+            w.input.topology_pinned = True
     return s
 
 
@@ -743,6 +745,30 @@ def test_ripup_global_pass_clears_stalled_overlap_end_to_end():
         s.do_command("ripup_reroute")
     assert s.nuts_result.num_overlaps == 0, buf.getvalue()
     assert _selections(s)[2] != 1 or True    # bundle 2 re-routed (or repack)
+
+
+def test_global_moves_budget_guarantees_beyond_window_extras():
+    """Codex #287 P1: the global pass's per-occupant move budget must
+    include the promoted BEYOND-WINDOW candidates — a head-slice of the
+    candidate order is all in-window whenever the pool exceeds the
+    8-candidate window, starving exactly the b61-class candidates the
+    pass exists to reach.  The split budget reserves up to half the slots
+    for extras while the in-window pool stays first (cheap fixes keep
+    first shot at the first-improving accept)."""
+    s = _build_occupant_session(truncate=False)
+    w = next(w for w in s.bundles if w.input.original_bundle.id == 1)
+    assert len(w.input.candidates) > 8      # extras exist for this pool
+    site = [(True, 1225.0)]                 # the band1 corridor's centre
+    moves = s._rr_global_moves(w, w.plan.selected_topology_index, 'a', site)
+    from buda_session.util import (_RR_GLOBAL_MOVES_PER_OCC,
+                                   _RR_MAX_CANDIDATES_PER_BUNDLE)
+    assert len(moves) <= _RR_GLOBAL_MOVES_PER_OCC
+    extras = [t for t in moves if t >= _RR_MAX_CANDIDATES_PER_BUNDLE]
+    assert extras, f"no beyond-window candidate in the budget: {moves}"
+    # In-window moves still come first (the cheap-tie preference).
+    first_extra = moves.index(extras[0])
+    assert all(t >= _RR_MAX_CANDIDATES_PER_BUNDLE
+               for t in moves[first_extra:]), moves
 
 
 def test_candidate_order_sites_override_matches_default():
