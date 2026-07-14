@@ -534,6 +534,83 @@ def test_canned_stage_b_ripup_clears_open():
     assert s.nuts_result.num_overlaps == 0
 
 
+def _full_wrapper_state(s):
+    """Every wrapper field a ripup trial can mutate, for exact-state diffs."""
+    st = {}
+    for w in s.bundles:
+        bid = w.input.original_bundle.id
+        st[bid] = (w.plan.selected_topology_index, w.input.topology_pinned,
+                   len(w.input.candidates), list(w.plan.seg_layers),
+                   list(w.plan.seg_perp), list(w.plan.seg_net_pull),
+                   list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi),
+                   w.input.assigned_v_layer, w.input.assigned_h_layer,
+                   list(w.input.pinned_seg_layers))
+    return st
+
+
+def _cut_usages(s):
+    """Per-band planner cut usage — what the visualizer's congestion overlay
+    draws directly from get_cuts() (Codex #286: a forward-restore commit must
+    leave the committed route here, not the last rejected trial)."""
+    return [list(c.band_usage) for c in s.planner.get_cuts()]
+
+
+def _force_legacy_commit(monkeypatch):
+    """Disable commit-by-forward-restore so the winning move commits via the
+    legacy pipeline re-run (the pre-L5 behavior)."""
+    monkeypatch.setattr(buda_cli.BudaSession, "_rr_fwd_ok",
+                        staticmethod(lambda snap, fwd: False))
+
+
+def test_commit_by_forward_restore_matches_rerun_commit_stage_a(monkeypatch):
+    """L5 exactness (stage a): committing a winning index move by restoring
+    its forward snapshot leaves EXACTLY the state the legacy re-run commit
+    produces — selections, every plan array, and the measured metric."""
+    s_fwd = _build_session(narrow=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_fwd.do_command("ripup_reroute")
+    s_leg = _build_session(narrow=True)
+    _force_legacy_commit(monkeypatch)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_leg.do_command("ripup_reroute")
+    assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
+    assert _full_wrapper_state(s_fwd) == _full_wrapper_state(s_leg)
+    assert _cut_usages(s_fwd) == _cut_usages(s_leg)
+
+
+def test_commit_by_forward_restore_matches_rerun_commit_stage_b(monkeypatch):
+    """L5 exactness (stage b): same A/B on the canned DNUTS-open fixture —
+    the lexicographic metric and per-wrapper state agree between the
+    forward-restore commit and the legacy re-run commit."""
+    s_fwd = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_fwd.do_command("ripup_reroute")
+    s_leg = _build_dnuts_open_session()
+    _force_legacy_commit(monkeypatch)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_leg.do_command("ripup_reroute")
+    assert (s_fwd.detailed_result.num_unplaced
+            == s_leg.detailed_result.num_unplaced == 0)
+    assert s_fwd.nuts_result.num_overlaps == s_leg.nuts_result.num_overlaps
+    assert _full_wrapper_state(s_fwd) == _full_wrapper_state(s_leg)
+    assert _cut_usages(s_fwd) == _cut_usages(s_leg)
+
+
+def test_ripup_prints_timing_summary():
+    """The per-run timing breakdown (Phase 0 instrumentation) rides the run's
+    final output for both ripup_reroute and negotiate_congestion."""
+    s = _build_session(narrow=True)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute")
+    assert "[ripup_reroute] timing: replan " in buf.getvalue()
+    s2 = _build_session(narrow=True)
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        s2.do_command("negotiate_congestion")
+    assert "[negotiate] timing: replan " in buf2.getvalue()
+
+
 def test_canned_stage_b_negotiate_clears_open():
     """Stage-b negotiation on the canned fixture (item 1 v2a): injecting the
     open segment's window teaches the width-blind planner about the dead band,

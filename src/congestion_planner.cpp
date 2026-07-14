@@ -1478,6 +1478,12 @@ void CongestionPlanner::recharge_committed_(
     apply_injected_(+1.0);
 }
 
+void CongestionPlanner::recharge_committed(
+        const std::vector<BundleWrapper>& bundles) {
+    if (cuts_.empty()) return;
+    recharge_committed_(bundles, nullptr);
+}
+
 std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
         std::vector<BundleWrapper>& bundles, int target_bundle_id) {
     // Needs the state a prior optimize_topologies established on this instance:

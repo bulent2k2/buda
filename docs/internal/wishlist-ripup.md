@@ -52,6 +52,66 @@ goldens hold (opens →0, overlaps ≤9).  Full fast+mid tier green.
 principled end-state; `replan_bundle` is a step toward it (the charge-others/
 plan-one machinery it needs now exists).
 
+## RR efficiency round 2 (bigHalf) — ✅ instrumentation + structural wins
+
+**Vehicle.** `flow/big_data_test/bigHalf.buda` (tc3a, 44 blocks / 2840 nets,
+half-size die — see `ReadMe_bigHalf.md`): with both `ripup_reroute` lines
+enabled the clean 0/0 endpoint cost ~49s vs ~5.7s for the checked-in
+negotiate-only config (same host; the ReadMe's ~3s/50.9s rows are the
+author's host).
+
+**Instrumentation (Phase 0).** Per-run timing accumulator in
+`src/buda_session/ripup.py` (`_rr_t_*`): seconds + call counts for
+replan / nuts / dnuts / snapshot / restore, charged inside `_rr_rerun`,
+`_rr_snapshot`, `_rr_restore` (getattr-guarded — free outside a run), an
+always-on one-line summary after each run's `done:` print, and a per-trial
+line behind `BUDA_RR_TRACE=1`.  The breakdown confirmed the post-replan_bundle
+residual is the per-trial FULL solves: bigHalf stage a `nuts 10.6s/34`
+(~0.31s each, 92% of the stage); stage b `nuts 20.8s/122 + dnuts 7.1s/122`
+(85%), 116 rejected trials for 6 commits.
+
+**Structural wins (Phase 1).**
+- **Commit-by-forward-restore:** the winning index move's trial state is
+  snapshotted BEFORE the per-trial restore, and the commit *restores forward*
+  to it instead of re-running the pipeline — one full rerun saved per
+  committed iteration.  Guarded by `_rr_fwd_ok`: a trial that appended a
+  dogleg candidate (or moved a dogleg slot) still commits via the legacy
+  re-run, because `_rr_restore` can trim a candidate pool but never re-grow
+  it; flip moves keep the legacy path too (their in-place geometry is not
+  snapshot-covered).  After the forward restore the planner's cut usage is
+  explicitly recharged from the restored committed assignments
+  (`CongestionPlanner::recharge_committed`, the public no-scoring recharge):
+  replanning consumers recharge anyway, but DIRECT cut readers — the
+  visualizer's congestion overlay reads `get_cuts()` — must see the
+  committed route, not the last rejected trial's recharge (Codex #286).
+  Exactness pinned by A/B tests (forward vs legacy commit: identical
+  wrapper state + metric + per-band cut usage, stages a and b).
+- **Scoped per-trial restore:** `_rr_restore(snap, only=dirty)` rewrites only
+  the wrappers a trial dirtied — the incremental replan mutates just its
+  target, plus any dogleg-adopted bundles (`_rr_rerun` collects
+  `{target} ∪ dogleg-slot keys`; full-replan fallbacks set dirty=None ⇒ full
+  restore; NUTSEngine::run takes the wrappers by value, so C++ never mutates
+  them).  bigHalf stage-b restore: 1.50s → 0.17s.
+- **Tried and REVERTED — stall skip-cache:** skipping a contender whose own
+  contention signature was unchanged since its last all-moves-failed sweep
+  looked conservative but is WRONG: trial outcomes depend on global state,
+  not the contender's own sites.  Measured on bigHalf stage b: commits to
+  five other bundles freed the capacity bundle 77's alternates needed while
+  77's own signature never moved — the skip stranded 52 opens (and cost MORE
+  trials, 569 vs 116, from the diverged trajectory).  Re-sweep cost must be
+  attacked by making trials cheaper, not fewer.
+- **Measured negligible — engine reuse:** NUTSEngine construction + pitch +
+  grid injection is ~0.004ms vs ~176ms per bigHalf solve (<0.01%); a cached
+  engine across trials is not worth the lifetime bookkeeping.
+
+**Measured (same host, fresh build).** bigHalf rr-enabled: 49s → **46s**,
+identical 9-commit trajectory and 0/0 endpoint; slowdown_rnr 11.1s → 9.4s,
+mix 10.4s → 9.4s, big2_noviz unchanged — all with identical endpoints,
+moves, and trial counts.  The remaining ~27s of bigHalf stage b is the
+116 full NUTS+DNUTS trial solves — the incremental-solve round (two-tier
+trials: cheap per-layer NUTS / fixed-bits DNUTS as filter, full-fidelity
+verify before accept) is the follow-on that attacks it.
+
 ## `ripup_reroute` v1 follow-ups (deferred from the implementing PR)
 
 The `ripup_reroute [max_iter]` command (Python greedy hill-climb in
