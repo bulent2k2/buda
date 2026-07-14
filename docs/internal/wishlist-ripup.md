@@ -90,7 +90,8 @@ residual is the per-trial FULL solves: bigHalf stage a `nuts 10.6s/34`
   the wrappers a trial dirtied — the incremental replan mutates just its
   target, plus any dogleg-adopted bundles (`_rr_rerun` collects
   `{target} ∪ dogleg-slot keys`; full-replan fallbacks set dirty=None ⇒ full
-  restore; NUTSEngine::run takes the wrappers by value, so C++ never mutates
+  restore; NUTSEngine::run takes `const&`, and pybind's list→vector
+  conversion copy is what isolates the session wrappers — C++ never mutates
   them).  bigHalf stage-b restore: 1.50s → 0.17s.
 - **Tried and REVERTED — stall skip-cache:** skipping a contender whose own
   contention signature was unchanged since its last all-moves-failed sweep
@@ -103,6 +104,29 @@ residual is the per-trial FULL solves: bigHalf stage a `nuts 10.6s/34`
 - **Measured negligible — engine reuse:** NUTSEngine construction + pitch +
   grid injection is ~0.004ms vs ~176ms per bigHalf solve (<0.01%); a cached
   engine across trials is not worth the lifetime bookkeeping.
+
+**Retrospective follow-ups (#286 post-merge review) — ✅ ALL ADDRESSED.**
+(1) A rejected full-replan-fallback trial's `_reset_doglegs` shrank a pool
+the trim-only restore couldn't re-grow (phantom out-of-range selection):
+`_rr_restore` now re-inserts the snapshot's dl_cand content at its slot
+before trimming, and `_persist_planner_output` is gated by the new
+`_rr_in_trial` flag so a trial's `run_planner` fallback can never leave
+rejected planner rows for a `load_pipeline` resume.  Chasing the re-grow
+test exposed a LATENT hazard in the original dl_cand capture: a bound
+vector member's element access returns a REFERENCE into its storage
+(def_readwrite getter = reference_internal), which dangles across
+size-changing reassignments — the direct capture survived only because
+size-preserving overwrites reuse the storage.  `Topology.__copy__` /
+`__deepcopy__` are now bound and the snapshot takes a real copy.
+(2) Cut-state parity: BOTH commit paths now `recharge_committed` (the
+legacy re-run's cuts predated `_adopt_doglegs` on in-place dogleg
+re-solves).  (3) The A/B exactness state is content-level (per-candidate
+geometry fingerprints + the dogleg bookkeeping dicts) and a big2 @mid A/B
+covers the MST/dogleg-capable branches.  Notes: mid-trial exceptions now
+restore via `_rr_guarded_move` / the extracted `_negotiate_iteration`
+guard, and the by-value wording below is corrected (const& + pybind's
+conversion copy).  The #287 micro-nit (`+ len(tried)` in the occupant
+request) is also taken.
 
 **Measured (same host, fresh build).** bigHalf rr-enabled: 49s → **46s**,
 identical 9-commit trajectory and 0/0 endpoint; slowdown_rnr 11.1s → 9.4s,

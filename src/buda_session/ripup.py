@@ -23,6 +23,7 @@ split); bodies unchanged — `self` is the composed BudaSession, so
 cross-mixin helper calls resolve through the class as before.
 """
 import contextlib
+import copy
 import io
 import os
 import time
@@ -220,13 +221,16 @@ class RipupMixin:
         # An adopted dogleg's split candidate is OVERWRITTEN in place when a
         # trial's NUTS re-solves the same bundle's cycle (cands[slot] = ...,
         # _adopt_doglegs) — the candidate COUNT doesn't change, so the trim
-        # below can't undo it.  Capture the slot's Topology (the pybind list
-        # conversion hands back an independent copy) so restore can put the
-        # committed split geometry back.
+        # below can't undo it.  Capture a REAL copy of the slot's Topology
+        # (copy.copy → the __copy__ binding): element access on the bound
+        # vector hands back a reference into its storage, which DANGLES if
+        # a trial's size-changing reassignment reallocates the vector — the
+        # previous direct capture survived only while size-preserving
+        # overwrites reused the storage (#286 retrospective follow-up).
         for bid, slot in self._dogleg_slot.items():
             w = self._rr_wrapper(bid)
             if w is not None and 0 <= slot < len(w.input.candidates):
-                snap['dl_cand'][bid] = w.input.candidates[slot]
+                snap['dl_cand'][bid] = copy.copy(w.input.candidates[slot])
         self._rr_t_add('snapshot', time.perf_counter() - t0)
         return snap
 
@@ -251,6 +255,22 @@ class RipupMixin:
              seg_net_pull, seg_slide_lo, seg_slide_hi, av, ah,
              pinned_layers) = cap
             cands = w.input.candidates
+            # RE-GROW a pool a rejected full-replan-fallback trial SHRANK:
+            # its _reset_doglegs deleted the adopted split candidate, and a
+            # trim-only restore would put selected_topology_index back onto
+            # an out-of-range slot — the bundle would silently vanish from
+            # opens/recharges (#286 retrospective item 1).  The only deleter
+            # is _reset_doglegs and the only deletable slot is the adopted
+            # one, whose content the snapshot holds in dl_cand — re-insert
+            # it at its slot before the trim.
+            if len(cands) < ncand:
+                slot = snap['dl_slot'].get(bid)
+                topo = snap['dl_cand'].get(bid)
+                if slot is not None and topo is not None \
+                        and 0 <= slot <= len(cands):
+                    cands.insert(slot, topo)
+                    w.input.candidates = cands
+                    cands = w.input.candidates
             while len(cands) > ncand:        # drop dogleg-appended candidates
                 del cands[len(cands) - 1]
             w.input.candidates = cands
@@ -357,39 +377,52 @@ class RipupMixin:
         unrelated to the topology move."""
         exact = False
         sink = io.StringIO()
-        with contextlib.redirect_stdout(sink), buda.ostream_redirect():
-            t0 = time.perf_counter()
-            asn = None
-            if target_bid is not None and self.planner is not None:
-                asn = self.planner.replan_bundle(self.bundles, target_bid)
-            if asn is not None:
-                w = self._rr_wrapper(target_bid)
-                w.plan.selected_topology_index = asn.topo_index
-                w.input.assigned_v_layer = asn.v_layer_id
-                w.input.assigned_h_layer = asn.h_layer_id
-                w.plan.seg_layers = list(asn.seg_layers)
-                w.plan.seg_perp = list(asn.seg_perp)
-                exact = True
-            elif self._planner_is_hier:
-                self._rr_replan_hier(self._planner_iterations)
-            else:
-                self.do_command(f"run_planner {self._planner_iterations}")
-            self._rr_t_add('replan', time.perf_counter() - t0)
-            t0 = time.perf_counter()
-            self._run_nuts_internal()
-            self._rr_t_add('nuts', time.perf_counter() - t0)
-            # Dirty set for the scoped per-trial restore: the incremental
-            # replan mutated only the target; _adopt_doglegs (inside
-            # _run_nuts_internal) may additionally have rewritten any bundle
-            # in the dogleg-slot map (new adoptions AND in-place re-solves of
-            # existing slots — including every pre-existing slot key is
-            # conservative and cheap).  A full replan touches everything.
-            self._rr_dirty = ({target_bid} | set(self._dogleg_slot)
-                              if exact else None)
-            if stage == 'b':
+        # A trial's state must NEVER reach the BDB: the full-replan fallback
+        # below drives the run_planner COMMAND, whose handler persists the
+        # planner output — for a rejected trial (or a run that commits
+        # nothing) a later load_pipeline would rehydrate the rejected state
+        # (#286 retrospective item 1).  _persist_planner_output checks this
+        # flag; the accepted final state is persisted once by
+        # _checkpoint_routing at the end of the run.
+        self._rr_in_trial = True
+        try:
+            with contextlib.redirect_stdout(sink), buda.ostream_redirect():
                 t0 = time.perf_counter()
-                self._run_detailed_nuts(bit_order=self._detailed_bit_order)
-                self._rr_t_add('dnuts', time.perf_counter() - t0)
+                asn = None
+                if target_bid is not None and self.planner is not None:
+                    asn = self.planner.replan_bundle(self.bundles, target_bid)
+                if asn is not None:
+                    w = self._rr_wrapper(target_bid)
+                    w.plan.selected_topology_index = asn.topo_index
+                    w.input.assigned_v_layer = asn.v_layer_id
+                    w.input.assigned_h_layer = asn.h_layer_id
+                    w.plan.seg_layers = list(asn.seg_layers)
+                    w.plan.seg_perp = list(asn.seg_perp)
+                    exact = True
+                elif self._planner_is_hier:
+                    self._rr_replan_hier(self._planner_iterations)
+                else:
+                    self.do_command(f"run_planner {self._planner_iterations}")
+                self._rr_t_add('replan', time.perf_counter() - t0)
+                t0 = time.perf_counter()
+                self._run_nuts_internal()
+                self._rr_t_add('nuts', time.perf_counter() - t0)
+                # Dirty set for the scoped per-trial restore: the incremental
+                # replan mutated only the target; _adopt_doglegs (inside
+                # _run_nuts_internal) may additionally have rewritten any
+                # bundle in the dogleg-slot map (new adoptions AND in-place
+                # re-solves of existing slots — including every pre-existing
+                # slot key is conservative and cheap).  A full replan touches
+                # everything.
+                self._rr_dirty = ({target_bid} | set(self._dogleg_slot)
+                                  if exact else None)
+                if stage == 'b':
+                    t0 = time.perf_counter()
+                    self._run_detailed_nuts(
+                        bit_order=self._detailed_bit_order)
+                    self._rr_t_add('dnuts', time.perf_counter() - t0)
+        finally:
+            self._rr_in_trial = False
         return exact
 
     def _rr_contention_centres(self, stage, bid):
@@ -565,11 +598,13 @@ class RipupMixin:
             # band), so a top-K C++ truncation would hand them the slots
             # and starve the genuinely NON-contended holder the pass
             # exists to find (review #287).  Request enough entries that
-            # K real occupants can survive the Python-side exclusion,
-            # then cap the TRIALED occupants per site at K here.
+            # K real occupants can survive the Python-side exclusion —
+            # including the cross-site `tried` dedupe, which also consumes
+            # ranking slots at later sites — then cap the TRIALED
+            # occupants per site at K here.
             occ = self.planner.band_occupants(
                 self.bundles, layer, s_lo, s_hi, p_lo, p_hi,
-                _RR_GLOBAL_TOP_K + len(exclude))
+                _RR_GLOBAL_TOP_K + len(exclude) + len(tried))
             site = [(layer in h_layers, 0.5 * (p_lo + p_hi))]
             site_occupants = 0
             for bid, _demand in occ:
@@ -587,7 +622,8 @@ class RipupMixin:
                 for tidx in self._rr_global_moves(w, old_tidx, stage, site):
                     if trials >= _RR_GLOBAL_MAX_TRIALS:
                         return None, trials
-                    m = self._rr_trial(w, tidx, stage, metric)
+                    m = self._rr_guarded_move(w, ('idx', tidx), old_tidx,
+                                              stage, metric, snap)
                     fwd = self._rr_snapshot() if m < cur else None
                     self._rr_restore(snap, only=self._rr_dirty)
                     trials += 1
@@ -676,6 +712,19 @@ class RipupMixin:
         buda.annotate_seg_conns(cands[sel])
         return self._rr_trial(w, sel, stage, metric)
 
+    def _rr_guarded_move(self, w, move, old_tidx, stage, metric, snap):
+        """_rr_apply_move with exception hygiene (#286 retrospective note):
+        a mid-trial exception — e.g. the bottom-up DNUTS 'stop' policy
+        raising inside _rr_rerun — must not leave trial state live.  Undo
+        any flip geometry and restore the FULL baseline (the dirty set may
+        be stale mid-flight) before re-raising."""
+        try:
+            return self._rr_apply_move(w, move, old_tidx, stage, metric)
+        except BaseException:
+            self._rr_undo_move(w, move, old_tidx)
+            self._rr_restore(snap)
+            raise
+
     def _rr_undo_move(self, w, move, sel):
         """Undo a rejected flip trial's in-place geometry change (flip_mst_edge is
         an involution).  Index moves need no geometry undo — _rr_restore already
@@ -756,6 +805,58 @@ class RipupMixin:
                 if missing > 0:
                     out.append((bid, si, missing, exp))
         return out
+
+    def _negotiate_iteration(self, affected, stage, sink):
+        """One negotiation iteration's mutation body, silenced: replan every
+        affected bundle UNPINNED under the injected prices, then re-run
+        NUTS (+ DNUTS for stage b).  Extracted so _negotiate_congestion can
+        wrap it in exception hygiene (restore + clear injected demand)."""
+        with contextlib.redirect_stdout(sink), buda.ostream_redirect():
+            t0 = time.perf_counter()
+            for bid in affected:
+                w = self._rr_wrapper(bid)
+                if w is None:
+                    continue
+                # A hier.locked wrapper (bottom-up template instance) is
+                # never a negotiation target: its pinned assignment is a
+                # uniform copy shared by all sibling instances.  Its
+                # overlap partner (if unlocked) still replans around it —
+                # and replan_bundle_ripup's victim stage skips locked
+                # blockers C++-side too.
+                if w.hier.locked:
+                    continue
+                # Unpin: the corrected prices, not a pinned index, choose
+                # the topology (snapshot restores the pins on rejection).
+                # Per-segment layer pins must go too — plan_bundle applies
+                # pinned_seg_layers[si] to EVERY candidate regardless of
+                # topology_pinned, so a stale sidecar pin would force
+                # layers onto whatever topology negotiation picks
+                # (including H/V mismatches that charge no cuts).
+                w.input.topology_pinned = False
+                w.input.pinned_seg_layers = []
+                # The ripup-capable replan (v2b): when the target has no
+                # overflow-free candidate under the injected prices, the
+                # planner's own ladder may also displace the committed
+                # bundle blocking it — both assignments come back and the
+                # outer accept/restore guard still owns safety.
+                asns = self.planner.replan_bundle_ripup(self.bundles, bid)
+                for asn in asns:
+                    w2 = self._rr_wrapper(asn.bundle_id)
+                    if w2 is None:
+                        continue
+                    w2.plan.selected_topology_index = asn.topo_index
+                    w2.input.assigned_v_layer = asn.v_layer_id
+                    w2.input.assigned_h_layer = asn.h_layer_id
+                    w2.plan.seg_layers = list(asn.seg_layers)
+                    w2.plan.seg_perp = list(asn.seg_perp)
+            self._rr_t_add('replan', time.perf_counter() - t0)
+            t0 = time.perf_counter()
+            self._run_nuts_internal()
+            self._rr_t_add('nuts', time.perf_counter() - t0)
+            if stage == 'b':
+                t0 = time.perf_counter()
+                self._run_detailed_nuts(bit_order=self._detailed_bit_order)
+                self._rr_t_add('dnuts', time.perf_counter() - t0)
 
     def _negotiate_congestion(self, max_iter=5):
         """Measured-congestion negotiation (wishlist-ripup item 1).  Instead of
@@ -859,52 +960,15 @@ class RipupMixin:
                 key=lambda b: -(self._rr_wrapper(b).input.width
                                 if self._rr_wrapper(b) is not None else 0.0))
             sink = io.StringIO()
-            with contextlib.redirect_stdout(sink), buda.ostream_redirect():
-                t0 = time.perf_counter()
-                for bid in affected:
-                    w = self._rr_wrapper(bid)
-                    if w is None:
-                        continue
-                    # A hier.locked wrapper (bottom-up template instance) is
-                    # never a negotiation target: its pinned assignment is a
-                    # uniform copy shared by all sibling instances.  Its
-                    # overlap partner (if unlocked) still replans around it —
-                    # and replan_bundle_ripup's victim stage skips locked
-                    # blockers C++-side too.
-                    if w.hier.locked:
-                        continue
-                    # Unpin: the corrected prices, not a pinned index, choose
-                    # the topology (snapshot restores the pins on rejection).
-                    # Per-segment layer pins must go too — plan_bundle applies
-                    # pinned_seg_layers[si] to EVERY candidate regardless of
-                    # topology_pinned, so a stale sidecar pin would force
-                    # layers onto whatever topology negotiation picks
-                    # (including H/V mismatches that charge no cuts).
-                    w.input.topology_pinned = False
-                    w.input.pinned_seg_layers = []
-                    # The ripup-capable replan (v2b): when the target has no
-                    # overflow-free candidate under the injected prices, the
-                    # planner's own ladder may also displace the committed
-                    # bundle blocking it — both assignments come back and the
-                    # outer accept/restore guard still owns safety.
-                    asns = self.planner.replan_bundle_ripup(self.bundles, bid)
-                    for asn in asns:
-                        w2 = self._rr_wrapper(asn.bundle_id)
-                        if w2 is None:
-                            continue
-                        w2.plan.selected_topology_index = asn.topo_index
-                        w2.input.assigned_v_layer = asn.v_layer_id
-                        w2.input.assigned_h_layer = asn.h_layer_id
-                        w2.plan.seg_layers = list(asn.seg_layers)
-                        w2.plan.seg_perp = list(asn.seg_perp)
-                self._rr_t_add('replan', time.perf_counter() - t0)
-                t0 = time.perf_counter()
-                self._run_nuts_internal()
-                self._rr_t_add('nuts', time.perf_counter() - t0)
-                if stage == 'b':
-                    t0 = time.perf_counter()
-                    self._run_detailed_nuts(bit_order=self._detailed_bit_order)
-                    self._rr_t_add('dnuts', time.perf_counter() - t0)
+            try:
+                self._negotiate_iteration(affected, stage, sink)
+            except BaseException:
+                # A mid-iteration exception (e.g. the bottom-up DNUTS 'stop'
+                # policy raising) must not leave speculative state live
+                # (#286 retrospective note).
+                self._rr_restore(snap)
+                self.planner.clear_injected_demand()
+                raise
             new = metric()
             if new < cur:
                 accepted += 1
@@ -1034,7 +1098,8 @@ class RipupMixin:
                 zero = (0, 0) if isinstance(cur, tuple) else 0
                 for move in moves:
                     t_trial = time.perf_counter()
-                    m = self._rr_apply_move(w, move, old_tidx, stage, metric)
+                    m = self._rr_guarded_move(w, move, old_tidx, stage,
+                                              metric, snap)
                     if m is None:
                         continue                 # invalid flip (bend on obstacle)
                     # New best so far: capture the trial's state BEFORE the
@@ -1102,10 +1167,16 @@ class RipupMixin:
             # never re-grows a pool).
             if fwd is not None and self._rr_fwd_ok(snap, fwd):
                 self._rr_restore(fwd)
-                self.planner.recharge_committed(self.bundles)
             else:
                 self._rr_apply_move(self._rr_wrapper(bid), move, old_t,
                                     stage, metric)
+            # Recharge after BOTH commit paths: the forward restore never
+            # touched the cuts, and even the legacy re-run's cuts predate
+            # _adopt_doglegs when the winning trial re-solved a dogleg in
+            # place — direct cut readers (the viz congestion overlay) must
+            # see the committed post-adoption state either way (#286
+            # retrospective item 2).
+            self.planner.recharge_committed(self.bundles)
             committed += 1
             print(f"[ripup_reroute] iter {it}: COMMIT bundle {bid} "
                   f"{self._rr_move_str(old_t, move)}, metric {self._rr_m_str(cur)}->"
