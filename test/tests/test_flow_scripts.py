@@ -806,3 +806,38 @@ def test_inline_comment_boundary_rules(tmp_path):
     assert "strategy must be" not in out, out
     segs, viol, over = nuts_summary(out)
     assert (viol, over) == (0, 0), f"expected clean NUTS, got viol={viol} over={over}\n{out}"
+
+
+@pytest.mark.slow
+def test_bighalf_rr_reaches_clean_endpoint(tmp_path):
+    """bigHalf with both ripup_reroute lines enabled reaches the clean
+    0 overlaps / 0 opens endpoint (ReadMe_bigHalf row 6, the config the
+    checked-in flow keeps commented out for speed).  The variant is
+    generated here — the checked-in bigHalf.buda stays the fast row-7
+    config — with a generous max_iter for host tolerance (tc3a NUTS-stage
+    counts are FP/CPU-sensitive under -march=native, so the ENDPOINT is
+    asserted, never intermediate counts or wall time; the trial budget
+    bound guards against a trial-count blowup regression)."""
+    src = FLOW / "big_data_test" / "bigHalf.buda"
+    text = src.read_text()
+    text = text.replace("# ripup_reroute", "ripup_reroute 30")
+    text = text.replace("source ../tracks/",
+                        f"source {FLOW / 'tracks'}/")
+    text = text.replace("source tc3a_flat_5x.buda",
+                        f"source {FLOW / 'big_data_test' / 'tc3a_flat_5x.buda'}")
+    script = tmp_path / "bigHalf_rr.buda"
+    script.write_text(text)
+    out, rc = _run_path(script)
+    assert rc == 0, f"bigHalf rr-enabled aborted (rc={rc})\n{out[-3000:]}"
+    # run output = terminal summary + flow log, so the done lines can appear
+    # twice (and the terminal copy may be ellipsis-truncated) — take the
+    # LAST two, which are the flow log's full stage-a / stage-b lines.
+    done = re.findall(r"\[ripup_reroute\] done: metric .*?->(\S+(?: \(ovl \d+\))?) "
+                      r"after \d+ move\(s\), (\d+) trial\(s\)", out)
+    assert len(done) >= 2, f"expected two ripup runs\n{out[-3000:]}"
+    st_a, st_b = done[-2], done[-1]
+    # Stage a ends at 0 overlaps; stage b at 0 opens / 0 collateral overlaps.
+    assert st_a[0] == "0", f"stage a not clean: {st_a}\n{out[-3000:]}"
+    assert st_b[0] == "0 (ovl 0)", f"stage b not clean: {st_b}\n{out[-3000:]}"
+    assert int(st_a[1]) + int(st_b[1]) < 600, \
+        f"trial-count blowup: {done}"

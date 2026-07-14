@@ -596,6 +596,226 @@ def test_commit_by_forward_restore_matches_rerun_commit_stage_b(monkeypatch):
     assert _cut_usages(s_fwd) == _cut_usages(s_leg)
 
 
+# --- Global-occupant pass (wishlist-ripup "global-overlap re-route of ------
+# --- NON-contended bundles", the big2 b61 class) ----------------------------
+
+def _build_occupant_session(truncate=True):
+    """Three buses through one narrow M4 corridor (band1 y[1180,1270]) that
+    fits two: a and c collide (one NUTS overlap), b holds a band1 slot and
+    has escape candidates (band2 y[600,660] is only reachable from x>=1650
+    ... but b's Z/U alternates suffice for the mechanics tests).  a and c's
+    candidate pools are truncated to their selected candidate — a legitimate
+    degenerate state — so no contender-derived move can fix the overlap;
+    moving the OCCUPANT b is the only fix."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    cmds = [
+        "def_layer 5 M5 V TOP 50",
+        "def_layer 4 M4 H TOP 50",
+        "def_track_pattern 4 0 SIGNAL 1 4",
+        "def_track_pattern 5 0 SIGNAL 1 4",
+        "add_block D1 0 1000 200 1400",
+        "add_block D2 400 1000 600 1400",
+        "add_block R1 2400 1000 2600 1400",
+        "add_block R2 2400 1600 2600 2000",
+        "add_block D3 1700 1000 1900 1400",
+        "add_block R3 2400 400 2600 800",
+        "add_bus a[8] D1.p R1.p",
+        "add_bus b[8] D2.p R2.p",
+        "add_bus c[8] D3.p R3.p",
+        "add_keepout 0 1270 3000 4000 4",
+        "add_keepout 0 660 3000 1180 4",
+        "add_keepout 0 0 1650 660 4",
+        "add_keepout 0 0 3000 600 4",
+        "run_bundler", "generate_topologies",
+        "select_topology 1 1", "select_topology 2 1", "select_topology 3 1",
+        "run_planner", "run_nuts",
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        for c in cmds:
+            s.do_command(c)
+    assert [(od.bid_a, od.bid_b)
+            for od in s.nuts_result.overlap_details] == [(1, 3)]
+    if truncate:
+        for bid in (1, 3):
+            w = next(w for w in s.bundles
+                     if w.input.original_bundle.id == bid)
+            sel = w.plan.selected_topology_index
+            w.input.candidates = [w.input.candidates[sel]]
+            w.plan.selected_topology_index = 0
+            w.input.topology_pinned = True
+    return s
+
+
+def test_band_occupants_ranks_holders_and_skips_outsiders():
+    """The C++ ranking: bundles charging the overlap rectangle's bands rank
+    with positive demand; a locked wrapper is excluded; top_k truncates."""
+    s = _build_occupant_session()
+    od = s.nuts_result.overlap_details[0]
+    occ = s.planner.band_occupants(s.bundles, od.layer,
+                                   od.span_lo, od.span_hi,
+                                   od.perp_lo, od.perp_hi, 3)
+    ranked = {bid: d for bid, d in occ}
+    # All three route through band1, so all three hold the contended bands.
+    assert set(ranked) == {1, 2, 3} and all(d > 0 for d in ranked.values())
+    # top_k truncation.
+    assert len(s.planner.band_occupants(s.bundles, od.layer,
+                                        od.span_lo, od.span_hi,
+                                        od.perp_lo, od.perp_hi, 1)) == 1
+    # A locked wrapper is never an occupant.
+    w2 = next(w for w in s.bundles if w.input.original_bundle.id == 2)
+    w2.hier.locked = True
+    occ2 = s.planner.band_occupants(s.bundles, od.layer,
+                                    od.span_lo, od.span_hi,
+                                    od.perp_lo, od.perp_hi, 3)
+    assert 2 not in {bid for bid, _ in occ2}
+
+
+def test_global_pass_moves_non_contended_occupant():
+    """The pass mechanics, driven directly: with the overlap pair {1,3}
+    excluded (modeling 'already scanned as contenders, no move helped'),
+    the pass ranks the occupants of the overlap's bands, trials bundle 2's
+    alternates against the overlap's location, finds the strictly-improving
+    move, and leaves the session restored to the baseline (the caller
+    commits via the returned forward snapshot)."""
+    s = _build_occupant_session()
+    stage, metric = s._rr_stage_metric()
+    assert stage == 'a' and metric() == 1
+    snap = s._rr_snapshot()
+    sel_before = _selections(s)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        best, trials = s._rr_global_pass(stage, metric, snap, metric(),
+                                         {1, 3})
+    assert best is not None and trials >= 1, buf.getvalue()
+    m, bid, old_tidx, move, fwd = best
+    assert bid == 2 and move[0] == 'idx' and m == 0
+    assert fwd is not None
+    assert "GLOBAL" in buf.getvalue()
+    # The pass itself commits nothing: baseline state intact.
+    assert _selections(s) == sel_before
+    assert s.nuts_result.num_overlaps == 1
+    # Committing the forward snapshot lands the winning state.
+    s._rr_restore(fwd)
+    assert s.nuts_result.num_overlaps == 0
+    assert _selections(s)[2] == move[1]
+
+
+def test_global_pass_survives_contender_dominated_ranking(monkeypatch):
+    """Review #287 medium: the site's own overlap parties charge its bands
+    by construction, so a top-K truncation BEFORE the Python exclusion can
+    return only excluded contenders and starve the genuine occupant.  With
+    K forced to 1 (the top slot goes to an overlap party — asserted, so
+    the fixture keeps its discriminating power), the pass must still reach
+    and trial occupant bundle 2 because the request is widened by
+    len(exclude) before the Python-side filter."""
+    import buda_session.ripup as ripup_mod
+    s = _build_occupant_session()
+    od = s.nuts_result.overlap_details[0]
+    occ = s.planner.band_occupants(s.bundles, od.layer,
+                                   od.span_lo, od.span_hi,
+                                   od.perp_lo, od.perp_hi, 1)
+    assert occ and occ[0][0] in (1, 3), \
+        f"fixture lost its discriminating power: top occupant {occ}"
+    monkeypatch.setattr(ripup_mod, "_RR_GLOBAL_TOP_K", 1)
+    stage, metric = s._rr_stage_metric()
+    snap = s._rr_snapshot()
+    with contextlib.redirect_stdout(io.StringIO()):
+        best, trials = s._rr_global_pass(stage, metric, snap, metric(),
+                                         {1, 3})
+    assert best is not None and best[1] == 2, (best, trials)
+
+
+def test_ripup_stall_invokes_global_pass_and_no_global_disables(monkeypatch):
+    """Loop wiring: when the contender scan stalls above zero, the global
+    pass runs by default; the `no_global` keyword disables it."""
+    calls = []
+    orig = buda_cli.BudaSession._rr_global_pass
+
+    def spy(self, stage, metric, snap, cur, exclude):
+        calls.append(sorted(exclude))
+        return orig(self, stage, metric, snap, cur, exclude)
+
+    monkeypatch.setattr(buda_cli.BudaSession, "_rr_global_pass", spy)
+    s = _build_occupant_session()
+    # Truncate the occupant's pool too, so the pass finds nothing and the
+    # invocation itself is what's asserted (a clean stall end to end).
+    w2 = next(w for w in s.bundles if w.input.original_bundle.id == 2)
+    w2.input.candidates = [w2.input.candidates[
+        w2.plan.selected_topology_index]]
+    w2.plan.selected_topology_index = 0
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute")
+    assert calls, buf.getvalue()             # pass invoked at the stall
+    assert "no improving re-route" in buf.getvalue()
+    calls.clear()
+    s2 = _build_occupant_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s2.do_command("ripup_reroute no_global")
+    assert not calls                          # keyword disables the pass
+
+
+def test_ripup_global_pass_clears_stalled_overlap_end_to_end():
+    """End to end through the command: contenders {1,3} have no moves (one
+    candidate each) — historical ripup stops at 1 overlap; occupant
+    bundle 2 is re-routed and the run ends clean.  NOTE: in this small
+    fixture bundle 2 also surfaces as a junction-infeasibility contender,
+    so the normal scan reaches it first — the assertions are the ENDPOINT
+    plus bundle 2's selection change (conditional on which path moved it),
+    with the global pass as the backstop; the direct-drive test above
+    pins the pass's own mechanics."""
+    s = _build_occupant_session()
+    sel2_before = _selections(s)[2]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute")
+    out = buf.getvalue()
+    assert s.nuts_result.num_overlaps == 0, out
+    # Bundles 1 and 3 are single-candidate, so the only possible commit —
+    # whether the contender scan or the global pass made it — is a bundle 2
+    # re-route; the COMMIT line and the selection must agree.
+    assert "COMMIT bundle 2" in out, out
+    assert _selections(s)[2] != sel2_before, out
+
+
+def test_global_moves_budget_guarantees_beyond_window_extras():
+    """Codex #287 P1: the global pass's per-occupant move budget must
+    include the promoted BEYOND-WINDOW candidates — a head-slice of the
+    candidate order is all in-window whenever the pool exceeds the
+    8-candidate window, starving exactly the b61-class candidates the
+    pass exists to reach.  The split budget reserves up to half the slots
+    for extras while the in-window pool stays first (cheap fixes keep
+    first shot at the first-improving accept)."""
+    s = _build_occupant_session(truncate=False)
+    w = next(w for w in s.bundles if w.input.original_bundle.id == 1)
+    assert len(w.input.candidates) > 8      # extras exist for this pool
+    site = [(True, 1225.0)]                 # the band1 corridor's centre
+    moves = s._rr_global_moves(w, w.plan.selected_topology_index, 'a', site)
+    from buda_session.util import (_RR_GLOBAL_MOVES_PER_OCC,
+                                   _RR_MAX_CANDIDATES_PER_BUNDLE)
+    assert len(moves) <= _RR_GLOBAL_MOVES_PER_OCC
+    extras = [t for t in moves if t >= _RR_MAX_CANDIDATES_PER_BUNDLE]
+    assert extras, f"no beyond-window candidate in the budget: {moves}"
+    # In-window moves still come first (the cheap-tie preference).
+    first_extra = moves.index(extras[0])
+    assert all(t >= _RR_MAX_CANDIDATES_PER_BUNDLE
+               for t in moves[first_extra:]), moves
+
+
+def test_candidate_order_sites_override_matches_default():
+    """An explicit `sites=` override handed the bundle's OWN contention
+    centres reproduces the default derive-from-own-contention ordering —
+    the override changes WHERE the ranking looks, never HOW it ranks."""
+    s = _build_session(narrow=True)
+    w = s.bundles[0]
+    old = w.plan.selected_topology_index
+    default_order = s._rr_candidate_order(w, old, 'a')
+    own = s._rr_contention_centres('a', w.input.original_bundle.id)
+    assert own, "narrow fixture should leave bundle 1 contended"
+    assert s._rr_candidate_order(w, old, 'a', sites=own) == default_order
+
+
 def test_ripup_prints_timing_summary():
     """The per-run timing breakdown (Phase 0 instrumentation) rides the run's
     final output for both ripup_reroute and negotiate_congestion."""

@@ -47,12 +47,6 @@ items this page doesn't see).
 *(bottom-up conditionals, added 2026-07-10 — these only fire on specific
 designs and fail LOUD, never silent:)*
 
-5. **Global-overlap re-route of NON-contended bundles** —
-   [`wishlist-ripup.md`](wishlist-ripup.md) → *"Global-overlap re-route of
-   NON-contended bundles"*. The measured b61-class global win (10 → 8
-   overlaps from re-routing a bundle that is not itself contended).
-   Explicitly bigger/riskier — enlarges the ripup search, can churn; only
-   worth it if the corpus shows several such cases.
 6. **True along-flex trunk DOF (Stage C)** —
    [`wishlist-topo.md`](wishlist-topo.md) → *"True along-flex trunk DOF"*.
    Stage A (ConnSeg `along_flex`/`along_pull`) landed; the always-on flip is
@@ -67,6 +61,26 @@ designs and fail LOUD, never silent:)*
    follows the documented pattern (own translation unit behind a CMake flag).
 
 ## Resolved (by 2026-07-14)
+
+- **Global-overlap re-route of NON-contended bundles** ✅ — **DONE
+  (2026-07-14)**, as ripup's **global-occupant pass** (the b61 class:
+  big2 bundle 61, not itself contended, holds the bands whose re-route
+  runs the design at 8 overlaps instead of 10 — via a window-infeasible
+  STRICT-rejected candidate no contended-only scan could reach).  Runs
+  ONLY when the normal contender scan stalls above zero (clean flows
+  structurally byte-identical — corpus verified): per remaining
+  contention site, `CongestionPlanner::band_occupants` (one new
+  read-only binding composing `inject_band_demand`'s rect→bands mapping
+  with `replan_bundle_ripup`'s `plan_band_overlap` victim ranking) ranks
+  the committed band holders, and each occupant's alternates are trialed
+  ranked against THE SITE's location, strict-improvement accept, bounded
+  (3 occupants/site, 6 moves/occupant, ≤36 trials/stall).  Default on;
+  `no_global` opts out.  Shipped alongside the RR efficiency round
+  (timing instrumentation exposing the per-trial full-solve residual,
+  commit-by-forward-restore, scoped restore — bigHalf 0/0 at ~45s vs
+  ~49s, corpus endpoints identical; the measured-and-reverted stall
+  skip-cache is documented as a negative result).  Details:
+  [`wishlist-ripup.md`](wishlist-ripup.md).
 
 - **Hier bundler: CONVERGENT + COMBINED + fan-in bundles** ✅ — **DONE
   (2026-07-14, PR #276)**, closing the fan-in item's hier follow-on: the
