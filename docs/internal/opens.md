@@ -1,7 +1,7 @@
 # Open items — the cross-subsystem priority view
 
 What remains to focus on, ranked by value/effort. This page is a **snapshot
-index** (last verified against `main`: **2026-07-13**, post PR #280/#281) —
+index** (last verified against `main`: **2026-07-14**, post PR #284) —
 the details, evidence, and where-to-start notes live in the per-subsystem
 wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
@@ -9,28 +9,18 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
-3. **Selection basis: rank on measured routability** —
-   [`wishlist-planner.md`](wishlist-planner.md) → *"Selection basis …
-   LEVERS 1+2 SHIPPED"*. Lever 1 landed as the opt-in `set_planner_param
-   kPeak` (peak existing-band-utilization term, in both segment scoring
-   and the slide-window band choice; measured at 0.1: channel_stress
-   keepout opens healed at zero overlap cost, rnr/mix DNUTS −33%, tc3a
-   clean — but big2's negotiate/ripup-healed flow prefers the knob off,
-   so **off by default**). Lever 2 landed in `_rr_candidate_order`:
-   under measured contention ripup's trial pool appends the top-8
-   farness-ranked candidates from beyond the 8-cheapest-estimate window,
-   so a higher-estimate class (OOB trunk, BITRUNK tree) is promotable —
-   committing only on a strictly better measured metric (cheap-first
-   order + strict `<`: ties keep the cheaper move) — goldens
-   byte-identical, big2 stage-a residual overlaps 1→0. The kPeak
-   default-on question is **decided: stays opt-in**, confirmed after the
-   supply-aware `peak_util` floor shipped — big2's stranding turned out
-   to be the pre-charge horizon (early-planned wide trunks vs later
-   arrivals sharing the DNUTS window), not absolute-supply blindness, so
-   no plan-time term can fix it; negotiate+ripup heal it. The floor
-   shipped anyway on its own merits (region-override supply the width
-   model can't see: mix pre-heal opens −55%, tc3a's kPeak-0.2 regression
-   gone; see wishlist-planner).
+8. **Bundler follow-on corners (hier)** —
+   [`wishlist-bundler.md`](wishlist-bundler.md) → *"Remaining corners"*.
+   Two bounded pieces left after the bundler subsystem went
+   feature-complete across flat and hier (PRs #268/#273/#276):
+   **cross-level fan-in grouping** (cross-level nets keep
+   STRICT/BIDIRECTIONAL grouping today because their single
+   `drv_spec_path` metadata cannot describe a multi-driver group — needs
+   a per-net endpoint record like the same-level `net_drivers` /
+   `net_receivers`), and **hier `set_max_bundle_bits`** (the balanced
+   split pass is flat-only; hier splits must propagate through the
+   template↔replica linkage so every instance splits identically). Both
+   fail LOUD/conservative today, never silent.
 
 4. **Non-TOP pin-access stub span-stretched onto its endpoint leaf** —
    [`wishlist-nuts.md`](wishlist-nuts.md) → *"Non-TOP pin-access stub
@@ -76,7 +66,73 @@ designs and fail LOUD, never silent:)*
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
 
+## Resolved (by 2026-07-14)
+
+- **Hier bundler: CONVERGENT + COMBINED + fan-in bundles** ✅ — **DONE
+  (2026-07-14, PR #276)**, closing the fan-in item's hier follow-on: the
+  bundler subsystem is now feature-complete across flat and hier flows.
+  `run_hier_bundler` accepts all four strategies, applied PER BUNDLING
+  DEPTH to same-level nets (each net bundles once at its most specific
+  level — the depth-aware semantics ARE the scope decision: fan-ins
+  split across subtrees/depths stay separate routing problems). A
+  multi-driver group with differing endpoint block sets becomes a
+  `FANIN:root|FROM:leaves` bundle routed as a per-bit tapered fan-in
+  tree in its frame (cell-local templates merge with replicas like
+  STRICT; the taper is re-derived per instance at expansion from donor
+  metadata, so replica net order can't misalign it); a mixed-direction
+  same-set group keeps the block-to-block BIDIR treatment, INCLUDING its
+  historical single-entry emission. `set_bundling` overrides apply to
+  both bundlers; cross-level pairs merge under BIDIRECTIONAL *and*
+  COMBINED (never-finer lattice guarantee); reasons are never a
+  driverless `REC:…`. Review hardening (two blocking seam bugs: pure
+  CONVERGENT stranding single-driver cross-block buses, pure BIDIR
+  emission divergence on return pairs) landed with seam-targeted
+  regression tests. Remaining corners → open item 8 above. Details:
+  [`convergent_bundling.md`](convergent_bundling.md) HIER section.
+
+- **COMBINED bundling + per-prefix overrides + bundle bit bound** ✅ —
+  **DONE (2026-07-12, PR #273)**, flat flow. The strategies form a
+  lattice — STRICT (finest) ⊂ {CONVERGENT, BIDIRECTIONAL} ⊂ COMBINED —
+  and `run_bundler COMBINED` is the join: union-find merges nets
+  connected by a CHAIN of either relation (sound because fan-in trees
+  are direction-agnostic and per-bit tapered). `set_bundling <prefix>|*
+  <mode>` gates each relation per net prefix (longest prefix wins, both
+  nets must permit — e.g. keep clock nets out of every merge).
+  `set_max_bundle_bits <N|auto|off>` bounds bundle size as a balanced,
+  bus-preserving split pass; `auto` derives a per-endpoint-block cap
+  from the shortest busterm edge vs the bits the taper lands on that
+  block, enforced PER PART (Codex #273). QoR: congestion_demo's
+  cpu+gpu→display merge, abstract WL −29% at zero overlaps.
+
+- **Fan-in per-bit taper + BIT_SHORT / taper-aware audits** ✅ —
+  **DONE (2026-07-12, PRs #268 follow-up + #271)**. The CONVERGENT
+  fan-in realization is per-bit TAPERED (`Topology::seg_bits` /
+  `BusSegment.bit_list`): planner charging, NUTS widths, and DNUTS
+  emission are all member-bit-scoped, so no net's wire lands on another
+  driver's block. New audits: `BIT_SHORT` in `check_dnuts` (two
+  different bits of one bundle sharing a layer+track over an extended
+  span — the same-bundle track-sharing exemption's blind spot once
+  per-segment bit subsets exist) and the taper-aware `UNPLACED` audit
+  (expects only the bits a segment actually carries, PR #271).
+
 ## Resolved (by 2026-07-12)
+
+- **Selection basis: rank on measured routability** ✅ — **SETTLED
+  (2026-07-10..12)**, all levers shipped and every open question
+  decided; see [`wishlist-planner.md`](wishlist-planner.md) →
+  *"Selection basis … LEVERS 1+2 SHIPPED"* for the full record. Lever 1
+  = opt-in `set_planner_param kPeak` (peak existing-band-utilization in
+  segment scoring + the slide-window band choice) with the supply-aware
+  `peak_util` floor (region-override supply the width model can't see:
+  mix pre-heal opens −55%, tc3a's 0.2 regression gone) and the
+  flat-score / proportional-band-choice hybrid adopted; the default-on
+  question is **decided: stays opt-in** — big2's stranding is the
+  pre-charge horizon (a feedback problem no plan-time term can price;
+  negotiate+ripup heal it to 0/0), and the proportional score clamp was
+  implemented, measured, and rejected (mix overlaps 20→40). Lever 2 =
+  ripup's beyond-window farness-ranked candidate promotion
+  (`_rr_candidate_order`, goldens byte-identical, big2 stage-a residual
+  1→0).
 
 - **`refine_passes` default-on decision** ✅ — **DECIDED & SHIPPED
   (2026-07-12): hier-only default-on at 1 pass.** All gating
@@ -133,8 +189,9 @@ evidence in the per-subsystem wishlist files as cited.)*
   downgraded to a note; pipeline collapse tests inverted into acceptance
   tests + a mixed-driver case; QoR: `demo/ariane136_l2`'s 1024-bit
   12-driver rdata merge generates the fan-in tree and checks clean.
-  Remaining follow-on in [`wishlist-bundler.md`](wishlist-bundler.md): a
-  hier-bundler CONVERGENT mode (scope decision).
+  The taper hardening, the flat COMBINED/overrides/bit-bound layer, and
+  the hier-bundler modes (the scope decision) all landed afterwards —
+  see *Resolved (by 2026-07-14)* above.
 - **Keepout scope generalization** ✅ — **DONE (2026-07-11)**, landed as
   the opt-in `set_bottom_up *`: mark EVERY eligible cell at once, where
   eligible = a cell with congruent placed instances (≥2 = solve-once-COPY;
