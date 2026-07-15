@@ -1,0 +1,15 @@
+# align_prep.buda — one-time placement alignment checkpoint
+
+# cp mix2.bdb.sql mix2_aligned.bdb.sql
+# git diff mix2.bdb.sql mix2_aligned.bdb.sql
+source mix_tracks.buda                  # layers + patterns (align needs the pitches)
+open_bdb mix2_aligned.bdb.sql writeback
+set_bottom_up dnuts1
+set_bottom_up dnuts2
+set_bottom_up dogleg1
+set_bottom_up dogleg2
+check_template_tracks
+align_bottom_up
+check_template_tracks
+save_bdb                                # writes the aligned placement to mix2_aligned.bdb.sql
+exit
