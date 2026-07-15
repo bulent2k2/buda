@@ -1,8 +1,37 @@
 # Wishlist — Rip-up & re-route
 
 Deferred follow-ups for the feedback-driven `ripup_reroute` pass (Python
-hill-climb in `src/buda_cli.py`, driving planner + NUTS + DetailedNUTS). Index:
-[`wishlist.md`](wishlist.md).
+hill-climb in `src/buda_session/ripup.py`, driving planner + NUTS +
+DetailedNUTS). Index: [`wishlist.md`](wishlist.md).
+
+## Status (2026-07-15, post PR #298) — the RR speedup arc is CLOSED OUT
+
+Rounds 1–5 are all on `main`; this file is their decision record, newest
+section last.  Headline: bigHalf's rr-enabled clean 0/0 endpoint went
+**~49s → ~12.4s flow wall** (~8s of rr+negotiate on top of the ~4.5s
+no-rr config, same host),
+with every round gated on identical/clean corpus endpoints:
+
+- **R1** incremental trial replan + no-persist reruns (30–42× on hier).
+- **R2** timing instrumentation, commit-by-forward-restore, scoped
+  restore (+ two recorded reverts: stall skip-cache, layer-scoped
+  two-tier trials).
+- **R3** fast trials + the sound stage-b place-abort + the abort study
+  (#289–#291), then the **fixed-context screen** (#293, default on).
+- **R4** warm-start single-bundle re-solve (#296): fidelity proven
+  (91–100% agreement, 4.6–6×/solve), production wash behind the screen —
+  shipped **opt-in** (`warm_trials`), default off.
+- **R5** batched screen (#298): 8.9 → 3.25 ms/screen, byte-identical —
+  the cost was run()'s dogleg-only wrapper deep copy, not the plumbing.
+
+**What would reopen work here (all trigger-gated, bars recorded below):**
+the warm-default flip (post-screen cold trials ≥3× the ~41–70ms warm
+eval), the stage-b opens-proxy (only if a corpus shows the abstract
+screen mis-ordering), fixed-bits incremental DNUTS (only if stage b's
+~30–60ms per-trial DNUTS floor ever dominates), and the C++
+band-injection ladder end-state (item 1 below; `negotiate_congestion`
+already covers the practical need).  Nothing is blocked; nothing fails
+silent.
 
 ## Incremental trial replan + no-persist reruns — ✅ IMPLEMENTED
 
