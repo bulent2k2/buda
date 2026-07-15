@@ -1287,7 +1287,7 @@ def test_screen_run_freezes_context_and_is_reproducible():
         eng.set_track_pitch(s._nuts_pitch)
         eng.set_skip_tighten(True)
         eng.set_skip_doglegs(True)
-        gx, gy = s._rr_screen_grid()
+        gx, gy, _need = s._rr_screen_grid(exclude_bid=bid)
         eng.set_extra_grid_points(gx, gy)
         eng.add_fixed_segments_except(base, bid)
         with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
@@ -1384,8 +1384,11 @@ def test_screen_grid_fallback_derives_from_all_bundles():
     """Grid parity for hier sessions: when the flat floorplan's Hanan grid
     and the planner grids are all empty (hier keeps geometry in the expanded
     wrappers), _rr_screen_grid must reproduce run()'s fallback — the union
-    of ALL bundles' selected-topology coordinates, not just the target's —
-    or the screen's perpendicular intervals diverge from the full solve's."""
+    of the OTHER bundles' selected-topology coordinates (a full trial's
+    fallback grid holds the target's PINNED candidate, so the target's
+    baseline is excluded here and its candidate coords are merged per pin
+    by _rr_screen_scores — Codex #293), with the need flags telling the
+    caller the fallback engaged."""
     import types
     s = _build_session(narrow=True)
 
@@ -1396,18 +1399,24 @@ def test_screen_grid_fallback_derives_from_all_bundles():
 
     fake = types.SimpleNamespace(fp=_EmptyFP(), planner=None,
                                  bundles=s.bundles)
-    px, py = buda_cli.BudaSession._rr_screen_grid(fake)
+    target = s.bundles[0].input.original_bundle.id
+    px, py, need = buda_cli.BudaSession._rr_screen_grid(
+        fake, exclude_bid=target)
+    assert need == (True, True)
     xs, ys = set(), set()
     for w in s.bundles:
+        if w.input.original_bundle.id == target:
+            continue
         sel = w.plan.selected_topology_index
         for seg in w.input.candidates[sel].segments:
             xs |= {seg.start.x, seg.end.x}
             ys |= {seg.start.y, seg.end.y}
     assert px == sorted(xs) and py == sorted(ys)
     # With a populated grid nothing extra is merged (the planner grids pass
-    # through): extra Hanan lines would subdivide intervals differently
-    # than the full solve.
-    px2, py2 = s._rr_screen_grid()
+    # through, fallback disengaged): extra Hanan lines would subdivide
+    # intervals differently than the full solve.
+    px2, py2, need2 = s._rr_screen_grid(exclude_bid=target)
+    assert need2 == (False, False)
     assert px2 == list(s.planner.get_x_grid())
     assert py2 == list(s.planner.get_y_grid())
 

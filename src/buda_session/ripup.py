@@ -571,18 +571,27 @@ class RipupMixin:
         return (sorted(idxs, key=farness, reverse=True)
                 + sorted(extras, key=farness, reverse=True)[:cap])
 
-    def _rr_screen_grid(self):
+    def _rr_screen_grid(self, exclude_bid=None):
         """Extra grid points for a screen engine, reproducing run()'s grid
         derivation: the planner's extra grids, PLUS — only when the flat
         floorplan's Hanan grid and the planner grids are both empty on an
         axis (hier sessions keep geometry in the expanded wrappers) — the
-        fallback union of ALL bundles' selected-topology coordinates.  A
+        fallback union of the bundles' selected-topology coordinates.  A
         single-wrapper screen run would otherwise derive its fallback grid
         from the target's own segments alone, and the perpendicular
         intervals (hence the screen scores) would not match the full
         solve's.  The merge is CONDITIONAL for the same reason: extra Hanan
         lines on a populated grid would subdivide intervals differently
-        than the full solve."""
+        than the full solve.
+
+        Returns (px, py, (need_x, need_y)).  When a need flag is set the
+        fallback engaged, and the caller must merge the SCREENED
+        candidate's own coordinates per pin: a full trial's fallback grid
+        derives from the CURRENT selections — the pinned candidate, not
+        the baseline — so `exclude_bid` (the screen target) is left out of
+        the base union here and re-added per candidate, or an alternate
+        reaching outside the baseline union would be screened with
+        different interval bounds than its full trial (Codex #293)."""
         fx, fy = self.fp.get_hanan_grid()
         px, py = [], []
         if self.planner is not None:
@@ -592,6 +601,8 @@ class RipupMixin:
         if need_x or need_y:
             xs, ys = set(), set()
             for w in self.bundles:
+                if w.input.original_bundle.id == exclude_bid:
+                    continue
                 sel = w.plan.selected_topology_index
                 cands = w.input.candidates
                 if sel < 0 or sel >= len(cands):
@@ -605,7 +616,7 @@ class RipupMixin:
                 px = sorted(xs)
             if need_y:
                 py = sorted(ys)
-        return px, py
+        return px, py, (need_x, need_y)
 
     def _rr_screen_scores(self, w, tidxs, snap):
         """Fixed-context screen scores for one contender's index alternates
@@ -639,7 +650,7 @@ class RipupMixin:
             eng.set_track_pitch(self._nuts_pitch)
             eng.set_skip_tighten(True)
             eng.set_skip_doglegs(True)
-            gx, gy = self._rr_screen_grid()
+            gx, gy, (need_x, need_y) = self._rr_screen_grid(exclude_bid=bid)
             eng.set_extra_grid_points(gx, gy)
             # The baseline already carries any bottom-up fixed copies (run()
             # appends them), so this is the WHOLE frozen context — do not
@@ -656,6 +667,20 @@ class RipupMixin:
                     w.plan.seg_net_pull = []
                     w.plan.seg_slide_lo = []
                     w.plan.seg_slide_hi = []
+                if need_x or need_y:
+                    # Fallback-grid parity per pin (Codex #293): the full
+                    # trial's fallback grid includes the PINNED candidate's
+                    # coordinates, so merge this candidate's own coords
+                    # into the base union (which excluded the target).
+                    cx, cy = set(), set()
+                    for seg in w.input.candidates[tidx].segments:
+                        cx.add(seg.start.x)
+                        cx.add(seg.end.x)
+                        cy.add(seg.start.y)
+                        cy.add(seg.end.y)
+                    eng.set_extra_grid_points(
+                        sorted(set(gx) | cx) if need_x else gx,
+                        sorted(set(gy) | cy) if need_y else gy)
                 asn = self.planner.replan_bundle(self.bundles, bid)
                 if asn is None:
                     scores = None
