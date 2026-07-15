@@ -304,10 +304,15 @@ def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
         _key(exp, 'j')                            # select seg 0 for stubbing
         _key(exp, 'S', x=50, y=50)                # stub b1
         _key(exp, 'S', x=250, y=50)               # stub b2 → range ~[100,200]
+        # Plant matching-length overrides from "an earlier commit / dogleg":
+        # the dropped-only commit must CLEAR them, not leave them to leak
+        # onto the newly pinned topology (Codex #295).
+        w.plan.seg_slide_lo = [50.0, 50.0, 50.0]
+        w.plan.seg_slide_hi = [60.0, 60.0, 60.0]
         _key(exp, 'enter')
         slo = list(w.plan.seg_slide_lo)
-        assert not slo or all(math.isnan(v) for v in slo), \
-            f"stale disjoint window written to the plan: {slo}"
+        assert slo and all(math.isnan(v) for v in slo), \
+            f"stale overrides must be cleared by the dropped-only commit: {slo}"
 
         # Clamp case: stage [120, 1090] on the bare trunk, then stub — commit
         # clamps the surviving overlap into the current structural range.
