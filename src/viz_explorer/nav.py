@@ -50,8 +50,36 @@ class ExplorerNavMixin:
         self._draw()
 
 
+    def _bundle_step_order(self):
+        """Wrapper indices in the order [ / ] should page through them.
+
+        With a parent BudaViz (`_bundle_order_fn`), mirror its bundle-panel
+        order (opens-first) so the two windows step bundles identically; any
+        wrapper whose id the parent doesn't list trails in natural (id-sorted)
+        order. Orphan explorer -> natural wrapper order = numeric stepping."""
+        n = len(self.wrappers)
+        if self._bundle_order_fn is None:
+            return list(range(n))
+        idx_by_id = {w.input.original_bundle.id: i
+                     for i, w in enumerate(self.wrappers)}
+        known, seen = [], set()
+        for bid in (self._bundle_order_fn() or []):
+            i = idx_by_id.get(bid)
+            if i is not None and i not in seen:
+                known.append(i); seen.add(i)
+        # wrappers is id-sorted, so the trailing (parent-unlisted) ones stay
+        # in numeric order.
+        return known + [i for i in range(n) if i not in seen]
+
     def _step_bundle(self, delta):
-        self.bidx = (self.bidx + delta) % len(self.wrappers)
+        order = self._bundle_step_order()
+        if not order:
+            return
+        try:
+            cur = order.index(self.bidx)
+        except ValueError:
+            cur = 0
+        self.bidx = order[(cur + delta) % len(order)]
         self.idx  = self._focus_topo_index()   # jump to this bundle's pinned topo
         self.sidx = -1
         self._autoscale_needed = True

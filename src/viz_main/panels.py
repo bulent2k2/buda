@@ -670,6 +670,13 @@ class VizPanelsMixin:
         self._bundle_scroll = max(0, min(max_scroll, self._bundle_scroll + delta))
         self._redraw_bundle_list()
 
+    def _scroll_bundles_page(self, direction):
+        """▲/▼ button: page by one full panel MINUS one row (keeps one row of
+        context across the jump).  Sized to the CURRENT visible count, which is
+        dynamic — the bundle list grows tall when the Overlap panel folds away
+        (no overlaps), so a fixed step would crawl through a long list."""
+        self._scroll_bundles(direction * max(1, self._bundle_list_n_visible() - 1))
+
 
     def _on_scroll_event(self, event):
         if self._ax_bundles is not None and event.inaxes == self._ax_bundles:
@@ -711,6 +718,11 @@ class VizPanelsMixin:
         max_scroll = max(0, len(self._overlap_entries) - n_vis)
         self._overlap_scroll = max(0, min(max_scroll, self._overlap_scroll + delta))
         self._redraw_overlap_list()
+
+    def _scroll_overlaps_page(self, direction):
+        """▲/▼ button: page by one full panel minus one row (see
+        _scroll_bundles_page)."""
+        self._scroll_overlaps(direction * max(1, self._overlap_list_n_visible() - 1))
 
 
     def _overlap_list_n_visible(self):
