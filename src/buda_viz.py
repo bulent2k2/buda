@@ -55,7 +55,7 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
     def __init__(self, fp, wrappers, sidecar_path=None, main_fig=None,
                  rerun_fn=None, refresh_fn=None, layer_stack=None,
                  ui_state: ViewState = None, start_bidx=0, layer_visible=None,
-                 on_focus_bundle=None):
+                 on_focus_bundle=None, bundle_order_fn=None):
         self.fp          = fp
         self.layer_stack = layer_stack
         self.ui_state    = ui_state or ViewState()
@@ -69,6 +69,11 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # Called with the current bundle's id when 'v' cycles back to the main
         # window, so the main view adopts the bundle paged to with [ / ] here.
         self._on_focus_bundle = on_focus_bundle
+        # Optional () -> [bundle_id, ...]: the parent BudaViz's live bundle-panel
+        # order (opens-first). When set, [ / ] step in THAT order instead of
+        # numeric, so the two windows page bundles the same way. None (orphan
+        # explorer, no parent) -> numeric/id order.
+        self._bundle_order_fn = bundle_order_fn
         
         self._block_patch_artists = []
         self._block_name_artists = []
@@ -605,7 +610,7 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         # ── Bundle list: ▲ · list · ▼ ───────────────────────────────────
         ax_bscroll_up = self.fig.add_axes(_rect(SCROLL_H, GAP))
         btn_bscroll_up = Button(ax_bscroll_up, '▲', color='#f0f0f0')
-        btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles(-5))
+        btn_bscroll_up.on_clicked(lambda _: self._scroll_bundles_page(-1))
 
         self._ax_bundles = self.fig.add_axes(_rect(bundle_list_h))
         self._ax_bundles.set_facecolor('#fafafa')
@@ -613,7 +618,7 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
 
         ax_bscroll_dn = self.fig.add_axes(_rect(SCROLL_H))
         btn_bscroll_dn = Button(ax_bscroll_dn, '▼', color='#f0f0f0')
-        btn_bscroll_dn.on_clicked(lambda _: self._scroll_bundles(+5))
+        btn_bscroll_dn.on_clicked(lambda _: self._scroll_bundles_page(+1))
 
         # ── All Overlaps ─────────────────────────────────────────────────
         n_ov = len(self._overlap_entries)
@@ -625,7 +630,7 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
         # ── Overlap list: ▲ · list · ▼ ──────────────────────────────────
         ax_oscroll_up = self.fig.add_axes(_rect(SCROLL_H, GAP))
         btn_oscroll_up = Button(ax_oscroll_up, '▲', color='#f0f0f0')
-        btn_oscroll_up.on_clicked(lambda _: self._scroll_overlaps(-5))
+        btn_oscroll_up.on_clicked(lambda _: self._scroll_overlaps_page(-1))
 
         self._ax_overlaps = self.fig.add_axes(_rect(overlap_list_h))
         self._ax_overlaps.set_facecolor('#fff8f8')
@@ -633,7 +638,7 @@ class BudaVisualizer(VizHighlightMixin, VizPanelsMixin, VizAbstractDrawMixin, Vi
 
         ax_oscroll_dn = self.fig.add_axes(_rect(SCROLL_H))
         btn_oscroll_dn = Button(ax_oscroll_dn, '▼', color='#f0f0f0')
-        btn_oscroll_dn.on_clicked(lambda _: self._scroll_overlaps(+5))
+        btn_oscroll_dn.on_clicked(lambda _: self._scroll_overlaps_page(+1))
 
         # Capture both right-panel geometries — the split above ('with_ov') and
         # the overlap space folded into the bundle list ('no_ov'). The widgets

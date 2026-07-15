@@ -176,7 +176,8 @@ class VizViewMixin:
             ui_state=self.ui_state,
             start_bidx=start,
             layer_visible=self._layer_visible,
-            on_focus_bundle=self._adopt_explorer_bundle)
+            on_focus_bundle=self._adopt_explorer_bundle,
+            bundle_order_fn=lambda: self._bid_list)   # opens-first panel order
         self._topo_explorer.fig.show()
         viz_window.install_tk_geometry_resync(self._topo_explorer.fig)
         viz_window.extract_from_fullscreen_tab(self._topo_explorer.fig)

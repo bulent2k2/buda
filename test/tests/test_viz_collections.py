@@ -145,6 +145,74 @@ def test_open_bundles_rank_first(monkeypatch):
     assert viz._bid_list[2:] == [b for b in bids if b not in (worst, worse)]
 
 
+def test_explorer_steps_bundles_in_panel_order(monkeypatch):
+    """[ / ] in the explorer page bundles in the parent BudaViz's live
+    bundle-panel order (opens-first), not numeric, so the two windows step
+    together. A full ']' cycle visits ids in exactly that order."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    bids = sorted(viz._bundle_artists.keys())
+    worst, worse = bids[-1], bids[-2]                 # force a non-numeric order
+    monkeypatch.setattr(viz, "_bundle_unplaced", lambda: {worst: 7, worse: 3})
+    viz._sort_bid_list()
+    assert viz._bid_list[:2] == [worst, worse]
+
+    viz._set_highlight(bids[0])
+    viz._open_topo_explorer()
+    exp = viz._topo_explorer
+
+    idx_by_id = {w.input.original_bundle.id: i for i, w in enumerate(exp.wrappers)}
+    assert exp._bundle_step_order() == [idx_by_id[b] for b in viz._bid_list]
+
+    order_ids = list(viz._bid_list)
+    seen = []
+    for _ in range(len(exp.wrappers)):
+        seen.append(exp.wrappers[exp.bidx].input.original_bundle.id)
+        exp._step_bundle(+1)
+    start = order_ids.index(seen[0])                  # rotation of the panel order
+    assert seen == [order_ids[(start + k) % len(order_ids)]
+                    for k in range(len(order_ids))]
+
+    # The order tracks the panel LIVE: re-sort clears the opens -> numeric again.
+    monkeypatch.setattr(viz, "_bundle_unplaced", lambda: {})
+    viz._sort_bid_list()
+    assert exp._bundle_step_order() == [idx_by_id[b] for b in sorted(idx_by_id)]
+
+
+def test_explorer_orphan_steps_numeric(monkeypatch):
+    """An explorer with no parent (bundle_order_fn=None) pages in numeric/id
+    order — wrappers are id-sorted, so the step order is 0,1,2,…"""
+    import buda_viz
+    from buda_viz import collect_candidate_bundles
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    wrappers, _ = collect_candidate_bundles(viz.bundles)
+    exp = buda_viz.TopologyExplorer(viz.fp, wrappers, layer_stack=viz.layer_stack)
+    try:
+        assert exp._bundle_order_fn is None
+        assert exp._bundle_step_order() == list(range(len(wrappers)))
+    finally:
+        plt.close(exp.fig)
+
+
+def test_scroll_buttons_page_by_visible_minus_one(monkeypatch):
+    """The ▲/▼ scroll buttons page by (visible rows − 1), sized to the CURRENT
+    dynamic panel height — not a fixed step — so a tall list (Overlap panel
+    folded away when there are no overlaps) pages a full screen at a time."""
+    viz = _build_viz("dnuts1.buda", monkeypatch)
+    monkeypatch.setattr(viz, "_redraw_bundle_list", lambda: None)   # arith only
+    viz._bid_list = list(range(100))
+
+    monkeypatch.setattr(viz, "_bundle_list_n_visible", lambda: 10)
+    viz._bundle_scroll = 0
+    viz._scroll_bundles_page(+1); assert viz._bundle_scroll == 9    # 10 - 1
+    viz._scroll_bundles_page(+1); assert viz._bundle_scroll == 18
+    viz._scroll_bundles_page(-1); assert viz._bundle_scroll == 9
+
+    # Taller panel (no Overlap panel) -> a click pages further, sized live.
+    monkeypatch.setattr(viz, "_bundle_list_n_visible", lambda: 30)
+    viz._bundle_scroll = 0
+    viz._scroll_bundles_page(+1); assert viz._bundle_scroll == 29   # 30 - 1
+
+
 def test_expected_bit_wires_taper_aware(monkeypatch):
     """#268 taper: a fan-in segment with a non-empty Topology::seg_bits entry
     emits NetSegments only for its member bits.  The opens-first ranking and

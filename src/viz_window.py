@@ -24,10 +24,55 @@ import matplotlib.pyplot as plt
 
 
 
+def _resync_canvas_to_widget(fig, settle_ms=80, max_tries=12):
+    """Re-run TkAgg's ``resize`` with the widget's SETTLED size until it stops
+    changing, re-centering the figure image (and the Tk→figure y-flip that maps
+    a click to a data coord) for the real on-screen size.
+
+    This is the same cure ``install_tk_geometry_resync`` applies on ``<Configure>``
+    events, but driven DIRECTLY off a caller (see ``_toggle_fullscreen``): a
+    programmatic transition can settle without a clean toplevel ``<Configure>``
+    on some WMs, so the event-driven resync never fires and the image stays
+    centered for a stale size — leaving button clicks a few pixels off
+    vertically. ``update_idletasks`` forces Tk to apply the pending geometry
+    before we read it, so the first pass already sees the real size. No-op off
+    Tk / on a headless backend."""
+    try:
+        canvas = fig.canvas
+        tkw = canvas.get_tk_widget()
+        win = tkw.winfo_toplevel()
+    except Exception:
+        return  # not a Tk backend; nothing to do
+
+    def _step(prev=None, tries=0):
+        try:
+            win.update_idletasks()
+            w, h = tkw.winfo_width(), tkw.winfo_height()
+        except Exception:
+            return
+        if w > 1 and h > 1:
+            try:
+                canvas.resize(types.SimpleNamespace(width=w, height=h))
+                canvas.draw_idle()
+            except Exception:
+                pass
+        if (w, h) != prev and tries < max_tries:
+            try:
+                win.after(settle_ms, lambda: _step((w, h), tries + 1))
+            except Exception:
+                pass
+
+    _step()
+
+
 def _toggle_fullscreen(fig):
     mgr = fig.canvas.manager
     if mgr:
         mgr.full_screen_toggle()
+        # Re-center the figure image for the post-toggle size so button clicks
+        # don't land a few pixels off vertically — the <Configure>-driven
+        # resync alone proved unreliable for the programmatic 'f' toggle.
+        _resync_canvas_to_widget(fig)
 
 
 def raise_window(win_or_fig):

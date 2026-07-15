@@ -44,8 +44,8 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | :--- | :--- |
 | `d`, `n`, `cmd+n` | View the **next** topology candidate for this bundle. |
 | `a`, `p`, `cmd+p` | View the **previous** topology candidate for this bundle. |
-| `]`, `pagedown` | Switch to the **next bundle** and view its selected topology. |
-| `[`, `pageup` | Switch to the **previous bundle** and view its selected topology. |
+| `]`, `pagedown` | Switch to the **next bundle** and view its selected topology. When launched from a BUDA viz window, steps in that window's **bundle-panel order** (opens-first), so the two stay in step; standalone, it steps in numeric bundle-id order. |
+| `[`, `pageup` | Switch to the **previous bundle** (same order as `]`). |
 | `k` | Select the **previous segment** of the current topology. |
 | `j` | Select the **next segment** of the current topology. |
 | `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
