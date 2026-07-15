@@ -1,13 +1,32 @@
 # Open items — the cross-subsystem priority view
 
 What remains to focus on, ranked by value/effort. This page is a **snapshot
-index** (last verified against `main`: **2026-07-14**, post PR #284) —
+index** (last verified against `main`: **2026-07-14**, post PR #291) —
 the details, evidence, and where-to-start notes live in the per-subsystem
 wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
 items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
+
+9. **RR fixed-context single-bundle trial screen** —
+   [`wishlist-ripup.md`](wishlist-ripup.md) → *"RR round 3 — early-abort
+   study"* (the remaining lever) and the round-2 negative result that
+   defines its shape.  Per-trial RR cost is now confirmed irreducible by
+   pass-skipping: the round-3 abort study showed repair+corner are the
+   PRIMARY overlap reducers (a post-fixpoint abort spuriously rejects
+   every actual accept), so the only remaining attack on the ~95%
+   rejected trials is a FIXED-CONTEXT screen — place only the moved
+   bundle's segments against frozen occupancy (a public
+   `LayerSolver::repack_members` entry; the Phase-0 profile puts its
+   cost at milliseconds) with the full pipeline verifying winners.  The
+   round-2 layer-scoped attempt (46s → 160s, reverted) is the recorded
+   anti-pattern; rounds 1–3 took bigHalf's clean 0/0 endpoint 49s →
+   32s, and this is the headline multiplier left.  **Riding on it: the
+   `bigHalf.buda` flip** — re-enable its two `ripup_reroute` lines once
+   the 0/0 endpoint is affordable next to the ~5.7s no-rr config (the
+   endpoint is CI-guarded by `test_bighalf_rr_reaches_clean_endpoint`
+   meanwhile).
 
 8. **Bundler follow-on corners (hier)** —
    [`wishlist-bundler.md`](wishlist-bundler.md) → *"Remaining corners"*.
@@ -75,11 +94,19 @@ designs and fail LOUD, never silent:)*
   the committed band holders, and each occupant's alternates are trialed
   ranked against THE SITE's location, strict-improvement accept, bounded
   (3 occupants/site, 6 moves/occupant, ≤36 trials/stall).  Default on;
-  `no_global` opts out.  Shipped alongside the RR efficiency round
-  (timing instrumentation exposing the per-trial full-solve residual,
-  commit-by-forward-restore, scoped restore — bigHalf 0/0 at ~45s vs
-  ~49s, corpus endpoints identical; the measured-and-reverted stall
-  skip-cache is documented as a negative result).  Details:
+  `no_global` opts out.  Shipped as the middle of a five-PR RR arc
+  (#286–#288 + rounds 3 in #290/#291): timing instrumentation down to
+  per-pass solve profiles, commit-by-forward-restore + scoped restore,
+  the #286-retrospective hardening (reject-restore pool re-grow,
+  trial-persist gate, commit cut parity, the latent
+  reference-internal element-dangling fix via `Topology.__copy__`),
+  fast trials (metric-neutral pass skipping) and the sound stage-b
+  place-abort — bigHalf's clean 0/0 endpoint 49s → **32s** with corpus
+  endpoints identical.  Two measured-and-reverted negative results
+  (stall skip-cache; layer-scoped two-tier trials, 3.5× worse) and the
+  abort study (repair+corner are the PRIMARY overlap reducers — no
+  post-fixpoint abort, no pass-skipping them) are documented as the
+  constraints on open item 9.  Details:
   [`wishlist-ripup.md`](wishlist-ripup.md).
 
 - **Hier bundler: CONVERGENT + COMBINED + fan-in bundles** ✅ — **DONE
