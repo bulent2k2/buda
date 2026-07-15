@@ -862,10 +862,15 @@ class TopologyExplorer:
         # the shown candidate.  Opened with 'e' (copy) / 'E' (empty), committed
         # with enter (appended to the pool as a USER candidate + pinned),
         # discarded with escape.  _edit_pending marks the first segment of a
-        # two-step connect/disconnect pair.
+        # two-step connect/disconnect pair.  _edit_slide stages per-segment
+        # slide-window refinements ({seg_idx: (lo, hi)}, 'W' two-step / 'w'
+        # clears) written to plan.seg_slide_lo/hi on commit; _edit_slide_mark
+        # holds the first 'W' bound as (seg_idx, coord).
         self._edit_topo    = None
         self._edit_pending = -1
         self._edit_msg     = ""
+        self._edit_slide   = {}
+        self._edit_slide_mark = None
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}
@@ -1022,7 +1027,8 @@ class TopologyExplorer:
         return (h if h != -1 else 4), (v_ if v_ != -1 else 5)
 
     def _edit_open(self, empty):
-        if self._edit_topo is not None:
+        was_open = self._edit_topo is not None
+        if was_open:
             self._edit_msg = "edit session already open — enter commits, esc aborts"
         elif empty:
             self._edit_topo = ic.Topology()
@@ -1034,17 +1040,24 @@ class TopologyExplorer:
             # candidates[] elements alias pool storage; deep-copy explicitly.
             self._edit_topo = ic.offset_topology(self.topos[self.idx], 0, 0)
             self._edit_msg = f"EDIT: copy of topo {self.idx + 1} ({self._edit_topo.type})"
+        if not was_open and self._edit_topo is not None:
+            self._edit_slide = {}          # fresh session: no staged windows
+            self._edit_slide_mark = None
         self._edit_pending = -1
         self._draw()
 
     def _edit_close(self, msg):
         self._edit_topo    = None
         self._edit_pending = -1
+        self._edit_slide   = {}
+        self._edit_slide_mark = None
         self._edit_msg     = msg
         self._draw()
 
     def _edit_apply(self, verdict):
-        """Render one op's verdict into the edit banner (and the console)."""
+        """Render one op's verdict into the edit banner (and the console).
+        Returns verdict.applied so callers can chain bookkeeping (e.g. the
+        staged-slide-window remap after a segment removal)."""
         if not verdict.applied:
             self._edit_msg = f"EDIT rejected: {verdict.note}"
         else:
@@ -1058,6 +1071,62 @@ class TopologyExplorer:
                 + ("; PINCHED" if verdict.pinched else "")
             self._edit_msg = f"EDIT: {verdict.note} — {state}"
         print(f"[edit] {self._edit_msg}")
+        self._draw()
+        return verdict.applied
+
+    @staticmethod
+    def _fmt_perp(v):
+        return ("-inf" if v < -_UNCONSTRAINED
+                else "inf" if v > _UNCONSTRAINED else f"{v:.0f}")
+
+    def _edit_slide_at(self, event):
+        """Two-step slide-window refine ('W'): with a segment selected, the
+        first press marks the cursor's PERPENDICULAR coordinate as one bound,
+        the second applies [min, max] of the two marks — intersected with the
+        segment's structural slide range (a window outside it would make the
+        NUTS placement infeasible) — as a staged override that lands on
+        plan.seg_slide_lo/hi at commit.  'w' clears the selected segment's
+        staged window."""
+        if not (0 <= self.sidx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: select a segment first (j/k)"
+            self._draw(); return
+        if event.xdata is None or event.ydata is None:
+            self._edit_msg = "EDIT: put the cursor on the canvas first"
+            self._draw(); return
+        cs = list(self._build_conn_topo(self._edit_topo).segs())[self.sidx]
+        coord = float(event.ydata if cs.horiz else event.xdata)
+        if (self._edit_slide_mark is None
+                or self._edit_slide_mark[0] != self.sidx):
+            self._edit_slide_mark = (self.sidx, coord)
+            self._edit_msg = (f"EDIT: seg {self.sidx} slide bound at "
+                              f"{coord:.0f} — press W at the other bound")
+            self._draw(); return
+        _, c1 = self._edit_slide_mark
+        self._edit_slide_mark = None
+        lo, hi = min(c1, coord), max(c1, coord)
+        s_lo, s_hi = float(cs.perp_lo), float(cs.perp_hi)
+        clo, chi = max(lo, s_lo), min(hi, s_hi)
+        if clo > chi:
+            self._edit_msg = (
+                f"EDIT rejected: window [{lo:.0f},{hi:.0f}] is outside seg "
+                f"{self.sidx}'s slide range "
+                f"[{self._fmt_perp(s_lo)},{self._fmt_perp(s_hi)}]")
+            self._draw(); return
+        self._edit_slide[self.sidx] = (clo, chi)
+        note = "" if (clo, chi) == (lo, hi) else " (clamped to slide range)"
+        self._edit_msg = (f"EDIT: seg {self.sidx} slide window "
+                          f"[{clo:.0f},{chi:.0f}]{note} — applies on commit")
+        print(f"[edit] {self._edit_msg}")
+        self._draw()
+
+    def _edit_slide_clear(self):
+        if not (0 <= self.sidx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: select a segment first (j/k)"
+        elif self._edit_slide.pop(self.sidx, None) is not None:
+            self._edit_msg = f"EDIT: seg {self.sidx} slide window cleared"
+        else:
+            self._edit_msg = f"EDIT: seg {self.sidx} has no slide window"
+        self._edit_slide_mark = None
         self._draw()
 
     @staticmethod
@@ -1076,7 +1145,10 @@ class TopologyExplorer:
         if event.xdata is None or event.ydata is None:
             self._edit_msg = "EDIT: put the cursor on the canvas first"
             self._draw(); return
-        xs, ys = self.fp.get_hanan_grid()
+        # Snap to the BUNDLE-scoped grid — exactly the lines the toggle
+        # displays (busterm-block + keepout edges), so a trunk never lands on
+        # an invisible full-design line.
+        xs, ys = self._bundle_hanan_grid()
         perp = self._snap(event.ydata if horiz else event.xdata,
                           ys if horiz else xs)
         h, v_ = self._edit_default_layers()
@@ -1159,6 +1231,22 @@ class TopologyExplorer:
         self.sidx = -1
         self._select_current()          # pin + sidecar (uid-carrying) + redraw
         self._edit_msg = f"EDIT: {note}, pinned"
+        # Land the session's slide-window refinements as NUTS overrides on the
+        # pinned candidate (plan.seg_slide_lo/hi, NaN = free) — the same hatch
+        # dogleg splits ride: the next run_nuts honors them, a re-plan clears
+        # them (existing override semantics).
+        if self._edit_slide:
+            nseg = len(topo.segments)
+            slo = [float('nan')] * nseg
+            shi = [float('nan')] * nseg
+            for si, (lo, hi) in self._edit_slide.items():
+                if 0 <= si < nseg:
+                    slo[si], shi[si] = float(lo), float(hi)
+            w.plan.seg_slide_lo = slo
+            w.plan.seg_slide_hi = shi
+            self._edit_msg += f" (+{len(self._edit_slide)} slide window(s))"
+            self._edit_slide = {}
+            self._edit_slide_mark = None
         print(f"[edit] {self._edit_msg}")
         self._draw()
 
@@ -1192,6 +1280,10 @@ class TopologyExplorer:
         return cs.net_pull
 
     def _seg_slide(self, cs, ci):
+        # A staged edit-session slide window wins while editing, so the slide
+        # band and its bound labels live-update as 'W' refines the window.
+        if self._edit_topo is not None and ci in self._edit_slide:
+            return self._edit_slide[ci]
         slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
         shi = getattr(self.wrapper.plan, 'seg_slide_hi', None)
         if (self._show_overrides() and slo and shi and len(slo) == self._n_segs()
@@ -1572,8 +1664,9 @@ class TopologyExplorer:
         # ── TopoEdit mode (Phase E3b): e/E open a session (copy/empty); while
         # open, T/Y add an H/V trunk at the cursor's Hanan line, S stubs the
         # block under the cursor to the selected segment, C/D pair-connect/
-        # -disconnect, X removes, enter commits (+pin), escape aborts.
-        # Candidate/bundle navigation is parked while editing.
+        # -disconnect, X removes, W/W refines the selected segment's slide
+        # window at the cursor (two bounds; 'w' clears), enter commits (+pin),
+        # escape aborts.  Candidate/bundle navigation is parked while editing.
         if event.key == 'e':                    self._edit_open(empty=False); return
         if event.key == 'E':                    self._edit_open(empty=True); return
         if self._edit_topo is not None:
@@ -1582,12 +1675,20 @@ class TopologyExplorer:
             if event.key == 'S':                self._edit_add_stub_at(event); return
             if event.key == 'C':                self._edit_pair_op(event, connect=True); return
             if event.key == 'D':                self._edit_pair_op(event, connect=False); return
+            if event.key == 'W':                self._edit_slide_at(event); return
+            if event.key == 'w':                self._edit_slide_clear(); return
             if event.key == 'X':
                 if 0 <= self.sidx < len(self._edit_topo.segments):
                     si = self.sidx
                     self.sidx = -1
-                    self._edit_apply(ic.edit_remove_segment(
-                        self._edit_topo, self.fp, si))
+                    if self._edit_apply(ic.edit_remove_segment(
+                            self._edit_topo, self.fp, si)):
+                        # Indices above si shifted down: remap the staged
+                        # slide windows, dropping the removed segment's own.
+                        self._edit_slide = {
+                            (i - 1 if i > si else i): v
+                            for i, v in self._edit_slide.items() if i != si}
+                        self._edit_slide_mark = None
                 else:
                     self._edit_msg = "EDIT: select a segment first (j/k)"
                     self._draw()
