@@ -1258,9 +1258,16 @@ class TopologyExplorer:
                     continue
                 slo[si], shi[si] = clo, chi
                 applied += 1
+            # Written even when NOTHING survived (all-NaN): once the session
+            # staged windows, its intent REPLACES any prior overrides — an
+            # earlier commit's or a dogleg's matching-length arrays would
+            # otherwise leak onto the newly pinned topology (Codex #295).  A
+            # session that staged nothing leaves the plan untouched, so a
+            # no-op re-commit of a dogleg-split candidate keeps its
+            # load-bearing pin.
+            w.plan.seg_slide_lo = slo
+            w.plan.seg_slide_hi = shi
             if applied:
-                w.plan.seg_slide_lo = slo
-                w.plan.seg_slide_hi = shi
                 self._edit_msg += f" (+{applied} slide window(s))"
             if dropped:
                 self._edit_msg += (
