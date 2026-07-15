@@ -97,21 +97,29 @@ def test_h_trunks_retracted_onto_their_stubs(flow):
     assert len(stubs) == 2
 
 
-def test_net_pull_is_derived_trunks_pull_stubs_dont(flow):
-    """Issue #1: net_pull IS computed (derive_net_pull runs in
-    ConnTopology.build).  The three trunk/spine segments pull toward their
-    connected busterms; the two perpendicular V stubs have no along-slide
-    wirelength preference, so their pull is correctly zero."""
+def test_net_pull_pulls_the_c_toward_the_block_edge(flow):
+    """net_pull tightens the detour toward the blocks.  An OOB trunk created via
+    edit_add_trunk is seeded with the half-open Hanan cell as its slide range
+    (perp_clamp), so the V spine is bounded at the block's left edge (x=0): its
+    +pull then has a finite target AND, because derive_net_pull reads that
+    bounded interval, the two V stubs — which sit past the spine — register a
+    -pull toward the block edge, shortening the H trunks.  Every segment pulls;
+    nothing is left with a dead (unbounded) pull."""
     segs = _conn_segs(flow)
-    nonzero = [cs for cs in segs if cs.net_pull != 0]
-    zero = [cs for cs in segs if cs.net_pull == 0]
-    assert len(nonzero) == 3                # 2 H trunks + V spine
-    assert len(zero) == 2                   # 2 V stubs
-    # Every zero-pull segment is a stub (single busterm + single seg conn).
-    for cs in zero:
-        assert not cs.horiz
-        kinds = [c.kind for c in cs.conns]
-        assert kinds.count(buda.SegConnKind.BUSTERM) == 1
+    by = {(cs.horiz, cs.perp_pos): cs for cs in segs}
+    spine = by[(False, -700)]
+    assert spine.perp_hi == 0 and spine.net_pull > 0   # bounded to the block edge
+    # Both V stubs (x=200, past the spine) pull toward the low side (block edge).
+    stubs = [cs for cs in segs if not cs.horiz and cs.perp_pos == 200]
+    assert len(stubs) == 2
+    assert all(cs.net_pull < 0 for cs in stubs)        # -1: shorten the trunks
+    # No segment is left with a nonzero pull and no finite target on its pull
+    # side (that is the dead-pull bug this fixes).
+    for cs in segs:
+        if cs.net_pull > 0:
+            assert cs.perp_hi < 5 * 10**8               # finite hi target
+        if cs.net_pull < 0:
+            assert cs.perp_lo > -5 * 10**8              # finite lo target
 
 
 def test_h_trunks_connect_to_v_spine(flow):
