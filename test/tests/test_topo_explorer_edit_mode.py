@@ -277,3 +277,56 @@ def test_edit_mode_slide_window_refine(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
+    """A staged 'W' window is validated against the ConnTopology AT STAGING
+    time; later geometry edits (stubs, connect/disconnect) can narrow the
+    segment's structural slide range, and NUTS honors any non-NaN override
+    verbatim.  Commit must therefore revalidate: a shrunken window clamps to
+    the current range, a now-disjoint one is dropped (never written stale) —
+    Codex #294."""
+    import math
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        w = s.bundles[0]
+
+        # Disjoint case: stage far away on a BARE trunk (unconstrained slide
+        # range accepts anything), then stubs narrow the range to the b1..b2
+        # channel — commit must drop the stale window, not write it.
+        _key(exp, 'E')
+        _key(exp, 'Y', x=150, y=50)               # bare V trunk at x=140
+        exp.sidx = 0
+        _key(exp, 'W', x=1050, y=50)
+        _key(exp, 'W', x=1090, y=50)
+        assert exp._edit_slide.get(0) == (1050, 1090)   # accepted: bare trunk
+        _key(exp, 'j')                            # select seg 0 for stubbing
+        _key(exp, 'S', x=50, y=50)                # stub b1
+        _key(exp, 'S', x=250, y=50)               # stub b2 → range ~[100,200]
+        _key(exp, 'enter')
+        slo = list(w.plan.seg_slide_lo)
+        assert not slo or all(math.isnan(v) for v in slo), \
+            f"stale disjoint window written to the plan: {slo}"
+
+        # Clamp case: stage [120, 1090] on the bare trunk, then stub — commit
+        # clamps the surviving overlap into the current structural range.
+        _key(exp, 'E')
+        _key(exp, 'Y', x=150, y=50)
+        exp.sidx = 0
+        _key(exp, 'W', x=120, y=50)
+        _key(exp, 'W', x=1090, y=50)
+        assert exp._edit_slide.get(0) == (120, 1090)
+        _key(exp, 'j')
+        _key(exp, 'S', x=50, y=50)
+        _key(exp, 'S', x=250, y=50)
+        cs = list(exp._build_conn_topo(exp._edit_topo).segs())[0]
+        s_lo, s_hi = float(cs.perp_lo), float(cs.perp_hi)
+        _key(exp, 'enter')
+        slo, shi = list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi)
+        assert not math.isnan(slo[0]), "clamped window should survive commit"
+        assert slo[0] == max(120.0, s_lo) and shi[0] == min(1090.0, s_hi)
+        assert s_lo <= slo[0] < shi[0] <= s_hi   # inside the CURRENT range
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
