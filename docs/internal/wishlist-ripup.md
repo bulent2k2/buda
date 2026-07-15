@@ -495,4 +495,10 @@ attempt's spurious-rejection mode for a saving the deferred-sweep design
 already captures.  Stage b's remaining floor is the per-trial full DNUTS
 (#291's place-abort already trims certain rejections); the fixed-bits
 incremental DNUTS (`add_fixed_bits`, the bottom-up ref/rest split) remains
-the next candidate if that floor ever matters.
+the next candidate if that floor ever matters.  One more noted lever
+(review #293): stage-b screens rank by ABSTRACT (overlaps, violations)
+only — a candidate's DNUTS-open potential is invisible, so the stage-b
+ranking is a proxy (protected by deferral; 11 full trials still found all
+6 bigHalf stage-b commits).  If a future corpus shows stage-b screens
+mis-ordering badly, a cheap opens-proxy (signal-track supply vs need per
+placed window) is the shape to add.
