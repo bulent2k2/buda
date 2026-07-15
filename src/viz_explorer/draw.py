@@ -78,6 +78,34 @@ class ExplorerDrawMixin:
                                   ec='none', alpha=0.7))
 
 
+    def _draw_pin_preview(self, topo):
+        """Pin-span mode: bold-outline each picked busterm block and, once two+
+        are picked, preview the trunk span (a thick line along the selected
+        segment's perp between the picked extent)."""
+        ax = self.ax
+        col = '#d62728'   # red — the 'pin' accent
+        for name in self._trunk_pin_set:
+            r = self.fp.get_block_bounds(name)
+            ax.add_patch(patches.Rectangle(
+                (r.x1, r.y1), r.x2 - r.x1, r.y2 - r.y1, fill=False,
+                edgecolor=col, linewidth=2.4, zorder=9))
+        seg_idx = self._trunk_pin_seg
+        if not (0 <= seg_idx < len(topo.segments)):
+            return
+        seg = topo.segments[seg_idx]
+        horiz = (seg.start.y == seg.end.y)
+        span = self._along_span_of_blocks(self._trunk_pin_set, horiz)
+        if span is None:
+            return
+        lo, hi = span
+        perp = seg.start.y if horiz else seg.start.x
+        if horiz:
+            ax.plot([lo, hi], [perp, perp], color=col, lw=3.0, alpha=0.85,
+                    solid_capstyle='butt', zorder=9)
+        else:
+            ax.plot([perp, perp], [lo, hi], color=col, lw=3.0, alpha=0.85,
+                    solid_capstyle='butt', zorder=9)
+
     def _draw_trunk_preview(self):
         """Highlight the Hanan cell the armed trunk (T/Y) is hovering: a
         vertical column for a V trunk (Y), a horizontal row for an H trunk (T),
@@ -535,6 +563,11 @@ class ExplorerDrawMixin:
         # cursor is hovering, so the user sees where the trunk will land.
         if self._trunk_mode is not None and self._trunk_hover is not None:
             self._draw_trunk_preview()
+
+        # Pin-span mode (P): outline the picked busterms and preview the span
+        # the selected trunk would take.
+        if self._trunk_pin_set is not None:
+            self._draw_pin_preview(topo)
 
         # Slide-range bands (drawn before segments so segments sit on top)
         self._draw_slide_spans(topo, ct)

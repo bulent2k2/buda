@@ -113,6 +113,11 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # second T·Y / enter places it, escape cancels.
         self._trunk_mode  = None
         self._trunk_hover = None
+        # "Pin trunk span to busterms" mode (P): _trunk_pin_set is None (off) or
+        # a set of clicked busterm-block names whose extent along the selected
+        # segment's axis becomes its span; _trunk_pin_seg is that segment index.
+        self._trunk_pin_seg = -1
+        self._trunk_pin_set = None
         self._edit_slide   = {}
         self._edit_slide_mark = None
 

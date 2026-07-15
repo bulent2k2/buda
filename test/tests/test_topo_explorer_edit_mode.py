@@ -429,3 +429,76 @@ def test_edit_trunk_two_step_arm_preview_place(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def _session_row():
+    """Two pairs of horizontally-aligned blocks with a big gap between them —
+    the scenario for two H trunks on one row, each spanning only its pair."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in (
+        "def_layer 4 M4 H TOP 10",
+        "def_layer 5 M5 V TOP 10",
+        "add_block a1 0 0 100 100",
+        "add_block a2 300 0 400 100",       # pair A (x-centres 50, 350)
+        "add_block b3 2000 0 2100 100",
+        "add_block b4 2300 0 2400 100",     # pair B (x-centres 2050, 2350)
+        "add_bus w[4] a1.o a2.i,b3.i,b4.i",
+        "run_bundler",
+        "generate_topologies",
+    ):
+        s.do_command(cmd)
+    return s
+
+
+def test_edit_trunk_pin_span_to_busterm_subset(tmp_path):
+    """Follow-up to #8: 'P' refines a trunk's span to a SUBSET of busterms by
+    clicking them, so two H trunks can share one Hanan row while each covers
+    only its pair (no reach across the big gap)."""
+    s = _session_row()
+    exp = _explorer(s, tmp_path)
+
+    def click(x, y):
+        exp._on_trunk_click(SimpleNamespace(button=1, inaxes=exp.ax,
+                                            xdata=x, ydata=y))
+    def xspan(i):
+        seg = exp._edit_topo.segments[i]
+        return (min(seg.start.x, seg.end.x), max(seg.start.x, seg.end.x))
+    try:
+        _key(exp, 'E')
+        # Trunk 0: default spans ALL busterms (a1 centre 50 .. b4 centre 2350).
+        _trunk(exp, 'T', 200, 190)
+        assert xspan(0) == (50, 2350)
+
+        # Pin trunk 0 to pair A (click a1, a2) -> span shrinks to [50, 350].
+        exp.sidx = 0
+        _key(exp, 'P')
+        assert exp._trunk_pin_set == set()
+        click(50, 50); click(350, 50)                 # a1, a2
+        assert exp._trunk_pin_set == {'a1', 'a2'}
+        _key(exp, 'enter')
+        assert exp._trunk_pin_set is None
+        assert xspan(0) == (50, 350)                  # limited to pair A
+
+        # Trunk 1 on the SAME row, pinned to pair B -> [2050, 2350].
+        _trunk(exp, 'T', 200, 190)
+        exp.sidx = 1
+        _key(exp, 'P')
+        click(2050, 50); click(2350, 50)              # b3, b4
+        assert exp._trunk_pin_set == {'b3', 'b4'}
+        _key(exp, 'enter')
+        assert xspan(1) == (2050, 2350)               # limited to pair B
+        assert xspan(0) == (50, 350)                  # trunk 0 unchanged
+
+        # esc cancels pin mode without changing the span; a click toggles off.
+        exp.sidx = 0
+        _key(exp, 'P')
+        click(50, 50); click(50, 50)                  # toggle a1 on then off
+        assert exp._trunk_pin_set == set()
+        click(50, 50)
+        _key(exp, 'escape')
+        assert exp._trunk_pin_set is None
+        assert xspan(0) == (50, 350)                  # unchanged by the cancel
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')

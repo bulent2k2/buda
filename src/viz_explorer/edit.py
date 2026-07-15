@@ -72,6 +72,8 @@ class ExplorerEditMixin:
         self._edit_slide_mark = None
         self._trunk_mode   = None
         self._trunk_hover  = None
+        self._trunk_pin_seg = -1
+        self._trunk_pin_set = None
         self._edit_msg     = msg
         self._draw()
 
@@ -226,11 +228,73 @@ class ExplorerEditMixin:
             self._draw()
 
     def _on_trunk_click(self, event):
-        """Left-click while arming places the trunk; other buttons (right-drag
+        """Left-click drives the click gestures while editing: toggle a busterm
+        in 'pin span' mode, else place an armed trunk.  Other buttons (right-drag
         zoom) are left alone."""
-        if (self._trunk_mode is not None and getattr(event, 'button', None) == 1
-                and event.inaxes is self.ax):
+        if getattr(event, 'button', None) != 1 or event.inaxes is not self.ax:
+            return
+        if self._trunk_pin_set is not None:
+            if event.xdata is None or event.ydata is None:
+                return
+            block = self._block_at(event.xdata, event.ydata)
+            if block is not None and block in self._bundle_busterm_names():
+                self._edit_trunk_pin_toggle(block)
+            return
+        if self._trunk_mode is not None:
             self._edit_trunk_place(event)
+
+    # ── Pin trunk span to selected busterms (P): click blocks → set span ─────
+    def _edit_trunk_pin_begin(self):
+        if not (0 <= self.sidx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: select the trunk first (j/k), then P"
+            self._draw(); return
+        self._trunk_pin_seg = self.sidx
+        self._trunk_pin_set = set()
+        self._edit_msg = ("PIN SPAN: click the busterm blocks this trunk should "
+                          "span, enter to apply, esc to cancel")
+        self._draw()
+
+    def _edit_trunk_pin_toggle(self, block):
+        if block in self._trunk_pin_set:
+            self._trunk_pin_set.discard(block)
+        else:
+            self._trunk_pin_set.add(block)
+        self._edit_msg = (f"PIN SPAN: {len(self._trunk_pin_set)} busterm(s) — "
+                          f"enter to apply, esc to cancel")
+        self._draw()
+
+    def _edit_trunk_pin_cancel(self):
+        self._trunk_pin_seg = -1
+        self._trunk_pin_set = None
+        self._edit_msg = "EDIT: pin span cancelled"
+        self._draw()
+
+    def _edit_trunk_pin_apply(self):
+        seg_idx = self._trunk_pin_seg
+        picked = set(self._trunk_pin_set or ())
+        self._trunk_pin_seg = -1
+        self._trunk_pin_set = None
+        if not (0 <= seg_idx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: pin target gone"; self._draw(); return
+        if not picked:
+            self._edit_msg = "PIN SPAN cancelled: no busterms picked"
+            self._draw(); return
+        seg = self._edit_topo.segments[seg_idx]
+        horiz = (seg.start.y == seg.end.y)
+        span = self._along_span_of_blocks(picked, horiz)
+        if span is None:
+            self._edit_msg = ("PIN SPAN rejected: those busterms give a "
+                              "degenerate span (pick two apart on the trunk axis)")
+            self._draw(); return
+        self._edit_apply(ic.edit_set_span(self._edit_topo, self.fp, seg_idx,
+                                          span[0], span[1]))
+
+    def _edit_add_trunk_from_perp(self, horiz, perp):
+        lo, hi = self._busterm_along_span(horiz)
+        h, v_ = self._edit_default_layers()
+        self._edit_apply(ic.edit_add_trunk(
+            self._edit_topo, self.fp, horiz, int(perp), lo, hi,
+            h if horiz else v_))
 
     def _edit_add_trunk_from_perp(self, horiz, perp):
         lo, hi = self._busterm_along_span(horiz)
@@ -259,17 +323,13 @@ class ExplorerEditMixin:
             self._edit_topo, self.fp, horiz, perp, lo, hi,
             h if horiz else v_))
 
-    def _busterm_along_span(self, horiz):
-        """(lo, hi) trunk endpoints along its axis so the trunk covers exactly
-        the blocks it serves — no whole-design overshoot:
-        - the extreme busterm-block CENTRES (x for an H trunk, y for a V) when
-          they differ, so each stub drops at a busterm centre;
-        - else the busterm-block EXTENT on that axis (blocks aligned on the
-          trunk axis — the trunk still spans their footprint, not the die);
-        - else (1, 0), the C++ full-span sentinel, for a single degenerate
-          busterm."""
+    def _along_span_of_blocks(self, names, horiz):
+        """(lo, hi) covering the given blocks along a trunk axis, or None if
+        degenerate: the extreme block CENTRES (x for H, y for V) when they
+        differ, else the block EXTENT on that axis (blocks aligned on the axis —
+        span their footprint), else None (a single point)."""
         cs, edges = [], []
-        for n in self._bundle_busterm_names():
+        for n in names:
             r = self.fp.get_block_bounds(n)
             if horiz:
                 cs.append(int(round((r.x1 + r.x2) / 2))); edges += [r.x1, r.x2]
@@ -279,7 +339,14 @@ class ExplorerEditMixin:
             return min(cs), max(cs)
         if edges and max(edges) > min(edges):
             return min(edges), max(edges)
-        return 1, 0
+        return None
+
+    def _busterm_along_span(self, horiz):
+        """Default trunk span = ALL the bundle's busterms' extent (no
+        whole-design overshoot); (1, 0) — the C++ full-span sentinel — only for
+        a single degenerate busterm."""
+        return self._along_span_of_blocks(self._bundle_busterm_names(), horiz) \
+            or (1, 0)
 
 
     def _edit_add_stub_at(self, event):

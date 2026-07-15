@@ -109,6 +109,11 @@ class ExplorerNavMixin:
         if event.key == 'e':                    self._edit_open(empty=False); return
         if event.key == 'E':                    self._edit_open(empty=True); return
         if self._edit_topo is not None:
+            # Pin-span mode (click busterms): swallow keys except apply/cancel.
+            if self._trunk_pin_set is not None:
+                if event.key == 'enter':        self._edit_trunk_pin_apply(); return
+                if event.key == 'escape':       self._edit_trunk_pin_cancel(); return
+                return
             # Two-step trunk placement is armed: swallow keys except place /
             # re-arm / cancel so a stray key can't fall through mid-placement.
             if self._trunk_mode is not None:
@@ -119,6 +124,7 @@ class ExplorerNavMixin:
                 return
             if event.key == 'T':                self._edit_trunk_key(event, horiz=True); return
             if event.key == 'Y':                self._edit_trunk_key(event, horiz=False); return
+            if event.key == 'P':                self._edit_trunk_pin_begin(); return
             if event.key == 'S':                self._edit_add_stub_at(event); return
             if event.key == 'C':                self._edit_pair_op(event, connect=True); return
             if event.key == 'D':                self._edit_pair_op(event, connect=False); return
