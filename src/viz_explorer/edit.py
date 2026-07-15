@@ -296,13 +296,6 @@ class ExplorerEditMixin:
             self._edit_topo, self.fp, horiz, int(perp), lo, hi,
             h if horiz else v_))
 
-    def _edit_add_trunk_from_perp(self, horiz, perp):
-        lo, hi = self._busterm_along_span(horiz)
-        h, v_ = self._edit_default_layers()
-        self._edit_apply(ic.edit_add_trunk(
-            self._edit_topo, self.fp, horiz, int(perp), lo, hi,
-            h if horiz else v_))
-
     def _edit_add_trunk_at(self, event, horiz):
         if event.xdata is None or event.ydata is None:
             self._edit_msg = "EDIT: put the cursor on the canvas first"
