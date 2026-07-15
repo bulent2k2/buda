@@ -502,3 +502,73 @@ def test_edit_trunk_pin_span_to_busterm_subset(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def _session_col():
+    """Two blocks aligned VERTICALLY — the C-detour scenario: a V spine runs
+    beside them and its span must reach a Hanan line below the lower block and
+    above the upper block (both BEYOND the busterms)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in (
+        "def_layer 4 M4 H TOP 10",
+        "def_layer 5 M5 V TOP 10",
+        "add_block up 0 2000 100 2100",     # upper block (y 2000..2100)
+        "add_block lo 0 0 100 100",         # lower block (y 0..100)
+        "add_bus w[4] lo.o up.i",
+        "run_bundler",
+        "generate_topologies",
+    ):
+        s.do_command(cmd)
+    return s
+
+
+def test_edit_trunk_pin_span_to_grid_lines_beyond_busterms(tmp_path):
+    """The designer's C-detour: 'P' pins a V trunk's endpoints to Hanan grid
+    lines (incl. the OOB detour lines) BELOW the lower and ABOVE the upper
+    block, so the span reaches beyond both busterms — hovering a block pins the
+    block, hovering elsewhere pins the nearest along-axis grid line."""
+    s = _session_col()
+    exp = _explorer(s, tmp_path)
+
+    def click(x, y):
+        exp._on_trunk_click(SimpleNamespace(button=1, inaxes=exp.ax,
+                                            xdata=x, ydata=y))
+    def yspan(i):
+        seg = exp._edit_topo.segments[i]
+        return (min(seg.start.y, seg.end.y), max(seg.start.y, seg.end.y))
+    try:
+        _key(exp, 'E')
+        xs, ys = exp._bundle_hanan_grid()
+        below, above = min(ys), max(ys)               # OOB lines beyond blocks
+        assert below < 0 and above > 2100
+        col = min(xs)                                  # V spine sits OOB, beside
+
+        # V trunk (the C spine); default span is the busterm extent (50..2050).
+        _trunk(exp, 'Y', col, 1000)
+        assert yspan(0) == (50, 2050)
+
+        # Pin the two endpoints to grid lines beyond both blocks.
+        exp.sidx = 0
+        _key(exp, 'P')
+        click(col, below)                             # empty space -> low grid
+        click(col, above)                             # ... -> high grid
+        assert exp._trunk_pin_set == set()            # no busterm blocks picked
+        assert exp._trunk_pin_grid == {below, above}
+        _key(exp, 'enter')
+        assert yspan(0) == (below, above)             # reaches beyond both
+        assert exp._edit_topo.segments[0].start.x == col   # perp preserved
+
+        # A grid pick toggles off; a mixed block+grid anchor also works.
+        _key(exp, 'P')
+        click(col, above); click(col, above)          # toggle high line on/off
+        assert exp._trunk_pin_grid == set()
+        click(50, 50)                                 # lower block centre (y=50)
+        click(col, above)                             # up to the high grid line
+        assert exp._trunk_pin_set == {'lo'}
+        assert exp._trunk_pin_grid == {above}
+        _key(exp, 'enter')
+        assert yspan(0) == (50, above)                # lower centre .. high line
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')

@@ -79,22 +79,44 @@ class ExplorerDrawMixin:
 
 
     def _draw_pin_preview(self, topo):
-        """Pin-span mode: bold-outline each picked busterm block and, once two+
-        are picked, preview the trunk span (a thick line along the selected
-        segment's perp between the picked extent)."""
+        """Pin-span mode: bold-outline each picked busterm block, mark each
+        picked grid line (a block-less anchor reaching beyond the busterms),
+        preview the hovered grid line, and preview the resulting trunk span (a
+        thick line along the selected segment's perp between the anchor extent)."""
         ax = self.ax
         col = '#d62728'   # red — the 'pin' accent
-        for name in self._trunk_pin_set:
-            r = self.fp.get_block_bounds(name)
-            ax.add_patch(patches.Rectangle(
-                (r.x1, r.y1), r.x2 - r.x1, r.y2 - r.y1, fill=False,
-                edgecolor=col, linewidth=2.4, zorder=9))
         seg_idx = self._trunk_pin_seg
         if not (0 <= seg_idx < len(topo.segments)):
             return
         seg = topo.segments[seg_idx]
         horiz = (seg.start.y == seg.end.y)
-        span = self._along_span_of_blocks(self._trunk_pin_set, horiz)
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        for name in self._trunk_pin_set:
+            r = self.fp.get_block_bounds(name)
+            ax.add_patch(patches.Rectangle(
+                (r.x1, r.y1), r.x2 - r.x1, r.y2 - r.y1, fill=False,
+                edgecolor=col, linewidth=2.4, zorder=9))
+        # Picked grid lines: a full-width/height dashed line at each anchor
+        # coordinate (x for an H trunk, y for a V trunk).
+        for c in self._trunk_pin_grid:
+            if horiz:
+                ax.plot([c, c], [y0, y1], color=col, lw=1.6, ls='--',
+                        alpha=0.9, zorder=9)
+            else:
+                ax.plot([x0, x1], [c, c], color=col, lw=1.6, ls='--',
+                        alpha=0.9, zorder=9)
+        # Hovered grid line the next click would pick (orange, like trunk arm).
+        hv = self._trunk_pin_hover
+        if hv is not None:
+            hcol = '#ff7f0e'
+            if horiz:
+                ax.plot([hv, hv], [y0, y1], color=hcol, lw=1.4, ls=':',
+                        alpha=0.9, zorder=8)
+            else:
+                ax.plot([x0, x1], [hv, hv], color=hcol, lw=1.4, ls=':',
+                        alpha=0.9, zorder=8)
+        span = self._pin_span_of(self._trunk_pin_set, self._trunk_pin_grid, horiz)
         if span is None:
             return
         lo, hi = span

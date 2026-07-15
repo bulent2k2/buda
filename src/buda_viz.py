@@ -116,8 +116,14 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # "Pin trunk span to busterms" mode (P): _trunk_pin_set is None (off) or
         # a set of clicked busterm-block names whose extent along the selected
         # segment's axis becomes its span; _trunk_pin_seg is that segment index.
+        # _trunk_pin_grid holds clicked Hanan-grid coordinates (a block-less
+        # anchor, so a span endpoint can land on a grid line BEYOND the last
+        # busterm — e.g. a C-detour trunk); _trunk_pin_hover is the grid line the
+        # cursor is previewing while in pin mode.
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
+        self._trunk_pin_grid = set()
+        self._trunk_pin_hover = None
         self._edit_slide   = {}
         self._edit_slide_mark = None
 

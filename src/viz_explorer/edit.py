@@ -74,6 +74,8 @@ class ExplorerEditMixin:
         self._trunk_hover  = None
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
+        self._trunk_pin_grid = set()
+        self._trunk_pin_hover = None
         self._edit_msg     = msg
         self._draw()
 
@@ -216,9 +218,22 @@ class ExplorerEditMixin:
 
     def _on_trunk_motion(self, event):
         """Preview the armed trunk's target line under the cursor (redraw only
-        when the snapped grid line changes, so hover is cheap)."""
-        if (self._trunk_mode is None or event.inaxes is not self.ax
-                or event.xdata is None or event.ydata is None):
+        when the snapped grid line changes, so hover is cheap).  In pin-span
+        mode, preview instead the grid line a click would pick (unless the
+        cursor is over a busterm block, which pins the block)."""
+        if event.inaxes is not self.ax or event.xdata is None or event.ydata is None:
+            return
+        if self._trunk_pin_set is not None:
+            over_bt = self._block_at(event.xdata, event.ydata)
+            if over_bt is not None and over_bt in self._bundle_busterm_names():
+                new = None                              # block pick — no grid line
+            else:
+                new = self._snap(*self._pin_grid_target(event.xdata, event.ydata))
+            if new != self._trunk_pin_hover:
+                self._trunk_pin_hover = new
+                self._draw()
+            return
+        if self._trunk_mode is None:
             return
         xs, ys = self._bundle_hanan_grid()
         horiz = self._trunk_mode
@@ -238,7 +253,10 @@ class ExplorerEditMixin:
                 return
             block = self._block_at(event.xdata, event.ydata)
             if block is not None and block in self._bundle_busterm_names():
-                self._edit_trunk_pin_toggle(block)
+                self._edit_trunk_pin_toggle(block)      # over a busterm → block
+            else:
+                self._edit_trunk_pin_toggle_grid(       # else → a grid line
+                    event.xdata, event.ydata)
             return
         if self._trunk_mode is not None:
             self._edit_trunk_place(event)
@@ -250,40 +268,95 @@ class ExplorerEditMixin:
             self._draw(); return
         self._trunk_pin_seg = self.sidx
         self._trunk_pin_set = set()
-        self._edit_msg = ("PIN SPAN: click the busterm blocks this trunk should "
-                          "span, enter to apply, esc to cancel")
+        self._trunk_pin_grid = set()
+        self._trunk_pin_hover = None
+        self._edit_msg = ("PIN SPAN: click busterm blocks and/or grid lines "
+                          "(a grid line reaches BEYOND the busterms — e.g. a "
+                          "C-detour), enter to apply, esc to cancel")
         self._draw()
+
+    def _pin_seg_horiz(self):
+        seg = self._edit_topo.segments[self._trunk_pin_seg]
+        return seg.start.y == seg.end.y
+
+    def _pin_grid_target(self, x, y):
+        """(cursor value, snap-coord list) on the pinned segment's ALONG axis:
+        x→vertical grid lines for an H trunk, y→horizontal lines for a V trunk
+        (both include the OOB detour lines from the bundle grid)."""
+        horiz = self._pin_seg_horiz()
+        xs, ys = self._bundle_hanan_grid()
+        return (x, xs) if horiz else (y, ys)
 
     def _edit_trunk_pin_toggle(self, block):
         if block in self._trunk_pin_set:
             self._trunk_pin_set.discard(block)
         else:
             self._trunk_pin_set.add(block)
-        self._edit_msg = (f"PIN SPAN: {len(self._trunk_pin_set)} busterm(s) — "
-                          f"enter to apply, esc to cancel")
+        self._pin_msg()
+
+    def _edit_trunk_pin_toggle_grid(self, x, y):
+        """Toggle the nearest along-axis Hanan line (incl. OOB detour lines)
+        into the pinned span's anchors — how a span endpoint lands beyond the
+        outermost busterm."""
+        coord = self._snap(*self._pin_grid_target(x, y))
+        if coord in self._trunk_pin_grid:
+            self._trunk_pin_grid.discard(coord)
+        else:
+            self._trunk_pin_grid.add(coord)
+        self._pin_msg()
+
+    def _pin_msg(self):
+        self._edit_msg = (
+            f"PIN SPAN: {len(self._trunk_pin_set)} busterm(s) + "
+            f"{len(self._trunk_pin_grid)} grid line(s) — enter to apply, "
+            f"esc to cancel")
         self._draw()
 
     def _edit_trunk_pin_cancel(self):
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
+        self._trunk_pin_grid = set()
+        self._trunk_pin_hover = None
         self._edit_msg = "EDIT: pin span cancelled"
         self._draw()
+
+    def _pin_span_of(self, blocks, coords, horiz):
+        """Span covering the pinned anchors along the trunk axis: each block
+        contributes its along-axis CENTRE (where a stub drops), each grid line
+        its coordinate; the span is [min, max] over them.  A block-only pick
+        that collapses to one point falls back to the footprint EXTENT (the
+        original single/collinear-block behaviour); anything still degenerate
+        (e.g. one lone grid line) → None."""
+        pts = []
+        for n in blocks:
+            r = self.fp.get_block_bounds(n)
+            pts.append(int(round((r.x1 + r.x2) / 2 if horiz
+                                 else (r.y1 + r.y2) / 2)))
+        pts += list(coords)
+        if len(set(pts)) >= 2:
+            return min(pts), max(pts)
+        if not coords:                      # blocks only, degenerate → extent
+            return self._along_span_of_blocks(blocks, horiz)
+        return None
 
     def _edit_trunk_pin_apply(self):
         seg_idx = self._trunk_pin_seg
         picked = set(self._trunk_pin_set or ())
+        grid = set(self._trunk_pin_grid or ())
         self._trunk_pin_seg = -1
         self._trunk_pin_set = None
+        self._trunk_pin_grid = set()
+        self._trunk_pin_hover = None
         if not (0 <= seg_idx < len(self._edit_topo.segments)):
             self._edit_msg = "EDIT: pin target gone"; self._draw(); return
-        if not picked:
-            self._edit_msg = "PIN SPAN cancelled: no busterms picked"
+        if not picked and not grid:
+            self._edit_msg = "PIN SPAN cancelled: nothing picked"
             self._draw(); return
         seg = self._edit_topo.segments[seg_idx]
         horiz = (seg.start.y == seg.end.y)
-        span = self._along_span_of_blocks(picked, horiz)
+        span = self._pin_span_of(picked, grid, horiz)
         if span is None:
-            self._edit_msg = ("PIN SPAN rejected: those busterms give a "
+            self._edit_msg = ("PIN SPAN rejected: those anchors give a "
                               "degenerate span (pick two apart on the trunk axis)")
             self._draw(); return
         self._edit_apply(ic.edit_set_span(self._edit_topo, self.fp, seg_idx,
