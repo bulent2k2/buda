@@ -1511,6 +1511,51 @@ std::optional<BundleAssignment> CongestionPlanner::replan_bundle(
     return make_assignment(*target, plan);
 }
 
+std::optional<std::vector<BundleAssignment>>
+CongestionPlanner::replan_candidates(
+        std::vector<BundleWrapper>& bundles, int target_bundle_id,
+        const std::vector<int>& tidxs) {
+    if (x_grid_.empty() || cuts_.empty() || span_ref_eff_ <= 0.0)
+        return std::nullopt;
+    BundleWrapper* target = nullptr;
+    for (auto& bw : bundles)
+        if (bw.input.original_bundle.id == target_bundle_id) {
+            target = &bw; break;
+        }
+    if (!target || target->input.candidates.empty()) return std::nullopt;
+    if (target->hier.locked) return std::nullopt;   // template copy
+    const int  old_sel = target->plan.selected_topology_index;
+    const bool old_pin = target->input.topology_pinned;
+    // The O(all bundles) recharge happens ONCE; the per-candidate ladder
+    // below never commits, so every candidate scores against this same
+    // others-only usage — identical to what each separate replan_bundle
+    // call saw (its recharge wiped the previous call's commit).
+    recharge_committed_(bundles, target);
+    std::vector<BundleAssignment> out;
+    out.reserve(tidxs.size());
+    for (int tidx : tidxs) {
+        if (tidx < 0 || tidx >= (int)target->input.candidates.size()) {
+            target->plan.selected_topology_index = old_sel;
+            target->input.topology_pinned = old_pin;
+            return std::nullopt;
+        }
+        target->plan.selected_topology_index = tidx;
+        target->input.topology_pinned = true;
+        PlanResult plan = plan_bundle(*target, PlanMode::STRICT);
+        if (!plan.found) plan = plan_bundle(*target, PlanMode::ALLOW_OVERFLOW);
+        if (!plan.found) plan = plan_bundle(*target, PlanMode::BEST_EFFORT);
+        if (!plan.found) {
+            target->plan.selected_topology_index = old_sel;
+            target->input.topology_pinned = old_pin;
+            return std::nullopt;
+        }
+        out.push_back(make_assignment(*target, plan));
+    }
+    target->plan.selected_topology_index = old_sel;
+    target->input.topology_pinned = old_pin;
+    return out;
+}
+
 std::vector<BundleAssignment> CongestionPlanner::replan_bundle_ripup(
         std::vector<BundleWrapper>& bundles, int target_bundle_id) {
     // replan_bundle WITH the ladder's victim rip-up stage (wishlist-ripup item

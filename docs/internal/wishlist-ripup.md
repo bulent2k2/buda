@@ -594,3 +594,44 @@ default:** a corpus where post-screen cold-trial cost dominates — roughly
 a cold trial >=3x the warm eval, i.e. designs several times bigHalf's
 size, or stall-sweep-heavy flows.  Measure with the study harness first;
 the wiring is already there.
+
+## RR round 5 — batched screen (2026-07-15): the cost was the COPY, not the plumbing
+
+Post-#296 the screen's ~8-10ms/candidate was the largest trimmable RR
+bucket.  Three hypotheses were implemented and MEASURED in sequence —
+recording the chain because the first two, though "obviously" right, were
+each only a sliver:
+
+1. *pybind conversion dominates* (one wrapper-list conversion per
+   `replan_bundle` call + a ~600-segment result copy per screen) →
+   `NUTSEngine::screen_candidates` batches a whole contender into one C++
+   call returning (tidx, overlaps, violations) triples.  Measured: ~8ms/
+   screen UNCHANGED.  (The conversion is real — ~5.6ms per full-list
+   crossing — but amortizing it over ~7 candidates only shaves ~0.8ms
+   each.)
+2. *replan_bundle's O(all-bundles) committed-usage recharge dominates* →
+   `CongestionPlanner::replan_candidates`: recharge ONCE, plan each pinned
+   candidate UNCOMMITTED — provably the same others-only usage every
+   separate replan_bundle call saw (each recharged away its predecessor's
+   commit); parity pinned by test.  Measured: still ~7.7ms/screen (the
+   ladder is only ~0.6-1.5ms).
+3. *Instrument the un-bucketed tail* (new pass_seconds buckets: grid /
+   bundle_copy / junctions / keepout_audit / report — observability that
+   outlives this round): the wall was in run()'s FIRST LINE —
+   `std::vector<BundleWrapper> bundles = bundles_in;`, the mutable deep
+   copy (every candidate topology of every wrapper) that exists solely for
+   dogleg surgery... which screen mode SKIPS.  ~2.5ms C++-side per screen
+   run, plus matching allocation/teardown.  Fix: skip_doglegs_ solves
+   straight from the caller's list (solve takes const&; the fallback is
+   the only mutator).
+
+**Measured (this host):** screen 8.9 → 3.25ms/candidate (2.7x; scores
+byte-identical, `rows equal: True`); bigHalf rr-enabled screen bucket
+1.58s → 0.65s (131+75 screens), big2 ripup 0.29 → 0.22s, mix stage-b
+1.16 → 1.03s — identical trajectories and endpoints everywhere (the
+batched path is an exact-equivalence refactor, not a heuristic change).
+The residual ~3ms = ladder ~1.5 + target placement + metrics over the
+frozen context; further trimming would attack run()'s per-call context
+rebuild — not worth it while the screen bucket sits at ~5% of the rr
+stages.  Warm evals (`rerun_bundle_warm`, opt-in) inherit the copy skip
+for free (their scratch engine is skip_doglegs).

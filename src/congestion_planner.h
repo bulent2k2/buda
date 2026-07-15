@@ -210,6 +210,21 @@ public:
     // callers fall back to a full replan.
     std::optional<BundleAssignment> replan_bundle(
             std::vector<BundleWrapper>& bundles, int target_bundle_id);
+    // Batched screen replan (RR round 5): recharge every other wrapper's
+    // committed assignment ONCE, then plan the target PINNED to each
+    // candidate index in turn against that fixed usage — with NO
+    // commit_plan (a screen readback, not a route change), so every
+    // candidate scores against the identical others-only band state:
+    // exactly what a sequence of replan_bundle calls sees, since each of
+    // those recharges away its predecessor's commit.  The recharge is the
+    // O(all bundles) part of replan_bundle, so batching it is what takes a
+    // screen from ~replan-cost to ~one-candidate-ladder cost.  The
+    // target's selection/pin are restored before returning.  nullopt on
+    // replan_bundle's preconditions, an out-of-range index, or a candidate
+    // with no plannable ladder stage (callers fall back to unscreened).
+    std::optional<std::vector<BundleAssignment>> replan_candidates(
+            std::vector<BundleWrapper>& bundles, int target_bundle_id,
+            const std::vector<int>& tidxs);
     // replan_bundle WITH the ladder's victim rip-up stage (wishlist-ripup item
     // 1 v2b): if the target has no overflow-free candidate, rip up the
     // committed bundle holding the most demand on the contended bands and

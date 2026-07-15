@@ -926,7 +926,11 @@ def test_results_carry_per_pass_profile():
     corpora pin that)."""
     s = _build_session(narrow=True)
     nuts_keys = {'extract', 'context', 'fixpoint', 'dogleg_detect',
-                 'repair', 'corner', 'tighten', 'metrics'}
+                 'repair', 'corner', 'tighten', 'metrics',
+                 # round-5 tail buckets: the stages OUTSIDE the solve
+                 # lambda, which dominate a ~ms fixed-context screen run
+                 'grid', 'bundle_copy', 'junctions', 'keepout_audit',
+                 'report'}
     ps = dict(s.nuts_result.pass_seconds)
     assert set(ps) == nuts_keys, ps
     assert all(v >= 0.0 for v in ps.values()), ps
@@ -1287,8 +1291,8 @@ def test_screen_run_freezes_context_and_is_reproducible():
         eng.set_track_pitch(s._nuts_pitch)
         eng.set_skip_tighten(True)
         eng.set_skip_doglegs(True)
-        gx, gy, _need = s._rr_screen_grid(exclude_bid=bid)
-        eng.set_extra_grid_points(gx, gy)
+        eng.set_extra_grid_points(list(s.planner.get_x_grid()),
+                                  list(s.planner.get_y_grid()))
         eng.add_fixed_segments_except(base, bid)
         with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
             return eng.run([w])
@@ -1348,7 +1352,7 @@ def test_adversarial_screen_cannot_cost_the_endpoint(monkeypatch):
     s = _build_session(narrow=True)
     monkeypatch.setattr(
         buda_cli.BudaSession, "_rr_screen_prune",
-        lambda self, w, idx_moves, snap: ([], list(idx_moves)))
+        lambda self, w, idx_moves: ([], list(idx_moves)))
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         s.do_command("ripup_reroute")
@@ -1370,68 +1374,94 @@ def test_screen_prune_orders_by_score_ties_keep_position(monkeypatch):
     idx_moves = [('idx', 3), ('idx', 1), ('idx', 5), ('idx', 2)]
     scores = {3: (2, 0), 1: (0, 0), 5: (0, 0), 2: (1, 0)}
     monkeypatch.setattr(buda_cli.BudaSession, "_rr_screen_scores",
-                        lambda self, w, tidxs, snap: scores)
-    kept, deferred = s._rr_screen_prune(w, idx_moves, None)
+                        lambda self, w, tidxs: scores)
+    kept, deferred = s._rr_screen_prune(w, idx_moves)
     assert kept == [('idx', 1), ('idx', 5)]      # tie: 1 precedes 5 incoming
     assert deferred == [('idx', 2), ('idx', 3)]  # deferred stays score-ranked
     monkeypatch.setattr(buda_cli.BudaSession, "_rr_screen_scores",
-                        lambda self, w, tidxs, snap: None)
-    kept, deferred = s._rr_screen_prune(w, idx_moves, None)
+                        lambda self, w, tidxs: None)
+    kept, deferred = s._rr_screen_prune(w, idx_moves)
     assert kept == idx_moves and deferred == []
 
 
-def test_screen_grid_fallback_derives_from_all_bundles():
-    """Grid parity for hier sessions: when the flat floorplan's Hanan grid
-    and the planner grids are all empty (hier keeps geometry in the expanded
-    wrappers), _rr_screen_grid must reproduce run()'s fallback — the union
-    of the OTHER bundles' selected-topology coordinates (a full trial's
-    fallback grid holds the target's PINNED candidate, so the target's
-    baseline is excluded here and its candidate coords are merged per pin
-    by _rr_screen_scores — Codex #293), with the need flags telling the
-    caller the fallback engaged."""
-    import types
-    s = _build_session(narrow=True)
-
-    class _EmptyFP:
-        @staticmethod
-        def get_hanan_grid():
-            return [], []
-
-    fake = types.SimpleNamespace(fp=_EmptyFP(), planner=None,
-                                 bundles=s.bundles)
-    target = s.bundles[0].input.original_bundle.id
-    px, py, need = buda_cli.BudaSession._rr_screen_grid(
-        fake, exclude_bid=target)
-    assert need == (True, True)
-    xs, ys = set(), set()
-    for w in s.bundles:
-        if w.input.original_bundle.id == target:
-            continue
-        sel = w.plan.selected_topology_index
-        for seg in w.input.candidates[sel].segments:
-            xs |= {seg.start.x, seg.end.x}
-            ys |= {seg.start.y, seg.end.y}
-    assert px == sorted(xs) and py == sorted(ys)
-    # With a populated grid nothing extra is merged (the planner grids pass
-    # through, fallback disengaged): extra Hanan lines would subdivide
-    # intervals differently than the full solve.
-    px2, py2, need2 = s._rr_screen_grid(exclude_bid=target)
-    assert need2 == (False, False)
-    assert px2 == list(s.planner.get_x_grid())
-    assert py2 == list(s.planner.get_y_grid())
-
-
-def test_screen_scores_restore_target_plan_state():
-    """_rr_screen_scores mutates the target's selection/pin/plan arrays per
-    screened candidate and must leave NO divergence from the snapshot
-    baseline afterwards — the subsequent full trials assume the committed
-    state."""
+def test_screen_candidates_batched_matches_per_candidate_calls():
+    """The batched entry must score each candidate exactly as a separate
+    single-candidate call would: every screen_candidates invocation works
+    on its own wrapper-list copy, so a batch of N and N batches of 1 see
+    identical inputs — any divergence means state leaks across candidates
+    within one call."""
+    import buda
     s = _build_session(narrow=True)
     w = s.bundles[0]
+    bid = w.input.original_bundle.id
+    tidxs = [t for t in range(1, min(4, len(w.input.candidates)))]
+
+    def make_eng():
+        eng = buda.NUTSEngine(s.fp, s.layers)
+        eng.set_track_pitch(s._nuts_pitch)
+        eng.set_skip_tighten(True)
+        eng.set_skip_doglegs(True)
+        eng.set_extra_grid_points(list(s.planner.get_x_grid()),
+                                  list(s.planner.get_y_grid()))
+        eng.add_fixed_segments_except(s.nuts_result, bid)
+        return eng
+
+    with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+        batched = make_eng().screen_candidates(s.bundles, bid, tidxs,
+                                               s.planner, False)
+        singles = [make_eng().screen_candidates(s.bundles, bid, [t],
+                                                s.planner, False)[0]
+                   for t in tidxs]
+    assert batched is not None
+    assert [tuple(r) for r in batched] == [tuple(r) for r in singles]
+    # Unknown target id -> None (the caller's unscreened fallback).
+    with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+        assert make_eng().screen_candidates(s.bundles, 10 ** 9, tidxs,
+                                            s.planner, False) is None
+
+
+def test_replan_candidates_matches_replan_bundle_sequence():
+    """The batched planner entry recharges once and never commits — every
+    candidate must still get EXACTLY the assignment a pin + replan_bundle
+    sequence produces (each of those recharges away its predecessor's
+    commit, so both see the same others-only usage), and the target's
+    selection/pin must come back untouched."""
+    s = _build_session(narrow=True)
+    w = s.bundles[0]
+    bid = w.input.original_bundle.id
+    sel0, pin0 = w.plan.selected_topology_index, w.input.topology_pinned
+    tidxs = [t for t in range(1, min(4, len(w.input.candidates)))]
+    batch = s.planner.replan_candidates(s.bundles, bid, tidxs)
+    assert batch is not None and len(batch) == len(tidxs)
+    assert (w.plan.selected_topology_index, w.input.topology_pinned) == \
+           (sel0, pin0)
     snap = s._rr_snapshot()
+    seq = []
+    for t in tidxs:
+        w.plan.selected_topology_index = t
+        w.input.topology_pinned = True
+        seq.append(s.planner.replan_bundle(s.bundles, bid))
+    s._rr_restore(snap, only={bid})
+    for b, q in zip(batch, seq):
+        assert q is not None
+        assert (b.topo_index, b.v_layer_id, b.h_layer_id,
+                list(b.seg_layers), list(b.seg_perp)) == \
+               (q.topo_index, q.v_layer_id, q.h_layer_id,
+                list(q.seg_layers), list(q.seg_perp))
+    # Unknown target / bad index -> None (the unscreened fallback).
+    assert s.planner.replan_candidates(s.bundles, 10 ** 9, tidxs) is None
+    assert s.planner.replan_candidates(s.bundles, bid, [10 ** 6]) is None
+
+
+def test_screen_scores_leave_session_state_untouched():
+    """The batched screen works on a C++-side copy of the wrapper list, so
+    _rr_screen_scores must leave NO divergence from the pre-screen state —
+    the subsequent full trials assume the committed baseline."""
+    s = _build_session(narrow=True)
+    w = s.bundles[0]
     before = _full_wrapper_state(s)
     tidxs = [t for t in range(1, min(4, len(w.input.candidates)))]
-    scores = s._rr_screen_scores(w, tidxs, snap)
+    scores = s._rr_screen_scores(w, tidxs)
     assert scores is not None and set(scores) == set(tidxs)
     assert all(isinstance(v, tuple) and len(v) == 2 for v in scores.values())
     assert _full_wrapper_state(s) == before

@@ -576,57 +576,10 @@ class RipupMixin:
         return (sorted(idxs, key=farness, reverse=True)
                 + sorted(extras, key=farness, reverse=True)[:cap])
 
-    def _rr_screen_grid(self, exclude_bid=None):
-        """Extra grid points for a screen engine, reproducing run()'s grid
-        derivation: the planner's extra grids, PLUS — only when the flat
-        floorplan's Hanan grid and the planner grids are both empty on an
-        axis (hier sessions keep geometry in the expanded wrappers) — the
-        fallback union of the bundles' selected-topology coordinates.  A
-        single-wrapper screen run would otherwise derive its fallback grid
-        from the target's own segments alone, and the perpendicular
-        intervals (hence the screen scores) would not match the full
-        solve's.  The merge is CONDITIONAL for the same reason: extra Hanan
-        lines on a populated grid would subdivide intervals differently
-        than the full solve.
-
-        Returns (px, py, (need_x, need_y)).  When a need flag is set the
-        fallback engaged, and the caller must merge the SCREENED
-        candidate's own coordinates per pin: a full trial's fallback grid
-        derives from the CURRENT selections — the pinned candidate, not
-        the baseline — so `exclude_bid` (the screen target) is left out of
-        the base union here and re-added per candidate, or an alternate
-        reaching outside the baseline union would be screened with
-        different interval bounds than its full trial (Codex #293)."""
-        fx, fy = self.fp.get_hanan_grid()
-        px, py = [], []
-        if self.planner is not None:
-            px = list(self.planner.get_x_grid())
-            py = list(self.planner.get_y_grid())
-        need_x, need_y = not (fx or px), not (fy or py)
-        if need_x or need_y:
-            xs, ys = set(), set()
-            for w in self.bundles:
-                if w.input.original_bundle.id == exclude_bid:
-                    continue
-                sel = w.plan.selected_topology_index
-                cands = w.input.candidates
-                if sel < 0 or sel >= len(cands):
-                    continue
-                for seg in cands[sel].segments:
-                    xs.add(seg.start.x)
-                    xs.add(seg.end.x)
-                    ys.add(seg.start.y)
-                    ys.add(seg.end.y)
-            if need_x:
-                px = sorted(xs)
-            if need_y:
-                py = sorted(ys)
-        return px, py, (need_x, need_y)
-
-    def _rr_screen_scores(self, w, tidxs, snap):
+    def _rr_screen_scores(self, w, tidxs):
         """Fixed-context screen scores for one contender's index alternates
         (RR round 3, the final lever — wishlist-ripup "fixed-context
-        single-bundle placement").
+        single-bundle placement"; batched in round 5).
 
         Per candidate: pin it, replan its layers incrementally, then place
         ONLY this bundle's segments against every other bundle's baseline
@@ -640,72 +593,52 @@ class RipupMixin:
         always run on the true full-trial metric, which is what separates
         this screen from the reverted layer-scoped two-tier trials.
 
+        The whole contender screens in ONE C++ call
+        (NUTSEngine.screen_candidates): the wrapper list converts once
+        instead of once per replan_bundle, every mutation lands on a
+        C++-side copy — the session wrappers are untouched, so there is
+        nothing to restore — and only (tidx, overlaps, violations) triples
+        cross back instead of a full-design segment vector per candidate.
+        Grid parity comes for free: run() sees the whole list, so its
+        empty-grid fallback derives from the CURRENT selections including
+        the pinned candidate — exactly a full trial's derivation, with no
+        caller-side union/merging (this subsumes the round-3 per-pin
+        fallback fix; the planner grids are still passed as extras for the
+        populated-grid case, mirroring _run_nuts_internal).
+
         Returns {tidx: score}, or None when the incremental replan is
         unavailable for some candidate (the caller falls back to the
         unscreened order — a full trial there would fall back to the legacy
-        full replan, which the screen cannot mirror).  The target's plan
-        state is restored from `snap` either way."""
+        full replan, which the screen cannot mirror)."""
         bid = w.input.original_bundle.id
         if self.planner is None or self.nuts_result is None:
             return None
-        scores = {}
-        try:
-            t0 = time.perf_counter()
-            eng = buda.NUTSEngine(self.fp, self.layers)
-            eng.set_track_pitch(self._nuts_pitch)
-            eng.set_skip_tighten(True)
-            eng.set_skip_doglegs(True)
-            gx, gy, (need_x, need_y) = self._rr_screen_grid(exclude_bid=bid)
-            eng.set_extra_grid_points(gx, gy)
-            # The baseline already carries any bottom-up fixed copies (run()
-            # appends them), so this is the WHOLE frozen context — do not
-            # also _inject_bottom_up_fixed here.
-            eng.add_fixed_segments_except(self.nuts_result, bid)
-            clear_doglegs = bid in self._dogleg_slot
-            for tidx in tidxs:
-                w.plan.selected_topology_index = tidx
-                w.input.topology_pinned = True
-                if clear_doglegs:
-                    # Same hazard as _rr_trial: the target's per-segment
-                    # dogleg overrides index its adopted split topology,
-                    # not the candidate being screened.
-                    w.plan.seg_net_pull = []
-                    w.plan.seg_slide_lo = []
-                    w.plan.seg_slide_hi = []
-                if need_x or need_y:
-                    # Fallback-grid parity per pin (Codex #293): the full
-                    # trial's fallback grid includes the PINNED candidate's
-                    # coordinates, so merge this candidate's own coords
-                    # into the base union (which excluded the target).
-                    cx, cy = set(), set()
-                    for seg in w.input.candidates[tidx].segments:
-                        cx.add(seg.start.x)
-                        cx.add(seg.end.x)
-                        cy.add(seg.start.y)
-                        cy.add(seg.end.y)
-                    eng.set_extra_grid_points(
-                        sorted(set(gx) | cx) if need_x else gx,
-                        sorted(set(gy) | cy) if need_y else gy)
-                asn = self.planner.replan_bundle(self.bundles, bid)
-                if asn is None:
-                    scores = None
-                    break
-                w.plan.selected_topology_index = asn.topo_index
-                w.input.assigned_v_layer = asn.v_layer_id
-                w.input.assigned_h_layer = asn.h_layer_id
-                w.plan.seg_layers = list(asn.seg_layers)
-                w.plan.seg_perp = list(asn.seg_perp)
-                with contextlib.redirect_stdout(io.StringIO()), \
-                        buda.ostream_redirect():
-                    res = eng.run([w])
-                scores[tidx] = (res.num_overlaps, res.num_violations)
-                self._rr_t_add('screen', time.perf_counter() - t0)
-                t0 = time.perf_counter()
-        finally:
-            self._rr_restore(snap, only={bid})
-        return scores
+        t0 = time.perf_counter()
+        eng = buda.NUTSEngine(self.fp, self.layers)
+        eng.set_track_pitch(self._nuts_pitch)
+        eng.set_skip_tighten(True)
+        eng.set_skip_doglegs(True)
+        eng.set_extra_grid_points(list(self.planner.get_x_grid()),
+                                  list(self.planner.get_y_grid()))
+        # The baseline already carries any bottom-up fixed copies (run()
+        # appends them), so this is the WHOLE frozen context — do not
+        # also _inject_bottom_up_fixed here.
+        eng.add_fixed_segments_except(self.nuts_result, bid)
+        with contextlib.redirect_stdout(io.StringIO()), \
+                buda.ostream_redirect():
+            rows = eng.screen_candidates(self.bundles, bid, list(tidxs),
+                                         self.planner,
+                                         bid in self._dogleg_slot)
+        # Charge per screened candidate so the timing bucket's count stays
+        # the number of screens, comparable across rounds.
+        dt, n = time.perf_counter() - t0, max(len(tidxs), 1)
+        for _ in range(len(tidxs)):
+            self._rr_t_add('screen', dt / n)
+        if rows is None:
+            return None
+        return {t: (o, v) for t, o, v in rows}
 
-    def _rr_screen_prune(self, w, idx_moves, snap):
+    def _rr_screen_prune(self, w, idx_moves):
         """Split a contender's idx-move list into (kept, deferred) by
         screened score: the _RR_SCREEN_TOP_N best-screened moves are
         full-trialed now, the rest DEFERRED to the iteration's stall sweep
@@ -713,7 +646,7 @@ class RipupMixin:
         Ties keep the incoming farness/cheap-first position, so the screen
         may reorder only on evidence; with screening unavailable the full
         unscreened list is returned (nothing deferred)."""
-        scores = self._rr_screen_scores(w, [mv[1] for mv in idx_moves], snap)
+        scores = self._rr_screen_scores(w, [mv[1] for mv in idx_moves])
         if scores is None:
             return idx_moves, []
         order = sorted(range(len(idx_moves)),
@@ -1544,7 +1477,7 @@ class RipupMixin:
                 # are deferred to this iteration's stall sweep below, so no
                 # reachable fix is ever pruned away — only postponed.
                 if screen and len(moves) > _RR_SCREEN_TOP_N:
-                    moves, rest = self._rr_screen_prune(w, moves, snap)
+                    moves, rest = self._rr_screen_prune(w, moves)
                     if rest:
                         deferred.append((ci, bid, old_tidx, rest))
                 # The per-edge MST L/Z flip move-source is opt-in

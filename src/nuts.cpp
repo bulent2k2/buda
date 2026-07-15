@@ -2140,6 +2140,22 @@ static void derive_junction_infeasibilities(
 }
 
 NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
+    // Per-pass profiling (RR round-3 Phase 0; tail buckets round 5):
+    // accumulate each stage's seconds so `pass_seconds` answers "where does
+    // a solve's wall go" — including the stages OUTSIDE the solve lambda
+    // (grid derivation, junction/keepout audits, reporting), which
+    // dominate a fixed-context screen's ~ms run.  Observation only; no
+    // placement decision reads it.
+    std::map<std::string, double> pass_t;
+    int n_solves = 0;
+    using pclock = std::chrono::steady_clock;
+    auto charge = [&pass_t](const char* key, pclock::time_point& t0) {
+        auto t1 = pclock::now();
+        pass_t[key] += std::chrono::duration<double>(t1 - t0).count();
+        t0 = t1;
+    };
+    auto t_run = pclock::now();
+
     std::vector<int> x_grid, y_grid;
     floorplan_.get_hanan_grid(x_grid, y_grid);
     merge_grid(x_grid, extra_x_);
@@ -2166,18 +2182,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         if (y_grid.empty()) y_grid.assign(ys.begin(), ys.end());
     }
 
-    // Per-pass profiling (RR round-3 Phase 0): accumulate each pass's seconds
-    // across EVERY solve of this run — the dogleg fallback's trial re-solves
-    // included — so `pass_seconds` answers "where inside a trial's full solve
-    // does the time go".  Observation only; no placement decision reads it.
-    std::map<std::string, double> pass_t;
-    int n_solves = 0;
-    using pclock = std::chrono::steady_clock;
-    auto charge = [&pass_t](const char* key, pclock::time_point& t0) {
-        auto t1 = pclock::now();
-        pass_t[key] += std::chrono::duration<double>(t1 - t0).count();
-        t0 = t1;
-    };
+    charge("grid", t_run);
 
     // One full placement of a (possibly dogleg-mutated) bundle set: extract
     // segments, build maps, run the orientation fixpoint, classify cycles, then
@@ -2239,7 +2244,18 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         return out;
     };
 
-    std::vector<BundleWrapper> bundles = bundles_in;   // mutable: doglegs edit topologies
+    // Doglegs mutate topologies, so the fallback needs a MUTABLE copy of
+    // the whole wrapper list — a deep copy (every candidate topology) that
+    // is the single biggest fixed cost of a ~ms fixed-context screen run.
+    // Screen mode (skip_doglegs_) never runs the fallback, so it solves
+    // straight from the caller's list (solve takes const&).
+    auto t_copy = pclock::now();
+    std::vector<BundleWrapper> bundles_mut;
+    if (!skip_doglegs_)
+        bundles_mut = bundles_in;          // mutable: doglegs edit topologies
+    const std::vector<BundleWrapper>& bundles =
+        skip_doglegs_ ? bundles_in : bundles_mut;
+    charge("bundle_copy", t_copy);
     DoglegSolveOut out = solve(bundles, {});
 
     // Dogleg fallback (nuts_dogleg.cpp): when a genuine vertical-constraint
@@ -2249,7 +2265,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // ordering only), so the topology surgery must not happen (see setter).
     const std::set<int> doglegged_bids = skip_doglegs_
         ? std::set<int>{}
-        : run_dogleg_fallback(bundles, out, solve, track_pitch_);
+        : run_dogleg_fallback(bundles_mut, out, solve, track_pitch_);
 
     // Export the dogleg-mutated topologies so the CLI can adopt them before it
     // rebuilds ConnTopology for detailed NUTS — otherwise the split bundle's
@@ -2272,11 +2288,14 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // adopted bundle list — dogleg-split topologies included — against the
     // winning result), one line per distinct edge, like planner overflow, so
     // a compromised junction is never silent.
+    auto t_tail = pclock::now();
     derive_junction_infeasibilities(bundles, out.result);
+    charge("junctions", t_tail);
     // Keepout conflicts: report-only, so a bus committed onto a keepout by the
     // exhausted-window centre fallback is never silent (keepout-model audit).
     out.result.num_keepout_conflicts =
         count_keepout_conflicts(low_keepouts(), out.result.segments);
+    charge("keepout_audit", t_tail);
     // Track overlaps first: it is the headline health metric, so it stays
     // visible even when a terminal/summary truncates the tail of this line.
     std::cout << "[NUTS] " << out.result.segments.size() << " segments placed. "
@@ -2286,6 +2305,7 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
         std::cout << "[NUTS] WARNING: " << out.result.num_keepout_conflicts
                   << " segment(s) placed ON a keepout (window exhausted; the "
                   << "bus cannot physically route there — re-pin or re-plan).\n";
+    charge("report", t_tail);
     // Stamp the accumulated per-pass profile onto the FINAL result (the
     // fallback's trial re-solves are already folded into the buckets).
     out.result.pass_seconds = std::move(pass_t);
@@ -2357,6 +2377,54 @@ NUTSResult NUTSEngine::rerun_layer(
               << "Violations: " << result.num_violations << ", "
               << "Overlaps: " << result.num_overlaps << ".\n";
     return result;
+}
+
+std::optional<std::vector<std::array<int, 3>>> NUTSEngine::screen_candidates(
+    const std::vector<BundleWrapper>& bundles_in,
+    int target_bid,
+    const std::vector<int>& tidxs,
+    CongestionPlanner& planner,
+    bool clear_dogleg_overrides)
+{
+    // One conversion + copy of the wrapper list for the WHOLE contender —
+    // the per-candidate Python loop paid it per replan_bundle call, and at
+    // the screen's ~ms budget that conversion dominated.  All mutations
+    // land on this copy; the caller's wrappers are never touched.
+    std::vector<BundleWrapper> bundles = bundles_in;
+    BundleWrapper* w = nullptr;
+    for (auto& bw : bundles)
+        if (bw.input.original_bundle.id == target_bid) { w = &bw; break; }
+    if (!w) return std::nullopt;
+    if (clear_dogleg_overrides) {
+        // Same hazard as _rr_trial: a dogleg-adopted target's per-segment
+        // overrides index its split topology, not the screened candidate.
+        w->plan.seg_net_pull.clear();
+        w->plan.seg_slide_lo.clear();
+        w->plan.seg_slide_hi.clear();
+    }
+    // Layers for ALL candidates in one planner call: the O(all bundles)
+    // committed-usage recharge inside replan_bundle was the dominant
+    // per-screen cost, and it is identical across one contender's
+    // candidates — replan_candidates pays it once (no commits, so every
+    // candidate scores against the same others-only usage, exactly as the
+    // per-call sequence did).
+    auto asns = planner.replan_candidates(bundles, target_bid, tidxs);
+    if (!asns)
+        return std::nullopt;       // caller falls back to unscreened order
+    std::vector<std::array<int, 3>> out;
+    out.reserve(tidxs.size());
+    for (size_t i = 0; i < tidxs.size(); ++i) {
+        const BundleAssignment& asn = (*asns)[i];
+        w->plan.selected_topology_index = asn.topo_index;
+        w->input.topology_pinned = true;
+        w->input.assigned_v_layer = asn.v_layer_id;
+        w->input.assigned_h_layer = asn.h_layer_id;
+        w->plan.seg_layers = asn.seg_layers;
+        w->plan.seg_perp = asn.seg_perp;
+        NUTSResult res = run(bundles);
+        out.push_back({tidxs[i], res.num_overlaps, res.num_violations});
+    }
+    return out;
 }
 
 NUTSResult NUTSEngine::rerun_bundle_warm(

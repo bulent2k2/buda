@@ -178,6 +178,14 @@ void bind_nuts(py::module_& m) {
              "Fix every placed segment of `baseline` except `exclude_bid`'s "
              "(the RR fixed-context screen's frozen occupancy, one call)")
         .def("run",                   &NUTSEngine::run)
+        .def("screen_candidates",     &NUTSEngine::screen_candidates,
+             py::arg("bundles"), py::arg("target_bid"), py::arg("tidxs"),
+             py::arg("planner"), py::arg("clear_dogleg_overrides") = false,
+             "Batched fixed-context screen: score every candidate in one "
+             "call on a pre-configured screen engine — one wrapper-list "
+             "conversion per contender, no session-state mutation.  Returns "
+             "[(tidx, overlaps, violations)], or None when the incremental "
+             "replan is unavailable")
         .def("rerun_layer",           &NUTSEngine::rerun_layer)
         .def("rerun_bundle_warm",     &NUTSEngine::rerun_bundle_warm,
              py::arg("prev"), py::arg("bundles"), py::arg("target_bid"),

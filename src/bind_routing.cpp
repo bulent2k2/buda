@@ -548,6 +548,13 @@ void bind_routing(py::module_& m) {
         .def("optimize_topologies",  &CongestionPlanner::optimize_topologies)
         .def("replan_bundle",        &CongestionPlanner::replan_bundle,
              py::arg("bundles"), py::arg("target_bundle_id"))
+        .def("replan_candidates",    &CongestionPlanner::replan_candidates,
+             py::arg("bundles"), py::arg("target_bundle_id"),
+             py::arg("tidxs"),
+             "Batched screen replan: one committed-usage recharge, then "
+             "plan the target pinned to each candidate index (no commits) "
+             "— per-candidate assignments identical to a replan_bundle "
+             "sequence")
         .def("replan_bundle_ripup",  &CongestionPlanner::replan_bundle_ripup,
              py::arg("bundles"), py::arg("target_bundle_id"))
         .def("inject_band_demand",   &CongestionPlanner::inject_band_demand,
