@@ -1234,17 +1234,38 @@ class TopologyExplorer:
         # Land the session's slide-window refinements as NUTS overrides on the
         # pinned candidate (plan.seg_slide_lo/hi, NaN = free) — the same hatch
         # dogleg splits ride: the next run_nuts honors them, a re-plan clears
-        # them (existing override semantics).
+        # them (existing override semantics).  Each staged window is
+        # REVALIDATED against the committed topology's connectivity first: a
+        # geometry edit after staging (stub/connect/disconnect/span) can
+        # narrow the segment's structural slide range, and NUTS honors any
+        # non-NaN override verbatim — so a shrunken window clamps and a
+        # now-disjoint one is dropped LOUD, never written stale (Codex #294).
         if self._edit_slide:
+            cs_list = list(self._build_conn_topo(topo).segs())
             nseg = len(topo.segments)
             slo = [float('nan')] * nseg
             shi = [float('nan')] * nseg
-            for si, (lo, hi) in self._edit_slide.items():
-                if 0 <= si < nseg:
-                    slo[si], shi[si] = float(lo), float(hi)
-            w.plan.seg_slide_lo = slo
-            w.plan.seg_slide_hi = shi
-            self._edit_msg += f" (+{len(self._edit_slide)} slide window(s))"
+            applied, dropped = 0, []
+            for si, (lo, hi) in sorted(self._edit_slide.items()):
+                if not (0 <= si < nseg):
+                    dropped.append(si)
+                    continue
+                s_lo = float(cs_list[si].perp_lo)
+                s_hi = float(cs_list[si].perp_hi)
+                clo, chi = max(float(lo), s_lo), min(float(hi), s_hi)
+                if clo > chi:
+                    dropped.append(si)
+                    continue
+                slo[si], shi[si] = clo, chi
+                applied += 1
+            if applied:
+                w.plan.seg_slide_lo = slo
+                w.plan.seg_slide_hi = shi
+                self._edit_msg += f" (+{applied} slide window(s))"
+            if dropped:
+                self._edit_msg += (
+                    f" (dropped stale slide window(s) on seg {dropped} — "
+                    f"outside the segment's current slide range)")
             self._edit_slide = {}
             self._edit_slide_mark = None
         print(f"[edit] {self._edit_msg}")
