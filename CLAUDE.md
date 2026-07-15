@@ -407,9 +407,11 @@ Adding a new command/stage means: (1) implement the C++ class; (2) expose it via
 
 ---
 
-### Stage 7 — Visualizer (`buda_viz.py`)
+### Stage 7 — Visualizer (`buda_viz.py` + `viz_*` modules)
 
 **Responsibility:** Interactive matplotlib window. All drawable elements are registered by bundle_id so click-to-highlight works uniformly across all draw methods.
+
+**Module layout** (mirrors the CLI's `buda_cmds`/`buda_session` split): `src/buda_viz.py` is the **façade/assembly** — both classes' `__init__` + `show()`, the mixin-composed `class` statements, and re-exports of every externally-used symbol (external importers only ever touch `buda_viz`). The helpers live in: `src/viz_common.py` (shared layer colors/labels, block/hanan draw helpers, zoom/pan geometry, button styling), `src/viz_window.py` (platform/window-manager glue: raise/focus, Tk geometry resync, macOS Dock icon/app name — monkeypatch `viz_window.<fn>` to intercept, mixins call it qualified), `src/viz_explorer/` (TopologyExplorer mixins: `edit`, `analysis`, `sidecar`, `draw`, `nav`), and `src/viz_main/` (BudaVisualizer mixins: `highlight`, `panels`, `draw_abstract`, `draw_detailed`, `view`). Mixin member sets are disjoint by construction; methods share state via `self`. Adding a viewer method: put it in the matching mixin module.
 
 **Artist registry pattern:** Every `ax.plot()` or `ax.add_patch()` call that represents a routable object is passed to `_register(bundle_id, artist, alpha=..., lw=..., is_band=...)`. This stores the artist's resting style. `_set_highlight(bundle_id)` then dims all other bundles to α=0.1 and brightens the selected bundle to α=1.0 with 2.2× line width. Clicking the same bundle or the background resets.
 
@@ -618,7 +620,7 @@ Realized by Phase G of the NUTS/DNUTS refactor ([plan + as-built resolution](doc
 | DB layer (`buda_core` → `buda_db`) | `bdb.h/cpp`, `sqlite3.c/h`, `busterm.h/cpp`, `bundler.h/cpp`, `bundle_refiner.h/cpp`, `gds_io.h/cpp`, `bind_db.cpp`, `bindings_db.cpp` |
 | Routing pipeline (`buda`) | `topology.h/cpp`, `conn_topology.h/cpp`, `topology_analysis.h/cpp`, `topo_edit.h/cpp`, `layering.h/cpp`, `congestion_planner.h/cpp`, `nuts.h/cpp`, `nuts_geom.h`, `nuts_dogleg.h/cpp`, `placed_segment.h`, `routing_grid.h/cpp`, `detailed_nuts.h/cpp`, `verify.h/cpp`, `floorplanner.h/cpp`, `placement_optimizer.h/cpp` |
 | Bindings (`buda`) | `bindings.cpp`, `bind_bundler.cpp`, `bind_routing.cpp`, `bind_nuts.cpp`, `bind_optimizer.cpp` |
-| Python | `src/buda_cli.py` (CLI core), `src/buda_cmds/` (command registry, one module per stage), `src/buda_session/` (BudaSession helper mixins + `util.py`), `src/buda_viz.py` (visualizer), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
+| Python | `src/buda_cli.py` (CLI core), `src/buda_cmds/` (command registry, one module per stage), `src/buda_session/` (BudaSession helper mixins + `util.py`), `src/buda_viz.py` (viewer façade/assembly), `src/viz_common.py` + `src/viz_window.py` (shared draw/zoom helpers; window-manager glue), `src/viz_explorer/` (TopologyExplorer mixins), `src/viz_main/` (BudaVisualizer mixins), `src/ui_state.py`, `tools/*.py` (floorplanner GUI + DEF/LEF viz) |
 | Demos | `demo/*.buda` — user/designer-facing demo vehicles (comprehensive_demo, quickstart, ariane/mempool/nvdla/ispd19 showcases, …); see `demo/README.md` |
 | Flows / tests | `flow/*.buda` — R&D / regression vehicles; shared track fixtures in `flow/tracks/`; `test/tests/*.py`, `test/tests/features/*.feature` |
 

@@ -95,7 +95,8 @@ def test_topo_explorer_v_raises_main_window(monkeypatch):
     assert exp is not None and exp._main_fig is viz.fig
 
     raised = []
-    monkeypatch.setattr(buda_viz, "raise_window", lambda f: raised.append(f))
+    import viz_window
+    monkeypatch.setattr(viz_window, "raise_window", lambda f: raised.append(f))
     for key in ("v", "cmd+1", "ctrl+1"):
         raised.clear()
         exp._on_key(SimpleNamespace(key=key, xdata=None, ydata=None))
@@ -113,7 +114,8 @@ def test_explorer_v_syncs_selection_to_main(monkeypatch):
     viz._set_highlight(next(iter(viz._bundle_artists)))
     viz._open_topo_explorer()
     exp = viz._topo_explorer
-    monkeypatch.setattr(buda_viz, "raise_window", lambda f: None)
+    import viz_window
+    monkeypatch.setattr(viz_window, "raise_window", lambda f: None)
 
     exp._step_bundle(+1)                       # the '[' / ']' page
     target = exp.wrappers[exp.bidx].input.original_bundle.id
