@@ -38,6 +38,19 @@ _RR_GLOBAL_MAX_TRIALS = 36          # hard trial budget per stall
 # the bar) — corpus-measured before this default was set.
 _RR_FAST_TRIALS_DEFAULT = True
 
+# Fixed-context screen (RR round 3, final lever): before full-trialing a
+# contender's alternates, place each candidate's segments ALONE against every
+# other bundle's baseline placement frozen as fixed occupancy (~ms per
+# candidate vs ~100ms+ per full trial) and full-trial only the
+# _RR_SCREEN_TOP_N best-screened moves.  Screened-out moves are DEFERRED, not
+# dropped: a stalled iteration sweeps them before the global pass, so the
+# loop still stops only when a FULL sweep proves no improving move — and the
+# accept decision always runs on the true full metric, so a bad screen can
+# only reorder work, never commit a wrong move.  Default corpus-measured
+# (the #290/#291 pattern); `no_screen` / `screen` tokens override per run.
+_RR_SCREEN_DEFAULT = True
+_RR_SCREEN_TOP_N = 2
+
 
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).

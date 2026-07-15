@@ -1058,6 +1058,17 @@ void NUTSEngine::add_fixed_segments(const std::vector<TrackSegment>& segs) {
     }
 }
 
+void NUTSEngine::add_fixed_segments_except(const NUTSResult& baseline,
+                                           int exclude_bid) {
+    std::vector<TrackSegment> keep;
+    keep.reserve(baseline.segments.size());
+    for (const auto& s : baseline.segments)
+        if (s.bundle_id != exclude_bid && s.placed &&
+            !std::isnan(s.track_position))
+            keep.push_back(s);
+    add_fixed_segments(keep);
+}
+
 TrackSegment transform_track_segment(const TrackSegment& ts,
                                      const std::string& orient,
                                      int cell_w, int cell_h,
@@ -2225,8 +2236,11 @@ NUTSResult NUTSEngine::run(const std::vector<BundleWrapper>& bundles_in) {
     // Dogleg fallback (nuts_dogleg.cpp): when a genuine vertical-constraint
     // cycle survives the corner pass, split one trunk on the cycle across two
     // tracks joined by a jog and re-solve; returns the mutated bundle ids.
-    const std::set<int> doglegged_bids =
-        run_dogleg_fallback(bundles, out, solve, track_pitch_);
+    // Screen mode skips it: a screen's result is discarded (candidate
+    // ordering only), so the topology surgery must not happen (see setter).
+    const std::set<int> doglegged_bids = skip_doglegs_
+        ? std::set<int>{}
+        : run_dogleg_fallback(bundles, out, solve, track_pitch_);
 
     // Export the dogleg-mutated topologies so the CLI can adopt them before it
     // rebuilds ConnTopology for detailed NUTS — otherwise the split bundle's

@@ -428,6 +428,77 @@ The abort lever was DESIGNED as two halves and measured before building
   + bit_spans 0.49->0.33s on the fast config (modest there because #290
   already cut the trial count; scales with trial count elsewhere).
 
-Remaining round-3 lever: the fixed-context single-bundle screen
-(`LayerSolver::repack_members`) — now confirmed as the ONLY way at the
-per-trial NUTS solve, since its passes are all load-bearing.
+Remaining round-3 lever: the fixed-context single-bundle screen — now
+confirmed as the ONLY way at the per-trial NUTS solve, since its passes are
+all load-bearing.  (Shipped below.)
+
+## RR round 3 — fixed-context single-bundle screen — ✅ SHIPPED (2026-07-15)
+
+The round's final lever, in the screen-then-confirm shape the round-2
+two-tier revert pointed to.  **Mechanism:** the bottom-up fixed-segment
+machinery, not a new solver entry — `NUTSEngine::add_fixed_segments_except
+(baseline, exclude_bid)` freezes every other bundle's placed TrackSegments
+as immovable occupancy (one C++ call; the baseline already carries any
+bottom-up copies), `set_skip_doglegs` keeps the screen read-only (no
+topology surgery on a discarded result), and `run([target_wrapper])` places
+ONLY the target's segments against the frozen context (`build_context` over
+a single wrapper; same-bundle metric exemption means the target cannot
+conflict with itself).  Screen score = the result's `(num_overlaps,
+num_violations)`: the fixed-fixed component is a CONSTANT within one
+contender's scan, so the score is a valid ORDERING — never a metric.
+
+**Wiring (`_rr_screen_scores` / `_rr_screen_prune`, `src/buda_session/
+ripup.py`):** per contender, pin each idx alternate + `replan_bundle` for
+its layers + screen (~10 ms measured, replan included), keep the
+`_RR_SCREEN_TOP_N = 2` best-screened for full trials, DEFER the rest.  A
+stalled iteration sweeps the deferred moves at full fidelity before the
+global pass (`_rr_scan_moves`, the extracted inner trial loop, is shared),
+so the loop's stop certificate is still a FULL sweep — the two-tier
+attempt's failure modes are structurally absent: accepts run on the true
+full metric (soundness), and the screen can only postpone a move within an
+iteration, never prune it (completeness).  Grid parity on hier sessions:
+`_rr_screen_grid` reproduces run()'s fallback-grid derivation (union of ALL
+bundles' selected-topology coords when the flat fp + planner grids are
+empty) — a single-wrapper run would otherwise derive intervals from the
+target alone.  Screening falls back to the unscreened order when
+`replan_bundle`'s preconditions fail; the global-occupant pass is never
+screened (already budget-bounded).  Timing rides the summary as a
+`screen s/N` bucket.
+
+**Measured (this host, screen vs `no_screen`, endpoints identical — all
+flows reach their clean 0/0):**
+
+    bigHalf (rr 30):  flow 40.8s -> 16.5s.  Stage b is the story:
+      full trials 123 -> 11 (nuts 21.1s/131 -> 2.6s/17, dnuts 5.3 -> 0.9)
+      + 75 screens at 0.74s total; stage-b ripup 28.9s -> 4.9s.  Stage a
+      modest (5.8s/25 -> 3.7s/27 solves + 1.4s/131 screens; 26 vs 23
+      trials — deferred sweeps fired).  Entry metric of stage b differs
+      (184 vs 257 opens): a trajectory effect of stage a committing a
+      different improving move first, exactly the #290 class.
+    big2:            ripup 0.91s -> 0.43s (17 -> 3 trials), same 2->0.
+    mix:             stage a 7 -> 3 trials; stage b 2.47s -> 1.49s
+                     (46(3) -> 0/0 both, 3 vs 4 moves).
+    slowdown_rnr:    same design/endpoints; stage b 2.45s -> 1.64s.
+
+**Default ON** (the measurement-decides-the-default pattern); `no_screen` /
+`screen` tokens override per run.  Tests: frozen-context verbatim +
+reproducibility + no-surgery-export (engine), screen-vs-no_screen endpoint
+A/B (both stages), an ADVERSARIAL screen (defers everything) that must
+still reach the clean endpoint through the stall sweep, prune ordering /
+tie discipline, target-state restore exactness, and the hier grid-fallback
+parity.
+
+**Deliberately NOT taken:** a screened-score threshold against the current
+metric (skip "hopeless" full trials outright) — that converts the screen
+from an ordering into a decision-maker, reintroducing the two-tier
+attempt's spurious-rejection mode for a saving the deferred-sweep design
+already captures.  Stage b's remaining floor is the per-trial full DNUTS
+(#291's place-abort already trims certain rejections); the fixed-bits
+incremental DNUTS (`add_fixed_bits`, the bottom-up ref/rest split) remains
+the next candidate if that floor ever matters.  One more noted lever
+(review #293): stage-b screens rank by ABSTRACT (overlaps, violations)
+only — a candidate's DNUTS-open potential is invisible, so the stage-b
+ranking is a proxy (protected by deferral; 11 full trials still found all
+6 bigHalf stage-b commits).  If a future corpus shows stage-b screens
+mis-ordering badly, a cheap opens-proxy (signal-track supply vs need per
+placed window) is the shape to add.

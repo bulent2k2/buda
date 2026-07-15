@@ -120,6 +120,7 @@ def cmd_run_detailed_nuts(session, cmd, args, cmd_line):
 
 def cmd_ripup_reroute(session, cmd, args, cmd_line):
     # Usage: ripup_reroute [max_iter] [use_edge_candidates] [no_global]
+    #                      [fast_trials|no_fast_trials] [screen|no_screen]
     # Stage auto-detected: after run_detailed_nuts ⇒ drive down DNUTS opens;
     # else after run_nuts ⇒ drive down NUTS overlaps.
     # `use_edge_candidates` (off by default) toggles the per-edge MST L/Z
@@ -137,13 +138,24 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
         fast_trials = False
     elif "fast_trials" in args:
         fast_trials = True
+    # Fixed-context screen (round 3, final lever): default per
+    # _RR_SCREEN_DEFAULT; `no_screen` opts out (every contender alternate is
+    # full-trialed in farness order, the pre-screen behavior), `screen`
+    # forces on.  Accepts stay on the true full metric either way.
+    screen = None
+    if "no_screen" in args:
+        screen = False
+    elif "screen" in args:
+        screen = True
     nums = [a for a in args if a not in ("use_edge_candidates", "no_global",
-                                         "fast_trials", "no_fast_trials")]
+                                         "fast_trials", "no_fast_trials",
+                                         "screen", "no_screen")]
     max_iter = int(nums[0]) if nums else _RR_DEFAULT_MAX_ITER
     session._ripup_reroute(max_iter=max_iter,
                            use_edge_candidates=use_edge_candidates,
                            use_global=use_global,
-                           fast_trials=fast_trials)
+                           fast_trials=fast_trials,
+                           screen=screen)
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):

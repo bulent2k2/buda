@@ -168,9 +168,15 @@ void bind_nuts(py::module_& m) {
         .def(py::init<const Floorplan&, const LayerStack&>())
         .def("set_track_pitch",       &NUTSEngine::set_track_pitch)
         .def("set_skip_tighten",      &NUTSEngine::set_skip_tighten)
+        .def("set_skip_doglegs",      &NUTSEngine::set_skip_doglegs)
         .def("set_extra_grid_points", &NUTSEngine::set_extra_grid_points)
         .def("add_fixed_segments",    &NUTSEngine::add_fixed_segments,
              py::arg("segs"))
+        .def("add_fixed_segments_except",
+             &NUTSEngine::add_fixed_segments_except,
+             py::arg("baseline"), py::arg("exclude_bid"),
+             "Fix every placed segment of `baseline` except `exclude_bid`'s "
+             "(the RR fixed-context screen's frozen occupancy, one call)")
         .def("run",                   &NUTSEngine::run)
         .def("rerun_layer",           &NUTSEngine::rerun_layer);
 

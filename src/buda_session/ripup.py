@@ -32,7 +32,8 @@ import buda
 
 from .util import (_RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
                    _RR_GLOBAL_MAX_TRIALS, _RR_GLOBAL_MOVES_PER_OCC,
-                   _RR_GLOBAL_TOP_K, _RR_MAX_CANDIDATES_PER_BUNDLE)
+                   _RR_GLOBAL_TOP_K, _RR_MAX_CANDIDATES_PER_BUNDLE,
+                   _RR_SCREEN_DEFAULT, _RR_SCREEN_TOP_N)
 
 
 class RipupMixin:
@@ -82,9 +83,9 @@ class RipupMixin:
 
     def _rr_t_init(self):
         self._rr_t = {'replan': 0.0, 'nuts': 0.0, 'dnuts': 0.0,
-                      'snapshot': 0.0, 'restore': 0.0,
+                      'screen': 0.0, 'snapshot': 0.0, 'restore': 0.0,
                       'n_replan': 0, 'n_nuts': 0, 'n_dnuts': 0,
-                      'n_snapshot': 0, 'n_restore': 0,
+                      'n_screen': 0, 'n_snapshot': 0, 'n_restore': 0,
                       'passes': {}}
 
     def _rr_t_add(self, key, dt):
@@ -109,11 +110,13 @@ class RipupMixin:
         t = getattr(self, '_rr_t', None)
         if t is None:
             return ""
-        return (f"replan {t['replan']:.2f}s/{t['n_replan']}, "
-                f"nuts {t['nuts']:.2f}s/{t['n_nuts']}, "
-                f"dnuts {t['dnuts']:.2f}s/{t['n_dnuts']}, "
-                f"snapshot {t['snapshot']:.2f}s/{t['n_snapshot']}, "
-                f"restore {t['restore']:.2f}s/{t['n_restore']}")
+        s = (f"replan {t['replan']:.2f}s/{t['n_replan']}, "
+             f"nuts {t['nuts']:.2f}s/{t['n_nuts']}, "
+             f"dnuts {t['dnuts']:.2f}s/{t['n_dnuts']}, ")
+        if t.get('n_screen'):
+            s += f"screen {t['screen']:.2f}s/{t['n_screen']}, "
+        return s + (f"snapshot {t['snapshot']:.2f}s/{t['n_snapshot']}, "
+                    f"restore {t['restore']:.2f}s/{t['n_restore']}")
 
     def _rr_t_passes_str(self):
         """One line answering WHERE inside the solves the nuts/dnuts seconds
@@ -568,6 +571,151 @@ class RipupMixin:
         return (sorted(idxs, key=farness, reverse=True)
                 + sorted(extras, key=farness, reverse=True)[:cap])
 
+    def _rr_screen_grid(self, exclude_bid=None):
+        """Extra grid points for a screen engine, reproducing run()'s grid
+        derivation: the planner's extra grids, PLUS — only when the flat
+        floorplan's Hanan grid and the planner grids are both empty on an
+        axis (hier sessions keep geometry in the expanded wrappers) — the
+        fallback union of the bundles' selected-topology coordinates.  A
+        single-wrapper screen run would otherwise derive its fallback grid
+        from the target's own segments alone, and the perpendicular
+        intervals (hence the screen scores) would not match the full
+        solve's.  The merge is CONDITIONAL for the same reason: extra Hanan
+        lines on a populated grid would subdivide intervals differently
+        than the full solve.
+
+        Returns (px, py, (need_x, need_y)).  When a need flag is set the
+        fallback engaged, and the caller must merge the SCREENED
+        candidate's own coordinates per pin: a full trial's fallback grid
+        derives from the CURRENT selections — the pinned candidate, not
+        the baseline — so `exclude_bid` (the screen target) is left out of
+        the base union here and re-added per candidate, or an alternate
+        reaching outside the baseline union would be screened with
+        different interval bounds than its full trial (Codex #293)."""
+        fx, fy = self.fp.get_hanan_grid()
+        px, py = [], []
+        if self.planner is not None:
+            px = list(self.planner.get_x_grid())
+            py = list(self.planner.get_y_grid())
+        need_x, need_y = not (fx or px), not (fy or py)
+        if need_x or need_y:
+            xs, ys = set(), set()
+            for w in self.bundles:
+                if w.input.original_bundle.id == exclude_bid:
+                    continue
+                sel = w.plan.selected_topology_index
+                cands = w.input.candidates
+                if sel < 0 or sel >= len(cands):
+                    continue
+                for seg in cands[sel].segments:
+                    xs.add(seg.start.x)
+                    xs.add(seg.end.x)
+                    ys.add(seg.start.y)
+                    ys.add(seg.end.y)
+            if need_x:
+                px = sorted(xs)
+            if need_y:
+                py = sorted(ys)
+        return px, py, (need_x, need_y)
+
+    def _rr_screen_scores(self, w, tidxs, snap):
+        """Fixed-context screen scores for one contender's index alternates
+        (RR round 3, the final lever — wishlist-ripup "fixed-context
+        single-bundle placement").
+
+        Per candidate: pin it, replan its layers incrementally, then place
+        ONLY this bundle's segments against every other bundle's baseline
+        placement frozen as fixed occupancy (add_fixed_segments_except —
+        the bottom-up fixed-segment machinery), doglegs and tighten skipped
+        (the result is discarded; surgery and WL polish have no ordering
+        value).  Score = (num_overlaps, num_violations) of the screened
+        result.  Overlaps among the frozen context count too, but they are
+        a CONSTANT within one contender's scan (only the target moves), so
+        the scores are a valid ORDERING — never a metric: accept decisions
+        always run on the true full-trial metric, which is what separates
+        this screen from the reverted layer-scoped two-tier trials.
+
+        Returns {tidx: score}, or None when the incremental replan is
+        unavailable for some candidate (the caller falls back to the
+        unscreened order — a full trial there would fall back to the legacy
+        full replan, which the screen cannot mirror).  The target's plan
+        state is restored from `snap` either way."""
+        bid = w.input.original_bundle.id
+        if self.planner is None or self.nuts_result is None:
+            return None
+        scores = {}
+        try:
+            t0 = time.perf_counter()
+            eng = buda.NUTSEngine(self.fp, self.layers)
+            eng.set_track_pitch(self._nuts_pitch)
+            eng.set_skip_tighten(True)
+            eng.set_skip_doglegs(True)
+            gx, gy, (need_x, need_y) = self._rr_screen_grid(exclude_bid=bid)
+            eng.set_extra_grid_points(gx, gy)
+            # The baseline already carries any bottom-up fixed copies (run()
+            # appends them), so this is the WHOLE frozen context — do not
+            # also _inject_bottom_up_fixed here.
+            eng.add_fixed_segments_except(self.nuts_result, bid)
+            clear_doglegs = bid in self._dogleg_slot
+            for tidx in tidxs:
+                w.plan.selected_topology_index = tidx
+                w.input.topology_pinned = True
+                if clear_doglegs:
+                    # Same hazard as _rr_trial: the target's per-segment
+                    # dogleg overrides index its adopted split topology,
+                    # not the candidate being screened.
+                    w.plan.seg_net_pull = []
+                    w.plan.seg_slide_lo = []
+                    w.plan.seg_slide_hi = []
+                if need_x or need_y:
+                    # Fallback-grid parity per pin (Codex #293): the full
+                    # trial's fallback grid includes the PINNED candidate's
+                    # coordinates, so merge this candidate's own coords
+                    # into the base union (which excluded the target).
+                    cx, cy = set(), set()
+                    for seg in w.input.candidates[tidx].segments:
+                        cx.add(seg.start.x)
+                        cx.add(seg.end.x)
+                        cy.add(seg.start.y)
+                        cy.add(seg.end.y)
+                    eng.set_extra_grid_points(
+                        sorted(set(gx) | cx) if need_x else gx,
+                        sorted(set(gy) | cy) if need_y else gy)
+                asn = self.planner.replan_bundle(self.bundles, bid)
+                if asn is None:
+                    scores = None
+                    break
+                w.plan.selected_topology_index = asn.topo_index
+                w.input.assigned_v_layer = asn.v_layer_id
+                w.input.assigned_h_layer = asn.h_layer_id
+                w.plan.seg_layers = list(asn.seg_layers)
+                w.plan.seg_perp = list(asn.seg_perp)
+                with contextlib.redirect_stdout(io.StringIO()), \
+                        buda.ostream_redirect():
+                    res = eng.run([w])
+                scores[tidx] = (res.num_overlaps, res.num_violations)
+                self._rr_t_add('screen', time.perf_counter() - t0)
+                t0 = time.perf_counter()
+        finally:
+            self._rr_restore(snap, only={bid})
+        return scores
+
+    def _rr_screen_prune(self, w, idx_moves, snap):
+        """Split a contender's idx-move list into (kept, deferred) by
+        screened score: the _RR_SCREEN_TOP_N best-screened moves are
+        full-trialed now, the rest DEFERRED to the iteration's stall sweep
+        (never dropped — completeness is the loop's, not the screen's).
+        Ties keep the incoming farness/cheap-first position, so the screen
+        may reorder only on evidence; with screening unavailable the full
+        unscreened list is returned (nothing deferred)."""
+        scores = self._rr_screen_scores(w, [mv[1] for mv in idx_moves], snap)
+        if scores is None:
+            return idx_moves, []
+        order = sorted(range(len(idx_moves)),
+                       key=lambda i: (scores[idx_moves[i][1]], i))
+        return ([idx_moves[i] for i in order[:_RR_SCREEN_TOP_N]],
+                [idx_moves[i] for i in order[_RR_SCREEN_TOP_N:]])
+
     def _gen_hv(self):
         """The generator's top H / top V layer ids (used to hint flipped MST legs
         by direction, mirroring _make_topo_gen)."""
@@ -819,6 +967,56 @@ class RipupMixin:
         return True
 
 
+    def _rr_scan_moves(self, w, bid, old_tidx, moves, cur, stage, metric,
+                       snap, trial_base=0):
+        """First-improving scan of ONE contender's move list — the inner
+        trial loop of _ripup_reroute, extracted verbatim so the screened
+        scan and the deferred-move stall sweep share it.  Every trial is
+        applied, measured on the TRUE metric, and restored to the snapshot
+        baseline; the winning trial's forward snapshot is captured when the
+        commit path can use it.  Returns (cand_best, n_trials) with
+        cand_best = (metric, bid, old_tidx, move, fwd) or None."""
+        zero = (0, 0) if isinstance(cur, tuple) else 0
+        cand_best = None
+        n_trials = 0
+        for move in moves:
+            t_trial = time.perf_counter()
+            m = self._rr_guarded_move(w, move, old_tidx, stage, metric, snap)
+            if m is None:
+                continue                 # invalid flip (bend on obstacle)
+            # New best so far: capture the trial's state BEFORE the
+            # restore, so the commit can jump straight to it instead
+            # of re-running the whole pipeline (index moves only —
+            # a flip's in-place geometry is not snapshot-covered).
+            take = ((m < cur and (cand_best is None
+                                  or m < cand_best[0]))
+                    or m == zero)
+            fwd = None
+            # Fast trials skip metric-neutral passes, so the trial
+            # state is NOT the committable full-pipeline state — the
+            # commit must take the legacy full re-run (no fwd).
+            if (take and move[0] == 'idx'
+                    and not getattr(self, '_rr_fast_trials', False)):
+                fwd = self._rr_snapshot()
+            self._rr_undo_move(w, move, old_tidx)
+            self._rr_restore(snap, only=self._rr_dirty)
+            n_trials += 1
+            if os.environ.get("BUDA_RR_TRACE"):
+                print(f"[rr-trace] trial {trial_base + n_trials}: bundle "
+                      f"{bid} {self._rr_move_str(old_tidx, move)} -> "
+                      f"{self._rr_m_str(m)} "
+                      f"({time.perf_counter() - t_trial:.3f}s)",
+                      flush=True)
+            if take:
+                cand_best = (m, bid, old_tidx, move, fwd)
+            # Absolute best (stage b: 0 opens AND 0 overlaps) — take it
+            # now.  A merely-primary zero keeps scanning: among moves
+            # that clear the opens, the lexicographic metric still
+            # prefers the one with the least collateral overlap.
+            if m == zero:
+                break
+        return cand_best, n_trials
+
     def _rr_trial(self, w, tidx, stage, metric, full=False):
         """Pin w to candidate tidx, re-run the pipeline, return metric (no restore)."""
         # Sound stage-b early abort (fast trials): capture the COMMITTED
@@ -1069,7 +1267,7 @@ class RipupMixin:
 
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
                        use_edge_candidates=False, use_global=True,
-                       fast_trials=None):
+                       fast_trials=None, screen=None):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -1086,6 +1284,11 @@ class RipupMixin:
         # re-sets it at entry) so it cannot leak into other flows.
         self._rr_fast_trials = (_RR_FAST_TRIALS_DEFAULT
                                 if fast_trials is None else fast_trials)
+        # Fixed-context screen (round 3, final lever): rank each contender's
+        # alternates by a cheap frozen-context placement and full-trial only
+        # the top few, deferring the rest to the iteration's stall sweep.
+        # Ordering only — accepts stay on the true full metric.
+        screen = _RR_SCREEN_DEFAULT if screen is None else screen
 
         m0 = metric()
         if self._rr_m_primary(m0) == 0:
@@ -1142,6 +1345,7 @@ class RipupMixin:
             snap = self._rr_snapshot()
             n_cont = len(contenders)
             best = None                      # (metric, bid, old_tidx, new_tidx)
+            deferred = []    # (ci, bid, old_tidx, moves) screened-out idx moves
             # First-improving-contender.  Each trial is a full pipeline re-run
             # (~1-2s on a large hier design), so the old "best move over ALL
             # contenders" sweep cost contenders*candidates re-runs per iteration —
@@ -1155,7 +1359,6 @@ class RipupMixin:
                 if w is None:
                     continue
                 old_tidx = snap['wrap'][bid][0]
-                cand_best = None         # (metric, bid, old_tidx, move, fwd)
                 # Two move sources for this contender:
                 #   ('idx', t)  — pin an alternate candidate index (existing).
                 #   ('flip', e) — flip one contended MST edge's L/Z bend on the
@@ -1166,6 +1369,15 @@ class RipupMixin:
                 # the measured contention are the likeliest fixes.
                 moves = [('idx', t)
                          for t in self._rr_candidate_order(w, old_tidx, stage)]
+                # Fixed-context screen (round 3, final lever): rank the idx
+                # alternates by a ~ms single-bundle placement against the
+                # frozen baseline and FULL-trial only the top few; the rest
+                # are deferred to this iteration's stall sweep below, so no
+                # reachable fix is ever pruned away — only postponed.
+                if screen and len(moves) > _RR_SCREEN_TOP_N:
+                    moves, rest = self._rr_screen_prune(w, moves, snap)
+                    if rest:
+                        deferred.append((ci, bid, old_tidx, rest))
                 # The per-edge MST L/Z flip move-source is opt-in
                 # (`use_edge_candidates`): on the current corpus a flip is only
                 # ever *tried* on real contended MST edges — an index alternate
@@ -1174,44 +1386,10 @@ class RipupMixin:
                 if use_edge_candidates:
                     moves += [('flip', e)
                               for e in self._rr_flip_edges(w, stage)]
-                zero = (0, 0) if isinstance(cur, tuple) else 0
-                for move in moves:
-                    t_trial = time.perf_counter()
-                    m = self._rr_guarded_move(w, move, old_tidx, stage,
-                                              metric, snap)
-                    if m is None:
-                        continue                 # invalid flip (bend on obstacle)
-                    # New best so far: capture the trial's state BEFORE the
-                    # restore, so the commit can jump straight to it instead
-                    # of re-running the whole pipeline (index moves only —
-                    # a flip's in-place geometry is not snapshot-covered).
-                    take = ((m < cur and (cand_best is None
-                                          or m < cand_best[0]))
-                            or m == zero)
-                    fwd = None
-                    # Fast trials skip metric-neutral passes, so the trial
-                    # state is NOT the committable full-pipeline state — the
-                    # commit must take the legacy full re-run (no fwd).
-                    if (take and move[0] == 'idx'
-                            and not getattr(self, '_rr_fast_trials', False)):
-                        fwd = self._rr_snapshot()
-                    self._rr_undo_move(w, move, old_tidx)
-                    self._rr_restore(snap, only=self._rr_dirty)
-                    n_trials += 1
-                    if os.environ.get("BUDA_RR_TRACE"):
-                        print(f"[rr-trace] trial {n_trials}: bundle {bid} "
-                              f"{self._rr_move_str(old_tidx, move)} -> "
-                              f"{self._rr_m_str(m)} "
-                              f"({time.perf_counter() - t_trial:.3f}s)",
-                              flush=True)
-                    if take:
-                        cand_best = (m, bid, old_tidx, move, fwd)
-                    # Absolute best (stage b: 0 opens AND 0 overlaps) — take it
-                    # now.  A merely-primary zero keeps scanning: among moves
-                    # that clear the opens, the lexicographic metric still
-                    # prefers the one with the least collateral overlap.
-                    if m == zero:
-                        break
+                cand_best, t = self._rr_scan_moves(w, bid, old_tidx, moves,
+                                                   cur, stage, metric, snap,
+                                                   trial_base=n_trials)
+                n_trials += t
                 if cand_best is not None:
                     best = cand_best
                     print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
@@ -1222,6 +1400,35 @@ class RipupMixin:
                     break
                 print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
                       f"bundle {bid} — no improvement", flush=True)
+            if best is None and deferred:
+                # Completeness fallback: the screened scan stalled, so sweep
+                # the deferred (screened-out) moves at full fidelity before
+                # concluding anything.  With this sweep the iteration's "no
+                # improving re-route" verdict rests on exactly the same full
+                # trial set as an unscreened run — the screen can reorder
+                # WHICH improving move is found first (like fast trials'
+                # trajectory effect) but never remove the stall certificate.
+                n_def = sum(len(mv) for _c, _b, _o, mv in deferred)
+                print(f"[ripup_reroute] iter {it}: screened scan stalled — "
+                      f"sweeping {n_def} deferred move(s)", flush=True)
+                for ci, bid, old_tidx, moves in deferred:
+                    w = self._rr_wrapper(bid)
+                    if w is None:
+                        continue
+                    cand_best, t = self._rr_scan_moves(w, bid, old_tidx,
+                                                       moves, cur, stage,
+                                                       metric, snap,
+                                                       trial_base=n_trials)
+                    n_trials += t
+                    if cand_best is not None:
+                        best = cand_best
+                        print(f"[ripup_reroute] iter {it}: contender "
+                              f"{ci}/{n_cont} bundle {bid} improves "
+                              f"{self._rr_m_str(cur)}->"
+                              f"{self._rr_m_str(cand_best[0])} "
+                              f"({self._rr_move_str(old_tidx, cand_best[3])}"
+                              f", deferred)", flush=True)
+                        break
             if best is None and use_global:
                 # Normal contenders stalled above zero: bounded global pass
                 # over the contention sites' band OCCUPANTS (bundles that hold

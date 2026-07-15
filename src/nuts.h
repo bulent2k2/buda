@@ -217,6 +217,14 @@ public:
     // Default off: run() is byte-identical unless explicitly enabled.
     void set_skip_tighten(bool v) { skip_tighten_ = v; }
 
+    // Screen mode (RR round 3, fixed-context single-bundle screen): skip the
+    // dogleg fallback in run().  Dogleg surgery mutates the selected Topology
+    // and its plan arrays and exports adoption maps — a screen's result is
+    // discarded (it only ORDERS candidates), so it must stay read-only, and
+    // the fallback's trial re-solves would multiply the screen's cost.
+    // Default off: run() is byte-identical unless explicitly enabled.
+    void set_skip_doglegs(bool v) { skip_doglegs_ = v; }
+
     // Supply additional Hanan grid coordinates (e.g. segment endpoints outside
     // the floorplan bounding box) that the NUTSEngine should use when deriving
     // perpendicular intervals.  Must be called before run() / rerun_layer().
@@ -231,6 +239,16 @@ public:
     // downstream stages (persist, viz, detailed NUTS) consume them normally.
     // Must be called before run() / rerun_layer().
     void add_fixed_segments(const std::vector<TrackSegment>& segs);
+
+    // add_fixed_segments() convenience for the RR fixed-context screen: fix
+    // every PLACED segment of `baseline` except `exclude_bid`'s in one call
+    // (a per-segment Python round-trip would dominate the screen's ~ms
+    // budget).  Unplaced segments are skipped — a NaN track_position has no
+    // physical extent to freeze.  On a bottom-up design the baseline already
+    // carries the bottom-up fixed copies (run() appends them), so the caller
+    // must NOT also inject them separately.
+    void add_fixed_segments_except(const NUTSResult& baseline,
+                                   int exclude_bid);
 
     // Run NUTS on the bundles that have already been processed by CongestionPlanner.
     // Each BundleWrapper must have candidates filled and selected_topology_index set.
@@ -250,6 +268,7 @@ private:
     const LayerStack& layers_;
     double track_pitch_ = 1.0;
     bool skip_tighten_ = false;            // fast-trial mode (see setter)
+    bool skip_doglegs_ = false;            // screen mode (see setter)
     std::vector<int> extra_x_, extra_y_;   // additional grid points from CongestionPlanner
 
     // User keepouts plus implicit solid-leaf-cell keepouts on every non-TOP
