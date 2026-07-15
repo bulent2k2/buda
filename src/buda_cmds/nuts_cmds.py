@@ -147,15 +147,27 @@ def cmd_ripup_reroute(session, cmd, args, cmd_line):
         screen = False
     elif "screen" in args:
         screen = True
+    # Warm trials (round 4): default per _RR_WARM_TRIALS_DEFAULT;
+    # `no_warm_trials` opts out (every move cold-trialed directly, the
+    # round-3 behavior), `warm_trials` forces on.  Accepts stay on the true
+    # cold metric either way, and the stop certificate stays a full cold
+    # sweep (warm-rejected moves are cold-swept at the stall point).
+    warm = None
+    if "no_warm_trials" in args:
+        warm = False
+    elif "warm_trials" in args:
+        warm = True
     nums = [a for a in args if a not in ("use_edge_candidates", "no_global",
                                          "fast_trials", "no_fast_trials",
-                                         "screen", "no_screen")]
+                                         "screen", "no_screen",
+                                         "warm_trials", "no_warm_trials")]
     max_iter = int(nums[0]) if nums else _RR_DEFAULT_MAX_ITER
     session._ripup_reroute(max_iter=max_iter,
                            use_edge_candidates=use_edge_candidates,
                            use_global=use_global,
                            fast_trials=fast_trials,
-                           screen=screen)
+                           screen=screen,
+                           warm=warm)
 
 
 def cmd_negotiate_congestion(session, cmd, args, cmd_line):

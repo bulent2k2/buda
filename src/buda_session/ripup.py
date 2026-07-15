@@ -33,7 +33,8 @@ import buda
 from .util import (_RR_DEFAULT_MAX_ITER, _RR_FAST_TRIALS_DEFAULT,
                    _RR_GLOBAL_MAX_TRIALS, _RR_GLOBAL_MOVES_PER_OCC,
                    _RR_GLOBAL_TOP_K, _RR_MAX_CANDIDATES_PER_BUNDLE,
-                   _RR_SCREEN_DEFAULT, _RR_SCREEN_TOP_N)
+                   _RR_SCREEN_DEFAULT, _RR_SCREEN_TOP_N,
+                   _RR_WARM_TRIALS_DEFAULT)
 
 
 class RipupMixin:
@@ -83,9 +84,11 @@ class RipupMixin:
 
     def _rr_t_init(self):
         self._rr_t = {'replan': 0.0, 'nuts': 0.0, 'dnuts': 0.0,
-                      'screen': 0.0, 'snapshot': 0.0, 'restore': 0.0,
+                      'screen': 0.0, 'warm': 0.0,
+                      'snapshot': 0.0, 'restore': 0.0,
                       'n_replan': 0, 'n_nuts': 0, 'n_dnuts': 0,
-                      'n_screen': 0, 'n_snapshot': 0, 'n_restore': 0,
+                      'n_screen': 0, 'n_warm': 0,
+                      'n_snapshot': 0, 'n_restore': 0,
                       'passes': {}}
 
     def _rr_t_add(self, key, dt):
@@ -115,6 +118,8 @@ class RipupMixin:
              f"dnuts {t['dnuts']:.2f}s/{t['n_dnuts']}, ")
         if t.get('n_screen'):
             s += f"screen {t['screen']:.2f}s/{t['n_screen']}, "
+        if t.get('n_warm'):
+            s += f"warm {t['warm']:.2f}s/{t['n_warm']}, "
         return s + (f"snapshot {t['snapshot']:.2f}s/{t['n_snapshot']}, "
                     f"restore {t['restore']:.2f}s/{t['n_restore']}")
 
@@ -967,6 +972,71 @@ class RipupMixin:
         return True
 
 
+    def _rr_warm_eval(self, w, tidx, stage, cur, snap):
+        """Warm-trial pre-filter (RR round 4): pin candidate tidx, replan its
+        layers incrementally, and measure the move with the warm-start
+        single-bundle re-solve (rerun_bundle_warm) instead of a full cold
+        pipeline — the Phase-0-measured PREDICTOR of the cold metric
+        (91-100% accept agreement, 4.6-6x cheaper).  Stage b adds a
+        stateless DNUTS on the warm result, place-abort armed at the
+        current opens (sound for the filter: unplaced is non-decreasing, so
+        an aborted count already exceeds the strict-improvement bar).
+        Tighten runs (matching the study's fidelity conditions).
+
+        Returns the warm metric, or None when the incremental replan is
+        unavailable (caller falls through to the cold trial — the
+        conservative choice).  Only the target's plan state is touched and
+        it is restored from `snap` before returning; session result refs
+        are never mutated.  NEVER an accept basis: a warm-improving move
+        still runs the full cold trial, and warm-rejected moves are
+        cold-swept at the stall point (the loop's certificate stays a full
+        COLD sweep)."""
+        bid = w.input.original_bundle.id
+        if self.planner is None or self.nuts_result is None:
+            return None
+        t0 = time.perf_counter()
+        wm = None
+        try:
+            w.plan.selected_topology_index = tidx
+            w.input.topology_pinned = True
+            if bid in self._dogleg_slot:
+                # Same hazard as _rr_trial: the target's per-segment dogleg
+                # overrides index its adopted split topology, not this one.
+                w.plan.seg_net_pull = []
+                w.plan.seg_slide_lo = []
+                w.plan.seg_slide_hi = []
+            asn = self.planner.replan_bundle(self.bundles, bid)
+            if asn is None:
+                return None
+            w.plan.selected_topology_index = asn.topo_index
+            w.input.assigned_v_layer = asn.v_layer_id
+            w.input.assigned_h_layer = asn.h_layer_id
+            w.plan.seg_layers = list(asn.seg_layers)
+            w.plan.seg_perp = list(asn.seg_perp)
+            eng = buda.NUTSEngine(self.fp, self.layers)
+            eng.set_track_pitch(self._nuts_pitch)
+            eng.set_extra_grid_points(
+                list(self.planner.get_x_grid()),
+                list(self.planner.get_y_grid()))
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    buda.ostream_redirect():
+                warm = eng.rerun_bundle_warm(snap['nuts'], self.bundles,
+                                             bid)
+                if stage == 'b':
+                    segs = buda.make_bus_segments(
+                        self.bundles, warm, self.fp,
+                        self._detailed_bit_order)
+                    deng = buda.DetailedNUTSEngine(self.routing_grid)
+                    dres = deng.run(segs, emit_vias=False,
+                                    abort_unplaced=self._rr_m_primary(cur))
+                    wm = (dres.num_unplaced, warm.num_overlaps)
+                else:
+                    wm = warm.num_overlaps
+        finally:
+            self._rr_t_add('warm', time.perf_counter() - t0)
+            self._rr_restore(snap, only={bid})
+        return wm
+
     def _rr_warm_study_sample(self, w, tidx, stage, cur, cold_m, snap):
         """RR round-4 Phase-0 probe (`BUDA_RR_WARM_STUDY=1`): after a COLD
         trial computed its metric — the loop still runs entirely on cold, so
@@ -1039,18 +1109,33 @@ class RipupMixin:
         self._rr_warm_rows = []
 
     def _rr_scan_moves(self, w, bid, old_tidx, moves, cur, stage, metric,
-                       snap, trial_base=0):
+                       snap, trial_base=0, warm=False, warm_rej=None):
         """First-improving scan of ONE contender's move list — the inner
         trial loop of _ripup_reroute, extracted verbatim so the screened
-        scan and the deferred-move stall sweep share it.  Every trial is
-        applied, measured on the TRUE metric, and restored to the snapshot
-        baseline; the winning trial's forward snapshot is captured when the
-        commit path can use it.  Returns (cand_best, n_trials) with
-        cand_best = (metric, bid, old_tidx, move, fwd) or None."""
+        scan, the deferred-move stall sweep, and the warm-stall cold sweep
+        share it.  Every COLD trial is applied, measured on the TRUE
+        metric, and restored to the snapshot baseline; the winning trial's
+        forward snapshot is captured when the commit path can use it.
+
+        `warm` (round 4): idx moves are pre-filtered by the warm-start
+        re-solve — a move whose WARM metric does not strictly improve
+        skips its cold trial and is appended to `warm_rej` (the caller's
+        list), to be cold-swept at the iteration's stall point; a
+        warm-improving move falls through to the normal cold trial, so
+        accepts stay on the true metric.  Flip moves and moves the warm
+        eval cannot mirror (replan unavailable) are never filtered.
+        Returns (cand_best, n_trials) with cand_best = (metric, bid,
+        old_tidx, move, fwd) or None; n_trials counts cold trials."""
         zero = (0, 0) if isinstance(cur, tuple) else 0
         cand_best = None
         n_trials = 0
         for move in moves:
+            if warm and move[0] == 'idx':
+                wm = self._rr_warm_eval(w, move[1], stage, cur, snap)
+                if wm is not None and not wm < cur:
+                    if warm_rej is not None:
+                        warm_rej.append(move)
+                    continue
             t_trial = time.perf_counter()
             m = self._rr_guarded_move(w, move, old_tidx, stage, metric, snap)
             if m is None:
@@ -1344,7 +1429,7 @@ class RipupMixin:
 
     def _ripup_reroute(self, max_iter=_RR_DEFAULT_MAX_ITER,
                        use_edge_candidates=False, use_global=True,
-                       fast_trials=None, screen=None):
+                       fast_trials=None, screen=None, warm=None):
         if not self.bundles:
             print("Error: ripup_reroute has no bundles.")
             return
@@ -1366,6 +1451,11 @@ class RipupMixin:
         # the top few, deferring the rest to the iteration's stall sweep.
         # Ordering only — accepts stay on the true full metric.
         screen = _RR_SCREEN_DEFAULT if screen is None else screen
+        # Warm trials (round 4): pre-filter each move with the warm-start
+        # re-solve; only warm-improving moves pay a cold trial, and
+        # warm-rejected moves are cold-swept at the stall point — the stop
+        # certificate stays a full COLD sweep.
+        warm = _RR_WARM_TRIALS_DEFAULT if warm is None else warm
 
         m0 = metric()
         if self._rr_m_primary(m0) == 0:
@@ -1423,6 +1513,8 @@ class RipupMixin:
             n_cont = len(contenders)
             best = None                      # (metric, bid, old_tidx, new_tidx)
             deferred = []    # (ci, bid, old_tidx, moves) screened-out idx moves
+            warm_pend = {}   # bid -> (ci, old_tidx, [moves]) warm-rejected,
+            #                  cold-pending (the certificate sweep's input)
             # First-improving-contender.  Each trial is a full pipeline re-run
             # (~1-2s on a large hier design), so the old "best move over ALL
             # contenders" sweep cost contenders*candidates re-runs per iteration —
@@ -1463,10 +1555,15 @@ class RipupMixin:
                 if use_edge_candidates:
                     moves += [('flip', e)
                               for e in self._rr_flip_edges(w, stage)]
+                wr = []
                 cand_best, t = self._rr_scan_moves(w, bid, old_tidx, moves,
                                                    cur, stage, metric, snap,
-                                                   trial_base=n_trials)
+                                                   trial_base=n_trials,
+                                                   warm=warm, warm_rej=wr)
                 n_trials += t
+                if wr:
+                    warm_pend.setdefault(bid, (ci, old_tidx, []))[2] \
+                        .extend(wr)
                 if cand_best is not None:
                     best = cand_best
                     print(f"[ripup_reroute] iter {it}: contender {ci}/{n_cont} "
@@ -1492,6 +1589,41 @@ class RipupMixin:
                     w = self._rr_wrapper(bid)
                     if w is None:
                         continue
+                    wr = []
+                    cand_best, t = self._rr_scan_moves(w, bid, old_tidx,
+                                                       moves, cur, stage,
+                                                       metric, snap,
+                                                       trial_base=n_trials,
+                                                       warm=warm,
+                                                       warm_rej=wr)
+                    n_trials += t
+                    if wr:
+                        warm_pend.setdefault(bid, (ci, old_tidx, []))[2] \
+                            .extend(wr)
+                    if cand_best is not None:
+                        best = cand_best
+                        print(f"[ripup_reroute] iter {it}: contender "
+                              f"{ci}/{n_cont} bundle {bid} improves "
+                              f"{self._rr_m_str(cur)}->"
+                              f"{self._rr_m_str(cand_best[0])} "
+                              f"({self._rr_move_str(old_tidx, cand_best[3])}"
+                              f", deferred)", flush=True)
+                        break
+            if best is None and warm_pend:
+                # Warm-stall certificate sweep: every warm-rejected move is
+                # cold-trialed before the iteration concludes anything, so
+                # the "no improving re-route" verdict (and the global-pass
+                # entry) rests on exactly the same full COLD trial set as a
+                # no-warm run — a warm false-reject costs this sweep, never
+                # the endpoint (the Phase-0 study's contract).
+                n_wp = sum(len(mv) for _c, _o, mv in warm_pend.values())
+                print(f"[ripup_reroute] iter {it}: warm scan stalled — "
+                      f"cold-sweeping {n_wp} warm-rejected move(s)",
+                      flush=True)
+                for bid, (ci, old_tidx, moves) in warm_pend.items():
+                    w = self._rr_wrapper(bid)
+                    if w is None:
+                        continue
                     cand_best, t = self._rr_scan_moves(w, bid, old_tidx,
                                                        moves, cur, stage,
                                                        metric, snap,
@@ -1504,7 +1636,7 @@ class RipupMixin:
                               f"{self._rr_m_str(cur)}->"
                               f"{self._rr_m_str(cand_best[0])} "
                               f"({self._rr_move_str(old_tidx, cand_best[3])}"
-                              f", deferred)", flush=True)
+                              f", warm-rescued)", flush=True)
                         break
             if best is None and use_global:
                 # Normal contenders stalled above zero: bounded global pass

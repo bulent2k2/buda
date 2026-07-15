@@ -557,3 +557,40 @@ stall triggers the cold re-sweep before the global pass; knob with a
 measurement-decided default.  Fidelity caveats recorded: study trials
 sampled post-cold-adoption wrapper state (doglegs; rare), and bottom-up
 sessions are out of the study's corpus.
+
+## RR round 4 — Phase 1: warm trials wired; default OFF (honest wash, 2026-07-15)
+
+The wiring shipped exactly in the Phase-0 shape (`_rr_warm_eval` +
+`warm_rej` collection in `_rr_scan_moves`, the warm-stall certificate
+sweep in `_ripup_reroute` before the global pass, `warm_trials` /
+`no_warm_trials` tokens, a `warm s/N` timing bucket) — soundness and
+completeness are structural: accepts run on the true cold metric, and the
+stop certificate remains a full cold sweep whatever the predictor does
+(pinned by the adversarial reject-all test).
+
+**But the production A/B came back a WASH, and the default is OFF:**
+
+    bigHalf (rr 30):  12.29s warm vs 12.73s no_warm — cold trials
+                      26->9 (a) and 11->8 (b), but 26+11 warm evals at
+                      ~41-70ms replaced them ~1:1 in cost (stage b
+                      slightly NEGATIVE: 2.94s vs 2.78s of solves).
+    mix:              wash (0.41+1.19 vs 0.39+1.13).
+    big2:             +0.09s with warm on (0.38 vs 0.29).
+
+**Why Phase 0's 4.6-6x didn't materialize:** the study measured per-SOLVE
+cost against `no_fast_trials` cold solves (175-304ms) on a 360-trial
+distribution.  Production runs sit BEHIND the #293 screen (trial volume
+already near-minimum — 11 stage-b cold trials) and fast trials (cold
+~111ms) — so there is little left for the pre-filter to eat, every
+warm-accepted move pays warm+cold, and a ~41-70ms warm eval is only ~2.7x
+cheaper than what it replaces.  The screen and the warm filter target the
+SAME waste (rejected cold trials); the screen gets there first at ~10ms.
+
+**Kept:** `rerun_bundle_warm` (the engine entry has standalone value and
+exact-for-warm-state metrics), the study harness (`BUDA_RR_WARM_STUDY=1`),
+and the opt-in wiring (zero default-route risk; every existing flow is
+byte-identical with the default off).  **The bar for flipping the
+default:** a corpus where post-screen cold-trial cost dominates — roughly
+a cold trial >=3x the warm eval, i.e. designs several times bigHalf's
+size, or stall-sweep-heavy flows.  Measure with the study harness first;
+the wiring is already there.

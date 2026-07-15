@@ -1437,6 +1437,108 @@ def test_screen_scores_restore_target_plan_state():
     assert _full_wrapper_state(s) == before
 
 
+# --- warm trials (RR round 4, opt-in) ----------------------------------------
+
+def test_warm_rerun_is_deterministic_and_leaves_prev_untouched():
+    """Engine properties the warm pre-filter rests on: rerun_bundle_warm is
+    deterministic call-to-call, never mutates the baseline it reads, and
+    exports no dogleg surgery (a warm state is a discarded predictor)."""
+    import buda
+    s = _build_session(narrow=True)
+    base = s.nuts_result
+    before = sorted((t.bundle_id, t.seg_idx, t.layer, t.track_position,
+                     t.span_lo, t.span_hi) for t in base.segments)
+    w = s.bundles[0]
+    bid = w.input.original_bundle.id
+    eng = buda.NUTSEngine(s.fp, s.layers)
+    eng.set_track_pitch(s._nuts_pitch)
+    eng.set_extra_grid_points(list(s.planner.get_x_grid()),
+                              list(s.planner.get_y_grid()))
+    with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+        r1 = eng.rerun_bundle_warm(base, s.bundles, bid)
+        r2 = eng.rerun_bundle_warm(base, s.bundles, bid)
+    key = lambda r: sorted((t.bundle_id, t.seg_idx, t.layer,     # noqa: E731
+                            t.track_position) for t in r.segments)
+    assert key(r1) == key(r2)
+    assert (r1.num_overlaps, r1.num_violations) == \
+           (r2.num_overlaps, r2.num_violations)
+    assert len(r1.dogleg_topologies) == 0
+    after = sorted((t.bundle_id, t.seg_idx, t.layer, t.track_position,
+                    t.span_lo, t.span_hi) for t in base.segments)
+    assert after == before                   # baseline untouched
+
+
+def test_warm_trials_match_no_warm_endpoint_stage_a():
+    """A/B on the canned stage-a fixture: the warm pre-filter may reorder
+    which improving move is found first, never what is committable — both
+    runs reach the clean endpoint, and the warm run's timing line exposes
+    the warm bucket."""
+    s_w = _build_session(narrow=True)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s_w.do_command("ripup_reroute warm_trials")
+    s_n = _build_session(narrow=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_n.do_command("ripup_reroute no_warm_trials")
+    assert s_w.nuts_result.num_overlaps == 0
+    assert s_n.nuts_result.num_overlaps == 0
+    timing = [ln for ln in buf.getvalue().splitlines() if "timing:" in ln]
+    assert timing and "warm" in timing[0]
+
+
+def test_warm_trials_match_no_warm_endpoint_stage_b():
+    """A/B on the canned DNUTS-open fixture (stage b): identical clean
+    endpoint with and without warm trials."""
+    s_w = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_w.do_command("ripup_reroute warm_trials")
+    s_n = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_n.do_command("ripup_reroute no_warm_trials")
+    assert s_w.detailed_result.num_unplaced == 0
+    assert s_n.detailed_result.num_unplaced == 0
+    assert s_w.nuts_result.num_overlaps == s_n.nuts_result.num_overlaps == 0
+
+
+def test_adversarial_warm_cannot_cost_the_endpoint(monkeypatch):
+    """The certificate lives in the loop, not the predictor: a warm eval
+    that rejects EVERY move (the worst possible predictor) must still reach
+    the clean endpoint — the stalled iteration cold-sweeps the
+    warm-rejected moves before concluding anything."""
+    s = _build_session(narrow=True)
+    monkeypatch.setattr(
+        buda_cli.BudaSession, "_rr_warm_eval",
+        lambda self, w, tidx, stage, cur, snap:
+            (10 ** 6, 10 ** 6) if isinstance(cur, tuple) else 10 ** 6)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute warm_trials")
+    out = buf.getvalue()
+    assert s.nuts_result.num_overlaps == 0, out
+    assert "warm scan stalled" in out
+    assert "warm-rescued" in out
+
+
+def test_warm_trials_off_by_default_makes_no_warm_evals():
+    """_RR_WARM_TRIALS_DEFAULT is False (corpus-measured: the screen
+    already cut cold-trial volume to near-minimum, so the pre-filter is
+    cost-neutral at best on the corpus): a bare ripup_reroute must never
+    call the warm eval, keeping default routes byte-identical to round 3."""
+    s = _build_session(narrow=True)
+    calls = [0]
+    orig = buda_cli.BudaSession._rr_warm_eval
+
+    def spy(self, w, tidx, stage, cur, snap):
+        calls[0] += 1
+        return orig(self, w, tidx, stage, cur, snap)
+
+    s._rr_warm_eval = spy.__get__(s)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s.do_command("ripup_reroute")
+    assert calls[0] == 0
+    assert s.nuts_result.num_overlaps == 0
+
+
 def test_dnuts_place_abort_is_sound_certain_rejection():
     """Round-3 place-abort: with abort_unplaced armed, placement stops the
     moment the running unplaced count exceeds the threshold — sound because
