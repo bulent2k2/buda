@@ -78,6 +78,38 @@ class ExplorerDrawMixin:
                                   ec='none', alpha=0.7))
 
 
+    def _draw_trunk_preview(self):
+        """Highlight the Hanan cell the armed trunk (T/Y) is hovering: a
+        vertical column for a V trunk (Y), a horizontal row for an H trunk (T),
+        centred on the snapped grid line and spanning the view.  The cell width
+        is the gap to the adjacent bundle-grid lines (a real Hanan cell), so
+        the highlight reads as the strip the trunk will occupy."""
+        ax = self.ax
+        p = self._trunk_hover
+        horiz = self._trunk_mode
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        col = '#ff7f0e'   # orange — distinct from every layer colour
+        xs, ys = self._bundle_hanan_grid()
+        lines = ys if horiz else xs
+        # Half-cell to each neighbouring grid line (fallback to a small slab).
+        below = [g for g in lines if g < p]
+        above = [g for g in lines if g > p]
+        lo = (p + max(below)) / 2 if below else p - (x1 - x0) * 0.01
+        hi = (p + min(above)) / 2 if above else p + (x1 - x0) * 0.01
+        if horiz:                                   # H trunk → horizontal row
+            ax.add_patch(patches.Rectangle(
+                (x0, lo), x1 - x0, hi - lo, facecolor=col, alpha=0.16,
+                linewidth=0, zorder=8))
+            ax.plot([x0, x1], [p, p], color=col, lw=2.0, ls='--',
+                    alpha=0.9, zorder=8)
+        else:                                       # V trunk → vertical column
+            ax.add_patch(patches.Rectangle(
+                (lo, y0), hi - lo, y1 - y0, facecolor=col, alpha=0.16,
+                linewidth=0, zorder=8))
+            ax.plot([p, p], [y0, y1], color=col, lw=2.0, ls='--',
+                    alpha=0.9, zorder=8)
+
     def _draw_slide_spans(self, topo, ct):
         """Overlay slide-range bands on the current topology."""
         ax = self.ax
@@ -96,9 +128,21 @@ class ExplorerDrawMixin:
         cs_list = list(ct.segs())
         cs_map  = {j: cs_list[j] for j in range(len(cs_list))}
 
+        # Emphasize the SELECTED segment's slide band + bounds and dim the rest,
+        # so overlapping bands are disambiguated while stepping with j/k (both
+        # edit mode and a pure selection).  hi == -1: no selection, all normal.
+        hi = (self.sidx if (self.sidx != -1 and
+              (self._edit_topo is not None or self._current_is_selected())) else -1)
+
         for ci, (raw_seg, cs) in enumerate(zip(topo.segments, cs_list)):
             if ci in getattr(self, '_hidden_seg', ()):   # layer hidden in main viz
                 continue
+            if hi == -1:
+                band_a, line_a, line_w = 0.10, 0.7, 0.9
+            elif ci == hi:
+                band_a, line_a, line_w = 0.30, 1.0, 2.0   # the selected segment
+            else:
+                band_a, line_a, line_w = 0.04, 0.25, 0.7  # dimmed
             col = _LAYER_COLOR.get(raw_seg.layer_hint, '#888888')
             slide_lo, slide_hi = self._seg_slide(cs, ci)   # NUTS override if any
 
@@ -124,11 +168,11 @@ class ExplorerDrawMixin:
                     continue
                 ax.add_patch(patches.Rectangle(
                     (ext_lo, band_y0), ext_hi - ext_lo, band_y1 - band_y0,
-                    linewidth=0, facecolor=col, alpha=0.10, zorder=3))
+                    linewidth=0, facecolor=col, alpha=band_a, zorder=3))
                 for y_b, label in ((slide_lo, 'lo'), (slide_hi, 'hi')):
                     if abs(y_b) < _UNCONSTRAINED:
                         ax.plot([ext_lo, ext_hi], [y_b, y_b],
-                                color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
+                                color=col, linewidth=line_w, linestyle=':', alpha=line_a, zorder=4)
                         ax.text((ext_lo + ext_hi) / 2, y_b, f' {y_b:.0f}',
                                 fontsize=6, color=col, va='bottom' if label == 'lo' else 'top',
                                 ha='center', zorder=5, alpha=0.85)
@@ -139,11 +183,11 @@ class ExplorerDrawMixin:
                     continue
                 ax.add_patch(patches.Rectangle(
                     (band_x0, ext_lo), band_x1 - band_x0, ext_hi - ext_lo,
-                    linewidth=0, facecolor=col, alpha=0.10, zorder=3))
+                    linewidth=0, facecolor=col, alpha=band_a, zorder=3))
                 for x_b, label in ((slide_lo, 'lo'), (slide_hi, 'hi')):
                     if abs(x_b) < _UNCONSTRAINED:
                         ax.plot([x_b, x_b], [ext_lo, ext_hi],
-                                color=col, linewidth=0.9, linestyle=':', alpha=0.7, zorder=4)
+                                color=col, linewidth=line_w, linestyle=':', alpha=line_a, zorder=4)
                         ax.text(x_b, (ext_lo + ext_hi) / 2, f' {x_b:.0f}',
                                 fontsize=6, color=col, va='center',
                                 ha='left' if label == 'lo' else 'right', zorder=5, alpha=0.85)
@@ -259,14 +303,18 @@ class ExplorerDrawMixin:
         cs_list = list(ct.segs())
 
         # Determine display geometry for segments — width proportional to
-        # bundle width, capped so a wide bus's fat line cannot bury the slide
-        # bands and dotted nominals it is drawn over; while a TopoEdit session
-        # is open the segments thin further still — edit verdicts are read off
-        # the slide indicators, which must stay visible.
-        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 9.0)
-        if self._edit_topo is not None:
-            viz_lw = min(viz_lw, 4.5)
+        # bundle width but capped thin (4.5pt) so a wide bus's fat line cannot
+        # bury the slide bands and dotted nominals it is drawn over.  (The thin
+        # cap used to be edit-mode-only; it now applies to the regular view
+        # too — the slide indicators stay readable everywhere.)
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 4.5)
         actual_lids = []
+        # A segment is "selected" (highlighted, info line, slide-marker
+        # emphasis) whenever one is picked AND either the candidate is
+        # selected/pinned OR a TopoEdit session is open — so j/k work in edit
+        # mode without first pinning the topology (issue: keys dead until 's').
+        sel_active = (self.sidx != -1 and
+                      (is_current_selection or self._edit_topo is not None))
 
         # ── Pre-compute display geometry for all segments ──────────────────
         # Minimum pull-arrow length in data units (prevents invisible arrows on
@@ -346,6 +394,7 @@ class ExplorerDrawMixin:
             and not self._layer_visible.get(_resolved_lid(i), True)
         }
 
+        _sel_lid = _sel_is_h = None   # selected segment's layer + orientation
         for i, seg in enumerate(topo.segments):
             lid = _resolved_lid(i)
 
@@ -366,8 +415,9 @@ class ExplorerDrawMixin:
 
             # Highlight selected segment; dim others
             seg_alpha = 1.0
-            if is_current_selection and self.sidx != -1:
+            if sel_active:
                 if i == self.sidx:
+                    _sel_lid, _sel_is_h = lid, cs.horiz
                     ax.plot([x0, x1], [y0, y1],
                             color='white', linewidth=viz_lw + 4,
                             alpha=0.6, solid_capstyle='round', zorder=9)
@@ -433,6 +483,25 @@ class ExplorerDrawMixin:
 
         ax.set_title(title_main, fontsize=12, pad=10, color=title_color)
 
+        # Selected-segment info line: "Selected V segment 3 on M5." — sits under
+        # the edit banner in a TopoEdit session, else standalone at top-left
+        # (pure j/k selection). A layer change (-/+) shows the transient
+        # "V segment 3 is now on M7." via a one-shot override set by _cycle_layer.
+        if sel_active and _sel_lid is not None:
+            orient = 'H' if _sel_is_h else 'V'
+            # Just the metal name (M5), not "M5 V" — the orientation is already
+            # in the "V segment" prefix.
+            info = (self._seg_info_override or
+                    f"Selected {orient} segment {self.sidx} on "
+                    f"{_layer_label(_sel_lid, self.layer_stack).split()[0]}.")
+            y_info = 0.93 if (self._edit_topo is not None or self._edit_msg) else 0.985
+            ax.text(0.01, y_info, info, transform=ax.transAxes, fontsize=8.5,
+                    color='#20304a', va='top', ha='left', zorder=60,
+                    clip_on=False,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='#eef4ff',
+                              edgecolor='#8899bb', linewidth=0.7, alpha=0.93))
+        self._seg_info_override = ""     # one-shot
+
         if self.fig.canvas.manager:
             bid_  = self.wrapper.input.original_bundle.id
             names_ = self.wrapper.input.original_bundle.get_net_names()
@@ -441,6 +510,11 @@ class ExplorerDrawMixin:
 
         # Identify blocks that this topology must connect (endpoints + passthru)
         highlight_blocks = set(topo.connected_block_names)
+        # In a TopoEdit session, always highlight the bundle's busterm blocks —
+        # an EMPTY topology (E) has no connected_block_names yet, so the target
+        # blocks would otherwise go un-highlighted while building from scratch.
+        if self._edit_topo is not None:
+            highlight_blocks |= self._bundle_busterm_names()
 
         # Floorplan blocks
         self._block_patch_artists, self._block_name_artists = _draw_blocks(
@@ -456,6 +530,11 @@ class ExplorerDrawMixin:
                          force=self._edit_topo is not None,
                          grid=self._bundle_hanan_grid())
 
+
+        # Two-step trunk placement (T/Y): highlight the target Hanan cell the
+        # cursor is hovering, so the user sees where the trunk will land.
+        if self._trunk_mode is not None and self._trunk_hover is not None:
+            self._draw_trunk_preview()
 
         # Slide-range bands (drawn before segments so segments sit on top)
         self._draw_slide_spans(topo, ct)

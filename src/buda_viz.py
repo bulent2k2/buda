@@ -104,6 +104,15 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._edit_topo    = None
         self._edit_pending = -1
         self._edit_msg     = ""
+        # One-shot text for the selected-segment info line (e.g. set by a layer
+        # change to "V segment 3 is now on M7."); cleared after one _draw.
+        self._seg_info_override = ""
+        # Two-step trunk placement (T/Y): _trunk_mode is None (off) / True (H) /
+        # False (V) while arming; _trunk_hover is the snapped perp coord the
+        # cursor is previewing.  Hover highlights the target cell; a click / a
+        # second T·Y / enter places it, escape cancels.
+        self._trunk_mode  = None
+        self._trunk_hover = None
         self._edit_slide   = {}
         self._edit_slide_mark = None
 
@@ -225,6 +234,10 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
 
         self.fig.canvas.mpl_connect('key_press_event', self._on_key)
         self.fig.canvas.mpl_connect('close_event', self._on_close)
+        # Two-step trunk placement (T/Y): hover previews the target cell, a
+        # left-click places it (right-click-drag stays the zoom-to-box gesture).
+        self.fig.canvas.mpl_connect('motion_notify_event', self._on_trunk_motion)
+        self.fig.canvas.mpl_connect('button_press_event', self._on_trunk_click)
         _install_bbox_zoom(self)   # right-click-drag zoom-to-box (from the Floorplanner)
 
         self._draw()

@@ -70,6 +70,8 @@ class ExplorerEditMixin:
         self._edit_pending = -1
         self._edit_slide   = {}
         self._edit_slide_mark = None
+        self._trunk_mode   = None
+        self._trunk_hover  = None
         self._edit_msg     = msg
         self._draw()
 
@@ -167,20 +169,117 @@ class ExplorerEditMixin:
         return None
 
 
+    # ── Two-step trunk placement (T/Y): arm → hover-preview → place ──────────
+    def _edit_trunk_key(self, event, horiz):
+        """T/Y in a session: arm 'add trunk' mode (first press), place it (same
+        key again), or switch orientation (the other key)."""
+        if self._trunk_mode is None or self._trunk_mode != horiz:
+            self._edit_trunk_begin(horiz, event)
+        else:
+            self._edit_trunk_place(event)
+
+    def _edit_trunk_begin(self, horiz, event):
+        self._trunk_mode = horiz
+        self._trunk_hover = None
+        if event is not None and event.xdata is not None and event.ydata is not None:
+            xs, ys = self._bundle_hanan_grid()
+            self._trunk_hover = self._snap(event.ydata if horiz else event.xdata,
+                                           ys if horiz else xs)
+        self._edit_msg = (
+            f"ADD {'H' if horiz else 'V'} TRUNK: hover a grid line "
+            f"(cell highlights), click or {'T' if horiz else 'Y'}/enter to "
+            f"place, esc to cancel")
+        self._draw()
+
+    def _edit_trunk_cancel(self):
+        self._trunk_mode = None
+        self._trunk_hover = None
+        self._edit_msg = "EDIT: trunk cancelled"
+        self._draw()
+
+    def _edit_trunk_place(self, event):
+        """Commit the armed trunk at the cursor's (or last-hovered) grid line."""
+        horiz = self._trunk_mode
+        self._trunk_mode = None
+        hover = self._trunk_hover
+        self._trunk_hover = None
+        if event is not None and event.xdata is not None and event.ydata is not None:
+            self._edit_add_trunk_at(event, horiz)
+        elif hover is not None:
+            # Placed by a key with no cursor coords: use the previewed line.
+            self._edit_add_trunk_from_perp(horiz, hover)
+        else:
+            self._edit_msg = "EDIT: hover a grid line first"
+            self._draw()
+
+    def _on_trunk_motion(self, event):
+        """Preview the armed trunk's target line under the cursor (redraw only
+        when the snapped grid line changes, so hover is cheap)."""
+        if (self._trunk_mode is None or event.inaxes is not self.ax
+                or event.xdata is None or event.ydata is None):
+            return
+        xs, ys = self._bundle_hanan_grid()
+        horiz = self._trunk_mode
+        new = self._snap(event.ydata if horiz else event.xdata, ys if horiz else xs)
+        if new != self._trunk_hover:
+            self._trunk_hover = new
+            self._draw()
+
+    def _on_trunk_click(self, event):
+        """Left-click while arming places the trunk; other buttons (right-drag
+        zoom) are left alone."""
+        if (self._trunk_mode is not None and getattr(event, 'button', None) == 1
+                and event.inaxes is self.ax):
+            self._edit_trunk_place(event)
+
+    def _edit_add_trunk_from_perp(self, horiz, perp):
+        lo, hi = self._busterm_along_span(horiz)
+        h, v_ = self._edit_default_layers()
+        self._edit_apply(ic.edit_add_trunk(
+            self._edit_topo, self.fp, horiz, int(perp), lo, hi,
+            h if horiz else v_))
+
     def _edit_add_trunk_at(self, event, horiz):
         if event.xdata is None or event.ydata is None:
             self._edit_msg = "EDIT: put the cursor on the canvas first"
             self._draw(); return
         # Snap to the BUNDLE-scoped grid — exactly the lines the toggle
-        # displays (busterm-block + keepout edges), so a trunk never lands on
-        # an invisible full-design line.
+        # displays (busterm-block + keepout edges + OOB detour lines), so a
+        # trunk never lands on an invisible full-design line.
         xs, ys = self._bundle_hanan_grid()
         perp = self._snap(event.ydata if horiz else event.xdata,
                           ys if horiz else xs)
+        # Span the bundle's busterm extent along the trunk axis instead of the
+        # whole-design Hanan extent (lo>hi) — a full-span trunk overshoots its
+        # busterms and stubs.  Endpoints at the extreme busterm centres (where
+        # stubs will drop), so the trunk covers exactly the blocks it serves.
+        lo, hi = self._busterm_along_span(horiz)
         h, v_ = self._edit_default_layers()
         self._edit_apply(ic.edit_add_trunk(
-            self._edit_topo, self.fp, horiz, perp, 1, 0,   # lo>hi = full span
+            self._edit_topo, self.fp, horiz, perp, lo, hi,
             h if horiz else v_))
+
+    def _busterm_along_span(self, horiz):
+        """(lo, hi) trunk endpoints along its axis so the trunk covers exactly
+        the blocks it serves — no whole-design overshoot:
+        - the extreme busterm-block CENTRES (x for an H trunk, y for a V) when
+          they differ, so each stub drops at a busterm centre;
+        - else the busterm-block EXTENT on that axis (blocks aligned on the
+          trunk axis — the trunk still spans their footprint, not the die);
+        - else (1, 0), the C++ full-span sentinel, for a single degenerate
+          busterm."""
+        cs, edges = [], []
+        for n in self._bundle_busterm_names():
+            r = self.fp.get_block_bounds(n)
+            if horiz:
+                cs.append(int(round((r.x1 + r.x2) / 2))); edges += [r.x1, r.x2]
+            else:
+                cs.append(int(round((r.y1 + r.y2) / 2))); edges += [r.y1, r.y2]
+        if len(cs) >= 2 and max(cs) > min(cs):
+            return min(cs), max(cs)
+        if edges and max(edges) > min(edges):
+            return min(edges), max(edges)
+        return 1, 0
 
 
     def _edit_add_stub_at(self, event):
@@ -191,6 +290,10 @@ class ExplorerEditMixin:
         if block is None:
             self._edit_msg = "EDIT: no block under the cursor"
             self._draw(); return
+        # With just the trunk in the topology, auto-select it as the stub
+        # target — there's only one thing a stub can attach to.
+        if self.sidx == -1 and len(self._edit_topo.segments) == 1:
+            self.sidx = 0
         if not (0 <= self.sidx < len(self._edit_topo.segments)):
             self._edit_msg = "EDIT: select the target segment first (j/k)"
             self._draw(); return

@@ -15,8 +15,9 @@
 """Phase E3b — the TopologyExplorer's TopoEdit mode.
 
 'e'/'E' open an edit session (copy of the shown candidate / empty topology);
-while open: 'T'/'Y' add an H/V trunk at the cursor's bundle-grid line (full
-span), 'S' stubs the block under the cursor to the selected segment, 'C'/'D'
+while open: 'T'/'Y' arm an H/V trunk (two-step: press to arm + preview the
+hovered cell, press again / enter / click to place at the busterm extent),
+'S' stubs the block under the cursor to the selected segment, 'C'/'D'
 pair-connect/-disconnect, 'W'/'W' refines the selected segment's slide window
 at the cursor ('w' clears; staged windows land on plan.seg_slide_lo/hi at
 commit), 'X' removes the selected segment, enter commits the result as a
@@ -71,6 +72,12 @@ def _key(exp, key, x=None, y=None):
     exp._on_key(SimpleNamespace(key=key, xdata=x, ydata=y))
 
 
+def _trunk(exp, key, x, y):
+    """Place a trunk via the two-step T/Y flow: arm, then place (same key)."""
+    _key(exp, key, x, y)   # arm
+    _key(exp, key, x, y)   # place
+
+
 def _explorer(s, tmp_path):
     return buda_viz.TopologyExplorer(
         s.fp, s.bundles, sidecar_path=str(tmp_path / "sc.json"),
@@ -87,15 +94,17 @@ def test_edit_mode_builds_commits_and_pins(tmp_path):
         _key(exp, 'E')                            # open empty session
         assert exp._edit_topo is not None
 
-        _key(exp, 'Y', x=150, y=50)               # V trunk, snaps to x=140
+        _trunk(exp, 'Y', 150, 50)               # V trunk, snaps to x=140
         assert len(exp._edit_topo.segments) == 1
         seg = exp._edit_topo.segments[0]
         # Bundle-grid snap: x=140 is the KEEPOUT's edge (busterm blocks +
         # keepouts are the only snap targets now — c1's edges are not).
         assert seg.start.x == seg.end.x == 140
-        # Full span: the Hanan y-extent (0..340 with block c1 present).
+        # No overshoot: the trunk spans the BUSTERM extent along its axis, not
+        # the whole-design Hanan extent. b1/b2 share a y-centre (50), so the
+        # span falls back to their y-EXTENT (0..100) — NOT (0..340) past c1.
         assert (min(seg.start.y, seg.end.y),
-                max(seg.start.y, seg.end.y)) == (0, 340)
+                max(seg.start.y, seg.end.y)) == (0, 100)
 
         _key(exp, 'j')                            # select seg 0 (stub target)
         assert exp.sidx == 0
@@ -145,8 +154,8 @@ def test_edit_mode_pair_connect(tmp_path):
     exp = _explorer(s, tmp_path)
     try:
         _key(exp, 'E')
-        _key(exp, 'T', x=150, y=200)              # H trunk at a Hanan row
-        _key(exp, 'Y', x=150, y=50)               # V trunk at x=140
+        _trunk(exp, 'T', 150, 200)              # H trunk at a Hanan row
+        _trunk(exp, 'Y', 150, 50)               # V trunk at x=140
         topo = exp._edit_topo
         assert len(topo.segments) == 2
         # Two-step connect: mark seg 0, move to seg 1, press again.
@@ -231,7 +240,7 @@ def test_edit_mode_slide_window_refine(tmp_path):
     try:
         w = s.bundles[0]
         _key(exp, 'E')
-        _key(exp, 'Y', x=150, y=50)               # V trunk at x=140
+        _trunk(exp, 'Y', 150, 50)               # V trunk at x=140
         _key(exp, 'j')                            # select seg 0
         _key(exp, 'S', x=50, y=50)                # stub b1
         _key(exp, 'S', x=250, y=50)               # stub b2
@@ -296,7 +305,7 @@ def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
         # range accepts anything), then stubs narrow the range to the b1..b2
         # channel — commit must drop the stale window, not write it.
         _key(exp, 'E')
-        _key(exp, 'Y', x=150, y=50)               # bare V trunk at x=140
+        _trunk(exp, 'Y', 150, 50)               # bare V trunk at x=140
         exp.sidx = 0
         _key(exp, 'W', x=1050, y=50)
         _key(exp, 'W', x=1090, y=50)
@@ -317,7 +326,7 @@ def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
         # Clamp case: stage [120, 1090] on the bare trunk, then stub — commit
         # clamps the surviving overlap into the current structural range.
         _key(exp, 'E')
-        _key(exp, 'Y', x=150, y=50)
+        _trunk(exp, 'Y', 150, 50)
         exp.sidx = 0
         _key(exp, 'W', x=120, y=50)
         _key(exp, 'W', x=1090, y=50)
@@ -332,6 +341,91 @@ def test_edit_mode_slide_window_revalidated_at_commit(tmp_path):
         assert not math.isnan(slo[0]), "clamped window should survive commit"
         assert slo[0] == max(120.0, s_lo) and shi[0] == min(1090.0, s_hi)
         assert s_lo <= slo[0] < shi[0] <= s_hi   # inside the CURRENT range
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_edit_trunk_spans_busterm_extent_and_stub_auto_selects(tmp_path):
+    """#8: a trunk spans the busterm extent (endpoints at the extreme busterm
+    centres), not the whole-design Hanan grid — no overshoot. #7: with only the
+    trunk present, 'S' auto-selects it as the stub target."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'E')
+        _trunk(exp, 'T', 150, 190)         # H trunk, snaps to y=200 (clear of faces)
+        seg = exp._edit_topo.segments[0]
+        # b1 x-centre 50, b2 x-centre 250 differ -> span = [50, 250], bounded.
+        assert (min(seg.start.x, seg.end.x),
+                max(seg.start.x, seg.end.x)) == (50, 250)
+
+        exp.sidx = -1                        # nothing selected...
+        _key(exp, 'S', x=50, y=50)           # ...'S' auto-selects the lone trunk
+        assert exp.sidx == 0                 # (#7) auto-selected the trunk
+        assert len(exp._edit_topo.segments) == 2   # stub landed on it
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_edit_bundle_grid_has_oob_detour_lines(tmp_path):
+    """#6: the bundle grid (the T/Y snap targets) includes an OOB detour line a
+    margin beyond each extreme, so an out-of-bounds detour trunk is placeable —
+    a cursor in the margin snaps to the OOB line, not back to a busterm edge."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        xs, _ = exp._bundle_hanan_grid()
+        assert min(xs) < 0 and max(xs) > 300      # beyond the [0,300] busterm span
+        far = max(xs)
+        assert exp._snap(far + 5, xs) == far      # margin cursor snaps OOB
+        assert far not in (0, 100, 140, 160, 200, 300)   # a genuine detour target
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_edit_trunk_two_step_arm_preview_place(tmp_path):
+    """#5: T/Y ARM 'add trunk' mode (no immediate placement); a motion event
+    previews the snapped target line; a second T/Y (or enter/click) places it;
+    esc cancels."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'E')
+        # First 'T' ARMS — it must NOT place a segment yet.
+        _key(exp, 'T', x=150, y=190)
+        assert exp._trunk_mode is True
+        assert len(exp._edit_topo.segments) == 0
+        assert "ADD H TRUNK" in exp._edit_msg
+
+        # A motion event previews the snapped row (y=190 -> 200) without placing.
+        exp._on_trunk_motion(SimpleNamespace(inaxes=exp.ax, xdata=150, ydata=190))
+        assert exp._trunk_hover == 200
+        assert len(exp._edit_topo.segments) == 0
+
+        # Second 'T' PLACES at the cursor and leaves trunk mode.
+        _key(exp, 'T', x=150, y=190)
+        assert exp._trunk_mode is None
+        assert len(exp._edit_topo.segments) == 1
+        seg = exp._edit_topo.segments[0]
+        assert min(seg.start.y, seg.end.y) == max(seg.start.y, seg.end.y) == 200
+
+        # esc cancels an armed trunk without touching the session or topology.
+        _key(exp, 'Y', x=150, y=50)
+        assert exp._trunk_mode is False
+        _key(exp, 'escape')
+        assert exp._trunk_mode is None
+        assert exp._edit_topo is not None            # session still open
+        assert len(exp._edit_topo.segments) == 1     # no V trunk added
+
+        # A left-click also places (switch back to a fresh arm first).
+        _key(exp, 'Y', x=150, y=150)                 # arm V (snaps x -> 140)
+        exp._on_trunk_click(SimpleNamespace(button=1, inaxes=exp.ax,
+                                            xdata=150, ydata=150))
+        assert exp._trunk_mode is None
+        assert len(exp._edit_topo.segments) == 2
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')

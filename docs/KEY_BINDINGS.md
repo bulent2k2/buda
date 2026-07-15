@@ -47,7 +47,7 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `]`, `pagedown` | Switch to the **next bundle** and view its selected topology. When launched from a BUDA viz window, steps in that window's **bundle-panel order** (opens-first), so the two stay in step; standalone, it steps in numeric bundle-id order. |
 | `[`, `pageup` | Switch to the **previous bundle** (same order as `]`). |
 | `k` | Select the **previous segment** of the current topology. |
-| `j` | Select the **next segment** of the current topology. |
+| `j` | Select the **next segment** of the current topology. The selected segment — its wire, its slide-range band, and its bounds — is highlighted (others dimmed) and named in a top-left info line (`Selected V segment 3 on M5.`); `-`/`+` restyle it to a new layer with a live update. |
 | `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
 | `+`, `=` | **Layer Up**: Assign the selected segment to the next higher valid routing layer. |
 | `-`, `_` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. |
@@ -80,10 +80,10 @@ the Script Reference).
 
 | Key(s) | Action |
 | :--- | :--- |
-| `e` / `E` | Open an edit session: copy of the shown candidate / empty topology. |
-| `T` (Shift+t) | Add a **horizontal trunk** at the cursor's nearest bundle-grid row, full Hanan span. |
-| `Y` (Shift+y) | Add a **vertical trunk** at the cursor's nearest bundle-grid column, full Hanan span. |
-| `S` (Shift+s) | Add a **stub** from the block under the cursor to the selected segment (`j`/`k`). |
+| `e` / `E` | Open an edit session: copy of the shown candidate / empty topology. The busterm blocks are highlighted, and `j`/`k` select segments immediately (no need to pin first). |
+| `T` (Shift+t) | **Arm** a **horizontal trunk**: the target row (a bundle-grid line) highlights as you hover; press `T` again, `enter`, or **click** to place it, `esc` to cancel. The trunk spans the busterm extent (no overshoot), not the whole die. |
+| `Y` (Shift+y) | **Arm** a **vertical trunk** (same two-step hover→place as `T`). Bundle-grid columns include out-of-bounds detour lines, so a U-shape/OOB trunk is placeable. |
+| `S` (Shift+s) | Add a **stub** from the block under the cursor to the selected segment (`j`/`k`); with only the trunk present it auto-selects the trunk as the target. |
 | `C` (Shift+c) | **Connect** two perpendicular segments: press once to mark the selected segment, re-select (`j`/`k`), press again. |
 | `D` (Shift+d) | **Disconnect** a junction pair (same two-step marking); the cursor position sets where the retracted endpoint lands. |
 | `W` (Shift+w) | **Refine the selected segment's slide window**: press at one perpendicular bound, then at the other — the window (∩ the structural slide range) is staged and lands as a NUTS override (`plan.seg_slide_lo/hi`) on commit. The drawn slide band follows live. |

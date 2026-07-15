@@ -137,4 +137,13 @@ class ExplorerAnalysisMixin:
         for koz in self.fp.get_keepout_zones():
             xs.update((koz.bbox.x1, koz.bbox.x2))
             ys.update((koz.bbox.y1, koz.bbox.y2))
+        # Out-of-bounds DETOUR lines: one line a margin beyond each extreme so a
+        # U-shape / OOB detour trunk has a visible snap target (T/Y snap to this
+        # grid; without these the cursor always snaps back to a busterm edge and
+        # an OOB trunk can't be placed).
+        for s in (xs, ys):
+            if len(s) >= 2:
+                lo, hi = min(s), max(s)
+                m = max(int(round((hi - lo) * 0.25)), 1)
+                s.update((lo - m, hi + m))
         return sorted(xs), sorted(ys)
