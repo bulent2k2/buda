@@ -61,6 +61,7 @@ class ExplorerEditMixin:
         if not was_open and self._edit_topo is not None:
             self._edit_slide = {}          # fresh session: no staged windows
             self._edit_slide_mark = None
+            self._edit_layers_changed = False
         self._edit_pending = -1
         self._draw()
 
@@ -70,6 +71,7 @@ class ExplorerEditMixin:
         self._edit_pending = -1
         self._edit_slide   = {}
         self._edit_slide_mark = None
+        self._edit_layers_changed = False
         self._trunk_mode   = None
         self._trunk_hover  = None
         self._trunk_pin_seg = -1
@@ -494,6 +496,19 @@ class ExplorerEditMixin:
         self._edit_pending = -1
         self.idx  = idx
         self.sidx = -1
+        # Re-derive the pinned layer overrides for the committed topology BEFORE
+        # _select_current persists them.  A stale pinned_seg_layers carried over
+        # from the source candidate would, if its length happened to match, be
+        # re-pinned as seg_layers and override the +/- layer edits the session
+        # just made (Codex #302).  If the session re-layered a segment, snapshot
+        # the working copy's layers as the pins (the edits stick); otherwise the
+        # session made no layer decision, so drop the stale list and let the
+        # planner assign (matching the no-pin default).
+        if self._edit_layers_changed:
+            w.input.pinned_seg_layers = [s.layer_hint for s in topo.segments]
+        else:
+            w.input.pinned_seg_layers = []
+        self._edit_layers_changed = False
         self._select_current()          # pin + sidecar (uid-carrying) + redraw
         self._edit_msg = f"EDIT: {note}, pinned"
         # Land the session's slide-window refinements as NUTS overrides on the

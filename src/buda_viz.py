@@ -126,6 +126,11 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         self._trunk_pin_hover = None
         self._edit_slide   = {}
         self._edit_slide_mark = None
+        # True once the session re-layered a segment (+/-): on commit the pinned
+        # layer overrides are rebuilt from the working copy so the edit sticks
+        # (else a stale pinned_seg_layers from the source would re-pin the old
+        # layers over the edit — Codex #302).
+        self._edit_layers_changed = False
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}

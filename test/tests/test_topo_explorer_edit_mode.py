@@ -572,3 +572,84 @@ def test_edit_trunk_pin_span_to_grid_lines_beyond_busterms(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def _session_multilayer():
+    """Two layers per direction so +/- actually cycles a segment's layer."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in (
+        "def_layer 4 M4 H TOP 10",
+        "def_layer 6 M6 H TOP 10",
+        "def_layer 5 M5 V TOP 10",
+        "def_layer 7 M7 V TOP 10",
+        "add_block b1 0 0 100 100",
+        "add_block b2 200 0 300 100",
+        "add_bus v[4] b1.o b2.i",
+        "run_bundler",
+        "generate_topologies",
+    ):
+        s.do_command(cmd)
+    return s
+
+
+def test_edit_layer_change_survives_commit(tmp_path):
+    """Codex #302: a +/- layer edit in a TopoEdit session must survive commit.
+    A stale wrapper.input.pinned_seg_layers carried over from the source
+    candidate would, if its length matched, be re-pinned as seg_layers by
+    _select_current and override the edit — the committed USER candidate would
+    route on the OLD layer.  Commit must rebuild the pins from the working copy."""
+    s = _session_multilayer()
+    exp = _explorer(s, tmp_path)
+    w = s.bundles[0]
+    try:
+        topo0 = w.input.candidates[exp.idx]
+        # Simulate a prior non-edit layer pin: the source candidate pinned to its
+        # own current layers (a full snapshot, as _cycle_layer would leave it).
+        stale = [sg.layer_hint for sg in topo0.segments]
+        w.input.pinned_seg_layers = list(stale)
+
+        _key(exp, 'e')                                # copy of the shown candidate
+        exp.sidx = 0
+        _key(exp, '+')                                # cycle segment 0's layer
+        after = exp._edit_topo.segments[0].layer_hint
+        assert after != stale[0]                       # the edit moved the layer
+        assert exp._edit_layers_changed
+        _key(exp, 'enter')                            # commit
+
+        committed = w.input.candidates[w.plan.selected_topology_index]
+        pins = list(w.input.pinned_seg_layers)
+        assert len(pins) == len(committed.segments)
+        assert pins[0] == after                        # the EDIT, not the stale layer
+        # The sidecar selection carries the rebuilt pins, so a re-plan honors them.
+        sel = exp._find_selection()
+        assert sel and sel.get('seg_layers', [])[0] == after
+        assert not exp._edit_layers_changed            # reset after commit
+
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_edit_commit_without_layer_change_drops_stale_pins(tmp_path):
+    """The complement: a session that makes NO layer decision must not inherit
+    the source candidate's stale per-segment pins (they are indexed to the old
+    topology).  Commit drops them so the planner assigns layers freely."""
+    s = _session_multilayer()
+    exp = _explorer(s, tmp_path)
+    w = s.bundles[0]
+    try:
+        topo0 = w.input.candidates[exp.idx]
+        w.input.pinned_seg_layers = [
+            5 if sg.start.x == sg.end.x else 4 for sg in topo0.segments]
+
+        _key(exp, 'e')                                # copy; no layer edits
+        _key(exp, 'j')
+        _key(exp, 'enter')                            # commit as-is
+
+        assert list(w.input.pinned_seg_layers) == []   # stale pins dropped
+        sel = exp._find_selection()
+        assert sel is not None and 'seg_layers' not in sel
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')

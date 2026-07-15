@@ -230,6 +230,7 @@ class ExplorerNavMixin:
                 lidx = 0
             new_lid = lids[(lidx + delta) % len(lids)]
             seg.layer_hint = new_lid
+            self._edit_layers_changed = True   # commit rebuilds pinned overrides
             self._seg_info_override = (
                 f"{'H' if is_h else 'V'} segment {self.sidx} is now on "
                 f"{_layer_label(new_lid, self.layer_stack).split()[0]}.")
