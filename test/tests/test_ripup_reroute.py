@@ -1263,6 +1263,171 @@ def test_dnuts_emit_vias_off_is_metric_identical():
     assert len(no_v.net_vias) == 0 and len(with_v.net_vias) > 0
 
 
+# --- fixed-context screen (RR round 3, final lever) --------------------------
+
+def test_screen_run_freezes_context_and_is_reproducible():
+    """Engine-level properties the screen rests on: a single-wrapper run with
+    every other bundle fixed (add_fixed_segments_except) returns the frozen
+    context VERBATIM (no pass may move a fixed segment), places the target,
+    is deterministic call-to-call (a score must mean the same thing twice),
+    and exports no dogleg surgery (set_skip_doglegs — the screen result is
+    discarded, so mutation would be a leak)."""
+    import buda
+    s = _build_session(narrow=True)
+    base = s.nuts_result
+    w = s.bundles[1]
+    bid = w.input.original_bundle.id
+    frozen = {(t.bundle_id, t.seg_idx):
+              (t.layer, t.span_lo, t.span_hi, t.track_position)
+              for t in base.segments if t.bundle_id != bid}
+    assert frozen, "fixture should have context segments to freeze"
+
+    def screen_once():
+        eng = buda.NUTSEngine(s.fp, s.layers)
+        eng.set_track_pitch(s._nuts_pitch)
+        eng.set_skip_tighten(True)
+        eng.set_skip_doglegs(True)
+        gx, gy = s._rr_screen_grid()
+        eng.set_extra_grid_points(gx, gy)
+        eng.add_fixed_segments_except(base, bid)
+        with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+            return eng.run([w])
+
+    r1 = screen_once()
+    r2 = screen_once()
+    got = {(t.bundle_id, t.seg_idx):
+           (t.layer, t.span_lo, t.span_hi, t.track_position)
+           for t in r1.segments if t.bundle_id != bid}
+    assert got == frozen                     # context actually frozen
+    assert any(t.bundle_id == bid and t.placed for t in r1.segments)
+    key = lambda r: sorted((t.bundle_id, t.seg_idx, t.layer,        # noqa: E731
+                            t.track_position) for t in r.segments)
+    assert key(r1) == key(r2)                # reproducible
+    assert (r1.num_overlaps, r1.num_violations) == \
+           (r2.num_overlaps, r2.num_violations)
+    assert len(r1.dogleg_topologies) == 0    # read-only: no surgery exported
+
+
+def test_screen_matches_no_screen_endpoint_stage_a():
+    """A/B on the canned stage-a fixture: the screen reorders WHICH improving
+    move is trialed first, never what is committable — both runs must reach
+    the clean endpoint, and the screened run's timing line must expose the
+    screen bucket."""
+    s_scr = _build_session(narrow=True)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s_scr.do_command("ripup_reroute screen")
+    s_ns = _build_session(narrow=True)
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_ns.do_command("ripup_reroute no_screen")
+    assert s_scr.nuts_result.num_overlaps == 0
+    assert s_ns.nuts_result.num_overlaps == 0
+    timing = [ln for ln in buf.getvalue().splitlines() if "timing:" in ln]
+    assert timing and "screen" in timing[0]
+
+
+def test_screen_matches_no_screen_endpoint_stage_b():
+    """A/B on the canned DNUTS-open fixture (stage b): identical clean
+    endpoint with and without the screen."""
+    s_scr = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_scr.do_command("ripup_reroute screen")
+    s_ns = _build_dnuts_open_session()
+    with contextlib.redirect_stdout(io.StringIO()):
+        s_ns.do_command("ripup_reroute no_screen")
+    assert s_scr.detailed_result.num_unplaced == 0
+    assert s_ns.detailed_result.num_unplaced == 0
+    assert s_scr.nuts_result.num_overlaps == s_ns.nuts_result.num_overlaps == 0
+
+
+def test_adversarial_screen_cannot_cost_the_endpoint(monkeypatch):
+    """Completeness lives in the loop, not the screen: even a screen that
+    defers EVERY move (the worst possible ranking) must still reach the
+    clean endpoint — the stalled iteration sweeps the deferred moves at
+    full fidelity before concluding anything."""
+    s = _build_session(narrow=True)
+    monkeypatch.setattr(
+        buda_cli.BudaSession, "_rr_screen_prune",
+        lambda self, w, idx_moves, snap: ([], list(idx_moves)))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s.do_command("ripup_reroute")
+    out = buf.getvalue()
+    assert s.nuts_result.num_overlaps == 0, out
+    assert "screened scan stalled" in out
+    assert "deferred" in out
+
+
+def test_screen_prune_orders_by_score_ties_keep_position(monkeypatch):
+    """_rr_screen_prune keeps the _RR_SCREEN_TOP_N best-screened moves and
+    defers the rest; equal scores keep the incoming (farness/cheap-first)
+    position — the screen may reorder only on evidence.  A None score sheet
+    (replan unavailable) returns the full unscreened list."""
+    from buda_session.util import _RR_SCREEN_TOP_N
+    assert _RR_SCREEN_TOP_N == 2, "test assumes the shipped top-N"
+    s = _build_session(narrow=True)
+    w = s.bundles[0]
+    idx_moves = [('idx', 3), ('idx', 1), ('idx', 5), ('idx', 2)]
+    scores = {3: (2, 0), 1: (0, 0), 5: (0, 0), 2: (1, 0)}
+    monkeypatch.setattr(buda_cli.BudaSession, "_rr_screen_scores",
+                        lambda self, w, tidxs, snap: scores)
+    kept, deferred = s._rr_screen_prune(w, idx_moves, None)
+    assert kept == [('idx', 1), ('idx', 5)]      # tie: 1 precedes 5 incoming
+    assert deferred == [('idx', 2), ('idx', 3)]  # deferred stays score-ranked
+    monkeypatch.setattr(buda_cli.BudaSession, "_rr_screen_scores",
+                        lambda self, w, tidxs, snap: None)
+    kept, deferred = s._rr_screen_prune(w, idx_moves, None)
+    assert kept == idx_moves and deferred == []
+
+
+def test_screen_grid_fallback_derives_from_all_bundles():
+    """Grid parity for hier sessions: when the flat floorplan's Hanan grid
+    and the planner grids are all empty (hier keeps geometry in the expanded
+    wrappers), _rr_screen_grid must reproduce run()'s fallback — the union
+    of ALL bundles' selected-topology coordinates, not just the target's —
+    or the screen's perpendicular intervals diverge from the full solve's."""
+    import types
+    s = _build_session(narrow=True)
+
+    class _EmptyFP:
+        @staticmethod
+        def get_hanan_grid():
+            return [], []
+
+    fake = types.SimpleNamespace(fp=_EmptyFP(), planner=None,
+                                 bundles=s.bundles)
+    px, py = buda_cli.BudaSession._rr_screen_grid(fake)
+    xs, ys = set(), set()
+    for w in s.bundles:
+        sel = w.plan.selected_topology_index
+        for seg in w.input.candidates[sel].segments:
+            xs |= {seg.start.x, seg.end.x}
+            ys |= {seg.start.y, seg.end.y}
+    assert px == sorted(xs) and py == sorted(ys)
+    # With a populated grid nothing extra is merged (the planner grids pass
+    # through): extra Hanan lines would subdivide intervals differently
+    # than the full solve.
+    px2, py2 = s._rr_screen_grid()
+    assert px2 == list(s.planner.get_x_grid())
+    assert py2 == list(s.planner.get_y_grid())
+
+
+def test_screen_scores_restore_target_plan_state():
+    """_rr_screen_scores mutates the target's selection/pin/plan arrays per
+    screened candidate and must leave NO divergence from the snapshot
+    baseline afterwards — the subsequent full trials assume the committed
+    state."""
+    s = _build_session(narrow=True)
+    w = s.bundles[0]
+    snap = s._rr_snapshot()
+    before = _full_wrapper_state(s)
+    tidxs = [t for t in range(1, min(4, len(w.input.candidates)))]
+    scores = s._rr_screen_scores(w, tidxs, snap)
+    assert scores is not None and set(scores) == set(tidxs)
+    assert all(isinstance(v, tuple) and len(v) == 2 for v in scores.values())
+    assert _full_wrapper_state(s) == before
+
+
 def test_dnuts_place_abort_is_sound_certain_rejection():
     """Round-3 place-abort: with abort_unplaced armed, placement stops the
     moment the running unplaced count exceeds the threshold — sound because

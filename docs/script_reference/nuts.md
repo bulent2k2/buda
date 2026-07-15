@@ -138,6 +138,7 @@ run_detailed_nuts hi_lo
 
 ```
 ripup_reroute [max_iter] [use_edge_candidates] [no_global]
+              [fast_trials|no_fast_trials] [screen|no_screen]
 ```
 
 Feedback-driven rip-up & re-route. The congestion planner's band-capacity model is
@@ -151,7 +152,9 @@ the pipeline, and keeps only moves that reduce the metric.
 |---|---|---|---|
 | `max_iter` | int | `10` | Maximum number of outer hill-climb iterations (each commits at most one re-route). |
 | `use_edge_candidates` | flag | off | Also try the per-edge MST L/Z **flip** move-source (below) on contended MST candidates. Off by default. |
-| `no_global` | flag | off | Disable the **global-occupant pass** (below), which otherwise runs when the contender scan stalls above zero. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
+| `no_global` | flag | off | Disable the **global-occupant pass** (below), which otherwise runs when the contender scan stalls above zero. |
+| `no_fast_trials` / `fast_trials` | flag | fast on | Disable / force **fast trials** (below): trials skip metric-neutral solve passes; commits always re-run the full pipeline. |
+| `no_screen` / `screen` | flag | screen on | Disable / force the **fixed-context screen** (below): rank each contender's alternates by a ~ms frozen-context placement and full-trial only the top few, deferring the rest to the iteration's stall sweep. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
 
 **Two stages, auto-detected from pipeline state:**
 
@@ -229,6 +232,32 @@ big2 byte-identical; bigHalf reaches the same 0/0 endpoint by a different
 trajectory at 32s vs 88s (123 vs 454 stage-b trials; per-solve savings are
 the stage-b DNUTS −13% and the stage-a tighten skip — the rest of that gap
 is the trajectory).
+
+**Fixed-context screen (round 3, default on; `no_screen` opts out, `screen`
+forces on).** Even with fast trials, every trial re-solves the WHOLE design's
+abstract NUTS to evaluate re-pinning ONE bundle.  The screen inverts that:
+before full-trialing a contender's alternates, each candidate is placed
+ALONE against every other bundle's baseline placement frozen as fixed
+occupancy (the bottom-up `add_fixed_segments` machinery; doglegs and tighten
+skipped — the result is discarded), which costs ~milliseconds, and only the
+best-screened few (`_RR_SCREEN_TOP_N`, default 2) are full-trialed.  The
+screened `(overlaps, violations)` is an **ordering, never a metric**: accept
+decisions always run on the true full-trial metric — which is exactly what
+separates this from the measured-worse-and-reverted layer-scoped two-tier
+trials (whose cheap metric decided accepts and mis-ranked).  Screened-out
+moves are **deferred, not dropped**: an iteration whose screened scan finds
+no improvement sweeps the deferred moves at full fidelity before the global
+pass, so the loop still stops only when a FULL sweep proves no improving
+move — a bad screen can reorder which improving move is found first (a
+trajectory effect, like fast trials) but never weaken the stall certificate
+or commit a wrong move.  Measured on the rr corpus (screen vs `no_screen`,
+same clean endpoints everywhere): bigHalf rr-enabled flow 40.8s → 16.5s
+(stage-b full trials 123 → 11 + 75 screens at ~10 ms; stage-b ripup
+28.9s → 4.9s), big2 ripup 0.91s → 0.43s (17 → 3 trials), mix /
+slowdown_rnr stage-b ~2.5s → ~1.5s.  When the incremental replan is
+unavailable for a candidate the contender falls back to the unscreened
+order; the global-occupant pass is never screened (its per-stall budget
+already bounds it).
 
 **Global-occupant pass (default on; `no_global` disables).** When the contender
 scan stalls above zero — every contender's every move tried, none improved —
