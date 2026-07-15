@@ -70,13 +70,15 @@ def _layer_label(lid, layer_stack=None):
 stat_title = "Bundle-based Design Assistant (BUDA) with Non-Uniform Track Sharing (NUTS)"
 
 
-def _draw_hanan_grid(ax, fp, ui_state: ViewState, force=False):
+def _draw_hanan_grid(ax, fp, ui_state: ViewState, force=False, grid=None):
     """Draw the Hanan grid and return the line artists. Visibility is set by
     ui_state; `force` shows the grid regardless (the topology editor turns it
     on for the session — trunks land on Hanan lines, so the targets must be
-    visible — without touching the shared ui_state the main window reads)."""
+    visible — without touching the shared ui_state the main window reads).
+    `grid` = explicit (xs, ys) to draw instead of the full-design
+    fp.get_hanan_grid() (the explorer passes the bundle-scoped grid)."""
     artists = []
-    xs, ys = fp.get_hanan_grid()
+    xs, ys = grid if grid is not None else fp.get_hanan_grid()
     # Style: prominent dashed line for debugging
     color = '#94a3b8'  # slate-400
     visible = force or ui_state.hanan_grid
@@ -1259,6 +1261,41 @@ class TopologyExplorer:
             return (lo + hi) / 2.0
         return float(cs.perp_pos)
 
+    def _bundle_busterm_names(self):
+        """The bundle's busterm block set — the union of seg_busterms taps
+        across this bundle's candidates (the generator's own tap record; every
+        valid candidate taps exactly the bundle's endpoint blocks, per the
+        coverage gate).  Falls back to the shown topo's connected_block_names
+        when no candidate carries taps (a fully hand-built pool)."""
+        names = set()
+        for t in self.wrapper.input.candidates:
+            for eps in t.seg_busterms.values():
+                for bt in eps:
+                    if bt is not None:
+                        names.add(bt.block_name)
+        if not names:
+            names = set(self._shown_topo().connected_block_names)
+        return names
+
+    def _bundle_hanan_grid(self):
+        """The per-bundle Hanan grid GENERATION actually uses for this bundle
+        (TopologyGenerator::generate_npin): edges of the bundle's busterm
+        rects — each individual rect of a multi-rect block, the orig bbox
+        otherwise — plus every keepout's edges.  The full-design
+        fp.get_hanan_grid() adds every unrelated block's lines, which is
+        noise when editing one bundle."""
+        xs, ys = set(), set()
+        for n in self._bundle_busterm_names():
+            rects = self.fp.get_block_rects(n)
+            if not rects:
+                rects = [self.fp.get_block_bounds(n)]
+            for r in rects:
+                xs.update((r.x1, r.x2)); ys.update((r.y1, r.y2))
+        for koz in self.fp.get_keepout_zones():
+            xs.update((koz.bbox.x1, koz.bbox.x2))
+            ys.update((koz.bbox.y1, koz.bbox.y2))
+        return sorted(xs), sorted(ys)
+
     def _draw_slide_spans(self, topo, ct):
         """Overlay slide-range bands on the current topology."""
         ax = self.ax
@@ -1995,8 +2032,13 @@ class TopologyExplorer:
 
         # Hanan grid — forced ON while a TopoEdit session is open: T/Y place
         # trunks at the cursor's Hanan line, so the candidate lines must show.
+        # The explorer shows the BUNDLE-scoped grid (busterm-block + keepout
+        # edges — what generation derives candidates from for THIS bundle),
+        # not the full-design grid; T/Y snapping stays on the full grid, a
+        # superset, so every displayed line remains a snap target.
         _draw_hanan_grid(ax, self.fp, self.ui_state,
-                         force=self._edit_topo is not None)
+                         force=self._edit_topo is not None,
+                         grid=self._bundle_hanan_grid())
 
 
         # Slide-range bands (drawn before segments so segments sit on top)

@@ -186,6 +186,13 @@ def test_edit_mode_ui_banner_hanan_and_thin_segments(tmp_path):
         assert any(a.get_visible() for a in hanan_lines()), \
             "hanan grid must show while editing"
         assert not exp.ui_state.hanan_grid        # shared state untouched
+        # The grid shown is the BUNDLE-scoped one generation uses (edges of
+        # the bundle's busterm blocks b1/b2 only) — NOT the full-design grid:
+        # c1 (x=140/160) is no bundle busterm, so its lines must be absent.
+        xs = {a.get_xdata()[0] for a in hanan_lines()
+              if a.get_xdata()[0] == a.get_xdata()[1]}
+        assert {0, 100, 200, 300} <= xs, xs       # b1/b2 edges present
+        assert not ({140, 160} & xs), xs          # non-busterm c1 excluded
         banners = [t for t in exp.ax.texts
                    if t.get_text().startswith("EDIT") and t.get_bbox_patch()]
         assert banners, "edit banner chip missing"
