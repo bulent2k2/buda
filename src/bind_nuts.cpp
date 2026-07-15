@@ -178,7 +178,13 @@ void bind_nuts(py::module_& m) {
              "Fix every placed segment of `baseline` except `exclude_bid`'s "
              "(the RR fixed-context screen's frozen occupancy, one call)")
         .def("run",                   &NUTSEngine::run)
-        .def("rerun_layer",           &NUTSEngine::rerun_layer);
+        .def("rerun_layer",           &NUTSEngine::rerun_layer)
+        .def("rerun_bundle_warm",     &NUTSEngine::rerun_bundle_warm,
+             py::arg("prev"), py::arg("bundles"), py::arg("target_bid"),
+             "Warm-start single-bundle re-solve: place target_bid against "
+             "prev frozen, then run the safety passes on the unfrozen "
+             "union.  Exact metrics for the WARM state — a predictor of "
+             "the cold run()'s metric, never a substitute");
 
     m.def("transform_track_segment", &transform_track_segment,
           py::arg("ts"), py::arg("orient"), py::arg("cell_w"),

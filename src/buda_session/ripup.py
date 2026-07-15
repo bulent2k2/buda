@@ -967,6 +967,77 @@ class RipupMixin:
         return True
 
 
+    def _rr_warm_study_sample(self, w, tidx, stage, cur, cold_m, snap):
+        """RR round-4 Phase-0 probe (`BUDA_RR_WARM_STUDY=1`): after a COLD
+        trial computed its metric — the loop still runs entirely on cold, so
+        trajectories are byte-identical with the study off — ALSO run the
+        warm-start single-bundle re-solve from the same baseline and record
+        how well the warm metric predicts the cold one.  The wrapper is
+        still in trial state here (pinned + replanned), which is exactly
+        the state a production warm trial would evaluate; one fidelity
+        caveat is that a cold trial may have dogleg-adopted the target
+        (rare — cyclic constraints only), which a warm-only world would
+        not have.  Run with `no_fast_trials` so the cold metric is the
+        exact full-pipeline one (fast trials abort/skips would truncate
+        it).  Rows accumulate on the session; _rr_warm_study_report
+        summarizes at run end."""
+        bid = w.input.original_bundle.id
+        t0 = time.perf_counter()
+        eng = buda.NUTSEngine(self.fp, self.layers)
+        eng.set_track_pitch(self._nuts_pitch)
+        if self.planner is not None:
+            eng.set_extra_grid_points(list(self.planner.get_x_grid()),
+                                      list(self.planner.get_y_grid()))
+        with contextlib.redirect_stdout(io.StringIO()), \
+                buda.ostream_redirect():
+            warm = eng.rerun_bundle_warm(snap['nuts'], self.bundles, bid)
+            if stage == 'b':
+                segs = buda.make_bus_segments(self.bundles, warm, self.fp,
+                                              self._detailed_bit_order)
+                deng = buda.DetailedNUTSEngine(self.routing_grid)
+                dres = deng.run(segs, emit_vias=False)
+                warm_m = (dres.num_unplaced, warm.num_overlaps)
+            else:
+                warm_m = warm.num_overlaps
+        dt = time.perf_counter() - t0
+        if not hasattr(self, '_rr_warm_rows'):
+            self._rr_warm_rows = []
+        self._rr_warm_rows.append((stage, bid, tidx, cur, cold_m, warm_m,
+                                   dt))
+        if os.environ.get("BUDA_RR_TRACE"):
+            print(f"[rr-warm-study] bundle {bid} topo ->{tidx + 1}: "
+                  f"cur {self._rr_m_str(cur)} cold {self._rr_m_str(cold_m)} "
+                  f"warm {self._rr_m_str(warm_m)} ({dt * 1000:.1f}ms)",
+                  flush=True)
+
+    def _rr_warm_study_report(self):
+        """Summarize the warm-vs-cold fidelity rows: exact metric matches,
+        accept-decision agreement against the committed metric, the two
+        error kinds — false-accept (warm improves, cold does not; cheap,
+        a verify-on-accept commit rejects it) and FALSE-REJECT (warm
+        misses a cold improvement; the two-tier killer) — and the mean
+        per-trial cost of each side."""
+        rows = getattr(self, '_rr_warm_rows', None)
+        if not rows:
+            return
+        t = getattr(self, '_rr_t', None) or {}
+        cold_s = t.get('nuts', 0.0) + t.get('dnuts', 0.0)
+        cold_n = max(t.get('n_nuts', 0), 1)
+        for stg in sorted({r[0] for r in rows}):
+            rs = [r for r in rows if r[0] == stg]
+            n = len(rs)
+            exact = sum(1 for r in rs if r[4] == r[5])
+            fa = sum(1 for r in rs if r[5] < r[3] and not r[4] < r[3])
+            fr = sum(1 for r in rs if not r[5] < r[3] and r[4] < r[3])
+            agree = n - fa - fr
+            warm_s = sum(r[6] for r in rs)
+            print(f"[rr-warm-study] stage {stg}: {n} trial(s), metric "
+                  f"exact {exact}/{n}, accept agreement {agree}/{n}, "
+                  f"false-accept {fa}, FALSE-REJECT {fr}; warm "
+                  f"{1000 * warm_s / n:.1f}ms/trial vs cold "
+                  f"{1000 * cold_s / cold_n:.1f}ms/trial", flush=True)
+        self._rr_warm_rows = []
+
     def _rr_scan_moves(self, w, bid, old_tidx, moves, cur, stage, metric,
                        snap, trial_base=0):
         """First-improving scan of ONE contender's move list — the inner
@@ -984,6 +1055,12 @@ class RipupMixin:
             m = self._rr_guarded_move(w, move, old_tidx, stage, metric, snap)
             if m is None:
                 continue                 # invalid flip (bend on obstacle)
+            # Round-4 Phase-0 probe: the wrapper is still in trial state
+            # (restored below), so the warm re-solve samples exactly what a
+            # production warm trial would see.  No-op without the env var.
+            if (move[0] == 'idx'
+                    and os.environ.get("BUDA_RR_WARM_STUDY")):
+                self._rr_warm_study_sample(w, move[1], stage, cur, m, snap)
             # New best so far: capture the trial's state BEFORE the
             # restore, so the commit can jump straight to it instead
             # of re-running the whole pipeline (index moves only —
@@ -1476,6 +1553,7 @@ class RipupMixin:
             print(f"[ripup_reroute] reached max_iter={max_iter} while still "
                   f"improving — re-run ripup_reroute or raise max_iter "
                   f"(e.g. `ripup_reroute {max_iter * 5}`) to continue.", flush=True)
+        self._rr_warm_study_report()
         print(f"[ripup_reroute] done: metric {self._rr_m_str(m0)}->"
               f"{self._rr_m_str(metric())} "
               f"after {committed} move(s), {n_trials} trial(s).", flush=True)
