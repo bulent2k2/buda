@@ -17,8 +17,10 @@
 #pragma once
 #include "congestion_planner.h"
 #include "placed_segment.h"
+#include <array>
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -261,6 +263,29 @@ public:
     NUTSResult rerun_layer(const NUTSResult& prev,
                            const std::vector<BundleWrapper>& bundles,
                            int layer_id) const;
+
+    // Batched fixed-context screen (RR round 5): score every candidate in
+    // `tidxs` for target_bid in ONE call on an engine already configured as
+    // a screen (pitch, extra grids, skip flags, add_fixed_segments_except).
+    // Works on a LOCAL COPY of the wrapper list — one Python->C++
+    // conversion per contender instead of one per replan, no session-state
+    // mutation, no restore — pinning each candidate, replanning its layers
+    // (`planner.replan_bundle`), and running the single-bundle placement;
+    // per candidate only (tidx, overlaps, violations) crosses back, not a
+    // ~full-design segment vector.  Because run() sees the WHOLE list, its
+    // empty-grid fallback derives from the current selections including
+    // the pinned candidate — exact full-trial grid parity with no
+    // caller-side merging.  clear_dogleg_overrides mirrors _rr_trial's
+    // hazard guard (a dogleg-adopted target's per-segment overrides index
+    // its split topology, not the screened candidate).  nullopt when the
+    // incremental replan is unavailable for any candidate — the caller
+    // falls back to the unscreened order.
+    std::optional<std::vector<std::array<int, 3>>> screen_candidates(
+        const std::vector<BundleWrapper>& bundles,
+        int target_bid,
+        const std::vector<int>& tidxs,
+        CongestionPlanner& planner,
+        bool clear_dogleg_overrides);
 
     // Warm-start single-bundle re-solve (RR round 4 study): re-extract and
     // place ONLY target_bid's segments against `prev` frozen as occupancy

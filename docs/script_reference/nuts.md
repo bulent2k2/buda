@@ -242,7 +242,17 @@ before full-trialing a contender's alternates, each candidate is placed
 ALONE against every other bundle's baseline placement frozen as fixed
 occupancy (the bottom-up `add_fixed_segments` machinery; doglegs and tighten
 skipped — the result is discarded), which costs ~milliseconds, and only the
-best-screened few (`_RR_SCREEN_TOP_N`, default 2) are full-trialed.  The
+best-screened few (`_RR_SCREEN_TOP_N`, default 2) are full-trialed.  A whole
+contender screens in ONE C++ call (`NUTSEngine::screen_candidates` +
+`CongestionPlanner::replan_candidates`, round 5): the wrapper list crosses
+the Python/C++ boundary once, the planner's committed-usage recharge runs
+once (candidates plan uncommitted against identical others-only usage —
+provably what a `replan_bundle` sequence saw), screen-mode `run()` skips
+its dogleg-only mutable deep copy of every wrapper, and only
+`(tidx, overlaps, violations)` triples come back — scores byte-identical
+to the per-candidate path at ~3 ms instead of ~8-10 ms per candidate
+(bigHalf screen bucket 1.58 s → 0.65 s, big2 ripup 0.29 → 0.22 s, same
+trajectories everywhere).  The
 screened `(overlaps, violations)` is an **ordering, never a metric**: accept
 decisions always run on the true full-trial metric — which is exactly what
 separates this from the measured-worse-and-reverted layer-scoped two-tier
