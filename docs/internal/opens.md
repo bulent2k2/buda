@@ -1,7 +1,7 @@
 # Open items — the cross-subsystem priority view
 
 What remains to focus on, ranked by value/effort. This page is a **snapshot
-index** (last verified against `main`: **2026-07-14**, post PR #291) —
+index** (last verified against `main`: **2026-07-15**, post PR #298) —
 the details, evidence, and where-to-start notes live in the per-subsystem
 wishlist files ([`wishlist.md`](wishlist.md) is their index). When an item
 lands, mark it ✅ in its wishlist file, move it to a (possibly new) section below in this document, titled *Resolved (by \<date\>)*, re-verify the whole list against `main` when picking the next piece of work (parallel sessions land
@@ -9,24 +9,17 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
-9. **RR fixed-context single-bundle trial screen** —
-   [`wishlist-ripup.md`](wishlist-ripup.md) → *"RR round 3 — early-abort
-   study"* (the remaining lever) and the round-2 negative result that
-   defines its shape.  Per-trial RR cost is now confirmed irreducible by
-   pass-skipping: the round-3 abort study showed repair+corner are the
-   PRIMARY overlap reducers (a post-fixpoint abort spuriously rejects
-   every actual accept), so the only remaining attack on the ~95%
-   rejected trials is a FIXED-CONTEXT screen — place only the moved
-   bundle's segments against frozen occupancy (a public
-   `LayerSolver::repack_members` entry; the Phase-0 profile puts its
-   cost at milliseconds) with the full pipeline verifying winners.  The
-   round-2 layer-scoped attempt (46s → 160s, reverted) is the recorded
-   anti-pattern; rounds 1–3 took bigHalf's clean 0/0 endpoint 49s →
-   32s, and this is the headline multiplier left.  **Riding on it: the
-   `bigHalf.buda` flip** — re-enable its two `ripup_reroute` lines once
-   the 0/0 endpoint is affordable next to the ~5.7s no-rr config (the
-   endpoint is CI-guarded by `test_bighalf_rr_reaches_clean_endpoint`
-   meanwhile).
+10. **The `bigHalf.buda` rr flip (decision, then a two-line edit)** —
+   re-enable the flow's two commented `ripup_reroute` lines now that the
+   RR arc has taken the clean 0/0 endpoint from ~49s to **~12.4s flow
+   wall** on the reference host (~8s of rr+negotiate on top of the ~4.5s
+   no-rr config, same host; rounds 3–5, see *Resolved (by 2026-07-15)*
+   below).  This was
+   the rider on the resolved screen item: the affordability bar ("next
+   to the ~5.7s no-rr config") is a judgment call, not a code change —
+   the endpoint stays CI-guarded by
+   `test_bighalf_rr_reaches_clean_endpoint` either way, and
+   `ReadMe_bigHalf.md` carries the row history to decide from.
 
 8. **Bundler follow-on corners (hier)** —
    [`wishlist-bundler.md`](wishlist-bundler.md) → *"Remaining corners"*.
@@ -79,6 +72,46 @@ designs and fail LOUD, never silent:)*
    the proprietary Si2 OA C++ libraries** — waits on external access, then
    follows the documented pattern (own translation unit behind a CMake flag).
 
+## Resolved (by 2026-07-15)
+
+- **RR fixed-context single-bundle trial screen** ✅ — **DONE (2026-07-15,
+  PRs #293 + #298)**, closing item 9 exactly in the screen-then-confirm
+  shape the round-2 revert pointed to.  **#293 (round 3):** per contender,
+  each idx alternate is placed ALONE against every other bundle's baseline
+  placement frozen as fixed occupancy (the bottom-up `add_fixed_segments`
+  machinery + `set_skip_doglegs`; ~ms per candidate) and only the top-2
+  screened moves are full-trialed — the screened score is an ORDERING,
+  never a metric (accepts stay on the true full metric), and screened-out
+  moves are DEFERRED to the iteration's stall sweep, so the stop
+  certificate remains a full sweep.  Default on; `no_screen` opts out.
+  bigHalf rr flow 40.8s → 16.5s (stage-b full trials 123 → 11), big2
+  ripup 0.91 → 0.43s, endpoints identical everywhere.  **#298 (round
+  5):** the screen batched — `NUTSEngine::screen_candidates` (one
+  wrapper-list crossing per contender, C++-side copy, triples back) +
+  `CongestionPlanner::replan_candidates` (recharge once, plan candidates
+  uncommitted — provably the `replan_bundle`-sequence state) + the real
+  win, found by instrumenting `run()`'s un-bucketed tail: skip run()'s
+  dogleg-only mutable deep copy of every wrapper in screen mode.  8.9 →
+  3.25 ms/screen, scores byte-identical (an exact-equivalence refactor).
+  bigHalf ~12.4s flow wall.
+
+- **RR warm-start single-bundle re-solve** ✅ (as a measured OPT-IN) —
+  **DONE (2026-07-15, PR #296)**: `NUTSEngine::rerun_bundle_warm` seeds
+  the baseline, places only the moved bundle against it frozen, then runs
+  the real safety passes on the unfrozen union — cost tracks the move's
+  blast radius.  Phase-0 fidelity study (`BUDA_RR_WARM_STUDY=1` harness,
+  kept): 91–100% accept agreement, 4.6–6× cheaper per solve on bigHalf,
+  errors skewing to verify-absorbable false-accepts.  Phase 1 wired
+  soundly (warm pre-filter; only warm-improving moves pay a cold trial;
+  warm-rejected moves cold-swept at the stall point — the certificate
+  stays a full COLD sweep) but the production A/B was a WASH behind the
+  #293 screen (bigHalf 12.29 vs 12.73s; big2 +0.09s), so
+  `_RR_WARM_TRIALS_DEFAULT = False`: default routes byte-identical,
+  `warm_trials` opts in.  The flip bar (post-screen cold trials ≥3× the
+  ~41–70ms warm eval — designs several times bigHalf's size) is recorded
+  in [`wishlist-ripup.md`](wishlist-ripup.md), which now carries the
+  complete round 1–5 history including all measured negative results.
+
 ## Resolved (by 2026-07-14)
 
 - **Global-overlap re-route of NON-contended bundles** ✅ — **DONE
@@ -105,9 +138,9 @@ designs and fail LOUD, never silent:)*
   endpoints identical.  Two measured-and-reverted negative results
   (stall skip-cache; layer-scoped two-tier trials, 3.5× worse) and the
   abort study (repair+corner are the PRIMARY overlap reducers — no
-  post-fixpoint abort, no pass-skipping them) are documented as the
-  constraints on open item 9.  Details:
-  [`wishlist-ripup.md`](wishlist-ripup.md).
+  post-fixpoint abort, no pass-skipping them) were the recorded
+  constraints item 9 was then closed under — see *Resolved (by
+  2026-07-15)* above.  Details: [`wishlist-ripup.md`](wishlist-ripup.md).
 
 - **Hier bundler: CONVERGENT + COMBINED + fan-in bundles** ✅ — **DONE
   (2026-07-14, PR #276)**, closing the fan-in item's hier follow-on: the
