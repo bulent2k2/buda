@@ -70,19 +70,23 @@ def _layer_label(lid, layer_stack=None):
 stat_title = "Bundle-based Design Assistant (BUDA) with Non-Uniform Track Sharing (NUTS)"
 
 
-def _draw_hanan_grid(ax, fp, ui_state: ViewState):
-    """Draw the Hanan grid and return the line artists. Visibility is set by ui_state."""
+def _draw_hanan_grid(ax, fp, ui_state: ViewState, force=False):
+    """Draw the Hanan grid and return the line artists. Visibility is set by
+    ui_state; `force` shows the grid regardless (the topology editor turns it
+    on for the session — trunks land on Hanan lines, so the targets must be
+    visible — without touching the shared ui_state the main window reads)."""
     artists = []
     xs, ys = fp.get_hanan_grid()
     # Style: prominent dashed line for debugging
     color = '#94a3b8'  # slate-400
+    visible = force or ui_state.hanan_grid
     for x in xs:
         l = ax.axvline(x=x, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
-        l.set_visible(ui_state.hanan_grid)
+        l.set_visible(visible)
         artists.append(l)
     for y in ys:
         l = ax.axhline(y=y, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
-        l.set_visible(ui_state.hanan_grid)
+        l.set_visible(visible)
         artists.append(l)
     return artists
 
@@ -1784,18 +1788,31 @@ class TopologyExplorer:
             spine.set_linewidth(border_lw)
 
         if self._edit_topo is not None or self._edit_msg:
-            ax.text(0.01, 1.01,
+            # Edit banner: a boxed status chip INSIDE the axes at top-left —
+            # the old spot just above the axes (0.01, 1.01) shared the title
+            # band and a long verdict overlapped the header.  Top-left is free
+            # (the legend sits upper-right); the box keeps it readable over
+            # design content.
+            ax.text(0.01, 0.985,
                     self._edit_msg or "EDIT",
                     transform=ax.transAxes, fontsize=9, color='#b03030',
-                    va='bottom', ha='left', clip_on=False)
+                    va='top', ha='left', zorder=60, clip_on=False,
+                    bbox=dict(boxstyle='round,pad=0.35', facecolor='#fff4f4',
+                              edgecolor='#b03030', linewidth=0.8, alpha=0.92))
             if self._edit_topo is None:
                 self._edit_msg = ""     # one-shot after the session closes
 
         ct = self._build_conn_topo(topo)
         cs_list = list(ct.segs())
 
-        # Determine display geometry for segments — width proportional to bundle width
-        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 14.0)
+        # Determine display geometry for segments — width proportional to
+        # bundle width, capped so a wide bus's fat line cannot bury the slide
+        # bands and dotted nominals it is drawn over; while a TopoEdit session
+        # is open the segments thin further still — edit verdicts are read off
+        # the slide indicators, which must stay visible.
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 9.0)
+        if self._edit_topo is not None:
+            viz_lw = min(viz_lw, 4.5)
         actual_lids = []
 
         # ── Pre-compute display geometry for all segments ──────────────────
@@ -1976,8 +1993,10 @@ class TopologyExplorer:
         self._block_patch_artists, self._block_name_artists = _draw_blocks(
             ax, self.fp, self.ui_state, highlight_blocks)
 
-        # Hanan grid
-        _draw_hanan_grid(ax, self.fp, self.ui_state)
+        # Hanan grid — forced ON while a TopoEdit session is open: T/Y place
+        # trunks at the cursor's Hanan line, so the candidate lines must show.
+        _draw_hanan_grid(ax, self.fp, self.ui_state,
+                         force=self._edit_topo is not None)
 
 
         # Slide-range bands (drawn before segments so segments sit on top)

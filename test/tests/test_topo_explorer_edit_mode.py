@@ -152,3 +152,51 @@ def test_edit_mode_pair_connect(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+def test_edit_mode_ui_banner_hanan_and_thin_segments(tmp_path):
+    """The edit-session UI affordances:
+    - the banner is a boxed chip INSIDE the axes (it used to sit just above
+      them at y=1.01 and overlap the centered title);
+    - the Hanan grid is forced visible while a session is open (T/Y place
+      trunks on Hanan lines) without touching the shared ui_state, and hides
+      again when the session closes;
+    - segments thin out while editing (<= 4.5pt) so the slide bands and
+      dotted nominals stay readable under a wide bus's line."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        assert not exp.ui_state.hanan_grid        # off by default
+
+        def hanan_lines():
+            return [a for a in exp.ax.lines
+                    if a.get_linestyle() == '--' and a.get_alpha() == 0.6]
+
+        def seg_lws():
+            # Colored segment lines only (>= 3pt); the white halo under each
+            # (lw + 4) is excluded — it scales with the same viz_lw anyway.
+            return [a.get_linewidth() for a in exp.ax.lines
+                    if a.get_linewidth() >= 3.0 and a.get_color() != 'white']
+
+        exp._draw()
+        assert hanan_lines() and not any(a.get_visible() for a in hanan_lines())
+        lw_before = max(seg_lws())
+
+        _key(exp, 'e')                            # open session (copy)
+        assert any(a.get_visible() for a in hanan_lines()), \
+            "hanan grid must show while editing"
+        assert not exp.ui_state.hanan_grid        # shared state untouched
+        banners = [t for t in exp.ax.texts
+                   if t.get_text().startswith("EDIT") and t.get_bbox_patch()]
+        assert banners, "edit banner chip missing"
+        x, y = banners[0].get_position()
+        assert y <= 1.0, "banner must sit inside the axes, not over the title"
+        assert max(seg_lws()) <= 4.5 + 1e-6, "segments must thin while editing"
+
+        _key(exp, 'escape')                       # close session
+        exp._draw()
+        assert not any(a.get_visible() for a in hanan_lines())
+        assert max(seg_lws()) == lw_before        # width restored
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
