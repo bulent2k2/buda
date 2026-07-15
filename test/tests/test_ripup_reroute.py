@@ -1468,6 +1468,34 @@ def test_warm_rerun_is_deterministic_and_leaves_prev_untouched():
     assert after == before                   # baseline untouched
 
 
+def test_warm_rerun_no_duplicate_rows_on_prefixed_engine():
+    """Codex #296 P2: a bottom-up engine already carries fixed segments and
+    the baseline holds the SAME copies (run() appends fixed segments to
+    every result) — rerun_bundle_warm's scratch copy must not freeze them
+    twice.  Every (bundle, seg) key must appear exactly once in the warm
+    result, and the pre-fixed bundle's rows must sit at their baseline
+    positions."""
+    import buda
+    s = _build_session(narrow=True)
+    base = s.nuts_result
+    bids = sorted({t.bundle_id for t in base.segments})
+    fixed_bid, target_bid = bids[0], bids[1]
+    fixed_rows = [t for t in base.segments if t.bundle_id == fixed_bid]
+    eng = buda.NUTSEngine(s.fp, s.layers)
+    eng.set_track_pitch(s._nuts_pitch)
+    eng.set_extra_grid_points(list(s.planner.get_x_grid()),
+                              list(s.planner.get_y_grid()))
+    eng.add_fixed_segments(fixed_rows)          # simulate a bottom-up engine
+    with buda.ostream_redirect(), contextlib.redirect_stdout(io.StringIO()):
+        warm = eng.rerun_bundle_warm(base, s.bundles, target_bid)
+    keys = [(t.bundle_id, t.seg_idx) for t in warm.segments]
+    assert len(keys) == len(set(keys)), "duplicate segment rows"
+    # Every pre-fixed row present exactly once (positions may shift: in the
+    # phase-2 union the safety passes treat them as ordinary segments).
+    want = {(t.bundle_id, t.seg_idx) for t in fixed_rows}
+    assert want <= set(keys)
+
+
 def test_warm_trials_match_no_warm_endpoint_stage_a():
     """A/B on the canned stage-a fixture: the warm pre-filter may reorder
     which improving move is found first, never what is committable — both

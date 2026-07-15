@@ -2377,7 +2377,22 @@ NUTSResult NUTSEngine::rerun_bundle_warm(
     NUTSEngine scratch(*this);
     scratch.set_skip_doglegs(true);
     scratch.set_skip_tighten(true);
-    scratch.add_fixed_segments_except(prev, target_bid);
+    // The scratch copy INHERITS this engine's fixed set (bottom-up copies),
+    // and `prev` holds the SAME segments again — run() appends fixed
+    // segments to every result.  Freeze from prev only what is not already
+    // fixed here, or the scratch would carry duplicate rows and zones and
+    // the warm metrics would be unusable on bottom-up sessions (Codex
+    // #296).  The inherited copies stay truly fixed in phase 1; in the
+    // phase-2 union they are ordinary segments the safety passes may move
+    // — acceptable for a discarded predictor, never a committed state.
+    std::vector<TrackSegment> freeze;
+    freeze.reserve(prev.segments.size());
+    for (const auto& s : prev.segments)
+        if (s.bundle_id != target_bid && s.placed &&
+            !std::isnan(s.track_position) &&
+            !fixed_bundle_ids_.count(s.bundle_id))
+            freeze.push_back(s);
+    scratch.add_fixed_segments(freeze);
     NUTSResult warm = scratch.run(bundles);
 
     // Phase 2 — unfreeze and run the safety passes on the REAL union, so
