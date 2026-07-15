@@ -51,6 +51,28 @@ _RR_FAST_TRIALS_DEFAULT = True
 _RR_SCREEN_DEFAULT = True
 _RR_SCREEN_TOP_N = 2
 
+# Warm trials (RR round 4): before paying a full COLD trial for a move, run
+# the warm-start single-bundle re-solve (rerun_bundle_warm — place the moved
+# bundle against the frozen baseline, then repair/corner/tighten the
+# unfrozen union) and skip the cold trial unless the WARM metric strictly
+# improves.  The warm metric is a measured PREDICTOR (Phase-0 study:
+# 91-100% accept agreement, 4.6-6x cheaper per solve on bigHalf), never the
+# accept basis: warm-improving moves still run the existing cold trial +
+# commit path (a false-accept costs one cold trial), and warm-rejected
+# moves are cold-swept at the iteration's stall point before any
+# stop/global verdict — the loop's certificate remains a full COLD sweep,
+# so a false-reject costs time, never the endpoint.
+#
+# Default OFF, corpus-measured: with the #293 screen already cutting cold
+# trials to near-minimum (bigHalf stage b: 11) and fast trials cutting
+# their cost, the pre-filter is cost-NEUTRAL to slightly negative on the
+# current corpus (bigHalf 12.3 vs 12.7s — wash; mix wash; big2 +0.09s) —
+# every warm-accepted move pays warm+cold, and a ~41-70ms warm eval is only
+# ~2.7x cheaper than a post-screen fast-cold trial.  Opt in with
+# `warm_trials` on designs where per-trial cold cost grows past ~3x the
+# warm eval (the study's crossover); `no_warm_trials` forces off.
+_RR_WARM_TRIALS_DEFAULT = False
+
 
 def _batched(method):
     """Run a BDB-persist method inside ONE transaction (see BudaSession._bdb_batch).

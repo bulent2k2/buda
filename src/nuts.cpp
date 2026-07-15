@@ -602,11 +602,18 @@ static void set_pull_targets(
 // each segment's busterm faces, clamp intervals to slide windows (+ trunk
 // margin), relax boundary intervals, resolve pull targets, then index the
 // segments.  only_layer restricts the two interval passes to that layer
-// (rerun_layer's single-layer contract); -1 = all layers.
+// (rerun_layer's single-layer contract); -1 = all layers.  prep=false skips
+// the three prep passes entirely (busterm faces and the index are still
+// built): the warm rerun assembles a union of ALREADY-prepped segments —
+// the target's by its scratch screen run, the context's by the run that
+// produced the baseline — and apply_interval_constraints' trunk-margin
+// shrink is NOT idempotent, so re-prepping would tighten every interval a
+// second time.
 static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
                                  const Floorplan& floorplan,
                                  std::vector<TrackSegment>& segments,
-                                 int only_layer = -1)
+                                 int only_layer = -1,
+                                 bool prep = true)
 {
     NutsContext ctx;
     build_nuts_maps(bundles, floorplan, ctx.pull_map, ctx.slide_map,
@@ -616,11 +623,13 @@ static NutsContext build_context(const std::vector<BundleWrapper>& bundles,
         auto bf = ctx.busterm_face_map.find({ts.bundle_id, ts.seg_idx});
         if (bf != ctx.busterm_face_map.end()) ts.busterm_faces = bf->second;
     }
-    apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
-                               ctx.net_pull_map, only_layer);
-    relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
-                             ctx.busterm_set, only_layer);
-    set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
+    if (prep) {
+        apply_interval_constraints(segments, ctx.slide_map, ctx.trunk_set,
+                                   ctx.net_pull_map, only_layer);
+        relax_boundary_intervals(segments, ctx.pull_map, ctx.net_pull_map,
+                                 ctx.busterm_set, only_layer);
+        set_pull_targets(segments, ctx.pull_map, ctx.net_pull_map);
+    }
     for (auto& ts : segments)
         ctx.ts_ptr_map[{ts.bundle_id, ts.seg_idx}] = &ts;
     return ctx;
@@ -2348,6 +2357,66 @@ NUTSResult NUTSEngine::rerun_layer(
               << "Violations: " << result.num_violations << ", "
               << "Overlaps: " << result.num_overlaps << ".\n";
     return result;
+}
+
+NUTSResult NUTSEngine::rerun_bundle_warm(
+    const NUTSResult&                  prev,
+    const std::vector<BundleWrapper>&  bundles,
+    int                                target_bid) const
+{
+    // Phase 1 — place ONLY the target against the frozen baseline: a scratch
+    // engine copy carries the frozen zones (this method stays const and the
+    // real engine's fixed set untouched).  extract_segments skips fixed
+    // bundles, so run(bundles) extracts JUST the target — full grid parity
+    // included, since the whole bundle list feeds run()'s fallback-grid
+    // derivation — places it (orientation fixpoint over the target's own
+    // segments only; every other segment is a keepout zone), and appends the
+    // frozen context verbatim.  Doglegs skipped: a warm state must never
+    // export topology surgery.  Tighten is deferred to phase 2 (a
+    // target-only tighten against zones would be discarded work).
+    NUTSEngine scratch(*this);
+    scratch.set_skip_doglegs(true);
+    scratch.set_skip_tighten(true);
+    // The scratch copy INHERITS this engine's fixed set (bottom-up copies),
+    // and `prev` holds the SAME segments again — run() appends fixed
+    // segments to every result.  Freeze from prev only what is not already
+    // fixed here, or the scratch would carry duplicate rows and zones and
+    // the warm metrics would be unusable on bottom-up sessions (Codex
+    // #296).  The inherited copies stay truly fixed in phase 1; in the
+    // phase-2 union they are ordinary segments the safety passes may move
+    // — acceptable for a discarded predictor, never a committed state.
+    std::vector<TrackSegment> freeze;
+    freeze.reserve(prev.segments.size());
+    for (const auto& s : prev.segments)
+        if (s.bundle_id != target_bid && s.placed &&
+            !std::isnan(s.track_position) &&
+            !fixed_bundle_ids_.count(s.bundle_id))
+            freeze.push_back(s);
+    scratch.add_fixed_segments(freeze);
+    NUTSResult warm = scratch.run(bundles);
+
+    // Phase 2 — unfreeze and run the safety passes on the REAL union, so
+    // neighbours can adjust to the target's new position exactly as in a
+    // full solve: settle cross-layer spans, repair materialised overlaps,
+    // resolve corner overlaps (trunk ordering / split bounds), and tighten
+    // unless the engine is in fast-trial mode.  No orientation fixpoint —
+    // the baseline seed replaces the from-scratch proactive ordering, which
+    // is the entire point: the passes' work now scales with the move's
+    // blast radius, not the design.  prep=false: both sides' intervals are
+    // already prepped (see build_context) and the trunk-margin shrink is
+    // not idempotent.
+    NutsContext ctx = build_context(bundles, floorplan_, warm.segments,
+                                    /*only_layer=*/-1, /*prep=*/false);
+    settle_spans(warm.segments, ctx);
+    repair_overlaps(warm.segments, ctx);
+    resolve_corner_overlaps(warm.segments, ctx);
+    if (!skip_tighten_)
+        tighten_pulls(warm.segments, ctx);
+    compute_metrics(warm);
+    warm.num_keepout_conflicts =
+        count_keepout_conflicts(low_keepouts(), warm.segments);
+    derive_junction_infeasibilities(bundles, warm);
+    return warm;
 }
 
 } // namespace buda

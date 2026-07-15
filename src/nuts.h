@@ -262,6 +262,21 @@ public:
                            const std::vector<BundleWrapper>& bundles,
                            int layer_id) const;
 
+    // Warm-start single-bundle re-solve (RR round 4 study): re-extract and
+    // place ONLY target_bid's segments against `prev` frozen as occupancy
+    // (the #293 screen), then UNFREEZE and run the safety passes —
+    // settle_spans / repair_overlaps / resolve_corner_overlaps / tighten
+    // (skipped in fast-trial mode) — over the real union so neighbours
+    // adjust, and compute exact metrics on the warm state.  No orientation
+    // fixpoint (the baseline seed replaces it) and no dogleg fallback (a
+    // warm state must not export topology surgery).  The warm metric is
+    // EXACT for the warm placement but the placement differs from a cold
+    // run()'s — consumers must treat it as a predictor of the cold metric
+    // and re-verify with run() before committing anything.
+    NUTSResult rerun_bundle_warm(const NUTSResult& prev,
+                                 const std::vector<BundleWrapper>& bundles,
+                                 int target_bid) const;
+
 private:
     friend class LayerSolver;   // placement pass: uses first_fit/preferred_fit/track_pitch_
     const Floorplan& floorplan_;

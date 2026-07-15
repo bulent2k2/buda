@@ -139,6 +139,7 @@ run_detailed_nuts hi_lo
 ```
 ripup_reroute [max_iter] [use_edge_candidates] [no_global]
               [fast_trials|no_fast_trials] [screen|no_screen]
+              [warm_trials|no_warm_trials]
 ```
 
 Feedback-driven rip-up & re-route. The congestion planner's band-capacity model is
@@ -154,7 +155,8 @@ the pipeline, and keeps only moves that reduce the metric.
 | `use_edge_candidates` | flag | off | Also try the per-edge MST L/Z **flip** move-source (below) on contended MST candidates. Off by default. |
 | `no_global` | flag | off | Disable the **global-occupant pass** (below), which otherwise runs when the contender scan stalls above zero. |
 | `no_fast_trials` / `fast_trials` | flag | fast on | Disable / force **fast trials** (below): trials skip metric-neutral solve passes; commits always re-run the full pipeline. |
-| `no_screen` / `screen` | flag | screen on | Disable / force the **fixed-context screen** (below): rank each contender's alternates by a ~ms frozen-context placement and full-trial only the top few, deferring the rest to the iteration's stall sweep. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
+| `no_screen` / `screen` | flag | screen on | Disable / force the **fixed-context screen** (below): rank each contender's alternates by a ~ms frozen-context placement and full-trial only the top few, deferring the rest to the iteration's stall sweep. |
+| `warm_trials` / `no_warm_trials` | flag | warm OFF | Enable / force-off **warm trials** (below): pre-filter each move with the warm-start single-bundle re-solve, cold-trialing only warm-improving moves; warm-rejected moves are cold-swept at the stall point (the stop certificate stays a full cold sweep). Off by default — corpus-measured cost-neutral once the screen has cut trial volume; opt in on designs whose per-trial cold cost dominates. All tokens are order-independent — `ripup_reroute 20 no_global` and `ripup_reroute no_global 20` are equivalent. |
 
 **Two stages, auto-detected from pipeline state:**
 
@@ -258,6 +260,28 @@ slowdown_rnr stage-b ~2.5s → ~1.5s.  When the incremental replan is
 unavailable for a candidate the contender falls back to the unscreened
 order; the global-occupant pass is never screened (its per-stall budget
 already bounds it).
+
+**Warm trials (round 4, default OFF; `warm_trials` opts in).** A cold trial
+re-solves the whole design's abstract NUTS from scratch; the warm-start
+re-solve (`NUTSEngine::rerun_bundle_warm`) instead seeds the baseline
+placement, places only the moved bundle against it frozen (the screen's
+machinery), then unfreezes and runs the real safety passes over the union —
+so its cost tracks the move's blast radius, not the design.  Its metric is
+exact *for the warm state* and a measured PREDICTOR of the cold metric
+(Phase-0 study, `BUDA_RR_WARM_STUDY=1` harness: 91-100% accept agreement,
+4.6-6× cheaper per solve on bigHalf; full record in `wishlist-ripup.md`).
+With `warm_trials` on, each move is warm-evaluated first: only
+warm-improving moves pay the cold trial (accepts stay on the true cold
+metric — a warm false-accept costs one cold trial), and warm-rejected moves
+are **cold-swept at the iteration's stall point** before any stop or
+global-pass verdict, so the stop certificate remains a full cold sweep and
+a warm false-reject costs time, never the endpoint.  **Off by default** by
+the same measurement discipline that turned the screen on: with the screen
+already cutting cold-trial volume to near-minimum and fast trials cutting
+their cost, the pre-filter measured cost-neutral to slightly negative on
+the corpus (bigHalf 12.3 vs 12.7s; mix wash; big2 +0.09s).  Opt in when
+per-trial cold cost dominates — the study's crossover is roughly a cold
+trial ≥3× the warm eval (~41-70 ms).
 
 **Global-occupant pass (default on; `no_global` disables).** When the contender
 scan stalls above zero — every contender's every move tried, none improved —

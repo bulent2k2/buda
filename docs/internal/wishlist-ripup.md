@@ -502,3 +502,95 @@ ranking is a proxy (protected by deferral; 11 full trials still found all
 6 bigHalf stage-b commits).  If a future corpus shows stage-b screens
 mis-ordering badly, a cheap opens-proxy (signal-track supply vs need per
 placed window) is the shape to add.
+
+## RR round 4 — Phase 0: warm-start single-bundle re-solve fidelity study (2026-07-15)
+
+After #293 the remaining RR cost is SEMANTIC: full cold solves for trials,
+certificates, and negotiate (the #291 abort study showed every pass inside
+them is load-bearing, so nothing may be skipped).  The round-4 hypothesis:
+replace the from-scratch orientation fixpoint with a WARM SEED — place only
+the moved bundle against the baseline frozen (#293's screen), then unfreeze
+and run the real safety passes (settle_spans / repair_overlaps /
+resolve_corner_overlaps / tighten) on the union so neighbours adjust — and
+the passes' work scales with the move's blast radius instead of the design.
+
+**Prototype:** `NUTSEngine::rerun_bundle_warm(prev, bundles, target_bid)`
+(const; scratch engine copy carries the frozen zones; doglegs skipped — a
+warm state must never export topology surgery; `build_context(prep=false)`
+because the trunk-margin interval shrink is NOT idempotent and both sides'
+segments are already prepped).  The warm metric is EXACT for the warm
+placement but the placement differs from a cold run()'s — it is a
+PREDICTOR of the cold metric, never a substitute.
+
+**Study harness** (`BUDA_RR_WARM_STUDY=1`, `_rr_warm_study_sample/report`):
+every cold ripup trial ALSO runs the warm re-solve from the same baseline
+(cold still drives — trajectories byte-identical with the study off) and
+records metric exactness, accept-decision agreement vs the committed
+metric, false-accepts (warm improves, cold doesn't — cheap: a
+verify-on-accept cold run rejects them), and FALSE-REJECTS (warm misses a
+cold improvement — the two-tier killer).  Run with `no_fast_trials` so the
+cold reference is the exact full metric.
+
+**Measured (this host, screen on, no_fast_trials):**
+
+    mix / slowdown_rnr:  a 3+3 trials, b 8+8 — accept agreement 22/22,
+                         0 FA, 0 FR; warm ~2x cheaper (14-19ms vs 28-38ms)
+    big2:                a 3 trials — 2/3 agree, 1 FA, 0 FR (25 vs 31ms)
+    bigHalf (rr 30):     a 7 trials — 4/7 agree, 3 FA, 0 FR;
+                           warm 29.4ms vs cold 175.3ms (6x)
+                         b 360 trials — 328/360 agree (91%), 28 FA,
+                           4 FR (1.1%); warm 66.6ms vs cold 304.0ms
+                           (4.6x; the warm 66ms includes a FULL DNUTS —
+                           the production wiring arms the #291 abort)
+
+**Decision: GO for Phase 1.**  The error structure matches the design:
+warm is systematically OPTIMISTIC (it can find packings the cold fixpoint
+doesn't), so errors skew to false-accepts, which verify-on-accept absorbs
+at one cold trial each; false-rejects are 4/392 overall and are made
+endpoint-harmless by a COLD certificate sweep at the stall point — the
+same deferral architecture #293 proved (the loop still stops only after a
+full COLD sweep finds nothing).  The multiplier grows with design size,
+confirming the blast-radius hypothesis.  Phase-1 shape: warm as a
+PRE-FILTER inside the move scan (screen orders -> warm evaluates ->
+only warm-improving moves run the existing cold trial + commit path),
+stall triggers the cold re-sweep before the global pass; knob with a
+measurement-decided default.  Fidelity caveats recorded: study trials
+sampled post-cold-adoption wrapper state (doglegs; rare), and bottom-up
+sessions are out of the study's corpus.
+
+## RR round 4 — Phase 1: warm trials wired; default OFF (honest wash, 2026-07-15)
+
+The wiring shipped exactly in the Phase-0 shape (`_rr_warm_eval` +
+`warm_rej` collection in `_rr_scan_moves`, the warm-stall certificate
+sweep in `_ripup_reroute` before the global pass, `warm_trials` /
+`no_warm_trials` tokens, a `warm s/N` timing bucket) — soundness and
+completeness are structural: accepts run on the true cold metric, and the
+stop certificate remains a full cold sweep whatever the predictor does
+(pinned by the adversarial reject-all test).
+
+**But the production A/B came back a WASH, and the default is OFF:**
+
+    bigHalf (rr 30):  12.29s warm vs 12.73s no_warm — cold trials
+                      26->9 (a) and 11->8 (b), but 26+11 warm evals at
+                      ~41-70ms replaced them ~1:1 in cost (stage b
+                      slightly NEGATIVE: 2.94s vs 2.78s of solves).
+    mix:              wash (0.41+1.19 vs 0.39+1.13).
+    big2:             +0.09s with warm on (0.38 vs 0.29).
+
+**Why Phase 0's 4.6-6x didn't materialize:** the study measured per-SOLVE
+cost against `no_fast_trials` cold solves (175-304ms) on a 360-trial
+distribution.  Production runs sit BEHIND the #293 screen (trial volume
+already near-minimum — 11 stage-b cold trials) and fast trials (cold
+~111ms) — so there is little left for the pre-filter to eat, every
+warm-accepted move pays warm+cold, and a ~41-70ms warm eval is only ~2.7x
+cheaper than what it replaces.  The screen and the warm filter target the
+SAME waste (rejected cold trials); the screen gets there first at ~10ms.
+
+**Kept:** `rerun_bundle_warm` (the engine entry has standalone value and
+exact-for-warm-state metrics), the study harness (`BUDA_RR_WARM_STUDY=1`),
+and the opt-in wiring (zero default-route risk; every existing flow is
+byte-identical with the default off).  **The bar for flipping the
+default:** a corpus where post-screen cold-trial cost dominates — roughly
+a cold trial >=3x the warm eval, i.e. designs several times bigHalf's
+size, or stall-sweep-heavy flows.  Measure with the study harness first;
+the wiring is already there.
