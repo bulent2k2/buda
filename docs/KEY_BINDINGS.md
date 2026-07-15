@@ -69,22 +69,28 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 
 Press `e` to open an **edit session** on a working *copy* of the shown
 candidate (`E` starts from an empty topology).  While a session is open the
-copy replaces the candidate on screen, a red banner shows each operation's
-verdict (violations, wire-graph components, pinch), and candidate/bundle
-navigation is parked.  The same operations are scriptable as `.buda`
-commands (`edit_topology` … `edit_commit` — see the Script Reference).
+copy replaces the candidate on screen, a boxed red banner (top-left, inside
+the axes) shows each operation's verdict (violations, wire-graph components,
+pinch), the **bundle-scoped Hanan grid** turns on (the lines generation
+derives this bundle's candidates from — busterm-block + keepout edges; also
+the only `T`/`Y` snap targets), segments thin so the slide bands stay
+readable, and candidate/bundle navigation is parked.  The same operations
+are scriptable as `.buda` commands (`edit_topology` … `edit_commit` — see
+the Script Reference).
 
 | Key(s) | Action |
 | :--- | :--- |
 | `e` / `E` | Open an edit session: copy of the shown candidate / empty topology. |
-| `T` (Shift+t) | Add a **horizontal trunk** at the cursor's nearest Hanan row, full Hanan span. |
-| `Y` (Shift+y) | Add a **vertical trunk** at the cursor's nearest Hanan column, full Hanan span. |
+| `T` (Shift+t) | Add a **horizontal trunk** at the cursor's nearest bundle-grid row, full Hanan span. |
+| `Y` (Shift+y) | Add a **vertical trunk** at the cursor's nearest bundle-grid column, full Hanan span. |
 | `S` (Shift+s) | Add a **stub** from the block under the cursor to the selected segment (`j`/`k`). |
 | `C` (Shift+c) | **Connect** two perpendicular segments: press once to mark the selected segment, re-select (`j`/`k`), press again. |
 | `D` (Shift+d) | **Disconnect** a junction pair (same two-step marking); the cursor position sets where the retracted endpoint lands. |
-| `X` (Shift+x) | **Remove** the selected segment (annotations re-keyed). |
-| `enter` | **Commit**: append the copy to the bundle's pool as a `USER` candidate (uid-deduped), pin it, and save the sidecar. |
-| `escape` | **Abort**: discard the working copy. |
+| `W` (Shift+w) | **Refine the selected segment's slide window**: press at one perpendicular bound, then at the other — the window (∩ the structural slide range) is staged and lands as a NUTS override (`plan.seg_slide_lo/hi`) on commit. The drawn slide band follows live. |
+| `w` | **Clear** the selected segment's staged slide window. |
+| `X` (Shift+x) | **Remove** the selected segment (annotations re-keyed; staged slide windows re-keyed too). |
+| `enter` | **Commit**: append the copy to the bundle's pool as a `USER` candidate (uid-deduped), pin it, save the sidecar, and apply any staged slide windows to the plan. |
+| `escape` | **Abort**: discard the working copy (staged slide windows included). |
 
 ### Mouse
 

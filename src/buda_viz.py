@@ -70,19 +70,25 @@ def _layer_label(lid, layer_stack=None):
 stat_title = "Bundle-based Design Assistant (BUDA) with Non-Uniform Track Sharing (NUTS)"
 
 
-def _draw_hanan_grid(ax, fp, ui_state: ViewState):
-    """Draw the Hanan grid and return the line artists. Visibility is set by ui_state."""
+def _draw_hanan_grid(ax, fp, ui_state: ViewState, force=False, grid=None):
+    """Draw the Hanan grid and return the line artists. Visibility is set by
+    ui_state; `force` shows the grid regardless (the topology editor turns it
+    on for the session — trunks land on Hanan lines, so the targets must be
+    visible — without touching the shared ui_state the main window reads).
+    `grid` = explicit (xs, ys) to draw instead of the full-design
+    fp.get_hanan_grid() (the explorer passes the bundle-scoped grid)."""
     artists = []
-    xs, ys = fp.get_hanan_grid()
+    xs, ys = grid if grid is not None else fp.get_hanan_grid()
     # Style: prominent dashed line for debugging
     color = '#94a3b8'  # slate-400
+    visible = force or ui_state.hanan_grid
     for x in xs:
         l = ax.axvline(x=x, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
-        l.set_visible(ui_state.hanan_grid)
+        l.set_visible(visible)
         artists.append(l)
     for y in ys:
         l = ax.axhline(y=y, color=color, linestyle='--', linewidth=0.7, alpha=0.6, zorder=0)
-        l.set_visible(ui_state.hanan_grid)
+        l.set_visible(visible)
         artists.append(l)
     return artists
 
@@ -856,10 +862,15 @@ class TopologyExplorer:
         # the shown candidate.  Opened with 'e' (copy) / 'E' (empty), committed
         # with enter (appended to the pool as a USER candidate + pinned),
         # discarded with escape.  _edit_pending marks the first segment of a
-        # two-step connect/disconnect pair.
+        # two-step connect/disconnect pair.  _edit_slide stages per-segment
+        # slide-window refinements ({seg_idx: (lo, hi)}, 'W' two-step / 'w'
+        # clears) written to plan.seg_slide_lo/hi on commit; _edit_slide_mark
+        # holds the first 'W' bound as (seg_idx, coord).
         self._edit_topo    = None
         self._edit_pending = -1
         self._edit_msg     = ""
+        self._edit_slide   = {}
+        self._edit_slide_mark = None
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}
@@ -1016,7 +1027,8 @@ class TopologyExplorer:
         return (h if h != -1 else 4), (v_ if v_ != -1 else 5)
 
     def _edit_open(self, empty):
-        if self._edit_topo is not None:
+        was_open = self._edit_topo is not None
+        if was_open:
             self._edit_msg = "edit session already open — enter commits, esc aborts"
         elif empty:
             self._edit_topo = ic.Topology()
@@ -1028,17 +1040,24 @@ class TopologyExplorer:
             # candidates[] elements alias pool storage; deep-copy explicitly.
             self._edit_topo = ic.offset_topology(self.topos[self.idx], 0, 0)
             self._edit_msg = f"EDIT: copy of topo {self.idx + 1} ({self._edit_topo.type})"
+        if not was_open and self._edit_topo is not None:
+            self._edit_slide = {}          # fresh session: no staged windows
+            self._edit_slide_mark = None
         self._edit_pending = -1
         self._draw()
 
     def _edit_close(self, msg):
         self._edit_topo    = None
         self._edit_pending = -1
+        self._edit_slide   = {}
+        self._edit_slide_mark = None
         self._edit_msg     = msg
         self._draw()
 
     def _edit_apply(self, verdict):
-        """Render one op's verdict into the edit banner (and the console)."""
+        """Render one op's verdict into the edit banner (and the console).
+        Returns verdict.applied so callers can chain bookkeeping (e.g. the
+        staged-slide-window remap after a segment removal)."""
         if not verdict.applied:
             self._edit_msg = f"EDIT rejected: {verdict.note}"
         else:
@@ -1052,6 +1071,62 @@ class TopologyExplorer:
                 + ("; PINCHED" if verdict.pinched else "")
             self._edit_msg = f"EDIT: {verdict.note} — {state}"
         print(f"[edit] {self._edit_msg}")
+        self._draw()
+        return verdict.applied
+
+    @staticmethod
+    def _fmt_perp(v):
+        return ("-inf" if v < -_UNCONSTRAINED
+                else "inf" if v > _UNCONSTRAINED else f"{v:.0f}")
+
+    def _edit_slide_at(self, event):
+        """Two-step slide-window refine ('W'): with a segment selected, the
+        first press marks the cursor's PERPENDICULAR coordinate as one bound,
+        the second applies [min, max] of the two marks — intersected with the
+        segment's structural slide range (a window outside it would make the
+        NUTS placement infeasible) — as a staged override that lands on
+        plan.seg_slide_lo/hi at commit.  'w' clears the selected segment's
+        staged window."""
+        if not (0 <= self.sidx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: select a segment first (j/k)"
+            self._draw(); return
+        if event.xdata is None or event.ydata is None:
+            self._edit_msg = "EDIT: put the cursor on the canvas first"
+            self._draw(); return
+        cs = list(self._build_conn_topo(self._edit_topo).segs())[self.sidx]
+        coord = float(event.ydata if cs.horiz else event.xdata)
+        if (self._edit_slide_mark is None
+                or self._edit_slide_mark[0] != self.sidx):
+            self._edit_slide_mark = (self.sidx, coord)
+            self._edit_msg = (f"EDIT: seg {self.sidx} slide bound at "
+                              f"{coord:.0f} — press W at the other bound")
+            self._draw(); return
+        _, c1 = self._edit_slide_mark
+        self._edit_slide_mark = None
+        lo, hi = min(c1, coord), max(c1, coord)
+        s_lo, s_hi = float(cs.perp_lo), float(cs.perp_hi)
+        clo, chi = max(lo, s_lo), min(hi, s_hi)
+        if clo > chi:
+            self._edit_msg = (
+                f"EDIT rejected: window [{lo:.0f},{hi:.0f}] is outside seg "
+                f"{self.sidx}'s slide range "
+                f"[{self._fmt_perp(s_lo)},{self._fmt_perp(s_hi)}]")
+            self._draw(); return
+        self._edit_slide[self.sidx] = (clo, chi)
+        note = "" if (clo, chi) == (lo, hi) else " (clamped to slide range)"
+        self._edit_msg = (f"EDIT: seg {self.sidx} slide window "
+                          f"[{clo:.0f},{chi:.0f}]{note} — applies on commit")
+        print(f"[edit] {self._edit_msg}")
+        self._draw()
+
+    def _edit_slide_clear(self):
+        if not (0 <= self.sidx < len(self._edit_topo.segments)):
+            self._edit_msg = "EDIT: select a segment first (j/k)"
+        elif self._edit_slide.pop(self.sidx, None) is not None:
+            self._edit_msg = f"EDIT: seg {self.sidx} slide window cleared"
+        else:
+            self._edit_msg = f"EDIT: seg {self.sidx} has no slide window"
+        self._edit_slide_mark = None
         self._draw()
 
     @staticmethod
@@ -1070,7 +1145,10 @@ class TopologyExplorer:
         if event.xdata is None or event.ydata is None:
             self._edit_msg = "EDIT: put the cursor on the canvas first"
             self._draw(); return
-        xs, ys = self.fp.get_hanan_grid()
+        # Snap to the BUNDLE-scoped grid — exactly the lines the toggle
+        # displays (busterm-block + keepout edges), so a trunk never lands on
+        # an invisible full-design line.
+        xs, ys = self._bundle_hanan_grid()
         perp = self._snap(event.ydata if horiz else event.xdata,
                           ys if horiz else xs)
         h, v_ = self._edit_default_layers()
@@ -1153,6 +1231,22 @@ class TopologyExplorer:
         self.sidx = -1
         self._select_current()          # pin + sidecar (uid-carrying) + redraw
         self._edit_msg = f"EDIT: {note}, pinned"
+        # Land the session's slide-window refinements as NUTS overrides on the
+        # pinned candidate (plan.seg_slide_lo/hi, NaN = free) — the same hatch
+        # dogleg splits ride: the next run_nuts honors them, a re-plan clears
+        # them (existing override semantics).
+        if self._edit_slide:
+            nseg = len(topo.segments)
+            slo = [float('nan')] * nseg
+            shi = [float('nan')] * nseg
+            for si, (lo, hi) in self._edit_slide.items():
+                if 0 <= si < nseg:
+                    slo[si], shi[si] = float(lo), float(hi)
+            w.plan.seg_slide_lo = slo
+            w.plan.seg_slide_hi = shi
+            self._edit_msg += f" (+{len(self._edit_slide)} slide window(s))"
+            self._edit_slide = {}
+            self._edit_slide_mark = None
         print(f"[edit] {self._edit_msg}")
         self._draw()
 
@@ -1186,6 +1280,10 @@ class TopologyExplorer:
         return cs.net_pull
 
     def _seg_slide(self, cs, ci):
+        # A staged edit-session slide window wins while editing, so the slide
+        # band and its bound labels live-update as 'W' refines the window.
+        if self._edit_topo is not None and ci in self._edit_slide:
+            return self._edit_slide[ci]
         slo = getattr(self.wrapper.plan, 'seg_slide_lo', None)
         shi = getattr(self.wrapper.plan, 'seg_slide_hi', None)
         if (self._show_overrides() and slo and shi and len(slo) == self._n_segs()
@@ -1254,6 +1352,41 @@ class TopologyExplorer:
         if abs(lo) < _UNCONSTRAINED and abs(hi) < _UNCONSTRAINED:
             return (lo + hi) / 2.0
         return float(cs.perp_pos)
+
+    def _bundle_busterm_names(self):
+        """The bundle's busterm block set — the union of seg_busterms taps
+        across this bundle's candidates (the generator's own tap record; every
+        valid candidate taps exactly the bundle's endpoint blocks, per the
+        coverage gate).  Falls back to the shown topo's connected_block_names
+        when no candidate carries taps (a fully hand-built pool)."""
+        names = set()
+        for t in self.wrapper.input.candidates:
+            for eps in t.seg_busterms.values():
+                for bt in eps:
+                    if bt is not None:
+                        names.add(bt.block_name)
+        if not names:
+            names = set(self._shown_topo().connected_block_names)
+        return names
+
+    def _bundle_hanan_grid(self):
+        """The per-bundle Hanan grid GENERATION actually uses for this bundle
+        (TopologyGenerator::generate_npin): edges of the bundle's busterm
+        rects — each individual rect of a multi-rect block, the orig bbox
+        otherwise — plus every keepout's edges.  The full-design
+        fp.get_hanan_grid() adds every unrelated block's lines, which is
+        noise when editing one bundle."""
+        xs, ys = set(), set()
+        for n in self._bundle_busterm_names():
+            rects = self.fp.get_block_rects(n)
+            if not rects:
+                rects = [self.fp.get_block_bounds(n)]
+            for r in rects:
+                xs.update((r.x1, r.x2)); ys.update((r.y1, r.y2))
+        for koz in self.fp.get_keepout_zones():
+            xs.update((koz.bbox.x1, koz.bbox.x2))
+            ys.update((koz.bbox.y1, koz.bbox.y2))
+        return sorted(xs), sorted(ys)
 
     def _draw_slide_spans(self, topo, ct):
         """Overlay slide-range bands on the current topology."""
@@ -1531,8 +1664,9 @@ class TopologyExplorer:
         # ── TopoEdit mode (Phase E3b): e/E open a session (copy/empty); while
         # open, T/Y add an H/V trunk at the cursor's Hanan line, S stubs the
         # block under the cursor to the selected segment, C/D pair-connect/
-        # -disconnect, X removes, enter commits (+pin), escape aborts.
-        # Candidate/bundle navigation is parked while editing.
+        # -disconnect, X removes, W/W refines the selected segment's slide
+        # window at the cursor (two bounds; 'w' clears), enter commits (+pin),
+        # escape aborts.  Candidate/bundle navigation is parked while editing.
         if event.key == 'e':                    self._edit_open(empty=False); return
         if event.key == 'E':                    self._edit_open(empty=True); return
         if self._edit_topo is not None:
@@ -1541,12 +1675,20 @@ class TopologyExplorer:
             if event.key == 'S':                self._edit_add_stub_at(event); return
             if event.key == 'C':                self._edit_pair_op(event, connect=True); return
             if event.key == 'D':                self._edit_pair_op(event, connect=False); return
+            if event.key == 'W':                self._edit_slide_at(event); return
+            if event.key == 'w':                self._edit_slide_clear(); return
             if event.key == 'X':
                 if 0 <= self.sidx < len(self._edit_topo.segments):
                     si = self.sidx
                     self.sidx = -1
-                    self._edit_apply(ic.edit_remove_segment(
-                        self._edit_topo, self.fp, si))
+                    if self._edit_apply(ic.edit_remove_segment(
+                            self._edit_topo, self.fp, si)):
+                        # Indices above si shifted down: remap the staged
+                        # slide windows, dropping the removed segment's own.
+                        self._edit_slide = {
+                            (i - 1 if i > si else i): v
+                            for i, v in self._edit_slide.items() if i != si}
+                        self._edit_slide_mark = None
                 else:
                     self._edit_msg = "EDIT: select a segment first (j/k)"
                     self._draw()
@@ -1784,18 +1926,31 @@ class TopologyExplorer:
             spine.set_linewidth(border_lw)
 
         if self._edit_topo is not None or self._edit_msg:
-            ax.text(0.01, 1.01,
+            # Edit banner: a boxed status chip INSIDE the axes at top-left —
+            # the old spot just above the axes (0.01, 1.01) shared the title
+            # band and a long verdict overlapped the header.  Top-left is free
+            # (the legend sits upper-right); the box keeps it readable over
+            # design content.
+            ax.text(0.01, 0.985,
                     self._edit_msg or "EDIT",
                     transform=ax.transAxes, fontsize=9, color='#b03030',
-                    va='bottom', ha='left', clip_on=False)
+                    va='top', ha='left', zorder=60, clip_on=False,
+                    bbox=dict(boxstyle='round,pad=0.35', facecolor='#fff4f4',
+                              edgecolor='#b03030', linewidth=0.8, alpha=0.92))
             if self._edit_topo is None:
                 self._edit_msg = ""     # one-shot after the session closes
 
         ct = self._build_conn_topo(topo)
         cs_list = list(ct.segs())
 
-        # Determine display geometry for segments — width proportional to bundle width
-        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 14.0)
+        # Determine display geometry for segments — width proportional to
+        # bundle width, capped so a wide bus's fat line cannot bury the slide
+        # bands and dotted nominals it is drawn over; while a TopoEdit session
+        # is open the segments thin further still — edit verdicts are read off
+        # the slide indicators, which must stay visible.
+        viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 9.0)
+        if self._edit_topo is not None:
+            viz_lw = min(viz_lw, 4.5)
         actual_lids = []
 
         # ── Pre-compute display geometry for all segments ──────────────────
@@ -1976,8 +2131,15 @@ class TopologyExplorer:
         self._block_patch_artists, self._block_name_artists = _draw_blocks(
             ax, self.fp, self.ui_state, highlight_blocks)
 
-        # Hanan grid
-        _draw_hanan_grid(ax, self.fp, self.ui_state)
+        # Hanan grid — forced ON while a TopoEdit session is open: T/Y place
+        # trunks at the cursor's Hanan line, so the candidate lines must show.
+        # The explorer shows the BUNDLE-scoped grid (busterm-block + keepout
+        # edges — what generation derives candidates from for THIS bundle),
+        # not the full-design grid; T/Y snapping stays on the full grid, a
+        # superset, so every displayed line remains a snap target.
+        _draw_hanan_grid(ax, self.fp, self.ui_state,
+                         force=self._edit_topo is not None,
+                         grid=self._bundle_hanan_grid())
 
 
         # Slide-range bands (drawn before segments so segments sit on top)

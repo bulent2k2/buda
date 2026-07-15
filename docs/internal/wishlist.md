@@ -8,6 +8,11 @@ priority view** — what's actually open right now, ranked by value/effort — s
 
 ## History
 
+- **2026-07-14** — Added [`wishlist-topoedit.md`](wishlist-topoedit.md) (topology
+  editor): 'W' slide-refine input-precision options (snap-to-grid variant, echo
+  marker at the marked bound, precise text entry) deferred until the raw
+  cursor-float capture proves too loose in practice, plus `edit_set_slide` CLI
+  parity.
 - **2026-07-13** — Added the **non-TOP pin-access stub span-stretched onto its
   endpoint leaf** open item ([`wishlist-nuts.md`](wishlist-nuts.md) +
   [`opens.md`](opens.md) #4 + `../future/nuts_packing_gaps.md` §4): flow 10's
@@ -49,6 +54,11 @@ priority view** — what's actually open right now, ranked by value/effort — s
   corner-margin default `dx=dy=0` (MEASURED — keep 0; the corner-touch
   generation gap is ✅ resolved via `CORNER_HV`/`CORNER_VH` diagonal L's).
   See [topo_conn_unification.md](topo_conn_unification.md).
+- **[wishlist-topoedit.md](wishlist-topoedit.md)** — Topology editor (TopoEdit).
+  Slide-window refine ('W') input precision — snap-to-grid variant, echo
+  marker at the marked bound, precise text entry — if the raw cursor-float
+  capture proves too loose in practice; CLI parity for the slide refine
+  (`edit_set_slide`, mirroring `edit_set_span`).
 - **[wishlist-planner.md](wishlist-planner.md)** — Congestion planner.
   Coverage gate (✅ resolved — superseded by the generation-time
   `filter_uncovered` gate); signal-track band capacity (Gap A part 2, ✅
