@@ -189,6 +189,28 @@ public:
     //                        slide-window band choice in best_band_perp)
     //                        steers off nearly-full bands before any
     //                        overflow materializes.
+    //   "kWLSpread"        — realization-risk wirelength penalty (default
+    //                        -1 = OFF): when >= 0 and a candidate carries the
+    //                        annotated slide/span WL envelope [wl_lo, wl_hi]
+    //                        (session-side, gated on this knob), the kWL term
+    //                        scores  nominal + kWLSpread * (wl_hi - wl_lo).
+    //                        NUTS realizations wander within the DOF
+    //                        envelope (corpus fill mean ~15% over 290
+    //                        bundles), so a wide-envelope shape (many
+    //                        slide-coupled segments) realizes far ABOVE its
+    //                        nominal while a tight 2-seg shape realizes at
+    //                        or below it — the nominal alone inverts the
+    //                        true ranking (flow/big_data_test/b44.buda: a
+    //                        6-seg TRUNK_H+MST at nominal 3510 / spread 8650
+    //                        realizes 4510, beaten by a 2-seg TRUNK_V at
+    //                        nominal 4010 / spread 1500 realizing 3715).
+    //                        The base stays the nominal — an envelope-point
+    //                        REPLACEMENT (wl_lo + fill*spread) was measured
+    //                        and rejected: switching the base to wl_lo
+    //                        reshuffles near-ties corpus-wide (big2 +27% WL)
+    //                        while the spread penalty alone keeps same-
+    //                        spread orderings identical.  Candidates without
+    //                        the annotation score the plain nominal.
     void set_planner_param(const std::string& name, double value);
     // Minimum inter-bus spacing, mirroring NUTSEngine::set_track_pitch.  The
     // band books reserve one pitch of margin per additional bus in a band so a
@@ -478,6 +500,9 @@ private:
     double kSpan_             = 0.001;
     double base_cost_non_top_ = 0.5;
     double kWL_               = 0.001;
+    // Realization-risk WL spread penalty (see set_planner_param "kWLSpread").
+    // < 0 = OFF (kWL scores the plain nominal estimated_wirelength).
+    double kWLSpread_         = -1.0;
     // Same-direction TOP-layer load-balancing weight.  Without it the planner
     // breaks ties toward the highest metal (span/base costs are 0 on a TOP layer
     // with no span window), piling every H bus on the top H layer and every V

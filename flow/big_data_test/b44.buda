@@ -30,3 +30,12 @@ check_design
 report_wl
 # [report_wirelength] total detailed WL = 193376 over 1 bundle(s) / 104 bit-wire(s), 0 unplaced bit(s); bit-scaled envelope [182520..260520]
 # visualize
+
+# The fix: `set_planner_param kWLSpread 0.125` (opt-in) prices realization
+# risk — scored WL = nominal + kWLSpread*(wl_hi - wl_lo), the candidate's
+# slide/span DOF envelope — so the wide-envelope trunk+mst (spread 8650) is
+# demoted and the planner UN-pinned picks an even better candidate than the
+# hand-pin above (detailed WL 188513, -19.6% vs the default's 234546).
+# See docs/script_reference/planner.md (kWLSpread) and
+# test/tests/test_planner_wl_spread.py.
+# set_planner_param kWLSpread 0.125

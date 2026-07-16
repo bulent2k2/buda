@@ -249,6 +249,58 @@ missing file is now a hard error (exit 1, like an unknown command), and
 `run_planner` prints a one-shot `[Planner] WARNING` when no H/V layers are defined
 before falling back to M4/M5.
 
+## Realization-risk WL: rank on the envelope, not just the nominal — `kWLSpread` SHIPPED (opt-in)
+
+**The b44 mis-ranking (repro `flow/big_data_test/b44.buda`, 2026-07-16):**
+the planner's `kWL` term scores the candidate's NOMINAL segment-sum, but the
+routed WL is a realization inside the candidate's slide/span DOF envelope
+`[wl_lo, wl_hi]` (the interval dump_topologies/report_wl already compute).
+b44's 52-bit multicast: the nominal ranking picks a 6-seg `TRUNK_H+MST`
+(nominal 3510, envelope [3510..12160]) whose greedy NUTS placement stretches
+the trunk between its independently-slid stubs to 4510/bit, over a 2-seg
+`TRUNK_V` (nominal 4010, [3510..5010]) that realizes 3715/bit — detailed WL
+234546 vs 193376 (+21%), in a single-bundle zero-contention flow. Corpus fill
+study (290 bundles / 6 flows): routed WL sits at **fill mean 14.7%, median 9%,
+p90 32%** of the envelope — realizations concentrate near the bottom, spread
+is the risk signal.
+
+**As-built:** `Topology::wl_lo/wl_hi` (derived annotation like `seg_bits`:
+never persisted, excluded from topo_uid), stamped by the session
+(`_annotate_wl_envelopes`, the dump_topologies envelope math + per-bundle
+frame resolver) at `run_planner`/`run_planner hier` when
+`set_planner_param kWLSpread <a>` is set; the planner's WL term becomes
+`nominal + kWLSpread × (wl_hi − wl_lo)`. **Base stays the nominal** — the
+envelope-point REPLACEMENT `wl_lo + fill×spread` was measured and REJECTED
+(it erases genuine nominal differences and reshuffles near-ties corpus-wide:
+big2 +27% WL / opens 0→252 at every fill tested). Measured at `0.125`:
+b44 −19.6% detailed WL (beats even the flow's hand-pin), **mempool_tile
+−46.5% WL with overlaps 61→27 AND opens 2971→2038**, mix −0.1%, hbundles/10
+−0.5%; plain no-healer pipelines can surface a selection-shuffle opens delta
+(big2 0→60) that the standard healers absorb completely (big2 + negotiate +
+ripup: **0 opens / 1 overlap** vs baseline 0/5, +2.1% WL; bigHalf + healers
+**0/0**). `0.25` is too aggressive (mix healed endpoint 0→16). Tests:
+`test/tests/test_planner_wl_spread.py`; docs: `docs/script_reference/planner.md`.
+
+**Root causes (deep-dive):** the nominal-vs-realization gap is a
+generation-policy comparability problem — the MST hybrid's nominal is a
+zero-overshoot monotone staircase (always AT its envelope bottom), plain
+trunks sample loci only at Hanan-channel midpoints (the WL-optimal
+edge-aligned locus is never emitted, b44's +500), and WL ties break
+alphabetically (`(wl, type)`, ASCII `'+' < '@'`) then by lowest index — see
+[`wishlist-topo.md`](wishlist-topo.md) → *"Nominal-WL comparability across
+shape families"* for the generation-side follow-ons (Hanan-line loci,
+structural tie-break) and why the score-term route shipped first.
+
+**Default-flip criteria (stays opt-in for now):** same bar as `kPeak` — the
+opens shuffle on plain pipelines means a blanket default needs either (a) the
+healers in the default flow path, or (b) a spread term that prices only the
+*trunk-stretch* component (junction-coupled spread) rather than the whole
+envelope. Bottom-up template planning (`_plan_bottom_up_templates`) IS
+annotated (Codex #312): the local solve's planner is seeded from
+`_planner_params`, and the templates' envelopes are stamped against the
+cell-local floorplan the solve plans in, so the spread term applies before
+the pin that expansion locks in.
+
 ## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVERS 1+2 SHIPPED; `kPeak` default DECIDED (stays opt-in)
 
 **Lever 1 as-built (2026-07-10):** `set_planner_param kPeak <w>` adds a

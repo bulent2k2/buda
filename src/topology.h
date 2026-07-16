@@ -190,6 +190,18 @@ struct Topology {
     // block's own lower-level router bridges the gap.  Empty unless a straddling
     // block was marked feedthru for the trunk layer (Floorplan::get_feedthru).
     std::vector<std::string> feedthru_blocks;
+    // Realization-aware wirelength envelope [wl_lo, wl_hi]: the abstract-WL
+    // interval this candidate's slide/span DOF permit (joint slide minimum ..
+    // loose outer bound — the same interval dump_topologies/report_wl show).
+    // DERIVED annotation like seg_bits: never persisted, excluded from the
+    // fingerprint/topo_uid; set by the session (Python _topology_wl_interval)
+    // before planning when the planner's kWLSpread knob is enabled, so the WL
+    // term can price realization risk (spread = wl_hi - wl_lo) on top of the
+    // nominal segment-sum (which for slide-coupled MST shapes sits at the
+    // envelope bottom and inverts the true ranking — flow/big_data_test/b44.buda).
+    // -1 = unset (planner falls back to estimated_wirelength).
+    double wl_lo = -1.0;
+    double wl_hi = -1.0;
 
     // ── Derived-analysis cache (Phase B, docs/internal/topo_conn_unification.md).
     // Filled by topology_analysis.cpp's analyze(); validated by CONTENT

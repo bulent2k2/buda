@@ -1544,6 +1544,13 @@ class HierMixin:
             self._apply_hier_refine_default(planner)
             planner.set_track_pitch(self._nuts_pitch)
             planner.build_congestion_map()
+            # Opt-in kWLSpread: the local planner is seeded from
+            # _planner_params above, so it WILL apply the spread term —
+            # stamp the templates' envelopes against the cell-local
+            # floorplan it plans in, or every candidate would fall back to
+            # the nominal here and expansion would lock that choice in.
+            if self._planner_params.get("kWLSpread", -1.0) >= 0.0:
+                self._annotate_wl_envelopes(wrappers, fp=fp)
             assignments = planner.optimize_topologies(wrappers, iterations)
             # The local NUTS solve must see the same candidate-extended
             # Hanan grid the local planner charged (exactly as run_nuts
