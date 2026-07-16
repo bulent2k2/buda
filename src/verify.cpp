@@ -181,6 +181,55 @@ static void detect_feedthru_relay(const std::vector<ConnSeg>& segs,
     }
 }
 
+// ── detect_disconnected ───────────────────────────────────────────────────────
+//
+// Whole-graph connectivity: the wire graph must be ONE island.  Union segments
+// joined by a SEG junction record (the authoritative annotation NUTS holds
+// together) and segments tapping the SAME block (through-block continuity: a
+// driver/receiver hosting several landings, a declared feedthru's split spine,
+// or a multi-rect block's internal routing — the ILLEGITIMATE through-block
+// joint is flagged separately as FEEDTHRU_RELAY, so counting it here never
+// hides it).  2+ components = the net cannot be electrically complete even
+// though every block is tapped and every junction touches — e.g. a TopoEdit
+// session that removed the only bridging stub and committed with comps=2.
+// Structural (conn records, not placement), so one detector serves every stage.
+static void detect_disconnected(const std::vector<ConnSeg>& segs,
+                                int bundle_id, const char* stage,
+                                ConnResult& result)
+{
+    int n = (int)segs.size();
+    if (n < 2) return;
+    std::vector<int> uf(n);
+    std::iota(uf.begin(), uf.end(), 0);
+    std::function<int(int)> find = [&](int x){ return uf[x]==x ? x : uf[x]=find(uf[x]); };
+    std::map<std::string, int> block_seen;   // block name -> first tapping seg
+    for (int i = 0; i < n; ++i) {
+        for (const auto& conn : segs[i].conns) {
+            if (conn.kind == SegConn::SEG) {
+                uf[find(i)] = find(conn.seg_idx);
+            } else if (conn.kind == SegConn::BUSTERM) {
+                auto [it, fresh] = block_seen.emplace(conn.block_name, i);
+                if (!fresh) uf[find(i)] = find(it->second);
+            }
+        }
+    }
+    std::set<int> comps;
+    for (int i = 0; i < n; ++i) comps.insert(find(i));
+    if ((int)comps.size() <= 1) return;
+    ConnViolation v;
+    v.kind = ViolationKind::DISCONNECTED;
+    v.bundle_id = bundle_id;
+    v.seg_idx  = *comps.begin();
+    v.seg_idx2 = *std::next(comps.begin());
+    std::ostringstream msg;
+    msg << "Topology splits into " << comps.size() << " disconnected islands"
+        << " (seg-graph roots:";
+    for (int r : comps) msg << " " << r;
+    msg << ") — the net cannot be electrically complete (" << stage << ")";
+    v.message = msg.str();
+    result.violations.push_back(std::move(v));
+}
+
 // ── check_topo ────────────────────────────────────────────────────────────────
 
 ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
@@ -281,6 +330,9 @@ ConnResult check_topo(const ConnTopology& ct, const Topology& topo,
     // 4. FEEDTHRU_RELAY: every block's incident stubs must be wire-connected, not
     //    relayed through the block's body (shared helper, geometric wire touch).
     detect_feedthru_relay(segs, topo, fp, bundle_id, "topo", result);
+
+    // 5. Whole-graph connectivity: one island only.
+    detect_disconnected(segs, bundle_id, "topo", result);
 
     return result;
 }
@@ -497,6 +549,7 @@ ConnResult check_nuts(const ConnTopology& ct, const NUTSResult& nuts,
 
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(segs, topo, fp, bundle_id, "nuts", result);
+    detect_disconnected(segs, bundle_id, "nuts", result);
 
     return result;
 }
@@ -741,6 +794,8 @@ ConnResult check_dnuts(const ConnTopology& ct, const DetailedNUTSResult& dnuts,
 
     // FEEDTHRU_RELAY (structural; see detect_feedthru_relay).
     detect_feedthru_relay(ct.segs(), topo, fp, bundle_id, "dnuts", result);
+    // Whole-graph connectivity (structural; see detect_disconnected).
+    detect_disconnected(ct.segs(), bundle_id, "dnuts", result);
 
     // BIT_SHORT: two DIFFERENT bits of this bundle are two different NETS,
     // so their wires sharing a layer + track with overlapping (or touching —

@@ -93,6 +93,25 @@ EditVerdict edit_add_trunk(Topology& topo, const Floorplan& fp, bool horiz,
     }
     if (along_lo >= along_hi)
         return fail("degenerate trunk span");
+    // Reject an EXACT geometric duplicate (same orientation + line + span) of
+    // an existing segment — the repeated-Y slip that silently stacks identical
+    // trunks.  Only the exact dup is refused: two trunks on the SAME line with
+    // different spans are a legitimate pattern (disjoint spans each covering a
+    // block pair; re-span with P / edit_set_span).
+    for (size_t i = 0; i < topo.segments.size(); ++i) {
+        const Segment& t = topo.segments[i];
+        if (seg_is_horiz(t) != horiz) continue;
+        const int t_perp = horiz ? t.start.y : t.start.x;
+        if (t_perp != perp_pos) continue;
+        const int t_lo = horiz ? std::min(t.start.x, t.end.x)
+                               : std::min(t.start.y, t.end.y);
+        const int t_hi = horiz ? std::max(t.start.x, t.end.x)
+                               : std::max(t.start.y, t.end.y);
+        if (t_lo == along_lo && t_hi == along_hi)
+            return fail("identical trunk already exists (seg "
+                        + std::to_string(i) + ") — re-span it with "
+                        "edit_set_span/P, or remove it (X) first");
+    }
     Segment s;
     s.start = horiz ? Point{along_lo, perp_pos} : Point{perp_pos, along_lo};
     s.end   = horiz ? Point{along_hi, perp_pos} : Point{perp_pos, along_hi};
