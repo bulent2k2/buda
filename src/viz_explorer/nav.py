@@ -71,6 +71,21 @@ class ExplorerNavMixin:
         # in numeric order.
         return known + [i for i in range(n) if i not in seen]
 
+    def _sync_bundle_fp(self):
+        """Point self.fp at the CURRENT bundle's own floorplan — cell-local for
+        a hier cell-level template, the endpoint frame for a cross-level
+        bundle, the session floorplan otherwise (flat bundles, expanded
+        per-instance wrappers).  Every fp consumer (drawn blocks, the
+        bundle-scoped Hanan grid, block hit-tests for S/P, edit-op verdicts,
+        span anchors) follows the swap; the view re-homes when the frame
+        changes (the extents differ wildly).  No-op without a resolver."""
+        if getattr(self, '_fp_resolver', None) is None:
+            return
+        new_fp = self._fp_resolver(self.wrapper) or self._session_fp
+        if new_fp is not self.fp:
+            self.fp = new_fp
+            self._autoscale_needed = True
+
     def _step_bundle(self, delta):
         order = self._bundle_step_order()
         if not order:
@@ -80,6 +95,7 @@ class ExplorerNavMixin:
         except ValueError:
             cur = 0
         self.bidx = order[(cur + delta) % len(order)]
+        self._sync_bundle_fp()                 # the new bundle's own frame
         self.idx  = self._focus_topo_index()   # jump to this bundle's pinned topo
         self.sidx = -1
         self._autoscale_needed = True
@@ -89,9 +105,19 @@ class ExplorerNavMixin:
 
     def show_bundle_index(self, idx):
         """Jump to a specific bundle (used when the explorer is already open and
-        the parent viz wants to focus a different highlighted bundle)."""
+        the parent viz wants to focus a different highlighted bundle).
+
+        Parked while a TopoEdit session is open, like the nav keys: an open
+        session pins the frame (self.fp) and the working copy to ITS bundle —
+        adopting the main window's focus here would move self.bidx and swap
+        self.fp under the copy (the cross-window race from review #311)."""
+        if self._edit_topo is not None:
+            self._edit_msg = "EDIT: finish the session first (enter/esc)"
+            self._draw()
+            return
         if 0 <= idx < len(self.wrappers) and idx != self.bidx:
             self.bidx = idx
+            self._sync_bundle_fp()                 # its own frame (hier)
             self.idx  = self._focus_topo_index()   # jump to its pinned topo
             self.sidx = -1
             self._autoscale_needed = True
@@ -115,10 +141,12 @@ class ExplorerNavMixin:
                 if event.key == 'escape':       self._edit_trunk_pin_cancel(); return
                 return
             # Two-step trunk placement is armed: swallow keys except place /
-            # re-arm / cancel so a stray key can't fall through mid-placement.
+            # re-arm / temp-grid-line / cancel so a stray key can't fall
+            # through mid-placement.
             if self._trunk_mode is not None:
                 if event.key == 'T':            self._edit_trunk_key(event, horiz=True);  return
                 if event.key == 'Y':            self._edit_trunk_key(event, horiz=False); return
+                if event.key == 'G':            self._edit_grid_line_at(event); return
                 if event.key == 'enter':        self._edit_trunk_place(event); return
                 if event.key == 'escape':       self._edit_trunk_cancel(); return
                 return

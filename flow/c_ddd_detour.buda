@@ -1,0 +1,76 @@
+# C-triple detour — one more level on flow/c_dd_detour: the two right-edge H
+# stubs are REMOVED; instead, two new H trunks run through the EMPTY CHANNEL
+# between `lo` and `up` (y 400..1000 — no Hanan line crosses it), each using
+# half of the channel, spanning from the blocks to the right V trunks:
+#
+#     +---------------------------------+    <- top H trunk (y=1700)
+#     |                                 |
+#     |    [ up ]                       |    <- right-top V trunk (x=500,
+#     |      | V stub (lower edge)      |       span 850..1700)
+#     |    ==+===========upper trunk====+    <- channel H trunk y=850
+#     |                                      (UPPER half of the channel)
+#     |    ==+===========lower trunk====+    <- channel H trunk y=550
+#     |      | V stub (upper edge)      |       (LOWER half)
+#     |    [ lo ]                       |    <- right-bottom V trunk (x=500,
+#     |                                 |       span -300..550)
+#     +---------------------------------+    <- bottom H trunk (y=-300)
+#     ^ V spine (x=-700)
+#
+# KEY POINT: y=850 and y=550 are NOT Hanan lines (the channel is empty), so
+# the GUI's T (which snaps to the bundle grid) cannot land there without a
+# temporary grid line (`G` while a trunk is armed adds one at the cursor).
+# The CLI has no such limit — edit_add_trunk takes the explicit perp.  The
+# two channel trunks are then W-restricted (edit_set_slide) to their halves
+# of the channel so NUTS keeps them apart.
+
+def_layer 4 M4 H TOP 44.44
+def_layer 5 M5 V TOP 50.00
+
+add_block lo 0    0 400  400
+add_block up 0 1000 400 1400
+
+add_bus w[4] lo.o up.i
+run_bundler
+generate_topologies
+
+# --- Build the triple-detour C by hand on bundle 1 --------------------------
+edit_topology 1 new
+# seg 0/1/2: the outer C (top H trunk, left V spine, bottom H trunk)
+edit_add_trunk H  1700 -700 500
+edit_add_trunk V  -700 -300 1700
+edit_add_trunk H  -300 -700 500
+# seg 3/4: the right V trunks — re-spanned vs the dd-detour: each now ends on
+# ITS channel trunk (850 / 550) instead of on a block-face stub.
+edit_add_trunk V   500 850 1700
+edit_add_trunk V   500 -300 550
+# seg 5/6: the CHANNEL trunks at y=850 (upper half) and y=550 (lower half) —
+# explicit perp coordinates mid-channel, where no Hanan line exists.  Placed
+# spanning the full block width first so the stubs land at the overlap centre
+# (x=200), then retracted onto the stubs below.
+edit_add_trunk H   850 0 500
+edit_add_trunk H   550 0 500
+# seg 7/8: the V stubs — from `up`'s LOWER edge down to the upper trunk, and
+# from `lo`'s UPPER edge up to the lower trunk.
+edit_add_stub up 5
+edit_add_stub lo 6
+# Retract each channel trunk's west end onto its stub (no dangle); the east
+# end stays on its right V trunk.
+edit_set_span 5 200 500
+edit_set_span 6 200 500
+# The user-space half-channel discipline: W-restrict each trunk's slide to
+# its half (the channel is 400..1000; min-stub push-outs give [.. ,980] and
+# [420, ..] structurally), so NUTS cannot collapse the two onto one row.
+edit_set_slide 5 700 980
+edit_set_slide 6 420 700
+edit_status
+edit_commit pin
+
+# --- Concrete tracks so DetailedNUTS can place the 4 bits -------------------
+def_track_pattern 4 -400  POWER 2 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1  SIGNAL 2 1 SIGNAL 2 1
+def_track_pattern 5 -500  POWER 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1  GROUND 3 1  SIGNAL 2 1 SIGNAL 2 1 SIGNAL 2 1  SIGNAL 2 1
+
+run_planner 5
+run_nuts
+run_detailed_nuts
+check_design
+report_wl
