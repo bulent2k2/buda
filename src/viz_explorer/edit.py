@@ -46,18 +46,26 @@ class ExplorerEditMixin:
 
     def _edit_open(self, empty):
         was_open = self._edit_topo is not None
+        bid = self.wrapper.input.original_bundle.id
         if was_open:
             self._edit_msg = "edit session already open — enter commits, esc aborts"
         elif empty:
             self._edit_topo = ic.Topology()
             self._edit_topo.type = "USER"
             self._edit_msg = "EDIT: empty topology — T/Y add a trunk at the cursor"
+            self._edit_ops, self._edit_base = [], 'new'
+            self._edit_log_op(f"edit_topology {bid} new", record=False)
         else:
             if not (0 <= self.idx < len(self.topos)):
                 return
             # candidates[] elements alias pool storage; deep-copy explicitly.
             self._edit_topo = ic.offset_topology(self.topos[self.idx], 0, 0)
             self._edit_msg = f"EDIT: copy of topo {self.idx + 1} ({self._edit_topo.type})"
+            # Base identity by stable content uid (survives pool reordering) —
+            # the sidecar op-log replays on top of it.
+            self._edit_ops = []
+            self._edit_base = ic.topo_uid(self.topos[self.idx])
+            self._edit_log_op(f"edit_topology {bid} {self.idx + 1}", record=False)
         if not was_open and self._edit_topo is not None:
             self._edit_slide = {}          # fresh session: no staged windows
             self._edit_slide_mark = None
@@ -72,6 +80,8 @@ class ExplorerEditMixin:
         self._edit_slide   = {}
         self._edit_slide_mark = None
         self._edit_layers_changed = False
+        self._edit_ops     = None
+        self._edit_base    = 'new'
         self._trunk_mode   = None
         self._trunk_hover  = None
         self._trunk_pin_seg = -1
@@ -80,6 +90,17 @@ class ExplorerEditMixin:
         self._trunk_pin_hover = None
         self._edit_msg     = msg
         self._draw()
+
+
+    def _edit_log_op(self, op, record=True):
+        """An APPLIED edit op, in `.buda` command syntax.  Printed with the
+        [edit-cmd] prefix so the flow log shows the GUI session as commands the
+        user can fold into the script for automation; recorded into the
+        session's op-log, which the commit stores in the sidecar so a re-run
+        rebuilds the USER candidate (replay via the same CLI commands)."""
+        if record and self._edit_ops is not None:
+            self._edit_ops.append(op)
+        print(f"[edit-cmd] {op}")
 
 
     def _edit_apply(self, verdict):
@@ -143,6 +164,7 @@ class ExplorerEditMixin:
                 f"[{self._fmt_perp(s_lo)},{self._fmt_perp(s_hi)}]")
             self._draw(); return
         self._edit_slide[self.sidx] = (clo, chi)
+        self._edit_log_op(f"edit_set_slide {self.sidx} {clo:.0f} {chi:.0f}")
         note = "" if (clo, chi) == (lo, hi) else " (clamped to slide range)"
         self._edit_msg = (f"EDIT: seg {self.sidx} slide window "
                           f"[{clo:.0f},{chi:.0f}]{note} — applies on commit")
@@ -154,6 +176,7 @@ class ExplorerEditMixin:
         if not (0 <= self.sidx < len(self._edit_topo.segments)):
             self._edit_msg = "EDIT: select a segment first (j/k)"
         elif self._edit_slide.pop(self.sidx, None) is not None:
+            self._edit_log_op(f"edit_set_slide {self.sidx} clear")
             self._edit_msg = f"EDIT: seg {self.sidx} slide window cleared"
         else:
             self._edit_msg = f"EDIT: seg {self.sidx} has no slide window"
@@ -221,8 +244,9 @@ class ExplorerEditMixin:
     def _on_trunk_motion(self, event):
         """Preview the armed trunk's target line under the cursor (redraw only
         when the snapped grid line changes, so hover is cheap).  In pin-span
-        mode, preview instead the grid line a click would pick (unless the
-        cursor is over a busterm block, which pins the block)."""
+        mode, preview instead the anchor a click would pick — a perpendicular
+        segment's exact perp line when near one, else the nearest grid line
+        (unless the cursor is over a busterm block, which pins the block)."""
         if event.inaxes is not self.ax or event.xdata is None or event.ydata is None:
             return
         if self._trunk_pin_set is not None:
@@ -230,7 +254,10 @@ class ExplorerEditMixin:
             if over_bt is not None and over_bt in self._bundle_busterm_names():
                 new = None                              # block pick — no grid line
             else:
-                new = self._snap(*self._pin_grid_target(event.xdata, event.ydata))
+                new = self._pin_segment_anchor_at(event.xdata, event.ydata)
+                if new is None:
+                    new = self._snap(*self._pin_grid_target(event.xdata,
+                                                            event.ydata))
             if new != self._trunk_pin_hover:
                 self._trunk_pin_hover = new
                 self._draw()
@@ -256,6 +283,13 @@ class ExplorerEditMixin:
             block = self._block_at(event.xdata, event.ydata)
             if block is not None and block in self._bundle_busterm_names():
                 self._edit_trunk_pin_toggle(block)      # over a busterm → block
+                return
+            # Near a PERPENDICULAR segment of the working copy → anchor at ITS
+            # exact perp coordinate (often not a grid line), so "end on that
+            # trunk" lands the junction precisely.
+            seg_c = self._pin_segment_anchor_at(event.xdata, event.ydata)
+            if seg_c is not None:
+                self._edit_trunk_pin_toggle_coord(seg_c)
             else:
                 self._edit_trunk_pin_toggle_grid(       # else → a grid line
                     event.xdata, event.ydata)
@@ -272,9 +306,9 @@ class ExplorerEditMixin:
         self._trunk_pin_set = set()
         self._trunk_pin_grid = set()
         self._trunk_pin_hover = None
-        self._edit_msg = ("PIN SPAN: click busterm blocks and/or grid lines "
-                          "(a grid line reaches BEYOND the busterms — e.g. a "
-                          "C-detour), enter to apply, esc to cancel")
+        self._edit_msg = ("PIN SPAN: click busterm blocks, perpendicular "
+                          "segments, and/or grid lines (one anchor moves only "
+                          "the nearest end), enter to apply, esc to cancel")
         self._draw()
 
     def _pin_seg_horiz(self):
@@ -300,17 +334,49 @@ class ExplorerEditMixin:
         """Toggle the nearest along-axis Hanan line (incl. OOB detour lines)
         into the pinned span's anchors — how a span endpoint lands beyond the
         outermost busterm."""
-        coord = self._snap(*self._pin_grid_target(x, y))
+        self._edit_trunk_pin_toggle_coord(self._snap(*self._pin_grid_target(x, y)))
+
+    def _edit_trunk_pin_toggle_coord(self, coord):
         if coord in self._trunk_pin_grid:
             self._trunk_pin_grid.discard(coord)
         else:
             self._trunk_pin_grid.add(coord)
         self._pin_msg()
 
+    def _pin_segment_anchor_at(self, x, y):
+        """Coordinate anchor from a click near a PERPENDICULAR segment of the
+        working copy: that segment's perp position, taken on the pinned
+        segment's along axis — so 'span up to that trunk' lands the endpoint
+        exactly on it (a junction), even when the trunk is not on a Hanan
+        line.  None when no perpendicular segment is within tolerance (≈2% of
+        the view span on the anchor axis)."""
+        horiz = self._pin_seg_horiz()          # pinned segment's orientation
+        x0, x1 = self.ax.get_xlim()
+        y0, y1 = self.ax.get_ylim()
+        tol = 0.02 * (abs(x1 - x0) if horiz else abs(y1 - y0))
+        best, best_d = None, tol
+        for i, sg in enumerate(self._edit_topo.segments):
+            if i == self._trunk_pin_seg:
+                continue
+            sg_h = (sg.start.y == sg.end.y)
+            if sg_h == horiz:
+                continue                       # anchors come from perpendiculars
+            if horiz:                          # pinned H → V partner at x=c
+                c = sg.start.x
+                lo, hi = sorted((sg.start.y, sg.end.y))
+                d, in_span = abs(x - c), (lo - tol) <= y <= (hi + tol)
+            else:                              # pinned V → H partner at y=c
+                c = sg.start.y
+                lo, hi = sorted((sg.start.x, sg.end.x))
+                d, in_span = abs(y - c), (lo - tol) <= x <= (hi + tol)
+            if in_span and d < best_d:
+                best, best_d = c, d
+        return best
+
     def _pin_msg(self):
         self._edit_msg = (
             f"PIN SPAN: {len(self._trunk_pin_set)} busterm(s) + "
-            f"{len(self._trunk_pin_grid)} grid line(s) — enter to apply, "
+            f"{len(self._trunk_pin_grid)} line anchor(s) — enter to apply, "
             f"esc to cancel")
         self._draw()
 
@@ -322,23 +388,34 @@ class ExplorerEditMixin:
         self._edit_msg = "EDIT: pin span cancelled"
         self._draw()
 
-    def _pin_span_of(self, blocks, coords, horiz):
+    def _pin_span_of(self, blocks, coords, horiz, seg_idx=-1):
         """Span covering the pinned anchors along the trunk axis: each block
-        contributes its along-axis CENTRE (where a stub drops), each grid line
-        its coordinate; the span is [min, max] over them.  A block-only pick
-        that collapses to one point falls back to the footprint EXTENT (the
-        original single/collinear-block behaviour); anything still degenerate
-        (e.g. one lone grid line) → None."""
+        contributes its along-axis CENTRE (where a stub drops), each line
+        anchor (grid line / perpendicular segment) its coordinate; the span is
+        [min, max] over them.  A block-only pick that collapses to one point
+        falls back to the footprint EXTENT (spans the block).  A SINGLE line
+        anchor moves only the NEAREST endpoint of the pinned segment (the far
+        end stays put) — the 're-span one end' gesture that lets a trunk span
+        one block on one side and keep its junction on the other.  None only
+        when the result would be degenerate."""
         pts = []
         for n in blocks:
             r = self.fp.get_block_bounds(n)
             pts.append(int(round((r.x1 + r.x2) / 2 if horiz
                                  else (r.y1 + r.y2) / 2)))
         pts += list(coords)
-        if len(set(pts)) >= 2:
-            return min(pts), max(pts)
-        if not coords:                      # blocks only, degenerate → extent
+        uniq = set(pts)
+        if len(uniq) >= 2:
+            return min(uniq), max(uniq)
+        if blocks and not coords:           # blocks only, degenerate → extent
             return self._along_span_of_blocks(blocks, horiz)
+        if len(uniq) == 1 and 0 <= seg_idx < len(self._edit_topo.segments):
+            c = next(iter(uniq))            # one anchor → move nearest end
+            sg = self._edit_topo.segments[seg_idx]
+            lo, hi = sorted((sg.start.x, sg.end.x) if horiz
+                            else (sg.start.y, sg.end.y))
+            span = (c, hi) if abs(c - lo) <= abs(c - hi) else (lo, c)
+            return span if span[0] < span[1] else None
         return None
 
     def _edit_trunk_pin_apply(self):
@@ -356,20 +433,36 @@ class ExplorerEditMixin:
             self._draw(); return
         seg = self._edit_topo.segments[seg_idx]
         horiz = (seg.start.y == seg.end.y)
-        span = self._pin_span_of(picked, grid, horiz)
+        span = self._pin_span_of(picked, grid, horiz, seg_idx)
         if span is None:
-            self._edit_msg = ("PIN SPAN rejected: those anchors give a "
-                              "degenerate span (pick two apart on the trunk axis)")
+            self._edit_msg = ("PIN SPAN rejected: those anchors collapse the "
+                              "span (a single anchor moves the nearest end — "
+                              "pick one apart from the far end, or two anchors)")
             self._draw(); return
-        self._edit_apply(ic.edit_set_span(self._edit_topo, self.fp, seg_idx,
-                                          span[0], span[1]))
+        if self._edit_apply(ic.edit_set_span(self._edit_topo, self.fp, seg_idx,
+                                             span[0], span[1])):
+            self._edit_log_op(f"edit_set_span {seg_idx} {span[0]} {span[1]}")
+
+    def _edit_log_trunk(self, horiz):
+        """Log the just-appended trunk with its RESOLVED geometry (post default
+        span), so the folded command reproduces it without cursor context."""
+        sg = self._edit_topo.segments[-1]
+        if horiz:
+            perp = sg.start.y
+            lo, hi = sorted((sg.start.x, sg.end.x))
+        else:
+            perp = sg.start.x
+            lo, hi = sorted((sg.start.y, sg.end.y))
+        self._edit_log_op(f"edit_add_trunk {'H' if horiz else 'V'} {perp} "
+                          f"{lo} {hi} layer {sg.layer_hint}")
 
     def _edit_add_trunk_from_perp(self, horiz, perp):
         lo, hi = self._busterm_along_span(horiz)
         h, v_ = self._edit_default_layers()
-        self._edit_apply(ic.edit_add_trunk(
-            self._edit_topo, self.fp, horiz, int(perp), lo, hi,
-            h if horiz else v_))
+        if self._edit_apply(ic.edit_add_trunk(
+                self._edit_topo, self.fp, horiz, int(perp), lo, hi,
+                h if horiz else v_)):
+            self._edit_log_trunk(horiz)
 
     def _edit_add_trunk_at(self, event, horiz):
         if event.xdata is None or event.ydata is None:
@@ -387,9 +480,10 @@ class ExplorerEditMixin:
         # stubs will drop), so the trunk covers exactly the blocks it serves.
         lo, hi = self._busterm_along_span(horiz)
         h, v_ = self._edit_default_layers()
-        self._edit_apply(ic.edit_add_trunk(
-            self._edit_topo, self.fp, horiz, perp, lo, hi,
-            h if horiz else v_))
+        if self._edit_apply(ic.edit_add_trunk(
+                self._edit_topo, self.fp, horiz, perp, lo, hi,
+                h if horiz else v_)):
+            self._edit_log_trunk(horiz)
 
     def _along_span_of_blocks(self, names, horiz):
         """(lo, hi) covering the given blocks along a trunk axis, or None if
@@ -435,8 +529,9 @@ class ExplorerEditMixin:
         tgt = self._edit_topo.segments[self.sidx]
         h, v_ = self._edit_default_layers()
         layer = v_ if tgt.start.y == tgt.end.y else h    # stub ⟂ target
-        self._edit_apply(ic.edit_add_stub(
-            self._edit_topo, self.fp, block, self.sidx, layer))
+        if self._edit_apply(ic.edit_add_stub(
+                self._edit_topo, self.fp, block, self.sidx, layer)):
+            self._edit_log_op(f"edit_add_stub {block} {self.sidx} layer {layer}")
 
 
     def _edit_pair_op(self, event, connect):
@@ -456,7 +551,8 @@ class ExplorerEditMixin:
             self._edit_msg = "EDIT: same segment twice — pair cancelled"
             self._draw(); return
         if connect:
-            self._edit_apply(ic.edit_connect(self._edit_topo, self.fp, i, j))
+            if self._edit_apply(ic.edit_connect(self._edit_topo, self.fp, i, j)):
+                self._edit_log_op(f"edit_connect {i} {j}")
         else:
             si = self._edit_topo.segments[i]
             horiz = si.start.y == si.end.y
@@ -464,8 +560,9 @@ class ExplorerEditMixin:
             if coord is None:
                 self._edit_msg = "EDIT: cursor sets the retract position"
                 self._draw(); return
-            self._edit_apply(ic.edit_disconnect(
-                self._edit_topo, self.fp, i, j, int(round(coord))))
+            if self._edit_apply(ic.edit_disconnect(
+                    self._edit_topo, self.fp, i, j, int(round(coord)))):
+                self._edit_log_op(f"edit_disconnect {i} {j} {int(round(coord))}")
 
 
     def _edit_commit(self):
@@ -510,6 +607,19 @@ class ExplorerEditMixin:
             w.input.pinned_seg_layers = []
         self._edit_layers_changed = False
         self._select_current()          # pin + sidecar (uid-carrying) + redraw
+        # Persist the session's op-log so a RE-RUN of the same flow rebuilds
+        # this USER candidate (the sidecar uid alone cannot resolve a topology
+        # that regeneration never produces): base = the source candidate's
+        # content uid ('new' for E), ops = the applied edit_* commands in
+        # order.  _apply_selections replays them through the CLI after
+        # generate_topologies, then resolves the pin by uid as usual.
+        sel = self._find_selection()
+        if sel is not None and self._edit_ops:
+            sel['user_topo'] = {'base': self._edit_base,
+                                'ops': list(self._edit_ops)}
+            self._save_sidecar()
+        self._edit_log_op("edit_commit pin", record=False)
+        self._edit_ops, self._edit_base = None, 'new'
         self._edit_msg = f"EDIT: {note}, pinned"
         # Land the session's slide-window refinements as NUTS overrides on the
         # pinned candidate (plan.seg_slide_lo/hi, NaN = free) — the same hatch

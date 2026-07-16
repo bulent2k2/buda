@@ -143,6 +143,13 @@ class ExplorerSidecarMixin:
         if len(pinned) == len(topo.segments):
             if any(lid != -1 for lid in pinned):
                 sel['seg_layers'] = pinned
+
+        # Re-selecting the SAME USER candidate (e.g. paging back to it and
+        # pressing 's') must not shed its replay log: carry user_topo forward
+        # when the old entry's uid matches the new selection's.
+        if old_sel is not None and 'user_topo' in old_sel \
+                and old_sel.get('topo_uid') == sel['topo_uid']:
+            sel['user_topo'] = old_sel['user_topo']
         
         # Update live object
         if wrapper.plan.selected_topology_index != self.idx:
@@ -187,6 +194,10 @@ class ExplorerSidecarMixin:
                     self._selections[entry['bundle_hint']]['topo_uid'] = entry['topo_uid']
                 if 'seg_layers' in entry:
                     self._selections[entry['bundle_hint']]['seg_layers'] = entry['seg_layers']
+                if 'user_topo' in entry:  # TopoEdit replay log — must survive a
+                    # load→save cycle, or one unrelated re-save silently strands
+                    # the USER candidate on the next flow run (Codex #305)
+                    self._selections[entry['bundle_hint']]['user_topo'] = entry['user_topo']
 
             print(f"Loaded {len(self._selections)} selection(s) from {self._sidecar_path}")
         except Exception as e:

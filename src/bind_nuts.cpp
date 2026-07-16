@@ -381,7 +381,8 @@ void bind_nuts(py::module_& m) {
         .value("LAYER_DIR",    ViolationKind::LAYER_DIR)
         .value("FEEDTHRU_RELAY", ViolationKind::FEEDTHRU_RELAY)
         .value("BIT_SHORT",    ViolationKind::BIT_SHORT)
-        .value("KEEPOUT_CROSS", ViolationKind::KEEPOUT_CROSS);
+        .value("KEEPOUT_CROSS", ViolationKind::KEEPOUT_CROSS)
+        .value("DISCONNECTED", ViolationKind::DISCONNECTED);
 
     py::class_<ConnViolation>(m, "ConnViolation")
         .def_readwrite("kind",       &ConnViolation::kind)

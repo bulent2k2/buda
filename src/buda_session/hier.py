@@ -362,6 +362,68 @@ class HierMixin:
         # connectivity (and any bridge) too.
         self._persist_topology_annotations(bid, sel, topo)
 
+    def _restore_user_topos(self, data):
+        """Replay sidecar-persisted TopoEdit op-logs ('user_topo': base uid +
+        applied edit_* commands) so hand-built USER candidates exist again
+        after regeneration.  Replays through the CLI's own edit commands —
+        deterministic engine ops with explicit coordinates, so the rebuilt
+        topology is content-identical (same topo_uid) as long as the floorplan
+        is; a drifted floorplan surfaces as the normal unresolved-uid warning
+        chain, never a silent wrong pin.  Skipped when the uid already
+        resolves (e.g. the flow itself runs the edit commands)."""
+        for sel in data.get('selections', []):
+            ut = sel.get('user_topo')
+            if not ut or not ut.get('ops'):
+                continue
+            hint = sel.get('bundle_hint', '')
+            matching = [w for w in self.bundles
+                        if w.input.original_bundle.get_net_names() and
+                           w.input.original_bundle.get_net_names()[0].startswith(hint)]
+            if not matching:
+                continue
+            w = matching[0]
+            bid = w.input.original_bundle.id
+            sc_uid = sel.get('topo_uid')
+            if sc_uid and any(buda.topo_uid(c) == sc_uid
+                              for c in w.input.candidates):
+                continue                       # already in the pool
+            if self._edit_topo is not None:
+                print(f"Warning: sidecar USER topology for bundle {bid} not "
+                      f"rebuilt — an edit session is already open")
+                continue
+            base = ut.get('base', 'new')
+            if base == 'new':
+                base_arg = 'new'
+            else:
+                bi = next((i for i, c in enumerate(w.input.candidates)
+                           if buda.topo_uid(c) == base), None)
+                if bi is None:
+                    print(f"Warning: sidecar USER topology for bundle {bid}: "
+                          f"base candidate (uid {base}) not in the regenerated "
+                          f"pool — skipped")
+                    continue
+                base_arg = str(bi + 1)
+            ops = list(ut['ops'])
+            print(f"[sidecar] rebuilding USER candidate for bundle {bid} "
+                  f"({len(ops)} edit op(s), base {base_arg})")
+            self.do_command(f"edit_topology {bid} {base_arg}")
+            for op in ops:
+                self.do_command(op)
+            # Commit WITH pin unless a script command (select_topology) already
+            # pinned this wrapper — the script keeps precedence, exactly as in
+            # the selection loop below.  The pin matters beyond selection: an
+            # un-pinned commit rightly DISCARDS the session's per-segment
+            # overrides (slide windows, edit_set_layer pins) because they
+            # attach to the selection — so the replayed session's overrides
+            # land only when its candidate actually becomes the selection.
+            already = getattr(w.input, 'topology_pinned', False)
+            self.do_command("edit_commit" if already else "edit_commit pin")
+            if sc_uid and not any(buda.topo_uid(c) == sc_uid
+                                  for c in w.input.candidates):
+                print(f"Warning: rebuilt USER candidate for bundle {bid} does "
+                      f"not match the sidecar uid (floorplan changed?) — the "
+                      f"selection may fall back to type/WL matching")
+
     def _apply_selections(self):
         """Load the sidecar and apply pinned topologies and layer overrides.
 
@@ -378,6 +440,12 @@ class HierMixin:
         except Exception as e:
             print(f"Warning: could not read selections sidecar: {e}")
             return
+
+        # Rebuild sidecar-persisted USER candidates FIRST (the explorer's
+        # TopoEdit commits store their op-log as 'user_topo'): regeneration
+        # never produces a hand-built topology, so without the replay the uid
+        # below can not resolve and the pin is lost on every re-run.
+        self._restore_user_topos(data)
 
         for sel in data.get('selections', []):
             hint = sel['bundle_hint']

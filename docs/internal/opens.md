@@ -9,6 +9,23 @@ items this page doesn't see).
 
 ## Substantial features (bounded, clear plans)
 
+12. **BDB topology tables as the USER-topo persistence home (hier flows)**
+   — [`wishlist-topoedit.md`](wishlist-topoedit.md) → *"BDB topology
+   tables as the USER-topo persistence home"*.  Hand-built USER
+   candidates persist via the sidecar op-log today (base uid + applied
+   `edit_*` commands, replayed after `generate_topologies`) — right for
+   the flat flow, a side channel for hier.  The hier flow's native
+   surface — the BDB `topology`/`topology_segment` tables +
+   `topology_seg_busterm`/bridge links and `load_pipeline` — should
+   carry USER candidates first-class: persist at `edit_commit`, restore
+   with taps/clamps/pin by `topo_uid`, and settle the template-vs-
+   instance scope of a hier edit (a cell-local edit replicates to
+   instances; an expanded-instance edit stays local), with BDB-fixture
+   round-trip + hier replication tests.  **The designer-interaction
+   keystone for hier designs** — today `load_pipeline` silently drops
+   USER candidates.  **Effort:** medium-large (persist path exists;
+   restore + hier scope + tests are the work).
+
 10. **The `bigHalf.buda` rr flip (decision, then a two-line edit)** —
    re-enable the flow's two commented `ripup_reroute` lines now that the
    RR arc has taken the clean 0/0 endpoint from ~49s to **~12.4s flow

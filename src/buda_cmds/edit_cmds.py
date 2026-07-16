@@ -63,6 +63,8 @@ def cmd_edit_topology(session, cmd, args, cmd_line):
         topo = buda.offset_topology(w.input.candidates[ci], 0, 0)
         src_desc = f"copy of candidate {ci + 1} ({topo.type})"
     session._edit_w, session._edit_topo, session._edit_src = w, topo, src_desc
+    session._edit_slide = {}
+    session._edit_layers_changed = False
     print(f"[edit] session opened on bundle {bid}: {src_desc} "
           f"({len(topo.segments)} segment(s)). "
           f"edit_status shows the verdict; edit_commit / edit_abort ends.")
@@ -117,8 +119,15 @@ def cmd_edit_add_stub(session, cmd, args, cmd_line):
 def cmd_edit_remove_segment(session, cmd, args, cmd_line):
     # Usage: edit_remove_segment <seg#>
     if session._edit_session() is None: return
-    v = buda.edit_remove_segment(session._edit_topo, session.fp, int(args[0]))
+    si = int(args[0])
+    v = buda.edit_remove_segment(session._edit_topo, session.fp, si)
     session._edit_report(v)
+    if v.applied:
+        # Indices above si shifted down: remap the staged slide windows,
+        # dropping the removed segment's own (mirrors the explorer's X).
+        session._edit_slide = {
+            (i - 1 if i > si else i): win
+            for i, win in session._edit_slide.items() if i != si}
 
 
 def cmd_edit_set_span(session, cmd, args, cmd_line):
@@ -127,6 +136,79 @@ def cmd_edit_set_span(session, cmd, args, cmd_line):
     v = buda.edit_set_span(session._edit_topo, session.fp,
                            int(args[0]), int(args[1]), int(args[2]))
     session._edit_report(v)
+
+
+def cmd_edit_set_slide(session, cmd, args, cmd_line):
+    # Usage: edit_set_slide <seg#> <lo> <hi>   |   edit_set_slide <seg#> clear
+    # The scriptable equivalent of the explorer's 'W' (two-press slide-window
+    # refine) / 'w' (clear): stage a per-segment perpendicular slide window,
+    # intersected with the segment's STRUCTURAL slide range (a window outside
+    # it would make the NUTS placement infeasible).  Staged windows land on
+    # plan.seg_slide_lo/hi at edit_commit — revalidated there again, since a
+    # later geometry edit can narrow the range.  Indices follow
+    # edit_remove_segment re-keying, exactly like the GUI staging.
+    if session._edit_session() is None: return
+    if len(args) < 2:
+        print("Error: edit_set_slide <seg#> <lo> <hi>  |  edit_set_slide <seg#> clear")
+        return
+    si = int(args[0])
+    topo = session._edit_topo
+    if not (0 <= si < len(topo.segments)):
+        print(f"Error: segment {si} out of range "
+              f"(topology has {len(topo.segments)})")
+        return
+    if args[1].lower() == "clear":
+        if session._edit_slide.pop(si, None) is not None:
+            print(f"[edit] seg {si} staged slide window cleared")
+        else:
+            print(f"[edit] seg {si} has no staged slide window")
+        return
+    if len(args) < 3:
+        print("Error: edit_set_slide <seg#> <lo> <hi>  |  edit_set_slide <seg#> clear")
+        return
+    lo, hi = sorted((float(args[1]), float(args[2])))
+    ct = buda.ConnTopology()
+    ct.build(topo, session.fp)
+    cs = list(ct.segs())[si]
+    s_lo, s_hi = float(cs.perp_lo), float(cs.perp_hi)
+    clo, chi = max(lo, s_lo), min(hi, s_hi)
+    if clo > chi:
+        print(f"Error: window [{lo:.0f},{hi:.0f}] is outside seg {si}'s "
+              f"slide range [{s_lo:.0f},{s_hi:.0f}]")
+        return
+    session._edit_slide[si] = (clo, chi)
+    note = "" if (clo, chi) == (lo, hi) else " (clamped to slide range)"
+    print(f"[edit] seg {si} slide window [{clo:.0f},{chi:.0f}]{note} — "
+          f"applies at edit_commit")
+
+
+def cmd_edit_set_layer(session, cmd, args, cmd_line):
+    # Usage: edit_set_layer <seg#> <layer_id>
+    # The scriptable equivalent of the explorer's +/- layer cycle in an edit
+    # session: set the working copy's segment layer hint directly.  The
+    # planner honors it via the commit's pinned overrides (GUI) or the
+    # candidate's layer_hint (CLI).
+    if session._edit_session() is None: return
+    if len(args) < 2:
+        print("Error: edit_set_layer <seg#> <layer_id>")
+        return
+    i, lid = int(args[0]), int(args[1])
+    topo = session._edit_topo
+    if not (0 <= i < len(topo.segments)):
+        print(f"Error: segment {i} out of range "
+              f"(topology has {len(topo.segments)})")
+        return
+    seg = topo.segments[i]
+    horiz = seg.start.y == seg.end.y
+    if session.layers is not None and session.layers.has_layer(lid):
+        dir_h = (session.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL)
+        if dir_h != horiz:
+            print(f"  Warning: seg {i} runs {'H' if horiz else 'V'} but layer "
+                  f"{lid} routes {'H' if dir_h else 'V'} — check_design will "
+                  f"flag LAYER_DIR")
+    seg.layer_hint = lid
+    session._edit_layers_changed = True   # commit rebuilds pinned_seg_layers
+    print(f"[edit] seg {i} layer -> {lid}")
 
 
 def cmd_edit_connect(session, cmd, args, cmd_line):
@@ -166,6 +248,8 @@ def cmd_edit_abort(session, cmd, args, cmd_line):
           f"{session._edit_w.input.original_bundle.id} discarded.")
     session._edit_w = session._edit_topo = None
     session._edit_src = ""
+    session._edit_slide = {}
+    session._edit_layers_changed = False
 
 
 def cmd_edit_commit(session, cmd, args, cmd_line):
@@ -210,6 +294,69 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         w.plan.selected_topology_index = idx
         w.input.topology_pinned = True
         print(f"  Pinned bundle {w.input.original_bundle.id} to it.")
+    # Per-segment overrides below are indexed by the COMMITTED topology's
+    # segments and live on plan/input state that NUTS/planner consult for the
+    # SELECTED candidate — writing them when the commit did not (re)select the
+    # candidate would misapply them to whatever is selected (the length guard
+    # can coincide).  So both blocks gate on the committed candidate being the
+    # selection (a 'pin' commit, or a dedup onto the already-selected one).
+    is_selected = (w.plan.selected_topology_index == idx)
+    # Rebuild the pinned layer overrides when the session re-layered a segment
+    # (edit_set_layer): layer_hint alone is only a suggestion to the planner —
+    # wrapper.input.pinned_seg_layers is what forces the layers (GUI parity;
+    # the explorer commit does the same).  No layer decision -> clear a stale
+    # list rather than let it re-pin old layers onto the new topology.
+    if is_selected:
+        if session._edit_layers_changed:
+            w.input.pinned_seg_layers = [s.layer_hint for s in topo.segments]
+            print(f"  Pinned {len(topo.segments)} segment layer(s) from the "
+                  f"session's edit_set_layer edits.")
+        else:
+            w.input.pinned_seg_layers = []
+    elif session._edit_layers_changed:
+        print("  Warning: edit_set_layer edits NOT pinned — the commit did "
+              "not select the candidate (use 'edit_commit pin'); the planner "
+              "treats bare layer_hints as suggestions only.")
+    session._edit_layers_changed = False
+    # Land the session's staged slide windows (edit_set_slide) as NUTS
+    # overrides on the committed candidate — the same plan.seg_slide_lo/hi
+    # hatch the explorer's 'W' rides.  REVALIDATED against the committed
+    # topology's connectivity (a geometry edit after staging can narrow a
+    # segment's structural range; NUTS honors any non-NaN override verbatim):
+    # a shrunken window clamps, a now-disjoint one is dropped LOUD.
+    if session._edit_slide and not is_selected:
+        print(f"  Warning: {len(session._edit_slide)} staged slide window(s) "
+              f"discarded — the commit did not select the candidate (use "
+              f"'edit_commit pin'); plan overrides attach to the selection.")
+        session._edit_slide = {}
+    if session._edit_slide:
+        ct = buda.ConnTopology()
+        ct.build(topo, session.fp)
+        cs_list = list(ct.segs())
+        nseg = len(topo.segments)
+        slo = [float('nan')] * nseg
+        shi = [float('nan')] * nseg
+        applied, dropped = 0, []
+        for si, (lo, hi) in sorted(session._edit_slide.items()):
+            if not (0 <= si < nseg):
+                dropped.append(si)
+                continue
+            s_lo, s_hi = float(cs_list[si].perp_lo), float(cs_list[si].perp_hi)
+            clo, chi = max(float(lo), s_lo), min(float(hi), s_hi)
+            if clo > chi:
+                dropped.append(si)
+                continue
+            slo[si], shi[si] = clo, chi
+            applied += 1
+        w.plan.seg_slide_lo = slo
+        w.plan.seg_slide_hi = shi
+        if applied:
+            print(f"  Applied {applied} slide window(s) to the plan "
+                  f"(run_nuts honors them).")
+        if dropped:
+            print(f"  Warning: dropped stale slide window(s) on seg {dropped} "
+                  f"— outside the segment's current slide range.")
+        session._edit_slide = {}
     session._edit_w = session._edit_topo = None
     session._edit_src = ""
     if session._persist_topologies():
@@ -222,6 +369,8 @@ COMMANDS = {
     "edit_add_stub": cmd_edit_add_stub,
     "edit_remove_segment": cmd_edit_remove_segment,
     "edit_set_span": cmd_edit_set_span,
+    "edit_set_slide": cmd_edit_set_slide,
+    "edit_set_layer": cmd_edit_set_layer,
     "edit_connect": cmd_edit_connect,
     "edit_disconnect": cmd_edit_disconnect,
     "edit_status": cmd_edit_status,

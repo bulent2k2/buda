@@ -47,7 +47,7 @@ The Topology Explorer allows you to inspect the alternative routing candidate sh
 | `]`, `pagedown` | Switch to the **next bundle** and view its selected topology. When launched from a BUDA viz window, steps in that window's **bundle-panel order** (opens-first), so the two stay in step; standalone, it steps in numeric bundle-id order. |
 | `[`, `pageup` | Switch to the **previous bundle** (same order as `]`). |
 | `k` | Select the **previous segment** of the current topology. |
-| `j` | Select the **next segment** of the current topology. The selected segment — its wire, its slide-range band, and its bounds — is highlighted (others dimmed) and named in a top-left info line (`Selected V segment 3 on M5.`); `-`/`+` restyle it to a new layer with a live update. |
+| `j` | Select the **next segment** of the current topology — on **any** shown candidate, pinned or not. The selected segment — its wire, its slide-range band, and its bounds — is highlighted (others dimmed) and described in a two-line top-left info box: `Selected V segment 3 on M5.` plus its position and slide range (`x=<perp> H-slide=[lo,hi]` for a V segment, `y=<perp> V-slide=[lo,hi]` for an H one); `-`/`+` restyle it to a new layer with a live update. |
 | `←` `→` `↑` `↓` | **Pan** the view left / right / up / down. |
 | `+`, `=` | **Layer Up**: Assign the selected segment to the next higher valid routing layer. |
 | `-`, `_` | **Layer Down**: Assign the selected segment to the next lower valid routing layer. |
@@ -81,17 +81,25 @@ the Script Reference).
 | Key(s) | Action |
 | :--- | :--- |
 | `e` / `E` | Open an edit session: copy of the shown candidate / empty topology. The busterm blocks are highlighted, and `j`/`k` select segments immediately (no need to pin first). |
-| `T` (Shift+t) | **Arm** a **horizontal trunk**: the target row (a bundle-grid line) highlights as you hover; press `T` again, `enter`, or **click** to place it, `esc` to cancel. The trunk spans the busterm extent (no overshoot), not the whole die. |
-| `Y` (Shift+y) | **Arm** a **vertical trunk** (same two-step hover→place as `T`). Bundle-grid columns include out-of-bounds detour lines, so a U-shape/OOB trunk is placeable. |
+| `T` (Shift+t) | **Arm** a **horizontal trunk**: the target row (a bundle-grid line) highlights as you hover; press `T` again, `enter`, or **click** to place it, `esc` to cancel. The trunk spans the busterm extent (no overshoot), not the whole die. A trunk **geometrically identical** to an existing segment (same line + span) is rejected — re-span the existing one with `P` or remove it with `X`. |
+| `Y` (Shift+y) | **Arm** a **vertical trunk** (same two-step hover→place as `T`, same duplicate rejection). Bundle-grid columns include out-of-bounds detour lines, so a U-shape/OOB trunk is placeable. |
 | `S` (Shift+s) | Add a **stub** from the block under the cursor to the selected segment (`j`/`k`); with only the trunk present it auto-selects the trunk as the target. |
-| `P` (Shift+p) | **Pin the selected segment's span to chosen anchors**: click **busterm blocks** and/or **Hanan grid lines** the trunk should reach — hovering over a busterm pins the block, hovering elsewhere pins the nearest along-axis grid line (the previewed line follows the cursor). Each click toggles; picked blocks outline red, picked grid lines draw as red dashed lines, and the resulting span previews live. `enter` applies, `esc` cancels. A grid line reaches **beyond** the outermost busterm — how a **C-detour** trunk's endpoints land on the Hanan line below the lower block and above the upper block (the bundle grid includes OOB detour lines). Two trunks on one grid line can each cover a limited span. |
+| `P` (Shift+p) | **Pin the selected segment's span to chosen anchors**: click **busterm blocks**, **perpendicular segments**, and/or **Hanan grid lines** the trunk should reach — a busterm pins the block (centre), a click near a perpendicular segment anchors at **its exact perp coordinate** (so "end on that trunk" lands the junction precisely, even off-grid), anything else pins the nearest along-axis grid line. Each click toggles; picked blocks outline red, line anchors draw red-dashed, and the resulting span previews live. `enter` applies, `esc` cancels. **Two+ anchors** → span = [min, max]. **One anchor** → only the **nearest endpoint** moves there (the far end — e.g. a junction — stays put): the "re-span one end" gesture. **One block alone** → span the block's extent. A grid line reaches **beyond** the outermost busterm (C-detours); two trunks on one grid line can each cover a limited span (the dd-detour's right V trunks). |
 | `C` (Shift+c) | **Connect** two perpendicular segments: press once to mark the selected segment, re-select (`j`/`k`), press again. |
 | `D` (Shift+d) | **Disconnect** a junction pair (same two-step marking); the cursor position sets where the retracted endpoint lands. |
-| `W` (Shift+w) | **Refine the selected segment's slide window**: press at one perpendicular bound, then at the other — the window (∩ the structural slide range) is staged and lands as a NUTS override (`plan.seg_slide_lo/hi`) on commit. The drawn slide band follows live. |
-| `w` | **Clear** the selected segment's staged slide window. |
+| `W` (Shift+w) | **Refine the selected segment's slide window**: press at one perpendicular bound, then at the other — the window (∩ the structural slide range) is staged and lands as a NUTS override (`plan.seg_slide_lo/hi`) on commit. The drawn slide band follows live. Scriptable as `edit_set_slide <seg#> <lo> <hi>`, so staged windows ride the `[edit-cmd]` log and the sidecar replay too. |
+| `w` | **Clear** the selected segment's staged slide window (`edit_set_slide <seg#> clear`). |
 | `X` (Shift+x) | **Remove** the selected segment (annotations re-keyed; staged slide windows re-keyed too). |
 | `enter` | **Commit**: append the copy to the bundle's pool as a `USER` candidate (uid-deduped), pin it, save the sidecar, and apply any staged slide windows to the plan. |
 | `escape` | **Abort**: discard the working copy (staged slide windows included). |
+
+Every applied edit op also prints its `.buda` equivalent as an `[edit-cmd]` line
+(`edit_add_trunk V 500 200 1200 layer 5`, `edit_set_layer 3 7`, …) — fold them
+into the flow script for automation.  The commit stores the same op-log in the
+**sidecar** (`user_topo`: base candidate uid + ops), and a re-run of the flow
+**replays it after `generate_topologies`**, so the hand-built USER candidate —
+which regeneration never produces — exists again and the pin resolves instead
+of the old `sidecar selection … could not be resolved` warning.
 
 ### Mouse
 

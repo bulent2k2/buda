@@ -653,3 +653,340 @@ def test_edit_commit_without_layer_change_drops_stale_pins(tmp_path):
     finally:
         import matplotlib.pyplot as plt
         plt.close('all')
+
+
+# ── dd-detour gestures: segment anchors, single-anchor re-span, dup trunks ────
+
+def _dd_base_session():
+    """The c_double_detour geometry with its committed C topo — the base the
+    dd-detour session edits (clone, add right V trunks, re-span)."""
+    s = buda_cli.BudaSession()
+    s.no_viz = True
+    for cmd in (
+        "def_layer 4 M4 H TOP 44.44",
+        "def_layer 5 M5 V TOP 50.00",
+        "add_block lo 0    0 400  400",
+        "add_block up 0 1000 400 1400",
+        "add_bus w[4] lo.o up.i",
+        "run_bundler",
+        "generate_topologies",
+        "edit_topology 1 new",
+        "edit_add_trunk H  1700 -700 400",
+        "edit_add_trunk V  -700 -300 1700",
+        "edit_add_trunk H  -300 -700 400",
+        "edit_add_stub up 0",
+        "edit_add_stub lo 2",
+        "edit_set_span 0 -700 200",
+        "edit_set_span 2 -700 200",
+        "edit_commit pin",
+    ):
+        s.do_command(cmd)
+    return s
+
+
+def _click(exp, x, y):
+    exp._on_trunk_click(SimpleNamespace(button=1, inaxes=exp.ax,
+                                        xdata=x, ydata=y))
+
+
+def _span(exp, i, horiz):
+    sg = exp._edit_topo.segments[i]
+    return ((min(sg.start.x, sg.end.x), max(sg.start.x, sg.end.x)) if horiz
+            else (min(sg.start.y, sg.end.y), max(sg.start.y, sg.end.y)))
+
+
+def test_edit_pin_segment_anchor_and_single_anchor_respan(tmp_path):
+    """The dd-detour gestures: (a) a click near a PERPENDICULAR segment anchors
+    the span at ITS perp coordinate (even off-grid), so 'up block + the top H
+    trunk' spans (1200, 1700) and the junction lands exactly; (b) a SINGLE
+    anchor moves only the NEAREST endpoint — re-spanning the H trunk's right
+    end onto the new V trunk while its left end stays on the spine.  This is
+    the workflow whose click-beside-the-block miss used to be rejected as a
+    'degenerate span' (a lone grid anchor)."""
+    s = _dd_base_session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'e')                        # clone the C (5 segments)
+        _trunk(exp, 'Y', 500, 700)            # right V trunk (idx 5), OOB x=500
+        exp.sidx = 5
+        _key(exp, 'P')
+        _click(exp, 200, 1200)                # inside `up` → block anchor (1200)
+        _click(exp, 0, 1700)                  # ON the top H trunk → segment
+        assert exp._trunk_pin_set == {'up'}   #   anchor at ITS y=1700 (off-grid)
+        assert exp._trunk_pin_grid == {1700}
+        _key(exp, 'enter')
+        assert _span(exp, 5, horiz=False) == (1200, 1700)
+
+        # Single segment-anchor: re-span the top H trunk's right end onto the
+        # new V trunk; the left end (on the spine at -700) must not move.
+        exp.sidx = 0
+        _key(exp, 'P')
+        _click(exp, 500, 1600)                # near the V trunk line (x=500)
+        assert exp._trunk_pin_grid == {500}
+        _key(exp, 'enter')
+        assert _span(exp, 0, horiz=True) == (-700, 500)
+        assert 'rejected' not in exp._edit_msg
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_edit_duplicate_trunk_rejected(tmp_path):
+    """Repeated Y at the same spot must NOT stack identical trunks: the second,
+    geometrically identical placement is rejected loud (same line + span);
+    disjoint spans on one line remain allowed (the dd-detour pattern)."""
+    s = _dd_base_session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'e')
+        _trunk(exp, 'Y', 500, 700)
+        n = len(exp._edit_topo.segments)
+        _trunk(exp, 'Y', 500, 700)            # identical → rejected
+        assert len(exp._edit_topo.segments) == n
+        assert 'identical trunk' in exp._edit_msg
+        # Disjoint spans on the same line are the legitimate pattern.
+        exp.sidx = n - 1
+        _key(exp, 'P'); _click(exp, 200, 1200); _click(exp, 0, 1700)
+        _key(exp, 'enter')                    # re-span to (1200, 1700)
+        _trunk(exp, 'Y', 500, 700)            # default span (200,1200) ≠ dup
+        assert len(exp._edit_topo.segments) == n + 1
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_edit_disconnected_commit_flagged(tmp_path):
+    """The user's escape recipe — stub `lo` onto a floating right trunk, then
+    remove lo's original V stub — must be flagged: the live banner shows
+    DISCONNECTED, and check_topo on the committed candidate reports it (the
+    audit that used to pass a two-island topology silently)."""
+    s = _dd_base_session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'e')
+        _trunk(exp, 'Y', 500, 700)            # floating right trunk (idx 5)
+        exp.sidx = 5
+        _key(exp, 'S', x=200, y=200)          # H stub from lo onto it
+        exp.sidx = 4                          # lo's original V stub
+        _key(exp, 'X')                        # → two islands
+        assert 'DISCONNECTED' in exp._edit_msg
+        _key(exp, 'enter')                    # commit (never strands — allowed)
+        w = s.bundles[0]
+        topo = w.input.candidates[w.plan.selected_topology_index]
+        ct = buda.ConnTopology(); ct.build(topo, s.fp)
+        kinds = {str(v.kind).split('.')[-1]
+                 for v in buda.check_topo(ct, topo, s.fp, 1).violations}
+        assert 'DISCONNECTED' in kinds
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_seg_info_lines_on_unpinned_topo(tmp_path):
+    """j/k works on an UN-pinned candidate too, and the info box carries the
+    second line: perp position + slide range on the perpendicular axis."""
+    s = _session()
+    exp = _explorer(s, tmp_path)
+    try:
+        _key(exp, 'j')                        # no pin, no edit session
+        assert exp.sidx == 0
+        infos = [t.get_text() for t in exp.ax.texts
+                 if 'segment 0' in t.get_text()]
+        assert infos, "info box missing on un-pinned topo"
+        lines = infos[0].splitlines()
+        assert lines[0].startswith('Selected')
+        assert '-slide=[' in lines[1]         # "y=.. V-slide=[..]" / "x=.. H-.."
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+
+def test_edit_ops_logged_and_user_topo_survives_rerun(tmp_path, capsys):
+    """Items 5+8: every applied GUI op prints its `.buda` equivalent
+    ([edit-cmd] …), the commit stores the op-log in the sidecar, and a FRESH
+    session re-running the same flow rebuilds the USER candidate (same uid)
+    and resolves the pin — no 'could not be resolved' warning."""
+    flow = tmp_path / "f.buda"
+    flow.write_text("\n".join((
+        "def_layer 4 M4 H TOP 10",
+        "def_layer 5 M5 V TOP 10",
+        "add_block lo 0    0 400  400",
+        "add_block up 0 1000 400 1400",
+        "add_bus w[4] lo.o up.i",
+        "run_bundler",
+        "generate_topologies",
+    )) + "\n")
+
+    def run_flow(sess):
+        for line in flow.read_text().splitlines():
+            if line.strip():
+                sess.do_command(line.strip())
+
+    # Session 1: run the flow, edit in the GUI, commit.
+    s1 = buda_cli.BudaSession(); s1.no_viz = True
+    s1.script_path = str(flow)
+    run_flow(s1)
+    exp = buda_viz.TopologyExplorer(
+        s1.fp, s1.bundles, sidecar_path=str(tmp_path / "f.json"),
+        layer_stack=s1.layers)                     # the session's sidecar
+    try:
+        _key(exp, 'E')
+        _trunk(exp, 'Y', 500, 700)
+        exp.sidx = 0
+        _key(exp, 'S', x=200, y=1200)
+        _key(exp, 'S', x=200, y=200)
+        exp.sidx = 0
+        _key(exp, 'W', x=420, y=700)          # slide window bound 1
+        _key(exp, 'W', x=460, y=700)          # bound 2 → staged [420,460]
+        _key(exp, 'enter')
+        out = capsys.readouterr().out
+        assert '[edit-cmd] edit_add_trunk V 500' in out
+        assert '[edit-cmd] edit_add_stub up 0 layer 4' in out
+        assert '[edit-cmd] edit_set_slide 0 420 460' in out
+        uid1 = None
+        sel = exp._find_selection()
+        assert sel and sel.get('user_topo', {}).get('ops'), \
+            "sidecar entry must carry the op-log"
+        assert 'edit_set_slide 0 420 460' in sel['user_topo']['ops']
+        uid1 = sel['topo_uid']
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+    # Session 2: fresh run of the SAME flow — the op-log replays and the pin
+    # resolves to the rebuilt USER candidate, W window included.
+    import math
+    s2 = buda_cli.BudaSession(); s2.no_viz = True
+    s2.script_path = str(flow)
+    run_flow(s2)
+    out2 = capsys.readouterr().out
+    assert 'rebuilding USER candidate' in out2
+    assert 'could not be resolved' not in out2
+    w2 = s2.bundles[0]
+    idx = w2.plan.selected_topology_index
+    assert w2.input.topology_pinned
+    assert w2.input.candidates[idx].type == 'USER'
+    assert buda.topo_uid(w2.input.candidates[idx]) == uid1
+    # The staged W window survived the round trip onto the plan.
+    assert (w2.plan.seg_slide_lo[0], w2.plan.seg_slide_hi[0]) == (420.0, 460.0)
+    assert all(math.isnan(v) for v in list(w2.plan.seg_slide_lo)[1:])
+
+
+def test_cli_edit_set_slide_stages_clamps_and_rekeys(tmp_path):
+    """The scriptable W: edit_set_slide stages a window (clamped to the
+    structural slide range), 'clear' unstages, edit_remove_segment re-keys,
+    and edit_commit lands the survivors on plan.seg_slide_lo/hi."""
+    import math
+    s = _dd_base_session()                    # C committed+pinned (5 segments)
+    for cmd in (
+        "edit_topology 1 new",
+        "edit_add_trunk V 500 200 1200",      # seg 0: OOB → range [400, inf)
+        "edit_add_stub up 0",                 # seg 1: slides in up's face
+        "edit_add_stub lo 0",                 # seg 2
+        "edit_set_slide 0 0 460",             # lo clamps to the range floor
+                                              # (400 face + 20 min-stub push-out)
+        "edit_set_slide 1 1000 1200",         # valid window on the stub
+        "edit_set_slide 1 clear",             # ...then unstaged
+        "edit_remove_segment 2",              # re-key check (no window ≥ 2)
+        "edit_commit pin",
+    ):
+        s.do_command(cmd)
+    w = s.bundles[0]
+    slo, shi = list(w.plan.seg_slide_lo), list(w.plan.seg_slide_hi)
+    assert (slo[0], shi[0]) == (420.0, 460.0)   # lo clamped 0 → 420
+    assert all(math.isnan(v) for v in slo[1:])  # seg 1 cleared, seg 2 gone
+
+
+# ── Codex #305 review fixes ───────────────────────────────────────────────────
+
+def test_cli_commit_without_pin_discards_overrides(capsys):
+    """Codex #305: an un-pinned edit_commit appends the candidate but does NOT
+    select it — per-segment overrides (staged slide windows, edit_set_layer
+    pins) are indexed by the committed topology and attach to the SELECTION,
+    so writing them would misapply to whatever is selected (the length guard
+    can coincide).  They must be discarded LOUD, and the live plan/input state
+    left untouched."""
+    import math
+    s = _dd_base_session()                    # C committed+pinned via the flow
+    w = s.bundles[0]
+    sel_before = w.plan.selected_topology_index
+    slide_before = list(w.plan.seg_slide_lo)
+    pins_before = list(w.input.pinned_seg_layers)
+    for cmd in (
+        "edit_topology 1 new",
+        "edit_add_trunk V 500 200 1200",
+        "edit_add_stub up 0",
+        "edit_add_stub lo 0",
+        "edit_set_slide 0 420 460",
+        "edit_set_layer 1 5",                 # H stub → V layer (just a change)
+        "edit_commit",                        # NO pin
+    ):
+        s.do_command(cmd)
+    out = capsys.readouterr().out
+    assert 'slide window(s) discarded' in out
+    assert 'NOT pinned' in out
+    assert w.plan.selected_topology_index == sel_before   # selection untouched
+    assert list(w.plan.seg_slide_lo) == slide_before      # no plan pollution
+    assert list(w.input.pinned_seg_layers) == pins_before
+
+
+def test_cli_edit_set_layer_pins_on_commit():
+    """Codex #305: edit_set_layer must survive planning — layer_hint alone is
+    a suggestion; a pinning commit rebuilds wrapper.input.pinned_seg_layers
+    from the working copy (GUI parity)."""
+    s = _dd_base_session()
+    for cmd in (
+        "edit_topology 1 new",
+        "edit_add_trunk V 500 200 1200",      # seg 0, default V layer 5
+        "edit_add_stub up 0",                 # seg 1, H layer 4
+        "edit_add_stub lo 0",                 # seg 2, H layer 4
+        "edit_set_layer 0 5",                 # explicit (same value, still a pin)
+        "edit_commit pin",
+    ):
+        s.do_command(cmd)
+    w = s.bundles[0]
+    topo = w.input.candidates[w.plan.selected_topology_index]
+    assert list(w.input.pinned_seg_layers) == \
+        [sg.layer_hint for sg in topo.segments]
+
+
+def test_sidecar_load_preserves_user_topo(tmp_path, capsys):
+    """Codex #305: _load_sidecar must carry user_topo through — a designer
+    opening an explorer on an existing sidecar and re-saving any selection
+    must not strand the USER candidate's replay log.  Re-pinning the SAME
+    USER candidate keeps it too."""
+    s = _dd_base_session()
+    sc = str(tmp_path / "sc.json")
+    exp = buda_viz.TopologyExplorer(s.fp, s.bundles, sidecar_path=sc,
+                                    layer_stack=s.layers)
+    try:
+        _key(exp, 'E')
+        _trunk(exp, 'Y', 500, 700)
+        exp.sidx = 0
+        _key(exp, 'S', x=200, y=1200)
+        _key(exp, 'S', x=200, y=200)
+        _key(exp, 'enter')                    # commit + pin → sidecar user_topo
+        assert 'user_topo' in exp._find_selection()
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')
+
+    # A SECOND explorer loads the same sidecar, then re-saves: the replay log
+    # must survive the load→save cycle.
+    exp2 = buda_viz.TopologyExplorer(s.fp, s.bundles, sidecar_path=sc,
+                                     layer_stack=s.layers)
+    try:
+        sel = exp2._find_selection()
+        assert sel is not None and 'user_topo' in sel, \
+            "_load_sidecar dropped the replay log"
+        exp2._save_sidecar()
+        import json
+        on_disk = json.load(open(sc))['selections'][0]
+        assert 'user_topo' in on_disk
+        # Re-pinning the same USER candidate (s on the shown selection) keeps it.
+        exp2._select_current()
+        sel2 = exp2._find_selection()
+        assert sel2 is not None and 'user_topo' in sel2
+    finally:
+        import matplotlib.pyplot as plt
+        plt.close('all')

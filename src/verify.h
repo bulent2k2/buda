@@ -49,6 +49,14 @@ enum class ViolationKind {
                   // dnuts: a bit's track centre is inside the zone (same
                   // predicate as DetailedNUTS's cull_keepout_crossers —
                   // defense-in-depth: the cull prevents this in production)
+    DISCONNECTED, // the topology's wire graph splits into 2+ islands: SEG
+                  // junctions + same-tapped-block continuity (a through-block
+                  // joint is either a declared feedthru or flagged separately
+                  // as FEEDTHRU_RELAY) leave some segments unreachable from
+                  // the rest — the net cannot be electrically complete even
+                  // though every block is tapped and every junction touches
+                  // (e.g. a TopoEdit session that removed the only bridging
+                  // stub and committed with comps=2)
 };
 
 struct ConnViolation {

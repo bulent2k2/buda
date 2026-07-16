@@ -45,17 +45,55 @@ none of these variants is needed until real use shows the float capture
 missing targets.  All three compose (snap key + echo marker + text entry
 are independent).
 
-## CLI parity for the slide-window refine
+## CLI parity for the slide-window refine — ✅ RESOLVED
 
-**Context.** The GUI stages `_edit_slide` and lands it on
-`plan.seg_slide_lo/hi` at commit; the scriptable `edit_*` session
-(`edit_topology` … `edit_commit`) has no equivalent — `edit_set_span`
-covers the ALONG range only.
+**Landed** (dd-detour batch): `edit_set_slide <seg#> <lo> <hi>` /
+`edit_set_slide <seg#> clear` stages per-segment windows on the CLI
+session (clamped to the structural slide range at stage time, revalidated
+at `edit_commit`, re-keyed by `edit_remove_segment`), and lands them on
+`plan.seg_slide_lo/hi` exactly like the GUI commit.  The GUI's `W`/`w`
+now log the same command into the `[edit-cmd]` stream and the sidecar
+op-log, so a replayed session keeps its slide refinements — the
+sidecar/replay story is whole.
 
-**Wish.** `edit_set_slide <seg#> <lo> <hi>` (and a clearing form), staged
-on the session and applied in `cmd_edit_commit`, so a `.buda` script can
-reproduce any hand-edited session including its slide refinements — the
-sidecar/replay story stays whole.  Where to start:
-`src/buda_cmds/edit_cmds.py` + the commit path in
-`src/buda_session/edit.py`; validate with the same
-intersect-with-structural-range rule as `_edit_slide_at`.
+## BDB topology tables as the USER-topo persistence home (hier flows) — OPEN, significant
+
+**Context.** Hand-built USER candidates now persist via the SIDECAR
+op-log (`user_topo`: base uid + applied `edit_*` commands, replayed after
+`generate_topologies`) — which covers the FLAT flow well.  The hier flow
+already has a richer, native persistence surface the op-log does not use:
+the BDB `topology`/`topology_segment` tables (+ `topology_seg_busterm` /
+`topology_bridge_segment` links, `perp_clamp_lo/hi` since v16, `topo_uid`
+identity) that `generate_[hier_]topologies` writes and `load_pipeline`
+restores.  A USER candidate committed in a hier session should live
+THERE — first-class rows, not a JSON side channel.
+
+**Wish.** Develop + test USER-topology persistence through the BDB for
+hier flows:
+
+1. **Persist**: `edit_commit` (CLI + explorer) writes the committed USER
+   candidate into the open BDB's topology tables exactly like generated
+   candidates (`_persist_topologies` already re-persists the pool — audit
+   that the USER rows carry taps, clamps, layer hints, and the op-log as
+   a provenance blob so the sidecar replay can be reconstructed FROM the
+   BDB).
+2. **Restore**: `load_pipeline` (both views) rehydrates USER candidates
+   with their seg_busterm links and slide overrides, and the pin
+   resolves by `topo_uid` — no sidecar needed when a BDB is open.
+3. **Hier semantics**: decide template-vs-instance scope — a USER edit
+   on a cell-local template should replicate to instances (the
+   template/replica linkage), while an edit on one expanded instance
+   wrapper stays instance-local; both must survive `run_planner hier`
+   expansion and be exercised by tests (cell-local, cross-level, and
+   post-expansion edits).
+4. **Tests**: BDB fixture round trips (commit → save → reopen →
+   `load_pipeline` → pin resolves; the `bdb_input` copy-to-temp fixture),
+   plus a hier flow whose template edit lands on every instance.
+
+**Why significant.** This is the designer-interaction keystone for hier
+designs: today a hier session's hand edits survive only while the sidecar
+matches the flow, and cross-session/hier-aware continuation
+(`load_pipeline`) silently drops USER candidates.  Where to start:
+`src/buda_session/persist.py` (`_persist_topologies`) +
+`src/buda_session/hier.py` (`load_pipeline` restore path) +
+[`../BDB_REFERENCE.md`](../BDB_REFERENCE.md) schema notes.
