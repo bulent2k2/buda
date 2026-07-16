@@ -101,6 +101,38 @@ def test_kwlspread_off_by_default_no_annotation():
     assert all(c.wl_lo < 0 for c in w.input.candidates)
 
 
+def test_annotation_failure_clears_stale_stamp(monkeypatch):
+    """A candidate stamped on an earlier run whose recompute later FAILS
+    (mutated topology) must be reset to the -1 sentinel — the planner falls
+    back to the nominal, never a stale pre-mutation envelope (Codex #312)."""
+    s, _ = _b44_session(knob=False)
+    w = s.bundles[0]
+    # First pass stamps everything.
+    s._annotate_wl_envelopes([w])
+    assert all(c.wl_lo >= 0 for c in w.input.candidates)
+
+    def boom(*a, **k):
+        raise RuntimeError("mutated beyond derivation")
+    monkeypatch.setattr(type(s), "_topology_wl_interval", boom)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._annotate_wl_envelopes([w])
+    assert all(c.wl_lo < 0 and c.wl_hi < 0 for c in w.input.candidates)
+    assert "underivable -> nominal fallback" in buf.getvalue()
+
+
+def test_annotation_fp_override_stamps_all_wrappers():
+    """The explicit-floorplan flavour (the bottom-up template solve hands the
+    cell-local floorplan it already built) stamps every candidate."""
+    s, _ = _b44_session(knob=False)
+    w = s.bundles[0]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        s._annotate_wl_envelopes([w], fp=s.fp)
+    assert all(c.wl_lo >= 0.0 and c.wl_hi >= c.wl_lo
+               for c in w.input.candidates)
+
+
 def test_kwlspread_param_recognized():
     """set_planner_param kWLSpread must not hit the unknown-param warning."""
     s = buda_cli.BudaSession()

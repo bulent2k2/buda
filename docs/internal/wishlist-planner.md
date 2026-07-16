@@ -295,10 +295,11 @@ structural tie-break) and why the score-term route shipped first.
 opens shuffle on plain pipelines means a blanket default needs either (a) the
 healers in the default flow path, or (b) a spread term that prices only the
 *trunk-stretch* component (junction-coupled spread) rather than the whole
-envelope. Bottom-up template planning (`_plan_bottom_up_templates`) is not
-annotated yet — those templates score the plain nominal (documented
-limitation; add the stamp inside that helper when a bottom-up design wants
-the knob).
+envelope. Bottom-up template planning (`_plan_bottom_up_templates`) IS
+annotated (Codex #312): the local solve's planner is seeded from
+`_planner_params`, and the templates' envelopes are stamped against the
+cell-local floorplan the solve plans in, so the spread term applies before
+the pin that expansion locks in.
 
 ## Selection basis: rank on measured routability, not the generation-time WL estimate — LEVERS 1+2 SHIPPED; `kPeak` default DECIDED (stays opt-in)
 

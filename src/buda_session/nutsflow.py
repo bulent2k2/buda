@@ -241,7 +241,7 @@ class NutsFlowMixin:
         lo = min(sum(span(t) for t in range(n)), hi)
         return (lo, hi)
 
-    def _annotate_wl_envelopes(self, wraps):
+    def _annotate_wl_envelopes(self, wraps, fp=None):
         """Stamp every candidate's slide/span WL envelope onto its Topology
         (`wl_lo`/`wl_hi`) so the planner's opt-in kWLSpread knob can price
         realization risk on top of the nominal segment-sum (the b44
@@ -250,10 +250,15 @@ class NutsFlowMixin:
         per-candidate CONSTANT (independent of contention/plan state), so
         one pass before planning also covers every later replan/rr trial on
         the same candidates.  A candidate whose envelope cannot be derived
-        keeps -1 and falls back to the nominal in the planner.  Element
-        access on w.input.candidates hands back a reference into the C++
-        vector, so the stamp writes through."""
-        topo_fp = self._make_topo_fp_resolver()
+        is reset to -1 and falls back to the nominal in the planner.
+        Element access on w.input.candidates hands back a reference into the
+        C++ vector, so the stamp writes through.  `fp` overrides the
+        per-bundle frame resolution for EVERY wrapper — the bottom-up
+        template solve passes the cell-local floorplan it already built
+        (its wrappers all belong to one cell); default = the same
+        cell-local/depth/endpoint resolution dump_topologies uses."""
+        topo_fp = (lambda w: fp) if fp is not None \
+            else self._make_topo_fp_resolver()
         n_ok = n_fail = 0
         for w in wraps:
             w_fp = topo_fp(w)
@@ -269,6 +274,11 @@ class NutsFlowMixin:
                     c.wl_hi = float(hi)
                     n_ok += 1
                 except Exception:
+                    # Clear any prior stamp: a mutated candidate whose
+                    # recompute fails must fall back to the nominal, not
+                    # keep a stale pre-mutation envelope.
+                    c.wl_lo = -1.0
+                    c.wl_hi = -1.0
                     n_fail += 1
         msg = f"[Planner] kWLSpread: WL envelopes annotated on {n_ok} candidate(s)"
         if n_fail:
