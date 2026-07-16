@@ -39,6 +39,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "base_span_ref")     base_span_ref_     = value;
     else if (name == "track_cap_slack")   track_cap_slack_   = value;
     else if (name == "refine_passes")     refine_passes_     = (int)value;
+    else if (name == "nontop_dead_span_gate") nontop_dead_span_gate_ = (value != 0.0);
     else std::cout << "[Planner] Warning: unknown param '" << name << "'\n";
 }
 
@@ -620,27 +621,12 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
     // this is a soft steering term and an exact shortfall is exactly the
     // signal it exists to price.  tracks_needed <= 0 (unknown width)
     // or a pattern-less layer keeps the pure relative behavior.
-    if (tracks_needed > 0.0 && (peak < 1.0 || proportional_floor) &&
-        grid_ != nullptr && grid_->has_layer(layer_id)) {
-        int lo, hi;
-        routed_extent(seg, layer_id, lo, hi);
-        if (lo < hi) {
-            bool is_h = (seg.start.y == seg.end.y);
-            int  pp   = (perp_pos_override != INT_MIN)
-                            ? perp_pos_override
-                            : (is_h ? seg.start.y : seg.start.x);
-            const auto& pgrid = is_h ? y_grid_ : x_grid_;
-            int b = find_band(/*is_vcut=*/is_h, pp);
-            if (b >= 0 && b + 1 < (int)pgrid.size()) {
-                // The perp window NUTS/DNUTS can actually use: the Hanan band,
-                // intersected with the slide window when one is known.
-                double w_lo = pgrid[b], w_hi = pgrid[b + 1];
-                if (slide_lo != INT_MIN) w_lo = std::max(w_lo, (double)slide_lo);
-                if (slide_hi != INT_MIN) w_hi = std::min(w_hi, (double)slide_hi);
-                if (w_lo < w_hi) {
-                    int supply = grid_->get_layer_grid(layer_id)
-                                     .count_signal_tracks_in_span(
-                                         (double)lo, (double)hi, w_lo, w_hi);
+    if (tracks_needed > 0.0 && (peak < 1.0 || proportional_floor)) {
+        int  pp     = (perp_pos_override != INT_MIN)
+                          ? perp_pos_override
+                          : ((seg.start.y == seg.end.y) ? seg.start.y : seg.start.x);
+        int supply = span_signal_supply(seg, layer_id, pp, slide_lo, slide_hi);
+        if (supply >= 0) {
                     // Deliberately the STRICT span-clear pool, NOT DetailedNUTS's
                     // admission policy (which retries the midpoint pool when the
                     // span pool falls short).  That retry is an admission
@@ -686,11 +672,41 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
                                    ? std::max(peak, tracks_needed /
                                                   std::max(0.5, (double)supply))
                                    : 1.0;
-                }
-            }
         }
     }
     return peak;
+}
+
+// Real span-wide SIGNAL-track supply — the DetailedNUTS pool (see header).
+// -1 when no supply model applies (leave the width model in charge).
+int CongestionPlanner::span_signal_supply(const Segment& seg, int layer_id,
+                                          int pp, int slide_lo, int slide_hi,
+                                          bool with_midpoint_fallback) const {
+    if (grid_ == nullptr || !grid_->has_layer(layer_id)) return -1;
+    int lo, hi;
+    routed_extent(seg, layer_id, lo, hi);
+    if (lo >= hi) return -1;                     // nothing routed here
+    bool is_h = (seg.start.y == seg.end.y);
+    const auto& pgrid = is_h ? y_grid_ : x_grid_;
+    int b = find_band(/*is_vcut=*/is_h, pp);
+    if (b < 0 || b + 1 >= (int)pgrid.size()) return -1;
+    // The perp window NUTS/DNUTS can actually use: the Hanan band, intersected
+    // with the slide window when one is known.
+    double w_lo = pgrid[b], w_hi = pgrid[b + 1];
+    if (slide_lo != INT_MIN) w_lo = std::max(w_lo, (double)slide_lo);
+    if (slide_hi != INT_MIN) w_hi = std::min(w_hi, (double)slide_hi);
+    if (w_lo >= w_hi) return -1;
+    const RoutingGrid& g = grid_->get_layer_grid(layer_id);
+    int span_pool = g.count_signal_tracks_in_span((double)lo, (double)hi,
+                                                  w_lo, w_hi);
+    if (!with_midpoint_fallback) return span_pool;
+    // Mirror DetailedNUTS's admission: when the span-clear pool is short it
+    // retries the along-MIDPOINT pool (a point query at (lo+hi)/2 across the
+    // same perp window), and admits on whichever is larger.  The gate must
+    // predict that, or it rejects a layer DNUTS would in fact place on.
+    int mid_pool = g.count_signal_tracks_in(0.5 * ((double)lo + (double)hi),
+                                            w_lo, w_hi);
+    return std::max(span_pool, mid_pool);
 }
 
 // Slide-aware band choice.  cong_cost_segment charges the whole bus to the
@@ -923,6 +939,43 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                             collect_overflow_bands(seg, lid, eff, pp,
                                                    slide_lo, slide_hi, *contended);
                         continue;
+                    }
+                    // Dead-span gate for NON-TOP layers (opt-in:
+                    // set_planner_param nontop_dead_span_gate 1; default off).
+                    // score_segment's per-cut capacity samples the endpoint-
+                    // CLAMPED extent (for_each_band treats a non-TOP stub's in-
+                    // cell tail as pin access on another layer), so a stub whose
+                    // in-cell span sits over a leaf keepout on a LOW layer can
+                    // pass the width/track check yet land where NO track is
+                    // keepout-clear across the whole span DetailedNUTS places
+                    // from — the abstract-span signal-track supply is 0.  When
+                    // enabled, reject such a NON-TOP layer so STRICT escalates to
+                    // a TOP layer that can host the bits.  Measured (bigHalf
+                    // no-rr, signal_tracks): unplaced 566 -> 135 (−76%).
+                    //
+                    // OFF by default because the abstract span is a CONSERVATIVE
+                    // overestimate of the final junction-adjusted bit spans, so
+                    // span_pool==0 does NOT distinguish bigHalf's stubs (which
+                    // genuinely cull — bits can't retract clear of the keepout)
+                    // from rnr_mix's (whose final spans DO clear it and place):
+                    // both read span_pool==0 at plan time, and gating both
+                    // regresses rnr_mix's healed endpoint 0 -> 16 by over-
+                    // escalating survivors onto TOP.  The always-on discriminator
+                    // (keepout-covers-the-whole-routed-extent vs partial, a
+                    // post-placement-aware predictor) is the follow-on tracked in
+                    // wishlist-planner / opens item 4.  TOP layers are exempt.
+                    if (nontop_dead_span_gate_ && enforce_overflow
+                        && !layers_.is_top(lid) && pp != INT_MIN
+                        && seg_n(topo, si) > 0) {
+                        int sup = span_signal_supply(seg, lid, pp,
+                                                     slide_lo, slide_hi,
+                                                     /*with_midpoint_fallback=*/false);
+                        if (sup == 0) {          // dead span: no keepout-clear track
+                            if (contended)
+                                collect_overflow_bands(seg, lid, eff, pp,
+                                                       slide_lo, slide_hi, *contended);
+                            continue;
+                        }
                     }
                     double cong = cong_cost_segment(seg, lid, eff, pp, slide_lo, slide_hi);
                     double span = span_cost_for(seg_span, lid);

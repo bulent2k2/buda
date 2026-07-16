@@ -314,6 +314,22 @@ private:
                              int slide_lo = INT_MIN, int slide_hi = INT_MIN,
                              double tracks_needed = 0.0,
                              bool proportional_floor = false) const;
+    // Real span-wide SIGNAL-track supply for `seg` on `layer_id` at
+    // perpendicular position `pp` — the exact pool DetailedNUTS places from
+    // (routed_extent along-span × the Hanan band at pp ∩ the slide window,
+    // via count_signal_tracks_in_span; grid keepouts/overrides honoured).
+    // Returns -1 when no supply model applies (no grid, layer un-patterned,
+    // or a degenerate window) so the caller leaves the width model in
+    // charge.  Shared by peak_util_segment's floor and the non-TOP
+    // span-supply gate in plan_bundle.  with_midpoint_fallback mirrors
+    // DetailedNUTS's admission — when the strict span-clear pool is short it
+    // retries the along-MIDPOINT pool (detailed_nuts.cpp) — so the gate
+    // rejects only what DNUTS will actually reject; the kPeak floor keeps the
+    // default strict pool (its midpoint-retry variant was measured & rejected,
+    // PR #257).
+    int span_signal_supply(const Segment& seg, int layer_id, int pp,
+                           int slide_lo, int slide_hi,
+                           bool with_midpoint_fallback = false) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
     double score_segment(const Segment& seg, int layer_id, double eff_width,
                          int perp_pos_override = INT_MIN,
@@ -512,6 +528,14 @@ private:
     // pass, with a fixpoint early-out.  See the optimize_topologies comment
     // and docs/congestion_planner.md "Level ordering".
     int    refine_passes_     = 0;
+    // Opt-in dead-span gate (default off — existing flows bit-identical).
+    // When set, a NON-TOP layer is refused for a segment whose abstract span
+    // has ZERO keepout-clear signal tracks in the chosen band (a guaranteed
+    // DetailedNUTS open), forcing STRICT escalation to a TOP layer.  See the
+    // gate comment in plan_bundle for why it is opt-in (span_pool==0 cannot
+    // distinguish genuine culls from survivors whose final adjusted spans
+    // clear the keepout).
+    bool   nontop_dead_span_gate_ = false;
 };
 
 } // namespace buda
