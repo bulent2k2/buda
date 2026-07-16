@@ -1021,6 +1021,22 @@ class PersistMixin:
             self.bdb.add_bundle_busterm(bid, bt, "entry")
         for bt in hb.exit_busterm_ids:
             self.bdb.add_bundle_busterm(bid, bt, "exit")
+        self._persist_bundle_candidates(w)
+
+    def _persist_bundle_candidates(self, w):
+        """(Re)write ONE bundle's candidate topology rows from its in-memory
+        pool: deletes any existing rows, then persists every candidate with
+        segments + logical annotations, is_selected/is_pinned, and the v15
+        source tag (a USER candidate persisted through this path must survive
+        the keep_user wipe like any other).  Used by _persist_normal_bundle
+        (fresh bundle — the delete is a no-op) and by the post-expansion
+        edit_commit for a NORMAL (non-expanded) wrapper, whose planner
+        persist only updates selection/layers and would otherwise point
+        is_selected at a candidate the BDB never received."""
+        import json
+        bid = str(w.input.original_bundle.id)
+        for tr in self.bdb.topologies(bid):
+            self.bdb.delete_topology(bid, tr.cand_index)
         sel = w.plan.selected_topology_index
         for ci, topo in enumerate(w.input.candidates):
             tr = buda.TopoRow()
@@ -1035,6 +1051,10 @@ class PersistMixin:
             tr.is_selected = (ci == sel)
             tr.is_pinned = bool(w.input.topology_pinned and ci == sel)
             tr.topo_uid = buda.topo_uid(topo)
+            tr.source = ("user" if topo.type == "USER" else
+                         "dogleg" if self._dogleg_slot.get(
+                             w.input.original_bundle.id) == ci else
+                         "generated")
             self.bdb.add_topology(tr)
             for si, seg in enumerate(topo.segments):
                 sr = buda.TopoSegRow()

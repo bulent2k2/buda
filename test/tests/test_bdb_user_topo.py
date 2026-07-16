@@ -90,9 +90,11 @@ def test_flat_user_topo_bdb_round_trip(tmp_path):
 
 # ── hier flow ─────────────────────────────────────────────────────────────────
 
-def _two_instance_design(path):
+def _two_instance_design(path, cross=False):
     """proc_cell (pa_i, pb_i) instantiated twice, 4 cell-local nets each —
-    the template/replica shape from test_hier_bundler, as a session BDB."""
+    the template/replica shape from test_hier_bundler, as a session BDB.
+    `cross` adds 4 level-0 nets between the two instances (a NORMAL
+    cross-block bundle that survives expansion un-expanded)."""
     db = buda.BDB(path)
     db.add_cell("proc_cell", 420, 200)
     db.add_cell("pipe_cell", 110, 80)
@@ -103,6 +105,8 @@ def _two_instance_design(path):
     for i in range(4):
         db.add_net_pins(f"ab1_{i}", "proc_i1/pa_i.out", ["proc_i1/pb_i.in"])
         db.add_net_pins(f"ab2_{i}", "proc_i2/pa_i.out", ["proc_i2/pb_i.in"])
+        if cross:
+            db.add_net_pins(f"x_{i}", "proc_i1/pb_i.out", ["proc_i2/pa_i.in"])
     db.compute_all()
 
 
@@ -216,3 +220,46 @@ def test_hier_instance_local_edit_round_trips_expanded(tmp_path):
         assert t.type == "USER"
         sg = t.segments[0]
         assert (min(sg.start.x, sg.end.x), max(sg.start.x, sg.end.x)) == want
+
+
+def test_hier_cross_block_user_edit_post_expansion_persists(tmp_path):
+    """Codex #306: after `run_planner hier`, self.bundles mixes expanded
+    instance wrappers with NORMAL (never-expanded) cross-block bundles.  An
+    edit_commit on one of those normal bundles used to 'save' via
+    set_topology_selected alone — pointing is_selected at a candidate the BDB
+    never received, so the reload dropped the USER topology.  The commit now
+    refreshes the bundle's candidate rows first."""
+    src = str(tmp_path / "twox.bdb")
+    post = str(tmp_path / "postx.bdb")
+    _two_instance_design(src, cross=True)
+    s, _ = _session(
+        *LAYERS, f"open_bdb {src}",
+        "add_blocks_from_bdb 0", "add_blocks_from_bdb 1 skip",
+        "derive_busterms 1", "run_hier_bundler depth 1",
+        "generate_hier_topologies", "run_planner hier 3")
+    expanded_ids = {w.input.original_bundle.id
+                    for ws in s._hier_expansion_map.values() for w in ws}
+    normal = next(w for w in s.bundles
+                  if w.input.original_bundle.id not in expanded_ids)
+    nid = normal.input.original_bundle.id
+    outs = []
+    for c in (f"edit_topology {nid} 1",        # absolute frame (cross-block)
+              "edit_commit pin",
+              f"save_bdb {post}"):
+        with contextlib.redirect_stdout(io.StringIO()) as b:
+            s.do_command(c)
+        outs.append(b.getvalue())
+    assert "committed as candidate" in "".join(outs)
+    uid = buda.topo_uid(
+        normal.input.candidates[normal.plan.selected_topology_index])
+    n_pool = len(normal.input.candidates)
+    del s
+
+    s2, out = _session(f"open_bdb {post}", *HIER_SETUP,
+                       "load_pipeline expanded")
+    assert "rehydrated" in out and "Error" not in out
+    w2 = next(w for w in s2.bundles if w.input.original_bundle.id == nid)
+    assert len(w2.input.candidates) == n_pool          # full pool, USER included
+    sel = w2.plan.selected_topology_index
+    assert w2.input.candidates[sel].type == "USER"
+    assert buda.topo_uid(w2.input.candidates[sel]) == uid

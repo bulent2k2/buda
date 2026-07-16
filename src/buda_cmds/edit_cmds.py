@@ -382,6 +382,17 @@ def cmd_edit_commit(session, cmd, args, cmd_line):
         # each instance's SELECTED topology is recorded, so a pinning commit
         # lands as the instance's routed shape.
         if session.bdb is not None:
+            expanded_ids = {x.input.original_bundle.id
+                            for ws in session._hier_expansion_map.values()
+                            for x in ws}
+            if w.input.original_bundle.id not in expanded_ids:
+                # A NORMAL bundle (cross-block / global) edited post-expansion:
+                # the planner persist below only updates its selection/layers —
+                # refresh its candidate rows first so the just-committed USER
+                # topology actually exists for is_selected to point at (else
+                # the pin appears to save but load_pipeline reloads the old
+                # pool — Codex #306).
+                session._persist_bundle_candidates(w)
             session._persist_planner_output()
             print("[BDB] re-persisted expanded planner state to the open BDB.")
             if not is_selected:
