@@ -681,12 +681,23 @@ double CongestionPlanner::peak_util_segment(const Segment& seg, int layer_id,
 // -1 when no supply model applies (leave the width model in charge).
 int CongestionPlanner::span_signal_supply(const Segment& seg, int layer_id,
                                           int pp, int slide_lo, int slide_hi,
-                                          bool with_midpoint_fallback) const {
+                                          bool with_midpoint_fallback,
+                                          bool use_raw_span) const {
     if (grid_ == nullptr || !grid_->has_layer(layer_id)) return -1;
-    int lo, hi;
-    routed_extent(seg, layer_id, lo, hi);
-    if (lo >= hi) return -1;                     // nothing routed here
     bool is_h = (seg.start.y == seg.end.y);
+    int lo, hi;
+    if (use_raw_span) {
+        // The RAW segment along-span DetailedNUTS's BusSegment carries
+        // (nuts.cpp:1195) — NOT the face-clamped routed_extent, which would
+        // hide a keepout covering only the in-cell tail from the gate.
+        lo = is_h ? std::min(seg.start.x, seg.end.x)
+                  : std::min(seg.start.y, seg.end.y);
+        hi = is_h ? std::max(seg.start.x, seg.end.x)
+                  : std::max(seg.start.y, seg.end.y);
+    } else {
+        routed_extent(seg, layer_id, lo, hi);
+    }
+    if (lo >= hi) return -1;                     // nothing routed here
     const auto& pgrid = is_h ? y_grid_ : x_grid_;
     int b = find_band(/*is_vcut=*/is_h, pp);
     if (b < 0 || b + 1 >= (int)pgrid.size()) return -1;
@@ -969,7 +980,8 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
                         && seg_n(topo, si) > 0) {
                         int sup = span_signal_supply(seg, lid, pp,
                                                      slide_lo, slide_hi,
-                                                     /*with_midpoint_fallback=*/false);
+                                                     /*with_midpoint_fallback=*/false,
+                                                     /*use_raw_span=*/true);
                         if (sup == 0) {          // dead span: no keepout-clear track
                             if (contended)
                                 collect_overflow_bands(seg, lid, eff, pp,

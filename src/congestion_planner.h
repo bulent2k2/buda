@@ -326,10 +326,17 @@ private:
     // retries the along-MIDPOINT pool (detailed_nuts.cpp) — so the gate
     // rejects only what DNUTS will actually reject; the kPeak floor keeps the
     // default strict pool (its midpoint-retry variant was measured & rejected,
-    // PR #257).
+    // PR #257).  use_raw_span uses the RAW segment along-extent (min/max of
+    // the endpoints) that DetailedNUTS's BusSegment carries (nuts.cpp:1195),
+    // NOT the endpoint-face-clamped routed_extent: the dead-span GATE must see
+    // the whole span DNUTS places over, or a keepout covering only the
+    // clamped-away in-cell tail hides from it (Codex #304).  The kPeak floor
+    // keeps routed_extent (its clamp deliberately avoids false-flooring
+    // pin-access tails on the soft steer).
     int span_signal_supply(const Segment& seg, int layer_id, int pp,
                            int slide_lo, int slide_hi,
-                           bool with_midpoint_fallback = false) const;
+                           bool with_midpoint_fallback = false,
+                           bool use_raw_span = false) const;
     // Raw overflow for logging (usage+eff - cap, clamped to 0).
     double score_segment(const Segment& seg, int layer_id, double eff_width,
                          int perp_pos_override = INT_MIN,
