@@ -112,6 +112,33 @@ static double band_available_length(
 void CongestionPlanner::build_congestion_map() {
     floorplan_.get_hanan_grid(x_grid_, y_grid_);
     rebuild_cuts_();
+    warn_above_top_layers_();
+}
+
+// Config-smell warning: a layer declared non-TOP but sitting ABOVE the TOP
+// band in its direction is almost certainly a mis-declaration — it is a high,
+// precious top-level metal, and the planner now treats it as TOP (denies the
+// offload discount) rather than as a cheap low layer.  Warn once so the stack
+// gets declared sanely (mark it TOP in def_layer).  Printed once per planner.
+void CongestionPlanner::warn_above_top_layers_() {
+    if (warned_above_top_) return;
+    warned_above_top_ = true;
+    std::vector<int> above;
+    for (auto dir : {LayerDir::HORIZONTAL, LayerDir::VERTICAL})
+        for (int lid : layers_.get_layer_ids_by_dir(dir))
+            if (layers_.is_above_top(lid)) above.push_back(lid);
+    if (above.empty()) return;
+    std::cout << "[Planner] WARNING: layer(s)";
+    for (int lid : above) {
+        const Layer* L = layers_.get_layer(lid);
+        std::cout << " " << (L ? L->name : ("M" + std::to_string(lid)));
+    }
+    std::cout << " are declared non-TOP but sit ABOVE the TOP band — a metal "
+                 "above the TOP layers is a high top-level metal, not a cheap "
+                 "low layer, yet the planner costs a non-TOP layer as a cheap "
+                 "stub-offload target (base_cost_non_top).  Mark them TOP in "
+                 "def_layer so the cost model treats them as the top-level "
+                 "metal they are.\n";
 }
 
 void CongestionPlanner::rebuild_cuts_() {

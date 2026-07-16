@@ -435,6 +435,9 @@ private:
     // lowest same-direction TOP layer, so short runs should not float to the
     // top of the stack for free.  Non-TOP layers return 0 (they never pay).
     int    top_height_rank(int layer_id) const;
+    // Warn once (build_congestion_map) about non-TOP layers declared ABOVE
+    // the TOP band — a config smell the planner now costs as TOP.
+    void   warn_above_top_layers_();
 
     // Band capacity usable by a segment confined to [slide_lo, slide_hi]:
     // band_cap clamped by the window's overlap with the band.
@@ -543,6 +546,8 @@ private:
     // distinguish genuine culls from survivors whose final adjusted spans
     // clear the keepout).
     bool   nontop_dead_span_gate_ = false;
+    // One-shot guard for the above-TOP config-smell warning.
+    bool   warned_above_top_ = false;
 };
 
 } // namespace buda

@@ -81,6 +81,13 @@ public:
     double       get_layer_dilution(int id) const;
     bool         has_layer(int id) const;
     bool         is_top(int id) const;
+    // True for a non-TOP layer that sits ABOVE the TOP band in its direction
+    // (its id exceeds the highest TOP-layer id for that direction).  A metal
+    // declared above the TOP layers is physically a high, precious top-level
+    // metal — NOT a cheap low layer — so callers that discount non-TOP layers
+    // (the planner's base_cost_non_top offload) must not discount it.  False
+    // when the layer is TOP, unknown, or its direction has no TOP layer.
+    bool         is_above_top(int id) const;
 
     LayerDir     get_layer_dir(int id) const;
     LayerType    get_layer_type(int id) const;
