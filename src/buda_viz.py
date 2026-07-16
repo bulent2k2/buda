@@ -131,6 +131,13 @@ class TopologyExplorer(ExplorerEditMixin, ExplorerAnalysisMixin, ExplorerSidecar
         # (else a stale pinned_seg_layers from the source would re-pin the old
         # layers over the edit — Codex #302).
         self._edit_layers_changed = False
+        # Session op-log: each applied edit op in .buda command syntax, printed
+        # as [edit-cmd] lines (foldable into the flow script) and stored in the
+        # sidecar at commit ('user_topo': base uid + ops) so a re-run replays
+        # them and the USER candidate — which regeneration never produces —
+        # exists again for the pin to resolve.  None = no session.
+        self._edit_ops  = None
+        self._edit_base = 'new'
 
         # bundle_hint -> {topo_type, topo_wl, topo_index_hint, note, selected_at, seg_layers}
         self._selections    = {}

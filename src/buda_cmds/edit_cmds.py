@@ -129,6 +129,34 @@ def cmd_edit_set_span(session, cmd, args, cmd_line):
     session._edit_report(v)
 
 
+def cmd_edit_set_layer(session, cmd, args, cmd_line):
+    # Usage: edit_set_layer <seg#> <layer_id>
+    # The scriptable equivalent of the explorer's +/- layer cycle in an edit
+    # session: set the working copy's segment layer hint directly.  The
+    # planner honors it via the commit's pinned overrides (GUI) or the
+    # candidate's layer_hint (CLI).
+    if session._edit_session() is None: return
+    if len(args) < 2:
+        print("Error: edit_set_layer <seg#> <layer_id>")
+        return
+    i, lid = int(args[0]), int(args[1])
+    topo = session._edit_topo
+    if not (0 <= i < len(topo.segments)):
+        print(f"Error: segment {i} out of range "
+              f"(topology has {len(topo.segments)})")
+        return
+    seg = topo.segments[i]
+    horiz = seg.start.y == seg.end.y
+    if session.layers is not None and session.layers.has_layer(lid):
+        dir_h = (session.layers.get_layer_dir(lid) == buda.LayerDir.HORIZONTAL)
+        if dir_h != horiz:
+            print(f"  Warning: seg {i} runs {'H' if horiz else 'V'} but layer "
+                  f"{lid} routes {'H' if dir_h else 'V'} — check_design will "
+                  f"flag LAYER_DIR")
+    seg.layer_hint = lid
+    print(f"[edit] seg {i} layer -> {lid}")
+
+
 def cmd_edit_connect(session, cmd, args, cmd_line):
     # Usage: edit_connect <seg_i> <seg_j>   (perpendicular pair)
     if session._edit_session() is None: return
@@ -222,6 +250,7 @@ COMMANDS = {
     "edit_add_stub": cmd_edit_add_stub,
     "edit_remove_segment": cmd_edit_remove_segment,
     "edit_set_span": cmd_edit_set_span,
+    "edit_set_layer": cmd_edit_set_layer,
     "edit_connect": cmd_edit_connect,
     "edit_disconnect": cmd_edit_disconnect,
     "edit_status": cmd_edit_status,

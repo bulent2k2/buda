@@ -116,7 +116,8 @@ class ExplorerDrawMixin:
             else:
                 ax.plot([x0, x1], [hv, hv], color=hcol, lw=1.4, ls=':',
                         alpha=0.9, zorder=8)
-        span = self._pin_span_of(self._trunk_pin_set, self._trunk_pin_grid, horiz)
+        span = self._pin_span_of(self._trunk_pin_set, self._trunk_pin_grid,
+                                 horiz, self._trunk_pin_seg)
         if span is None:
             return
         lo, hi = span
@@ -360,11 +361,10 @@ class ExplorerDrawMixin:
         viz_lw = min(3.0 + math.log2(1 + self.wrapper.input.width) * 1.5, 4.5)
         actual_lids = []
         # A segment is "selected" (highlighted, info line, slide-marker
-        # emphasis) whenever one is picked AND either the candidate is
-        # selected/pinned OR a TopoEdit session is open — so j/k work in edit
-        # mode without first pinning the topology (issue: keys dead until 's').
-        sel_active = (self.sidx != -1 and
-                      (is_current_selection or self._edit_topo is not None))
+        # emphasis) whenever one is picked — on ANY shown candidate, pinned or
+        # not (j/k stepping is a browsing tool, not a commitment; it originally
+        # required a pin, then an edit session, now nothing).
+        sel_active = (self.sidx != -1)
 
         # ── Pre-compute display geometry for all segments ──────────────────
         # Minimum pull-arrow length in data units (prevents invisible arrows on
@@ -544,6 +544,17 @@ class ExplorerDrawMixin:
             info = (self._seg_info_override or
                     f"Selected {orient} segment {self.sidx} on "
                     f"{_layer_label(_sel_lid, self.layer_stack).split()[0]}.")
+            # Second line: the segment's perpendicular position + slide range —
+            # "y=<perp> V-slide=[lo,hi]" for an H segment (it slides vertically),
+            # "x=<perp> H-slide=[lo,hi]" for a V one.  Reflects any staged 'W'
+            # window / NUTS override via _seg_slide.
+            if 0 <= self.sidx < len(cs_list):
+                cs_i = cs_list[self.sidx]
+                s_lo, s_hi = self._seg_slide(cs_i, self.sidx)
+                axis, sdir = ('y', 'V') if cs_i.horiz else ('x', 'H')
+                info += (f"\n{axis}={cs_i.perp_pos} {sdir}-slide="
+                         f"[{self._fmt_perp(float(s_lo))},"
+                         f"{self._fmt_perp(float(s_hi))}]")
             y_info = 0.93 if (self._edit_topo is not None or self._edit_msg) else 0.985
             ax.text(0.01, y_info, info, transform=ax.transAxes, fontsize=8.5,
                     color='#20304a', va='top', ha='left', zorder=60,
