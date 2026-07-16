@@ -1,0 +1,32 @@
+source ../tracks/tracks4top.buda
+#source tc3a_flat_x10.buda
+
+add_block blk_07 2960 9750 4660 10250
+add_block blk_23 200 10830 2700 11830
+add_block io_pad_tl 200 12000 1200 12800
+
+add_bus bus_060[52] blk_23.p blk_07.p,io_pad_tl.p
+
+run_bundler
+generate_topologies
+check_design topo all
+
+# planner selects the first topo: trunk+mst topo (topo WL = 3510)
+# select_topology 1 1
+run_planner
+run_nuts
+run_detailed_nuts
+check_design
+report_wl
+# [report_wirelength] total detailed WL = 234546 over 1 bundle(s) / 312 bit-wire(s), 0 unplaced bit(s); bit-scaled envelope [182520..632320]
+# visualize
+
+# simple L-topo comes much later (topo WL = 4010)
+select_topology 1 10
+run_planner
+run_nuts
+run_detailed_nuts
+check_design
+report_wl
+# [report_wirelength] total detailed WL = 193376 over 1 bundle(s) / 104 bit-wire(s), 0 unplaced bit(s); bit-scaled envelope [182520..260520]
+# visualize
