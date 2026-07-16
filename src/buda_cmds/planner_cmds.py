@@ -127,6 +127,11 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         session._planner_pitch = session._nuts_pitch
         session._configure_capacity_mode(args)   # opt-in signal_tracks (Gap A part 2)
         session.planner.build_congestion_map()
+        # Opt-in kWLSpread: stamp each candidate's WL envelope so the planner
+        # can price realization risk (post-expansion wrappers are
+        # absolute-coord, so the resolver hands back session.fp for them).
+        if session._planner_params.get("kWLSpread", -1.0) >= 0.0:
+            session._annotate_wl_envelopes(expanded)
         session._planner_iterations = iterations
         with buda.ostream_redirect():
             assignments = session.planner.optimize_topologies(expanded, iterations)
@@ -166,6 +171,10 @@ def cmd_run_planner(session, cmd, args, cmd_line):
         # bundle's candidates so the planner charges each driver stub for its
         # own sub-bus only (Topology.seg_bits; no-op for non-fan-in bundles).
         session._derive_fanin_bits_all()
+        # Opt-in kWLSpread: stamp each candidate's WL envelope so the planner
+        # can price realization risk on top of the nominal.
+        if session._planner_params.get("kWLSpread", -1.0) >= 0.0:
+            session._annotate_wl_envelopes(session.bundles)
         session._planner_is_hier = False
         session._planner_iterations = session._planner_iters(args)
         with buda.ostream_redirect():

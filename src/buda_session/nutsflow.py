@@ -241,6 +241,40 @@ class NutsFlowMixin:
         lo = min(sum(span(t) for t in range(n)), hi)
         return (lo, hi)
 
+    def _annotate_wl_envelopes(self, wraps):
+        """Stamp every candidate's slide/span WL envelope onto its Topology
+        (`wl_lo`/`wl_hi`) so the planner's opt-in kWLSpread knob can price
+        realization risk on top of the nominal segment-sum (the b44
+        mis-ranking; see set_planner_param "kWLSpread").  Called by the
+        run_planner handlers only when kWLSpread >= 0 — the envelope is a
+        per-candidate CONSTANT (independent of contention/plan state), so
+        one pass before planning also covers every later replan/rr trial on
+        the same candidates.  A candidate whose envelope cannot be derived
+        keeps -1 and falls back to the nominal in the planner.  Element
+        access on w.input.candidates hands back a reference into the C++
+        vector, so the stamp writes through."""
+        topo_fp = self._make_topo_fp_resolver()
+        n_ok = n_fail = 0
+        for w in wraps:
+            w_fp = topo_fp(w)
+            cands = w.input.candidates
+            for i in range(len(cands)):
+                c = cands[i]
+                # Always recompute (never trust a prior stamp): a candidate can
+                # be mutated between planner runs (dogleg split, TopoEdit), and
+                # the recompute is cheap relative to planning.
+                try:
+                    lo, hi = self._topology_wl_interval(c, fp=w_fp)
+                    c.wl_lo = float(lo)
+                    c.wl_hi = float(hi)
+                    n_ok += 1
+                except Exception:
+                    n_fail += 1
+        msg = f"[Planner] kWLSpread: WL envelopes annotated on {n_ok} candidate(s)"
+        if n_fail:
+            msg += f" ({n_fail} underivable -> nominal fallback)"
+        print(msg)
+
     def _selected_wl_intervals(self):
         """Per-bundle [lo, hi] WL interval for each bundle's SELECTED topology.
         {bundle_id: (lo, hi)} — bundles without a selection are omitted."""

@@ -232,7 +232,9 @@ void bind_routing(py::module_& m) {
         .def_readwrite("bridge_segments",       &Topology::bridge_segments)
         .def_readwrite("connected_block_names", &Topology::connected_block_names)
         .def_readwrite("seg_bits",              &Topology::seg_bits)
-        .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks);
+        .def_readwrite("feedthru_blocks",       &Topology::feedthru_blocks)
+        .def_readwrite("wl_lo",                 &Topology::wl_lo)
+        .def_readwrite("wl_hi",                 &Topology::wl_hi);
 
     // Tapered fan-in: derive per-segment bit membership (Topology::seg_bits)
     // from the bundle's per-net endpoint blocks — one driver + receiver list

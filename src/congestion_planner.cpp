@@ -36,6 +36,7 @@ void CongestionPlanner::set_planner_param(const std::string& name, double value)
     else if (name == "kBalance")          kBalance_          = value;
     else if (name == "kHeight")           kHeight_           = value;
     else if (name == "kPeak")             kPeak_             = value;
+    else if (name == "kWLSpread")         kWLSpread_         = value;
     else if (name == "base_span_ref")     base_span_ref_     = value;
     else if (name == "track_cap_slack")   track_cap_slack_   = value;
     else if (name == "refine_passes")     refine_passes_     = (int)value;
@@ -1095,8 +1096,18 @@ CongestionPlanner::PlanResult CongestionPlanner::plan_bundle(
 
         // Wirelength term: with congestion/span/layer costs equal, shorter
         // topologies win — a detour must buy real congestion relief to be
-        // worth its extra length.
-        topo_score += kWL_ * topo.estimated_wirelength;
+        // worth its extra length.  With kWLSpread on and the candidate's WL
+        // envelope annotated, ADD a realization-risk penalty proportional to
+        // the envelope spread (wl_hi - wl_lo): NUTS realizations wander
+        // within the slide/span DOF, so a wide-envelope shape (many
+        // slide-coupled segments) realizes far above its nominal while a
+        // tight shape realizes at or below it (see set_planner_param
+        // "kWLSpread"; base stays the nominal — replacing it with wl_lo was
+        // measured and rejected, it reshuffles near-ties corpus-wide).
+        double wl_est = topo.estimated_wirelength;
+        if (kWLSpread_ >= 0.0 && topo.wl_lo >= 0.0 && topo.wl_hi >= topo.wl_lo)
+            wl_est += kWLSpread_ * (topo.wl_hi - topo.wl_lo);
+        topo_score += kWL_ * wl_est;
 
         if (topo_infeasible) {
             cuts_ = cuts_snapshot;
