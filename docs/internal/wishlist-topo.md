@@ -42,6 +42,29 @@ mis-ranking traced to THREE generation-policy facts that make the nominal
    alphabet**, and NUTS's greedy per-segment placement then realized it at
    4510/bit vs the 3-seg tie-sibling's 3625/bit.
 
+**Measured and rejected: "assign every I/L/Z (= trunk + ≤2 MST edges) its
+deterministic minimum WL".** The reduction is conceptually right — a monotone
+2-pin I/L/Z is already AT the floor (a Z's WL is locus-independent:
+Δx+Δy for any interior trunk), and for k≥3 trunk shapes the constrained
+minimum is computable (the envelope `wl_lo`). But assigning it as the
+estimate was tested literally on b44 (stamp `estimated_wirelength = wl_lo`
+on all 23 candidates, plan knob-off): **11/23 candidates collapse onto the
+same 3510 floor**, the WL term differentiates nothing, the alphabetical/
+lowest-index tie-break decides again, and the planner re-picks the 6-seg
+staircase → 4510/bit — the original mis-pick, reproduced exactly. Two
+floor-tied candidates also genuinely differ in what a real BUS can attain:
+an interior-optimum window centers the bus at the optimum
+(`TRUNK_V@x1950` → 3625/bit) while a window-EDGE optimum can only bring the
+bus center to half-bus-width from the edge (`TRUNK_V@x700`'s ideal x=1200,
+center stops at ~1073 → 3719/bit) — equal under min-assignment, ~2.6% apart
+in reality. The minimum is the wrong statistic not because it is ill-defined
+but because NUTS does not deliver it: realization ≈ lo + fill·spread, so the
+estimate must carry BOTH the floor and the risk — hence the (nominal,
+spread) pair the shipped `kWLSpread` scores. The clean salvage of the
+min-assignment idea is **dominance pruning**: a candidate whose `wl_lo`
+exceeds another's `wl_hi` is deterministically dominated and could be
+dropped at generation.
+
 **Shipped mitigation:** the planner-side `kWLSpread` knob (opt-in) prices the
 envelope spread, which resolves exactly these ties toward the tightest
 realization (b44: picks `TRUNK_V@x1950`, detailed 188513 = 3625/bit, −19.6%,
